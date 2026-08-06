@@ -94,6 +94,7 @@ set(_PULP_WCLAP_INCLUDES
     ${_PULP_WCLAP_ROOT}/core/platform/include
     ${_PULP_WCLAP_ROOT}/core/runtime/include
     ${_PULP_WCLAP_ROOT}/core/timebase/include
+    ${_PULP_WCLAP_ROOT}/core/music/include
     ${_PULP_WCLAP_ROOT}/core/timeline/include
     ${_PULP_WCLAP_ROOT}/core/playback/include
     ${_PULP_WCLAP_ROOT}/core/state/include

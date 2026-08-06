@@ -22,10 +22,11 @@ on:
       - "tools/cmake/PulpWclap.cmake"
       - "tools/cmake/wasi-toolchain.cmake"
       - ".github/workflows/wclap-cloudflare.yml"
-  # No paths filter on pull_request ON PURPOSE: this lane is a REQUIRED status check
-  # (branch protection), and a required check that is path-filtered leaves any PR that
-  # does not touch those paths stuck forever on "Expected — Waiting for status". It must
-  # run on EVERY PR. It ALSO catches the real silent-breakage risk this lane exists for:
+  # No event-level paths filter on pull_request: this lane is a REQUIRED status check,
+  # and a required check that is path-filtered leaves unrelated PRs stuck forever on
+  # "Expected — Waiting for status". The job therefore always reports, but its first
+  # step classifies the PR diff and skips the expensive proof for unrelated changes.
+  # Relevant core/web changes still catch the real silent-breakage risk this lane exists for:
   # the wasm UI build hand-lists its sources (PulpWebUi.cmake), so a CORE refactor
   # (core/view/**, core/canvas/**) that splits a TU breaks the link with nothing under
   # examples/web-demos/** touched — invisible to a path-filtered lane. Deploy stays
@@ -33,9 +34,9 @@ on:
   pull_request:
   # Run this required check on queued merge groups so a merge queue on `main` can
   # land PRs. `merge_group` does not honour a paths filter (like the pull_request
-  # lane above, on purpose), and deploy stays owner-gated + main-only, so a group
-  # run builds + proves and never deploys — exactly the gate the queue must clear.
-  # Without this, the queue would wait forever on a required check that never posts.
+  # lane above, on purpose), so the job always reports. Its trusted base-to-group
+  # diff classifier skips the expensive proof for unrelated groups while relevant
+  # changes still build + prove. Deploy stays owner-gated + main-only.
   merge_group:
   # Weekly drift check — a broken build is a red run, not a dead site.
   schedule:
@@ -58,6 +59,79 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Resolve WebCLAP relevance
+        id: relevance
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          CHANGED_FILE_COUNT: ${{ github.event.pull_request.changed_files }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          changed_files="$(mktemp)"
+          trusted_classifier="$(mktemp)"
+          trap 'rm -f "$changed_files" "$trusted_classifier"' EXIT
+
+          case "${{ github.event_name }}" in
+            pull_request)
+              # GitHub caps the pull files API at 3,000 entries. At the boundary
+              # the response may be truncated, so fail closed and run the proof.
+              if [ "${CHANGED_FILE_COUNT:-0}" -ge 3000 ]; then
+                echo "run=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              GH_TOKEN="${{ github.token }}" gh api --paginate \
+                "repos/${{ github.repository }}/pulls/${PR_NUMBER}/files" \
+                --jq '.[] | .filename, (.previous_filename // empty)' > "$changed_files"
+              ;;
+            merge_group)
+              # The queue head may contain more than one PR. Diff the complete
+              # speculative group against GitHub's trusted base SHA so relevance
+              # covers the union. --no-renames emits both sides of a rename.
+              if [ -z "${BASE_SHA:-}" ] \
+                  || ! git fetch --no-tags --depth=1 origin "$BASE_SHA" \
+                  || ! git diff --name-only --no-renames "$BASE_SHA" "$GITHUB_SHA" > "$changed_files"; then
+                echo "run=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              ;;
+            *)
+              echo "run=true" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+
+          # A PR must never use its own classifier to decide whether that
+          # classifier or this workflow receives the full proof. This also
+          # bootstraps the first landing, before the base branch has the script.
+          if grep -Fxq '.github/workflows/wclap-cloudflare.yml' "$changed_files" \
+              || grep -Fxq 'tools/scripts/webclap_relevance.py' "$changed_files"; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Execute the classifier from the trusted base SHA, not the PR
+          # checkout. Scope the token to gh only; PR-controlled Python never
+          # inherits a repository credential.
+          GH_TOKEN="${{ github.token }}" gh api \
+            "repos/${{ github.repository }}/contents/tools/scripts/webclap_relevance.py?ref=${BASE_SHA}" \
+            --jq '.content' | base64 --decode > "$trusted_classifier"
+          set +e
+          python3 "$trusted_classifier" < "$changed_files"
+          relevance_status=$?
+          set -e
+          case "$relevance_status" in
+            0) echo "run=true" >> "$GITHUB_OUTPUT" ;;
+            1)
+              echo "run=false" >> "$GITHUB_OUTPUT"
+              echo "WebCLAP proof skipped: the PR does not touch a WebCLAP build surface."
+              ;;
+            *) exit "$relevance_status" ;;
+          esac
+
+      - name: Test WebCLAP relevance policy
+        if: steps.relevance.outputs.run == 'true'
+        run: python3 tools/scripts/test_webclap_relevance.py
+
       # The gallery's 23 plugins do NOT live in pulp — they live in two separate
       # public repos (the examples-out-of-core split), and wclap-build/CMakeLists.txt
       # declares each gallery target ONLY IF its plugin header is present. A job that
@@ -67,19 +141,23 @@ jobs:
       # skip is quiet; the assemble is not. Without these two checkouts this workflow
       # cannot deploy the gallery at all, which is exactly how it broke.
       - uses: actions/checkout@v4
+        if: steps.relevance.outputs.run == 'true'
         with:
           repository: danielraffel/pulp-example-plugins
           path: _ext/pulp-example-plugins
       - uses: actions/checkout@v4
+        if: steps.relevance.outputs.run == 'true'
         with:
           repository: danielraffel/pulp-classic-effects
           path: _ext/pulp-classic-effects
 
       - uses: actions/setup-node@v4
+        if: steps.relevance.outputs.run == 'true'
         with:
           node-version: "22"
 
       - name: Set up wasi-sdk (pinned)
+        if: steps.relevance.outputs.run == 'true'
         run: |
           set -euo pipefail
           ver=25
@@ -90,15 +168,18 @@ jobs:
           echo "WASI_SDK_PREFIX=$HOME/wasi-sdk" >> "$GITHUB_ENV"
 
       - name: Set up Chrome
+        if: steps.relevance.outputs.run == 'true'
         id: chrome
         uses: browser-actions/setup-chrome@v1
         with:
           chrome-version: stable
 
       - name: Install playwright-core
+        if: steps.relevance.outputs.run == 'true'
         run: npm install --no-save playwright-core
 
       - name: Build WebCLAP module
+        if: steps.relevance.outputs.run == 'true'
         working-directory: examples/web-demos/wclap-build
         run: |
           set -euo pipefail
@@ -134,11 +215,13 @@ jobs:
       # site, "skipped" means DELETED from the live URL, not "left as it was". That is a
       # far worse failure than the loud one it replaced, so they are built here.
       - name: Set up Emscripten
+        if: steps.relevance.outputs.run == 'true'
         uses: mymindstorm/setup-emsdk@v14
         with:
           version: 6.0.2
 
       - name: Vendor choc for the WAM build
+        if: steps.relevance.outputs.run == 'true'
         run: |
           set -euo pipefail
           git clone --depth 1 --branch pulp-webview-dnd-poc1 \
@@ -146,6 +229,7 @@ jobs:
           echo "PULP_WAM_CHOC_INCLUDE=$HOME/choc-src" >> "$GITHUB_ENV"
 
       - name: Cache the Skia wasm slice
+        if: steps.relevance.outputs.run == 'true'
         id: skia-cache
         uses: actions/cache@v4
         with:
@@ -153,6 +237,7 @@ jobs:
           key: skia-wasm-${{ hashFiles('tools/deps/manifest.json') }}
 
       - name: Build the WAM, Pulp-UI and WebGPU-DSP modules
+        if: steps.relevance.outputs.run == 'true'
         run: |
           set -euo pipefail
 
@@ -199,6 +284,7 @@ jobs:
           fi
 
       - name: Assemble self-contained deploy dir
+        if: steps.relevance.outputs.run == 'true'
         working-directory: examples/web-demos/wclap-build/cloudflare
         run: |
           set -euo pipefail
@@ -238,6 +324,7 @@ jobs:
       # assemble-gallery pass is required — it bakes the og:image/twitter tags in
       # only for pages whose og.png now exists.
       - name: Render OG preview images (per page, from the started plugin)
+        if: steps.relevance.outputs.run == 'true'
         working-directory: examples/web-demos/wclap-build/cloudflare
         run: |
           set -euo pipefail
@@ -256,14 +343,17 @@ jobs:
             $gpu_args
 
       - name: Guard — every demo page has a fresh OG image
+        if: steps.relevance.outputs.run == 'true'
         working-directory: examples/web-demos/wclap-build/cloudflare
         run: node check-og-images.mjs
 
       - name: Prove @danielraffel/web-player adapter unit tests
+        if: steps.relevance.outputs.run == 'true'
         working-directory: packages/pulp-web-player
         run: npm test
 
       - name: "Prove locally (single-plugin: crossOriginIsolated + WebCLAP audio + subresources)"
+        if: steps.relevance.outputs.run == 'true'
         working-directory: examples/web-demos/wclap-build/cloudflare
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
@@ -273,13 +363,14 @@ jobs:
           node validate-deploy.mjs --screenshot /tmp/wclap-cloudflare.png
 
       - name: "Prove locally (shared player: real-time WebCLAP + param + clap.state, same UI as WAM)"
+        if: steps.relevance.outputs.run == 'true'
         working-directory: examples/web-demos/wclap-build/cloudflare
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
         run: node validate-player.mjs --screenshot /tmp/wclap-shared-player.png
 
       - name: Upload proof screenshots
-        if: always()
+        if: always() && steps.relevance.outputs.run == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: wclap-cloudflare-proof
@@ -303,7 +394,7 @@ jobs:
         # invisible because merge-group runs were starving before reaching this
         # step. Naming the events that MAY deploy fails closed when the next
         # trigger is added.
-        if: ${{ contains(fromJSON('["push","schedule","workflow_dispatch"]'), github.event_name) && env.HAS_CF_TOKEN == 'true' }}
+        if: ${{ steps.relevance.outputs.run == 'true' && contains(fromJSON('["push","schedule","workflow_dispatch"]'), github.event_name) && env.HAS_CF_TOKEN == 'true' }}
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -328,6 +419,6 @@ jobs:
         # invisible because merge-group runs were starving before reaching this
         # step. Naming the events that MAY deploy fails closed when the next
         # trigger is added.
-        if: ${{ contains(fromJSON('["push","schedule","workflow_dispatch"]'), github.event_name) && env.HAS_CF_TOKEN == 'true' }}
+        if: ${{ steps.relevance.outputs.run == 'true' && contains(fromJSON('["push","schedule","workflow_dispatch"]'), github.event_name) && env.HAS_CF_TOKEN == 'true' }}
         working-directory: examples/web-demos/wclap-build/cloudflare
         run: node check-unfurl.mjs --base https://pulp-wclap-demos.pages.dev

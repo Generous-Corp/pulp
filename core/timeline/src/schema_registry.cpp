@@ -276,10 +276,13 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                  {"root_sequence_id", SchemaValueKind::U64String},
                  {"sequences", SchemaValueKind::Array},
                  {"session_start", SchemaValueKind::Object, false},
-                 {"tempo_map", SchemaValueKind::Array, false}},
+                 {"tempo_map", SchemaValueKind::Array, false},
+                 {"tuning", SchemaValueKind::Object, false, "pulp.timeline.tuning"}},
                 detail::project_schema_policy.current_version);
     project.upgrades.push_back({1, 2, {}, detail::migrate_project_v1_to_v2});
+    project.upgrades.push_back({2, 3, {}, detail::migrate_project_v2_to_v3});
     project.downgrades.push_back({2, 1, {}, detail::migrate_project_v2_to_v1});
+    project.downgrades.push_back({3, 2, {}, detail::migrate_project_v3_to_v2});
     schemas.push_back(std::move(project));
     auto asset = builtin(std::string(detail::asset_schema_policy.type_name), SchemaDomain::Document,
                          {{"content_hash", SchemaValueKind::String},
@@ -320,11 +323,13 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
     sequence.upgrades.push_back({3, 4, {}, detail::migrate_sequence_v3_to_v4});
     sequence.upgrades.push_back({4, 5, {}, detail::migrate_sequence_v4_to_v5});
     sequence.upgrades.push_back({5, 6, {}, detail::migrate_sequence_v5_to_v6});
+    sequence.upgrades.push_back({6, 7, {}, detail::migrate_sequence_v6_to_v7});
     sequence.downgrades.push_back({2, 1, {}, detail::migrate_sequence_v2_to_v1});
     sequence.downgrades.push_back({3, 2, {}, detail::migrate_sequence_v3_to_v2});
     sequence.downgrades.push_back({4, 3, {}, detail::migrate_sequence_v4_to_v3});
     sequence.downgrades.push_back({5, 4, {}, detail::migrate_sequence_v5_to_v4});
     sequence.downgrades.push_back({6, 5, {}, detail::migrate_sequence_v6_to_v5});
+    sequence.downgrades.push_back({7, 6, {}, detail::migrate_sequence_v7_to_v6});
     schemas.push_back(std::move(sequence));
     schemas.push_back(builtin("pulp.timeline.groove_template", SchemaDomain::Document,
                               {{"name", SchemaValueKind::String},
@@ -339,11 +344,14 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                               {{"timing_offset", SchemaValueKind::I64String},
                                {"velocity_scale", SchemaValueKind::U32}}));
     schemas.push_back(builtin("pulp.timeline.chord_scale_event", SchemaDomain::Document,
-                              {{"chord_quality", SchemaValueKind::String},
+                              {{"chord_bass", SchemaValueKind::U32},
+                               {"chord_extensions", SchemaValueKind::U32},
+                               {"chord_quality", SchemaValueKind::String},
                                {"chord_root", SchemaValueKind::U32},
                                {"position", SchemaValueKind::I64String},
                                {"scale_mode", SchemaValueKind::String},
-                               {"scale_root", SchemaValueKind::U32}}));
+                               {"scale_root", SchemaValueKind::U32},
+                               {"voicing", SchemaValueKind::String}}));
     schemas.push_back(builtin("pulp.timeline.marker", SchemaDomain::Document,
                               {{"color", SchemaValueKind::U32, false},
                                {"id", SchemaValueKind::U64String},
@@ -354,7 +362,13 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"duration", SchemaValueKind::I64String},
                                {"id", SchemaValueKind::U64String},
                                {"name", SchemaValueKind::String},
-                               {"position", SchemaValueKind::I64String}}));
+                               {"position", SchemaValueKind::I64String},
+                               {"role", SchemaValueKind::String}}));
+    schemas.push_back(builtin("pulp.timeline.tuning", SchemaDomain::Document,
+                              {{"keyboard_map_content", SchemaValueKind::String},
+                               {"reference_pitch_millihertz", SchemaValueKind::U32},
+                               {"scale_content", SchemaValueKind::String},
+                               {"system", SchemaValueKind::String}}));
     schemas.push_back(builtin("pulp.timeline.scene", SchemaDomain::Document,
                               {{"id", SchemaValueKind::U64String},
                                {"name", SchemaValueKind::String},
@@ -371,10 +385,14 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                           {"device_chain", SchemaValueKind::Array},
                           {"freeze", SchemaValueKind::Object, false},
                           {"id", SchemaValueKind::U64String},
+                          {"macros", SchemaValueKind::Array, false},
                           {"mixer", SchemaValueKind::Object, false},
+                          {"modulation_routes", SchemaValueKind::Array, false},
+                          {"modulators", SchemaValueKind::Array, false},
                           {"name", SchemaValueKind::String},
                           {"record_armed", SchemaValueKind::Boolean},
-                          {"take_lanes", SchemaValueKind::Array}},
+                          {"take_lanes", SchemaValueKind::Array},
+                          {"tuning", SchemaValueKind::Object, false, "pulp.timeline.tuning"}},
                          detail::track_schema_policy.current_version);
     track.upgrades.push_back({1, 2, {}, detail::migrate_track_v1_to_v2});
     track.upgrades.push_back({2, 3, {}, detail::migrate_track_v2_to_v3});
@@ -382,6 +400,10 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
     track.upgrades.push_back({4, 5, {}, detail::migrate_track_v4_to_v5});
     track.upgrades.push_back({5, 6, {}, detail::migrate_track_v5_to_v6});
     track.upgrades.push_back({6, 7, {}, detail::migrate_track_v6_to_v7});
+    track.upgrades.push_back({7, 8, {}, detail::migrate_track_v7_to_v8});
+    track.upgrades.push_back({8, 9, {}, detail::migrate_track_v8_to_v9});
+    track.downgrades.push_back({9, 8, {}, detail::migrate_track_v9_to_v8});
+    track.downgrades.push_back({8, 7, {}, detail::migrate_track_v8_to_v7});
     track.downgrades.push_back({7, 6, {}, detail::migrate_track_v7_to_v6});
     track.downgrades.push_back({6, 5, {}, detail::migrate_track_v6_to_v5});
     track.downgrades.push_back({5, 4, {}, detail::migrate_track_v5_to_v4});
@@ -401,6 +423,21 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                               {{"parameter", SchemaValueKind::String}}));
     schemas.push_back(builtin("pulp.timeline.device_placement", SchemaDomain::Document,
                               {{"id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.macro_control", SchemaDomain::Document,
+                              {{"id", SchemaValueKind::U64String},
+                               {"name", SchemaValueKind::String},
+                               {"value_bits", SchemaValueKind::U32}}));
+    schemas.push_back(builtin("pulp.timeline.modulation_route", SchemaDomain::Document,
+                              {{"depth_bits", SchemaValueKind::U32},
+                               {"enabled", SchemaValueKind::Boolean},
+                               {"id", SchemaValueKind::U64String},
+                               {"source_id", SchemaValueKind::U64String},
+                               {"source_kind", SchemaValueKind::String},
+                               {"target", SchemaValueKind::Object}}));
+    schemas.push_back(builtin("pulp.timeline.modulator", SchemaDomain::Document,
+                              {{"id", SchemaValueKind::U64String},
+                               {"kind", SchemaValueKind::String},
+                               {"name", SchemaValueKind::String}}));
     auto take_lane = builtin("pulp.timeline.take_lane", SchemaDomain::Document,
                              {{"comp_segments", SchemaValueKind::Array},
                               {"id", SchemaValueKind::U64String},
@@ -481,10 +518,27 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"replacement_velocity", SchemaValueKind::U32},
                                {"sequence_id", SchemaValueKind::U64String},
                                {"track_id", SchemaValueKind::U64String}}));
-    schemas.push_back(builtin("pulp.timeline.command.replace_note_content", SchemaDomain::Command,
+    // Every field is required. This type names no envelope written before it
+    // existed, so unlike a widened schema it has nothing to keep decoding: an
+    // omitted array here is a payload that cannot be paired, not an older
+    // spelling of an empty one.
+    schemas.push_back(builtin("pulp.timeline.command.set_note_events", SchemaDomain::Command,
                               {{"clip_id", SchemaValueKind::U64String},
                                {"expected", SchemaValueKind::Array},
                                {"replacement", SchemaValueKind::Array},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    // The modifier arrays are optional at the current version because a command
+    // schema has no migration edges to walk: decode gates on exact version
+    // equality, so raising the version would reject every envelope already
+    // written. An omitted array keeps meaning what it meant before the field
+    // existed.
+    schemas.push_back(builtin("pulp.timeline.command.replace_note_content", SchemaDomain::Command,
+                              {{"clip_id", SchemaValueKind::U64String},
+                               {"expected", SchemaValueKind::Array},
+                               {"expected_modifiers", SchemaValueKind::Array, false},
+                               {"replacement", SchemaValueKind::Array},
+                               {"replacement_modifiers", SchemaValueKind::Array, false},
                                {"sequence_id", SchemaValueKind::U64String},
                                {"track_id", SchemaValueKind::U64String}}));
     schemas.push_back(builtin("pulp.timeline.command.set_clip_playback_properties",

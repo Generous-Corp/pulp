@@ -387,6 +387,7 @@ struct Project::Data {
     timebase::TempoMap tempo_map;
     timebase::MeterMap meter_map;
     std::optional<SessionStart> session_start;
+    std::optional<TuningReference> tuning;
     detail::IdentityDirectory identities;
     std::uint64_t sequence_compile_structure_token = 0;
 };
@@ -491,6 +492,9 @@ detail::ProjectStateAccess::restore_identities(Project project,
                        entry.item != location.clip_id && entry.item != location.parent_id;
             case ItemKind::DevicePlacement:
             case ItemKind::AutomationLane:
+            case ItemKind::Modulator:
+            case ItemKind::MacroControl:
+            case ItemKind::ModulationRoute:
             case ItemKind::TakeLane:
                 return location.sequence_id.valid() && location.track_id.valid() &&
                        location.sequence_id != location.track_id &&
@@ -547,6 +551,9 @@ detail::ProjectStateAccess::restore_identities(Project project,
             }
             case ItemKind::DevicePlacement:
             case ItemKind::AutomationLane:
+            case ItemKind::Modulator:
+            case ItemKind::MacroControl:
+            case ItemKind::ModulationRoute:
             case ItemKind::TakeLane: {
                 const auto* track = find_entry(location.parent_id);
                 return track && track->location.kind == ItemKind::Track &&
@@ -625,6 +632,8 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
             return fail<Project>(ModelErrorCode::InvalidSessionStart, input.id);
         input.session_start->sample_rate = input.session_start->sample_rate.normalized();
     }
+    if (input.tuning && !valid_tuning_reference(*input.tuning))
+        return fail<Project>(ModelErrorCode::InvalidTuningReference, input.id);
     visit_project_identities(input, [&](ItemId id, ItemLocation item_location) {
         identity_entries.push_back({id, item_location});
     });
@@ -665,6 +674,7 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
              .tempo_map = std::move(input.tempo_map),
              .meter_map = std::move(input.meter_map),
              .session_start = input.session_start,
+             .tuning = input.tuning,
              .identities = std::move(identities),
              .sequence_compile_structure_token = next_sequence_compile_structure_token()}))));
 }
@@ -692,6 +702,9 @@ const timebase::TempoMap& Project::tempo_map() const noexcept {
 }
 const std::optional<SessionStart>& Project::session_start() const noexcept {
     return data_->session_start;
+}
+const std::optional<TuningReference>& Project::tuning() const noexcept {
+    return data_->tuning;
 }
 const timebase::MeterMap& Project::meter_map() const noexcept {
     return data_->meter_map;
@@ -830,6 +843,7 @@ Project::append_asset(MediaAsset asset, std::span<const IdentityMutation> mutati
              .tempo_map = data_->tempo_map,
              .meter_map = data_->meter_map,
              .session_start = data_->session_start,
+             .tuning = data_->tuning,
              .identities = std::move(identities),
              .sequence_compile_structure_token = data_->sequence_compile_structure_token}))));
 }
@@ -876,6 +890,7 @@ Project::remove_asset(ItemId asset_id, std::span<const IdentityMutation> mutatio
              .tempo_map = data_->tempo_map,
              .meter_map = data_->meter_map,
              .session_start = data_->session_start,
+             .tuning = data_->tuning,
              .identities = std::move(identities),
              .sequence_compile_structure_token = data_->sequence_compile_structure_token}))));
 }

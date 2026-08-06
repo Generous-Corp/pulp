@@ -183,7 +183,13 @@ endif()
 if(APPLE)
     add_executable(pulp-test-web-compat-reftest
         test_reftests.cpp
+        test_native_css_probe.cpp
     )
+    if(PULP_HAS_SKIA)
+        target_sources(pulp-test-web-compat-reftest PRIVATE
+            test_computed_style_paint.cpp
+        )
+    endif()
     target_link_libraries(pulp-test-web-compat-reftest PRIVATE pulp::view Catch2::Catch2WithMain)
     target_include_directories(pulp-test-web-compat-reftest PRIVATE ${WEBCOMPAT_INCLUDE_DIR})
     target_compile_definitions(pulp-test-web-compat-reftest PRIVATE

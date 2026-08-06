@@ -21,15 +21,51 @@ MODULE_FLOORS = {
     # a serializer from reaching for the editor's gesture verbs. A document model
     # that can name Draw/Erase/Move/Resize hands them to every consumer of the
     # model — a headless importer, a .pulpgraph loader, a plugin that wants only
-    # commands — with no gate able to object.
-    "timeline": {"timeline", "timebase", "platform", "runtime"},
+    # commands — with no gate able to object. `music` is a lower, header-only
+    # value vocabulary: admitting it lets the document model share checked
+    # pitch/chord/scale identities without acquiring MIDI, signal, or playback.
+    "timeline": {"timeline", "music", "timebase", "platform", "runtime"},
+    # Durable project-package publication sits above the document model. It may
+    # validate package-relative Timeline paths and use runtime/platform durability
+    # primitives, but ZIP formats, interchange adapters, playback, and UI remain
+    # outside this layer. Both self spellings are admitted because the directory
+    # uses an underscore while the CMake alias uses a hyphen.
+    "project_package": {
+        "project_package",
+        "project-package",
+        "timeline",
+        "music",
+        "timebase",
+        "platform",
+        "runtime",
+    },
+    # Agent-facing read projections sit directly above the immutable document.
+    # They may hash and summarize timeline values but must not acquire editor,
+    # playback, interchange, UI, host, or adapter dependencies.
+    "timeline_agent_view": {
+        "timeline_agent_view",
+        "timeline-agent-view",
+        "timeline",
+        "music",
+        "timebase",
+        "platform",
+        "runtime",
+    },
     # Interchange sits above the document model, not inside it: it may read a
     # document and consult what formats declare, but a format adapter, a plugin
     # host, or a view must never become something it can reach for.
-    "interchange": {"interchange", "timeline", "timebase", "platform", "runtime"},
+    "interchange": {
+        "interchange",
+        "timeline",
+        "music",
+        "timebase",
+        "platform",
+        "runtime",
+    },
     "playback": {
         "playback",
         "timeline",
+        "music",
         "timebase",
         "audio",
         "midi",
@@ -56,6 +92,7 @@ MODULE_FLOORS = {
         "timeline_editor",
         "timeline-editor",
         "timeline",
+        "music",
         "timebase",
         "platform",
         "runtime",
@@ -77,6 +114,7 @@ MODULE_FLOORS = {
         "timeline_editor",
         "timeline-editor",
         "timeline",
+        "music",
         "timebase",
         "view",
         "canvas",

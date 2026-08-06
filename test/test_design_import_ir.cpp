@@ -40,6 +40,40 @@ TEST_CASE("parse coerces CSS string dimensions to floats", "[view][import][parse
     REQUIRE_FALSE(ir2.root.style.height.has_value());
 }
 
+TEST_CASE("a resolved clip rectangle survives canonical IR serialization",
+          "[view][import][ir-v1][clip-model]") {
+    // The clip an importer resolved along CSS's containing-block chain is the
+    // node's authority for what is drawn of it. A field the C++ writes and the
+    // round-trip drops sends an imported panel back to clipping by parentage
+    // after one save/load, which looks like a rendering bug and is a schema
+    // one — so both directions are pinned here, not just the writer.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+
+    IRNode clipped;
+    clipped.type = "frame";
+    clipped.name = "Escapee";
+    clipped.style.clip_rect = IRStyle::ClipRect{60.0f, -20.0f, 100.0f, 100.0f};
+    ir.root.children.push_back(std::move(clipped));
+
+    const auto canonical = serialize_design_ir(ir);
+    const auto parsed = parse_design_ir_json(canonical);
+
+    REQUIRE(parsed.root.children.size() == 1);
+    const auto& rect = parsed.root.children[0].style.clip_rect;
+    REQUIRE(rect.has_value());
+    REQUIRE(rect->x == 60.0f);
+    REQUIRE(rect->y == -20.0f);
+    REQUIRE(rect->width == 100.0f);
+    REQUIRE(rect->height == 100.0f);
+    REQUIRE(serialize_design_ir(parsed) == canonical);
+
+    // Absent stays absent: a node with no resolved clip must not gain an
+    // all-zero rectangle, which would clip it away entirely.
+    REQUIRE_FALSE(parsed.root.style.clip_rect.has_value());
+}
+
 TEST_CASE("design_source_name returns display names", "[view][import]") {
     REQUIRE(std::string(design_source_name(DesignSource::figma)) == "Figma");
     REQUIRE(std::string(design_source_name(DesignSource::v0)) == "v0");
@@ -1265,6 +1299,65 @@ TEST_CASE("Interactive promotion ignores presentational cursor-only frames",
     node.name = "Decorative";
     node.style.cursor = "pointer";
     node.attributes["role"] = "presentation";
+
+    REQUIRE(classify_interactive_signal(node) == WidgetPromotionSignal::none);
+    REQUIRE(promote_interactive_frames(node) == 0);
+    REQUIRE(node.type == "frame");
+}
+
+// A node lowered from a browser capture carries `paint_class`, and its
+// appearance is the browser's own. Promoting it hands it the widget's DEFAULT
+// chrome, which paints OVER the captured fill rather than alongside it — so a
+// green toggle and a borderless nav icon both came out as the same grey
+// rounded box, and every selected state in a captured panel became invisible.
+//
+// `cursor: pointer` is what did the damage, because a web design puts it on
+// every clickable thing — tabs, cards, nav items, mode switches — and the
+// browser draws none of them any differently for it. It is a hover affordance,
+// not ink.
+TEST_CASE("a captured node keeps its own appearance instead of widget chrome",
+          "[view][import][diagnostics]") {
+    IRNode node;
+    node.type = "frame";
+    node.name = "STEREO";
+    node.style.cursor = "pointer";
+    node.style.background_color = "rgb(22, 218, 120)";
+    node.attributes["paint_class"] = "native";
+
+    REQUIRE(classify_interactive_signal(node) == WidgetPromotionSignal::none);
+    REQUIRE(promote_interactive_frames(node) == 0);
+    REQUIRE(node.type == "frame");
+}
+
+// The same node WITHOUT the capture marker still promotes. The authoring
+// lanes — v0, Figma, Stitch — rely on this signal to turn a clickable div into
+// a real control, and gating it on the capture marker must not disturb them.
+TEST_CASE("an authored cursor-pointer frame still promotes",
+          "[view][import][diagnostics]") {
+    IRNode node;
+    node.type = "frame";
+    node.name = "STEREO";
+    node.style.cursor = "pointer";
+    node.style.background_color = "rgb(22, 218, 120)";
+
+    REQUIRE(classify_interactive_signal(node) ==
+            WidgetPromotionSignal::cursor_pointer);
+    REQUIRE(promote_interactive_frames(node) == 1);
+    REQUIRE(node.type == "button");
+}
+
+// The marker covers a declared `role="button"` too, and deliberately: what
+// breaks the panel is a widget's default chrome painting over the captured
+// appearance, and that happens whatever prompted the promotion. Interactivity
+// on this lane comes from the semantic report, which names its controls and
+// lowers them separately — nothing is lost by not also sniffing markup here.
+TEST_CASE("a captured node is not promoted on a declared button role either",
+          "[view][import][diagnostics]") {
+    IRNode node;
+    node.type = "frame";
+    node.name = "Save";
+    node.attributes["role"] = "button";
+    node.attributes["paint_class"] = "native";
 
     REQUIRE(classify_interactive_signal(node) == WidgetPromotionSignal::none);
     REQUIRE(promote_interactive_frames(node) == 0);

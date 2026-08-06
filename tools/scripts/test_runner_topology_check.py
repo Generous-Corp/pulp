@@ -626,12 +626,16 @@ SUPERVISORS = {
 # differently, since there is no plist to read the invocation out of.
 OTHER_SUPERVISORS = {
     "proxmox-systemd": CI / "proxmox-ephemeral-runner-linux.sh",
+    "native-intel-launchd": CI / "native-intel-runner.sh",
 }
 
 
 def _fixed_supervisor_labels(script: Path) -> list[str]:
-    """The label set a supervisor registers from a plain `LABELS="..."`."""
-    m = re.search(r'^LABELS="([^"$]+)"', script.read_text(), re.M)
+    """The default label set a non-Tart supervisor registers."""
+    text = script.read_text()
+    m = re.search(r'^LABELS="([^"$]+)"', text, re.M)
+    if m is None:
+        m = re.search(r'^LABELS="\$\{[^:}]+:-([^}"]+)\}"', text, re.M)
     assert m, f"no LABELS assignment found in {script}"
     return [x.strip() for x in m.group(1).split(",") if x.strip()]
 

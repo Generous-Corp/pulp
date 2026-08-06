@@ -239,6 +239,14 @@ public:
     view::ScriptedUiSession* scripted_ui();
     const view::ScriptedUiSession* scripted_ui() const;
 
+    /// Borrow the active scripted UI only for the duration of `visitor`.
+    /// Processor-owned sessions are visited under the processor's lifetime
+    /// discipline; framework-owned sessions are already owned by this bridge.
+    void visit_scripted_ui(
+        const std::function<void(view::ScriptedUiSession*)>& visitor);
+    void visit_scripted_ui(
+        const std::function<void(const view::ScriptedUiSession*)>& visitor) const;
+
     uint32_t width() const { return width_; }
     uint32_t height() const { return height_; }
     const ViewSize& size_hints() const { return size_hints_; }
@@ -342,6 +350,10 @@ private:
     std::unique_ptr<view::StateStoreHostParamSurface> host_param_surface_;
     view::HostActionSurface* host_actions_ = nullptr;  ///< caller-owned; may be null
     std::unique_ptr<view::ScriptedUiSession> scripted_ui_;
+    /// True when a processor explicitly opts its active scripted session into
+    /// in-place reload. Keep the root and host subscriptions stable across
+    /// processor generation changes.
+    bool in_place_scripted_ui_reload_ = false;
     bool uses_script_ui_ = false;
     bool uses_auto_ui_ = false;  ///< true when the editor is the AutoUi default
     bool attached_ = false;  ///< true between notify_attached() and close()

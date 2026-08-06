@@ -140,7 +140,9 @@ int cmd_dev(const std::vector<std::string>& args) {
     auto capped_build = cap_cmake_build_parallel_args(build_args, lease.jobs());
 
     // Ensure configured
-    if (!fs::exists(build_dir / "CMakeCache.txt")) {
+    if (!fs::exists(build_dir / "CMakeCache.txt")
+        || (!standalone_mode
+            && !source_checkout_dependencies_enabled(project_root, build_dir / "CMakeCache.txt"))) {
         std::cout << "Project not configured. Building first...\n";
         std::vector<std::string> bootstrap_args;
         if (allow_unsupported_sdk) {

@@ -1,6 +1,7 @@
 #include <pulp/timeline/model.hpp>
 
 #include "automation_document_internal.hpp"
+#include "modulation_document_internal.hpp"
 #include "owned_identity_traversal.hpp"
 #include "project_state_access.hpp"
 #include "track_input_access.hpp"
@@ -272,6 +273,21 @@ runtime::Result<Track, ModelError> rebuild_track(const Track& track, const IdRem
                                rebuilt.error().related_item);
         automation_lanes.push_back(std::move(rebuilt).value());
     }
+    std::vector<Modulator> modulators(track.modulators().begin(), track.modulators().end());
+    for (auto& modulator : modulators)
+        modulator.id = *table.find(modulator.id);
+    std::vector<MacroControl> macros(track.macros().begin(), track.macros().end());
+    for (auto& macro : macros)
+        macro.id = *table.find(macro.id);
+    std::vector<ModulationRoute> modulation_routes;
+    modulation_routes.reserve(track.modulation_routes().size());
+    for (const auto& route : track.modulation_routes()) {
+        auto rebuilt = detail::remap_attached_modulation_route(route, table);
+        if (!rebuilt)
+            return fail<Track>(rebuilt.error().code, rebuilt.error().item,
+                               rebuilt.error().related_item);
+        modulation_routes.push_back(std::move(rebuilt).value());
+    }
     std::vector<TakeLane> take_lanes;
     take_lanes.reserve(track.take_lanes().size());
     for (const auto& lane : track.take_lanes()) {
@@ -297,6 +313,9 @@ runtime::Result<Track, ModelError> rebuild_track(const Track& track, const IdRem
     input.clips = std::move(clips);
     input.device_chain = std::move(device_chain);
     input.automation_lanes = std::move(automation_lanes);
+    input.modulators = std::move(modulators);
+    input.macros = std::move(macros);
+    input.modulation_routes = std::move(modulation_routes);
     input.take_lanes = std::move(take_lanes);
     input.active_take_lane_id =
         track.active_take_lane_id().valid() ? *table.find(track.active_take_lane_id()) : ItemId{};

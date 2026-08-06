@@ -67,6 +67,12 @@ FEATURE_FLOORS: tuple[tuple[str, str, str], ...] = (
         "is stamped [skip ci], so its required checks never run and the PR "
         "can never merge",
     ),
+    (
+        r'^\s*ssh_signing_setup_script\s*=\s*"[^"]+"\s*$',
+        "0.81.4",
+        "post_tag_hook ssh_signing_setup_script — older Shipyard releases "
+        "ignore the key and regenerate a workflow without signed bot setup",
+    ),
 )
 
 

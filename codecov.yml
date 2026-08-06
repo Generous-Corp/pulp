@@ -237,6 +237,10 @@ flags:
     paths:
       - core/midi/
     carryforward: true
+  music:
+    paths:
+      - core/music/
+    carryforward: true
   native-components:
     paths:
       - core/native-components/
@@ -248,6 +252,10 @@ flags:
   playback:
     paths:
       - core/playback/
+    carryforward: true
+  project_package:
+    paths:
+      - core/project_package/
     carryforward: true
   sequence:
     paths:
@@ -292,6 +300,10 @@ flags:
   timeline:
     paths:
       - core/timeline/
+    carryforward: true
+  timeline_agent_view:
+    paths:
+      - core/timeline_agent_view/
     carryforward: true
   timeline_editor:
     paths:
@@ -458,6 +470,9 @@ component_management:
       paths:
         - "core/midi/**"
         - "!core/midi/platform/**"
+    - component_id: music
+      name: music
+      paths: ["core/music/**"]
     - component_id: native-components
       name: native-components
       paths: ["core/native-components/**"]
@@ -467,6 +482,9 @@ component_management:
     - component_id: playback
       name: playback
       paths: ["core/playback/**"]
+    - component_id: project_package
+      name: project_package
+      paths: ["core/project_package/**"]
     - component_id: sequence
       name: sequence
       paths: ["core/sequence/**"]
@@ -516,6 +534,9 @@ component_management:
     - component_id: timeline
       name: timeline
       paths: ["core/timeline/**"]
+    - component_id: timeline_agent_view
+      name: timeline_agent_view
+      paths: ["core/timeline_agent_view/**"]
     - component_id: timeline_editor
       name: timeline_editor
       paths: ["core/timeline_editor/**"]

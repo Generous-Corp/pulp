@@ -24,7 +24,8 @@ pulp_add_test_suite(pulp-test-remote-view LIBRARIES pulp::format pulp::runtime)
 pulp_add_test_suite(pulp-test-script SOURCES test_script_engine.cpp LIBRARIES pulp::view)
 
 # Scripted UI hot reload/theme reload tests
-add_executable(pulp-test-scripted-ui test_scripted_ui.cpp)
+add_executable(pulp-test-scripted-ui
+    test_scripted_ui.cpp)
 target_link_libraries(pulp-test-scripted-ui PRIVATE pulp::view Catch2::Catch2WithMain)
 if(TARGET pulp-render)
     target_link_libraries(pulp-test-scripted-ui PRIVATE pulp::render)
@@ -32,6 +33,18 @@ endif()
 # `slow`: ScriptedUiSession reload tests sleep on file-watcher
 # debounce + filesystem mtime; ~0.5-1 sec each. Excluded from fast-CI.
 catch_discover_tests(pulp-test-scripted-ui PROPERTIES LABELS slow)
+
+# Runtime-evaluation tests do not use the file watcher or its debounce sleeps.
+# Keep them in the normal-speed coverage lane so the capability, timeout, realm
+# replacement, and teardown paths are exercised by the diff-coverage gate.
+add_executable(pulp-test-scripted-ui-runtime-eval
+    test_scripted_ui_runtime_eval.cpp)
+target_link_libraries(pulp-test-scripted-ui-runtime-eval
+    PRIVATE pulp::view Catch2::Catch2WithMain)
+if(TARGET pulp-render)
+    target_link_libraries(pulp-test-scripted-ui-runtime-eval PRIVATE pulp::render)
+endif()
+catch_discover_tests(pulp-test-scripted-ui-runtime-eval)
 
 # JS engine abstraction tests (shared across all backends)
 pulp_add_test_suite(pulp-test-js-engine LIBRARIES pulp::view)
@@ -181,6 +194,29 @@ target_compile_definitions(pulp-test-canvas-fonts PRIVATE
     # weight-instancing regression tests. Test-only; not in bundled_blobs().
     "PULP_TEST_VARIABLE_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/FunnelDisplay-VariableFont_wght.ttf\"")
 catch_discover_tests(pulp-test-canvas-fonts)
+
+# CSS gradient strings judged by the pixels they produce. Every defect this
+# covers was a value the parser ACCEPTED and painted wrong, so a string
+# assertion cannot see any of them — each case renders the CSS beside a
+# hand-written equivalent and requires the two images to agree.
+if(PULP_HAS_SKIA)
+    add_executable(pulp-test-css-gradient-render test_css_gradient_render.cpp)
+    target_link_libraries(pulp-test-css-gradient-render
+        PRIVATE pulp::view Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-css-gradient-render)
+endif()
+
+# CSS gradient geometry against Chrome's own render of the same string. Split
+# from the file above because its oracle is different in kind: those cases
+# assert that two CSS spellings agree with EACH OTHER, which cannot see an
+# arithmetic error both spellings share. These expectations are pixel
+# positions read off Chromium by tools/import-validation/chrome_gradient_oracle.py.
+if(PULP_HAS_SKIA)
+    add_executable(pulp-test-css-gradient-geometry test_css_gradient_geometry.cpp)
+    target_link_libraries(pulp-test-css-gradient-geometry
+        PRIVATE pulp::view Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-css-gradient-geometry)
+endif()
 
 # CG-degraded gradient + pattern cluster. Apple-only TU: every
 # TEST_CASE drives CoreGraphics directly to prove the CoreGraphicsCanvas

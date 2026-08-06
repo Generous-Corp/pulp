@@ -26,10 +26,17 @@ function(_pulp_add_standalone target name bundle_id version)
             ${standalone_entry}
         )
     endif()
-    target_link_libraries(${target}_Standalone PRIVATE
-        ${target}_Core
-        ${_PULP_STANDALONE_TARGET}
-    )
+    set(_standalone_target "${_PULP_STANDALONE_TARGET}")
+    if(PULP_${target}_SHIP_INSPECTOR_RUNTIME_EVAL)
+        set(_standalone_target "${_PULP_STANDALONE_INSPECTOR_RUNTIME_EVAL_TARGET}")
+    elseif(PULP_${target}_SHIP_INSPECTOR)
+        set(_standalone_target "${_PULP_STANDALONE_INSPECTOR_TARGET}")
+    endif()
+    if(NOT _standalone_target)
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): declared inspector shipping component is unavailable; configure/install Pulp with Inspector support")
+    endif()
+    target_link_libraries(${target}_Standalone PRIVATE ${target}_Core ${_standalone_target})
     _pulp_apply_ui_script_definition(${target}_Standalone "${PULP_${target}_UI_SCRIPT}")
     _pulp_apply_view_mac_objc_suffix(${target}_Standalone)
     target_include_directories(${target}_Standalone PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -58,6 +65,7 @@ function(_pulp_add_standalone target name bundle_id version)
     include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpPortable.cmake")
     pulp_assert_portable_bundle(${target}_Standalone)
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_Standalone)
+    _pulp_attach_inspector_shipping(${target} ${target}_Standalone)
     # Linux+GNU-ld link-order fix: libskia.a → fontconfig. Same helper
     # used for pulp-cli (#1986) and pulp-import-design (#2018). Standalone
     # transitively pulls in pulp::view → pulp::canvas → libskia.a, which

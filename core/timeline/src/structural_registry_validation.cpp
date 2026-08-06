@@ -66,6 +66,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"sequences", SchemaValueKind::Array},
         {"session_start", SchemaValueKind::Object, false},
         {"tempo_map", SchemaValueKind::Array, false},
+        {"tuning", SchemaValueKind::Object, false, "pulp.timeline.tuning"},
     };
     static constexpr ExpectedField asset_fields[] = {
         {"content_hash", SchemaValueKind::String}, {"frame_count", SchemaValueKind::U64String},
@@ -94,11 +95,14 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"tracks", SchemaValueKind::Array},
     };
     static constexpr ExpectedField chord_scale_event_fields[] = {
+        {"chord_bass", SchemaValueKind::U32},
+        {"chord_extensions", SchemaValueKind::U32},
         {"chord_quality", SchemaValueKind::String},
         {"chord_root", SchemaValueKind::U32},
         {"position", SchemaValueKind::I64String},
         {"scale_mode", SchemaValueKind::String},
         {"scale_root", SchemaValueKind::U32},
+        {"voicing", SchemaValueKind::String},
     };
     static constexpr ExpectedField groove_template_fields[] = {
         {"name", SchemaValueKind::String},
@@ -123,7 +127,13 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
     static constexpr ExpectedField region_fields[] = {
         {"color", SchemaValueKind::U32, false},   {"duration", SchemaValueKind::I64String},
         {"id", SchemaValueKind::U64String},       {"name", SchemaValueKind::String},
-        {"position", SchemaValueKind::I64String},
+        {"position", SchemaValueKind::I64String}, {"role", SchemaValueKind::String},
+    };
+    static constexpr ExpectedField tuning_fields[] = {
+        {"keyboard_map_content", SchemaValueKind::String},
+        {"reference_pitch_millihertz", SchemaValueKind::U32},
+        {"scale_content", SchemaValueKind::String},
+        {"system", SchemaValueKind::String},
     };
     static constexpr ExpectedField scene_fields[] = {
         {"id", SchemaValueKind::U64String},
@@ -143,13 +153,35 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"device_chain", SchemaValueKind::Array},
         {"freeze", SchemaValueKind::Object, false},
         {"id", SchemaValueKind::U64String},
+        {"macros", SchemaValueKind::Array, false},
         {"mixer", SchemaValueKind::Object, false},
+        {"modulation_routes", SchemaValueKind::Array, false},
+        {"modulators", SchemaValueKind::Array, false},
         {"name", SchemaValueKind::String},
         {"record_armed", SchemaValueKind::Boolean},
         {"take_lanes", SchemaValueKind::Array},
+        {"tuning", SchemaValueKind::Object, false, "pulp.timeline.tuning"},
     };
     static constexpr ExpectedField device_placement_fields[] = {
         {"id", SchemaValueKind::U64String},
+    };
+    static constexpr ExpectedField modulator_fields[] = {
+        {"id", SchemaValueKind::U64String},
+        {"kind", SchemaValueKind::String},
+        {"name", SchemaValueKind::String},
+    };
+    static constexpr ExpectedField macro_control_fields[] = {
+        {"id", SchemaValueKind::U64String},
+        {"name", SchemaValueKind::String},
+        {"value_bits", SchemaValueKind::U32},
+    };
+    static constexpr ExpectedField modulation_route_fields[] = {
+        {"depth_bits", SchemaValueKind::U32},
+        {"enabled", SchemaValueKind::Boolean},
+        {"id", SchemaValueKind::U64String},
+        {"source_id", SchemaValueKind::U64String},
+        {"source_kind", SchemaValueKind::String},
+        {"target", SchemaValueKind::Object},
     };
     static constexpr ExpectedField take_lane_fields[] = {
         {"comp_segments", SchemaValueKind::Array},
@@ -213,6 +245,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {SchemaDomain::Document, "pulp.timeline.groove_step", groove_step_fields},
         {SchemaDomain::Document, "pulp.timeline.marker", marker_fields},
         {SchemaDomain::Document, "pulp.timeline.region", region_fields},
+        {SchemaDomain::Document, "pulp.timeline.tuning", tuning_fields},
         {SchemaDomain::Document, "pulp.timeline.scene", scene_fields},
         {SchemaDomain::Document, "pulp.timeline.slot", slot_fields},
         {SchemaDomain::Document, track_schema_policy.type_name, track_fields,
@@ -223,6 +256,9 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {SchemaDomain::Document, "pulp.timeline.automation_target.track_mixer",
          track_mixer_target_fields},
         {SchemaDomain::Document, "pulp.timeline.device_placement", device_placement_fields},
+        {SchemaDomain::Document, "pulp.timeline.modulator", modulator_fields},
+        {SchemaDomain::Document, "pulp.timeline.macro_control", macro_control_fields},
+        {SchemaDomain::Document, "pulp.timeline.modulation_route", modulation_route_fields},
         {SchemaDomain::Document, "pulp.timeline.take_lane", take_lane_fields, 2, 1},
         {SchemaDomain::Document, "pulp.timeline.take", take_fields},
         {SchemaDomain::Document, clip_schema_policy.type_name, clip_fields,

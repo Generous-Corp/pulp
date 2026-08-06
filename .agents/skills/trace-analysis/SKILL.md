@@ -43,12 +43,13 @@ named query primitives. This harness decides *what to ask*; `trace-sql` is
 
 | Tier | Who | Entry | This skill's role |
 |---|---|---|---|
-| **L0** | novice, no agent | `pulp trace slowest-frames`, `--preset dsp-hotspots`/`xruns` | not needed — canned preset → plain table |
-| **L1** | novice, one-shot | `pulp trace explain "<q>"` · `pulp_trace_explain` · `/trace "<q>"` | **run this protocol autonomously**, return narrated root cause + evidence + fix |
-| **L2** | expert, iterative | `pulp trace query "<sql>"` + this skill + `trace-sql` loaded | drive the full loop by hand on hard/multi-bottleneck cases |
+| **L0** | novice, no agent | Planned named presets | not available yet |
+| **L1** | novice, one-shot | A `.pftrace` plus a question | **run this protocol autonomously**, return narrated root cause + evidence + fix |
+| **L2** | expert, iterative | `pulp trace query "<sql>" --trace FILE` + this skill + `trace-sql` loaded | drive the full loop by hand on hard/multi-bottleneck cases |
 
-L0 needs no agent. L1 is the headline: you run the whole protocol and hand back
-prose. L2 is the same protocol, interactive, for cases the presets cannot crack.
+The live `Trace.query` / `Trace.explain` methods and named preset verbs are
+reserved and currently return `capability_unavailable`; do not treat them as
+successful analysis. L1 runs this workflow over real offline queries.
 
 ---
 
@@ -63,10 +64,17 @@ available for offline SQL:
 pulp trace doctor            # human report; add --json for {ready_to_capture, ready_to_query, …}
 ```
 
-`ready_to_capture:false` usually means the inspector is unreachable (start it
-with `PULP_TRACE_SERVER=1`) or tracing was compiled out; `ready_to_query:false`
-means no `trace_processor` (on `$PULP_TRACE_PROCESSOR`, the pinned Pulp-fetched
-build, or `$PATH`) or no captured trace yet. For zero-install, run
+`ready_to_capture:false` usually means no eligible inspector session was found
+or tracing was compiled out. Normal launches create no endpoint; capture
+requires an explicitly wired custom fixture published through authenticated discovery.
+When more than one live session exists—or when a capture spans separate CLI
+invocations—pass the same `--session ID --instance ID --publication ID`
+selector to `doctor`, `start`, and `stop`. The non-reusable
+publication ID pins the exact authenticated publication instead of allowing a
+replacement process that reuses the other IDs to inherit the operation.
+`ready_to_query:false` means no `trace_processor` (on
+`$PULP_TRACE_PROCESSOR`, the pinned Pulp-fetched build, or `$PATH`) or no
+captured trace yet. For zero-install, run
 `pulp trace fetch` once — it downloads the pinned `trace_processor_shell`
 (Perfetto v57.2), SHA-256-verified, into `$PULP_HOME`. (`pulp tool install
 trace-processor` fetches the same pinned artifact via the tool registry.)
@@ -74,7 +82,7 @@ trace-processor` fetches the same pinned artifact via the tool registry.)
 ```bash
 pulp trace start --categories render,gpu,text,js,layout   # pick the categories the question implicates
 # ... reproduce (open the editor, sweep the knob, run the offline render) ...
-pulp trace stop                                           # → /tmp/pulp-<ts>.pftrace
+pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION
 ```
 
 Or accept a `--trace FILE.pftrace` the user hands you. Choose categories from
@@ -209,8 +217,8 @@ deterministic — no real-time hazard, works regardless of the DSP story.
 ```bash
 pulp trace start --categories render,gpu,text,js,layout
 # ... open the editor ...
-pulp trace stop
-pulp trace explain "why is my plugin slow to open?"
+pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION
+# Investigate the printed .pftrace using the offline query loop below.
 ```
 
 A good answer reads like this:

@@ -1,11 +1,14 @@
 #include "browser_capture_ir.hpp"
 #include "browser_capture_limits.hpp"
+#include "browser_capture_styles.hpp"
+#include "browser_capture_tree.hpp"
 
 #include <pulp/runtime/crypto.hpp>
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <fstream>
 #include <limits>
 #include <sstream>
@@ -203,6 +206,205 @@ bool validate_semantic_report(const fs::path& path,
     return true;
 }
 
+/// A declared pointer, expressed the way the renderer wants it.
+///
+/// `Knob::paint` draws the design's own pointer as a radial stroke swept along
+/// the value arc, and takes its extent as FRACTIONS of the dial's half-extent
+/// (the same convention `hoist_captured_art_knobs` records for the Figma lane)
+/// so the numbers survive any later rescale of the control.
+///
+/// The declared rectangle is not axis-aligned with the radius it sits on: a dot
+/// at 7 o'clock is a square whose diagonal, not its width, spans the radial
+/// direction. Projecting the box's half-extents onto the radial unit vector and
+/// its perpendicular gives the true along-radius reach and across-radius width
+/// for a pointer at ANY angle, which a plain width/height read does not.
+struct DeclaredPointer {
+    float r_in = 0.0f;
+    float r_out = 0.0f;
+    float width = 0.0f;
+};
+
+/// The pointer's box, as the capture recorded it.
+///
+/// `left`/`top`/`width`/`height` are the painted footprint in page CSS px --
+/// what `getBoundingClientRect` measures, plus any stroke the capture could
+/// recover. That box is axis-aligned with the SCREEN, so for a rotated pointer
+/// it is the box the shape's diagonal sweeps rather than the shape: a 4x38
+/// needle at 38 degrees measures 26.5x32.4, and a width read off it is ten times
+/// the truth.
+///
+/// `intrinsic_*` and the matrix are the same pointer described in its OWN
+/// coordinate space, which is the only description a rotation does not distort.
+/// `oriented` says whether the capture supplied them; a report that predates
+/// them, or an element that could answer neither of the two APIs, leaves it
+/// false and the footprint is all there is.
+struct IndicatorBox {
+    double left = 0.0;
+    double top = 0.0;
+    double width = 0.0;
+    double height = 0.0;
+    bool oriented = false;
+    double intrinsic_width = 0.0;
+    double intrinsic_height = 0.0;
+    // The intrinsic box centre transformed into page coordinates. An
+    // asymmetric SVG shape need not paint pixels symmetrically inside its
+    // geometry box, so its client-rect centre is only an erasure hint.
+    double center_x = 0.0;
+    double center_y = 0.0;
+    // The linear part of element space -> page, column-major as CSS writes it:
+    // local x maps to (a, b), local y to (c, d).
+    double a = 1.0;
+    double b = 0.0;
+    double c = 0.0;
+    double d = 1.0;
+};
+
+std::optional<DeclaredPointer> pointer_fractions(double dial_left,
+                                                 double dial_top,
+                                                 double dial_width,
+                                                 double dial_height,
+                                                 const IndicatorBox& ind) {
+    const double half = std::min(dial_width, dial_height) * 0.5;
+    if (!(half > 0.0)) return std::nullopt;
+    // The pointer's two half-extent VECTORS in page coordinates.
+    //
+    // Without an element space to read, these are the footprint's own axes and
+    // the projection below is a support function of an axis-aligned box, which
+    // is what this has always computed. With one, they are the images of the
+    // element's own axes -- identical for an unrotated pointer, and the whole
+    // fix for a rotated one, because the element's box is the shape and the
+    // footprint is only the box the shape sweeps.
+    double xx = ind.width * 0.5;
+    double xy = 0.0;
+    double yx = 0.0;
+    double yy = ind.height * 0.5;
+    if (ind.oriented) {
+        xx = ind.a * ind.intrinsic_width * 0.5;
+        xy = ind.b * ind.intrinsic_width * 0.5;
+        yx = ind.c * ind.intrinsic_height * 0.5;
+        yy = ind.d * ind.intrinsic_height * 0.5;
+    }
+    // Reject a box with NO extent on EITHER axis -- that carries no direction
+    // to sweep along. A box with one zero axis is a different thing and must
+    // survive: an SVG <line> or <path> drawn straight up, down, left or right
+    // reports zero extent across its own axis, because a client rect excludes
+    // stroke. The capture recovers the painted width from the stroke where it
+    // can, but where it cannot -- a shape with no stroke to read -- the right
+    // answer is a correctly PLACED pointer of defaulted thickness, not a
+    // dropped one. `&&` rather than `||` is the whole difference.
+    //
+    // Measured on the axes actually used, not on the footprint. A rotated line
+    // is zero-width in its own space and fat in its footprint, so a guard left
+    // behind on the footprint would pass exactly the box it should refuse.
+    //
+    // This predicate exists twice, once here and once as the capture's own
+    // guard in browser_capture/semantics.mjs. They are in different languages,
+    // so neither grep finds the other; relaxing one alone leaves the other
+    // refusing the same box, one layer down and just as silently.
+    const double x_extent = std::hypot(xx, xy);
+    const double y_extent = std::hypot(yx, yy);
+    if (!(x_extent > 0.0) && !(y_extent > 0.0)) return std::nullopt;
+    const double cx = dial_left + dial_width * 0.5;
+    const double cy = dial_top + dial_height * 0.5;
+    // New captures carry the transformed intrinsic-box centre. The footprint
+    // centre remains the compatibility fallback: it is exact for rectangular
+    // HTML pointers and lines, but an asymmetric SVG path may paint unevenly
+    // inside the geometry box and therefore produce an off-centre client rect.
+    const double pointer_cx = ind.oriented
+                                  ? ind.center_x
+                                  : ind.left + ind.width * 0.5;
+    const double pointer_cy = ind.oriented
+                                  ? ind.center_y
+                                  : ind.top + ind.height * 0.5;
+    const double dx = pointer_cx - cx;
+    const double dy = pointer_cy - cy;
+    const double distance = std::sqrt(dx * dx + dy * dy);
+    // A pointer centred on the dial has no radial direction to sweep along, so
+    // there is nothing to reproduce. Refuse rather than divide by zero and
+    // stamp a pointer that pivots on itself.
+    if (!(distance > 0.0)) return std::nullopt;
+    const double ux = dx / distance;
+    const double uy = dy / distance;
+    // Support function of the box along the radial axis, and along the axis
+    // perpendicular to it.
+    const double along =
+        std::abs(xx * ux + xy * uy) + std::abs(yx * ux + yy * uy);
+    const double across =
+        std::abs(xy * ux - xx * uy) + std::abs(yy * ux - yx * uy);
+    if (!std::isfinite(along) || !std::isfinite(across)) return std::nullopt;
+    DeclaredPointer out;
+    out.r_in = static_cast<float>(std::max(0.0, distance - along) / half);
+    out.r_out = static_cast<float>((distance + along) / half);
+    out.width = static_cast<float>((2.0 * across) / half);
+    if (!(out.r_out > out.r_in)) return std::nullopt;
+    return out;
+}
+
+/// A browser-resolved colour as `#rrggbb` / `#rrggbbaa`.
+///
+/// `getComputedStyle` always answers in `rgb()` / `rgba()` form, and the two
+/// consumers of `knob_ind_color` do not agree on what they can read: the native
+/// materializer parses any CSS colour, the scripted bridge parses hex only and
+/// silently falls back to near-white. Normalizing here means the design's
+/// pointer colour survives BOTH paths instead of only the one that happens to
+/// be exercised. Anything else — an author-declared `oklch()`, a named colour —
+/// is carried through verbatim for the parser that can read it.
+std::string css_color_to_hex(const std::string& value) {
+    const auto open = value.find('(');
+    if (open == std::string::npos ||
+        (value.compare(0, 4, "rgb(") != 0 && value.compare(0, 5, "rgba(") != 0))
+        return value;
+    double channels[4] = {0.0, 0.0, 0.0, 1.0};
+    int count = 0;
+    std::size_t cursor = open + 1;
+    while (count < 4 && cursor < value.size()) {
+        try {
+            std::size_t consumed = 0;
+            channels[count] = std::stod(value.substr(cursor), &consumed);
+            if (consumed == 0) break;
+            cursor += consumed;
+            ++count;
+        } catch (const std::exception&) {
+            break;
+        }
+        while (cursor < value.size() &&
+               (value[cursor] == ',' || value[cursor] == ' ' ||
+                value[cursor] == '/'))
+            ++cursor;
+    }
+    if (count < 3) return value;
+    const auto byte = [](double v) {
+        return static_cast<int>(std::lround(std::clamp(v, 0.0, 255.0)));
+    };
+    char buffer[10];
+    if (count == 4 && channels[3] < 0.999) {
+        std::snprintf(buffer, sizeof(buffer), "#%02x%02x%02x%02x",
+                      byte(channels[0]), byte(channels[1]), byte(channels[2]),
+                      byte(channels[3] * 255.0));
+    } else {
+        std::snprintf(buffer, sizeof(buffer), "#%02x%02x%02x",
+                      byte(channels[0]), byte(channels[1]), byte(channels[2]));
+    }
+    return buffer;
+}
+
+/// A CSS-pixel page rectangle as the capture PNG's own integer pixel rectangle,
+/// serialized "x,y,w,h".
+///
+/// Rounded at the edges rather than at origin+size so a crop and the pointer
+/// inside it stay aligned: rounding a size independently of its origin can move
+/// a boundary by a pixel, which is enough to leave a sliver of the erased
+/// pointer showing at the edge of the rectangle meant to contain it.
+std::string device_pixel_rect(double left, double top,
+                              double width, double height, double dpr) {
+    const long x0 = std::lround(left * dpr);
+    const long y0 = std::lround(top * dpr);
+    const long x1 = std::lround((left + width) * dpr);
+    const long y1 = std::lround((top + height) * dpr);
+    return std::to_string(x0) + "," + std::to_string(y0) + "," +
+           std::to_string(x1 - x0) + "," + std::to_string(y1 - y0);
+}
+
 /// Lower each bound semantic candidate into a control node beneath the
 /// faithful-capture backdrop.
 ///
@@ -222,8 +424,11 @@ bool validate_semantic_report(const fs::path& path,
 /// leaving that part of the picture alone.
 int lower_semantic_controls(const fs::path& path,
                             const DesignIR& ir,
-                            double dx, double dy,
+                            double dx, double dy, double dpr,
                             pulp::view::IRNode& root,
+                            const CapturedStyleIndex* styles,
+                            bool body_is_native_underlay,
+                            int& styled_controls,
                             int& undeclared_paint_boxes,
                             std::string& error) {
     std::ifstream input(path, std::ios::binary);
@@ -253,8 +458,19 @@ int lower_semantic_controls(const fs::path& path,
         else continue;  // buttons and unknowns stay part of the backdrop
 
         const auto data = object_member(candidate, "data_pulp");
+        // Which attribute supplied the key IS the declared role: a control
+        // DRIVES its parameter, a meter only DISPLAYS one. Keying the role off
+        // the attribute rather than the widget kind keeps this agreeing by
+        // construction with the authoring contract an importing host checks
+        // before the browser runs -- a fader beside its own level meter binds
+        // the same parameter twice, which is completely ordinary and must not
+        // read as two controls driving one parameter.
         std::string param = string_member(data, "param");
-        if (param.empty()) param = string_member(data, "meter");
+        bool displays_only = false;
+        if (param.empty()) {
+            param = string_member(data, "meter");
+            displays_only = !param.empty();
+        }
         if (param.empty()) continue;  // "bound" without a key is not a binding
 
         // Prefer the declared paint box; fall back to the component box and
@@ -281,7 +497,14 @@ int lower_semantic_controls(const fs::path& path,
         // real widgets and an EMPTY binding manifest -- knobs that render and
         // move nothing.
         control.attributes["binding"] = param;
-        control.attributes["pulpParamKey"] = param;
+        // The JS emitter reads one key for both roles and branches on the
+        // widget type (bindMeter vs bindWidgetToParam), so "binding" is
+        // shared. The C++ / manifest vocabulary separates them, and writing a
+        // display under pulpParamKey claims the parameter is DRIVEN here --
+        // which reads downstream as a second control on a parameter that
+        // already has one.
+        control.attributes[displays_only ? "pulpMeterValueKey" : "pulpParamKey"] =
+            param;
         // A param key alone gets the control into the binding MANIFEST but not
         // into the emitted C++. `collect_resolved_binding_plan` admits a helper
         // route only when the node ALSO carries a route id and a stable anchor:
@@ -298,11 +521,14 @@ int lower_semantic_controls(const fs::path& path,
         control.stable_anchor_id = anchor;
         control.anchor_strategy = "path";
         control.attributes["pulpRouteId"] = anchor;
-        // The body of this control is the captured bitmap beneath it, so it
-        // carries no background of its own and would otherwise fail the
-        // has-a-body test that selects the value-only skin -- and be painted
-        // over by an opaque default widget body.
-        control.attributes["designed_body"] = "capture";
+        // The body of this control is the layer beneath it, so it carries no
+        // background of its own and would otherwise fail the has-a-body test
+        // that selects the value-only skin -- and be painted over by an opaque
+        // default widget body. Stated explicitly per mode: on a natively drawn
+        // panel the rule can no longer be inferred from a bitmap's existence,
+        // because there is no bitmap.
+        control.attributes["designed_body"] =
+            body_is_native_underlay ? "underlay" : "capture";
         // The caption is already in the capture. audio_label would draw a
         // second copy on top of it; the name survives on the node for host
         // parameter naming.
@@ -327,6 +553,28 @@ int lower_semantic_controls(const fs::path& path,
             static_cast<float>(number_member(box, "top", 0.0) + dy);
         control.style.width = static_cast<float>(number_member(box, "width", 0.0));
         control.style.height = static_cast<float>(number_member(box, "height", 0.0));
+        // Chrome already solved this element's appearance; record it so the
+        // node carries the gradient, radius, and shadow stack that make it look
+        // like the designed control instead of only a transparent hit box.
+        // Applied after the geometry above and confined to appearance
+        // properties, so the design's paint box stays the placement authority.
+        if (styles != nullptr) {
+            const auto backend_node_id = static_cast<int>(
+                number_member(candidate, "backend_node_id", -1.0));
+            if (backend_node_id >= 0) {
+                CapturedBox paint_box;
+                paint_box.left = number_member(box, "left", 0.0);
+                paint_box.top = number_member(box, "top", 0.0);
+                paint_box.width = number_member(box, "width", 0.0);
+                paint_box.height = number_member(box, "height", 0.0);
+                const auto computed =
+                    styles->styles_for(backend_node_id, paint_box);
+                if (!computed.empty()) {
+                    apply_computed_styles(computed, paint_box, control.style);
+                    ++styled_controls;
+                }
+            }
+        }
         // The value layer's colours come from the DESIGN's tokens, not the
         // widget defaults. DesignedControlSkin's header says exactly this, but
         // its call site passes a default-constructed skin whose accent is a
@@ -355,6 +603,135 @@ int lower_semantic_controls(const fs::path& path,
             control.attributes["design_track"] = track;
         if (const auto ind = token("css/text-strong"); !ind.empty())
             control.attributes["design_indicator"] = ind;
+
+        // The design's OWN pointer, when it declared one.
+        //
+        // Recorded in the SAME vocabulary the Figma lane already emits
+        // (`hoist_captured_art_knobs` -> knob_ind_r_in / _r_out / _w /
+        // _color), as fractions of the paint box's HALF-extent, so the
+        // consumer needs no second set of names and no second code path. A
+        // design that declares nothing keeps the widget's derived tick, which
+        // is the common case and not a failure.
+        //
+        // `design_indicator` above is only a COLOUR -- with no geometry the
+        // engine has nothing to move, so an imported control showed the
+        // indicator frozen wherever the capture happened to catch it.
+        //
+        // The two device-pixel rectangles are hand-off state for the sprite
+        // pass (`apply_browser_capture_control_sprites`), which crops the
+        // control out of the panel capture and erases the indicator baked into
+        // that crop. It consumes and removes them; they are not a runtime
+        // contract. Knobs use the cleaned crop as their disc. Faders use it to
+        // cover the frozen thumb while the marked thumb art is hoisted into a
+        // value-driven overlay.
+        const auto ind_box = object_member(candidate, "indicator_bounds");
+        if (ind_box.isObject() && box.isObject()) {
+            const double dial_left = number_member(box, "left", 0.0);
+            const double dial_top = number_member(box, "top", 0.0);
+            const double dial_w = number_member(box, "width", 0.0);
+            const double dial_h = number_member(box, "height", 0.0);
+            IndicatorBox ind;
+            ind.left = number_member(ind_box, "left", 0.0);
+            ind.top = number_member(ind_box, "top", 0.0);
+            ind.width = number_member(ind_box, "width", 0.0);
+            ind.height = number_member(ind_box, "height", 0.0);
+            // The pointer in its OWN space, when the capture could describe it
+            // there. Both halves or neither: an element size without the matrix
+            // that scales it reads SVG user units as CSS px, which is the
+            // viewBox error one layer along, and a matrix without a size has
+            // nothing to scale.
+            const auto intrinsic = object_member(ind_box, "intrinsic");
+            const auto matrix = array_member(ind_box, "transform");
+            if (intrinsic.isObject() && matrix.size() >= 6) {
+                const auto component = [&](uint32_t index) {
+                    return matrix[index].getWithDefault<double>(
+                        std::numeric_limits<double>::quiet_NaN());
+                };
+                const double a = component(0);
+                const double b = component(1);
+                const double c = component(2);
+                const double d = component(3);
+                const double e = component(4);
+                const double f = component(5);
+                const double ix = number_member(intrinsic, "x", 0.0);
+                const double iy = number_member(intrinsic, "y", 0.0);
+                const double iw = number_member(intrinsic, "width", -1.0);
+                const double ih = number_member(intrinsic, "height", -1.0);
+                if (std::isfinite(a) && std::isfinite(b) && std::isfinite(c) &&
+                    std::isfinite(d) && std::isfinite(e) && std::isfinite(f) &&
+                    std::isfinite(ix) && std::isfinite(iy) && iw >= 0.0 &&
+                    ih >= 0.0) {
+                    ind.oriented = true;
+                    ind.intrinsic_width = iw;
+                    ind.intrinsic_height = ih;
+                    ind.a = a;
+                    ind.b = b;
+                    ind.c = c;
+                    ind.d = d;
+                    const double local_cx = ix + iw * 0.5;
+                    const double local_cy = iy + ih * 0.5;
+                    ind.center_x = a * local_cx + c * local_cy + e;
+                    ind.center_y = b * local_cx + d * local_cy + f;
+                }
+            }
+            if (widget == pulp::view::AudioWidgetType::knob) {
+                if (const auto pointer = pointer_fractions(
+                        dial_left, dial_top, dial_w, dial_h, ind)) {
+                    control.attributes["knob_ind_r_in"] =
+                        std::to_string(pointer->r_in);
+                    control.attributes["knob_ind_r_out"] =
+                        std::to_string(pointer->r_out);
+                    control.attributes["knob_ind_w"] =
+                        std::to_string(pointer->width);
+                    if (const auto color =
+                            string_member(candidate, "indicator_color");
+                        !color.empty())
+                        control.attributes["knob_ind_color"] = css_color_to_hex(color);
+                    control.attributes["browser_sprite_crop_px"] =
+                        device_pixel_rect(dial_left, dial_top, dial_w, dial_h, dpr);
+                    // The PAINTED footprint, deliberately: this pass crops the
+                    // control out of the panel capture and erases the pointer
+                    // baked into that crop, so it wants every pixel the pointer
+                    // covers. For a rotated needle that is the fat box -- the
+                    // one thing the geometry above must not use and this must.
+                    control.attributes["browser_sprite_indicator_px"] =
+                        device_pixel_rect(ind.left, ind.top, ind.width,
+                                          ind.height, dpr);
+                }
+            } else if (widget == pulp::view::AudioWidgetType::fader &&
+                       dial_w > 0.0 && dial_h > 0.0 &&
+                       ind.width > 0.0 && ind.height > 0.0) {
+                // A fader indicator is a translating thumb, not a radial
+                // pointer. Preserve the rectangles directly: the sprite pass
+                // needs the authored pixels and the runtime derives its travel
+                // from the fader orientation/value.
+                control.attributes["browser_sprite_crop_px"] =
+                    device_pixel_rect(dial_left, dial_top, dial_w, dial_h, dpr);
+                control.attributes["browser_sprite_indicator_px"] =
+                    device_pixel_rect(ind.left, ind.top, ind.width, ind.height, dpr);
+            }
+        }
+
+        // Sit above the lowered decoration, explicitly.
+        //
+        // Lowering assigns every composed node a z-index from Chrome's paint
+        // order, and these synthesized controls are appended afterwards without
+        // one — so they defaulted to `auto` and sat BENEATH any decoration
+        // carrying an explicit z-index. Hit-testing follows paint order, so a
+        // glow or gradient band drawn over a knob answered the press meant for
+        // it: the panel rendered correctly and responded to nothing. Appending
+        // last does not save them, because z-index beats document order.
+        //
+        // Root children are siblings in one stacking context, so a z-index above
+        // every root sibling puts the control above those siblings' whole
+        // subtrees — which is where the covering bands live. Computed from the
+        // tree rather than a constant: a fixed number silently stops working the
+        // day a design nests one level deeper than it did today.
+        int max_sibling_z = 0;
+        for (const auto& sibling : root.children)
+            if (sibling.style.z_index)
+                max_sibling_z = std::max(max_sibling_z, *sibling.style.z_index);
+        control.style.z_index = max_sibling_z + 1;
 
         root.children.push_back(std::move(control));
         ++lowered;
@@ -600,6 +977,25 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     const double logical_width = number_member(reference, "logical_width");
     const double logical_height = number_member(reference, "logical_height");
     const double dpr = number_member(reference, "device_scale_factor");
+    // Where the authored frame sits INSIDE the captured image, in CSS px. The
+    // capture is deliberately larger than the design -- the root carries its
+    // own padding and the harness grows the extent so drop shadows and
+    // absolutely positioned decoration survive -- so the two pictures are not
+    // in correspondence until one is cropped to this rect.
+    //
+    // The member is null on a capture that could not resolve the frame, and
+    // null is not a zero offset: object_member hands back an empty view for a
+    // null, which reads as absent, and absent must reach the consumer's refusal
+    // path rather than becoming an origin of (0,0).
+    const auto authored_frame = object_member(reference, "authored_frame");
+    const double authored_frame_width =
+        number_member(authored_frame, "width", 0.0);
+    const double authored_frame_height =
+        number_member(authored_frame, "height", 0.0);
+    const bool has_authored_frame =
+        std::isfinite(authored_frame_width) &&
+        std::isfinite(authored_frame_height) &&
+        authored_frame_width > 0.0 && authored_frame_height > 0.0;
     // The panel's own bounds, which the capture already measures. The document
     // is the VIEWPORT plus whatever room the overhang needed, so using it as
     // the root opens a plugin far larger than its design with dead space
@@ -780,9 +1176,42 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         (surface_width < logical_width - 1.0 ||
          surface_height < logical_height - 1.0);
 
+    // The DOM snapshot is optional evidence: a capture that predates the
+    // computed-style request, or names its snapshot by asset id rather than by
+    // file, still lowers to a faithful capture. It just gains no appearance,
+    // which is strictly what the pipeline did before.
+    std::optional<CapturedStyleIndex> captured_styles;
+    const std::string snapshot_asset =
+        string_member(documents[static_cast<int>(0)], "snapshot_asset");
+    if (!snapshot_asset.empty()) {
+        std::string ignored;
+        if (const auto snapshot_path =
+                contained_sidecar(envelope_path, snapshot_asset, ignored)) {
+            captured_styles = CapturedStyleIndex::load(*snapshot_path);
+        }
+    }
+    // Native drawing needs the painted tree; without a snapshot there is
+    // nothing to draw FROM, and silently falling back to the photograph would
+    // report a native panel that is a picture.
+    const bool native_lowering = options.native_panel_lowering;
+    if (native_lowering && !captured_styles) {
+        result.error =
+            "native panel lowering requires a DOM snapshot with computed "
+            "styles; this capture carries none";
+        return result;
+    }
+
     ir.root.type = "frame";
     ir.root.name = "Browser-evaluated HTML";
-    if (crop_to_surface) {
+    if (native_lowering) {
+        // No backdrop at all. The panel is its nodes.
+        ir.root.style.width = static_cast<float>(
+            crop_to_surface ? surface_width : logical_width);
+        ir.root.style.height = static_cast<float>(
+            crop_to_surface ? surface_height : logical_height);
+        ir.root.style.overflow = "hidden";
+        ir.root.style.position = "relative";
+    } else if (crop_to_surface) {
         ir.root.style.width = static_cast<float>(surface_width);
         ir.root.style.height = static_cast<float>(surface_height);
         ir.root.style.overflow = "hidden";
@@ -800,6 +1229,14 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         capture.style.height = static_cast<float>(logical_height);
         capture.style.object_fit = "fill";
         capture.attributes["asset_ref"] = reference_id;
+        // Every node in a lowered tree carries an anchor: it is the identity a
+        // consumer edits, re-links and reconciles against. This backdrop is
+        // adapter-authored rather than a document element, so the anchor is a
+        // constant -- but a tree with one unanchored node is refused whole by
+        // a host that enforces the contract, and the panel it refuses is the
+        // one the browser just solved correctly.
+        capture.stable_anchor_id = "browser:capture";
+        capture.anchor_strategy = "adapter";
         ir.root.children.push_back(std::move(capture));
     } else {
         ir.root.render_mode = NodeRenderMode::faithful_capture;
@@ -813,10 +1250,19 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     ir.root.anchor_strategy = "adapter";
     ir.root.source_adapter = "browser-capture";
     ir.root.source_version = "pulp-browser-capture-v1";
-    // The typed capture_asset_id is the render contract. asset_ref keeps the
-    // existing source-agnostic manifest refresh/localization pass aware of the
-    // same backing without teaching that utility a browser-specific field.
-    ir.root.attributes["asset_ref"] = reference_id;
+    if (native_lowering) {
+        // The reference PNG stays in the asset manifest as the A/B oracle, but
+        // it is no longer what the root renders. Naming it `asset_ref` here
+        // would hand the manifest pass a root that reads as an image and put
+        // the photograph back on screen through the side door.
+        ir.root.attributes["browser_reference_asset"] = reference_id;
+    } else {
+        // The typed capture_asset_id is the render contract. asset_ref keeps
+        // the existing source-agnostic manifest refresh/localization pass aware
+        // of the same backing without teaching that utility a browser-specific
+        // field.
+        ir.root.attributes["asset_ref"] = reference_id;
+    }
 
     // The backdrop alone is a picture. These children are the live controls.
     // Their bounds are page coordinates, so when the root is cropped they must
@@ -826,11 +1272,152 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     const double control_dx = crop_to_surface ? -surface_left : 0.0;
     const double control_dy = crop_to_surface ? -surface_top : 0.0;
     int undeclared_paint_boxes = 0;
+
+    // Draw the design before the controls that sit on it. Both are absolutely
+    // positioned siblings, so document order IS paint order here; appending the
+    // controls after the tree is what keeps a value ring above the knob face it
+    // belongs to rather than under it.
+    if (native_lowering) {
+        const auto tree = lower_painted_tree(
+            *captured_styles, control_dx, control_dy, ir.root);
+        ir.root.attributes["native_painted_nodes"] =
+            std::to_string(tree.painted);
+        ir.root.attributes["native_nodes_lowered"] =
+            std::to_string(tree.lowered);
+        ir.root.attributes["native_nodes_native"] =
+            std::to_string(tree.native);
+        ir.root.attributes["native_nodes_image_asset"] =
+            std::to_string(tree.image_asset);
+        ir.root.attributes["native_nodes_element_capture_fallback"] =
+            std::to_string(tree.element_capture_fallback);
+        // How much of the panel those fallbacks leave BLANK, as a fraction of
+        // the emitted root. The count above cannot carry that: eighteen `<svg>`
+        // icons and two full-window `<canvas>` elements are both small numbers,
+        // and one of them is 0.4% of the design while the other is all of it.
+        // Emitted whenever there is a fallback at all, including 0.000, so a
+        // consumer that reads it can tell "measured and negligible" from "the
+        // producer never computed it".
+        if (tree.element_capture_fallback > 0) {
+            const double panel =
+                static_cast<double>(ir.root.style.width.value_or(0.0f)) *
+                static_cast<double>(ir.root.style.height.value_or(0.0f));
+            char fraction[32] = {};
+            std::snprintf(fraction, sizeof(fraction), "%.4f",
+                          panel > 0.0 ? tree.unpainted_fallback_area / panel
+                                      : 0.0);
+            ir.root.attributes["native_nodes_unpainted_area_fraction"] =
+                fraction;
+        }
+        ir.root.attributes["native_nodes_text"] = std::to_string(tree.text);
+        ir.root.attributes["native_nodes_pooled"] =
+            std::to_string(tree.pooled_into_fallback);
+        // A capture that carries no paint order at all would otherwise lower to
+        // pure document order and look like a plausible panel with its stacking
+        // silently wrong.
+        ir.root.attributes["native_nodes_missing_paint_order"] =
+            std::to_string(tree.missing_paint_order);
+        // The shape of the tree, not just its size. A depth of 1 means the
+        // lowering flattened the design and an agent asked to "tweak the
+        // pickup section" has no section to grab — the number that says so
+        // belongs next to the counts, where a reviewer already looks.
+        ir.root.attributes["native_tree_root_children"] =
+            std::to_string(tree.root_children);
+        ir.root.attributes["native_tree_depth"] =
+            std::to_string(tree.max_depth);
+        // Recorded only when they happened, following the same rule as the
+        // controls counters: a zero here is the normal case and printing it
+        // everywhere buries the one panel where a node went missing.
+        const auto record_if = [&ir](const char* key, int value) {
+            if (value > 0) ir.root.attributes[key] = std::to_string(value);
+        };
+        record_if("native_nodes_skipped_empty_box", tree.skipped_empty_box);
+        record_if("native_nodes_skipped_blank_text", tree.skipped_blank_text);
+        record_if("native_nodes_skipped_non_visual", tree.skipped_non_visual);
+        record_if("native_nodes_hoisted", tree.hoisted_escapes);
+        // Rotations solved back into a rectangle plus an angle. Reported
+        // because "no fallbacks" reads the same whether a design has no
+        // rotations or its rotations were recovered, and only one of those is
+        // evidence the recovery ran.
+        record_if("native_nodes_rotation_recovered", tree.rotation_recovered);
+        record_if("native_nodes_overlapping_reorders",
+                  tree.overlapping_reorders);
+        // The count says a panel can paint wrong; the pairs say where. Without
+        // them the only way to find an inversion is to diff two renders by eye.
+        if (!tree.overlapping_reorder_pairs.empty()) {
+            std::string joined;
+            for (const auto& pair : tree.overlapping_reorder_pairs) {
+                if (!joined.empty()) joined += ",";
+                joined += pair;
+            }
+            ir.root.attributes["native_nodes_overlapping_reorder_pairs"] =
+                joined;
+        }
+        // The nested tree clips by DOM parentage while CSS clips along the
+        // containing-block chain, so both of these are known limitations of the
+        // opt-in native path rather than transient regressions. Reported so the
+        // census stops counting the affected nodes as faithfully drawn.
+        record_if("native_nodes_clip_over_applied", tree.clip_over_applied);
+        record_if("native_nodes_clip_lost", tree.clip_lost);
+        // Inline `<svg>`, reported as three numbers rather than one: how many
+        // icons became geometry, how many still arrive as a captured element,
+        // and how many vector nodes the drawn ones cost. Read `svg_refused`
+        // beside the per-node `capture_fallback_reason` — that string names the
+        // construct that refused, which is the actual can't-draw list.
+        record_if("native_svg_lowered", tree.svg_lowered);
+        record_if("native_svg_refused", tree.svg_refused);
+        record_if("native_svg_shapes", tree.svg_shapes);
+        // A snapshot taken before the capture collected SVG paint holds the
+        // geometry and no colour for it, so every icon in the design falls
+        // back — and a reader sees a panel with no icons and no error, which
+        // is indistinguishable from the bug this lowering exists to fix. The
+        // one refusal a caller can act on gets said out loud, with the action.
+        if (tree.svg_refused_stale_capture > 0) {
+            // Also ON the IR, because the IR is the artifact a render harness
+            // dumps and greps. A warning only the CLI prints is invisible to
+            // every caller that lowers in-process, which is how this went
+            // unnoticed for a whole debugging round.
+            ir.root.attributes["native_svg_stale_capture"] =
+                std::to_string(tree.svg_refused_stale_capture);
+            result.warnings.push_back(
+                "capture predates the SVG paint protocol: " +
+                std::to_string(tree.svg_refused_stale_capture) + " of " +
+                std::to_string(tree.svg_refused + tree.svg_lowered) +
+                " inline <svg> element(s) kept their captured pixels because "
+                "this snapshot carries no resolved fill/stroke. Re-run the "
+                "browser capture to draw them.");
+        }
+
+        // Same failure, different field. A basis with no resolved face is one
+        // the renderer refuses, so the run re-derives its own line breaking —
+        // and a run that resumes mid-line after an inline `<span>` loses the
+        // offset that placed it and prints over its own sibling. That reads as
+        // a text-layout bug, and it is a capture missing one column.
+        if (tree.text_line_boxes_without_face > 0) {
+            ir.root.attributes["native_text_stale_capture"] =
+                std::to_string(tree.text_line_boxes_without_face);
+            result.warnings.push_back(
+                "capture predates the resolved-font-face protocol: " +
+                std::to_string(tree.text_line_boxes_without_face) +
+                " text run(s) carry captured line boxes with no face, so their "
+                "line breaking is re-derived rather than reproduced. Re-run the "
+                "browser capture to use the browser's own line breaks.");
+        }
+        record_if("native_nodes_type_scaled", tree.type_scaled);
+        record_if("native_nodes_type_scale_refused", tree.type_scale_refused);
+    }
+
+    int styled_controls = 0;
     const int lowered = lower_semantic_controls(
-        *semantic_report, ir, control_dx, control_dy, ir.root,
-        undeclared_paint_boxes, result.error);
+        *semantic_report, ir, control_dx, control_dy, dpr, ir.root,
+        captured_styles ? &*captured_styles : nullptr, native_lowering,
+        styled_controls, undeclared_paint_boxes, result.error);
     if (lowered < 0) return result;
     ir.root.attributes["controls_lowered"] = std::to_string(lowered);
+    // Recorded so a capture that silently lost its solved appearance is
+    // visible as a number rather than as a flat-looking panel nobody can
+    // attribute.
+    ir.root.attributes["controls_with_captured_style"] =
+        std::to_string(styled_controls);
     // Surfaced rather than swallowed: an undeclared paint box means the widget
     // was placed on the component box, which for a captioned control paints its
     // value geometry low. Correct for a meter, wrong for a knob, and nothing
@@ -868,6 +1455,32 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
             number_member(semantics, "unresolved_count", 0.0)));
     ir.root.attributes["browser_device_scale_factor"] =
         std::to_string(dpr);
+    // Carry the registration rect onto the root so a consumer holding only the
+    // IR can put its render and the reference over the same pixels. Recorded in
+    // CSS px next to the DPR that scales them, so the envelope keeps one device
+    // scale and there is no second copy to drift from it.
+    //
+    // The primary surface is the same rect measured a different way, and it is
+    // what this root's own geometry was derived from just above -- so a capture
+    // that predates reference.authored_frame still registers, instead of the
+    // consumer refusing every panel captured before the field existed.
+    const auto record_authored_frame =
+        [&ir](double x, double y, double width, double height) {
+            ir.root.attributes["browser_authored_frame_x"] = std::to_string(x);
+            ir.root.attributes["browser_authored_frame_y"] = std::to_string(y);
+            ir.root.attributes["browser_authored_frame_width"] =
+                std::to_string(width);
+            ir.root.attributes["browser_authored_frame_height"] =
+                std::to_string(height);
+        };
+    if (has_authored_frame) {
+        record_authored_frame(number_member(authored_frame, "x", 0.0),
+                              number_member(authored_frame, "y", 0.0),
+                              authored_frame_width, authored_frame_height);
+    } else if (crop_to_surface) {
+        record_authored_frame(surface_left, surface_top, surface_width,
+                              surface_height);
+    }
 
     result.reference_png = *reference_png;
     result.semantic_report = *semantic_report;

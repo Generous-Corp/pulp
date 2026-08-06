@@ -1587,6 +1587,12 @@ TEST_CASE("value_channels() defaults to null and costs the vtable nothing",
     };
     Bare bare;
     CHECK(bare.value_channels() == nullptr);
+    bool visited_default = false;
+    bare.visit_value_channels([&](pulp::view::ValueChannelSet* channels) {
+        visited_default = true;
+        CHECK(channels == nullptr);
+    });
+    CHECK(visited_default);
 
     // No sizeof assertion here on purpose. `Processor` already has virtuals, so
     // appending one cannot grow the object — the vptr is present either way,
@@ -1607,4 +1613,10 @@ TEST_CASE("value_channels() defaults to null and costs the vtable nothing",
     WithChannels declared;
     pulp::format::Processor& as_base = declared;
     CHECK(as_base.value_channels() == &declared.set);
+    bool visited_override = false;
+    as_base.visit_value_channels([&](pulp::view::ValueChannelSet* channels) {
+        visited_override = true;
+        CHECK(channels == &declared.set);
+    });
+    CHECK(visited_override);
 }

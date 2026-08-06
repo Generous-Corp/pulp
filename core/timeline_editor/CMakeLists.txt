@@ -14,15 +14,18 @@
 # would make every consumer of the editor kernel — including a plugin that only
 # wants the interfaces — pay for the view stack.
 #
-# The rung carries one translation unit rather than being header-only, because
-# lowering an intent onto a command is a definition and not a declaration. The
-# alternative — leaving the lowering in `pulp-timeline` to keep this target
-# INTERFACE — is what the floor gate is unable to police: `core/timeline` cannot
-# include `pulp/timeline_editor/*`, so a document-model source reaching for a
-# tool verb only fails when the verbs live up here.
+# The rung carries translation units rather than being header-only, because
+# editor policy and lowering are definitions rather than declarations. The
+# alternative — leaving them in `pulp-timeline` to keep this target INTERFACE —
+# is what the floor gate is unable to police: `core/timeline` cannot include
+# `pulp/timeline_editor/*`, so a document-model source reaching for a tool verb
+# only fails when the verbs live up here.
 
 add_library(pulp-timeline-editor
     src/edit_intent.cpp
+    src/gesture_budget.cpp
+    src/snap_grid.cpp
+    src/track_edit_intent.cpp
     src/viewport_projection.cpp)
 add_library(pulp::timeline-editor ALIAS pulp-timeline-editor)
 

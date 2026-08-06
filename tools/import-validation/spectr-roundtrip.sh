@@ -14,6 +14,7 @@
 #   PULP_HARNESS_THRESHOLD  similarity threshold for PASS (default 0.85)
 #   PULP_DIR               override pulp checkout path (default /Users/danielraffel/Code/pulp)
 #   SPECTR_DIR             override spectr checkout path (default /Users/danielraffel/Code/spectr)
+#   PULP_CAPTURE_CLI       pulp/pulp-cpp binary with `inspect screenshot` (default: PATH pulp)
 #
 # Exit codes:
 #   0  PASS  — Spectr native render matches reference within tolerance
@@ -29,6 +30,7 @@ REFERENCE="$PULP/planning/screenshots/REFERENCE-spectr-editor-html.png"
 OUT_DIR="$PULP/planning/screenshots"
 OUT="$OUT_DIR/spectr-native-latest.png"
 THRESHOLD="${PULP_HARNESS_THRESHOLD:-0.85}"
+CAPTURE_CLI="${PULP_CAPTURE_CLI:-$(command -v pulp || true)}"
 
 SKIP_IMPORT=0
 SKIP_BUILD=0
@@ -50,6 +52,7 @@ yel()   { printf '\033[33m%s\033[0m\n' "$*"; }
 [[ -f "$REFERENCE" ]] || { red "ERROR: missing reference $REFERENCE — capture via Chrome first"; exit 2; }
 [[ -f "$EDITOR_HTML" ]] || { red "ERROR: missing $EDITOR_HTML"; exit 2; }
 which pulp >/dev/null || { red "ERROR: pulp CLI not in PATH"; exit 2; }
+[[ -x "$CAPTURE_CLI" ]] || { red "ERROR: capture CLI is not executable: $CAPTURE_CLI"; exit 2; }
 which python3 >/dev/null || { red "ERROR: python3 required for diff"; exit 2; }
 
 # Freshness — refuse to validate from a checkout behind origin/main.
@@ -115,7 +118,7 @@ if [[ $SKIP_CAPTURE -eq 0 ]]; then
   sleep 0.5
   BINARY="$SPECTR/build/Spectr.app/Contents/MacOS/Spectr"
   [[ -x "$BINARY" ]] || { red "ERROR: $BINARY missing or not executable"; exit 2; }
-  "$BINARY" >/tmp/spectr-rt-runtime.log 2>&1 &
+  PULP_INSPECT_PROFILE=observe "$BINARY" >/tmp/spectr-rt-runtime.log 2>&1 &
   PID=$!
   sleep 4
   if ! kill -0 $PID 2>/dev/null; then
@@ -135,68 +138,34 @@ if [[ $SKIP_CAPTURE -eq 0 ]]; then
   green "  Spectr running (PID=$PID, path verified)"
 
   # ── [4/5] Capture window ────────────────────────────────────────────────
-  echo "[4/5] Capture Spectr window…"
-  # Bring to front
-  osascript >/dev/null 2>&1 <<EOF || true
-    tell application "System Events"
-      set proc to first process whose unix id is $PID
-      set frontmost of proc to true
-    end tell
-EOF
-  sleep 1
-  # Window-specific capture only. A full-screen fallback was tempting but
-  # poisons the histogram diff against the REFERENCE render (terminal /
-  # desktop background bleeds into the global color distribution and the
-  # similarity score ends up reflecting the wallpaper, not the plugin
-  # UI). See task #81. Retry the window-id query a few times — Cocoa
-  # windows can take a moment to appear in System Events after launch.
-  WID=""
-  for attempt in 1 2 3 4 5; do
-    WID=$(osascript 2>/dev/null <<EOF || echo ""
-      tell application "System Events"
-        tell first process whose unix id is $PID
-          if (count of windows) > 0 then
-            return id of window 1
-          end if
-        end tell
-      end tell
-EOF
-)
-    if [[ -n "$WID" && "$WID" =~ ^[0-9]+$ ]]; then break; fi
-    sleep 0.5
+  echo "[4/5] Capture Spectr window in-process…"
+  # Match discovery by PID so another live inspector session cannot be
+  # captured accidentally. This path runs inside Spectr and therefore works
+  # over SSH without Screen Recording or Accessibility permission.
+  IDENTITY=""
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    IDENTITY=$("$CAPTURE_CLI" inspect list --json 2>/dev/null | \
+      python3 -c 'import json,sys; p=int(sys.argv[1]); rows=json.load(sys.stdin).get("sessions", []); matches=[r for r in rows if r.get("processId")==p]; print("\t".join((matches[0]["sessionId"], matches[0]["instanceId"], matches[0]["publicationId"]))) if len(matches)==1 else None' "$PID" || true)
+    [[ -n "$IDENTITY" ]] && break
+    sleep 0.25
   done
-
-  if [[ -z "$WID" || ! "$WID" =~ ^[0-9]+$ ]]; then
-    red "ERROR: could not query Spectr window id after 5 attempts."
-    red "  pid=$PID — process may have crashed during launch, or System"
-    red "  Events accessibility permission is missing for Terminal."
-    red "  (Full-screen capture intentionally skipped — it would poison"
-    red "  the histogram diff with desktop/terminal background colors."
-    red "  Set PULP_HARNESS_ALLOW_FULLSCREEN=1 to opt back into the"
-    red "  legacy fallback if you really want a fullscreen capture.)"
-    if [[ -n "${PULP_HARNESS_ALLOW_FULLSCREEN:-}" ]]; then
-      yel "  PULP_HARNESS_ALLOW_FULLSCREEN=1 set — falling back to full-screen capture (-o to drop shadow)"
-      screencapture -x -o "$OUT"
-    else
-      kill $PID 2>/dev/null
-      exit 2
-    fi
+  if [[ -z "$IDENTITY" ]]; then
+    red "ERROR: Spectr did not publish one inspector session for pid=$PID."
+    red "  Ensure it was rebuilt against a Pulp SDK with standalone inspector support."
+    kill $PID 2>/dev/null || true
+    exit 2
+  fi
+  IFS=$'\t' read -r SESSION_ID INSTANCE_ID PUBLICATION_ID <<< "$IDENTITY"
+  if "$CAPTURE_CLI" inspect screenshot --out "$OUT" \
+      --session "$SESSION_ID" --instance "$INSTANCE_ID" \
+      --publication "$PUBLICATION_ID"; then
+    :
   else
-    # -o drops the drop-shadow border (which would otherwise pick up
-    # whatever's behind the window — terminal, desktop, etc. — and
-    # contribute the same kind of background noise to the diff).
-    if ! screencapture -x -l"$WID" -o "$OUT"; then
-      red "ERROR: screencapture -l$WID failed."
-      red "  (Falling back to full-screen capture would poison the diff;"
-      red "  set PULP_HARNESS_ALLOW_FULLSCREEN=1 if that's what you want.)"
-      if [[ -n "${PULP_HARNESS_ALLOW_FULLSCREEN:-}" ]]; then
-        yel "  PULP_HARNESS_ALLOW_FULLSCREEN=1 set — falling back"
-        screencapture -x -o "$OUT"
-      else
-        kill $PID 2>/dev/null
-        exit 2
-      fi
-    fi
+    status=$?
+    red "ERROR: in-process Spectr capture failed (status=$status)."
+    red "  Status 3 means this standalone host explicitly lacks capture capability."
+    kill $PID 2>/dev/null || true
+    exit 2
   fi
   [[ -f "$OUT" ]] || { red "ERROR: screenshot was not written to $OUT"; kill $PID 2>/dev/null; exit 2; }
   green "  captured to $OUT ($(stat -f %z "$OUT") bytes)"

@@ -76,6 +76,9 @@ public:
     // How many reloads have occurred
     uint32_t reload_count() const { return reload_count_.load(); }
 
+    // Whether the watcher has queued code that the UI thread has not applied.
+    bool has_pending_reload() const;
+
     // Content-addressed reload gate: returns true only when `path` is a readable
     // .js/.mjs whose content hash differs from the last observed hash (a
     // save-without-edit or an editor's atomic-rename touch does not reload).
@@ -97,7 +100,7 @@ private:
 #endif
     std::unordered_map<std::string, std::uint64_t> observed_content_hashes_;
 
-    std::mutex pending_mutex_;
+    mutable std::mutex pending_mutex_;
     std::string pending_code_;
     bool has_pending_ = false;
     std::atomic<uint32_t> reload_count_{0};

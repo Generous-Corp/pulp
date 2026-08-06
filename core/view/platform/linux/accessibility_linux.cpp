@@ -112,7 +112,7 @@ constexpr uint32_t kCoordWindow = 1;
 // so navigation is pure arithmetic (no live View-tree walk per D-Bus call).
 // index 0 is reserved for the application root; per-widget nodes start at 1.
 struct AccessNode {
-    View* view = nullptr;          // null only for the root node (index 0)
+    ViewCapture view;              // empty only for the root node (index 0)
     int parent_index = 0;          // 0 ⇒ parent is the application root
     std::vector<int> children;     // indices into nodes_, in DFS order
 };
@@ -187,7 +187,7 @@ struct AtspiProvider {
     void append_state(DBus::Writer& w, int index) {
         atspi::StateSet st = atspi::default_states();
         if (index > 0 && index < static_cast<int>(nodes_.size())) {
-            if (View* v = nodes_[static_cast<size_t>(index)].view) {
+            if (View* v = view_at(index)) {
                 if (v->focusable()) atspi::set_state(st, atspi::kStateFocusable);
                 if (v->has_focus()) atspi::set_state(st, atspi::kStateFocused);
                 // AT-SPI has no "value" for a checkbox: CHECKED / PRESSED /
@@ -213,7 +213,7 @@ struct AtspiProvider {
         int my_index = parent_index;
         if (is_accessibility_element(v)) {
             AccessNode node;
-            node.view = &v;
+            node.view.set(&v);
             node.parent_index = parent_index;
             my_index = static_cast<int>(nodes_.size());
             nodes_.push_back(node);
@@ -246,23 +246,27 @@ struct AtspiProvider {
         const std::string& m = ctx.member();
         const bool is_root = (index == 0);
         AccessNode& node = nodes_[static_cast<size_t>(index)];
+        View* view = is_root ? nullptr : view_at(index);
 
         if (m == "GetRole") {
             ctx.reply().append_uint32(
                 is_root ? atspi::kRoleApplication
-                        : atspi::role_to_atspi_role(node.view->access_role()));
+                        : atspi::role_to_atspi_role(
+                              view ? view->access_role() : View::AccessRole::none));
             return true;
         }
         if (m == "GetRoleName") {
             ctx.reply().append_string(
                 is_root ? "application"
-                        : atspi::role_to_atspi_role_name(node.view->access_role()));
+                        : atspi::role_to_atspi_role_name(
+                              view ? view->access_role() : View::AccessRole::none));
             return true;
         }
         if (m == "GetLocalizedRoleName") {
             ctx.reply().append_string(
                 is_root ? "application"
-                        : atspi::role_to_atspi_role_name(node.view->access_role()));
+                        : atspi::role_to_atspi_role_name(
+                              view ? view->access_role() : View::AccessRole::none));
             return true;
         }
         if (m == "GetChildCount") {
@@ -377,7 +381,7 @@ struct AtspiProvider {
 
     bool handle_component(DBus::CallContext& ctx, int index) {
         if (index == 0) return false;  // the application root has no geometry
-        View* v = nodes_[static_cast<size_t>(index)].view;
+        View* v = view_at(index);
         const std::string& m = ctx.member();
 
         if (m == "GetExtents") {
@@ -513,10 +517,10 @@ struct AtspiProvider {
         return false;
     }
 
-    const std::string& name_for(int index) const {
-        static const std::string kToolkit = kToolkitName;
-        if (index == 0) return kToolkit;
-        return nodes_[static_cast<size_t>(index)].view->access_label();
+    std::string name_for(int index) const {
+        if (index == 0) return kToolkitName;
+        View* view = view_at(index);
+        return view ? view->access_label() : std::string{};
     }
 
     // The View→AccessibilityValueInterface accessor, identical to the one
@@ -526,14 +530,15 @@ struct AtspiProvider {
     // and for any View that does not implement the interface.
     AccessibilityValueInterface* value_iface(int index) const {
         if (index <= 0 || index >= static_cast<int>(nodes_.size())) return nullptr;
-        View* v = nodes_[static_cast<size_t>(index)].view;
+        View* v = view_at(index);
         return v ? dynamic_cast<AccessibilityValueInterface*>(v) : nullptr;
     }
 
     // The View behind an index, or nullptr for the application root.
     View* view_at(int index) const {
         if (index <= 0 || index >= static_cast<int>(nodes_.size())) return nullptr;
-        return nodes_[static_cast<size_t>(index)].view;
+        if (!root) return nullptr;
+        return nodes_[static_cast<size_t>(index)].view.live_in(*root);
     }
 
     // The optional AccessibilityTextInterface (a TextEditor). A ComboBox has
@@ -995,7 +1000,9 @@ void* init_accessibility(View& root, void* /*native_window*/) {
     // calls accessibility_pump() each frame / on a timer (wired in the SDL
     // standalone host's run_event_loop). The X11 plugin-view host has no
     // internal loop because the DAW owns pumping.
-    return provider.release();
+    void* handle = provider.release();
+    detail::register_accessibility_provider(root, handle);
+    return handle;
 }
 
 void shutdown_accessibility(void* handle) {
@@ -1004,6 +1011,7 @@ void shutdown_accessibility(void* handle) {
         return;
     }
     auto* p = static_cast<AtspiProvider*>(handle);
+    detail::unregister_accessibility_provider(handle);
     p->unexport_all();
     delete p;  // closes the a11y connection via DBus dtor
     runtime::log_info("Linux AT-SPI: accessible objects torn down");
@@ -1025,6 +1033,19 @@ void accessibility_tree_changed(void* handle) {
     p->export_all();
     p->emit_children_changed();
 }
+
+void accessibility_tree_will_change(void* handle) {
+    if (handle == reinterpret_cast<void*>(static_cast<uintptr_t>(1)) || !handle)
+        return;
+    auto* p = static_cast<AtspiProvider*>(handle);
+    p->unexport_all();
+    p->nodes_.clear();
+    p->view_to_index_.clear();
+}
+
+bool accessibility_tree_retirement_ready(void*) { return true; }
+
+void accessibility_retain_until_retired(void*, std::shared_ptr<void>) noexcept {}
 
 // L7c event-raising surface. Each emits the matching org.a11y.atspi.Event.Object
 // signal FROM the changed object's path so a listening registry/Orca re-reads it.
@@ -1104,7 +1125,9 @@ void* init_accessibility_on_session_bus_for_test(View& root,
 
     provider->rebuild_tree();
     if (!provider->export_all()) return nullptr;
-    return provider.release();
+    void* handle = provider.release();
+    detail::register_accessibility_provider(root, handle);
+    return handle;
 }
 
 }  // namespace pulp::view

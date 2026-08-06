@@ -77,6 +77,12 @@ enum class ModelErrorCode : std::uint8_t {
     SequenceNestingTooDeep,
     InvalidTrackMixer,
     InvalidTimeConform,
+    InvalidTuningReference,
+    InvalidModulator,
+    InvalidMacroControl,
+    InvalidModulationRoute,
+    MissingModulationSource,
+    MissingModulationTarget,
 };
 
 /// Model failure with the offending and, when relevant, conflicting identity.

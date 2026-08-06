@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/screenshot.hpp>
+#include <pulp/view/screenshot_compare.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -1008,6 +1009,138 @@ TEST_CASE("browser capture validator creates nested proof directories",
     CHECK(fs::is_regular_file(diff));
 }
 
+// The capture's own frame is checked against the box the design DECLARED.
+//
+// `resolve_reference_registration` deliberately does not do this: it snaps a
+// one-pixel disagreement to the render (a fractional CSS height rounds
+// independently on the two sides) and lets anything larger through, because a
+// larger disagreement means the frame and the root describe different boxes and
+// the crop has to happen before that can be seen. So the refusal lives after
+// the crop -- and the render's extent IS the declared root box, resolved in
+// browser_import_cli.cpp from `design_ir.root.style.{width,height}`.
+//
+// Scored and refused are asserted as a PAIR on the same fixtures. A refusal
+// test alone passes when nothing can be decoded at all, which is the shape of
+// failure this lane is most exposed to.
+TEST_CASE("a capture frame that is not the declared root box is refused",
+          "[import-design][browser-capture][registration]") {
+    TempTree tree;
+
+    // The render: a 32x32 root at device scale 2, so 64x64 device pixels.
+    pulp::view::DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.style.width = 32.0f;
+    ir.root.style.height = 32.0f;
+    ir.root.attributes["browser_device_scale_factor"] = "2.000000";
+
+    // The reference: a LARGER capture, 48x48 CSS at the same scale, so the
+    // authored frame has somewhere to sit inside it and a crop is real work.
+    pulp::view::DesignIR reference_ir;
+    reference_ir.root.type = "frame";
+    reference_ir.root.style.width = 48.0f;
+    reference_ir.root.style.height = 48.0f;
+    auto reference_root = pulp::view::build_native_view_tree(
+        reference_ir, reference_ir.asset_manifest);
+    REQUIRE(reference_root);
+    const auto reference = pulp::view::render_to_png(
+        *reference_root, 48, 48, 2.0f, pulp::view::ScreenshotBackend::skia);
+    REQUIRE_FALSE(reference.empty());
+    const auto reference_path = tree.root / "reference.png";
+    tree.write(reference_path, reference);
+
+    const auto validate = [&](double x, double y, double w, double h,
+                              const std::string& tag) {
+        auto probe = ir;
+        probe.root.attributes["browser_authored_frame_x"] = std::to_string(x);
+        probe.root.attributes["browser_authored_frame_y"] = std::to_string(y);
+        probe.root.attributes["browser_authored_frame_width"] =
+            std::to_string(w);
+        probe.root.attributes["browser_authored_frame_height"] =
+            std::to_string(h);
+        return id::validate_browser_capture_design_ir(
+            probe,
+            {.reference = reference_path,
+             .rendered = tree.root / ("render-" + tag + ".png"),
+             .diff = tree.root / ("diff-" + tag + ".png"),
+             .width = 32,
+             .height = 32});
+    };
+
+    // A build with no PNG pixel decoder refuses every crop, which would make
+    // the negative sections below pass for a reason that has nothing to do with
+    // the code under test. Establish that a CORRECT frame scores first, and
+    // skip if it cannot.
+    const auto agreeing = validate(4.0, 4.0, 32.0, 32.0, "agreeing");
+    INFO(agreeing.error);
+    INFO(agreeing.registration_reason);
+    REQUIRE(agreeing.valid);
+    if (!agreeing.scored) {
+        SUCCEED("PNG cropping is unavailable in this build");
+        return;
+    }
+
+    SECTION("a frame agreeing with the root scores") {
+        // The control, restated as an assertion so the pairing is visible in
+        // the report rather than only in the guard above.
+        CHECK(agreeing.scored);
+        CHECK(agreeing.registration_reason.empty());
+    }
+
+    // The case the whole item exists for: the capture recorded a frame the
+    // design's own root does not describe. Registration succeeds -- the rect is
+    // well formed and lies inside the reference -- and the crop then produces a
+    // 48x48 picture to compare against a 64x64 render. Scoring that reads the
+    // same pixel box out of two pictures holding different content there.
+    SECTION("a frame smaller than the root is refused, not scored") {
+        const auto result = validate(4.0, 4.0, 24.0, 24.0, "small");
+        INFO(result.registration_reason);
+        // The import is fine; only its oracle is unusable.
+        CHECK(result.valid);
+        CHECK_FALSE(result.scored);
+        CHECK(result.registration_reason.rfind("never scored", 0) == 0);
+        CHECK(result.registration_reason.find(
+                  "is not the size of the render") != std::string::npos);
+        // A refused comparison's numbers are meaningless and must not be
+        // reported as measurements.
+        CHECK(result.similarity == 0.0f);
+        CHECK(result.diff_pixels == 0);
+    }
+
+    SECTION("a frame larger than the root is refused, not scored") {
+        const auto result = validate(4.0, 4.0, 40.0, 40.0, "large");
+        INFO(result.registration_reason);
+        CHECK(result.valid);
+        CHECK_FALSE(result.scored);
+        CHECK(result.registration_reason.rfind("never scored", 0) == 0);
+    }
+
+    // A pixel of rounding is arithmetic, not a misregistration: a fractional
+    // CSS height rounds independently on the two sides. This is the boundary
+    // the snap exists for, and it is asserted here so a future tightening of
+    // the refusal cannot quietly start rejecting every panel with a fractional
+    // root height -- which is all three agent panels.
+    SECTION("a pixel of rounding still scores") {
+        const auto result = validate(4.0, 4.0, 32.0, 32.25, "rounding");
+        INFO(result.registration_reason);
+        CHECK(result.valid);
+        CHECK(result.scored);
+    }
+
+    // The same misregistration wearing a correct-looking rect: crop_png CLAMPS
+    // a rect that overruns its image and returns a SMALLER picture rather than
+    // an error, so a frame positioned off the edge yields a plausible
+    // registration and an impossible comparison. Either refusal string is
+    // correct here -- which one fires depends on whether the clamp leaves any
+    // pixels at all -- so the assertion is on the refusal, not on its wording.
+    SECTION("a frame overrunning the reference is refused, not clamped") {
+        const auto result = validate(40.0, 40.0, 32.0, 32.0, "overrun");
+        INFO(result.registration_reason);
+        CHECK(result.valid);
+        CHECK_FALSE(result.scored);
+        CHECK(result.registration_reason.rfind("never scored", 0) == 0);
+    }
+}
+
 TEST_CASE("asset localization stamps a portable path from asset_ref",
           "[import-design][browser-capture][assets]") {
     TempTree tree;
@@ -1032,6 +1165,29 @@ TEST_CASE("asset localization stamps a portable path from asset_ref",
           *ir.asset_manifest.assets[0].local_path);
     CHECK(fs::is_regular_file(
         output.parent_path() / ir.root.attributes.at("asset_path")));
+}
+
+TEST_CASE("asset localization preserves split captured fader art",
+          "[import-design][browser-capture][assets][fader]") {
+    TempTree tree;
+    const auto body = tree.root / "capture/fader-body.png";
+    const auto indicator = tree.root / "capture/fader-indicator.png";
+    const auto output = tree.root / "published/ui.js";
+    tree.write(body, "clean-body-pixels");
+    tree.write(indicator, "moving-indicator-pixels");
+
+    pulp::view::DesignIR ir;
+    ir.root.attributes["fader_body_asset_path"] = body.string();
+    ir.root.attributes["fader_indicator_asset_path"] = indicator.string();
+
+    std::string error;
+    REQUIRE(id::localize_ir_assets(ir, output.string(), &error));
+    for (const char* key : {"fader_body_asset_path",
+                            "fader_indicator_asset_path"}) {
+        const auto& localized = ir.root.attributes.at(key);
+        CHECK(fs::path(localized).is_relative());
+        CHECK(fs::is_regular_file(output.parent_path() / localized));
+    }
 }
 
 TEST_CASE("browser CLI detection and direct inference preserve CLI disposition",

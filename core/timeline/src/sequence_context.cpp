@@ -1,5 +1,7 @@
 #include <pulp/timeline/model.hpp>
 
+#include "chord_scale_names.hpp"
+
 #include <algorithm>
 #include <cstdint>
 #include <memory>
@@ -16,34 +18,21 @@ runtime::Result<T, ModelError> fail(ModelErrorCode code, ItemId item = {}, ItemI
 constexpr std::uint8_t kPitchClassCount = 12;
 
 constexpr bool valid_chord_quality(ChordQuality quality) noexcept {
-    switch (quality) {
-    case ChordQuality::Major:
-    case ChordQuality::Minor:
-    case ChordQuality::Diminished:
-    case ChordQuality::Augmented:
-    case ChordQuality::Dominant7:
-    case ChordQuality::Major7:
-    case ChordQuality::Minor7:
-    case ChordQuality::HalfDiminished7:
-    case ChordQuality::Suspended2:
-    case ChordQuality::Suspended4:
-        return true;
-    }
-    return false;
+    return detail::music_chord_quality(quality).has_value();
 }
 
 constexpr bool valid_scale_mode(ScaleMode mode) noexcept {
-    switch (mode) {
-    case ScaleMode::Major:
-    case ScaleMode::NaturalMinor:
-    case ScaleMode::HarmonicMinor:
-    case ScaleMode::MelodicMinor:
-    case ScaleMode::Dorian:
-    case ScaleMode::Phrygian:
-    case ScaleMode::Lydian:
-    case ScaleMode::Mixolydian:
-    case ScaleMode::Locrian:
-    case ScaleMode::Chromatic:
+    return detail::music_scale_mode(mode).has_value();
+}
+
+constexpr bool valid_chord_voicing(ChordVoicing voicing) noexcept {
+    switch (voicing) {
+    case ChordVoicing::Close:
+    case ChordVoicing::Open:
+    case ChordVoicing::Drop2:
+    case ChordVoicing::Drop3:
+    case ChordVoicing::Rootless:
+    case ChordVoicing::Shell:
         return true;
     }
     return false;
@@ -58,6 +47,13 @@ ChordScaleLane::create(std::vector<ChordScaleEvent> events) {
         if (event.position.value < 0 || event.chord_root >= kPitchClassCount ||
             event.scale_root >= kPitchClassCount || !valid_chord_quality(event.chord_quality) ||
             !valid_scale_mode(event.scale_mode))
+            return fail<ChordScaleLane>(ModelErrorCode::InvalidChordScaleEvent);
+        // An undefined extension bit would survive a round trip and mean
+        // something different to the next reader that defines it, so the mask
+        // is closed rather than open.
+        if ((event.chord_bass && *event.chord_bass >= kPitchClassCount) ||
+            (event.chord_extensions & ~kChordExtensionMask) != 0 ||
+            (event.voicing && !valid_chord_voicing(*event.voicing)))
             return fail<ChordScaleLane>(ModelErrorCode::InvalidChordScaleEvent);
         // Authored order is the document's order. Sorting a caller's events
         // here would silently accept a lane whose harmony the caller did not

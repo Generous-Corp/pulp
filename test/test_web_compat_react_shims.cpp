@@ -920,3 +920,84 @@ TEST_CASE("Native web-API globals are mirrored onto window so React's scheduler 
             "rAF=true|cAF=true|sT=true|cT=true|sI=true|cI=true|"
             "MC=true|qM=true|pf=true");
 }
+
+// A gradient crosses to native as ONE string, and the parser on that side does
+// not know the CSS Color 4 function forms. An unrecognised function name falls
+// back to WHITE, so a translucent bloom paints as an opaque white blob.
+//
+// This is not a corner case: Chrome serializes every `color-mix(in oklab, ...)`
+// to `oklab(...)`, and color-mix over a token is the idiom generated panels use
+// for every glow, bloom and shadow — so it landed on essentially all of them.
+// Measured on a real one, a #58f0ff stop at 48% alpha rendered (254,254,254).
+//
+// The shim already resolves these correctly for solid colours, so the stops are
+// rewritten before the handoff rather than by growing a second parser on the
+// far side that has to be kept in step.
+TEST_CASE("gradient stops in CSS Color 4 notation reach native as hex",
+          "[view][web-compat][gradient][color]") {
+    auto result = run_in_bridge(R"(
+        return _resolveGradientStopColors(
+            'radial-gradient(circle, oklab(0.881151 -0.115999 -0.0528023 / 0.48), rgba(0,0,0,0) 70%)');
+    )");
+    // #58f0ff at 48% alpha — the same colour parseCSSColor already returns for
+    // this string when it appears as a plain background-color.
+    REQUIRE(result ==
+            "radial-gradient(circle, #58f0ff7a, rgba(0,0,0,0) 70%)");
+}
+
+// Every other notation must survive untouched. A rewrite that "fixes" hex or
+// rgba() would be a silent change to colours that already worked.
+TEST_CASE("gradient stops already native to the parser are left alone",
+          "[view][web-compat][gradient][color]") {
+    const std::string css =
+        "linear-gradient(45deg, #58f0ff, rgba(0, 0, 0, 0) 70%, red)";
+    auto result = run_in_bridge("return _resolveGradientStopColors('" + css + "');");
+    REQUIRE(result == css);
+}
+
+// An unparseable function passes through verbatim. The native side may still
+// understand it, and a silent rewrite to a wrong colour is worse than the
+// original text reaching a parser that can refuse it.
+TEST_CASE("an unreadable gradient stop is passed through, not guessed at",
+          "[view][web-compat][gradient][color]") {
+    const std::string css = "linear-gradient(90deg, oklab(not a colour), #000)";
+    auto result = run_in_bridge("return _resolveGradientStopColors('" + css + "');");
+    REQUIRE(result == css);
+}
+
+// Chrome serializes a shadow's colour FIRST — `oklab(...) 0px 1px 0px 0px` —
+// and the parser matched colour-last only, so a computed shadow did not match
+// at all and fell through, leaving a card ringed by a bright halo.
+//
+// Asserted through the parse helper, not by reading the property back:
+// `el.style.boxShadow` returns whatever string was assigned whether or not it
+// parsed, so a round-trip assertion passes against a shadow that never reached
+// the renderer. Verified — the first version of this test passed with the fix
+// disabled, which is why the parse was extracted into a named function.
+TEST_CASE("a colour-first box-shadow parses, colour intact",
+          "[view][web-compat][box-shadow]") {
+    auto result = run_in_bridge(R"(
+        var m = _parseBoxShadowOffsets(
+            'oklab(0.970671 0.00855935 -0.0140294 / 0.18) 0px 1px 3px 0px');
+        return m ? [m[1], m[2], m[3], m[4], m[5]].join('|') : 'NO MATCH';
+    )");
+    INFO(result);
+    REQUIRE(result != "NO MATCH");
+    // x|y|blur|spread|colour, with the colour resolved rather than torn on its
+    // internal spaces.
+    CHECK(result.rfind("0|1|3|0|", 0) == 0);
+    CHECK(result.find('#') != std::string::npos);
+}
+
+// The colour-last form is what already worked. It must keep working, or
+// accommodating Chrome's ordering breaks hand-authored CSS.
+TEST_CASE("a colour-last box-shadow still parses",
+          "[view][web-compat][box-shadow]") {
+    auto result = run_in_bridge(R"(
+        var m = _parseBoxShadowOffsets('0px 2px 6px 1px rgba(0, 0, 0, 0.4)');
+        return m ? [m[1], m[2], m[3], m[4], m[5]].join('|') : 'NO MATCH';
+    )");
+    INFO(result);
+    REQUIRE(result != "NO MATCH");
+    CHECK(result.rfind("0|2|6|1|", 0) == 0);
+}

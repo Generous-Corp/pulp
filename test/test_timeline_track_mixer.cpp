@@ -1,3 +1,4 @@
+#include "support/timeline_schema_version.hpp"
 #include "timeline_command_test_helpers.hpp"
 
 #include <pulp/timeline/schema_registry.hpp>
@@ -12,8 +13,14 @@
 #include <utility>
 
 using namespace timeline_test;
+using timeline_test_support::current_schema_version;
+using timeline_test_support::track_version_stamp;
 
 namespace {
+
+std::uint32_t current_track_version() {
+    return current_schema_version("pulp.timeline.track");
+}
 
 // `detail::track_input_of` names every TrackInput member so an identity rewrite
 // can copy the whole authored input and overwrite only the identities. That
@@ -48,7 +55,7 @@ template <typename T, std::size_t Count = 0> constexpr std::size_t field_count()
         return Count;
 }
 
-constexpr std::size_t kTrackInputFields = 10;
+constexpr std::size_t kTrackInputFields = 14;
 static_assert(field_count<TrackInput>() == kTrackInputFields,
               "TrackInput gained or lost a member. Carry it in detail::track_input_of "
               "(core/timeline/src/track.cpp) so an id remap stops resetting it, then update "
@@ -145,7 +152,14 @@ TEST_CASE("A default track mixer is written as absence", "[timeline][mixer]") {
 
 TEST_CASE("Track schema migrates v6 to v7 and back", "[timeline][mixer][migration]") {
     const auto reg = registry();
-    const auto plain = track_envelope(serialized(mixer_project(TrackMixer{})));
+    // A saved track is current-version, states no tuning of its own and carries
+    // no modulation, so the step down to v7 is lossless and leaves the mixer as
+    // the only thing v6 cannot hold. The step starts from whatever version is
+    // current rather than a literal, so this stays a test of the v6/v7 pair.
+    const auto authored_now = track_envelope(serialized(mixer_project(TrackMixer{})));
+    REQUIRE(authored_now.find(track_version_stamp()) != std::string::npos);
+    const auto plain = take_result(reg.migrate(SchemaDomain::Document, "pulp.timeline.track",
+                                               current_track_version(), 7, authored_now, {}));
     REQUIRE(plain.find("\"version\":7") != std::string::npos);
 
     const auto downgraded = take_result(
@@ -163,8 +177,8 @@ TEST_CASE("Downgrading a track that carries a mixer is refused", "[timeline][mix
     // how the document sounds, so the migration refuses instead.
     const auto authored = track_envelope(serialized(mixer_project(TrackMixer{0.25f, 0.5f})));
     REQUIRE(authored.find("\"mixer\"") != std::string::npos);
-    const auto downgraded =
-        registry().migrate(SchemaDomain::Document, "pulp.timeline.track", 7, 6, authored, {});
+    const auto downgraded = registry().migrate(SchemaDomain::Document, "pulp.timeline.track",
+                                               current_track_version(), 6, authored, {});
     REQUIRE_FALSE(downgraded);
 }
 
@@ -172,8 +186,8 @@ TEST_CASE("Downgrading a track with mixer automation is refused", "[timeline][mi
     const auto authored = track_envelope(serialized(mixer_project(
         TrackMixer{}, {mixer_lane({40}, {41}, TrackMixerParameter::Gain, 0.25f, 0.75f)})));
     REQUIRE(authored.find("pulp.timeline.automation_target.track_mixer") != std::string::npos);
-    const auto downgraded =
-        registry().migrate(SchemaDomain::Document, "pulp.timeline.track", 7, 6, authored, {});
+    const auto downgraded = registry().migrate(SchemaDomain::Document, "pulp.timeline.track",
+                                               current_track_version(), 6, authored, {});
     REQUIRE_FALSE(downgraded);
 }
 
@@ -356,4 +370,38 @@ TEST_CASE("Remapping a track carries its authored mixer and arm intent",
     REQUIRE(rebuilt->mixer().pan == -0.75f);
     REQUIRE(rebuilt->record_armed());
     REQUIRE(rebuilt->name() == "authored track");
+}
+
+TEST_CASE("Remapping a track carries the tuning it overrides the project's with",
+          "[timeline][tuning][remap]") {
+    // `TuningReference` is content-addressed rather than identity-addressed, so
+    // a remap has nothing to rewrite and must carry it through untouched. The
+    // failure this pins is not a wrong tuning but an absent one: dropping the
+    // member returns the track to whatever the project states, which is a
+    // playable document that sounds wrong rather than an error anyone sees.
+    //
+    // The authored pitch is deliberately not the default. A track that fell
+    // back to the project's tuning would still answer 440 kmHz, so asserting
+    // the default would pass whether or not the override survived.
+    const TuningReference authored{.system = TuningSystem::EqualTemperament,
+                                   .reference_pitch_millihertz = 432'000};
+    REQUIRE(authored.reference_pitch_millihertz != kDefaultReferencePitchMillihertz);
+    const auto original = take_result(
+        Track::create(TrackInput{.id = {4}, .name = "retuned track", .tuning = authored}));
+    REQUIRE(original.tuning().has_value());
+
+    ItemIdAllocator allocator(100);
+    const auto remapped = take_result(remap_ids(original, allocator));
+    REQUIRE(remapped.track.id() != original.id());
+    // Presence first: the defect drops the member, and comparing a disengaged
+    // optional to an engaged one would report a value mismatch for what is
+    // really an absence.
+    REQUIRE(remapped.track.tuning().has_value());
+    REQUIRE(*remapped.track.tuning() == authored);
+
+    // A track that states no tuning must still state none afterwards, so the
+    // fix cannot be a default that manufactures an override nobody authored.
+    const auto untuned = take_result(Track::create(TrackInput{.id = {7}, .name = "untuned track"}));
+    REQUIRE_FALSE(untuned.tuning().has_value());
+    REQUIRE_FALSE(take_result(remap_ids(untuned, allocator)).track.tuning().has_value());
 }

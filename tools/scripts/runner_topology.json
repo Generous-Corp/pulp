@@ -7,6 +7,7 @@
     "ubuntu-22.04",
     "macos-26",
     "macos-15",
+    "macos-15-intel",
     "macos-14",
     "macos-13",
     "windows-latest",
@@ -111,6 +112,24 @@
       "provisioning": "ephemeral",
       "severity": "required",
       "hosts": []
+    },
+    {
+      "variable": "PULP_NATIVE_INTEL_RUNS_ON_JSON",
+      "purpose": "Advisory native Intel build and test lane on the dedicated physical Mac mini. Its labels cannot match the required Apple-Silicon gate, and unsetting the variable immediately restores the hosted macos-15-intel fallback.",
+      "expect": [
+        "self-hosted",
+        "macOS",
+        "X64",
+        "pulp-intel-native",
+        "pulp-host-macmini"
+      ],
+      "unset_fallback": "macos-15-intel",
+      "provisioning": "ephemeral",
+      "severity": "advisory",
+      "supervisor": "native-intel-launchd",
+      "hosts": [
+        "macmini"
+      ]
     },
     {
       "variable": "PULP_SANITIZER_TSAN_RUNS_ON_JSON",

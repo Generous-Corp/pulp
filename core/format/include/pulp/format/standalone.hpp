@@ -13,12 +13,17 @@
 #include <pulp/midi/device.hpp>
 #include <pulp/midi/message_collector.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
+#include <pulp/runtime/seqlock.hpp>
+#include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/view/audio_bridge.hpp>
 
 #include <atomic>
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -67,6 +72,14 @@ struct StandaloneConfig {
     // restored at startup (the first launch keeps the configured defaults).
     bool persist_settings = true;
 
+    // Development Inspector activation. Empty/"off" is inert, "local" owns
+    // only the in-window overlay, and agent profiles start an authenticated
+    // endpoint.
+    // Capability ids are only used with the "custom" profile. Kept as plain
+    // strings so public standalone headers remain independent of inspector SDK
+    // types when inspector support is compiled out.
+    std::string inspector_profile;
+    std::vector<std::string> inspector_capabilities;
     // When non-empty, run_with_editor() installs a one-shot idle callback
     // that captures the first painted frame via WindowHost::capture_png()
     // and writes to this path, then closes the window. Codified in the SDK
@@ -77,6 +90,16 @@ struct StandaloneConfig {
     // Frames to wait before capture. Default 30 (~0.5s @60fps) gives the
     // first React-driven layout + effects pass time to settle.
     int screenshot_frame_delay = 30;
+
+    // A screenshot-only launch creates NO audio system and NO audio device: it
+    // paints a few frames, writes the PNG, and exits, so the render callback
+    // could only ever push silence at whoever is at the machine. Set this true
+    // (or export PULP_SCREENSHOT_KEEP_AUDIO=1) when the capture must show a UI
+    // driven by live audio — a meter or scope reading real signal. Requesting
+    // any live readout (audio_probe_json_path, audio_scope_json_path,
+    // audio_capture_wav_path, audio_capture_rolling_path) keeps audio on its
+    // own; this flag is for the case where only the pixels need it.
+    bool screenshot_keeps_audio = false;
 
     // When non-empty, run_with_editor() arms the same one-shot frame-delay
     // path as `screenshot_path` and, after the delay, writes the live output
@@ -147,13 +170,23 @@ struct StandaloneConfig {
     // UI MIDI path, so they reach the processor only if it accepts MIDI input;
     // on a processor that ignores MIDI the keys are silent by construction.
     bool enable_musical_typing_keyboard = false;
+
+    // Separate high-risk acknowledgement for arbitrary evaluation in the live
+    // scripted UI realm. No profile or persisted setting implies this bit.
+    // Appended to preserve every legacy positional aggregate initializer.
+    bool inspector_runtime_eval = false;
+
 };
 
 namespace detail {
 
 inline constexpr std::size_t kStandaloneMidiInputQueueCapacity = 2048;
+inline constexpr std::size_t kStandaloneTestMidiQueueCapacity = 256;
+inline constexpr std::size_t kStandaloneTestMidiNoteCount = 16 * 128;
 inline constexpr std::size_t kStandaloneMidiBufferEventCapacity =
     kStandaloneMidiInputQueueCapacity +
+    kStandaloneTestMidiQueueCapacity +
+    kStandaloneTestMidiNoteCount +
     midi::MidiMessageCollector<>::capacity() +
     midi::MidiMessageCollector<>::pending_capacity();
 
@@ -173,6 +206,97 @@ inline std::size_t drain_standalone_midi_input(StandaloneMidiInputQueue& queue,
     return drained;
 }
 
+enum class StandaloneTestMidiKind : std::uint8_t {
+    NoteOn,
+    NoteOff,
+};
+
+struct StandaloneTestMidiNote {
+    StandaloneTestMidiKind kind = StandaloneTestMidiKind::NoteOn;
+    /// Protocol-facing MIDI channel number (1..16).
+    std::uint8_t channel = 1;
+    std::uint8_t note = 0;
+    std::uint8_t velocity = 0;
+};
+
+struct StandaloneTestTransportUpdate {
+    std::optional<bool> playing;
+    std::optional<std::int64_t> position_samples;
+    std::optional<double> tempo_bpm;
+};
+
+struct StandaloneTestTransportState {
+    bool playing = true;
+    double tempo_bpm = 120.0;
+    std::int64_t position_samples = 0;
+};
+
+enum class StandaloneTestInputResult : std::uint8_t {
+    Applied,
+    InvalidArgument,
+    QueueFull,
+};
+
+/// Bounded control-thread to audio-thread bridge for standalone inspector test
+/// input. MIDI delivery is generation-scoped so releasing a controller drops
+/// stale note-offs, turns accepted queued note-ons into bounded one-block
+/// pulses, and schedules note-offs for every note that already reached DSP.
+/// Transport commands use a main-to-audio triple buffer; audio observations use
+/// an audio-writer sequence lock. Both directions stay coherent without making
+/// the audio callback wait for a preempted control-thread writer.
+class StandaloneTestInputHost {
+  public:
+    static constexpr double kMinimumTempoBpm = 20.0;
+    static constexpr double kMaximumTempoBpm = 400.0;
+
+    StandaloneTestInputResult inject_note(StandaloneTestMidiNote note);
+    StandaloneTestInputResult
+    update_transport(const StandaloneTestTransportUpdate& update);
+
+    /// Invalidate all queued input from the current controller. Safe from any
+    /// non-audio thread; the next audio block emits tracked note-offs first.
+    void release_test_input() noexcept;
+
+    StandaloneTestTransportState transport_snapshot() const noexcept;
+    std::uint64_t midi_overflow_count() const noexcept;
+
+    /// @internal Standalone audio-driver/test seam. Call prepare only while the
+    /// audio callback is stopped; all remaining methods are RT-safe.
+    void prepare(bool playing, double tempo_bpm) noexcept;
+    std::size_t drain_midi_into(midi::MidiBuffer& out,
+                                int block_size_samples) noexcept;
+    StandaloneTestTransportState begin_audio_block() noexcept;
+    void end_audio_block(int block_size_samples) noexcept;
+
+  private:
+    struct QueuedNote {
+        StandaloneTestMidiNote note;
+        std::uint64_t generation = 0;
+    };
+    struct TransportCommand {
+        bool playing = true;
+        double tempo_bpm = 120.0;
+        std::int64_t position_samples = 0;
+        std::uint64_t position_revision = 0;
+    };
+
+    bool release_active_notes(midi::MidiBuffer& out,
+                              int sample_offset) noexcept;
+
+    runtime::SpscQueue<QueuedNote, kStandaloneTestMidiQueueCapacity> midi_queue_;
+    std::atomic<std::uint64_t> midi_generation_{1};
+    std::uint64_t audio_midi_generation_ = 1;
+    std::array<std::array<bool, 128>, 16> active_notes_{};
+    bool note_release_pending_ = false;
+
+    TransportCommand control_transport_{};
+    runtime::TripleBuffer<TransportCommand> transport_commands_{control_transport_};
+    StandaloneTestTransportState audio_transport_{};
+    runtime::SeqLock<StandaloneTestTransportState> observed_transport_{audio_transport_};
+    std::uint64_t audio_position_revision_ = 0;
+    bool prepared_ = false;
+};
+
 }  // namespace detail
 
 class StandaloneApp {
@@ -186,6 +310,9 @@ public:
     bool start();
     void stop();
     bool is_running() const { return running_.load(); }
+    std::uint64_t audio_xrun_count() const {
+        return audio_device_ ? audio_device_->xrun_count() : 0;
+    }
     bool run_with_editor(bool use_gpu = false);
 
     /// Restart audio with a new config (stop → reconfigure → start).
@@ -193,6 +320,12 @@ public:
 
     Processor* processor() { return processor_.get(); }
     state::StateStore& state() { return store_; }
+
+    /// True when this launch skipped the audio backend entirely because it is a
+    /// screenshot-only capture (see StandaloneConfig::screenshot_keeps_audio).
+    /// No audio system, no device, and no render callback exist for such a run,
+    /// so a headless capture never opens an audio device on the host machine.
+    bool audio_skipped_for_capture() const { return audio_skipped_for_capture_; }
 
     TestSignalSource& test_signal() { return test_signal_; }
     view::AudioBridge& input_meter_bridge() { return input_meter_bridge_; }
@@ -217,6 +350,10 @@ public:
     // correct sample offsets. Identical thread-safety surface that
     // pulp::midi::MidiMessageCollector documents — push_now is non-blocking.
     midi::MidiMessageCollector<>& ui_midi_collector() { return ui_midi_collector_; }
+    detail::StandaloneTestInputHost& test_input_host() { return test_input_host_; }
+    const detail::StandaloneTestInputHost& test_input_host() const {
+        return test_input_host_;
+    }
 
     // Persist + restore StandaloneConfig under
     // ApplicationProperties so `pulp run` opens the user's last device,
@@ -262,6 +399,11 @@ private:
     // render path is allocation/lock-free. Mirrors the @internal hook precedent.
     friend struct StandaloneRenderTestAccess;
 
+    // Test-only accessor (defined in test/test_standalone_capture_audio.cpp)
+    // that injects `audio_system_factory_` so the device lifecycle can be
+    // asserted without opening real hardware.
+    friend struct StandaloneAudioDeviceTestAccess;
+
     ProcessorFactory factory_;
     // The store is declared before the Processor so it is destroyed after it.
     // `Processor::state()` dereferences a pointer to this store, and a Processor
@@ -280,6 +422,12 @@ private:
 
     std::unique_ptr<audio::AudioSystem> audio_system_;
     std::unique_ptr<audio::AudioDevice> audio_device_;
+    // Set by start(): this launch is a screenshot-only capture, so it created
+    // no audio system and no device. Reported by audio_skipped_for_capture().
+    bool audio_skipped_for_capture_ = false;
+    // Test seam: when set, start() builds the audio system from this factory
+    // instead of audio::create_audio_system(). Never set in shipped code.
+    std::function<std::unique_ptr<audio::AudioSystem>()> audio_system_factory_;
     std::unique_ptr<midi::MidiSystem> midi_system_;
     std::unique_ptr<midi::MidiInput> midi_input_;
 
@@ -287,15 +435,8 @@ private:
     midi::MidiBuffer midi_in_;
     midi::MidiBuffer midi_out_;
     midi::MidiMessageCollector<> ui_midi_collector_;
+    detail::StandaloneTestInputHost test_input_host_;
     std::atomic<bool> running_{false};
-
-    // Built-in transport state (the standalone "host").
-    // `transport_position_samples_` advances atomically on the audio
-    // thread; `transport_block_time_seconds_` is derived by the audio
-    // callback (`position_samples / sample_rate`) and is what
-    // `MidiMessageCollector::drain_into` uses to align UI MIDI events
-    // to sample offsets within the current block.
-    std::atomic<int64_t> transport_position_samples_{0};
 
     TestSignalSource test_signal_;
     view::AudioBridge input_meter_bridge_;

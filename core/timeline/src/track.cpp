@@ -1,6 +1,7 @@
 #include <pulp/timeline/model.hpp>
 
 #include "automation_document_internal.hpp"
+#include "modulation_document_internal.hpp"
 #include "track_input_access.hpp"
 
 #include <algorithm>
@@ -122,11 +123,14 @@ std::optional<ItemId> take_identity_collision(const Clip& clip,
 }
 
 bool compile_relevant(const Clip& clip) noexcept {
-    return std::holds_alternative<SequenceRef>(clip.content()) ||
+    return std::holds_alternative<MidiContent>(clip.content()) ||
+           std::holds_alternative<SequenceRef>(clip.content()) ||
            std::holds_alternative<RegisteredContent>(clip.content());
 }
 
 bool same_compile_structure(const Clip& lhs, const Clip& rhs) noexcept {
+    if (std::holds_alternative<MidiContent>(lhs.content()))
+        return std::holds_alternative<MidiContent>(rhs.content());
     if (const auto* left = std::get_if<SequenceRef>(&lhs.content())) {
         const auto* right = std::get_if<SequenceRef>(&rhs.content());
         return right && left->sequence_id == right->sequence_id;
@@ -358,12 +362,16 @@ struct Track::Data {
     std::shared_ptr<const std::vector<DevicePlacement>> device_chain;
     std::shared_ptr<const std::vector<AutomationLane>> automation_lanes;
     std::shared_ptr<const std::vector<ItemId>> automation_owned_ids;
+    std::shared_ptr<const std::vector<Modulator>> modulators;
+    std::shared_ptr<const std::vector<MacroControl>> macros;
+    std::shared_ptr<const std::vector<ModulationRoute>> modulation_routes;
     std::shared_ptr<const std::vector<TakeLane>> take_lanes;
     std::shared_ptr<const std::vector<ItemId>> take_owned_ids;
     bool record_armed = false;
     ItemId active_take_lane_id;
     std::optional<TrackFreeze> freeze;
     TrackMixer mixer;
+    std::optional<TuningReference> tuning;
 };
 
 std::optional<ModelErrorCode> track_freeze_error(const TrackFreeze& freeze) noexcept {
@@ -443,11 +451,30 @@ runtime::Result<Track, ModelError> Track::create(TrackInput input) {
     auto automation_lanes =
         std::make_shared<const std::vector<AutomationLane>>(std::move(input.automation_lanes));
     auto automation_owned_ids = canonical_automation_owned_ids(*automation_lanes);
-    // Takes must be disjoint from every other track-owned id: reuse the same
-    // non-automation id set plus the automation-owned ids computed above.
-    auto take_other_ids = other_ids;
-    take_other_ids.insert(take_other_ids.end(), automation_owned_ids->begin(),
-                          automation_owned_ids->end());
+    // Every remaining track-owned collection must be disjoint from the ones
+    // already validated, so each one extends the same running id set rather
+    // than restating it.
+    auto remaining_other_ids = other_ids;
+    remaining_other_ids.insert(remaining_other_ids.end(), automation_owned_ids->begin(),
+                               automation_owned_ids->end());
+    std::sort(input.modulators.begin(), input.modulators.end(),
+              [](const Modulator& lhs, const Modulator& rhs) { return lhs.id < rhs.id; });
+    std::sort(input.macros.begin(), input.macros.end(),
+              [](const MacroControl& lhs, const MacroControl& rhs) { return lhs.id < rhs.id; });
+    std::sort(input.modulation_routes.begin(), input.modulation_routes.end(),
+              [](const ModulationRoute& lhs, const ModulationRoute& rhs) {
+                  return lhs.id < rhs.id;
+              });
+    // `*device_chain`, not `input.device_chain`: the input's chain was moved out
+    // above, so reading it here would validate every route's target against an
+    // empty chain and reject the whole document.
+    if (const auto error = detail::validate_attached_modulation(
+            input.modulators, input.macros, input.modulation_routes, *device_chain,
+            remaining_other_ids))
+        return fail<Track>(error->code, error->item, error->related_item);
+    detail::append_modulation_owned_ids(input.modulators, input.macros, input.modulation_routes,
+                                        remaining_other_ids);
+    auto take_other_ids = std::move(remaining_other_ids);
     if (const auto error = validate_attached_takes(input.take_lanes, take_other_ids))
         return fail<Track>(error->code, error->item, error->related_item);
     std::sort(input.take_lanes.begin(), input.take_lanes.end(),
@@ -468,6 +495,8 @@ runtime::Result<Track, ModelError> Track::create(TrackInput input) {
     }
     if (const auto error = track_mixer_error(input.mixer))
         return fail<Track>(*error, input.id, input.id);
+    if (input.tuning && !valid_tuning_reference(*input.tuning))
+        return fail<Track>(ModelErrorCode::InvalidTuningReference, input.id, input.id);
     auto take_lanes = std::make_shared<const std::vector<TakeLane>>(std::move(input.take_lanes));
     auto take_owned_ids = canonical_take_owned_ids(*take_lanes);
     return runtime::Result<Track, ModelError>(runtime::Ok(Track(std::make_shared<const Data>(
@@ -480,12 +509,19 @@ runtime::Result<Track, ModelError> Track::create(TrackInput input) {
              .device_chain = std::move(device_chain),
              .automation_lanes = std::move(automation_lanes),
              .automation_owned_ids = std::move(automation_owned_ids),
+             .modulators = std::make_shared<const std::vector<Modulator>>(
+                 std::move(input.modulators)),
+             .macros =
+                 std::make_shared<const std::vector<MacroControl>>(std::move(input.macros)),
+             .modulation_routes = std::make_shared<const std::vector<ModulationRoute>>(
+                 std::move(input.modulation_routes)),
              .take_lanes = std::move(take_lanes),
              .take_owned_ids = std::move(take_owned_ids),
              .record_armed = input.record_armed,
              .active_take_lane_id = input.active_take_lane_id,
              .freeze = std::move(input.freeze),
-             .mixer = input.mixer}))));
+             .mixer = input.mixer,
+             .tuning = std::move(input.tuning)}))));
 }
 
 namespace detail {
@@ -499,17 +535,24 @@ TrackInput track_input_of(const Track& track) {
     const auto devices = track.device_chain();
     const auto automation = track.automation_lanes();
     const auto takes = track.take_lanes();
+    const auto modulators = track.modulators();
+    const auto macros = track.macros();
+    const auto routes = track.modulation_routes();
     return TrackInput{
         .id = track.id(),
         .name = track.name(),
         .clips = std::move(clip_values),
         .device_chain = {devices.begin(), devices.end()},
         .automation_lanes = {automation.begin(), automation.end()},
+        .modulators = {modulators.begin(), modulators.end()},
+        .macros = {macros.begin(), macros.end()},
+        .modulation_routes = {routes.begin(), routes.end()},
         .take_lanes = {takes.begin(), takes.end()},
         .record_armed = track.record_armed(),
         .active_take_lane_id = track.active_take_lane_id(),
         .freeze = track.freeze(),
         .mixer = track.mixer(),
+        .tuning = track.tuning(),
     };
 }
 
@@ -830,6 +873,45 @@ const AutomationLane* Track::find_automation_lane(ItemId id) const noexcept {
         [](const AutomationLane& candidate, ItemId wanted) { return candidate.id() < wanted; });
     return found != data_->automation_lanes->end() && found->id() == id ? &*found : nullptr;
 }
+namespace {
+// The three modulation collections are all sorted by identity, so one lookup
+// serves them rather than three copies that could drift apart.
+template <typename T> const T* find_by_id(const std::vector<T>& values, ItemId id) noexcept {
+    if (!id.valid())
+        return nullptr;
+    const auto found = std::lower_bound(
+        values.begin(), values.end(), id,
+        [](const T& candidate, ItemId wanted) { return candidate.id < wanted; });
+    return found != values.end() && found->id == id ? &*found : nullptr;
+}
+} // namespace
+std::span<const Modulator> Track::modulators() const noexcept {
+    return *data_->modulators;
+}
+const Modulator* Track::find_modulator(ItemId id) const noexcept {
+    return find_by_id(*data_->modulators, id);
+}
+std::span<const MacroControl> Track::macros() const noexcept {
+    return *data_->macros;
+}
+const MacroControl* Track::find_macro(ItemId id) const noexcept {
+    return find_by_id(*data_->macros, id);
+}
+std::span<const ModulationRoute> Track::modulation_routes() const noexcept {
+    return *data_->modulation_routes;
+}
+const ModulationRoute* Track::find_modulation_route(ItemId id) const noexcept {
+    return find_by_id(*data_->modulation_routes, id);
+}
+std::vector<ModulationRoute> Track::routes_from_source(ItemId source_id) const {
+    std::vector<ModulationRoute> found;
+    if (!source_id.valid())
+        return found;
+    for (const auto& route : *data_->modulation_routes)
+        if (route.source.id == source_id)
+            found.push_back(route);
+    return found;
+}
 std::span<const TakeLane> Track::take_lanes() const noexcept {
     return *data_->take_lanes;
 }
@@ -852,6 +934,9 @@ const std::optional<TrackFreeze>& Track::freeze() const noexcept {
 }
 const TrackMixer& Track::mixer() const noexcept {
     return data_->mixer;
+}
+const std::optional<TuningReference>& Track::tuning() const noexcept {
+    return data_->tuning;
 }
 std::size_t Track::shared_index_nodes_with(const Track& other) const {
     std::unordered_set<const ClipIndexNode*> addresses;

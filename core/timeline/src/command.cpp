@@ -391,6 +391,29 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
                                   right.expected.begin(), equal_note) &&
                        left.replacement.size() == right.replacement.size() &&
                        std::equal(left.replacement.begin(), left.replacement.end(),
+                                  right.replacement.begin(), equal_note) &&
+                       // The idempotency cache returns the first result for a
+                       // repeated transaction id, so two payloads that differ
+                       // only in their modifiers are not the same command:
+                       // calling them equivalent would answer a retry with the
+                       // modifiers of the transaction it did not send.
+                       left.expected_modifiers == right.expected_modifiers &&
+                       left.replacement_modifiers == right.replacement_modifiers;
+            } else if constexpr (std::is_same_v<T, SetNoteEvents>) {
+                // NoteEvent has no operator==, so the generic fallback below
+                // cannot compare these arrays and this arm is not optional.
+                // Both arrays matter to the idempotency cache: two edits of the
+                // same notes that agree on the result but disagree on the value
+                // they started from are different commands with different
+                // inverses, and answering one with the other's cached result
+                // would undo to a value the clip never held.
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.clip_id == right.clip_id &&
+                       left.expected.size() == right.expected.size() &&
+                       std::equal(left.expected.begin(), left.expected.end(),
+                                  right.expected.begin(), equal_note) &&
+                       left.replacement.size() == right.replacement.size() &&
+                       std::equal(left.replacement.begin(), left.replacement.end(),
                                   right.replacement.begin(), equal_note);
             } else if constexpr (std::is_same_v<T, SetClipPlaybackProperties>) {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
@@ -548,6 +571,21 @@ std::size_t retained_size(const Command& command) noexcept {
                                      saturated_multiply(segment_count, sizeof(TakeCompSegment)));
             }
             if constexpr (std::is_same_v<T, ReplaceNoteContent>) {
+                const auto note_count =
+                    saturated_add(value.expected.size(), value.replacement.size());
+                const auto modifier_count = saturated_add(value.expected_modifiers.size(),
+                                                          value.replacement_modifiers.size());
+                return saturated_add(
+                    saturated_add(sizeof(T),
+                                  saturated_multiply(note_count, sizeof(NoteEvent))),
+                    saturated_multiply(modifier_count, sizeof(NoteModifier)));
+            }
+            // Both note arrays are heap storage the journal retains until the
+            // command falls out of undo. Without this arm the dispatch falls
+            // through to a flat `sizeof(T)`, which charges the same handful of
+            // bytes for a hundred-note edit as for a one-note edit and defeats
+            // the retained-byte ceiling it is the only input to.
+            if constexpr (std::is_same_v<T, SetNoteEvents>) {
                 const auto note_count =
                     saturated_add(value.expected.size(), value.replacement.size());
                 return saturated_add(sizeof(T), saturated_multiply(note_count, sizeof(NoteEvent)));

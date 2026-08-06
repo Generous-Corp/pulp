@@ -183,7 +183,7 @@ eval.evaluate("x * 100 + 10");  // 60.0
 | Primes | `primes.hpp` | `is_prime(97)`, `generate_prime(32)`, `sieve_primes(1000)` |
 | Range | `range.hpp` | `Range<float>(0, 1).contains(0.5)`, intersection, union |
 | Scope Guard | `scope_guard.hpp` | `PULP_ON_SCOPE_EXIT(file.close())` |
-| Sockets | `socket.hpp` | TCP/UDP client and server for networked audio |
+| Sockets | `socket.hpp` | TCP/UDP plus credential-bearing OS-local streams; local endpoints require an owner-private parent and expose kernel peer credentials |
 | System Info | `system.hpp` | CPU model, core count, RAM, OS, SIMD features (runtime detected) |
 | Temp File | `temporary_file.hpp` | Auto-deleting temp file — `TemporaryFile tmp(".wav")` |
 | Text Diff | `text_diff.hpp` | Line-by-line diff with formatted +/- output |
@@ -200,7 +200,14 @@ Event loop, timers, IPC, and process management.
 
 ### IPC — Inter-process communication
 
-Length-prefixed messages over named pipes or TCP sockets. Use for crash-isolated plugin scanning, multi-process architectures, standalone↔plugin communication.
+Length-prefixed messages over named pipes, TCP sockets, or OS-local sockets. Use
+named pipes for existing worker protocols, TCP only where a network carrier is
+actually intended, and `LocalSocket` when a local security boundary needs
+kernel-observed peer credentials. Local endpoints require an absolute path in
+an owner-owned `0700` directory with no extended ACL, refuse to replace an
+existing filesystem object, are created `0600`, and are removed with the owning
+listener. macOS additionally exposes a peer audit-token process generation;
+unsupported identity-verification platforms fail closed.
 
 ```cpp
 #include <pulp/events/interprocess_connection.hpp>
@@ -215,6 +222,17 @@ InterprocessConnection client;
 client.connect("my_pipe", IpcTransport::NamedPipe);
 client.send_message("scan_plugin:/path/to/plugin.vst3");
 ```
+
+`LocalSocket` does not make a peer authorized. It supplies carrier evidence
+only. The capability-control verifier combines accepted-socket UID, GID, PID,
+and macOS audit-token PID generation with the live process's validated code
+signature, identifier, Team ID or per-artifact ad-hoc CDHash. The broker must
+still exact-match that observation against launcher- or policy-owned expected
+identity before minting a verified peer. Named-pipe and TCP peers cannot be
+passed to that verifier. The installed `pulp::inspect-control` component owns
+the resulting identity, registration, and grant state in a dormant
+`ControlBroker`; constructing it never opens an endpoint or activates a runtime
+bridge.
 
 ### Child Process Pool — Crash-isolated workers
 
@@ -300,6 +318,14 @@ config.buffer_size = 256;
 
 auto device = system->create_device(devices[0].id);
 device->open(config);
+if (auto timing = query_audio_io_timing(*device)) {
+    // Consume the graph's already-computed PDC total; this does not recompute it.
+    auto latency = make_latency_snapshot(
+        *timing, graph.latency_samples(), device->sample_rate());
+    if (latency && latency->output_scheduling_offset_frames) {
+        schedule_output_early_by(*latency->output_scheduling_offset_frames);
+    }
+}
 device->start([](const auto& input, auto& output, const auto& ctx) {
     // Real-time audio callback — no allocation, no locks
     process(input, output, ctx.buffer_size);
@@ -307,6 +333,25 @@ device->start([](const auto& input, auto& output, const auto& ctx) {
 ```
 
 **Device backends:** CoreAudio (macOS), WASAPI (Windows), ALSA + JACK (Linux), Web Audio (browser)
+
+`AudioIoTiming` reports present input/output latency, safety-offset, and I/O
+buffer properties in device-rate sample frames, together with the exact sample rate, timestamp
+provenance, confidence, and a calibration generation. `LatencySnapshot` is a
+control-thread value that composes this with the graph's reported total latency
+for input placement, monitoring, and output scheduling. Each directional result
+is optional: an output-only route still supports output scheduling, while live
+monitoring requires complete input and output properties. Composition refuses a
+graph/device rate mismatch. CoreAudio publishes this contract today; other
+desktop and mobile backends currently return no timing value rather than guessed
+magnitudes.
+
+Snapshot composition fails closed when timestamp domain/source is unspecified
+or confidence is unavailable; provenance-free values are not scheduling data.
+
+For CoreAudio, a complete directional presentation path is device latency plus
+the directional safety offset plus one I/O buffer. Input placement and output
+scheduling each count that buffer once; live monitoring composes both paths and
+therefore counts it twice.
 
 ### Audio file format support
 
@@ -386,6 +431,54 @@ Offline render manifests intentionally separate artifact identity from render
 plan identity. Equivalent renders with different chunk schedules can have the
 same `audio_sha256` and a zero residual while still carrying different
 `render_plan_sha256` values and chunk metadata for distributed reproduction.
+
+---
+
+## music
+
+Dependency-light 12-tone equal-temperament theory values for sharing musical
+intent across audio, MIDI, timeline, and product code. The module does not own a
+clock, sequencer, transform chain, event ledger, or tuning system.
+
+**Link:** `pulp::music` · **Include prefix:** `<pulp/music/...>`
+
+`PitchClassSet` is an arbitrary checked 12-bit set. `Scale` adds a root and
+supports degree lookup, signed octave-spanning degrees, transposition, and mode
+rotation. `NamedScale` retains the existing ten Pulp signal selector values and
+appends the scale set currently needed by Forge. The explicit
+`kPulpSignalScales`, `kForgeRuntimeScales`, and `kForgePrimitiveScales` tables
+carry each existing stored index and spelling; consumers should map through the
+matching table rather than cast between product enums.
+
+Pulp's existing signal harmonizer scale table and Timeline chord/scale wire
+codec delegate through these compatibility maps. Their public enum ordinals and
+stored names remain unchanged while the interval and identity data has one
+owner.
+
+`ChordFormula` accepts fixed-capacity ascending semitone formulas, including
+extensions and alterations. `kPulpTimelineChordQualities` and
+`kForgeChordQualities` map the two existing stored identities onto the shared
+named qualities. `Chord::construct()` builds bounded MIDI pitches and
+deterministic inversions, failing when a root, inversion, formula, or resulting
+pitch is outside its legal domain.
+
+```cpp
+#include <pulp/music/music.hpp>
+
+using namespace pulp::music;
+const auto scale = Scale::named(PitchClass::d, NamedScale::dorian);
+const auto formula = ChordFormula::for_quality(ChordQuality::minor7);
+const auto first_inversion = Chord::construct(62, *formula, 1);
+```
+
+The named collection is a 12-TET compatibility vocabulary, not a claim of
+microtonal support. More tuning systems belong in the provider-neutral MIDI
+tuning APIs rather than in this representation.
+
+This module is the shared-theory foundation sub-slice. It does not yet provide
+pitch spelling, chord recognition, voicing constraints, or minimum-motion
+voice leading; those remain separate later additions rather than implied
+capabilities of `ChordFormula`.
 
 ---
 
@@ -935,6 +1028,28 @@ Project. Lanes persist in snapshots and are reachable through typed commands
 and `DocumentSession`. `pulp::playback` compiles attached lanes into immutable
 cursor programs, while host-graph parameter delivery remains outside Timeline.
 
+`parameter_target.hpp` holds the format-neutral vocabulary for naming a
+document parameter — a placed device parameter, or one of the owning track's own
+mixer controls. One vocabulary serves every consumer that addresses a parameter,
+because "which parameter" is addressing rather than a property of what writes
+there. `AutomationTarget` and `ModulationTarget` are both names for it.
+
+`modulation.hpp` provides modulators, macro controls, and modulation routes as
+Track-owned document entities distinct from automation. The difference is what
+they write: an automation lane authors a parameter's *base* value over time,
+while a modulation route contributes a depth-scaled *relative offset* on top of
+whatever base is in force, which is CLAP's `param_value`/`param_mod` separation.
+Two consequences the document preserves: several routes may reach one parameter
+and their offsets sum, where two automation lanes on one parameter is a
+contradiction the model rejects; and depth belongs to the connection rather than
+to the source, so one macro reaches many parameters with a different amount for
+each. A route names its source by identity *and* kind, so a macro can never
+stand in for a modulator that shared its ID. Track attachment proves the source
+is a modulator or macro of the matching kind on the same track and that any
+referenced placement exists in that track's chain. No modulator runtime ships
+yet; the schema exists so routing authored now survives to the phase that adds
+one.
+
 `device_placement.hpp` defines the durable identity of one logical placement in
 a Track-owned device chain. The chain preserves authored processing order
 through immutable clip edits, persistence, and ID remapping. A placement is
@@ -1039,6 +1154,104 @@ launch arbitration, device implementation and routing, and UI. Authored scenes
 and launch slots are durable document state. The compiler accepts Arrangement
 only; the embedding application owns runtime launcher interpretation and
 scene-to-track arbitration.
+
+## project_package
+
+Crash-consistent publication for stable project-package roots and generic
+files or directories. `AtomicPublisher::create()` creates a private sibling
+directory stage, accepts only safe package-relative paths through `write()`,
+and publishes it with `commit_directory()`. File publication instead uses
+`create_file()`, which returns one pre-created `staging_file()` that an external
+producer may truncate and fill before `commit_file()`. Both modes publish a
+previously absent destination without replacing it. `PackageWriter` instead maintains one
+stable package root: `stage_blob()` hash-verifies and fences content-addressed
+blobs before publishing them no-replace, while `publish()` validates every
+package-relative asset reference before atomically replacing the root's
+`project.json` generation and fencing the root directory. An interrupted stage
+remains unreachable and cannot expose a durable reference to unfenced content;
+package-wide abandoned-stage recovery and reachability GC belong to the
+follow-on recovery layer.
+
+Writer exclusion is cooperative. All package writers must honor the package
+lock, and callers must not concurrently rename or replace package or private
+staging entries out of band from another process running as the same account.
+Any external producer using `staging_directory()` or `staging_file()` must
+finish and release the stage before commit or cancellation begins. On Windows,
+staged objects retain a private DACL until the rename succeeds; the still-open
+published handle then adopts the destination parent's inheritance. A crash
+before or during that adoption can leave the published object or some
+descendants owner-private instead of broadly inherited; callers must treat
+final permissions as incomplete.
+The implementation pins and revalidates identities to reject detected
+rebinding, but POSIX does not provide a portable operation that renames an
+already-open directory by identity.
+
+**Link:** `pulp::project-package` · **Include prefix:**
+`<pulp/project_package/...>`
+
+```cpp
+#include <pulp/project_package/atomic_publisher.hpp>
+
+using namespace pulp::project_package;
+
+auto publisher = AtomicPublisher::create(destination);
+if (!publisher)
+    return;
+auto staged = publisher->write("render-manifest.json", manifest_json);
+if (!staged || !staged.value())
+    return;
+
+auto outcome = publisher->commit_directory();
+if (!outcome || outcome.value() != AtomicPublishOutcome::PublishedDurably)
+    return;
+```
+
+Use `PackageWriter` when the destination is a stable project-package root.
+Stage each referenced blob first, then publish the Project that references it;
+opening the package revalidates both the generation and its references:
+
+```cpp
+#include <pulp/project_package/project_package.hpp>
+
+using namespace pulp::project_package;
+using pulp::timeline::make_builtin_timeline_registry;
+
+auto registry = make_builtin_timeline_registry();
+if (!registry)
+    return;
+auto writer = PackageWriter::create(package_root, registry.value());
+if (!writer)
+    return;
+
+auto blob = writer.value().stage_blob(BlobStore::Media, media_hash, media_bytes);
+if (!blob)
+    return;
+// `project` contains the matching package-relative asset reference.
+auto outcome = writer.value().publish(project);
+if (!outcome || outcome.value() != AtomicPublishOutcome::PublishedDurably)
+    return;
+
+auto opened = open_package(package_root, registry.value());
+if (!opened)
+    return;
+```
+
+`PublishedDurabilityUncertain` means the new `project.json` may already be
+visible even though final permission adoption or the directory fence did not
+complete; callers must not report that outcome as a definite rollback.
+
+Source builds may set `PULP_ENABLE_PROJECT_PACKAGE=OFF` to omit this component
+and the dependent Timeline authoring tools. The resulting installed SDK does
+not export `Pulp::project-package`, so requesting the `project-package`
+component with `find_package(Pulp REQUIRED COMPONENTS ...)` fails.
+
+The module owns publication and bounded exact-prefix cleanup of its private
+staging files, not package-wide recovery, reachability GC, a project schema, or
+an archive format. Timeline remains the authority for canonical project JSON;
+DAWproject ZIP admission and interchange loss accounting stay in their format
+and tooling layers rather than entering this dependency floor.
+
+**Depends on:** `pulp::timeline`, `pulp::runtime`
 
 ## interchange
 
@@ -1169,6 +1382,30 @@ separate target exists for consumers that want manifest handling alone.
 **Depends on:** `pulp::runtime`
 
 
+## timeline_agent_view
+
+Bounded, versioned read projections for agents and other context-limited
+consumers. `AgentView` pins an immutable `timeline::DocumentView`; every read
+requires the caller's expected revision and refuses mismatches. The outline is
+project/sequence/track/clip sized. Rows carry Merkle content commitments, while
+each `omitted` count and SHA-256 covers only the directly omitted authored rows,
+so omission counts form a non-overlapping partition of the structural census.
+
+Region pages select clip starts in a half-open window and order them by
+`(start, id)`. A cursor is accepted only when its version, revision, sequence,
+anchor, exact window bounds, and key identify a member of that same window.
+`DirtySet` projection additionally requires an adjacent before/after revision
+range ending at the pinned view. That range rejects stale and multi-commit
+projections, but it cannot authenticate `DirtySet` origin because the public set
+type carries no session-issued provenance token; callers must pair it with the
+`CommitResult` that produced it. Removed identities map to their tombstoned
+nearest outline owner.
+
+**Link:** `pulp::timeline-agent-view` · **Include prefix:**
+`<pulp/timeline_agent_view/...>`
+
+**Depends on:** `pulp::timeline`, `pulp::runtime`
+
 ## timeline_editor
 
 Interfaces for building a timeline editor over the document model, plus the edit
@@ -1240,6 +1477,33 @@ floor check can reject a reducer or serializer that reaches for one; the model's
 floor excludes this module, which is the only direction in which the two rungs
 differ.
 
+`TrackEditIntent` is a second channel beside it, for arranging tracks rather than
+editing clips, and `lower_track_edit_intent` turns one into the `MoveTrack` that
+performs it. It is a separate type rather than added fields on `EditIntent`
+because the two name different subjects: a clip intent names a clip inside a
+track and carries clip time ranges, while a track intent names a track inside a
+sequence and carries an insertion point. Folded together, every clip intent would
+carry track-destination fields that are always empty and vice versa, with nothing
+in the type able to say which combination is meaningful. `TrackEditIntentHost` is
+the matching `SequencerUiHostT<TrackEditIntent>`, so a view that only rearranges
+tracks never acquires the clip vocabulary.
+
+Insertion is expressed as "before this track", matching the command, so a
+front-end that resolved a drop position to a neighbour need not convert it to an
+index. A `std::nullopt` destination means last position — a request, not an
+omission, and deliberately not a separate append verb.
+
+```cpp
+#include <pulp/timeline_editor/track_edit_intent.hpp>
+
+TrackEditIntent intent;                       // drag `moved` above `neighbour`
+intent.sequence_id = sequence_id;
+intent.track_id = moved;
+intent.expected_before_track_id = current_neighbour_of(moved);
+intent.replacement_before_track_id = neighbour;
+auto transaction = lower_track_edit_intent(intent, identity);
+```
+
 Piano-roll gestures use the sibling `NoteEditIntent` vocabulary. Insert carries
 only a replacement note, erase carries only the expected note, and move, resize,
 and velocity edits carry both snapshots with the same note identity.
@@ -1248,6 +1512,32 @@ and velocity edits carry both snapshots with the same note identity.
 have no transaction lowerer yet: granular
 note commands own that later boundary, so this editor API does not disguise an
 O(clip) `ReplaceNoteContent` rewrite as an interactive note edit.
+
+`undo_gesture_budget` answers how long a gesture can stream before the document
+refuses it, which an editor needs *before* it opens one. A gesture coalesces
+every `Update` into a single undo group, that group stays open until its `End`,
+and only closed groups are evictable — so the charge accumulates with nothing
+able to reclaim it, and past `UndoLimits::max_retained_bytes` the next step comes
+back `ConflictCode::UndoFull`: a drag that stops responding rather than one that
+degrades. The answer is `max_retained_bytes / step_bytes` and does not depend on
+what the undo stack already holds, because a session has one open gesture at a
+time, so every group present when one opens is closed and evictable.
+
+```cpp
+#include <pulp/timeline_editor/gesture_budget.hpp>
+
+// Priced before the gesture opens, from the step the drag is about to repeat.
+const auto budget = undo_gesture_budget(limits.undo, forward, inverse);
+if (budget.steps < expected_frames)
+    hold_the_edit_locally_and_commit_one_single_on_release();
+else
+    stream_updates_into_one_open_group();
+```
+
+A `GesturePhase::Single` edit is closed on admission and therefore immediately
+evictable, so the fallback branch has no step ceiling at all — only undo depth.
+This is the undo ceiling alone: `JournalLimits` bounds the same gesture
+independently, has no automatic eviction, and can bind first.
 
 `ScriptedUiHost<Intent>` is a host whose playhead is written by the caller and
 which keeps what a view emitted, so an editor is testable with no audio and no

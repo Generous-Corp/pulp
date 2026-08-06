@@ -1,11 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/view/css_effect_parse.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_ir.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/view.hpp>
 
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -53,6 +56,128 @@ std::vector<unsigned char> render_bytes(const DesignIR& ir, const char* name) {
                                       std::istreambuf_iterator<char>());
 }
 
+/// Two flat opaque rectangles, the upper one carrying `blend`. Flat colours
+/// and full cover make the composite arithmetic checkable by hand: the child
+/// fills the ground exactly, so every interior pixel is one blend of one pair.
+DesignIR flat_over_flat(const std::string& blend) {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "ground";
+    ir.root.style.width = 64.0f;
+    ir.root.style.height = 64.0f;
+    ir.root.style.background_color = "#483221";  // (72, 50, 33)
+
+    IRNode bar;
+    bar.type = "frame";
+    bar.name = "bar";
+    bar.style.width = 64.0f;
+    bar.style.height = 64.0f;
+    bar.style.background_color = "#C86B37";  // (200, 107, 55)
+    if (!blend.empty()) bar.style.mix_blend_mode = blend;
+    ir.root.children.push_back(std::move(bar));
+    return ir;
+}
+
+/// A dark ground with one small opaque square in the middle, carrying a box
+/// shadow and optionally a blend mode. Small box, wide shadow: almost all of
+/// the shadow's ink lands OUTSIDE the box, which is exactly the ink a layer
+/// sized to the box throws away.
+DesignIR dot_with_shadow(const std::string& blend, bool inset = false) {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "ground";
+    ir.root.style.width = 96.0f;
+    ir.root.style.height = 96.0f;
+    ir.root.style.background_color = "#07080B";
+
+    IRNode dot;
+    dot.type = "frame";
+    dot.name = "dot";
+    dot.style.width = 24.0f;
+    dot.style.height = 24.0f;
+    dot.style.position = "absolute";
+    dot.style.left = 36.0f;
+    dot.style.top = 36.0f;
+    dot.style.background_color = "#C86B37";
+    IRBoxShadow glow;
+    glow.blur = 16.0f;
+    glow.color = "rgba(200, 107, 55, 0.9)";
+    glow.inset = inset;
+    dot.style.box_shadow.push_back(glow);
+    if (!blend.empty()) dot.style.mix_blend_mode = blend;
+    ir.root.children.push_back(std::move(dot));
+    return ir;
+}
+
+/// Only the raw-RGBA helpers below need this. `render_bytes` and the text
+/// cases go through `render_to_file`, which falls back to CoreGraphics and
+/// still paints, so skipping those would hide regressions they can catch.
+///
+/// Keyed on the build, never on an empty render. The Skia path here is
+/// `SkSurfaces::Raster` — CPU, no device to be missing — so once Skia is
+/// compiled in an empty buffer has no benign cause left and has to keep
+/// failing. Deciding from the result instead would swallow exactly that.
+///
+/// Call a guarded helper on its own line, never inside `CHECK(...)`/
+/// `REQUIRE(...)`: SKIP unwinds by exception, and CATCH_CONFIG_FAST_COMPILE
+/// disables the translation that would turn it back into a skip, so a guarded
+/// call nested in an assertion reports a hard failure instead.
+void skip_without_raw_rgba() {
+    if (!raw_rgba_render_available()) {
+        SKIP("no raw-RGBA backend compiled in (needs Skia) — pixel probes "
+             "cannot run in this build");
+    }
+}
+
+/// How many pixels OUTSIDE the dot's own 24x24 box carry ink the flat ground
+/// does not. Counted rather than compared: the point is whether the halo
+/// exists at all, and a count says that without depending on what a blend mode
+/// does to the halo's colour.
+int halo_pixels(const DesignIR& ir) {
+    skip_without_raw_rgba();
+    auto root = build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(root != nullptr);
+    uint32_t w = 0, h = 0;
+    const auto rgba = render_to_rgba(*root, 96, 96, 1.0f, &w, &h);
+    REQUIRE_FALSE(rgba.empty());
+    REQUIRE(w == 96u);
+    REQUIRE(h == 96u);
+    int lit = 0;
+    for (uint32_t y = 0; y < h; ++y) {
+        for (uint32_t x = 0; x < w; ++x) {
+            const bool inside_dot = x >= 36u && x < 60u && y >= 36u && y < 60u;
+            if (inside_dot) continue;
+            const size_t i = (static_cast<size_t>(y) * w + x) * 4u;
+            // The ground is (7, 8, 11). Anything meaningfully above it in red
+            // is the warm glow, and nothing else in this document paints.
+            if (static_cast<int>(rgba[i]) > 7 + 6) ++lit;
+        }
+    }
+    return lit;
+}
+
+struct Rgb {
+    int r = 0, g = 0, b = 0;
+};
+
+/// The centre pixel of the rendered tree, from the Skia raster path's own
+/// buffer. No PNG encode/decode round-trip, so the value read is the value
+/// composited.
+Rgb render_centre(const DesignIR& ir) {
+    skip_without_raw_rgba();
+    auto root = build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(root != nullptr);
+    uint32_t w = 0, h = 0;
+    const auto rgba = render_to_rgba(*root, 64, 64, 1.0f, &w, &h);
+    // An empty buffer would read as (0,0,0) and quietly fail every assertion
+    // for the wrong reason.
+    REQUIRE_FALSE(rgba.empty());
+    REQUIRE(w == 64u);
+    REQUIRE(h == 64u);
+    const size_t i = (static_cast<size_t>(32) * w + 32u) * 4u;
+    return Rgb{rgba[i], rgba[i + 1], rgba[i + 2]};
+}
+
 }  // namespace
 
 TEST_CASE("a blur filter changes what the native tree draws",
@@ -85,6 +210,100 @@ TEST_CASE("a blend mode changes what the native tree draws",
 
     REQUIRE_FALSE(plain.empty());
     CHECK(plain != screened);
+}
+
+TEST_CASE("the CSS blend parser maps the additive keywords",
+          "[view][blend][design]") {
+    using BM = pulp::canvas::Canvas::BlendMode;
+    // The parser is the native lane's only mapping from the IR keyword to a
+    // canvas blend mode. A keyword it does not know is not an error anywhere
+    // downstream — the importer simply never calls set_mix_blend_mode and the
+    // node composites source-over — so an absent entry is invisible except in
+    // pixels.
+    CHECK(css_blend_mode("plus-lighter") == BM::lighter);
+    CHECK(css_blend_mode("plus-darker") == BM::lighter);
+    CHECK(css_blend_mode("screen") == BM::screen);
+    CHECK(css_blend_mode("multiply") == BM::multiply);
+    // Still nothing for a keyword with no faithful lowering, which is what
+    // keeps an unhonored mode visible as absent rather than as normal.
+    CHECK_FALSE(css_blend_mode("linear-burn").has_value());
+}
+
+TEST_CASE("plus-lighter composites additively in the native tree",
+          "[view][blend][design]") {
+    // A bar of (200,107,55) over a ground of (72,50,33). Additive compositing
+    // gives (272,157,88), which clamps to (255,157,88) — brighter than either
+    // input in every channel. Source-over leaves the bar's own colour.
+    //
+    // Measured numbers, not invented ones: on the lattice fixture's velocity
+    // row the native render drew (200,107,55) where the browser drew
+    // (241,143,82) over the same (72,50,33) backdrop, with the bar geometry an
+    // exact match. Nothing but the compositing was wrong, and it was wrong
+    // because the keyword had no entry in the parser above — so the importer
+    // never called set_mix_blend_mode and the View stayed at
+    // BlendMode::normal.
+    const Rgb source_over = render_centre(flat_over_flat(""));
+    // Control first: the reader must be able to report the UN-blended state,
+    // or an additive assertion below would only be agreeing with itself.
+    CHECK(std::abs(source_over.r - 200) <= 1);
+    CHECK(std::abs(source_over.g - 107) <= 1);
+    CHECK(std::abs(source_over.b - 55) <= 1);
+
+    const Rgb additive = render_centre(flat_over_flat("plus-lighter"));
+    INFO("plus-lighter centre = " << additive.r << "," << additive.g << ","
+                                  << additive.b);
+    // The sum is taken on the 8-bit sRGB-encoded values, which is what Skia's
+    // kPlus does on this raster surface and what the browser does in device
+    // space. A blend performed in linear light would land near (255,118,65)
+    // instead and fail these bounds loudly rather than silently passing.
+    CHECK(additive.r >= 250);
+    CHECK(std::abs(additive.g - 157) <= 4);
+    CHECK(std::abs(additive.b - 88) <= 4);
+}
+
+TEST_CASE("a blend mode does not delete the node's outset shadow",
+          "[view][blend][shadow][design]") {
+    // A compositing layer's bounds are a CLIP, and an outset shadow paints
+    // INSIDE that layer. Sized to the border box, the layer threw the shadow
+    // away — every pixel of it, because a 16px glow on a 24px box is almost
+    // entirely outside the box.
+    //
+    // The bug is older than the blend support that exposed it: nothing in the
+    // fixture corpus opened a layer AND carried a shadow until `plus-lighter`
+    // started opening one. It does now — kelvin's three envelope vertex dots
+    // and lattice's fifteen velocity bars all carry `plus-lighter` and an
+    // outset glow — so this is a live defect, not a hypothetical.
+    //
+    // Control first. Without a blend mode no layer opens, so this is the halo
+    // the renderer has always drawn and the number the assertion below is
+    // measured against. If it is zero the instrument is broken and the blend
+    // assertion would be agreeing with itself.
+    const int plain = halo_pixels(dot_with_shadow(""));
+    INFO("halo without a blend mode: " << plain);
+    REQUIRE(plain > 500);
+
+    const int blended = halo_pixels(dot_with_shadow("plus-lighter"));
+    INFO("halo with plus-lighter: " << blended);
+    // Before the fix this is exactly 0 — the layer is 24x24 and the glow has
+    // nowhere to land. After it, the halo is the same silhouette composited
+    // additively, so it covers at least as much ground as the plain one.
+    CHECK(blended >= plain);
+}
+
+TEST_CASE("an inset shadow does not grow a blend node's layer",
+          "[view][blend][shadow][design]") {
+    // The other half of the contract, and the reason the extent is computed
+    // from the shadow list rather than padded by a constant. An inset shadow
+    // paints inside the padding box by definition, so it must contribute
+    // nothing to the layer — a constant pad would enlarge the layer for every
+    // node that has one and admit ink that does not exist.
+    //
+    // Asserted where it is observable: no ink outside the box, blend or not.
+    // Rendered before the assertion, not inside it — see `skip_without_raw_rgba`.
+    const int plain = halo_pixels(dot_with_shadow("", /*inset=*/true));
+    const int blended = halo_pixels(dot_with_shadow("plus-lighter", /*inset=*/true));
+    CHECK(plain == 0);
+    CHECK(blended == 0);
 }
 
 TEST_CASE("a filter list without blur leaves the node unfiltered",

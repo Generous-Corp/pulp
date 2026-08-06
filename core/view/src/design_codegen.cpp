@@ -9,9 +9,11 @@
 //
 // Definitions only; declarations stay in pulp/view/design_import.hpp.
 
+#include <pulp/view/css_effect_parse.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_capture_lowering.hpp>
 #include <pulp/view/design_fidelity.hpp>
+#include <pulp/view/design_tokens.hpp>
 #include <pulp/view/input_events.hpp>
 
 #include "design_import_internal.hpp"
@@ -88,6 +90,28 @@ static std::string format_px(float v) {
     std::ostringstream ss;
     ss << v << "px";
     return ss.str();
+}
+
+// IR attributes are strings and may originate in a hand-authored .pulp.json.
+// Numeric bridge arguments must be parsed before emission; copying raw text
+// here would turn an attribute into executable JavaScript.
+static double finite_numeric_attribute(const IRNode& node,
+                                       const char* key,
+                                       double fallback) {
+    const auto it = node.attributes.find(key);
+    if (it == node.attributes.end()) return fallback;
+    try {
+        std::size_t consumed = 0;
+        const double value = std::stod(it->second, &consumed);
+        if (consumed == it->second.size() && std::isfinite(value)) return value;
+    } catch (const std::exception&) {
+    }
+    return fallback;
+}
+
+static bool fader_is_horizontal(const IRNode& node) {
+    return node.style.width.value_or(0.0f) >=
+           node.style.height.value_or(0.0f);
 }
 
 // The lowercase tag `__widgetTagFactory__` (core/view/js/web-compat-element.js)
@@ -267,6 +291,41 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
                 ss << ind << var << ".style.height = '"
                    << format_px(*node.style.height) << "';\n";
 
+            // And it is a POSITIONED box. This branch returns before the shared
+            // style emitter, so anything it does not write here is dropped —
+            // which silently discarded the design's placement and left every
+            // control to flex flow. Over a faithful capture that is the whole
+            // panel: the backdrop is absolutely positioned art, and controls
+            // meant to sit on top of it stack down one edge instead, all
+            // sharing an x. The result renders, so nothing downstream objects.
+            //
+            // Deliberately the positioning subset and not the full style block.
+            // A control over a capture carries `designed_body: capture` because
+            // its body IS the bitmap underneath; emitting the general
+            // background/border/shadow run here would paint an opaque widget
+            // over the art this exists to reveal.
+            if (node.style.position)
+                ss << ind << var << ".style.position = '"
+                   << js_single_quote_escape(*node.style.position) << "';\n";
+            const auto emit_edge = [&](const char* name,
+                                       const std::optional<float>& value) {
+                if (value)
+                    ss << ind << var << ".style." << name << " = '"
+                       << format_px(*value) << "';\n";
+            };
+            emit_edge("left", node.style.left);
+            emit_edge("top", node.style.top);
+            emit_edge("right", node.style.right);
+            emit_edge("bottom", node.style.bottom);
+            // z-index is deliberately NOT emitted here, and adding it is not the
+            // obvious improvement it looks like. web-compat's auto-overlay
+            // heuristic claims the single global overlay slot for any element
+            // that is `position:absolute` with z-index >= 10
+            // (web-compat-style-decl.js), so emitting a designed stacking order
+            // would make a row of overlay knobs fight over one slot — last one
+            // wins, the rest are released. Placement alone fixes the defect;
+            // the capture lowering sets position/left/top and no z-index.
+
             // Every user-authored string goes through the same escape as the
             // rest of this file. Interpolating the label raw let a crafted
             // design terminate the literal and inject executable bridge JS.
@@ -278,12 +337,70 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "setValue(" << var << "._id, " << node.audio_default
                << ");\n";
 
+            if (node.audio_widget == AudioWidgetType::fader) {
+                if (fader_is_horizontal(node))
+                    ss << ind << "setOrientation(" << var
+                       << "._id, 'horizontal');\n";
+                const auto body = node.attributes.find("fader_body_asset_path");
+                const auto indicator =
+                    node.attributes.find("fader_indicator_asset_path");
+                if (body != node.attributes.end() &&
+                    indicator != node.attributes.end()) {
+                    ss << ind << "setFaderCapturedArt(" << var << "._id, '"
+                       << js_single_quote_escape(body->second) << "', "
+                       << finite_numeric_attribute(node, "fader_body_natural_w", 0.0)
+                       << ", "
+                       << finite_numeric_attribute(node, "fader_body_natural_h", 0.0)
+                       << ", '"
+                       << js_single_quote_escape(indicator->second) << "', "
+                       << finite_numeric_attribute(node, "fader_indicator_natural_w", 0.0)
+                       << ", "
+                       << finite_numeric_attribute(node, "fader_indicator_natural_h", 0.0)
+                       << ", "
+                       << std::clamp(finite_numeric_attribute(
+                              node, "fader_indicator_cross", 0.5), 0.0, 1.0)
+                       << ", "
+                       << finite_numeric_attribute(node, "fader_body_origin_x", 0.0)
+                       << ", "
+                       << finite_numeric_attribute(node, "fader_body_origin_y", 0.0)
+                       << ", "
+                       << finite_numeric_attribute(node, "fader_control_natural_w", 0.0)
+                       << ", "
+                       << finite_numeric_attribute(node, "fader_control_natural_h", 0.0)
+                       << ");\n";
+                    const auto color = [&](const char* key) {
+                        const auto it = node.attributes.find(key);
+                        return it != node.attributes.end()
+                            ? js_single_quote_escape(it->second) : std::string();
+                    };
+                    ss << ind << "setFaderSkin(" << var << "._id, '"
+                       << color("design_track") << "', '"
+                       << color("design_accent") << "', '"
+                       << color("design_indicator") << "', '');\n";
+                }
+            }
+
             // A declared parameter binding is the reason an audio widget
             // exists. `bindWidgetToParam` is deliberately host-to-widget only:
             // it keeps automation and restored state visible, but does not
             // turn a user gesture back into a parameter write. Emit the reverse
             // change path alongside it or the imported control looks live while
             // dragging it changes no audio or host automation.
+            // The colour the DESIGN drew this control in. Without it the widget
+            // falls back to the host theme's accent, so a panel whose author
+            // chose lilac renders its knobs in whatever mint the surrounding
+            // app happens to use — the design's own palette reaches the panel
+            // and stops at its controls.
+            //
+            // The IR carries this per control and the native lane already
+            // consumes it (apply_designed_body_skin); only this lane was
+            // silent, which is why the same ui.js renders differently in two
+            // hosts.
+            if (const auto accent = node.attributes.find("design_accent");
+                accent != node.attributes.end() && !accent->second.empty()) {
+                ss << ind << "setAccentColor(" << var << "._id, '"
+                   << js_single_quote_escape(accent->second) << "');\n";
+            }
             if (const auto binding = node.attributes.find("binding");
                 binding != node.attributes.end() && !binding->second.empty()) {
                 const std::string escaped =
@@ -385,6 +502,16 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     emit_str("backgroundColor", s.background_color);
     if (s.background_gradient)
         ss << ind << var << ".style.background = '" << js_single_quote_escape(*s.background_gradient) << "';\n";
+    // AFTER the shorthand, never before: `background` resets `background-size`,
+    // so emitting the size first silently throws it away.
+    //
+    // Without this a tiled background collapses to one stretched copy of its
+    // gradient. That is not a texture nicety — a design-system grid or scanline
+    // IS a gradient plus a size, so losing the size loses the element. A
+    // spectrum display whose only content was `.grid-x` / `.grid-y` rendered as
+    // an empty panel and was reported as a layout bug three separate times, on
+    // three different panels, before the size was found missing here.
+    emit_str("backgroundSize", s.background_size);
     emit_str("color", s.color);
     emit_float("opacity", s.opacity);
     emit_str("mixBlendMode", s.mix_blend_mode);
@@ -416,6 +543,7 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     emit_str("textTransform", s.text_transform);
     emit_str("overflow", s.overflow);
     emit_str("cursor", s.cursor);
+    emit_str("pointerEvents", s.pointer_events);
     emit_str("position", s.position);
     emit_px("top", s.top);
     emit_px("left", s.left);
@@ -829,13 +957,15 @@ static void emit_js_visual_overrides(const NativeEmit& e, const std::string& tar
     // renderer default (center); the decoder already compensated left/top for
     // that pivot, so no setTransformOrigin is emitted here (a CSS-lane
     // rotate() also rotates about center, so this stays correct there too).
-    if (st.transform && !st.transform->empty()) {
-        const auto rp = st.transform->find("rotate(");
-        if (rp != std::string::npos) {
-            const float deg = std::strtof(st.transform->c_str() + rp + 7, nullptr);
-            if (deg != 0.0f)
-                ss << ind << "setRotation('" << target_id << "', " << deg << ");\n";
-        }
+    //
+    // Read through the SHARED parser the native materializer uses, so the two
+    // lanes cannot disagree about which transforms are honored — a design that
+    // rotates has to look the same whether it renders through the script bridge
+    // or through the native tree.
+    if (st.transform) {
+        if (const auto deg = css_transform_rotation(*st.transform);
+            deg && *deg != 0.0f)
+            ss << ind << "setRotation('" << target_id << "', " << *deg << ");\n";
     }
     // A shadow is a visual override like any other here, and it belongs on
     // EVERY kind of node — not just frames. Before this lived here, a shadow
@@ -1235,6 +1365,22 @@ static void emit_js_audio_widget(const NativeEmit& e) {
                        << kattr_f("art_core_x") << ", " << kattr_f("art_core_y")
                        << ", " << cw << ", " << ch << ");\n";
                 }
+                // The design's OWN pointer, when the importer recovered it —
+                // fractions of the disc half-extent, the same data the native
+                // materializer forwards. Without this the scripted path draws
+                // the generic notch over the design's disc while the
+                // materialized path draws the design's pointer: one import,
+                // two different knobs.
+                if (auto c = node.attributes.find("knob_ind_color");
+                    node.attributes.count("knob_ind_r_out") != 0) {
+                    ss << ind << "setKnobCapturedIndicator('" << id << "', "
+                       << kattr_f("knob_ind_r_in") << ", "
+                       << kattr_f("knob_ind_r_out") << ", "
+                       << kattr_f("knob_ind_w") << ", '"
+                       << js_single_quote_escape(
+                              c != node.attributes.end() ? c->second : "")
+                       << "');\n";
+                }
             }
         }
         emit_style(id);
@@ -1278,7 +1424,9 @@ static void emit_js_audio_widget(const NativeEmit& e) {
         ss << ind << "setFlex('" << col_id << "', 'height', " << col_h << ");\n";
         ss << ind << "setFlex('" << col_id << "', 'min_width', " << frame_w << ");\n";
         fid_w = widget_w; fid_h = shape_h;  // emitted widget dims (fidelity)
-        ss << ind << "createFader('" << id << "', 'vertical', '" << col_id << "');\n";
+        const char* orientation = shape_w >= shape_h ? "horizontal" : "vertical";
+        ss << ind << "createFader('" << id << "', '" << orientation
+           << "', '" << col_id << "');\n";
         ss << ind << "setFlex('" << id << "', 'width', " << widget_w << ");\n";
         ss << ind << "setFlex('" << id << "', 'height', " << shape_h << ");\n";
         // Fader label overlaps track when rendered inside bounds — use separate label
@@ -1300,6 +1448,43 @@ static void emit_js_audio_widget(const NativeEmit& e) {
             pit != node.attributes.end() && !pit->second.empty())
             fader_norm = std::clamp(std::stof(pit->second), 0.0f, 1.0f);
         ss << ind << "setValue('" << id << "', " << fader_norm << ");\n";
+        if (const auto body = node.attributes.find("fader_body_asset_path");
+            body != node.attributes.end()) {
+            const auto indicator = node.attributes.find("fader_indicator_asset_path");
+            if (indicator != node.attributes.end()) {
+                ss << ind << "setFaderCapturedArt('" << id << "', '"
+                   << js_single_quote_escape(body->second) << "', "
+                   << finite_numeric_attribute(node, "fader_body_natural_w", 0.0)
+                   << ", "
+                   << finite_numeric_attribute(node, "fader_body_natural_h", 0.0)
+                   << ", '"
+                   << js_single_quote_escape(indicator->second) << "', "
+                   << finite_numeric_attribute(node, "fader_indicator_natural_w", 0.0)
+                   << ", "
+                   << finite_numeric_attribute(node, "fader_indicator_natural_h", 0.0)
+                   << ", "
+                   << std::clamp(finite_numeric_attribute(
+                          node, "fader_indicator_cross", 0.5), 0.0, 1.0)
+                   << ", "
+                   << finite_numeric_attribute(node, "fader_body_origin_x", 0.0)
+                   << ", "
+                   << finite_numeric_attribute(node, "fader_body_origin_y", 0.0)
+                   << ", "
+                   << finite_numeric_attribute(node, "fader_control_natural_w", 0.0)
+                   << ", "
+                   << finite_numeric_attribute(node, "fader_control_natural_h", 0.0)
+                   << ");\n";
+                const auto color = [&](const char* key) {
+                    const auto it = node.attributes.find(key);
+                    return it != node.attributes.end()
+                        ? js_single_quote_escape(it->second) : std::string();
+                };
+                ss << ind << "setFaderSkin('" << id << "', '"
+                   << color("design_track") << "', '"
+                   << color("design_accent") << "', '"
+                   << color("design_indicator") << "', '');\n";
+            }
+        }
         // Value-driven skin derived from the captured asset. The importer
         // sampled the PNG's track/fill/thumb colors; emit setFaderSkin so
         // the native fader renders the captured look while the thumb still
@@ -2435,6 +2620,26 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
                 ss << "setColorToken('" << name << "', '" << value << "');\n";
             for (auto& [name, value] : ir.tokens.dimensions)
                 ss << "setDimensionToken('" << name << "', " << value << ");\n";
+
+            // The design states `css/accent`; a Knob resolves `knob.arc`. The
+            // native materializer bridges the two through ir_tokens_to_theme,
+            // but `setColorToken` stores the name it is given and derives
+            // nothing — so without this the emitted panel keeps the design's
+            // palette for everything the design draws and paints every CONTROL
+            // in Pulp's built-in default. That reads as a design bug (blue
+            // knobs on a cream faceplate) and scores as a pass on similarity.
+            // Derived through the same function the native path calls, so the
+            // two lanes cannot answer this differently.
+            const Theme derived = ir_tokens_to_theme(ir.tokens);
+            const IRTokens widget_tokens = theme_to_ir_tokens(derived);
+            bool wrote_widget_token = false;
+            for (auto& [name, value] : widget_tokens.colors) {
+                if (ir.tokens.colors.count(name) != 0) continue;
+                if (!wrote_widget_token && opts.include_comments)
+                    ss << "// Widget keys derived from the design's palette\n";
+                wrote_widget_token = true;
+                ss << "setColorToken('" << name << "', '" << value << "');\n";
+            }
         } else {
             for (auto& [name, value] : ir.tokens.colors)
                 ss << "theme.colors[\"" << name << "\"] = '" << value << "';\n";

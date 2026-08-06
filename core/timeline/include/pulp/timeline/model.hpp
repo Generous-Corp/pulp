@@ -12,8 +12,10 @@
 #include <pulp/timeline/clip_launch.hpp>
 #include <pulp/timeline/device_placement.hpp>
 #include <pulp/timeline/item_id.hpp>
+#include <pulp/timeline/modulation.hpp>
 #include <pulp/timeline/note_modifier.hpp>
 #include <pulp/timeline/recording.hpp>
+#include <pulp/timeline/tuning.hpp>
 
 #include <compare>
 #include <cstddef>
@@ -61,12 +63,17 @@ struct TrackInput {
     std::vector<Clip> clips;
     std::vector<DevicePlacement> device_chain;
     std::vector<AutomationLane> automation_lanes;
+    std::vector<Modulator> modulators;
+    std::vector<MacroControl> macros;
+    std::vector<ModulationRoute> modulation_routes;
     std::vector<TakeLane> take_lanes;
     bool record_armed = false;
     // Zero selects the arrangement rather than a take playlist/comp lane.
     ItemId active_take_lane_id;
     std::optional<TrackFreeze> freeze;
     TrackMixer mixer;
+    // Absence means the track plays in whatever tuning the project states.
+    std::optional<TuningReference> tuning;
 };
 
 /// Immutable identity-bearing arrangement track.
@@ -191,6 +198,23 @@ class Track {
     std::span<const AutomationLane> automation_lanes() const noexcept;
     /// Finds an automation lane by identity, or returns `nullptr`.
     const AutomationLane* find_automation_lane(ItemId id) const noexcept;
+    /// Returns modulators in canonical identity order.
+    std::span<const Modulator> modulators() const noexcept;
+    /// Finds a modulator by identity, or returns `nullptr`.
+    const Modulator* find_modulator(ItemId id) const noexcept;
+    /// Returns macro controls in canonical identity order.
+    std::span<const MacroControl> macros() const noexcept;
+    /// Finds a macro control by identity, or returns `nullptr`.
+    const MacroControl* find_macro(ItemId id) const noexcept;
+    /// Returns modulation routes in canonical identity order.
+    std::span<const ModulationRoute> modulation_routes() const noexcept;
+    /// Finds a modulation route by identity, or returns `nullptr`.
+    const ModulationRoute* find_modulation_route(ItemId id) const noexcept;
+    /// Returns the routes drawing from `source_id`, in canonical identity order.
+    ///
+    /// This is the fan-out of one macro or modulator: the set a removal has to
+    /// account for, and the set an inverse has to restore.
+    std::vector<ModulationRoute> routes_from_source(ItemId source_id) const;
     /// Returns take lanes in canonical identity order.
     std::span<const TakeLane> take_lanes() const noexcept;
     /// Finds a take lane by identity, or returns `nullptr`.
@@ -203,6 +227,8 @@ class Track {
     const std::optional<TrackFreeze>& freeze() const noexcept;
     /// Returns the authored track mixer.
     const TrackMixer& mixer() const noexcept;
+    /// Returns the tuning this track overrides the project's with, if any.
+    const std::optional<TuningReference>& tuning() const noexcept;
     /// Counts persistent clip-index nodes shared with `other`.
     std::size_t shared_index_nodes_with(const Track& other) const;
     /// Returns whether both snapshots contain the same clip identities.
@@ -226,30 +252,64 @@ class Track {
 ///
 /// Spelling and voicing are presentation and generation concerns.
 enum class ChordQuality : std::uint8_t {
-    Major,
-    Minor,
-    Diminished,
-    Augmented,
-    Dominant7,
-    Major7,
-    Minor7,
-    HalfDiminished7,
-    Suspended2,
-    Suspended4,
+    Major = 0,
+    Minor = 1,
+    Diminished = 2,
+    Augmented = 3,
+    Dominant7 = 4,
+    Major7 = 5,
+    Minor7 = 6,
+    HalfDiminished7 = 7,
+    Suspended2 = 8,
+    Suspended4 = 9,
 };
 
 /// Scale mode associated with a harmonic context event.
 enum class ScaleMode : std::uint8_t {
-    Major,
-    NaturalMinor,
-    HarmonicMinor,
-    MelodicMinor,
-    Dorian,
-    Phrygian,
-    Lydian,
-    Mixolydian,
-    Locrian,
-    Chromatic,
+    Major = 0,
+    NaturalMinor = 1,
+    HarmonicMinor = 2,
+    MelodicMinor = 3,
+    Dorian = 4,
+    Phrygian = 5,
+    Lydian = 6,
+    Mixolydian = 7,
+    Locrian = 8,
+    Chromatic = 9,
+};
+
+/// Added scale degree a chord statement carries above its quality.
+///
+/// One bit per degree, so a chord may state several at once. The values are a
+/// bitmask rather than an enum class because that is what they are; naming them
+/// here keeps the spelling out of every call site that builds one.
+enum ChordExtension : std::uint16_t {
+    kChordExtensionNinth = 1u << 0,
+    kChordExtensionFlatNinth = 1u << 1,
+    kChordExtensionSharpNinth = 1u << 2,
+    kChordExtensionEleventh = 1u << 3,
+    kChordExtensionSharpEleventh = 1u << 4,
+    kChordExtensionThirteenth = 1u << 5,
+    kChordExtensionFlatThirteenth = 1u << 6,
+};
+
+/// Every extension bit the vocabulary defines; anything outside is rejected.
+inline constexpr std::uint16_t kChordExtensionMask =
+    kChordExtensionNinth | kChordExtensionFlatNinth | kChordExtensionSharpNinth |
+    kChordExtensionEleventh | kChordExtensionSharpEleventh | kChordExtensionThirteenth |
+    kChordExtensionFlatThirteenth;
+
+/// Non-binding hint for how a generator should spread a chord's tones.
+///
+/// A hint, not an instruction: nothing in the document is re-voiced because one
+/// changed, and a generator that ignores it is still correct.
+enum class ChordVoicing : std::uint8_t {
+    Close,
+    Open,
+    Drop2,
+    Drop3,
+    Rootless,
+    Shell,
 };
 
 /// Harmonic statement in force from `position` until the next event.
@@ -261,6 +321,14 @@ struct ChordScaleEvent {
     std::uint8_t chord_root = 0;
     ScaleMode scale_mode = ScaleMode::Major;
     std::uint8_t scale_root = 0;
+    // The pitch class that sounds lowest, when it is not the chord root. This
+    // is the general form of an inversion: naming the bass covers both a chord
+    // tone in the bass and a bass note outside the chord, and a separate
+    // inversion number beside it could only ever contradict it.
+    std::optional<std::uint8_t> chord_bass;
+    // Bitmask over ChordExtension. Zero states the plain quality.
+    std::uint16_t chord_extensions = 0;
+    std::optional<ChordVoicing> voicing;
 
     constexpr auto operator<=>(const ChordScaleEvent&) const = default;
 };
@@ -312,6 +380,25 @@ struct SequenceMarker {
     std::optional<std::uint32_t> color;
 };
 
+/// Structural part a region names, independent of what the region is called.
+///
+/// The name is free text a user typed; the role is the typed restatement a
+/// generator can dispatch on without parsing prose. Unspecified is a region
+/// that states a span without claiming a part.
+enum class SectionRole : std::uint8_t {
+    Unspecified,
+    Intro,
+    Verse,
+    PreChorus,
+    Chorus,
+    Bridge,
+    Breakdown,
+    Drop,
+    Solo,
+    Interlude,
+    Outro,
+};
+
 /// Named positive-duration span on a sequence's musical timeline.
 ///
 /// Regions may overlap or contain one another. Position and duration are in
@@ -322,6 +409,7 @@ struct SequenceRegion {
     timebase::TickPosition position;
     timebase::TickDuration duration;
     std::optional<std::uint32_t> color;
+    SectionRole role = SectionRole::Unspecified;
 };
 
 /// Per-mille identity scale for deterministic groove strengths and velocity.
@@ -702,6 +790,10 @@ struct ProjectInput {
     timebase::TempoMap tempo_map{};
     timebase::MeterMap meter_map{};
     std::optional<SessionStart> session_start;
+    // Absence states no tuning at all, which is not the same claim as stating
+    // equal temperament: a document that never chose still follows whatever the
+    // host or instrument defaults to.
+    std::optional<TuningReference> tuning;
 };
 
 /// Kind of an identity-bearing item in a Project.
@@ -717,6 +809,9 @@ enum class ItemKind : std::uint8_t {
     DevicePlacement,
     AutomationLane,
     AutomationPoint,
+    Modulator,
+    MacroControl,
+    ModulationRoute,
     TakeLane,
     Take,
     Marker,
@@ -749,6 +844,13 @@ constexpr ItemId immediate_parent_id(ItemKind kind, ItemId project_id, ItemId se
     case ItemKind::Clip:
     case ItemKind::DevicePlacement:
     case ItemKind::AutomationLane:
+    case ItemKind::Modulator:
+    case ItemKind::MacroControl:
+    // A route is owned by the track, not by the source it reads. Parenting it
+    // to its source would make the source's removal an ownership question the
+    // document answers twice, and would leave a route whose source is a macro
+    // and a route whose source is a modulator with different owners.
+    case ItemKind::ModulationRoute:
     case ItemKind::TakeLane:
         return track_id;
     case ItemKind::Note:
@@ -853,6 +955,8 @@ class Project {
     const timebase::MeterMap& meter_map() const noexcept;
     /// Returns the optional absolute source-clock origin.
     const std::optional<SessionStart>& session_start() const noexcept;
+    /// Returns the tuning every track plays in unless it states its own.
+    const std::optional<TuningReference>& tuning() const noexcept;
     /// Finds a media asset by identity, or returns `nullptr`.
     const MediaAsset* find_asset(ItemId id) const noexcept;
     /// Finds a sequence by identity, or returns `nullptr`.

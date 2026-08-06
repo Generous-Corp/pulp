@@ -142,6 +142,33 @@ bool validate_publication_destinations(
     return true;
 }
 
+std::vector<fs::path> localized_asset_paths(
+    const pulp::view::DesignIR& ir,
+    const fs::path& output_dir) {
+    std::vector<fs::path> paths;
+    const auto append = [&](std::string_view value) {
+        if (value.empty()) return;
+        fs::path path(value);
+        if (path.is_relative()) path = output_dir / path;
+        paths.push_back(std::move(path));
+    };
+    for (const auto& asset : ir.asset_manifest.assets)
+        if (asset.local_path) append(*asset.local_path);
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            for (const char* key : {"fader_body_asset_path",
+                                    "fader_indicator_asset_path"}) {
+                if (const auto it = node.attributes.find(key);
+                    it != node.attributes.end())
+                    append(it->second);
+            }
+            for (const auto& alternate : node.alternate_frames) walk(alternate);
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(ir.root);
+    return paths;
+}
+
 bool validate_localized_asset_destinations(
     const BrowserImportCliRequest& request,
     const pulp::view::DesignIR& ir,
@@ -159,10 +186,7 @@ bool validate_localized_asset_destinations(
         protected_paths.push_back(*request.browser_interactions);
     if (!request.reference_image.empty())
         protected_paths.emplace_back(request.reference_image);
-    for (const auto& asset : ir.asset_manifest.assets) {
-        if (!asset.local_path || asset.local_path->empty()) continue;
-        auto asset_path = fs::path(*asset.local_path);
-        if (asset_path.is_relative()) asset_path = output_dir / asset_path;
+    for (const auto& asset_path : localized_asset_paths(ir, output_dir)) {
         const auto normalized_asset = normalized_destination(asset_path);
         if ((!rendered.empty() &&
              normalized_render == normalized_asset) ||
@@ -596,7 +620,8 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
          .allow_browser_network = request.allow_browser_network,
          .dry_run = request.dry_run,
          .supports_faithful_capture =
-             request.supports_faithful_capture},
+             request.supports_faithful_capture,
+         .native_panel_lowering = request.native_panel_lowering},
         content);
 
     std::vector<std::shared_ptr<BrowserCaptureWorkspace>> workspaces;
@@ -639,6 +664,10 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
                           : "")
                   << "\n";
         std::cout << "Semantic report → semantic-report.json\n";
+        // Before the visual-contract line, because a warning that a whole
+        // class of content was not drawn changes what that contract means.
+        for (const auto& warning : captured->warnings)
+            std::cout << "Warning: " << warning << "\n";
         std::cout
             << "Visual contract: pixel-exact default frame; interactions are "
                "evidence-only and require a runtime bridge.\n";
@@ -733,27 +762,13 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
             {diff_path, published_diff_path, true});
     }
 
-    // When the root was cropped out of a larger capture, the reference must be
-    // cropped the same way or the comparison is between two different pictures.
-    // The offset lives on the capture child as a negative position, and the
-    // reference is at device scale, so the rect is scaled by the DPR.
-    int crop_x = 0, crop_y = 0, crop_w = 0, crop_h = 0;
-    for (const auto& child : design_ir.root.children) {
-        if (child.render_mode != pulp::view::NodeRenderMode::faithful_capture)
-            continue;
-        const float left = child.style.left.value_or(0.0f);
-        const float top = child.style.top.value_or(0.0f);
-        if (left >= 0.0f && top >= 0.0f) break;   // not a crop
-        constexpr int kCaptureDpr = 2;
-        crop_x = static_cast<int>(std::lround(-left)) * kCaptureDpr;
-        crop_y = static_cast<int>(std::lround(-top)) * kCaptureDpr;
-        crop_w = static_cast<int>(std::lround(
-                     design_ir.root.style.width.value_or(0.0f))) * kCaptureDpr;
-        crop_h = static_cast<int>(std::lround(
-                     design_ir.root.style.height.value_or(0.0f))) * kCaptureDpr;
-        break;
-    }
-
+    // The reference must be registered against the render before it is scored.
+    // That rect is resolved from the IR inside validate_capture, because the
+    // registration has to hold for every caller of the comparison and not just
+    // for the one that prints it. Deriving it here is what failed: the rect was
+    // recovered from a faithful_capture child's negative offset, and native
+    // panel lowering emits no such child, so the crop silently became zero and
+    // every native panel was scored against a misregistered oracle.
     const auto comparison = operations.validate_capture(
         design_ir,
         {.reference = reference_image,
@@ -762,10 +777,6 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
          .width = render_width,
          .height = render_height,
          .fail_below_percent = request.fail_below_percent,
-         .reference_crop_x = crop_x,
-         .reference_crop_y = crop_y,
-         .reference_crop_width = crop_w,
-         .reference_crop_height = crop_h,
          .backend = request.screenshot_backend});
     if (!comparison.valid) {
         std::cerr << "Validation error: " << comparison.error << "\n";
@@ -806,16 +817,12 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
             std::cerr << "Error: " << localization_error << "\n";
             return BrowserImportFailure{2};
         }
-        for (const auto& asset : design_ir.asset_manifest.assets) {
-            if (!asset.local_path || asset.local_path->empty()) continue;
-            auto asset_path = fs::path(*asset.local_path);
-            if (asset_path.is_relative()) {
-                auto output_dir = request.output_file.parent_path();
-                if (output_dir.empty()) output_dir = fs::current_path();
-                asset_path = output_dir / asset_path;
-            }
-            protected_paths.push_back(std::move(asset_path));
-        }
+        auto output_dir = request.output_file.parent_path();
+        if (output_dir.empty()) output_dir = fs::current_path();
+        auto asset_paths = localized_asset_paths(design_ir, output_dir);
+        protected_paths.insert(protected_paths.end(),
+                               std::make_move_iterator(asset_paths.begin()),
+                               std::make_move_iterator(asset_paths.end()));
     }
 
     const auto retained_proof_root =
@@ -841,17 +848,29 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
               << proof_note
               << " ("
               << render_width << "x" << render_height << ")\n";
-    std::cout << "Similarity: "
-              << static_cast<int>(comparison.similarity * 100) << "% ("
-              << comparison.diff_pixels << "/" << comparison.total_pixels
-              << " pixels differ, mean error: " << comparison.mean_error
-              << ")\n";
-    std::cout << "Validation: "
-              << (comparison.passes ? "PASS" : "NEEDS REVIEW") << "\n";
+    // A refusal prints where the number went instead of a number. Printing 0%
+    // for a comparison that never ran is the same lie in the other direction,
+    // and it is the one that gets quoted.
+    if (comparison.scored) {
+        std::cout << "Similarity: "
+                  << static_cast<int>(comparison.similarity * 100) << "% ("
+                  << comparison.diff_pixels << "/" << comparison.total_pixels
+                  << " pixels differ, mean error: " << comparison.mean_error
+                  << ")\n";
+        std::cout << "Validation: "
+                  << (comparison.passes ? "PASS" : "NEEDS REVIEW") << "\n";
+    } else {
+        std::cout << "Similarity: " << comparison.registration_reason << "\n";
+        std::cout << "Validation: NEVER SCORED\n";
+    }
     std::cout << "Diff image → "
               << reported_diff_path.string()
               << proof_note << "\n";
-    if (!comparison.passes && request.fail_below_percent >= 0.0f) {
+    // An unscorable comparison cannot satisfy a bar, so a run that ASKED for
+    // one fails. A run that did not ask keeps its exit code: the panel imported
+    // fine and only its oracle is unusable.
+    if (request.fail_below_percent >= 0.0f &&
+        !(comparison.scored && comparison.passes)) {
         similarity_failed = true;
     }
 

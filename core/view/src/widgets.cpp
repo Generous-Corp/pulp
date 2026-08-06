@@ -745,11 +745,72 @@ void Knob::paint(canvas::Canvas& canvas) {
 
 void Fader::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
+
+    // A browser capture freezes the authored thumb at one value. The importer
+    // gives us a cleaned body crop to cover that frozen instance, then the
+    // separately captured indicator below is translated with value_. Draw the
+    // body before any live chrome so track/fill remain functional and visible.
+    if (captured_body_ && captured_body_->loaded()) {
+        const float natural_w = captured_control_natural_w_ > 0.0f
+            ? captured_control_natural_w_
+            : static_cast<float>(captured_body_->frame_width());
+        const float natural_h = captured_control_natural_h_ > 0.0f
+            ? captured_control_natural_h_
+            : static_cast<float>(captured_body_->frame_height());
+        const float body_scale_x = b.width / natural_w;
+        const float body_scale_y = b.height / natural_h;
+        canvas.draw_image_from_file_rect(
+            captured_body_->path(), 0.0f, 0.0f,
+            static_cast<float>(captured_body_->frame_width()),
+            static_cast<float>(captured_body_->frame_height()),
+            captured_body_origin_x_ * body_scale_x,
+            captured_body_origin_y_ * body_scale_y,
+            captured_body_->frame_width() * body_scale_x,
+            captured_body_->frame_height() * body_scale_y);
+    }
+
+    // A paint delegate installed on this fader or on any ancestor gets first
+    // refusal, exactly as Knob::paint gives it. It declines by default, in which
+    // case the stock rendering below runs unchanged.
+    //
+    // WidgetPainter::paint_linear existed with no caller, so a delegate could be
+    // installed on a fader and never consulted: the install compiled, ran, and
+    // moved zero pixels. An imported fader whose design already painted its own
+    // track therefore still drew the stock track, fill and thumb on top of it.
+    // A captured indicator needs the stock branch below because that branch
+    // owns the functional track/fill and can replace only its thumb. The
+    // designed-control delegate paints an indivisible track+fill+stock-thumb.
+    if (!has_captured_indicator_art()) {
+        if (auto* p = effective_painter()) {
+            LinearPaintState s;
+            s.bounds = local_bounds();
+            s.enabled = enabled();
+            s.hovered = is_hovered();
+            s.pressed = dragging_;
+            s.focused = has_focus();
+            s.horizontal = orientation_ == Orientation::horizontal;
+            // The delegate normalizes thumb_pos across [track_min, track_max], so a
+            // 0..1 track hands it position_for_value() unchanged — including the
+            // skew, which is what keeps a skewed fader's skin agreeing with its
+            // stock rendering.
+            s.thumb_pos = position_for_value();
+            s.track_min = 0.0f;
+            s.track_max = 1.0f;
+            s.thumb_size = orientation_ == Orientation::horizontal ? thumb_width_
+                                                                   : thumb_height_;
+            s.value = value_;
+            s.value_min = 0.0;
+            s.value_max = 1.0;
+            if (p->paint_linear(canvas, s, *this)) return;
+        }
+    }
+
     float shader_time = frame_clock() ? frame_clock()->time() : 0.0f;
 
     bool vert = orientation_ == Orientation::vertical;
     float track_length = vert ? b.height : b.width;
     float track_width = vert ? b.width : b.height;
+    const float pos = position_for_value();
 
     // Sprite strip path
     if (sprite_strip_ && sprite_strip_->loaded()) {
@@ -793,8 +854,6 @@ void Fader::paint(canvas::Canvas& canvas) {
     } else {
         // Skew-mapped track position for the current value (== value_ when
         // skew is linear, so the default look is unchanged).
-        const float pos = position_for_value();
-
         // ── Per-widget skin overrides (figma-plugin import) ────────────────
         // When the importer derived track / fill / thumb colors from the
         // captured design, honor them here and force a rounded-rect thumb so
@@ -858,13 +917,17 @@ void Fader::paint(canvas::Canvas& canvas) {
             canvas.fill_rounded_rect(0, ty, fill_width, track_thick, track_radius);
         }
 
-        // Thumb (with hover scale animation)
+        // Thumb (with hover scale animation). A browser-authored indicator
+        // replaces only this slab; track and fill above remain native and
+        // value-driven, so the result is still a working fader rather than a
+        // static screenshot.
         auto thumb_color = has_skin_thumb_
             ? thumb_color_
             : resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
         canvas.set_fill_color({thumb_color.r, thumb_color.g, thumb_color.b, thumb_color.a});
 
-        if (thumb_shape_ == ThumbShape::rectangle || skin_rect_thumb) {
+        if (!has_captured_indicator_art() &&
+            (thumb_shape_ == ThumbShape::rectangle || skin_rect_thumb)) {
             const float scale = hover_thumb_scale_.value();
             // Skinned faders default to a wide rounded slab (matching the
             // captured Figma thumb) when explicit dimensions weren't given.
@@ -910,7 +973,7 @@ void Fader::paint(canvas::Canvas& canvas) {
                 canvas.set_line_width(1.5f);
                 canvas.stroke_rounded_rect(thumb_x, thumb_y, thumb_w, thumb_h, radius);
             }
-        } else {
+        } else if (!has_captured_indicator_art()) {
             float thumb_radius = std::min(track_width * 0.35f, 8.0f) * hover_thumb_scale_.value();
             // Convention: when mapping a 0..1 value to a position with a circular/rect
             // indicator, inset by the indicator's radius so it stays fully within bounds:
@@ -925,6 +988,42 @@ void Fader::paint(canvas::Canvas& canvas) {
                 canvas.fill_circle(thumb_x, b.height * 0.5f, thumb_radius);
             }
         }
+    }
+
+    // Captured indicator art is a final compositing layer, independent of the
+    // chosen body renderer (stock, minimal preview, schema, shader or sprite).
+    // Scale it by the same transform as the cleaned body so responsive bounds
+    // cannot stretch the body while leaving the hoisted thumb at DPR-2 size.
+    if (has_captured_indicator_art()) {
+        const float hover_scale = hover_thumb_scale_.value();
+        const float body_w = captured_control_natural_w_ > 0.0f
+            ? captured_control_natural_w_
+            : static_cast<float>(captured_body_->frame_width());
+        const float body_h = captured_control_natural_h_ > 0.0f
+            ? captured_control_natural_h_
+            : static_cast<float>(captured_body_->frame_height());
+        const float scale_x = body_w > 0.0f ? b.width / body_w : 0.0f;
+        const float scale_y = body_h > 0.0f ? b.height / body_h : 0.0f;
+        const float thumb_w = std::max(
+            1.0f, static_cast<float>(captured_indicator_->frame_width()) *
+                      scale_x * hover_scale);
+        const float thumb_h = std::max(
+            1.0f, static_cast<float>(captured_indicator_->frame_height()) *
+                      scale_y * hover_scale);
+        const float axis_half = (vert ? thumb_h : thumb_w) * 0.5f;
+        const float usable = std::max(0.0f, track_length - 2.0f * axis_half);
+        const float axis_center =
+            axis_half + (vert ? (1.0f - pos) : pos) * usable;
+        const float cross_center = captured_indicator_cross_ * track_width;
+        const float thumb_x = vert ? cross_center - thumb_w * 0.5f
+                                   : axis_center - thumb_w * 0.5f;
+        const float thumb_y = vert ? axis_center - thumb_h * 0.5f
+                                   : cross_center - thumb_h * 0.5f;
+        canvas.draw_image_from_file_rect(
+            captured_indicator_->path(), 0.0f, 0.0f,
+            static_cast<float>(captured_indicator_->frame_width()),
+            static_cast<float>(captured_indicator_->frame_height()),
+            thumb_x, thumb_y, thumb_w, thumb_h);
     }
 
     // Label

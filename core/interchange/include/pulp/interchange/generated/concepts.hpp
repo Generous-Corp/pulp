@@ -61,9 +61,20 @@ enum class Concept : std::uint16_t {
     TempoValueQuantized = 47,
     ClipMediaWindow = 48,
     ClipFadeShape = 49,
+    ClipMidiExpressionLane = 50,
+    SequenceSectionRole = 51,
+    ContextChordBass = 52,
+    ContextChordExtension = 53,
+    ContextChordVoicing = 54,
+    TuningProject = 55,
+    TuningInstrument = 56,
+    ModulationModulator = 57,
+    ModulationMacro = 58,
+    ModulationRouteDeviceParam = 59,
+    ModulationRouteTrackMixer = 60,
 };
 
-inline constexpr std::size_t kConceptCount = 50;
+inline constexpr std::size_t kConceptCount = 61;
 
 namespace detail {
 struct ConceptRecord {
@@ -123,6 +134,17 @@ inline constexpr ConceptRecord kConceptRecords[kConceptCount] = {
     {"tempo.value-quantized", "A tempo value that cannot round-trip exactly through an integer-microseconds-per-quarter representation.", true},
     {"clip.media-window", "A media clip that plays a source subrange rather than the referenced asset's complete frame range.", true},
     {"clip.fade-shape", "A fade whose gain curve is not the linear ramp, so a format carrying only fade durations changes what the transition sounds like.", true},
+    {"clip.midi-expression-lane", "A continuous controller stream authored alongside a clip's notes -- control change, pitch bend, channel or poly pressure, program change, or a registered or assignable parameter -- carrying its own points independently of any note.", true},
+    {"sequence.section-role", "A region that names the structural part it spans, beyond its free-text name.", true},
+    {"context.chord-bass", "A chord statement naming the pitch class in the bass, rather than sounding root position.", true},
+    {"context.chord-extension", "A chord statement carrying added scale degrees beyond its quality.", true},
+    {"context.chord-voicing", "A chord statement carrying a hint for how a generator should spread its tones.", true},
+    {"tuning.project", "A document-wide statement of the tuning every instrument plays in.", true},
+    {"tuning.instrument", "One instrument overriding the document-wide tuning with its own.", true},
+    {"modulation.modulator", "A track-owned generator of modulation signal, by identity and declared kind.", true},
+    {"modulation.macro", "A track-owned named performer control that drives parameters through modulation routes.", true},
+    {"modulation.route-device-param", "A modulation route contributing a depth-scaled offset to a device parameter, on top of whatever base value is in force.", true},
+    {"modulation.route-track-mixer", "A modulation route contributing a depth-scaled offset to a track's own gain or pan.", true},
 };
 } // namespace detail
 

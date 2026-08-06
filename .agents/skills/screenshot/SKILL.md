@@ -53,6 +53,19 @@ below. The image-compositing rule still applies to the raster backends.
 | `coregraphics` (macOS default of `default_backend`) | **Yes, as of #6223** | Vector-only UIs, or when you specifically want the CG raster path |
 | `default_backend` | macOS → CoreGraphics, else provider | Fine for images now; still prefer `skia` for import fidelity |
 
+**"Skia is the fidelity reference" is about IMAGES, not about everything.**
+The rule above exists because CG could not composite file-backed images — it is
+not a general statement that the GPU path is more correct. Conic gradients were
+the counter-example: Skia's sweep shader clamps angles outside its
+`[start, end]` window instead of wrapping, so passing the CSS rotation as the
+window's start left a flat wedge the size of that rotation, and the default
+`from 0deg` lost a quarter of the circle. CoreGraphics software-rasterises the
+sweep and wraps its angle correctly, so it never had the defect — a CG
+screenshot of a conic was the more faithful one. Fixed by rotating the shader
+instead of shifting its window, so the two agree again. The durable lesson:
+when two backends disagree, find out WHICH is wrong before assuming; a
+per-backend gap is a claim about one primitive, not a ranking.
+
 **History (the trap — fixed #6223 S34):** `ImageView::paint` decodes images
 on-paint via the canvas's `draw_image_from_file` / `measure_image_from_file`
 primitive. `SkiaCanvas` always implemented it; the **CoreGraphics canvas did
@@ -81,6 +94,32 @@ Confirmed 2026-06-02 on the ELYSIUM Figma import (pre-#6223): CoreGraphics →
 empty vessel boxes + filename text; Skia → the gradient beakers/knobs/curves
 all composite and the montage matches the Figma reference. Post-#6223 both
 backends composite the images; Skia still wins on gradient/AA fidelity.
+
+## Scoring an imported capture? Set `PULP_SHOT_NO_RECONCILE=1`
+
+`pulp-screenshot` reconciles oversize absolutely-positioned descendants to the
+capture viewport (`reconcile_oversize_absolute_subtree`). That exists so
+runtime-imported React trees with a hardcoded oversize container still land
+inside the frame, and it is the right default — leave it on for ordinary
+captures.
+
+It is **wrong for a faithful-capture import**, whose backdrop is exactly the
+shape the clamp targets: `position:absolute`, a literal width (e.g. 1280px in a
+920px root), no opposite-edge anchor, carrying bound controls positioned against
+it. The clamp rescales the artwork out from under those controls. Nothing
+errors; you simply score a different image than the one on disk, and the error
+runs in **both** directions — it flatters a broken panel and crushes a correct
+one, so it cannot even be corrected for after the fact.
+
+So any comparison of a rendered panel against a reference render must set the
+opt-out, or it is measuring the clamp:
+
+```bash
+PULP_SHOT_NO_RECONCILE=1 pulp-screenshot --script build.ui.js --backend skia …
+```
+
+Unset, empty, `0` and `false` all mean "reconcile", so a variable left exported
+as `0` cannot silently disable reconciliation for every capture on the machine.
 
 ## Imported-design validation
 
@@ -147,6 +186,18 @@ missing comparison backend, not proof that the rendered PNG was empty.
   `--script` expects its own entry-module shape — a raw generated `ui.js` from
   `import-design` does not load that way (throws). Prefer `--validate` with the
   Skia backend for an imported `ui.js`.
+- **`pulp inspect screenshot --out FILE`** — asks an explicitly enabled,
+  running standalone to capture its own selected window surface and writes
+  validated PNG bytes. It prefers host back-buffer readback and falls back to
+  the shared `capture_view()` Skia/GPU/provider path when host readback is
+  missing, malformed, or blank. An active design viewport requires the live
+  back buffer; the fallback never re-lays out a live design tree at window size
+  and calls that transformed frame. This is the live-window choice from SSH:
+  capture runs inside
+  the app, so the remote shell does not need macOS Screen Recording permission.
+  Exit 3 is an explicit unsupported host/capability skip and creates no output.
+  This does not capture a plugin editor composited inside Logic, REAPER, or
+  another external host.
 - **`pulp::view::render_to_file`** in tests — headless view-tree PNGs in CI.
 - **`pulp::view::render_to_rgba`** (`screenshot.hpp`) — raw-pixel sibling of
   `render_to_png`. Returns the decoded **RGBA8** buffer (R,G,B,A byte order,
@@ -160,6 +211,35 @@ missing comparison backend, not proof that the rendered PNG was empty.
   `AssetManager::decode_png` does NOT actually decode (it stores raw PNG bytes +
   parses IHDR), so you cannot get RGBA by round-tripping a PNG through it — use
   `render_to_rgba` for raw pixels.
+
+## A standalone `--screenshot` run opens NO audio device
+
+`StandaloneApp::start()` skips the audio backend entirely for a screenshot-only
+launch: no `AudioSystem`, no device, no render callback, and no hardware MIDI
+(nothing drains it without the callback). That is what makes the Standalone
+format capturable on a shared or unattended machine — before it, every capture
+opened a CoreAudio device, so the format could only be verified with a human at
+the desk.
+
+Consequences when you read such a capture:
+
+- **Meters, scopes and any live-signal UI read zero.** That is the mode, not a
+  broken UI. To capture a UI that must show real signal, set
+  `StandaloneConfig::screenshot_keeps_audio` or export
+  `PULP_SCREENSHOT_KEEP_AUDIO=1`.
+- **The Settings tab's device lists are empty** — there is no audio system to
+  enumerate. Capture with the keep-audio opt-in if the device picker is the
+  subject of the shot.
+- **Asking for a live readout in the same run keeps audio on**, because those
+  readouts are produced BY the render callback: `--audio-probe-json`,
+  `--audio-scope-json`, `--audio-capture-wav`, `--audio-capture-rolling`.
+
+Verify a capture really stayed silent by process state, not by listening: while
+the app is alive, `lsof -p <pid>` must not map
+`/System/Library/Components/CoreAudio.component/…/CoreAudio`, and
+`sample <pid> 1` must show no `com.apple.audio.IOThread.client` thread running
+`HALC_ProxyIOContext::IOWorkLoop()`. Both appear when a device IS open, so
+their absence is a two-state result rather than a hopeful one.
 
 ## Render size: use the design's true root, not the source bbox
 
@@ -199,6 +279,28 @@ real desktop session where you actually want to prove the on-screen window.
 session only).
 
 ## Gotchas
+
+- **`render_to_rgba` is Skia-only, and without Skia it returns an EMPTY buffer
+  rather than failing loudly.** The CoreGraphics path on macOS is PNG-only, so a
+  build configured without Skia has no raw-pixel producer at all — every pixel
+  probe reads back nothing no matter what the code under test does. This reads
+  as a pile of unrelated feature failures: a UBSan lane once reported nine reds
+  across box-shadow, inset shadow, mix-blend-mode, oklab and backdrop-filter,
+  all from this one cause. The tell is that the suite's own control ("a plain
+  fill actually reaches the buffer") is among the failures — when the control
+  fails, the environment is the suspect, not the features.
+
+  Ask `pulp::view::raw_rgba_render_available()` (in `screenshot.hpp`) and `SKIP`
+  when it is false. It answers for the BUILD, mirroring the `#ifdef
+  PULP_HAS_SKIA` that selects the backend. **Never skip on an empty result** —
+  a build that CAN rasterize and produced nothing is a real defect, and keying
+  the skip on the result would convert exactly that regression into a green run.
+  Note the same trap applies to `render_to_png(..., ScreenshotBackend::skia)`,
+  which is a named-backend request and likewise yields nothing without Skia.
+
+  A skip has its own failure mode: a guard that wrongly reports "unavailable"
+  greens a whole file without running any of it. Keep one case that never skips
+  and asserts the guard matches reality in both directions.
 
 - **Absolute-positioned leaf views need `preferred_width`/`preferred_height`,
   not just `dim_width`.** `yoga_layout.cpp` applies an explicit px size from
