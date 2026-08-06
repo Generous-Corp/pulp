@@ -129,4 +129,4 @@ module shows no ports, its indices are **not known**, so prefer a module that
 has them; if you must use it, keep to index 0 and say so in the `why` block.
 In a parameter range, `d=` is that knob's default value.
 
-<!--INVENTORY-->
+<<<FORGE-INVENTORY-BEGIN>>><!--INVENTORY--><<<FORGE-INVENTORY-END>>>

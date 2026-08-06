@@ -2453,9 +2453,13 @@ def check_streamed_model_call() -> tuple:
     codex = os.path.join(home, "codex")
     with open(codex, "w") as f:
         f.write("""#!/usr/bin/env python3
+import hashlib
 import json
 import os
+import re
+import stat
 import sys
+import time
 
 args = sys.argv[1:]
 fixed = ["exec"]
@@ -2470,10 +2474,11 @@ if args[:len(fixed)] != fixed or args[-1] != "-" or \
     raise SystemExit(64)
 answer = args[args.index("--output-last-message") + 1]
 prompt = sys.stdin.read()
-if prompt != "hello codex":
+mode = os.environ.get("FAKE_CODEX_MODE", "ok")
+if mode not in ("external-inventory", "external-timeout") and \
+        prompt != "hello codex":
     print("prompt did not arrive on stdin", file=sys.stderr)
     raise SystemExit(65)
-mode = os.environ.get("FAKE_CODEX_MODE", "ok")
 if mode == "malformed":
     print("this is not JSON")
 elif mode == "nonzero":
@@ -2487,6 +2492,29 @@ elif mode == "error-event":
 elif mode == "warning-success":
     print(json.dumps({"type": "item.completed", "item": {
         "type": "error", "message": "skill budget warning"}}))
+    open(answer, "w").write("exact final response\\n")
+elif mode in ("external-inventory", "external-timeout"):
+    capture = os.environ["FAKE_CODEX_PROMPT_CAPTURE"]
+    expected_path = os.environ["FAKE_CODEX_EXPECTED_INVENTORY"]
+    open(capture, "w").write(prompt)
+    path_match = re.search(r"^Absolute path: (.+)$", prompt, re.M)
+    hash_match = re.search(r"^SHA-256: ([0-9a-f]{64})$", prompt, re.M)
+    length_match = re.search(r"^UTF-8 byte length: ([0-9]+)$", prompt, re.M)
+    if not path_match or not hash_match or not length_match:
+        print("shortened prompt lacks inventory metadata", file=sys.stderr)
+        raise SystemExit(66)
+    path = path_match.group(1)
+    actual = open(path, "rb").read()
+    expected = open(expected_path, "rb").read()
+    if (not os.path.isabs(path) or actual != expected or
+            hashlib.sha256(actual).hexdigest() != hash_match.group(1) or
+            len(actual) != int(length_match.group(1)) or
+            stat.S_IMODE(os.stat(path).st_mode) != stat.S_IRUSR):
+        print("external inventory failed content, metadata, or mode check",
+              file=sys.stderr)
+        raise SystemExit(67)
+    if mode == "external-timeout":
+        time.sleep(30)
     open(answer, "w").write("exact final response\\n")
 else:
     print(json.dumps({"type": "item.completed", "item": {
@@ -2564,6 +2592,152 @@ else:
               f"{code} {text!r} {why!r}")
     else:
         print("  ok     a warning-like Codex error item does not poison success")
+
+    inventory_text = "\n" + ("### Exact/Module — café Ω\n" * 7000)
+    full_inventory_prompt = (
+        "contract prefix\n" + P.INVENTORY_BEGIN + inventory_text +
+        P.INVENTORY_END + "\ncontract suffix")
+    expected_inventory = os.path.join(home, "expected-inventory.md")
+    prompt_capture = os.path.join(home, "shortened-prompt.txt")
+    with open(expected_inventory, "w") as f:
+        f.write(inventory_text)
+    external_env = {
+        "FAKE_CODEX_MODE": "external-inventory",
+        "FAKE_CODEX_PROMPT_CAPTURE": prompt_capture,
+        "FAKE_CODEX_EXPECTED_INVENTORY": expected_inventory,
+    }
+    old_external_env = {key: os.environ.get(key) for key in external_env}
+    os.environ.update(external_env)
+    try:
+        code, text, why = P.ask_model(
+            codex, full_inventory_prompt, 30.0, tick=0.0)
+    finally:
+        for key, old in old_external_env.items():
+            if old is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old
+    shortened = open(prompt_capture).read()
+    spill_lines = [line for line in shortened.splitlines()
+                   if line.startswith("Absolute path: ")]
+    spill_path = spill_lines[0].removeprefix("Absolute path: ") \
+        if len(spill_lines) == 1 else ""
+    if (code != 0 or text != "exact final response\n" or why or
+            inventory_text in shortened or
+            len(shortened) >= len(full_inventory_prompt) or
+            not spill_path or os.path.exists(spill_path)):
+        bad += 1
+        print(f"  WRONG  external inventory content or cleanup failed: "
+              f"{code} full={len(full_inventory_prompt)} "
+              f"short={len(shortened)} spill={spill_path!r} {why!r}")
+    else:
+        print(f"  ok     Codex inventory shrinks from "
+              f"{len(full_inventory_prompt):,} to {len(shortened):,} chars, "
+              "is exact and read-only, and is cleaned up")
+
+    timeout_env = dict(external_env)
+    timeout_env["FAKE_CODEX_MODE"] = "external-timeout"
+    old_timeout_env = {key: os.environ.get(key) for key in timeout_env}
+    os.environ.update(timeout_env)
+    try:
+        code, _, why = P.ask_model(
+            codex, full_inventory_prompt, 1.0, tick=0.0)
+    finally:
+        for key, old in old_timeout_env.items():
+            if old is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old
+    timeout_shortened = open(prompt_capture).read()
+    timeout_lines = [line for line in timeout_shortened.splitlines()
+                     if line.startswith("Absolute path: ")]
+    timeout_path = timeout_lines[0].removeprefix("Absolute path: ") \
+        if len(timeout_lines) == 1 else ""
+    if (code == 0 or "limit" not in why or not timeout_path or
+            os.path.exists(timeout_path)):
+        bad += 1
+        print(f"  WRONG  a timed-out Codex inventory was not cleaned: "
+              f"{code} {timeout_path!r} {why!r}")
+    else:
+        print("  ok     a timed-out Codex inventory file is cleaned up")
+
+    try:
+        P.ask_model(codex, "x" * (P.CODEX_INLINE_INVENTORY_CHAR_LIMIT + 1),
+                    30.0)
+    except SystemExit as e:
+        refused = "has no inventory boundary markers" in str(e)
+    else:
+        refused = False
+    if not refused:
+        bad += 1
+        print("  WRONG  an oversized unmarked Codex prompt was guessed apart")
+    else:
+        print("  ok     an oversized Codex prompt with missing markers fails closed")
+
+    malformed_prompt = (P.INVENTORY_BEGIN + inventory_text +
+                        "contract suffix")
+    try:
+        P.ask_model(codex, malformed_prompt, 30.0)
+    except SystemExit as e:
+        refused = "malformed inventory boundary markers" in str(e)
+    else:
+        refused = False
+    if not refused:
+        bad += 1
+        print("  WRONG  malformed inventory markers were guessed apart")
+    else:
+        print("  ok     malformed Codex inventory markers fail closed")
+
+    missing_cli = os.path.join(home, "missing-codex-wrapper")
+    recorded_spills = []
+    real_externalize = P._externalize_codex_inventory
+
+    def record_externalize(value):
+        result = real_externalize(value)
+        recorded_spills.append(result[1])
+        return result
+
+    old_missing_bin = os.environ.get("FORGE_CODEX_BIN")
+    os.environ["FORGE_CODEX_BIN"] = missing_cli
+    P._externalize_codex_inventory = record_externalize
+    try:
+        try:
+            P.ask_model(missing_cli, full_inventory_prompt, 30.0)
+        except FileNotFoundError:
+            launch_refused = True
+        else:
+            launch_refused = False
+    finally:
+        P._externalize_codex_inventory = real_externalize
+        if old_missing_bin is None:
+            os.environ.pop("FORGE_CODEX_BIN", None)
+        else:
+            os.environ["FORGE_CODEX_BIN"] = old_missing_bin
+    if (not launch_refused or len(recorded_spills) != 1 or
+            not recorded_spills[0] or os.path.exists(recorded_spills[0])):
+        bad += 1
+        print("  WRONG  a launch-failed Codex inventory file was not cleaned")
+    else:
+        print("  ok     a launch-failed Codex inventory file is cleaned up")
+
+    claude_capture_dir = os.path.join(home, "exact-claude")
+    os.makedirs(claude_capture_dir)
+    claude_capture = os.path.join(claude_capture_dir, "prompt.txt")
+    claude_exact = os.path.join(claude_capture_dir, "claude")
+    with open(claude_exact, "w") as f:
+        f.write("#!/usr/bin/env python3\nimport json, sys\n")
+        f.write(f"open({claude_capture!r}, 'w').write(sys.stdin.read())\n")
+        f.write("print(json.dumps({'type': 'result', 'result': 'exact'}))\n")
+    os.chmod(claude_exact, os.stat(claude_exact).st_mode | stat.S_IEXEC)
+    code, text, why = P.ask_model(
+        claude_exact, full_inventory_prompt, 30.0, tick=0.0)
+    received_by_claude = open(claude_capture).read()
+    if (code != 0 or text != "exact" or why or
+            received_by_claude != full_inventory_prompt):
+        bad += 1
+        print("  WRONG  Claude did not receive the byte-identical inline prompt")
+    else:
+        print("  ok     Claude receives the byte-identical self-contained prompt")
 
     unknown = os.path.join(home, "unknown-model-wrapper")
     with open(unknown, "w") as f:
@@ -2653,7 +2827,7 @@ else:
         print("  WRONG  a malformed FORGE_CODEX_MODEL was passed as CLI args")
     else:
         print("  ok     a malformed FORGE_CODEX_MODEL fails closed")
-    ran += 10
+    ran += 16
 
     real = P.SETTINGS_PATH
     try:

@@ -2577,7 +2577,103 @@ def audibility(patch: dict) -> tuple[str, str]:
         os.unlink(tmp)
 
 
+INVENTORY_BEGIN = "<<<FORGE-INVENTORY-BEGIN>>>"
+INVENTORY_END = "<<<FORGE-INVENTORY-END>>>"
+CODEX_INLINE_INVENTORY_CHAR_LIMIT = 128 * 1024
+
+
+def _remove_private_inventory(path: str) -> None:
+    """Remove a read-only inventory on Unix and Windows alike."""
+    try:
+        os.chmod(path, 0o600)
+    except FileNotFoundError:
+        return
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+
+
+def _externalize_codex_inventory(prompt: str) -> tuple[str, str | None]:
+    """Move one oversized, explicitly bounded inventory to a private file."""
+    begins = prompt.count(INVENTORY_BEGIN)
+    ends = prompt.count(INVENTORY_END)
+    if not begins and not ends:
+        if len(prompt) > CODEX_INLINE_INVENTORY_CHAR_LIMIT:
+            raise SystemExit(
+                "the Codex prompt is too large to send inline and has no "
+                "inventory boundary markers; refusing to guess which content "
+                "may be externalized")
+        return prompt, None
+    if begins != 1 or ends != 1:
+        raise SystemExit(
+            "the Codex prompt has malformed inventory boundary markers; "
+            "expected exactly one begin marker and one end marker")
+
+    begin = prompt.index(INVENTORY_BEGIN)
+    content_start = begin + len(INVENTORY_BEGIN)
+    end = prompt.index(INVENTORY_END)
+    if end <= content_start:
+        raise SystemExit(
+            "the Codex prompt has malformed inventory boundary markers; "
+            "the end marker must follow a non-empty inventory section")
+    if len(prompt) <= CODEX_INLINE_INVENTORY_CHAR_LIMIT:
+        return prompt, None
+
+    import hashlib
+    import stat
+    import tempfile
+
+    inventory = prompt[content_start:end]
+    encoded = inventory.encode("utf-8")
+    handle = tempfile.NamedTemporaryFile(
+        mode="wb", prefix="forge-inventory-", suffix=".md", delete=False)
+    inventory_path = os.path.abspath(handle.name)
+    try:
+        try:
+            handle.write(encoded)
+            handle.flush()
+        finally:
+            handle.close()
+    except Exception:
+        _remove_private_inventory(inventory_path)
+        raise
+    try:
+        os.chmod(inventory_path, stat.S_IRUSR)
+        digest = hashlib.sha256(encoded).hexdigest()
+        instruction = (
+            INVENTORY_BEGIN + "\n"
+            "The complete available-module inventory is in this owner-private, "
+            "read-only UTF-8 file. Read the entire file before choosing or "
+            "wiring modules; it is authoritative and must not be filtered or "
+            "inferred.\n"
+            f"Absolute path: {inventory_path}\n"
+            f"SHA-256: {digest}\n"
+            f"UTF-8 byte length: {len(encoded)}\n" + INVENTORY_END)
+    except Exception:
+        _remove_private_inventory(inventory_path)
+        raise
+    return (prompt[:begin] + instruction +
+            prompt[end + len(INVENTORY_END):], inventory_path)
+
+
 def ask_model(claude: str, prompt: str, seconds: float, tick: float = 8.0):
+    """Run the selected model CLI, externalizing only a marked Codex inventory."""
+    import toolpaths
+
+    protocol = toolpaths.model_cli_kind(claude)
+    inventory_path = None
+    if protocol == "codex":
+        prompt, inventory_path = _externalize_codex_inventory(prompt)
+    try:
+        return _ask_model(claude, prompt, seconds, tick, protocol)
+    finally:
+        if inventory_path is not None:
+            _remove_private_inventory(inventory_path)
+
+
+def _ask_model(claude: str, prompt: str, seconds: float, tick: float,
+               protocol: str):
     """Run the model and NARRATE it while it runs. -> (code, text, stderr).
 
     The model call is the longest step in a generation by a wide margin --
@@ -2615,7 +2711,6 @@ def ask_model(claude: str, prompt: str, seconds: float, tick: float = 8.0):
     # every generation on the machine fails identically. It broke here at
     # around 700 cartographed modules, which is a library somebody measured
     # rather than a prompt somebody wrote. stdin has no such ceiling.
-    protocol = toolpaths.model_cli_kind(claude)
     answer_path = None
     if protocol == "claude":
         command = [claude, "-p", "--strict-mcp-config", "--verbose",

@@ -193,7 +193,7 @@ def check_model_boundary() -> tuple:
         f.write("#!/usr/bin/env python3\n"
                 "import json, os, sys\n"
                 "open(os.environ['CAPTURE_TO'], 'w', encoding='utf-8')"
-                ".write(sys.argv[-1])\n"
+                ".write(sys.stdin.read())\n"
                 "print('```json patch\\n' + json.dumps({'modules': ["
                 "{'id': 1, 'plugin': 'Fundamental', 'model': 'VCO', 'pos': [0, 0]},"
                 "{'id': 2, 'plugin': 'Core', 'model': 'AudioInterface2', 'pos': [8, 0]}],"
