@@ -5,12 +5,22 @@
 #include <pulp/signal/osc/minblep.hpp>
 #include <pulp/signal/osc/phase.hpp>
 
+#include <cmath>
 #include <cstddef>
 
 namespace pulp::examples {
 
 class MinBlepSaw {
   public:
+    // A sub-Nyquist saw can wrap at most once every two samples. Corrections
+    // remain live for 32 samples, so 16 slots cover the complete supported
+    // oscillator domain without dropping a discontinuity.
+    static constexpr std::size_t correction_capacity = 16;
+
+    [[nodiscard]] static bool supports_increment(double increment) noexcept {
+        return std::isfinite(increment) && std::abs(increment) <= 0.5;
+    }
+
     void reset(double phase = 0.0) noexcept {
         phase_.reset(phase);
         correction_.reset();
@@ -43,7 +53,7 @@ class MinBlepSaw {
     }
 
     signal::osc::PhaseAccumulator phase_;
-    signal::osc::MinBlepAccumulator<> correction_;
+    signal::osc::MinBlepAccumulator<correction_capacity> correction_;
     std::size_t dropped_events_ = 0;
 };
 

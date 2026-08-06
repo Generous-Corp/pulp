@@ -172,6 +172,25 @@ TEST_CASE("PulpSynth minBLEP consumer records lower saw alias than its legacy pa
     REQUIRE(legacy_alias.worst_alias_db - minimum_alias.worst_alias_db >= 30.0);
 }
 
+TEST_CASE("PulpSynth minBLEP consumer covers its complete sub-Nyquist event overlap",
+          "[examples][synth][minblep]") {
+    constexpr double sample_rate = 48'000.0;
+    const double highest_note_hz =
+        440.0 * std::exp2((127.0 - 69.0) / 12.0) * std::exp2(100.0 / 1200.0);
+    const double highest_note_increment = highest_note_hz / sample_rate;
+    REQUIRE(highest_note_increment > 0.25);
+    REQUIRE(highest_note_increment < 0.5);
+
+    MinBlepSaw saw;
+    REQUIRE(MinBlepSaw::supports_increment(highest_note_increment));
+    for (int sample = 0; sample < 4096; ++sample)
+        REQUIRE(std::isfinite(saw.next(highest_note_increment)));
+    CHECK(saw.dropped_events() == 0);
+
+    CHECK(MinBlepSaw::supports_increment(0.5));
+    CHECK_FALSE(MinBlepSaw::supports_increment(std::nextafter(0.5, 1.0)));
+}
+
 // Master gain at -60 dB takes the note-on output well under the
 // audible floor. Guards against a future refactor that forgets to
 // apply the master gain to one of the audio paths.
