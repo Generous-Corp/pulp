@@ -149,6 +149,16 @@ public:
     /// Primarily useful for deterministic lifecycle tests and state handoff.
     bool advance_note_generation(MpeNoteGeneration next) noexcept;
 
+    /// Number of accepted physical note-offs waiting for a bounded lifecycle
+    /// sink to make room. While nonzero, fresh note-ons and retriggers are
+    /// consumed without mutation so the fixed queue cannot be overrun.
+    std::size_t pending_note_off_count() const noexcept { return pending_note_off_count_; }
+
+    /// Retry deferred note-offs in FIFO order. Returns true when the queue is
+    /// empty. A sidecar calls this once, at sample offset zero, before ingesting
+    /// each new block. Accepted releases invoke `on_note_off` exactly once.
+    bool flush_pending_note_offs();
+
     /// Direct access to the underlying slots (active flag identifies live
     /// notes). Stable indices across calls.
     const std::array<MpeNoteState, kMaxNotes>& slots() const { return notes_; }
@@ -165,6 +175,18 @@ public:
 
     // ── Callbacks (host-thread setup; invoked inline during process()) ────
 
+    /// Transactional note-lifecycle sink. `note_off` and `note_on` are null
+    /// when that half is absent; a retrigger supplies both, in retirement-then-
+    /// start order. Return false when the complete lifecycle cannot be
+    /// represented. Rejection leaves a retrigger slot and generation cursor
+    /// unchanged and suppresses the observer callbacks below.
+    ///
+    /// The pointers are valid only for the duration of the call. This hook is
+    /// intended for bounded realtime sinks such as `MpeBuffer`; ordinary
+    /// observers should continue to use `on_note_on` / `on_note_off`.
+    std::function<bool(const MpeNoteState* note_off,
+                       const MpeNoteState* note_on)> on_note_lifecycle;
+
     std::function<void(const MpeNoteState&)> on_note_on;
     std::function<void(const MpeNoteState&)> on_note_off;
     std::function<void(const MpeNoteState&)> on_pitch_bend;
@@ -178,6 +200,9 @@ public:
 private:
     void add_note(uint8_t ch, uint8_t note, uint8_t velocity, bool upper);
     void remove_note(uint8_t ch, uint8_t note);
+    bool accept_note_lifecycle(const MpeNoteState* note_off,
+                               const MpeNoteState* note_on) const;
+    bool defer_note_off(const MpeNoteState& note_off) noexcept;
     std::optional<MpeNoteGeneration> take_note_generation() noexcept;
     void record_generation_refusal() noexcept;
 
@@ -211,6 +236,9 @@ private:
     float manager_bend_semi_ = kDefaultManagerBendSemitones;
     MpeNoteGeneration next_note_generation_ = 1;
     std::uint64_t refused_note_on_count_ = 0;
+    std::array<MpeNoteState, kMaxNotes> pending_note_offs_{};
+    std::size_t pending_note_off_head_ = 0;
+    std::size_t pending_note_off_count_ = 0;
     std::optional<uint8_t> assignable_timbre_index_;
 };
 

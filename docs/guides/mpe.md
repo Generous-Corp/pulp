@@ -64,6 +64,29 @@ condition can query `note_generation_exhausted()` and
 `refused_note_on_count()`; constructing a new tracker requires clearing every
 downstream owner that could still hold a generation from the old instance.
 
+A same-channel, same-pitch retrigger is an identity rotation, not an in-place
+voice mutation. `MpeVoiceTracker` emits `NoteOff(old generation)` immediately
+before `NoteOn(new generation)` at the same sample offset. The bound
+`MpeBuffer` appends that pair atomically: if its prepared realtime capacity
+cannot hold both events, it records both drops and the tracker preserves the old
+slot and generation cursor. `MpeBuffer::sort()` preserves producer order at
+equal offsets. This lets an allocator release the old voice (including its
+tail) while giving the replacement a distinct identity; the later physical
+note-off can then release the replacement without orphaning the old voice.
+
+A physical note-off cannot simply be rejected because controllers do not replay
+it. If the buffer is full, the tracker deactivates the slot and retains the
+release in a fixed FIFO. `MpeSidecar` flushes that FIFO at sample offset zero
+before the next block's input. Until it is empty, the tracker refuses new starts
+without consuming a generation; this keeps active plus pending lifecycles within
+the tracker's fixed 128-slot bound. Direct tracker/buffer integrations must call
+`flush_pending_note_offs()` after clearing their output buffer and before
+ingesting more input.
+
+`MpeVoiceTracker::reset()` remains an identity-free local clear and emits no
+lifecycle callbacks. A reset boundary must also clear its downstream allocator
+with `MpeVoiceAllocator::reset_all()` before input resumes.
+
 ## Zone configuration
 
 `MpeConfig` (from `pulp/midi/ump.hpp`) describes which channels belong to
