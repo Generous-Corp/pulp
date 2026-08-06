@@ -253,6 +253,17 @@ release-cache failures before the release is announced.
 Each note describes one release's visible behaviour shift. Read them
 like a pro-developer changelog, not a marketing blurb.
 
+### Rendering-only notes still need an old/new proof
+
+A non-breaking SDK hop can legitimately change pixels without changing an
+API. In particular, the v0.773.1 Skia update corrected interpolation toward a
+fully transparent gradient stop, so snapshots containing fades, washes, or
+vignettes can change while opaque-to-opaque gradients remain identical. Do
+not bless or re-record those baselines from the digest alone: amplify the
+image diff, confirm it is confined to the gradient, and render the same source
+against the preceding SDK when available. The applicable migration note under
+`docs/migrations/` carries the expected-value probe and the exact scope.
+
 ### Breaking vs non-breaking
 
 - `breaking: true` — requires user action: code change, config edit,

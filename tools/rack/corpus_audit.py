@@ -10,6 +10,7 @@ happened to fail; this asks thousands of real cables the same question at once.
     corpus_audit.py jacks          # jack names our matcher cannot place
     corpus_audit.py coverage       # how much of the corpus we can even judge
     corpus_audit.py cables         # what real patches actually connect
+    corpus_audit.py usage-priors   # corroborated hints for unmapped ports
 
 WHY CABLES AND NOT PATCHES. A patch is one datapoint and carries the whole
 idiom-resolution machinery on top; a cable is a datapoint about exactly one
@@ -38,6 +39,7 @@ sys.path.insert(0, HERE)
 
 import idiom_check  # noqa: E402
 import patch as _patch  # noqa: E402
+import patch_corpus  # noqa: E402
 
 CORPUS = os.path.expanduser(
     "~/Library/Application Support/Forge Modular/corpus/patchstorage")
@@ -90,8 +92,23 @@ def patches() -> list:
               file=sys.stderr)
         return []
     meta = json.load(open(index)).get("patches", {})
-    out, unreadable = [], 0
+    out, unreadable, quarantined, duplicates = [], 0, 0, 0
+    seen_bodies: set[str] = set()
     for pid, row in meta.items():
+        # The downloader's index may predate the licence-storage guard. Such a
+        # body can remain on disk pending an explicit cleanup decision, but it
+        # must not silently influence a derived prior. Unknown licences are
+        # quarantine, not permission.
+        if not patch_corpus.may_store_body(row.get("license_slug") or ""):
+            if row.get("file"):
+                quarantined += 1
+            continue
+        body = row.get("sha256") or ""
+        if body and body in seen_bodies:
+            duplicates += 1
+            continue
+        if body:
+            seen_bodies.add(body)
         path = os.path.join(CORPUS, "patches", row.get("file") or "")
         if not os.path.exists(path):
             continue
@@ -104,6 +121,12 @@ def patches() -> list:
         # Said out loud: a patch we cannot open is our limit, not a finding
         # about the matcher, and it must not quietly shrink the denominator.
         print(f"  note: {unreadable} patch file(s) could not be read")
+    if quarantined:
+        print(f"  note: {quarantined} body file(s) have a licence outside the "
+              "storage allowlist and were quarantined from analysis")
+    if duplicates:
+        print(f"  note: {duplicates} byte-identical duplicate body file(s) "
+              "were counted once")
     return out
 
 
@@ -158,7 +181,9 @@ def walk(pm: dict, roles: dict):
             d = jack(pm, dst, "in", c.get("inputId"))
             yield {
                 "patch": meta.get("id"), "coverage": coverage,
+                "patch_sha256": meta.get("sha256"),
                 "src": src, "dst": dst, "s": s, "d": d,
+                "s_index": c.get("outputId"), "d_index": c.get("inputId"),
                 "s_kinds": placeable(s[0], s[1], out_kinds, roles) if s else None,
                 "d_kinds": placeable(d[0], d[1], in_kinds, roles) if d else None,
             }
@@ -234,10 +259,121 @@ def cmd_cables(rows: list) -> None:
         print(f"    {n:5d}  {label}")
 
 
+def _signal(name: str, role, direction: str) -> str | None:
+    """A narrow semantic fact from one mapped cable end.
+
+    This intentionally does not reuse the permissive idiom matcher. The old
+    audit asked whether *any* role accepted a jack and therefore learned that
+    nearly everything was CV. A usage prior is admissible only when the known
+    end says what the signal is specifically enough to teach us about the
+    unknown end.
+    """
+    import re
+    label = (name or "").upper()
+    roles = {str(x).lower() for x in (role if isinstance(role, list)
+                                      else [role]) if x}
+    if re.search(r"(?:^|[^A-Z])(?:1V/?OCT|V/?OCT|PITCH)(?:$|[^A-Z])", label):
+        return "pitch"
+    if re.search(r"(?:^|[^A-Z])(?:CLOCK|CLK)(?:$|[^A-Z])", label):
+        return "clock"
+    if re.search(r"(?:^|[^A-Z])(?:GATE|TRIG|TRIGGER)(?:$|[^A-Z])", label):
+        return "gate"
+    if "pitch" in roles:
+        return "pitch"
+    if "clock" in roles:
+        return "clock"
+    if roles & {"gate", "trigger"}:
+        return "gate"
+    # Audio is broad, but unlike CV it is still a useful routing class. Require
+    # the measured role or an unmistakable oscillator/listener label; a bare
+    # OUT is not evidence.
+    audio_labels = {"AUDIO", "SAW", "SINE", "SIN", "TRI", "TRIANGLE",
+                    "SQUARE", "SQR", "PULSE", "PLS", "LP", "HP", "BP"}
+    if "audio" in roles or label in audio_labels:
+        return "audio"
+    return None
+
+
+def usage_prior_report(rows: list, min_support: int = 3) -> dict:
+    """Corroborated, non-authoritative port hints for unscanned modules.
+
+    Evidence is deduplicated per patch body and per proposed fact. Conflicting
+    signal meanings quarantine a port. Nothing here edits the port map: a real
+    CARTOG scan always outranks this report.
+    """
+    evidence: dict[tuple, set] = collections.defaultdict(set)
+    for row in rows:
+        patch_key = row.get("patch_sha256") or f"id:{row.get('patch')}"
+        if row["s"] is None and row["d"] is not None:
+            signal = _signal(row["d"][0], row["d"][1], "in")
+            if signal:
+                key = (*row["src"], "output", row["s_index"], signal)
+                evidence[key].add(patch_key)
+        if row["d"] is None and row["s"] is not None:
+            signal = _signal(row["s"][0], row["s"][1], "out")
+            if signal:
+                key = (*row["dst"], "input", row["d_index"], signal)
+                evidence[key].add(patch_key)
+
+    by_port: dict[tuple, set[str]] = collections.defaultdict(set)
+    for plugin, model, direction, index, signal in evidence:
+        by_port[(plugin, model, direction, index)].add(signal)
+
+    admitted, quarantine = [], []
+    for key, patches_seen in sorted(evidence.items(), key=lambda item:
+                                    (-len(item[1]), item[0])):
+        plugin, model, direction, index, signal = key
+        signals = sorted(by_port[(plugin, model, direction, index)])
+        row = {
+            "plugin": plugin, "model": model, "direction": direction,
+            "index": index, "signal": signal, "support": len(patches_seen),
+            "provenance": "inferred", "authority": "usage-prior",
+            "must_not_override": "cartography",
+        }
+        if len(signals) > 1:
+            row["reason"] = "conflicting inferred meanings: " + ", ".join(signals)
+            quarantine.append(row)
+        elif len(patches_seen) < min_support:
+            row["reason"] = f"support below admission floor {min_support}"
+            quarantine.append(row)
+        else:
+            admitted.append(row)
+    return {
+        "schema": "forge.patchstorage_usage_priors.v1",
+        "source": "patchstorage.com",
+        "policy": "inferred hints only; never override CARTOG or certify quality",
+        "minimum_distinct_patch_support": min_support,
+        "admitted": admitted,
+        "quarantine": quarantine,
+    }
+
+
+def cmd_usage_priors(rows: list, min_support: int, json_path: str = "") -> None:
+    report = usage_prior_report(rows, min_support)
+    print(f"  corroborated priors      : {len(report['admitted'])}")
+    print(f"  quarantined observations: {len(report['quarantine'])}")
+    for row in report["admitted"][:25]:
+        print(f"    {row['support']:5d}  {row['plugin']}/{row['model']} "
+              f"{row['direction']}[{row['index']}] -> {row['signal']}")
+    if not report["admitted"]:
+        print("    (none clear the admission floor)")
+    if json_path:
+        with open(json_path, "w") as f:
+            json.dump(report, f, indent=2, sort_keys=True)
+        print(f"  wrote proposal-only report: {json_path}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("cmd", choices=["jacks", "coverage", "cables"])
+    ap.add_argument("cmd", choices=["jacks", "coverage", "cables",
+                                    "usage-priors"])
+    ap.add_argument("--min-support", type=int, default=3,
+                    help="distinct patch bodies required for a usage prior")
+    ap.add_argument("--json", default="",
+                    help="write the usage-priors proposal report")
     a = ap.parse_args()
+    if a.min_support < 1:
+        ap.error("--min-support must be at least 1")
     roles = idiom_check.load_roles()
     pm = portmap()
     rows = list(walk(pm, roles))
@@ -245,8 +381,11 @@ def main() -> int:
         print("  no cables read — is the corpus fetched?")
         return 1
     print(f"corpus: {CORPUS}")
-    ({"jacks": cmd_jacks, "coverage": cmd_coverage,
-      "cables": cmd_cables}[a.cmd])(rows)
+    if a.cmd == "usage-priors":
+        cmd_usage_priors(rows, a.min_support, a.json)
+    else:
+        ({"jacks": cmd_jacks, "coverage": cmd_coverage,
+          "cables": cmd_cables}[a.cmd])(rows)
     return 0
 
 
