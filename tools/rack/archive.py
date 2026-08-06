@@ -125,15 +125,46 @@ def create(archive: str, root_dir: str, member: str) -> None:
     """
     zstd = _zstd()
     if zstd:
-        stream = subprocess.Popen(
-            [_tar(), "--no-xattrs", "-cf", "-", "-C", root_dir, member],
-            stdout=subprocess.PIPE)
-        subprocess.run([zstd, "-q", "-19", "-o", archive], stdin=stream.stdout,
-                       check=True)
-        stream.wait()
+        producer = None
+        try:
+            producer = subprocess.Popen(
+                [_tar(), "--no-xattrs", "-cf", "-", "-C", root_dir, member],
+                stdout=subprocess.PIPE)
+            consumer = subprocess.run(
+                [zstd, "-q", "-19", "-o", archive], stdin=producer.stdout)
+            # Close our duplicate read end before waiting. If zstd quit early,
+            # tar must see the broken pipe rather than blocking on a reader
+            # that will never consume another byte.
+            if producer.stdout:
+                producer.stdout.close()
+            producer_status = producer.wait()
+            if producer_status != 0:
+                raise subprocess.CalledProcessError(producer_status,
+                                                    producer.args)
+            if consumer.returncode != 0:
+                raise subprocess.CalledProcessError(consumer.returncode,
+                                                    consumer.args)
+        except Exception:
+            if producer is not None and producer.poll() is None:
+                if producer.stdout:
+                    producer.stdout.close()
+                producer.terminate()
+                producer.wait()
+            try:
+                os.remove(archive)
+            except FileNotFoundError:
+                pass
+            raise
         return
-    subprocess.run(
-        [_tar(), "--no-xattrs", "--zstd",
-         "--options", "zstd:compression-level=19",
-         "-cf", archive, "-C", root_dir, member],
-        check=True)
+    try:
+        subprocess.run(
+            [_tar(), "--no-xattrs", "--zstd",
+             "--options", "zstd:compression-level=19",
+             "-cf", archive, "-C", root_dir, member],
+            check=True)
+    except Exception:
+        try:
+            os.remove(archive)
+        except FileNotFoundError:
+            pass
+        raise

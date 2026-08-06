@@ -256,20 +256,25 @@ struct SEQModule : rack::engine::Module {
     using L = forge_modular::SEQLayout;
     static constexpr int kSteps = 8;
     Edge clock_, reset_;
-    int step_ = 0;
+    // -1 means no clock has selected a step yet. The output still reads Step 1
+    // while idle, and the first edge advances this sentinel to index 0 instead
+    // of skipping directly to Step 2.
+    int step_ = -1;
     rack::dsp::PulseGenerator gate_;
 
     SEQModule() { forge_modular::config_SEQ(this); }
 
     void process(const ProcessArgs& args) override {
-        if (reset_.process(inputs[L::RESET_INPUT].getVoltage())) step_ = 0;
+        if (reset_.process(inputs[L::RESET_INPUT].getVoltage())) step_ = -1;
         if (clock_.process(inputs[L::CLOCK_INPUT].getVoltage())) {
             step_ = (step_ + 1) % kSteps;
             gate_.trigger(1e-3f);
         }
         // Step values are already in volts, so they feed a 1V/oct input
         // directly -- no scaling, which is what keeps the pitch exact.
-        outputs[L::CV_OUTPUT].setVoltage(params[L::STEP1_PARAM + step_].getValue());
+        const int active_step = std::max(step_, 0);
+        outputs[L::CV_OUTPUT].setVoltage(
+            params[L::STEP1_PARAM + active_step].getValue());
         outputs[L::GATE_OUTPUT].setVoltage(gate_.process(args.sampleTime) ? V::kGateHigh : 0.0f);
     }
 };
