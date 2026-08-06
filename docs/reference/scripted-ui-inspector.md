@@ -77,6 +77,14 @@ and event callbacks created by evaluated code are therefore discarded before any
 frame pump can execute them outside the request deadline. Evaluations that share
 a realm between two frames owe one rebuild between them, not one each.
 
+Sharing a realm is observable, and deliberately so: a global that one evaluation
+plants is visible to another evaluation issued before the next frame. What the
+reset guarantees is that evaluated code never reaches a **frame** — the deferred
+timer, animation frame, Promise job, or patched callback is discarded with its
+realm before any frame pump could run it. It does not, and never did, isolate
+one evaluation from the next within a single frame; an inspector client that
+can evaluate at all could put the same statements in one request.
+
 The rebuild is deliberately **not** run inside `Runtime.evaluate`: replacing the
 view tree there would leave every widget pointer the caller held across the
 request pointing into a detached tree, so a panel would render and stop
