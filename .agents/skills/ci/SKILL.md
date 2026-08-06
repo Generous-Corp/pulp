@@ -482,6 +482,35 @@ issue) plus the `runner-topology-selftest` ctest. Lane→label intent lives in
 together, or the drift check fails. Full rationale:
 `docs/guides/local-ci.md` → "Routing contract (checked)".
 
+## A red `macos` or `linux` alias does not mean tests failed
+
+`macos` and `linux` are **alias checks**: jobs that poll the real lane and mirror
+its outcome. They run no build and produce no build output of their own — a
+`linux` alias log is about 48 lines, and it says so outright:
+
+```
+Linux leg conclusion: cancelled
+Linux leg cancelled — failing linux alias (advisory only; not required)
+```
+
+**The alias exits non-zero on anything not green — including `CANCELLED`.** So a
+cancelled leg surfaces on the alias as **FAILURE**, and a batch that got
+interrupted produces a red alias beside its own `CANCELLED` entry in the same
+check list. Reading that as a second, independent failure is the trap; it is one
+event reported twice.
+
+Before treating either alias as a real break, fetch **the underlying leg's job**
+(`Linux (x64) [github-hosted]`, the macOS build job) or the alias's own short
+log. Do not infer from the alias name alone.
+
+Two more things that mislead here:
+
+- **Neither `AddressSanitizer` nor `linux` is a required check.** Read the
+  required list live from branch protection rather than from memory — a red
+  advisory lane can sit beside a mergeable PR indefinitely.
+- **An alias that is QUEUED is not evidence a stale failure was superseded.** It
+  is evidence that nothing has run yet.
+
 ## Never wait on a signal you did not uniquely produce
 
 Several agents share each dev Mac, and **the bounded-build rule is what makes

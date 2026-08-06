@@ -29,3 +29,18 @@ pulp_add_test_suite(pulp-test-asset-manager LIBRARIES pulp::view)
 
 # Web-compat test suite — CSS parsing, layout, events, visual regression
 add_subdirectory(web-compat)
+
+# Palette health of a design's own colour tokens
+# (tools/import-validation/check_palette_health.py) — accent-ramp structure,
+# named-hue survival, and text-contrast bars, asserted in both directions. Also
+# holds the shipped ink-signal pack to the bars the checker states, so the
+# checker cannot drift away from the pack it judges. Pure-python, no build
+# artifacts, no PIL.
+if(Python3_Interpreter_FOUND)
+    add_test(NAME palette-health-selftest
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tools/import-validation/test_check_palette_health.py)
+    set_tests_properties(palette-health-selftest PROPERTIES
+        LABELS "import;design;palette"
+        TIMEOUT 60)
+endif()

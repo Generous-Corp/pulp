@@ -66,9 +66,9 @@ control and collaboration are unavailable there.
 
 ## Implemented foundation and current boundary
 
-The optional control foundation now represents broker identity, exact T0/T1
-registration, and client-scoped grants without opening a listener or routing an
-operation. Verified peer identity binds UID/SID, PID, process generation,
+The optional control foundation now composes broker identity, exact T0/T1
+registration, and client-scoped grants behind one dormant `ControlBroker`
+owner without opening a listener or routing an operation. Verified peer identity binds UID/SID, PID, process generation,
 executable identity, publisher, and role; same-UID membership and payload claims
 are not proof. Launcher bootstrap material is single-use, short-lived,
 peer-bound, and wiped. Registrations validate a canonical manifest plus the
@@ -90,8 +90,8 @@ inspection. TCP, POSIX FIFO, client payload identity, dead/zombie processes,
 missing PID generation, signature failure, and any expectation mismatch fail
 closed. Other platforms do not yet mint a verified control peer.
 
-This remains a dormant foundation, not a running broker. The one installed
-per-user service, trusted consent UI, operation dispatcher, receipts, and
+This remains a dormant composition root, not a running broker. The installed
+per-user service activation, trusted consent UI, operation dispatcher, receipts, and
 artifact ACLs are still required. Only Pulp-owned T0 offline jobs and T1
 standalone hosts are admissible at this stage. Shared-host slots and direct
 AUv3 access fail closed as `host-unavailable`; plugin-rendered consent and

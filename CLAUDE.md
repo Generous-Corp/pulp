@@ -862,6 +862,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 **design-import** — get a design into Pulp
 - Check agent-authored panel HTML before importing it — the one entry point that runs all three contract gates. → `tools/import-design/check_contracts.py`
   - ⚠ **Cannot see:** Static text analysis, so it proves the markup keeps its side of the contract — never that the panel renders well. It is deliberately the check a pixel diff CANNOT make: a meter authored with invented children draws the same empty box in the browser and in Skia, so an A/B comparison scores it 100% identical and PASS while the control is dead. Without --macros the macro contract is SKIPPED (and says so) — a green run that checked two gates of three.
+- A render matches its reference pixel for pixel and still reads wrong — a screaming accent, a label you cannot read. Pixel comparison scores agreement with the source, so a palette defect the source already had survives every visual gate. → `tools/import-validation/check_palette_health.py (--tokens`
+  - ⚠ **Cannot see:** Judges declared token values, which are an upper bound — anything composited under the type (shadow, accent bloom) only lowers real contrast. parse_color has no color-mix()/relative-color support, so a token defined that way is skipped rather than judged; ink-signal's light --accent is one, and the emitted note names --accent-text as the unresolvable token rather than the --accent it failed on.
 - Catch a panel that invents component classes or child parts the design system never defined. → `tools/import-design/component_contract.py`
   - ⚠ **Cannot see:** Derives the contract from CSS rules, so a component nothing styles is a component it cannot police. Commented-out rules deliberately do not license a class.
 - Decode a local .fig file offline — no Figma desktop, no REST quota. → `tools/import-design/fig_decode.mjs emit`
@@ -1401,7 +1403,8 @@ tools/scripts/clean_build_cov.sh          # dry-run: list + total reclaimable
 tools/scripts/clean_build_cov.sh --yes    # delete (idle-gated; skips an in-flight build)
 ```
 
-It only ever removes dirs literally named `build-cov` / `build-coverage` (never
+It only ever removes dirs named `build-cov` / `build-coverage` or their
+hyphen-suffixed variants such as `build-cov-phase6-gpu` (never
 a source tree or the primary `build/`), scans sibling worktrees by default
 (override with `PULP_WORKTREES_ROOT`), and skips any coverage dir a live build
 process is using. Tested by `tools/scripts/test_clean_build_cov.py`.
