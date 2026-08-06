@@ -310,6 +310,8 @@ class EditorOpenMode(unittest.TestCase):
             self.assertEqual(rs.run_editor_open_mode(pathlib.Path("/reaper"), args),
                              rs.EXIT_PASS)
         self.assertEqual(pixels.call_count, 2)
+        self.assertTrue(all(call.args[1] is session.portable
+                            for call in pixels.call_args_list))
         session.cleanup.assert_called_once_with()
 
     def test_a_shown_but_unpainted_editor_is_not_a_pass(self):

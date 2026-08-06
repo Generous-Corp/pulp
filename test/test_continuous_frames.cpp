@@ -248,6 +248,8 @@ constexpr const char* kTimeShader =
     "uniform float time; half4 main(float2 p) { return half4(time); }";
 constexpr const char* kStaticShader =
     "half4 main(float2 p) { return half4(1); }";
+
+class UntaggedShaderView : public View, public CustomShaderHost {};
 } // namespace
 
 TEST_CASE("a time-driven widget shader keeps the tree live", "[view][continuous-frames]") {
@@ -270,6 +272,13 @@ TEST_CASE("a time-driven widget shader keeps the tree live", "[view][continuous-
         auto toggle = std::make_unique<Toggle>();
         toggle->set_custom_shader(kTimeShader);
         root.add_child(std::move(toggle));
+        REQUIRE(needs_continuous_frames(&root));
+    }
+    SECTION("future untagged shader host") {
+        View root;
+        auto future = std::make_unique<UntaggedShaderView>();
+        future->set_custom_shader(kTimeShader);
+        root.add_child(std::move(future));
         REQUIRE(needs_continuous_frames(&root));
     }
 }

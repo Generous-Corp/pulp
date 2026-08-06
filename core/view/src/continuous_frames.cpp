@@ -45,6 +45,15 @@ bool needs_continuous_frames(const View* view) {
         break;
     }
 
+    // Concrete core widgets take the allocation-free tag path above. Keep the
+    // mixin as the fail-closed extension point: a future shader-capable widget
+    // animates correctly before it earns a dedicated hot-path tag.
+    if (view->runtime_view_kind() == RuntimeViewKind::generic) {
+        if (const auto* shader = dynamic_cast<const CustomShaderHost*>(view);
+            shader && shader->shader_uses_time())
+            return true;
+    }
+
     // A running CSS animation on a generic View must keep the render loop
     // alive: tick_animations() advances it every frame, but without a
     // continuous-frame request the loop stalls once needs_repaint_ clears.

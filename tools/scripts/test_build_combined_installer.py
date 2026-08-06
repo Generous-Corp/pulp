@@ -248,7 +248,7 @@ class CombinedInstallerTest(unittest.TestCase):
         self.assertIn("Fixture.app.pkg", xml)
         self.assertEqual(relocation.splitlines(), ["false", "false"])
 
-    def test_an_app_component_passes_scripts_and_requires_them(self) -> None:
+    def test_an_app_component_passes_scripts_without_distribution_javascript(self) -> None:
         xml, relocation = self._run_installer(
             [],
             [("Forge Modular", "Forge Modular")],
@@ -260,7 +260,7 @@ class CombinedInstallerTest(unittest.TestCase):
         scripts_dir = argv[argv.index("--scripts") + 1]
         self.assertTrue(scripts_dir.endswith("/Forge Modular-scripts"), scripts_dir)
         self.assertNotIn("Modular-scripts", argv)
-        self.assertIn('require-scripts="true"', xml)
+        self.assertIn('require-scripts="false"', xml)
         self.assertEqual(relocation.splitlines(), ["false", "false"])
 
     def test_an_app_without_scripts_keeps_scripts_disabled(self) -> None:

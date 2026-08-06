@@ -38,10 +38,10 @@ class View;
 
 /// Internal concrete-type hint for the two whole-tree hot paths.
 ///
-/// Stored in View's already-indirected style extras, so adding it changes
-/// neither View's object layout nor its vtable. Only the named constructors
-/// set a non-generic value; readers may then use a checked static_cast without
-/// asking RTTI the same question for every node at every vsync.
+/// Stored in View's padding after `AccessRole`, so it adds neither a heap
+/// allocation nor a vtable slot. Only the named constructors set a non-generic
+/// value; readers may then use a checked static_cast without asking RTTI the
+/// same question for every node at every vsync.
 enum class RuntimeViewKind : std::uint8_t {
     generic, knob, fader, toggle, scroll, eq_curve, design_frame
 };
@@ -1805,10 +1805,10 @@ public:
     void set_continuous_repaint(bool on) { wants_continuous_repaint_ = on; }
     bool wants_continuous_repaint() const { return wants_continuous_repaint_; }
 
-    RuntimeViewKind runtime_view_kind() const noexcept;
+    RuntimeViewKind runtime_view_kind() const noexcept { return runtime_view_kind_; }
 
 protected:
-    void mark_runtime_view_kind(RuntimeViewKind kind);
+    void mark_runtime_view_kind(RuntimeViewKind kind) { runtime_view_kind_ = kind; }
 
 public:
     /// RN textShadow per-attribute storage. Storage-only; SkPaint shadow
@@ -2333,6 +2333,7 @@ private:
     std::uint32_t last_paint_self_ns_ = 0;
     std::uint32_t last_paint_with_children_ns_ = 0;
     AccessRole access_role_ = AccessRole::none;
+    RuntimeViewKind runtime_view_kind_ = RuntimeViewKind::generic;
     std::string access_label_;          // author-set (aria-label) — wins
     std::string derived_access_label_;  // content-derived (visible text)
     std::string access_value_;
@@ -2472,7 +2473,6 @@ private:
     // (SkPath::FromSVGString on Skia, no-op fallback elsewhere); mask_image /
     // mask via mask-capable backends; the rest round-trip through storage.
     struct ViewStyleExtras {
-        RuntimeViewKind runtime_view_kind = RuntimeViewKind::generic;
         StagedAnimation staged_animation{};
         float backdrop_blur = 0.0f;
         /// The whole `backdrop-filter` list when it is more than a blur.

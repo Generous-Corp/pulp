@@ -65,10 +65,10 @@ else
     say_bad "no Scripts/postinstall: the Rack modules would never be placed"
 fi
 
-if grep -q 'require-scripts="true"' "$DIST" 2>/dev/null; then
-    say_ok "the distribution requires its scripts"
+if grep -q 'require-scripts="false"' "$DIST" 2>/dev/null; then
+    say_ok "component hooks do not pretend to be distribution JavaScript"
 else
-    say_bad "require-scripts is not true, so an install could skip the script"
+    say_bad "the distribution incorrectly requires a JavaScript layer it does not carry"
 fi
 
 # ── the app is not optional ──────────────────────────────────────────────────

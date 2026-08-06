@@ -446,7 +446,7 @@ def run_reload_mode(reaper: Path, args: argparse.Namespace) -> int:
 
     _announce(f'"{args.plugin_name}" ({args.format}) hot-reload smoke', args.timeout)
     session = ReaperSession(reaper, args)
-    status = Path("/tmp/pulp_daw_smoke_status.txt")
+    status = session.portable / "status.txt"
     try:
         placed = session.place_plugin()
         if placed is not None:
@@ -567,7 +567,8 @@ def _editor_is_really_in_front(uidriver: str, x: int, y: int,
     return True
 
 
-def _editor_rect_in(window: tuple[int, int, int, int]) -> tuple[int, int, int, int] | None:
+def _editor_rect_in(window: tuple[int, int, int, int],
+                    scratch: Path) -> tuple[int, int, int, int] | None:
     """Where the PLUGIN's editor sits inside the host's window.
 
     A hosted editor is not the window. REAPER wraps it in a preset strip and
@@ -581,8 +582,9 @@ def _editor_rect_in(window: tuple[int, int, int, int]) -> tuple[int, int, int, i
     that is off by a preset strip is a click into somebody else's control.
     """
     x, y, w, h = window
-    shot = "/tmp/pulp-daw-smoke-rect.png"
-    subprocess.run(["screencapture", "-x", "-o", shot], check=False)
+    shot = scratch / "editor-rect.png"
+    subprocess.run(["screencapture", "-x", f"-R{x},{y},{w},{h}", str(shot)],
+                   check=False)
     _dismiss_own_screenshot_ui()
     try:
         from PIL import Image
@@ -590,9 +592,11 @@ def _editor_rect_in(window: tuple[int, int, int, int]) -> tuple[int, int, int, i
     except Exception as e:
         log(f"cannot measure the editor ({e})")
         return None
-    factor = 2 if im.width > (x + w) * 1.5 else 1
-    left, top = int(x * factor), int(y * factor)
-    right, bottom = min(int((x + w) * factor), im.width), min(int((y + h) * factor), im.height)
+    finally:
+        shot.unlink(missing_ok=True)
+    factor = 2 if im.width > w * 1.5 else 1
+    left, top = 0, 0
+    right, bottom = im.width, im.height
     px = im.load()
     xs, ys = [], []
     colors = set()
@@ -610,7 +614,7 @@ def _editor_rect_in(window: tuple[int, int, int, int]) -> tuple[int, int, int, i
     if len(xs) < 50:
         log("could not find the editor's surface inside the host window")
         return None
-    ex, ey = min(xs) // factor, min(ys) // factor
+    ex, ey = x + min(xs) // factor, y + min(ys) // factor
     ew, eh = (max(xs) - min(xs)) // factor, (max(ys) - min(ys)) // factor
     if ew < 200 or eh < 200:
         log(f"the editor measured {ew}x{eh}, too small to be the editor")
@@ -649,13 +653,11 @@ def run_editor_build_mode(reaper: Path, args: argparse.Namespace) -> int:
     existing_logs = set(runs_dir.glob("*.log")) if runs_dir.exists() else set()
     prompt = "a classic subtractive voice with a filter envelope"
     want = re.sub(r"[^a-z0-9]+", "-", prompt.lower()).strip("-")[:40]
-    trigger = Path("/tmp/pulp-daw-smoke-prompt.txt")
-    trigger.unlink(missing_ok=True)
-
     _announce(f'"{args.plugin_name}" ({args.format}) editor-build smoke '
               f'(it will run a generation inside REAPER)', args.timeout)
     session = ReaperSession(reaper, args)
-    status = Path("/tmp/pulp_daw_smoke_status.txt")
+    trigger = session.portable / "forge-modular-test-prompt.txt"
+    status = session.portable / "status.txt"
     try:
         placed = session.place_plugin()
         if placed is not None:
@@ -770,7 +772,7 @@ def run_editor_open_mode(reaper: Path, args: argparse.Namespace) -> int:
 
     _announce(f'"{args.plugin_name}" ({args.format}) editor-open smoke', args.timeout)
     session = ReaperSession(reaper, args)
-    status = Path("/tmp/pulp_daw_smoke_status.txt")
+    status = session.portable / "status.txt"
     try:
         placed = session.place_plugin()
         if placed is not None:
@@ -792,9 +794,9 @@ def run_editor_open_mode(reaper: Path, args: argparse.Namespace) -> int:
             log("REAPER reported the FX shown, but no floating editor window was measurable — "
                 "INCONCLUSIVE")
             return EXIT_INCONCLUSIVE
-        first_frame = _editor_rect_in(bounds)
+        first_frame = _editor_rect_in(bounds, session.portable)
         time.sleep(1)
-        second_frame = _editor_rect_in(bounds)
+        second_frame = _editor_rect_in(bounds, session.portable)
         if first_frame is None or second_frame is None:
             log("the editor window did not produce two nonblank frames — INCONCLUSIVE")
             return EXIT_INCONCLUSIVE
@@ -829,7 +831,7 @@ def run_live_plugin_swap_mode(reaper: Path, args: argparse.Namespace) -> int:
     _announce(f'"{args.plugin_name}" ({args.format}) live plugin-instance-swap smoke',
               args.timeout)
     session = ReaperSession(reaper, args)
-    status = Path("/tmp/pulp_daw_smoke_status.txt")
+    status = session.portable / "status.txt"
     try:
         placed = session.place_plugin()
         if placed is not None:
@@ -1052,7 +1054,7 @@ def run_sequence_loop_seek_mode(reaper: Path, args: argparse.Namespace) -> int:
 
     _announce(f'"{args.plugin_name}" ({args.format}) sequence loop/seek smoke', args.timeout)
     session = ReaperSession(reaper, args)
-    status = Path("/tmp/pulp_daw_smoke_status.txt")
+    status = session.portable / "status.txt"
     try:
         placed = session.place_plugin()
         if placed is not None:

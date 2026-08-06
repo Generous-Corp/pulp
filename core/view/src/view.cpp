@@ -78,15 +78,6 @@ View::View()
       import_binding_lifetime_token_(std::make_shared<const std::uint64_t>(
           import_binding_instance_id_)) {}
 
-RuntimeViewKind View::runtime_view_kind() const noexcept {
-    return style_extras_ ? style_extras_->runtime_view_kind
-                         : RuntimeViewKind::generic;
-}
-
-void View::mark_runtime_view_kind(RuntimeViewKind kind) {
-    style_extras().runtime_view_kind = kind;
-}
-
 void ViewCapture::set(View* view) noexcept {
     view_ = view;
     instance_id_ = view ? view->import_binding_instance_id() : 0;

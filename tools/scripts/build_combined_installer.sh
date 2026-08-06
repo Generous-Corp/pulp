@@ -324,7 +324,6 @@ for ((i=0; i<${#P_KIND[@]}; i++)); do
 done
 
 echo "== apps → /Applications =="
-ANY_SCRIPTS=0
 for ((i=0; i<${#A_TITLE[@]}; i++)); do
   t="${A_TITLE[$i]}"; p="${A_PATH[$i]}"; ent="${A_ENT[$i]}"; [[ -d "$p" ]] || { echo "missing: $p" >&2; exit 2; }
   # Ship the uninstaller inside the nominated app, BEFORE signing — a bundle
@@ -375,7 +374,6 @@ for ((i=0; i<${#A_TITLE[@]}; i++)); do
       fi
     done
     SCRIPT_ARGS=(--scripts "${S_DIR[$s]}")
-    ANY_SCRIPTS=1
     echo "  scripts: ${S_DIR[$s]}"
     break
   done
@@ -465,14 +463,13 @@ for ((i=0; i<${#C_TITLE[@]}; i++)); do
   CHOICES="$CHOICES<line choice=\"$id\"/>"   # content sits at the top level
 done
 
-REQUIRE_SCRIPTS=false
-[[ "$ANY_SCRIPTS" == 1 ]] && REQUIRE_SCRIPTS=true
-
 cat > "$STAGE/distribution.xml" <<XML
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
   <title>$NAME $VERSION</title><organization>com.pulp</organization>
-  <options customize="always" require-scripts="$REQUIRE_SCRIPTS" hostArchitectures="$HOST_ARCHITECTURES"/>
+  <!-- pkgbuild component pre/postinstall hooks run independently of this
+       distribution-script flag. This distribution has no JavaScript layer. -->
+  <options customize="always" require-scripts="false" hostArchitectures="$HOST_ARCHITECTURES"/>
   $PANES
   <choices-outline>$CHOICES</choices-outline>
   $DEFS
