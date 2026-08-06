@@ -49,6 +49,12 @@ quantizer's beat/frame arithmetic.
   values immediately before `Count`, assign every ordinal explicitly, and keep
   `beat_fraction()` reduced. `division_ticks()` must fail if a future fraction
   is not exactly representable on the 705,600-tick quarter-note lattice.
+- `BeatDivision` owns the canonical fraction table. The older
+  `signal::units::Division` vocabulary is a compatibility adapter: preserve its
+  lowercase public spellings and persisted ordinals, map it to `BeatDivision`,
+  and derive its beat values from `beat_fraction_or()`. Append both enums in the
+  same change and keep exhaustive compile-time and runtime parity coverage in
+  `test_signal_units.cpp`; never add a second division formula in signal.
 - Grid projection consumes explicit document and monotonic anchors in
   `GridProjectionRange`; it does not infer transport state from an unwrapped
   sample clock. This matches `playback::MasterTransport`: pre-loop material uses

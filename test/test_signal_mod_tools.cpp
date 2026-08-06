@@ -247,29 +247,3 @@ TEST_CASE("One-pole and T60 helpers match their definitions", "[signal][mod][uni
         amplitude *= gain;
     REQUIRE_THAT(linear_to_db(amplitude), WithinAbs(-60.0f, 0.1f));
 }
-
-TEST_CASE("Musical division table is order-locked and correct", "[signal][mod][units]") {
-    using namespace pulp::signal::units;
-
-    REQUIRE_THAT(division_to_beats(Division::whole), WithinAbs(4.0f, 1e-6f));
-    REQUIRE_THAT(division_to_beats(Division::half), WithinAbs(2.0f, 1e-6f));
-    REQUIRE_THAT(division_to_beats(Division::quarter), WithinAbs(1.0f, 1e-6f));
-    REQUIRE_THAT(division_to_beats(Division::eighth), WithinAbs(0.5f, 1e-6f));
-    REQUIRE_THAT(division_to_beats(Division::sixteenth), WithinAbs(0.25f, 1e-6f));
-
-    REQUIRE_THAT(division_to_beats(Division::quarter_dotted), WithinAbs(1.5f, 1e-6f));
-    REQUIRE_THAT(division_to_beats(Division::eighth_triplet), WithinAbs(1.0f / 3.0f, 1e-6f));
-    // Three triplet eighths fill one beat: the property the shared table exists
-    // to make every synced object agree on.
-    REQUIRE_THAT(3.0f * division_to_beats(Division::eighth_triplet), WithinAbs(1.0f, 1e-5f));
-
-    // Index overload addresses the same rows.
-    for (int i = 0; i < kDivisionCount; ++i)
-        REQUIRE(division_to_beats(i) == division_to_beats(static_cast<Division>(i)));
-
-    // Monotone decreasing across straight note values.
-    REQUIRE(division_to_beats(Division::sixty_fourth) < division_to_beats(Division::thirty_second));
-
-    // A synced LFO period lands where the tempo says it should.
-    REQUIRE_THAT(division_to_samples(Division::quarter, 120.0f, 48000.0), WithinAbs(24000.0, 1e-3));
-}
