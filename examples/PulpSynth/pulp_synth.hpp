@@ -193,13 +193,17 @@ private:
         target->active = true;
         target->note = note;
         target->velocity = vel;
-        target->use_minblep_saw = waveform == 4;
         target->increment = static_cast<double>(freq) / sample_rate_;
         target->increment2 = static_cast<double>(freq2) / sample_rate_;
+        target->use_minblep_saw = waveform == 4 &&
+                                  MinBlepSaw::supports_increment(target->increment) &&
+                                  MinBlepSaw::supports_increment(target->increment2);
         target->minblep.reset();
         target->minblep2.reset();
-        const auto wave = static_cast<signal::Oscillator::Waveform>(
-            std::clamp(waveform, 0, 3));
+        const auto wave = waveform == 4
+                              ? signal::Oscillator::Waveform::saw
+                              : static_cast<signal::Oscillator::Waveform>(
+                                    std::clamp(waveform, 0, 3));
         target->osc.set_frequency(freq);
         target->osc.set_waveform(wave);
         target->osc.reset();
