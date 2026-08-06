@@ -143,8 +143,25 @@ def load_config() -> dict:
     return cfg
 
 
-def kill_reaper(only_pid: int | None = None) -> None:
-    """Stop the REAPER this harness started -- and ONLY that one.
+def stop_reaper_process(proc: subprocess.Popen, timeout: float = 2.0) -> None:
+    """Stop and reap the exact REAPER child represented by ``proc``.
+
+    Keep ownership attached to the ``Popen`` object instead of saving its
+    numeric PID. Once a child exits and is reaped, that number may identify an
+    unrelated process; sending a second raw ``kill`` to it is unsafe.
+    """
+    if proc.poll() is not None:
+        return
+    proc.terminate()
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=timeout)
+
+
+def kill_reaper() -> None:
+    """Optionally stop every REAPER on a dedicated, explicitly opted-in host.
 
     `pkill -x REAPER` killed every REAPER on the machine, including the one
     the person at the keyboard was working in. On a shared machine that is
@@ -152,9 +169,6 @@ def kill_reaper(only_pid: int | None = None) -> None:
     "REAPER keeps restarting"; it was being killed and relaunched underneath
     them.
     """
-    if only_pid is not None:
-        subprocess.run(["kill", "-9", str(only_pid)], capture_output=True)
-        return
     if os.environ.get("PULP_DAW_SMOKE_KILL_ALL") == "1":
         # The old behaviour, for a dedicated CI box with nobody at it.
         subprocess.run(["pkill", "-9", "-x", "REAPER"], capture_output=True)
@@ -355,8 +369,7 @@ class ReaperSession:
         if not cache_ready:
             log("pre-warm scan did not publish the target into REAPER's plugin "
                 "cache before timeout; scripted launch may remain inconclusive.")
-        warm.terminate(); time.sleep(2); warm.kill()
-        kill_reaper(only_pid=warm.pid); time.sleep(2)
+        stop_reaper_process(warm)
 
         with open(self.reaper_out, "a") as out:
             self.proc = subprocess.Popen(
@@ -388,8 +401,7 @@ class ReaperSession:
     def terminate(self) -> None:
         try:
             if self.proc is not None:
-                self.proc.terminate(); time.sleep(2); self.proc.kill()
-                kill_reaper(only_pid=self.proc.pid)
+                stop_reaper_process(self.proc)
                 self.proc = None
         except Exception:  # noqa: BLE001
             pass

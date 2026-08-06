@@ -94,9 +94,11 @@ Full rules: `docs/guides/daw-smoke.md`. CLAUDE.md has the one-paragraph policy.
 - **Only ever kill the REAPER you started.** `pkill -9 -x REAPER` to clear
   "stragglers" kills every REAPER on the machine — including the one the person at
   the keyboard is working in, with their unsaved project. It was reported as "REAPER
-  keeps restarting"; it was being killed and relaunched underneath them. `kill_reaper()`
-  now takes the pid this harness owns, and `PULP_DAW_SMOKE_KILL_ALL=1` restores the
-  blunt behaviour for a dedicated box with nobody at it.
+  keeps restarting"; it was being killed and relaunched underneath them. Keep the
+  owned child as a `Popen` object and stop it through `poll` / `terminate` / bounded
+  `wait` / `kill` / `wait`; never send a later raw signal to its saved numeric PID,
+  which may have been recycled after the child exited. `PULP_DAW_SMOKE_KILL_ALL=1`
+  restores the blunt behaviour for a dedicated box with nobody at it.
 - **Seed the portable config FROM the user's real one — never from empty.** The
   throwaway `reaper.ini` is what keeps a run from polluting somebody's install, but an
   *empty* one makes REAPER come up as a fresh install on every launch: licence prompt,

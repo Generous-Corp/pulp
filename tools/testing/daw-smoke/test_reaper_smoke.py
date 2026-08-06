@@ -551,11 +551,25 @@ class DoesNotWreckSomebodysReaper(unittest.TestCase):
             self.assertNotIn("pkill", call.args[0],
                              "killed every REAPER, including somebody's session")
 
-    def test_it_does_kill_the_one_it_started(self):
-        with mock.patch.object(rs.subprocess, "run") as run:
-            rs.kill_reaper(only_pid=4321)
-        self.assertTrue(any("4321" in " ".join(c.args[0])
-                            for c in run.call_args_list))
+    def test_it_stops_and_reaps_the_exact_child_it_started(self):
+        proc = mock.Mock()
+        proc.poll.return_value = None
+        proc.wait.side_effect = [rs.subprocess.TimeoutExpired("REAPER", 2), 0]
+
+        rs.stop_reaper_process(proc)
+
+        proc.terminate.assert_called_once_with()
+        proc.kill.assert_called_once_with()
+        self.assertEqual(proc.wait.call_count, 2)
+
+    def test_it_never_signals_an_already_reaped_child(self):
+        proc = mock.Mock()
+        proc.poll.return_value = 0
+
+        rs.stop_reaper_process(proc)
+
+        proc.terminate.assert_not_called()
+        proc.kill.assert_not_called()
 
 
 if __name__ == "__main__":
