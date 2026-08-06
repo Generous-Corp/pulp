@@ -104,6 +104,7 @@ pulp_dsp_series_signal_suite(pulp-test-signal-granular       test_signal_granula
     test_signal_granular_live_rt_safety.cpp)
 pulp_dsp_series_signal_suite(pulp-test-signal-additive-bank  test_signal_additive_bank_spectrum_envelopes.cpp
     test_signal_additive_bank_gain_rt_voices.cpp)
+pulp_dsp_series_signal_suite(pulp-test-signal-fm-operator-engine test_signal_fm_operator_engine.cpp)
 pulp_dsp_series_signal_suite(pulp-test-signal-vocoder        test_signal_vocoder_filter_voicing_formant.cpp
     test_signal_vocoder_rt_composition_safety.cpp)
 
