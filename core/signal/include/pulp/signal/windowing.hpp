@@ -5,13 +5,51 @@
 
 namespace pulp::signal {
 
+namespace detail {
+
+template <typename SampleType>
+inline SampleType four_term_cosine_window(SampleType phase,
+                                          SampleType a0,
+                                          SampleType a1,
+                                          SampleType a2,
+                                          SampleType a3) {
+    return a0 - a1 * std::cos(phase) +
+           a2 * std::cos(SampleType{2.0f} * phase) -
+           a3 * std::cos(SampleType{3.0f} * phase);
+}
+
+template <typename SampleType>
+inline SampleType blackman_harris_window(SampleType phase) {
+    return four_term_cosine_window(
+        phase, SampleType{0.35875f}, SampleType{0.48829f},
+        SampleType{0.14128f}, SampleType{0.01168f});
+}
+
+template <typename SampleType>
+inline SampleType blackman_nuttall_window(SampleType phase) {
+    return four_term_cosine_window(
+        phase, SampleType{0.3635819f}, SampleType{0.4891775f},
+        SampleType{0.1365995f}, SampleType{0.0106411f});
+}
+
+} // namespace detail
+
 // Window functions for FFT, spectral analysis, FIR filter design.
 //
 // RT contract: generate() allocates and is prepare/design-time only. apply()
 // is allocation-free when callers pass a valid buffer and a precomputed window.
 class WindowFunction {
 public:
-    enum class Type { rectangular, hann, hamming, blackman, flat_top, kaiser };
+    enum class Type {
+        rectangular,
+        hann,
+        hamming,
+        blackman,
+        flat_top,
+        kaiser,
+        blackman_harris,
+        blackman_nuttall,
+    };
 
     // Generate a window of the given size and type. Not real-time safe.
     template <typename SampleType = float>
@@ -49,6 +87,16 @@ public:
                                std::cos(SampleType{2.0f} * pi<SampleType> * n / N)
                            + SampleType{0.08f} *
                                  std::cos(SampleType{4.0f} * pi<SampleType> * n / N);
+                    break;
+
+                case Type::blackman_harris:
+                    w[i] = detail::blackman_harris_window(
+                        SampleType{2.0f} * pi<SampleType> * n / N);
+                    break;
+
+                case Type::blackman_nuttall:
+                    w[i] = detail::blackman_nuttall_window(
+                        SampleType{2.0f} * pi<SampleType> * n / N);
                     break;
 
                 case Type::flat_top:
