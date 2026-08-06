@@ -232,6 +232,13 @@ and entitlement templates consume these resolved values; downstream projects
 should keep using `pulp_add_plugin()` rather than calling the internal format
 helpers.
 
+Each AU/AUv3 target must claim a unique Audio Unit identity — the
+(component type, `PLUGIN_CODE`, `MANUFACTURER_CODE`) triple macOS keys the
+AudioComponent registry on. Two targets in one project that share it are one
+component as far as a host is concerned, so only one of them can ever load;
+configure fails with the conflicting target named. Declaring both `AU` and
+`AUv3` for the *same* target is fine — one plugin publishes one identity.
+
 ### Format Availability
 
 Format targets are only created when the corresponding SDK is available:

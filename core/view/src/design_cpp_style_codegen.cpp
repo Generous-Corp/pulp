@@ -266,6 +266,19 @@ void emit_visual_style(std::ostringstream& out,
     if (style.text_align)
         emit_line(out, depth, opts.indent_spaces,
                   std::string(var) + "->set_inheritable_text_align(static_cast<int>(" + label_align_expr(*style.text_align) + "));");
+    // The clip an importer resolved along CSS's containing-block chain, in the
+    // node's own space. Emitted alongside `overflow` rather than folded into
+    // it: `overflow` clips the node's children — DOM parentage — and this
+    // clips the node itself, which is the only one of the two that can express
+    // a node escaping a clip its emitted parent is inside.
+    if (style.clip_rect) {
+        emit_line(out, depth, opts.indent_spaces,
+                  std::string(var) + "->set_ancestor_clip_rect({" +
+                      float_expr(ctx, style.clip_rect->x) + ", " +
+                      float_expr(ctx, style.clip_rect->y) + ", " +
+                      float_expr(ctx, style.clip_rect->width) + ", " +
+                      float_expr(ctx, style.clip_rect->height) + "});");
+    }
     if (style.overflow) {
         std::string lower;
         for (unsigned char c : *style.overflow)

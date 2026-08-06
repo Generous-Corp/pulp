@@ -219,6 +219,12 @@ Key rules, each learned the hard way:
 
 Tests: `test/test_plugin_registry.cpp` (portable registry contract) and `test/test_au_bundle_entry.cpp` (two `aumf` plugins in one binary via the macros; asserts the mismatched-`.factory` override).
 
+### Every plugin needs its OWN `PLUGIN_CODE` — the build now enforces it
+
+macOS keys the AudioComponent registry on the **(type, subtype, manufacturer)** triple. Two plugins in one project that share `PLUGIN_CODE` are therefore ONE component to a host: only one can ever load, and which one is undefined. The same pair also names the Cocoa view-factory ObjC class (`PulpAUCocoaViewFactory_<mfr>_<code>`), so a duplicate puts two implementations of one ObjC class into any process that loads both — a shipping product family is exactly that process.
+
+`_pulp_metadata_claim_au_component` (tools/cmake/PulpPluginMetadata.cmake) claims the triple per target at configure time and fails naming the conflicting target. Re-claiming from the SAME target is legal, so `FORMATS AU AUv3` on one plugin is fine — one plugin publishes one identity. Pinned by `test/cmake/test_au_v2_type_selection.cmake`.
+
 ## Recent changes
 
 ### Param-events sidecar + RT-safety guard

@@ -211,22 +211,34 @@ sk_sp<SkFontMgr> platform_font_manager();
 /// caches the results keyed by `getFamilyName()`. Subsequent calls are O(1)
 /// and never touch the embedded bytes again.
 ///
+/// A family holds EVERY bundled face that reports its name, not one: the
+/// weights of a family all report the same family name, so keeping one face
+/// per name would silently reduce a four-weight family to whichever weight
+/// happened to be declared first.
+///
 /// Returns `nullptr` if:
 ///   * `mgr` is null (font manager not available on this platform), or
-///   * No bundled font advertises the requested family name.
+///   * No bundled font advertises the requested family name, or
+///   * The family advertises no face close enough to `style`.
 ///
-/// The bundle currently ships only Regular/Upright faces. Off-style requests
-/// return `nullptr` so the caller can continue to registered or platform font
-/// fallback for bold, italic, or otherwise unavailable variants.
+/// Style matching is the same rule the plugin registry applies: the exact
+/// weight+slant if the family has it, else the nearest same-slant face within
+/// one approximate CSS weight step, else nothing. A family that ships a
+/// single Regular therefore still declines a Bold request, so the caller's
+/// cascade can reach a system-installed Bold rather than the bundle
+/// hijacking every off-style request.
 sk_sp<SkTypeface> match_bundled_typeface(SkFontMgr* mgr,
                                          const std::string& family,
                                          SkFontStyle style);
 
 /// Look up a plugin-registered typeface by family name (registered via the
 /// public `register_font` API). Returns `nullptr` if no matching family
-/// has been registered or the registered face does not satisfy `style`
-/// (a Regular face will not be returned for a Bold request, mirroring
-/// `match_bundled_typeface`).
+/// has been registered or the family advertises no face close enough to
+/// `style` (a lone Regular face will not be returned for a Bold request).
+/// Style matching is shared with `match_bundled_typeface`, plus one extra
+/// pass: a registered VARIABLE face whose `wght` axis covers the request is
+/// returned even when its default instance is far off, so the resolver can
+/// `makeClone` it at the requested weight instead of losing the family.
 ///
 /// Skia-aware variant; `core/view/` callers should prefer `is_font_registered`
 /// to avoid pulling Skia headers in.

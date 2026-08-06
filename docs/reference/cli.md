@@ -133,6 +133,10 @@ Before configure/build, `pulp build` also compares the active project's pinned `
 
 When `pulp build` decides a CMake reconfigure is required, it also runs the FetchContent cache preflight from `pulp doctor --caches` first. If the shared cache (`~/Library/Caches/Pulp/fetchcontent-src/` on macOS, `$XDG_CACHE_HOME/pulp/fetchcontent-src/` on Linux, `%LOCALAPPDATA%/Pulp/fetchcontent-src/` on Windows) contains a dangling symlink or stale-commit entry, `pulp build` aborts with a one-screen remediation message instead of letting `cmake` blow up 200 lines into the configure log. Run `pulp doctor --caches --fix` to heal user-owned drift, or set `PULP_SKIP_CACHE_PREFLIGHT=1` to bypass the gate.
 
+For a cold or dependency-pin-stale build of the Pulp source checkout (not a standalone project), `pulp build` runs the pinned dependency bootstrap before CMake. Ordinary CMake-only reconfigures do not rerun the bootstrap. The large, slow-changing dependency sources remain in the machine-wide FetchContent cache and the checkout receives lightweight links. Dependencies patched by Pulp are first materialized into a small build-local mutable copy, so concurrent worktrees never modify the shared source. The cache and checkout may live on different macOS volumes; set `PULP_SHARED_FETCHCONTENT_SOURCE_DIR` to put the shared cache on a specific mounted volume. Configure then requires VST3 and, on macOS, AudioUnitSDK to be detected; it fails instead of silently producing a reduced build and test matrix. Compiled objects and generated files remain isolated in each worktree's build directory. Set `PULP_SKIP_DEPENDENCY_BOOTSTRAP=1` only as an emergency bypass when a developer-managed checkout is already complete but the shared-cache bootstrap itself is unavailable; the fail-closed CMake dependency checks still apply.
+
+When developing a dependency itself, use CMake's explicit `FETCHCONTENT_SOURCE_DIR_<UPPERCASE_NAME>` override to point that dependency at a writable checkout; an explicit source override takes precedence over the shared-cache default. Skia/Dawn development keeps using its specialized build options and cache selection. The automatic bootstrap optimizes the common pinned-dependency path without turning shared cached sources into the only supported workflow.
+
 On Windows, `pulp build` also selects a Visual Studio generator automatically when no active MSVC shell is detected on `PATH`.
 
 ### test
@@ -249,6 +253,8 @@ pulp run MyApp -- --arg1                            # pass arguments to the laun
 pulp run --headless --screenshot ui.png             # CI: render offscreen, save PNG
 pulp run --headless --screenshot ui.png --frames 60 # render N frames before capture
 pulp run --watch                                    # re-launch on source-file changes
+pulp run --inspect                                  # authenticated develop-profile inspector
+pulp run --inspect=observe                          # read-only inspector profile
 pulp run --audio-inspector                          # open the live Audio Inspector window
 pulp run --audio-probe-json probe.json              # dump live probe metrics as JSON, then exit
 pulp run --audio-scope-json scope.json              # dump live scope acquisition/measurements JSON
@@ -293,6 +299,52 @@ audio live: ask for a readout in the same run (`--audio-probe-json`,
 each produced by the render callback), or opt in explicitly with
 `PULP_SCREENSHOT_KEEP_AUDIO=1` / `StandaloneConfig::screenshot_keeps_audio`
 when the pixels themselves must show live signal.
+
+#### Development Inspector profiles
+
+Shipping is a separate build/package decision from these runtime profiles. See
+[Shipping a Development Inspector Endpoint](../guides/development-inspector-shipping.md)
+for the exact target manifest, binary proof, and the separate unsafe
+`runtime.eval` acknowledgement.
+
+Standalone inspector activation requires a GPU-enabled desktop build and a
+window host that can drain accepted owning-thread work while its event loop
+exits and defer a startup-failure close to a later native event turn. Pulp
+currently supplies that complete host contract in its built-in macOS
+standalone window hosts, for both rendering paths. On Windows and Linux,
+`WindowHost` instances come from an external factory. A factory host that wants
+to support an active inspector profile must override
+`event_loop_supports_exit_drain()`, `run_event_loop_until()`,
+`supports_deferred_close()`, and `request_close_deferred()`. The exit drain must
+keep its owning-thread dispatcher live until the readiness callback returns
+true, and deferred close must never invoke the close callback in the idle-pump
+stack that requested it. Active profiles fail closed when either contract is
+absent. A build with
+`PULP_ENABLE_GPU=OFF`, or a mobile build, keeps the inspector runtime disabled
+even when the protocol/client SDK components are present.
+
+- `--inspect` enables the `develop` profile for this standalone instance.
+- `--inspect=observe|develop` selects a named capability set.
+- `--inspect=custom --inspect-capability <id>...` selects an explicit,
+  nonempty capability set; the capability option is repeatable. A custom set
+  containing `state.write`, `test.input`, or `authoring.tweaks` must also contain
+  `session.control`, because mutations require a controller lease.
+- `--inspect-runtime-eval` is the separate high-risk acknowledgement for
+  arbitrary JavaScript evaluation in the live UI realm. It requires
+  `--inspect=develop`, or `--inspect=custom` with both `runtime.eval` and
+  `session.control`. No profile or saved developer preference implies it.
+- `--inspect=off` is the default and starts no listener or discovery artifact.
+
+The active session binds only to loopback, publishes an owner-private ephemeral
+record and credential, and displays an `INSPECT <profile>` badge in the live
+window. `PULP_INSPECT_PROFILE` and comma-separated
+`PULP_INSPECT_CAPABILITIES` are the equivalent host environment contract.
+The explicit evaluation acknowledgement is forwarded as
+`PULP_INSPECT_RUNTIME_EVAL=1` and is never persisted.
+Plugin scanning, validation, and an ordinary `pulp run` never activate it.
+The standalone runtime supports in-place scripted-UI hot reload. A processor
+that replaces its entire editor at runtime fails inspector startup closed
+because its borrowed sources cannot be reattached atomically.
 
 #### Live Audio Inspector flags
 
@@ -1001,7 +1053,12 @@ and are only notarized + verified.
 
 For `.app` inputs, use `--output <dir>` to choose where the generated DMG lands
 instead of `artifacts/`, and `--entitlements <plist>` to override the default
-app-signing entitlements.
+app-signing entitlements. Inspector-capable apps must also pass
+`--ship-inspector`; apps that include `runtime.eval` additionally require the
+distinct `--ship-inspector-runtime-eval` acknowledgement. `share` scans the
+app executable against its adjacent capability sidecar before signing. For a
+prebuilt `.dmg` or `.pkg`, it mounts or expands the container and applies the
+same scan to every contained standalone app before accepting the flags.
 
 `release --dmg`/`--pkg` notarizes and staples the distributable it produces, so
 the artifact it leaves in `artifacts/` is Gatekeeper-ready, not merely signed.
@@ -1257,18 +1314,52 @@ Remaining limitation:
 **Status**: experimental
 
 Authenticated low-level client for an explicitly enabled inspector session.
-Normal `pulp run` and plugin-format launches do not currently start an
-endpoint. The client reads owner-private ephemeral discovery records, selects
+Use `pulp run --inspect` (or `--inspect=<profile>`) in a GPU-enabled desktop
+build to activate a standalone; normal `pulp run`, GPU-off/mobile builds, and
+plugin-format launches start no endpoint. The client reads
+owner-private ephemeral discovery records, selects
 an exact non-reusable publication when requested, and proves possession of the
 session credential before sending a request.
+The offline `audit` subcommand is the exception: it ships even when
+`PULP_ENABLE_INSPECTOR=OFF`, never connects to a session, and blocks empty or
+unauditable targets. Artifact and manifest symlinks are rejected rather than
+followed, so an audit cannot escape the directory containing its evidence.
 
 ```bash
-pulp inspect
-pulp inspect --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
-pulp inspect --port 49152
-pulp inspect --command DOM.getDocument
-pulp inspect --command State.getParameters
+pulp inspect profiles --json
+pulp inspect audit path/to/MyProduct --json
+pulp inspect doctor --json
+pulp inspect list --json
+pulp inspect capabilities --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+pulp inspect --session SESSION_ID --instance INSTANCE_ID \
+  --publication PUBLICATION_ID --command State.getParameters
+pulp inspect set-parameter --id 7 --value 0.75 --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+pulp inspect inject-midi --kind note_on --channel 1 --note 60 --velocity 100 \
+  --duration-ms 250 --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+pulp inspect set-transport --playing true --position-samples 0 --tempo-bpm 120 --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
 ```
+
+The named commands are the stable orientation surface:
+
+| Command | Result |
+|---|---|
+| `profiles` | Declared `off`, `observe`, and `develop` capability sets. |
+| `audit ARTIFACT` | Read-only artifact check: canonical control manifest, profile/digest markers, declared capabilities, and known external surfaces. The artifact is never loaded. |
+| `list` | Live publications, including the exact session, instance, and non-reusable publication IDs needed by every operation. |
+| `capabilities` | Authenticated available/effective authority for one exact publication; all three identity options are required. |
+| `doctor` | Discovery runtime directory, live-session count, and issues. |
+| `screenshot` | Decode and save the selected standalone's in-process whole-window PNG. Missing host capability is an explicit unsupported result (exit 3), never an empty file. |
+| `set-parameter` | One bounded numeric parameter mutation under `state.write`. |
+| `inject-midi` | One bounded note-on/off event under `test.input`. |
+| `set-transport` | One idempotent partial standalone transport update under `test.input`. |
+
+Each supports human output and `--json`; JSON includes `schemaVersion: 1`.
+The installed Rust `pulp` forwards `inspect` to its installed sibling
+`pulp-cpp`, so these commands do not require source-build paths.
 
 Options:
 
@@ -1281,6 +1372,43 @@ Options:
 - `--command METHOD` - send one inspector command and print the response
 - `--params JSON` - JSON params for `--command`
 - `--output FILE` - write a one-shot command response to a file
+- `--out FILE` - write decoded PNG bytes for `screenshot`
+- `--id`, `--value`, `--normalized` - typed `set-parameter` fields
+- `--kind`, `--channel`, `--note`, `--velocity`, `--duration-ms` - bounded
+  `inject-midi` fields; note-on duration is 1 through 2000 ms
+- `--playing`, `--position-samples`, `--tempo-bpm` - partial `set-transport` fields
+- `--json` - stable JSON for named commands
+
+`audit` is the Phase 1 authoring spelling; it needs only an artifact path and
+does not use live-session options. It exits 0 for `pass`, 1 for `block`, and 2
+for invalid invocation. JSON uses `pulp.control.audit.v1`. A later `pulp
+control audit` command may become the canonical spelling; this command remains
+the no-activation developer preflight. Sidecars are capped at 1 MiB. Directory
+mode rejects absolute or traversing artifact identities and reads each candidate
+executable once; direct-file mode applies the same safe-identity rules and
+requires an exact-named sidecar's target or product identity to match the
+artifact filename. Canonical directory sidecars must also use the manifest
+target as their stem and cannot fall back to a uniquely marker-bearing renamed
+sibling. Plugin-format subtrees never count as standalone evidence. The same
+immutable bytes are used for selection,
+known-surface detection, marker verification, `artifactDigest`, and
+`consentIdentity`.
+
+Typed parameter, MIDI, and transport mutations require the exact three-part
+publication identity and a same-connection controller lease. `inject-midi`
+accepts only note-on/off events on public channels 1–16 with byte-range note
+and velocity values. A note-on requires a bounded duration and the client sends
+the matching note-off on the same connection before releasing its lease; a
+separate note-off is only an individual cleanup event. `set-transport` requires at least one of play state,
+nonnegative sample position, or finite tempo from 20 through 400 BPM. Their
+schema versions are `pulp.inspect.set-parameter.v1`,
+`pulp.inspect.inject-midi.v1`, and `pulp.inspect.set-transport.v1`.
+
+This is not a preset/filesystem or raw-event API. Parameter writes remain under
+`state.write`; transient authoring controls remain under `authoring.tweaks`;
+generic preset/filesystem operations, raw MIDI, and arbitrary scripting remain
+unavailable. Injected notes are released on lease loss, disconnect, or teardown.
+None of these typed commands routes through `Runtime.evaluate`.
 
 The transport is loopback-only, token-authenticated, bounded, and
 capability-enforced. Mutations additionally require the controller lease.
@@ -1289,12 +1417,47 @@ response, the client reports `{"mayHaveApplied":true}`; a timeout also fences
 the connection. Do not automatically retry that operation: the server may
 already have executed it.
 
-`Capture.screenshot` and `Capture.screenshotNode` are reserved inspector
-protocol methods that currently return explicit unavailable errors until
-host-capture references are wired into the inspector domain.
+Use the named capture command when the artifact itself is wanted:
+
+```bash
+pulp inspect screenshot --out artifacts/live.png
+# Pin a specific publication when more than one app is live:
+pulp inspect screenshot --out artifacts/live.png \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+```
+
+The command requests `Capture.screenshot` inside the running app, decodes the
+base64 response, verifies the PNG signature and dimensions, and atomically
+writes the output. It therefore works from an SSH shell without granting the
+shell or `sshd` macOS Screen Recording permission. It prefers the selected
+Pulp standalone's readable back buffer and otherwise uses Pulp's in-process
+`capture_view()` renderer (portable Skia/GPU or a registered provider). It does
+not capture a plugin editor as composited by Logic, REAPER, or another external
+host. An active design viewport requires live back-buffer capture; Pulp does not
+re-layout that live tree at window size and mislabel the result as the visible
+frame. If neither capture route is available, or the view contains an
+OS-composited native overlay, the app does not advertise `capture.image`; the
+command reports `unsupported`, exits 3, and writes nothing. `--json` uses the
+`pulp.inspect.screenshot.v1` schema. Capability publication reflects the initial
+tree. If an in-place UI reload later introduces a native overlay or another
+unsupported requirement, the existing session remains stable but the request
+returns `capture_unavailable` instead of emitting an incomplete frame.
+
+The underlying `Capture.screenshot` response contains a base64 PNG plus the
+selected standalone window's dimensions. Screenshot-capable sessions and
+clients use a bounded 16 MiB message ceiling (large enough for ordinary
+multi-megabyte window PNGs); larger responses fail explicitly.
+`Capture.screenshotNode` remains explicitly unavailable.
 `Runtime.evaluate` is unavailable in normal launches, but an explicitly wired
 and enabled custom fixture can evaluate code; treat that opt-in as remote code
 execution.
+
+Installed `pulp-mcp` uses the same in-process typed client rather than spawning
+the CLI. Its `pulp_inspect_profiles`, `pulp_inspect_list`,
+`pulp_inspect_capabilities`, and `pulp_inspect_doctor` tools provide orientation;
+operational tools require the exact identity returned by `list`. Success
+payloads include that identity, and errors use
+`structuredContent: {ok:false,error:{code,message,data}}`.
 
 ### motion
 

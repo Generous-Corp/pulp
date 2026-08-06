@@ -188,3 +188,36 @@ TEST_CASE("generate_pulp_cpp emits the public layout and visual-style surface",
     CHECK(result.source.find("set_text_decoration(pulp::view::Label::TextDecoration::underline)") !=
           std::string::npos);
 }
+
+TEST_CASE("baked C++ codegen emits a resolved clip rectangle",
+          "[view][import][cpp-codegen][clip-model]") {
+    // A node's resolved CSS clip chain reaches a baked panel through
+    // set_ancestor_clip_rect, not through set_overflow: `overflow` clips the
+    // node's CHILDREN, which is DOM parentage, and the clip an importer
+    // resolves belongs to the node itself. Dropping it bakes a panel that draws
+    // ink the browser cut away.
+    DesignIR ir;
+    ir.source = DesignSource::html;
+    ir.capture_method = "clip-codegen-test";
+    ir.source_adapter = "clip-codegen-test";
+    ir.source_version = "1";
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.root.stable_anchor_id = "panel";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 400.0f;
+    ir.root.style.clip_rect = IRStyle::ClipRect{60.0f, -20.0f, 100.0f, 100.0f};
+
+    CppExportOptions opts;
+    opts.header_filename = "clip_panel.hpp";
+    opts.namespace_name = "pulp::test::clip";
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, opts);
+
+    REQUIRE(result.source.find("set_ancestor_clip_rect({60") !=
+            std::string::npos);
+    REQUIRE(result.source.find(", 100") != std::string::npos);
+    // And it did NOT arrive as an overflow clip, which would clip the node's
+    // children instead of the node.
+    REQUIRE(result.source.find("set_overflow") == std::string::npos);
+}

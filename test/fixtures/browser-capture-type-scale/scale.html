@@ -1,0 +1,22 @@
+<!doctype html>
+<style>
+  body { margin: 0; background: #111; font-family: Inter, sans-serif; }
+  #panel { position: relative; width: 400px; height: 200px; background: #222; }
+  /* A fit-to-viewport wrapper: the idiom that makes Chrome report a
+     post-transform box beside an untransformed font-size. */
+  #shrunk { position: absolute; left: 20px; top: 20px; width: 300px;
+            transform: scale(0.5); transform-origin: 0 0; }
+  #inside { color: #fff; font-size: 40px; letter-spacing: 2px; }
+  /* Same string, same size, outside the wrapper — the control. */
+  #outside { position: absolute; left: 20px; top: 120px; color: #fff;
+             font-size: 40px; letter-spacing: 2px; }
+  /* Two axes: type cannot carry it, so lowering must refuse. */
+  #squashed { position: absolute; left: 20px; top: 160px;
+              transform: scale(0.5, 1.5); transform-origin: 0 0; }
+  #squashed span { color: #fff; font-size: 20px; }
+</style>
+<div id="panel">
+  <div id="shrunk"><div id="inside">Hamburgefons</div></div>
+  <div id="outside">Hamburgefons</div>
+  <div id="squashed"><span>Squashed</span></div>
+</div>

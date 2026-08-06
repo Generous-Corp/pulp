@@ -26,7 +26,9 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <sstream>
+#include <string>
 #include <vector>
 
 namespace pulp::view {
@@ -48,6 +50,58 @@ namespace {
 //        |               |
 //      bl|               |br
 //        +---------------+
+// How far past its own border box a view's OUTSET box-shadows reach, per side.
+//
+// A compositing layer's bounds are a CLIP, not a hint:
+// `SkCanvas::saveLayer(&bounds, ...)` discards everything drawn outside them,
+// and `paint_outset_shadows` draws INSIDE that layer because CSS puts a
+// shadow in the element's own stacking context. So a layer sized to the border
+// box erases every outset shadow the box has — silently, and only on the nodes
+// that open a layer at all, which is why it hid until `mix-blend-mode:
+// plus-lighter` started opening one.
+//
+// The extent is GEOMETRY, not a pad. A shadow's silhouette is the box grown by
+// `spread` and translated by (offset_x, offset_y); the blur adds its own
+// visible reach around that. The reach is `3 * sigma + 2` with
+// `sigma = blur / 2`, which is not a guess twice over:
+//
+//   * `sigma = blur / 2` is what `skia_canvas_box_shadow.cpp:79` actually
+//     rasterizes with, and it is MEASURED rather than assumed — a browser
+//     oracle fitted it at six radii to ~0.2/255 (`D07-oracle.html`), refuting
+//     the competing rule at every one.
+//   * `3 * sigma + 2` is the same expression that file already uses to size
+//     its own shadow cache (`:98`). Deriving a second, different number here
+//     would let the layer clip ink the rasterizer had decided to draw.
+//
+// INSET shadows are excluded, and must be: an inset shadow paints inside the
+// padding box by definition, so it cannot grow the layer. Counting its blur
+// would inflate a layer on every node that has one, for no ink.
+struct OutsetShadowExtent {
+    float left = 0.0f, top = 0.0f, right = 0.0f, bottom = 0.0f;
+};
+
+OutsetShadowExtent outset_shadow_extent(
+    const std::vector<pulp::view::View::BoxShadow>& shadows) {
+    OutsetShadowExtent e;
+    for (const auto& s : shadows) {
+        if (s.inset) continue;
+        const float reach =
+            s.blur > 0.0f ? std::ceil(1.5f * s.blur) + 2.0f : 0.0f;
+        const float grow = s.spread + reach;
+        e.left = std::max(e.left, grow - s.offset_x);
+        e.right = std::max(e.right, grow + s.offset_x);
+        e.top = std::max(e.top, grow - s.offset_y);
+        e.bottom = std::max(e.bottom, grow + s.offset_y);
+    }
+    // A negative spread shrinks the silhouette; it can never pull the layer
+    // inside the box, which would clip the box itself.
+    e.left = std::max(0.0f, e.left);
+    e.right = std::max(0.0f, e.right);
+    e.top = std::max(0.0f, e.top);
+    e.bottom = std::max(0.0f, e.bottom);
+    return e;
+}
+
 void build_per_corner_rounded_rect_path(
     pulp::canvas::Canvas& canvas,
     float w, float h,
@@ -158,6 +212,64 @@ void build_continuous_corner_rounded_rect_path(
 }
 }  // namespace
 
+// CSS radial sizing (css-images-3 §3.3). The ending shape is measured from the
+// gradient's own centre, not the box's, so an off-centre `at` changes every
+// radius — which is why a constant fraction of the box cannot stand in for any
+// of these keywords.
+//
+// For an ellipse the two corner keywords are NOT the corner distance: the spec
+// gives the ending ellipse the aspect ratio it would have under the matching
+// `-side` keyword and then scales it until it passes through that corner.
+// Substituting (dx, dy) into (dx/rx)^2 + (dy/ry)^2 = 1 with ry/rx = dy/dx makes
+// both terms equal, so the scale factor is exactly sqrt(2) on each axis.
+View::ResolvedRadial View::resolve_radial(const BackgroundGradient& g,
+                                          float w, float h) {
+    const float cx = g.x0 * w;
+    const float cy = g.y0 * h;
+    // Distances from the centre to each side, folded into a nearest and a
+    // farthest per axis.
+    const float near_x = std::min(std::fabs(cx), std::fabs(w - cx));
+    const float near_y = std::min(std::fabs(cy), std::fabs(h - cy));
+    const float far_x = std::max(std::fabs(cx), std::fabs(w - cx));
+    const float far_y = std::max(std::fabs(cy), std::fabs(h - cy));
+    constexpr float kSqrt2 = 1.41421356f;
+
+    float rx = 0.0f, ry = 0.0f;
+    switch (g.radial_size) {
+        case BackgroundGradient::RadialSize::explicit_radii:
+            rx = g.radial_rx * w + g.radial_rx_px;
+            ry = g.radial_ry * h + g.radial_ry_px;
+            break;
+        case BackgroundGradient::RadialSize::closest_side:
+            rx = g.radial_circle ? std::min(near_x, near_y) : near_x;
+            ry = g.radial_circle ? std::min(near_x, near_y) : near_y;
+            break;
+        case BackgroundGradient::RadialSize::farthest_side:
+            rx = g.radial_circle ? std::max(far_x, far_y) : far_x;
+            ry = g.radial_circle ? std::max(far_x, far_y) : far_y;
+            break;
+        case BackgroundGradient::RadialSize::closest_corner:
+            rx = g.radial_circle ? std::sqrt(near_x * near_x + near_y * near_y)
+                                 : near_x * kSqrt2;
+            ry = g.radial_circle ? rx : near_y * kSqrt2;
+            break;
+        case BackgroundGradient::RadialSize::farthest_corner:
+            rx = g.radial_circle ? std::sqrt(far_x * far_x + far_y * far_y)
+                                 : far_x * kSqrt2;
+            ry = g.radial_circle ? rx : far_y * kSqrt2;
+            break;
+        case BackgroundGradient::RadialSize::max_side:
+            rx = ry = g.radius * std::max(w, h);
+            break;
+    }
+    // A zero radius makes the shader degenerate (Skia returns null, which
+    // paints nothing at all). CSS treats a zero-size ending shape as the
+    // smallest non-zero one, so clamp rather than drop the layer.
+    rx = std::max(rx, 0.001f);
+    ry = std::max(ry, 0.001f);
+    return {cx, cy, rx, ry};
+}
+
 void View::apply_canvas_transforms(canvas::Canvas& canvas) {
     // CSS transforms: translate, rotate, scale, skew — around transform-origin
     bool has_transform = (scale_ != 1.0f || rotation_deg_ != 0 ||
@@ -210,6 +322,47 @@ void View::apply_canvas_transforms(canvas::Canvas& canvas) {
     }
 }
 
+namespace {
+
+/// `View::FilterOp` in the shape the canvas layer verbs take. The two types
+/// carry the same ten kinds and are kept separate so a canvas-side change is
+/// not an ABI change for every View; the translation lives here once and
+/// serves both the element layer (`filter`) and the backdrop layer
+/// (`backdrop-filter`) rather than each keeping its own copy. The switch has
+/// no `default:` so adding a kind to either enum surfaces here.
+std::vector<canvas::Canvas::FilterChainEntry> to_canvas_filter_chain(
+    const std::vector<View::FilterOp>& ops) {
+    using ViewK = View::FilterOp::Kind;
+    using CanvK = canvas::Canvas::FilterChainEntry::Kind;
+    std::vector<canvas::Canvas::FilterChainEntry> chain;
+    chain.reserve(ops.size());
+    for (const auto& op : ops) {
+        canvas::Canvas::FilterChainEntry e{};
+        switch (op.kind) {
+            case ViewK::blur:        e.kind = CanvK::blur;        break;
+            case ViewK::brightness:  e.kind = CanvK::brightness;  break;
+            case ViewK::contrast:    e.kind = CanvK::contrast;    break;
+            case ViewK::grayscale:   e.kind = CanvK::grayscale;   break;
+            case ViewK::hue_rotate:  e.kind = CanvK::hue_rotate;  break;
+            case ViewK::invert:      e.kind = CanvK::invert;      break;
+            case ViewK::opacity:     e.kind = CanvK::opacity;     break;
+            case ViewK::saturate:    e.kind = CanvK::saturate;    break;
+            case ViewK::sepia:       e.kind = CanvK::sepia;       break;
+            case ViewK::drop_shadow: e.kind = CanvK::drop_shadow; break;
+        }
+        e.amount      = op.amount;
+        e.angle_deg   = op.angle_deg;
+        e.ds_offset_x = op.ds_offset_x;
+        e.ds_offset_y = op.ds_offset_y;
+        e.ds_blur     = op.ds_blur;
+        e.ds_color    = op.ds_color;
+        chain.push_back(e);
+    }
+    return chain;
+}
+
+}  // namespace
+
 View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
     EffectLayerState state;
 
@@ -218,7 +371,9 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
     // widget's own opacity/filter layer so background, border, and children
     // composite over the frosted backdrop. Paired with the matching restore()
     // in pop_effect_layers.
-    bool needs_backdrop_layer = (backdrop_blur() > 0.0f);
+    const auto& backdrop_chain = backdrop_filter_chain();
+    bool needs_backdrop_layer =
+        !backdrop_chain.empty() || backdrop_blur() > 0.0f;
     if (needs_backdrop_layer) {
         if (!canvas.supports(canvas::CanvasCapability::backdrop_filter)) {
             warn_capability_fallback_once(
@@ -226,8 +381,26 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
                 "canvas backend has no backdrop-filter blur; backdrop-filter "
                 "renders as an unblurred tint");
         }
-        canvas.save_backdrop_filter(0, 0, bounds_.width, bounds_.height,
-                                    backdrop_blur());
+        if (backdrop_chain.empty()) {
+            canvas.save_backdrop_filter(0, 0, bounds_.width, bounds_.height,
+                                        backdrop_blur());
+        } else {
+            // A list beyond a bare blur — `saturate()`, `invert()`, a pair of
+            // them. A backend without the chain keeps whatever blur the list
+            // carries and drops the colour half, so the frosting survives but
+            // the tint does not; say so rather than let it pass as faithful.
+            if (!canvas.supports(
+                    canvas::CanvasCapability::backdrop_filter_chain)) {
+                warn_capability_fallback_once(
+                    canvas::CanvasCapability::backdrop_filter_chain,
+                    "canvas backend does not honor backdrop-filter color ops; "
+                    "backdrop-filter collapses to its blur");
+            }
+            const auto chain = to_canvas_filter_chain(backdrop_chain);
+            canvas.save_backdrop_filter_chain(0, 0, bounds_.width,
+                                              bounds_.height, chain.data(),
+                                              static_cast<int>(chain.size()));
+        }
     }
     state.backdrop_pushed = needs_backdrop_layer;
 
@@ -257,6 +430,20 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
     // one and a half radii covers the visible tail; two is used here so the
     // rounding never lands inside it.
     const float blur_pad = filter_blur_ > 0.0f ? filter_blur_ * 2.0f : 0.0f;
+
+    // The layer must also contain the view's OUTSET shadows, which paint
+    // inside it. Sized to the box, it deletes them: a node carrying both a
+    // blend mode and an outset shadow lost the shadow entirely, and nothing
+    // in the corpus had exposed it because no node that opened a layer had a
+    // shadow until `plus-lighter` started opening one. The four sides are
+    // resolved independently because an OFFSET shadow is not symmetric.
+    const OutsetShadowExtent shadow_pad = outset_shadow_extent(shadows_);
+    const float pad_l = blur_pad + shadow_pad.left;
+    const float pad_t = blur_pad + shadow_pad.top;
+    const float pad_r = blur_pad + shadow_pad.right;
+    const float pad_b = blur_pad + shadow_pad.bottom;
+    const float layer_w = bounds_.width + pad_l + pad_r;
+    const float layer_h = bounds_.height + pad_t + pad_b;
 
     // How many layers we pushed, so we pop exactly that many below. Only an
     // effect can push more than one (EffectChain pushes one per child); every
@@ -292,6 +479,12 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
                     "canvas backend cannot apply mask layers; mask-image "
                     "collapses to a plain layer (mask ignored)");
             }
+            // Deliberately NOT grown by the shadow extent. A mask's own
+            // coordinate space is the layer rect, so widening it would resize
+            // and re-anchor the mask image rather than admit more ink. A masked
+            // node with an outset shadow still loses the shadow; fixing that
+            // means giving the mask an explicit origin, which is its own
+            // change.
             canvas.save_layer_with_mask(0, 0, bounds_.width, bounds_.height,
                                          opacity_, mask_image(), mask_size());
         } else if (!filter_chain_.empty()) {
@@ -304,48 +497,49 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
                     "canvas backend does not honor CSS filter color ops; "
                     "filter chain collapses to blur/opacity only");
             }
-            std::vector<pulp::canvas::Canvas::FilterChainEntry> chain;
-            chain.reserve(filter_chain_.size());
-            for (const auto& op : filter_chain_) {
-                pulp::canvas::Canvas::FilterChainEntry e{};
-                using ViewK = View::FilterOp::Kind;
-                using CanvK = pulp::canvas::Canvas::FilterChainEntry::Kind;
-                switch (op.kind) {
-                    case ViewK::blur:        e.kind = CanvK::blur;        break;
-                    case ViewK::brightness:  e.kind = CanvK::brightness;  break;
-                    case ViewK::contrast:    e.kind = CanvK::contrast;    break;
-                    case ViewK::grayscale:   e.kind = CanvK::grayscale;   break;
-                    case ViewK::hue_rotate:  e.kind = CanvK::hue_rotate;  break;
-                    case ViewK::invert:      e.kind = CanvK::invert;      break;
-                    case ViewK::opacity:     e.kind = CanvK::opacity;     break;
-                    case ViewK::saturate:    e.kind = CanvK::saturate;    break;
-                    case ViewK::sepia:       e.kind = CanvK::sepia;       break;
-                    case ViewK::drop_shadow: e.kind = CanvK::drop_shadow; break;
-                }
-                e.amount      = op.amount;
-                e.angle_deg   = op.angle_deg;
-                e.ds_offset_x = op.ds_offset_x;
-                e.ds_offset_y = op.ds_offset_y;
-                e.ds_blur     = op.ds_blur;
-                e.ds_color    = op.ds_color;
-                chain.push_back(e);
+            // A node may carry BOTH, and the branch below is an `else if`, so
+            // taking this one used to drop the blend mode entirely. That is
+            // not a subtle loss: the idiom it breaks is a blurred bloom set to
+            // `screen` or `plus-lighter` over a dark panel, which is how these
+            // designs make light. Composited with plain source-over instead,
+            // the bloom stops adding light and simply paints over everything —
+            // a big soft WHITE blob across the artwork. It reads as a broken
+            // renderer, and it is the single most destructive thing that can
+            // happen to a dark panel.
+            //
+            // Two layers, in the order CSS defines: filter applies to the
+            // element, THEN the filtered result is blended with the backdrop.
+            // So the blend layer is the outer one. `layers_pushed` is what the
+            // restore below pops, so counting both keeps the stack balanced.
+            if (needs_blend_layer) {
+                canvas.save_layer_with_blend(-pad_l, -pad_t, layer_w, layer_h,
+                                             1.0f, 0.0f, mix_blend_mode_);
+                ++layers_pushed;
             }
-            canvas.save_layer_with_filters(0, 0, bounds_.width, bounds_.height,
+            // The INNER filter layer takes the same bounds. Growing only the
+            // outer one would leave the shadow clipped by this one instead,
+            // which looks like the fix not working rather than like a second
+            // clip. A filter applies to the element's whole rendering, shadow
+            // included, so admitting it here is also what CSS asks for.
+            const auto chain = to_canvas_filter_chain(filter_chain_);
+            canvas.save_layer_with_filters(-pad_l, -pad_t, layer_w, layer_h,
                                             opacity_, chain.data(),
                                             static_cast<int>(chain.size()));
+            ++layers_pushed;
         } else if (needs_blend_layer) {
             // saveLayer with explicit blend mode for CSS / RN `mix-blend-mode`.
-            canvas.save_layer_with_blend(-blur_pad, -blur_pad,
-                                         bounds_.width + blur_pad * 2.0f,
-                                         bounds_.height + blur_pad * 2.0f,
+            canvas.save_layer_with_blend(-pad_l, -pad_t, layer_w, layer_h,
                                          opacity_, filter_blur_, mix_blend_mode_);
         } else {
-            canvas.save_layer(-blur_pad, -blur_pad,
-                              bounds_.width + blur_pad * 2.0f,
-                              bounds_.height + blur_pad * 2.0f,
+            // Not blend-specific. An opacity or blur layer sized to the box
+            // clipped its outset shadows the same way; blend is only where it
+            // was noticed, because it is the one layer whose visual signature
+            // makes a missing halo obvious.
+            canvas.save_layer(-pad_l, -pad_t, layer_w, layer_h,
                               opacity_, filter_blur_);
         }
-        // Every non-effect branch above pushes exactly one layer.
+        // Every branch above except the effect chain and the filter branch
+        // pushes exactly one layer, and those two count their own.
         if (layers_pushed == 0) layers_pushed = 1;
     }
     state.layers_pushed = layers_pushed;
@@ -506,6 +700,98 @@ void View::apply_overflow_and_clip_path(canvas::Canvas& canvas) {
     }
 }
 
+namespace {
+
+// CSS `background-size` resolved against a box: the size of the tile each
+// background-image layer paints into. `background-repeat` decides how many
+// copies follow, and it collapses into the same two numbers — an axis that
+// does not repeat keeps the element's own extent, so the tile loop below emits
+// exactly one row or column there without a second concept.
+//
+// Only the LENGTH and PERCENTAGE forms resolve here. `cover` / `contain` /
+// `auto` size a layer against its INTRINSIC dimensions, and CSS gives a
+// gradient none — so for the gradient stack all three mean "the element's own
+// box", which is a single untiled pass and exactly what this path did before
+// tiling existed.
+struct BackgroundTile {
+    float w = 0.0f, h = 0.0f;
+};
+
+// One `background-size` component in pixels, against `extent`. A keyword or a
+// unit this does not read returns nullopt, which drops the whole declaration
+// rather than tiling one axis on a guess.
+std::optional<float> background_size_axis(const std::string& tok, float extent) {
+    if (tok.empty()) return std::nullopt;
+    const auto number = [&](std::size_t unit_len) -> std::optional<float> {
+        if (tok.size() <= unit_len) return std::nullopt;
+        const std::string head = tok.substr(0, tok.size() - unit_len);
+        try {
+            std::size_t used = 0;
+            const float v = std::stof(head, &used);
+            if (used != head.size()) return std::nullopt;
+            return v;
+        } catch (...) {
+            return std::nullopt;
+        }
+    };
+    if (tok.back() == '%') {
+        const auto v = number(1);
+        return v ? std::optional<float>(*v * 0.01f * extent) : std::nullopt;
+    }
+    if (tok.size() > 2 && tok.compare(tok.size() - 2, 2, "px") == 0)
+        return number(2);
+    return std::nullopt;
+}
+
+BackgroundTile resolve_background_tile(const std::string& size_css,
+                                       const std::string& repeat_css,
+                                       float box_w, float box_h) {
+    BackgroundTile tile;
+    if (size_css.empty() || box_w <= 0.0f || box_h <= 0.0f) return tile;
+
+    // A SIZED, NON-REPEATING layer is deliberately left on the old path. Its
+    // ink lands wherever `background-position` says, and position is still a
+    // storage-only slot — so honouring the size without the origin would move
+    // paint to a place nothing has verified. Tiling is what this resolves; the
+    // sized-once case is its own change.
+    if (repeat_css == "no-repeat") return tile;
+
+    std::vector<std::string> parts;
+    std::istringstream in(size_css);
+    for (std::string tok; in >> tok;) parts.push_back(tok);
+    if (parts.empty() || parts.size() > 2) return tile;
+
+    const auto w = background_size_axis(parts[0], box_w);
+    // A single value sizes the x axis and leaves y `auto`, which for a gradient
+    // is the element's own height.
+    const auto h = parts.size() == 2 ? background_size_axis(parts[1], box_h)
+                                     : std::optional<float>(box_h);
+    if (!w || !h || !(*w > 0.0f) || !(*h > 0.0f)) return tile;
+    tile.w = *w;
+    tile.h = *h;
+
+    // `repeat-x` / `repeat-y` pin the other axis to the element, so that axis
+    // yields one tile and no ink moves along it. `round` and `space` differ
+    // only in how the remainder is distributed and tile here as `repeat` does —
+    // a closer approximation than not tiling at all, and named so nobody reads
+    // the omission as support.
+    if (repeat_css == "repeat-x") tile.h = box_h;
+    else if (repeat_css == "repeat-y") tile.w = box_w;
+    return tile;
+}
+
+// A stop list this long fits on the stack. Paint runs inside a ScopedNoAlloc
+// region, so resolving raw `px` stop positions must not reach for a vector; a
+// longer list keeps its raw positions and paints as it did before, which is
+// wrong but bounded and is not a shape a design pass emits.
+constexpr int kMaxInlineStops = 64;
+
+// A tile a fraction of a pixel wide would turn one fill into thousands. Past
+// this the layer paints once, as it did before tiling existed.
+constexpr int kMaxTilesPerAxis = 512;
+
+}  // namespace
+
 void View::paint_background_and_border(canvas::Canvas& canvas) {
     // Per-corner border-radius: when any of the
     // setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight setters
@@ -540,103 +826,413 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
     const float eff_bl = effective_corner_radius_bl(bounds_.width, bounds_.height);
     const float eff_br = effective_corner_radius_br(bounds_.width, bounds_.height);
 
+    // The background COLOUR goes down first, beneath every image layer.
+    //
+    // CSS paints background-color under the background-image stack, not
+    // instead of it. Painting the colour only when no gradient parsed let
+    // every translucent layer show the PARENT through: a dark deck carrying a
+    // 7%-alpha grid-line gradient rendered as the cream panel behind it, and
+    // the `screen` veneers stacked on that deck then blended against a cream
+    // backdrop instead of a dark one — so one condition here accounted for
+    // most of a panel's blend, fill and filter error at once.
+    //
+    // Order is the whole point: this must precede the stack below. Painting it
+    // afterwards covers the gradients with the flat colour, which turns a
+    // spoked tape reel into a solid disc — right pixels, wrong sequence, and it
+    // reads as missing conic support rather than as a paint-order bug.
+    if (has_bg_) {
+        canvas.set_fill_color(bg_color_);
+        if (use_per_corner) {
+            build_corner_path(bounds_.width, bounds_.height,
+                              eff_tl, eff_tr, eff_bl, eff_br);
+            canvas.fill_current_path();
+        } else if (eff_r > 0) {
+            canvas.fill_rounded_rect(0, 0, bounds_.width, bounds_.height, eff_r);
+        } else {
+            canvas.fill_rect(0, 0, bounds_.width, bounds_.height);
+        }
+    }
+
     // Paint background gradient if set (CSS background: linear/radial/conic).
     // The canvas + Skia/CoreGraphics backends implement all three; the View
-    // just dispatches on the stored type. cx/cy are box fractions; radial
-    // radius is a fraction of the larger box dimension; conic angle is radians.
-    // CSS lists background layers first-on-top, so paint the stack in reverse:
-    // the last entry goes down first and the first entry lands over it. Each
-    // pass is self-contained (set gradient → fill → clear), so layering needs
-    // only the loop.
+    // just dispatches on the stored type. cx/cy are TILE fractions; radial
+    // radius is a fraction of the larger tile dimension; conic angle is
+    // radians. CSS lists background layers first-on-top, so paint the stack in
+    // reverse: the last entry goes down first and the first entry lands over
+    // it. Each pass is self-contained (set gradient → fill → clear), so
+    // layering needs only the loop.
+    //
+    // `background-size` sizes the box a layer paints INTO and
+    // `background-repeat` tiles that box across the element. Both reached the
+    // View and stopped there, so a scanline authored as
+    // `linear-gradient(<colour> 1px, transparent 1px)` under
+    // `background-size: 100% 32px` painted ONE gradient stretched across the
+    // whole element — a monotone wash where the design asked for a stripe every
+    // 32px. Every layer in the stack shares the tile, so it resolves once.
+    const BackgroundTile bg_tile = resolve_background_tile(
+        background_size(), background_repeat(), bounds_.width, bounds_.height);
+    const bool bg_tiles =
+        bg_tile.w > 0.0f && bg_tile.h > 0.0f &&
+        (bg_tile.w < bounds_.width - 0.01f ||
+         bg_tile.h < bounds_.height - 0.01f) &&
+        bounds_.width <= bg_tile.w * static_cast<float>(kMaxTilesPerAxis) &&
+        bounds_.height <= bg_tile.h * static_cast<float>(kMaxTilesPerAxis);
+    const float tile_w = bg_tiles ? bg_tile.w : bounds_.width;
+    const float tile_h = bg_tiles ? bg_tile.h : bounds_.height;
+
     for (auto layer = bg_gradients_.rbegin(); layer != bg_gradients_.rend(); ++layer) {
         if (layer->type <= 0 || layer->colors.empty()) continue;
         const int grad_n = static_cast<int>(layer->colors.size());
         const Color* grad_c = layer->colors.data();
         const float* grad_p = layer->positions.data();
-        if (layer->type == 2) {  // radial
-            canvas.set_fill_gradient_radial(
-                layer->x0 * bounds_.width, layer->y0 * bounds_.height,
-                layer->radius * std::max(bounds_.width, bounds_.height),
-                grad_c, grad_p, grad_n);
-        } else if (layer->type == 3) {  // conic / sweep
-            // One call for both spellings: a plain conic spans a full turn, so
-            // the repeating entry point resolves to the same shader for it.
-            canvas.set_fill_gradient_conic_repeating(
-                layer->x0 * bounds_.width, layer->y0 * bounds_.height,
-                layer->angle, layer->sweep_turns, grad_c, grad_p, grad_n);
-        } else {  // linear
-            canvas.set_fill_gradient_linear(
-                layer->x0 * bounds_.width, layer->y0 * bounds_.height,
-                layer->x1 * bounds_.width, layer->y1 * bounds_.height,
-                grad_c, grad_p, grad_n);
+        float stop_buf[kMaxInlineStops];
+
+        // A linear layer's LINE is a function of the tile, not of which tile,
+        // so it is resolved once per layer here and only its origin moves
+        // below. Untiled, the tile IS the element's box and every expression
+        // is what it always was.
+        float lx0 = layer->x0, ly0 = layer->y0;
+        float lx1 = layer->x1, ly1 = layer->y1;
+        float band_span = 0.0f;  // > 0 when a repeating band tiles the line
+        if (layer->type == 1) {
+            if (layer->linear_from != BackgroundGradient::LinearFrom::endpoints) {
+                float radians = layer->linear_angle;
+                if (layer->linear_from == BackgroundGradient::LinearFrom::corner) {
+                    // A corner gradient's line is perpendicular to the OTHER
+                    // diagonal, so its end colour lands exactly on the named
+                    // corner — which makes the angle a function of the box's
+                    // aspect ratio and impossible to bake before layout.
+                    //
+                    // The perpendicular to the bottom-left..top-right diagonal
+                    // (w, -h) is (h, w), so the angle off vertical is
+                    // atan2(HEIGHT, width) — the transposed atan2(w, h) is a
+                    // different angle on any box that is not square, and on a
+                    // 160x100 box it misses Chrome's boundary by 48px.
+                    const float a = std::atan2(tile_h, tile_w);
+                    radians = layer->corner_y < 0.0f
+                                  ? layer->corner_x * a
+                                  : 3.14159265f - layer->corner_x * a;
+                }
+                // The line runs through the centre; its length is the box's
+                // projection onto it, so the end stops sit on the corners.
+                const float w = tile_w, h = tile_h;
+                const float dx = std::sin(radians), dy = -std::cos(radians);
+                const float len = std::fabs(w * dx) + std::fabs(h * dy);
+                lx0 = (w * 0.5f - dx * len * 0.5f) / (w != 0.0f ? w : 1.0f);
+                ly0 = (h * 0.5f - dy * len * 0.5f) / (h != 0.0f ? h : 1.0f);
+                lx1 = (w * 0.5f + dx * len * 0.5f) / (w != 0.0f ? w : 1.0f);
+                ly1 = (h * 0.5f + dy * len * 0.5f) / (h != 0.0f ? h : 1.0f);
+            }
+            const float line_dx = (lx1 - lx0) * tile_w;
+            const float line_dy = (ly1 - ly0) * tile_h;
+            const float line_len =
+                std::sqrt(line_dx * line_dx + line_dy * line_dy);
+
+            // A repeating linear's stops span ONE BAND, so the shader gets the
+            // band's endpoints and tiles it along the line rather than being
+            // stretched across the box. The band arrives either as a CSS length
+            // or as a fraction of the line, and the line's length is only
+            // knowable here — which is the whole reason the parser hands the
+            // unit forward instead of collapsing it.
+            //
+            // A band that already covers the line has nothing to repeat and
+            // degrades to the plain form, mirroring the conic below.
+            const float band =
+                layer->linear_repeat_unit == BackgroundGradient::RepeatUnit::px
+                    ? layer->linear_repeat
+                    : layer->linear_repeat * line_len;
+            if (band > 0.0f && line_len > 0.0f && band < line_len)
+                band_span = band / line_len;
+
+            // Raw `px` stop positions divide by the line, and the line is the
+            // TILE's whenever `background-size` shrank the layer. That is the
+            // second half of the same defect and it cannot land separately:
+            // against the element's 128px box a one-pixel stop is 1/128 and
+            // draws ONE hairline at the top, against the 32px tile it is 1/32
+            // and draws the stripe the design asked for, once per tile.
+            if (layer->positions_in_px && line_len > 0.0f &&
+                grad_n <= kMaxInlineStops) {
+                for (int i = 0; i < grad_n; ++i)
+                    stop_buf[i] =
+                        layer->positions[static_cast<std::size_t>(i)] / line_len;
+                grad_p = stop_buf;
+            }
         }
+
+        // Set this layer's shader for ONE tile, whose top-left is (ox, oy) in
+        // the view's own coordinates.
+        const auto set_layer_shader = [&](float ox, float oy) {
+            if (layer->type == 2) {  // radial
+                const ResolvedRadial r = resolve_radial(*layer, tile_w, tile_h);
+                canvas.set_fill_gradient_radial_elliptical(
+                    ox + r.cx, oy + r.cy, r.rx, r.ry, grad_c, grad_p, grad_n);
+            } else if (layer->type == 3) {  // conic / sweep
+                // One call for both spellings: a plain conic spans a full turn,
+                // so the repeating entry point resolves to the same shader.
+                canvas.set_fill_gradient_conic_repeating(
+                    ox + layer->x0 * tile_w, oy + layer->y0 * tile_h,
+                    layer->angle, layer->sweep_turns, grad_c, grad_p, grad_n);
+            } else {  // linear
+                const float px0 = ox + lx0 * tile_w, py0 = oy + ly0 * tile_h;
+                const float px1 = ox + lx1 * tile_w, py1 = oy + ly1 * tile_h;
+                if (band_span > 0.0f) {
+                    canvas.set_fill_gradient_linear_repeating(
+                        px0, py0, px0 + (px1 - px0) * band_span,
+                        py0 + (py1 - py0) * band_span, grad_c, grad_p, grad_n);
+                } else {
+                    canvas.set_fill_gradient_linear(px0, py0, px1, py1,
+                                                    grad_c, grad_p, grad_n);
+                }
+            }
+        };
+
+        if (!bg_tiles) {
+            set_layer_shader(0.0f, 0.0f);
+            if (use_per_corner) {
+                build_corner_path(bounds_.width, bounds_.height,
+                                                   eff_tl, eff_tr, eff_bl, eff_br);
+                canvas.fill_current_path();
+            } else if (eff_r > 0) {
+                canvas.fill_rounded_rect(0, 0, bounds_.width, bounds_.height, eff_r);
+            } else {
+                canvas.fill_rect(0, 0, bounds_.width, bounds_.height);
+            }
+            canvas.clear_fill_gradient();
+            continue;
+        }
+
+        // A tiled layer fills RECTANGLES, so the element's own shape has to
+        // come from the clip rather than from the fill. `clip_rect` is the
+        // floor every backend implements; a rounded box additionally clips to
+        // its corner path, and a backend without a path clip no-ops that and
+        // leaves the tiles square-cornered rather than spilling past the box.
+        canvas.save();
+        canvas.clip_rect(0, 0, bounds_.width, bounds_.height);
         if (use_per_corner) {
             build_corner_path(bounds_.width, bounds_.height,
-                                               eff_tl, eff_tr, eff_bl, eff_br);
-            canvas.fill_current_path();
+                              eff_tl, eff_tr, eff_bl, eff_br);
+            canvas.clip();
         } else if (eff_r > 0) {
-            canvas.fill_rounded_rect(0, 0, bounds_.width, bounds_.height, eff_r);
-        } else {
-            canvas.fill_rect(0, 0, bounds_.width, bounds_.height);
-        }
-        canvas.clear_fill_gradient();
-    }
-
-    // Paint background if set
-    if (has_bg_ && bg_gradients_.empty()) {
-        canvas.set_fill_color(bg_color_);
-        if (use_per_corner) {
             build_corner_path(bounds_.width, bounds_.height,
-                                               eff_tl, eff_tr, eff_bl, eff_br);
-            canvas.fill_current_path();
-        } else if (eff_r > 0) {
-            canvas.fill_rounded_rect(0, 0, bounds_.width, bounds_.height, eff_r);
-        } else {
-            canvas.fill_rect(0, 0, bounds_.width, bounds_.height);
+                              eff_r, eff_r, eff_r, eff_r);
+            canvas.clip();
         }
+        for (float ty = 0.0f; ty < bounds_.height; ty += tile_h) {
+            for (float tx = 0.0f; tx < bounds_.width; tx += tile_w) {
+                set_layer_shader(tx, ty);
+                canvas.fill_rect(tx, ty, tile_w, tile_h);
+                canvas.clear_fill_gradient();
+            }
+        }
+        canvas.restore();
     }
 
-    // Paint border if set. border-style is honored at paint time:
-    // `none` / `hidden` short-circuit; `dashed` / `dotted` install a
-    // SkDashPathEffect via canvas.set_line_dash(...) before stroking.
-    // Other named styles (`double` / `groove` / `ridge` / `inset` /
-    // `outset`) currently degrade to solid.
-    if (has_border_ && border_width_ > 0
-            && border_style_ != BorderStyle::none
-            && border_style_ != BorderStyle::hidden) {
-        canvas.set_stroke_color(border_color_);
-        canvas.set_line_width(border_width_);
+    paint_border(canvas, use_per_corner, build_corner_path,
+                 eff_r, eff_tl, eff_tr, eff_bl, eff_br);
+}
 
-        // Install dash pattern for dashed / dotted. Pattern values are
-        // a function of the stroke width so the visible cadence scales
-        // with the border thickness — matches how CSS UAs render these.
-        const float w = border_width_;
+// A border lives INSIDE the border box. `bounds_` is the border box, so the
+// outer edge of every side is the box outline and the ink grows inward. A
+// stroke is centred on its path, so stroking the outline directly puts half
+// the width OUTSIDE the element: measured against Chrome at dpr 2, a 4px
+// border landed 4 device pixels wide of where the browser drew it, on all four
+// sides, on every bordered node in a captured panel.
+//
+// The four sides are resolved independently, the same way `apply_border_widths`
+// resolves them for layout, because CSS resolves them independently even when
+// the author wrote the shorthand. Two shapes come out of that:
+//
+//   * All four widths AND colours equal — one stroke down the middle of the
+//     border band. This is the only shape that can carry `dashed` / `dotted`
+//     around a corner, and the only one that follows a corner radius exactly.
+//   * Anything else — each side filled as the trapezoid between its outer edge
+//     and the padding box, which is how a UA mitres adjacent sides of
+//     different widths or colours. A corner radius is applied as a clip on
+//     that path rather than followed per side: the outer arc is then right and
+//     the inner corner is mitred straight, which is a fraction of a pixel off
+//     for the small radii these appear with.
+void View::paint_border(canvas::Canvas& canvas,
+                        bool use_per_corner,
+                        const CornerPathBuilder& build_corner_path,
+                        float eff_r, float eff_tl, float eff_tr,
+                        float eff_bl, float eff_br) {
+    if (border_style_ == BorderStyle::none
+            || border_style_ == BorderStyle::hidden) {
+        return;
+    }
+
+    // Resolution order matches yoga_layout.cpp's `resolve_edge`: an explicitly
+    // set edge wins even when it is 0, otherwise the uniform shorthand applies.
+    const float uniform_w = has_border_ ? std::max(0.0f, border_width_) : 0.0f;
+    const auto edge_w = [&](bool was_set, float value) {
+        return was_set ? std::max(0.0f, value) : uniform_w;
+    };
+    const float w = bounds_.width;
+    const float h = bounds_.height;
+
+    // Opposite sides cannot want more than the box has. Chrome resolves that
+    // over-constraint by giving the NEAR side its full width and handing the
+    // far side only what is left: `border-left: 50px; border-right: 50px` on a
+    // 60px-wide box paints 50 on the left and 10 on the right, measured. It is
+    // also what keeps the inset stroke below from being handed a negative
+    // rectangle, which no backend has a sensible answer for.
+    const float wt = std::min(edge_w(border_top_set_, border_top_.width), h);
+    const float wb = std::min(edge_w(border_bottom_set_, border_bottom_.width),
+                              std::max(0.0f, h - wt));
+    const float wl = std::min(edge_w(border_left_set_, border_left_.width), w);
+    const float wr = std::min(edge_w(border_right_set_, border_right_.width),
+                              std::max(0.0f, w - wl));
+    if (wt <= 0.0f && wr <= 0.0f && wb <= 0.0f && wl <= 0.0f) return;
+
+    const auto edge_c = [&](bool was_set, Color value) {
+        return was_set ? value : border_color_;
+    };
+    const Color ct = edge_c(border_top_color_set_, border_top_.color);
+    const Color cr = edge_c(border_right_color_set_, border_right_.color);
+    const Color cb = edge_c(border_bottom_color_set_, border_bottom_.color);
+    const Color cl = edge_c(border_left_color_set_, border_left_.color);
+
+    if (wt == wr && wr == wb && wb == wl && ct == cr && cr == cb && cb == cl) {
+        const float bw = wt;
+        const float half = bw * 0.5f;
+        canvas.set_stroke_color(ct);
+        canvas.set_line_width(bw);
+
+        // Dash cadence read off Chrome's own render of a 3px border at dpr 2:
+        // `dashed` paints 12 device px on / 6 off, `dotted` 6 on / 6 off —
+        // 2w/1w and 1w/1w. Blink additionally stretches the pattern so a whole
+        // number of dashes fits each side exactly; a single path effect cannot,
+        // so the cadence is right and the phase drifts along a long edge.
         if (border_style_ == BorderStyle::dashed) {
-            const float dashed[2] = { 3.0f * w, 3.0f * w };
+            const float dashed[2] = { 2.0f * bw, 1.0f * bw };
             canvas.set_line_dash(dashed, 2, 0.0f);
         } else if (border_style_ == BorderStyle::dotted) {
-            const float dotted[2] = { 1.0f * w, 2.0f * w };
+            const float dotted[2] = { 1.0f * bw, 1.0f * bw };
             canvas.set_line_dash(dotted, 2, 0.0f);
         }
 
         if (use_per_corner) {
-            build_corner_path(bounds_.width, bounds_.height,
-                                               eff_tl, eff_tr, eff_bl, eff_br);
+            canvas.save();
+            canvas.translate(half, half);
+            build_corner_path(w - bw, h - bw,
+                              std::max(0.0f, eff_tl - half),
+                              std::max(0.0f, eff_tr - half),
+                              std::max(0.0f, eff_bl - half),
+                              std::max(0.0f, eff_br - half));
             canvas.stroke_current_path();
+            canvas.restore();
         } else if (eff_r > 0) {
-            canvas.stroke_rounded_rect(0, 0, bounds_.width, bounds_.height, eff_r);
+            canvas.stroke_rounded_rect(half, half, w - bw, h - bw,
+                                       std::max(0.0f, eff_r - half));
         } else {
-            canvas.stroke_rect(0, 0, bounds_.width, bounds_.height);
+            canvas.stroke_rect(half, half, w - bw, h - bw);
         }
 
-        // Reset dash pattern so subsequent strokes (per-side borders,
-        // children) aren't dashed inadvertently. Empty intervals array
-        // disables the path effect on Skia and is a no-op on CG.
+        // Reset the dash so later strokes (outline, children) aren't dashed
+        // inadvertently. An empty intervals array disables the path effect on
+        // Skia and is a no-op on CG.
         if (border_style_ == BorderStyle::dashed
                 || border_style_ == BorderStyle::dotted) {
             canvas.set_line_dash(nullptr, 0, 0.0f);
         }
+        return;
     }
+
+    // Mixed sides. Confine the ink to the rounded outline first so a radius is
+    // not simply lost, then draw each side.
+    const bool rounded = use_per_corner || eff_r > 0;
+    if (rounded) {
+        canvas.save();
+        if (use_per_corner) {
+            build_corner_path(w, h, eff_tl, eff_tr, eff_bl, eff_br);
+        } else {
+            build_per_corner_rounded_rect_path(canvas, w, h, eff_r, eff_r,
+                                               eff_r, eff_r);
+        }
+        canvas.clip();
+    }
+
+    const bool patterned = border_style_ == BorderStyle::dashed
+                        || border_style_ == BorderStyle::dotted;
+
+    // Sides that differ only in WIDTH are one shape, and drawing them as four
+    // abutting fills is not the same picture: two antialiased edges meeting
+    // along a mitre composite to about 75% coverage, so a seam of background
+    // shows through the diagonal. It is four corner pixels on a hairline and a
+    // full diagonal once the sides are thick. One ring — the border box with
+    // the padding box knocked out of it — has no interior edge to seam.
+    if (!patterned && ct == cr && cr == cb && cb == cl) {
+        const float inner_w = std::max(0.0f, w - wl - wr);
+        const float inner_h = std::max(0.0f, h - wt - wb);
+        canvas.set_fill_color(ct);
+        canvas.begin_path();
+        canvas.move_to(0.0f, 0.0f);
+        canvas.line_to(w, 0.0f);
+        canvas.line_to(w, h);
+        canvas.line_to(0.0f, h);
+        canvas.close_path();
+        if (inner_w > 0.0f && inner_h > 0.0f) {
+            canvas.move_to(wl, wt);
+            canvas.line_to(wl + inner_w, wt);
+            canvas.line_to(wl + inner_w, wt + inner_h);
+            canvas.line_to(wl, wt + inner_h);
+            canvas.close_path();
+        }
+        canvas.fill_current_path(canvas::FillRule::evenodd);
+        if (rounded) canvas.restore();
+        return;
+    }
+
+    const auto side_dash = [&](float bw) {
+        if (border_style_ == BorderStyle::dashed) {
+            const float dashed[2] = { 2.0f * bw, 1.0f * bw };
+            canvas.set_line_dash(dashed, 2, 0.0f);
+        } else {
+            const float dotted[2] = { 1.0f * bw, 1.0f * bw };
+            canvas.set_line_dash(dotted, 2, 0.0f);
+        }
+    };
+    // A dash pattern is a stroke property, so a patterned side is stroked down
+    // its own centre line instead of filled. The mitre is lost, which is what
+    // a dashed corner looks like anyway.
+    const auto draw_side = [&](float bw, Color c,
+                               float ax, float ay, float bx, float by,
+                               float cx, float cy, float dx, float dy,
+                               float lx0, float ly0, float lx1, float ly1) {
+        if (bw <= 0.0f) return;
+        if (patterned) {
+            canvas.set_stroke_color(c);
+            canvas.set_line_width(bw);
+            side_dash(bw);
+            canvas.begin_path();
+            canvas.move_to(lx0, ly0);
+            canvas.line_to(lx1, ly1);
+            canvas.stroke_current_path();
+            canvas.set_line_dash(nullptr, 0, 0.0f);
+            return;
+        }
+        canvas.set_fill_color(c);
+        canvas.begin_path();
+        canvas.move_to(ax, ay);
+        canvas.line_to(bx, by);
+        canvas.line_to(cx, cy);
+        canvas.line_to(dx, dy);
+        canvas.close_path();
+        canvas.fill_current_path();
+    };
+
+    // Outer edge along the border box, inner edge along the padding box; the
+    // two meet on the 45° mitre CSS draws between adjacent sides.
+    draw_side(wt, ct, 0, 0, w, 0, w - wr, wt, wl, wt,
+              0, wt * 0.5f, w, wt * 0.5f);
+    draw_side(wr, cr, w, 0, w, h, w - wr, h - wb, w - wr, wt,
+              w - wr * 0.5f, 0, w - wr * 0.5f, h);
+    draw_side(wb, cb, w, h, 0, h, wl, h - wb, w - wr, h - wb,
+              0, h - wb * 0.5f, w, h - wb * 0.5f);
+    draw_side(wl, cl, 0, h, 0, 0, wl, wt, wl, h - wb,
+              wl * 0.5f, 0, wl * 0.5f, h);
+
+    if (rounded) canvas.restore();
 }
 
 void View::paint_children_in_order(canvas::Canvas& canvas) {
@@ -764,14 +1360,70 @@ void View::paint_content(canvas::Canvas& canvas, const EffectLayerState& layers,
     // push_effect_layers opened. Kept as one unit so FU-3's subtree cache can
     // wrap exactly this (background/border/paint()/children/decorations) while
     // the animatable layer wrappers stay outside the cache.
+    // An import-resolved ancestor clip wraps this view's OWN ink — its shadow,
+    // its box, its widget painting — and is released before the children, each
+    // of which carries the rectangle its own CSS clip chain resolves to. That
+    // asymmetry against `overflow` below is the point: `overflow` clips the
+    // subtree, this clips the view, and only the latter can express a child
+    // that escapes a clip its parent is inside.
+    const bool has_ancestor_clip = ancestor_clip_rect().has_value();
+    const auto open_ancestor_clip = [&] {
+        if (!has_ancestor_clip) return;
+        const Rect& r = *ancestor_clip_rect();
+        canvas.save();
+        // CSS clips overflow to the clipper's ROUNDED padding box, so a child
+        // with square corners inside a rounded card is cut to the card's curve.
+        // Clipping to the bare rectangle paints that child square into the
+        // corner and the card reads as unrounded even though its border curves.
+        const auto& cr = ancestor_clip_radii();
+        const float m = 0.5f * std::min(r.width, r.height);
+        const float tl = std::min(cr[0], m), tr = std::min(cr[1], m);
+        const float br = std::min(cr[2], m), bl = std::min(cr[3], m);
+        const bool rounded =
+            (tl > 0.5f || tr > 0.5f || br > 0.5f || bl > 0.5f) &&
+            canvas.supports(canvas::CanvasCapability::clip_path_svg);
+        if (!rounded) {
+            canvas.clip_rect(r.x, r.y, r.width, r.height);
+            return;
+        }
+        const float x = r.x, y = r.y, w = r.width, h = r.height;
+        std::ostringstream d;
+        d << "M " << (x + tl) << " " << y
+          << " H " << (x + w - tr)
+          << " A " << tr << " " << tr << " 0 0 1 " << (x + w) << " " << (y + tr)
+          << " V " << (y + h - br)
+          << " A " << br << " " << br << " 0 0 1 " << (x + w - br) << " " << (y + h)
+          << " H " << (x + bl)
+          << " A " << bl << " " << bl << " 0 0 1 " << x << " " << (y + h - bl)
+          << " V " << (y + tl)
+          << " A " << tl << " " << tl << " 0 0 1 " << (x + tl) << " " << y << " Z";
+        canvas.clip_path_svg(d.str());
+    };
+    const auto close_ancestor_clip = [&] {
+        if (has_ancestor_clip) canvas.restore();
+    };
+
+    // The shadow is painted before the view's own `overflow` clip is installed
+    // — a box does not clip its own outset shadow — but an ANCESTOR's clip does
+    // cut it, so when there IS a shadow it gets its own scope. Skipped
+    // otherwise, so the common case installs the rectangle exactly once.
+    const bool clip_shadows = has_ancestor_clip && has_box_shadow();
+    if (clip_shadows) open_ancestor_clip();
     paint_outset_shadows(canvas);
+    if (clip_shadows) close_ancestor_clip();
+
+    // Pushed outside the scope below because `overflow` / `clip-path` DO apply
+    // to the children, and the ancestor clip deliberately does not.
     apply_overflow_and_clip_path(canvas);
+
+    open_ancestor_clip();
     paint_background_and_border(canvas);
 
     // Widget-specific painting. The outer timer wraps the whole paint_all body,
     // so `paint(canvas)` no-op overrides on styled containers still get
     // accurate self-time attribution.
     paint(canvas);
+    close_ancestor_clip();
 
     // Time only the recursive child paint so self_ns = outer - children in
     // paint_all correctly attributes framework drawing to this view.

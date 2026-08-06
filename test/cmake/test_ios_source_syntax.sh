@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root=${1:?usage: test_ios_source_syntax.sh <source-root> [build-dir]}
+root=${1:?usage: test_ios_source_syntax.sh <source-root> [build-dir] [choc-root]}
 build_dir=${2:-$root/build}
+choc_root=${3:-}
 
 if [[ $(uname -s) != Darwin ]] || ! command -v xcrun >/dev/null 2>&1; then
     echo "SKIP: iOS source syntax gate requires macOS with Xcode"
@@ -19,19 +20,23 @@ while IFS= read -r include_dir; do
 done < <(find "$root/core" -mindepth 2 -maxdepth 2 -type d -name include | sort)
 includes+=("-I$root/core/format/src")
 
-# window_host_ios.mm reaches CHOC through the event-loop headers. CMake's
-# configured FetchContent tree is the canonical dependency location in CI.
-choc_root=
-if [[ -d "$build_dir/_deps/choc-src/choc" ]]; then
+# window_host_ios.mm reaches CHOC through the event-loop headers. The configured
+# source can live in the build tree or in a shared FetchContent cache.
+if [[ -n "$choc_root" ]] && [[ ! -d "$choc_root/choc/containers" ]]; then
+    echo "ERROR: configured CHOC source is invalid: $choc_root" >&2
+    exit 1
+fi
+if [[ -z "$choc_root" ]] && [[ -d "$build_dir/_deps/choc-src/choc" ]]; then
     choc_root="$build_dir/_deps/choc-src"
-else
+fi
+if [[ -z "$choc_root" ]]; then
     choc_dir=$(find "$build_dir/_deps" -type d -path '*/choc/containers' -print -quit 2>/dev/null || true)
     if [[ -n "$choc_dir" ]]; then
         choc_root=${choc_dir%/choc/containers}
     fi
 fi
 if [[ -z "$choc_root" ]]; then
-    echo "ERROR: configured CHOC source not found under $build_dir/_deps" >&2
+    echo "ERROR: configured CHOC source not found for $build_dir" >&2
     exit 1
 fi
 includes+=("-I$choc_root")

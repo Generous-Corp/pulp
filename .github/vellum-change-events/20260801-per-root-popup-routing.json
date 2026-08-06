@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20260801-per-root-popup-routing",
+  "kind": "change",
+  "created_at": "2026-08-01T19:05:00Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "Wheel delivery resolved the open dropdown through ComboBox::active_popup_, a process-wide mirror naming whichever editor opened a dropdown most recently. That is correct while one editor exists per process and wrong the moment several do, which is the ordinary shape on macOS: a product family loaded into one shared AUHostingServiceXPC puts several Pulp editors in a single process. A wheel delivered to editor B whose point happened to fall inside editor A's dropdown rect was routed into A's ComboBox, so B's own scroll handling never ran and B's captured target became a View owned by a different plugin instance. deliver_mouse_wheel now asks ComboBox::active_popup_in(root), which resolves the root-owned interaction slot and by construction only ever names a popup inside that same tree; the surrounding bypass, the rect containment test, and the fallthrough to normal hit testing are all unchanged, so a single-editor process behaves exactly as before. The lookup is non-allocating, so a tree that never opened a dropdown answers null without materializing state. Pulp-only: the defect is reachable only through Pulp's plug-in hosting model, where the host decides how many editors share a process, and no counterpart framework change exists to backport.",
+  "tests": [
+    "pulp-test-interaction-multiinstance",
+    "pulp-test-multi-plugin-coexistence",
+    "pulp-test-widget-bridge"
+  ],
+  "disposition": "pulp-only"
+}

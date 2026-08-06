@@ -211,6 +211,7 @@ ProgramWireAutomationLaneRecord lane_record(const AutomationProgram& lane,
     ProgramWireAutomationLaneRecord record;
     record.lane_id = lane.lane_id().value;
     record.generation = lane.generation();
+    record.instance_token = lane.instance_token().value;
     record.segment_first = segment_first;
     record.segment_count = static_cast<std::uint32_t>(lane.segments().size());
     record.leading_value = lane.leading_value();
@@ -649,6 +650,13 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
         if (!in_range(lane.segment_first, lane.segment_count, view.automation_segments_.size()))
             return ViewResult(runtime::Err(
                 Error{Code::RangeOutOfBounds, section_id(ProgramWireSection::AutomationLanes), l}));
+        // Zero is what a lane record left unwritten holds, and it would compare
+        // equal to every other unwritten lane, so a consumer would report
+        // Unchanged for a program it has never adopted. Refused here rather
+        // than treated as "no identity available".
+        if (lane.instance_token == 0)
+            return ViewResult(runtime::Err(Error{
+                Code::InvalidInstanceToken, section_id(ProgramWireSection::AutomationLanes), l}));
         if (lane.target_kind > static_cast<std::uint8_t>(ProgramWireTargetKind::TrackMixer) ||
             lane.evaluation_rate > static_cast<std::uint8_t>(AutomationEvaluationRate::BlockRate) ||
             lane.mixer_parameter > static_cast<std::uint8_t>(timeline::TrackMixerParameter::Pan))
@@ -824,7 +832,8 @@ bool program_wire_matches(const ProgramWireView& view, const PlaybackProgram& pr
                 copy.leading_value != lane.leading_value())
                 return false;
             const auto expected = lane_record(lane, copy.segment_first);
-            if (copy.target_kind != expected.target_kind ||
+            if (copy.instance_token != expected.instance_token ||
+                copy.target_kind != expected.target_kind ||
                 copy.device_placement_id != expected.device_placement_id ||
                 copy.device_param_id != expected.device_param_id ||
                 copy.mixer_parameter != expected.mixer_parameter ||

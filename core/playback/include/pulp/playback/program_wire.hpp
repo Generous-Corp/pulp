@@ -49,35 +49,47 @@
 /// id order, even when empty. One program, one tempo-point sequence, and one
 /// producer epoch have exactly one byte encoding, which is what makes a
 /// byte-level golden a real guard rather than a record of whatever the encoder
-/// happened to do.
+/// happened to do. Note the unit: one *program*, not one document. Each
+/// automation lane carries its program's instance token, which is minted per
+/// compile, so two compiles of one document are two programs and encode to two
+/// byte ranges — deliberately, since that difference is the identity a consumer
+/// needs. A golden over a fixed document therefore normalises those tokens
+/// before hashing; everything else in the payload is still fixed by the input.
 ///
-/// **Adoption contract — `(producer_epoch, generation)`, not `generation`.**
-/// A consumer decides three ways about an arriving payload, and both components
-/// are load-bearing:
+/// **Adoption contract — `(producer_epoch, generation)` decides the producer
+/// and the ordering; the lane's `instance_token` decides sameness.**
+/// A consumer decides three ways about an arriving payload:
 ///
 ///   - `producer_epoch` differs from the adopted one → a *different producer*.
 ///     Reset any carried cursor state and adopt unconditionally. Comparing
 ///     generations across producers is meaningless.
 ///   - Same epoch, `generation` greater → the same producer advancing. Adopt.
-///   - Same epoch, same generation → genuinely the same publication. Keep
-///     carried state.
+///   - Same epoch, same generation → **not** necessarily the same publication.
+///     `generation` is supplied by the caller rather than minted per compile,
+///     so one producer can publish two different programs under one generation.
+///     Compare each lane's `instance_token`: equal means genuinely the same
+///     program, so carried cursor state is still valid and is kept; different
+///     means a new program that happens to share a generation, and the lane is
+///     re-adopted. Deciding this case on `(lane_id, generation)` alone is what
+///     renders a stale curve with nothing malformed for a decoder to reject.
 ///
-/// Neither component is sufficient alone, because the two counters have
-/// different scopes. `generation` is **per store and restarts**: a fresh
-/// `PlaybackProgramStore` publishes generation 1, so a producer that is torn
-/// down and recreated — a page rebuilding a Worker while the AudioWorklet
+/// Neither program-level component is sufficient alone, because the two
+/// counters have different scopes. `generation` is **per store and restarts**:
+/// a fresh `PlaybackProgramStore` publishes generation 1, so a producer that is
+/// torn down and recreated — a page rebuilding a Worker while the AudioWorklet
 /// survives — begins again at 1 while the consumer sits at N. Judged on
 /// generation alone that is not monotonic, so every publish is refused and the
 /// consumer renders a stale program indefinitely, with nothing distinguishing
 /// "refused once" from "refused forever". Judged on the epoch first, it is
-/// simply a new producer.
+/// simply a new producer. In the other direction, two *producers* of one
+/// document both mint generation 1 for the same lane, and without an epoch a
+/// consumer would read that as the same publication.
 ///
-/// The epoch also replaces, across the boundary, the guard the in-process
-/// instance token provides: two producers of one document both mint generation
-/// 1 for the same lane, and without an epoch a consumer would read that as the
-/// same publication and silently keep stale state. The token itself cannot do
-/// this job here — it is process-local, so two producers' tokens are not
-/// comparable at all.
+/// The epoch answers both of those and only those: they are questions about
+/// *producers*. It does not separate two programs from **one** producer, which
+/// is the more common case. So the full lane identity a consumer compares is
+/// `(producer_epoch, lane_id, generation, instance_token)`, and no proper
+/// subset of it is sufficient — see `ProgramWireAutomationLaneRecord`.
 ///
 /// **What this format is sufficient for.** A note, automation, and mixer
 /// program. It structurally cannot express an audio-clip program: there is no
@@ -134,11 +146,19 @@ static_assert(std::endian::native == std::endian::little,
               "consume one, not silently emit records a reader would misread");
 
 /// The format this build writes and is able to read.
-inline constexpr std::uint16_t kProgramWireVersion = 1;
+///
+/// Version 2 widened `ProgramWireAutomationLaneRecord` to carry the lane's
+/// instance token. A version 1 reader would not merely miss that field: it
+/// divides the section's byte length by its own 48-byte record, and a lane
+/// count whose 56-byte length happens to divide by 48 — six lanes, for one —
+/// decodes as seven records of shifted garbage rather than failing. So
+/// `min_reader_version` moves with it, which is what makes that reader refuse
+/// the payload instead of misreading it.
+inline constexpr std::uint16_t kProgramWireVersion = 2;
 
 /// Written into every payload this build produces. Bump only when a reader at
 /// an earlier version would misread the bytes rather than merely miss data.
-inline constexpr std::uint16_t kProgramWireMinReaderVersion = 1;
+inline constexpr std::uint16_t kProgramWireMinReaderVersion = 2;
 
 /// Spells `PLPW` in the first four bytes of every payload.
 inline constexpr std::uint32_t kProgramWireMagic = 0x5750'4C50u;
@@ -244,6 +264,11 @@ enum class ProgramWireErrorCode : std::uint8_t {
     /// other zero, making two unrelated producers look like one, so it is
     /// refused at both ends rather than silently acting as a wildcard.
     InvalidProducerEpoch,
+    /// An automation lane's instance token is zero. Same reasoning one level
+    /// down: two lanes carrying zero would compare equal, so a consumer would
+    /// report Unchanged for a program it has never seen. `detail` carries the
+    /// lane's index within the section.
+    InvalidInstanceToken,
 };
 
 struct ProgramWireError {
@@ -390,21 +415,43 @@ struct ProgramWireNoteModifierRecord {
     std::uint8_t pad[7] = {};
 };
 
-/// AutomationProgram's instance token is deliberately absent: it is a
-/// producer-process-local allocation counter, and a consuming realm has no
-/// token space to compare a foreign one against, so carrying it would move a
-/// meaningless number rather than an identity. Omitting it is also what makes
-/// one document encode to one byte range.
+/// `instance_token` is the producer's own `AutomationProgram::instance_token()`
+/// carried verbatim, because lane identity is **not** `(lane_id, generation)`
+/// alone. In-process, `AutomationCursor` decides Unchanged on the lane key
+/// *and* the token together, so the token is what stops two different programs
+/// that share a key from being mistaken for one; a consumer computing Unchanged
+/// without it reaches the opposite answer to the cursor and renders a stale
+/// lane, silently, with no decode error to notice.
 ///
-/// It is **not** absent because lane identity is `(lane_id, generation)` alone.
-/// In-process, `AutomationCursor` decides Unchanged on the lane key *and* the
-/// instance token together, so the token is what stops two different programs
-/// that share a key from being mistaken for one. `producer_epoch` on the
-/// program record is what replaces that guard across a realm — see the adoption
-/// contract above.
+/// The objection this answers is that the token is a producer-process-local
+/// allocation counter, so a foreign one names nothing a consumer can look up.
+/// True, and beside the point: a consumer never compares a foreign token to one
+/// of its own. It compares two foreign tokens **to each other, within one
+/// `producer_epoch`**, where they came from the same counter and mean exactly
+/// what they mean in process. Across epochs they are indeed incomparable — and
+/// across epochs the epoch has already decided, so the token is not consulted.
+///
+/// Equality only. A larger token does not mean *newer* on the wire: ordering is
+/// `(producer_epoch, generation)`'s job, and a producer is free to publish
+/// programs compiled out of order. Zero is refused for the reason a zero epoch
+/// is — it would compare equal to every other zero and quietly merge two
+/// distinct programs into one — but at the decoder only, not at both ends like
+/// the epoch: `AutomationProgram`'s constructor is private to the compiler,
+/// which always mints a nonzero token, so an encoder-side check would be
+/// unreachable. The decoder is where a foreign payload arrives, which is the
+/// end that needs it.
+///
+/// The incremental compiler reuses a lane's program when that lane did not
+/// change, so its token is stable across a publish that touched only its
+/// neighbours. Per-lane rather than per-publication is what preserves that:
+/// a consumer re-adopts the lanes that actually moved and keeps its cursor
+/// state for the rest.
 struct ProgramWireAutomationLaneRecord {
     std::uint64_t lane_id = 0;
     std::uint64_t generation = 0;
+    /// Nonzero always. Comparable only against another token carrying the same
+    /// `producer_epoch`, and only for equality.
+    std::uint64_t instance_token = 0;
     std::uint32_t segment_first = 0;
     std::uint32_t segment_count = 0;
     float leading_value = 0.0f;
@@ -450,7 +497,7 @@ static_assert(sizeof(ProgramWireTrackRecord) == 112);
 static_assert(sizeof(ProgramWireIdRecord) == 8);
 static_assert(sizeof(ProgramWireNoteEventRecord) == 40);
 static_assert(sizeof(ProgramWireNoteModifierRecord) == 32);
-static_assert(sizeof(ProgramWireAutomationLaneRecord) == 48);
+static_assert(sizeof(ProgramWireAutomationLaneRecord) == 56);
 static_assert(sizeof(ProgramWireAutomationSegmentRecord) == 48);
 
 /// Every record is a multiple of eight bytes, so tiling sections back to back

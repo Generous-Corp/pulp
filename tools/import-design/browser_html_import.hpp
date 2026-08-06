@@ -28,6 +28,10 @@ struct BrowserHtmlImportRequest {
     bool allow_browser_network = false;
     bool dry_run = false;
     bool supports_faithful_capture = true;
+    /// Draw the panel from its lowered nodes instead of the captured bitmap.
+    /// See BrowserCaptureIrOptions::native_panel_lowering — off by default
+    /// because the capture is the A-side of the A/B, not a legacy path.
+    bool native_panel_lowering = false;
 };
 
 struct BrowserHtmlNotApplicable {};
@@ -51,6 +55,10 @@ struct BrowserHtmlCaptured {
     std::filesystem::path reference_png;
     std::filesystem::path semantic_report;
     std::vector<std::shared_ptr<BrowserCaptureWorkspace>> workspaces;
+    /// Lowering succeeded but part of the design could not be drawn for a
+    /// reason the CALLER can fix — carried out so the CLI prints it rather
+    /// than leaving it in a node attribute nobody reads.
+    std::vector<std::string> warnings;
 };
 
 using BrowserHtmlImportResult = std::variant<

@@ -362,6 +362,19 @@ public:
         if (count > 0) set_fill_color(colors[0]);
     }
 
+    /// Radial gradient with an independent radius per axis — the ending shape
+    /// CSS calls an `ellipse`, which is `radial-gradient`'s DEFAULT shape and
+    /// the only one a two-value size (`90% 70%`) can express. Backends that can
+    /// carry a local matrix on the shader override this; the default forwards
+    /// to the circular overload using the horizontal radius, which is the
+    /// pre-existing approximation rather than a blank fill.
+    virtual void set_fill_gradient_radial_elliptical(
+            float cx, float cy, float rx, float ry,
+            const Color* colors, const float* positions, int count) {
+        (void)ry;
+        set_fill_gradient_radial(cx, cy, rx, colors, positions, count);
+    }
+
     /// Canvas2D `ctx.createRadialGradient(x0,y0,r0,x1,y1,r1)`
     /// two-circle form. (x0,y0,r0) is the inner / start circle, (x1,y1,r1)
     /// is the outer / end circle. Backends with a real two-circle shader
@@ -1391,6 +1404,27 @@ public:
         save();
     }
 
+    /// CSS `backdrop-filter` with its full function list — `saturate(0.2)`,
+    /// `brightness(2)`, `invert(1)`, a `grayscale(1) brightness(1.6)` pair.
+    /// Same layer contract as `save_backdrop_filter`: the layer's initial
+    /// contents are the parent surface run through the composed filter, and it
+    /// must be paired with restore().
+    ///
+    /// The default keeps exactly the behaviour every backend already had —
+    /// blur entries summed, everything else dropped — so a backend that has
+    /// not implemented the chain renders an unfiltered (or merely blurred)
+    /// backdrop rather than an unbalanced canvas stack. Query
+    /// `CanvasCapability::backdrop_filter_chain` to find out which you got.
+    virtual void save_backdrop_filter_chain(float x, float y, float w, float h,
+                                            const FilterChainEntry* chain,
+                                            int count) {
+        float blur = 0.0f;
+        for (int i = 0; i < count; ++i)
+            if (chain[i].kind == FilterChainEntry::Kind::blur)
+                blur += chain[i].amount;
+        save_backdrop_filter(x, y, w, h, blur);
+    }
+
     // ── Box shadow ──────────────────────────────────────────────────
     /// Draw a CSS-style box shadow around (or inside, when inset) a
     /// rounded rectangle anchored at (x, y, w, h). When `inset` is false
@@ -1752,6 +1786,26 @@ protected:
                                                     int count) {
         (void)sweep_turns;
         set_fill_gradient_conic(cx, cy, start_angle, colors, positions, count);
+    }
+
+    /// Set a REPEATING linear gradient (CSS `repeating-linear-gradient`). The
+    /// two points delimit ONE BAND rather than the whole box — positions are
+    /// normalized to 0..1 across that band — and the band tiles along the
+    /// gradient line in both directions.
+    ///
+    /// Declared after the conic form above and for the same two reasons: a
+    /// wider set_fill_gradient_linear would reorder this vtable under every
+    /// prebuilt SDK consumer, and the Canvas2D command recorders would have to
+    /// grow a field to carry the tile mode. The default paints the band ONCE
+    /// and clamps the rest, which is what a backend that cannot tile should
+    /// show — recognisably the right colours in the wrong places, rather than
+    /// nothing or a silent stretch across the box.
+    virtual void set_fill_gradient_linear_repeating(float x0, float y0,
+                                                     float x1, float y1,
+                                                     const Color* colors,
+                                                     const float* positions,
+                                                     int count) {
+        set_fill_gradient_linear(x0, y0, x1, y1, colors, positions, count);
     }
 
 };

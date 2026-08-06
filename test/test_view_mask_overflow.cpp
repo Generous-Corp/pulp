@@ -12,6 +12,8 @@
 //      empty or set to 'none'.
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
 #include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/frame_clock.hpp>
@@ -190,6 +192,141 @@ TEST_CASE("overflow:hidden on a rounded frame clips to the rounded box, not a sq
     square.paint_all(rc2);
     REQUIRE(rc2.count(pulp::canvas::DrawCommand::Type::clip_path_svg) == 0);
     REQUIRE(rc2.count(pulp::canvas::DrawCommand::Type::clip_rect) >= 1);
+}
+
+// ── Import-resolved ancestor clip ───────────────────────────────────────
+//
+// `overflow` clips a view AND its subtree, which is what a browser does along
+// the containing-block chain and NOT what it does along DOM parentage. An
+// importer that resolves a node's real clip chain therefore needs a clip that
+// applies to the node alone, because a child can legitimately need a WIDER clip
+// than its parent — an absolutely positioned node whose containing block sits
+// above the `overflow: hidden` box it is nested in escapes that clip in a
+// browser, and an inherited clip is an intersection and cannot widen.
+
+namespace {
+/// Where each command sits in the recording, so a clip can be shown to have
+/// been released before a later draw rather than merely to have been pushed.
+int index_of(const pulp::canvas::RecordingCanvas& rc,
+             pulp::canvas::DrawCommand::Type type, int nth = 0) {
+    int seen = 0;
+    for (size_t i = 0; i < rc.commands().size(); ++i) {
+        if (rc.commands()[i].type != type) continue;
+        if (seen++ == nth) return static_cast<int>(i);
+    }
+    return -1;
+}
+}
+
+TEST_CASE("an import-resolved clip applies to the view and not to its children",
+          "[view][overflow][clip-model]") {
+    using T = pulp::canvas::DrawCommand::Type;
+
+    pulp::view::View parent;
+    parent.set_bounds({0, 0, 200, 200});
+    parent.set_background_color(pulp::canvas::Color::rgba8(10, 10, 10, 255));
+    parent.set_ancestor_clip_rect({20, 20, 60, 60});
+
+    auto child = std::make_unique<pulp::view::View>();
+    child->set_bounds({100, 100, 50, 50});
+    child->set_background_color(pulp::canvas::Color::rgba8(200, 0, 0, 255));
+    parent.add_child(std::move(child));
+
+    pulp::canvas::RecordingCanvas rc;
+    parent.paint_all(rc);
+
+    // The rectangle reached the canvas, in the view's own coordinate space.
+    const int clip = index_of(rc, T::clip_rect);
+    REQUIRE(clip >= 0);
+    CHECK(rc.commands()[static_cast<size_t>(clip)].f[0] == 20.0f);
+    CHECK(rc.commands()[static_cast<size_t>(clip)].f[2] == 60.0f);
+
+    // And it was released before the child painted. Without the release the
+    // child's 50x50 box at (100,100) — entirely outside a 60x60 clip at
+    // (20,20) — would have no pixels at all, which is the exact way an escaping
+    // node disappears when a tree clips by parentage.
+    const int child_fill = index_of(rc, T::fill_rect, 1);
+    REQUIRE(child_fill > clip);
+    int depth = 0;
+    int lowest = 0;
+    for (int i = clip; i < child_fill; ++i) {
+        const auto type = rc.commands()[static_cast<size_t>(i)].type;
+        if (type == T::save) ++depth;
+        if (type == T::restore) --depth;
+        lowest = std::min(lowest, depth);
+    }
+    // Dipping below the depth the clip was pushed at is the scope closing. The
+    // child then opens its own, so the depth at the child's draw is back to
+    // where it started and only the minimum along the way says what happened.
+    CHECK(lowest < 0);
+}
+
+TEST_CASE("a view with no import-resolved clip installs none",
+          "[view][overflow][clip-model]") {
+    // The control: without this, the assertion above is satisfied by a canvas
+    // that clips everything, and every native tree would be paying for a
+    // feature only imported ones use.
+    pulp::view::View v;
+    v.set_bounds({0, 0, 200, 200});
+    v.set_background_color(pulp::canvas::Color::rgba8(10, 10, 10, 255));
+    CHECK_FALSE(v.ancestor_clip_rect().has_value());
+
+    pulp::canvas::RecordingCanvas rc;
+    v.paint_all(rc);
+    CHECK(rc.count(pulp::canvas::DrawCommand::Type::clip_rect) == 0);
+}
+
+TEST_CASE("an import-resolved clip and overflow coexist with different reach",
+          "[view][overflow][clip-model]") {
+    // `overflow` still clips the subtree. The two clips are different tools and
+    // a view can carry both: the ancestor clip cuts the view's own ink, the
+    // overflow clip cuts its children. Merging them would put DOM parentage
+    // back in charge of the ancestor clip.
+    using T = pulp::canvas::DrawCommand::Type;
+
+    pulp::view::View parent;
+    parent.set_bounds({0, 0, 200, 200});
+    parent.set_background_color(pulp::canvas::Color::rgba8(10, 10, 10, 255));
+    parent.set_ancestor_clip_rect({20, 20, 60, 60});
+    parent.set_overflow(pulp::view::View::Overflow::hidden);
+
+    auto child = std::make_unique<pulp::view::View>();
+    child->set_bounds({100, 100, 50, 50});
+    child->set_background_color(pulp::canvas::Color::rgba8(200, 0, 0, 255));
+    parent.add_child(std::move(child));
+
+    pulp::canvas::RecordingCanvas rc;
+    parent.paint_all(rc);
+
+    // Two distinct clips. The overflow clip goes first and covers the parent's
+    // whole 200x200 box; the resolved 60x60 rectangle goes inside it.
+    REQUIRE(rc.count(T::clip_rect) == 2);
+    const int overflow_clip = index_of(rc, T::clip_rect, 0);
+    const int ancestor_clip = index_of(rc, T::clip_rect, 1);
+    REQUIRE(overflow_clip >= 0);
+    REQUIRE(ancestor_clip > overflow_clip);
+    CHECK(rc.commands()[static_cast<size_t>(overflow_clip)].f[2] == 200.0f);
+    CHECK(rc.commands()[static_cast<size_t>(ancestor_clip)].f[2] == 60.0f);
+
+    // The overflow clip is never released before the child paints — it reaches
+    // the subtree. The resolved rectangle's scope is, so it does not.
+    const int child_fill = index_of(rc, T::fill_rect, 1);
+    REQUIRE(child_fill > ancestor_clip);
+    // Each measured from its own clip, so "the scope closed" is a dip below
+    // where that clip was pushed rather than below a shared zero.
+    const auto lowest_after = [&](int from) {
+        int depth = 0;
+        int lowest = 0;
+        for (int i = from; i < child_fill; ++i) {
+            const auto type = rc.commands()[static_cast<size_t>(i)].type;
+            if (type == T::save) ++depth;
+            if (type == T::restore) --depth;
+            lowest = std::min(lowest, depth);
+        }
+        return lowest;
+    };
+    CHECK(lowest_after(overflow_clip) == 0);
+    CHECK(lowest_after(ancestor_clip) < 0);
 }
 
 TEST_CASE("View::paint_all does NOT route through save_layer_with_mask when mask-image is 'none'",

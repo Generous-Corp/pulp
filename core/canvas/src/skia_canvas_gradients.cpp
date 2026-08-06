@@ -70,6 +70,25 @@ void SkiaCanvas::set_fill_gradient_linear(float x0, float y0, float x1, float y1
     has_gradient_ = gradient_shader_ != nullptr;
 }
 
+// The band spans pts[0]..pts[1] and Skia tiles it the rest of the way: a
+// one-band span plus a repeating tile mode IS the repetition, so nothing here
+// expands the stop list or touches the paint path. Same shape as
+// set_fill_gradient_conic_repeating below, one axis instead of one turn.
+void SkiaCanvas::set_fill_gradient_linear_repeating(float x0, float y0,
+                                                     float x1, float y1,
+                                                     const Color* colors,
+                                                     const float* positions,
+                                                     int count) {
+    std::vector<SkColor4f> sk_colors;
+    std::vector<float> sk_pos;
+    colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
+    SkPoint pts[2] = {{x0, y0}, {x1, y1}};
+    gradient_shader_ = skia_gradient::make_linear(pts, sk_colors.data(),
+                                                  sk_pos.data(), count,
+                                                  SkTileMode::kRepeat);
+    has_gradient_ = gradient_shader_ != nullptr;
+}
+
 void SkiaCanvas::set_fill_gradient_radial(float cx, float cy, float radius,
                                            const Color* colors, const float* positions, int count) {
     std::vector<SkColor4f> sk_colors;
@@ -77,6 +96,34 @@ void SkiaCanvas::set_fill_gradient_radial(float cx, float cy, float radius,
     colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
     gradient_shader_ = skia_gradient::make_radial({cx, cy}, radius,
                                                   sk_colors.data(), sk_pos.data(), count);
+    has_gradient_ = gradient_shader_ != nullptr;
+}
+
+// An ellipse is a circle of radius rx with the y axis squashed by ry/rx about
+// the centre. Skia has no elliptical gradient, but every shader carries a local
+// matrix, so the squash goes on the SHADER rather than on the canvas — which
+// matters because the canvas transform would also distort the shape being
+// filled, and a background gradient is routinely filled through a rounded-rect
+// or per-corner path whose corners must not stretch with it.
+void SkiaCanvas::set_fill_gradient_radial_elliptical(
+        float cx, float cy, float rx, float ry,
+        const Color* colors, const float* positions, int count) {
+    if (!(rx > 0.0f) || !(ry > 0.0f)) {
+        set_fill_gradient_radial(cx, cy, rx, colors, positions, count);
+        return;
+    }
+    std::vector<SkColor4f> sk_colors;
+    std::vector<float> sk_pos;
+    colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
+    auto shader = skia_gradient::make_radial({cx, cy}, rx,
+                                             sk_colors.data(), sk_pos.data(), count);
+    if (shader) {
+        SkMatrix m = SkMatrix::Translate(cx, cy);
+        m.preScale(1.0f, ry / rx);
+        m.preTranslate(-cx, -cy);
+        shader = shader->makeWithLocalMatrix(m);
+    }
+    gradient_shader_ = std::move(shader);
     has_gradient_ = gradient_shader_ != nullptr;
 }
 

@@ -31,7 +31,7 @@ struct InspectorDiscoveryRecord {
 
 /// Move-only inspector credential whose storage is wiped on every exit path.
 class InspectorCredential {
-public:
+  public:
     explicit InspectorCredential(std::span<const std::uint8_t> bytes);
     ~InspectorCredential();
 
@@ -54,7 +54,7 @@ public:
         return credential == bytes;
     }
 
-private:
+  private:
     void clear() noexcept;
     std::vector<std::uint8_t> bytes_;
 };
@@ -67,28 +67,28 @@ std::filesystem::path default_inspector_runtime_directory();
 /// records or credentials outside the configured owner-private directory,
 /// insecure file modes, expired records, and dead publishers.
 class InspectorDiscoveryReader {
-public:
+  public:
     explicit InspectorDiscoveryReader(
-        std::filesystem::path runtime_directory =
-            default_inspector_runtime_directory());
+        std::filesystem::path runtime_directory = default_inspector_runtime_directory());
 
     const std::filesystem::path& runtime_directory() const {
         return runtime_directory_;
     }
 
-    std::vector<InspectorDiscoveryRecord> list() const;
-    std::optional<InspectorCredential> read_credential(
-        const InspectorDiscoveryRecord& record) const;
+    /// Returns live publications. When `error` is supplied, it is cleared on a
+    /// successful read and describes an unusable discovery directory on
+    /// failure; an empty successful result means no sessions are live.
+    std::vector<InspectorDiscoveryRecord> list(std::string* error = nullptr) const;
+    std::optional<InspectorCredential>
+    read_credential(const InspectorDiscoveryRecord& record) const;
 
-private:
+  private:
     std::filesystem::path runtime_directory_;
 };
 
-std::optional<InspectorDiscoveryRecord> select_inspector_session(
-    std::span<const InspectorDiscoveryRecord> records,
-    std::string_view session_id,
-    std::string_view instance_id = {},
-    std::string_view publication_id = {},
-    std::string* error = nullptr);
+std::optional<InspectorDiscoveryRecord>
+select_inspector_session(std::span<const InspectorDiscoveryRecord> records,
+                         std::string_view session_id, std::string_view instance_id = {},
+                         std::string_view publication_id = {}, std::string* error = nullptr);
 
 } // namespace pulp::inspect

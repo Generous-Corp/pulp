@@ -1,12 +1,12 @@
 #include <pulp/tools/timeline/agent.hpp>
 
-#include "atomic_publisher.hpp"
 #include "bounded_zip_archive.hpp"
 #include "dawproject_media_packager.hpp"
 #include "timeline_agent_internal.hpp"
 
 #include <pulp/dawproject/dawproject_export.hpp>
 #include <pulp/interchange/export_plan.hpp>
+#include <pulp/project_package/atomic_publisher.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/url.hpp>
 #include <pulp/smf/interchange.hpp>
@@ -228,18 +228,27 @@ OperationResult export_project(const ProjectSource& project, std::string_view fo
         return {0, export_result_json(format_text, output_directory, plan)};
     }
 
-    auto publisher = detail::AtomicPublisher::create(output_directory);
+    auto publisher = pulp::project_package::AtomicPublisher::create(output_directory);
     if (!publisher)
         return export_error_result(format_text, plan, "publish",
                                    "output directory must not exist and its parent must exist",
                                    filesystem_path_to_utf8(output_directory));
-    for (const auto& artifact : exported.value().artifacts)
-        if (!publisher->write(artifact.name, artifact.bytes))
+    for (const auto& artifact : exported.value().artifacts) {
+        auto staged = publisher->write(artifact.name, artifact.bytes);
+        if (!staged || !staged.value())
             return export_error_result(format_text, plan, "publish",
                                        "could not stage export artifact", artifact.name);
-    if (!publisher->commit_directory())
+    }
+    auto publication = publisher->commit_directory();
+    if (!publication ||
+        publication.value() == pulp::project_package::AtomicPublishOutcome::NotPublished)
         return export_error_result(format_text, plan, "publish",
                                    "output directory appeared before atomic publication",
+                                   filesystem_path_to_utf8(output_directory));
+    if (publication.value() ==
+        pulp::project_package::AtomicPublishOutcome::PublishedDurabilityUncertain)
+        return export_error_result(format_text, plan, "publish",
+                                   "output directory publication finalization is uncertain",
                                    filesystem_path_to_utf8(output_directory));
     return {0, export_result_json(format_text, output_directory, plan)};
 }
@@ -294,12 +303,12 @@ OperationResult import_project(const fs::path& input, std::string_view format_te
             const pulp::timeline::DawProjectImportLimits* limits = nullptr;
         } resolver_context{&*archive_entries, &limits};
         pulp::timeline::detail::DawProjectMediaViewResolver resolver{
-            &resolver_context, [](void* opaque, std::string_view relative)
-                -> std::optional<std::span<const std::uint8_t>> {
+            &resolver_context,
+            [](void* opaque,
+               std::string_view relative) -> std::optional<std::span<const std::uint8_t>> {
                 auto& context = *static_cast<ResolverContext*>(opaque);
                 const auto entry = context.archive->find(relative);
-                if (!entry ||
-                    entry->size() > context.limits->max_media_bytes_per_resolver_call ||
+                if (!entry || entry->size() > context.limits->max_media_bytes_per_resolver_call ||
                     !context.archive->retain_media_path(relative))
                     return std::nullopt;
                 return entry;
@@ -320,17 +329,24 @@ OperationResult import_project(const fs::path& input, std::string_view format_te
         return detail::failure("import", detail::persistence_message(serialized.error()),
                                serialized.error().path);
 
-    auto publisher = detail::AtomicPublisher::create(output_directory);
+    auto publisher = pulp::project_package::AtomicPublisher::create(output_directory);
     if (!publisher)
         return detail::failure("publish",
                                "output directory must not exist and its parent must exist",
                                filesystem_path_to_utf8(output_directory));
-    if (!publisher->write("project.json", serialized.value().json))
+    auto staged_project = publisher->write("project.json", serialized.value().json);
+    if (!staged_project || !staged_project.value())
         return detail::failure("publish", "could not stage canonical project.json");
     if (archive_entries && !archive_entries->publish_retained_media(*publisher))
         return detail::failure("publish", "could not stage imported sibling media");
-    if (!publisher->commit_directory())
+    auto publication = publisher->commit_directory();
+    if (!publication ||
+        publication.value() == pulp::project_package::AtomicPublishOutcome::NotPublished)
         return detail::failure("publish", "output directory appeared before atomic publication",
+                               filesystem_path_to_utf8(output_directory));
+    if (publication.value() ==
+        pulp::project_package::AtomicPublishOutcome::PublishedDurabilityUncertain)
+        return detail::failure("publish", "output directory publication finalization is uncertain",
                                filesystem_path_to_utf8(output_directory));
     return {0, output_json(format_text, output_directory, fidelity)};
 }

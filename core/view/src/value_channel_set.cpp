@@ -4,6 +4,11 @@
 
 namespace pulp::view {
 
+std::uint64_t ValueChannelSet::generation_identity() const noexcept {
+    return detail::value_channel_telemetry_control_identity(
+        telemetry_control_.get());
+}
+
 const char* ValueChannelSet::describe(DeclareError e) noexcept {
     switch (e) {
         case DeclareError::ok: return "declared";
@@ -33,6 +38,8 @@ ValueChannelSet::Entry* ValueChannelSet::add_entry(std::string name, std::string
 
     infos_.push_back(ValueChannelInfo{std::move(name), std::move(unit), shape, neutral});
     entries_.push_back(std::make_unique<Entry>());
+    if (!telemetry_control_)
+        telemetry_control_ = detail::make_value_channel_telemetry_control();
     if (error) *error = DeclareError::ok;
     return entries_.back().get();
 }
@@ -42,7 +49,9 @@ ScalarSource* ValueChannelSet::declare_scalar(std::string name, std::string unit
     auto* entry = add_entry(std::move(name), std::move(unit), neutral,
                             ValueChannelShape::scalar, error);
     if (!entry) return nullptr;
+    entry->telemetry = detail::make_scalar_telemetry_state();
     entry->scalar = std::make_unique<ScalarSource>();
+    entry->scalar->telemetry_ = detail::scalar_telemetry_writer(entry->telemetry.get());
     return entry->scalar.get();
 }
 
@@ -51,7 +60,9 @@ MeterSource* ValueChannelSet::declare_meter(std::string name, std::string unit, 
     auto* entry = add_entry(std::move(name), std::move(unit), neutral,
                             ValueChannelShape::meter, error);
     if (!entry) return nullptr;
+    entry->telemetry = detail::make_meter_telemetry_state();
     entry->meter = std::make_unique<MeterSource>();
+    entry->meter->telemetry_ = detail::meter_telemetry_writer(entry->telemetry.get());
     return entry->meter.get();
 }
 
@@ -60,7 +71,9 @@ VectorSource* ValueChannelSet::declare_vector(std::string name, std::string unit
     auto* entry = add_entry(std::move(name), std::move(unit), neutral,
                             ValueChannelShape::vector, error);
     if (!entry) return nullptr;
+    entry->telemetry = detail::make_vector_telemetry_state();
     entry->vector = std::make_unique<VectorSource>();
+    entry->vector->telemetry_ = detail::vector_telemetry_writer(entry->telemetry.get());
     return entry->vector.get();
 }
 
@@ -69,7 +82,9 @@ EventSource* ValueChannelSet::declare_events(std::string name, std::string unit,
     auto* entry = add_entry(std::move(name), std::move(unit), 0.0f,
                             ValueChannelShape::events, error);
     if (!entry) return nullptr;
+    entry->telemetry = detail::make_event_telemetry_state();
     entry->events = std::make_unique<EventSource>();
+    entry->events->telemetry_ = detail::event_telemetry_writer(entry->telemetry.get());
     return entry->events.get();
 }
 
@@ -103,6 +118,16 @@ VectorSource* ValueChannelSet::vector(std::string_view name) const {
 EventSource* ValueChannelSet::events(std::string_view name) const {
     const auto i = index_of(name, ValueChannelShape::events);
     return i < 0 ? nullptr : entries_[static_cast<std::size_t>(i)]->events.get();
+}
+
+ValueChannelTelemetryAttachment ValueChannelSet::attach_telemetry() const {
+    if (!telemetry_control_)
+        return {};
+    std::vector<std::shared_ptr<detail::ValueChannelTelemetryState>> states;
+    states.reserve(entries_.size());
+    for (const auto& entry : entries_)
+        states.push_back(entry->telemetry);
+    return ValueChannelTelemetryAttachment(telemetry_control_, std::move(states), infos_);
 }
 
 }  // namespace pulp::view

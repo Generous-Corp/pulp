@@ -56,6 +56,10 @@ public:
         // its edge rather than at the stock radius, which was tuned for a knob
         // that draws its own smaller body.
         style.radius_scale = skin_.ring_radius_scale;
+        // And the pointer rides the same gap. Without this it starts at the
+        // box centre, which on a designed knob is the middle of the artwork.
+        style.indicator_inner_scale = skin_.indicator_inner_scale;
+        style.indicator_outer_scale = skin_.indicator_outer_scale;
         painters::paint_mod_ring_knob(canvas, state.bounds, state.position, style);
         return true;
     }

@@ -104,11 +104,31 @@ clients) can drive them in one turn instead of multiple shell calls.
 |---|---|
 | Build / test / status | `pulp_build`, `pulp_test`, `pulp_status`, `pulp_validate` (`screenshot=true` for validation editor PNGs), `pulp_create`, `pulp_docs_check`, `pulp_docs_search` |
 | UI rendering + interaction | `pulp_screenshot` (render demo/script UI fixtures to PNG), `pulp_simulate_click`, `pulp_get_view_tree` |
-| Experimental inspector clients | `pulp_inspect_*`, `pulp_motion_*`, and live-session `pulp_trace_*` wrappers currently require a Pulp source checkout plus a custom host/test fixture that explicitly constructs the server. Normal and installed-user launches do not expose these RPCs. Offline trace query remains usable without an inspector session. |
+| Development Inspector | Installed `pulp_inspect_*` clients discover and authenticate to explicitly inspector-enabled standalone sessions. `pulp_motion_*` and live-session `pulp_trace_*` wrappers still require host support; offline trace query remains usable without a live session. |
 | Audio model / WAV-first excerpt-find / live probe/scope JSON / third-party plugin inspection + offline render / advisory before-after compare | `pulp_audio_model_list`, `pulp_audio_model_status`, `pulp_audio_model_activate`, `pulp_audio_excerpt_find`, `pulp_audio_read_bundle`, `pulp_audio_probe_json`, `pulp_audio_scope`, `pulp_audio_plugin_inspect`, `pulp_audio_render`, `pulp_audio_compare` |
 | Timeline project editing, history, rendering + interchange | `pulp_timeline_project_open`, `pulp_timeline_command_apply`, `pulp_timeline_diff`, `pulp_timeline_undo`, `pulp_timeline_redo`, `pulp_timeline_validate`, `pulp_timeline_explain`, `pulp_timeline_render`, `pulp_timeline_export`, `pulp_timeline_import` |
 | Kit manifests | `pulp_kit`, `pulp_kit_search`, `pulp_kit_validate`, `pulp_kit_inspect`, `pulp_kit_plan`, `pulp_kit_verify`, `pulp_kit_apply`, `pulp_kit_remove`, `pulp_kit_pack`, `pulp_kit_publish_check`, `pulp_kit_init` |
 | Content packs | `pulp_content`, `pulp_content_validate`, `pulp_content_preview`, `pulp_content_install`, `pulp_content_update`, `pulp_content_list`, `pulp_content_rescan`, `pulp_content_remove`, `pulp_content_reveal` |
+
+For a standalone synth or transport fixture, first confirm that `test.input`
+is effective, then use the bounded typed commands with the same exact selectors:
+
+```bash
+pulp inspect inject-midi --kind note_on --channel 1 --note 60 --velocity 100 \
+  --duration-ms 250 --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+pulp inspect set-transport --playing true --position-samples 0 --tempo-bpm 120 --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+```
+
+The matching MCP tools are `pulp_inspect_inject_midi` and
+`pulp_inspect_set_transport`. MIDI is limited to note-on/off with channels
+1–16 and byte-range note/velocity values. Transport is an idempotent partial
+standalone update. Raw MIDI, SysEx, files, presets, generic UI scripting, and
+`Runtime.evaluate` are outside `test.input`. Injected notes are released on
+controller lease loss, disconnect, or session teardown. A `note_on` requires a
+1–2000 ms duration; the client sends its matching note-off on the same
+connection before releasing the one-shot lease.
 
 Use `pulp_audio_probe_json` as the quick live-health check for a standalone
 target. It runs the existing `pulp run --audio-probe-json` path through

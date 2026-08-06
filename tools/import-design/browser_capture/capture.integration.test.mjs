@@ -543,6 +543,221 @@ test("real browser interactions reject and close popup pages",
     }
   });
 
+// `layout.styles` rows are positional against the request order the snapshot
+// records as `computedStyleNames`, and every value is a string-table index.
+// Decoding through the recorded names is the only way to read a row without
+// hardcoding a parallel property list that drifts the first time the capture
+// collects one more property.
+function laidOutNodes(snapshot) {
+  const strings = snapshot.strings;
+  const names = snapshot.computedStyleNames;
+  assert.ok(Array.isArray(names) && names.length > 0,
+    "the snapshot must record the property request order");
+  const document = snapshot.documents[0];
+  const nodes = document.nodes;
+  const layout = document.layout;
+  const decode = (index) =>
+    typeof index === "number" && index >= 0 && index < strings.length
+      ? strings[index]
+      : "";
+  const attributesFor = (nodeIndex) => {
+    const pairs = nodes.attributes?.[nodeIndex] ?? [];
+    const result = {};
+    for (let offset = 0; offset + 1 < pairs.length; offset += 2) {
+      result[decode(pairs[offset])] = decode(pairs[offset + 1]);
+    }
+    return result;
+  };
+  const result = [];
+  // A node can own more than one layout entry -- a box that also lays out an
+  // inline text box contributes two, and a ::before with generated content is
+  // the common case. The first entry is the node's own box; the capture keys
+  // paint order the same way, so this reader must not diverge from it.
+  const seen = new Set();
+  for (let entry = 0; entry < layout.nodeIndex.length; entry++) {
+    const nodeIndex = layout.nodeIndex[entry];
+    if (seen.has(nodeIndex)) continue;
+    seen.add(nodeIndex);
+    const row = layout.styles?.[entry] ?? [];
+    const style = {};
+    names.forEach((name, position) => {
+      style[name] = decode(row[position]);
+    });
+    result.push({
+      node_index: nodeIndex,
+      backend_node_id: nodes.backendNodeId?.[nodeIndex] ?? null,
+      tag: decode(nodes.nodeName?.[nodeIndex]).toLowerCase(),
+      attributes: attributesFor(nodeIndex),
+      paint_order: layout.paintOrders?.[entry] ?? null,
+      style,
+    });
+  }
+  return result;
+}
+
+// The capture is what decides what can ever be drawn. Every assertion here is
+// a property whose absence renders as a plausible wrong picture: a tiled grid
+// collapsed to one hairline, a dashed left edge silently gone, a layered panel
+// stacked by a z-index guess instead of by Chromium's answer.
+test("real browser capture round-trips whole-panel paint properties",
+  { timeout: 30000 }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-paint-properties-"));
+    const input = path.join(root, "panel.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html>
+<style>
+  html, body { margin: 0; width: 320px; height: 240px; overflow: hidden; }
+  body { background: #111; color: #eee; font: 12px sans-serif; }
+  /* The standard CSS grid idiom: one hard-stop gradient, tiled. The column
+     count exists only in background-size. */
+  #grid-x {
+    position: absolute; inset: 0;
+    background-image: linear-gradient(to right,
+      rgba(255,255,255,.25) 0 1px, transparent 1px 100%);
+    background-size: 12.5% 100%;
+    /* Every value here is deliberately NOT the CSS initial value, so an
+       assertion that passes cannot be passing on a default. */
+    background-position: 4px 6px;
+    background-repeat: repeat-x;
+    background-origin: border-box;
+    background-clip: content-box;
+  }
+  #edges {
+    position: absolute; left: 20px; top: 20px; width: 120px; height: 40px;
+    border-width: 2px 3px 4px 5px;
+    border-color: #f00 #0f0 #00f #ff0;
+    border-top-style: none;
+    border-right-style: solid;
+    border-bottom-style: dotted;
+    border-left-style: dashed;
+    outline: 2px dotted rgb(10, 200, 240);
+    outline-offset: 3px;
+  }
+  #typo {
+    position: absolute; left: 20px; top: 90px;
+    word-spacing: 7px;
+    text-decoration-line: underline;
+    text-decoration-color: rgb(240, 90, 10);
+    text-decoration-style: wavy;
+    text-decoration-thickness: 3px;
+    text-underline-offset: 4px;
+  }
+  #generated::before { content: "GENERATED"; }
+  /* opacity < 1 makes #context a stacking context, so #deep cannot escape it
+     however large its z-index. A z-index sort disagrees with Chromium here. */
+  #context { position: absolute; left: 20px; top: 130px; z-index: 1; opacity: .99; }
+  #deep { position: relative; z-index: 999; }
+  #sibling { position: absolute; left: 20px; top: 170px; z-index: 2; }
+</style>
+<div id="grid-x"></div>
+<div id="edges"></div>
+<div id="typo">spaced out words</div>
+<div id="generated"></div>
+<div id="context"><button id="deep">DEEP</button></div>
+<button id="sibling">SIBLING</button>
+`);
+      await execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", output,
+        "--initial-width", "320",
+        "--initial-height", "240",
+        "--dpr", "2",
+        "--timeout-ms", "20000",
+      ], { maxBuffer: 1024 * 1024 });
+
+      const snapshot = JSON.parse(
+        await readFile(path.join(output, "dom-snapshot.json"), "utf8"));
+      const laidOut = laidOutNodes(snapshot);
+      const byId = new Map(
+        laidOut.filter((node) => node.attributes.id)
+          .map((node) => [node.attributes.id, node]));
+
+      const grid = byId.get("grid-x");
+      assert.ok(grid, "the tiled-gradient node must reach the snapshot");
+      assert.equal(grid.style["background-size"], "12.5% 100%",
+        "without this exact value the grid lowers to a single 1px line");
+      assert.equal(grid.style["background-repeat"], "repeat-x");
+      assert.equal(grid.style["background-position"], "4px 6px");
+      assert.equal(grid.style["background-origin"], "border-box");
+      assert.equal(grid.style["background-clip"], "content-box");
+
+      const edges = byId.get("edges");
+      assert.ok(edges, "the mixed-edge border node must reach the snapshot");
+      assert.equal(edges.style["border-left-style"], "dashed",
+        "a dashed left border must survive a capture that used to read " +
+        "only the top edge");
+      assert.equal(edges.style["border-top-style"], "none");
+      assert.equal(edges.style["border-right-style"], "solid");
+      assert.equal(edges.style["border-bottom-style"], "dotted");
+      assert.equal(edges.style["outline-style"], "dotted");
+      assert.equal(edges.style["outline-width"], "2px");
+      assert.equal(edges.style["outline-offset"], "3px");
+      assert.equal(edges.style["outline-color"], "rgb(10, 200, 240)");
+
+      const typo = byId.get("typo");
+      assert.equal(typo.style["word-spacing"], "7px");
+      assert.equal(typo.style["text-decoration-color"], "rgb(240, 90, 10)");
+      assert.equal(typo.style["text-decoration-style"], "wavy");
+      assert.equal(typo.style["text-decoration-thickness"], "3px");
+      assert.equal(typo.style["text-underline-offset"], "4px");
+
+      // The ::before box is its own laid out node with no DOM text child, so
+      // `content` is the only place its text exists.
+      const generated = laidOut.filter(
+        (node) => node.style.content.includes("GENERATED"));
+      assert.equal(generated.length, 1,
+        "generated content must be recoverable from the capture");
+      assert.equal(generated[0].tag, "::before");
+
+      // Paint order in the report is Chromium's, verified against the array
+      // Chromium returned rather than against a rule we reimplemented.
+      //
+      // The anchor is the node's own id in the page source, NOT the candidate's
+      // backend id: the candidate's backend id comes from the same element walk
+      // as its paint order, so checking one against the other would agree even
+      // when both point at the wrong node. This page puts a ::before ahead of
+      // both buttons for exactly that reason -- counting pseudo boxes as
+      // elements hands #deep the data of #context.
+      const report = JSON.parse(
+        await readFile(path.join(output, "semantic-report.json"), "utf8"));
+      const deep = byId.get("deep");
+      const sibling = byId.get("sibling");
+      const byName = new Map(
+        report.candidates.map((candidate) => [candidate.name, candidate]));
+      for (const [name, node] of [["DEEP", deep], ["SIBLING", sibling]]) {
+        const candidate = byName.get(name);
+        assert.ok(candidate, `${name} must be recognised as a candidate`);
+        assert.equal(candidate.backend_node_id, node.backend_node_id,
+          `${name} must resolve to its own snapshot node`);
+        assert.equal(candidate.paint_order, node.paint_order,
+          `${name} must carry the paint order Chromium reported for it`);
+      }
+      assert.equal(report.summary.paint_ordered, report.candidates.length);
+
+      // A z-index sort would put #deep (999) above #sibling (2). Chromium does
+      // not, because #deep is trapped in the stacking context #context created
+      // with opacity < 1. Consuming the reported order is what gets this right.
+      assert.ok(deep.paint_order < sibling.paint_order,
+        "Chromium paints the stacking-context-trapped node first; a z-index " +
+        "sort would invert this pair");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 test("real browser capture preserves WebGL through software composition",
   { timeout: 20000 }, async (context) => {
     const browser = await installedBrowser();
@@ -596,6 +811,111 @@ test("real browser capture preserves WebGL through software composition",
       const screenshot = await readFile(path.join(output, "browser.png"));
       const [red, green, blue, alpha] = rgbaPixel(screenshot, 40, 40);
       assert.ok(red > 240 && green < 16 && blue < 16 && alpha > 240);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("a pointer drawn straight up survives the capture",
+  { timeout: 30000 }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    // getBoundingClientRect() does not include stroke, so an SVG <line> drawn
+    // at 12, 3, 6 or 9 o'clock reports ZERO extent across its own axis however
+    // thick it is. Twelve o'clock is the resting position of every centred
+    // bipolar parameter, so a guard that refuses a zero axis drops the
+    // commonest pointer there is -- silently, falling back to the derived tick,
+    // which renders as a plausible knob and is why no picture caught it.
+    //
+    // The rotated knob is the positive control. Every probe in the corpus
+    // carries a rotation, and the rotation is exactly what hid this: a rotated
+    // line has extent on both axes. Without an unrotated case in the same file
+    // the guard passes on the one orientation that cannot fail.
+    //
+    // The scaled knob is the second trap: stroke-width is in USER UNITS, so a
+    // 2-unit stroke in a 24-unit viewBox drawn at 96px paints 8 CSS px. Reading
+    // the stroke without the viewBox scale recovers the pointer at a quarter of
+    // its width, which looks like a hairline rather than a miss.
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-axis-aligned-pointer-"));
+    const input = path.join(root, "panel.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html>
+<style>
+  html, body { margin: 0; width: 320px; height: 160px; background: #111; }
+  .dial { position: absolute; top: 20px; width: 96px; height: 96px; }
+</style>
+<div id="up" class="dial" style="left:8px" data-pulp-kind="knob">
+  <svg width="96" height="96" viewBox="0 0 96 96">
+    <circle cx="48" cy="48" r="46" fill="#333"/>
+    <line data-pulp-indicator x1="48" y1="48" x2="48" y2="10"
+          stroke="#fff" stroke-width="4"/>
+  </svg>
+</div>
+<div id="turned" class="dial" style="left:112px" data-pulp-kind="knob">
+  <svg width="96" height="96" viewBox="0 0 96 96">
+    <circle cx="48" cy="48" r="46" fill="#333"/>
+    <line data-pulp-indicator x1="48" y1="48" x2="48" y2="10"
+          stroke="#fff" stroke-width="4" transform="rotate(38 48 48)"/>
+  </svg>
+</div>
+<div id="scaled" class="dial" style="left:216px" data-pulp-kind="knob">
+  <svg width="96" height="96" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="11.5" fill="#333"/>
+    <line data-pulp-indicator x1="12" y1="12" x2="12" y2="3"
+          stroke="#fff" stroke-width="2"/>
+  </svg>
+</div>
+`);
+      await execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", output,
+        "--initial-width", "320",
+        "--initial-height", "160",
+        "--dpr", "2",
+        "--timeout-ms", "20000",
+      ], { maxBuffer: 1024 * 1024 });
+
+      const report = JSON.parse(
+        await readFile(path.join(output, "semantic-report.json"), "utf8"));
+      // Keyed on the dial's own left edge, which the page fixes at 8 / 112 /
+      // 216. The marked <line> also surfaces as its own candidate (it carries a
+      // data-pulp- attribute), so the kind filter is load-bearing.
+      const boxFor = (left) => {
+        const candidate = report.candidates.find(
+          (c) => c.kind === "knob" && c.bounds && Math.abs(c.bounds.left - left) < 1);
+        assert.ok(candidate, `a knob at left=${left} must be a semantic candidate`);
+        return candidate.indicator_bounds;
+      };
+
+      const up = boxFor(8);
+      assert.ok(up, "an unrotated 12 o'clock pointer must survive the capture; " +
+        "dropping it falls back to the derived tick and looks correct");
+      assert.ok(Math.abs(up.width - 4) < 0.5,
+        `a 4px stroke must arrive 4px wide, got ${up && up.width}`);
+      assert.ok(up.height > 30, "the pointer keeps its length");
+
+      const turned = boxFor(112);
+      assert.ok(turned, "the rotated control must keep working");
+      assert.ok(turned.width > 20 && turned.height > 20,
+        "a rotated pointer reports a fat axis-aligned box on both axes; this " +
+        "is the case that passed while 12 o'clock silently failed");
+
+      const scaled = boxFor(216);
+      assert.ok(scaled, "a scaled-viewBox pointer must survive too");
+      assert.ok(Math.abs(scaled.width - 8) < 0.5,
+        "stroke-width is in user units: 2 units in a 24-unit viewBox drawn at " +
+        `96px paints 8 CSS px, got ${scaled && scaled.width}`);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

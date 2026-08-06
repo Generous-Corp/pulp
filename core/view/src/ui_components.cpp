@@ -269,6 +269,29 @@ void ComboBox::close_active_popup() {
     }
 }
 
+ComboBox* ComboBox::active_popup_in(View& scope) {
+    // The root-owned slot only ever holds a combo whose tree_root IS that root
+    // (open_dropdown writes interaction(), which walks to its own tree root), so
+    // resolving the slot is already the containment answer — no parent walk
+    // needed. Non-allocating: a tree that never opened a popup has no state
+    // block and answers nullptr.
+    RootInteractionState* s = scope.existing_interaction();
+    return s ? s->active_popup : nullptr;
+}
+
+void ComboBox::close_active_popup(View& root) {
+    if (ComboBox* popup = active_popup_in(root)) popup->close_dropdown();
+}
+
+void ComboBox::abandon_active_popup(View& root) noexcept {
+    if (auto* interaction = root.existing_interaction();
+        interaction && interaction->active_popup) {
+        if (active_popup_ == interaction->active_popup)
+            active_popup_ = nullptr;
+        interaction->active_popup = nullptr;
+    }
+}
+
 void ComboBox::notify_global_click(View* target) {
     // Forwarding shim (S11): resolve the popup owned by the CLICK's OWN root, so
     // an outside-click in one hosted editor never dismisses another editor's
@@ -1034,8 +1057,9 @@ void ScrollView::scroll_by(float dx, float dy, bool animate) {
     // A scroll gesture dismisses any open dropdown — the anchored menu would
     // otherwise drift away from its field as the page moves under it. Matches
     // native menu behavior (scrolling the backdrop closes the menu).
-    if ((dx != 0.0f || dy != 0.0f) && ComboBox::active_popup_)
-        ComboBox::close_active_popup();
+    // Scoped to THIS view's tree: scrolling in one hosted editor must not
+    // dismiss a dropdown a DIFFERENT editor has open in the same process.
+    if (dx != 0.0f || dy != 0.0f) ComboBox::close_active_popup(*this);
     target_scroll_x_ += dx;
     target_scroll_y_ += dy;
     clamp_scroll_targets();

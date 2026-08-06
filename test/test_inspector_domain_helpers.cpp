@@ -27,7 +27,7 @@ TEST_CASE("Inspector method registry assigns one stable capability to every meth
           "[inspect][capabilities]") {
     const auto capabilities = inspector_capability_registry();
     const auto registry = inspector_method_registry();
-    REQUIRE(capabilities.size() == 15);
+    REQUIRE(capabilities.size() == 19);
     REQUIRE_FALSE(registry.empty());
 
     for (const auto& descriptor : capabilities) {
@@ -108,11 +108,11 @@ TEST_CASE("Inspector profiles separate observation, typed control, and runtime e
     REQUIRE_FALSE(capability_is_grantable(InspectorCapability::Unavailable));
     REQUIRE(capability_is_grantable(InspectorCapability::RuntimeEval));
     REQUIRE(capability_risk(InspectorCapability::StateRead) ==
-            InspectorCapabilityRisk::Observe);
+            InspectorCapabilityRisk::Sensitive);
     REQUIRE(capability_risk(InspectorCapability::StateWrite) ==
             InspectorCapabilityRisk::Control);
     REQUIRE(capability_risk(InspectorCapability::RuntimeEval) ==
-            InspectorCapabilityRisk::HighRisk);
+            InspectorCapabilityRisk::Critical);
     REQUIRE(capability_requires_controller_lease(
         InspectorCapability::AuthoringTweaks));
     REQUIRE_FALSE(capability_requires_controller_lease(
@@ -244,6 +244,12 @@ TEST_CASE("AudioInspector stores runtime telemetry as latest-value snapshot",
     auto empty = audio.runtime_telemetry();
     REQUIRE_FALSE(empty.available);
     REQUIRE(empty.xrun_count == 0);
+    REQUIRE(empty.process_load.callback_count == 0);
+
+    audio.set_xrun_count(2);
+    empty = audio.runtime_telemetry();
+    REQUIRE_FALSE(empty.available);
+    REQUIRE(empty.xrun_count == 2);
     REQUIRE(empty.process_load.callback_count == 0);
 
     pulp::audio::AudioProcessLoadSnapshot load;

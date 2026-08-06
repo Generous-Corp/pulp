@@ -1,9 +1,13 @@
 cmake_minimum_required(VERSION 3.24)
 project(PulpTimelineSdkConsumer VERSION 0.1.0 LANGUAGES CXX)
 
-find_package(Pulp REQUIRED COMPONENTS timebase timeline playback dawproject-import dawproject-export smf-interop smf-interchange)
+find_package(Pulp REQUIRED COMPONENTS
+    timebase timeline project-package playback
+    dawproject-import dawproject-export smf-interop smf-interchange)
 
-foreach(_component timebase timeline playback dawproject-import dawproject-export smf-interop smf-interchange)
+foreach(_component
+        timebase timeline project-package playback
+        dawproject-import dawproject-export smf-interop smf-interchange)
     if(NOT Pulp_${_component}_FOUND)
         message(FATAL_ERROR "Pulp did not report required component ${_component}")
     endif()
@@ -28,6 +32,11 @@ target_link_libraries(pulp-registered-chord-renderer-consumer PRIVATE
     Pulp::timebase
     Pulp::timeline
     Pulp::playback
+)
+
+add_executable(pulp-project-package-sdk-consumer project_package.cpp)
+target_link_libraries(pulp-project-package-sdk-consumer PRIVATE
+    Pulp::project-package
 )
 
 add_executable(pulp-dawproject-import-sdk-consumer dawproject_import.cpp)
@@ -118,6 +127,32 @@ foreach(_forbidden
             "Timeline SDK unexpectedly pulled ${_forbidden} into its link closure")
     endif()
 endforeach()
+
+set_property(GLOBAL PROPERTY PULP_TIMELINE_SDK_CLOSURE "")
+_pulp_collect_dependencies(Pulp::project-package)
+get_property(_actual_project_package_closure GLOBAL PROPERTY PULP_TIMELINE_SDK_CLOSURE)
+list(REMOVE_DUPLICATES _actual_project_package_closure)
+list(SORT _actual_project_package_closure)
+set(_expected_project_package_closure
+    Pulp::everest
+    Pulp::hwy
+    Pulp::mbedcrypto
+    Pulp::mbedtls
+    Pulp::mbedx509
+    Pulp::p256m
+    Pulp::platform
+    Pulp::project-package
+    Pulp::runtime
+    Pulp::timebase
+    Pulp::timeline
+)
+list(SORT _expected_project_package_closure)
+if(NOT _actual_project_package_closure STREQUAL _expected_project_package_closure)
+    message(FATAL_ERROR
+        "Project-package SDK closure drifted.\n"
+        "Expected: ${_expected_project_package_closure}\n"
+        "Actual:   ${_actual_project_package_closure}")
+endif()
 
 set_property(GLOBAL PROPERTY PULP_TIMELINE_SDK_CLOSURE "")
 _pulp_collect_dependencies(Pulp::smf-interop)

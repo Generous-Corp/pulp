@@ -3,6 +3,7 @@
 // See mac_runtime_validators.hpp for the rationale and dispatch table.
 
 #include "mac_runtime_validators.hpp"
+#include "shell_quote.hpp"
 
 #include <algorithm>
 #include <array>
@@ -138,11 +139,22 @@ fs::path resolve_standalone_executable(const fs::path& bundle,
     if (bundle.extension() != ".app") return {};
     auto macos_dir = bundle / "Contents" / "MacOS";
     if (!env.path_exists(macos_dir)) return {};
-    // Use the bundle stem as the convention. Pulp's standalone
-    // packager always names the binary after the bundle (see
-    // PulpStandalone.cmake), so this is robust for our own artifacts
-    // and degrades gracefully — the smoke check will skip if the
-    // candidate path doesn't exist.
+    const auto info_plist = bundle / "Contents" / "Info.plist";
+    if (env.path_exists(info_plist)) {
+        const auto [result, output] = env.run_capture(
+            "plutil -extract CFBundleExecutable raw -o - " +
+            shell_quote(info_plist));
+        if (result != 0) return {};
+        auto executable_name = output;
+        while (!executable_name.empty() &&
+               std::isspace(static_cast<unsigned char>(executable_name.back())))
+            executable_name.pop_back();
+        const auto declared = macos_dir / executable_name;
+        if (!executable_name.empty() && env.path_exists(declared)) return declared;
+        return {};
+    }
+    // Legacy Pulp fixtures may omit Info.plist; retain the product-name
+    // convention only when no authoritative bundle metadata exists.
     auto candidate = macos_dir / bundle.stem();
     if (env.path_exists(candidate)) return candidate;
     return {};

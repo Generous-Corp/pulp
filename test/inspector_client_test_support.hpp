@@ -23,6 +23,7 @@
 #include <span>
 #include <thread>
 #include <type_traits>
+#include <vector>
 
 #ifndef _WIN32
 #include <arpa/inet.h>
@@ -32,19 +33,20 @@
 #include <sys/stat.h>
 #endif
 
+using pulp::inspect::generate_inspector_secret;
 using pulp::inspect::InspectorCapability;
 using pulp::inspect::InspectorClient;
 using pulp::inspect::InspectorDiscoveryPublisher;
 using pulp::inspect::InspectorDiscoveryReader;
 using pulp::inspect::InspectorDiscoveryRecord;
+using pulp::inspect::InspectorMainThreadRpc;
+using pulp::inspect::InspectorMessage;
 using pulp::inspect::InspectorPolicyConfig;
 using pulp::inspect::InspectorProfile;
 using pulp::inspect::InspectorServer;
 using pulp::inspect::InspectorServerConfig;
 using pulp::inspect::InspectorSession;
 using pulp::inspect::InspectorSessionInfo;
-using pulp::inspect::InspectorMainThreadRpc;
-using pulp::inspect::generate_inspector_secret;
 using pulp::inspect::make_response;
 using pulp::runtime::Socket;
 using pulp::runtime::SocketType;
@@ -66,15 +68,13 @@ std::shared_ptr<InspectorMainThreadRpc> make_inline_test_main_thread_rpc() {
         [] { return false; });
 }
 
-bool start_test_inspector_server(
-    InspectorServer& server, InspectorServerConfig config) {
+bool start_test_inspector_server(InspectorServer& server, InspectorServerConfig config) {
     if (!config.main_thread_rpc)
         config.main_thread_rpc = make_inline_test_main_thread_rpc();
     return server.start_authenticated(std::move(config));
 }
 
-[[maybe_unused]] bool send_all(
-    Socket& socket, std::span<const std::uint8_t> bytes) {
+[[maybe_unused]] bool send_all(Socket& socket, std::span<const std::uint8_t> bytes) {
     std::size_t sent = 0;
     while (sent < bytes.size()) {
         const auto count = socket.send(bytes.data() + sent, bytes.size() - sent);
@@ -85,8 +85,7 @@ bool start_test_inspector_server(
     return true;
 }
 
-[[maybe_unused]] bool send_frame(
-    Socket& socket, std::string_view payload) {
+[[maybe_unused]] bool send_frame(Socket& socket, std::string_view payload) {
     if (payload.size() > std::numeric_limits<std::uint32_t>::max())
         return false;
     const auto size = static_cast<std::uint32_t>(payload.size());
@@ -97,18 +96,15 @@ bool start_test_inspector_server(
         static_cast<std::uint8_t>(size >> 24),
     };
     return send_all(socket, header) &&
-           send_all(socket, std::span(
-               reinterpret_cast<const std::uint8_t*>(payload.data()),
-               payload.size()));
+           send_all(socket, std::span(reinterpret_cast<const std::uint8_t*>(payload.data()),
+                                      payload.size()));
 }
 
-[[maybe_unused]] std::optional<std::string> receive_frame(
-    Socket& socket) {
+[[maybe_unused]] std::optional<std::string> receive_frame(Socket& socket) {
     auto read_exact = [&socket](std::span<std::uint8_t> bytes) {
         std::size_t received = 0;
         while (received < bytes.size()) {
-            const auto count =
-                socket.receive(bytes.data() + received, bytes.size() - received);
+            const auto count = socket.receive(bytes.data() + received, bytes.size() - received);
             if (count <= 0)
                 return false;
             received += static_cast<std::size_t>(count);
@@ -125,14 +121,12 @@ bool start_test_inspector_server(
     if (size > 1024u * 1024u)
         return std::nullopt;
     std::string payload(size, '\0');
-    if (!read_exact(std::span(
-            reinterpret_cast<std::uint8_t*>(payload.data()), payload.size())))
+    if (!read_exact(std::span(reinterpret_cast<std::uint8_t*>(payload.data()), payload.size())))
         return std::nullopt;
     return payload;
 }
 
-[[maybe_unused]] bool authenticate_raw(
-    Socket& socket, std::span<const std::uint8_t> token) {
+[[maybe_unused]] bool authenticate_raw(Socket& socket, std::span<const std::uint8_t> token) {
     const auto challenge_frame = receive_frame(socket);
     if (!challenge_frame)
         return false;
@@ -147,40 +141,35 @@ bool start_test_inspector_server(
         challenge.nonce_hex = std::string(params["nonce"].getString());
         challenge.session_id = std::string(params["sessionId"].getString());
         challenge.instance_id = std::string(params["instanceId"].getString());
-        challenge.publication_id =
-            std::string(params["publicationId"].getString());
-        challenge.protocol_version =
-            std::string(params["protocolVersion"].getString());
+        challenge.publication_id = std::string(params["publicationId"].getString());
+        challenge.protocol_version = std::string(params["protocolVersion"].getString());
     } catch (...) {
         return false;
     }
-    const auto proof =
-        pulp::inspect::make_inspector_auth_proof(token, challenge);
+    const auto proof = pulp::inspect::make_inspector_auth_proof(token, challenge);
     if (!proof)
         return false;
-    const auto request = pulp::inspect::make_request(
-        1, "Session.authenticate",
-        std::string("{\"proof\":\"") + *proof + "\"}");
+    const auto request = pulp::inspect::make_request(1, "Session.authenticate",
+                                                     std::string("{\"proof\":\"") + *proof + "\"}");
     if (!send_frame(socket, pulp::inspect::encode_message(request)))
         return false;
     const auto response_frame = receive_frame(socket);
     if (!response_frame)
         return false;
     pulp::inspect::InspectorMessage response;
-    return pulp::inspect::decode_message(*response_frame, response) &&
-           response.id == 1 && !response.is_error;
+    return pulp::inspect::decode_message(*response_frame, response) && response.id == 1 &&
+           !response.is_error;
 }
 
 class TemporaryDirectory {
-public:
+  public:
     TemporaryDirectory() {
         const auto token = generate_inspector_secret();
         REQUIRE(token.has_value());
         std::string suffix;
         for (std::size_t index = 0; index < 8; ++index)
             suffix += "0123456789abcdef"[(*token)[index] & 0xf];
-        path = std::filesystem::temp_directory_path() /
-               ("pulp-inspector-client-test-" + suffix);
+        path = std::filesystem::temp_directory_path() / ("pulp-inspector-client-test-" + suffix);
     }
     ~TemporaryDirectory() {
         std::error_code error;
@@ -194,6 +183,8 @@ struct AuthenticatedFixture {
     InspectorDiscoveryPublisher publisher{temporary.path};
     InspectorDiscoveryReader reader{temporary.path};
     InspectorPolicyConfig policy;
+    std::mutex seen_mutex;
+    std::vector<InspectorMessage> seen;
     InspectorSession session;
     InspectorServer server;
 
@@ -202,35 +193,31 @@ struct AuthenticatedFixture {
               InspectorPolicyConfig result;
               result.profile = InspectorProfile::Develop;
               result.available_capabilities = {
-                  InspectorCapability::SessionDescribe,
-                  InspectorCapability::SessionControl,
-                  InspectorCapability::StateRead,
-                  InspectorCapability::StateWrite,
+                  InspectorCapability::SessionDescribe, InspectorCapability::SessionControl,
+                  InspectorCapability::StateRead,       InspectorCapability::StateWrite,
+                  InspectorCapability::TestInput,
               };
               return result;
           }()),
-          session(
-              InspectorSessionInfo{
-                  "session-client-test",
-                  "instance-client-test",
-                  "com.pulp.client-test",
-                  "1"},
-              policy,
-              [](const auto& request) {
-                  return make_response(
-                      request.id,
-                      request.method == "State.getParameters"
-                          ? R"({"parameters":[{"id":"gain","value":0.5}]})"
-                          : R"({"applied":true})");
-              }) {
+          session(InspectorSessionInfo{"session-client-test", "instance-client-test",
+                                       "com.pulp.client-test", "1"},
+                  policy, [this](const auto& request) {
+                      {
+                          std::lock_guard lock(seen_mutex);
+                          seen.push_back(request);
+                      }
+                      return make_response(request.id,
+                                           request.method == "State.getParameters"
+                                               ? R"({"parameters":[{"id":"gain","value":0.5}]})"
+                                               : R"({"applied":true})");
+                  }) {
         const auto token = generate_inspector_secret();
         REQUIRE(token.has_value());
         InspectorDiscoveryRecord record;
         record.session_id = session.info().session_id;
         record.instance_id = session.info().instance_id;
         record.plugin_id = session.info().plugin_id;
-        InspectorServerConfig config{
-            &session, &publisher, record, *token};
+        InspectorServerConfig config{&session, &publisher, record, *token};
         config.main_thread_rpc = make_inline_test_main_thread_rpc();
         REQUIRE(start_test_inspector_server(server, std::move(config)));
     }
@@ -246,19 +233,14 @@ struct AuthenticatedFixture {
     if (getifaddrs(&interfaces) != 0 || interfaces == nullptr)
         return std::nullopt;
     std::optional<std::string> found;
-    for (auto* current = interfaces; current != nullptr;
-         current = current->ifa_next) {
-        if (current->ifa_addr == nullptr ||
-            current->ifa_addr->sa_family != AF_INET ||
-            (current->ifa_flags & IFF_LOOPBACK) != 0 ||
-            (current->ifa_flags & IFF_UP) == 0) {
+    for (auto* current = interfaces; current != nullptr; current = current->ifa_next) {
+        if (current->ifa_addr == nullptr || current->ifa_addr->sa_family != AF_INET ||
+            (current->ifa_flags & IFF_LOOPBACK) != 0 || (current->ifa_flags & IFF_UP) == 0) {
             continue;
         }
         char buffer[INET_ADDRSTRLEN] = {};
-        const auto* address = reinterpret_cast<const sockaddr_in*>(
-            current->ifa_addr);
-        if (inet_ntop(AF_INET, &address->sin_addr, buffer,
-                      sizeof(buffer)) != nullptr) {
+        const auto* address = reinterpret_cast<const sockaddr_in*>(current->ifa_addr);
+        if (inet_ntop(AF_INET, &address->sin_addr, buffer, sizeof(buffer)) != nullptr) {
             found = std::string(buffer);
             break;
         }
