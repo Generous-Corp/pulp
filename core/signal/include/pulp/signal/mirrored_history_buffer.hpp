@@ -14,6 +14,16 @@
 
 namespace pulp::signal {
 
+namespace detail {
+
+template <typename SampleType>
+concept MirroredHistorySample =
+    std::is_arithmetic_v<SampleType> &&
+    std::is_same_v<SampleType, std::remove_cv_t<SampleType>> &&
+    !std::is_same_v<SampleType, bool>;
+
+} // namespace detail
+
 /// A single-thread circular history whose complete oldest-to-newest window is
 /// always physically contiguous.
 ///
@@ -26,12 +36,9 @@ namespace pulp::signal {
 /// This is DSP-local history, not a queue and not a synchronization primitive.
 /// It is not safe for concurrent producer/consumer access. After `prepare()`,
 /// `push()`, `window()`, `reset()`, and the accessors allocate no memory.
-template <typename SampleType>
+template <detail::MirroredHistorySample SampleType>
 class MirroredHistoryBuffer {
 public:
-    static_assert(std::is_arithmetic_v<SampleType>,
-                  "MirroredHistoryBuffer requires an arithmetic sample type");
-
     MirroredHistoryBuffer() = default;
     MirroredHistoryBuffer(const MirroredHistoryBuffer&) = default;
     MirroredHistoryBuffer& operator=(const MirroredHistoryBuffer&) = default;

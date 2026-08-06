@@ -24,6 +24,18 @@ using pulp::signal::WindowFunction;
 
 namespace {
 
+template <typename SampleType>
+concept SupportsMirroredHistory = requires {
+    typename pulp::signal::MirroredHistoryBuffer<SampleType>;
+};
+
+static_assert(SupportsMirroredHistory<float>);
+static_assert(SupportsMirroredHistory<int>);
+static_assert(!SupportsMirroredHistory<bool>);
+static_assert(!SupportsMirroredHistory<const float>);
+static_assert(!SupportsMirroredHistory<volatile float>);
+static_assert(!SupportsMirroredHistory<std::complex<float>>);
+
 class ReferenceCircularHistory {
   public:
     explicit ReferenceCircularHistory(std::size_t capacity) : storage_(capacity, 0) {}
