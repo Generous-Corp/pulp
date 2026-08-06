@@ -160,11 +160,14 @@ if(FORGE_MODULAR_BUILD_APP AND COMMAND pulp_add_plugin)
                 COMMAND "${CMAKE_COMMAND}" -E copy_directory
                         "${_fm_app}/ui"
                         "$<TARGET_BUNDLE_CONTENT_DIR:${_fm_tgt}>/Resources/ui"
-                # The generator has to travel too. Without it an installed app
-                # could not build anything, and said nothing about why.
-                COMMAND "${CMAKE_COMMAND}" -E copy_directory
-                        "${CMAKE_SOURCE_DIR}/tools/rack"
-                        "$<TARGET_BUNDLE_CONTENT_DIR:${_fm_tgt}>/Resources/tools"
+                # The generator has to travel too. Stage it through the
+                # filtered boundary rather than copying the source folder:
+                # tools/rack may contain ignored reference corpora and caches
+                # that must never enter a signed bundle.
+                COMMAND "${CMAKE_COMMAND}"
+                        "-DSOURCE=${CMAKE_SOURCE_DIR}/tools/rack"
+                        "-DDEST=$<TARGET_BUNDLE_CONTENT_DIR:${_fm_tgt}>/Resources/tools/rack"
+                        -P "${_fm_app}/stage_toolchain.cmake"
                 COMMENT "Copying Forge Modular UI and tools into ${_fm_tgt}")
         endif()
     endforeach()

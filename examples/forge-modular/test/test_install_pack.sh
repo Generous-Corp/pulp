@@ -353,6 +353,37 @@ else
     fail "package requires signing identities before setup can provide them"
 fi
 
+# CMake builds stage the same runtime before package.sh runs. Prove this path
+# uses the correct tools/rack layout and cannot carry ignored reference books.
+ran=$((ran + 1))
+W="$(mktemp -d)"
+mkdir -p "$W/source/nested/.corpus" "$W/source/nested/.git" \
+         "$W/source/nested/__pycache__"
+printf 'generator\n' > "$W/source/patch.py"
+printf 'book\n' > "$W/source/nested/.corpus/reference.pdf"
+printf 'repo\n' > "$W/source/nested/.git/config"
+printf 'cache\n' > "$W/source/nested/__pycache__/cache.pyc"
+cmake -DSOURCE="$W/source" -DDEST="$W/bundle/Resources/tools/rack" \
+      -P "$FM/stage_toolchain.cmake" >/dev/null 2>&1
+if [ -f "$W/bundle/Resources/tools/rack/patch.py" ] && \
+   ! find "$W/bundle" \( -name .corpus -o -name .git -o -name __pycache__ \) \
+        -print -quit | grep -q . && \
+   grep -q 'stage_toolchain.cmake' "$FM/CMakeLists.txt" && \
+   grep -q 'Resources/tools/rack' "$FM/CMakeLists.txt"; then
+    ok "CMake stages the generator at tools/rack without local corpora or caches"
+else
+    fail "CMake bundle staging has the wrong layout or leaked local material"
+fi
+/bin/rm -rf "$W"
+
+ran=$((ran + 1))
+if grep -q -- '--license "\$PKG_LICENSE_FILE"' "$FM/package.sh" && \
+   grep -q 'the distribution declares a license consent pane' "$FM/verify_package.sh"; then
+    ok "package passes consent text to the installer and verifies the pane"
+else
+    fail "package configures consent without wiring or artifact verification"
+fi
+
 echo
 echo "$((ran - bad))/$ran correct"
 [ "$bad" -eq 0 ] || exit 1

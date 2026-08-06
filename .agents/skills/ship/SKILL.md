@@ -1445,16 +1445,20 @@ Adding a subcommand: quote with `shell_quote()`, do not copy whichever idiom is 
 
 ## A required component, and consent before installing
 
-`build_combined_installer.sh`'s `add_ref()` takes a fifth argument,
-`required`. It emits `enabled="false" selected="true"` on the choice, which
-is how macOS expresses "this ships, and you cannot untick it". Use it for the
-payload the others depend on — for Forge Modular that is the app, because the
-Rack modules and the uninstaller live inside its bundle, so an install that
-skipped it would produce plugins with no way to generate anything and no way
-to remove them.
+Use `--app-for BUNDLE "Title" PATH` when a standalone application belongs to a
+product group and cannot be deselected. The parser records that app's choice id
+in `REQUIRED_APP_IDS`, and distribution generation emits
+`enabled="false" selected="true"` on the choice. For Forge Modular the app is
+required because the Rack modules and uninstaller live inside its bundle; an
+install that skipped it would produce plugins with no generator and no removal
+path. `add_ref()` itself only creates the choice and package reference.
 
-Set `PKG_LICENSE_FILE` to put a consent pane in front of the install. It maps
-to `productbuild --resources` plus a `<license>` line in the distribution XML.
+Pass `--license FILE` to put a consent pane in front of the install (or set the
+helper's `LICENSE_FILE` shell variable before argument parsing). The helper
+stages the basename under `productbuild --resources` and emits the matching
+`<license>` element in the distribution XML. A product wrapper may use its own
+environment variable, but it must translate it into `--license`; exporting an
+unknown variable does nothing.
 
 **Do not hard-wrap the licence text.** macOS rewraps it to the pane width, so
 pre-wrapped lines come out ragged and broken-looking. Write each paragraph as

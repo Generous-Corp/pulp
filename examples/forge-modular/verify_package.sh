@@ -71,6 +71,23 @@ else
     say_bad "the distribution incorrectly requires a JavaScript layer it does not carry"
 fi
 
+# ── informed consent is part of the artifact ────────────────────────────────
+# An environment variable in package.sh does not configure productbuild. Read
+# both the Distribution declaration and the expanded resource, because either
+# half missing produces an installer with no useful consent pane.
+license_name=$(sed -n 's/.*<license file="\([^"]*\)"\/>.*/\1/p' "$DIST" | head -1)
+if [[ -n "$license_name" ]]; then
+    say_ok "the distribution declares a license consent pane"
+else
+    say_bad "the distribution has no license consent pane"
+fi
+if [[ -n "$license_name" ]] && find "$WORK/exp" -type f -name "$license_name" -print -quit \
+        2>/dev/null | grep -q .; then
+    say_ok "the consent text is embedded in the installer resources"
+else
+    say_bad "the declared consent text is absent from installer resources"
+fi
+
 # ── the app is not optional ──────────────────────────────────────────────────
 # It carries the Rack plug-in, the uninstaller and the generator. Deselecting
 # it leaves the plug-in formats with nothing behind them.

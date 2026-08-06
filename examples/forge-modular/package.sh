@@ -87,6 +87,7 @@ trap 'rm -rf "$STAGED_ROOT" "${STAGE:-}" "${CHECK:-}"' EXIT
 ditto "$APP" "$STAGED_ROOT/$(basename "$APP")"
 APP="$STAGED_ROOT/$(basename "$APP")"
 TOOLS_DEST="$APP/Contents/Resources/tools/rack"
+rm -rf "$TOOLS_DEST"
 mkdir -p "$TOOLS_DEST"
 ditto "$REPO/tools/rack" "$TOOLS_DEST"
 
@@ -446,10 +447,15 @@ fi
 codesign --force --options runtime --timestamp \
          -s "$PULP_SIGN_IDENTITY_HASH" "$APP/Contents/Resources/build/shape_text"
 
+# The consent pane. Apple shows it before anything is written, which is where
+# the Rack SDK / GPLv3 note belongs -- the moment the user is deciding.
+PKG_LICENSE_FILE="${PKG_LICENSE_FILE:-$REPO/examples/forge-modular/LICENSE-INSTALLER.txt}"
+
 ARGS=(--name "Forge Modular" --version "$VERSION" --out "$OUT_DIR"
       --architectures "$INSTALLER_ARCH"
       --sign-identity "$PULP_SIGN_IDENTITY_HASH"
       --installer-identity "$PULP_SIGN_INSTALLER_HASH"
+      --license "$PKG_LICENSE_FILE"
       --app-for "Forge Modular" "Forge Modular" "$APP"
       # Rack loads plug-ins from the user's Application Support. A package
       # writes absolute paths as root, so the .vcvplugin cannot be addressed to
@@ -463,10 +469,6 @@ ARGS=(--name "Forge Modular" --version "$VERSION" --out "$OUT_DIR"
 # opt out -- the inverse of this script's own flag. Passing --notarize through
 # made it reject the whole invocation.
 [[ $DO_NOTARIZE -eq 1 ]] || ARGS+=(--no-notarize)
-
-# The consent pane. Apple shows it before anything is written, which is where
-# the Rack SDK / GPLv3 note belongs -- the moment the user is deciding.
-export PKG_LICENSE_FILE="${PKG_LICENSE_FILE:-$REPO/examples/forge-modular/LICENSE-INSTALLER.txt}"
 
 # NOT `exec`. The package has to be opened afterwards and read back, because
 # every delivery failure this project has had was a build script reporting
