@@ -157,10 +157,13 @@ inline CustomNodeType make_clock_divider_node() {
                     std::max(1.0f, std::round(params.value_at(kDivision, o))));
                 if (++s.count >= div) {
                     s.count = 0;
-                    s.out_high = !s.out_high;
+                    s.out_high = true;
+                } else {
+                    s.out_high = false;
                 }
             } else if (s.high && v <= kSchmittLow) {
                 s.high = false;
+                s.out_high = false;
             }
             output[static_cast<std::size_t>(i)] = s.out_high ? kGateHigh : 0.0f;
         }

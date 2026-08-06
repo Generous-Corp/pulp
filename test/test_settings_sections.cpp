@@ -354,6 +354,19 @@ TEST_CASE("a Settings panel that is not on screen asks for no frames at all",
     }
     CHECK(m.host.repaints == parked);
 
+    // Silence while still hidden must advance release/peak-hold state without
+    // painting. Otherwise reopening after a quiet interval resurrects the old
+    // peak and starts its decay from that moment.
+    m.input.push_meter(stereo_levels(0.0f, 0.0f));
+    m.output.push_meter(stereo_levels(0.0f, 0.0f));
+    m.tick(300);
+    CHECK(m.host.repaints == parked);
+    std::vector<pulp::view::MultiMeter*> meters;
+    collect_widgets(m.panel, meters);
+    REQUIRE(meters.size() >= 2);
+    CHECK(meters[0]->ballistics().channels[0].display_peak == 0.0f);
+    CHECK(meters[1]->ballistics().channels[0].display_peak == 0.0f);
+
     // Opening Settings puts it back on screen, and the meters resume.
     m.panel->set_visible(true);
     const int shown = m.host.repaints;

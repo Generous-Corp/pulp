@@ -279,6 +279,21 @@ for kind in au vst3 clap; do
     else
         say_bad "$kind reports \"$kgot\", not $WANT_VERSION"
     fi
+    proot="$WORK/$kind/$sub"
+    [[ -d "$proot" ]] || proot="$WORK/$kind"
+    for required in \
+        Contents/Resources/tools/rack/patch.py \
+        Contents/Resources/tools/rack/generate.py \
+        Contents/Resources/tools/dsp_vocabulary.py \
+        Contents/Resources/external/fonts/Inter-Regular.ttf \
+        Contents/Resources/build/shape_text \
+        Contents/Resources/examples/forge-modular/plugin.json; do
+        if [[ -f "$proot/$required" ]]; then
+            say_ok "$kind carries $required"
+        else
+            say_bad "$kind cannot generate patches: missing $required"
+        fi
+    done
 done
 
 # ── signature and notarization, reported but never trusted alone ─────────────

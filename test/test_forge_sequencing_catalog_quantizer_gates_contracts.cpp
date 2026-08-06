@@ -1,4 +1,27 @@
 #include "test_forge_sequencing_catalog_support.hpp"
+#include <pulp/host/forge_eurorack_utility_catalog.hpp>
+
+TEST_CASE("Eurorack clock divider emits one input-width pulse every N edges",
+          "[host][baked][forge][eurorack][clock-divider]") {
+    using Fixture = pulp::test::BakedNodeFixture<1>;
+    const auto render = [](int division) {
+        Fixture fx(pulp::host::eurorack::make_clock_divider_node(), kSr, kFrames);
+        auto inj = fx.claim_injector();
+        REQUIRE(inj.valid());
+        REQUIRE(inj.inject(immediate(pulp::host::eurorack::kDivision,
+                                     static_cast<float>(division))) == InjectStatus::Ok);
+        return fx.render({clock_line(16)})[0];
+    };
+
+    const auto div1 = render(1);
+    const auto div2 = render(2);
+    for (int i = 0; i < kFrames; ++i) {
+        const bool input_pulse = (i % 16) == 0;
+        CHECK(high(div1[static_cast<std::size_t>(i)]) == input_pulse);
+        const bool second_pulse = input_pulse && ((i / 16) % 2 == 1);
+        CHECK(high(div2[static_cast<std::size_t>(i)]) == second_pulse);
+    }
+}
 
 TEST_CASE("Forge sequencing quantizer: edo_n sets the step grid",
           "[host][baked][forge][forge-sequencing][quantizer]") {

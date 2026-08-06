@@ -191,6 +191,15 @@ echo "[installer] toolchain stamped $VERSION ($PACKAGED_AT)"
 stage_and_stamp() {   # <bundle> -> echoes the staged path
     local dest="$STAGED_ROOT/$(basename "$1")"
     ditto "$1" "$dest"
+    # A hosted plug-in can be the first Forge surface opened on a clean
+    # machine. Give every format the same self-contained generator runtime as
+    # the app instead of relying on the app having run and seeded a user dir.
+    for runtime_part in tools external build core examples; do
+        [[ -d "$APP/Contents/Resources/$runtime_part" ]] || continue
+        mkdir -p "$dest/Contents/Resources/$runtime_part"
+        ditto "$APP/Contents/Resources/$runtime_part" \
+              "$dest/Contents/Resources/$runtime_part"
+    done
     stamp_bundle_version "$dest" "$VERSION" >&2 || return 1
     echo "$dest"
 }
@@ -381,10 +390,22 @@ if [[ $DO_SIGN -eq 0 ]]; then
 
     PKG="$OUT_DIR/ForgeModular-$VERSION-unsigned.pkg"
     pkgbuild --root "$STAGE" \
+             --scripts "$REPO/examples/forge-modular/scripts" \
              --identifier com.generous.forgemodular \
              --version "$VERSION" \
              --install-location / \
              "$PKG"
+    # This flat unsigned package does not have a Distribution wrapper, so read
+    # the component back directly and prove both the hook and its payload.
+    CHECK="$(mktemp -d)"
+    pkgutil --expand "$PKG" "$CHECK/expanded" >/dev/null
+    [[ -x "$CHECK/expanded/Scripts/postinstall" ]] || {
+        echo "unsigned package has no executable postinstall" >&2; exit 1; }
+    _unsigned_packs=$(/usr/bin/tar tzf "$CHECK/expanded/Payload" \
+        | grep -c 'Forge Modular.app/Contents/Resources/rack/.*\.vcvplugin$' || true)
+    [[ "$_unsigned_packs" -ge 1 ]] || {
+        echo "unsigned package has no bundled Rack pack" >&2; exit 1; }
+    rm -rf "$CHECK"
     echo "$PKG"
     exit 0
 fi

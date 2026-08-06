@@ -61,7 +61,8 @@ signal::MultiChannelMeterData to_multi_channel_meter(const view::MeterData& data
     return out;
 }
 
-void update_meter_from_bridge(view::AudioBridge* bridge, view::MultiMeter* meter) {
+void update_meter_from_bridge(view::AudioBridge* bridge, view::MultiMeter* meter,
+                              bool request_repaint) {
     if (!bridge || !meter) return;
 
     view::MeterData data;
@@ -81,7 +82,7 @@ void update_meter_from_bridge(view::AudioBridge* bridge, view::MultiMeter* meter
     // before every vsync and composites a full frame at the display's refresh
     // rate for the life of the process. Nothing moved, so ask for nothing.
     const bool levels_moved = meter->update(converted, 1.0f / 30.0f);
-    if (levels_moved || channels_changed)
+    if (request_repaint && (levels_moved || channels_changed))
         meter->request_repaint();
 }
 
@@ -626,14 +627,13 @@ void SettingsPanel::poll() {
         rebuild_midi_list();
 
     // Device and MIDI hotplug are event-driven and must stay current while the
-    // panel is shut, so the lists above rebuild regardless. The meters are the
-    // opposite: they are polled every host tick, and a meter nobody can see has
-    // no reason to advance its ballistics or ask for a frame. Off-screen level
-    // is not a reason to repaint a window.
-    if (!visible()) return;
-
-    update_meter_from_bridge(input_bridge_, input_meter_);
-    update_meter_from_bridge(output_bridge_, output_meter_);
+    // panel is shut, so the lists above rebuild regardless. Meter ballistics
+    // must advance too: freezing them while hidden reopens Settings on a stale
+    // peak and restarts its hold/release clock. Hidden meters consume the
+    // latest state but never ask the window for a frame.
+    const bool repaint = visible();
+    update_meter_from_bridge(input_bridge_, input_meter_, repaint);
+    update_meter_from_bridge(output_bridge_, output_meter_, repaint);
 }
 
 } // namespace pulp::format

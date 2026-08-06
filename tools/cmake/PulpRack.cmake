@@ -193,8 +193,18 @@ function(pulp_add_rack_plugin target)
                     | ${PULP_ZSTD_EXE} -q -19 -o "${_pkg}"
             VERBATIM
             COMMENT "Packaging ${RACK_SLUG}-${RACK_VERSION}-${_rack_os}-${_rack_cpu}.vcvplugin")
+    elseif(APPLE AND EXISTS "/usr/bin/tar")
+        # macOS ships bsdtar with native --zstd support even though it does not
+        # ship a standalone `zstd` executable. Rack packaging must not quietly
+        # disappear on a stock developer machine.
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E rm -f "${_pkg}"
+            COMMAND /usr/bin/tar --zstd --no-xattrs -cf "${_pkg}"
+                    -C "${CMAKE_BINARY_DIR}/rack" "${RACK_SLUG}"
+            VERBATIM
+            COMMENT "Packaging ${RACK_SLUG}-${RACK_VERSION}-${_rack_os}-${_rack_cpu}.vcvplugin with system tar")
     else()
-        message(WARNING "pulp_add_rack_plugin(${target}): zstd not found; "
-                        "the .vcvplugin package will not be produced.")
+        message(FATAL_ERROR "pulp_add_rack_plugin(${target}): cannot package a "
+                            ".vcvplugin without zstd (or macOS system tar --zstd).")
     endif()
 endfunction()
