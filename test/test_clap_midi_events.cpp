@@ -1234,8 +1234,37 @@ TEST_CASE("CLAP resets MPE sidecar ownership across reset and reactivation",
     REQUIRE(h.plugin.mpe.tracker.pending_note_off_count() == 0);
     REQUIRE(h.plugin.mpe.buffer.empty());
 
+    // A state restore holds the render gate, so neither Processor nor the MPE
+    // tracker may observe this block. The reset request remains pending until
+    // the first real render after the restore finishes.
+    InputEventList contended_input;
+    clap_event_note_t contended_note{};
+    contended_note.header = make_header(
+        sizeof(contended_note), CLAP_EVENT_NOTE_ON, 0);
+    contended_note.note_id = -1;
+    contended_note.port_index = 0;
+    contended_note.channel = 1;
+    contended_note.key = 71;
+    contended_note.velocity = 0.8;
+    const int process_count_before_contention = g_capturing->process_count;
+    {
+        auto restore_lock = h.plugin.state_restore_gate.lock_for_restore();
+        contended_input.push(contended_note);
+        REQUIRE(h.run(contended_input) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(g_capturing->process_count == process_count_before_contention);
+        REQUIRE(h.plugin.mpe.tracker.active_count() == 0);
+        REQUIRE(h.plugin.reset_requested);
+    }
+    InputEventList empty;
+    REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_capturing->captured_context.reset_requested);
+    REQUIRE_FALSE(h.plugin.reset_requested);
+    REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+    REQUIRE_FALSE(g_capturing->captured_context.reset_requested);
+
     // A bypassed block does not call Processor::process(), so it must not
     // consume the one-shot reset request meant for processor-owned voices.
+    clap_adapter::clap_reset(&h.plugin.plugin);
     InputEventList bypassed_input;
     clap_event_note_t bypassed_note{};
     bypassed_note.header = make_header(
@@ -1252,7 +1281,6 @@ TEST_CASE("CLAP resets MPE sidecar ownership across reset and reactivation",
     REQUIRE(g_capturing->process_count == process_count_before_bypass);
     REQUIRE(h.plugin.mpe.tracker.active_count() == 0);
     h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 0.0f);
-    InputEventList empty;
     REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
     REQUIRE(g_capturing->captured_context.reset_requested);
     REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
