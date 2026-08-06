@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <pulp/signal/fast_math.hpp>
+#include <pulp/signal/scoped_flush_denormals.hpp>
 
 using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
@@ -114,7 +115,25 @@ TEST_CASE("FastMath exp2 defines exceptional and range-edge results", "[signal][
     REQUIRE(FastMath::exp2(-149.0f) == std::numeric_limits<float>::denorm_min());
 }
 
-TEST_CASE("FastMath exp2 returns every representable integer power exactly",
+TEST_CASE("FastMath exp2 follows the audio callback floating-point mode",
+          "[signal][fast_math]") {
+    volatile float exponent = -149.0f;
+    float standard = 0.0f;
+    float actual = 0.0f;
+    {
+        ScopedFlushDenormals flush_denormals;
+        standard = std::exp2(exponent);
+        actual = FastMath::exp2(exponent);
+    }
+
+    INFO("callback-mode std::exp2(-149)=" << standard
+                                          << " FastMath::exp2(-149)=" << actual);
+    REQUIRE(actual == standard);
+    REQUIRE(actual >= 0.0f);
+    REQUIRE_FALSE(std::signbit(actual));
+}
+
+TEST_CASE("FastMath exp2 returns every integer power exactly under gradual underflow",
           "[signal][fast_math]") {
     for (int exponent = -149; exponent <= 127; ++exponent)
         REQUIRE(FastMath::exp2(static_cast<float>(exponent)) == std::ldexp(1.0f, exponent));

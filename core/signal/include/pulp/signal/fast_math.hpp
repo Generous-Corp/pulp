@@ -75,9 +75,12 @@ struct FastMath {
     ///
     /// NaN propagates, positive infinity and finite overflow produce positive
     /// infinity, and negative infinity and finite underflow produce positive
-    /// zero. Subnormal results and representable integer powers are preserved.
-    /// This deliberately uses the standard implementation: a polynomial plus
-    /// `ldexp` measured slower on supported Apple hardware while weakening
+    /// zero. With gradual underflow enabled, subnormal results and representable
+    /// integer powers are preserved. Under Pulp's audio-callback
+    /// `ScopedFlushDenormals` policy, the finite subnormal range may flush to
+    /// positive zero exactly as the platform `std::exp2` does in that ambient FP
+    /// mode. This deliberately uses the standard implementation: a polynomial
+    /// plus `ldexp` measured slower on supported Apple hardware while weakening
     /// these edge contracts.
     static float exp2(float x) {
         return std::exp2(x);
