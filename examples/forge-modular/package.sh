@@ -239,8 +239,8 @@ rebuild_forge_products() {
     prefix="$(cd "$prefix" 2>/dev/null && pwd)" || true
     [[ -n "$prefix" && -d "$prefix" ]] || {
         echo "Forge Pulp SDK prefix does not exist" >&2; return 1; }
-    expected_sdk_version="${FORGE_PULP_SDK_VERSION:-$(sed -n \
-        's/^project(Pulp VERSION \([0-9][0-9.]*\).*/\1/p' "$REPO/CMakeLists.txt" | head -1)}"
+    expected_sdk_version="$(resolve_pulp_sdk_version \
+        "$prefix" "${FORGE_PULP_SDK_VERSION:-}")" || return 1
     expected_sdk_source="${FORGE_PULP_SDK_SOURCE_SHA:-}"
     expected_sdk_content="${FORGE_PULP_SDK_CONTENT_SHA256:-}"
     [[ -n "$expected_sdk_content" ]] || {

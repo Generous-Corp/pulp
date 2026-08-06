@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 2,
+  "inventory_version": 3,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -33,15 +33,15 @@
   ],
   "counts": {
     "public_headers": 345,
-    "reviewed_headers": 7,
-    "legacy_unreviewed_headers": 338,
-    "unsupported_headers": 1,
+    "reviewed_headers": 8,
+    "legacy_unreviewed_headers": 337,
+    "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 6,
       "capability_support": 0,
       "infrastructure": 0,
-      "legacy_unreviewed": 338,
-      "unsupported_capability": 1
+      "legacy_unreviewed": 337,
+      "unsupported_capability": 2
     },
     "by_domain": {
       "audio": {
@@ -64,9 +64,9 @@
       },
       "signal": {
         "public_headers": 194,
-        "reviewed_headers": 2,
-        "legacy_unreviewed_headers": 192,
-        "unsupported_headers": 1
+        "reviewed_headers": 3,
+        "legacy_unreviewed_headers": 191,
+        "unsupported_headers": 2
       },
       "timebase": {
         "public_headers": 6,
@@ -2426,11 +2426,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/multi_channel_meter.hpp",
-      "fingerprint": "sha256:e3b23b5fbeda54d6074934994cf58a4d54b461a8ff9ab97d1f8d91cb8f909505",
+      "fingerprint": "sha256:3ccb8f63241c150c00a4ce323f9de0501d2d54c0ef4ec3f0f307ac72111c329d",
       "include": "pulp/signal/multi_channel_meter.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "unsupported_capability",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "The multi-channel meter is a public DSP and presentation helper, but it does not yet have the typed bindings, lifecycle contract, parameter semantics, and link probe required for a generator-facing capability claim."
     },
     {
       "domain": "signal",

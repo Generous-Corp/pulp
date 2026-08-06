@@ -29,8 +29,8 @@ from agent_capability_evolution import (
 
 SCHEMA = "pulp.agent-capabilities.v1"
 SCHEMA_MINOR = 1
-MANIFEST_REVISION = 2
-SURFACE_INVENTORY_VERSION = 2
+MANIFEST_REVISION = 3
+SURFACE_INVENTORY_VERSION = 3
 HISTORY_SCHEMA = "pulp.agent-capability-history.v1"
 HISTORY_FILE = pathlib.Path("tools/agent-capabilities/contract-history.json")
 SNAPSHOT = pathlib.Path("docs/status/agent-capabilities.json")
@@ -495,6 +495,18 @@ EXPORTS = [
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
+        "include": "pulp/signal/multi_channel_meter.hpp",
+        "fingerprint": "sha256:3ccb8f63241c150c00a4ce323f9de0501d2d54c0ef4ec3f0f307ac72111c329d",
+        "disposition": "unsupported_capability",
+        "capability_keys": [],
+        "rationale": (
+            "The multi-channel meter is a public DSP and presentation helper, "
+            "but it does not yet have the typed bindings, lifecycle contract, "
+            "parameter semantics, and link probe required for a generator-facing "
+            "capability claim."
+        ),
+    },
+    {
         "include": "pulp/signal/harmony_engine.hpp",
         "fingerprint": "sha256:edf2c597ddeb7b31f07c7cf094e4cfb2b833b4f4fb6b00376b36635d11734f79",
         "disposition": "unsupported_capability",
@@ -764,9 +776,16 @@ def history_entry(
     material = {
         "manifest": {
             "schema": manifest_document["schema"],
+            "schema_minor": manifest_document["schema_minor"],
             "manifest_revision": manifest_document["manifest_revision"],
+            "required_features": copy.deepcopy(
+                manifest_document["required_features"]
+            ),
+            "coverage": copy.deepcopy(manifest_document["coverage"]),
             "capabilities": copy.deepcopy(manifest_document["capabilities"]),
             "tombstones": copy.deepcopy(manifest_document["tombstones"]),
+            "counts": copy.deepcopy(manifest_document["counts"]),
+            "compatibility": copy.deepcopy(manifest_document["compatibility"]),
         },
         "surface": {
             "schema": surface_document["schema"],

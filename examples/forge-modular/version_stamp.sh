@@ -49,3 +49,24 @@ write_toolchain_stamp() {   # <tools dir> <version> [packaged-at]
     local at="${3:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
     printf '%s\n%s\n' "$2" "$at" > "$1/VERSION"
 }
+
+# Resolve the Pulp SDK version from the artifact being consumed. The root
+# CMakeLists declaration is intentionally multiline, and in any case describes
+# this checkout rather than necessarily describing the selected release SDK.
+resolve_pulp_sdk_version() {   # <SDK prefix> [explicit override]
+    local prefix="$1" explicit="${2:-}" version_file="$1/version.txt" version
+    if [ -n "$explicit" ]; then
+        printf '%s\n' "$explicit"
+        return 0
+    fi
+    if [ ! -f "$version_file" ]; then
+        echo "selected Pulp SDK has no version marker: $version_file" >&2
+        return 1
+    fi
+    version="$(tr -d '[:space:]' < "$version_file")"
+    if [ -z "$version" ]; then
+        echo "selected Pulp SDK has an empty version marker: $version_file" >&2
+        return 1
+    fi
+    printf '%s\n' "$version"
+}

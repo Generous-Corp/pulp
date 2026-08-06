@@ -59,7 +59,7 @@ BORING = {"reset", "prepare", "set_sample_rate", "clear"}
 
 
 def public_enums(text: str, cls: str):
-    """Enum types declared inside `cls`, as (name, [values]).
+    """Enum types declared inside `cls`, as JSON-shaped [name, [values]].
 
     Without these the model sees `set_mode(Mode m)` and has to guess what a
     Mode is. It guesses plausibly and wrongly -- `Mode::Independent`,
@@ -104,7 +104,7 @@ def public_enums(text: str, cls: str):
             if re.fullmatch(r"[A-Za-z_]\w*", raw):
                 values.append(raw)
         if values:
-            out.append((local, values))
+            out.append([local, values])
 
     for em in re.finditer(r"enum\s+class\s+(\w+)[^{]*\{([^}]*)\}", src):
         name = em.group(1)
@@ -117,7 +117,7 @@ def public_enums(text: str, cls: str):
             if re.fullmatch(r"[A-Za-z_]\w*", raw):
                 values.append(raw)
         if values:
-            out.append((name, values))
+            out.append([name, values])
     return out
 
 

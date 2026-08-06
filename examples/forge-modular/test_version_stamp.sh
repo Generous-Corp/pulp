@@ -98,6 +98,27 @@ grep -q 'if \[ "\$part" = "tools/rack" \] && \[ ! -f "\$SRC/\$part/VERSION" \]' 
     && ok "an install from a checkout leaves an existing stamp alone" \
     || fail "install_toolchain.sh would delete the destination's VERSION"
 
+# 8. The SDK version belongs to the selected release artifact. Pulp's real root
+#    project declaration spans multiple lines, so the old one-line sed fallback
+#    returned an empty string and made the default packaging path reject every
+#    valid SDK.
+mkdir -p "$WORK/multiline-root" "$WORK/pulp-sdk"
+printf '%s\n' 'project(Pulp' '    VERSION 0.999.0' ')' \
+    > "$WORK/multiline-root/CMakeLists.txt"
+printf '0.790.1\n' > "$WORK/pulp-sdk/version.txt"
+got="$(cd "$WORK/multiline-root" && \
+    resolve_pulp_sdk_version "$WORK/pulp-sdk" "")"
+[ "$got" = "0.790.1" ] \
+    && ok "the default Pulp SDK version comes from the selected SDK" \
+    || fail "the multiline root made the selected SDK version resolve as \"$got\""
+
+# An explicit release override remains available, but it does not change where
+# the default comes from.
+got="$(resolve_pulp_sdk_version "$WORK/pulp-sdk" "0.790.2")"
+[ "$got" = "0.790.2" ] \
+    && ok "an explicit Pulp SDK version override remains authoritative" \
+    || fail "the explicit SDK version override resolved as \"$got\""
+
 echo
 if [ "$bad" -eq 0 ]; then echo "version stamping is correct"; else
     echo "$bad problem(s)"; fi

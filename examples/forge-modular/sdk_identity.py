@@ -36,7 +36,7 @@ def directory_sha256(root: Path) -> str:
 
 def identify(prefix: Path, platform: str, source_sha: str, version: str,
              expected_content_sha256: str) -> dict[str, str]:
-    marker = PROVENANCE.verify_release_marker(
+    marker = PROVENANCE.verify_release_sdk(
         prefix, expected_platform=platform, expected_source_sha=source_sha
     )
     if marker["sdk_version"] != version:

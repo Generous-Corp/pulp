@@ -387,12 +387,30 @@
                 "items": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["class", "methods"],
+                  "required": ["class", "methods", "enums"],
                   "properties": {
                     "class": { "type": "string", "minLength": 1 },
                     "methods": {
                       "type": "array",
                       "items": { "type": "string", "minLength": 1 }
+                    },
+                    "enums": {
+                      "type": "array",
+                      "items": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "items": {
+                          "oneOf": [
+                            { "type": "string", "minLength": 1 },
+                            {
+                              "type": "array",
+                              "minItems": 1,
+                              "items": { "type": "string", "minLength": 1 }
+                            }
+                          ]
+                        }
+                      }
                     }
                   }
                 }

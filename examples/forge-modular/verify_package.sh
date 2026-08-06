@@ -23,6 +23,7 @@
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$REPO/examples/forge-modular/version_stamp.sh"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -165,8 +166,8 @@ EXPECTED_PULP_SDK_SOURCE="${FORGE_PULP_SDK_SOURCE_SHA:-}"
 EXPECTED_PULP_SDK_CONTENT="${FORGE_PULP_SDK_CONTENT_SHA256:-}"
 [[ -n "$EXPECTED_PULP_SDK_CONTENT" ]] || {
     echo "FORGE_PULP_SDK_CONTENT_SHA256 is required for exact verification" >&2; exit 1; }
-EXPECTED_PULP_SDK_VERSION="${FORGE_PULP_SDK_VERSION:-$(sed -n \
-    's/^project(Pulp VERSION \([0-9][0-9.]*\).*/\1/p' "$REPO/CMakeLists.txt" | head -1)}"
+EXPECTED_PULP_SDK_VERSION="$(resolve_pulp_sdk_version \
+    "$EXPECTED_PULP_SDK_PREFIX" "${FORGE_PULP_SDK_VERSION:-}")" || exit 1
 case "$EXPECTED_PLATFORM" in
     mac-arm64) EXPECTED_PULP_SDK_PLATFORM="darwin-arm64" ;;
     mac-x64) EXPECTED_PULP_SDK_PLATFORM="darwin-x64" ;;

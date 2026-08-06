@@ -54,6 +54,22 @@ class SdkIdentityTest(unittest.TestCase):
                 MODULE.directory_sha256(self.prefix),
             )
 
+    def test_current_sdk_without_capability_handoff_is_rejected(self) -> None:
+        self.version = "0.790.1"
+        (self.prefix / "version.txt").write_text(self.version + "\n")
+        marker_path = self.prefix / "sdk-provenance.json"
+        marker = json.loads(marker_path.read_text())
+        marker["sdk_version"] = self.version
+        marker["source_git_ref"] = "v" + self.version
+        marker["features"]["inspector"] = True
+        marker_path.write_text(json.dumps(marker))
+
+        with self.assertRaises(MODULE.PROVENANCE.HandoffError):
+            MODULE.identify(
+                self.prefix, "darwin-arm64", self.source, self.version,
+                MODULE.directory_sha256(self.prefix),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

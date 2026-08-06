@@ -1,10 +1,10 @@
 {
   "_doc": "Canonical DSP capability surface, extracted statically from the Forge bake catalog headers by tools/scripts/dsp_capability_registry.py. Regenerate with `pulp dsp capabilities --write`. Construction-time values (notably rate-dependent latency) are deliberately absent \u2014 a static reader cannot evaluate them.",
   "counts": {
-    "catalogs": 30,
+    "catalogs": 31,
     "type_ids": 103,
-    "factories": 65,
-    "baked_params": 393
+    "factories": 69,
+    "baked_params": 398
   },
   "catalogs": [
     {
@@ -829,6 +829,61 @@
               "default": "kModeVibrato"
             }
           ]
+        }
+      ]
+    },
+    {
+      "header": "core/host/include/pulp/host/forge_eurorack_utility_catalog.hpp",
+      "type_ids": [],
+      "nodes": [
+        {
+          "factory": "make_attenuverter_node",
+          "baked_params": [
+            {
+              "id": "kAmount",
+              "min": "-1.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kOffset",
+              "min": "-kCvBipolarPeak",
+              "max": "kCvBipolarPeak",
+              "default": "0.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_slew_node",
+          "baked_params": [
+            {
+              "id": "kSlewRise",
+              "min": "0.0f",
+              "max": "10.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kSlewFall",
+              "min": "0.0f",
+              "max": "10.0f",
+              "default": "0.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_clock_divider_node",
+          "baked_params": [
+            {
+              "id": "kDivision",
+              "min": "1.0f",
+              "max": "64.0f",
+              "default": "2.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_sample_hold_node",
+          "baked_params": []
         }
       ]
     },
