@@ -144,26 +144,46 @@ template <typename SampleType = float, std::size_t MaxBands = 8> class LinkwitzR
             !valid_configuration(sample_rate_, cutoffs))
             return false;
 
-        copy_cutoffs(cutoffs, target_cutoffs_);
-        Bank::warp_cutoffs(std::span<const double>(target_cutoffs_.data(), cutoff_count_),
-                           sample_rate_, target_warped_cutoffs_);
+        std::array<double, MaxBands - 1> proposed_cutoffs{};
+        std::array<double, MaxBands - 1> proposed_warped_cutoffs{};
+        copy_cutoffs(cutoffs, proposed_cutoffs);
+        Bank::warp_cutoffs(std::span<const double>(proposed_cutoffs.data(), cutoff_count_),
+                           sample_rate_, proposed_warped_cutoffs);
         if (transition_samples == 0) {
-            cutoffs_ = target_cutoffs_;
-            current_warped_cutoffs_ = target_warped_cutoffs_;
+            cutoffs_ = proposed_cutoffs;
+            target_cutoffs_ = proposed_cutoffs;
+            current_warped_cutoffs_ = proposed_warped_cutoffs;
+            target_warped_cutoffs_ = proposed_warped_cutoffs;
             Bank::design_coefficients(current_warped_cutoffs_, cutoff_count_,
                                       current_coefficients_);
             bank_.reset();
             return true;
         }
 
-        if (transition_samples < minimum_transition_samples_from_warped(target_warped_cutoffs_))
+        const auto minimum = minimum_transition_samples_from_warped(proposed_warped_cutoffs);
+        if (minimum == std::numeric_limits<std::size_t>::max() || transition_samples < minimum)
             return false;
 
+        std::array<double, MaxBands - 1> proposed_multipliers{};
+        bool changes_cutoff = false;
         for (std::size_t split = 0; split < cutoff_count_; ++split) {
-            warped_cutoff_multipliers_[split] =
-                std::exp(std::log(target_warped_cutoffs_[split] / current_warped_cutoffs_[split]) /
+            changes_cutoff =
+                changes_cutoff || proposed_warped_cutoffs[split] != current_warped_cutoffs_[split];
+            proposed_multipliers[split] =
+                std::exp(std::log(proposed_warped_cutoffs[split] / current_warped_cutoffs_[split]) /
                          static_cast<double>(transition_samples));
+            if (!(std::isfinite(proposed_multipliers[split]) &&
+                  proposed_multipliers[split] > 0.0) ||
+                (proposed_warped_cutoffs[split] != current_warped_cutoffs_[split] &&
+                 proposed_multipliers[split] == 1.0))
+                return false;
         }
+        if (!changes_cutoff)
+            return true;
+
+        target_cutoffs_ = proposed_cutoffs;
+        target_warped_cutoffs_ = proposed_warped_cutoffs;
+        warped_cutoff_multipliers_ = proposed_multipliers;
         transition_position_ = 0;
         transition_length_ = transition_samples;
         return true;
@@ -220,8 +240,16 @@ template <typename SampleType = float, std::size_t MaxBands = 8> class LinkwitzR
         return fault_count_;
     }
 
+    /// Maximum accepted downward motion in the logarithm of the bilinear-warped
+    /// cutoff. This parameter-rate guarantee does not imply a signal peak bound,
+    /// which also depends on the recursive state established by prior input.
+    static constexpr double maximum_downward_log_slew_nepers_per_second() noexcept {
+        return 20.0;
+    }
+
     /// Minimum safe nonzero transition for the requested cutoff set. Returning
-    /// max() means the configuration is invalid for this prepared topology.
+    /// max() means the configuration is invalid for this prepared topology or
+    /// that no nonzero transition length can represent the requested motion.
     std::size_t minimum_transition_samples(std::span<const SampleType> cutoffs) const noexcept {
         if (!prepared_ || cutoffs.size() != cutoff_count_ ||
             !valid_configuration(sample_rate_, cutoffs))
@@ -464,10 +492,8 @@ template <typename SampleType = float, std::size_t MaxBands = 8> class LinkwitzR
         const std::array<double, MaxBands - 1>& target) const noexcept {
         // TPT state is invariant under coefficient changes, but a rapid downward
         // move can still release stored integrator energy into a much slower
-        // pole. Limit only that direction; upward moves do not expose the stored
-        // state through a narrower bandwidth. Twenty nepers/second keeps a
-        // musically useful sweep while bounding the full supported-domain move.
-        constexpr double maximum_downward_log_slew_per_second = 20.0;
+        // pole. Limit that parameter motion explicitly. Signal peaks also depend
+        // on prior input and are intentionally not described by this rate bound.
         double largest_downward_distance = 0.0;
         for (std::size_t split = 0; split < cutoff_count_; ++split) {
             if (target[split] < current_warped_cutoffs_[split]) {
@@ -477,9 +503,9 @@ template <typename SampleType = float, std::size_t MaxBands = 8> class LinkwitzR
             }
         }
         const double required = std::ceil(sample_rate_ * largest_downward_distance /
-                                          maximum_downward_log_slew_per_second);
+                                          maximum_downward_log_slew_nepers_per_second());
         if (!(std::isfinite(required) && required >= 0.0) ||
-            required > static_cast<double>(std::numeric_limits<std::size_t>::max()))
+            required >= static_cast<double>(std::numeric_limits<std::size_t>::max()))
             return std::numeric_limits<std::size_t>::max();
         return static_cast<std::size_t>(required);
     }

@@ -685,6 +685,193 @@ TEST_CASE("N-way Linkwitz-Riley adversarial downward sweeps enforce the disclose
     }
 }
 
+TEST_CASE("N-way Linkwitz-Riley rejects unrepresentable transitions transactionally",
+          "[signal][crossover][automation][stability]") {
+    using Runtime = pulp::signal::LinkwitzRileyCrossoverT<double, 2>;
+    constexpr auto sentinel = std::numeric_limits<std::size_t>::max();
+    const double full_domain_distance =
+        std::log(std::tan(std::numbers::pi * 0.4) / std::tan(std::numbers::pi * 1.0e-5));
+    const double sentinel_rounding_edge = static_cast<double>(sentinel) *
+                                          Runtime::maximum_downward_log_slew_nepers_per_second() /
+                                          full_domain_distance;
+
+    for (const double sample_rate : {sentinel_rounding_edge, 1.0e20, 1.0e100}) {
+        const std::array high{sample_rate * 0.4};
+        const std::array low{sample_rate * 1.0e-5};
+        Runtime runtime;
+        Runtime unchanged;
+        REQUIRE(Runtime::supports_configuration(sample_rate, high));
+        REQUIRE(Runtime::supports_configuration(sample_rate, low));
+        REQUIRE(runtime.prepare(sample_rate, high));
+        REQUIRE(unchanged.prepare(sample_rate, high));
+
+        for (std::size_t sample = 0; sample < 4096; ++sample) {
+            const double input = 0.25 * std::sin(0.173 * static_cast<double>(sample));
+            REQUIRE(runtime.process(input).bands == unchanged.process(input).bands);
+        }
+
+        REQUIRE(runtime.minimum_transition_samples(low) == sentinel);
+        REQUIRE_FALSE(runtime.set_cutoffs(low, sentinel));
+        REQUIRE_FALSE(runtime.transitioning());
+        REQUIRE(runtime.cutoff(0) == high[0]);
+        for (std::size_t sample = 0; sample < 4096; ++sample) {
+            const double input = 0.25 * std::cos(0.119 * static_cast<double>(sample));
+            REQUIRE(runtime.process(input).bands == unchanged.process(input).bands);
+        }
+
+        REQUIRE(runtime.set_cutoffs(low));
+        REQUIRE(runtime.cutoff(0) == low[0]);
+        REQUIRE_FALSE(runtime.transitioning());
+    }
+
+    Runtime unprepared;
+    REQUIRE(unprepared.minimum_transition_samples(std::array<double, 1>{1000.0}) == sentinel);
+
+    const std::array<double, 1> low{0.01};
+    const std::array<double, 1> high{23999.0};
+    Runtime rounding_edge;
+    Runtime rounding_control;
+    REQUIRE(rounding_edge.prepare(48000.0, low));
+    REQUIRE(rounding_control.prepare(48000.0, low));
+    REQUIRE_FALSE(rounding_edge.set_cutoffs(high, sentinel));
+    REQUIRE_FALSE(rounding_edge.transitioning());
+    REQUIRE(rounding_edge.cutoff(0) == low[0]);
+    for (std::size_t sample = 0; sample < 4096; ++sample) {
+        const double input = 0.5 * std::sin(0.07 * static_cast<double>(sample));
+        REQUIRE(rounding_edge.process(input).bands == rounding_control.process(input).bands);
+    }
+
+    REQUIRE(rounding_edge.set_cutoffs(low, sentinel));
+    REQUIRE_FALSE(rounding_edge.transitioning());
+}
+
+TEST_CASE("N-way Linkwitz-Riley downward slew remains healthy with warmed recursive state",
+          "[signal][crossover][automation][stability]") {
+    constexpr double input_peak = 0.5;
+    // This is a deterministic corpus regression ceiling, not an
+    // input-independent transfer bound. The public guarantee is the warped
+    // cutoff rate asserted below.
+    constexpr double corpus_peak_ceiling = 2.0;
+
+    using TwoBand = pulp::signal::LinkwitzRileyCrossoverT<float, 2>;
+    for (const float sample_rate : {44100.0f, 48000.0f, 96000.0f, 192000.0f}) {
+        const std::array<float, 1> low{0.01f};
+        const std::array<float, 1> high{std::nextafter(sample_rate * 0.5f, 0.0f)};
+        for (const double frequency : {20.0, 1000.0, static_cast<double>(sample_rate) * 0.47}) {
+            for (const double phase : {0.0, 0.5, 1.0, 1.5}) {
+                TwoBand runtime;
+                REQUIRE(runtime.prepare(sample_rate, high));
+                std::size_t cursor = 0;
+                auto sine = [&](std::size_t sample) {
+                    return static_cast<float>(
+                        input_peak * std::sin(2.0 * std::numbers::pi * frequency *
+                                                  static_cast<double>(sample) / sample_rate +
+                                              phase * std::numbers::pi));
+                };
+                for (; cursor < 8192; ++cursor)
+                    (void)runtime.process(sine(cursor));
+                const auto stored_state_probe = runtime.process(0.0f);
+                double stored_state_output = 0.0;
+                for (std::size_t band = 0; band < stored_state_probe.count; ++band) {
+                    stored_state_output =
+                        std::max(stored_state_output,
+                                 std::abs(static_cast<double>(stored_state_probe.bands[band])));
+                }
+                REQUIRE(stored_state_output > 1.0e-12);
+
+                const std::size_t required = runtime.minimum_transition_samples(low);
+                const double high_warped =
+                    std::tan(std::numbers::pi * static_cast<double>(high[0]) / sample_rate);
+                const double low_warped =
+                    std::tan(std::numbers::pi * static_cast<double>(low[0]) / sample_rate);
+                const auto expected = static_cast<std::size_t>(std::ceil(
+                    static_cast<double>(sample_rate) * std::log(high_warped / low_warped) /
+                    TwoBand::maximum_downward_log_slew_nepers_per_second()));
+                REQUIRE(required == expected);
+                REQUIRE(runtime.set_cutoffs(low, required));
+
+                double peak = 0.0;
+                bool all_healthy = true;
+                const std::size_t tail = static_cast<std::size_t>(sample_rate * 0.25f);
+                for (std::size_t sample = 0; sample < required + tail; ++sample, ++cursor) {
+                    const auto frame = runtime.process(sine(cursor));
+                    all_healthy = all_healthy && frame.healthy;
+                    peak = std::max(peak, std::abs(sum(frame)));
+                }
+                INFO("sample_rate=" << sample_rate << " frequency=" << frequency << " phase="
+                                    << phase << " required=" << required << " peak=" << peak);
+                REQUIRE(all_healthy);
+                REQUIRE_FALSE(runtime.transitioning());
+                REQUIRE(runtime.fault_count() == 0);
+                REQUIRE(peak < corpus_peak_ceiling);
+            }
+        }
+    }
+
+    using NineBand = pulp::signal::LinkwitzRileyCrossoverT<float, 9>;
+    for (const float sample_rate : {44100.0f, 48000.0f, 96000.0f, 192000.0f}) {
+        const std::array<float, 8> low{0.01f, 0.1f, 1.0f, 10.0f, 100.0f, 500.0f, 1000.0f, 2000.0f};
+        const std::array<float, 8> high{
+            sample_rate * 0.05f, sample_rate * 0.10f,
+            sample_rate * 0.18f, sample_rate * 0.26f,
+            sample_rate * 0.34f, sample_rate * 0.40f,
+            sample_rate * 0.46f, std::nextafter(sample_rate * 0.5f, 0.0f)};
+
+        for (const bool impulse_train : {false, true}) {
+            NineBand runtime;
+            REQUIRE(runtime.prepare(sample_rate, high));
+            std::uint32_t rng = 0x9e3779b9u;
+            std::size_t cursor = 0;
+            auto stimulus = [&]() {
+                if (impulse_train) {
+                    const float value =
+                        cursor % 127 == 0 ? 0.5f : (cursor % 257 == 0 ? -0.5f : 0.0f);
+                    ++cursor;
+                    return value;
+                }
+                rng ^= rng << 13;
+                rng ^= rng >> 17;
+                rng ^= rng << 5;
+                ++cursor;
+                return static_cast<float>(static_cast<double>(rng) / 4294967295.0 - 0.5);
+            };
+
+            const std::size_t warmup = static_cast<std::size_t>(sample_rate * 0.5f);
+            for (std::size_t sample = 0; sample < warmup; ++sample)
+                (void)runtime.process(stimulus());
+            const auto stored_state_probe = runtime.process(0.0f);
+            double stored_state_output = 0.0;
+            for (std::size_t band = 0; band < stored_state_probe.count; ++band) {
+                stored_state_output =
+                    std::max(stored_state_output,
+                             std::abs(static_cast<double>(stored_state_probe.bands[band])));
+            }
+            REQUIRE(stored_state_output > 1.0e-12);
+            const std::size_t required = runtime.minimum_transition_samples(low);
+            REQUIRE(required != std::numeric_limits<std::size_t>::max());
+            REQUIRE(runtime.set_cutoffs(low, required));
+
+            double peak = 0.0;
+            bool all_healthy = true;
+            const std::size_t long_tail = static_cast<std::size_t>(sample_rate);
+            for (std::size_t sample = 0; sample < required + long_tail; ++sample) {
+                const auto frame = runtime.process(stimulus());
+                all_healthy = all_healthy && frame.healthy;
+                peak = std::max(peak, std::abs(sum(frame)));
+            }
+            INFO("sample_rate=" << sample_rate
+                                << " stimulus=" << (impulse_train ? "impulse" : "noise")
+                                << " required=" << required << " peak=" << peak);
+            REQUIRE(all_healthy);
+            REQUIRE_FALSE(runtime.transitioning());
+            REQUIRE(runtime.cutoff(0) == low[0]);
+            REQUIRE(runtime.cutoff(7) == low[7]);
+            REQUIRE(runtime.fault_count() == 0);
+            REQUIRE(peak < corpus_peak_ceiling);
+        }
+    }
+}
+
 TEST_CASE("N-way Linkwitz-Riley validates its numerical support domain and maximum topology",
           "[signal][crossover][stability]") {
     using FloatCrossover = pulp::signal::LinkwitzRileyCrossover;
