@@ -228,6 +228,46 @@ std::vector<BuildLine> BuildMonitor::poll() {
     return added;
 }
 
+std::vector<std::string> BuildMonitor::closing_block(
+    const std::vector<BuildLine>& lines) {
+    // From the LAST ending, not the first. A run can print a recoverable
+    // ending-shaped line early -- a model call that failed and was retried --
+    // and starting there would hand back the whole rest of the transcript.
+    std::size_t start = lines.size();
+    for (std::size_t i = lines.size(); i-- > 0;) {
+        if (lines[i].kind == BuildLine::Kind::error ||
+            lines[i].kind == BuildLine::Kind::refusal) {
+            start = i;
+            break;
+        }
+    }
+    std::vector<std::string> out;
+    for (std::size_t i = start; i < lines.size(); ++i)
+        out.push_back(lines[i].text);
+    return out;
+}
+
+std::string format_failure_report(const RunFailure& f) {
+    std::string out = "Forge Modular";
+    if (!f.app_version.empty()) out += " " + f.app_version;
+    out += ": a build failed.\n\n";
+    if (!f.request.empty()) out += "Asked for: " + f.request + "\n";
+    if (!f.headline.empty()) out += "Stopped because: " + f.headline + "\n";
+    // The patch FIRST among the paths. It is the one thing here a person can
+    // act on in ten seconds, and burying it under a log path is how the whole
+    // handover gets missed.
+    if (!f.artifact.empty())
+        out += "Unfinished patch: " + f.artifact + "\n";
+    if (!f.log_path.empty()) out += "Run log: " + f.log_path + "\n";
+    // The transcript, whole. This is the part the user asked for by name:
+    // "i didn't even get a way to copy the prompt output". A summary of a
+    // failure is the thing they already had.
+    if (!f.log_text.empty())
+        out += "\n----- the run -----\n" + f.log_text +
+               (f.log_text.back() == '\n' ? "" : "\n");
+    return out;
+}
+
 std::string BuildMonitor::headline() const {
     // Walk backwards for the most recent line of each rank, then pick by rank.
     const BuildLine* refusal = nullptr;

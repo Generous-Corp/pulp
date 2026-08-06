@@ -44,6 +44,29 @@ struct BuildLine {
     std::string text;
 };
 
+/// Everything a person needs to report a failed run, gathered in one place.
+///
+/// Each field is something only one part of the app knows -- the version from
+/// the bundle, the request from the composer, the transcript from the log --
+/// so they are collected rather than looked up, and `failure_report` stays a
+/// pure function a test can call.
+struct RunFailure {
+    std::string app_version;
+    std::string request;     ///< what the person typed
+    std::string headline;    ///< the generator's last word on why it stopped
+    std::string artifact;    ///< the patch handed over anyway, or empty
+    std::string log_path;
+    std::string log_text;    ///< the run's whole transcript
+};
+
+/// The failed run as one block of text, safe to copy whole.
+///
+/// A Label cannot be selected with a mouse. The About report solved this with
+/// a Copy action for a report nobody urgently needs; a failure is the case
+/// where it actually matters, and it shipped without one -- a user who lost a
+/// five-attempt run said so in exactly those words.
+std::string format_failure_report(const RunFailure& f);
+
 /// Which of the chrome's five stage chips a line implies, or -1.
 ///
 /// Thinking / Writing files / Building / Verifying / Installing. Derived from
@@ -85,6 +108,21 @@ public:
     /// a retry re-runs earlier stages, and a card that walks backwards reads
     /// as the build losing ground.
     int stage() const;
+
+    /// The generator's closing block: the line that ended the run, and
+    /// everything it said after it.
+    ///
+    /// A failed run used to be reported as ONE line, `headline()`, which names
+    /// the ending and nothing else. The generator says considerably more than
+    /// that when it gives up -- what was asked for, what the patch it is
+    /// handing over does not meet, where that patch is, where every attempt
+    /// behind it went -- and all of it was on the floor. Empty when the run has
+    /// not ended.
+    static std::vector<std::string> closing_block(
+        const std::vector<BuildLine>& lines);
+    std::vector<std::string> closing_block() const {
+        return closing_block(lines_);
+    }
 
 private:
     std::string path_;

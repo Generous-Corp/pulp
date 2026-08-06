@@ -17,6 +17,8 @@
 
 #include <cctype>
 #include <chrono>
+#include <fstream>
+#include <sstream>
 #include <cstdio>
 #include <cstdint>
 #include <mach-o/dyld.h>
@@ -564,6 +566,26 @@ forge::ComposerRow ForgeModularShell::composer_row() {
         .on_click = [this] { offer_random(); },
     });
 
+    // WHAT A FAILURE LEAVES BEHIND, on the clipboard.
+    //
+    // Only after one has failed, and only until the next build starts. A
+    // control that is always there teaches nobody anything; one that appears
+    // exactly when a person has just lost a run is the moment they want it.
+    // The About report already argued this for a report nobody urgently
+    // needs -- a Label cannot be selected with a mouse -- and a failure is
+    // the case where it actually cost somebody their work.
+    if (failed_report_) {
+        row.left.push_back({
+            .label = "Copy report",
+            .access_label = "Copy the failed run's report to the clipboard",
+            .icon = forge::ComposerAction::Icon::document,
+            .primary = false,
+            .on_click = [this] {
+                pulp::platform::Clipboard::set_text(failure_report());
+            },
+        });
+    }
+
     // Ask and Build differ in one bit and it is carried, not inferred: an Ask
     // that could rewrite the artifact would destroy work on a misread intent.
     row.right.push_back({
@@ -743,6 +765,28 @@ ForgeModularShell::settings_choices() {
 
     return {std::move(source), std::move(downloads), std::move(limit),
             std::move(refresh), std::move(about)};
+}
+
+std::string ForgeModularShell::failure_report() const {
+    RunFailure f;
+    f.app_version = bundle_short_version();
+    f.request = last_request_;
+    f.headline = trimmed(monitor_.headline());
+    f.artifact = artifact_path();
+    f.log_path = monitor_log_path_;
+    // The log READ BACK FROM DISK rather than rebuilt from the lines the
+    // monitor kept. The monitor drops blank lines and only ever holds what it
+    // has polled, and a report that quietly differs from the file it names is
+    // the kind of thing that wastes an hour when somebody compares the two.
+    if (!f.log_path.empty()) {
+        std::ifstream in(f.log_path, std::ios::binary);
+        if (in) {
+            std::ostringstream all;
+            all << in.rdbuf();
+            f.log_text = all.str();
+        }
+    }
+    return format_failure_report(f);
 }
 
 AppDetails ForgeModularShell::gather_details() {
@@ -1472,6 +1516,13 @@ std::string ForgeModularShell::start_build_with(const std::string& prompt) {
     // module named SLEWRF. Worse, the once-only guard then refused to report
     // the real result when it arrived.
     if (watching_) monitor_.watch(monitor_log_path_);
+    // And the previous run's Copy control goes with it. A control offering to
+    // copy the LAST failure while a new build is in flight hands somebody the
+    // wrong report at the moment they most need the right one.
+    if (failed_report_) {
+        failed_report_ = false;
+        c->refresh_composer_row();
+    }
     c->set_status_note({});
     c->set_status_activity({});
     c->set_active_stage(-1);
@@ -2049,13 +2100,52 @@ void ForgeModularShell::on_poll() {
                 case BuildOutcome::failed: {
                     c->set_skeleton_caption("build failed");
                     c->set_status_activity({});
-                    // Say what stopped it, once, rather than the whole log.
-                    auto why = monitor_.headline();
-                    c->narrate(why.empty()
-                                   ? std::string("The build failed and nothing "
-                                                 "was installed.")
-                                   : trimmed(why),
-                               /*alarming=*/true);
+                    // THE WHOLE CLOSING BLOCK, not one line of it.
+                    //
+                    // This narrated `headline()` and stopped, which names the
+                    // ending and nothing else. When the generator gives up it
+                    // now hands over the best patch it built and says what
+                    // that patch does not meet, where it is, and where every
+                    // attempt behind it went. Showing one line of that threw
+                    // the rest away for a second time, one layer up from the
+                    // bug being fixed.
+                    const auto block = monitor_.closing_block();
+                    if (block.empty()) {
+                        c->narrate("The build failed and nothing was "
+                                   "installed.", /*alarming=*/true);
+                    } else {
+                        for (const auto& line : block) {
+                            const auto text = trimmed(line);
+                            if (!text.empty())
+                                c->narrate(text, /*alarming=*/true);
+                        }
+                    }
+                    // WHERE THE RUN WROTE ITSELF DOWN. The log has always
+                    // existed and nothing has ever named it, so the only way
+                    // to read a failure was to know the path already.
+                    if (!monitor_log_path_.empty())
+                        c->narrate("The full run log is at " +
+                                   monitor_log_path_);
+                    // SHOW WHAT IT HANDED OVER. A failed run that produced an
+                    // unfinished patch left it on disk and on screen showed
+                    // the materializing skeleton, so the patch existed and
+                    // nothing said so. `done` does this and `failed` did not.
+                    const auto artifact = artifact_path();
+                    if (!artifact.empty()) {
+                        if (open_patch_file(artifact).empty()) {
+                            c->narrate("This is the unfinished patch. Open it "
+                                       "in Rack and listen: it loads, and "
+                                       "whether it is what you meant is the "
+                                       "one judgement this cannot make.");
+                        } else {
+                            c->set_skeleton_caption("build failed");
+                        }
+                        save_project_for(artifact);
+                    }
+                    // And make the whole thing copyable. Last, so the control
+                    // appears once everything it would copy has been said.
+                    failed_report_ = true;
+                    c->refresh_composer_row();
                     break;
                 }
                 case BuildOutcome::running:

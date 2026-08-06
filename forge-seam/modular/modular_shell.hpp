@@ -205,6 +205,18 @@ public:
     /// Rebuild the index now, whatever its state. What the Refresh control does.
     void refresh_library_index();
 
+    /// The last failed run as one copyable block, or empty if none has failed.
+    ///
+    /// Everything about a failure was unselectable text on a screen: one
+    /// narrated line, a transcript in a Label, and a log at a path nothing
+    /// named. A person who lost a five-attempt run could not even quote it
+    /// back. This is what the Copy control puts on the clipboard, and it is
+    /// public so a test can read it without a clipboard or a window.
+    std::string failure_report() const;
+
+    /// Whether the composer is currently offering to copy that report.
+    bool copy_failure_offered() const { return failed_report_; }
+
     /// Which settings row the library-index status belongs to. The order in
     /// settings_choices() is the contract between the two, so it is named
     /// once rather than counted twice.
@@ -489,6 +501,10 @@ private:
     /// a shell that is merely watching and has started nothing. Using it as
     /// the lock refused the FIRST build of every session.
     bool in_flight_ = false;
+    /// A run has failed and its report is worth offering. Cleared when the
+    /// next build starts: a Copy control that hands over the PREVIOUS run's
+    /// failure while a new one is in flight is worse than no control.
+    bool failed_report_ = false;
     PatchExplanation* explanation_ = nullptr;
     ModuleSummary* module_summary_ = nullptr;
     void refresh_module_summary();

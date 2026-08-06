@@ -19,7 +19,7 @@ index 63b40c2..3e9e147 100644
  list(TRANSFORM FORGE_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
  
  # M2's Designer document consumes Pulp's optional design-import surface. Keep
-@@ -645,6 +655,31 @@ if(FORGE_BUILD_TESTS)
+@@ -645,6 +655,38 @@ if(FORGE_BUILD_TESTS)
              forge_core Catch2::Catch2WithMain)
          catch_discover_tests(forge-test-chrome)
  
@@ -38,6 +38,13 @@ index 63b40c2..3e9e147 100644
 +            catch_discover_tests(forge-test-chrome-no-leak)
 +        endif()
 +
++        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_build_failure.cpp")
++            add_executable(forge-test-build-failure test/test_build_failure.cpp)
++            target_link_libraries(forge-test-build-failure PRIVATE
++                forge_core Catch2::Catch2WithMain)
++            catch_discover_tests(forge-test-build-failure)
++        endif()
++
 +        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/shot_mention.cpp")
 +            add_executable(forge-shot-mention test/shot_mention.cpp)
 +            target_link_libraries(forge-shot-mention PRIVATE forge_core)
@@ -51,7 +58,7 @@ index 63b40c2..3e9e147 100644
          add_executable(forge-test-audio-asset-coordinator
              test/test_audio_asset_coordinator.cpp)
          target_include_directories(forge-test-audio-asset-coordinator PRIVATE
-@@ -1573,6 +1608,10 @@ if(FORGE_BUILD_PLUGIN AND COMMAND pulp_add_plugin)
+@@ -1573,6 +1615,10 @@ if(FORGE_BUILD_PLUGIN AND COMMAND pulp_add_plugin)
      # today; AU aumi is gated on a core adapter (see midi/CMakeLists.txt).
      add_subdirectory(midi)
  
