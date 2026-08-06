@@ -252,30 +252,30 @@ class Track {
 ///
 /// Spelling and voicing are presentation and generation concerns.
 enum class ChordQuality : std::uint8_t {
-    Major,
-    Minor,
-    Diminished,
-    Augmented,
-    Dominant7,
-    Major7,
-    Minor7,
-    HalfDiminished7,
-    Suspended2,
-    Suspended4,
+    Major = 0,
+    Minor = 1,
+    Diminished = 2,
+    Augmented = 3,
+    Dominant7 = 4,
+    Major7 = 5,
+    Minor7 = 6,
+    HalfDiminished7 = 7,
+    Suspended2 = 8,
+    Suspended4 = 9,
 };
 
 /// Scale mode associated with a harmonic context event.
 enum class ScaleMode : std::uint8_t {
-    Major,
-    NaturalMinor,
-    HarmonicMinor,
-    MelodicMinor,
-    Dorian,
-    Phrygian,
-    Lydian,
-    Mixolydian,
-    Locrian,
-    Chromatic,
+    Major = 0,
+    NaturalMinor = 1,
+    HarmonicMinor = 2,
+    MelodicMinor = 3,
+    Dorian = 4,
+    Phrygian = 5,
+    Lydian = 6,
+    Mixolydian = 7,
+    Locrian = 8,
+    Chromatic = 9,
 };
 
 /// Added scale degree a chord statement carries above its quality.

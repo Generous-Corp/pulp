@@ -434,6 +434,54 @@ same `audio_sha256` and a zero residual while still carrying different
 
 ---
 
+## music
+
+Dependency-light 12-tone equal-temperament theory values for sharing musical
+intent across audio, MIDI, timeline, and product code. The module does not own a
+clock, sequencer, transform chain, event ledger, or tuning system.
+
+**Link:** `pulp::music` · **Include prefix:** `<pulp/music/...>`
+
+`PitchClassSet` is an arbitrary checked 12-bit set. `Scale` adds a root and
+supports degree lookup, signed octave-spanning degrees, transposition, and mode
+rotation. `NamedScale` retains the existing ten Pulp signal selector values and
+appends the scale set currently needed by Forge. The explicit
+`kPulpSignalScales`, `kForgeRuntimeScales`, and `kForgePrimitiveScales` tables
+carry each existing stored index and spelling; consumers should map through the
+matching table rather than cast between product enums.
+
+Pulp's existing signal harmonizer scale table and Timeline chord/scale wire
+codec delegate through these compatibility maps. Their public enum ordinals and
+stored names remain unchanged while the interval and identity data has one
+owner.
+
+`ChordFormula` accepts fixed-capacity ascending semitone formulas, including
+extensions and alterations. `kPulpTimelineChordQualities` and
+`kForgeChordQualities` map the two existing stored identities onto the shared
+named qualities. `Chord::construct()` builds bounded MIDI pitches and
+deterministic inversions, failing when a root, inversion, formula, or resulting
+pitch is outside its legal domain.
+
+```cpp
+#include <pulp/music/music.hpp>
+
+using namespace pulp::music;
+const auto scale = Scale::named(PitchClass::d, NamedScale::dorian);
+const auto formula = ChordFormula::for_quality(ChordQuality::minor7);
+const auto first_inversion = Chord::construct(62, *formula, 1);
+```
+
+The named collection is a 12-TET compatibility vocabulary, not a claim of
+microtonal support. More tuning systems belong in the provider-neutral MIDI
+tuning APIs rather than in this representation.
+
+This module is the shared-theory foundation sub-slice. It does not yet provide
+pitch spelling, chord recognition, voicing constraints, or minimum-motion
+voice leading; those remain separate later additions rather than implied
+capabilities of `ChordFormula`.
+
+---
+
 ## midi
 
 MIDI I/O, file handling, MIDI 2.0 support, and provider-neutral note tuning.

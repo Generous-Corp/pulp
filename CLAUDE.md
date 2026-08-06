@@ -377,6 +377,7 @@ Sync primitives (in `core/runtime/`):
 | runtime | `core/runtime/` | Logging, SIMD (Highway), XML, ZIP, HTTP, sockets, pipes, base64, crypto (mbedTLS), i18n, analytics, licensing, BigInteger |
 | events | `core/events/` | EventLoop, Timer, CoalescedUpdater, InterprocessConnection, ChildProcessManager, NetworkServiceDiscovery |
 | audio | `core/audio/` | BufferView, FormatRegistry (WAV/FLAC/MP3/OGG/AIFF/AAC), ChannelSet, OfflineProcessor, SystemVolume |
+| music | `core/music/` | Dependency-light 12-TET pitch-class, scale, and chord value types |
 | midi | `core/midi/` | MidiEvent, MidiBuffer (via choc::midi), MIDI CI (discovery, profiles, properties) |
 | state | `core/state/` | ParamValue, ParamInfo, StateStore, Binding, StateTree, PropertiesFile, CachedProperty |
 | signal | `core/signal/` | 30+ DSP processors, math, SIMD buffer, DryWetMixer, matrix, special functions |
@@ -532,6 +533,7 @@ pulp/
 │   ├── runtime/
 │   ├── events/
 │   ├── audio/
+│   ├── music/
 │   ├── midi/
 │   ├── signal/
 │   ├── state/

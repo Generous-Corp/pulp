@@ -891,6 +891,15 @@ longer exists, so a reason cannot outlive its code.
 
 ## Dependency floor
 
+The inbound sequencer tiers in `tools/cmake/PulpLinkFloor.cmake` include the
+dependency-free `music` rung. `pulp::signal` uses that canonical pitch/scale
+contract, so a sequencer plugin reaches `music` through its ordinary audio
+closure even when its own sources do not include a music header. Keep `music`
+in `sequencer-editor`, `sequencer-plugin`, and `sequencer-plugin-editor`
+together: `pulp::timeline` also consumes the same theory owner, and the two
+positive link-floor fixtures exercise the plugin and plugin-editor tiers. This
+is a shared public-contract dependency, not per-target link debt.
+
 `playback`'s floor is declared in `MODULE_FLOORS` in
 `tools/scripts/timeline_engine_dependency_floor_check.py`, which scans both
 `#include <pulp/<module>/...>` in every source file under `core/playback/` and
@@ -1072,4 +1081,3 @@ the seam and binding to this engine specifically.
 (It also omits `project_package`, keeping storage a sibling rung rather than a base: an editor is
 proven against a `serialize_project` round trip, and re-hosting it on a package protocol later is
 adapter work above the row rather than a change to it.)
-
