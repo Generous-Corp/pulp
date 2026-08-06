@@ -1139,6 +1139,13 @@ struct Harness {
         active = false;
     }
 
+    void reactivate() {
+        REQUIRE_FALSE(active);
+        REQUIRE(clap_adapter::clap_activate(
+            &plugin.plugin, 48000.0, 32, kFrames));
+        active = true;
+    }
+
     clap_process_status run(InputEventList& in_list,
                             OutputEventList* out_list = nullptr) {
         return run_custom(&in_list, out_list,
@@ -3705,6 +3712,43 @@ TEST_CASE("CLAP retries rejected outbound ownership releases before new attacks"
         CHECK(events[0]->header.time == 0);
         CHECK(events[0]->data[0] == 0x81);
         CHECK(events[0]->data[1] == 61);
+    }
+
+    SECTION("deactivate and reactivate preserve release debt until processing resumes") {
+        g_emitting->to_emit = {midi::MidiEvent::note_on(1, 63, 100)};
+        OutputEventList attack_accepted;
+        REQUIRE(h.run(in, &attack_accepted) == CLAP_PROCESS_CONTINUE);
+
+        g_emitting->to_emit = {midi::MidiEvent::note_off(1, 63)};
+        OutputEventList release_rejected;
+        release_rejected.accept_at_most(0);
+        REQUIRE(h.run(in, &release_rejected) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(h.plugin.outbound_note_release_debt[1 * 128 + 63] == 1);
+
+        h.deactivate();
+        CHECK(h.plugin.outbound_note_release_debt[1 * 128 + 63] == 1);
+        h.reactivate();
+        CHECK(h.plugin.outbound_note_release_debt[1 * 128 + 63] == 1);
+
+        auto resumed_attack = midi::MidiEvent::note_on(1, 65, 100);
+        resumed_attack.sample_offset = 7;
+        g_emitting->to_emit = {resumed_attack};
+        OutputEventList resumed;
+        REQUIRE(h.run(in, &resumed) == CLAP_PROCESS_CONTINUE);
+        auto resumed_events = resumed.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI);
+        REQUIRE(resumed_events.size() == 2);
+        CHECK(resumed_events[0]->header.time == 0);
+        CHECK((resumed_events[0]->data[0] & 0xF0) == 0x80);
+        CHECK(resumed_events[0]->data[1] == 63);
+        CHECK(resumed_events[1]->header.time == 7);
+        CHECK((resumed_events[1]->data[0] & 0xF0) == 0x90);
+        CHECK(resumed_events[1]->data[1] == 65);
+        CHECK(h.plugin.outbound_note_release_debt[1 * 128 + 63] == 0);
+
+        g_emitting->to_emit.clear();
+        OutputEventList no_duplicate;
+        REQUIRE(h.run(in, &no_duplicate) == CLAP_PROCESS_CONTINUE);
+        CHECK(no_duplicate.size() == 0);
     }
 
     SECTION("a refusal mid-merge retains every later release") {
