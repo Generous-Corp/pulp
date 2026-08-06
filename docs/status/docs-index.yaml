@@ -422,6 +422,11 @@ docs:
     kind: reference
     summary: Exhaustive public-method inventory for the advanced signal-processing families
 
+  - slug: analysis-chroma-onset-frontends
+    path: reference/analysis-chroma-onset-frontends.md
+    kind: reference
+    summary: Fixed-capacity chroma and onset-novelty front ends with offline compatibility adapters
+
   - slug: cli
     path: reference/cli.md
     kind: reference
