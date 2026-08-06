@@ -744,7 +744,7 @@ mode span into a prepared bank. Link `pulp::signal-modal-spec` in addition to
 | Processor | Header | Description |
 |-----------|--------|-------------|
 | Bias | `bias.hpp` | Shift a signal's DC offset — useful for asymmetric waveshaping |
-| Fast Math | `fast_math.hpp` | Approximations of sin, cos, tanh, exp for inner loops where precision is traded for speed |
+| Fast Math | `fast_math.hpp` | Scalar DSP math helpers; approximations are explicitly labeled, while `exp2` preserves standard float edge semantics and exact representable integer powers |
 | Interpolator | `interpolator.hpp` | Lagrange and Hermite interpolation for fractional-sample delay and resampling |
 | Log Ramped Value | `log_ramped_value.hpp` | Logarithmic smoothing for perceptually linear parameter transitions |
 | Lookup Table | `lookup_table.hpp` | Pre-computed function table for fast repeated evaluation of expensive functions |
