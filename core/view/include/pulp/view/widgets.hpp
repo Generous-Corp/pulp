@@ -982,6 +982,32 @@ public:
     void set_sprite_strip(std::shared_ptr<SpriteStrip> strip) { sprite_strip_ = std::move(strip); }
     const std::shared_ptr<SpriteStrip>& sprite_strip() const { return sprite_strip_; }
 
+    /// Browser-captured fader art. The body is the authored control crop with
+    /// its declared indicator removed; the indicator is the authored thumb
+    /// crop, translated along the value axis at paint time. Keeping these
+    /// separate lets the functional track/fill remain live without drawing the
+    /// stock white slab over the designer's own thumb.
+    void set_captured_art(std::shared_ptr<SpriteStrip> body,
+                          std::shared_ptr<SpriteStrip> indicator,
+                          float indicator_cross = 0.5f,
+                          float body_origin_x = 0.0f,
+                          float body_origin_y = 0.0f,
+                          float control_natural_w = 0.0f,
+                          float control_natural_h = 0.0f) {
+        captured_body_ = std::move(body);
+        captured_indicator_ = std::move(indicator);
+        captured_indicator_cross_ = std::clamp(indicator_cross, 0.0f, 1.0f);
+        captured_body_origin_x_ = body_origin_x;
+        captured_body_origin_y_ = body_origin_y;
+        captured_control_natural_w_ = control_natural_w;
+        captured_control_natural_h_ = control_natural_h;
+        request_repaint();
+    }
+    bool has_captured_indicator_art() const {
+        return captured_indicator_ && captured_indicator_->loaded();
+    }
+    float captured_indicator_cross() const { return captured_indicator_cross_; }
+
     // ── Skin overrides ────────────────────────────────────────────────────
     // Per-widget appearance, generalising the knob sprite-strip path to the
     // fader: instead of baking the captured Figma art (which would freeze the
@@ -1028,6 +1054,13 @@ public:
 
 private:
     std::shared_ptr<SpriteStrip> sprite_strip_;
+    std::shared_ptr<SpriteStrip> captured_body_;
+    std::shared_ptr<SpriteStrip> captured_indicator_;
+    float captured_indicator_cross_ = 0.5f;
+    float captured_body_origin_x_ = 0.0f;
+    float captured_body_origin_y_ = 0.0f;
+    float captured_control_natural_w_ = 0.0f;
+    float captured_control_natural_h_ = 0.0f;
     canvas::Color track_color_{};
     canvas::Color fill_color_{};
     canvas::Color thumb_color_{};

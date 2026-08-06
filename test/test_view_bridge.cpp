@@ -385,8 +385,13 @@ TEST_CASE("ViewBridge honors custom create_view()", "[view_bridge]") {
 
 TEST_CASE("ViewBridge detects processor-owned scripted custom views",
           "[view_bridge][scripted-ui]") {
-    ScriptedCustomViewProcessor p;
+    // The store is declared first so it outlives the processor. A
+    // ScriptedUiSession holds a StateStore& and flushes deferred gesture
+    // releases through it while being destroyed, and the session is owned by
+    // the PROCESSOR — so a processor declared first is destroyed last and
+    // flushes through a store whose scope has already ended.
     state::StateStore store;
+    ScriptedCustomViewProcessor p;
     p.set_state_store(&store);
     p.define_parameters(store);
 
@@ -402,8 +407,11 @@ TEST_CASE("ViewBridge detects processor-owned scripted custom views",
 
 TEST_CASE("ViewBridge contains throwing scripted reload opt-in callbacks",
           "[view_bridge][scripted-ui][exceptions]") {
-    ThrowingInPlaceOptInProcessor p;
+    // Store before processor: the scripted session this processor owns
+    // outlives the processor's own members and reaches the store from its
+    // destructor.
     state::StateStore store;
+    ThrowingInPlaceOptInProcessor p;
     p.set_state_store(&store);
     p.define_parameters(store);
 
