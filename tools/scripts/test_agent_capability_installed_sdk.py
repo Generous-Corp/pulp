@@ -12,6 +12,8 @@ import shutil
 import subprocess
 import tempfile
 
+import json_schema_lite
+
 
 SCHEMA = "pulp.agent-capabilities.v1"
 MAINTENANCE_ONLY = {
@@ -60,7 +62,13 @@ def load_installed_manifest(prefix: pathlib.Path, owners: dict[str, str]) -> dic
     schema_name = document.get("$schema")
     if not isinstance(schema_name, str) or not (shared / schema_name).is_file():
         raise RuntimeError("installed manifest has no installed relative schema")
-    json.loads((shared / schema_name).read_text())
+    schema_document = json.loads((shared / schema_name).read_text())
+    schema_problems = json_schema_lite.validate(document, schema_document)
+    if schema_problems:
+        raise RuntimeError(
+            "installed manifest does not satisfy its installed schema: "
+            + "; ".join(schema_problems)
+        )
     present_maintenance = sorted(
         name for name in MAINTENANCE_ONLY if (shared / name).exists()
     )
@@ -137,10 +145,8 @@ def configure_consumer(
     generator: str | None,
     generator_options: list[str],
     configuration: str | None,
+    use_pulp_dir: bool = True,
 ) -> subprocess.CompletedProcess[str]:
-    config_files = sorted(prefix.rglob("PulpConfig.cmake"))
-    if len(config_files) != 1:
-        raise RuntimeError(f"expected one installed PulpConfig.cmake, got {config_files}")
     project.mkdir(parents=True, exist_ok=True)
     (project / "main.cpp").write_text(source)
     (project / "CMakeLists.txt").write_text(
@@ -171,8 +177,16 @@ def configure_consumer(
         "-DFETCHCONTENT_FULLY_DISCONNECTED=ON",
         "-DFETCHCONTENT_UPDATES_DISCONNECTED=ON",
         f"-DPULP_SDK_PREFIX={prefix}",
-        f"-DPulp_DIR={config_files[0].parent}",
     ])
+    if use_pulp_dir:
+        config_files = sorted(prefix.rglob("PulpConfig.cmake"))
+        if len(config_files) != 1:
+            raise RuntimeError(
+                f"expected one installed PulpConfig.cmake, got {config_files}"
+            )
+        command.append(f"-DPulp_DIR={config_files[0].parent}")
+    else:
+        command.append(f"-DCMAKE_PREFIX_PATH={prefix}")
     if configuration:
         command.append(f"-DCMAKE_BUILD_TYPE={configuration}")
     return run(command, cwd=project)
@@ -326,6 +340,7 @@ def configure_build_run(
     generator_options: list[str],
     configuration: str | None,
     forbidden_roots: list[pathlib.Path],
+    use_pulp_dir: bool = True,
 ) -> None:
     configured = configure_consumer(
         cmake,
@@ -336,6 +351,7 @@ def configure_build_run(
         generator=generator,
         generator_options=generator_options,
         configuration=configuration,
+        use_pulp_dir=use_pulp_dir,
     )
     if configured.returncode != 0:
         raise RuntimeError(
@@ -457,6 +473,18 @@ def main() -> int:
             held_schema.rename(schema)
 
         manifest = prefix / "share/pulp/agent-capabilities.json"
+        original_manifest = manifest.read_text()
+        invalid_manifest = copy.deepcopy(document)
+        invalid_manifest["capabilities"][0]["summary"] = 42
+        manifest.write_text(json.dumps(invalid_manifest, indent=2) + "\n")
+        try:
+            expect_failure(
+                "installed manifest violates installed schema",
+                lambda: load_installed_manifest(prefix, owners),
+            )
+        finally:
+            manifest.write_text(original_manifest)
+
         held_manifest = manifest.with_suffix(".held")
         manifest.rename(held_manifest)
         try:
@@ -566,9 +594,9 @@ def main() -> int:
         if len(config_exports) != 1:
             raise RuntimeError(f"expected one installed PulpTargets.cmake, got {config_exports}")
         config_dir = config_exports[0].parent
-        alternate_config = prefix / "sdk-config/cmake/Pulp"
+        alternate_config = prefix / "share/cmake/Pulp"
         if alternate_config == config_dir:
-            alternate_config = prefix / "portable-config/cmake/Pulp"
+            alternate_config = prefix / "share/Pulp/cmake"
         alternate_config.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(config_dir), str(alternate_config))
         try:
@@ -576,6 +604,7 @@ def main() -> int:
                 args.cmake, prefix, root / "lib64-layout",
                 binding_source(first, first_binding), first_binding["target"],
                 generator, generator_options, configuration, [source_root, build_dir],
+                use_pulp_dir=False,
             )
         finally:
             config_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -718,7 +747,7 @@ def main() -> int:
 
     print(
         "agent-capabilities-installed-sdk: "
-        f"14 negative/install controls and {proofs} independent capability/binding "
+        f"15 negative/install controls and {proofs} independent capability/binding "
         f"configure-build-run proofs passed with {generator or 'default generator'} "
         f"in {configuration or 'the default single configuration'}"
     )

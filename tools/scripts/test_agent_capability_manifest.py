@@ -272,6 +272,7 @@ def exercise_manifest_mutations(canonical: dict) -> int:
 
     held_probes = manifest.EXPORTS[0]["_link_probes"]
     manifest.EXPORTS[0]["_link_probes"] = [{
+        "role": "entrypoint",
         "binding": "not::advertised",
         "operation": "construct",
         "arguments": "",
@@ -283,6 +284,16 @@ def exercise_manifest_mutations(canonical: dict) -> int:
         )
     finally:
         manifest.EXPORTS[0]["_link_probes"] = held_probes
+    checks += 1
+
+    role_distinct_duplicate = copy.deepcopy(manifest.EXPORTS[0])
+    duplicate_binding = copy.deepcopy(role_distinct_duplicate["bindings"][0])
+    duplicate_binding["role"] = "alternate-entrypoint"
+    role_distinct_duplicate["bindings"].append(duplicate_binding)
+    expect_problem(
+        manifest._link_probe_problems(role_distinct_duplicate),
+        "alternate-entrypoint:pulp::signal::SaturatorT<float>",
+    )
     checks += 1
 
     swing = next(row for row in manifest.EXPORTS if row["key"] == "timebase.swing")
@@ -612,6 +623,21 @@ def exercise_surface_mutations() -> int:
     duplicate_root["roots"].append(copy.deepcopy(duplicate_root["roots"][0]))
     expect_problem(
         json_schema_lite.validate(duplicate_root, surface_schema),
+        "array items are not unique",
+    )
+    checks += 1
+
+    reordered_duplicate_root = copy.deepcopy(canonical_surface)
+    first_root = reordered_duplicate_root["roots"][0]
+    reordered_duplicate_root["roots"].append(
+        {
+            "source": first_root["source"],
+            "install_prefix": first_root["install_prefix"],
+            "domain": first_root["domain"],
+        }
+    )
+    expect_problem(
+        json_schema_lite.validate(reordered_duplicate_root, surface_schema),
         "array items are not unique",
     )
     checks += 1
