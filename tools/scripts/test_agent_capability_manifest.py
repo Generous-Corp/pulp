@@ -338,18 +338,19 @@ def exercise_manifest_mutations(canonical: dict) -> int:
     expect_validation_failure(wrong_removed_status, "expected const 'removed'")
     checks += 1
 
-    held_probes = manifest.EXPORTS[0].pop("_link_probes")
+    saturator = next(row for row in manifest.EXPORTS if row["key"] == "signal.saturator")
+    held_probes = saturator.pop("_link_probes")
     try:
         expect_problem(
             manifest.validate(canonical, ROOT),
             "requires operational installed-consumer probes",
         )
     finally:
-        manifest.EXPORTS[0]["_link_probes"] = held_probes
+        saturator["_link_probes"] = held_probes
     checks += 1
 
-    held_probes = manifest.EXPORTS[0]["_link_probes"]
-    manifest.EXPORTS[0]["_link_probes"] = [{
+    held_probes = saturator["_link_probes"]
+    saturator["_link_probes"] = [{
         "role": "entrypoint",
         "binding": "not::advertised",
         "operation": "construct",
@@ -361,16 +362,16 @@ def exercise_manifest_mutations(canonical: dict) -> int:
             "must name an advertised binding",
         )
     finally:
-        manifest.EXPORTS[0]["_link_probes"] = held_probes
+        saturator["_link_probes"] = held_probes
     checks += 1
 
-    role_distinct_duplicate = copy.deepcopy(manifest.EXPORTS[0])
+    role_distinct_duplicate = copy.deepcopy(saturator)
     duplicate_binding = copy.deepcopy(role_distinct_duplicate["bindings"][0])
     duplicate_binding["role"] = "alternate-entrypoint"
     role_distinct_duplicate["bindings"].append(duplicate_binding)
     expect_problem(
         manifest._link_probe_problems(role_distinct_duplicate),
-        "alternate-entrypoint:pulp::signal::SaturatorT<float>",
+        f"alternate-entrypoint:{duplicate_binding['qualified_name']}",
     )
     checks += 1
 

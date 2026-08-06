@@ -1,8 +1,7 @@
 #pragma once
 
 /// @file fast_math.hpp
-/// Fast math approximations for real-time audio DSP.
-/// All functions are branchless and SIMD-friendly (no conditionals in hot path).
+/// Scalar math helpers for real-time audio DSP.
 
 #include <algorithm>  // std::max / std::min, used by clamp()
 #include <cstdint>
@@ -11,18 +10,17 @@
 
 namespace pulp::signal {
 
-/// Fast approximations of common math functions optimized for audio DSP.
+/// Math helpers optimized for audio DSP.
 ///
 /// RT contract: all functions are stateless scalar math helpers and allocate no
 /// memory.
 ///
-/// These trade precision for speed — typically accurate to 3-5 decimal
-/// places, which is more than sufficient for audio processing where
-/// the output is ultimately quantized to 16/24/32-bit samples.
+/// Functions documented as approximations trade precision for speed. Functions
+/// without that label retain the standard-library numerical contract.
 ///
 /// @code
 /// float out = FastMath::tanh(input);       // ~4x faster than std::tanh
-/// float freq = FastMath::exp2(pitch);       // ~3x faster than std::exp2
+/// float freq = FastMath::exp2(pitch);
 /// float phase = FastMath::sin(angle);       // ~5x faster than std::sin
 /// float db = FastMath::log2(amplitude);     // ~3x faster than std::log2
 /// @endcode
@@ -73,17 +71,19 @@ struct FastMath {
         return sin(x + 1.5707963f); // x + pi/2
     }
 
-    /// Fast exp2 approximation (2^x, max error ~0.06% for any x).
+    /// Computes 2^x with the platform's standard float exp2 semantics.
+    ///
+    /// NaN propagates, positive infinity and finite overflow produce positive
+    /// infinity, and negative infinity and finite underflow produce positive
+    /// zero. With gradual underflow enabled, subnormal results and representable
+    /// integer powers are preserved. Under Pulp's audio-callback
+    /// `ScopedFlushDenormals` policy, the finite subnormal range may flush to
+    /// positive zero exactly as the platform `std::exp2` does in that ambient FP
+    /// mode. This deliberately uses the standard implementation: a polynomial
+    /// plus `ldexp` measured slower on supported Apple hardware while weakening
+    /// these edge contracts.
     static float exp2(float x) {
-        // Schraudolph's method with polynomial refinement
-        float xi = std::floor(x);
-        float xf = x - xi;
-        // Polynomial for 2^frac on [0, 1]
-        float p = 1.0f + xf * (0.6931472f + xf * (0.2402265f + xf * 0.0558015f));
-        // Multiply by 2^integer part via bit manipulation
-        int32_t i = static_cast<int32_t>(xi);
-        // ldexpf is well-optimized on all platforms
-        return p * ldexpf(1.0f, i);
+        return std::exp2(x);
     }
 
     /// Fast log2 approximation (max error ~0.007 for x > 0).

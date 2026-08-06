@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 3,
+  "inventory_version": 4,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -32,15 +32,15 @@
     }
   ],
   "counts": {
-    "public_headers": 345,
-    "reviewed_headers": 8,
-    "legacy_unreviewed_headers": 337,
+    "public_headers": 347,
+    "reviewed_headers": 11,
+    "legacy_unreviewed_headers": 336,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 6,
-      "capability_support": 0,
-      "infrastructure": 0,
-      "legacy_unreviewed": 337,
+      "capability_entrypoint": 7,
+      "capability_support": 1,
+      "infrastructure": 1,
+      "legacy_unreviewed": 336,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -63,9 +63,9 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 194,
-        "reviewed_headers": 3,
-        "legacy_unreviewed_headers": 191,
+        "public_headers": 196,
+        "reviewed_headers": 6,
+        "legacy_unreviewed_headers": 190,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -1940,11 +1940,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fast_math.hpp",
-      "fingerprint": "sha256:462131dc5a1801300da5e636c759f42a888036c6595a9b528de687a63367d35d",
+      "fingerprint": "sha256:040569eb66723784d089120ecb679b78df4f206678a77a2f2881e0a874456de4",
       "include": "pulp/signal/fast_math.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "FastMath is a shared scalar implementation utility rather than a standalone semantic DSP unit. The corrected exp2 operation has no product consumer outside its own documentation and tests, so exposing it as a generator capability would overstate demonstrated adoption."
     },
     {
       "domain": "signal",
@@ -2512,6 +2512,28 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/osc/detail/minblep_table.hpp",
+      "fingerprint": "sha256:9354ed2187ec030386544ccffe90b85f1ed35f539a861983ee994c04dde05b31",
+      "include": "pulp/signal/osc/detail/minblep_table.hpp",
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.minblep"
+      ],
+      "rationale": "Generated residual coefficients are an installed implementation dependency of signal.minblep, not an independent authoring surface."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/osc/minblep.hpp",
+      "fingerprint": "sha256:f310b561f6e616926b2079050c1b49cc762e8ab8ad8d1b518677d77a98cd2631",
+      "include": "pulp/signal/osc/minblep.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.minblep"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",

@@ -137,7 +137,7 @@ modules:
     docs: reference/modules.md#midi
 
   - name: signal
-    summary: 30+ DSP processors — filters (IIR, FIR, SVF, ladder, measured analog VCF voicings, Linkwitz-Riley), oscillators (legacy signal::Oscillator plus the pulp::signal::osc VA/VCO/DCO/WT suite), convolution, compressor, limiter, reverb (including the multirate FDN reverb), chorus, delay, oversampling, FFT (vDSP), SIMD ops, dry/wet mixer, plus the modulation and utility toolkit (deterministic RNG, LFO, slew/sample-hold/quantizer control tools, trigger and gate kit, envelope family, VCA, low-pass gate, mod matrix, unit conversions)
+    summary: 30+ DSP processors — filters (IIR, FIR, SVF, ladder, measured analog VCF voicings, Linkwitz-Riley), oscillators (legacy signal::Oscillator plus the pulp::signal::osc VA/VCO/DCO/WT suite and fixed-capacity minBLEP primitive), convolution, compressor, limiter, reverb (including the multirate FDN reverb), chorus, delay, oversampling, FFT (vDSP), SIMD ops, dry/wet mixer, standard-semantics exp2 and explicitly labeled fast approximations, plus the modulation and utility toolkit (deterministic RNG, LFO, slew/sample-hold/quantizer control tools, trigger and gate kit, envelope family, VCA, low-pass gate, mod matrix, unit conversions)
     status: usable
     dependencies: [music, runtime]
     docs: reference/modules.md#signal

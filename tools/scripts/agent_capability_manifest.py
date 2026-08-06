@@ -29,8 +29,8 @@ from agent_capability_evolution import (
 
 SCHEMA = "pulp.agent-capabilities.v1"
 SCHEMA_MINOR = 1
-MANIFEST_REVISION = 3
-SURFACE_INVENTORY_VERSION = 3
+MANIFEST_REVISION = 4
+SURFACE_INVENTORY_VERSION = 4
 HISTORY_SCHEMA = "pulp.agent-capability-history.v1"
 HISTORY_FILE = pathlib.Path("tools/agent-capabilities/contract-history.json")
 SNAPSHOT = pathlib.Path("docs/status/agent-capabilities.json")
@@ -92,6 +92,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/saturator.hpp": "Pulp::signal",
     "pulp/signal/fft_backend.hpp": "Pulp::signal-fft-backend",
     "pulp/signal/modal_spec.hpp": "Pulp::signal-modal-spec",
+    "pulp/signal/osc/minblep.hpp": "Pulp::signal",
     "pulp/timebase/quantize.hpp": "Pulp::timebase",
     "pulp/timebase/tick.hpp": "Pulp::timebase",
 }
@@ -138,6 +139,60 @@ def capability(**row: Any) -> dict[str, Any]:
 # ships. Header fingerprints are maintenance data and are stripped from the
 # installed manifest.
 EXPORTS = [
+    capability(
+        key="signal.minblep",
+        domain="signal",
+        summary=(
+            "Fixed-capacity minimum-phase bandlimited-step correction for "
+            "oscillator discontinuities."
+        ),
+        rt_class="audio",
+        lifecycle={
+            "construction": "control",
+            "prepare": "none",
+            "process": "audio",
+            "reset": "audio",
+            "release": "none",
+        },
+        state_model=(
+            "A compile-time-bounded slot array accumulates causal corrections; "
+            "insertion reports invalid inputs and capacity exhaustion explicitly."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "same_build",
+            "transport_history": "irrelevant",
+        },
+        input_domain="fractional oscillator discontinuity positions and step heights",
+        output_domain="causal bandlimited-step correction samples",
+        units=["normalized sample position", "sample amplitude", "samples"],
+        latency="zero",
+        tail="32 samples per inserted discontinuity",
+        scheduling="sample-synchronous",
+        bindings=[
+            binding(
+                role="entrypoint",
+                kind="cpp_type",
+                include="pulp/signal/osc/minblep.hpp",
+                qualified_name="pulp::signal::osc::MinBlepAccumulator<>",
+                target="Pulp::signal",
+                header_fingerprint=(
+                    "sha256:f310b561f6e616926b2079050c1b49cc762e8ab8ad8d1b518677d77a98cd2631"
+                ),
+            ),
+        ],
+        _link_probes=[
+            {
+                "role": "entrypoint",
+                "binding": "pulp::signal::osc::MinBlepAccumulator<>",
+                "operation": "member_call",
+                "member": "insert",
+                "arguments": "0.5, 1.0",
+            },
+        ],
+    ),
     capability(
         key="signal.saturator",
         contract_version={"major": 1, "minor": 1},
@@ -494,6 +549,28 @@ EXPORTS = [
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {
+        "include": "pulp/signal/fast_math.hpp",
+        "fingerprint": "sha256:040569eb66723784d089120ecb679b78df4f206678a77a2f2881e0a874456de4",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "FastMath is a shared scalar implementation utility rather than a "
+            "standalone semantic DSP unit. The corrected exp2 operation has no "
+            "product consumer outside its own documentation and tests, so exposing "
+            "it as a generator capability would overstate demonstrated adoption."
+        ),
+    },
+    {
+        "include": "pulp/signal/osc/detail/minblep_table.hpp",
+        "fingerprint": "sha256:9354ed2187ec030386544ccffe90b85f1ed35f539a861983ee994c04dde05b31",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.minblep"],
+        "rationale": (
+            "Generated residual coefficients are an installed implementation "
+            "dependency of signal.minblep, not an independent authoring surface."
+        ),
+    },
     {
         "include": "pulp/signal/multi_channel_meter.hpp",
         "fingerprint": "sha256:3ccb8f63241c150c00a4ce323f9de0501d2d54c0ef4ec3f0f307ac72111c329d",
