@@ -156,6 +156,17 @@ template <typename SampleType = float> class BallisticsFilterT {
         state_ = SampleType{0.0f};
     }
 
+  protected:
+    SampleType detector_state() const noexcept {
+        return state_;
+    }
+
+    void synchronize_detector_state(SampleType state) noexcept {
+        state_ = std::isfinite(static_cast<double>(state)) && state >= SampleType{0}
+                     ? state
+                     : SampleType{0};
+    }
+
   private:
     SampleType sample_rate_ = SampleType{44100.0f};
     SampleType attack_ms_ = SampleType{1.0f};

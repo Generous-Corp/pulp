@@ -5,8 +5,9 @@
 #include <pulp/signal/denormal.hpp>
 #include <pulp/signal/dynamics_contract.hpp>
 
-#include <cmath>
 #include <algorithm>
+#include <cmath>
+#include <limits>
 
 namespace pulp::signal {
 
@@ -266,8 +267,11 @@ public:
     GainReduction gain_reduction() const noexcept {
         const SampleType gain =
             (envelope_ > threshold_) ? threshold_ / envelope_ : SampleType{1};
+        if (!(gain > SampleType{0}))
+            return GainReduction::from_magnitude_db(
+                std::numeric_limits<double>::infinity());
         return GainReduction::from_signed_db(
-            SampleType{20} * std::log10(std::max(gain, SampleType{1e-30f})));
+            SampleType{20} * std::log10(gain));
     }
 
     void reset() { envelope_ = SampleType{0.0f}; }

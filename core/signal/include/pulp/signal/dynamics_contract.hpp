@@ -77,6 +77,17 @@ class EnvelopeFollowerT : public BallisticsFilterT<SampleType> {
     static SampleType coefficient_for_time_ms(SampleType ms, SampleType sample_rate) {
         return Base::exact_coefficient_for_time_ms(ms, sample_rate);
     }
+
+  private:
+    template <typename> friend class StereoEnvelopeFollowerT;
+
+    SampleType detector_state() const noexcept {
+        return Base::detector_state();
+    }
+
+    void synchronize_detector_state(SampleType state) noexcept {
+        Base::synchronize_detector_state(state);
+    }
 };
 
 using EnvelopeFollower = EnvelopeFollowerT<float>;
@@ -113,8 +124,12 @@ template <typename SampleType = float> class StereoEnvelopeFollowerT {
     }
 
     void set_link(SampleType amount) {
-        if (std::isfinite(static_cast<double>(amount)))
-            link_ = std::clamp(amount, SampleType{0}, SampleType{1});
+        if (!std::isfinite(static_cast<double>(amount)))
+            return;
+        const SampleType next = std::clamp(amount, SampleType{0}, SampleType{1});
+        if (next == SampleType{1} && link_ != SampleType{1})
+            synchronize_linked_state();
+        link_ = next;
     }
 
     SampleType link() const noexcept {
@@ -139,6 +154,10 @@ template <typename SampleType = float> class StereoEnvelopeFollowerT {
         const SampleType left_envelope = left_.process(left_detector);
         const SampleType right_envelope = right_.process(right_detector);
         if (link_ == SampleType{1}) {
+            const SampleType linked_state =
+                std::max(left_.detector_state(), right_.detector_state());
+            left_.synchronize_detector_state(linked_state);
+            right_.synchronize_detector_state(linked_state);
             const SampleType linked_envelope = std::max(left_envelope, right_envelope);
             return {linked_envelope, linked_envelope};
         }
@@ -146,13 +165,7 @@ template <typename SampleType = float> class StereoEnvelopeFollowerT {
     }
 
     std::array<SampleType, 2> current() const {
-        const SampleType left = left_.current();
-        const SampleType right = right_.current();
-        if (link_ == SampleType{1}) {
-            const SampleType linked = std::max(left, right);
-            return {linked, linked};
-        }
-        return {left, right};
+        return {left_.current(), right_.current()};
     }
 
     void reset() {
@@ -161,6 +174,13 @@ template <typename SampleType = float> class StereoEnvelopeFollowerT {
     }
 
   private:
+    void synchronize_linked_state() noexcept {
+        const SampleType linked_state =
+            std::max(left_.detector_state(), right_.detector_state());
+        left_.synchronize_detector_state(linked_state);
+        right_.synchronize_detector_state(linked_state);
+    }
+
     EnvelopeFollowerT<SampleType> left_{};
     EnvelopeFollowerT<SampleType> right_{};
     SampleType link_ = SampleType{1};

@@ -356,6 +356,46 @@ TEST_CASE("Stereo RMS supports partial detector links and finite extreme input",
     REQUIRE(std::isfinite(follower.current()[1]));
 }
 
+TEST_CASE("Stereo link transitions synchronize detector history before unlinking",
+          "[signal][dynamics]") {
+    StereoEnvelopeFollower64 follower;
+    follower.prepare(48000.0);
+    follower.set_attack_ms(10.0);
+    follower.set_release_ms(100.0);
+    follower.set_link(0.0);
+
+    for (int i = 0; i < 1000; ++i)
+        follower.process(1.0, 0.1);
+    const auto independent = follower.current();
+    REQUIRE(independent[0] > independent[1] * 5.0);
+
+    follower.set_link(1.0);
+    REQUIRE(follower.current()[0] == follower.current()[1]);
+    for (int i = 0; i < 100; ++i) {
+        const auto linked = follower.process(0.2, 0.2);
+        REQUIRE(linked[0] == linked[1]);
+    }
+
+    follower.set_link(0.5);
+    const auto partial = follower.process(0.8, 0.2);
+    REQUIRE(partial[0] > partial[1]);
+    REQUIRE(partial[1] > 0.2);
+
+    follower.set_link(1.0);
+    REQUIRE(follower.current()[0] == follower.current()[1]);
+    follower.set_link(0.0);
+    const auto unlinked = follower.current();
+    REQUIRE(unlinked[0] == unlinked[1]);
+
+    const auto equal_input = follower.process(0.3, 0.3);
+    REQUIRE(equal_input[0] == equal_input[1]);
+    const auto downstream_gain = [](double envelope) {
+        const double reduction_db = std::max(0.0, 20.0 * std::log10(envelope / 0.1));
+        return GainReduction::from_magnitude_db(reduction_db).linear_gain();
+    };
+    REQUIRE(downstream_gain(equal_input[0]) == downstream_gain(equal_input[1]));
+}
+
 TEST_CASE("Envelope follower recovers deterministically from non-finite detector input",
           "[signal][dynamics]") {
     EnvelopeFollower64 follower;
@@ -453,6 +493,13 @@ TEST_CASE("Gain-reduction telemetry has one sign and unit across dynamics lineag
     const double limited = limiter.process(1.0);
     REQUIRE(limiter.gain_reduction().db() > 0.0);
     REQUIRE_THAT(limiter.gain_reduction().linear_gain(), WithinAbs(limited, 1e-14));
+
+    limiter.reset();
+    limiter.set_threshold_db(-std::numeric_limits<double>::infinity());
+    const double muted = limiter.process(1.0);
+    REQUIRE(muted == 0.0);
+    REQUIRE(limiter.gain_reduction().db() == std::numeric_limits<double>::infinity());
+    REQUIRE(limiter.gain_reduction().linear_gain() == muted);
 
     NoiseGate64 gate;
     require_unity_meter(gate.gain_reduction());
