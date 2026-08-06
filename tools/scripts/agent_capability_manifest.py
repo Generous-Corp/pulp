@@ -30,7 +30,7 @@ from agent_capability_evolution import (
 SCHEMA = "pulp.agent-capabilities.v1"
 SCHEMA_MINOR = 1
 MANIFEST_REVISION = 5
-SURFACE_INVENTORY_VERSION = 6
+SURFACE_INVENTORY_VERSION = 7
 HISTORY_SCHEMA = "pulp.agent-capability-history.v1"
 HISTORY_FILE = pathlib.Path("tools/agent-capabilities/contract-history.json")
 SNAPSHOT = pathlib.Path("docs/status/agent-capabilities.json")
@@ -253,7 +253,7 @@ EXPORTS = [
                 qualified_name="pulp::signal::MirroredHistoryBuffer<float>",
                 target="Pulp::signal",
                 header_fingerprint=(
-                    "sha256:a008193b186b53f91576d23e8bd82209599f39c159587e8bae28f106e5374802"
+                    "sha256:5f203acc21d01060d814ec0a19a82cd9aa8ffc669a9836fa929af888c4f31c2a"
                 ),
             )
         ],

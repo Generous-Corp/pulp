@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 6,
+  "inventory_version": 7,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -2466,7 +2466,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/mirrored_history_buffer.hpp",
-      "fingerprint": "sha256:a008193b186b53f91576d23e8bd82209599f39c159587e8bae28f106e5374802",
+      "fingerprint": "sha256:5f203acc21d01060d814ec0a19a82cd9aa8ffc669a9836fa929af888c4f31c2a",
       "include": "pulp/signal/mirrored_history_buffer.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [

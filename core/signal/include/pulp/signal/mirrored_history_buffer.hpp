@@ -7,7 +7,6 @@
 #include <cstddef>
 #include <limits>
 #include <span>
-#include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -57,13 +56,18 @@ public:
         return *this;
     }
 
-    void prepare(std::size_t capacity) {
+    /// Allocates control-thread storage transactionally. Returns false when
+    /// doubling the requested capacity would overflow size_t; the existing
+    /// history remains unchanged. Allocation failure follows std::vector's
+    /// build-mode policy (exception or termination).
+    bool prepare(std::size_t capacity) {
         if (capacity > std::numeric_limits<std::size_t>::max() / 2u)
-            throw std::length_error("MirroredHistoryBuffer capacity is too large");
+            return false;
         std::vector<SampleType> storage(capacity * 2u, SampleType{0});
         storage_.swap(storage);
         capacity_ = capacity;
         write_pos_ = 0u;
+        return true;
     }
 
     void reset() noexcept {

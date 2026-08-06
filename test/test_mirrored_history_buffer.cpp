@@ -144,8 +144,7 @@ TEST_CASE("Mirrored history rejects a capacity whose mirror would overflow", "[s
     history.prepare(3u);
     history.push(1.0f);
     const std::vector<float> before(history.window().begin(), history.window().end());
-    CHECK_THROWS_AS(history.prepare(std::numeric_limits<std::size_t>::max() / 2u + 1u),
-                    std::length_error);
+    CHECK_FALSE(history.prepare(std::numeric_limits<std::size_t>::max() / 2u + 1u));
     CHECK(history.capacity() == 3u);
     CHECK(std::equal(history.window().begin(), history.window().end(), before.begin()));
 }
