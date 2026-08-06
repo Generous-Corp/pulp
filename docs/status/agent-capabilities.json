@@ -486,13 +486,16 @@
               [
                 "RetrigPhase",
                 [
-                  "reset_stored"
+                  "reset_stored",
+                  "free_run",
+                  "seeded_random"
                 ]
               ],
               [
                 "EnvelopeMode",
                 [
-                  "shared_ar"
+                  "shared_ar",
+                  "per_partial_decay"
                 ]
               ]
             ]
@@ -1314,6 +1317,7 @@
                 "Model",
                 [
                   "silicon",
+                  "germanium",
                   "led"
                 ]
               ]
@@ -1338,6 +1342,7 @@
                 "Model",
                 [
                   "silicon",
+                  "germanium",
                   "led"
                 ]
               ],
@@ -2245,7 +2250,8 @@
               [
                 "Detector",
                 [
-                  "peak"
+                  "peak",
+                  "rms"
                 ]
               ]
             ]
@@ -2401,21 +2407,22 @@
                 "Mode",
                 [
                   "classic",
-                  "through_zero"
+                  "through_zero",
+                  "barberpole"
                 ]
               ],
               [
                 "Polarity",
                 [
-                  "positive"
+                  "positive",
+                  "negative"
                 ]
               ],
               [
                 "Engine",
                 [
                   "clean",
-                  "transparent",
-                  "companded"
+                  "bbd"
                 ]
               ]
             ]
@@ -2526,7 +2533,8 @@
               [
                 "Device",
                 [
-                  "germanium"
+                  "germanium",
+                  "silicon"
                 ]
               ]
             ]
@@ -2762,7 +2770,8 @@
                 "Speed",
                 [
                   "stop",
-                  "chorale"
+                  "chorale",
+                  "tremolo"
                 ]
               ]
             ]
@@ -3761,7 +3770,8 @@
                 [
                   "tanh_soft",
                   "atan_soft",
-                  "cubic_soft"
+                  "cubic_soft",
+                  "sinh_arc"
                 ]
               ],
               [
@@ -4436,7 +4446,8 @@
               [
                 "CarrierSource",
                 [
-                  "external"
+                  "external",
+                  "internal"
                 ]
               ],
               [

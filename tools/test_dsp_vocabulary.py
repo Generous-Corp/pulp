@@ -57,6 +57,12 @@ def main():
     spec.loader.exec_module(extractor)
     fixture = """
 struct Fixture {
+    enum class Mode {
+        first, // a trailing comment must not consume the next line
+        second,
+        third = 3, /* nor may a block comment hide later values */
+        fourth,
+    };
     float process(float input) {
         std::vector<float> work(static_cast<std::size_t>(4));
         return calibration_tables(input);
@@ -67,6 +73,10 @@ struct Fixture {
     parsed = extractor.public_methods(fixture, "Fixture")
     if parsed != ["process(float input)", "declared(int amount)"]:
         print(f"FAIL: inline method bodies leaked into the API surface: {parsed}")
+        return 1
+    enums = extractor.public_enums(fixture, "Fixture")
+    if enums != [["Mode", ["first", "second", "third", "fourth"]]]:
+        print(f"FAIL: enum comments hid public choices: {enums}")
         return 1
 
     r = subprocess.run([sys.executable, EXTRACTOR, "--json"],

@@ -86,6 +86,19 @@ def public_enums(text: str, cls: str):
     src = "".join(body)
     out = []
 
+    def values_from(block: str):
+        # Remove comments before comma tokenization. If a line comment follows
+        # one enumerator, splitting first makes that comment share a fragment
+        # with the next line's enumerator and silently drops the latter.
+        block = re.sub(r"/\*.*?\*/", "", block, flags=re.S)
+        block = re.sub(r"//[^\n]*", "", block)
+        values = []
+        for raw in block.split(","):
+            raw = raw.split("=", 1)[0].strip()
+            if re.fullmatch(r"[A-Za-z_]\w*", raw):
+                values.append(raw)
+        return values
+
     # A class often aliases a file-level enum -- `using Mode = SlewMode;` --
     # so the values live outside the body the caller sees. Follow the alias,
     # and report it under the name the METHOD signature uses, since that is
@@ -98,24 +111,13 @@ def public_enums(text: str, cls: str):
             aliased.append((local, em.group(1)))
 
     for local, block in aliased:
-        values = []
-        for raw in block.split(","):
-            raw = re.sub(r"//.*", "", raw.split("=")[0]).strip()
-            if re.fullmatch(r"[A-Za-z_]\w*", raw):
-                values.append(raw)
+        values = values_from(block)
         if values:
             out.append([local, values])
 
     for em in re.finditer(r"enum\s+class\s+(\w+)[^{]*\{([^}]*)\}", src):
         name = em.group(1)
-        values = []
-        for raw in em.group(2).split(","):
-            raw = raw.split("=")[0].strip()
-            # Drop comments and stray tokens; an enumerator is a bare
-            # identifier.
-            raw = re.sub(r"//.*", "", raw).strip()
-            if re.fullmatch(r"[A-Za-z_]\w*", raw):
-                values.append(raw)
+        values = values_from(em.group(2))
         if values:
             out.append([name, values])
     return out
