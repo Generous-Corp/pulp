@@ -21,6 +21,9 @@ plugin (FFT/analysis stays tool-side).
   reference, and a committed baseline flags when an engine change regresses.
 - **Works on real audio** — point it at any WAV; it checks reference-free that a faithful
   stretch preserves the source's spectrum.
+- **Measures synth renders without a golden WAV** — reports absolute tonal/noise/
+  modulation features, then scores catalogue-off/on renders against explicit physical
+  expectations with the tuning loop's Pareto/holdout Goodhart guard.
 - **Trustworthy** — non-circular validation, coverage/confidence on every verdict,
   re-derivable provenance, and a license fence that keeps copyleft/heavy tools out of the
   committed surface.
@@ -80,6 +83,13 @@ python -m quality_lab.cli corpus add --file vocal.wav --name vocal1 \
 python -m quality_lab.cli compare before.wav after.wav --profile tonal-balance --json report.json
 python -m quality_lab.cli compare golden.wav candidate.wav --profile added-hf --reference-role golden  # enables regression_suspected
 
+# one-render features, then a catalogue-off/on experiment
+python -m quality_lab.cli analyze catalogue-on.wav --json on-features.json
+python -m quality_lab.cli catalogue-ab catalogue-off.wav catalogue-on.wav \
+    --expectations cello-expectations.json \
+    --holdout-without catalogue-off-2.wav --holdout-with catalogue-on-2.wav \
+    --json cello-ab.json
+
 pytest tests/ -q
 ```
 
@@ -117,6 +127,46 @@ of detectors — so the same machinery serves more than drums:
 | **percussive** | synthetic drum break | onset-map | transient, centroid, hf_fizz |
 | **tonal** | synthetic sustained vocal/pad | identity | centroid, hf_fizz, spectral_flux, hnr |
 | **real audio** | any developer-supplied WAV | reference-free (preserve source spectrum) | centroid, hf_fizz, spectral_flux, hnr |
+| **synth render** | any rendered WAV | explicit physical expectations | centroid, HF fraction, spectral flux, HNR, amplitude-modulation rate |
+
+### Catalogue-on/off experiment
+
+`analyze` measures a single render without silently treating a second render as
+truth. `catalogue-ab` converts cited physical expectations into normalized target
+errors, where lower is better, and asks `loop.goodhart_guard` whether catalogue-on is
+a Pareto improvement. A win on one target while another regresses is `NOT_PROVEN`;
+a working-set win is only `WORKING_SET_IMPROVES`, and supplying a second pair makes
+the same improvement mandatory before the headline becomes `CATALOGUE_IMPROVES`.
+`NOT_PROVEN` exits zero because it is a valid measurement result; malformed/missing
+inputs exit 2.
+
+An expectations file names one `target`, `min`, or `max` per metric and a physical
+`tolerance`. Keep the source location in the file so the resulting JSON report remains
+traceable to the original book rather than a derived corpus row. For the Forge book
+experiment the authoritative originals are under
+`/Users/danielraffel/Documents/synth-refs/` (for example, cite the Welsh PDF and page):
+
+```json
+{
+  "schema_version": 1,
+  "source": {
+    "path": "/Users/danielraffel/Documents/synth-refs/Welshs Synthesizer Cookbook by Fred Welsh (z-lib.pdf",
+    "page": 42,
+    "claim": "cello amplitude modulation rate"
+  },
+  "metrics": {
+    "amplitude_modulation_hz": {"target": 7.5, "tolerance": 0.5}
+  }
+}
+```
+
+`catalogue-ab` requires `source.path` plus either `source.page` or a string
+`source.locator`; it refuses an untraceable expectations file.
+
+The other supported keys are `spectral_centroid_hz`, `hf_energy_fraction`,
+`spectral_flux`, and `hnr_db`. These are measurement fields, not universal quality
+directions; only the cited expectation gives them a target. Use a second generation
+seed/render as the holdout instead of reusing the working WAV.
 
 ### Real engine validation + regression gate
 
@@ -291,6 +341,7 @@ compared to itself.
 | `quality_lab/mir.py` | opt-in, license-fenced MIR structural oracle adapters (aubio onset cross-check) — advisory, not metrics |
 | `quality_lab/reviewer.py` | opt-in advisory LLM/multimodal reviewer (never a gate) |
 | `quality_lab/loop.py` | experimental tuning loop: rank candidates, Goodhart guard, label proposals |
+| `quality_lab/reference_free.py` | single-render features + expectation-grounded catalogue A/B |
 | `quality_lab/corpus.py` | versioned, license-guarded corpus |
 | `quality_lab/provenance.py` | re-derivable provenance + self-describing sidecars |
 | `quality_lab/regions.py` | worst-region clip extraction |

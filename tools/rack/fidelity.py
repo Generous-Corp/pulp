@@ -3,6 +3,7 @@
 
     fidelity.py <patch.vcv>              # run both checks against one patch
     fidelity.py <patch.vcv> --seconds 6  # a longer listening window
+    fidelity.py <patch.vcv> --wav out.wav # keep the signal a listener heard
 
 Everything downstream of writing a patch file has been taken on trust: that
 Rack restores the parameter values the generator chose, connects the cables it
@@ -56,6 +57,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import wave
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -558,6 +560,45 @@ def read_capture(path: str, channels: int) -> list[list[float]]:
     return [list(a[c::channels]) for c in range(channels)]
 
 
+def write_audio_artifact(path: str, frames: list[list[float]],
+                         taps: list[tuple], sample_rate: float) -> dict:
+    """Write the audio taps from a successful probe capture as a PCM WAV.
+
+    Rack signals are normally around +/-5 V, while a WAV conventionally lives
+    in +/-1. Peak-normalizing all audio channels with one shared gain keeps the
+    stereo balance and prevents player-side clipping. Fidelity's verdict still
+    reports the original voltage RMS; this artifact is for downstream
+    level-invariant Quality Lab analysis and listening, not level metering.
+    """
+    audio_channels = [frames[i] for i, tap in enumerate(taps)
+                      if tap[2] == "audio" and i < len(frames)]
+    if not audio_channels:
+        raise ValueError("the capture has no audio tap to write")
+    count = min(len(ch) for ch in audio_channels)
+    if count <= 0 or sample_rate <= 0:
+        raise ValueError("the audio capture is empty")
+    audio_channels = [ch[:count] for ch in audio_channels]
+    peak = max(abs(float(x)) for ch in audio_channels for x in ch)
+    gain = 0.95 / peak if peak > 1e-12 else 1.0
+    pcm = array.array("h")
+    for i in range(count):
+        for ch in audio_channels:
+            x = max(-1.0, min(1.0, float(ch[i]) * gain))
+            pcm.append(int(round(x * 32767.0)))
+    if sys.byteorder != "little":
+        pcm.byteswap()
+    parent = os.path.dirname(os.path.abspath(path))
+    os.makedirs(parent, exist_ok=True)
+    with wave.open(path, "wb") as out:
+        out.setnchannels(len(audio_channels))
+        out.setsampwidth(2)
+        out.setframerate(int(round(sample_rate)))
+        out.writeframes(pcm.tobytes())
+    return {"path": os.path.abspath(path), "channels": len(audio_channels),
+            "frames": count, "sample_rate": int(round(sample_rate)),
+            "source_peak_volts": peak, "normalization_gain": gain}
+
+
 # ── Structural fidelity ──────────────────────────────────────────────────────
 
 # Parameter values round-trip through JSON as decimal text, so an exact
@@ -775,7 +816,8 @@ def judge(given: dict, got: Run, taps: list[tuple],
 
 def check(patch_path: str, seconds: float = 4.0,
           taps: list[tuple] | None = None,
-          probe_dir: str | None = None) -> tuple[int, list[str]]:
+          probe_dir: str | None = None,
+          wav_out: str | None = None) -> tuple[int, list[str]]:
     """Run both checks against one patch. Returns (exit code, report lines)."""
     rack = mr.rack_binary()
     if not rack:
@@ -805,6 +847,18 @@ def check(patch_path: str, seconds: float = 4.0,
         if got.why:
             return 2, [f"the run did not measure anything: {got.why}"]
         v = judge(given, got, used, param_names(portmap))
+        if wav_out:
+            try:
+                artifact = write_audio_artifact(
+                    wav_out, got.frames, used,
+                    float((got.signal or {}).get("sampleRate") or 0))
+            except (OSError, ValueError) as exc:
+                return 2, v.lines + [f"the WAV artifact could not be written: {exc}"]
+            v.lines.append(
+                f"artifact: wrote {artifact['channels']}-channel, "
+                f"{artifact['frames'] / artifact['sample_rate']:.2f}s WAV to "
+                f"{artifact['path']} (shared peak normalization; original level "
+                f"remains in the audible report)")
         return (0 if v.ok else 1), v.lines
     finally:
         shutil.rmtree(stage, ignore_errors=True)
@@ -817,10 +871,18 @@ def main(argv: list[str]) -> int:
         at = argv.index("--seconds") + 1
         seconds = float(argv[at])
         args = [a for a in args if a != argv[at]]
+    wav_out = None
+    if "--wav" in argv:
+        at = argv.index("--wav") + 1
+        if at >= len(argv):
+            print("--wav needs an output path")
+            return 2
+        wav_out = argv[at]
+        args = [a for a in args if a != wav_out]
     if not args:
         print(__doc__.split("\n\n")[1].strip("\n"))
         return 2
-    code, lines = check(args[0], seconds)
+    code, lines = check(args[0], seconds, wav_out=wav_out)
     for line in lines:
         print(line)
     return code

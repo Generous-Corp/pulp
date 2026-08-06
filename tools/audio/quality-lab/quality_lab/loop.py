@@ -101,7 +101,9 @@ def goodhart_guard(cand: CandidateScore, champ: CandidateScore,
     if cand.confidence < min_confidence:
         return {"accepted": False, "needs_ear": True,
                 "reason": f"Pareto win but confidence {cand.confidence:.2f} < {min_confidence} — NEEDS-EAR"}
-    return {"accepted": True, "needs_ear": False, "reason": "Pareto improvement on working + held-out slices"}
+    scope = "working + held-out slices" if holdout_cand is not None else "working set"
+    return {"accepted": True, "needs_ear": False,
+            "reason": f"Pareto improvement on {scope}"}
 
 
 # ── label proposal transaction (sidecar; never touches MANIFEST.json) ─────

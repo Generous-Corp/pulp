@@ -156,6 +156,46 @@ def _cmd_loop(args: argparse.Namespace) -> int:
     return 0
 
 
+def _write_or_print(report: dict, path: str) -> None:
+    text = json.dumps(report, indent=2)
+    if path:
+        with open(path, "w") as fh:
+            fh.write(text)
+        print(f"  wrote report -> {path}")
+    else:
+        print(text)
+
+
+def _cmd_analyze(args: argparse.Namespace) -> int:
+    from . import reference_free
+    try:
+        report = reference_free.analyze_file(args.wav)
+    except (OSError, ValueError) as exc:
+        print(f"[quality-lab analyze] ERROR — {exc}")
+        return 2
+    print(f"[quality-lab analyze] {report['duration_s']:.2f}s at "
+          f"{report['sample_rate']} Hz")
+    _write_or_print(report, args.json)
+    return 0
+
+
+def _cmd_catalogue_ab(args: argparse.Namespace) -> int:
+    from . import reference_free
+    try:
+        report = reference_free.compare_files(
+            args.without, args.with_catalogue, args.expectations,
+            args.holdout_without or None, args.holdout_with or None)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"[quality-lab catalogue-ab] ERROR — {exc}")
+        return 2
+    print(f"[quality-lab catalogue-ab] {report['verdict']} — "
+          f"{report['goodhart_guard']['reason']}")
+    _write_or_print(report, args.json)
+    # NOT_PROVEN is a measurement result, not a broken run. Match compare's
+    # convention: nonzero only means the apparatus could not measure.
+    return 0
+
+
 def _cmd_compare(args: argparse.Namespace) -> int:
     import json
     from . import compare
@@ -339,6 +379,26 @@ def main(argv: list[str] | None = None) -> int:
     lp.add_argument("--corpus-dir", default="", dest="corpus_dir",
                     help="write label proposals to <dir>/LABEL_PROPOSALS.json (never MANIFEST.json)")
     lp.set_defaults(func=_cmd_loop)
+
+    ana = sub.add_parser(
+        "analyze", help="measure one synth/effect WAV without a reference")
+    ana.add_argument("wav", help="render to measure")
+    ana.add_argument("--json", default="", help="write the feature report JSON")
+    ana.set_defaults(func=_cmd_analyze)
+
+    cab = sub.add_parser(
+        "catalogue-ab",
+        help="score catalogue-off/on WAVs against explicit physical expectations")
+    cab.add_argument("without", help="catalogue-off WAV")
+    cab.add_argument("with_catalogue", help="catalogue-on WAV")
+    cab.add_argument("--expectations", required=True,
+                     help="JSON target/min/max rules with tolerance and source citation")
+    cab.add_argument("--holdout-without", default="",
+                     help="second catalogue-off render (must accompany --holdout-with)")
+    cab.add_argument("--holdout-with", default="",
+                     help="second catalogue-on render (must accompany --holdout-without)")
+    cab.add_argument("--json", default="", help="write the full A/B report JSON")
+    cab.set_defaults(func=_cmd_catalogue_ab)
 
     from . import compare
     cmp_ = sub.add_parser(

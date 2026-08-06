@@ -24,6 +24,8 @@ import json
 import math
 import os
 import sys
+import tempfile
+import wave
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -491,6 +493,26 @@ def test_with_rack(probe: str) -> int:
     return bad
 
 
+def test_audio_artifact_contains_only_audio_taps() -> int:
+    """The Quality Lab artifact must not accidentally include pitch CV."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "render.wav")
+        meta = F.write_audio_artifact(
+            path,
+            [[0.0, 2.5, -5.0], [0.0, 1.0, 2.0], [0.0, -2.5, 5.0]],
+            [(1, 0, "audio"), (2, 0, "pitch"), (1, 1, "audio")],
+            48000.0,
+        )
+        with wave.open(path, "rb") as wav:
+            bad = check(wav.getnchannels() == 2,
+                        "only the two listener-audio taps become WAV channels")
+            bad += check(wav.getnframes() == 3 and wav.getframerate() == 48000,
+                         "the artifact keeps the capture length and sample rate")
+        bad += check(meta["source_peak_volts"] == 5.0,
+                     "artifact metadata preserves the original voltage peak")
+        return bad
+
+
 def main(argv: list[str]) -> int:
     bad = 0
     for fn in (test_a_faithful_load_reads_as_faithful,
@@ -517,7 +539,8 @@ def main(argv: list[str]) -> int:
                test_tracking_needs_both_taps,
                test_tracking_is_blind_to_tuning_but_not_to_intervals,
                test_scatter_is_not_reported_as_mistuning,
-               test_a_capture_is_read_back_channel_by_channel):
+               test_a_capture_is_read_back_channel_by_channel,
+               test_audio_artifact_contains_only_audio_taps):
         print(f"{fn.__name__}:")
         bad += fn()
 
