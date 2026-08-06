@@ -1297,7 +1297,7 @@ def check_named_sounds() -> int:
         """
         claimed = idiom_check.resolve_intent(prompt, idioms)
         return (patch_vocabulary.for_prompt(prompt, idioms) if claimed.slug
-                else patch_vocabulary.render(idioms))
+                else patch_vocabulary.render(idioms, prompt))
 
     settings = {e["id"]: e for e in entries.values()
                 if e.get("kind") == "settings"}
@@ -1334,6 +1334,21 @@ def check_named_sounds() -> int:
         else:
             print(f"  ok     {prompt!r} puts {len(nums)} measured value(s) in "
                   f"front of the model")
+
+        # Guidance means the requested recipe is the answer, not one row in a
+        # glossary. Keep this coupled to contract_for(): the first catalogue
+        # regression passed by testing a helper that production never called.
+        target = text.find("## the sound this request names")
+        if target != 0:
+            print(f"  WRONG  {prompt!r} does not lead with its matched recipe")
+            bad += 1
+        elif "## named sounds" in text or "## other named sounds" in text:
+            print(f"  WRONG  {prompt!r} still receives the unrelated recipe "
+                  "glossary")
+            bad += 1
+        else:
+            print(f"  ok     {prompt!r} leads with one target, not the whole "
+                  "catalogue")
 
     # A FAMILY LANDS SOMEWHERE SENSIBLE when nothing is named outright.
     # Either route is right: a record whose own name carries the word, or the

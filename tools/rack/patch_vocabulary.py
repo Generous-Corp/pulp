@@ -67,9 +67,10 @@ def render(idioms: dict | None = None, prompt: str | None = None) -> str:
     model wrote 5 Hz on pitch instead. The numbers were present, correct, and
     indistinguishable from the 74 sounds nobody asked for.
 
-    The compact list stays, because it is how "a brass stab" lands somewhere
-    sensible when it names no recipe outright. It is the matched entry that has
-    to be lifted out of it.
+    The compact list stays for prompts that name no recipe outright, because it
+    is how "a brass stab" lands somewhere sensible. Once a sound matches, the
+    other recipes are omitted: the exact answer must not compete with 74 sounds
+    the request did not name.
     """
     idioms = idioms if idioms is not None else load_idioms()
     families: dict[str, list] = {}
@@ -178,14 +179,12 @@ def render(idioms: dict | None = None, prompt: str | None = None) -> str:
         # the request is being read rather than after the reference material.
         out = head + out
 
-    if sounds:
-        out += ["## other named sounds",
-                "The rest of the catalogue, for when a request names no sound "
-                "outright. Do NOT reach for one of these unless the request "
-                "actually asks for it.", ""]
+    if sounds and not matched:
+        out += ["## named sounds",
+                "Settings measured from a synthesis catalogue. If the request "
+                "names one of these, start from its values and then use your "
+                "ears.", ""]
         for e in sorted(sounds, key=lambda x: x["names"][0]):
-            if e in matched:
-                continue        # already given above, in full
             vals = "; ".join(f"{n['quantity']} {n['value']}"
                              for n in e["numbers"])
             out.append(f"- {e['names'][0]}: {vals}")
@@ -220,10 +219,10 @@ def for_prompt(prompt: str, idioms: dict | None = None) -> str:
         heard = knowledge.for_prompt(prompt)
         if heard:
             named_sounds = (
-                "The request names a sound this library has settings for. "
-                "These are a starting point measured from a synthesis "
-                "catalogue, not a target — match them and then use your ears:"
-                "\n\n" + "\n\n".join(knowledge.render(e) for e in heard))
+                "## the sound this request names\n"
+                "Measured settings for exactly what was asked for. Start from "
+                "these values, then use your ears.\n\n" +
+                "\n\n".join(knowledge.render(e) for e in heard))
     except Exception:                                    # noqa: BLE001
         named_sounds = ""
 
@@ -339,15 +338,13 @@ def for_prompt(prompt: str, idioms: dict | None = None) -> str:
         known = ""
     if known:
         lines += ["", known.rstrip()]
-    if named_sounds:
-        lines += ["", named_sounds.rstrip()]
-
     listen = idiom.get("listen_for") or {}
     if listen.get("sounds_like"):
         lines += ["", f"It should sound like: {listen['sounds_like']}"]
     if listen.get("confusable_with"):
         lines.append(f"It is NOT: {listen['confusable_with']}")
-    return "\n".join(lines) + "\n"
+    body = "\n".join(lines) + "\n"
+    return named_sounds.rstrip() + "\n\n" + body if named_sounds else body
 
 
 def guard(contract: str) -> list[str]:

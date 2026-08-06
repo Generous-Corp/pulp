@@ -71,7 +71,7 @@
             "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
             "quote": "Tune : - Wave : Sine Cutoff: 40hz 10% 40hz 10%"
           },
-          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+          "grounding": "Read from the Cello settings grid on printed page 53 of Fred Welsh's original Synthesizer Cookbook PDF, not chosen here. The row states LFO routing to amplitude and a 7.5 Hz moderate frequency. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
         },
         {
           "quantity": "low-pass cutoff",
@@ -85,7 +85,7 @@
         }
       ],
       "provenance": "read",
-      "source": "A synthesizer patch catalogue, the Strings section — the Cello recipe",
+      "source": "Fred Welsh, Welsh's Synthesizer Cookbook, Strings section — the Cello recipe, printed page 53",
       "anchor": {
         "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
         "quote": "Tune : - Wave : Sine Cutoff: 40hz 10% 40hz 10%"
