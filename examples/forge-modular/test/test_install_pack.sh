@@ -369,10 +369,12 @@ if [ -f "$W/bundle/Resources/tools/rack/patch.py" ] && \
    ! find "$W/bundle" \( -name .corpus -o -name .git -o -name __pycache__ \) \
         -print -quit | grep -q . && \
    grep -q 'stage_toolchain.cmake' "$FM/CMakeLists.txt" && \
-   grep -q 'Resources/tools/rack' "$FM/CMakeLists.txt"; then
-    ok "CMake stages the generator at tools/rack without local corpora or caches"
+   grep -q 'Resources/tools/rack' "$FM/CMakeLists.txt" && \
+   grep -q '"Resources" / "tools" / "rack"' \
+        "$FM/app/src/engine_client.cpp"; then
+    ok "CMake stages and the app resolves tools/rack without local corpora or caches"
 else
-    fail "CMake bundle staging has the wrong layout or leaked local material"
+    fail "bundle staging and app resolution disagree or leaked local material"
 fi
 /bin/rm -rf "$W"
 

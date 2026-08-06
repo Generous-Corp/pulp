@@ -130,7 +130,7 @@ std::filesystem::path resolve_tools_dir() {
     if (size > 0 && _NSGetExecutablePath(buf.data(), &size) == 0) {
         const std::filesystem::path exe(buf.c_str());
         const auto bundled =
-            exe.parent_path().parent_path() / "Resources" / "tools";
+            exe.parent_path().parent_path() / "Resources" / "tools" / "rack";
         if (std::filesystem::exists(bundled / "generate.py", ec)) return bundled;
     }
 #endif
