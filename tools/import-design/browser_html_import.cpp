@@ -166,9 +166,9 @@ BrowserHtmlImportResult import_browser_html(
             shape,
             std::move(workspaces)};
     }
-    // Give each knob whose author declared a pointer its own slice of the
-    // capture, cleaned of the pointer frozen into it, so the design's indicator
-    // can be driven by the parameter instead of standing still. Fails the
+    // Give each knob/fader whose author declared an indicator the capture
+    // slices needed to clean the frozen instance and move the authored art with
+    // the parameter. Fails the
     // import rather than dropping the pointer silently: a declared indicator
     // that produced nothing is exactly the failure that reads as "it works" in
     // every pixel gate.
@@ -177,7 +177,7 @@ BrowserHtmlImportResult import_browser_html(
     // ordinary result for a panel that declared no indicators, so a caller that
     // reads the count as the verdict swallows every failure as "nothing to do".
     std::string sprite_error;
-    apply_browser_capture_knob_sprites(
+    apply_browser_capture_control_sprites(
         *lowered.design_ir, lowered.reference_png, capture_directory,
         &sprite_error);
     if (!sprite_error.empty()) {
