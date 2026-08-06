@@ -303,9 +303,10 @@ The measured product fixtures compose this primitive with `PhaseAccumulator`
 for free-running saw and hard sync. Across 1.1–6.3 kHz, the worst in-band saw
 alias is 38–47 dB below the existing polyBLEP path; the hard-sync fixture is
 35.76 dB lower. The regression floor is 30 dB. Forge's current oscillator
-catalog remains unchanged: this is a public construction primitive for an
-explicit future oscillator realization, not a silent sound change to an
-existing product identity.
+catalog remains unchanged, so existing product identities do not silently
+change sound. PulpSynth provides the explicit product proof instead: waveform
+choice 4 opts into a public-API `MinBlepSaw` voice, and its Release test records
+a 46.59 dB improvement over the example's legacy saw path.
 
 Capacity overflow is observable and deterministic. Slots are allocated and
 summed in ascending order; when all are live, `insert` returns
