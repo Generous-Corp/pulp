@@ -220,7 +220,7 @@ target_link_libraries(pulp-sampler-render-wav PRIVATE pulp::audio)
 add_executable(pulp-sampler-heritage-render-wav sample_heritage_render_wav.cpp)
 target_link_libraries(pulp-sampler-heritage-render-wav PRIVATE pulp::audio)
 option(PULP_AUDIO_QUALITY_LAB_GATE
-    "Register the dependency-bearing sampler Quality Lab reference gate" OFF)
+    "Register the dependency-bearing Audio Quality Lab gates" OFF)
 set(PULP_AUDIO_QUALITY_LAB_PYTHON "" CACHE FILEPATH
     "Python from an environment containing Quality Lab plus pytest dependencies")
 if(PULP_AUDIO_QUALITY_LAB_GATE)
@@ -274,6 +274,17 @@ if(PULP_AUDIO_QUALITY_LAB_GATE)
                 LABELS "audio;sampler;heritage;quality-lab;dependency-gate"
                 TIMEOUT 120)
     endforeach()
+    add_test(NAME quality-lab-reference-free
+        COMMAND "${PULP_AUDIO_QUALITY_LAB_PYTHON}" -m pytest
+            "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab/tests/test_reference_free.py"
+            -q)
+    set_tests_properties(quality-lab-reference-free
+        PROPERTIES
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
+            ENVIRONMENT
+                "PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
+            LABELS "audio;quality-lab;dependency-gate"
+            TIMEOUT 120)
 endif()
 if(PULP_HAS_VST3)
     # The VST3 sibling of the CLAP null above: same deterministic Processor,
