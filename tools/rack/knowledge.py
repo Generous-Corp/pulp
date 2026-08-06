@@ -32,8 +32,10 @@ failure.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -56,6 +58,7 @@ PROVENANCE = ("read", "canon", "inferred")
 # from the `why` requirement, because demanding one would only produce more of
 # the same sentence, and it is counted separately everywhere.
 KINDS = ("technique", "settings")
+STATUSES = ("admitted", "candidate", "quarantined")
 
 # Words that mean this entry has stopped being instrument-agnostic. Checked
 # against OUR prose only -- an anchor quotes the source, and the source is
@@ -64,8 +67,14 @@ _REALISATION_WORDS = ("vcv", " rack ", "module", "cable", "jack", "patch cable",
                       "vco", "vca", "vcf", "attenuverter", "multiple's")
 
 
-def load(path: str | None = None) -> dict:
-    """Every technique entry, by id."""
+def load(path: str | None = None, include_candidates: bool = False) -> dict:
+    """Technique entries by id; unvalidated candidates are excluded normally.
+
+    Recovery is not admission. A candidate can be linted, reviewed and used by
+    a controlled A/B harness, but `for_prompt` and `for_idiom` call this default
+    path and therefore cannot put it in a generation contract. Promotion is an
+    explicit status edit after validation, never a side effect of extraction.
+    """
     out: dict[str, dict] = {}
     root = path or TECHNIQUE_DIR
     if not os.path.isdir(root):
@@ -76,9 +85,22 @@ def load(path: str | None = None) -> dict:
         with open(os.path.join(root, name)) as f:
             doc = json.load(f)
         for entry in doc.get("entries", []):
-            if entry.get("id"):
+            status = entry.get("status", "admitted")
+            if entry.get("id") and (include_candidates or status == "admitted"):
                 out[entry["id"]] = entry
     return out
+
+
+def semantic_fingerprint(claim: str) -> str:
+    """Stable identity for a claim, independent of its presentation prose."""
+    normal = re.sub(r"\s+", " ", claim.strip().lower())
+    return hashlib.sha256(normal.encode("utf-8")).hexdigest()
+
+
+def canonical_locator(evidence: dict) -> str:
+    """Edition/page identity used to attach corroboration to one claim row."""
+    return ":".join(str(evidence.get(field, "")) for field in
+                    ("work_id", "edition_id", "page", "source_sha256"))
 
 
 def _our_prose(entry: dict) -> str:
@@ -99,12 +121,54 @@ def problems(entries: dict | None = None, idioms: dict | None = None) -> list[st
     into naming modules is one nobody outside this directory can use, and the
     drift is invisible because the entry still reads perfectly well.
     """
-    entries = entries if entries is not None else load()
+    entries = entries if entries is not None else load(include_candidates=True)
     bad: list[str] = []
     slugs = set(idioms or {})
+    fingerprints: dict[str, str] = {}
 
     for eid, entry in sorted(entries.items()):
         prose = _our_prose(entry)
+
+        status = entry.get("status", "admitted")
+        if status not in STATUSES:
+            bad.append(f"{eid} has status {status!r}, which is not one of "
+                       f"{STATUSES}")
+        claim = entry.get("claim")
+        fingerprint = entry.get("semantic_fingerprint")
+        if status != "admitted" or claim or fingerprint:
+            if not claim or not fingerprint:
+                bad.append(f"{eid} is admission-tracked but has no claim and "
+                           "semantic_fingerprint")
+            elif semantic_fingerprint(claim) != fingerprint:
+                bad.append(f"{eid} has a semantic fingerprint that does not "
+                           "match its canonical claim")
+            elif fingerprint in fingerprints:
+                bad.append(f"{eid} duplicates the semantic claim already held "
+                           f"by {fingerprints[fingerprint]}; attach its source "
+                           "as corroborating evidence to that row")
+            else:
+                fingerprints[fingerprint] = eid
+        evidence = entry.get("evidence") or []
+        if status != "admitted" and not evidence:
+            bad.append(f"{eid} is {status} with no canonical source locator")
+        validation = entry.get("validation") or {}
+        if status == "candidate" and validation.get("type") != "guided-audio-ab":
+            bad.append(f"{eid} is a candidate without a guided-audio-ab "
+                       "promotion plan")
+        entry_locators: set[str] = set()
+        for source in evidence:
+            locator = canonical_locator(source)
+            required = ("work_id", "edition_id", "page", "source_sha256",
+                        "page_sha256", "shows")
+            missing = [field for field in required if not source.get(field)]
+            if missing:
+                bad.append(f"{eid} has incomplete source evidence: "
+                           f"{', '.join(missing)}")
+            if locator in entry_locators:
+                bad.append(f"{eid} repeats source locator {locator}; one "
+                           "evidence row is enough")
+            else:
+                entry_locators.add(locator)
 
         for word in _REALISATION_WORDS:
             if word in prose:
@@ -126,7 +190,9 @@ def problems(entries: dict | None = None, idioms: dict | None = None) -> list[st
 
         if entry.get("provenance") not in PROVENANCE:
             bad.append(f"{eid} has provenance {entry.get('provenance')!r}")
-        elif entry["provenance"] == "read" and not (entry.get("anchor") or {}).get("quote"):
+        elif entry["provenance"] == "read" and not any(
+                (entry.get("anchor") or {}).get(field)
+                for field in ("quote", "page")):
             bad.append(f"{eid} says it was read and carries no anchor")
         elif entry["provenance"] != "read" and entry.get("anchor"):
             bad.append(f"{eid} is {entry['provenance']} and carries an anchor")
@@ -153,7 +219,9 @@ def problems(entries: dict | None = None, idioms: dict | None = None) -> list[st
             where = f"{eid}/{n.get('quantity')}"
             if n.get("provenance") not in PROVENANCE:
                 bad.append(f"{where} has provenance {n.get('provenance')!r}")
-            elif n["provenance"] == "read" and not (n.get("anchor") or {}).get("quote"):
+            elif n["provenance"] == "read" and not any(
+                    (n.get("anchor") or {}).get(field)
+                    for field in ("quote", "page")):
                 bad.append(f"{where} says it was read and carries no anchor")
             elif n["provenance"] != "read" and n.get("anchor"):
                 bad.append(f"{where} is {n['provenance']} and carries an anchor")
@@ -321,10 +389,11 @@ def main(argv: list[str]) -> int:
     if "--check" in argv:
         sys.path.insert(0, HERE)
         import idiom_check                            # noqa: PLC0415
-        bad = problems(load(), idiom_check.load_idioms())
+        all_entries = load(include_candidates=True)
+        bad = problems(all_entries, idiom_check.load_idioms())
         for b in bad:
             print(f"  {b}")
-        e = load()
+        e = all_entries
         n_t = sum(1 for x in e.values() if x.get("kind", "technique") == "technique")
         print(f"  {n_t} technique entries + {len(e) - n_t} settings records, "
               f"{len(bad)} problem(s)")

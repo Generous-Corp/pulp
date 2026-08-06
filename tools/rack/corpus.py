@@ -29,9 +29,13 @@ directory out of the repo, and nothing in the repo needs it to exist: without a
 corpus the anchor check reports that it verified nothing, which is the honest
 answer, rather than demoting citations it merely could not read.
 
-WHAT IS NOT HERE, AND CANNOT BE. Strange, Patch & Tweak, Welsh's book itself,
+WHAT IS NOT HERE, AND CANNOT SHIP. Strange, Patch & Tweak, Welsh's book itself,
 the Buchla and Serge manuals, and Elsea are in copyright and not openly
-published; nothing citing them can ever be `read`. The original ARP 2600
+published; their source text can never live in this repository or an app
+payload. A locally owned PDF with broken subset-font mappings may be recovered
+offline with `recover_subset_font_pdf.py`, but recovery does not admit guidance:
+candidate records remain outside the generation loader until a guided A/B
+validates them. The original ARP 2600
 owner's manual and the 2600 Patch Book ARE openly published by Korg, and both
 are page scans with no text layer -- 0 extractable words from 111 pages of
 patch book -- so they are unreadable here too, however freely they are offered.
@@ -373,7 +377,10 @@ def ingest_local(verbose: bool = True) -> list[dict]:
                 # one: a PDF with plenty of "words" and none of them real.
                 why += (". A PDF that extracts this much gibberish has "
                         "embedded subset fonts with no ToUnicode map, so every "
-                        "glyph comes out as the wrong character")
+                        "glyph comes out as the wrong character. If the PDF is "
+                        "locally owned, recover_subset_font_pdf.py can attempt "
+                        "an offline decode into the external corpus; low-score "
+                        "blocks are rejected and no recovered source may ship")
         else:
             usable = True
 

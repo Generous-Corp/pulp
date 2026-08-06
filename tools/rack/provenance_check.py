@@ -212,6 +212,8 @@ def sweep(write: bool = True) -> tuple[dict, list]:
     counts["unlabelled"] = 0
     counts["read (quoted)"] = 0
     counts["read (page image)"] = 0
+    counts["candidate"] = 0
+    counts["quarantined"] = 0
     demoted: list[str] = []
 
     # The knowledge base is swept alongside the idioms, and its NUMBERS are
@@ -234,6 +236,17 @@ def sweep(write: bool = True) -> tuple[dict, list]:
         for idiom in list(doc.get("idioms", [])) + list(doc.get("entries", [])) \
                 + [n for e in doc.get("entries", [])
                    for n in (e.get("numbers") or [])]:
+            status = idiom.get("status", "admitted")
+            if status in ("candidate", "quarantined"):
+                # Verify the pointer, but do not publish or count unadmitted
+                # guidance as "derived from". Recovery is evidence gathering;
+                # admission waits for the candidate's declared validation.
+                why = verify(idiom, docs, pages)
+                if why is not None:
+                    demoted.append(
+                        f"{idiom.get('id')}: unadmitted evidence {why}")
+                counts[status] += 1
+                continue
             tier = idiom.get("provenance")
             if tier not in TIERS:
                 counts["unlabelled"] += 1
@@ -287,6 +300,9 @@ def main(argv: list[str]) -> int:
             share = 100.0 * counts[tier] / total if total else 0.0
             print(f"  {indent}{tier:<{18 - len(indent)}} {counts[tier]:>4}"
                   + (f"  {share:4.0f}%" if not indent else ""))
+    if counts["candidate"] or counts["quarantined"]:
+        print(f"  admission quarantine: {counts['candidate']} candidate, "
+              f"{counts['quarantined']} quarantined (verified but not counted)")
 
     if demoted:
         verb = "would be demoted" if "--check" in argv else "DEMOTED to canon"
