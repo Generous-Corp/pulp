@@ -102,6 +102,11 @@ pulp_add_test_suite(pulp-test-noise-source
     LIBRARIES pulp::signal
     TIMEOUT 600)
 
+pulp_add_test_suite(pulp-test-stochastic-sources
+    SOURCES test_stochastic_sources.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 600)
+
 pulp_add_test_suite(pulp-test-decay-envelope
     SOURCES test_decay_envelope.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
