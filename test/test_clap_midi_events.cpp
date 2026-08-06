@@ -1210,6 +1210,73 @@ TEST_CASE("CLAP lifecycle forwards prepare/release and handles no-op callbacks",
     g_capturing = nullptr;
 }
 
+TEST_CASE("CLAP resets MPE sidecar ownership across reset and reactivation",
+          "[clap][mpe][lifecycle][reset]") {
+    g_pending_opts_mpe = true;
+    g_pending_opts_ump = false;
+    g_pending_capturing_bypass = true;
+    Harness h(make_capturing);
+    REQUIRE(g_capturing != nullptr);
+    REQUIRE(h.plugin.mpe.enabled);
+
+    // Seed an active identity and force its physical release into the bounded
+    // pending FIFO. clap_reset() must clear every adapter-owned part together.
+    REQUIRE(h.plugin.mpe.tracker.process(midi::MidiEvent::note_on(1, 60, 100)));
+    while (h.plugin.mpe.buffer.size() < h.plugin.mpe.buffer.capacity()) {
+        REQUIRE(h.plugin.mpe.buffer.add(
+            {0, midi::MpeExpressionEvent::Kind::Pressure, {}}));
+    }
+    REQUIRE(h.plugin.mpe.tracker.process(midi::MidiEvent::note_off(1, 60)));
+    REQUIRE(h.plugin.mpe.tracker.pending_note_off_count() == 1);
+
+    clap_adapter::clap_reset(&h.plugin.plugin);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 0);
+    REQUIRE(h.plugin.mpe.tracker.pending_note_off_count() == 0);
+    REQUIRE(h.plugin.mpe.buffer.empty());
+
+    // A bypassed block does not call Processor::process(), so it must not
+    // consume the one-shot reset request meant for processor-owned voices.
+    InputEventList bypassed_input;
+    clap_event_note_t bypassed_note{};
+    bypassed_note.header = make_header(
+        sizeof(bypassed_note), CLAP_EVENT_NOTE_ON, 0);
+    bypassed_note.note_id = -1;
+    bypassed_note.port_index = 0;
+    bypassed_note.channel = 1;
+    bypassed_note.key = 72;
+    bypassed_note.velocity = 0.8;
+    bypassed_input.push(bypassed_note);
+    const int process_count_before_bypass = g_capturing->process_count;
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 1.0f);
+    REQUIRE(h.run(bypassed_input) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_capturing->process_count == process_count_before_bypass);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 0);
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 0.0f);
+    InputEventList empty;
+    REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_capturing->captured_context.reset_requested);
+    REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+    REQUIRE_FALSE(g_capturing->captured_context.reset_requested);
+
+    // Deactivate/re-activate repeatedly. Processor::release() owns downstream
+    // DSP state; the adapter resets its tracker immediately afterward.
+    for (int cycle = 0; cycle < 3; ++cycle) {
+        REQUIRE(h.plugin.mpe.tracker.process(midi::MidiEvent::note_on(
+            1, static_cast<uint8_t>(61 + cycle), 90)));
+        REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
+        h.deactivate();
+        REQUIRE(h.plugin.mpe.tracker.active_count() == 0);
+        REQUIRE(h.plugin.mpe.tracker.pending_note_off_count() == 0);
+        REQUIRE(h.plugin.mpe.buffer.empty());
+        REQUIRE(clap_adapter::clap_activate(
+            &h.plugin.plugin, 48000.0, 32, Harness::kFrames));
+        h.active = true;
+        REQUIRE(h.plugin.mpe.tracker.active_count() == 0);
+        REQUIRE(h.plugin.mpe.tracker.pending_note_off_count() == 0);
+    }
+    REQUIRE(g_capturing->release_count == 3);
+}
+
 TEST_CASE("CLAP latency and tail extensions report processor runtime contract",
           "[clap][latency][tail]") {
     g_pending_latency_samples = 256;

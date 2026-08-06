@@ -107,11 +107,15 @@ public:
         }
     }
 
+    void release() override { allocator_.reset_all(); }
+
     void process(
         audio::BufferView<float>& output,
         const audio::BufferView<const float>&,
         midi::MidiBuffer&, midi::MidiBuffer&,
         const format::ProcessContext& ctx) override {
+
+        if (ctx.reset_requested) allocator_.reset_all();
 
         const std::size_t nch = output.num_channels();
         const std::size_t ns = output.num_samples();

@@ -1,9 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/mpe_expression.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
+#include <pulp/midi/mpe_synth_voice.hpp>
+#include <array>
 #include <vector>
 
 #include "harness/rt_allocation_probe.hpp"
@@ -26,6 +29,37 @@ UmpPacket channel_pressure_ump(uint8_t group, uint8_t channel, uint32_t value) {
         | (static_cast<uint32_t>(0xD0 | (channel & 0x0F)) << 16);
     p.words[1] = value;
     return p;
+}
+
+class SidecarProcessor final : public pulp::format::Processor {
+public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor d;
+        d.name = "MpeSidecarTest";
+        d.supports_mpe = true;
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&,
+                 const pulp::audio::BufferView<const float>&,
+                 MidiBuffer&, MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+};
+
+class SidecarVoice final : public MpeSynthVoice {
+public:
+    void render(float*, int) override {}
+};
+
+template <typename Allocator>
+std::size_t held_voice_count(const Allocator& allocator) {
+    std::size_t count = 0;
+    for (std::size_t i = 0; i < allocator.polyphony(); ++i) {
+        const auto& voice = allocator.voice(i);
+        if (voice.active() && !voice.releasing()) ++count;
+    }
+    return count;
 }
 } // namespace
 
@@ -278,6 +312,101 @@ TEST_CASE("MpeBuffer callback appends are allocation-free after reserve",
     REQUIRE(buffer[0].state.note_id == held_id);
     REQUIRE(tracker.process(MidiEvent::note_on(1, 62, 100)));
     REQUIRE(tracker.find(1, 62)->note_id == held_id + 1);
+}
+
+TEST_CASE("MpeSidecar drains a deferred release before next-block input",
+          "[midi][mpe][lifecycle][sidecar][rt-safety]") {
+    pulp::format::boundary::MpeSidecar sidecar;
+    SidecarProcessor processor;
+    MpeVoiceAllocator<SidecarVoice> allocator{2};
+    sidecar.configure(true);
+    sidecar.reserve(sidecar.buffer.capacity());
+
+    // Fill block N's production sidecar buffer, then deliver a physical
+    // NoteOff that cannot fit and must be retained for the next run().
+    std::vector<MidiEvent> first_block;
+    first_block.reserve(sidecar.buffer.capacity() + 1);
+    first_block.push_back(MidiEvent::note_on(1, 60, 100));
+    while (first_block.size() < sidecar.buffer.capacity()) {
+        auto bend = MidiEvent::pitch_bend(1, 8192);
+        bend.sample_offset = 7;
+        first_block.push_back(bend);
+    }
+    auto physical_off = MidiEvent::note_off(1, 60);
+    physical_off.sample_offset = 31;
+    first_block.push_back(physical_off);
+    sidecar.run(processor, first_block);
+
+    REQUIRE(processor.mpe_input() == &sidecar.buffer);
+    REQUIRE(sidecar.buffer.size() == sidecar.buffer.capacity());
+    REQUIRE(sidecar.tracker.pending_note_off_count() == 1);
+    const auto retired_generation = sidecar.buffer[0].state.note_id;
+    allocator.dispatch_all(sidecar.buffer);
+    REQUIRE(held_voice_count(allocator) == 1);
+
+    // Block N+1 starts at the same offset as the deferred release. Production
+    // run() must publish retirement first, then the new generation, without an
+    // allocation on the audio thread.
+    const std::array second_block{MidiEvent::note_on(1, 60, 110)};
+    {
+        pulp::test::RtAllocationProbe probe;
+        sidecar.run(processor, second_block);
+        allocator.dispatch_all(sidecar.buffer);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+
+    REQUIRE(sidecar.buffer.size() == 2);
+    REQUIRE(sidecar.buffer[0].kind == Kind::NoteOff);
+    REQUIRE(sidecar.buffer[0].sample_offset == 0);
+    REQUIRE(sidecar.buffer[0].state.note_id == retired_generation);
+    REQUIRE(sidecar.buffer[1].kind == Kind::NoteOn);
+    REQUIRE(sidecar.buffer[1].sample_offset == 0);
+    REQUIRE(sidecar.buffer[1].state.note_id == retired_generation + 1);
+    REQUIRE(sidecar.tracker.pending_note_off_count() == 0);
+    REQUIRE(held_voice_count(allocator) == 1);
+    REQUIRE_FALSE(allocator.last_was_glide());
+}
+
+TEST_CASE("MpeSidecar reset clears buffer and deferred releases across reactivation cycles",
+          "[midi][mpe][lifecycle][sidecar][reset]") {
+    pulp::format::boundary::MpeSidecar sidecar;
+    SidecarProcessor processor;
+    sidecar.configure(true);
+    sidecar.reserve(sidecar.buffer.capacity());
+
+    std::vector<MidiEvent> overflowing_block;
+    overflowing_block.reserve(sidecar.buffer.capacity() + 1);
+    overflowing_block.push_back(MidiEvent::note_on(1, 60, 100));
+    while (overflowing_block.size() < sidecar.buffer.capacity()) {
+        auto bend = MidiEvent::pitch_bend(1, 8192);
+        bend.sample_offset = 4;
+        overflowing_block.push_back(bend);
+    }
+    auto physical_off = MidiEvent::note_off(1, 60);
+    physical_off.sample_offset = 15;
+    overflowing_block.push_back(physical_off);
+    sidecar.run(processor, overflowing_block);
+    REQUIRE(sidecar.tracker.pending_note_off_count() == 1);
+
+    MpeNoteGeneration previous_generation = sidecar.buffer[0].state.note_id;
+    for (int cycle = 0; cycle < 3; ++cycle) {
+        sidecar.reset();
+        REQUIRE(sidecar.buffer.empty());
+        REQUIRE(sidecar.tracker.active_count() == 0);
+        REQUIRE(sidecar.tracker.pending_note_off_count() == 0);
+        REQUIRE(sidecar.current_sample_offset == 0);
+
+        auto note_on = MidiEvent::note_on(
+            1, static_cast<uint8_t>(61 + cycle), 90);
+        note_on.sample_offset = 9;
+        const std::array input{note_on};
+        sidecar.run(processor, input);
+        REQUIRE(sidecar.buffer.size() == 1);
+        REQUIRE(sidecar.buffer[0].kind == Kind::NoteOn);
+        REQUIRE(sidecar.buffer[0].sample_offset == 9);
+        REQUIRE(sidecar.buffer[0].state.note_id > previous_generation);
+        previous_generation = sidecar.buffer[0].state.note_id;
+    }
 }
 
 TEST_CASE("MpeBuffer emits retrigger retirement and replacement atomically",

@@ -73,6 +73,10 @@ slot and generation cursor. `MpeBuffer::sort()` preserves producer order at
 equal offsets. This lets an allocator release the old voice (including its
 tail) while giving the replacement a distinct identity; the later physical
 note-off can then release the replacement without orphaning the old voice.
+Because the retirement is observed before the replacement, a same-note
+retrigger is an explicit **reattack**, not a legato overlap:
+`MpeVoiceAllocator::last_was_glide()` is false. Glide remains reserved for a
+second held note that overlaps on the same member channel.
 
 A physical note-off cannot simply be rejected because controllers do not replay
 it. If the buffer is full, the tracker deactivates the slot and retains the
@@ -84,8 +88,15 @@ the tracker's fixed 128-slot bound. Direct tracker/buffer integrations must call
 ingesting more input.
 
 `MpeVoiceTracker::reset()` remains an identity-free local clear and emits no
-lifecycle callbacks. A reset boundary must also clear its downstream allocator
-with `MpeVoiceAllocator::reset_all()` before input resumes.
+lifecycle callbacks. `MpeSidecar` cannot own or discover a processor's voice
+allocator, so reset ownership is deliberately paired rather than coupled. On
+deactivation, the adapter calls `Processor::release()` first and then resets
+its sidecar; an MPE processor must clear its allocator in `release()`. For a
+live host reset, the adapter clears its sidecar and raises
+`ProcessContext::reset_requested` on the next block; the processor must clear
+its allocator before dispatching that block's MPE input. A transport jump alone
+does not reset tracker identity and must not clear the allocator. The MPE synth
+example implements both paired paths with `MpeVoiceAllocator::reset_all()`.
 
 ## Zone configuration
 
@@ -138,10 +149,12 @@ lowpass.
 
 ## Adapter status
 
-The CLAP adapter populates `mpe_input()` and `ump_input()` when the descriptor
-opts in. Other adapters still deliver the standard `MidiBuffer` path only, so
-MPE-aware processors should continue to handle ordinary MIDI input as their
-fallback.
+The CLAP, VST3, and AUv3 adapters populate `mpe_input()` when the descriptor
+opts in; CLAP also populates `ump_input()` for native or synthesized UMP. Each
+of those formats owns and resets its tracker at lifecycle boundaries. AUv2 and
+other formats without this sidecar wiring still deliver the standard
+`MidiBuffer` path only, so MPE-aware processors should continue to handle
+ordinary MIDI input as their fallback.
 
 ## SignalGraph routing
 

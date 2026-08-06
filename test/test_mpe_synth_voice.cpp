@@ -190,6 +190,7 @@ TEST_CASE("MPE retrigger pipeline retires every generation without orphaning a v
     REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 90)));
     const auto first = tracker.find(1, 60)->note_id;
     alloc.dispatch_all(buffer);
+    REQUIRE_FALSE(alloc.last_was_glide());
     buffer.clear();
     offset = 16;
     REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 110)));
@@ -201,6 +202,8 @@ TEST_CASE("MPE retrigger pipeline retires every generation without orphaning a v
     REQUIRE(buffer[1].state.note_id == second);
     alloc.dispatch_all(buffer);
     buffer.clear();
+    // Retrigger is a retirement + reattack, not an overlapping legato note.
+    REQUIRE_FALSE(alloc.last_was_glide());
     REQUIRE(alloc.active_count() == 2);
     REQUIRE(alloc.releasing_count() == 1);
     REQUIRE(held_count(alloc) == 1);
