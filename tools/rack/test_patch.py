@@ -2480,6 +2480,14 @@ elif mode == "nonzero":
     open(answer, "w").write("partial response")
     print("authentication failed", file=sys.stderr)
     raise SystemExit(7)
+elif mode == "error-event":
+    print(json.dumps({"type": "item.completed", "item": {
+        "type": "error", "message": "model quota exhausted"}}))
+    raise SystemExit(9)
+elif mode == "warning-success":
+    print(json.dumps({"type": "item.completed", "item": {
+        "type": "error", "message": "skill budget warning"}}))
+    open(answer, "w").write("exact final response\\n")
 else:
     print(json.dumps({"type": "item.completed", "item": {
         "type": "reasoning", "text": "considering"}}))
@@ -2526,6 +2534,36 @@ else:
               f"{code} {text!r} {why!r}")
     else:
         print("  ok     a Codex failure preserves status, response, and stderr")
+
+    os.environ["FAKE_CODEX_MODE"] = "error-event"
+    try:
+        code, text, why = P.ask_model(codex, "hello codex", 30.0)
+    finally:
+        if old_fake_mode is None:
+            os.environ.pop("FAKE_CODEX_MODE", None)
+        else:
+            os.environ["FAKE_CODEX_MODE"] = old_fake_mode
+    if code != 9 or text or "model quota exhausted" not in why:
+        bad += 1
+        print(f"  WRONG  a Codex error event was lost: "
+              f"{code} {text!r} {why!r}")
+    else:
+        print("  ok     a failing Codex error event becomes diagnostics")
+
+    os.environ["FAKE_CODEX_MODE"] = "warning-success"
+    try:
+        code, text, why = P.ask_model(codex, "hello codex", 30.0)
+    finally:
+        if old_fake_mode is None:
+            os.environ.pop("FAKE_CODEX_MODE", None)
+        else:
+            os.environ["FAKE_CODEX_MODE"] = old_fake_mode
+    if code != 0 or text != "exact final response\n" or why:
+        bad += 1
+        print(f"  WRONG  a warning-like Codex error item poisoned success: "
+              f"{code} {text!r} {why!r}")
+    else:
+        print("  ok     a warning-like Codex error item does not poison success")
 
     unknown = os.path.join(home, "unknown-model-wrapper")
     with open(unknown, "w") as f:
@@ -2615,7 +2653,7 @@ else:
         print("  WRONG  a malformed FORGE_CODEX_MODEL was passed as CLI args")
     else:
         print("  ok     a malformed FORGE_CODEX_MODEL fails closed")
-    ran += 8
+    ran += 10
 
     real = P.SETTINGS_PATH
     try:

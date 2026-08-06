@@ -2689,6 +2689,7 @@ def ask_model(claude: str, prompt: str, seconds: float, tick: float = 8.0):
     last_said = started
     answer, plain, characters, thinking = [], [], 0, 0
     protocol_errors = []
+    codex_diagnostics = []
     try:
         for raw in proc.stdout:
             line = raw.rstrip("\n")
@@ -2712,6 +2713,11 @@ def ask_model(claude: str, prompt: str, seconds: float, tick: float = 8.0):
                 if (kind == "item.completed" and
                         item.get("type") in ("agent_message", "reasoning")):
                     characters += len(item.get("text") or "")
+                elif (kind == "item.completed" and
+                        item.get("type") == "error"):
+                    message = item.get("message") or item.get("text")
+                    if isinstance(message, str) and message.strip():
+                        codex_diagnostics.append(message.strip())
             elif kind == "stream_event":
                 delta = (event.get("event") or {}).get("delta") or {}
                 text = delta.get("text") or ""
@@ -2758,6 +2764,9 @@ def ask_model(claude: str, prompt: str, seconds: float, tick: float = 8.0):
         return 1, text, (
             f"the model call passed its {minutes:g} minute limit and was "
             f"stopped. Raise it in Settings, on the Permissions tab.")
+    if codex_diagnostics and (proc.returncode != 0 or not text):
+        detail = "\n".join(codex_diagnostics)
+        stderr = detail + ("\n" + stderr if stderr else "")
     if protocol_errors:
         detail = "\n".join(protocol_errors)
         stderr = detail + ("\n" + stderr if stderr else "")
