@@ -2340,11 +2340,27 @@ def ask_model(claude: str, prompt: str, seconds: float, tick: float = 8.0):
 
     import toolpaths
 
+    # THE PROMPT GOES ON STDIN, NOT IN ARGV. It carries the inventory, and the
+    # inventory grows with every module anybody cartographs -- so passing it
+    # as an argument works until it does not, and then fails for a reason that
+    # names nothing to do with size: "Argument list too long", after which
+    # every generation on the machine fails identically. It broke here at
+    # around 700 cartographed modules, which is a library somebody measured
+    # rather than a prompt somebody wrote. stdin has no such ceiling.
     proc = subprocess.Popen(
         [claude, "-p", "--strict-mcp-config", "--verbose",
-         "--output-format=stream-json", "--include-partial-messages", prompt],
+         "--output-format=stream-json", "--include-partial-messages"],
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
         env=toolpaths.tool_env())
+    try:
+        proc.stdin.write(prompt)
+        proc.stdin.close()
+    except BrokenPipeError:
+        # The CLI died before reading it. The exit code and stderr below say
+        # why; swallowing this keeps that diagnosis rather than replacing it
+        # with a traceback about a pipe.
+        pass
 
     # A wedged call produces no lines at all, and a blocking read on a pipe
     # cannot time itself out -- so the deadline is a timer that kills the
