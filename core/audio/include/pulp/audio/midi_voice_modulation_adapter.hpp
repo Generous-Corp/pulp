@@ -42,7 +42,10 @@ template <std::size_t MaximumVoices> class MidiVoiceModulationAdapter {
         auto& voice = voices_[voice_index];
         const bool is_attack = event.is_note_on() && event.velocity() != 0;
         if (is_attack) {
-            if (voice.active && note_id <= voice.note_id)
+            // note_id is also the slot's monotonic watermark while inactive;
+            // ordinary release must not allow an older delayed attack to
+            // resurrect after the voice has been reused.
+            if (note_id <= voice.note_id)
                 return false;
             voice = {true, event.channel(), event.note(), event.velocity(), note_id, 0.0f, 0.0f,
                      0.0f};
@@ -51,7 +54,9 @@ template <std::size_t MaximumVoices> class MidiVoiceModulationAdapter {
         if (!voice.active || voice.channel != event.channel() || voice.note != event.note() ||
             voice.note_id != note_id)
             return false;
+        const auto watermark = voice.note_id;
         voice = {};
+        voice.note_id = watermark;
         return true;
     }
 
@@ -115,7 +120,9 @@ template <std::size_t MaximumVoices> class MidiVoiceModulationAdapter {
         if (voice_index >= MaximumVoices || note_id == 0 || !voices_[voice_index].active ||
             voices_[voice_index].note_id != note_id)
             return false;
+        const auto watermark = voices_[voice_index].note_id;
         voices_[voice_index] = {};
+        voices_[voice_index].note_id = watermark;
         return true;
     }
 

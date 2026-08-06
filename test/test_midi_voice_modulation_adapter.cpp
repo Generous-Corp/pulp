@@ -84,6 +84,8 @@ TEST_CASE("Voice modulation adapter reset and hot swap clear voice ownership",
         REQUIRE(adapter.state(0)->note_id == 101);
         REQUIRE(adapter.note_event(0, pulp::midi::MidiEvent::note_on(2, 70, 0), 101));
         CHECK_FALSE(adapter.state(0)->active);
+        CHECK(adapter.state(0)->note_id == 101);
+        CHECK_FALSE(adapter.note_event(0, pulp::midi::MidiEvent::note_on(2, 69, 120), 100));
         REQUIRE(adapter.note_event(0, pulp::midi::MidiEvent::note_on(2, 70, 110), 102));
         CHECK_FALSE(adapter.note_event(0, pulp::midi::MidiEvent::note_off(2, 70), 99));
         REQUIRE(adapter.state(0)->active);
@@ -93,6 +95,9 @@ TEST_CASE("Voice modulation adapter reset and hot swap clear voice ownership",
         REQUIRE(adapter.state(0)->active);
         REQUIRE(adapter.release_voice(0, 102));
         CHECK_FALSE(adapter.state(0)->active);
+        CHECK(adapter.state(0)->note_id == 102);
+        CHECK_FALSE(adapter.note_event(0, pulp::midi::MidiEvent::note_on(2, 71, 120), 101));
+        REQUIRE(adapter.note_event(0, pulp::midi::MidiEvent::note_on(2, 71, 120), 103));
     }
 
     SECTION("zero is not a usable ownership generation") {

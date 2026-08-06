@@ -1337,6 +1337,30 @@ TEST_CASE("CLAP resets MPE sidecar ownership across reset and reactivation",
     h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 0.0f);
     REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
     REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
+
+    // Expression/configuration events mutate the tracker too. If one crosses a
+    // bypassed block, it cannot be replayed, so the next real render must reset
+    // both the sidecar and processor-owned voice state rather than retain
+    // permanently divergent pitch/pressure/timbre.
+    clap_event_midi_t skipped_bend{};
+    skipped_bend.header = make_header(sizeof(skipped_bend), CLAP_EVENT_MIDI, 0);
+    skipped_bend.data[0] = 0xE0 | static_cast<uint8_t>(held_note.channel);
+    skipped_bend.data[1] = 0x7f;
+    skipped_bend.data[2] = 0x7f;
+    InputEventList skipped_expression;
+    skipped_expression.push(skipped_bend);
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 1.0f);
+    REQUIRE(h.run(skipped_expression) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
+    REQUIRE(h.plugin.sidecar_reconcile_requested);
+    REQUIRE(h.plugin.reset_requested);
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 0.0f);
+    REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 0);
+    REQUIRE(g_capturing->captured_context.reset_requested);
+    REQUIRE(h.run(continued_held_input) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
+
     for (const uint8_t controller : {uint8_t{64}, uint8_t{66}, uint8_t{123}}) {
         clap_event_midi_t control{};
         control.header = make_header(sizeof(control), CLAP_EVENT_MIDI, 0);

@@ -168,6 +168,71 @@ TEST_CASE("MIDI channel routing, note ranges, and keyboard splits preserve proto
     }
 }
 
+TEST_CASE("routing spec replacement cannot strand held notes",
+          "[midi][utility][routing][lifecycle][ownership]") {
+    auto input = prepared_buffer();
+    auto output = prepared_buffer();
+
+    SECTION("channel routes keep the accepting mapping through release") {
+        midi::ChannelRouteSpec initial;
+        initial.accepted_channels = std::uint16_t{1} << 3;
+        initial.output_channel[3] = 15;
+        midi::ChannelRouter router(initial);
+        input.add(midi::MidiEvent::note_on(3, 64, 100));
+        REQUIRE(router.process(input, output).complete);
+
+        auto replacement = initial;
+        replacement.output_channel[3] = 4;
+        CHECK_FALSE(router.replace_spec(replacement));
+        input.clear();
+        input.add(midi::MidiEvent::note_off(3, 64));
+        REQUIRE(router.process(input, output).complete);
+        REQUIRE(output.size() == 1);
+        CHECK(output[0].channel() == 15);
+        REQUIRE(router.replace_spec(replacement));
+        input.clear();
+        input.add(midi::MidiEvent::note_on(3, 65, 100));
+        REQUIRE(router.process(input, output).complete);
+        CHECK(output[0].channel() == 4);
+    }
+
+    SECTION("note ranges reject replacement until the accepted note releases") {
+        midi::NoteRangeFilter range({60, 72});
+        input.add(midi::MidiEvent::note_on(0, 64, 100));
+        REQUIRE(range.process(input, output).complete);
+        CHECK_FALSE(range.replace_spec({65, 72}));
+        input.clear();
+        input.add(midi::MidiEvent::note_off(0, 64));
+        REQUIRE(range.process(input, output).complete);
+        REQUIRE(output.size() == 1);
+        CHECK(output[0].is_note_off());
+        REQUIRE(range.replace_spec({65, 72}));
+        input.clear();
+        input.add(midi::MidiEvent::note_on(0, 64, 100));
+        REQUIRE(range.process(input, output).complete);
+        CHECK(output.empty());
+    }
+
+    SECTION("keyboard splits keep the accepting side and channel through release") {
+        midi::KeyboardSplit split({60, true, 2, 14});
+        auto lower = prepared_buffer();
+        auto upper = prepared_buffer();
+        input.add(midi::MidiEvent::note_on(0, 59, 100));
+        REQUIRE(split.process(input, lower, upper).complete);
+        CHECK_FALSE(split.replace_spec({58, true, 5, 9}));
+        input.clear();
+        input.add(midi::MidiEvent::note_off(0, 59));
+        REQUIRE(split.process(input, lower, upper).complete);
+        REQUIRE(lower.size() == 1);
+        CHECK(lower[0].channel() == 2);
+        REQUIRE(split.replace_spec({58, true, 5, 9}));
+        input.clear();
+        input.add(midi::MidiEvent::note_on(0, 57, 100));
+        REQUIRE(split.process(input, lower, upper).complete);
+        CHECK(lower[0].channel() == 5);
+    }
+}
+
 TEST_CASE("MIDI utilities clear stale sidecars and preserve exact SysEx and UMP routing",
           "[midi][utility][sidecars]") {
     midi::MidiBuffer input;
