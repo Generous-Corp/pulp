@@ -64,6 +64,47 @@ CORPUS = [
     ("bouncing-ball-never-bounces.vcv", "bouncing-ball", False,
      "end-of-cycle has to retrigger"),
     ("bouncing-ball-correct.vcv", "bouncing-ball", True, None),
+    # THE SEQUENCED-VOICE FIXTURES, WHICH NOTHING RAN.
+    #
+    # Four `.vcv` files sat in regressions/ named for defects they were saved
+    # to pin, and no test, script or manifest referenced any of them. A fixture
+    # nothing executes asserts nothing: it looks like coverage in a directory
+    # listing and is worth exactly as much as an empty file. That is how
+    # `sequenced-voice-gated-from-the-clock.vcv` came to be treated as proof of
+    # a clock-gated melody while it plays one held note -- nobody had ever run
+    # it, so nobody had to notice.
+    #
+    # WHAT THESE THREE ACTUALLY COVER, measured rather than assumed from their
+    # names. They are END-TO-END SMOKE for the sequenced-voice path, not
+    # regression pins for the defects they are named after.
+    #
+    # Both "rejected-over-" files are named for a case-sensitive tag comparison
+    # and a missing port role. Re-breaking either does NOT fail them: they are
+    # built almost entirely from ForgeModular modules, which carry a
+    # cartographed role on every jack and exact-case tags, so neither defect
+    # can reach them. Verified by mutation -- making `has_tag` case-sensitive
+    # again, and switching the port-role promotion off, both leave all three
+    # holding. A blunt mutation (`_module_matches` returning False) does fail
+    # all three, so they are not vacuous.
+    #
+    # Said plainly because the alternative is worse: a fixture whose NAME
+    # claims a defect it cannot catch is how somebody comes to believe a
+    # subsystem is covered. The defects those names refer to are covered by
+    # the "modules everyone actually has" checks below, on Fundamental and
+    # Core, which is where they were found.
+    ("sequenced-voice-generated-and-plays.vcv", "sequenced-voice", True, None),
+    ("sequenced-voice-rejected-over-clock-tag.vcv", "sequenced-voice",
+     True, None),
+    ("sequenced-voice-rejected-over-pitch-role.vcv", "sequenced-voice",
+     True, None),
+    # `sequenced-voice-gated-from-the-clock.vcv` is deliberately ABSENT. It
+    # fails today, and it SHOULD: its sequencer's pitch lands on the
+    # oscillator's Sync jack and every module in it carries `params: []`, so
+    # measured it plays 1 note of 1 distinct pitch against a healthy control's
+    # 8 and 4. Registering it as an expected failure would pin the wrong thing
+    # -- it is a broken fixture, not a regression -- and registering it as a
+    # pass would need the idiom widened to accept a patch that does not play.
+    # It goes in once it has written step values, and not before.
 ]
 
 
