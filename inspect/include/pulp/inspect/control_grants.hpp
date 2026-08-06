@@ -86,6 +86,10 @@ struct ControlGrantStoreConfig {
     std::size_t max_grants = 256;
     std::size_t max_consumed_consent_decisions = 1024;
     std::chrono::milliseconds maximum_ttl = std::chrono::hours(24);
+    /// Bounds IDs retained after explicit revocation so repeated revoke calls
+    /// remain idempotent without retired grants consuming active capacity.
+    /// Zero disables retired-ID retention.
+    std::size_t max_retired_grant_ids = 1024;
 };
 
 /// Stores only the `client_granted` term of the permission equation. A true

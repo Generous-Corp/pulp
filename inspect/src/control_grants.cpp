@@ -3,6 +3,7 @@
 #include <pulp/runtime/crypto.hpp>
 
 #include <algorithm>
+#include <deque>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
@@ -117,12 +118,28 @@ public:
         });
     }
 
+    void retire_locked(std::string grant_id) {
+        if (config.max_retired_grant_ids == 0)
+            return;
+        if (retired_grant_ids.contains(grant_id))
+            return;
+        const auto capacity = config.max_retired_grant_ids;
+        if (retired_grant_order.size() == capacity) {
+            retired_grant_ids.erase(retired_grant_order.front());
+            retired_grant_order.pop_front();
+        }
+        retired_grant_order.push_back(grant_id);
+        retired_grant_ids.emplace(std::move(grant_id));
+    }
+
     ControlIdentityRegistry& identities;
     std::shared_ptr<ControlSecurityAuditLog> audit_log;
     ControlGrantStoreConfig config;
     Clock clock;
     std::mutex mutex;
     std::unordered_map<std::string, ControlGrant> grants;
+    std::deque<std::string> retired_grant_order;
+    std::unordered_set<std::string> retired_grant_ids;
     std::unordered_set<std::string> consumed_consent_decisions;
 };
 
@@ -154,6 +171,17 @@ ControlGrantResult ControlGrantStore::issue(
         impl_->audit_denial(request, control_grant_status_id(result.status));
         return result;
     }
+    const auto now = impl_->clock();
+    if (now >= client->expires_at) {
+        result.status = ControlGrantStatus::ClientUnavailable;
+        impl_->audit_denial(request, control_grant_status_id(result.status));
+        return result;
+    }
+    if (now >= registration->expires_at) {
+        result.status = ControlGrantStatus::RegistrationUnavailable;
+        impl_->audit_denial(request, control_grant_status_id(result.status));
+        return result;
+    }
     if (client->broker_id != impl_->identities.broker_id() ||
         registration->broker_id != impl_->identities.broker_id()) {
         result.status = ControlGrantStatus::BrokerMismatch;
@@ -177,7 +205,6 @@ ControlGrantResult ControlGrantStore::issue(
         impl_->audit_denial(request, control_grant_status_id(result.status));
         return result;
     }
-    const auto now = impl_->clock();
     const auto ttl = std::chrono::duration_cast<
         std::chrono::steady_clock::duration>(request.ttl);
     if (ttl > std::chrono::steady_clock::time_point::max() - now) {
@@ -231,8 +258,11 @@ ControlGrantResult ControlGrantStore::issue(
                                 control_grant_status_id(result.status));
             return result;
         }
-        const auto [_, inserted] =
-            impl_->grants.emplace(grant.grant_id.value, grant);
+        const bool retired_collision = impl_->retired_grant_ids.contains(
+            grant.grant_id.value);
+        const auto [_, inserted] = retired_collision
+            ? std::pair{impl_->grants.end(), false}
+            : impl_->grants.emplace(grant.grant_id.value, grant);
         if (!inserted) {
             result.status = ControlGrantStatus::ResourceExhausted;
             impl_->audit_denial(request,
@@ -261,12 +291,14 @@ ControlGrantStatus ControlGrantStore::revoke(
     {
         std::lock_guard lock(impl_->mutex);
         const auto found = impl_->grants.find(grant_id.value);
-        if (found == impl_->grants.end())
-            return ControlGrantStatus::NotFound;
-        if (found->second.revoked)
-            return ControlGrantStatus::Revoked;
-        found->second.revoked = true;
+        if (found == impl_->grants.end()) {
+            return impl_->retired_grant_ids.contains(grant_id.value)
+                       ? ControlGrantStatus::Revoked
+                       : ControlGrantStatus::NotFound;
+        }
         snapshot = found->second;
+        impl_->grants.erase(found);
+        impl_->retire_locked(grant_id.value);
     }
     impl_->audit(snapshot, "grant.revoke", ControlSecurityOutcome::Revoked,
                  "revoked");
@@ -281,10 +313,13 @@ std::size_t ControlGrantStore::revoke_client(
     std::vector<ControlGrant> revoked;
     {
         std::lock_guard lock(impl_->mutex);
-        for (auto& [_, grant] : impl_->grants) {
-            if (grant.client_id == client_id && !grant.revoked) {
-                grant.revoked = true;
-                revoked.push_back(grant);
+        for (auto it = impl_->grants.begin(); it != impl_->grants.end();) {
+            if (it->second.client_id == client_id) {
+                revoked.push_back(it->second);
+                impl_->retire_locked(it->second.grant_id.value);
+                it = impl_->grants.erase(it);
+            } else {
+                ++it;
             }
         }
     }
@@ -303,10 +338,13 @@ std::size_t ControlGrantStore::revoke_registration(
     std::vector<ControlGrant> revoked;
     {
         std::lock_guard lock(impl_->mutex);
-        for (auto& [_, grant] : impl_->grants) {
-            if (grant.registration_id == registration_id && !grant.revoked) {
-                grant.revoked = true;
-                revoked.push_back(grant);
+        for (auto it = impl_->grants.begin(); it != impl_->grants.end();) {
+            if (it->second.registration_id == registration_id) {
+                revoked.push_back(it->second);
+                impl_->retire_locked(it->second.grant_id.value);
+                it = impl_->grants.erase(it);
+            } else {
+                ++it;
             }
         }
     }
@@ -364,21 +402,52 @@ std::optional<ControlGrant> ControlGrantStore::grant(
 
 void ControlGrantStore::sweep_expired() {
     const auto now = impl_->clock();
+    std::vector<ControlGrant> candidates;
+    {
+        std::lock_guard lock(impl_->mutex);
+        candidates.reserve(impl_->grants.size());
+        for (const auto& [_, grant] : impl_->grants)
+            candidates.push_back(grant);
+    }
+
+    std::vector<ControlGrantId> unavailable;
+    unavailable.reserve(candidates.size());
+    for (const auto& grant : candidates) {
+        if (now < grant.expires_at &&
+            (!impl_->identities.client(grant.client_id) ||
+             !impl_->identities.registration(grant.registration_id))) {
+            unavailable.push_back(grant.grant_id);
+        }
+    }
+
     std::vector<ControlGrant> expired;
+    std::vector<ControlGrant> removed;
     {
         std::lock_guard lock(impl_->mutex);
         for (auto it = impl_->grants.begin(); it != impl_->grants.end();) {
-            if (now < it->second.expires_at) {
+            const bool identity_unavailable = std::ranges::any_of(
+                unavailable, [&](const auto& grant_id) {
+                    return grant_id == it->second.grant_id;
+                });
+            if (now < it->second.expires_at && !identity_unavailable) {
                 ++it;
                 continue;
             }
-            expired.push_back(it->second);
+            if (now >= it->second.expires_at)
+                expired.push_back(it->second);
+            else
+                removed.push_back(it->second);
             it = impl_->grants.erase(it);
         }
     }
     for (const auto& grant : expired) {
         impl_->audit(grant, "grant.expire", ControlSecurityOutcome::Expired,
                      "expired");
+    }
+    for (const auto& grant : removed) {
+        impl_->audit(grant, "grant.remove-unavailable",
+                     ControlSecurityOutcome::Revoked,
+                     "identity-unavailable");
     }
 }
 
