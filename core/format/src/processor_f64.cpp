@@ -6,6 +6,19 @@
 namespace pulp::format {
 
 void Processor::prepare_f64_fallback_scratch(const PrepareContext& context) {
+    const auto desc = descriptor();
+    BusesLayout layout;
+    layout.inputs.reserve(desc.input_buses.size());
+    layout.outputs.reserve(desc.output_buses.size());
+    for (const auto& bus : desc.input_buses)
+        layout.inputs.push_back(bus.default_channels);
+    for (const auto& bus : desc.output_buses)
+        layout.outputs.push_back(bus.default_channels);
+    prepare_f64_fallback_scratch(context, layout);
+}
+
+void Processor::prepare_f64_fallback_scratch(const PrepareContext& context,
+                                              const BusesLayout& layout) {
     const auto input_channels =
         context.input_channels > 0 ? static_cast<std::size_t>(context.input_channels) : 0u;
     const auto output_channels =
@@ -15,12 +28,17 @@ void Processor::prepare_f64_fallback_scratch(const PrepareContext& context) {
     f64_fallback_input_scratch_.resize(input_channels, max_frames);
     f64_fallback_output_scratch_.resize(output_channels, max_frames);
 
-    const auto desc = descriptor();
     for (std::size_t i = 0; i < kF64FallbackMaxBuses; ++i) {
-        const auto in_channels = fallback_bus_channels(
-            desc.input_buses, i, input_channels);
-        const auto out_channels = fallback_bus_channels(
-            desc.output_buses, i, output_channels);
+        std::size_t in_channels = i < layout.inputs.size() && layout.inputs[i] > 0
+            ? static_cast<std::size_t>(layout.inputs[i])
+            : 0u;
+        std::size_t out_channels = i < layout.outputs.size() && layout.outputs[i] > 0
+            ? static_cast<std::size_t>(layout.outputs[i])
+            : 0u;
+        if (i == 0) {
+            in_channels = (std::max)(in_channels, input_channels);
+            out_channels = (std::max)(out_channels, output_channels);
+        }
         f64_fallback_input_bus_scratch_[i].resize(in_channels, max_frames);
         f64_fallback_output_bus_scratch_[i].resize(out_channels, max_frames);
     }
@@ -88,17 +106,6 @@ void Processor::process_f64(
     audio::BufferView<const double> empty_input;
     auto* input = audio.main_input();
     process_f64(*output, input ? *input : empty_input, midi_in, midi_out, context);
-}
-
-std::size_t Processor::fallback_bus_channels(const std::vector<BusInfo>& buses,
-                                             std::size_t index,
-                                             std::size_t prepared_main_channels) {
-    std::size_t channels = 0;
-    if (index < buses.size() && buses[index].default_channels > 0) {
-        channels = static_cast<std::size_t>(buses[index].default_channels);
-    }
-    if (index == 0) channels = (std::max)(channels, prepared_main_channels);
-    return channels;
 }
 
 bool Processor::requires_rich_f64_fallback(const ProcessBuffers64& audio) {
