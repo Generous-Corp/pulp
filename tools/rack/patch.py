@@ -2583,18 +2583,21 @@ def ask_model(claude: str, prompt: str, seconds: float, tick: float = 8.0):
     counts whether or not anything is happening, which is the one thing the
     watcher needs to know.
 
-    `--output-format=stream-json --include-partial-messages` turns that call
-    into a line of JSON per event, so the answer can be counted as it arrives.
-    (`--verbose` is not optional: the CLI refuses stream-json without it.)
-    Each tick prints how much has come back, which is a fact about THIS run --
-    a number that stops moving says something a clock cannot.
+    Claude's stream-json mode and Codex's JSONL exec mode turn that call into a
+    line of JSON per event, so the answer can be counted as it arrives. Codex's
+    output-last-message file is the authority for its final text; progress and
+    reasoning events can never leak into the generated patch. Each tick prints
+    how much has come back, which is a fact about THIS run -- a number that
+    stops moving says something a clock cannot.
 
     Plain text on stdout is still accepted and returned as-is: a caller that
     stubs the CLI with a script that prints the answer is testing the parsing
     around it, and should not have to imitate a stream to do so.
     """
     import json as _json
+    import os as _os
     import subprocess
+    import tempfile
     import threading
     import time
 
@@ -2607,12 +2610,35 @@ def ask_model(claude: str, prompt: str, seconds: float, tick: float = 8.0):
     # every generation on the machine fails identically. It broke here at
     # around 700 cartographed modules, which is a library somebody measured
     # rather than a prompt somebody wrote. stdin has no such ceiling.
-    proc = subprocess.Popen(
-        [claude, "-p", "--strict-mcp-config", "--verbose",
-         "--output-format=stream-json", "--include-partial-messages"],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
-        env=toolpaths.tool_env())
+    protocol = toolpaths.model_cli_kind(claude)
+    answer_path = None
+    if protocol == "claude":
+        command = [claude, "-p", "--strict-mcp-config", "--verbose",
+                   "--output-format=stream-json",
+                   "--include-partial-messages"]
+    else:
+        answer_file = tempfile.NamedTemporaryFile(
+            prefix="forge-model-answer-", suffix=".txt", delete=False)
+        answer_path = answer_file.name
+        answer_file.close()
+        command = [claude, "exec", "--ephemeral", "--sandbox", "read-only",
+                   "--ignore-user-config", "--ignore-rules", "--color",
+                   "never", "--skip-git-repo-check", "--json",
+                   "--output-last-message", answer_path, "-"]
+
+    try:
+        proc = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            bufsize=1, env=toolpaths.tool_env())
+    except Exception:
+        if answer_path is not None:
+            try:
+                _os.unlink(answer_path)
+            except FileNotFoundError:
+                pass
+        raise
     try:
         proc.stdin.write(prompt)
         proc.stdin.close()
@@ -2641,6 +2667,7 @@ def ask_model(claude: str, prompt: str, seconds: float, tick: float = 8.0):
     started = time.monotonic()
     last_said = started
     answer, plain, characters, thinking = [], [], 0, 0
+    protocol_errors = []
     try:
         for raw in proc.stdout:
             line = raw.rstrip("\n")
@@ -2651,11 +2678,20 @@ def ask_model(claude: str, prompt: str, seconds: float, tick: float = 8.0):
                 except ValueError:
                     event = None
             if not isinstance(event, dict) or "type" not in event:
+                if protocol == "codex":
+                    protocol_errors.append(
+                        f"Codex emitted a malformed JSON event: {line!r}")
+                    continue
                 plain.append(line)                  # not a stream: keep it
                 continue
 
             kind = event.get("type")
-            if kind == "stream_event":
+            if protocol == "codex":
+                item = event.get("item") or {}
+                if (kind == "item.completed" and
+                        item.get("type") in ("agent_message", "reasoning")):
+                    characters += len(item.get("text") or "")
+            elif kind == "stream_event":
                 delta = (event.get("event") or {}).get("delta") or {}
                 text = delta.get("text") or ""
                 characters += len(text)
@@ -2687,11 +2723,28 @@ def ask_model(claude: str, prompt: str, seconds: float, tick: float = 8.0):
     stderr = proc.stderr.read() if proc.stderr else ""
     proc.wait()
     text = "".join(answer) if answer else "\n".join(plain)
+    if answer_path is not None:
+        try:
+            with open(answer_path) as response:
+                text = response.read()
+        finally:
+            try:
+                _os.unlink(answer_path)
+            except FileNotFoundError:
+                pass
     if killed.is_set():
         minutes = seconds / 60.0
         return 1, text, (
             f"the model call passed its {minutes:g} minute limit and was "
             f"stopped. Raise it in Settings, on the Permissions tab.")
+    if protocol_errors:
+        detail = "\n".join(protocol_errors)
+        stderr = detail + ("\n" + stderr if stderr else "")
+        return proc.returncode or 1, text, stderr
+    if protocol == "codex" and proc.returncode == 0 and not text:
+        return 1, text, (
+            "Codex completed without writing its final response" +
+            ("\n" + stderr if stderr else ""))
     return proc.returncode, text, stderr
 
 

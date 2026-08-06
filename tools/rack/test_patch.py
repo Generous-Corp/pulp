@@ -2418,7 +2418,9 @@ def check_streamed_model_call() -> tuple:
     # A stub that prints the answer plainly is still understood: every other
     # check here stubs the CLI that way, and imitating a stream to test the
     # code AROUND the model is work for nothing.
-    plain = os.path.join(home, "claude-plain")
+    plain_dir = os.path.join(home, "plain")
+    os.makedirs(plain_dir)
+    plain = os.path.join(plain_dir, "claude")
     with open(plain, "w") as f:
         f.write("#!/bin/sh\necho '```json patch'\necho '{}'\necho '```'\n")
     os.chmod(plain, os.stat(plain).st_mode | stat.S_IEXEC)
@@ -2431,7 +2433,9 @@ def check_streamed_model_call() -> tuple:
 
     # The limit is a setting, clamped, and a call that overruns says so in
     # words that name the remedy rather than as a traceback.
-    hang = os.path.join(home, "claude-hang")
+    hang_dir = os.path.join(home, "hang")
+    os.makedirs(hang_dir)
+    hang = os.path.join(hang_dir, "claude")
     with open(hang, "w") as f:
         f.write("#!/bin/sh\nsleep 30\n")
     os.chmod(hang, os.stat(hang).st_mode | stat.S_IEXEC)
@@ -2442,6 +2446,120 @@ def check_streamed_model_call() -> tuple:
     else:
         print("  ok     a call past its limit is stopped and says so")
     ran += 1
+
+    # Codex has a different non-interactive protocol. Its JSON stream is used
+    # only for progress; --output-last-message is the authority for the exact
+    # final response, so status events can never leak into the patch text.
+    codex = os.path.join(home, "codex")
+    with open(codex, "w") as f:
+        f.write("""#!/usr/bin/env python3
+import json
+import os
+import sys
+
+args = sys.argv[1:]
+fixed = ["exec", "--ephemeral", "--sandbox", "read-only",
+         "--ignore-user-config", "--ignore-rules", "--color", "never",
+         "--skip-git-repo-check", "--json"]
+if args[:len(fixed)] != fixed or args[-1] != "-" or \
+        "--output-last-message" not in args:
+    print("wrong Codex protocol: " + repr(args), file=sys.stderr)
+    raise SystemExit(64)
+answer = args[args.index("--output-last-message") + 1]
+prompt = sys.stdin.read()
+if prompt != "hello codex":
+    print("prompt did not arrive on stdin", file=sys.stderr)
+    raise SystemExit(65)
+mode = os.environ.get("FAKE_CODEX_MODE", "ok")
+if mode == "malformed":
+    print("this is not JSON")
+elif mode == "nonzero":
+    open(answer, "w").write("partial response")
+    print("authentication failed", file=sys.stderr)
+    raise SystemExit(7)
+else:
+    print(json.dumps({"type": "item.completed", "item": {
+        "type": "reasoning", "text": "considering"}}))
+    open(answer, "w").write("exact final response\\n")
+    print(json.dumps({"type": "turn.completed", "usage": {}}))
+""")
+    os.chmod(codex, os.stat(codex).st_mode | stat.S_IEXEC)
+
+    code, text, why = P.ask_model(codex, "hello codex", 30.0, tick=0.0)
+    if code != 0 or text != "exact final response\n" or why:
+        bad += 1
+        print(f"  WRONG  Codex did not use its native protocol or exact final "
+              f"response: {code} {text!r} {why!r}")
+    else:
+        print("  ok     Codex receives stdin and returns its exact final response")
+
+    old_fake_mode = os.environ.get("FAKE_CODEX_MODE")
+    os.environ["FAKE_CODEX_MODE"] = "malformed"
+    try:
+        code, text, why = P.ask_model(codex, "hello codex", 30.0)
+    finally:
+        if old_fake_mode is None:
+            os.environ.pop("FAKE_CODEX_MODE", None)
+        else:
+            os.environ["FAKE_CODEX_MODE"] = old_fake_mode
+    if code == 0 or text or "malformed JSON event" not in why:
+        bad += 1
+        print(f"  WRONG  malformed Codex output was accepted: "
+              f"{code} {text!r} {why!r}")
+    else:
+        print("  ok     malformed Codex output fails closed")
+
+    os.environ["FAKE_CODEX_MODE"] = "nonzero"
+    try:
+        code, text, why = P.ask_model(codex, "hello codex", 30.0)
+    finally:
+        if old_fake_mode is None:
+            os.environ.pop("FAKE_CODEX_MODE", None)
+        else:
+            os.environ["FAKE_CODEX_MODE"] = old_fake_mode
+    if code != 7 or text != "partial response" or "authentication failed" not in why:
+        bad += 1
+        print(f"  WRONG  a Codex failure lost its status or diagnostics: "
+              f"{code} {text!r} {why!r}")
+    else:
+        print("  ok     a Codex failure preserves status, response, and stderr")
+
+    unknown = os.path.join(home, "unknown-model-wrapper")
+    with open(unknown, "w") as f:
+        f.write("#!/bin/sh\nexit 0\n")
+    os.chmod(unknown, os.stat(unknown).st_mode | stat.S_IEXEC)
+    try:
+        P.ask_model(unknown, "hello codex", 30.0)
+    except SystemExit as e:
+        refused = "cannot determine the argument protocol" in str(e)
+    else:
+        refused = False
+    if not refused:
+        bad += 1
+        print("  WRONG  an unidentified model CLI was silently guessed")
+    else:
+        print("  ok     an unidentified model CLI fails closed")
+
+    with open(codex) as source, open(unknown, "w") as target:
+        target.write(source.read())
+    os.chmod(unknown, os.stat(unknown).st_mode | stat.S_IEXEC)
+    old_codex_bin = os.environ.get("FORGE_CODEX_BIN")
+    os.environ["FORGE_CODEX_BIN"] = unknown
+    try:
+        code, text, why = P.ask_model(
+            unknown, "hello codex", 30.0, tick=0.0)
+    finally:
+        if old_codex_bin is None:
+            os.environ.pop("FORGE_CODEX_BIN", None)
+        else:
+            os.environ["FORGE_CODEX_BIN"] = old_codex_bin
+    if code != 0 or text != "exact final response\n" or why:
+        bad += 1
+        print(f"  WRONG  FORGE_CODEX_BIN did not identify a named wrapper: "
+              f"{code} {text!r} {why!r}")
+    else:
+        print("  ok     FORGE_CODEX_BIN identifies an arbitrarily named wrapper")
+    ran += 5
 
     real = P.SETTINGS_PATH
     try:

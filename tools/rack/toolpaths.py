@@ -97,6 +97,40 @@ def find_claude() -> str:
         "  Looked on PATH and in:\n    " + "\n    ".join(TOOL_DIRS))
 
 
+def model_cli_kind(executable: str) -> str:
+    """Return the selected CLI's argument protocol, or refuse ambiguity.
+
+    Claude and Codex are both valid model backends, but their non-interactive
+    flags and streaming formats are unrelated. An explicit environment
+    variable may name an arbitrarily named wrapper; otherwise only the real
+    CLI names identify a protocol.
+    """
+    chosen = os.path.normcase(os.path.realpath(os.path.abspath(executable)))
+    matches = set()
+    for var, kind in (("FORGE_CLAUDE_BIN", "claude"),
+                      ("FORGE_CODEX_BIN", "codex"),
+                      ("CODEX_BIN", "codex")):
+        value = os.environ.get(var)
+        explicit = (os.path.normcase(os.path.realpath(os.path.abspath(value)))
+                    if value else None)
+        if explicit == chosen:
+            matches.add(kind)
+    if len(matches) > 1:
+        raise SystemExit(
+            f"the model CLI {executable!r} is selected as both Claude and "
+            "Codex; set only the matching FORGE_*_BIN variable")
+    if matches:
+        return matches.pop()
+
+    name = os.path.basename(executable)
+    if name in ("claude", "codex"):
+        return name
+    raise SystemExit(
+        f"cannot determine the argument protocol for model CLI {executable!r}.\n"
+        "  Name the executable `claude` or `codex`, or identify an arbitrary "
+        "wrapper explicitly with FORGE_CLAUDE_BIN or FORGE_CODEX_BIN.")
+
+
 def missing_prerequisites() -> list:
     """Everything this machine needs and does not have, in one list.
 
