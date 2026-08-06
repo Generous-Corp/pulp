@@ -599,6 +599,73 @@ instrument. And "silent" and "unreadable" are different findings: report the
 recording's level, or a patch that plainly sounds reads as one that makes
 nothing.
 
+## A zero is usually your instrument, not the world
+
+The single most expensive habit on this project is believing a measurement
+that returned nothing. **Absence is what a true negative and a broken
+instrument look like from the outside**, so a zero is the one reading that
+must be re-taken before it is reported. Every one of these was confident,
+plausible, and wrong:
+
+| the reading | the instrument | what was true |
+|---|---|---|
+| `0 modules carry ranges` | probed `min`/`max` | the keys are `minValue`/`maxValue` |
+| `scan version: None` | read a top-level field | `scan` is per module |
+| `pack has no dylib` | `unzip` | `.vcvplugin` is Zstandard (`tar --zstd`) |
+| `the EPUB is 0 bytes` | `ls -s` (blocks) | it is a directory; 2.3M chars of text |
+| `no scan version in CARTOG.cpp` | grepped `"scan"` | the quotes are escaped in C++ |
+| `EMITS_CLOCK_TAGS is absent` | grepped the wrong file | it is in `patch.py` |
+| `the sweep died` | `pgrep -fl` | `ps` showed it running; 8 minutes in |
+| `no prior installers` | a zsh glob | one non-matching pattern aborts the **whole** command |
+| `no .component built` | the same zsh glob | all four bundles existed |
+| `render_for returns nothing` | — | that one was real |
+
+Nine of ten were the tool. The tenth — the instrument catalogue rendering
+zero characters — was a genuine defect, and it was only believable **because
+the other nine had been checked and eliminated first**.
+
+The habits that catch these, in order of cost:
+
+- **When two instruments disagree, resolve it — do not pick the convenient
+  one.** `find` reported SDK directories empty while `ls -A` showed contents,
+  because `find` does not follow symlinks. `pgrep` said the sweep was dead
+  while `ps` said it was running. The disagreement is the information.
+- **A zero from a query you just wrote is a bug in the query** until you have
+  pointed the same query at data known to be non-empty. The port-map probe
+  above would have been caught in one step by asking it for any key at all.
+- **`setopt NULL_GLOB` or use `find`.** zsh aborts an entire command when any
+  glob matches nothing, so a single stray pattern silently discards the output
+  of everything beside it. This happened four times in one session.
+
+## One matching rule produced five defects
+
+`_port_matches` compares a jack's label to a role's label list **whole**:
+`label.upper() in ok_labels`. Vendors name jacks descriptively, so this fails
+on every jack whose name says more than the bare word:
+
+```
+"PITCH CV (1V/OCT)"  vs  cv_out labels ["CV", ...]        -> no match
+"GATE 1 CV"          vs  gate_in labels ["GATE", ...]     -> no match
+"SQUARE"             vs  clock_out labels ["SQR", ...]    -> no match
+```
+
+Each was found, diagnosed and fixed **separately**, as though they were
+unrelated bugs, and each fix was a new entry in a list. The fifth was found
+only because a run log printed the rejected jacks beside the complaint:
+
+```
+this patch's envelope CANNOT receive it, however it is wired:
+  CVfunk/EnvelopeArray (its inputs are ..., Gate 1 CV, Gate 2 CV, ...)
+```
+
+**When a fix is an entry in a list, ask what the list is compensating for.**
+A per-label fix costs an hour and buys one module; changing the comparison
+costs the same hour and buys the class. The reason to be careful rather than
+bold is real — a wider match is how a gate becomes a rubber stamp, and
+`clock_out`'s `not_ports: ["Audio"]` exists because an oscillator's audio-rate
+pulse once read as a clock. But "careful" means **measure the blast radius and
+sweep the corpus**, not "add one more label".
+
 ## Count the readers before you trust a format
 
 Every shared format here had more parsers than anybody was checking, and the
