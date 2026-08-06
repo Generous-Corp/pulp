@@ -295,8 +295,8 @@ fi
 if [ -f "$ROOT/tools/scripts/agent_capability_manifest.py" ]; then
     echo "Checking installed agent capability manifest is valid and in sync..."
     if ! python3 "$ROOT/tools/scripts/agent_capability_manifest.py" --check; then
-        error "The installed agent capability manifest has a collision, invalid \
-reference, or stale snapshot/compile fixture. Regenerate with: \
+        error "The installed agent capability contract has an invalid schema, \
+surface change, collision, reference, or stale generated artifact. Regenerate with: \
 python3 tools/scripts/agent_capability_manifest.py --write"
     fi
 fi

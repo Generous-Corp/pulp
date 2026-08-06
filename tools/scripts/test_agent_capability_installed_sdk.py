@@ -23,19 +23,46 @@ def load_installed_manifest(prefix: pathlib.Path) -> dict:
     document = json.loads(path.read_text())
     if document.get("schema") != SCHEMA:
         raise RuntimeError(f"installed manifest has wrong schema: {document.get('schema')!r}")
+    required_companions = {
+        document.get("$schema"),
+        "agent-capability-surface.json",
+        "agent-capability-surface.schema.json",
+    }
+    if None in required_companions:
+        raise RuntimeError("installed manifest has no relative schema reference")
+    for relative in sorted(required_companions):
+        companion = prefix / "share/pulp" / relative
+        if not companion.is_file():
+            raise RuntimeError(f"installed capability companion missing: {companion}")
+        json.loads(companion.read_text())
     for row in document.get("capabilities", []):
-        header = prefix / "include" / row["include"]
-        if not header.is_file():
-            raise RuntimeError(f"advertised installed header missing: {header}")
+        for binding in row.get("bindings", []):
+            header = prefix / "include" / binding["include"]
+            if not header.is_file():
+                raise RuntimeError(f"advertised installed header missing: {header}")
     return document
 
 
 def consumer_source(document: dict) -> str:
-    includes = sorted({row["include"] for row in document["capabilities"]})
+    includes = sorted({
+        binding["include"]
+        for row in document["capabilities"]
+        for binding in row["bindings"]
+    })
     rows = {row["key"]: row for row in document["capabilities"]}
     lines = [*(f"#include <{header}>" for header in includes), "", "int main() {"]
+    binding_index = 0
     for row in document["capabilities"]:
-        lines.extend(["    {", f"        {row['symbol']} value{{}};", "        (void)value;", "    }"])
+        lines.extend(["    {", f"        // {row['key']}"])
+        for binding in row["bindings"]:
+            name = binding["qualified_name"]
+            if binding["kind"] == "cpp_type":
+                lines.append(f"        static_assert(sizeof({name}) > 0);")
+            else:
+                lines.append(f"        auto *binding_{binding_index} = &{name};")
+                lines.append(f"        (void)binding_{binding_index};")
+            binding_index += 1
+        lines.append("    }")
     # These non-inline calls force the installed exported targets to provide
     # audio, MIDI, and sequence link closure rather than proving headers only.
     if "audio.instrument-voice-allocator" in rows:
@@ -51,6 +78,11 @@ def consumer_source(document: dict) -> str:
 def configure_consumer(cmake: str, prefix: pathlib.Path, project: pathlib.Path,
                        document: dict | None = None) -> subprocess.CompletedProcess[str]:
     document = document or load_installed_manifest(prefix)
+    targets = sorted({
+        binding["target"]
+        for row in document["capabilities"]
+        for binding in row["bindings"]
+    })
     project.mkdir(parents=True, exist_ok=True)
     (project / "main.cpp").write_text(consumer_source(document))
     (project / "CMakeLists.txt").write_text(
@@ -59,8 +91,8 @@ def configure_consumer(cmake: str, prefix: pathlib.Path, project: pathlib.Path,
         "find_package(Pulp CONFIG REQUIRED NO_DEFAULT_PATH "
         "PATHS \"${PULP_SDK_PREFIX}/lib/cmake/Pulp\")\n"
         "add_executable(consumer main.cpp)\n"
-        "target_link_libraries(consumer PRIVATE Pulp::sequence)\n"
-        "get_target_property(PULP_EXPORTED_INCLUDE_DIRS Pulp::sequence "
+        f"target_link_libraries(consumer PRIVATE {' '.join(targets)})\n"
+        f"get_target_property(PULP_EXPORTED_INCLUDE_DIRS {targets[0]} "
         "INTERFACE_INCLUDE_DIRECTORIES)\n"
         "file(WRITE \"${CMAKE_BINARY_DIR}/pulp-include-dirs.txt\" "
         "\"${PULP_EXPORTED_INCLUDE_DIRS}\n\")\n"
@@ -135,6 +167,24 @@ def main() -> int:
             raise RuntimeError(f"SDK install failed:\n{installed.stdout}\n{installed.stderr}")
         document = load_installed_manifest(prefix)
 
+        for index, companion_name in enumerate((
+            "agent-capabilities.schema.json",
+            "agent-capability-surface.json",
+            "agent-capability-surface.schema.json",
+        )):
+            companion = prefix / "share/pulp" / companion_name
+            held_companion = companion.with_suffix(companion.suffix + ".held")
+            companion.rename(held_companion)
+            try:
+                expect_failure(
+                    f"missing installed companion {companion_name}",
+                    lambda index=index: configure_consumer(
+                        args.cmake, prefix, root / f"missing-companion-{index}"
+                    ),
+                )
+            finally:
+                held_companion.rename(companion)
+
         manifest = prefix / "share/pulp/agent-capabilities.json"
         held_manifest = manifest.with_suffix(".held")
         manifest.rename(held_manifest)
@@ -146,7 +196,10 @@ def main() -> int:
         finally:
             held_manifest.rename(manifest)
 
-        header = prefix / "include" / document["capabilities"][0]["include"]
+        header = (
+            prefix / "include" /
+            document["capabilities"][0]["bindings"][0]["include"]
+        )
         held_header = header.with_suffix(header.suffix + ".held")
         header.rename(held_header)
         try:
@@ -187,7 +240,7 @@ def main() -> int:
         if executed.returncode != 0:
             raise RuntimeError(f"installed consumer exited {executed.returncode}")
 
-    print("agent-capabilities-installed-sdk: 5 install/isolation/include/export/consumer checks passed")
+    print("agent-capabilities-installed-sdk: 11 install/schema/surface/isolation/include/export/consumer checks passed")
     return 0
 
 

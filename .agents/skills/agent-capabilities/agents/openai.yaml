@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Capabilities"
+  short_description: "Maintain the installed agent capability contract"
+  default_prompt: "Use $agent-capabilities to register or evolve a public Pulp capability safely."

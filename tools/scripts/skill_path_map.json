@@ -26,6 +26,27 @@
         ".agents/skills/ableton-link/**"
       ]
     },
+    "agent-capabilities": {
+      "paths": [
+        ".agents/skills/agent-capabilities/**",
+        "docs/reference/capabilities.md",
+        "docs/status/agent-capabilities.json",
+        "docs/status/agent-capabilities.schema.json",
+        "docs/status/agent-capability-surface.json",
+        "docs/status/agent-capability-surface.schema.json",
+        "test/cmake/quality_tests.cmake",
+        "test/test_agent_capability_compile.cpp",
+        "tools/agent-capabilities/**",
+        "tools/check-docs.sh",
+        "tools/cmake/PulpInstallRules.cmake",
+        "tools/dsp_vocabulary.py",
+        "tools/scripts/agent_capability_evolution.py",
+        "tools/scripts/agent_capability_manifest.py",
+        "tools/scripts/agent_capability_surface.py",
+        "tools/scripts/test_agent_capability_installed_sdk.py",
+        "tools/scripts/test_agent_capability_manifest.py"
+      ]
+    },
     "android": {
       "paths": [
         "core/render/platform/android/**",
