@@ -199,9 +199,117 @@ TEST_CASE("SixBandEq transition queues block changes without interpolating coeff
 
     REQUIRE(eq.set_band(3, {1800.0f, -12.0f, 2.0f}));
     REQUIRE(eq.transition_active());
+    auto unchanged = eq;
+    eq.set_transition_samples(4);
+    REQUIRE(eq.process(0.125f, 0) == unchanged.process(0.125f, 0));
     eq.set_transition_samples(0);
     REQUIRE(eq.transition_samples() == 0);
-    REQUIRE_FALSE(eq.transition_active());
+    REQUIRE(eq.transition_active());
+    REQUIRE(eq.process(0.0f, 0) == unchanged.process(0.0f, 0));
+}
+
+TEST_CASE("SixBandEq transition length changes preserve warmed staggered channel state",
+          "[signal][eq][automation]") {
+    using Eq = pulp::signal::SixBandEqT<double, 2>;
+    Eq changed;
+    changed.prepare(48000.0);
+    REQUIRE(changed.set_band(2, {900.0, 14.0, 6.0}));
+    for (int i = 0; i < 48; ++i) {
+        static_cast<void>(changed.process(i == 0 ? 0.05 : 0.0, 0));
+        static_cast<void>(changed.process(i == 0 ? 0.05 : 0.0, 1));
+    }
+    changed.set_transition_samples(64);
+    REQUIRE(changed.set_band(2, {900.0, -18.0, 6.0}));
+    for (int i = 0; i < 19; ++i) static_cast<void>(changed.process(0.0, 0));
+    for (int i = 0; i < 7; ++i) static_cast<void>(changed.process(0.0, 1));
+
+    auto reference = changed;
+    changed.set_transition_samples(64);
+    REQUIRE(changed.process(0.05, 0) == reference.process(0.05, 0));
+    changed.set_transition_samples(23);
+    REQUIRE(changed.process(-0.05, 1) == reference.process(-0.05, 1));
+    changed.set_transition_samples(0);
+    REQUIRE(changed.transition_samples() == 0);
+    for (int i = 0; i < 70; ++i) {
+        REQUIRE(changed.process(i == 0 ? 0.05 : 0.0, 0) ==
+                reference.process(i == 0 ? 0.05 : 0.0, 0));
+        REQUIRE(changed.process(i == 0 ? -0.05 : 0.0, 1) ==
+                reference.process(i == 0 ? -0.05 : 0.0, 1));
+    }
+    REQUIRE_FALSE(changed.transition_active());
+}
+
+TEST_CASE("SixBandEq immediate mode waits for a bounded queued continuation",
+          "[signal][eq][automation]") {
+    using Eq = pulp::signal::SixBandEqT<double, 1>;
+    Eq changed;
+    changed.prepare(48000.0);
+    changed.set_transition_samples(32);
+    REQUIRE(changed.set_band(1, {300.0, 18.0, 7.0}));
+    for (int i = 0; i < 11; ++i)
+        static_cast<void>(changed.process(i == 0 ? 0.05 : 0.0));
+
+    auto smooth_reference = changed;
+    changed.set_transition_samples(0);
+    REQUIRE(changed.set_band(4, {6000.0, -18.0, 8.0}));
+    REQUIRE(smooth_reference.set_band(4, {6000.0, -18.0, 8.0}));
+    for (int i = 0; i < 64; ++i)
+        REQUIRE(changed.process(i == 0 ? 0.05 : 0.0) ==
+                smooth_reference.process(i == 0 ? 0.05 : 0.0));
+    REQUIRE_FALSE(changed.transition_active());
+    REQUIRE(changed.transition_samples() == 0);
+
+    REQUIRE(changed.set_band(4, {6000.0, 6.0, 8.0}));
+    REQUIRE_FALSE(changed.transition_active());
+
+    changed.set_transition_samples(7);
+    REQUIRE(changed.set_band(4, {6000.0, -6.0, 8.0}));
+    for (int i = 0; i < 6; ++i) static_cast<void>(changed.process(0.0));
+    REQUIRE(changed.transition_active());
+    static_cast<void>(changed.process(0.0));
+    REQUIRE_FALSE(changed.transition_active());
+}
+
+TEST_CASE("SixBandEq identical sanitized controls are exact state no-ops",
+          "[signal][eq][automation]") {
+    using Eq = pulp::signal::SixBandEqT<float, 1>;
+    Eq repeated;
+    repeated.prepare(48000.0f);
+    repeated.set_transition_samples(256);
+    const Eq::Parameters target{850.0f, 12.0f, 3.0f};
+    REQUIRE(repeated.set_band(2, target));
+    std::array<Eq::Parameters, Eq::band_count> controls{};
+    for (std::size_t band = 0; band < controls.size(); ++band)
+        controls[band] = repeated.band(band);
+    auto reference = repeated;
+
+    for (int frame = 0; frame < 6400; ++frame) {
+        if (frame % 64 == 0) {
+            REQUIRE(repeated.set_band(2, target));
+            repeated.set_bands(controls);
+        }
+        const float input = frame % 113 == 0 ? 0.05f : 0.0f;
+        REQUIRE(repeated.process(input) == reference.process(input));
+    }
+    REQUIRE_FALSE(repeated.transition_active());
+
+    REQUIRE(repeated.set_band(0, {-1000.0f, 0.0f, 0.707f}));
+    for (int i = 0; i < 256; ++i) static_cast<void>(repeated.process(0.0f));
+    REQUIRE_FALSE(repeated.transition_active());
+    auto clamped_reference = repeated;
+    REQUIRE(repeated.set_band(0, {-1.0f, 0.0f, 0.707f}));
+    REQUIRE_FALSE(repeated.transition_active());
+    REQUIRE(repeated.process(0.05f) == clamped_reference.process(0.05f));
+
+    REQUIRE(repeated.set_band(0, {20.0f, 0.0f, 0.8f}));
+    REQUIRE(repeated.transition_active());
+    for (int i = 0; i < 256; ++i) static_cast<void>(repeated.process(0.0f));
+    REQUIRE_FALSE(repeated.transition_active());
+    for (std::size_t band = 0; band < controls.size(); ++band)
+        controls[band] = repeated.band(band);
+    controls[5].gain_db = 1.0f;
+    repeated.set_bands(controls);
+    REQUIRE(repeated.transition_active());
 }
 
 TEST_CASE("SixBandEq set_bands transition is deterministic across reset and extremes",

@@ -327,13 +327,21 @@ coefficients immediately and preserve the legacy demo output. Set a non-zero
 length to crossfade two complete, stable cascades without interpolating
 recursive coefficients. That temporarily doubles the EQ processing work only
 while a fade is active. Use `set_bands()` to apply several changed controls as
-one atomic destination at a block boundary.
+one atomic destination at a block boundary. A request whose sanitized controls
+exactly match the current request is a state-preserving no-op, so hosts may send
+unchanged values without keeping the transition path active or doubling CPU.
 
 Several changes made before a fade processes its first sample update that same
 destination. Changes arriving after it starts are coalesced into the latest
 destination for one subsequent fade. Each channel advances independently as it
-is processed. `reset()` clears both cascades' history without changing controls
-or transition progress. During a fade, `coefficients()`, `magnitude()`,
+is processed. `set_transition_samples()` configures future scheduling only;
+assigning the current length is an exact no-op, and a fade or queued
+continuation already in flight retains its duration and warmed state. Selecting
+zero therefore does not cold-retune or cancel an audible fade. If another
+control request arrives before that fade finishes, it uses one bounded queued
+continuation before subsequent requests become immediate. `reset()` clears both
+cascades' history without changing controls or transition progress. During a
+fade, `coefficients()`, `magnitude()`,
 `magnitude_db()`, and `response_curve_db()` describe the requested destination,
 not the instantaneous crossfade. The class owns no parameters and registers no
 host or runtime controls; the processor remains the single authority for

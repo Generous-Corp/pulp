@@ -62,10 +62,10 @@ public:
     }
 
     /// Set the length of future coefficient transitions. Zero is the legacy
-    /// immediate mode. Changing the length while a transition is active safely
-    /// commits the latest requested controls immediately and cancels the fade.
+    /// immediate mode. Already scheduled transitions retain their duration and
+    /// warmed filter state; assigning the current length is an exact no-op.
     void set_transition_samples(std::size_t samples) {
-        if (transition_active()) apply_all_parameters_immediate();
+        if (samples == transition_samples_) return;
         transition_samples_ = samples;
     }
 
@@ -82,7 +82,9 @@ public:
     /// Returns false for an out-of-range band and leaves the instance unchanged.
     bool set_band(std::size_t band, Parameters parameters) {
         if (band >= band_count) return false;
-        parameters_[band] = sanitize(band, parameters);
+        parameters = sanitize(band, parameters);
+        if (parameters_equal(parameters_[band], parameters)) return true;
+        parameters_[band] = parameters;
         design_parameters(band);
         schedule_band(band);
         return true;
@@ -92,8 +94,15 @@ public:
     /// path when several controls change at one block boundary: every band
     /// shares one transition rather than serializing six fades.
     void set_bands(const std::array<Parameters, band_count>& parameters) {
+        std::array<Parameters, band_count> sanitized{};
+        bool changed = false;
         for (std::size_t band = 0; band < band_count; ++band) {
-            parameters_[band] = sanitize(band, parameters[band]);
+            sanitized[band] = sanitize(band, parameters[band]);
+            changed = changed || !parameters_equal(parameters_[band], sanitized[band]);
+        }
+        if (!changed) return;
+        for (std::size_t band = 0; band < band_count; ++band) {
+            parameters_[band] = sanitized[band];
             design_parameters(band);
         }
         schedule_all_bands();
@@ -139,8 +148,10 @@ public:
         if (--transition_remaining_[channel] == 0) {
             filters_[channel] = transition_filters_[channel];
             if (queued_transition_[channel]) {
+                const std::size_t queued_samples = queued_transition_samples_[channel];
                 queued_transition_[channel] = false;
-                begin_transition(channel);
+                queued_transition_samples_[channel] = 0;
+                begin_transition(channel, queued_samples);
             }
         }
         return output;
@@ -242,6 +253,11 @@ private:
         return parameters;
     }
 
+    static bool parameters_equal(const Parameters& lhs, const Parameters& rhs) {
+        return lhs.frequency_hz == rhs.frequency_hz && lhs.gain_db == rhs.gain_db &&
+               lhs.q == rhs.q;
+    }
+
     void design_parameters(std::size_t band) {
         Filter designer;
         const auto& parameters = parameters_[band];
@@ -261,6 +277,7 @@ private:
             transition_remaining_[channel] = 0;
             transition_total_[channel] = 0;
             queued_transition_[channel] = false;
+            queued_transition_samples_[channel] = 0;
         }
     }
 
@@ -269,39 +286,50 @@ private:
             cascade[band].set_coefficients(requested_coefficients_[band]);
     }
 
-    void begin_transition(std::size_t channel) {
+    void begin_transition(std::size_t channel, std::size_t samples) {
         transition_filters_[channel] = filters_[channel];
         load_requested(transition_filters_[channel]);
-        transition_total_[channel] = transition_samples_;
-        transition_remaining_[channel] = transition_samples_;
+        transition_total_[channel] = samples;
+        transition_remaining_[channel] = samples;
+    }
+
+    void queue_transition(std::size_t channel) {
+        if (queued_transition_[channel]) return;
+        queued_transition_[channel] = true;
+        // A request made after immediate mode was selected still completes via
+        // a bounded continuation: cold-retuning the audible source cascade
+        // would defeat the click-safe contract of the transition in flight.
+        queued_transition_samples_[channel] =
+            transition_samples_ != 0 ? transition_samples_ : transition_total_[channel];
     }
 
     void schedule_band(std::size_t band) {
-        if (transition_samples_ == 0) {
-            for (auto& channel : filters_)
-                channel[band].set_coefficients(requested_coefficients_[band]);
-            return;
-        }
         for (std::size_t channel = 0; channel < Channels; ++channel) {
-            if (!transition_active(channel)) begin_transition(channel);
+            if (!transition_active(channel)) {
+                if (transition_samples_ == 0)
+                    filters_[channel][band].set_coefficients(requested_coefficients_[band]);
+                else
+                    begin_transition(channel, transition_samples_);
+            }
             else if (transition_remaining_[channel] == transition_total_[channel])
                 transition_filters_[channel][band].set_coefficients(requested_coefficients_[band]);
             else
-                queued_transition_[channel] = true;
+                queue_transition(channel);
         }
     }
 
     void schedule_all_bands() {
-        if (transition_samples_ == 0) {
-            for (auto& channel : filters_) load_requested(channel);
-            return;
-        }
         for (std::size_t channel = 0; channel < Channels; ++channel) {
-            if (!transition_active(channel)) begin_transition(channel);
+            if (!transition_active(channel)) {
+                if (transition_samples_ == 0)
+                    load_requested(filters_[channel]);
+                else
+                    begin_transition(channel, transition_samples_);
+            }
             else if (transition_remaining_[channel] == transition_total_[channel])
                 load_requested(transition_filters_[channel]);
             else
-                queued_transition_[channel] = true;
+                queue_transition(channel);
         }
     }
 
@@ -324,6 +352,7 @@ private:
     std::array<std::size_t, Channels> transition_total_{};
     std::array<std::size_t, Channels> transition_remaining_{};
     std::array<bool, Channels> queued_transition_{};
+    std::array<std::size_t, Channels> queued_transition_samples_{};
     std::size_t transition_samples_ = 0;
 };
 
