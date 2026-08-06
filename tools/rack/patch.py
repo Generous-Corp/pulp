@@ -3620,7 +3620,14 @@ def name_the_jacks(missing: list, idiom: dict, inv: dict,
             if kind in ("any_out", "any_in"):
                 continue                      # unconstrained: nothing to name
             role = req.get(role_key, "any")
-            if patch is not None:
+            # ROLE "any" MAKES NO ACCUSATION. A requirement that any module may
+            # satisfy has no expectation of a particular one, so "this patch's
+            # any CANNOT send it" is both ungrammatical and false -- it named
+            # every module without a gate output, including the clock that was
+            # doing the gating. An idiom widened from a named role to `any`
+            # (which is how "a clock may articulate the step too" is expressed)
+            # turned the most actionable line in the retry into a wrong one.
+            if patch is not None and role != "any":
                 for line in _patch_cannot(patch, inv, roles, role, kind, side):
                     out.append(f"    this patch's {role} CANNOT {verb}, "
                                f"however it is wired: {line}")
@@ -3630,8 +3637,9 @@ def name_the_jacks(missing: list, idiom: dict, inv: dict,
                 out.append(f"    installed jacks that can {verb}: "
                            f"{'; '.join(can)}")
             elif cannot:
-                out.append(f"    NO installed {role} can {verb}: "
-                           f"{'; '.join(cannot)}")
+                out.append("    NOTHING installed can {}: {}".format(
+                    verb, "; ".join(cannot)) if role == "any" else
+                    f"    NO installed {role} can {verb}: {'; '.join(cannot)}")
     return out
 
 

@@ -176,6 +176,76 @@ def check_retry_names_a_real_jack() -> tuple:
     return bad, 5
 
 
+def check_a_widened_role_accuses_nobody() -> tuple:
+    """A requirement ANY module may satisfy must not accuse a particular one.
+
+    An idiom widens `from_module` to "any" when several kinds of module can
+    legitimately satisfy it -- a step can be articulated by the sequencer's own
+    gate OR by the clock. The retry's most actionable line is "this patch's
+    <role> CANNOT do it, however it is wired", and with role "any" it became
+    both ungrammatical and false: it named every module in the patch without a
+    matching jack, INCLUDING the clock that was doing the gating.
+
+    The named-role case has to keep working, because that line is the whole
+    reason the escalation beats restating the requirement.
+    """
+    bad = 0
+    # A clock whose only output is a CLOCK, not a gate -- CVfunk/Hammer's real
+    # shape, and the reason widening the role alone does not help: the port
+    # kind rejects it before the role is ever consulted.
+    inv = _inv(["A", "B", "C", "D", "E"], ["Cv"] * 5)   # keeps PentaSequencer
+    inv["Clocked"] = {"name": "Clocked", "brand": "Clocked", "version": "2.0",
+                      "modules": {"Hammer": {
+                          "name": "Hammer", "description": "", "tags": ["Clock"],
+                          "inputs": ["Reset"], "roles_in": ["Trigger"],
+                          "outputs": ["Main Clock"], "roles_out": ["Clock"]}}}
+    pch = {"modules": [{"id": 1, "plugin": "Clocked", "model": "Hammer",
+                        "pos": [0, 0], "params": []},
+                       {"id": 2, "plugin": "CVfunk",
+                        "model": "PentaSequencer", "pos": [8, 0], "params": []},
+                       {"id": 3, "plugin": "AS", "model": "ADSR",
+                        "pos": [16, 0], "params": []}],
+           "cables": []}
+
+    def req(role, port):
+        return {"topology": [{"id": "gate", "from_module": role,
+                              "from_port": port, "to_module": "envelope",
+                              "to_port": "gate_in", "describe": "STEP"}]}
+
+    wide = "\n".join(P.name_the_jacks(["STEP"], req("any", "clock_out"),
+                                      inv, pch))
+    if "any CANNOT" in wide or "this patch's any" in wide:
+        bad += 1
+        print(f"  WRONG  a requirement any module may satisfy still accuses "
+              f"'the patch's any':\n{wide}")
+    elif "Hammer" in wide and "CANNOT" in wide:
+        bad += 1
+        print(f"  WRONG  the clock is named as unable to articulate a step, "
+              f"which is exactly what it does here:\n{wide}")
+    else:
+        print("  ok     a widened requirement accuses no particular module")
+
+    # It must still be USEFUL: naming nobody is not the same as saying nothing.
+    if "can receive it" not in wide:
+        bad += 1
+        print(f"  WRONG  a widened requirement stopped naming jacks "
+              f"altogether:\n{wide}")
+    else:
+        print("  ok     a widened requirement still names jacks that fit")
+
+    # And a NAMED role keeps its accusation, which is the line that ended a
+    # four-attempt loop.
+    named = "\n".join(P.name_the_jacks(["STEP"],
+                                       req("sequencer", "gate_out"), inv, pch))
+    if "CANNOT" not in named or "PentaSequencer" not in named:
+        bad += 1
+        print(f"  WRONG  a named role no longer says which module in the "
+              f"patch cannot satisfy it:\n{named}")
+    else:
+        print("  ok     a named role still names the module that cannot")
+    return bad, 3
+
+
 def check_inventory_says_when_ports_are_unknown() -> tuple:
     """A module with no recorded jacks must not render as one with no jacks.
 
@@ -895,6 +965,7 @@ def check_registered_before_the_skip() -> tuple:
 
 
 CHECKS = (check_retry_names_a_real_jack,
+          check_a_widened_role_accuses_nobody,
           check_the_dead_module_is_named,
           check_a_repeat_escalates_to_replacement,
           check_the_reader_refuses_to_guess,
