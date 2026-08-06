@@ -12,6 +12,7 @@
 #include <memory>
 #include <new>
 #include <span>
+#include <vector>
 
 using Catch::Matchers::WithinAbs;
 using pulp::signal::AudioMatrixMixer;
@@ -42,6 +43,10 @@ template <typename T> struct ToggleFailAllocator {
         return fail == other.fail;
     }
 };
+
+template <std::size_t Inputs, std::size_t Outputs>
+concept AvailableAudioMatrix =
+    requires { typename pulp::signal::AudioMatrixMixerT<float, Inputs, Outputs>; };
 
 TEST_CASE("Orthonormal mid-side preserves identity, mono, and energy",
           "[signal][routing][mid-side]") {
@@ -100,6 +105,10 @@ TEST_CASE("Orthonormal mid-side preserves identity, mono, and energy",
 
 TEST_CASE("Audio matrix applies signed gains, headroom policy, aliasing, and faults",
           "[signal][routing][matrix]") {
+    STATIC_REQUIRE((AvailableAudioMatrix<2, 2>));
+    constexpr auto overflowing_inputs = std::numeric_limits<std::size_t>::max() / 2 + 2;
+    STATIC_REQUIRE_FALSE((AvailableAudioMatrix<overflowing_inputs, 2>));
+
     AudioMatrixMixer mixer;
     REQUIRE(mixer.set_dimensions(2, 2));
     REQUIRE(mixer.prepare(8));
@@ -263,6 +272,14 @@ TEST_CASE("N-way crossfade obeys endpoints and constant-power law",
                                                     std::span<double>(gains)));
     CHECK(gains[0] == 1.0);
     CHECK_FALSE(pulp::signal::nway_constant_power_gains(0.0, std::span<double>{}));
+
+    constexpr auto float_consecutive_integer_limit = std::size_t{1}
+                                                     << std::numeric_limits<float>::digits;
+    std::vector<float> large_gains(float_consecutive_integer_limit + 2);
+    REQUIRE(pulp::signal::nway_constant_power_gains(
+        static_cast<float>(float_consecutive_integer_limit), std::span<float>(large_gains)));
+    CHECK(large_gains[float_consecutive_integer_limit] == 1.0f);
+    CHECK(large_gains.back() == 0.0f);
     // Negative control: a linear midpoint has half the required power.
     CHECK(std::abs((0.5 * 0.5 + 0.5 * 0.5) - 1.0) > 0.49);
 }

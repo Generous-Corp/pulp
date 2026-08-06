@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <span>
 #include <type_traits>
 
@@ -16,6 +17,8 @@ namespace pulp::signal {
 template <typename SampleType>
 inline bool nway_constant_power_gains(SampleType position, std::span<SampleType> gains) noexcept {
     static_assert(std::is_floating_point_v<SampleType>);
+    static_assert(std::numeric_limits<SampleType>::max_exponent >
+                  std::numeric_limits<std::size_t>::digits);
     if (gains.empty())
         return false;
     std::fill(gains.begin(), gains.end(), SampleType{0});
@@ -25,12 +28,16 @@ inline bool nway_constant_power_gains(SampleType position, std::span<SampleType>
         gains.front() = SampleType{1};
         return true;
     }
-    const auto final_position = static_cast<SampleType>(gains.size() - 1);
-    if (position >= final_position) {
+    const auto size_exclusive = std::ldexp(SampleType{1}, std::numeric_limits<std::size_t>::digits);
+    if (position >= size_exclusive) {
         gains.back() = SampleType{1};
         return true;
     }
     const auto lower = static_cast<std::size_t>(position);
+    if (lower >= gains.size() - 1) {
+        gains.back() = SampleType{1};
+        return true;
+    }
     const auto fraction = position - static_cast<SampleType>(lower);
     crossfade_gains(fraction, CrossfadeGainLaw::EqualPower, gains[lower], gains[lower + 1]);
     return true;

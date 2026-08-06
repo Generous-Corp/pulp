@@ -103,10 +103,12 @@ propagate rather than being silently rewritten.
 ### `AudioMatrixMixerT`
 
 The fixed-capacity signed matrix supports up to 16 inputs and 16 outputs by
-default. `prepare(max_block_size)` allocates the bounded input scratch used to
-make arbitrary input/output aliasing safe; output buffers may not overlap each
-other. Allocation failure leaves the previous prepared storage, block bound,
-and ramp state intact. `set_dimensions()` chooses the active rectangle.
+default. Custom compile-time dimensions whose product exceeds `size_t` capacity
+are rejected by the template constraint. `prepare(max_block_size)` allocates
+the bounded input scratch used to make arbitrary input/output aliasing safe;
+output buffers may not overlap each other. Allocation failure leaves the
+previous prepared storage, block bound, and ramp state intact.
+`set_dimensions()` chooses the active rectangle.
 `set_gain()` changes a cell immediately, while
 `set_gain_ramped(..., ramp_samples)` emits the old value on the next sample and
 leaves the internal state at its target after the requested frames, independent
