@@ -7,3 +7,4 @@
 # tools/rack/corpus.py fetches it; the anchor check reads it; nothing else in
 # the repo depends on it existing.
 .corpus/
+.sweeps/
