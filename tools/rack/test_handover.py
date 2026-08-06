@@ -176,6 +176,108 @@ def check_retry_names_a_real_jack() -> tuple:
     return bad, 5
 
 
+def check_a_specific_word_beats_a_generic_one() -> tuple:
+    """"Gate 1 CV" is a gate. "Trigger probability" is not a trigger.
+
+    `_ROLE_WORDS` is scanned in order with Cv first, and "CV" is the least
+    specific token in the vocabulary -- nearly every voltage-controlled jack
+    carries it. So a jack whose name SAYS what it is was claimed by Cv before
+    its own word was consulted. CVfunk/EnvelopeArray publishes six gate inputs
+    named "Gate N CV", so an envelope with six gates read as unable to receive
+    one, and every idiom needing a gated envelope rejected a correct patch.
+
+    The other half is what stops this from being a loosening: a name carrying a
+    MODULATION word is a CV about the thing it names, not the thing itself.
+    Both directions are asserted, because a rule that only promotes is how
+    "Pulse Width Modulation" became audio.
+    """
+    bad = 0
+    env = ["Envelope generator"]
+
+    promote = [
+        ("Gate 1 CV", env, "in", "Gate", "an envelope's gate input"),
+        ("1V/OCTAVE CV", ["Oscillator"], "in", "Pitch", "a pitch input"),
+        ("Reset CV", ["Sequencer"], "in", "Trigger", "a reset trigger"),
+        ("Clock CV", ["Clock generator"], "in", "Clock", "a clock input"),
+    ]
+    for name, tags, kind, want, why in promote:
+        got = P.infer_port_role(name, tags, kind)
+        if got != want:
+            bad += 1
+            print(f"  WRONG  {name!r} is {why} and reads as {got!r}, not "
+                  f"{want!r}, so nothing can be wired to it")
+    if not bad:
+        print("  ok     a jack whose name says what it is keeps that meaning, "
+              "even with 'CV' in the name")
+
+    # A CV *about* a thing is not the thing. Each of these was a real
+    # misreading the promotion introduced before it was narrowed.
+    keep = [
+        ("Trigger probability", ["Random"], "in", "how often a trigger fires"),
+        ("Pulse Width Modulation", ["Oscillator"], "in", "a PWM input"),
+        ("Noise Mod A CV", ["Oscillator"], "in", "a modulation depth"),
+        ("Gate length CV", ["Sequencer"], "in", "how long a gate lasts"),
+        # Audio is not promotable, and these are why. Every one is a real
+        # name from the installed library that a looser rule turns into an
+        # audio jack -- and an Audio role is a VETO on gate_out and clock_out,
+        # so a wrong one here does not merely mislabel a jack, it stops a
+        # working clock or gate from satisfying anything.
+        ("Noise CV", ["Oscillator"], "in", "how much noise is mixed in"),
+        ("Wet CV", ["Reverb"], "in", "the wet/dry balance"),
+        ("Sine mix CV", ["Oscillator"], "in", "how much sine is in the mix"),
+        ("Sum CV", ["Utility"], "out", "a summed control voltage"),
+    ]
+    before = bad
+    for name, tags, kind, why in keep:
+        got = P.infer_port_role(name, tags, kind)
+        if got != "Cv":
+            bad += 1
+            print(f"  WRONG  {name!r} sets {why} and reads as {got!r}; a CV "
+                  f"about a thing is not the thing")
+    if bad == before:
+        print("  ok     a CV that modulates something keeps Cv, however "
+              "specific the word it modulates")
+
+    # KNOWN CONSERVATIVE MISSES, pinned on purpose.
+    #
+    # The rule promotes only when every word left after dropping "CV" and bare
+    # numbers is a marker for that role, so a name carrying an ordinary English
+    # word does not promote even though a person can read it. These stay Cv,
+    # which is exactly today's behaviour and merely conservative -- a promotion
+    # that does not happen costs nothing, while one that should not have
+    # happened is a new false accept.
+    #
+    # Recorded as assertions rather than left out, so that widening the rule
+    # later is a deliberate act with a red test in front of it, instead of a
+    # silent change nobody notices.
+    before = bad
+    for name, tags, kind in (("CV external trigger", ["Utility"], "in"),
+                             ("CH 1 Reset CV", ["Low-frequency oscillator"],
+                              "in")):
+        got = P.infer_port_role(name, tags, kind)
+        if got != "Cv":
+            bad += 1
+            print(f"  WRONG  {name!r} now reads as {got!r}. That may be an "
+                  f"improvement, but it is a WIDENING: re-run the sweep and "
+                  f"move this line deliberately rather than deleting it")
+    if bad == before:
+        print("  ok     names a person could read but the rule cannot are "
+              "left alone, and the limit is pinned")
+
+    # And nothing that was ALREADY specific is touched. Every change this rule
+    # makes must be from Cv; a rule that rewrites a cartographed role would be
+    # overruling a measurement with a guess.
+    if P.infer_port_role("V/Oct", ["Oscillator"], "in") != "Pitch":
+        bad += 1
+        print("  WRONG  an unambiguous name stopped resolving")
+    elif P.infer_port_role("Gate", env, "in") != "Gate":
+        bad += 1
+        print("  WRONG  a bare 'Gate' stopped resolving")
+    else:
+        print("  ok     names that were already unambiguous are unchanged")
+    return bad, 4
+
+
 def check_a_widened_role_accuses_nobody() -> tuple:
     """A requirement ANY module may satisfy must not accuse a particular one.
 
@@ -965,6 +1067,7 @@ def check_registered_before_the_skip() -> tuple:
 
 
 CHECKS = (check_retry_names_a_real_jack,
+          check_a_specific_word_beats_a_generic_one,
           check_a_widened_role_accuses_nobody,
           check_the_dead_module_is_named,
           check_a_repeat_escalates_to_replacement,

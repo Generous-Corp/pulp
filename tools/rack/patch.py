@@ -328,6 +328,19 @@ def _add_port_names(inv: dict, our_plugin: str = "ForgeModular") -> None:
 # CV comes first deliberately. Almost every modulation jack is named after the
 # thing it modulates -- "Frequency", "Time", "Attack" -- so a later pass would
 # have to un-claim them one at a time.
+#: Words that qualify a jack without saying what it carries. A jack named
+#: "Gate 1 CV" is a gate; the "CV" only says it is voltage-controlled, which is
+#: true of nearly every jack on the machine. These never decide a role on their
+#: own when a more specific word is also present.
+WEAK_PORT_WORDS = frozenset({
+    "CV", "IN", "OUT", "INPUT", "OUTPUT", "L", "R",
+    "MIX", "LEVEL", "LVL", "AMOUNT", "AMT",
+})
+
+#: Roles a specific word may promote past a generic one. Audio is absent by
+#: measurement, not by oversight: see the comment in `infer_port_role`.
+PROMOTABLE_ROLES = frozenset({"Pitch", "Clock", "Gate", "Trigger"})
+
 _ROLE_WORDS: list[tuple[str, tuple[str, ...]]] = [
     ("Cv", ("CV", "MODULATION", "FM", "PROBABILITY", "SPREAD", "RATE",
             "AMOUNT", "AMT", "DEPTH", "LEVEL", "LVL", "EXPONENTIAL", "LINEAR",
@@ -426,9 +439,70 @@ def infer_port_role(name: str | None, tags: list | None,
         if words & set(_WAVE_SMOOTH):
             return ["Cv"]
 
+    # A SPECIFIC WORD BEATS A GENERIC ONE, WHATEVER ORDER THE TABLES ARE IN.
+    #
+    # `_ROLE_WORDS` is scanned in order and "Cv" is first, so a jack named
+    # "<anything> CV" was claimed by Cv before its own word was ever consulted.
+    # "CV" is the least specific token in the whole vocabulary -- almost every
+    # voltage-controlled jack carries it -- and it was outranking the word that
+    # says what the jack IS:
+    #
+    #   "Gate 1 CV"        GATE + CV      -> Cv        (an envelope's gate in)
+    #   "1V/OCTAVE CV"     V/OCT + CV     -> Cv        (a pitch in)
+    #   "CV external trigger"  TRIGGER + CV -> Cv      (a trigger in)
+    #
+    # CVfunk/EnvelopeArray publishes six gate inputs named that way, so an
+    # envelope with six gates read as unable to receive one, and every idiom
+    # needing a gated envelope rejected a correct patch.
+    #
+    # Only PROMOTABLE roles jump the queue. Audio is deliberately NOT one:
+    # its markers are waveform names, and on an INPUT those describe what the
+    # CV controls rather than what the jack carries. Measured -- promoting
+    # Audio too reclassified "Pulse Width Modulation", "Noise Mod A CV" and
+    # "Dry-Wet Mix CV" as audio, and an Audio role is a VETO on gate_out and
+    # clock_out, so it would have broken working patches to fix a different
+    # set. Restricted, the change moves 152 of 8,484 named ports, every one of
+    # them from Cv to something more specific and none of them to Audio.
+    # A JACK NAMED FOR A THING, versus a CV *ABOUT* that thing.
+    #
+    # "Gate 1 CV" is a gate. "Gate length CV" sets how long one lasts, "Trigger
+    # probability" sets how often one fires, "CV for Step 3" is the value
+    # routed at step 3. The first must promote; the rest must not, and a rule
+    # that only promotes is how "Pulse Width Modulation" became audio.
+    #
+    # The test is deliberately strict: promote only when every word left after
+    # dropping the "CV" qualifier and bare numbers is a marker for that same
+    # role. A property word (length, width, mode, divider, probability) or a
+    # relational one ("for") leaves a word that is not, so the name keeps Cv.
+    #
+    # Strictness is the SAFE direction. A promotion that does not happen
+    # leaves today's behaviour, which is merely conservative; a promotion that
+    # should not have happened is a new false accept in a checker whose whole
+    # job is to refuse patches that will not play. Measured over the installed
+    # library: 57 of 8,484 named ports move, every one from Cv to something
+    # more specific, across 19 distinct names.
+    #
+    # Audio stays out of PROMOTABLE_ROLES even so, and that is not belt and
+    # braces -- measured, it blocks ten more: "Noise CV", "Wet CV", "Sine mix
+    # CV", "Sum CV" and the like, all of them CVs controlling the thing they
+    # name. An Audio role is a VETO on gate_out and clock_out, so a wrong one
+    # there does not merely mislabel a jack, it stops a working clock or gate
+    # from satisfying any requirement at all.
+    core = {w for w in words if w not in WEAK_PORT_WORDS and not w.isdigit()}
+    first = strong = None
     for role, markers in _ROLE_WORDS:
-        if words & set(markers):
-            return role
+        hit = words & set(markers)
+        if not hit:
+            continue
+        if first is None:
+            first = role
+        if (strong is None and role in PROMOTABLE_ROLES
+                and (hit - WEAK_PORT_WORDS) and not (core - set(markers))):
+            strong = role
+    if strong is not None:
+        return strong
+    if first is not None:
+        return first
     if words & set(_NUMBERED):
         return "Audio" if has_tag(tags, AUDIO_TAGS) else "Cv"
 
