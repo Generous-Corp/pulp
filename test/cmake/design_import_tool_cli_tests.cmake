@@ -40,6 +40,7 @@ endif()
 add_executable(pulp-test-browser-capture-import
     test_browser_capture_backdrop_filter.cpp
     test_browser_capture_ir.cpp
+    test_browser_knob_sprites.cpp
     test_browser_capture_text_metrics.cpp
     test_browser_capture_tree.cpp
     test_browser_capture_svg_render.cpp
@@ -49,6 +50,7 @@ add_executable(pulp-test-browser-capture-import
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_import_cli.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_import_session.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_ir.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/browser_knob_sprites.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_styles.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_tree.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_validation.cpp
@@ -58,7 +60,8 @@ add_executable(pulp-test-browser-capture-import
     ${CMAKE_SOURCE_DIR}/tools/import-design/claude_html_dependencies.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/html_project_stager.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/html_intake.cpp
-    ${CMAKE_SOURCE_DIR}/tools/import-design/sprite_skins.cpp)
+    ${CMAKE_SOURCE_DIR}/tools/import-design/sprite_skins.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/import_png_codec.cpp)
 target_include_directories(pulp-test-browser-capture-import PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/external/miniz)
