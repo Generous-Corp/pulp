@@ -106,10 +106,10 @@ ToolchainPick pick_toolchain() {
         candidate(std::string(home ? home : ".") +
                   "/Library/Application Support/Forge Modular/tools/rack"),
         candidate(bundle_tools_dir()),
-        // A developer with no installed copy can still point at their
-        // checkout, consent once, and carry on.
-        ToolchainCandidate{"/Volumes/Workshop/Code/pulp-modular-rack/tools/rack",
-                           true, {}});
+        // A checkout is never guessed. Developers can name one with the
+        // explicit override above; a private absolute path is not usable on a
+        // customer's machine merely because it existed on the author's.
+        candidate(""));
 }
 
 std::string tools_dir() { return pick_toolchain().path; }

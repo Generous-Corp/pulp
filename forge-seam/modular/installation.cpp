@@ -1,6 +1,7 @@
 #include "forge/installation.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -30,8 +31,10 @@ std::vector<long> fields(const std::string& stamp) {
         const auto part = core.substr(at, dot == std::string::npos
                                                ? std::string::npos : dot - at);
         char* end = nullptr;
+        errno = 0;
         const long v = std::strtol(part.c_str(), &end, 10);
-        if (end == part.c_str()) break;   // not a number: the version ends here
+        if (end == part.c_str() || *end != '\0' || errno == ERANGE)
+            return {};
         out.push_back(v);
         if (dot == std::string::npos) break;
         at = dot + 1;
@@ -154,7 +157,9 @@ ToolchainPick choose_toolchain(const ToolchainCandidate& override_dir,
                                   "installed copy"};
     if (bundled.usable) return {bundled.path, bundled.stamp,
                                 "shipped inside this application"};
-    return {checkout.path, checkout.stamp, "source checkout"};
+    if (checkout.usable)
+        return {checkout.path, checkout.stamp, "source checkout"};
+    return {"", "", "generator unavailable"};
 }
 
 std::string describe_age(std::time_t written, std::time_t now) {
