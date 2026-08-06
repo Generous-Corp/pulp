@@ -2,13 +2,18 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/audio/audio_device_manager.hpp>
 #include <pulp/inspect/audio_inspector.hpp>
+#include <pulp/inspect/capabilities.hpp>
 #include <pulp/inspect/console_capture.hpp>
 #include <pulp/inspect/editor_url.hpp>
+#include <pulp/inspect/protocol.hpp>
 #include <pulp/inspect/state_inspector.hpp>
 #include <pulp/state/store.hpp>
 
+#include <choc/text/choc_JSON.h>
+
 #include "../inspect/src/inspector_overlay_internal.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <string>
@@ -17,6 +22,128 @@
 
 using namespace pulp::inspect;
 using namespace pulp::state;
+
+TEST_CASE("Inspector method registry assigns one stable capability to every method",
+          "[inspect][capabilities]") {
+    const auto capabilities = inspector_capability_registry();
+    const auto registry = inspector_method_registry();
+    REQUIRE(capabilities.size() == 19);
+    REQUIRE_FALSE(registry.empty());
+
+    for (const auto& descriptor : capabilities) {
+        CAPTURE(descriptor.id);
+        REQUIRE_FALSE(descriptor.id.empty());
+        REQUIRE(capability_from_id(descriptor.id) == descriptor.capability);
+        REQUIRE(capability_id(descriptor.capability) == descriptor.id);
+        REQUIRE(capability_risk(descriptor.capability) == descriptor.risk);
+        REQUIRE(capability_is_grantable(descriptor.capability) ==
+                descriptor.grantable);
+    }
+
+    for (std::size_t i = 0; i < registry.size(); ++i) {
+        CAPTURE(registry[i].method);
+        REQUIRE_FALSE(registry[i].method.empty());
+        REQUIRE(find_inspector_method(registry[i].method) == &registry[i]);
+        REQUIRE(capability_from_id(capability_id(registry[i].capability)) ==
+                registry[i].capability);
+        for (std::size_t j = i + 1; j < registry.size(); ++j)
+            REQUIRE(registry[i].method != registry[j].method);
+    }
+
+    REQUIRE(find_inspector_method("Unknown.method") == nullptr);
+    REQUIRE(find_inspector_method(methods::kTraceQuery)->capability ==
+            InspectorCapability::Unavailable);
+    REQUIRE(find_inspector_method(methods::kTraceExplain)->capability ==
+            InspectorCapability::Unavailable);
+}
+
+TEST_CASE("Inspector profiles separate observation, typed control, and runtime evaluation",
+          "[inspect][capabilities]") {
+    REQUIRE(profile_capabilities(InspectorProfile::Off).empty());
+    REQUIRE(profile_capabilities(InspectorProfile::Custom).empty());
+
+    const auto observe = profile_capabilities(InspectorProfile::Observe);
+    const auto develop = profile_capabilities(InspectorProfile::Develop);
+    const auto expected_observe = std::to_array<InspectorCapability>({
+        InspectorCapability::SessionDescribe,
+        InspectorCapability::StateRead,
+        InspectorCapability::UiRead,
+        InspectorCapability::DiagnosticsRead,
+        InspectorCapability::LogsRead,
+        InspectorCapability::CaptureImage,
+    });
+    const auto expected_develop = std::to_array<InspectorCapability>({
+        InspectorCapability::SessionDescribe,
+        InspectorCapability::SessionControl,
+        InspectorCapability::StateRead,
+        InspectorCapability::UiRead,
+        InspectorCapability::DiagnosticsRead,
+        InspectorCapability::LogsRead,
+        InspectorCapability::CaptureImage,
+        InspectorCapability::TraceControl,
+        InspectorCapability::TraceSessionControl,
+        InspectorCapability::StateWrite,
+        InspectorCapability::TestInput,
+        InspectorCapability::AuthoringTweaks,
+        InspectorCapability::TelemetryStream,
+    });
+    REQUIRE(std::ranges::equal(observe, expected_observe));
+    REQUIRE(std::ranges::equal(develop, expected_develop));
+    const auto contains = [](auto capabilities, InspectorCapability expected) {
+        return std::find(capabilities.begin(), capabilities.end(), expected) !=
+               capabilities.end();
+    };
+
+    REQUIRE(contains(observe, InspectorCapability::SessionDescribe));
+    REQUIRE(contains(observe, InspectorCapability::StateRead));
+    REQUIRE_FALSE(contains(observe, InspectorCapability::StateWrite));
+    REQUIRE_FALSE(contains(observe, InspectorCapability::RuntimeEval));
+
+    REQUIRE(contains(develop, InspectorCapability::StateWrite));
+    REQUIRE(contains(develop, InspectorCapability::TestInput));
+    REQUIRE(contains(develop, InspectorCapability::TelemetryStream));
+    REQUIRE_FALSE(contains(develop, InspectorCapability::RuntimeEval));
+    REQUIRE_FALSE(contains(develop, InspectorCapability::Unavailable));
+
+    REQUIRE_FALSE(capability_is_grantable(InspectorCapability::Unavailable));
+    REQUIRE(capability_is_grantable(InspectorCapability::RuntimeEval));
+    REQUIRE(capability_risk(InspectorCapability::StateRead) ==
+            InspectorCapabilityRisk::Sensitive);
+    REQUIRE(capability_risk(InspectorCapability::StateWrite) ==
+            InspectorCapabilityRisk::Control);
+    REQUIRE(capability_risk(InspectorCapability::RuntimeEval) ==
+            InspectorCapabilityRisk::Critical);
+    REQUIRE(capability_requires_controller_lease(
+        InspectorCapability::AuthoringTweaks));
+    REQUIRE_FALSE(capability_requires_controller_lease(
+        InspectorCapability::CaptureImage));
+    REQUIRE(capability_requires_publication_binding(
+        InspectorCapability::TraceSessionControl));
+    REQUIRE_FALSE(capability_requires_publication_binding(
+        InspectorCapability::TraceControl));
+    REQUIRE_FALSE(capability_requires_publication_binding(
+        InspectorCapability::StateWrite));
+    REQUIRE(profile_from_id("develop") == InspectorProfile::Develop);
+    REQUIRE_FALSE(profile_from_id("everything").has_value());
+}
+
+TEST_CASE("Inspector protocol errors preserve stable code and structured data",
+          "[inspect][protocol][errors]") {
+    const auto encoded = encode_message(make_error(
+        41, "Profile does not grant state writes", "capability_denied",
+        R"({"capability":"state.write","profile":"observe"})"));
+
+    InspectorMessage decoded;
+    REQUIRE(decode_message(encoded, decoded));
+    REQUIRE(decoded.id == 41);
+    REQUIRE(decoded.is_error);
+    REQUIRE(decoded.params_json == "Profile does not grant state writes");
+    REQUIRE(decoded.error_code == "capability_denied");
+    const auto data = choc::json::parse(decoded.error_data_json);
+    REQUIRE(data["capability"].getString() == "state.write");
+    REQUIRE(data["profile"].getString() == "observe");
+    REQUIRE_FALSE(data.hasObjectMember("token"));
+}
 
 TEST_CASE("ConsoleCapture preserves previous callback ordering",
           "[inspect][console]") {
@@ -117,6 +244,12 @@ TEST_CASE("AudioInspector stores runtime telemetry as latest-value snapshot",
     auto empty = audio.runtime_telemetry();
     REQUIRE_FALSE(empty.available);
     REQUIRE(empty.xrun_count == 0);
+    REQUIRE(empty.process_load.callback_count == 0);
+
+    audio.set_xrun_count(2);
+    empty = audio.runtime_telemetry();
+    REQUIRE_FALSE(empty.available);
+    REQUIRE(empty.xrun_count == 2);
     REQUIRE(empty.process_load.callback_count == 0);
 
     pulp::audio::AudioProcessLoadSnapshot load;

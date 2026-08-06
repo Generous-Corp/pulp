@@ -100,8 +100,8 @@ void StandaloneMusicalTyping::install_key_route(view::View& root) {
 
 void StandaloneMusicalTyping::add_menu_command(view::WindowOptions& options) {
     std::weak_ptr<CallbackState> weak_state = callback_state_;
-    options.menu_commands.push_back({
-        .menu = "Window",
+    view::WindowOptions::MenuCommand command{
+        .menu = "",
         .title = "Musical Typing Keyboard",
         .key = view::KeyCode::k,
         .modifiers = platform_main_modifier(),
@@ -112,7 +112,13 @@ void StandaloneMusicalTyping::add_menu_command(view::WindowOptions& options) {
                     state->owner->registry_->dispatch(kToggleStandaloneMusicalTypingCommand);
                 }
             },
-    });
+    };
+    // Keep the command easy to find in the application menu while also
+    // exposing it in the conventional Window menu. Both entries dispatch the
+    // same CommandRegistry command.
+    options.menu_commands.push_back(command);
+    command.menu = "Window";
+    options.menu_commands.push_back(std::move(command));
 }
 
 std::vector<view::CommandID> StandaloneMusicalTyping::commands() const {
@@ -337,12 +343,12 @@ bool StandaloneMusicalTyping::show() {
         window_ = host_factory_(*keyboard_, options);
         if (!window_ || !window_->is_gpu_backed()) {
             // The keyboard paints through Skia, so a CPU-only WindowHost cannot
-            // show it. Say so: the Window menu item and Cmd+K are already
-            // installed by the time we get here, and a silent bail-out reads as
-            // a dead menu item rather than an unsupported build.
+            // show it. Say so: the menu item and Cmd+K are already installed by
+            // the time we get here, and a silent bail-out reads as a dead menu
+            // item rather than an unsupported build.
             runtime::log_warn(
                 "[musical-typing] cannot open: this build's WindowHost is not GPU-backed "
-                "(Skia/Dawn unavailable). The Window > Musical Typing Keyboard command "
+                "(Skia/Dawn unavailable). The Musical Typing Keyboard command "
                 "will not work.");
             window_.reset();
             keyboard_.reset();

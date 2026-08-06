@@ -31,7 +31,10 @@ want to build and validate AAX plugins locally.
 `core/format/src/aax_effect_gui.cpp` embeds a Pulp editor in the Pro Tools
 plugin window through the shared, format-agnostic `view::PluginViewHost` — the
 same seam VST3 / AU v2 / AU v3 / CLAP use, so there is no AAX-specific render
-path to maintain.
+path to maintain. Its `ViewBridge` is built from
+`ViewBridge::Options::hosted_editor()` like every other hosted adapter — never a
+hand-assembled `Options`, and a structural test enforces that. See the
+`view-bridge` skill.
 
 **The editor is opt-in, and defaulting it off is deliberate — do not "fix" it.**
 `PULP_AAX_PLUGIN` registers no editor, so a plugin gets Pro Tools'
@@ -338,6 +341,28 @@ helper; a shared bit-exact fixture in `test_adapter_boundary_parity.cpp`
 (`[bypass]`) covers it since the real AAX runtime can't build without the Avid
 SDK.
 
+### The editor's GPU surface is a SUBSCRIPTION, not a one-shot read
+
+`aax_effect_gui.cpp` must not sample `host_->gpu_surface()` once and hand
+the result to the scripted UI session. That read is only valid on hosts
+which build their surface in the constructor; the Windows host — the one
+Pro Tools loads — creates its Dawn surface inside
+`try_attach_to_parent()`, so a read taken before that call returns
+`nullptr` forever and the editor's WebGPU JS silently renders through
+mocks.
+
+Use the shared helper, BEFORE the attach:
+
+```cpp
+gpu_surface_binding_ = bind_gpu_surface(*host_, bridge_->scripted_ui(),
+                                        gpu, "AAX");
+if (!host_->try_attach_to_parent(parent)) { gpu_surface_binding_.reset(); ... }
+```
+
+Reset the subscription in `teardown()` before `bridge_->close()` — the
+observer writes into the session that call destroys. Full contract:
+the `view-bridge` skill's "GpuSurface plumbing into WidgetBridge".
+
 ## Review Checklist
 
 ### Parameter semantics and declared layouts
@@ -356,3 +381,24 @@ After any AAX-related change:
 2. Build with `PULP_ENABLE_AAX=ON` against a developer-supplied SDK.
 3. Run `pulp validate` and `pulp validate --all` when the validator is installed.
 4. Recheck the user-facing guidance in `docs/guides/aax.md` if behavior changed.
+
+### Tracing attaches for this format now (WAH-4)
+
+Perfetto tracing used to be wired into **VST3 only**. A capture of a Pro Tools/AAX
+session recorded nothing while `Tracing`'s API described itself as
+process-global — so an empty `.pftrace` looked like an environment problem
+rather than a missing call.
+
+This adapter now holds a `runtime::ScopedTracingAttachment` (`InstanceState::tracing`). Two
+things follow:
+
+- **It is RAII, not a hand-balanced attach/detach pair.** A leaked attachment
+  is not benign: the `.pftrace` is only written by the FINAL detach, so one
+  unbalanced instance means the capture silently produces nothing.
+- **Declaration order is load-bearing.** It must outlive every span this
+  instance can emit, so it is declared to destroy LAST. The final detach also
+  cancels and JOINS the auto-flush timer, which is what makes plug-in module
+  unload safe — a detached timer thread that wakes after `FreeLibrary` /
+  `dlclose` runs freed code.
+
+No-op unless the build is configured `PULP_TRACING=ON`.

@@ -386,6 +386,81 @@ class FreezeUnitTests(unittest.TestCase):
                 mapping(),
             )
 
+    def test_uncovered_slice_error_names_the_slice_paths_and_the_fix(self):
+        # The bare invariant named neither the slice nor the paths, so a reader
+        # had no route from the failure to a fix — and an unactionable gate gets
+        # ignored. Everything needed to write the event must be in the message.
+        with self.assertRaises(freeze.FreezeError) as caught:
+            freeze._validate_event_coverage(
+                [],
+                {
+                    "retained-ui-kernel": [
+                        "core/view/src/view.cpp",
+                        "core/view/src/window.cpp",
+                    ]
+                },
+                set(),
+                None,
+                None,
+                mapping(),
+            )
+        message = str(caught.exception)
+        self.assertIn("retained-ui-kernel", message)
+        self.assertIn("core/view/src/view.cpp", message)
+        self.assertIn("core/view/src/window.cpp", message)
+        self.assertIn(freeze.EVENT_PREFIX, message)
+        self.assertIn("docs/contracts/vellum-extraction-freeze.md", message)
+        for disposition in freeze.CHANGE_DISPOSITIONS:
+            self.assertIn(disposition, message)
+
+    def test_unexpected_slice_error_names_the_slice_and_not_a_missing_fix(self):
+        event = change_event("20260722-pulp-only")
+        with self.assertRaises(freeze.FreezeError) as caught:
+            freeze._validate_event_coverage(
+                [("event.json", event)],
+                {},
+                set(),
+                None,
+                None,
+                mapping(),
+            )
+        message = str(caught.exception)
+        self.assertIn("design-ir", message)
+        self.assertIn("no changed path", message)
+        # Nothing is uncovered here, so the add-an-event remedy would mislead.
+        self.assertNotIn("Fix: add one event", message)
+
+    def test_duplicate_slice_error_reports_the_claim_count(self):
+        first = change_event("20260722-pulp-only")
+        second = change_event("20260722-backport")
+        second.update({"disposition": "framework-backport", "framework_commit": "c" * 40})
+        with self.assertRaises(freeze.FreezeError) as caught:
+            freeze._validate_event_coverage(
+                [("first.json", first), ("second.json", second)],
+                {"design-ir": ["core/view/src/design_ir_json.cpp"]},
+                set(),
+                None,
+                None,
+                mapping(),
+            )
+        message = str(caught.exception)
+        self.assertIn("design-ir", message)
+        self.assertIn("claimed 2 times", message)
+
+    def test_authority_coverage_error_names_the_untransferred_slices(self):
+        with self.assertRaises(freeze.FreezeError) as caught:
+            freeze._validate_event_coverage(
+                [],
+                {},
+                {"design-ir"},
+                "b" * 40,
+                "activate",
+                mapping(),
+            )
+        message = str(caught.exception)
+        self.assertIn("design-ir", message)
+        self.assertIn("without an authority event", message)
+
     def test_historical_emergency_document_remains_parseable_after_expiry(self):
         event = change_event("20260722-replay")
         event.update({
@@ -831,6 +906,58 @@ class FreezeGitIntegrationTests(unittest.TestCase):
         self._git("mv", "core/view/src/design_ir_json.cpp", "outside.cpp")
         head = self._commit("rename out of slice")
         self.assertEqual(self._run(head), 1)
+
+    def _diverged_branch_with_event_only_on_base(self) -> str:
+        """A branch forked before the base branch gained a change event.
+
+        Reproduces the shape every real PR has: the base branch moves while the
+        branch is open, and the commit it moved by adds an append-only change
+        event the branch never saw.
+        """
+        self._git("checkout", "-q", "-b", "mainline", self.base)
+        self._write(
+            ".github/vellum-change-events/20260723-base-side.json",
+            change_event("20260723-base-side"),
+        )
+        self._git("update-ref", "refs/remotes/origin/main", self._commit("base-side event"))
+        self._git("checkout", "-q", "-b", "topic", self.base)
+        self._write("core/view/src/design_ir_json.cpp", "after\n")
+        self._write(
+            ".github/vellum-change-events/20260722-design-fix.json", change_event()
+        )
+        return self._commit("classified change")
+
+    def test_base_branch_tip_reports_base_side_event_as_a_deletion(self):
+        # The intuitive `--base origin/main` invocation: a two-dot diff against
+        # the moved tip reads the base-side event as a deletion the branch made.
+        head = self._diverged_branch_with_event_only_on_base()
+        self.assertEqual(
+            freeze.main([
+                "--repo", str(self.repo),
+                "--base", "origin/main",
+                "--head", head,
+                "--output", str(self.repo / "outbox.json"),
+            ]),
+            1,
+        )
+
+    def test_fork_point_default_matches_the_gate(self):
+        # Same branch, no --base: diffing from the fork point sees only what the
+        # branch changed, which is what CI compares.
+        head = self._diverged_branch_with_event_only_on_base()
+        self.assertEqual(
+            freeze.main([
+                "--repo", str(self.repo),
+                "--head", head,
+                "--output", str(self.repo / "outbox.json"),
+            ]),
+            0,
+        )
+        outbox = json.loads((self.repo / "outbox.json").read_text())
+        self.assertEqual(
+            [ref["path"] for ref in outbox["event_refs"]],
+            [".github/vellum-change-events/20260722-design-fix.json"],
+        )
 
 
 if __name__ == "__main__":

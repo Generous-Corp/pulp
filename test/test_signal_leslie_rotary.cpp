@@ -1,5 +1,7 @@
 #include "harness/leslie_test_support.hpp"
 
+#include <numbers>
+
 // ── 1. Doppler ────────────────────────────────────────────────────────────
 
 TEST_CASE("the rotating source produces the Doppler depth its geometry implies",
@@ -357,9 +359,11 @@ TEST_CASE("the mic pair produces a real stereo image, not a doubled mono",
         const std::size_t skip = el.size() / 5;
         double phase = std::arg(coherent(er, Leslie::kHornFastHz, dr.rate_hz, skip)) -
                        std::arg(coherent(el, Leslie::kHornFastHz, dl.rate_hz, skip));
-        while (phase > M_PI) phase -= kTwoPi;
-        while (phase < -M_PI) phase += kTwoPi;
-        return std::abs(phase) * 180.0 / M_PI;
+        while (phase > std::numbers::pi)
+            phase -= kTwoPi;
+        while (phase < -std::numbers::pi)
+            phase += kTwoPi;
+        return std::abs(phase) * 180.0 / std::numbers::pi;
     };
 
     // The default: the two tremolos are the mic angle apart in rotor phase.

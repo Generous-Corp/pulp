@@ -98,6 +98,12 @@ const std::set<std::string>& allowed_kinds() {
         "function",
         "host_object",
         "promise_function",
+        // A public JS global defined in the bridge preamble rather than
+        // registered natively. Required whenever the API takes a callback:
+        // CHOC's NativeFunction cannot carry a JSValue, so those must be a JS
+        // shim over a native primitive. Tracked here so a preamble API cannot
+        // ship invisible to the generated docs and @pulp/react typings.
+        "preamble_function",
     };
     return kinds;
 }
@@ -227,6 +233,23 @@ std::vector<RegistrationSite> widget_bridge_registrations(const std::string& sou
             source_path,
             line_number_at(source, static_cast<size_t>((*it).position())),
             false,
+        });
+    }
+
+    // Public preamble globals: a `function name(` definition inside the JS the
+    // bridge evaluates. Names starting with `__` are preamble-internal helpers
+    // (__dispatch__, __invokeTimer__, ...), not API, so they are excluded.
+    const std::regex preamble_pattern("function\\s+([A-Za-z_$][A-Za-z0-9_$]*)\\s*\\(");
+
+    for (std::sregex_iterator it(source.begin(), source.end(), preamble_pattern), end; it != end; ++it) {
+        const auto name = (*it)[1].str();
+        if (name.rfind("__", 0) == 0) continue;
+        out.push_back({
+            name,
+            "preamble_function",
+            source_path,
+            line_number_at(source, static_cast<size_t>((*it).position())),
+            true,
         });
     }
 

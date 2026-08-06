@@ -577,7 +577,28 @@ void SkiaCanvas::set_fill_color(Color c) {
     gradient_shader_ = nullptr;
 }
 void SkiaCanvas::set_stroke_color(Color c) { stroke_color_ = c; }
-void SkiaCanvas::set_line_width(float w) { line_width_ = w; }
+// Text geometry a glyph outline can survive.
+//
+// Skia converts a glyph to a path and strokes it whenever the text paint is
+// stroked. A non-finite or absurd size makes that path's allocation
+// pathological, and the failure is not an exception we can catch: it lands in
+// libsystem_malloc's cold path and SIGTRAPs the process. In a plugin that
+// takes the host DAW down with it, so a scripted UI must not be able to reach
+// it by assigning ctx.lineWidth or a computed font size.
+//
+// Ignoring a non-finite value rather than substituting one matches Canvas2D,
+// which specifies that assigning a non-finite lineWidth leaves the previous
+// value in place. The upper clamp is ours: no plugin UI needs a 4096px glyph,
+// and the alternative to clamping is aborting.
+namespace {
+constexpr float kMaxTextGeometryPx = 4096.0f;
+bool usable_text_geometry(float v) { return std::isfinite(v) && v > 0.0f; }
+}  // namespace
+
+void SkiaCanvas::set_line_width(float w) {
+    if (!usable_text_geometry(w)) return;  // Canvas2D: invalid is ignored
+    line_width_ = std::min(w, kMaxTextGeometryPx);
+}
 
 void SkiaCanvas::set_line_cap(LineCap cap) {
     line_cap_ = cap;
@@ -818,13 +839,13 @@ void SkiaCanvas::stroke_path(const Point2D* points, size_t count) {
 // FillRule::evenodd and as a disc under FillRule::nonzero — the same split
 // fill_current_path() has always honored. Degenerate input (null, or fewer
 // than three points — no enclosed area) draws nothing, matching
-// CgCanvas::fill_path.
+// CgCanvas::fill_path. The rule goes to SkPathBuilder's CONSTRUCTOR — the inline
+// `setFillType` is a no-op against the pinned libskia.a (`skia-gpu-build` skill).
 void SkiaCanvas::fill_path(const Point2D* points, size_t count, FillRule rule) {
     GUARD_CANVAS;
     if (!points || count < 3) return;
-    SkPathBuilder builder;
-    builder.setFillType(rule == FillRule::evenodd ? SkPathFillType::kEvenOdd
-                                                  : SkPathFillType::kWinding);
+    SkPathBuilder builder(rule == FillRule::evenodd ? SkPathFillType::kEvenOdd
+                                                    : SkPathFillType::kWinding);
     builder.moveTo(points[0].x, points[0].y);
     for (size_t i = 1; i < count; ++i)
         builder.lineTo(points[i].x, points[i].y);
@@ -839,7 +860,10 @@ void SkiaCanvas::set_line_dash(const float* intervals, int count, float phase) {
 
 void SkiaCanvas::set_font(const std::string& family, float size) {
     font_family_ = family;
-    font_size_ = size;
+    // Same reasoning as set_line_width: an unusable size must not reach the
+    // glyph-to-path stroker.
+    if (usable_text_geometry(size))
+        font_size_ = std::min(size, kMaxTextGeometryPx);
     // Reset rich state so a legacy set_font() call doesn't carry a previous
     // weight/slant/spacing forward unexpectedly.
     font_weight_ = SkFontStyle::kNormal_Weight;
@@ -850,7 +874,8 @@ void SkiaCanvas::set_font(const std::string& family, float size) {
 void SkiaCanvas::set_font_full(const std::string& family, float size,
                                int weight, int slant, float letter_spacing) {
     font_family_ = family;
-    font_size_ = size;
+    if (usable_text_geometry(size))
+        font_size_ = std::min(size, kMaxTextGeometryPx);
     font_weight_ = weight;
     font_slant_ = slant;
     letter_spacing_ = letter_spacing;

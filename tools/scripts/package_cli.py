@@ -149,8 +149,36 @@ def find_wgpu_lib(build_dir: Path, platform: str) -> Path | None:
     return candidates[0]
 
 
+def resign_macos(binary: Path) -> None:
+    """Ad-hoc sign one staged Mach-O product, failing closed when available."""
+    codesign = os.environ.get("CODESIGN", "codesign")
+    # shutil.which() resolves both a bare command on PATH AND an absolute path
+    # (returning None if that absolute path doesn't exist or isn't executable),
+    # so it is the complete guard. A prior `or os.path.isabs(codesign)` made a
+    # NON-EXISTENT absolute CODESIGN look usable, then `subprocess.run(...,
+    # check=False)` raised an uncaught FileNotFoundError (check=False suppresses
+    # only non-zero exits, not a missing executable) — crashing the packager
+    # instead of taking the intended skip-with-note path.
+    if shutil.which(codesign):
+        print("  ad-hoc signing staged Mach-O product", flush=True)
+        result = subprocess.run(
+            [codesign, "--force", "--sign", "-", str(binary)])
+        if result.returncode != 0:
+            # FATAL, not swallowed. The release validator requires every
+            # executable and bundled dylib in a Darwin archive to carry a valid
+            # native signature.
+            raise SystemExit(
+                f"FAIL: codesign of {binary} failed "
+                f"(exit {result.returncode}); refusing to package an unsigned "
+                "Mach-O product.")
+    else:
+        print(f"  note: '{codesign}' not found — skipping ad-hoc re-sign; "
+              "the Darwin archive will fail native-signature verification",
+              flush=True)
+
+
 def fix_rpath_macos(binary: Path) -> None:
-    """Drop every absolute LC_RPATH and add @loader_path.
+    """Drop every absolute LC_RPATH, add @loader_path, and re-sign.
 
     Honors `OTOOL` and `INSTALL_NAME_TOOL` environment overrides so
     Linux-hosted darwin cross builds can run this packager with the
@@ -196,44 +224,8 @@ def fix_rpath_macos(binary: Path) -> None:
         check=False,
     )
 
-    # Re-sign ad-hoc. Every install_name_tool write above INVALIDATES the
-    # binary's code signature, and on Apple Silicon a binary with a stale
-    # signature is SIGKILL'd ("killed: 9", exit 137) the instant it launches.
-    # GitHub-hosted never hit this because its cargo build produced no absolute
-    # LC_RPATHs to strip (a no-op rewrite leaves the original signature
-    # intact); the self-hosted Studio build bakes in absolute rpaths, so the
-    # rewrite is real and the unsigned result fails the `pulp help` smoke test
-    # (2026-06-10 release thread). Honor a CODESIGN env override so a
-    # Linux-hosted darwin cross-build can point at the llvm/cctools
-    # equivalent; skip with a clear note when no codesign tool is available.
-    codesign = os.environ.get("CODESIGN", "codesign")
-    # shutil.which() resolves both a bare command on PATH AND an absolute path
-    # (returning None if that absolute path doesn't exist or isn't executable),
-    # so it is the complete guard. A prior `or os.path.isabs(codesign)` made a
-    # NON-EXISTENT absolute CODESIGN look usable, then `subprocess.run(...,
-    # check=False)` raised an uncaught FileNotFoundError (check=False suppresses
-    # only non-zero exits, not a missing executable) — crashing the packager
-    # instead of taking the intended skip-with-note path.
-    if shutil.which(codesign):
-        print("  re-signing (ad-hoc) after rpath rewrite", flush=True)
-        result = subprocess.run(
-            [codesign, "--force", "--sign", "-", str(binary)])
-        if result.returncode != 0:
-            # FATAL, not swallowed. When codesign IS available the ad-hoc
-            # re-sign is expected to succeed; a failure leaves the binary with
-            # the install_name_tool-invalidated signature, which is SIGKILL'd on
-            # launch (Apple Silicon today, and any future non-arm64 darwin lane
-            # where the downstream `pulp help` smoke gate would NOT catch it —
-            # the gate only reproduces SIGKILL on arm64). Fail here so a broken,
-            # unsigned release binary can never ship regardless of the smoke
-            # lane's architecture.
-            raise SystemExit(
-                f"FAIL: codesign re-sign of {binary} failed "
-                f"(exit {result.returncode}); refusing to ship a binary that "
-                "will be SIGKILL'd on launch.")
-    else:
-        print(f"  note: '{codesign}' not found — skipping ad-hoc re-sign; "
-              "the binary may be SIGKILL'd on Apple Silicon", flush=True)
+    # Every install_name_tool write above invalidates the build-time signature.
+    resign_macos(binary)
 
     # Also rewrite the install_name on the bundled wgpu dylib to use
     # @rpath/<basename> if it's currently absolute; pulp's load command
@@ -285,6 +277,10 @@ def main() -> int:
                    help="Optional pulp-cpp delegate binary (dual-binary tarball).")
     p.add_argument("--mcp-binary", required=False, type=Path, default=None,
                    help="Optional pulp-mcp server binary (#2067 — Claude plugin MCP).")
+    p.add_argument("--import-design-binary", required=False, type=Path, default=None,
+                   help="Optional pulp-import-design delegate binary.")
+    p.add_argument("--import-design-runtime-dir", required=False, type=Path, default=None,
+                   help="Browser-capture .mjs runtime directory bundled with import-design.")
     p.add_argument("--build-dir", required=True, type=Path)
     p.add_argument("--platform", required=True)
     p.add_argument("--out", required=True, type=Path)
@@ -298,6 +294,20 @@ def main() -> int:
         return 2
     if args.mcp_binary is not None and not args.mcp_binary.exists():
         print(f"FAIL: --mcp-binary not at {args.mcp_binary}", file=sys.stderr)
+        return 2
+    if args.import_design_binary is not None and not args.import_design_binary.exists():
+        print(f"FAIL: --import-design-binary not at {args.import_design_binary}",
+              file=sys.stderr)
+        return 2
+    if ((args.import_design_binary is None) !=
+            (args.import_design_runtime_dir is None)):
+        print("FAIL: import-design binary and runtime directory must be supplied together",
+              file=sys.stderr)
+        return 2
+    if (args.import_design_runtime_dir is not None and
+            not args.import_design_runtime_dir.is_dir()):
+        print(f"FAIL: --import-design-runtime-dir not at {args.import_design_runtime_dir}",
+              file=sys.stderr)
         return 2
 
     is_windows = args.platform.startswith("windows-")
@@ -337,10 +347,40 @@ def main() -> int:
             names.append(mcp_name)
             print(f"bundled: {args.mcp_binary} -> {mcp_name}", flush=True)
 
+        staged_import: Path | None = None
+        if args.import_design_binary is not None:
+            import_name = "pulp-import-design.exe" if is_windows else "pulp-import-design"
+            staged_import = stage_binary(
+                args.import_design_binary, stage, import_name, is_windows)
+            files.append(staged_import)
+            names.append(import_name)
+            runtime_manifest = (
+                Path(__file__).resolve().parents[1]
+                / "import-design" / "browser_capture" / "runtime_manifest.txt"
+            )
+            runtime_names = tuple(
+                line.strip()
+                for line in runtime_manifest.read_text(encoding="utf-8").splitlines()
+                if line.strip() and not line.lstrip().startswith("#")
+            )
+            for runtime_name in runtime_names:
+                runtime_file = args.import_design_runtime_dir / runtime_name
+                if not runtime_file.is_file():
+                    print(f"FAIL: browser-capture runtime missing {runtime_file}",
+                          file=sys.stderr)
+                    return 2
+                files.append(runtime_file)
+                names.append(f"browser_capture/{runtime_name}")
+            print(f"bundled: {args.import_design_binary} -> {import_name} "
+                  "with browser_capture runtime", flush=True)
+
         wgpu = find_wgpu_lib(args.build_dir, args.platform)
         if wgpu is not None and wgpu.exists():
             staged_wgpu = stage / wgpu.name
             shutil.copy2(wgpu, staged_wgpu)
+            if is_macos:
+                print("re-signing bundled macOS wgpu runtime", flush=True)
+                resign_macos(staged_wgpu)
             files.append(staged_wgpu)
             names.append(wgpu.name)
             print(f"bundled: {wgpu} -> {wgpu.name}", flush=True)
@@ -373,6 +413,9 @@ def main() -> int:
             if staged_mcp is not None:
                 print("rewriting macOS rpath: pulp-mcp", flush=True)
                 fix_rpath_macos(staged_mcp)
+            if staged_import is not None:
+                print("rewriting macOS rpath: pulp-import-design", flush=True)
+                fix_rpath_macos(staged_import)
         elif is_linux:
             print("rewriting Linux rpath: pulp", flush=True)
             fix_rpath_linux(staged_bin)
@@ -382,6 +425,9 @@ def main() -> int:
             if staged_mcp is not None:
                 print("rewriting Linux rpath: pulp-mcp", flush=True)
                 fix_rpath_linux(staged_mcp)
+            if staged_import is not None:
+                print("rewriting Linux rpath: pulp-import-design", flush=True)
+                fix_rpath_linux(staged_import)
 
         if is_windows:
             write_zip(args.out, files, names)

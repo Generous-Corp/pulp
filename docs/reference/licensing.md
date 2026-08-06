@@ -33,10 +33,35 @@ Tables are sorted alphabetically (case-insensitive) by name. Entries here must s
 
 These packages are npm-installed for design-import tooling and validation. They are not bundled into Pulp's C++ runtime.
 
+Faithful runnable-HTML import can also invoke a user-installed Google Chrome or
+Chromium browser and Node.js 22. Pulp does not bundle, link, or redistribute
+either program with Pulp or generated plugins. The importer launches Chromium with a temporary
+isolated profile, serves only the authorized input folder over tokenized
+loopback HTTP, denies external requests by default, captures the evaluated
+design, and then exits. Generated plugins and applications do not require
+Chrome, Chromium, or Node.
+
 | Name | License | Purpose | Link |
 |------|---------|---------|------|
 | **Babel parser** | MIT | JSX/TSX source-contract extraction for `tools/import-design/jsx-runtime/jsx-contract-audit.mjs` | [github.com/babel/babel/tree/main/packages/babel-parser](https://github.com/babel/babel/tree/main/packages/babel-parser) |
 | **css-tree** | MIT | CSS value parsing and lexer validation for JSX source-contract extraction | [github.com/csstree/csstree](https://github.com/csstree/csstree) |
+
+### Optional Externally Licensed Machine Tools
+
+Pulp can manage a pinned copy of **Google Chrome for Testing** when a developer
+explicitly runs `pulp tool install chrome-for-testing`. It is a separate
+machine-local tool governed by the [Google Chrome Terms of
+Service](https://www.google.com/chrome/terms/), not by Pulp's MIT license.
+Review those terms before installing it.
+
+Pulp downloads the complete official versioned archive from Google's
+Chrome-for-Testing storage, verifies Pulp's committed SHA-256 pin, and installs
+it under `$PULP_HOME/tools/chrome-for-testing/`. It is not part of a Pulp
+release archive, SDK, plugin, or generated application. Design import never
+downloads it silently; system Chrome/Chromium remains sufficient, and the
+managed copy is used only after explicit installation. Normal agent operation
+does not require a special enable switch: the user-visible `pulp tool install`
+command is the opt-in action.
 
 ### Design Formats and Test Fixtures
 
@@ -44,17 +69,18 @@ Pulp adopts Google's [DESIGN.md](https://github.com/google-labs-code/design.md) 
 
 | Name | License | Purpose | Link |
 |------|---------|---------|------|
-| **DESIGN.md format spec + `paws-and-paths` fixture** | Apache-2.0 | Design-system interchange format consumed by `pulp import-design --from designmd`; one upstream example file redistributed verbatim as a Pulp test fixture. Pinned at tag `0.3.0`. | [github.com/google-labs-code/design.md @ 0.3.0](https://github.com/google-labs-code/design.md/releases/tag/0.3.0) |
+| **DESIGN.md format spec + `paws-and-paths` fixture** | Apache-2.0 | Design-system interchange format consumed by `pulp import-design --from designmd`; one upstream example file redistributed verbatim as a Pulp test fixture. Pinned at tag `0.4.0`. | [github.com/google-labs-code/design.md @ 0.4.0](https://github.com/google-labs-code/design.md/releases/tag/0.4.0) |
 | **Khronos Box Textured fixture** | LicenseRef-CC-BY-TM + LicenseRef-LegalMark-Cesium | Official glTF Sample Assets `BoxTextured.glb` redistributed as a Scene3D native loader/render test fixture at `test/fixtures/scene3d/BoxTextured/BoxTextured.glb`. | [github.com/KhronosGroup/glTF-Sample-Assets/Models/BoxTextured](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/BoxTextured) |
 
 ### Embedded Fonts
 
-Embedded at build time for deterministic text rendering. Both fonts are redistributed under the SIL OFL 1.1, which explicitly permits bundling in software.
+Embedded at build time for deterministic text rendering. Every font below is redistributed under the SIL OFL 1.1, which explicitly permits bundling in software.
 
 | Name | License | Purpose | Link |
 |------|---------|---------|------|
 | **Inter** | SIL OFL 1.1 | Embedded UI font (`Inter-Regular.ttf`, version `4.001;git-9221beed3`) | [github.com/rsms/inter](https://github.com/rsms/inter) |
 | **JetBrains Mono** | SIL OFL 1.1 | Embedded monospace font (`JetBrainsMono-Regular.ttf`, version `2.304`) | [github.com/JetBrains/JetBrainsMono](https://github.com/JetBrains/JetBrainsMono) |
+| **Jost** | SIL OFL 1.1 | Embedded UI font (`Jost-Regular/Medium/SemiBold/Bold.ttf`, version `3.710`) | [github.com/indestructible-type/Jost](https://github.com/indestructible-type/Jost) |
 | **Noto Color Emoji** | SIL OFL 1.1 | Embedded cross-platform color-emoji typeface (`NotoColorEmoji.ttf`, COLRv1, `noto-emoji main @ 2026-05-17`). Gated by `PULP_BUNDLE_NOTO_COLOR_EMOJI` (defaults ON for Linux/Android/headless, OFF for macOS/Windows where the platform color-emoji typeface is preferred). | [github.com/googlefonts/noto-emoji](https://github.com/googlefonts/noto-emoji) |
 
 ### Plugin Format SDKs
@@ -131,6 +157,7 @@ through explicit opt-in local configuration, and are intentionally absent from
 | Name | License | Purpose | Distribution |
 |------|---------|---------|--------------|
 | **AAX SDK** | Separately licensed by Avid | Optional AAX plugin format support | Developer obtains it independently and points `PULP_AAX_SDK_DIR` at an out-of-tree SDK copy |
+| **Ableton Link** | GPLv2+ or proprietary by arrangement with Ableton | Optional desktop session tempo, beat, phase, and start/stop synchronization | Developer obtains [`Ableton/link`](https://github.com/Ableton/link) independently under suitable rights, keeps it out-of-tree, points `PULP_ABLETON_LINK_SDK_DIR` at it, and sets `PULP_ENABLE_ABLETON_LINK=ON`. Never bundled. |
 | **ARA SDK** | MIT-compatible (Celemony) | Optional ARA 2.x integration (pitch correction, spectral editing, clip-aware workflows) | Developer obtains it independently (`https://github.com/Celemony/ARA_SDK`), keeps it out-of-tree, points `PULP_ARA_SDK_DIR` at it, and sets `PULP_ENABLE_ARA=ON`. Never bundled. |
 | **ASIO SDK** | Proprietary (Steinberg) | Optional ASIO device I/O integration | Developer obtains it independently; never bundled or exported by Pulp |
 
@@ -243,7 +270,9 @@ Pulp implements or builds on these open standards:
 |----------|-------------|---------|
 | [Audio Unit](https://developer.apple.com/documentation/audiounit) | Apple | Plugin format specification |
 | [CLAP](https://cleveraudio.org) | Clever Audio | Plugin format specification |
+| [DAWproject](https://github.com/bitwig/dawproject) | Bitwig | DAW project interchange format (bounded import + export) |
 | [LV2](https://lv2plug.in) | LV2 Community | Plugin format specification |
+| [Standard MIDI File](https://midi.org/standard-midi-files) | MIDI Association | SMF format 0/1 import and export against the tempo map |
 | [MIDI 2.0 UMP](https://www.midi.org/specifications) | MIDI Association | Universal MIDI Packet format |
 | [OSC 1.0](https://opensoundcontrol.stanford.edu) | CNMAT | Open Sound Control messaging |
 | [VST3](https://steinbergmedia.github.io/vst3_dev_portal/) | Steinberg | Plugin format specification |
@@ -253,6 +282,46 @@ Pulp implements or builds on these open standards:
 | [Web MIDI API](https://www.w3.org/TR/webmidi/) | W3C | Browser MIDI access |
 | [WebCLAP](https://github.com/WebCLAP) | WebCLAP | Portable CLAP plugins via WebAssembly |
 | [WebGPU](https://www.w3.org/TR/webgpu/) | W3C | GPU rendering API |
+
+!!! note "DAWproject and SMF: specifications, not fetched code"
+
+    Listing a standard here does **not** by itself say whether Pulp uses a
+    vendor SDK for it — several do. VST3 ships against the Steinberg SDK, Audio
+    Unit against Apple's AudioUnitSDK, and CLAP is fetched via FetchContent;
+    those are covered under [Plugin Format SDKs](#plugin-format-sdks) and carry
+    their own attribution.
+
+    **DAWproject** and **Standard MIDI File** are different: Pulp implements
+    both **directly from their published specifications**. It fetches no SDK,
+    vendors no source, and bundles no schema for either, so neither carries a
+    `NOTICE.md` entry or a `DEPENDENCIES.md` row — there is nothing third-party
+    being redistributed. That is why they are not under [Optional
+    Fetched Third-Party
+    Integrations](#optional-fetched-third-party-integrations), where the
+    distinguishing fact is that Pulp *does* redistribute the dependency through
+    the build.
+
+    Pulp's DAWproject reader and writer are its own code over
+    [pugixml](https://github.com/zeux/pugixml) (MIT, already a core dependency
+    and attributed as one). Support is a deliberately **bounded, fail-closed
+    subset**, not full-format coverage:
+
+    - **Import** accepts flat, beats-timed note and audio tracks. Nested groups,
+      warps, seconds-timed lanes, and any construct outside the subset **fail the
+      import** rather than being silently dropped.
+    - **Export** emits flat tracks, beats-timed clips, inline notes, referenced
+      audio, and a single tempo and meter — plus an in-band loss manifest inside
+      the package. Everything outside that subset (markers, clip gain and fades,
+      embedded media, mixer state, automation, devices, take lanes, freeze) is
+      declared lost in the capability table and **refused unless the caller
+      accepts each concept by name**. There is no force flag.
+    - A **neutral channel** (unity volume, centre pan) is written so a receiving
+      DAW registers the track. That is not an export of authored mixer state,
+      which is still reported as dropped.
+
+    Concept-by-concept status is in the [interchange
+    matrix](interchange-matrix.md); the API is in the [Timeline
+    SDK](../guides/timeline-sdk.md#optional-dawproject-exporter).
 
 Pulp's JS/React UI layer also targets the web-platform standards below. These
 are implemented as a deliberate, tracked **subset** (Pulp is Flexbox + Grid only

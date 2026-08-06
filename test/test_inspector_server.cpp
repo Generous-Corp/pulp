@@ -2,6 +2,7 @@
 
 #include <pulp/events/interprocess_connection.hpp>
 #include <pulp/inspect/inspector_server.hpp>
+#include "unsafe_legacy_inspector_server.hpp"
 #include <pulp/inspect/protocol.hpp>
 #include <pulp/runtime/socket.hpp>
 
@@ -24,13 +25,19 @@
 #ifdef _WIN32
 #include <process.h>
 #else
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <unistd.h>
 #endif
 
 using pulp::events::InterprocessConnection;
 using pulp::events::IpcTransport;
 using pulp::inspect::InspectorMessage;
-using pulp::inspect::InspectorServer;
+using InspectorServer =
+    pulp::inspect::test::UnsafeLegacyInspectorServer;
 using pulp::inspect::decode_message;
 using pulp::inspect::encode_message;
 using pulp::inspect::make_error;
@@ -202,6 +209,7 @@ TEST_CASE("InspectorServer starts on an explicit port and writes discovery file"
     REQUIRE(contents == std::to_string(*port));
 
     server.stop();
+    REQUIRE_FALSE(std::filesystem::exists(file));
     server.stop();
     std::filesystem::remove_all(tmp);
 }
@@ -224,7 +232,7 @@ TEST_CASE("InspectorServer pre-start operations are inert",
         make_event("Inspector.noClientsAfterHandler", R"({"ok":true})")));
 }
 
-TEST_CASE("InspectorServer honors PULP_INSPECTOR_PORT when starting with zero",
+TEST_CASE("InspectorServer uses an OS-assigned port and ignores global port state",
           "[inspect][server]") {
     auto candidate = find_bindable_port();
     REQUIRE(candidate.has_value());
@@ -237,21 +245,26 @@ TEST_CASE("InspectorServer honors PULP_INSPECTOR_PORT when starting with zero",
     tmpdir.set(tmp.string());
     port_env.set(std::to_string(*candidate));
 
+    Socket reserved;
+    REQUIRE(reserved.create(SocketType::TCP));
+    REQUIRE(reserved.bind("127.0.0.1", *candidate));
+
     InspectorServer server;
     REQUIRE(server.start(0));
-    REQUIRE(server.port() == *candidate);
+    REQUIRE(server.port() != 0);
+    REQUIRE(server.port() != *candidate);
 
     const auto file = inspector_port_file(tmp);
     std::ifstream in(file);
     std::string contents;
     in >> contents;
-    REQUIRE(contents == std::to_string(*candidate));
+    REQUIRE(contents == std::to_string(server.port()));
 
     server.stop();
     std::filesystem::remove_all(tmp);
 }
 
-TEST_CASE("InspectorServer ignores malformed PULP_INSPECTOR_PORT values",
+TEST_CASE("InspectorServer ephemeral start is unaffected by malformed port state",
           "[inspect][server]") {
     const auto tmp = std::filesystem::temp_directory_path() /
                      ("pulp-inspector-invalid-env-test-" +
@@ -263,18 +276,14 @@ TEST_CASE("InspectorServer ignores malformed PULP_INSPECTOR_PORT values",
     port_env.set("not-a-port");
 
     InspectorServer server;
-    if (!server.start(0)) {
-        std::filesystem::remove_all(tmp);
-        SKIP("default inspector port is already in use");
-    }
-
-    REQUIRE(server.port() == 9147);
+    REQUIRE(server.start(0));
+    REQUIRE(server.port() != 0);
 
     const auto file = inspector_port_file(tmp);
     std::ifstream in(file);
     std::string contents;
     in >> contents;
-    REQUIRE(contents == "9147");
+    REQUIRE(contents == std::to_string(server.port()));
 
     server.stop();
     std::filesystem::remove_all(tmp);
@@ -643,5 +652,81 @@ TEST_CASE("InspectorServer stop disconnects clients and is idempotent after acti
 
     server.stop();
     REQUIRE(server.client_count() == 0);
-    REQUIRE(server.port() == *port);
+    REQUIRE(server.port() == 0);
+}
+
+// ── Transport reachability ───────────────────────────────────────────────────
+//
+// The inspector protocol has no authentication and exposes Runtime.evaluate, so
+// where it binds decides whether "debug port" or "remote code execution in the
+// host process" is the accurate description. InterprocessConnectionServer binds
+// all interfaces when handed a bare port — deliberate for that general-purpose
+// class, wrong for this one — so InspectorServer qualifies the endpoint.
+
+namespace {
+
+#ifndef _WIN32
+// First non-loopback IPv4 on this machine, or nullopt when the host has none
+// (an isolated CI container often does not).
+std::optional<std::string> first_non_loopback_ipv4() {
+    struct ifaddrs* ifs = nullptr;
+    if (getifaddrs(&ifs) != 0 || ifs == nullptr) return std::nullopt;
+    std::optional<std::string> found;
+    for (auto* it = ifs; it != nullptr; it = it->ifa_next) {
+        if (it->ifa_addr == nullptr || it->ifa_addr->sa_family != AF_INET) continue;
+        if ((it->ifa_flags & IFF_LOOPBACK) != 0) continue;
+        if ((it->ifa_flags & IFF_UP) == 0) continue;
+        char buf[INET_ADDRSTRLEN] = {};
+        auto* in4 = reinterpret_cast<struct sockaddr_in*>(it->ifa_addr);
+        if (inet_ntop(AF_INET, &in4->sin_addr, buf, sizeof(buf)) == nullptr) continue;
+        found = std::string(buf);
+        break;
+    }
+    freeifaddrs(ifs);
+    return found;
+}
+#endif
+
+} // namespace
+
+TEST_CASE("unsafe legacy inspector fixture is reachable only on loopback",
+          "[inspect][server][security][legacy]") {
+    const auto tmp = std::filesystem::temp_directory_path() /
+                     ("pulp-inspector-bind-test-" + std::to_string(socket_port_seed()));
+    std::filesystem::create_directories(tmp);
+    ScopedEnv tmpdir(discovery_env_name());
+    tmpdir.set(tmp.string());
+
+    InspectorServer server;
+    auto port = start_inspector_server(server);
+    REQUIRE(port.has_value());
+
+    // POSITIVE CONTROL. If loopback does not connect, the negative below proves
+    // nothing — an unreachable server is trivially unreachable off-box.
+    {
+        Socket loopback;
+        loopback.create(SocketType::TCP);
+        INFO("the inspector must still be reachable on 127.0.0.1:" << *port);
+        REQUIRE(loopback.connect("127.0.0.1", *port));
+    }
+
+#ifdef _WIN32
+    WARN("SKIPPED off-box reachability: no getifaddrs on Windows. The loopback "
+         "control above still ran; the off-box half is unverified here.");
+#else
+    const auto external = first_non_loopback_ipv4();
+    if (!external) {
+        WARN("SKIPPED off-box reachability: this host has no non-loopback IPv4 "
+             "interface, so there is no address to prove unreachable.");
+    } else {
+        Socket off_box;
+        off_box.create(SocketType::TCP);
+        INFO("the inspector must NOT accept connections on " << *external << ':' << *port
+             << " — that transport is unauthenticated and carries Runtime.evaluate");
+        CHECK_FALSE(off_box.connect(*external, *port));
+    }
+#endif
+
+    server.stop();
+    std::filesystem::remove_all(tmp);
 }

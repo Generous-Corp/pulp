@@ -1105,9 +1105,21 @@ registry header. Use the family header that owns the DSP you are exposing:
   `forge_tape_catalog.hpp` for nonlinear/color processors.
 - `forge_dynamics_catalog.hpp` for feed-forward, VCA, FET, and diode-bridge
   compressors.
+- `forge_multiband_catalog.hpp` for the two-band Linkwitz-Riley plus compressor
+  composition, and `forge_sidechain_catalog.hpp` for the two-input compressor
+  whose port 0 is signal and port 1 is the external detector/key.
+- `forge_wavetable_catalog.hpp` for the zero-input, one-output fixed-bank
+  wavetable source. Source-node consumers must preserve that 0 -> 1 shape; do
+  not invent a dummy audio input in an application registry.
 - `forge_effect_modulation_catalog.hpp`, `forge_pitch_catalog.hpp`,
   `forge_space_catalog.hpp`, `forge_synthesis_catalog.hpp`, and
   `forge_sequencing_catalog.hpp` for the remaining Round-2 families.
+
+The sidechain HPF setter resets its biquad when the cutoff changes. Cache the
+last applied cutoff in any baked adapter and call the setter only on an actual
+change; calling it unconditionally per block manufactures a fresh detector
+transient and prevents the HPF state from ever settling. Keep a regression that
+runs enough unchanged blocks for a DC key to disappear through the HPF.
 
 Each header owns its stable type/parameter IDs, declared ranges, and `make_*_node`
 factory. Consumers should use those constants and factories rather than duplicate
@@ -1830,7 +1842,7 @@ it with the index, so adding an unindexed pack or retaining an entry for a
 removed pack fails closed. Downstream consumers should derive their Pulp catalog
 header set from this index instead of maintaining another manual list.
 
-Two things bite when adding a pack:
+Three things bite when adding a pack:
 
 - **A control signal is an ordinary audio port.** The convention across every
   pack is a unipolar `[0, 1]` signal on a normal port — a source declares
@@ -1843,6 +1855,13 @@ Two things bite when adding a pack:
   header is invisible to that check — the nodes exist, nothing reaches them, and
   every test stays green — until the consumer's header list learns about it.
   When you add a pack, add its header to that list in the same change.
+- **Gain metadata belongs to the catalog that owns the DSP.** A downstream
+  registry must call a catalog helper, not reconstruct a bound from engine
+  constants. When the runtime helper depends on sample rate but the registry
+  stores one fixed number, expose a second catalog helper for the all-rate
+  ceiling (for example, `vocoder_all_sample_rates_worst_case_gain()`) and test
+  that it bounds the rate-specific helper. Otherwise DSP math leaks into the
+  importer/generator layer and the two formulas drift independently.
 
 - **The index array is length-typed — bump the size, not just the entry.**
   `kHeaderNames` is a `std::array<std::string_view, N>`, so adding a pack means the
@@ -1973,3 +1992,182 @@ If the duplicated bodies are identical, removing either is behaviour-preserving 
 clang was already using the last. If they differ, clang has been running the
 second and GCC has never compiled it at all, so decide which is correct before
 deleting.
+
+## A custom node declares its latency; it does not dodge it
+
+`CustomNodeType::latency_samples` is a `std::function<int(double sample_rate)>`,
+evaluated once off the audio thread at compile/lower time and fed into both the
+legacy and routed PDC plans. It is rate-taking rather than a fixed count because
+the two things that usually need it — a lookahead quoted in milliseconds, and an
+oversampler's half-band group delay — resolve differently per rate.
+
+Before it existed, a node with intrinsic delay had one option: remove the delay.
+The Forge drum catalog did exactly that, forcing every voice's output stage to
+`bypass` so it could keep the zero-latency contract. That workaround outlived
+its reason by several releases, because the comment explaining it was never
+revisited — it still claimed no latency surface existed.
+
+Worth knowing how that ended, because "the constraint is gone, so lift the
+workaround" turned out to be wrong: measured, the oversampled path was a net
+loss at the shipped defaults. Every nonlinear stage is inactive by default
+(drive 0, fold 0, quantiser at 24 bits), so the signal made a pure half-band
+round trip and paid the FIR's linear-phase pre-ringing for a stage doing
+nothing to it — about -0.1 dB above 8 kHz gained, against a material attack
+smear on the voices whose character is dense transients. The node still
+bypasses, but now it says so on evidence and derives its declared latency from
+that one choice, so flipping it cannot leave a stale number behind.
+
+The general lesson: removing a workaround is a behaviour change and wants the
+same measurement any other behaviour change would. `tools/audio/quality-lab`
+(`compare a.wav b.wav --profile transient-integrity --align latency`) is what
+caught it; `--align latency` matters, because the delay you just introduced
+will otherwise read as a difference all by itself.
+
+Two things to know when wiring it up:
+
+- **Where the value is captured depends on how the node runs.** The live compile
+  only records latency for a node that has a live callback
+  (`custom_processors.contains(id) && type->latency_samples`) — a node with no
+  live callback is transparent on the live graph and must not add delay there.
+  A **baked-only** node (`create` + `process_instance_baked_param`, no `process`)
+  therefore reports 0 from `SignalGraph::live_custom_latency_samples` and carries
+  its latency through lowering into `BakedGraphProcessor` instead. Asserting on
+  the wrong one of those two paths looks like the feature is broken.
+- **Derive the number, never restate it.** The latency the host compensates and
+  the latency the DSP introduces have to be the same value. If a node names its
+  quality/lookahead in one place and its latency in another, they drift the
+  moment either default moves, and nothing fails — the drum sits a few dozen
+  samples off every undelayed path beside it. Name the choice once
+  (`OutputStage::kDefaultOversampling`) and compute the latency from it.
+
+## Refusing a control is the last resort, not the first
+
+A catalog node that cannot honour a control has two honest options: make the
+control mean something, or do not declare it. Refusing a *declared* control is
+the worst of the three, and it is the one that looks most rigorous.
+
+The case that made this concrete: the bridged-T kick has no frequency
+parameter — its pitch is a property of the network — so a `tune_hz` macro on
+that body was refused with an accurate, actionable message. The message was
+correct and the behaviour was wrong. A kick that cannot be tuned is not what
+anyone asking for an 808 kit means, and "an 808 style kit" failed to build
+because of it: the model generated the natural graph, was refused, regenerated,
+and the attempt budget ran out. The refusal taught the user our implementation
+detail instead of serving the request.
+
+The control was implementable the whole time. The network retunes by
+substituting capacitors, exactly as the hardware does; scaling both arms moves
+the centre frequency and leaves Q invariant. The header had even said so —
+"scaling both arms therefore retunes the drum while leaving Q exactly
+invariant, which is the signature a tune control has to reproduce" — describing
+a control nobody had built.
+
+So when a node cannot honour a control, ask in this order:
+
+1. **Can the underlying model express it another way?** Physical models usually
+   can: a frequency is some function of the components, a time is some function
+   of a decay coefficient. Solve the inverse. That is a real control, and the
+   parameter-efficacy gate will then pass it honestly.
+2. **If genuinely impossible, do not declare it.** An emergent behaviour — the
+   circuit kick's pitch droop — is not a control, and declaring one would be a
+   dead knob.
+3. **Only refuse when the pairing is expressible but wrong**, and then teach the
+   refusal wherever the capability is advertised. An untaught refusal is a retry
+   loop that costs a generation budget, not a guardrail.
+
+## `ExecutorSnapshotBinders` is a designated-initializer aggregate
+
+`build_executor_snapshot()` takes its collaborators as an
+`ExecutorSnapshotBinders` aggregate, filled in `SignalGraph` with designated
+initializers. Two rules bind when you add or move a binder:
+
+* **Designators must stay in member-declaration order**, and no member may be
+  named twice. Clang accepts violations of both; **MSVC rejects them** with
+  `C7560`, so the mistake is invisible on the required macOS gate and takes out
+  `pulp-host` — and therefore every Windows plug-in — instead.
+* A duplicated binder is what a merge conflict resolution produces here, because
+  the blocks are long lambdas that diff poorly. `main` carried a byte-identical
+  duplicate of `.custom_latency_for` for exactly that reason.
+
+`tools/scripts/designated_initializer_lint.py` guards the duplicate case; adding
+a binder out of order is still only caught by an MSVC build.
+
+## A Forge-exposed parameter needs a descriptor, not just a baked range
+
+`CustomNodeBakedParam` carries id, min, max and default — everything the audio
+graph needs, and nothing an agent choosing the node can read. The rest of the
+vocabulary (stable key, label, unit, stepped-vs-continuous, named states,
+description, and the finite construction axes) lives in
+`ForgeNodeDescriptor` (`pulp/host/forge_param_descriptor.hpp`), authored as an
+`inline ForgeNodeDescriptor descriptor()` next to the node it describes.
+`forge_fuzz_catalog.hpp` is the worked example.
+
+Two rules that are easy to get wrong:
+
+- **Descriptors carry no range or default.** Those are joined from the baked
+  node at export time so a number exists in exactly one place. Adding them back
+  reintroduces the drift the descriptor was built to end.
+- **A parameter absent on some realizations is expressed with
+  `realization_modes`, not by dropping it.** Some families deliberately omit a
+  control that would be inert (an Ampex deck has no selectable EQ standard), and
+  an inert control presented as live is a worse answer than an absent one.
+- **A named choice that exists only on some realizations carries its own
+  `realization_modes`.** Tape EQ is the worked example: Studer exposes NAB/CCIR
+  while cassette exposes Type I/II. A single unscoped four-choice list lies
+  about both baked ranges.
+- **Each concrete realization explicitly selects every finite axis.** Do not
+  make a consumer parse an opaque mode like `silicon_x4`; its `settings` pairs
+  machine keys (`device=silicon`, `oversampling=x4`) with the exact `type_id`.
+
+`audit_forge_descriptor()` joins descriptors against the node in both
+directions, so a node that gains a control with no descriptor fails as loudly
+as a descriptor for a control that was removed — the two ways a catalog goes
+quietly stale. `tools/scripts/forge_descriptor_coverage.py` holds the other
+half: its independent 77-key semantic manifest must agree with the 19-pack
+index, descriptor sources, expected-node inventory, and explicit export
+registrations. There is no `PENDING` escape hatch, so a newly indexed pack
+cannot land undescribed.
+
+`forge_catalog_export_nodes()` is the runtime projection used by
+`pulp forge catalog export`. It constructs each registered semantic node and
+copies `baked_params` beside its descriptor; JSON serialization joins by
+`ParamID` and realization, so each `min`/`max`/`default` always comes from that
+concrete DSP declaration rather than one representative preset.
+`audit_forge_catalog_export()` checks both descriptor parity and an independent
+expected-node inventory. Keep the missing-node negative control: removing a
+registry entry must fail instead of emitting a shorter, superficially valid
+document. SDK installs carry the checked projection at
+`share/pulp/forge-catalog.json`; consumers read it from the selected SDK.
+
+Treat that JSON as a published v1 contract, not a regenerable implementation
+detail:
+
+- Preserve existing realization mode keys, axis tokens, axis numeric values,
+  and type IDs. Additive realizations may introduce new identities, but changing
+  an existing one requires an explicit schema migration.
+- Axis declarations name construction dimensions; the concrete `realizations`
+  list is the authoritative supported finite subset, not an implied Cartesian
+  product. Keep it aligned with the registrations the consumer can instantiate.
+- Computed realization modes and type IDs must be owned strings. A descriptor
+  built from factory-generated IDs cannot retain `string_view`s into temporary
+  nodes.
+- A realization-specific baked contract must describe effective DSP behavior
+  after construction-time constraints. For example, a through-zero flanger
+  whose fixed offset clamps modulation depth exports that offset as its maximum
+  depth instead of advertising values the DSP collapses.
+
+## A live-swap test must wait for the swap, not budget for it
+
+`begin_swap_edit()` / `prepare_swap()` are control-thread calls, so a test that
+proves the no-silence contract runs them on a worker while the main thread
+renders. Nothing orders that worker's first iteration before a fixed render
+budget runs out. On a loaded machine the whole budget can be spent before the
+worker is ever scheduled, leaving every swap counter at zero — which reads as
+"`prepare_swap` never published", a `SignalGraph` regression, when the swap
+path was never entered at all.
+
+Assert on the worker's progress, not on the render budget: spend the budget,
+then keep rendering until a swap outcome is observed, under a deadline so a
+graph that genuinely never swaps fails the check instead of hanging. The same
+shape applies to any `SignalGraph` test whose assertion depends on a second
+thread having reached a specific call.

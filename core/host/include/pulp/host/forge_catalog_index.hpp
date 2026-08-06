@@ -23,19 +23,22 @@
 #include <pulp/host/forge_fuzz_catalog.hpp>
 #include <pulp/host/forge_lofi_catalog.hpp>
 #include <pulp/host/forge_modulation_catalog.hpp>
+#include <pulp/host/forge_multiband_catalog.hpp>
 #include <pulp/host/forge_pitch_catalog.hpp>
 #include <pulp/host/forge_saturator_catalog.hpp>
 #include <pulp/host/forge_sequencing_catalog.hpp>
+#include <pulp/host/forge_sidechain_catalog.hpp>
 #include <pulp/host/forge_space_catalog.hpp>
 #include <pulp/host/forge_synthesis_catalog.hpp>
 #include <pulp/host/forge_tape_catalog.hpp>
+#include <pulp/host/forge_wavetable_catalog.hpp>
 
 #include <array>
 #include <string_view>
 
 namespace pulp::host::forge_catalog {
 
-inline constexpr std::array<std::string_view, 17> kHeaderNames{{
+inline constexpr std::array<std::string_view, 20> kHeaderNames{{
     "forge_analog_vcf_catalog.hpp",
     "forge_character_delay_catalog.hpp",
     "forge_distortion_catalog.hpp",
@@ -47,12 +50,15 @@ inline constexpr std::array<std::string_view, 17> kHeaderNames{{
     "forge_fuzz_catalog.hpp",
     "forge_lofi_catalog.hpp",
     "forge_modulation_catalog.hpp",
+    "forge_multiband_catalog.hpp",
     "forge_pitch_catalog.hpp",
     "forge_saturator_catalog.hpp",
     "forge_sequencing_catalog.hpp",
+    "forge_sidechain_catalog.hpp",
     "forge_space_catalog.hpp",
     "forge_synthesis_catalog.hpp",
     "forge_tape_catalog.hpp",
+    "forge_wavetable_catalog.hpp",
 }};
 
 } // namespace pulp::host::forge_catalog

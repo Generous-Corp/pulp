@@ -42,7 +42,7 @@ using namespace Steinberg::Vst;
 namespace {
 
 // Per-note expression types Pulp's VST3 adapter declares to the host when the
-// plug-in opts into MPE. The mapping VST3 type -> MPE dimension is a clean-room
+// plug-in opts into MPE. The mapping VST3 type -> MPE dimension is a independent
 // choice derived from the VST3 note-expression value ranges (ivstnoteexpression.h)
 // and the MPE spec's three per-note axes (pitch bend, pressure, timbre):
 //
@@ -228,16 +228,14 @@ inline void resize_sample_scratch(std::vector<std::vector<float>>& scratch,
 PulpVst3Processor::PulpVst3Processor(ProcessorFactory factory)
     : factory_(factory)
 {
-    // Reference-counted tracing attachment (no-op unless PULP_TRACING=ON).
-    // A plug-in has no main(), so this is where a dev build picks up
-    // $PULP_TRACE_PATH and starts recording; the matching detach() in the
-    // destructor flushes the .pftrace once the last instance goes away.
-    runtime::Tracing::attach();
+    // Tracing attachment is now the RAII `tracing_` member (declared in the
+    // header) rather than a hand-balanced attach/detach pair: an early return
+    // on any future destroy path would have leaked the attachment, and a leaked
+    // attachment means the .pftrace is never flushed — the capture silently
+    // produces nothing. No-op unless PULP_TRACING=ON.
 }
 
-PulpVst3Processor::~PulpVst3Processor() {
-    runtime::Tracing::detach();
-}
+PulpVst3Processor::~PulpVst3Processor() = default;
 
 tresult PLUGIN_API PulpVst3Processor::queryInterface(const TUID iid, void** obj) {
     // Expose the interfaces this subclass adds on top of SingleComponentEffect
@@ -603,44 +601,34 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     // and caches bypass_param_id_. No-op when the accommodation is off.
     maybe_synthesize_bypass(store_, quirks_);
 
-    // Wire gesture callbacks to VST3 host
-    store_.set_gesture_callbacks(
-        [this](state::ParamID id) {
-            editing_params_.insert(id);
-            beginEdit(static_cast<ParamID>(id));
-        },
-        [this](state::ParamID id) {
-            // Report the final value before closing the gesture, so a host that
-            // latches on endEdit records where the control actually landed.
-            if (editing_params_.erase(id) > 0) {
+    // Report EDITOR parameter edits to the host, via the shared provenance
+    // bridge (host_parameter_edit.hpp).
+    //
+    // Why this exists at all: the process() snapshot-diff below only catches
+    // changes made DURING process() (the snapshot is taken at the top of the
+    // block), so a value the editor wrote between two process calls is already
+    // in the snapshot and is never reported. Without this, a knob drag moved
+    // the DSP while the host's own parameter — and therefore automation write,
+    // undo, and any generic UI — stayed frozen at the old value.
+    //
+    // Why the BRIDGE rather than the gesture-inference this replaces: an open
+    // gesture is not evidence that the editor wrote the value. Host automation
+    // arriving while the user holds a knob satisfied that test and was echoed
+    // straight back at the host. The bridge decides on real provenance — the
+    // writing thread plus the explicit ScopedHostParameterWrite scopes below —
+    // and snapshots the normalized value ONCE per reported edit, so
+    // performEdit and setParamNormalized can no longer disagree.
+    edit_bridge_ = std::make_unique<HostParameterEditBridge>(
+        store_,
+        HostParameterEditBridge::Callbacks{
+            [this](state::ParamID id) { beginEdit(static_cast<ParamID>(id)); },
+            [this](state::ParamID id, float normalized) {
                 performEdit(static_cast<ParamID>(id),
-                            static_cast<ParamValue>(store_.get_normalized(id)));
-            }
-            endEdit(static_cast<ParamID>(id));
-        }
-    );
-
-    // Report editor-driven parameter edits to the host.
-    //
-    // The process() snapshot-diff below only catches changes made DURING
-    // process() (the snapshot is taken at the top of the block), so a value the
-    // editor wrote between two process calls is already in the snapshot and is
-    // never reported. Without this listener a knob drag moved the DSP while the
-    // host's own parameter — and therefore automation write, undo, and any
-    // generic UI — stayed frozen at the old value.
-    //
-    // Gated on an OPEN GESTURE so this only ever reports edits the editor is
-    // actually performing: host-driven changes are applied on the audio thread
-    // and have no gesture, so they can never be echoed back at the host.
-    editor_param_listener_ = store_.add_listener(
-        [this](state::ParamID id, float) {
-            if (editing_params_.find(id) == editing_params_.end()) return;
-            performEdit(static_cast<ParamID>(id),
-                        static_cast<ParamValue>(store_.get_normalized(id)));
-            setParamNormalized(static_cast<ParamID>(id),
-                               static_cast<ParamValue>(store_.get_normalized(id)));
-        },
-        state::ListenerThread::Main);
+                            static_cast<ParamValue>(normalized));
+                setParamNormalized(static_cast<ParamID>(id),
+                                   static_cast<ParamValue>(normalized));
+            },
+            [this](state::ParamID id) { endEdit(static_cast<ParamID>(id)); }});
 
     // Add audio buses from descriptor (supports multi-bus: main, sidechain, aux)
     for (const auto& bus : desc.input_buses) {
@@ -2200,6 +2188,15 @@ tresult PLUGIN_API PulpVst3Processor::setState(IBStream* stream) {
         data.insert(data.end(), buf, buf + read_count);
     }
     if (!processor_) return kResultFalse;
+    // A preset/session restore rewrites every parameter on the MAIN thread —
+    // the same thread the editor writes from — so the thread check alone cannot
+    // tell it apart from a user edit. Marking the scope is what stops the whole
+    // restore being echoed back at the host as a burst of editor automation.
+    //
+    // Scoped to cover the setParamNormalized loop below as well, not just the
+    // deserialize: those writes are equally the host's, not the user's.
+    const ScopedHostParameterWrite host_write;
+
     {
         // Hosts call setState while the plug-in is active and rendering, so
         // hold the gate across the restore: acquiring it proves no audio

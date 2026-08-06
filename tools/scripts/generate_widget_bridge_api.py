@@ -72,7 +72,11 @@ DOC_CATEGORY_NOTES = {
 }
 
 CAPABILITY_ORDER = ["exec", "clipboard", "filesystem", "storage", "ai", "runtime_import", "network"]
-CALLABLE_KINDS = {"function", "promise_function"}
+# preamble_function is a public JS global defined in the bridge preamble rather
+# than registered natively: CHOC's NativeFunction cannot carry a JSValue, so any
+# API taking a callback must be a JS shim over a native primitive. It is still a
+# callable the UI author sees, so it types and documents like one.
+CALLABLE_KINDS = {"function", "promise_function", "preamble_function"}
 
 
 @dataclass(frozen=True)
@@ -82,11 +86,6 @@ class ManifestRow:
     kind: str
     source: str
     jsx: str = ""
-
-
-JS_PREAMBLE_ROWS = [
-    ManifestRow("on", "events", "function", "core/view/src/widget_bridge.cpp", "event:names"),
-]
 
 
 TYPE_PREAMBLE = """export {};
@@ -147,6 +146,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "__pulpRuntimeSettle__": "(rounds?: number) => void",
     "__requestFrame__": "(callbackName: string) => number",
     "__cancelFrame__": "(requestId: number) => void",
+    "__bindEvents__": "(source: string) => number",
     "__flushFrames__": "() => void",
     "__motionPublishValue__": "(key: string, value: number) => void",
     "__motionSetProvenance__": "(key: string, source: string) => void",
@@ -155,9 +155,11 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "__cancelTimer__": "(timerId: number) => void",
     "__flushTimers__": "() => void",
     "__performanceNow__": "() => number",
+    "__unbindEvents__": "(id: number) => boolean",
     "animate": "(id: string, property: string, targetValue: number | string, durationMs: number, easingName?: string) => void",
     "applyTokenDiff": "(json: string) => void",
     "beginPath": "() => void",
+    "bindEvents": "(source: string, handler: (events: Array<{frameIndex: number, value: number}>) => void) => number",
     "bindMeter": "(widgetId: string, source: string, transform?: PulpBridgeBindingTransform) => boolean",
     "bindWidgetToParam": "(widgetId: string, paramName: string, transform?: PulpBridgeBindingTransform) => boolean",
     "canvasArc": "(canvasId: string, x: number, y: number, radius: number, startAngle: number, endAngle: number, anticlockwise?: boolean) => void",
@@ -340,6 +342,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "storageGetItem": "(key: string) => string | null",
     "storageRemoveItem": "(key: string) => void",
     "storageSetItem": "(key: string, value: string) => void",
+    "unbindEvents": "(id: number) => boolean",
     "unbindWidget": "(widgetId: string) => number",
     "writeClipboard": "(text: string) => void",
 }
@@ -509,7 +512,7 @@ def read_manifest(root: Path) -> list[ManifestRow]:
 
 
 def api_rows(root: Path) -> list[ManifestRow]:
-    return read_manifest(root) + JS_PREAMBLE_ROWS
+    return read_manifest(root)
 
 
 def read_capability_wire_names(root: Path) -> dict[str, str]:

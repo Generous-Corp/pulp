@@ -142,15 +142,19 @@ class SequenceContentLowerer::Impl {
         std::int64_t right_trim = 0;
         std::size_t note_index = 0;
         std::vector<timeline::NoteEvent> clipped_notes;
+        timeline::ItemId context_sequence_id;
     };
 
     StepResult append(timeline::Clip clip, timeline::ItemId source,
-                      double source_frame_offset = 0.0) {
+                      double source_frame_offset = 0.0, timeline::ItemId context_sequence_id = {},
+                      std::optional<timebase::TickPosition> context_start = std::nullopt) {
         if (expanded_clips_ >= max_expanded_clips_)
             return {.error =
                         SequenceLoweringError{CompileErrorCode::ExpansionBudgetExceeded, source}};
         ++expanded_clips_;
-        output_->push_back({std::move(clip), source_frame_offset});
+        const auto authored_start = context_start.value_or(clip.start());
+        output_->push_back(
+            {std::move(clip), source_frame_offset, context_sequence_id, authored_start});
         return {};
     }
 
@@ -236,6 +240,16 @@ class SequenceContentLowerer::Impl {
         const auto left_trim = clipped_start.value - child.start().value;
         const auto right_trim = child.end().value - clipped_end.value;
         if (std::holds_alternative<timeline::MediaRef>(child.content())) {
+            // A conforming clip maps its complete authored source span onto its
+            // musical placement. The legacy nested-trim path below advances a
+            // raw source-frame offset from elapsed timeline samples, which is
+            // only valid for TimeConform::None. Refuse a partial view until the
+            // renderer owns a conform-aware source-range mapping; otherwise a
+            // nested tempo-ramped clip can silently start at the wrong audio.
+            if (child.time_conform() != timeline::TimeConform::None &&
+                (left_trim != 0 || right_trim != 0))
+                return {.error = SequenceLoweringError{
+                            CompileErrorCode::NestedSequenceUnsupported, child.id()}};
             const auto playback = child.playback_properties();
             const auto retained_start = static_cast<std::uint64_t>(left_trim);
             const auto retained_end =
@@ -291,15 +305,16 @@ class SequenceContentLowerer::Impl {
             right_trim,
             0,
             {},
+            frame.sequence->id(),
         };
-        if (!std::holds_alternative<timeline::NoteContent>(child.content()))
+        if (!std::holds_alternative<timeline::MidiContent>(child.content()))
             return finish_pending_leaf();
         return {};
     }
 
     StepResult step_pending_leaf() {
         auto& pending = *pending_leaf_;
-        const auto& notes = std::get<timeline::NoteContent>(pending.child.content()).notes();
+        const auto& notes = std::get<timeline::MidiContent>(pending.child.content()).notes();
         if (pending.note_index == notes.size())
             return finish_pending_leaf();
         const auto& note = notes[pending.note_index++];
@@ -340,7 +355,15 @@ class SequenceContentLowerer::Impl {
         pending_leaf_.reset();
         timeline::ClipContent content = pending.child.content();
         double source_frame_offset = 0.0;
-        if (const auto* notes = std::get_if<timeline::NoteContent>(&content)) {
+        if (const auto* notes = std::get_if<timeline::MidiContent>(&content)) {
+            const auto* owner = project_.find_sequence(pending.context_sequence_id);
+            if (!owner)
+                return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
+                                                       pending.context_sequence_id}};
+            if ((pending.left_trim != 0 || pending.right_trim != 0) &&
+                !owner->groove().states_no_feel())
+                return {.error = SequenceLoweringError{CompileErrorCode::TrimmedGrooveUnsupported,
+                                                       pending.child.id()}};
             // A nested note clip keeps its modifiers and its authored seed.
             // Rebuilding with the notes alone would leave the notes sounding
             // unconditionally inside a SequenceRef while they honour their
@@ -363,7 +386,17 @@ class SequenceContentLowerer::Impl {
                 if (retained(modifier.note_id))
                     modifiers.push_back(modifier);
             const auto seed = notes->modifier_seed();
-            auto rebuilt = timeline::NoteContent::create(std::move(pending.clipped_notes),
+            // Trimming a nested clip has no defined answer for a controller
+            // lane yet: a point before the retained window can still be the
+            // value that is sounding inside it, so neither dropping nor
+            // carrying it is correct. The named refusal says which decision is
+            // missing; silently rebuilding without the lanes would lower a clip
+            // whose controllers stopped existing.
+            if (!notes->lanes().empty())
+                return {.error =
+                            SequenceLoweringError{CompileErrorCode::TrimmedMidiLaneUnsupported,
+                                                  pending.child.id()}};
+            auto rebuilt = timeline::MidiContent::create(std::move(pending.clipped_notes),
                                                          std::move(modifiers), seed);
             if (!rebuilt)
                 return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
@@ -417,11 +450,13 @@ class SequenceContentLowerer::Impl {
         playback.fade_out_duration = std::min(playback.fade_out_duration, duration);
         auto flattened =
             timeline::Clip::create(pending.generated_id, pending.target_start,
-                                   pending.target_duration, std::move(content), playback);
+                                   pending.target_duration, std::move(content), playback,
+                                   pending.child.time_conform());
         if (!flattened)
             return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
                                                    pending.child.id()}};
-        return append(std::move(flattened).value(), pending.child.id(), source_frame_offset);
+        return append(std::move(flattened).value(), pending.child.id(), source_frame_offset,
+                      pending.context_sequence_id, pending.clipped_start);
     }
 
     const timeline::Project& project_;

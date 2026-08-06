@@ -65,6 +65,23 @@ public:
     struct Options {
         bool enable_hot_reload = false;  ///< Poll scripted UI + theme.json for changes
         ViewRole role = ViewRole::Editor;
+
+        /// Options for a primary editor embedded in a host: hot reload follows
+        /// the developer's `PULP_DEV_HOT_RELOAD` opt-in, role is Editor.
+        ///
+        /// Every format adapter builds its editor from this rather than
+        /// assembling the struct itself. Hand-assembly is what let VST3 and CLAP
+        /// diverge: they used the no-Options constructor, so a sweep over call
+        /// sites that named the field did not reach them and their editors never
+        /// honoured the flag. One definition means a new adapter cannot silently
+        /// omit an option, and a new option lands in exactly one place.
+        ///
+        /// The standalone host deliberately does NOT use this — it forces hot
+        /// reload on unconditionally because it is itself the dev tool.
+        static Options hosted_editor() {
+            return Options{.enable_hot_reload = dev_editor_hot_reload_enabled(),
+                           .role = ViewRole::Editor};
+        }
     };
 
     ViewBridge(Processor& processor, state::StateStore& store);
@@ -222,6 +239,14 @@ public:
     view::ScriptedUiSession* scripted_ui();
     const view::ScriptedUiSession* scripted_ui() const;
 
+    /// Borrow the active scripted UI only for the duration of `visitor`.
+    /// Processor-owned sessions are visited under the processor's lifetime
+    /// discipline; framework-owned sessions are already owned by this bridge.
+    void visit_scripted_ui(
+        const std::function<void(view::ScriptedUiSession*)>& visitor);
+    void visit_scripted_ui(
+        const std::function<void(const view::ScriptedUiSession*)>& visitor) const;
+
     uint32_t width() const { return width_; }
     uint32_t height() const { return height_; }
     const ViewSize& size_hints() const { return size_hints_; }
@@ -265,6 +290,12 @@ public:
     ViewRole role_at(size_t index) const;
 
 private:
+    /// Consume a successful StateStore deserialize edge on the editor's
+    /// main-thread idle tick, reconciling Main listeners with the restored
+    /// parameter snapshot. Returns true once per edge while the bridge is open;
+    /// the caller schedules the repaint.
+    bool poll_state_restore();
+
     /// Pump every owner-backed host-to-UI path while the adapter owner is
     /// alive. This guards both the StateStore and the routed design surface;
     /// either may otherwise retain references past Processor teardown.
@@ -294,7 +325,7 @@ private:
     std::size_t sync_design_frames_from_host();
 
     /// The editor idle pump — the sole production caller of the host pull.
-    friend std::function<void()> make_scripted_idle_pump(ViewBridge&);
+    friend std::function<void()> make_editor_idle_pump(ViewBridge&);
     /// Test-only reach-in, mirroring `StandaloneRenderTestAccess`.
     friend struct ViewBridgeTestAccess;
     Processor& processor_;
@@ -319,11 +350,16 @@ private:
     std::unique_ptr<view::StateStoreHostParamSurface> host_param_surface_;
     view::HostActionSurface* host_actions_ = nullptr;  ///< caller-owned; may be null
     std::unique_ptr<view::ScriptedUiSession> scripted_ui_;
+    /// True when a processor explicitly opts its active scripted session into
+    /// in-place reload. Keep the root and host subscriptions stable across
+    /// processor generation changes.
+    bool in_place_scripted_ui_reload_ = false;
     bool uses_script_ui_ = false;
     bool uses_auto_ui_ = false;  ///< true when the editor is the AutoUi default
     bool attached_ = false;  ///< true between notify_attached() and close()
     bool released_ = false;  ///< true after release_view() transfers ownership
     uint64_t last_reload_generation_ = 0;  ///< editor-reload generation last applied (1.9)
+    uint64_t last_state_restore_revision_ = 0;
     /// Cross-thread liveness (see alive_token()). Flipped false in ~ViewBridge.
     std::shared_ptr<std::atomic<bool>> alive_ =
         std::make_shared<std::atomic<bool>>(true);

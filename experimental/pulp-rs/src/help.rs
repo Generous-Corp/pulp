@@ -96,6 +96,10 @@ pub const COMMANDS: &[Entry] = &[
         summary: "Browse local documentation",
     },
     Entry {
+        name: "forge",
+        summary: "Export Forge catalog integration data",
+    },
+    Entry {
         name: "clean",
         summary: "Remove build directory",
     },
@@ -133,7 +137,7 @@ pub const COMMANDS: &[Entry] = &[
     },
     Entry {
         name: "inspect",
-        summary: "Connect to a running plugin inspector",
+        summary: "Connect to an explicitly hosted inspector fixture",
     },
     Entry {
         name: "motion",
@@ -238,7 +242,7 @@ pub const BINARY_COMMANDS: &[Entry] = &[
 pub const PACKAGE_EXTRAS: &[Entry] = &[
     Entry {
         name: "audit",
-        summary: "License and clean-room audit",
+        summary: "License and provenance audit",
     },
     Entry {
         name: "add",

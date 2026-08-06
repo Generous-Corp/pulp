@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/schemas/importer-differential-report-v1.schema.json",
+  "title": "Pulp importer differential report v1",
+  "type": "object",
+  "required": ["schema", "version", "source", "oracle", "candidate", "timings", "comparison", "promotion", "canonical_output_modified"],
+  "properties": {
+    "schema": {"const": "pulp-importer-differential-report-v1"},
+    "version": {"const": 1},
+    "fixture": {"type": ["object", "null"]},
+    "source": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "oracle": {"type": "object"},
+    "candidate": {"type": "object"},
+    "source_recognition": {"type": "object"},
+    "unsupported_dynamic_features": {"type": "array", "items": {"type": "string"}},
+    "timings": {"type": "object"},
+    "comparison": {
+      "type": "object",
+      "required": ["structural", "geometry", "typography", "visual"]
+    },
+    "classifications": {"type": "array"},
+    "promotion": {
+      "type": "object",
+      "required": ["classification", "production_promotion_enabled", "threshold_eligible"]
+    },
+    "canonical_output_modified": {"const": false}
+  }
+}

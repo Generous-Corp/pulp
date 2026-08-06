@@ -6,7 +6,8 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdio>
+#include <charconv>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <variant>
@@ -28,7 +29,10 @@ using interchange::Concept;
 /// not promise a construct the writer cannot emit.
 constexpr std::array kImplementedExports{
     Concept::TrackFlat,   Concept::ClipMusical,        Concept::ClipNote,
-    Concept::ClipMedia,   Concept::TempoSingle,        Concept::MeterSingle,
+    Concept::ClipEmpty,   Concept::ClipMedia,           Concept::TempoSingle,
+    Concept::ClipNoteVelocityQuantized,
+    Concept::TempoValueQuantized,
+    Concept::MeterSingle,
     Concept::AssetSealedHash, Concept::AssetReferencedMedia,
 };
 
@@ -37,18 +41,17 @@ constexpr bool implemented(Concept concept_value) noexcept {
            kImplementedExports.end();
 }
 
-// Every concept the table rates Full for DAWproject export must be one this
-// writer emits. A row widened to Full without writer code fails here.
+// Every concept the table rates lossless for DAWproject export must be one this
+// writer emits. A Full or RoundtripOnly row widened without writer code fails here.
 static_assert([] {
     for (std::size_t index = 0; index < interchange::kConceptCount; ++index) {
         const auto concept_value = static_cast<Concept>(index);
-        if (interchange::export_capability(interchange::Format::DawProject, concept_value).level ==
-                interchange::ExportLevel::Full &&
+        if (interchange::export_is_lossless(interchange::Format::DawProject, concept_value) &&
             !implemented(concept_value))
             return false;
     }
     return true;
-}(), "a DAWproject export row is rated Full but this writer does not emit it");
+}(), "a lossless DAWproject export row is not implemented by the writer");
 
 /// DAWproject measures arrangement time in beats; Pulp measures it in canonical
 /// ticks. One quarter note is one beat, so the conversion is exact division by
@@ -61,15 +64,16 @@ double beats(timebase::TickDuration duration) noexcept {
     return static_cast<double>(duration.value) / static_cast<double>(timebase::kTicksPerQuarter);
 }
 
-/// Fixed-precision so the output is byte-stable across platforms: a golden
-/// comparison of project.xml would otherwise drift on locale or default
-/// formatting. Trailing zeros are kept rather than trimmed for the same reason.
+/// Locale-independent, round-trip-safe formatting keeps output byte-stable
+/// without changing a binary64 tempo or normalized velocity value.
 std::string number(double value) {
     std::array<char, 64> buffer{};
-    const int written = std::snprintf(buffer.data(), buffer.size(), "%.6f", value);
-    if (written <= 0)
-        return "0.000000";
-    return std::string(buffer.data(), static_cast<std::size_t>(written));
+    const auto conversion =
+        std::to_chars(buffer.data(), buffer.data() + buffer.size(), value,
+                      std::chars_format::general, std::numeric_limits<double>::max_digits10);
+    if (conversion.ec != std::errc{})
+        return "0";
+    return std::string(buffer.data(), conversion.ptr);
 }
 
 std::string element_id(std::string_view prefix, timeline::ItemId id) {
@@ -81,7 +85,7 @@ std::string element_id(std::string_view prefix, timeline::ItemId id) {
 /// the plan refuses any concept this writer does not emit.
 bool track_holds_notes(const timeline::Track& track) noexcept {
     for (const timeline::Clip& clip : track.clips())
-        if (std::holds_alternative<timeline::NoteContent>(clip.content()))
+        if (std::holds_alternative<timeline::MidiContent>(clip.content()))
             return true;
     return false;
 }
@@ -100,7 +104,7 @@ void write_clip(pugi::xml_node clips, const timeline::Project& project,
     node.append_attribute("duration") = number(beats(clip.duration())).c_str();
     node.append_attribute("name") = element_id("clip", clip.id()).c_str();
 
-    if (const auto* notes = std::get_if<timeline::NoteContent>(&clip.content())) {
+    if (const auto* notes = std::get_if<timeline::MidiContent>(&clip.content())) {
         auto notes_node = node.append_child("Notes");
         for (const timeline::NoteEvent& note : notes->notes()) {
             auto note_node = notes_node.append_child("Note");
@@ -119,8 +123,16 @@ void write_clip(pugi::xml_node clips, const timeline::Project& project,
         const auto* asset = find_asset(project, media->asset_id);
         auto audio = node.append_child("Audio");
         audio.append_attribute("algorithm") = "stretch";
-        audio.append_attribute("channels") = 2;
-        audio.append_attribute("duration") = number(beats(clip.duration())).c_str();
+        // Arrangement Clip duration is measured in beats, but Audio duration
+        // is the referenced media duration in seconds. The importer seals this
+        // value against actual WAV frames, so deriving it from clip placement
+        // makes a writer-produced project.xml fail its own import boundary.
+        const double media_seconds =
+            asset ? static_cast<double>(asset->frame_count) *
+                        static_cast<double>(asset->sample_rate.denominator) /
+                        static_cast<double>(asset->sample_rate.numerator)
+                  : 0.0;
+        audio.append_attribute("duration") = number(media_seconds).c_str();
         audio.append_attribute("sampleRate") =
             asset ? static_cast<int>(asset->sample_rate.numerator) : 48'000;
         auto file = audio.append_child("File");
@@ -131,128 +143,125 @@ void write_clip(pugi::xml_node clips, const timeline::Project& project,
     }
 }
 
+bool omit_clip(const timeline::Clip& clip) noexcept {
+    return clip.time_anchor() == timeline::ClipTimeAnchor::Absolute;
+}
+
 std::vector<std::uint8_t> to_bytes(std::string_view text) {
     return std::vector<std::uint8_t>(text.begin(), text.end());
 }
 
-/// The loss record, carried into the package rather than left behind in the
-/// caller's console. An export whose manifest does not travel with it is an
-/// export whose losses are invisible to whoever opens the file next.
-std::string manifest_json(const interchange::ExportPlan& plan) {
-    std::ostringstream out;
-    out << "{\"format\":\"dawproject\",\"lossless\":" << (plan.is_lossless() ? "true" : "false")
-        << ",\"losses\":[";
-    bool first = true;
-    for (const interchange::LossEntry& entry : plan.losses().entries()) {
-        if (!first)
-            out << ',';
-        first = false;
-        out << "{\"concept\":\"" << interchange::concept_id(entry.concept_value) << "\",\"class\":\""
-            << interchange::loss_class_id(entry.loss_class) << "\",\"count\":" << entry.count
-            << ",\"detail\":\"" << entry.detail << "\"}";
+runtime::Result<interchange::ExportArtifacts, interchange::ExportError>
+write_plan(const interchange::ExportPlan& plan, const ExportOptions& options) {
+    const timeline::Project& project = plan.project();
+    const timeline::Sequence* sequence = project.find_sequence(project.root_sequence_id());
+    if (sequence == nullptr)
+        return runtime::Err(
+            interchange::ExportError{interchange::ExportErrorCode::WriterFailed,
+                                     "the project names a root sequence that does not exist",
+                                     {}});
+
+    pugi::xml_document doc;
+    auto declaration = doc.append_child(pugi::node_declaration);
+    declaration.append_attribute("version") = "1.0";
+    declaration.append_attribute("encoding") = "UTF-8";
+
+    auto root = doc.append_child("Project");
+    root.append_attribute("version") = "1.0";
+
+    auto application = root.append_child("Application");
+    application.append_attribute("name") = options.application_name.c_str();
+    application.append_attribute("version") = options.application_version.c_str();
+
+    // A single tempo and a single time signature: the plan has already
+    // refused (or the caller has already accepted losing) anything richer.
+    auto transport = root.append_child("Transport");
+    auto tempo = transport.append_child("Tempo");
+    tempo.append_attribute("unit") = "bpm";
+    const auto tempo_points = project.tempo_map().points();
+    tempo.append_attribute("value") =
+        number(tempo_points.empty() ? 120.0 : tempo_points.front().bpm).c_str();
+    auto signature = transport.append_child("TimeSignature");
+    const auto meter_points = project.meter_map().points();
+    const auto meter =
+        meter_points.empty() ? timebase::MeterSignature{4, 4} : meter_points.front().signature;
+    signature.append_attribute("numerator") = static_cast<int>(meter.numerator);
+    signature.append_attribute("denominator") = static_cast<int>(meter.denominator);
+
+    auto structure = root.append_child("Structure");
+    auto arrangement = root.append_child("Arrangement");
+    arrangement.append_attribute("id") = element_id("arrangement", sequence->id()).c_str();
+    auto lanes = arrangement.append_child("Lanes");
+    lanes.append_attribute("timeUnit") = "beats";
+    lanes.append_attribute("id") = "lanes-root";
+
+    for (const timeline::Track& track : sequence->tracks()) {
+        const std::string track_id = element_id("track", track.id());
+        auto track_node = structure.append_child("Track");
+        track_node.append_attribute("contentType") = track_holds_notes(track) ? "notes" : "audio";
+        track_node.append_attribute("loaded") = "true";
+        track_node.append_attribute("id") = track_id.c_str();
+        track_node.append_attribute("name") = track.name().c_str();
+
+        // A DAWproject track is a channel. A receiving DAW registers the
+        // track from this element, and a <Lanes track="..."> reference to a
+        // track that was never registered resolves to nothing -- Bitwig
+        // 6.0.11 fails such a file with EmptyStackException while adding the
+        // first clip, because its track-context stack is empty.
+        //
+        // This channel is deliberately NEUTRAL: unity volume, centre pan.
+        // That is not the document's authored mixer state, which this writer
+        // does not export -- the capability table says mixer.track-gain and
+        // mixer.track-pan are dropped, and they are. Emitting a default
+        // channel is what makes the file loadable, not a partial export of
+        // levels the manifest claims were dropped.
+        auto channel = track_node.append_child("Channel");
+        channel.append_attribute("id") = element_id("channel", track.id()).c_str();
+        channel.append_attribute("role") = "regular";
+        channel.append_attribute("audioChannels") = 2;
+        auto volume = channel.append_child("Volume");
+        volume.append_attribute("value") = "1.000000";
+        volume.append_attribute("unit") = "linear";
+        volume.append_attribute("min") = "0.000000";
+        volume.append_attribute("max") = "2.000000";
+        auto pan = channel.append_child("Pan");
+        pan.append_attribute("value") = "0.500000";
+        pan.append_attribute("unit") = "normalized";
+        pan.append_attribute("min") = "0.000000";
+        pan.append_attribute("max") = "1.000000";
+
+        auto track_lanes = lanes.append_child("Lanes");
+        track_lanes.append_attribute("track") = track_id.c_str();
+        track_lanes.append_attribute("id") = element_id("lanes", track.id()).c_str();
+        auto clips = track_lanes.append_child("Clips");
+        clips.append_attribute("id") = element_id("clips", track.id()).c_str();
+        for (const timeline::Clip& clip : track.clips()) {
+            if (!omit_clip(clip))
+                write_clip(clips, project, clip);
+        }
     }
-    out << "]}";
-    return out.str();
+
+    std::ostringstream xml;
+    doc.save(xml, "  ");
+
+    interchange::ExportArtifacts artifacts;
+    artifacts.artifacts.push_back({"project.xml", to_bytes(xml.str())});
+    return runtime::Ok(std::move(artifacts));
 }
 
 } // namespace
 
-interchange::ExportWriter writer(const timeline::Project& project, const ExportOptions& options) {
-    return [&project, options](const interchange::ExportPlan& plan)
-               -> runtime::Result<interchange::ExportArtifacts, interchange::ExportError> {
-        const timeline::Sequence* sequence = project.find_sequence(project.root_sequence_id());
-        if (sequence == nullptr)
-            return runtime::Err(interchange::ExportError{
-                interchange::ExportErrorCode::WriterFailed,
-                "the project names a root sequence that does not exist",
-                {}});
+interchange::FormatBoundExportWriter writer(const ExportOptions& options) {
+    return {interchange::Format::DawProject,
+            [options](const interchange::ExportPlan& plan) {
+                return write_plan(plan, options);
+            }};
+}
 
-        pugi::xml_document doc;
-        auto declaration = doc.append_child(pugi::node_declaration);
-        declaration.append_attribute("version") = "1.0";
-        declaration.append_attribute("encoding") = "UTF-8";
-
-        auto root = doc.append_child("Project");
-        root.append_attribute("version") = "1.0";
-
-        auto application = root.append_child("Application");
-        application.append_attribute("name") = options.application_name.c_str();
-        application.append_attribute("version") = options.application_version.c_str();
-
-        // A single tempo and a single time signature: the plan has already
-        // refused (or the caller has already accepted losing) anything richer.
-        auto transport = root.append_child("Transport");
-        auto tempo = transport.append_child("Tempo");
-        tempo.append_attribute("unit") = "bpm";
-        const auto tempo_points = project.tempo_map().points();
-        tempo.append_attribute("value") =
-            number(tempo_points.empty() ? 120.0 : tempo_points.front().bpm).c_str();
-        auto signature = transport.append_child("TimeSignature");
-        const auto meter_points = project.meter_map().points();
-        const auto meter = meter_points.empty() ? timebase::MeterSignature{4, 4}
-                                                : meter_points.front().signature;
-        signature.append_attribute("numerator") = static_cast<int>(meter.numerator);
-        signature.append_attribute("denominator") = static_cast<int>(meter.denominator);
-
-        auto structure = root.append_child("Structure");
-        auto arrangement = root.append_child("Arrangement");
-        arrangement.append_attribute("id") = element_id("arrangement", sequence->id()).c_str();
-        auto lanes = arrangement.append_child("Lanes");
-        lanes.append_attribute("timeUnit") = "beats";
-        lanes.append_attribute("id") = "lanes-root";
-
-        for (const timeline::Track& track : sequence->tracks()) {
-            const std::string track_id = element_id("track", track.id());
-            auto track_node = structure.append_child("Track");
-            track_node.append_attribute("contentType") =
-                track_holds_notes(track) ? "notes" : "audio";
-            track_node.append_attribute("loaded") = "true";
-            track_node.append_attribute("id") = track_id.c_str();
-            track_node.append_attribute("name") = track.name().c_str();
-
-            // A DAWproject track is a channel. A receiving DAW registers the
-            // track from this element, and a <Lanes track="..."> reference to a
-            // track that was never registered resolves to nothing -- Bitwig
-            // 6.0.11 fails such a file with EmptyStackException while adding the
-            // first clip, because its track-context stack is empty.
-            //
-            // This channel is deliberately NEUTRAL: unity volume, centre pan.
-            // That is not the document's authored mixer state, which this writer
-            // does not export -- the capability table says mixer.track-gain and
-            // mixer.track-pan are dropped, and they are. Emitting a default
-            // channel is what makes the file loadable, not a partial export of
-            // levels the manifest claims were dropped.
-            auto channel = track_node.append_child("Channel");
-            channel.append_attribute("id") = element_id("channel", track.id()).c_str();
-            channel.append_attribute("role") = "regular";
-            channel.append_attribute("audioChannels") = 2;
-            auto volume = channel.append_child("Volume");
-            volume.append_attribute("value") = "1.000000";
-            volume.append_attribute("unit") = "linear";
-            volume.append_attribute("min") = "0.000000";
-            volume.append_attribute("max") = "2.000000";
-            auto pan = channel.append_child("Pan");
-            pan.append_attribute("value") = "0.500000";
-            pan.append_attribute("unit") = "normalized";
-            pan.append_attribute("min") = "0.000000";
-            pan.append_attribute("max") = "1.000000";
-
-            auto track_lanes = lanes.append_child("Lanes");
-            track_lanes.append_attribute("track") = track_id.c_str();
-            track_lanes.append_attribute("id") = element_id("lanes", track.id()).c_str();
-            auto clips = track_lanes.append_child("Clips");
-            clips.append_attribute("id") = element_id("clips", track.id()).c_str();
-            for (const timeline::Clip& clip : track.clips())
-                write_clip(clips, project, clip);
-        }
-
-        std::ostringstream xml;
-        doc.save(xml, "  ");
-
-        interchange::ExportArtifacts artifacts;
-        artifacts.artifacts.push_back({"project.xml", to_bytes(xml.str())});
-        artifacts.artifacts.push_back({"pulp-loss-manifest.json", to_bytes(manifest_json(plan))});
-        return runtime::Ok(std::move(artifacts));
+interchange::ExportWriter writer(const timeline::Project& /*legacy_project*/,
+                                 const ExportOptions& options) {
+    return [options](const interchange::ExportPlan& plan) {
+        return write_plan(plan, options);
     };
 }
 

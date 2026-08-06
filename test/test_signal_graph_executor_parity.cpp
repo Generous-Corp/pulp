@@ -18,6 +18,8 @@
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
 
+#include "support/thread_progress.hpp"
+
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -524,9 +526,10 @@ TEST_CASE("SignalGraph re-prepare while the executor path renders is race-free",
             blocks.fetch_add(1, std::memory_order_relaxed);
         }
     });
-    while (!started.load(std::memory_order_acquire)) {
-        std::this_thread::yield();
-    }
+    // Bounded: an unbounded spin here hangs the suite if the audio thread never
+    // starts, where the CHECK below reports that as the failure it is.
+    CHECK(pulp::test::wait_for_condition(
+        [&] { return started.load(std::memory_order_acquire); }));
     bool prepared_all = true;
     for (int i = 0; i < 200; ++i) {
         if (!g.prepare(kSr, kFrames)) {  // builds + publishes fresh snapshots
@@ -2155,7 +2158,10 @@ TEST_CASE("SignalGraph re-prepare while the parallel path renders is race-free",
             blocks.fetch_add(1, std::memory_order_relaxed);
         }
     });
-    while (!started.load(std::memory_order_acquire)) std::this_thread::yield();
+    // Bounded: an unbounded spin here hangs the suite if the audio thread never
+    // starts, where the CHECK below reports that as the failure it is.
+    CHECK(pulp::test::wait_for_condition(
+        [&] { return started.load(std::memory_order_acquire); }));
     bool prepared_all = true;
     for (int i = 0; i < 200; ++i) {
         if (!g.prepare(kSr, kFrames)) prepared_all = false;
@@ -2556,4 +2562,84 @@ TEST_CASE("Translated routing matches SignalGraph: unresolved custom node pass-t
     const std::vector<std::vector<float>> input{ramp(kFrames, 0.7f)};
     expect_equal(run_legacy(g, kFrames, input, 1),
                  run_routed(exec, routing, kFrames, input, 1));
+}
+
+// A Custom node's DECLARED intrinsic latency must reach the routed plan's PDC
+// pass, not just the legacy walk's.
+//
+// The legacy walk reads `CompiledGraph::custom_latency_samples` directly, while
+// the routed plan learns it only through the `custom_latency_for` binder that
+// SignalGraph installs when it builds its routing snapshot. Drop that one binder
+// and nothing fails to compile and nothing crashes: every call site guards on
+// `if (custom_latency_for)`, so the routed plan simply believes every custom
+// node is zero-latency and quietly stops compensating for it.
+//
+// The topology makes that difference audible. One branch is a custom node that
+// declares 8 samples of latency but passes its input through unchanged; the
+// other is a plain gain. PDC exists to align them, so it must delay the gain
+// branch by the declared 8. A routed plan that never learned the declaration
+// sums an undelayed gain branch against the custom branch and diverges from the
+// walk immediately.
+TEST_CASE("Routed PDC compensates a Custom node's declared latency like the walk does",
+          "[host][graph][executor][routing][parity][pdc]") {
+    constexpr int kDeclaredLatency = 8;
+
+    const auto build = [](SignalGraph& g, bool route_executor) {
+        pulp::host::CustomNodeType type;
+        type.type_id = "pulp.test.declared-latency";
+        type.version = 1;
+        type.num_input_ports = 1;
+        type.num_output_ports = 1;
+        type.default_name = "Lookahead";
+        // Passes audio through untouched. The point is the DECLARATION below:
+        // PDC aligns on what a node claims, so a pass-through that claims
+        // latency is exactly what isolates the declaration's effect.
+        type.process = [](pulp::audio::BufferView<float>& out,
+                          const pulp::audio::BufferView<const float>& in, int n) {
+            for (int ch = 0; ch < out.num_channels() && ch < in.num_channels(); ++ch)
+                for (int i = 0; i < n; ++i) out.channel(ch)[i] = in.channel(ch)[i];
+        };
+        type.latency_samples = [](double) { return kDeclaredLatency; };
+        REQUIRE(g.register_custom_node_type(type));
+
+        const auto in = g.add_input_node(1, "In");
+        const auto lookahead = g.add_custom_node("pulp.test.declared-latency", "Lookahead");
+        const auto dry = g.add_gain_node("Dry");
+        const auto out = g.add_output_node(1, "Out");
+        REQUIRE(lookahead != 0);
+        REQUIRE(g.connect(in, 0, lookahead, 0));
+        REQUIRE(g.connect(in, 0, dry, 0));
+        REQUIRE(g.connect(lookahead, 0, out, 0));
+        REQUIRE(g.connect(dry, 0, out, 0));
+        REQUIRE(g.set_node_gain(dry, 0.5f));
+
+        g.set_canonical_executor_routing_enabled(route_executor);
+        g.set_parallel_routing_enabled(false);
+        g.set_anticipation_enabled(false);
+        REQUIRE(g.prepare(kSr, kFrames));
+    };
+
+    SignalGraph legacy, routed;
+    build(legacy, /*route_executor=*/false);
+    build(routed, /*route_executor=*/true);
+
+    // The declaration reached the compiled graph at all -- otherwise the
+    // comparison below would be two identically-uncompensated paths agreeing
+    // for the wrong reason.
+    REQUIRE(legacy.latency_samples() == kDeclaredLatency);
+
+    for (int blk = 0; blk < 4; ++blk) {
+        CAPTURE(blk);
+        const auto x = ramp(kFrames, 0.4f + 0.1f * static_cast<float>(blk));
+        std::vector<float> li = x, ri = x, lo(kFrames, 0.0f), ro(kFrames, 0.0f);
+        std::array<const float*, 1> lic{li.data()}, ric{ri.data()};
+        std::array<float*, 1> loc{lo.data()}, roc{ro.data()};
+        pulp::audio::BufferView<const float> liv(lic.data(), 1, kFrames),
+            riv(ric.data(), 1, kFrames);
+        pulp::audio::BufferView<float> lov(loc.data(), 1, kFrames), rov(roc.data(), 1, kFrames);
+        legacy.process(lov, liv, kFrames);
+        routed.process(rov, riv, kFrames);
+        for (int i = 0; i < kFrames; ++i)
+            REQUIRE(lo[static_cast<std::size_t>(i)] == ro[static_cast<std::size_t>(i)]);
+    }
 }

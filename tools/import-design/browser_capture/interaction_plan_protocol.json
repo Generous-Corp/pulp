@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://www.generouscorp.com/pulp/schemas/pulp-browser-interactions-v1.json",
+  "title": "Pulp browser capture interaction plan",
+  "type": "object",
+  "x-pulp-max-document-bytes": 65536,
+  "x-pulp-max-total-wait-ms": 30000,
+  "required": ["schema", "version", "actions"],
+  "properties": {
+    "schema": { "const": "pulp-browser-interactions-v1" },
+    "version": { "const": 1 },
+    "actions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["action", "selector"],
+            "properties": {
+              "action": { "const": "click" },
+              "selector": { "type": "string", "minLength": 1, "maxLength": 512 },
+              "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 10000 }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": ["action", "selector", "text"],
+            "properties": {
+              "action": { "const": "type" },
+              "selector": { "type": "string", "minLength": 1, "maxLength": 512 },
+              "text": {
+                "type": "string",
+                "description": "Public prototype input only; rendered text may persist in capture evidence, so secrets are forbidden",
+                "maxLength": 4096
+              },
+              "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 10000 }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": ["action", "selector"],
+            "properties": {
+              "action": { "const": "wait-for" },
+              "selector": { "type": "string", "minLength": 1, "maxLength": 512 },
+              "state": {
+                "enum": ["attached", "detached", "visible", "hidden"]
+              },
+              "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 10000 }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": ["action", "milliseconds"],
+            "properties": {
+              "action": { "const": "wait-ms" },
+              "milliseconds": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 5000
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      }
+    }
+  },
+  "additionalProperties": false
+}

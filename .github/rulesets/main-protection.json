@@ -13,11 +13,20 @@
     "Required-check contract (fast lane, blocks merge):",
     "  - macos   : macOS build+test leg of .github/workflows/build.yml",
     "  - Enforce version & skill sync : .github/workflows/version-skill-check.yml",
+    "  - Build + prove + (owner-gated) deploy",
+    "  - Vellum freeze         : .github/workflows/vellum-freeze-check.yml",
+    "  - Vellum trusted freeze : status posted by .github/workflows/vellum-trusted-gate.yml",
     "",
-    "ONLY these two contexts are required. This matches the LIVE branch",
-    "protection posture: the macOS leg is the single required build gate, and",
-    "Linux/Windows validate as advisory GitHub-hosted lanes that do NOT block",
-    "merge. Do NOT promote `linux` or `windows` into required_status_checks",
+    "These five mirror LIVE enforcement, which is read from",
+    "`/repos/{owner}/{repo}/branches/main/protection` — NOT from",
+    "`/repos/{owner}/{repo}/rulesets`. This repo's only branch ruleset",
+    "(`main-merge-queue`) carries a `merge_queue` rule and no",
+    "`required_status_checks` rule, so ruleset evidence alone reads as",
+    "\"nothing is required\" and has caused a required check to be dismissed as",
+    "advisory. GitHub enforces both surfaces; the drift workflow unions them.",
+    "",
+    "Linux/Windows remain advisory GitHub-hosted lanes that do NOT block merge.",
+    "Do NOT promote `linux` or `windows` into required_status_checks",
     "without an explicit policy change — making the advisory lanes blocking",
     "craters throughput (a saturated/flaky advisory lane would wedge every",
     "merge) without adding real signal. Keep this in sync with the",
@@ -81,6 +90,18 @@
           },
           {
             "context": "Enforce version & skill sync",
+            "integration_id": null
+          },
+          {
+            "context": "Build + prove + (owner-gated) deploy",
+            "integration_id": null
+          },
+          {
+            "context": "Vellum freeze",
+            "integration_id": null
+          },
+          {
+            "context": "Vellum trusted freeze",
             "integration_id": null
           }
         ]

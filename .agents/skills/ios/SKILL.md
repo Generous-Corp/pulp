@@ -246,7 +246,12 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
   do on macOS. Gate with `PULP_HAS_COREAUDIO_DEVICE`.
 - **No FSEvents** — `choc_FileWatcher.h` pulls `FSEventStreamRef` which does not
   exist on iOS. `hot_reload.hpp` is gated so the iOS path gets a no-op
-  `HotReloader`; keep file-watched hot reload off for AUv3 / HostApp builds.
+  `HotReloader`. The iOS editor still builds its bridge from
+  `ViewBridge::Options::hosted_editor()` like every other adapter, so the flag
+  is accepted and file-watch reload is simply inert;
+  `HotReloader::kWatchesFiles` is false there and `ScriptedUiSession` logs once
+  so the degradation is visible. DSP-swap-driven editor rebuilds
+  (`ViewBridge::poll_editor_reload()`) are watcher-free and DO work on device.
 
 ### Frame timing (CADisplayLink)
 
@@ -1056,3 +1061,38 @@ func discover() {
 Cleared in both the success path (inside the `Task { @MainActor in ... }` after `AVAudioUnit.instantiate` succeeds) AND the bail paths (no matching component found, instantiate callback returns `error != nil`). Forgetting either bail path leaks the in-flight flag and the discovery never retries.
 
 Grep `PULP_DISCOVER` + `PULP_INSTANTIATE` in the launch log to trace the discovery cycle; the new code reuses these existing log markers and adds no new noise.
+
+### The GPU surface reaches the scripted UI by subscription (WAH-1)
+
+`au_view_controller_ios.mm` no longer reads `_viewHost->gpu_surface()`
+once. It holds a `_gpuSurfaceBinding` from
+`pulp::format::bind_gpu_surface(...)`, which follows the host's
+surface lifecycle and forwards BOTH creation and teardown into the
+scripted UI session.
+
+Ivar order is load-bearing, same as `_viewHost`: declare
+`_gpuSurfaceBinding` AFTER `_viewHost` so reverse-order destruction drops
+the subscription before the host it observes, and reset it explicitly in
+the `-dealloc` main-thread teardown block alongside `_viewHost.reset()`.
+
+Why it changed: the read was correct on iOS (this host builds its surface
+in the constructor) but wrong on Windows, and one shared code path beats
+six per-format copies with one silently-broken member.
+
+### `window_to_root_point` is shared now, not per-host (WAH-10)
+
+`plugin_view_host_ios.mm` no longer carries its own inverse letterbox
+transform. It calls `WindowHost::design_viewport_window_to_root()`, the same
+one the macOS and Windows plug-in hosts use.
+
+Why it matters here specifically: the iOS host maps TOUCH points through this,
+and the transform must stay identical to the one paint applies — including
+`design_top_align`, which AU v3 sets. When these were four separate copies, a
+change to the paint-side transform could leave one host's INPUT mapping behind,
+and the symptom is touches landing on the wrong control rather than anything
+that looks like a coordinate bug.
+
+If you need to change the mapping, change it in `window_host.hpp` beside the
+forward transform it inverts, and let `pulp-test-design-viewport-inverse`
+(round-trip: the point paint places at X is the point input recovers from a
+touch at X) tell you whether the pair still agree.

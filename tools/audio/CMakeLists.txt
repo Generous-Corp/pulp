@@ -57,6 +57,8 @@ if(APPLE AND TARGET pulp-host)
             pulp::midi
             pulp::signal
             pulp::runtime
+            "-framework AudioToolbox"
+            "-framework CoreFoundation"
     )
     install(TARGETS pulp-au-effect-ab RUNTIME DESTINATION bin)
 endif()

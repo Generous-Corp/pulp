@@ -47,7 +47,8 @@ constexpr interchange::Format kFormat = interchange::Format::DawProject;
 // quietly dropped -- the failure mode a capability table most has to avoid.
 constexpr interchange::Concept kImplementedImports[] = {
     interchange::Concept::TrackFlat,       interchange::Concept::ClipMusical,
-    interchange::Concept::ClipNote,        interchange::Concept::ClipMedia,
+    interchange::Concept::ClipNote,        interchange::Concept::ClipEmpty,
+    interchange::Concept::ClipMedia,
     interchange::Concept::TempoSingle,     interchange::Concept::MeterSingle,
     interchange::Concept::AssetSealedHash, interchange::Concept::AssetReferencedMedia,
 };
@@ -183,7 +184,8 @@ struct IdSource {
 // import (fail closed); std::nullopt means success.
 class Importer {
   public:
-    Importer(DawProjectMediaResolver media_resolver, const DawProjectImportLimits& limits)
+    Importer(detail::DawProjectMediaViewResolver media_resolver,
+             const DawProjectImportLimits& limits)
         : media_(std::move(media_resolver), limits, ids_.next), limits_(limits) {}
     ImportResult run(const pugi::xml_node& project);
 
@@ -558,6 +560,10 @@ std::optional<DawProjectImportError> Importer::read_clip(const pugi::xml_node& c
     if (content_children > 1)
         return err(DawProjectImportErrorCode::UnsupportedFeature,
                    "<Clip> with multiple content timelines is not supported");
+    if (content_children == 0)
+        if (auto e = admit(interchange::Concept::ClipEmpty,
+                           "an empty positioned <Clip> is unsupported"))
+            return e;
 
     if (auto e = admit(interchange::Concept::ClipMusical,
                        "<Clip> beat-anchored placement is unsupported"))
@@ -649,7 +655,7 @@ std::optional<DawProjectImportError> Importer::read_notes(const pugi::xml_node& 
         events.push_back(ev);
     }
 
-    auto made = NoteContent::create(std::move(events));
+    auto made = MidiContent::create(std::move(events));
     if (made.is_err())
         return DawProjectImportError{DawProjectImportErrorCode::ModelRejected,
                                      "model rejected notes", made.error()};
@@ -806,7 +812,7 @@ ImportResult Importer::run(const pugi::xml_node& project) {
 
 runtime::Result<Project, DawProjectImportError>
 import_dawproject_xml(std::string_view project_xml) {
-    return import_dawproject_xml(project_xml, {}, DawProjectImportLimits{});
+    return detail::import_dawproject_xml_view(project_xml, {}, DawProjectImportLimits{});
 }
 
 runtime::Result<Project, DawProjectImportError>
@@ -817,6 +823,29 @@ import_dawproject_xml(std::string_view project_xml, DawProjectMediaResolver medi
 runtime::Result<Project, DawProjectImportError>
 import_dawproject_xml(std::string_view project_xml, DawProjectMediaResolver media_resolver,
                       const DawProjectImportLimits& limits) {
+    if (!media_resolver)
+        return detail::import_dawproject_xml_view(project_xml, {}, limits);
+    struct ResolverState {
+        DawProjectMediaResolver resolver;
+        std::optional<std::vector<std::uint8_t>> storage;
+    } state{std::move(media_resolver), std::nullopt};
+    detail::DawProjectMediaViewResolver view_resolver{
+        &state, [](void* opaque, std::string_view path)
+            -> std::optional<std::span<const std::uint8_t>> {
+            auto& state = *static_cast<ResolverState*>(opaque);
+            state.storage = state.resolver(path);
+            if (!state.storage)
+                return std::nullopt;
+            return std::span<const std::uint8_t>(*state.storage);
+        }
+    };
+    return detail::import_dawproject_xml_view(project_xml, view_resolver, limits);
+}
+
+runtime::Result<Project, DawProjectImportError>
+detail::import_dawproject_xml_view(std::string_view project_xml,
+                                   DawProjectMediaViewResolver media_resolver,
+                                   const DawProjectImportLimits& limits) {
     if (project_xml.size() > limits.max_xml_bytes)
         return Err(
             err(DawProjectImportErrorCode::LimitExceeded, "DAWproject XML exceeds max_xml_bytes"));

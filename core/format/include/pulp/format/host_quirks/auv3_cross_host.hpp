@@ -31,7 +31,7 @@
 /// version-keyed. The helper fires both flags unconditionally for any
 /// host that exposes an AU v3 surface.
 ///
-/// **Reference-Lineage**: cleanroom reproducer=macos-plan-item-5.11
+/// **Reference-Lineage**: independent reproducer=macos-plan-item-5.11
 /// docs=https://developer.apple.com/documentation/audiotoolbox/auaudiounit
 
 #include <pulp/format/host_quirks.hpp>

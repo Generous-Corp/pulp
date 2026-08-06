@@ -1,10 +1,10 @@
 {
   "_doc": "Canonical DSP capability surface, extracted statically from the Forge bake catalog headers by tools/scripts/dsp_capability_registry.py. Regenerate with `pulp dsp capabilities --write`. Construction-time values (notably rate-dependent latency) are deliberately absent \u2014 a static reader cannot evaluate them.",
   "counts": {
-    "catalogs": 22,
-    "type_ids": 100,
-    "factories": 62,
-    "baked_params": 374
+    "catalogs": 30,
+    "type_ids": 103,
+    "factories": 65,
+    "baked_params": 393
   },
   "catalogs": [
     {
@@ -60,7 +60,17 @@
       ]
     },
     {
+      "header": "core/host/include/pulp/host/forge_catalog_export.hpp",
+      "type_ids": [],
+      "nodes": []
+    },
+    {
       "header": "core/host/include/pulp/host/forge_catalog_index.hpp",
+      "type_ids": [],
+      "nodes": []
+    },
+    {
+      "header": "core/host/include/pulp/host/forge_catalog_json.hpp",
       "type_ids": [],
       "nodes": []
     },
@@ -1703,6 +1713,76 @@
       ]
     },
     {
+      "header": "core/host/include/pulp/host/forge_multiband_catalog.hpp",
+      "type_ids": [
+        {
+          "constant": "kTypeId",
+          "value": "multiband.compressor"
+        }
+      ],
+      "nodes": [
+        {
+          "factory": "make_multiband_compressor_node",
+          "baked_params": [
+            {
+              "id": "kCrossoverHz",
+              "min": "80.0f",
+              "max": "8000.0f",
+              "default": "800.0f"
+            },
+            {
+              "id": "kLowThresholdDb",
+              "min": "-60.0f",
+              "max": "0.0f",
+              "default": "-18.0f"
+            },
+            {
+              "id": "kLowRatio",
+              "min": "1.0f",
+              "max": "20.0f",
+              "default": "4.0f"
+            },
+            {
+              "id": "kHighThresholdDb",
+              "min": "-60.0f",
+              "max": "0.0f",
+              "default": "-18.0f"
+            },
+            {
+              "id": "kHighRatio",
+              "min": "1.0f",
+              "max": "20.0f",
+              "default": "4.0f"
+            },
+            {
+              "id": "kAttackMs",
+              "min": "0.1f",
+              "max": "100.0f",
+              "default": "10.0f"
+            },
+            {
+              "id": "kReleaseMs",
+              "min": "10.0f",
+              "max": "1000.0f",
+              "default": "150.0f"
+            },
+            {
+              "id": "kLowMakeupDb",
+              "min": "-24.0f",
+              "max": "12.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kHighMakeupDb",
+              "min": "-24.0f",
+              "max": "12.0f",
+              "default": "0.0f"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "header": "core/host/include/pulp/host/forge_pitch_catalog.hpp",
       "type_ids": [
         {
@@ -2180,6 +2260,64 @@
               "id": "kReset",
               "min": "0.0f",
               "max": "1.0f",
+              "default": "0.0f"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "header": "core/host/include/pulp/host/forge_sidechain_catalog.hpp",
+      "type_ids": [
+        {
+          "constant": "kTypeId",
+          "value": "sidechain.compressor"
+        }
+      ],
+      "nodes": [
+        {
+          "factory": "make_sidechain_compressor_node",
+          "baked_params": [
+            {
+              "id": "kThresholdDb",
+              "min": "-60.0f",
+              "max": "0.0f",
+              "default": "-18.0f"
+            },
+            {
+              "id": "kRatio",
+              "min": "1.0f",
+              "max": "20.0f",
+              "default": "4.0f"
+            },
+            {
+              "id": "kAttackMs",
+              "min": "0.1f",
+              "max": "100.0f",
+              "default": "10.0f"
+            },
+            {
+              "id": "kReleaseMs",
+              "min": "10.0f",
+              "max": "1000.0f",
+              "default": "150.0f"
+            },
+            {
+              "id": "kKneeDb",
+              "min": "0.0f",
+              "max": "24.0f",
+              "default": "6.0f"
+            },
+            {
+              "id": "kMakeupDb",
+              "min": "-24.0f",
+              "max": "12.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kKeyHpfHz",
+              "min": "0.0f",
+              "max": "2000.0f",
               "default": "0.0f"
             }
           ]
@@ -2810,6 +2948,45 @@
       ]
     },
     {
+      "header": "core/host/include/pulp/host/forge_wavetable_catalog.hpp",
+      "type_ids": [
+        {
+          "constant": "kTypeId",
+          "value": "wavetable.oscillator"
+        }
+      ],
+      "nodes": [
+        {
+          "factory": "make_wavetable_oscillator_node",
+          "baked_params": [
+            {
+              "id": "kFrequencyHz",
+              "min": "20.0f",
+              "max": "20000.0f",
+              "default": "220.0f"
+            },
+            {
+              "id": "kPosition",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kLevelDb",
+              "min": "-60.0f",
+              "max": "0.0f",
+              "default": "-12.0f"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "header": "core/host/include/pulp/host/detail/forge_drum_catalog_descriptor.hpp",
+      "type_ids": [],
+      "nodes": []
+    },
+    {
       "header": "core/host/include/pulp/host/detail/forge_drum_catalog_impl.hpp",
       "type_ids": [],
       "nodes": [
@@ -2838,6 +3015,11 @@
       "nodes": []
     },
     {
+      "header": "core/host/include/pulp/host/detail/forge_effect_modulation_catalog_descriptor.hpp",
+      "type_ids": [],
+      "nodes": []
+    },
+    {
       "header": "core/host/include/pulp/host/detail/forge_effect_modulation_extended_catalog.hpp",
       "type_ids": [
         {
@@ -2858,6 +3040,12 @@
           "factory": "make_flanger_node",
           "baked_params": [
             {
+              "id": "kBarberpoleHz",
+              "min": "static_cast<float>(-Engine::kBarberpoleShiftMaxHz)",
+              "max": "static_cast<float>(Engine::kBarberpoleShiftMaxHz)",
+              "default": "3.0f"
+            },
+            {
               "id": "kRate",
               "min": "static_cast<float>(Engine::kRateMinHz)",
               "max": "static_cast<float>(Engine::kRateMaxHz)",
@@ -2866,8 +3054,8 @@
             {
               "id": "kDepth",
               "min": "static_cast<float>(Engine::kDepthMinMs)",
-              "max": "static_cast<float>(Engine::kDepthMaxMs)",
-              "default": "1.5f"
+              "max": "depth_max",
+              "default": "depth_default"
             },
             {
               "id": "kCenter",
@@ -2904,12 +3092,6 @@
               "min": "0.0f",
               "max": "1.0f",
               "default": "0.0f"
-            },
-            {
-              "id": "kBarberpoleHz",
-              "min": "static_cast<float>(-Engine::kBarberpoleShiftMaxHz)",
-              "max": "static_cast<float>(Engine::kBarberpoleShiftMaxHz)",
-              "default": "3.0f"
             },
             {
               "id": "kWave",
@@ -3116,6 +3298,11 @@
           ]
         }
       ]
+    },
+    {
+      "header": "core/host/include/pulp/host/detail/forge_lofi_catalog_descriptor.hpp",
+      "type_ids": [],
+      "nodes": []
     }
   ]
 }

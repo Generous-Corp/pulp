@@ -274,7 +274,9 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
                 )
         raise AssertionError("resolve-provider matrix step not found")
 
-    def _matrix_keys(self, event_name: str) -> list[str]:
+    def _matrix_keys(
+        self, event_name: str, *, run_windows: bool = True
+    ) -> list[str]:
         """Run the real resolver for one event and return its matrix leg keys."""
         env = {
             k: v
@@ -289,6 +291,9 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
                 "GITHUB_WORKSPACE": str(REPO_ROOT),
                 "EXPLICIT_LINUX_RUNNER_SELECTOR_JSON": "",
                 "EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON": "",
+                "WORKFLOW_DISPATCH_RUN_WINDOWS": (
+                    "true" if run_windows else "false"
+                ),
                 "WORKFLOW_DISPATCH_MACOS_SELECTOR": "",
                 "LOCAL_MACOS_RUNS_ON_JSON": json.dumps(
                     ["self-hosted", "macOS", "ARM64", "pulp-build"]
@@ -326,17 +331,43 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         keys = self._matrix_keys("pull_request")
         self.assertNotIn("windows", keys)
         # Negative control: the saving must come from Windows alone. macOS runs
-        # on the self-hosted Macs and Linux on the local Linux VMs, so neither
-        # competes for the hosted pool — dropping either would cost PR-head
-        # signal for nothing.
+        # on the self-hosted Macs while automatic PR Linux uses the hosted pool;
+        # dropping either would still cost PR-head signal.
         self.assertIn("macos", keys)
         self.assertIn("linux", keys)
 
-    def test_merge_group_matrix_keeps_windows(self) -> None:
-        self.assertIn("windows", self._matrix_keys("merge_group"))
+    def test_merge_group_matrix_keeps_only_required_macos(self) -> None:
+        """Advisory hosted legs must not sit in the path every merge takes.
+
+        A merge-group leg runs per queued entry, so Windows there is the single
+        largest consumer of hosted minutes while gating nothing — `windows` is
+        advisory, and only `macos` plus the version/skill and Vellum checks are
+        required. Linux has already reported on the PR head; broader coverage
+        remains in the nightly cross-platform suite.
+        """
+        keys = self._matrix_keys("merge_group")
+        self.assertNotIn("windows", keys)
+        self.assertIn("macos", keys)
+        self.assertNotIn("linux", keys)
 
     def test_workflow_dispatch_matrix_keeps_windows(self) -> None:
+        """Reduced by default, still reachable on demand.
+
+        Dropping Windows from pull_request and merge_group is a scheduling
+        decision, not a withdrawal of support. A hand-dispatched run must still
+        be able to build it — that is how a Windows fix gets verified without
+        waiting for the nightly.
+        """
         self.assertIn("windows", self._matrix_keys("workflow_dispatch"))
+
+    def test_workflow_dispatch_can_omit_windows_for_trusted_linux_only_run(
+        self,
+    ) -> None:
+        """Mac Pro dispatches must not worsen hosted Windows saturation."""
+        keys = self._matrix_keys("workflow_dispatch", run_windows=False)
+        self.assertNotIn("windows", keys)
+        self.assertIn("macos", keys)
+        self.assertIn("linux", keys)
 
     def test_latest_toolchain_gates_skip_pull_request(self) -> None:
         for name in self.WINDOWS_GATE_JOBS:
@@ -344,6 +375,10 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
                 condition = " ".join(self.workflow["jobs"][name]["if"].split())
                 self.assertIn("github.event_name != 'pull_request'", condition)
                 self.assertIn("github.event_name != 'push'", condition)
+                self.assertIn(
+                    "github.event_name != 'workflow_dispatch' || inputs.run_windows",
+                    condition,
+                )
 
     def test_windows_alias_short_circuits_on_pull_request(self) -> None:
         """Without this the advisory alias fails closed once the leg is absent."""
@@ -351,24 +386,52 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         body = "\n".join(step.get("run", "") for step in steps)
         self.assertIn("github.event_name }}\" = \"pull_request\"", body)
 
+    def test_windows_alias_short_circuits_on_linux_only_dispatch(self) -> None:
+        steps = self.workflow["jobs"]["windows"]["steps"]
+        body = "\n".join(step.get("run", "") for step in steps)
+        self.assertIn("inputs.run_windows", body)
+        self.assertIn("Windows omitted by operator request", body)
+
     def test_required_macos_alias_never_consumes_preamble_capacity(self) -> None:
         """The long-polling required alias must leave classifiers runnable.
 
-        `macos` can poll the real matrix leg for an hour. If it runs on
-        `pulp-preamble`, several merge-group aliases occupy every runner capable
-        of starting the next run's fail-closed classify/resolve jobs. Hosted
-        Linux is sufficient for the API-only alias; an explicit dedicated alias
-        pool remains configurable.
+        If it runs on `pulp-preamble`, several aliases can occupy every runner
+        capable of starting the next run's fail-closed classify/resolve jobs.
+        Hosted Linux is sufficient for the short API-only report.
         """
         runs_on = self.workflow["jobs"]["macos"]["runs-on"]
         self.assertIn("PULP_ALIAS_RUNS_ON_JSON", runs_on)
         self.assertIn("ubuntu-latest", runs_on)
         self.assertNotIn("PULP_PREAMBLE_RUNS_ON_JSON", runs_on)
 
-    def test_required_macos_gate_still_runs_on_pull_request(self) -> None:
-        """The required gate must keep reporting from the PR head."""
+        merge_runs_on = self.workflow["jobs"]["macos-merge-group"]["runs-on"]
+        self.assertIn("PULP_PREAMBLE_RUNS_ON_JSON", merge_runs_on)
+        self.assertNotIn("PULP_ALIAS_RUNS_ON_JSON", merge_runs_on)
+
+    def test_required_macos_alias_paths_do_not_share_advisory_dependencies(self) -> None:
+        """PR polling stays independent; merge-group reporting stays short."""
         condition = " ".join(self.workflow["jobs"]["macos"]["if"].split())
-        self.assertNotIn("pull_request", condition)
+        self.assertIn("github.event_name != 'merge_group'", condition)
+        self.assertNotIn("build", self.workflow["jobs"]["macos"]["needs"])
+
+        pr_alias = self.workflow["jobs"]["macos"]
+        self.assertIn("macos-pr-unused", pr_alias["name"])
+
+        merge_alias = self.workflow["jobs"]["macos-merge-group"]
+        self.assertIn("macos-merge-unused", merge_alias["name"])
+        self.assertIn("'macos'", merge_alias["name"])
+        self.assertIn("build", merge_alias["needs"])
+        self.assertIn("classify", merge_alias["needs"])
+        merge_condition = " ".join(merge_alias["if"].split())
+        self.assertEqual(
+            merge_condition, "always() && github.event_name == 'merge_group'"
+        )
+
+    def test_advisory_aliases_do_not_run_without_merge_group_legs(self) -> None:
+        for name in ("linux", "windows"):
+            with self.subTest(job=name):
+                condition = " ".join(self.workflow["jobs"][name]["if"].split())
+                self.assertIn("github.event_name != 'merge_group'", condition)
 
 
 class TartMacosWorkflowPrerequisiteTests(unittest.TestCase):

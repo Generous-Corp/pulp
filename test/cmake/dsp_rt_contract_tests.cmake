@@ -33,6 +33,10 @@ pulp_add_test_suite(pulp-test-signal-rt-safety
     SOURCES test_signal_rt_safety.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal pulp::signal-fft-backend)
 
+pulp_add_test_suite(pulp-test-realtime-pitch-time-rt-safety
+    SOURCES test_realtime_pitch_time_rt_safety.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal pulp::signal-fft-backend)
+
 pulp_add_test_suite(pulp-test-signal-mod-rt-safety
     SOURCES test_signal_mod_rt_safety.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
@@ -153,6 +157,9 @@ pulp_add_test_suite(pulp-test-drum-fm
 # sources keep the independent trigger and matrix families navigable.
 pulp_add_test_suite(pulp-test-mod-utilities
     SOURCES test_mod_utilities.cpp
+            test_mod_utilities_lfo.cpp
+            test_mod_utilities_slew_envelope.cpp
+            test_mod_utilities_vca_vactrol_trigger.cpp
             test_mod_utilities_trigger.cpp
             test_mod_utilities_mod_matrix.cpp
             harness/rt_allocation_probe.cpp

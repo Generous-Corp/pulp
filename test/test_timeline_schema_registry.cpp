@@ -120,7 +120,9 @@ TEST_CASE("Built-in command registry covers the complete mutation variant") {
         "pulp.timeline.command.insert_slot",
         "pulp.timeline.command.insert_take",
         "pulp.timeline.command.insert_take_lane",
+        "pulp.timeline.command.insert_track",
         "pulp.timeline.command.move_clip",
+        "pulp.timeline.command.move_track",
         "pulp.timeline.command.remove_asset",
         "pulp.timeline.command.remove_automation_lane",
         "pulp.timeline.command.remove_clip",
@@ -131,6 +133,7 @@ TEST_CASE("Built-in command registry covers the complete mutation variant") {
         "pulp.timeline.command.remove_slot",
         "pulp.timeline.command.remove_take",
         "pulp.timeline.command.remove_take_lane",
+        "pulp.timeline.command.remove_track",
         "pulp.timeline.command.replace_note_content",
         "pulp.timeline.command.set_active_take_lane",
         "pulp.timeline.command.set_chord_scale_lane",
@@ -138,12 +141,14 @@ TEST_CASE("Built-in command registry covers the complete mutation variant") {
         "pulp.timeline.command.set_clip_sequence_ref",
         "pulp.timeline.command.set_groove",
         "pulp.timeline.command.set_meter_map",
+        "pulp.timeline.command.set_note_events",
         "pulp.timeline.command.set_note_velocity",
         "pulp.timeline.command.set_record_arm",
         "pulp.timeline.command.set_take_comp",
         "pulp.timeline.command.set_tempo_map",
         "pulp.timeline.command.set_track_freeze",
         "pulp.timeline.command.set_track_mixer",
+        "pulp.timeline.command.set_track_name",
     };
     static_assert(expected.size() == std::variant_size_v<Command>);
 

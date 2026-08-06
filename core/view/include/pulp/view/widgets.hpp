@@ -202,6 +202,62 @@ public:
     /// containers keep the legacy one-line metric.
     float measured_height(float available_width) const;
 
+    /// One captured line of text: where it sits in this Label's box, and which
+    /// slice of the text it holds (UTF-16 code units, as the capture indexes).
+    struct CachedLineBox {
+        float left = 0.0f;
+        float top = 0.0f;
+        float width = 0.0f;
+        float height = 0.0f;
+        int start = 0;
+        int length = 0;
+    };
+
+    /// How many Labels took each line-breaking path since the last reset.
+    ///
+    /// Three paths now decide where text breaks, and pixels cannot tell them
+    /// apart: a captured layout used verbatim, a captured layout rejected and
+    /// reflowed, and text that never had one. A render that looks wrong is a
+    /// different bug in each case, so the counts are reported rather than
+    /// inferred — and a cache that never activates and one that always does
+    /// look identical without them.
+    struct LineBreakPathCounts {
+        int cached = 0;      ///< captured layout used verbatim
+        int reflowed = 0;    ///< captured layout present but rejected
+        int uncached = 0;    ///< no captured layout at all
+    };
+    static LineBreakPathCounts line_break_path_counts();
+    static void reset_line_break_path_counts();
+
+    /// Adopt a browser's own line breaking for this text.
+    ///
+    /// The Label stays a paragraph — full text, one style, one box — and this
+    /// is a CACHE of how the text was already broken, not a replacement for
+    /// breaking it. Paint uses it verbatim while `basis_width` and
+    /// `basis_face` still describe the situation, and reflows through the
+    /// shaper the moment they do not. Adopting a foreign layout is only sound
+    /// while the thing that produced it still holds.
+    ///
+    /// `basis_face` is the PostScript name of the face the boxes were laid out
+    /// with, not the requested family. Empty means unverifiable, and an
+    /// unverifiable cache is never used.
+    void set_cached_line_boxes(std::vector<CachedLineBox> boxes,
+                               float basis_width, std::string basis_face);
+    const std::vector<CachedLineBox>& cached_line_boxes() const {
+        return cached_line_boxes_;
+    }
+
+    /// The CSS numeric weight this Label will actually be painted at — its own
+    /// when it was given one, otherwise the nearest ancestor's.
+    ///
+    /// Not the same as `font_weight()`, and the difference is not cosmetic: an
+    /// imported design sets the weight on the *view* via
+    /// `set_inheritable_font_weight`, leaving `font_weight()` at its 400
+    /// default. Anything that measures this text has to ask the same question
+    /// the painter does, or a bold run is measured as regular on exactly the
+    /// panels where weight came from the cascade.
+    int effective_font_weight() const;
+
     /// Baseline offset from the top of the Label's measured box, used by Yoga's
     /// `YGNodeSetBaselineFunc` to honor `align-items: baseline` on
     /// flex containers. Returns
@@ -348,23 +404,47 @@ private:
     // Cache of the soft-wrap shaped layout so paint() reuses it instead of
     // re-running the expensive TextShaper prepare()+layout each frame. Keyed on
     // every input the shaper reads; a key mismatch recomputes, so no stale hit
-    // is possible. Weight/style/letter-spacing are intentionally absent — they
-    // affect rasterization, not line breaking.
+    // is possible.
+    //
+    // Weight IS one of those inputs. A Bold face is a different set of glyph
+    // advances, not a Regular one drawn heavier, so the same string at the same
+    // size in the same family breaks at a different word depending on it —
+    // which is why a key without it serves a Regular layout to a Bold label.
+    // Letter-spacing is still absent: it is applied after breaking, by the
+    // caller.
     struct ShapedLayoutKey {
         std::string display_text;  // text_ after text-transform
         std::string family;        // resolved family ("Inter" fallback)
         float font_size = 0.0f;
+        int font_weight = 400;     // CSS numeric weight; selects the face
         float width = 0.0f;        // bounds().width — changes every resize
         float line_height = 0.0f;
         int break_mode = 0;        // canvas::BreakMode as int
         std::uint64_t font_gen = 0;  // font_registration_generation() snapshot
         bool operator==(const ShapedLayoutKey& o) const {
             return display_text == o.display_text && family == o.family &&
-                   font_size == o.font_size && width == o.width &&
-                   line_height == o.line_height && break_mode == o.break_mode &&
-                   font_gen == o.font_gen;
+                   font_size == o.font_size && font_weight == o.font_weight &&
+                   width == o.width && line_height == o.line_height &&
+                   break_mode == o.break_mode && font_gen == o.font_gen;
         }
     };
+    /// Whether the captured line boxes still describe this Label.
+    ///
+    /// CONSERVATIVE BY CONSTRUCTION: every condition that could move a break
+    /// must match, and anything unknown counts as a mismatch. Reusing a cache
+    /// that no longer applies reintroduces exactly the defect it exists to
+    /// prevent; discarding one that still applies costs a reflow.
+    bool cached_line_layout_usable(const std::string& display_text) const;
+
+    /// Build a ShapedLayout from the captured boxes, so the rest of paint —
+    /// line-clamp, vertical-align, alignment — is the same code either way.
+    canvas::ShapedLayout layout_from_cached_lines(const std::string& text,
+                                                  float line_height) const;
+
+    std::vector<CachedLineBox> cached_line_boxes_;
+    float cached_line_basis_width_ = 0.0f;
+    std::string cached_line_basis_face_;
+
     ShapedLayoutKey shaped_cache_key_;
     canvas::ShapedLayout shaped_cache_layout_;
     bool shaped_cache_valid_ = false;
@@ -1560,7 +1640,13 @@ public:
 
     // Sample the skin gradient at normalized position t (0=low/bottom,
     // 1=high/top). Linear interpolation across the supplied stops.
-    canvas::Color gradient_color_at(float t) const;
+    //
+    // Nothing when no stops were set: a meter with no gradient has no colour
+    // to give, and the caller must draw nothing rather than receive one. This
+    // used to answer a built-in green, which is a colour from nowhere on any
+    // design that never chose it — and returning a transparent Color instead
+    // would be no safer, since a caller that ignores alpha paints it black.
+    std::optional<canvas::Color> gradient_color_at(float t) const;
 
 private:
     // Drive the ballistic path from the frame the View base snapshotted for us.

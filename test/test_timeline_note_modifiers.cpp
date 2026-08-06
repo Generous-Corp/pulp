@@ -43,7 +43,7 @@ std::size_t sounding_passes(const NoteModifier& modifier, std::uint64_t seed, It
 
 TEST_CASE("Note modifiers attach to notes and normalize to a canonical order",
           "[timeline][note-modifier]") {
-    auto content = take(NoteContent::create(
+    auto content = take(MidiContent::create(
         two_notes(), {chance(8, note_probability_certain / 2), chance(7, 1)}, 0xC0FFEE));
     REQUIRE(content.modifiers().size() == 2);
     REQUIRE(content.modifiers()[0].note_id == ItemId{7});
@@ -54,7 +54,7 @@ TEST_CASE("Note modifiers attach to notes and normalize to a canonical order",
     REQUIRE(content.modifier_for({9}) == nullptr);
 
     // Notes alone stay exactly as cheap as before: no modifiers, zero seed.
-    const auto plain = take(NoteContent::create(two_notes()));
+    const auto plain = take(MidiContent::create(two_notes()));
     REQUIRE(plain.modifiers().empty());
     REQUIRE(plain.modifier_seed() == 0);
     REQUIRE(plain.modifier_for({7}) == nullptr);
@@ -63,35 +63,35 @@ TEST_CASE("Note modifiers attach to notes and normalize to a canonical order",
 TEST_CASE("Note modifiers are rejected when they cannot describe a real decision",
           "[timeline][note-modifier]") {
     // Names a note the content does not contain.
-    REQUIRE_FALSE(NoteContent::create(two_notes(), {chance(99, 1)}, 0));
+    REQUIRE_FALSE(MidiContent::create(two_notes(), {chance(99, 1)}, 0));
     // Two entries for one note: the content would have two answers.
-    REQUIRE_FALSE(NoteContent::create(two_notes(), {chance(7, 1), chance(7, 2)}, 0));
+    REQUIRE_FALSE(MidiContent::create(two_notes(), {chance(7, 1), chance(7, 2)}, 0));
     // Neutral: a second encoding of a note that already plays that way.
-    REQUIRE_FALSE(NoteContent::create(two_notes(), {chance(7, note_probability_certain)}, 0));
+    REQUIRE_FALSE(MidiContent::create(two_notes(), {chance(7, note_probability_certain)}, 0));
 
     NoteModifier zero_period = chance(7, 1);
     zero_period.condition = NoteConditionKind::EveryNth;
     zero_period.condition_period = 0;
-    REQUIRE_FALSE(NoteContent::create(two_notes(), {zero_period}, 0));
+    REQUIRE_FALSE(MidiContent::create(two_notes(), {zero_period}, 0));
 
     NoteModifier offset_past_period = chance(7, 1);
     offset_past_period.condition = NoteConditionKind::EveryNth;
     offset_past_period.condition_period = 4;
     offset_past_period.condition_offset = 4;
-    REQUIRE_FALSE(NoteContent::create(two_notes(), {offset_past_period}, 0));
+    REQUIRE_FALSE(MidiContent::create(two_notes(), {offset_past_period}, 0));
 
     // An unread period/offset must stay canonical so one behavior has one form.
     NoteModifier noisy_always = chance(7, 1);
     noisy_always.condition_period = 3;
-    REQUIRE_FALSE(NoteContent::create(two_notes(), {noisy_always}, 0));
+    REQUIRE_FALSE(MidiContent::create(two_notes(), {noisy_always}, 0));
 
     NoteModifier no_ratchet = chance(7, 1);
     no_ratchet.ratchet_count = 0;
-    REQUIRE_FALSE(NoteContent::create(two_notes(), {no_ratchet}, 0));
+    REQUIRE_FALSE(MidiContent::create(two_notes(), {no_ratchet}, 0));
 
     NoteModifier huge_ratchet = chance(7, 1);
     huge_ratchet.ratchet_count = note_ratchet_maximum + 1;
-    REQUIRE_FALSE(NoteContent::create(two_notes(), {huge_ratchet}, 0));
+    REQUIRE_FALSE(MidiContent::create(two_notes(), {huge_ratchet}, 0));
 }
 
 TEST_CASE("Note probability is exact at both endpoints", "[timeline][note-modifier][determinism]") {
@@ -225,7 +225,7 @@ TEST_CASE("Condition names round trip and unknown spellings are refused",
 
 TEST_CASE("Replacing a note keeps its modifiers and the content seed",
           "[timeline][note-modifier]") {
-    auto content = take(NoteContent::create(two_notes(), {chance(7, 1024)}, 99));
+    auto content = take(MidiContent::create(two_notes(), {chance(7, 1024)}, 99));
     auto updated = take(content.replace_note({{7}, {0}, {240}, 0x4000, 61, 0}));
     REQUIRE(updated.modifier_seed() == 99);
     REQUIRE(updated.modifiers().size() == 1);

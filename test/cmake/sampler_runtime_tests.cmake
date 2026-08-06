@@ -3,6 +3,7 @@
 # ProcessContext.
 pulp_add_test_suite(pulp-test-transport-quantizer LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-timebase LIBRARIES pulp::timebase TIMEOUT 60)
+pulp_add_test_suite(pulp-test-timebase-continuous LIBRARIES pulp::timebase TIMEOUT 60)
 
 # Sample asset drop target adapter over cheap extension classification.
 pulp_add_test_suite(pulp-test-sample-asset-drop-target LIBRARIES pulp::view)
@@ -104,6 +105,16 @@ include("${PROJECT_SOURCE_DIR}/examples/PulpSampler/pulp_sampler_sources.cmake")
 # (`ctest -LE "…|performance|quality-lab"`). The Pulp Catch discovery wrapper
 # preserves every label in these lists, including the gate-exclusion labels
 # used by pull-request validation.
+# A wall-clock CPU-budget assertion measures the sanitizer's instrumentation
+# overhead rather than the shipping code, so the budget halves of these gates
+# stand down on an instrumented build. Everything else in the binary — the
+# correctness and resource-bound assertions — still runs, so the sanitizer lanes
+# keep their coverage of these paths. Mirrors the same signal in
+# timeline_tests.cmake.
+set(PULP_HERITAGE_GATES_SANITIZED OFF)
+if(PULP_SANITIZER OR CMAKE_CXX_FLAGS MATCHES "(^|[ ;])-fsanitize")
+    set(PULP_HERITAGE_GATES_SANITIZED ON)
+endif()
 pulp_add_test_suite(pulp-test-sample-heritage-shipping-gates
     SOURCES test_sample_heritage_shipping_gates.cpp
             ${PROJECT_SOURCE_DIR}/examples/PulpSampler/test_pulp_sampler_heritage_render_clock.cpp
@@ -112,6 +123,7 @@ pulp_add_test_suite(pulp-test-sample-heritage-shipping-gates
     INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/examples/PulpSampler
                  ${PROJECT_SOURCE_DIR}/test/harness
     COMPILE_DEFINITIONS PULP_SAMPLER_TEST_HOOKS=1
+        $<$<BOOL:${PULP_HERITAGE_GATES_SANITIZED}>:PULP_TEST_WITH_SANITIZER=1>
     TEST_SPEC "[shipping-gate]~[g1]~[performance],[heritage][typed][pitch][polyphony],[heritage][typed][mip],[heritage][typed][pitch][stream][mip],[heritage][typed][failure],[heritage][latency]"
     LABELS "quality-lab;audio;sampler;heritage;shipping-gate"
     TIMEOUT 30)

@@ -42,6 +42,19 @@ Project project_with_takes() {
     return take(Project::create(ProjectInput{{1}, "takes", 7, {2}, {asset}, {sequence}}));
 }
 
+// Two tracks stored 4 then 3 and arranged the other way round, so the sequence
+// carries an authored order no shipped release can represent.
+Project project_with_reordered_tracks() {
+    auto first = take(Track::create({4}, "first", {}));
+    auto second = take(Track::create({3}, "second", {}));
+    auto sequence = take(Sequence::create(SequenceInput{.id = {2},
+                                                        .name = "root",
+                                                        .musical_duration = TickDuration{100},
+                                                        .tracks = {first, second},
+                                                        .track_order = {{3}, {4}}}));
+    return take(Project::create(ProjectInput{{1}, "reordered", 5, {2}, {}, {sequence}}));
+}
+
 } // namespace
 
 TEST_CASE("Timeline release maps name exact shipped schema sets") {
@@ -113,6 +126,15 @@ TEST_CASE("Timeline release export rejects lossy feature downgrades") {
         serialize_project_for_release(project_with_takes(), registry, release("v0.748.0"));
     REQUIRE_FALSE(takes.has_value());
     REQUIRE(takes.error().code == PersistenceErrorCode::MigrationFailed);
+
+    // Every shipped release predates the authored track order, and a reader
+    // that never had the field arranges tracks in their identity order, so
+    // exporting a reordering would rewrite the arrangement rather than drop
+    // something the older reader would have ignored.
+    const auto reordered = serialize_project_for_release(project_with_reordered_tracks(), registry,
+                                                         release("v0.750.0"));
+    REQUIRE_FALSE(reordered.has_value());
+    REQUIRE(reordered.error().code == PersistenceErrorCode::MigrationFailed);
 }
 
 TEST_CASE("Timeline release export removes only unsupported inactive identity tombstones") {
@@ -158,7 +180,7 @@ TEST_CASE("Timeline release export validates caller-defined maps") {
             take(serialize_project(project_with_takes(), registry)).json);
 
     constexpr std::array future{
-        SchemaVersionTarget{SchemaDomain::Document, "pulp.timeline.project", 3},
+        SchemaVersionTarget{SchemaDomain::Document, "pulp.timeline.project", 4},
     };
     auto future_result =
         serialize_project_for_release(project_with(), registry, SchemaReleaseMap{"future", future});

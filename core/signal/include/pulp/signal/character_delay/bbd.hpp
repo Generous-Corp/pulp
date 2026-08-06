@@ -115,7 +115,10 @@ public:
     double bandwidth_hz() const noexcept { return bandwidth_hz_; }
     std::size_t stages() const noexcept { return stages_; }
 
-    double process(double x) noexcept {
+    // `clock_mod` scales the bucket clock for this sample (LFO chorus: a varying
+    // clock varies both delay time and pitch, which is how a BBD choruses). 0
+    // leaves the control-rate clock_period_ unchanged.
+    double process(double x, double clock_mod = 0.0) noexcept {
         // ── Compander, compress half ──────────────────────────────────────
         // NE570-class parts close the rectifier loop around the COMPRESSED
         // signal, not the input; that feedback typology is why the compressed
@@ -137,6 +140,7 @@ public:
         double value = previous_input_;
         const double internal_period = 1.0 / oversampled_rate_;
         double first_read = 0.0;
+        const double period = std::max(clock_period_ * (1.0 + clock_mod), 1e-9);
 
         for (int u = 0; u < kBbdOversample; ++u) {
             time_accumulator_ += internal_period;
@@ -147,8 +151,8 @@ public:
             // on the audio thread is not something to leave to a clamp two
             // layers away.
             int ticks = 0;
-            while (time_accumulator_ >= clock_period_ && ticks++ < kMaxTicksPerStep) {
-                const double jittered = clock_period_ + next_jitter();
+            while (time_accumulator_ >= period && ticks++ < kMaxTicksPerStep) {
+                const double jittered = period + next_jitter();
                 buckets_[write_] = static_cast<float>(value);
                 if (++write_ >= kBbdMaxStages) write_ = 0;
                 time_accumulator_ -= std::max(jittered, 1e-9);

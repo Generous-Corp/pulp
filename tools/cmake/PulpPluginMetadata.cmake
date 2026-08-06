@@ -14,6 +14,34 @@ function(_pulp_metadata_require_fourcc context label value)
     endif()
 endfunction()
 
+# Claim one AudioComponent identity for `owner`.
+#
+# macOS keys the AudioComponent registry on the (type, subtype, manufacturer)
+# triple, so two components that share it are ONE component as far as a host is
+# concerned: the second is unreachable, and which of the two a DAW resolves is
+# not defined. The same pair also names the Cocoa view-factory ObjC class
+# (`PulpAUCocoaViewFactory_<mfr>_<code>`), so a duplicate additionally puts two
+# implementations of one ObjC class into whatever process loads both — and a
+# product family is exactly the case where all the codes come from one author
+# and a copy-paste is easy.
+#
+# Re-claiming the same triple from the SAME target is fine: AU v2 and AUv3 of
+# one plugin deliberately publish one identity.
+function(_pulp_metadata_claim_au_component owner context au_type plugin_code manufacturer_code)
+    set(_pulp_component_id "${au_type}/${plugin_code}/${manufacturer_code}")
+    get_property(_pulp_component_owner GLOBAL
+        PROPERTY "PULP_AU_COMPONENT_OWNER_${_pulp_component_id}")
+    if(_pulp_component_owner AND NOT _pulp_component_owner STREQUAL "${owner}")
+        message(FATAL_ERROR
+            "pulp: ${context}: Audio Unit identity ${_pulp_component_id} "
+            "(type/PLUGIN_CODE/MANUFACTURER_CODE) is already used by target "
+            "'${_pulp_component_owner}'. macOS treats two components sharing "
+            "that triple as one, so only one of them can ever load. Give each "
+            "plugin its own PLUGIN_CODE.")
+    endif()
+    set_property(GLOBAL PROPERTY "PULP_AU_COMPONENT_OWNER_${_pulp_component_id}" "${owner}")
+endfunction()
+
 function(_pulp_metadata_parse_au_version out_var context version)
     if(NOT "${version}" MATCHES "^([0-9]+)(\\.([0-9]+))?(\\.([0-9]+))?($|[-+])")
         message(FATAL_ERROR

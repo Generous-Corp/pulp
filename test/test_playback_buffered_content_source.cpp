@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "harness/rt_allocation_probe.hpp"
+#include "harness/scoped_rt_process_probe.hpp"
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/playback/buffered_content_source.hpp>
@@ -332,7 +333,8 @@ TEST_CASE("a partial underrun cannot retag a concurrent producer block",
     source.release();
 }
 
-TEST_CASE("the audio-thread pull path allocates nothing", "[playback][production][rt-safety]") {
+TEST_CASE("the audio-thread pull path allocates nothing and takes no lock",
+          "[playback][production][rt-safety]") {
     playback::BufferedContentSource source;
     REQUIRE(source.prepare(buffered_declaration(), default_config(),
                            bounded_producer(kDeclaredFrames, 0.5f)));
@@ -352,15 +354,18 @@ TEST_CASE("the audio-thread pull path allocates nothing", "[playback][production
     }
     REQUIRE(control_saw_allocation);
 
-    bool pull_saw_allocation = false;
+    std::size_t pull_allocations = 1;
     std::uint64_t produced = 0;
     {
-        test::RtAllocationProbe probe;
+        // The combined probe adds lock-freedom to the allocation assertion:
+        // the trap backend aborts if the pull path takes a blocking lock while
+        // the producer thread owns the other side of the ring.
+        test::ScopedRtProcessProbe probe;
         produced = source.pull(block.view(), kChunkFrames);
-        pull_saw_allocation = probe.saw_allocation();
+        pull_allocations = probe.allocation_count();
     }
     REQUIRE(produced == kChunkFrames);
-    REQUIRE_FALSE(pull_saw_allocation);
+    REQUIRE(pull_allocations == 0);
 }
 
 TEST_CASE("counters stay consistent with the play cursor across the producer thread",

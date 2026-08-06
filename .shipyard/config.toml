@@ -23,6 +23,21 @@ profile   = "solo"
 # validate as advisory GitHub-hosted lanes.
 platforms = ["macos", "linux", "windows"]
 
+# Physical and planned machines that must remain visible even when no runner is
+# registered. Shipyard matches these by label subset, so JIT/ephemeral runner
+# names remain disposable. `active = false` records planned inventory without
+# claiming capacity or raising an availability alert.
+[runner.fleet.expected_host.macpro]
+labels = ["self-hosted", "Linux", "X64", "pulp-host-macpro"]
+min_online = 2
+
+[runner.fleet.expected_host.macmini]
+labels = ["self-hosted", "macOS", "X64", "pulp-intel-native", "pulp-host-macmini"]
+
+[runner.fleet.expected_host.macbook_air]
+active = false
+labels = ["self-hosted", "Linux", "ARM64", "pulp-host-macbook-air"]
+
 # ── Gate script paths (Shipyard v0.19.1+ path discovery) ───────────────────
 # Pulp keeps the skill-sync, version-bump, and versioning-config files
 # under tools/scripts/. Shipyard v0.19.1+ auto-discovers this layout, but
@@ -89,7 +104,7 @@ versioning_config   = "tools/scripts/versioning.json"
 [validation.default]
 stages = ["setup", "configure", "build", "test"]
 setup     = "./setup.sh --ci --deps-only"
-configure = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON"
+configure = "ci_python=$(python3 tools/ci/find_python311.py) && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPython3_EXECUTABLE=\"$ci_python\""
 build     = "tools/ci/governed-build.sh cmake --build build"
 # `--label-exclude "validation|slow"` mirrors build.yml's PR ctest and
 # cross-platform-check.yml. Two label groups are skipped on the per-PR gate:
@@ -97,11 +112,11 @@ build     = "tools/ci/governed-build.sh cmake --build build"
 #   * `validation` — the example plugins' real-host format-validators
 #     (`pluginval-*`, `auval-*`, `clap-dlopen-*`; all live under examples/ and
 #     are the only users of this label). They are slow and flaky under load and
-#     have no business gating unrelated core PRs. configure keeps
-#     PULP_BUILD_EXAMPLES=ON, so example *compile* breakage is still caught here;
-#     only the runtime validators move off the required lane. They are enforced
-#     on the path-filtered example-validation lane (examples/** changes) and run
-#     nightly. See docs/guides/test-lanes.md.
+#     have no business gating unrelated core PRs. Runtime validation lives on
+#     the path-filtered example-validation lane. Compilation deliberately stays
+#     ON here until that stable context is promoted to a required check; only
+#     then may a follow-up turn examples OFF in Shipyard. See
+#     docs/guides/test-lanes.md.
 # `--repeat until-pass:2` retries a failed test once before failing the leg, so a
 # single timing-flake self-heals instead of reddening the required `macos` gate
 # and wedging auto-merge (mirrors build.yml + sanitizers.yml; each attempt is
@@ -236,9 +251,21 @@ backend  = "local"
 platform = "macos-arm64"
 workflow = "build"
 # Phase 8 timeout bump (Dawn + Skia + mbedtls + cargo build); see
-# git history for context. Kept at 1h because clean local builds still
-# run long on cold caches.
-timeout_secs = 3600
+# git history for context.
+#
+# 2026-07-27: raised 3600 -> 7200. One hour no longer covers a clean local
+# build on a loaded machine, and the failure mode is indistinguishable from a
+# broken PR: the lane is killed mid-build and reports `Validation timed out`
+# with no per-target diagnostics, so a perfectly good branch looks red.
+# Measured on this Mac with four agent sessions active: a change touching
+# core/view broadly ran 62 min and was killed at 98% with ZERO compile errors;
+# another ran 113 min and died at 67%. A small change against a warm build dir
+# finished in 41 min and passed — which is why this presents as flakiness
+# rather than as a ceiling everyone hits.
+#
+# Queue wait is NOT charged against this budget (the clock starts when the lane
+# starts), so 3600 was only ever bounding the build itself.
+timeout_secs = 7200
 
 # ── Cloud dispatch (manual only) ───────────────────────────────────────────
 # Namespace remains available only for explicit operator-dispatched cloud
@@ -327,6 +354,7 @@ trailers = [
 ]
 only_for_tag_pattern = "v*"
 max_push_attempts    = 5
+ssh_signing_setup_script = "tools/scripts/configure_release_bot_ssh_signing.sh"
 
 [release.post_tag_hook.bot_identity]
 name  = "pulp-release-bot"

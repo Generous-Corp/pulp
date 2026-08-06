@@ -917,3 +917,225 @@ TEST_CASE("scrub blocks stay allocation free including the restarting block") {
     REQUIRE(snapshot.range_count == 2); // the probed block really did restart
     REQUIRE(allocation_count == 0);
 }
+
+TEST_CASE("transport publishes a playhead a non-audio reader can consume") {
+    // A step map whose tempo at the starting position is neither the map's
+    // first tempo nor TransportPlayhead's default, so a reading that reported
+    // either would be visible rather than coincidentally right.
+    const std::array points{
+        TempoPoint{{0}, 60.0},
+        TempoPoint{{kTicksPerQuarter}, 180.0},
+    };
+    const auto map = require_compiled_tempo_map(points, RationalRate{48'000, 1});
+    auto setup = config();
+    setup.initially_playing = true;
+    setup.initial_position = {2 * kTicksPerQuarter};
+    setup.loop = {true, {0}, {4 * kTicksPerQuarter}};
+    MasterTransport transport;
+    REQUIRE(transport.playhead() == TransportPlayhead{});
+
+    REQUIRE(transport.prepare(map, setup) == TransportError::None);
+    const auto prepared = transport.playhead();
+    // prepare() states where the transport starts instead of leaving a reading
+    // from a program that is gone — or a cleared one — readable until the first
+    // block lands.
+    REQUIRE(prepared.sequence != 0);
+    REQUIRE(prepared.position == setup.initial_position);
+    REQUIRE(prepared.loop == setup.loop);
+    REQUIRE(prepared.tempo_bpm == 180.0);
+    REQUIRE(prepared.is_playing);
+    REQUIRE_FALSE(prepared.scrubbing);
+
+    const auto first = block(transport, 512);
+    const auto after_first = transport.playhead();
+    REQUIRE(after_first.sequence == prepared.sequence + 1);
+    REQUIRE(after_first.playback_epoch == first.playback_epoch);
+    REQUIRE(after_first.loop == first.loop);
+    REQUIRE(after_first.tempo_bpm == first.tempo_bpm);
+    REQUIRE(after_first.is_playing);
+    REQUIRE_FALSE(after_first.scrubbing);
+
+    // The reading names the block's first frame, which has not left the device
+    // yet. Publishing the end would put every reading a buffer into the future.
+    REQUIRE(after_first.position == setup.initial_position);
+    REQUIRE(after_first.position == first.ranges[0].timeline_tick_start);
+    REQUIRE(first.ranges[0].timeline_tick_end != first.ranges[0].timeline_tick_start);
+    REQUIRE(after_first.position != first.ranges[0].timeline_tick_end);
+
+    const auto second = block(transport, 512);
+    REQUIRE(transport.playhead().position == second.ranges[0].timeline_tick_start);
+    REQUIRE(transport.playhead().sequence == after_first.sequence + 1);
+}
+
+TEST_CASE("a stopped transport publishes the position a seek parked it on") {
+    const auto map = constant_map();
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, config()) == TransportError::None);
+    const TickPosition target{3 * kTicksPerQuarter};
+    REQUIRE(transport.seek(target) == TransportError::None);
+
+    // A seek reaches the audio thread through desired_, so it becomes readable
+    // on the block that applies it — not on the control call that posted it.
+    REQUIRE(transport.playhead().position == TickPosition{});
+    block(transport, 256);
+    const auto parked = transport.playhead();
+    REQUIRE(parked.position == target);
+    REQUIRE_FALSE(parked.is_playing);
+    REQUIRE_FALSE(parked.scrubbing);
+
+    REQUIRE(transport.begin_scrub(1'024, target) == TransportError::None);
+    block(transport, 256);
+    const auto scrubbing = transport.playhead();
+    REQUIRE(scrubbing.scrubbing);
+    // is_playing is true while scrubbing: a reader asking only whether the
+    // playhead moves needs no scrub branch.
+    REQUIRE(scrubbing.is_playing);
+}
+
+TEST_CASE("the published playhead is the newest reading, never a backlog") {
+    const auto map = constant_map();
+    auto setup = config();
+    setup.initially_playing = true;
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, setup) == TransportError::None);
+    const auto prepared = transport.playhead();
+
+    constexpr int kBlocks = 64;
+    TransportSnapshot last;
+    for (int i = 0; i < kBlocks; ++i)
+        last = block(transport, 256);
+
+    const auto reading = transport.playhead();
+    REQUIRE(reading.sequence == prepared.sequence + kBlocks);
+    REQUIRE(reading.position == last.ranges[0].timeline_tick_start);
+    // A reader that skipped every intermediate block still lands on the latest
+    // position rather than replaying the first one it missed.
+    REQUIRE(reading.position != TickPosition{});
+}
+
+TEST_CASE("publishing the playhead is lock and allocation free") {
+    const auto map = constant_map();
+    auto setup = config();
+    setup.initially_playing = true;
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, setup) == TransportError::None);
+    const auto before = transport.playhead().sequence;
+
+    TransportSnapshot snapshot;
+    auto error = TransportError::NotPrepared;
+    std::size_t allocation_count = 1;
+    {
+        test::ScopedRtProcessProbe probe;
+        error = transport.begin_block(512, snapshot);
+        allocation_count = probe.allocation_count();
+    }
+    REQUIRE(error == TransportError::None);
+    REQUIRE(allocation_count == 0);
+    // The probed block really did publish, so the probe covered the publish and
+    // not merely the block around it.
+    REQUIRE(transport.playhead().sequence == before + 1);
+}
+
+TEST_CASE("concurrent playhead readings are never internally inconsistent") {
+    // A step tempo map makes tempo a function of position, so a reading whose
+    // fields were assembled from two different publishes is detectable: no
+    // legal reading pairs a position before the step with the tempo after it.
+    const std::array points{
+        TempoPoint{{0}, 60.0},
+        TempoPoint{{kTicksPerQuarter}, 180.0},
+    };
+    const auto map = require_compiled_tempo_map(points, RationalRate{48'000, 1});
+    auto setup = config(64);
+    setup.initially_playing = true;
+    setup.loop = {true, {0}, {2 * kTicksPerQuarter}};
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, setup) == TransportError::None);
+
+    const auto consistent = [&setup](const TransportPlayhead& reading) {
+        if (reading.position < TickPosition{} ||
+            !(reading.position < TickPosition{2 * kTicksPerQuarter}))
+            return false;
+        const double expected = reading.position < TickPosition{kTicksPerQuarter} ? 60.0 : 180.0;
+        if (reading.tempo_bpm != expected)
+            return false;
+        if (reading.loop != setup.loop)
+            return false;
+        return reading.is_playing && !reading.scrubbing;
+    };
+
+    // Prove the invariant holds of a reading built by a single thread before
+    // trusting it to detect a torn one.
+    for (int i = 0; i < 64; ++i) {
+        block(transport, 64);
+        REQUIRE(consistent(transport.playhead()));
+    }
+
+    std::atomic<bool> done{false};
+    std::atomic<bool> writer_failed{false};
+    std::thread writer([&] {
+        TransportSnapshot snapshot;
+        for (int i = 0; i < 200'000; ++i) {
+            if (transport.begin_block(64, snapshot) != TransportError::None) {
+                writer_failed.store(true, std::memory_order_relaxed);
+                break;
+            }
+        }
+        done.store(true, std::memory_order_release);
+    });
+
+    bool torn = false;
+    bool went_backwards = false;
+    bool advanced = false;
+    std::uint64_t previous = transport.playhead().sequence;
+    while (!done.load(std::memory_order_acquire)) {
+        const auto reading = transport.playhead();
+        if (!consistent(reading)) {
+            torn = true;
+            break;
+        }
+        if (reading.sequence < previous) {
+            went_backwards = true;
+            break;
+        }
+        if (reading.sequence > previous)
+            advanced = true;
+        previous = reading.sequence;
+    }
+    writer.join();
+    REQUIRE_FALSE(torn);
+    REQUIRE_FALSE(went_backwards);
+    REQUIRE_FALSE(writer_failed.load(std::memory_order_relaxed));
+    // Without this the run above would pass on a reader that never observed a
+    // single publish.
+    REQUIRE(advanced);
+}
+
+TEST_CASE("a retired playhead never lets a new reading impersonate an old one") {
+    const auto map = constant_map();
+    auto setup = config();
+    setup.initially_playing = true;
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, setup) == TransportError::None);
+    // Two blocks: the first one STARTS at tick zero, and a reading names the
+    // start, so only the second moves the published position off the origin.
+    block(transport, 256);
+    block(transport, 256);
+    const auto live = transport.playhead();
+    REQUIRE(live.position != TickPosition{});
+
+    transport.reset();
+    const auto retired = transport.playhead();
+    // The previous lifecycle's position stops being readable at reset() rather
+    // than surviving until some later block replaces it.
+    REQUIRE(retired.position == TickPosition{});
+    REQUIRE_FALSE(retired.is_playing);
+    REQUIRE(retired.sequence > live.sequence);
+
+    // The counter is the only field reset() leaves alone. A restarted counter
+    // would make the next reading look like one a reader already acted on.
+    REQUIRE(transport.prepare(map, setup) == TransportError::None);
+    REQUIRE(transport.playhead().sequence > retired.sequence);
+    block(transport, 256);
+    REQUIRE(transport.playhead().sequence > retired.sequence + 1);
+    REQUIRE(transport.playhead().playback_epoch != live.playback_epoch);
+}

@@ -26,9 +26,16 @@ include(GNUInstallDirs)
 # `pulp-render`, are optional in smoke or non-GPU builds, so only export targets
 # that were actually configured in this build tree.
 set(PULP_SDK_TARGETS
-    pulp-platform pulp-runtime pulp-timebase pulp-timeline pulp-playback pulp-events
+    pulp-platform pulp-runtime pulp-timebase pulp-timeline
+)
+if(TARGET pulp-project-package)
+    list(APPEND PULP_SDK_TARGETS pulp-project-package)
+endif()
+list(APPEND PULP_SDK_TARGETS
+    pulp-timeline-agent-view pulp-timeline-editor
+    pulp-playback pulp-events
     pulp-sample-bank-manifest pulp-state
-    pulp-interchange pulp-dawproject-import pulp-smf-interop
+    pulp-interchange pulp-dawproject-import pulp-dawproject-export pulp-smf-interop pulp-smf-interchange
     pulp-audio pulp-midi pulp-signal pulp-graph pulp-format pulp-sequence
     pulp-osc pulp-canvas pulp-view-core pulp-view
     pulp-standalone pulp-dsl pulp-native-components
@@ -83,6 +90,42 @@ endif()
 
 if(TARGET pulp-inspect)
     list(APPEND PULP_SDK_TARGETS pulp-inspect)
+endif()
+if(TARGET pulp-inspect-protocol)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-protocol)
+endif()
+if(TARGET pulp-inspect-discovery-support)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-discovery-support)
+endif()
+if(TARGET pulp-inspect-discovery)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-discovery)
+endif()
+if(TARGET pulp-inspect-publication)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-publication)
+endif()
+if(TARGET pulp-inspect-control)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-control)
+endif()
+if(TARGET pulp-inspect-client)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-client)
+endif()
+if(TARGET pulp-inspect-runtime)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-runtime)
+endif()
+if(TARGET pulp-inspect-runtime-eval)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-runtime-eval)
+endif()
+if(TARGET pulp-inspect-telemetry)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-telemetry)
+endif()
+if(TARGET pulp-inspect-authoring)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-authoring)
+endif()
+if(TARGET pulp-standalone-inspector)
+    list(APPEND PULP_SDK_TARGETS pulp-standalone-inspector)
+endif()
+if(TARGET pulp-standalone-inspector-runtime-eval)
+    list(APPEND PULP_SDK_TARGETS pulp-standalone-inspector-runtime-eval)
 endif()
 
 # pulp-canvas links pulp-bundled-fonts privately when Skia is on.
@@ -156,6 +199,26 @@ if(TARGET yogacore)
         )
     endif()
 endif()
+if(PULP_ENABLE_DESIGN_IMPORT AND TARGET yaml-cpp)
+    # yaml-cpp remains an implementation detail of the public DESIGN.md parser,
+    # but pulp-view-core is static, so installed consumers need its archive in
+    # their final link closure. Export it under Pulp's namespace rather than
+    # installing a second, independently discoverable yaml-cpp package.
+    set_target_properties(yaml-cpp PROPERTIES EXPORT_NAME yaml-cpp)
+    install(TARGETS yaml-cpp
+        EXPORT PulpTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
+    if(DEFINED yaml-cpp_SOURCE_DIR
+       AND EXISTS "${yaml-cpp_SOURCE_DIR}/include/yaml-cpp")
+        install(DIRECTORY "${yaml-cpp_SOURCE_DIR}/include/yaml-cpp"
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        )
+    endif()
+endif()
 # Perfetto tracing (PULP_TRACING=ON only; the OFF default defines an empty
 # INTERFACE target and installs nothing).
 #
@@ -216,7 +279,13 @@ endif()
 # aligned with the targets exported above: iOS deliberately has no pulp-host,
 # so it must not receive orphaned desktop-host headers either.
 set(_pulp_sdk_header_subsystems
-    platform runtime timebase timeline playback events state audio midi signal graph format sequence osc canvas
+    platform runtime timebase timeline
+)
+if(TARGET pulp-project-package)
+    list(APPEND _pulp_sdk_header_subsystems project_package)
+endif()
+list(APPEND _pulp_sdk_header_subsystems
+    timeline_agent_view timeline_editor playback interchange dawproject smf events state audio midi signal graph format sequence osc canvas
     render view gpu_audio native-components dsl
 )
 if(TARGET pulp-host)
@@ -233,12 +302,47 @@ foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)
 endforeach()
 unset(_pulp_sdk_header_subsystems)
 
+# The inspector protocol/session foundation is deliberately separate from the
+# desktop GPU overlay and remains available to installed CPU-only clients.
+if(TARGET pulp-inspect)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h" PATTERN "*.inc")
+elseif(TARGET pulp-inspect-protocol)
+    install(FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/audit.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/authentication.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/capabilities.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/capability_definitions.inc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_broker.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_grants.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_identity.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_manifest.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_peer.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_registry_digest.inc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/client.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/discovery.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/discovery_publisher.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/inspector_server.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/main_thread_rpc.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/protocol.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/protocol_methods.inc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/publication_binding.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/session.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/test_input.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/trace_inspector.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/tweak_store.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/value_channel_telemetry_broker.hpp"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
+endif()
+
 # SDK license + third-party attribution.
 #
 # The rules above install third-party headers and archives into the SDK tree —
-# VST3, CLAP, AudioUnitSDK, LV2, Yoga, Highway, mbedTLS, SDL3, SheenBidi. That
-# is redistribution, and MIT conditions it on shipping the copyright and
-# permission notice with "all copies or substantial portions of the Software"
+# VST3, CLAP, AudioUnitSDK, LV2, Yoga, yaml-cpp, Highway, mbedTLS, SDL3,
+# SheenBidi. That is redistribution. MIT conditions it on shipping the
+# copyright and permission notice with "all copies or substantial portions of
+# the Software"
 # (Apache-2.0 §4 likewise requires the license text and any NOTICE). Without
 # these two files the installed SDK carried none: a `cmake --install` tree held
 # 218 files of third-party code and zero attribution, and every plugin that
@@ -270,6 +374,19 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/docs/status/dsp-capabilities.json")
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/status/dsp-capabilities.json"
             DESTINATION "share/pulp")
 endif()
+
+# Joined semantic Forge catalog. Unlike the static DSP capability inventory,
+# this snapshot includes ranges/defaults read from constructed baked nodes.
+# Forge consumes the copy belonging to its selected SDK, never a source tree.
+set(_pulp_forge_catalog_snapshot
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/status/forge-catalog.json")
+if(NOT EXISTS "${_pulp_forge_catalog_snapshot}")
+    message(FATAL_ERROR
+        "Required Forge catalog snapshot is missing: ${_pulp_forge_catalog_snapshot}\n"
+        "Regenerate it with `pulp forge catalog export --write`.")
+endif()
+install(FILES "${_pulp_forge_catalog_snapshot}" DESTINATION "share/pulp")
+unset(_pulp_forge_catalog_snapshot)
 
 # SDK version file
 file(WRITE "${CMAKE_BINARY_DIR}/version.txt" "${PROJECT_VERSION}\n")
@@ -333,6 +450,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAuv3.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpIosHostApp.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAppTargets.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInspectorShipping.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/check_inspector_shipping_artifact.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlugin.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlatformConfig.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake"
@@ -340,9 +459,23 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSdkGuards.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSdkProvenance.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWebGpuImportedTarget.cmake"
+    # Resolved by PulpWebGpuImportedTarget.cmake relative to its own directory,
+    # so it must land beside it in the installed SDK too — a consumer that can
+    # stage sidecars but cannot verify them is exactly the gap WAH-3 closes.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpRuntimeStaging.cmake"
+    # Resolved by PulpRuntimeStaging.cmake relative to its own directory, so it
+    # must land beside it — a consumer that can stage sidecars but not verify
+    # them is exactly the gap WAH-3 closes.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpVerifyRuntimeStaging.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.aax.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.au.in"
+    # Every plist template a format helper can reach must ship. PulpPluginFormats
+    # selects them with `elseif(EXISTS ...)`, so one left out of this list does
+    # not error — the helper silently falls through and the bundle is built with
+    # an empty CFBundleIdentifier and type APPL. That is invisible until a host
+    # rejects the plugin or codesign names it `<name>-<hash>`.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.clap.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.vst3.in"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp
 )
@@ -504,6 +637,8 @@ if(APPLE)
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac_text_input.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/drag_drop_mac.mm"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/accessibility_mac_host_lifetime.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/accessibility_mac_host_lifetime.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/accessibility_mac.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/text_accessibility_macos.mm"
         DESTINATION src/pulp/view/platform/mac

@@ -12,6 +12,9 @@ on:
       - "core/format/include/pulp/format/web/**"
       - "core/timebase/**"
       - "core/timeline/**"
+      - "core/interchange/**"
+      - "test/fixtures/timeline/**"
+      - "tools/ci/wasm-fixture-lane.sh"
       - "core/playback/**"
       - "core/audio/include/pulp/audio/wav_decoder.hpp"
       - "core/audio/src/wav_decoder.cpp"
@@ -28,10 +31,11 @@ on:
       - "tools/cmake/PulpGpuWasm.cmake"
       - "tools/cmake/wasi-toolchain.cmake"
       - ".github/workflows/web-plugins.yml"
-  # Run the required `WAMv2 + WebCLAP (Linux, headless Chrome)` check on queued
-  # merge groups so a merge queue on `main` can land PRs. `merge_group` does not
-  # honour the `paths` filter above, so this fires on every group.
-  merge_group:
+  # Deliberately NOT run on `merge_group` — see header-self-contained.yml for the
+  # full rationale. Neither `WAMv2 + WebCLAP (Linux, headless Chrome)` nor
+  # `GPU audio proof (macOS, real WebGPU)` is a required context, and the latter
+  # claimed a self-hosted macOS runner on every queue entry — starving the
+  # required `macos` gate with work that could not affect the merge decision.
   workflow_dispatch:
 
 concurrency:
@@ -39,6 +43,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The timeline conformance runner, compiled to WASM and actually RUN.
+  # `core/interchange/tools/fixture_runner_main.cpp` says the same binary runs
+  # "compiled to WASM"; before this job nothing built it under emscripten, so
+  # the sentence was prose. Its own script runs the corpus twice — good corpus
+  # must pass, deliberately broken copy must fail — so a build that produced a
+  # runner incapable of judging anything fails here instead of passing green.
+  #
+  # Separate from the job below on purpose: this needs emsdk and nothing else —
+  # no Skia slice, no Chrome, no wasi-sdk, no npm — so it reports in about a
+  # minute rather than waiting on the full web lane. GitHub-hosted Linux; the
+  # self-hosted macOS runners serve the required `macos` gate and emscripten
+  # work has no reason to compete with it.
+  fixture-runner-wasm:
+    name: Timeline fixture corpus (WASM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same pin as the job below, for the same reason: emsdk `latest` floats
+      # and has landed breaking changes on PRs that touched nothing.
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 6.0.2
+
+      - name: Build + run the corpus under WASM (incl. negative control)
+        run: tools/ci/wasm-fixture-lane.sh "$GITHUB_WORKSPACE/build-wasm-fixture" "$(nproc)"
+
   web-plugins:
     name: WAMv2 + WebCLAP (Linux, headless Chrome)
     runs-on: ubuntu-latest
@@ -368,7 +400,8 @@ jobs:
         run: |
           python3 tools/scripts/resolve_advisory_macos_runner.py \
             --configured-json "$CONFIGURED_JSON" \
-            --require-self-hosted
+            --require-self-hosted \
+            --event-name "${{ github.event_name }}"
 
   gpu-audio-macos:
     name: GPU audio proof (macOS, real WebGPU)

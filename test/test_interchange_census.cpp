@@ -4,6 +4,8 @@
 #include <pulp/timeline/model.hpp>
 
 #include <algorithm>
+#include <array>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -30,7 +32,7 @@ MediaAsset asset(ItemId id, AssetStoragePolicy policy, char digit) {
 // is a complete statement of what the model can express today.
 Project rich_project() {
     auto note_clip = take_value(
-        Clip::create({5}, {200}, {100}, take_value(NoteContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}))));
+        Clip::create({5}, {200}, {100}, take_value(MidiContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}))));
     auto media_clip = take_value(Clip::create({4}, {0}, {100}, MediaRef{{11}, {25}, 100},
                                               ClipPlaybackProperties{0.5f, 16, 32}));
     auto nested_clip =
@@ -79,6 +81,7 @@ TEST_CASE("a census records what a document uses, and only that", "[interchange]
         REQUIRE(counted.count(Concept::ClipAbsolute) == 1);
         REQUIRE(counted.count(Concept::ClipNote) == 1);
         REQUIRE(counted.count(Concept::ClipMedia) == 2);
+        REQUIRE(counted.count(Concept::ClipMediaWindow) == 2);
         REQUIRE(counted.count(Concept::SequenceNested) == 1);
         REQUIRE(counted.count(Concept::ClipGain) == 1);
         REQUIRE(counted.count(Concept::ClipFades) == 1);
@@ -136,6 +139,26 @@ TEST_CASE("a census records what a document uses, and only that", "[interchange]
         REQUIRE(launch_owners.size() == 1);
         REQUIRE(launch_owners[0] == ItemId{16});
     }
+}
+
+TEST_CASE("media windows are census-visible only when they select an asset subrange",
+          "[interchange][census]") {
+    auto full = take_value(Clip::create({4}, {0}, {100}, MediaRef{{11}, {0}, 1'000}));
+    auto offset = take_value(Clip::create({5}, {100}, {100}, MediaRef{{11}, {25}, 975}));
+    auto partial = take_value(Clip::create({6}, {200}, {100}, MediaRef{{11}, {0}, 500}));
+    auto track = take_value(Track::create({7}, "media", {full, offset, partial}));
+    auto sequence =
+        take_value(Sequence::create({3}, "sequence", TickDuration{400}, {track}));
+    const Project project = take_value(Project::create(ProjectInput{
+        {1}, "project", 20, {3}, {asset({11}, AssetStoragePolicy::External, 'a')}, {sequence}}));
+
+    const ConceptCensus counted = census(project);
+    REQUIRE(counted.count(Concept::ClipMedia) == 3);
+    REQUIRE(counted.count(Concept::ClipMediaWindow) == 2);
+    const auto owners = counted.owners(Concept::ClipMediaWindow);
+    REQUIRE(owners.size() == 2);
+    REQUIRE(owners[0] == ItemId{5});
+    REQUIRE(owners[1] == ItemId{6});
 }
 
 TEST_CASE("a census bounds the evidence it keeps without understating it", "[interchange]") {
@@ -211,7 +234,7 @@ TEST_CASE("a census records per-note modifiers so an export cannot drop them sil
     NoteModifier chance;
     chance.note_id = {8};
     chance.probability = 0x4000;
-    auto content = take_value(NoteContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}, {chance}, 7));
+    auto content = take_value(MidiContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}, {chance}, 7));
     auto clip = take_value(Clip::create({5}, {200}, {100}, std::move(content)));
     auto track = take_value(Track::create({6}, "musical", {clip}));
     auto sequence = take_value(Sequence::create({2}, "root", TickDuration{1'000}, {track}));
@@ -227,7 +250,7 @@ TEST_CASE("a census records per-note modifiers so an export cannot drop them sil
 
     // The same notes without a modifier record only the note concept, so the
     // new row cannot be a constant that fires on every note clip.
-    auto plain_content = take_value(NoteContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}));
+    auto plain_content = take_value(MidiContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}));
     auto plain_clip = take_value(Clip::create({5}, {200}, {100}, std::move(plain_content)));
     auto plain_track = take_value(Track::create({6}, "musical", {plain_clip}));
     auto plain_sequence = take_value(Sequence::create({2}, "root", TickDuration{1'000},
@@ -242,7 +265,7 @@ TEST_CASE("a census records per-note modifiers so an export cannot drop them sil
     // neutral defaults. Formats that cannot carry it must still disclose the
     // loss rather than silently changing future probability decisions.
     auto seeded_content =
-        take_value(NoteContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}, {}, 7));
+        take_value(MidiContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}, {}, 7));
     auto seeded_clip =
         take_value(Clip::create({5}, {200}, {100}, std::move(seeded_content)));
     auto seeded_track = take_value(Track::create({6}, "musical", {seeded_clip}));
@@ -251,6 +274,61 @@ TEST_CASE("a census records per-note modifiers so an export cannot drop them sil
     const Project seeded = take_value(
         Project::create(ProjectInput{{1}, "seeded", 100, {2}, {}, {seeded_sequence}}));
     REQUIRE(census(seeded).count(Concept::ClipNoteModifier) == 1);
+}
+
+TEST_CASE("a census records a clip's controller streams so an export cannot drop them silently",
+          "[interchange]") {
+    // A lane's points are authored independently of every note, so a format
+    // that carries the notes and not the lanes writes a file that opens
+    // successfully with the controller movement gone. Before this row existed
+    // the walker counted the lanes and the vocabulary had no way to name them,
+    // so such a document exported reporting no loss at all.
+    MidiExpressionLane mod_wheel;
+    mod_wheel.id = {30};
+    mod_wheel.address = {0, 0, 0x0B, 0, 1};
+    mod_wheel.points = {{{40}, TickPosition{0}, 0u}, {{41}, TickPosition{24}, 0x8000'0000u}};
+
+    MidiExpressionLane brightness;
+    brightness.id = {31};
+    brightness.address = {0, 1, 0x0B, 0, 74};
+    brightness.points = {{{42}, TickPosition{48}, 0xFFFF'FFFFu}};
+
+    auto content = take_value(MidiContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}, {}, 0,
+                                                  {brightness, mod_wheel}));
+    auto clip = take_value(Clip::create({5}, {200}, {100}, std::move(content)));
+    auto track = take_value(Track::create({6}, "musical", {clip}));
+    auto sequence = take_value(Sequence::create({2}, "root", TickDuration{1'000}, {track}));
+    const Project project = take_value(
+        Project::create(ProjectInput{{1}, "expressive", 100, {2}, {}, {sequence}}));
+
+    const ConceptCensus counted = census(project);
+    REQUIRE(counted.count(Concept::ClipNote) == 1);
+    REQUIRE(counted.count(Concept::ClipMidiExpressionLane) == 2);
+    REQUIRE(concept_detectable_in_model(Concept::ClipMidiExpressionLane));
+
+    // The owners are the LANE identities, not the clip's. A per-clip recording
+    // would also make the count 1 rather than 2, so asserting the values is
+    // what separates "recorded per lane" from "recorded per clip" -- a count
+    // alone passes for a document holding exactly one lane in one clip.
+    // `MidiContent::create` returns lanes in (address, id) order, so the
+    // channel-0 lane precedes the channel-1 lane whatever order they arrived in.
+    const std::span<const ItemId> owners = counted.owners(Concept::ClipMidiExpressionLane);
+    REQUIRE(owners.size() == 2);
+    REQUIRE(owners[0] == ItemId{30});
+    REQUIRE(owners[1] == ItemId{31});
+
+    // The same notes with no lane record only the note concept, so the new row
+    // cannot be a constant that fires on every note clip.
+    auto plain_content = take_value(MidiContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}));
+    auto plain_clip = take_value(Clip::create({5}, {200}, {100}, std::move(plain_content)));
+    auto plain_track = take_value(Track::create({6}, "musical", {plain_clip}));
+    auto plain_sequence = take_value(Sequence::create({2}, "root", TickDuration{1'000},
+                                                      {plain_track}));
+    const Project plain = take_value(
+        Project::create(ProjectInput{{1}, "plain", 100, {2}, {}, {plain_sequence}}));
+    const ConceptCensus plain_census = census(plain);
+    REQUIRE(plain_census.count(Concept::ClipNote) == 1);
+    REQUIRE_FALSE(plain_census.contains(Concept::ClipMidiExpressionLane));
 }
 
 TEST_CASE("a census records track mixer state and the lanes that automate it",
@@ -344,4 +422,141 @@ TEST_CASE("a census records markers, regions, and the session timecode origin",
     REQUIRE(concept_detectable_in_model(Concept::TimecodeOrigin));
     for (Concept concept_value : counted.present())
         REQUIRE(concept_detectable_in_model(concept_value));
+}
+
+TEST_CASE("a census names empty clips and continuous tempo ramps", "[interchange]") {
+    auto empty = take_value(Clip::create({4}, {0}, {100}, EmptyContent{}));
+    auto note_content = take_value(MidiContent::create(
+        {NoteEvent{{6}, TickPosition{0}, TickDuration{100}, 40'000, 60, 0}}));
+    auto note = take_value(Clip::create({7}, {100}, {100}, std::move(note_content)));
+    auto track =
+        take_value(Track::create({5}, "empty", {std::move(empty), std::move(note)}));
+    auto sequence = take_value(Sequence::create({3}, "root", TickDuration{1'000},
+                                                {std::move(track)}));
+    const std::array tempo_points{
+        TempoPoint{TickPosition{0}, 100.0, TempoCurve::LinearInTicks},
+        TempoPoint{TickPosition{1'000}, 140.0, TempoCurve::Constant}};
+    auto tempo = TempoMap::create(tempo_points);
+    REQUIRE(tempo);
+    ProjectInput input{{1}, "ramped", 10, {3}, {}, {std::move(sequence)}};
+    input.tempo_map = std::move(tempo.value());
+    const ConceptCensus counted = census(take_value(Project::create(std::move(input))));
+
+    REQUIRE(counted.count(Concept::ClipEmpty) == 1);
+    REQUIRE(counted.owners(Concept::ClipEmpty).size() == 1);
+    REQUIRE(counted.owners(Concept::ClipEmpty)[0] == ItemId{4});
+    REQUIRE(counted.count(Concept::TempoRamp) == 1);
+    REQUIRE(counted.owners(Concept::TempoRamp).size() == 1);
+    REQUIRE(counted.owners(Concept::TempoRamp)[0] == ItemId{1});
+    REQUIRE(counted.count(Concept::ClipNoteVelocityQuantized) == 1);
+    REQUIRE(counted.owners(Concept::ClipNoteVelocityQuantized)[0] == ItemId{7});
+    REQUIRE(counted.contains(Concept::TempoMap));
+}
+
+TEST_CASE("a census names a zero velocity that cannot be a sounding SMF Note On",
+          "[interchange]") {
+    auto notes = take_value(MidiContent::create(
+        {NoteEvent{{6}, TickPosition{0}, TickDuration{100}, 0, 60, 0}}));
+    auto clip = take_value(Clip::create({7}, {0}, {100}, std::move(notes)));
+    auto track = take_value(Track::create({5}, "silent", {std::move(clip)}));
+    auto sequence = take_value(Sequence::create({3}, "root", TickDuration{1'000},
+                                                {std::move(track)}));
+    const auto project = take_value(Project::create(
+        ProjectInput{{1}, "zero velocity", 10, {3}, {}, {std::move(sequence)}}));
+
+    const ConceptCensus counted = census(project);
+    REQUIRE(counted.count(Concept::ClipNoteVelocityQuantized) == 1);
+    REQUIRE(counted.owners(Concept::ClipNoteVelocityQuantized).size() == 1);
+    REQUIRE(counted.owners(Concept::ClipNoteVelocityQuantized)[0] == ItemId{7});
+}
+
+TEST_CASE("a per-instrument tuning is recorded beside the project's, not folded into it",
+          "[interchange]") {
+    TuningReference project_tuning;
+    project_tuning.system = TuningSystem::Scala;
+    project_tuning.scale_content = content_hash('c');
+
+    TuningReference instrument_tuning;
+    instrument_tuning.system = TuningSystem::MtsEsp;
+
+    TrackInput tuned;
+    tuned.id = {3};
+    tuned.name = "tuned";
+    tuned.tuning = instrument_tuning;
+    TrackInput plain;
+    plain.id = {4};
+    plain.name = "follows the project";
+
+    auto sequence = take_value(Sequence::create(SequenceInput{
+        .id = {2},
+        .name = "sequence",
+        .musical_duration = TickDuration{100},
+        .tracks = {take_value(Track::create(std::move(tuned))),
+                   take_value(Track::create(std::move(plain)))},
+        .regions = {SequenceRegion{{5}, "A", {0}, {50}, std::nullopt, SectionRole::Verse},
+                    SequenceRegion{{6}, "B", {50}, {50}, std::nullopt}},
+    }));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "project";
+    input.next_item_id = 7;
+    input.root_sequence_id = {2};
+    input.sequences = {sequence};
+    input.tuning = project_tuning;
+    const ConceptCensus counted = census(take_value(Project::create(std::move(input))));
+
+    // A format carrying one document-wide tuning satisfies tuning.project
+    // honestly. Recording the override separately is what stops an export from
+    // claiming full fidelity while flattening two tunings into one.
+    REQUIRE(counted.count(Concept::TuningProject) == 1);
+    REQUIRE(counted.count(Concept::TuningInstrument) == 1);
+    REQUIRE(counted.owners(Concept::TuningInstrument).size() == 1);
+    REQUIRE(counted.owners(Concept::TuningInstrument)[0] == ItemId{3});
+
+    // Both regions are named locations; only the typed one claims a part.
+    REQUIRE(counted.count(Concept::Marker) == 2);
+    REQUIRE(counted.count(Concept::SequenceSectionRole) == 1);
+    REQUIRE(counted.owners(Concept::SequenceSectionRole)[0] == ItemId{5});
+}
+
+TEST_CASE("richer chord spelling is recorded beside the base chord concept", "[interchange]") {
+    ChordScaleEvent bare{{0}, ChordQuality::Major, 0, ScaleMode::Major, 0};
+    ChordScaleEvent slash{{100}, ChordQuality::Minor7, 9, ScaleMode::Dorian, 9};
+    slash.chord_bass = 4;
+    ChordScaleEvent extended{{200}, ChordQuality::Dominant7, 7, ScaleMode::Mixolydian, 0};
+    extended.chord_extensions = kChordExtensionFlatNinth;
+    extended.voicing = ChordVoicing::Shell;
+
+    auto sequence = take_value(Sequence::create(SequenceInput{
+        .id = {2},
+        .name = "sequence",
+        .musical_duration = TickDuration{400},
+        .tracks = {take_value(Track::create({3}, "track", {}))},
+        .chord_scale_lane = take_value(ChordScaleLane::create({bare, slash, extended})),
+    }));
+    const ConceptCensus counted = census(take_value(
+        Project::create(ProjectInput{{1}, "project", 4, {2}, {}, {sequence}})));
+
+    // The base concept still fires once for the lane; the detail is additive,
+    // so an export that carries quality and root but drops the rest has to say
+    // so separately rather than reporting nothing lost.
+    REQUIRE(counted.count(Concept::ContextChordScale) == 1);
+    REQUIRE(counted.count(Concept::ContextChordBass) == 1);
+    REQUIRE(counted.count(Concept::ContextChordExtension) == 1);
+    REQUIRE(counted.count(Concept::ContextChordVoicing) == 1);
+
+    // A lane of plain statements records only the base concept.
+    auto plain_sequence = take_value(Sequence::create(SequenceInput{
+        .id = {2},
+        .name = "sequence",
+        .musical_duration = TickDuration{400},
+        .tracks = {take_value(Track::create({3}, "track", {}))},
+        .chord_scale_lane = take_value(ChordScaleLane::create({bare})),
+    }));
+    const ConceptCensus plain = census(
+        take_value(Project::create(ProjectInput{{1}, "project", 4, {2}, {}, {plain_sequence}})));
+    REQUIRE(plain.contains(Concept::ContextChordScale));
+    REQUIRE_FALSE(plain.contains(Concept::ContextChordBass));
+    REQUIRE_FALSE(plain.contains(Concept::ContextChordExtension));
+    REQUIRE_FALSE(plain.contains(Concept::ContextChordVoicing));
 }

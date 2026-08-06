@@ -25,7 +25,7 @@ For the end-to-end release pipeline that turns a merged PR into a published GitH
 
 **There is no Intel/universal gate on the release path.** A `universal-arch-gate` job used to build PulpGain universal and run dual-arch `auval` on every tag. It was removed: it is redundant with `nightly-intel.yml`'s `universal-crosscheck` (same check) and `intel-portability.yml` (Intel at PR time), and — worse — it pinned itself to the GitHub-hosted `macos-15` pool for ~2h per tag, which is the SAME scarce pool the release's own required `darwin-x64` legs need. At ~14 tags/day it queued ~28 macOS-hours/day of hosted work ahead of the leg that actually gates publication, while the self-hosted Studios sat idle. Never put an advisory check in front of the release on a pool the release itself competes for. (Universal-build gotcha worth keeping: a raw lipo'd wgpu dylib fails `codesign --verify` and the arm64 slice is SIGKILL'd at load — always re-sign after lipo.) See `docs/guides/intel-support.md`.
 
-**Intel-Mac release slice — CROSS-COMPILED on Apple Silicon, required.** The `darwin-x64` build+smoke rows (`os: macos-15-xcompile`) cross-compile the x86_64 CLI+SDK on the healthy arm64 runner via `-DCMAKE_OSX_ARCHITECTURES=x86_64` (C++) + `-DPULP_RUST_CLI_TARGET=x86_64-apple-darwin` (Rust CLI), and route through `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` (default `["macos-15"]`), NOT `resolve-macos-runner` (keeps Intel off the Studios). The native GitHub-hosted `macos-15-intel` image is deliberately avoided: it CPU-pegs on a full CLI+SDK build (observed: 71-min build cancelled at a 75-min cap, every run) and its timeout **cancellation** (not a clean failure) makes `build-cli`'s aggregate `cancelled` and skips `release` — the earlier native leg never shipped an artifact for this reason. The pair is REQUIRED (`release-publish.yml` lists it unconditionally). Two leg-specific gotchas: (a) the arm64 runner's bootstrap prefetches arm64 Skia, so the leg `rm -rf external/skia-build/build` before the x86_64 Skia fetch and asserts `lipo -archs libskia.a == x86_64`; (b) `rustup target add x86_64-apple-darwin` is required (the toolchain pins the channel but no targets). **Load-bearing CI gotchas that caused a multi-hour release stall:**
+**Intel-Mac release slice — CROSS-COMPILED on Apple Silicon, required.** The `darwin-x64` build+smoke rows (`os: macos-15-xcompile`) cross-compile the x86_64 CLI+SDK on the healthy arm64 runner via `-DCMAKE_OSX_ARCHITECTURES=x86_64` (C++) + `-DPULP_RUST_CLI_TARGET=x86_64-apple-darwin` (Rust CLI). They prefer the per-leg override, then `PULP_RELEASE_MACOS_RUNS_ON_JSON` (the dedicated `pulp-build-vm-release` Tart pool), then the legacy `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON`, and finally hosted `macos-15`. The native GitHub-hosted `macos-15-intel` image is deliberately avoided: it CPU-pegs on a full CLI+SDK build (observed: 71-min build cancelled at a 75-min cap, every run) and its timeout **cancellation** (not a clean failure) makes `build-cli`'s aggregate `cancelled` and skips `release` — the earlier native leg never shipped an artifact for this reason. The native Mac Mini remains a separate advisory/nightly portability canary. The pair is REQUIRED (`release-publish.yml` lists it unconditionally). Two leg-specific gotchas: (a) the arm64 runner's bootstrap prefetches arm64 Skia, so the leg `rm -rf external/skia-build/build` before the x86_64 Skia fetch and asserts `lipo -archs libskia.a == x86_64`; (b) `rustup target add x86_64-apple-darwin` is required (the toolchain pins the channel but no targets). **Load-bearing CI gotchas that caused a multi-hour release stall:**
 - `continue-on-error` on a matrix leg masks a clean **failure** (leg finishes non-zero) but NOT a **cancellation** (timeout / stuck-queued / run-cancel). A cancelled advisory leg still turns the aggregate `cancelled`. If you ever reintroduce an advisory leg, wrap its long steps in a shell `timeout` so they exit non-zero (clean fail) *before* the job `timeout-minutes` cancels them.
 - The `release` job's `if:` uses `always() && needs.build-cli.result == 'success' && needs.smoke-cli.result == 'success' && needs.universal-arch-gate.result == 'success'` (NOT the implicit `success()` over all needs). `always()` forces evaluation even if a needed job failed, so nothing silently skips publish; the explicit `== 'success'` checks are what enforce the requirement. All three are now required (the universal-arch-gate was re-required once its shell-bug false failure was fixed). A genuine build/smoke/gate failure blocks publish.
 - To recover a stuck release when the tag already exists but no run published: the successful matrix legs' CLI+SDK artifacts persist on the (even cancelled) run — `gh run download <run> -R Generous-Corp/pulp`, then `gh release create <tag> --latest --notes-file <composed>` with `compose_release_notes.py` for the body. On `workflow_dispatch` the pipeline itself publishes directly (draft only on tag-push), so a hand-published backfill matches its semantics.
@@ -247,6 +247,74 @@ component-selectable `.pkg` — it collects every built bundle (Standalone →
 `--separate` restores the legacy behavior (one `.pkg` per format); `--dmg`
 produces disk images instead. The routing lives in the `pulp ship package`
 branch of `tools/cli/cmd_ship.cpp`.
+
+### Multi-product installers: group by product, ship the uninstaller
+
+`build_combined_installer.sh` gained four things a multi-product installer
+needs. Both Forge installers use them.
+
+**Group by product, not by build target.** Without `--product-title`, an
+installer carrying three products lists each one TWICE under two naming
+schemes: an expandable format group named from the bundle (`PulpDesignSynth`)
+and, separately at top level, its standalone app named from the title passed in
+(`Kelvin (instrument)`). Six rows for three products, with nothing on screen
+saying they are the same thing.
+
+```bash
+--product-title PulpDesignSynth "Kelvin — instrument" \
+--app-for       PulpDesignSynth "Standalone app" "$B/…/PulpDesignSynth.app"
+```
+
+`--app-for BUNDLE TITLE PATH` nests the app inside that product's group instead
+of at top level, and marks the choice `enabled="false" selected="true"`. Forced
+on deliberately: the standalone carries the uninstaller, so a user who
+deselects it installs plugins they cannot later remove. The row stays visible
+rather than hidden, which is honest about what is being installed.
+
+**The uninstaller is manifest-driven.** `--uninstaller-in BUNDLE` ships
+`pulp_uninstall.sh` inside that app next to a manifest generated for the
+release. Two rules it exists to enforce:
+
+- It removes what the MANIFEST says, never a glob. Globbing for likely-looking
+  names under `/Library/Audio/Plug-Ins` deletes another vendor's plugin the day
+  two products share a word.
+- It ALSO removes the same bundle NAMES from the other standard plugin folder.
+  The installer writes to `/Library`; a development build writes to
+  `~/Library`; every host scans both. Removing only the manifest's exact paths
+  leaves a plugin the host keeps loading, so "uninstalled" would not mean gone.
+  Names, never wildcards: `Forge FX.component` matches itself and not
+  `Forge FX Pro.component`.
+
+The manifest is computed BEFORE anything is signed, because a bundle modified
+after signing has a broken signature. Its receipt ids are derived independently
+of the loops that build the components and are then VERIFIED against `REFS` —
+the build fails if an id rule drifts, rather than leaving the uninstaller
+quietly unable to forget a receipt.
+
+**Panes.** `--welcome` / `--license` / `--readme` / `--conclusion`. productbuild
+resolves these by BASENAME inside `--resources`, so each file is staged there
+under its own name. Passing a path in the XML shows a blank pane with no error.
+
+Covered by `test_build_combined_installer.py` and `test_pulp_uninstall.py`
+(the `pulp-uninstaller-contract` ctest), which tests both failure directions:
+removing too little and removing too much.
+
+### VST3 bundles: moduleinfo.json must be in Contents/Resources/
+
+A loose non-code file directly under `Contents/` makes codesign treat it as an
+unsigned nested code object and refuse the whole bundle:
+
+```
+code object is not signed at all
+In subcomponent: …/Contents/moduleinfo.json
+```
+
+An unsignable bundle cannot be notarized, so it cannot ship. Nothing before
+packaging notices, because the plugin builds, loads and validates happily
+unsigned — and `core/host/src/scanner.cpp` reads the file from
+`Contents/Resources/`, so a misplaced one is invisible to Pulp's own FUID
+lookup too. Guarded by the `vst3-bundle-layout` ctest
+(`tools/cmake/scripts/check_vst3_bundle_layout.py`).
 
 ### macOS one-command pipeline: `pulp ship release`
 
@@ -877,8 +945,13 @@ so any release SDK build that forgets to opt in will ship a
 
 Keep the release SDK path aligned with the GitHub release workflow:
 1. Configure release SDK builds with `-DPULP_BUILD_WEBVIEW=ON`.
-2. On Linux, install `libgtk-3-dev` and `libwebkit2gtk-4.1-dev` before
-   configuring.
+2. On Linux, use `.github/actions/install-linux-build-deps` with the
+   `native-webview` capability profile. Shared release headers belong in
+   `tools/ci/linux_build_deps.json`; do not copy an apt list into
+   `release-cli.yml` or its PR gate. Manual backfills can check out a tag that
+   predates the local action, so the workflow materializes the action, installer,
+   and manifest from the immutable workflow revision when they are absent
+   before invoking it.
 3. Before packaging, verify the staged SDK view-core archive still contains
    `WebViewPanel` and `make_webview_embedded_resource_fetcher`.
 
@@ -886,11 +959,26 @@ This applies to both `.github/workflows/release-cli.yml` and the local
 helper `tools/scripts/release-cli-local.sh`. If one changes without the
 other, GitHub releases and local release drills diverge.
 
-Release/SDK builds also pass `-DPULP_ENABLE_AUDIO_PROBES=OFF` so SDK and
-standalone artifacts do not ship the dev audio-probe surface. Keep
+Release/SDK builds pass `-DPULP_ENABLE_AUDIO_PROBES=OFF` so SDK and standalone
+artifacts do not ship the dev audio-probe surface. Starting at the product
+matrix's `inspector_sdk_floor`, they also pass `-DPULP_ENABLE_INSPECTOR=ON`
+because the matrix promises the optional inspector SDK archive family; older
+marker-era backfills keep it OFF. That build-time component does not enable
+runtime inspector endpoints; those remain off by default. Keep
 `.github/workflows/release-cli.yml`, `.github/workflows/sign-and-release.yml`,
 and `tools/scripts/release-cli-local.sh` in sync when changing release
 configure flags.
+
+Starting at `tools/scripts/release_product_matrix.json`'s
+`sdk_provenance_floor`, the SDK tarballs also require
+`sdk-provenance.json`: a positive `official-release` marker bound to the exact
+release tag commit and archive platform, with a clean Release source, audio
+probes disabled, and the inspector SDK component set according to
+`inspector_sdk_floor`. `release-cli.yml`
+stamps the selected install prefix, and its downloaded-asset finalizer
+re-verifies the exact tag SHA/platform before publication. Marker-era manual
+backfills must build the tag itself; `source_ref` substitution is reserved for
+pre-marker history.
 
 ### Shipyard pin drift between local tooling and tag sync
 
@@ -1072,9 +1160,16 @@ from the tag's source. Two safe options:
    The build-cli job overlays safe release-pipeline helper files from
    main automatically, so a backfill picks up post-tag fetch-script,
    packaging, manifest, and targeted CMake fixes even though the tag's
-   tree predates them. Leave `make_latest` false for old-tag backfills;
-   set it true only when backfilling the current newest tag after the
-   automatic tag-triggered run failed.
+   tree predates them. It also overlays the current
+   `release_artifact_contents.py` compatibility engine while retaining the
+   tag's own product matrix. CLI packaging and smoke checks include the
+   import-design binary/runtime only when that checkout built them; the
+   verifier uses the release version to distinguish the original
+   three-binary contract from the transitional `v0.764.0` import-design
+   payload, before newer matrices declare CLI members directly. Leave
+   `make_latest` false for old-tag backfills; set it true only when
+   backfilling the current newest tag after the automatic tag-triggered run
+   failed.
 
 2. **Cherry-pick fix + retag:** Only if the build itself needs to change.
    Pulp doesn't retag immutable releases — use option 1 unless the
@@ -1207,6 +1302,53 @@ so a build that only works on the build machine never ships. Identities are the
 the ambiguous name). `examples/super-convolver/package.sh` is a thin wrapper —
 copy it for a new plugin. Intended to graduate into `pulp ship package --combined`.
 
+### Packaging a MULTI-plugin product, and packaging from OUTSIDE the Pulp tree
+
+Two facts that are easy to guess wrong, and both were verified by reading the
+recipe rather than assumed:
+
+**`--plugin` accumulates.** The parser is
+`--plugin) P_KIND+=("$2"); P_PATH+=("$3"); shift 3;;` — arrays, not scalars. So a
+product with several plugins passes one `--plugin` per artifact *per format*
+(e.g. 3 AU + 2 VST3 + 3 CLAP = eight flags) and gets one installer with a nested
+per-product Customize tree. Do NOT conclude the tool is single-plugin-only from
+the single-plugin example above, and do NOT build one installer per plugin.
+
+**The recipe is NOT installed into the SDK prefix.** An installed SDK carries
+`bin external include lib` only — no `tools/`. A consumer project (a separate
+repo building against the SDK, e.g. Forge) therefore cannot reach
+`build_combined_installer.sh` from the SDK and must point at a Pulp *source*
+checkout:
+
+```bash
+PULP_ROOT=/path/to/pulp ./package.sh   # package.sh resolves $PULP_ROOT/tools/scripts/...
+```
+
+`pulp ship` has the same limitation from the other direction — `cmd_ship.cpp`
+resolves a project root via `find_project_root()`, which requires `core/`, and
+`root` is then used ~45 times for Pulp-tree-internal assets
+(`root/tools/scripts/ensure_signing_ready.sh`,
+`root/ship/templates/entitlements.plist`, …), so swapping the resolver is not a
+one-liner. Tracked in **#6714**. Until it lands, a consumer project's
+`package.sh` is the supported path — keep it to *inputs only* and `exec` the
+shared recipe, so signing/notarizing logic never forks per product.
+
+Two things such a wrapper must do, because both failures are silent:
+- **Resolve identities by name → hash at runtime** (`security find-identity`)
+  rather than pinning a hash, or the script only works on one machine.
+- **Assert every expected artifact exists before invoking the recipe.** A
+  Customize pane that quietly lost a format still looks like a successful build.
+
+**Standalone apps must be non-relocatable package components.** `pkgbuild`
+otherwise marks an app bundle relocatable, and Installer may overwrite any
+Launch-Services-known development copy with the same bundle ID instead of
+placing the selected app in `/Applications`. A successful Installer summary and
+receipt do not prove the destination. The recipe analyzes each staged app,
+sets `BundleIsRelocatable=false` for every discovered bundle, and passes the
+result through `--component-plist`. Keep the app-relocation assertion in
+`test_build_combined_installer.py`, and on a real release verify the final paths
+under `/Applications` rather than accepting receipts alone.
+
 The script also accepts bundles from multiple products in one installer. Every
 component package and `pkg-ref` is keyed by the plugin's deterministic
 first-seen index plus format (`plugin-0-au`, `plugin-1-au`, ...), never by format
@@ -1256,6 +1398,15 @@ tools/scripts/release_routing.sh github linux-arm64      # -> revert, next tag
 
 **Fluidity invariant:** every variable unset == today's GitHub-hosted routing. If the
 local pool is down, `github <leg>` is a full revert in one command.
+
+The lightweight resolver jobs for `release-cli.yml` and
+`sign-and-release.yml` may use the always-on trusted MacPro Linux/X64 pool
+without moving artifact builds or publication there. Their selector priority is
+`PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON`, then the existing
+`PULP_LOCAL_LINUX_RUNS_ON_JSON`, then `ubuntu-latest`. Keep this routing limited
+to tag-push or maintainer-dispatch workflows, and keep resolver policy checkouts
+pinned to the repository default branch; never expose the persistent pool to
+`pull_request` or `merge_group` code through this fallback.
 
 Facts worth keeping (measured):
 

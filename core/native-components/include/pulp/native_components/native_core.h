@@ -431,8 +431,11 @@ const pulp_native_core_v1* pulp_native_core_entry_v1(void);
 /* The RT-safety hook (test builds) calls this from a checking allocator /
  * operator new when an allocation is attempted inside a no-alloc scope. The
  * default (production) implementation is a no-op; test harnesses override it to
- * trap. `kind` is a small tag (0=c++ new, 1=malloc, 2=rust-global-alloc, ...),
- * `bytes` the requested size. It must itself never allocate. */
+ * trap. `kind` is a small tag (0=c++ new, 1=malloc, 2=rust-global-alloc,
+ * 3=blocking lock, ...), `bytes` the requested size — 0 when the tag names a
+ * non-allocating violation. A trapping harness reports the tag, so a new tag
+ * needs a message there or it reads as an allocation. It must never
+ * allocate. */
 void pulp_rt_trap_if_no_alloc_scope(int32_t kind, size_t bytes);
 
 #ifdef __cplusplus

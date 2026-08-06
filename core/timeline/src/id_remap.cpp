@@ -1,8 +1,10 @@
 #include <pulp/timeline/model.hpp>
 
 #include "automation_document_internal.hpp"
+#include "modulation_document_internal.hpp"
 #include "owned_identity_traversal.hpp"
 #include "project_state_access.hpp"
+#include "track_input_access.hpp"
 
 #include <algorithm>
 
@@ -69,11 +71,46 @@ std::optional<ModelError> validate_owned_ids(std::vector<ItemId> ids) {
     return std::nullopt;
 }
 
-void append_clip_ids(const Clip& clip, std::vector<ItemId>& ids) {
-    detail::visit_clip_owned_identities(
-        clip, {}, [&](const detail::ModelOwnedIdentity& identity) {
-            ids.push_back(identity.id);
-        });
+// Adapts the three canonical traversals to one name, so the two passes every
+// level runs — collect the owned ids for preflight, then issue a fresh id for
+// each — are written once and each level gets exactly the enumeration the
+// traversal defines. Only the identity is read here, so the clip walk needs no
+// track coordinate.
+template <typename Visitor>
+void visit_owned(const Clip& clip, Visitor&& visitor) {
+    detail::visit_clip_owned_identities(clip, {}, visitor);
+}
+
+template <typename Visitor>
+void visit_owned(const Track& track, Visitor&& visitor) {
+    detail::visit_track_owned_identities(track, visitor);
+}
+
+template <typename Visitor>
+void visit_owned(const Sequence& sequence, Visitor&& visitor) {
+    detail::visit_sequence_owned_identities(sequence, visitor);
+}
+
+template <typename Owner>
+std::vector<ItemId> owned_ids(const Owner& owner) {
+    std::vector<ItemId> ids;
+    visit_owned(owner, [&](const detail::ModelOwnedIdentity& identity) {
+        ids.push_back(identity.id);
+    });
+    return ids;
+}
+
+// The first allocation failure is kept and the rest of the walk is skipped, so
+// neither the table nor the allocator advances past it.
+template <typename Owner>
+std::optional<ModelError> allocate_owned_subtree(IdRemapTable& table, ItemIdAllocator& allocator,
+                                                 const Owner& owner) {
+    std::optional<ModelError> error;
+    visit_owned(owner, [&](const detail::ModelOwnedIdentity& identity) {
+        if (!error)
+            error = allocate_owned(table, allocator, identity.id);
+    });
+    return error;
 }
 
 // A clip can only be remapped when its content's identity/reference shape is
@@ -84,7 +121,7 @@ std::optional<ModelErrorCode> remap_rejection(const ClipContent& content) noexce
         ClipContentCases{
             [](const EmptyContent&) { return std::optional<ModelErrorCode>{}; },
             [](const MediaRef&) { return std::optional<ModelErrorCode>{}; },
-            [](const NoteContent&) { return std::optional<ModelErrorCode>{}; },
+            [](const MidiContent&) { return std::optional<ModelErrorCode>{}; },
             [](const RegisteredContent&) { return std::optional<ModelErrorCode>{}; },
             [](const OpaqueContent&) {
                 return std::optional<ModelErrorCode>{ModelErrorCode::OpaqueContentCannotRemap};
@@ -94,43 +131,17 @@ std::optional<ModelErrorCode> remap_rejection(const ClipContent& content) noexce
         content);
 }
 
-void append_take_ids(const Track& track, std::vector<ItemId>& ids) {
-    for (const auto& lane : track.take_lanes()) {
-        ids.push_back(lane.id());
-        for (const auto& take : lane.takes())
-            ids.push_back(take.id());
-    }
-}
-
 std::optional<ModelError> preflight(const Clip& clip) {
     if (const auto rejected = remap_rejection(clip.content()))
         return ModelError{*rejected, clip.id(), {}};
-    std::vector<ItemId> ids;
-    append_clip_ids(clip, ids);
-    return validate_owned_ids(std::move(ids));
+    return validate_owned_ids(owned_ids(clip));
 }
 
 std::optional<ModelError> preflight(const Track& track) {
-    std::vector<ItemId> ids{track.id()};
-    for (const auto& device : track.device_chain())
-        ids.push_back(device.id);
-    detail::append_automation_owned_ids(track.automation_lanes(), ids);
-    append_take_ids(track, ids);
-    for (const auto& clip : track.clips()) {
+    for (const auto& clip : track.clips())
         if (const auto rejected = remap_rejection(clip.content()))
             return ModelError{*rejected, clip.id(), {}};
-        append_clip_ids(clip, ids);
-    }
-    return validate_owned_ids(std::move(ids));
-}
-
-std::vector<ItemId> owned_sequence_ids(const Sequence& sequence) {
-    std::vector<ItemId> ids;
-    detail::visit_sequence_owned_identities(
-        sequence, [&](const detail::ModelOwnedIdentity& identity) {
-            ids.push_back(identity.id);
-        });
-    return ids;
+    return validate_owned_ids(owned_ids(track));
 }
 
 std::optional<ModelError> preflight(const Sequence& sequence) {
@@ -138,8 +149,7 @@ std::optional<ModelError> preflight(const Sequence& sequence) {
         for (const auto& clip : track.clips())
             if (const auto rejected = remap_rejection(clip.content()))
                 return ModelError{*rejected, clip.id(), {}};
-    auto ids = owned_sequence_ids(sequence);
-    return validate_owned_ids(std::move(ids));
+    return validate_owned_ids(owned_ids(sequence));
 }
 
 runtime::Result<Clip, ModelError> rebuild_clip(const Clip& clip, const IdRemapTable& table,
@@ -157,7 +167,7 @@ runtime::Result<Clip, ModelError> rebuild_clip(const Clip& clip, const IdRemapTa
                        else
                            media.asset_id = fixed.value();
                    },
-                   [&](NoteContent& old_notes) {
+                   [&](MidiContent& old_notes) {
                        std::vector<NoteEvent> notes(old_notes.notes().begin(),
                                                     old_notes.notes().end());
                        for (auto& note : notes)
@@ -169,8 +179,20 @@ runtime::Result<Clip, ModelError> rebuild_clip(const Clip& clip, const IdRemapTa
                                                            old_notes.modifiers().end());
                        for (auto& modifier : modifiers)
                            modifier.note_id = *table.find(modifier.note_id);
-                       auto rebuilt = NoteContent::create(std::move(notes), std::move(modifiers),
-                                                          old_notes.modifier_seed());
+                       // Lanes and their points own identities of their own, so
+                       // both are rewritten; a lane's address is a wire
+                       // coordinate rather than a document identity and is
+                       // carried across unchanged.
+                       std::vector<MidiExpressionLane> lanes(old_notes.lanes().begin(),
+                                                             old_notes.lanes().end());
+                       for (auto& lane : lanes) {
+                           lane.id = *table.find(lane.id);
+                           for (auto& point : lane.points)
+                               point.id = *table.find(point.id);
+                       }
+                       auto rebuilt = MidiContent::create(std::move(notes), std::move(modifiers),
+                                                          old_notes.modifier_seed(),
+                                                          std::move(lanes));
                        if (!rebuilt)
                            content_error = rebuilt.error();
                        else
@@ -193,49 +215,11 @@ runtime::Result<Clip, ModelError> rebuild_clip(const Clip& clip, const IdRemapTa
         return fail<Clip>(content_error->code, content_error->item, content_error->related_item);
     if (clip.time_anchor() == ClipTimeAnchor::Musical)
         return Clip::create(*table.find(clip.id()), clip.start(), clip.duration(),
-                            std::move(content), clip.playback_properties());
+                            std::move(content), clip.playback_properties(), clip.time_conform());
     return Clip::create_absolute(*table.find(clip.id()), clip.absolute_start(),
                                  clip.absolute_duration_samples(), clip.absolute_sample_rate(),
-                                 std::move(content), clip.playback_properties());
-}
-
-void allocate_clip_owned(const Clip& clip, IdRemapTable& table, ItemIdAllocator& allocator,
-                         std::optional<ModelError>& error) {
-    if (error)
-        return;
-    error = allocate_owned(table, allocator, clip.id());
-    if (const auto* notes = std::get_if<NoteContent>(&clip.content()))
-        for (const auto& note : notes->notes()) {
-            if (error)
-                return;
-            error = allocate_owned(table, allocator, note.id);
-        }
-}
-
-void allocate_automation_owned(const AutomationLane& lane, IdRemapTable& table,
-                               ItemIdAllocator& allocator, std::optional<ModelError>& error) {
-    if (error)
-        return;
-    error = allocate_owned(table, allocator, lane.id());
-    for (const auto& point : lane.curve().points()) {
-        if (error)
-            return;
-        error = allocate_owned(table, allocator, point.id);
-    }
-}
-
-void allocate_take_owned(const Track& track, IdRemapTable& table, ItemIdAllocator& allocator,
-                         std::optional<ModelError>& error) {
-    for (const auto& lane : track.take_lanes()) {
-        if (error)
-            return;
-        error = allocate_owned(table, allocator, lane.id());
-        for (const auto& take : lane.takes()) {
-            if (error)
-                return;
-            error = allocate_owned(table, allocator, take.id());
-        }
-    }
+                                 std::move(content), clip.playback_properties(),
+                                 clip.time_conform());
 }
 
 // A take's identity is owned and remapped; its MediaRef::asset_id is an external
@@ -289,6 +273,21 @@ runtime::Result<Track, ModelError> rebuild_track(const Track& track, const IdRem
                                rebuilt.error().related_item);
         automation_lanes.push_back(std::move(rebuilt).value());
     }
+    std::vector<Modulator> modulators(track.modulators().begin(), track.modulators().end());
+    for (auto& modulator : modulators)
+        modulator.id = *table.find(modulator.id);
+    std::vector<MacroControl> macros(track.macros().begin(), track.macros().end());
+    for (auto& macro : macros)
+        macro.id = *table.find(macro.id);
+    std::vector<ModulationRoute> modulation_routes;
+    modulation_routes.reserve(track.modulation_routes().size());
+    for (const auto& route : track.modulation_routes()) {
+        auto rebuilt = detail::remap_attached_modulation_route(route, table);
+        if (!rebuilt)
+            return fail<Track>(rebuilt.error().code, rebuilt.error().item,
+                               rebuilt.error().related_item);
+        modulation_routes.push_back(std::move(rebuilt).value());
+    }
     std::vector<TakeLane> take_lanes;
     take_lanes.reserve(track.take_lanes().size());
     for (const auto& lane : track.take_lanes()) {
@@ -305,18 +304,23 @@ runtime::Result<Track, ModelError> rebuild_track(const Track& track, const IdRem
             return fail<Track>(fixed.error().code, fixed.error().item, fixed.error().related_item);
         freeze->media.asset_id = fixed.value();
     }
-    return Track::create(
-        TrackInput{.id = *table.find(track.id()),
-                   .name = track.name(),
-                   .clips = std::move(clips),
-                   .device_chain = std::move(device_chain),
-                   .automation_lanes = std::move(automation_lanes),
-                   .take_lanes = std::move(take_lanes),
-                   .record_armed = track.record_armed(),
-                   .active_take_lane_id = track.active_take_lane_id().valid()
-                                              ? *table.find(track.active_take_lane_id())
-                                              : ItemId{},
-                   .freeze = std::move(freeze)});
+    // A remap rewrites identities and carries authored value state across
+    // unchanged, so it names only the identity-bearing fields over a copy of
+    // the source input. Enumerating the whole struct instead would silently
+    // reset any authored field the list forgot to a default.
+    auto input = detail::track_input_of(track);
+    input.id = *table.find(track.id());
+    input.clips = std::move(clips);
+    input.device_chain = std::move(device_chain);
+    input.automation_lanes = std::move(automation_lanes);
+    input.modulators = std::move(modulators);
+    input.macros = std::move(macros);
+    input.modulation_routes = std::move(modulation_routes);
+    input.take_lanes = std::move(take_lanes);
+    input.active_take_lane_id =
+        track.active_take_lane_id().valid() ? *table.find(track.active_take_lane_id()) : ItemId{};
+    input.freeze = std::move(freeze);
+    return Track::create(std::move(input));
 }
 
 runtime::Result<Sequence, ModelError>
@@ -330,6 +334,13 @@ rebuild_sequence(const Sequence& sequence, const IdRemapTable& table, RemapIdFix
                                   rebuilt.error().related_item);
         tracks.push_back(std::move(rebuilt).value());
     }
+    // Authored order names the same identities the track list does, so it is
+    // remapped alongside them. Dropping it would silently reset the arrangement
+    // to identity order every time a sequence is copied or imported.
+    std::vector<ItemId> track_order;
+    track_order.reserve(sequence.track_order().size());
+    for (const auto& id : sequence.track_order())
+        track_order.push_back(*table.find(id));
     std::vector<SequenceMarker> markers(sequence.markers().begin(), sequence.markers().end());
     for (auto& marker : markers)
         marker.id = *table.find(marker.id);
@@ -361,6 +372,7 @@ rebuild_sequence(const Sequence& sequence, const IdRemapTable& table, RemapIdFix
         .chord_scale_lane = sequence.chord_scale_lane(),
         .groove = sequence.groove(),
         .scenes = std::move(scenes),
+        .track_order = std::move(track_order),
     });
 }
 
@@ -377,9 +389,7 @@ runtime::Result<RemappedClip, ModelError> remap_ids(const Clip& clip, ItemIdAllo
         return fail<RemappedClip>(error->code, error->item, error->related_item);
     auto working = allocator;
     IdRemapTable table;
-    std::optional<ModelError> error;
-    allocate_clip_owned(clip, table, working, error);
-    if (error)
+    if (const auto error = allocate_owned_subtree(table, working, clip))
         return fail<RemappedClip>(error->code, error->item, error->related_item);
     if (const auto table_error = finish_table(table))
         return fail<RemappedClip>(table_error->code, table_error->item, table_error->related_item);
@@ -403,17 +413,7 @@ runtime::Result<RemappedTrack, ModelError> remap_ids(const Track& track, ItemIdA
         return fail<RemappedTrack>(error->code, error->item, error->related_item);
     auto working = allocator;
     IdRemapTable table;
-    std::optional<ModelError> error = allocate_owned(table, working, track.id());
-    for (const auto& device : track.device_chain()) {
-        if (!error)
-            error = allocate_owned(table, working, device.id);
-    }
-    for (const auto& clip : track.clips())
-        allocate_clip_owned(clip, table, working, error);
-    for (const auto& lane : track.automation_lanes())
-        allocate_automation_owned(lane, table, working, error);
-    allocate_take_owned(track, table, working, error);
-    if (error)
+    if (const auto error = allocate_owned_subtree(table, working, track))
         return fail<RemappedTrack>(error->code, error->item, error->related_item);
     if (const auto table_error = finish_table(table))
         return fail<RemappedTrack>(table_error->code, table_error->item, table_error->related_item);
@@ -437,13 +437,7 @@ remap_ids(const Sequence& sequence, ItemIdAllocator& allocator, RemapIdFixups fi
         return fail<RemappedSequence>(error->code, error->item, error->related_item);
     auto working = allocator;
     IdRemapTable table;
-    std::optional<ModelError> error;
-    detail::visit_sequence_owned_identities(
-        sequence, [&](const detail::ModelOwnedIdentity& identity) {
-            if (!error)
-                error = allocate_owned(table, working, identity.id);
-        });
-    if (error)
+    if (const auto error = allocate_owned_subtree(table, working, sequence))
         return fail<RemappedSequence>(error->code, error->item, error->related_item);
     if (const auto table_error = finish_table(table))
         return fail<RemappedSequence>(table_error->code, table_error->item,
@@ -463,7 +457,7 @@ remap_ids(const Sequence& sequence,
           RemapIdFixups fixups) {
     if (const auto error = preflight(sequence))
         return fail<RemappedSequence>(error->code, error->item, error->related_item);
-    auto expected = owned_sequence_ids(sequence);
+    auto expected = owned_ids(sequence);
     std::sort(expected.begin(), expected.end());
     if (carried_ids.size() != expected.size())
         return fail<RemappedSequence>(ModelErrorCode::InvalidIdentityTransition, sequence.id());

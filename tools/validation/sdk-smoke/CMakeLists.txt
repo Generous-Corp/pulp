@@ -96,6 +96,12 @@ add_executable(PulpSDKSmokeWavDecoderProbe
     "${CMAKE_CURRENT_BINARY_DIR}/wav_decoder_export_probe.cpp")
 target_link_libraries(PulpSDKSmokeWavDecoderProbe PRIVATE Pulp::audio)
 
+# Public AudioDevice timing capability probe. The unsupported dummy forces the
+# installed Pulp::audio archive to resolve the non-inline free-function symbol
+# while also proving an unknown backend fails closed at runtime.
+add_executable(PulpSDKSmokeAudioIoTimingProbe audio_io_timing_probe.cpp)
+target_link_libraries(PulpSDKSmokeAudioIoTimingProbe PRIVATE Pulp::audio)
+
 if(NOT TARGET Pulp::playback)
     message(FATAL_ERROR
         "Pulp SDK smoke: installed SDK does not expose Pulp::playback")
@@ -168,6 +174,26 @@ add_executable(PulpSDKSmokeTimelineProbe
     "${CMAKE_CURRENT_BINARY_DIR}/timeline_export_probe.cpp")
 target_link_libraries(PulpSDKSmokeTimelineProbe PRIVATE Pulp::timeline)
 
+if(NOT TARGET Pulp::timeline-agent-view)
+    message(FATAL_ERROR
+        "Pulp SDK smoke: installed SDK does not expose Pulp::timeline-agent-view")
+endif()
+if(NOT TARGET pulp::timeline-agent-view)
+    message(FATAL_ERROR
+        "Pulp SDK smoke: installed SDK does not expose pulp::timeline-agent-view")
+endif()
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/timeline_agent_view_export_probe.cpp"
+"#include <pulp/timeline_agent_view/agent_view.hpp>\n"
+"\n"
+"int main() {\n"
+"    const auto result = pulp::timeline_agent_view::AgentView::create({});\n"
+"    return result ? 1 : 0;\n"
+"}\n")
+add_executable(PulpSDKSmokeTimelineAgentViewProbe
+    "${CMAKE_CURRENT_BINARY_DIR}/timeline_agent_view_export_probe.cpp")
+target_link_libraries(PulpSDKSmokeTimelineAgentViewProbe
+    PRIVATE Pulp::timeline-agent-view)
+
 # Installed host/state/dsl header + link probe. These targets were exported
 # before all of their public headers were reliably copied into the SDK, so a
 # target-existence check alone produced a linkable-looking but unusable package.
@@ -195,6 +221,41 @@ if(TARGET Pulp::host)
         "${CMAKE_CURRENT_BINARY_DIR}/host_export_probe.cpp")
     target_link_libraries(PulpSDKSmokeHostProbe PRIVATE
         Pulp::dsl Pulp::events Pulp::host Pulp::state)
+endif()
+
+# DESIGN.md parser export probe. yaml-cpp is intentionally absent from Pulp's
+# public headers, but the installed static view-core archive retains YAML
+# symbols. Link only Pulp::view-core here so its install interface must supply
+# that private implementation dependency, then run the executable so the proof
+# covers the parser rather than merely an unreferenced archive.
+if(TARGET Pulp::view-core)
+    get_target_property(_pulp_view_core_definitions
+        Pulp::view-core INTERFACE_COMPILE_DEFINITIONS)
+    if("PULP_HAS_DESIGN_IMPORT=1" IN_LIST _pulp_view_core_definitions)
+        file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/designmd_export_probe.cpp" [=[
+#include <pulp/view/design_sources.hpp>
+
+int main() {
+    const auto ir = pulp::view::parse_designmd_yaml(
+        "---\n"
+        "name: Installed SDK probe\n"
+        "colors:\n"
+        "  primary: \"#336699\"\n"
+        "---\n");
+    const auto primary = ir.tokens.colors.find("primary");
+    return primary != ir.tokens.colors.end() && primary->second == "#336699"
+        ? 0 : 1;
+}
+]=])
+        add_executable(PulpSDKSmokeDesignMdProbe
+            "${CMAKE_CURRENT_BINARY_DIR}/designmd_export_probe.cpp")
+        target_link_libraries(PulpSDKSmokeDesignMdProbe PRIVATE Pulp::view-core)
+        add_custom_command(TARGET PulpSDKSmokeDesignMdProbe POST_BUILD
+            COMMAND "$<TARGET_FILE:PulpSDKSmokeDesignMdProbe>"
+            COMMENT "Running installed-SDK DESIGN.md parser probe"
+            VERBATIM)
+    endif()
+    unset(_pulp_view_core_definitions)
 endif()
 
 # Source-bearing modal-spec parser export probe. The public header alone is not
@@ -316,6 +377,39 @@ pulp_add_plugin(PulpSDKSmokeProbe
     AAX_PRODUCT_CODE "SdSm"
     AAX_NATIVE_CODE "SdkS"
 )
+
+# Runtime-sidecar staging proof (WAH-3).
+#
+# This is the BEHAVIORAL replacement for the source-text regex that used to
+# stand in as proof that Windows bundles carry Skia's `icudtl.dat`. A regex over
+# PulpWebGpuImportedTarget.cmake can only tell you somebody wrote a copy rule.
+# It cannot tell you the installed SDK exposes the file, that the staging helper
+# was invoked for a given format's target, or that anything reached the bundle —
+# and all three fail silently until a user's DAW crashes on the plug-in's first
+# text render.
+#
+# Running it HERE is what puts it on the truth surface that matters: this
+# consumer is built against the INSTALLED SDK by the Windows and Linux Shipyard
+# lanes (see .shipyard/config.toml), so the assertion runs on the real
+# release-path artifacts rather than in a source tree.
+#
+# Every format Pulp produced above is checked, so a format whose helper forgets
+# to stage fails here rather than in the field.
+if(COMMAND pulp_verify_runtime_dependencies_staged)
+    foreach(_pulp_sdk_smoke_format IN LISTS PULP_SDK_SMOKE_FORMATS)
+        set(_pulp_sdk_smoke_target "PulpSDKSmokeProbe_${_pulp_sdk_smoke_format}")
+        if(TARGET ${_pulp_sdk_smoke_target})
+            pulp_verify_runtime_dependencies_staged(${_pulp_sdk_smoke_target})
+        endif()
+    endforeach()
+    unset(_pulp_sdk_smoke_format)
+    unset(_pulp_sdk_smoke_target)
+else()
+    message(FATAL_ERROR
+        "Pulp SDK smoke: the installed SDK does not expose "
+        "pulp_verify_runtime_dependencies_staged(). An SDK without it cannot "
+        "prove its plug-in bundles carry their runtime sidecars.")
+endif()
 
 # GPU-audio transport export probe.
 #

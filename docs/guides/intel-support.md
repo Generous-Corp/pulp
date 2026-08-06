@@ -21,8 +21,9 @@ Intel/AMD GPU.
 |------|------|-------|------|-----------|
 | 0 | Intel **canary**: static lint + `-DPULP_ENABLE_GPU=OFF -DCMAKE_OSX_ARCHITECTURES=x86_64` compile of `pulp-runtime pulp-signal pulp-platform pulp-state pulp-format` | inside the existing ARM macOS job (`build.yml`), gated on the `PULP_INTEL_CANARY` repo variable | every PR (opt-in; forks pay nothing) | yes, on `Generous-Corp/pulp` |
 | 1 | Path-triggered **advisory** x86_64 build + full ctest under Rosetta | `intel-portability.yml`, **stable** `macos-15` (arm64+Rosetta) | PRs that touch arch-sensitive paths | no (advisory) |
-| 2 | **Nightly** native Intel (job A) + universal cross-check (job B) | `nightly-intel.yml`: job A on `macos-15-intel`, job B on `macos-15` | cron, off-peak | no (opens a watchdog issue) |
+| 2 | **Nightly** native Intel (job A) + universal cross-check (job B) | `nightly-intel.yml`: job A on the dedicated Intel selector with a `macos-15-intel` fallback, job B on `macos-15` | cron, off-peak | no (opens a watchdog issue) |
 | 3 | **Universal cross-check**: universal build + `lipo -archs` + `codesign --verify` + dual-arch `auval` | `nightly-intel.yml` `universal-crosscheck` | nightly | advisory |
+| 4 | **Physical native Intel**: full build + ctest on real Intel CPU/GPU hardware | dedicated Mac mini via `PULP_NATIVE_INTEL_RUNS_ON_JSON` | nightly and operator dispatch | advisory |
 
 The Tier-3 gate was blocking, but as of 2026-07-11 it is **advisory**
 (`continue-on-error`, dropped from the `release` job's required `if:`): a known
@@ -59,15 +60,15 @@ reason. Cross-compiling sidesteps the flaky runner entirely:
 The leg routes via `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` (default
 `["macos-15"]`), deliberately **not** `resolve-macos-runner` — Intel work stays
 off the self-hosted Studios that back the required `macos` gate. `macos-15-intel`
-remains the pinned x86_64 image only for the Tier-2 nightly's native-silicon
-signal (`nightly-intel.yml` Job A) and the successor plan when it EOLs
-(~Aug 2027). See `planning/2026-07-10-intel-mac-cli-support.md` (Option A).
+remains the Tier-2 native fallback while the dedicated physical selector is
+unset, and is the successor fallback if that host is unavailable.
 
 Runner discipline is absolute: **no Intel work ever routes to the self-hosted
-Mac Studios** that host the required `macos` gate, and **Namespace is never
-used** (cost). `Generous-Corp/pulp` is a public repo, so GitHub-hosted macOS
-minutes — including the native `macos-15-intel` runner — are free; the only
-budget that matters is wall-clock, runner flakiness, and Studio capacity.
+Apple-Silicon Mac Studios** that host the required `macos` gate, and
+**Namespace is never used** (cost). The physical Intel runner carries the
+dedicated `pulp-intel-native,pulp-host-macmini` labels, so it cannot claim
+required gate work. Unset `PULP_NATIVE_INTEL_RUNS_ON_JSON` to restore the hosted
+`macos-15-intel` fallback, then redispatch any job already queued locally.
 
 ### Why `macos-15-intel` is quarantined to the nightly
 
@@ -163,22 +164,47 @@ that changes rarely. Neither is worth it. Instead:
   after 30 days with no infra-signature failure.** Until then it stays
   quarantined in the nightly.
 
-## Tier 4 is CUT
+## Tier 4: dedicated physical Intel Mac
 
-A dedicated Intel Mac / a tartci Intel host (the former "Phase 2") is **cut**.
-`macos-15-intel` already covers the **native Intel CPU + toolchain**, which was
-the whole reason a physical Intel Mac was ever contemplated. What remains
-genuinely untestable in CI is narrow:
+The physical Mac mini closes two gaps a hosted Intel VM cannot: execution on a
+real Intel CPU/toolchain combination and access to a real Intel-era Metal GPU.
+It serves only the advisory native-Intel job. The workflow remains safe while
+the machine is offline because the routing variable is opt-in and documents a
+hosted fallback; once the variable is set, GitHub cannot move an already queued
+self-hosted job to that fallback, so rollback is **unset then redispatch**.
 
-- **Metal on real AMD/Intel GPUs.** GitHub's macOS runners are VMs without a
-  representative discrete GPU, so no tier — not even native `macos-15-intel` —
-  exercises a real Intel/AMD Metal driver.
-- **Intel-native DAW-in-the-loop.** Hosting the plugin inside Logic / Live /
-  Cubase on real Intel hardware.
+The host supervisor uses a fresh JIT runner identity and workspace for each job.
+Its authenticated controller runs under the login account, while `run.sh` and
+all workflow steps run as a separate non-admin `pulp-ci` account. A root-owned
+fixed-operation shim is the only sudo boundary between them; the job account has
+no `gh`/`ghapp` credential and cannot modify the controller. Follow the one-time
+admin installation and exact sudoers rule in `local-ci.md`; `--check` refuses to
+register unless the hidden `pulp-ci` identity is uid 499 with disabled login and
+an unwritable real home. The shim copies a root-owned golden runner for each job
+and deletes the ephemeral home, temp state, runner, workspace, and leftover
+uid-owned processes afterward. Only the protected, read-only warm ccache
+persists between jobs, with ccache depend mode disabled.
+Its exact route is:
 
-Those two gaps are exactly the `experimental` justification recorded in
-`docs/status/support-matrix.yaml`. Revisit a dedicated Intel host only on a
-user-reported Intel-GPU or Intel-DAW bug — not preemptively.
+```text
+self-hosted,macOS,X64,pulp-intel-native,pulp-host-macmini
+```
+
+Enable it only after `tools/ci/native-intel-runner.sh --check` passes and a
+one-run `workflow_dispatch` proof succeeds. Then set:
+
+```sh
+ghapp variable set PULP_NATIVE_INTEL_RUNS_ON_JSON --repo Generous-Corp/pulp \
+  --body '["self-hosted","macOS","X64","pulp-intel-native","pulp-host-macmini"]'
+```
+
+The launchd agent restarts after login and ordinary reboots. FileVault protects
+the startup volume, so a cold power cycle still needs a person to unlock the
+disk before any user LaunchAgent can run. Do not weaken FileVault to make an
+advisory lane unattended; record the host as unavailable until it is unlocked.
+
+This tier does not automate Intel-native DAW-in-the-loop validation. That
+remains an operator-run check when a DAW or GPU issue needs reproduction.
 
 ## Running the canary locally
 

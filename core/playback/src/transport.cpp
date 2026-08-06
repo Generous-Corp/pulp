@@ -15,6 +15,48 @@ bool valid_meter(MeterSignature meter) noexcept {
     return (denominator & (denominator - 1)) == 0;
 }
 
+bool beats_to_ticks(double beats, timebase::TickPosition& result) noexcept {
+    if (!std::isfinite(beats))
+        return false;
+    const auto scaled =
+        static_cast<long double>(beats) * static_cast<long double>(timebase::kTicksPerQuarter);
+    const auto rounded = std::round(scaled);
+    const auto minimum = static_cast<long double>(std::numeric_limits<std::int64_t>::min());
+    // Use an exclusive, exactly representable 2^63 upper bound. On platforms
+    // where long double aliases double, converting INT64_MAX to long double can
+    // itself round to 2^63 and make an inclusive comparison unsafe.
+    const auto maximum_exclusive = -minimum;
+    if (rounded < minimum || !(rounded < maximum_exclusive))
+        return false;
+    result.value = static_cast<std::int64_t>(rounded);
+    return true;
+}
+
+double ticks_to_beats(timebase::TickPosition ticks) noexcept {
+    return static_cast<double>(ticks.value) / static_cast<double>(timebase::kTicksPerQuarter);
+}
+
+double wrap_loop_beat(double beat, double loop_start, double loop_end) noexcept {
+    if (beat < loop_end)
+        return beat;
+    const auto length = loop_end - loop_start;
+    auto remainder = std::fmod(beat - loop_start, length);
+    if (remainder < 0.0)
+        remainder += length;
+    return loop_start + remainder;
+}
+
+bool beat_fits_tick_domain(double beat) noexcept {
+    timebase::TickPosition ignored;
+    return beats_to_ticks(beat, ignored);
+}
+
+bool beats_nearly_equal(double lhs, double rhs, double absolute_floor) noexcept {
+    const auto magnitude = std::max({1.0, std::abs(lhs), std::abs(rhs)});
+    const auto numeric_floor = 8.0 * std::numeric_limits<double>::epsilon() * magnitude;
+    return std::abs(lhs - rhs) <= std::max(absolute_floor, numeric_floor);
+}
+
 std::int64_t saturating_add(std::int64_t value, std::uint32_t increment) noexcept {
     const auto maximum = std::numeric_limits<std::int64_t>::max();
     if (value > maximum - static_cast<std::int64_t>(increment))
@@ -44,7 +86,25 @@ timebase::BarPosition bar_at_tick(timebase::TickPosition tick, timebase::TickPos
     return {static_cast<std::int64_t>(projected)};
 }
 
+TransportPlayhead playhead_from_block(const TransportSnapshot& snapshot) noexcept {
+    TransportPlayhead reading;
+    reading.playback_epoch = snapshot.playback_epoch;
+    reading.position = snapshot.ranges[0].timeline_tick_start;
+    reading.loop = snapshot.loop;
+    reading.tempo_bpm = snapshot.tempo_bpm;
+    reading.is_playing = snapshot.is_playing;
+    reading.scrubbing = snapshot.scrubbing;
+    return reading;
+}
+
 } // namespace
+
+TransportError detail::advance_playback_epoch(std::uint64_t& epoch) noexcept {
+    if (epoch == std::numeric_limits<std::uint64_t>::max())
+        return TransportError::PlaybackEpochExhausted;
+    ++epoch;
+    return TransportError::None;
+}
 
 bool valid_transport_ranges(const TransportSnapshot& transport) noexcept {
     if (transport.tempo_map == nullptr || transport.frame_count == 0 ||
@@ -61,6 +121,18 @@ bool valid_transport_ranges(const TransportSnapshot& transport) noexcept {
         const auto& range = transport.ranges[index];
         if (range.frame_count == 0 || range.sample_offset != expected_offset)
             return false;
+        if (index == 0) {
+            if (range.playback_epoch != transport.playback_epoch)
+                return false;
+        } else {
+            const auto previous_epoch = transport.ranges[index - 1].playback_epoch;
+            const bool same_epoch = range.playback_epoch == previous_epoch;
+            const bool next_epoch =
+                previous_epoch != std::numeric_limits<std::uint64_t>::max() &&
+                range.playback_epoch == previous_epoch + 1;
+            if (!same_epoch && (!transport.scrubbing || !range.discontinuity || !next_epoch))
+                return false;
+        }
         if (range.has_precise_host_ticks &&
             (!range.host_beat_mapping || !std::isfinite(range.host_tick_start) ||
              !std::isfinite(range.host_tick_end) ||
@@ -124,10 +196,120 @@ bool host_mapped_output_offset_for_tick(const TransportRange& range,
     return true;
 }
 
+struct MasterTransport::BlockProjection {
+    std::uint32_t frame_count = 0;
+    bool playing = false;
+    bool scrubbing = false;
+    bool transport_changed = false;
+    bool transport_started = false;
+    bool reset_requested = false;
+};
+
+struct MasterTransport::RangeProjection {
+    std::uint32_t sample_offset = 0;
+    std::uint32_t frame_count = 0;
+    timebase::SamplePosition timeline_sample_start{};
+    timebase::TickPosition timeline_tick_start{};
+    timebase::TickPosition timeline_tick_end{};
+    double tempo_bpm = 120.0;
+    bool discontinuity = false;
+    bool host_beat_mapping = false;
+    double host_tick_start = 0.0;
+    double host_tick_end = 0.0;
+    bool has_precise_host_ticks = false;
+    std::uint64_t playback_epoch = 0;
+    std::uint64_t loop_pass_index = 0;
+};
+
+void MasterTransport::begin_projected_block(const DesiredState& desired,
+                                            const BlockProjection& projection,
+                                            timebase::TickPosition anchor_tick,
+                                            TransportSnapshot& snapshot) noexcept {
+    if (desired.meter != meter_anchor_signature_) {
+        if (first_block_) {
+            meter_anchor_tick_ = {};
+            meter_anchor_bar_ = {};
+        } else {
+            meter_anchor_bar_ = bar_at_tick(anchor_tick, meter_anchor_tick_, meter_anchor_bar_,
+                                            meter_anchor_signature_);
+            meter_anchor_tick_ = anchor_tick;
+        }
+        meter_anchor_signature_ = desired.meter;
+    }
+
+    snapshot = {};
+    snapshot.tempo_map = tempo_map_;
+    snapshot.sample_rate = tempo_map_->sample_rate();
+    snapshot.block_index = block_index_++;
+    snapshot.frame_count = projection.frame_count;
+    snapshot.meter = desired.meter;
+    snapshot.loop = desired.loop;
+    snapshot.is_playing = projection.playing;
+    snapshot.scrubbing = projection.scrubbing;
+    snapshot.transport_changed = projection.transport_changed;
+    snapshot.transport_started = projection.transport_started;
+    snapshot.reset_requested = projection.reset_requested;
+    snapshot.time_sig_changed = !first_block_ && desired.meter != previous_meter_;
+}
+
+void MasterTransport::append_projected_range(const RangeProjection& projection,
+                                             TransportSnapshot& snapshot) noexcept {
+    const auto index = snapshot.range_count;
+    auto& range = snapshot.ranges[index];
+    range.sample_offset = projection.sample_offset;
+    range.frame_count = projection.frame_count;
+    range.timeline_sample_start = projection.timeline_sample_start;
+    range.timeline_tick_start = projection.timeline_tick_start;
+    range.timeline_tick_end = projection.timeline_tick_end;
+    range.monotonic_start = monotonic_;
+    range.monotonic_end = monotonic_ + (range.timeline_tick_end - range.timeline_tick_start);
+    range.bar_start = bar_at_tick(range.timeline_tick_start, meter_anchor_tick_, meter_anchor_bar_,
+                                  meter_anchor_signature_);
+    range.tempo_bpm = projection.tempo_bpm;
+    range.tempo_changed = index == 0 ? !first_block_ && range.tempo_bpm != previous_tempo_bpm_
+                                     : range.tempo_bpm != snapshot.ranges[index - 1].tempo_bpm;
+    range.discontinuity = projection.discontinuity;
+    range.host_beat_mapping = projection.host_beat_mapping;
+    range.host_tick_start = projection.host_tick_start;
+    range.host_tick_end = projection.host_tick_end;
+    range.has_precise_host_ticks = projection.has_precise_host_ticks;
+    range.playback_epoch = projection.playback_epoch;
+    range.loop_pass_index = projection.loop_pass_index;
+    monotonic_ = range.monotonic_end;
+    timeline_tick_ = range.timeline_tick_end;
+    timeline_sample_ = tempo_map_->ticks_to_samples(timeline_tick_);
+    ++snapshot.range_count;
+}
+
+void MasterTransport::finish_projected_block(const DesiredState& desired,
+                                             const BlockProjection& projection,
+                                             TransportSnapshot& snapshot) noexcept {
+    snapshot.playback_epoch = snapshot.ranges[0].playback_epoch;
+    snapshot.tempo_bpm = snapshot.ranges[0].tempo_bpm;
+    previous_tempo_bpm_ = snapshot.ranges[snapshot.range_count - 1].tempo_bpm;
+    previous_playing_ = projection.playing;
+    previous_scrubbing_ = projection.scrubbing;
+    previous_meter_ = desired.meter;
+    previous_loop_ = desired.loop;
+    first_block_ = false;
+}
+
+void MasterTransport::publish_playhead(TransportPlayhead reading) noexcept {
+    reading.sequence = ++playhead_sequence_;
+    playhead_.write(reading);
+}
+
 TransportError MasterTransport::prepare(const timebase::CompiledTempoMap& tempo_map,
                                         const MasterTransportConfig& config) noexcept {
     reset();
+    if (config.tempo_sync_source != nullptr &&
+        (!std::isfinite(config.tempo_sync_quantum_beats) || config.tempo_sync_quantum_beats <= 0.0))
+        return TransportError::InvalidTempoSyncConfig;
+    if (playback_epoch_exhausted_)
+        return TransportError::PlaybackEpochExhausted;
     tempo_map_ = &tempo_map;
+    tempo_sync_source_ = config.tempo_sync_source;
+    tempo_sync_quantum_beats_ = config.tempo_sync_quantum_beats;
     max_buffer_size_ = config.max_buffer_size;
     if (max_buffer_size_ == 0 ||
         max_buffer_size_ > static_cast<std::uint32_t>(std::numeric_limits<int>::max())) {
@@ -162,6 +344,19 @@ TransportError MasterTransport::prepare(const timebase::CompiledTempoMap& tempo_
     previous_loop_ = config.loop;
     previous_tempo_bpm_ = tempo_cursor_.tempo_at_tick(config.initial_position);
     publish_desired();
+
+    // State the transport's starting position now rather than leaving the
+    // cleared reading reset() published readable until the first block. A view
+    // that draws between prepare() and the first callback otherwise shows tick
+    // zero at the default tempo, neither of which this transport was configured
+    // with.
+    TransportPlayhead initial;
+    initial.playback_epoch = playback_epoch_;
+    initial.position = config.initial_position;
+    initial.loop = config.loop;
+    initial.tempo_bpm = previous_tempo_bpm_;
+    initial.is_playing = config.initially_playing;
+    publish_playhead(initial);
     return TransportError::None;
 }
 
@@ -169,6 +364,20 @@ TransportError MasterTransport::set_playing(bool playing) noexcept {
     if (tempo_map_ == nullptr)
         return TransportError::NotPrepared;
     control_state_.playing = playing;
+    ++control_state_.playing_generation;
+    publish_desired();
+    return TransportError::None;
+}
+
+TransportError MasterTransport::set_tempo_sync_tempo(double tempo_bpm) noexcept {
+    if (tempo_map_ == nullptr)
+        return TransportError::NotPrepared;
+    if (tempo_sync_source_ == nullptr)
+        return TransportError::InvalidTempoSyncConfig;
+    if (!std::isfinite(tempo_bpm) || tempo_bpm <= 0.0)
+        return TransportError::InvalidTempo;
+    control_state_.tempo_sync_tempo_bpm = tempo_bpm;
+    ++control_state_.tempo_sync_tempo_generation;
     publish_desired();
     return TransportError::None;
 }
@@ -190,6 +399,8 @@ TransportError MasterTransport::begin_scrub(std::uint32_t window_frames,
                                             timebase::TickPosition position) noexcept {
     if (tempo_map_ == nullptr)
         return TransportError::NotPrepared;
+    if (tempo_sync_source_ != nullptr)
+        return TransportError::InvalidTempoSyncConfig;
     if (window_frames == 0)
         return TransportError::InvalidScrubWindow;
     if (window_frames < max_buffer_size_)
@@ -265,11 +476,30 @@ void MasterTransport::publish_desired() noexcept {
 
 TransportError MasterTransport::begin_block(std::uint32_t frame_count,
                                             TransportSnapshot& snapshot) noexcept {
+    if (tempo_sync_source_ != nullptr)
+        return TransportError::TempoSyncHostTimeRequired;
+    return begin_internal_block(frame_count, snapshot);
+}
+
+TransportError MasterTransport::begin_block(std::uint32_t frame_count,
+                                            TempoSyncHostTime output_host_time,
+                                            TransportSnapshot& snapshot) noexcept {
+    if (tempo_sync_source_ == nullptr)
+        return begin_internal_block(frame_count, snapshot);
+    if (output_host_time.source_ != tempo_sync_source_)
+        return TransportError::TempoSyncHostTimeRequired;
+    return begin_tempo_synced_block(frame_count, output_host_time.micros_, snapshot);
+}
+
+TransportError MasterTransport::begin_internal_block(std::uint32_t frame_count,
+                                                     TransportSnapshot& snapshot) noexcept {
     runtime::ScopedNoAlloc no_alloc_guard;
     if (tempo_map_ == nullptr)
         return TransportError::NotPrepared;
     if (frame_count == 0 || frame_count > max_buffer_size_)
         return TransportError::InvalidFrameCount;
+    if (playback_epoch_exhausted_)
+        return TransportError::PlaybackEpochExhausted;
 
     const auto desired = desired_.read();
 
@@ -278,6 +508,25 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
     // later, more explicit intent, so it is applied afterwards and wins.
     const bool scrub_entered = desired.scrubbing && !previous_scrubbing_;
     const bool scrub_exited = !desired.scrubbing && previous_scrubbing_;
+    const bool scrub_generation_changed =
+        desired.scrub_generation != applied_scrub_generation_;
+    const bool seeked = desired.seek_generation != applied_seek_generation_;
+    const bool advancing = desired.scrubbing || desired.playing;
+    const bool transport_started = advancing && (first_block_ || !previous_playing_);
+    const bool loop_changed = desired.loop != previous_loop_;
+    const bool block_epoch_change =
+        seeked || transport_started || scrub_entered || scrub_exited || loop_changed;
+    const bool scrub_anchor_change =
+        desired.scrubbing && !scrub_entered && !(seeked && desired.scrubbing) &&
+        has_applied_scrub_position_ &&
+        (scrub_generation_changed || desired.scrub_position != applied_scrub_position_) &&
+        (scrub_generation_changed || scrub_window_remaining_ == 0 ||
+         frame_count > scrub_window_remaining_);
+    const auto required_epochs =
+        static_cast<std::uint64_t>(block_epoch_change) +
+        static_cast<std::uint64_t>(scrub_anchor_change);
+    if (required_epochs > std::numeric_limits<std::uint64_t>::max() - playback_epoch_)
+        return TransportError::PlaybackEpochExhausted;
     if (scrub_exited) {
         timeline_sample_ = tempo_map_->ticks_to_samples(desired.scrub_position);
         tempo_cursor_.seek(timeline_sample_);
@@ -288,12 +537,11 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
 
     // A fresh drag abandons the window in flight; moving an existing drag does
     // not, which is what keeps the anchor latched to window boundaries.
-    if (desired.scrub_generation != applied_scrub_generation_) {
+    if (scrub_generation_changed) {
         applied_scrub_generation_ = desired.scrub_generation;
         scrub_window_remaining_ = 0;
     }
 
-    const bool seeked = desired.seek_generation != applied_seek_generation_;
     if (seeked) {
         timeline_sample_ = tempo_map_->ticks_to_samples(desired.position);
         tempo_cursor_.seek(timeline_sample_);
@@ -306,85 +554,75 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
     }
 
     // Scrubbing moves the playhead whether or not the musical transport rolls.
-    const bool advancing = desired.scrubbing || desired.playing;
-
-    if (desired.meter != meter_anchor_signature_) {
-        if (first_block_) {
-            meter_anchor_tick_ = {};
-            meter_anchor_bar_ = {};
-        } else {
-            meter_anchor_bar_ = bar_at_tick(timeline_tick_, meter_anchor_tick_, meter_anchor_bar_,
-                                            meter_anchor_signature_);
-            meter_anchor_tick_ = timeline_tick_;
-        }
-        meter_anchor_signature_ = desired.meter;
+    if (block_epoch_change)
+        (void)detail::advance_playback_epoch(playback_epoch_);
+    if (scrub_entered || (seeked && desired.scrubbing)) {
+        applied_scrub_position_ = desired.scrub_position;
+        has_applied_scrub_position_ = true;
+    } else if (scrub_exited) {
+        has_applied_scrub_position_ = false;
     }
 
-    snapshot = {};
-    snapshot.tempo_map = tempo_map_;
-    snapshot.sample_rate = tempo_map_->sample_rate();
-    snapshot.block_index = block_index_++;
-    snapshot.frame_count = frame_count;
-    snapshot.meter = desired.meter;
-    snapshot.loop = desired.loop;
-    snapshot.is_playing = advancing;
-    snapshot.scrubbing = desired.scrubbing;
-    snapshot.transport_changed =
+    BlockProjection projection;
+    projection.frame_count = frame_count;
+    projection.playing = advancing;
+    projection.scrubbing = desired.scrubbing;
+    projection.transport_changed =
         !first_block_ &&
         (advancing != previous_playing_ || desired.loop.enabled != previous_loop_.enabled);
-    snapshot.transport_started = advancing && (first_block_ || !previous_playing_);
+    projection.transport_started = transport_started;
     // Entering and leaving scrub are hard repositions. The window restarts in
     // between are not: they recur many times a second, and a per-grain state
     // reset would wipe consumer state that the plain discontinuity already
     // describes correctly.
-    snapshot.reset_requested =
-        seeked || scrub_entered || scrub_exited || desired.loop != previous_loop_;
-    snapshot.time_sig_changed = !first_block_ && desired.meter != previous_meter_;
-    if (seeked || snapshot.transport_started || scrub_entered || scrub_exited ||
-        desired.loop != previous_loop_ || !advancing || desired.scrubbing ||
-        !desired.loop.enabled)
+    projection.reset_requested = seeked || scrub_entered || scrub_exited || loop_changed;
+    if (seeked || projection.transport_started || scrub_entered || scrub_exited ||
+        loop_changed ||
+        !advancing || desired.scrubbing || !desired.loop.enabled)
         loop_pass_index_ = 0;
+    begin_projected_block(desired, projection, timeline_tick_, snapshot);
 
-    auto make_range = [&](std::uint8_t index, std::uint32_t offset, std::uint32_t count,
-                          bool discontinuity,
+    auto make_range = [&](std::uint32_t offset, std::uint32_t count, bool discontinuity,
                           const timebase::TickPosition* forced_end_tick = nullptr) {
-        auto& range = snapshot.ranges[index];
+        RangeProjection range;
         range.sample_offset = offset;
         range.frame_count = count;
         range.timeline_sample_start = timeline_sample_;
         range.timeline_tick_start = timeline_tick_;
-        range.monotonic_start = monotonic_;
-        range.bar_start = bar_at_tick(range.timeline_tick_start, meter_anchor_tick_,
-                                      meter_anchor_bar_, meter_anchor_signature_);
         range.tempo_bpm = tempo_cursor_.tempo_at_tick(range.timeline_tick_start);
-        range.tempo_changed = index == 0 ? !first_block_ && range.tempo_bpm != previous_tempo_bpm_
-                                         : range.tempo_bpm != snapshot.ranges[index - 1].tempo_bpm;
         range.discontinuity = discontinuity;
+        range.playback_epoch = playback_epoch_;
         range.loop_pass_index =
             advancing && !desired.scrubbing && desired.loop.enabled ? loop_pass_index_ : 0;
+        auto end_sample = timeline_sample_;
         if (advancing) {
-            const timebase::SamplePosition end_sample{
-                saturating_add(timeline_sample_.value, count)};
+            end_sample = {saturating_add(timeline_sample_.value, count)};
             range.timeline_tick_end = forced_end_tick != nullptr
                                           ? *forced_end_tick
                                           : tempo_cursor_.advance(end_sample).tick;
             if (range.timeline_tick_end < range.timeline_tick_start)
                 range.timeline_tick_end = range.timeline_tick_start;
-            const auto duration = range.timeline_tick_end - range.timeline_tick_start;
-            range.monotonic_end = monotonic_ + duration;
-            timeline_sample_ = end_sample;
-            timeline_tick_ = range.timeline_tick_end;
-            monotonic_ = range.monotonic_end;
         } else {
             range.timeline_tick_end = range.timeline_tick_start;
-            range.monotonic_end = range.monotonic_start;
         }
+        append_projected_range(range, snapshot);
+        // The internal clock owns an exact sample cursor. Preserve it instead of
+        // round-tripping the projected tick through the tempo map.
+        timeline_sample_ = end_sample;
     };
 
     // Restarting the window is structurally a loop wrap: reposition, mark a
     // discontinuity, and split the block. Consumers that already release notes
     // and reset readers on a wrap therefore need no scrub-specific handling.
     auto start_scrub_window = [&]() {
+        const bool anchor_changed =
+            has_applied_scrub_position_ &&
+            (desired.scrub_position != applied_scrub_position_ ||
+             (scrub_generation_changed && !scrub_entered && !(seeked && desired.scrubbing)));
+        if (anchor_changed)
+            (void)detail::advance_playback_epoch(playback_epoch_);
+        applied_scrub_position_ = desired.scrub_position;
+        has_applied_scrub_position_ = true;
         timeline_sample_ = tempo_map_->ticks_to_samples(desired.scrub_position);
         tempo_cursor_.seek(timeline_sample_);
         timeline_tick_ = desired.scrub_position;
@@ -399,26 +637,22 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
         if (scrub_window_remaining_ == 0)
             start_scrub_window();
         const auto first_count = std::min(frame_count, scrub_window_remaining_);
-        make_range(0, 0, first_count, pending_discontinuity_);
-        snapshot.range_count = 1;
+        make_range(0, first_count, pending_discontinuity_);
         pending_discontinuity_ = false;
         scrub_window_remaining_ -= first_count;
 
         const auto remaining = frame_count - first_count;
         if (remaining > 0) {
             start_scrub_window();
-            make_range(1, first_count, remaining, true);
-            snapshot.range_count = 2;
+            make_range(first_count, remaining, true);
             pending_discontinuity_ = false;
             scrub_window_remaining_ -= remaining;
         }
     } else if (!desired.playing) {
-        make_range(0, 0, frame_count, pending_discontinuity_);
-        snapshot.range_count = 1;
+        make_range(0, frame_count, pending_discontinuity_);
         pending_discontinuity_ = false;
     } else if (!desired.loop.enabled) {
-        make_range(0, 0, frame_count, pending_discontinuity_);
-        snapshot.range_count = 1;
+        make_range(0, frame_count, pending_discontinuity_);
         pending_discontinuity_ = false;
     } else {
         const auto loop_start = tempo_map_->ticks_to_samples(desired.loop.start);
@@ -436,8 +670,7 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
         if (first_count > 0) {
             const auto* forced_end =
                 static_cast<std::uint64_t>(first_count) == until_wrap ? &desired.loop.end : nullptr;
-            make_range(0, 0, first_count, pending_discontinuity_, forced_end);
-            snapshot.range_count = 1;
+            make_range(0, first_count, pending_discontinuity_, forced_end);
             pending_discontinuity_ = false;
         }
 
@@ -447,8 +680,7 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
             timeline_tick_ = desired.loop.start;
             tempo_cursor_.seek(loop_start);
             ++loop_pass_index_;
-            make_range(snapshot.range_count, first_count, remaining, true);
-            ++snapshot.range_count;
+            make_range(first_count, remaining, true);
         } else if (timeline_sample_ == loop_end) {
             timeline_sample_ = loop_start;
             timeline_tick_ = desired.loop.start;
@@ -458,19 +690,192 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
         }
     }
 
-    snapshot.tempo_bpm = snapshot.ranges[0].tempo_bpm;
-    previous_tempo_bpm_ = snapshot.ranges[snapshot.range_count - 1].tempo_bpm;
-    previous_playing_ = advancing;
-    previous_scrubbing_ = desired.scrubbing;
-    previous_meter_ = desired.meter;
-    previous_loop_ = desired.loop;
-    first_block_ = false;
+    finish_projected_block(desired, projection, snapshot);
+    publish_playhead(playhead_from_block(snapshot));
+    return TransportError::None;
+}
+
+TransportError MasterTransport::begin_tempo_synced_block(std::uint32_t frame_count,
+                                                         std::int64_t output_host_time_micros,
+                                                         TransportSnapshot& snapshot) noexcept {
+    runtime::ScopedNoAlloc no_alloc_guard;
+    if (tempo_map_ == nullptr)
+        return TransportError::NotPrepared;
+    if (frame_count == 0 || frame_count > max_buffer_size_)
+        return TransportError::InvalidFrameCount;
+    if (playback_epoch_exhausted_)
+        return TransportError::PlaybackEpochExhausted;
+    if (tempo_sync_source_ == nullptr || !std::isfinite(tempo_sync_quantum_beats_) ||
+        tempo_sync_quantum_beats_ <= 0.0)
+        return TransportError::InvalidTempoSyncConfig;
+
+    const auto desired = desired_.read();
+    // A scrub window deliberately repositions on a private clock. Mixing that
+    // with an active shared beat mapping would make neither clock authoritative.
+    if (desired.scrubbing)
+        return TransportError::InvalidTempoSyncConfig;
+
+    TempoSyncBlockRequest request;
+    request.output_host_time_micros = output_host_time_micros;
+    request.frame_count = frame_count;
+    request.sample_rate = static_cast<double>(tempo_map_->sample_rate().as_long_double());
+    request.quantum_beats = tempo_sync_quantum_beats_;
+    request.command.request_playing =
+        desired.playing_generation != applied_tempo_sync_playing_generation_;
+    request.command.playing = desired.playing;
+    request.command.request_beat = desired.seek_generation != applied_tempo_sync_seek_generation_;
+    request.command.beat = ticks_to_beats(desired.position);
+    request.command.request_tempo =
+        desired.tempo_sync_tempo_generation != applied_tempo_sync_tempo_generation_;
+    request.command.tempo_bpm = desired.tempo_sync_tempo_bpm;
+    if (!valid_tempo_sync_request(request))
+        return TransportError::InvalidTempoSyncState;
+
+    TempoSyncBlockState state;
+    const auto source_error = tempo_sync_source_->capture_audio_block(request, state);
+    if (source_error == TempoSyncError::Disabled || source_error == TempoSyncError::BackendFailure)
+        return TransportError::TempoSyncUnavailable;
+    if (source_error != TempoSyncError::None || !valid_tempo_sync_state(state))
+        return TransportError::InvalidTempoSyncState;
+    const bool block_playing =
+        project_tempo_sync_playing(request, state, previous_playing_).playing_for_block;
+    const auto source_beat_start = state.beat_start;
+    const auto source_beat_end = block_playing ? state.beat_end : state.beat_start;
+    if (!beat_fits_tick_domain(source_beat_start) || !beat_fits_tick_domain(source_beat_end))
+        return TransportError::InvalidTempoSyncState;
+    const bool explicit_seek = request.command.request_beat;
+    const auto continuity_tolerance =
+        std::max(1.0e-9, 2.0 * state.tempo_bpm / (60.0 * request.sample_rate));
+    const bool inferred_jump =
+        has_expected_tempo_sync_beat_ && block_playing &&
+        !beats_nearly_equal(source_beat_start, expected_tempo_sync_beat_, continuity_tolerance);
+    const bool loop_changed = !first_block_ && desired.loop != previous_loop_;
+    const bool transport_started = block_playing && (first_block_ || !previous_playing_);
+    const bool playback_epoch_changed =
+        explicit_seek || inferred_jump || transport_started || loop_changed;
+    if (playback_epoch_changed &&
+        detail::advance_playback_epoch(playback_epoch_) != TransportError::None) {
+        playback_epoch_exhausted_ = true;
+        return TransportError::PlaybackEpochExhausted;
+    }
+    if (!block_playing || explicit_seek || inferred_jump || transport_started || loop_changed)
+        loop_pass_index_ = 0;
+
+    double local_beat_start = source_beat_start;
+    double local_beat_end = source_beat_end;
+    double loop_start_beat = 0.0;
+    double loop_end_beat = 0.0;
+    double next_loop_boundary = 0.0;
+    bool crosses_loop = false;
+    bool ends_at_loop = false;
+    if (block_playing && desired.loop.enabled) {
+        loop_start_beat = ticks_to_beats(desired.loop.start);
+        loop_end_beat = ticks_to_beats(desired.loop.end);
+        const auto loop_length = loop_end_beat - loop_start_beat;
+        const auto source_span = source_beat_end - source_beat_start;
+        if (!(loop_length > 0.0) ||
+            (source_span > loop_length && !beats_nearly_equal(source_span, loop_length, 1.0e-9)))
+            return TransportError::LoopTooShortForMaximumBlock;
+
+        local_beat_start = wrap_loop_beat(source_beat_start, loop_start_beat, loop_end_beat);
+        if (source_beat_start < loop_start_beat) {
+            next_loop_boundary = loop_end_beat;
+        } else {
+            const auto cycle = std::floor((source_beat_start - loop_start_beat) / loop_length);
+            next_loop_boundary = loop_start_beat + (cycle + 1.0) * loop_length;
+        }
+        if (source_beat_end > next_loop_boundary &&
+            !beats_nearly_equal(source_beat_end, next_loop_boundary, 1.0e-9)) {
+            if (source_beat_end > next_loop_boundary + loop_length &&
+                !beats_nearly_equal(source_beat_end, next_loop_boundary + loop_length, 1.0e-9))
+                return TransportError::LoopTooShortForMaximumBlock;
+            crosses_loop = true;
+        } else if (beats_nearly_equal(source_beat_end, next_loop_boundary, 1.0e-9)) {
+            ends_at_loop = true;
+        }
+        local_beat_end = crosses_loop || ends_at_loop
+                             ? loop_end_beat
+                             : wrap_loop_beat(source_beat_end, loop_start_beat, loop_end_beat);
+    }
+
+    timebase::TickPosition local_start_tick;
+    if (!beats_to_ticks(local_beat_start, local_start_tick))
+        return TransportError::InvalidTempoSyncState;
+    BlockProjection projection;
+    projection.frame_count = frame_count;
+    projection.playing = block_playing;
+    projection.transport_changed =
+        !first_block_ && (block_playing != previous_playing_ || loop_changed);
+    projection.transport_started = transport_started;
+    projection.reset_requested = explicit_seek || inferred_jump || loop_changed;
+    begin_projected_block(desired, projection, local_start_tick, snapshot);
+
+    auto make_range = [&](std::uint32_t offset, std::uint32_t count, double beat_start,
+                          double beat_end, bool discontinuity) {
+        RangeProjection range;
+        range.sample_offset = offset;
+        range.frame_count = count;
+        beats_to_ticks(beat_start, range.timeline_tick_start);
+        beats_to_ticks(block_playing ? beat_end : beat_start, range.timeline_tick_end);
+        range.timeline_sample_start = tempo_map_->ticks_to_samples(range.timeline_tick_start);
+        range.tempo_bpm = state.tempo_bpm;
+        range.discontinuity = discontinuity;
+        range.host_beat_mapping = true;
+        range.host_tick_start = beat_start * static_cast<double>(timebase::kTicksPerQuarter);
+        range.host_tick_end = (block_playing ? beat_end : beat_start) *
+                              static_cast<double>(timebase::kTicksPerQuarter);
+        range.has_precise_host_ticks = true;
+        range.playback_epoch = playback_epoch_;
+        range.loop_pass_index = block_playing && desired.loop.enabled ? loop_pass_index_ : 0;
+        append_projected_range(range, snapshot);
+    };
+
+    const bool first_discontinuity = pending_discontinuity_ || explicit_seek || inferred_jump;
+    pending_discontinuity_ = false;
+    if (!crosses_loop) {
+        make_range(0, frame_count, local_beat_start, local_beat_end, first_discontinuity);
+        if (ends_at_loop) {
+            ++loop_pass_index_;
+            pending_discontinuity_ = true;
+        }
+    } else {
+        const auto source_span = source_beat_end - source_beat_start;
+        const auto boundary_fraction = (next_loop_boundary - source_beat_start) / source_span;
+        auto first_count = static_cast<std::uint32_t>(
+            std::ceil(boundary_fraction * static_cast<double>(frame_count)));
+        first_count = std::clamp(first_count, std::uint32_t{1}, frame_count);
+        make_range(0, first_count, local_beat_start, loop_end_beat, first_discontinuity);
+        const auto remaining = frame_count - first_count;
+        ++loop_pass_index_;
+        if (remaining > 0) {
+            const auto second_end = loop_start_beat + (source_beat_end - next_loop_boundary);
+            make_range(first_count, remaining, loop_start_beat, second_end, true);
+        } else {
+            pending_discontinuity_ = true;
+        }
+    }
+
+    finish_projected_block(desired, projection, snapshot);
+    has_expected_tempo_sync_beat_ = block_playing;
+    expected_tempo_sync_beat_ = state.beat_end;
+    applied_tempo_sync_playing_generation_ = desired.playing_generation;
+    applied_tempo_sync_seek_generation_ = desired.seek_generation;
+    applied_tempo_sync_tempo_generation_ = desired.tempo_sync_tempo_generation;
+    // A block whose ranges failed validation is one the caller is told not to
+    // render, so it must not become the position a view draws either.
+    if (!valid_transport_ranges(snapshot))
+        return TransportError::InvalidTempoSyncState;
+    publish_playhead(playhead_from_block(snapshot));
     return TransportError::None;
 }
 
 void MasterTransport::reset() noexcept {
+    if (detail::advance_playback_epoch(playback_epoch_) != TransportError::None)
+        playback_epoch_exhausted_ = true;
     tempo_map_ = nullptr;
     tempo_cursor_ = {};
+    tempo_sync_source_ = nullptr;
+    tempo_sync_quantum_beats_ = 4.0;
     max_buffer_size_ = 0;
     control_state_ = {};
     desired_.write(control_state_);
@@ -482,16 +887,41 @@ void MasterTransport::reset() noexcept {
     meter_anchor_signature_ = {};
     applied_seek_generation_ = 0;
     applied_scrub_generation_ = 0;
+    applied_tempo_sync_playing_generation_ = 0;
+    applied_tempo_sync_seek_generation_ = 0;
+    applied_tempo_sync_tempo_generation_ = 0;
     block_index_ = 0;
     loop_pass_index_ = 0;
     scrub_window_remaining_ = 0;
     previous_scrubbing_ = false;
+    has_applied_scrub_position_ = false;
+    applied_scrub_position_ = {};
     previous_playing_ = false;
     previous_meter_ = {};
     previous_loop_ = {};
     previous_tempo_bpm_ = 120.0;
     first_block_ = true;
     pending_discontinuity_ = false;
+    has_expected_tempo_sync_beat_ = false;
+    expected_tempo_sync_beat_ = 0.0;
+    // Retire the previous lifecycle's reading instead of leaving it readable
+    // until the first block of the next one, which is exactly the moment a
+    // reader would draw a playhead belonging to a program that is gone.
+    //
+    // This publishes from whichever thread calls reset(), while the ordinary
+    // publisher is the audio thread. That is the same shape reset() already has
+    // for desired_ above, whose ordinary publisher is the control thread, and
+    // it costs the same: a SeqLock write allocates nothing and takes no lock.
+    // The single-writer requirement is met the way it already was — a caller
+    // that reset a transport concurrently with begin_block() would be racing
+    // the plain assignments above long before it raced this one.
+    //
+    // playhead_sequence_ is deliberately not among the fields cleared above: a
+    // reader tells readings apart by sequence, so restarting the counter would
+    // let a new reading impersonate one the reader already acted on.
+    TransportPlayhead retired;
+    retired.playback_epoch = playback_epoch_;
+    publish_playhead(retired);
 }
 
 } // namespace pulp::playback

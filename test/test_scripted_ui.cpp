@@ -7,11 +7,13 @@
 #define PULP_TEST_HAS_GPU_SURFACE 0
 #endif
 #include <pulp/view/scripted_ui.hpp>
+#include <pulp/view/value_channel_set.hpp>
 #include <pulp/format/reload/scripted_ui_swap_unit.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <vector>
 #include <filesystem>
 #include <fstream>
@@ -23,7 +25,20 @@ using namespace pulp::state;
 using Catch::Matchers::WithinAbs;
 namespace fs = std::filesystem;
 
+static_assert(offsetof(ScriptedUiOptions, granted_capabilities)
+              > offsetof(ScriptedUiOptions, value_channel_access));
+
 namespace {
+
+TEST_CASE("ScriptedUiOptions preserves its legacy positional aggregate prefix",
+          "[view][scripted-ui][compat]") {
+    ScriptedUiOptions options{
+        fs::path{"ui.js"}, fs::path{"theme.json"}, {},
+        true, false, nullptr, {}};
+    REQUIRE(options.enable_hot_reload);
+    REQUIRE_FALSE(options.enable_theme_reload);
+    REQUIRE(options.granted_capabilities.has(ReloadCapability::Exec));
+}
 
 fs::path make_temp_dir(const char* stem) {
     auto unique = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
@@ -37,6 +52,14 @@ void write_text(const fs::path& path, const std::string& content) {
     file << content;
     file.close();
 }
+
+struct CurrentPathGuard {
+    fs::path original = fs::current_path();
+    ~CurrentPathGuard() {
+        std::error_code error;
+        fs::current_path(original, error);
+    }
+};
 
 bool wait_for_reload(const std::function<bool()>& poller) {
     for (int i = 0; i < 30; ++i) {
@@ -313,6 +336,56 @@ TEST_CASE("ScriptedUiSession resolves reviewed kit asset roots", "[view][scripte
     fs::remove_all(temp_dir);
 }
 
+TEST_CASE("ScriptedUiSession resolves imported assets beside load and reload scripts",
+          "[view][scripted-ui][assets][reload]") {
+    const auto temp_dir = make_temp_dir("pulp-scripted-relative-assets");
+    const auto other_cwd = temp_dir / "other-cwd";
+    const auto first_dir = temp_dir / "first";
+    const auto second_dir = temp_dir / "second";
+    fs::create_directories(other_cwd);
+    fs::create_directories(first_dir / "assets");
+    fs::create_directories(second_dir / "assets");
+    write_text(first_dir / "assets/hero.png", "first");
+    write_text(second_dir / "assets/hero.png", "second");
+    const auto script =
+        "createImage('img', '');\n"
+        "setImageSource('img', 'assets/hero.png');\n";
+    write_text(first_dir / "ui.js", script);
+    write_text(second_dir / "ui.js", script);
+
+    CurrentPathGuard current_path;
+    fs::current_path(other_cwd);
+    View root;
+    root.set_bounds({0, 0, 100, 100});
+    StateStore store;
+    ScriptedUiSession session(
+        root, store,
+        {.script_path = first_dir / "ui.js",
+         .enable_theme_reload = false});
+    std::string error;
+    REQUIRE(session.load(&error));
+    auto* first =
+        dynamic_cast<ImageView*>(session.bridge()->widget("img"));
+    REQUIRE(first);
+    CHECK(
+        first->image_path() ==
+        "file://" +
+            (first_dir / "assets/hero.png")
+                .lexically_normal()
+                .generic_string());
+
+    REQUIRE(session.reload_from(second_dir / "ui.js", &error));
+    auto* second =
+        dynamic_cast<ImageView*>(session.bridge()->widget("img"));
+    REQUIRE(second);
+    CHECK(
+        second->image_path() ==
+        "file://" +
+            (second_dir / "assets/hero.png")
+                .lexically_normal()
+                .generic_string());
+}
+
 TEST_CASE("ScriptedUiSession blocks reviewed kit asset root escape hatches", "[view][scripted-ui][assets]") {
     const auto temp_dir = make_temp_dir("pulp-scripted-kit-asset-escape");
     const auto script_path = temp_dir / "ui" / "main.js";
@@ -436,6 +509,7 @@ TEST_CASE("ScriptedUiSession keeps repaint callback across reload", "[view][scri
     root.set_theme(Theme::dark());
 
     StateStore store;
+    int repaint_count = 0;
     ScriptedUiSession session(root, store, {
         .script_path = script_path,
         .enable_hot_reload = true,
@@ -446,7 +520,6 @@ TEST_CASE("ScriptedUiSession keeps repaint callback across reload", "[view][scri
     REQUIRE(session.load(&error));
     REQUIRE(error.empty());
 
-    int repaint_count = 0;
     session.set_repaint_callback([&] { ++repaint_count; });
 
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
@@ -730,6 +803,81 @@ TEST_CASE("ScriptedUiSession reload latency baseline", "[view][scripted-ui][.ben
          << "ms p95=" << p95 << "ms worst=" << totals.back() << "ms (60fps frame=16.7ms)");
     CHECK(p50 >= 0.0);
     fs::remove_all(temp_dir);
+}
+
+TEST_CASE("ScriptedUiSession retains an inspector console sink across reload",
+          "[view][scripted-ui][console]") {
+    const auto dir = make_temp_dir("pulp-scripted-console");
+    const auto script = dir / "ui.js";
+    write_text(script, "console.log('first'); createLabel('v', 'one', '');");
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    StateStore store;
+    ScriptedUiSession session(root, store, {.script_path = script});
+    std::vector<std::string> messages;
+    std::vector<std::string> observed;
+    session.set_log_callback(
+        [&](std::string_view, std::string_view message) {
+            messages.emplace_back(message);
+        });
+    const auto subscription = session.add_log_callback(
+        [&](std::string_view, std::string_view message) {
+            observed.emplace_back(message);
+        });
+    REQUIRE(subscription != 0);
+
+    std::string error;
+    REQUIRE(session.load(&error));
+    REQUIRE(messages == std::vector<std::string>{"first"});
+    REQUIRE(observed == std::vector<std::string>{"first"});
+
+    write_text(script, "console.warn('second'); createLabel('v', 'two', '');");
+    REQUIRE(session.reload(&error));
+    REQUIRE(messages == std::vector<std::string>{"first", "second"});
+    REQUIRE(observed == std::vector<std::string>{"first", "second"});
+
+    session.remove_log_callback(subscription);
+    write_text(script, "console.error('third'); createLabel('v', 'three', '');");
+    REQUIRE(session.reload(&error));
+    REQUIRE(messages == std::vector<std::string>{"first", "second", "third"});
+    REQUIRE(observed == std::vector<std::string>{"first", "second"});
+    fs::remove_all(dir);
+}
+
+TEST_CASE("ScriptedUiSession log observers may remove themselves during dispatch",
+          "[view][scripted-ui][console][reentrant]") {
+    const auto dir = make_temp_dir("pulp-scripted-console-reentrant");
+    const auto script = dir / "ui.js";
+    write_text(script, "console.log('first'); createLabel('v', 'one', '');");
+
+    View root;
+    StateStore store;
+    ScriptedUiSession session(root, store, {.script_path = script});
+    std::vector<std::string> self_messages;
+    std::vector<std::string> following_messages;
+    std::uint64_t self_subscription = 0;
+    self_subscription = session.add_log_callback(
+        [&](std::string_view, std::string_view message) {
+            self_messages.emplace_back(message);
+            session.remove_log_callback(self_subscription);
+        });
+    session.add_log_callback(
+        [&](std::string_view, std::string_view message) {
+            following_messages.emplace_back(message);
+        });
+
+    std::string error;
+    REQUIRE(session.load(&error));
+    REQUIRE(self_messages == std::vector<std::string>{"first"});
+    REQUIRE(following_messages == std::vector<std::string>{"first"});
+
+    write_text(script, "console.warn('second'); createLabel('v', 'two', '');");
+    REQUIRE(session.reload(&error));
+    REQUIRE(self_messages == std::vector<std::string>{"first"});
+    REQUIRE(following_messages ==
+            std::vector<std::string>{"first", "second"});
+    fs::remove_all(dir);
 }
 
 // ── UX SwapUnit adapter (live-swap item 1.8b/2.5b) ────────────────────────────

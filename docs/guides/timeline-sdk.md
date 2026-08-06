@@ -4,26 +4,24 @@ The Creative Timeline Engine is usable as three layered C++ libraries from an
 installed Pulp SDK. It does not require Pulp's UI, GPU renderer, plugin-format
 adapters, SignalGraph, standalone shell, or plugin host.
 
+For task-focused integration recipes, start with the
+[Timeline cookbook](timeline-cookbook.md). The
+[C++ API reference](../api-reference.md) documents individual public methods,
+the [module reference](../reference/modules.md#timebase) describes subsystem
+boundaries, the [example gallery](../examples/index.md#validation) points to
+runnable Timeline examples, and the
+[interchange matrix](../reference/interchange-matrix.md) states format
+capabilities and losses.
+
 ## Configure an external project
 
-```cmake
-cmake_minimum_required(VERSION 3.24)
-project(MyTimelineApp LANGUAGES CXX)
-
-find_package(Pulp REQUIRED COMPONENTS timebase timeline playback)
-
-add_executable(my_timeline_app main.cpp)
-target_link_libraries(my_timeline_app PRIVATE
-    Pulp::timebase
-    Pulp::timeline
-    Pulp::playback
-)
-```
-
-The lowercase aliases `pulp::timebase`, `pulp::timeline`, and
-`pulp::playback` are also available. Components validate that the installed SDK
-contains each requested target; the package still defines its complete set of
-installed targets.
+Use the cookbook's
+[library-selection recipe](timeline-cookbook.md#choose-libraries-for-an-external-consumer)
+for the minimal `find_package()` and `target_link_libraries()` setup. The
+lowercase aliases `pulp::timebase`, `pulp::timeline`, `pulp::project-package`,
+and `pulp::playback` are also available. Components validate that the installed
+SDK contains each requested target; the package still defines its complete set
+of installed targets.
 
 ## Dependency boundary
 
@@ -55,6 +53,29 @@ host targets enter the closure.
 
 Plugin hosting is deliberately outside the engine. A desktop integration
 adapts its own instrument/effect ports; the caller owns audio-device I/O.
+
+## Optional durable project publication
+
+Canonical Timeline JSON remains a document-model concern. When an application
+needs to publish that JSON together with package-relative assets, request the
+separate project-package component. It no-replace publishes hash-verified,
+fenced content-addressed blobs, then validates their references before
+atomically replacing `project.json` inside the stable package root. Unpublished
+staging remains unreachable:
+
+```cmake
+find_package(Pulp REQUIRED COMPONENTS project-package)
+target_link_libraries(my_timeline_app PRIVATE Pulp::project-package)
+```
+
+This component does not add an archive format or interchange policy. Those stay
+in the DAWproject, SMF, and interchange components below. Its lower-level
+generic file and directory publisher is also no-replace; that guarantee does
+not apply to the stable root's replaceable `project.json` generation.
+Configuring Pulp from source with `-DPULP_ENABLE_PROJECT_PACKAGE=OFF` omits this
+component and the Timeline authoring tools that depend on it. An SDK installed
+from that build cannot satisfy `find_package(Pulp REQUIRED COMPONENTS
+project-package)`.
 
 ## Optional DAWproject importer
 
@@ -91,8 +112,13 @@ concept by name:
 const auto plan = interchange::plan_export(project, interchange::Format::DawProject);
 interchange::ExportOptions options;
 options.accepted_losses = plan.required_consent();   // review these, do not paste blindly
-auto artifacts = interchange::run_export(plan, options, dawproject::writer(project));
+auto artifacts = interchange::run_export(plan, options, dawproject::writer());
 ```
+
+The former `dawproject::writer(project, options)` overload remains temporarily
+available for source compatibility but is deprecated. Its `project` argument
+is deliberately ignored: the writer serializes the snapshot owned by the
+`ExportPlan`, so callers should migrate to `dawproject::writer(options)`.
 
 There is deliberately no force flag: a pipeline pins the exact losses it
 reviewed, so a loss kind introduced later stops that pipeline instead of riding
@@ -103,6 +129,18 @@ every concept that was dropped. The manifest travels inside the package rather
 than scrolling past in a console, because an export whose losses are invisible
 to whoever opens the file next is the failure this contract exists to prevent.
 Packing those entries plus media into a `.dawproject` zip is the caller's step.
+
+`pulp-loss-manifest.json` schema version 1 is shared by every interchange
+adapter. Its root contains numeric `schema_version`, string `format`, boolean
+`lossless`, and a `losses` array. Each loss contains string `concept`, `level`,
+`class`, `count`, and `detail`, plus an `owners` array of decimal strings;
+`degraded_to` is present only for a degradation. Counts and owner IDs are
+decimal strings so 64-bit values survive JSON consumers without precision loss.
+`owners` is a bounded diagnostic sample controlled by `CensusLimits`, while
+`count` is the complete occurrence count. The filename is reserved to
+`run_export()` and adapters cannot replace it. Changing this schema requires a
+new `schema_version`; version 1 replaces the older unversioned DAWproject
+manifest shape.
 
 Each exported track carries a neutral `<Channel>` — unity volume, centre pan.
 A receiving DAW registers the track from that element, and a file without one
@@ -136,6 +174,12 @@ responsibilities. See
 representative supported document; malformed or out-of-subset input returns a
 typed `DawProjectImportError` rather than a partial project.
 
+That raw-member contract belongs to the low-level installed SDK. The higher-level
+`pulp seq` and Timeline MCP interchange operations own bounded package I/O:
+they import a standard `.dawproject` ZIP, require a safe root `project.xml`,
+resolve only safe package-relative media, and export a standard `.dawproject`
+ZIP containing the XML, manifest, and referenced media.
+
 ## Optional Standard MIDI File interop
 
 Standard MIDI File (SMF) import and export live in their own target for the same
@@ -149,6 +193,27 @@ target_link_libraries(my_timeline_app PRIVATE Pulp::smf-interop)
 
 `Pulp::smf-interop` exposes `pulp::timeline::import_smf` and
 `pulp::timeline::export_smf` from `<pulp/timeline/smf.hpp>`.
+
+For the same plan/consent contract as DAWproject export, request the separate
+adapter and include `<pulp/smf/interchange.hpp>`:
+
+```cmake
+find_package(Pulp REQUIRED COMPONENTS smf-interchange)
+target_link_libraries(my_timeline_app PRIVATE Pulp::smf-interchange)
+```
+
+```cpp
+const auto plan = interchange::plan_export(project, interchange::Format::Smf);
+interchange::ExportOptions options;
+options.accepted_losses = plan.required_consent();   // review these, do not paste blindly
+auto artifacts = interchange::run_export(plan, options, smf::writer());
+```
+
+The format-bound writer can only be invoked by `run_export`, and the plan owns
+the project snapshot it measured. On success, `project.mid` and the centrally
+generated `pulp-loss-manifest.json` are returned. The adapter may omit only the
+concepts named by consent, strips consented note modifiers, and represents a
+consented continuous tempo ramp as Set Tempo steps at authored tempo points.
 
 Conversion runs entirely in the musical domain. An SMF carries its own timebase
 — a header division in ticks per quarter note plus Set Tempo and Time Signature
@@ -174,11 +239,13 @@ so a tempo change mid-file survives the round trip as a tempo point.
 - `SmfImportLimits` bounds file bytes, tracks, events, notes, simultaneously
   sounding notes, tempo and meter points, meta payload bytes, track-name bytes,
   and the absolute tick ceiling before the corresponding state grows.
-- Export writes a format-1 file whose track 0 is a conductor track carrying the
+- Raw `export_smf` writes a format-1 file whose track 0 is a conductor track carrying the
   tempo and meter maps. Note velocity is scaled to the 7-bit MIDI domain; a
   velocity that would scale to zero is rejected rather than rewritten, because
   a zero-velocity Note On reads as a Note Off. A tempo ramp, a sample-anchored
-  clip, and a clip holding non-note content are errors, not approximations.
+  clip, and registered, opaque, nested-sequence, or media content are errors,
+  not approximations. Empty clips are silently absent from the raw event codec;
+  use the census-backed adapter when that loss must require consent.
 - Round trips through a dividing division preserve note start, duration, pitch,
   channel, and 7-bit-representable velocity exactly. Tempo returns within the
   Set Tempo event's whole-microsecond resolution.
@@ -227,36 +294,50 @@ Timeline applications move immutable values through a small set of owners:
    one pinned playback-program block and that transport snapshot without
    allocating.
 
-The editing portion of that flow is intentionally explicit:
+The cookbook provides the compile-backed
+[transaction](timeline-cookbook.md#submit-an-optimistic-transaction-and-undo-it),
+[journal recovery](timeline-cookbook.md#open-or-restore-a-durable-session), and
+[compile/publish/render](timeline-cookbook.md#compile-publish-and-render)
+recipes for that ownership flow.
 
-```cpp
-auto registry = pulp::timeline::make_builtin_timeline_registry();
-auto decoded = pulp::timeline::deserialize_project(project_json, registry.value());
-auto session = pulp::timeline::DocumentSession::create(std::move(decoded).value());
-auto writer = session.value()->register_writer();
+### Audio clip time-conform intent
 
-pulp::timeline::Transaction edit;
-edit.id = writer.value().allocate_transaction_id();
-edit.expected_revision = session.value()->revision();
-edit.commands.push_back({
-    writer.value().allocate_command_id(),
-    pulp::timeline::SetRecordArm{{2}, {3}, false, true},
-});
+`Clip::time_conform()` records how authored media is intended to adapt when a
+musical clip's duration and its source-media duration differ:
 
-auto committed = session.value()->submit(writer.value(), std::move(edit));
-if (committed) {
-    auto snapshot = committed.value().snapshot;
-    auto revision = committed.value().revision;
-    auto dirty = committed.value().dirty;
-    // Send these immutable values to the background playback compiler.
-}
-```
+- `TimeConform::None` is the default and preserves the existing, unconformed
+  behavior.
+- `TimeConform::Resample` requests varispeed, coupling duration and pitch.
+- `TimeConform::Stretch` requests tempo-preserving time stretch.
 
-For native crash-consistent storage, call `FileJournal::open()` first. Use
-`DocumentSession::restore()` when it recovered an existing file, or
-`DocumentSession::create()` with its sink for a new file. Do not write the
-project beside the session independently; the journal sink is the durability
-boundary.
+Pass the intent as the final argument to `Clip::create()` or
+derive a new immutable snapshot with `with_time_conform()`. `Resample` and
+`Stretch` are valid only for musical clips whose content is a `MediaRef`;
+absolute clips and non-media content reject non-default intent with
+`InvalidTimeConform`. Clip schema v2 persists the required values as `none`,
+`resample`, and `stretch`; v1 clips load as `None`, and release downgrade to v1
+refuses an authored non-default value rather than discarding it.
+
+Playback consumes `Resample` as bounded realtime varispeed: source phase spans
+the clip's musical tick interval, so tempo ramps and precise host beat mapping
+change duration and pitch together. `None` retains native-rate playback.
+`Stretch` compiles off the audio thread. The compiler takes the exact slice from
+the decoded asset pool, converts it to the compiled timeline sample rate,
+applies the authored tempo schedule at stretch-analysis boundaries, and
+publishes an immutable audio artifact with exactly the clip's compiled timeline
+frame count. On the document clock the renderer consumes that artifact 1:1.
+With a precise host-beat mapping, `TimelineGraphPlaybackBinding` and
+`SequenceProcessor` prepare a program-wide live Stretch runtime off the audio
+thread. It streams the immutable artifact through a bounded causal stretcher,
+reports one fixed latency for graph compensation, and delays the track's
+conventional audio and mixer automation by that same amount. Publication is
+object-, generation-, and tempo-map-exact. Identity changes and discontinuities
+are reported explicitly while a charged FIFO preserves the old segment through
+the delayed cut and a bounded finalization hands off to the reset stream.
+Missing or stale state, impossible ratios, backpressure, and underflow fail
+closed with distinct status rather than falling back to `None` or `Resample`.
+Host-mapped Stretch scrubbing is explicitly unsupported. Capacity, ratio, or
+exact-length failures in the document-clock artifact still fail compilation.
 
 ### Reusing and diverging sequences
 
@@ -278,22 +359,52 @@ reusing writer-scoped command IDs.
 audio thread. Stage 1 fails closed when a child contains device processing,
 automation, takes, freeze/record state, absolute clips, or when a reference has
 gain/fades. A source window that cuts through a child audio fade also fails
-closed because Stage 1 has no envelope-offset representation. Set
+closed. Complete nested media clips retain their authored time-conform intent;
+a source window that trims a `Resample` or `Stretch` clip fails with
+`NestedSequenceUnsupported` until playback can map that partial conforming
+source range without changing its authored phase.
+Set
 `ProgramCompileRequest::max_expanded_note_events` to bound note expansion and
 `ProgramCompileRequest::max_expanded_clips` to bound total clip materialization
 and reference traversal, including charges carried by reused track programs.
 `AudioRendererLimits::max_clips` remains the separate ceiling for compiled audio
-regions. When compiling incrementally, build and retain one snapshot-scoped
-`CompileInvalidationIndex` from the project, root sequence, and
-`CompileContextRegistry`, then pass each transaction dirty set through
-`resolve_dirty_tracks()`. The bundled index combines direct edits, transitive
-sequence dependencies, and nested context readers so every affected root track
-is rebuilt. Resolution compares an O(1) immutable Project structure token plus
-the root identity and registry generation; it fails closed to a full recompile
-when any of them is stale or mismatched. Rebuild the index after a relevant
-structural edit or registry declaration. Context lane contents, ordinary
-note/audio edits, freeze selection, and active-take selection preserve the
-structure token.
+regions. When compiling incrementally, keep one shared
+`CompileContextRegistry` and put it plus the committed transaction `DirtySet`
+in `ProgramCompileRequest::invalidation` by constructing it from that exact
+`CommitResult`. `PlaybackProgramCompiler::submit()`
+builds the snapshot-scoped `CompileInvalidationIndex` and resolves the exact
+`DirtyTrackSet` in the same production path that accepts the compile. The index
+combines direct edits, transitive sequence dependencies, built-in MIDI groove
+reads, and registered/nested context readers. The input must carry the exact
+request snapshot pointer, document revision, and exact predecessor snapshot.
+Sparse reuse occurs only when that predecessor is the currently published
+project; a restored or forked lineage rebuilds the cumulative target in full.
+It copies an immutable registry snapshot, so later control-thread registry
+changes affect the next request; a changed registry generation forces a full
+compile even at the same document revision.
+Because such a refresh can publish the same document revision twice, wait for
+`CompilerStatus::latest_published_epoch >= CompileTicket::submission_epoch`;
+document-revision equality alone is not a terminal signal. The epoch is a
+successful-publication watermark: reaching a ticket means its request published
+or was superseded by a later successful publication. Callers that require the
+exact ticket to be the latest successful publication require epoch equality and
+must also compare the published program identity/revision for their document.
+Epochs are scoped to one compiler instance; destroying its facade forfeits
+completion observation, and a replacement compiler starts a new epoch domain.
+Once `busy` is false, an error with the watermark still below the ticket means
+that ticket did not terminate successfully.
+Callers that need to inspect a prospective delta may still build an index and
+call `resolve_dirty_tracks()` directly, but must not use a separately resolved
+set as a substitute for the request's generation-pinned invalidation input.
+
+Built-in MIDI clips render their owning sequence's `GrooveTemplate`: one timing
+displacement from the authored onset moves note-on and note-off together, and
+the authored-onset accent scales velocity with deterministic half-up rounding
+and saturation. Ratchets inherit that single displacement and accent. A root
+leaf reads root groove; a nested leaf reads child groove exactly once. A
+`SequenceRef` that trims a grooved MIDI leaf currently fails with
+`TrimmedGrooveUnsupported`, because chasing displaced material across the
+retained source-window boundary has no defined contract yet.
 
 `pulp seq apply`, `pulp seq explain`, and `pulp render` expose the same
 load/edit/compile/render path for headless workflows. Their source-tree
@@ -342,6 +453,14 @@ transform with a different input. The durable journal therefore contains only
 canonical expected/replacement note arrays, and undo/redo use ordinary inverse
 commands with the identity directory's tombstone rules.
 
+An inverse additionally restates the clip's modifiers, because a modifier keys
+on a note identity and vanishes with the note its edit removed — nothing in the
+edited clip could bring it back. The `expected_modifiers` and
+`replacement_modifiers` fields are optional: authoring code omits them and the
+reducer carries the surviving modifiers across on its own. Expression lanes need
+no such field. They key on a channel-voice address that names no note, so an
+edit to the note set never filters them.
+
 ## Scrubbing the playhead
 
 Dragging the playhead is audible through `MasterTransport` itself, not through a
@@ -385,51 +504,11 @@ The rules that matter when wiring a UI to it:
 
 ## One typed edit through CLI and MCP
 
-Start by asking the installed CLI for the generated schema, then validate the
-source before editing:
-
-```bash
-pulp seq schema > timeline-schema.json
-pulp seq validate song.pulpseq.json
-```
-
-Commands are versioned envelopes. For example, this `commands.json` arms track
-`6` in sequence `5` only if it is currently unarmed:
-
-```json
-[
-  {
-    "data": {
-      "expected": false,
-      "replacement": true,
-      "sequence_id": "5",
-      "track_id": "6"
-    },
-    "type_name": "pulp.timeline.command.set_record_arm",
-    "version": 1
-  }
-]
-```
-
-Apply the complete batch transactionally, then inspect and render the result:
-
-```bash
-pulp seq apply song.pulpseq.json commands.json --out armed.pulpseq.json
-pulp seq validate armed.pulpseq.json
-pulp seq explain armed.pulpseq.json --sample-rate 48000
-pulp render armed.pulpseq.json --out armed.wav --sample-rate 48000
-```
-
-The equivalent agent flow calls `pulp_timeline_project_open`, passes the same
-envelope array to `pulp_timeline_command_apply`, then calls
-`pulp_timeline_validate`, `pulp_timeline_explain`, and optionally
-`pulp_timeline_render`. MCP accepts the project as a path or inline canonical
-JSON; its `commands` argument is the JSON array itself, not a filename. The
-generated schema is the source of truth for document and command shapes.
-
-These headless surfaces edit existing canonical projects. Realtime device I/O,
-capture-buffer ownership, plugin instantiation, and durable `FileJournal`
-sessions are embedding APIs, not hidden CLI or MCP operations.
+CLI and MCP consume the same generated schema and versioned command envelopes.
+They edit canonical snapshots rather than owning realtime device I/O,
+capture buffers, plugin instances, or a durable `FileJournal` session. Use the
+cookbook's [CLI/MCP recipe](timeline-cookbook.md#apply-the-same-edit-through-cli-or-mcp)
+for the exact commands and operation names.
 
 ## Takes, comps, freeze, and capture
 
@@ -457,26 +536,14 @@ chain with a nontransparent mixer, set `post_device_audio_source` and
 transactionally replaces the direct device-to-bus edge and restores it when the
 route is removed. Adoption fails closed when that post-device route is absent.
 
-The realtime recorder is `<pulp/playback/capture_engine.hpp>`:
-
-1. Build a `CaptureEngineConfig` with explicit track, block, take-frame,
-   take-slot, MIDI-event, and total preallocation limits, then call `prepare()`
-   away from the callback.
-2. Enqueue `Start`, `Stop`, `Cancel`, and `ReleaseTake` commands from the
-   control side. The callback calls `process()` with the same
-   `TransportSnapshot` used for playback.
-3. Drain `CaptureEvent`s away from the callback. A completed
-   `CaptureTakeHandle` remains immutable until `ReleaseTake`; copy its audio or
-   MIDI before releasing it. Queue drops and capacity failures are observable
-   in `CaptureEngineStats`.
-4. Use `<pulp/playback/recording_commit.hpp>` to
-   `seal_recording_take()` (or `seal_retrospective_take()`) into WAV bytes, a
-   content-hashed asset, a take, and ordered `CreateAsset`/take commands. Use
-   `<pulp/playback/midi_capture_materializer.hpp>` to
-   `materialize_midi_capture()` against the exact capture-rate tempo map.
-5. Publish those ordinary commands through `DocumentSession`, then publish the
-   media bytes through application-owned storage. Capture never mutates the
-   project or journal directly.
+The realtime recorder is `<pulp/playback/capture_engine.hpp>`. It owns bounded,
+preallocated callback-time capture slots; completed handles remain immutable
+until explicit release. `recording_commit.hpp` seals audio into ordinary asset
+and take commands, while `midi_capture_materializer.hpp` maps captured MIDI
+through the exact capture-rate tempo map. Capture never mutates the project or
+journal directly. Follow the cookbook's
+[capture-to-take recipe](timeline-cookbook.md#capture-audio-into-a-take) for the
+required ordering and failure checks.
 
 The application owns device I/O, media-file publication, and plugin/device
 instantiation. The timeline owns editing intent and durable identity; playback
@@ -485,11 +552,13 @@ owns immutable compiled artifacts; capture owns bounded callback-time buffers.
 ## Durable journals
 
 Include `<pulp/timeline/file_journal.hpp>` for native crash-consistent sessions.
-`FileJournal::open()` returns the sink, recovered checkpoint, nonzero revision,
-and whether it repaired a torn trailing frame. Restore that exact
-checkpoint/revision with `DocumentSession::restore()`, or create a new session
-with the sink. A transaction is not published until the sink reports its whole
-frame durable.
+`FileJournal::open()` returns the sink, exact checkpoint and revision, whether
+existing state was recovered, and whether it repaired a torn trailing frame.
+The revision is zero for a new journal and nonzero after recovered commits.
+Restore the recovered checkpoint/revision with `DocumentSession::restore()`, or
+create a new session with the fallback checkpoint and sink. The session retains
+shared ownership of the sink. A transaction is not published until the sink
+reports its whole frame durable.
 
 Checkpoint only a revision the application has durably acknowledged. A sink
 error is ambiguous—it may have reached storage—so the session rejects later
@@ -497,6 +566,10 @@ durable writes instead of guessing. Recovery discards only a torn final frame
 and fails on earlier corruption. Symlink aliases share one lock identity, while
 multiply linked journal files are rejected because atomic replacement cannot
 preserve their identity.
+
+See the cookbook's
+[open-or-restore recipe](timeline-cookbook.md#open-or-restore-a-durable-session)
+for the capability branch and checkpoint call-site rules.
 
 ## Sample-rate conversion
 

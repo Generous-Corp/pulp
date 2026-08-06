@@ -111,7 +111,7 @@
       "host": "Ableton Live 10.1.13",
       "symptom_area": "state-io",
       "source_type": "release-notes",
-      "evidence": "iPlug2 quirks audit 2026-05-25 (clean-room lessons); host-quirks-log.md 2026-05-25",
+      "evidence": "iPlug2 quirks audit 2026-05-25 (independent-derivation lessons); host-quirks-log.md 2026-05-25",
       "last_verified": "2026-05-25",
       "note": "Live 10.1.13 IInfoListener::getString writes past spec buffer length; allocate buffers at twice spec size.",
       "affected_versions": "=10.1.13"
@@ -263,7 +263,7 @@
       "host": "REAPER",
       "symptom_area": "keyboard",
       "source_type": "release-notes",
-      "evidence": "iPlug2 quirks audit 2026-05-25 (clean-room lessons, 5.x-7.x); host-quirks-log.md 2026-05-25",
+      "evidence": "iPlug2 quirks audit 2026-05-25 (independent-derivation lessons, 5.x-7.x); host-quirks-log.md 2026-05-25",
       "last_verified": "2026-05-25",
       "note": "Only VKEY_SPACE delivers a well-formed keyMsg; reject non-Space keys."
     },

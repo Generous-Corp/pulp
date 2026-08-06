@@ -153,6 +153,8 @@ TEST_CASE("SkiaSurface retains cacheable layers across frame canvases",
     gpu_config.height = 100;
     if (!gpu->initialize(gpu_config))
         SKIP("Dawn adapter initialization failed");
+    if (gpu->adapter_info().backend_type == "Null")
+        SKIP("Dawn Null backend cannot produce raster output");
 
     auto skia = SkiaSurface::create(*gpu, {.width = 100, .height = 100});
     if (!skia || !skia->is_available())
@@ -952,6 +954,52 @@ TEST_CASE("SkiaCanvas fill_path honors FillRule -- evenodd rings, nonzero discs"
 #endif
 }
 
+// The retained-`Path` overload reaches Skia through its own converter
+// (`to_sk_path`), so it needs its own raster proof: the point-array overload
+// passing says nothing about this one, and a fill rule that never reaches the
+// SkPath renders a ring as a solid disc with no error anywhere.
+TEST_CASE("SkiaCanvas fill_path(Path) honors FillRule on a two-contour ring",
+          "[render][skia][canvas]") {
+#ifdef PULP_HAS_SKIA
+    constexpr int W = 48, H = 48;
+    const auto pts = ring_points(24.0f, 24.0f, 20.0f, 10.0f);
+
+    // Two genuine contours: outer ring closed, then inner ring closed. Both are
+    // wound the same direction, so the winding rule is the only thing that can
+    // decide the center.
+    pulp::canvas::Path ring;
+    ring.move_to(pts[0].x, pts[0].y);
+    for (size_t i = 1; i < 64; ++i) ring.line_to(pts[i].x, pts[i].y);
+    ring.close();
+    ring.move_to(pts[64].x, pts[64].y);
+    for (size_t i = 65; i < pts.size(); ++i) ring.line_to(pts[i].x, pts[i].y);
+    ring.close();
+
+    auto draw = [&](pulp::canvas::FillRule rule) {
+        return [&, rule](pulp::canvas::Canvas& c) {
+            c.set_fill_color(pulp::canvas::Color{0.0f, 1.0f, 0.0f, 1.0f});  // green
+            c.fill_path(ring, rule);
+        };
+    };
+
+    const SkColor4f center_eo =
+        render_and_sample(W, H, draw(pulp::canvas::FillRule::evenodd), 24, 24);
+    INFO("evenodd center g=" << center_eo.fG);
+    REQUIRE(center_eo.fG < 0.25f);
+
+    const SkColor4f center_nz =
+        render_and_sample(W, H, draw(pulp::canvas::FillRule::nonzero), 24, 24);
+    INFO("nonzero center g=" << center_nz.fG);
+    REQUIRE(center_nz.fG > 0.5f);
+
+    // The band between the rings is painted under BOTH rules.
+    REQUIRE(render_and_sample(W, H, draw(pulp::canvas::FillRule::evenodd), 24, 9).fG > 0.5f);
+    REQUIRE(render_and_sample(W, H, draw(pulp::canvas::FillRule::nonzero), 24, 9).fG > 0.5f);
+#else
+    SKIP("Skia not compiled in (PULP_HAS_SKIA undefined) — no raster backend");
+#endif
+}
+
 TEST_CASE("SkiaCanvas stroke_path strokes a polyline without filling it",
           "[render][skia]") {
 #ifdef PULP_HAS_SKIA
@@ -1065,6 +1113,8 @@ TEST_CASE("SkpFrameCapture round-trips a GPU-texture-backed embedded image",
     gpu_config.width = 16;
     gpu_config.height = 16;
     if (!gpu->initialize(gpu_config)) return;  // no GPU adapter
+    if (gpu->adapter_info().backend_type == "Null")
+        SKIP("Dawn Null backend cannot produce raster output");
 
     auto skia = SkiaSurface::create(*gpu, {.width = 16, .height = 16});
     if (!skia || !skia->is_available()) return;

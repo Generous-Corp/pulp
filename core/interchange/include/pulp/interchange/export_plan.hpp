@@ -11,6 +11,7 @@
 #include <functional>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace pulp::interchange {
@@ -32,6 +33,8 @@ enum class ExportErrorCode : std::uint8_t {
     NoWriterRegistered,
     /// The writer ran and failed on its own terms.
     WriterFailed,
+    /// The supplied writer belongs to a different interchange format.
+    WriterFormatMismatch,
 };
 
 struct ExportError {
@@ -46,9 +49,10 @@ struct ExportOptions {
     /// here or the export refuses.
     ///
     /// There is deliberately no blanket force flag. A pipeline pins the exact
-    /// losses it reviewed, so a loss kind introduced later -- by a wider census,
-    /// a changed capability row, or a new format version -- stops that pipeline
-    /// instead of riding in on consent that was given for something else.
+    /// losses it reviewed, so a newly lossy concept introduced by a wider census
+    /// or capability table stops that pipeline instead of riding in on consent
+    /// given for something else. Consent identifies concepts, not every semantic
+    /// field of a row.
     std::vector<Concept> accepted_losses;
 };
 
@@ -58,16 +62,23 @@ struct ExportOptions {
 /// A plan is only obtainable from plan_export, and run_export only accepts a
 /// plan. That is what makes the loss accounting unskippable -- there is no
 /// one-shot entry point that writes an artifact without producing the plan
-/// first, because no other code can construct one.
+/// first within the consent-gated interchange adapter surface, because no other
+/// interchange code can construct one. Strict raw format codecs may remain as
+/// separate APIs for callers that want refusal rather than planned loss.
 class ExportPlan {
   public:
     Format format() const noexcept { return format_; }
+    const timeline::Project& project() const noexcept { return project_; }
     const ConceptCensus& census() const noexcept { return census_; }
 
-    /// Concepts the document uses that the format carries without loss.
+    /// Concept kinds present in the document that the format supports in
+    /// isolation. This is concept-level capability, not an instance survivor
+    /// projection: a supported note inside a dropped container is still listed.
     std::span<const Concept> representable() const noexcept { return representable_; }
 
     const LossManifest& losses() const noexcept { return losses_; }
+    /// True when no model-detectable concept needs a lossy format row.
+    /// This is not byte-for-byte or identity-preserving round-trip equivalence.
     bool is_lossless() const noexcept { return losses_.empty(); }
 
     /// The concepts a caller must accept for run_export to proceed.
@@ -75,9 +86,11 @@ class ExportPlan {
 
   private:
     friend ExportPlan plan_export(const timeline::Project&, Format, const CensusLimits&);
-    ExportPlan() = default;
+    ExportPlan(timeline::Project project, Format format)
+        : format_(format), project_(std::move(project)) {}
 
     Format format_{};
+    timeline::Project project_;
     ConceptCensus census_;
     std::vector<Concept> representable_;
     LossManifest losses_;
@@ -89,18 +102,51 @@ class ExportPlan {
 ExportPlan plan_export(const timeline::Project& project, Format format,
                        const CensusLimits& limits = {});
 
-/// Turns a plan into bytes. Writers are supplied per call rather than through a
-/// registry, so a caller cannot end up exporting through a writer it did not
-/// choose, and a test can drive the contract without global state.
-///
-/// Whether a writer exists at all for a format is separately declared by its
-/// capability data (format_has_writer); this seam is what a writer plugs into.
+/// Serialize the canonical loss manifest carried by every plan and export
+/// result. The exact same bytes are appended to successful export artifacts as
+/// `pulp-loss-manifest.json`.
+std::string loss_manifest_json(const ExportPlan& plan);
+
+/// The released v0.759 writer seam. Kept source-compatible so existing SDK
+/// consumers can still construct, store, and invoke their std::function.
 using ExportWriter =
     std::function<runtime::Result<ExportArtifacts, ExportError>(const ExportPlan&)>;
+
+/// A format-bound byte writer that can only be invoked by run_export.
+///
+/// Binding the format prevents a plan for one format from authorizing bytes
+/// produced by another. Keeping invocation private preserves the plan ->
+/// consent -> write sequence mechanically: callers can choose or pass a writer,
+/// but cannot execute its callable directly.
+class FormatBoundExportWriter {
+  public:
+    using Function =
+        std::function<runtime::Result<ExportArtifacts, ExportError>(const ExportPlan&)>;
+
+    FormatBoundExportWriter() = default;
+    FormatBoundExportWriter(Format format, Function function)
+        : format_(format), function_(std::move(function)) {}
+
+    explicit operator bool() const noexcept { return static_cast<bool>(function_); }
+    Format format() const noexcept { return format_; }
+
+  private:
+    friend runtime::Result<ExportArtifacts, ExportError>
+    run_export(const ExportPlan&, const ExportOptions&, const FormatBoundExportWriter&);
+
+    Format format_{};
+    Function function_;
+};
 
 /// Execute a plan. Refuses before touching the writer when the plan loses
 /// anything the caller did not accept.
 runtime::Result<ExportArtifacts, ExportError>
 run_export(const ExportPlan& plan, const ExportOptions& options, const ExportWriter& writer);
+
+/// Execute through a format-bound writer. New adapters should expose this
+/// overload so a plan for one format cannot authorize another format's bytes.
+runtime::Result<ExportArtifacts, ExportError>
+run_export(const ExportPlan& plan, const ExportOptions& options,
+           const FormatBoundExportWriter& writer);
 
 } // namespace pulp::interchange

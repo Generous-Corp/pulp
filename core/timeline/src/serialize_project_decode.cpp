@@ -1,13 +1,17 @@
 #include <pulp/timeline/serialize.hpp>
 
 #include "asset_schema_policy.hpp"
+#include "clip_schema_policy.hpp"
 #include "chord_scale_names.hpp"
+#include "document_enum_names.hpp"
 #include "project_schema_policy.hpp"
 #include "project_state_access.hpp"
 #include "sequence_schema_policy.hpp"
 #include "serialize_asset_loop_decode.hpp"
 #include "serialize_automation_decode.hpp"
+#include "serialize_modulation_decode.hpp"
 #include "serialize_decode_context.hpp"
+#include "serialize_decode_support.hpp"
 #include "track_schema_policy.hpp"
 
 #include <algorithm>
@@ -275,60 +279,100 @@ decode_content(const std::shared_ptr<const ParsedJson>& document, const JsonValu
         if (!decoded_seed)
             return fail<ClipContent>(PersistenceErrorCode::InvalidNumber,
                                      path + "/data/modifier_seed");
-        // A modifier names a note, so the array can never outgrow the notes it
-        // annotates; bounding it against the same budget keeps a hostile
-        // document from spending unbounded memory on annotations alone.
-        if (modifiers.value()->array.size() > events.size())
-            return fail<ClipContent>(PersistenceErrorCode::LimitExceeded, path + "/data/modifiers",
-                                     modifiers.value()->begin, modifiers.value()->array.size(),
-                                     events.size());
-        std::vector<NoteModifier> decoded_modifiers;
-        decoded_modifiers.reserve(modifiers.value()->array.size());
-        for (std::size_t index = 0; index < modifiers.value()->array.size(); ++index) {
-            const auto modifier_path = path + "/data/modifiers/" + std::to_string(index);
-            const auto& entry = modifiers.value()->array[index];
-            auto condition = required(entry, "condition", modifier_path);
-            auto condition_offset = required(entry, "condition_offset", modifier_path);
-            auto condition_period = required(entry, "condition_period", modifier_path);
-            auto note_id = required(entry, "note_id", modifier_path);
-            auto probability = required(entry, "probability", modifier_path);
-            auto ratchet_count = required(entry, "ratchet_count", modifier_path);
-            if (!condition || !condition_offset || !condition_period || !note_id || !probability ||
-                !ratchet_count)
-                return fail<ClipContent>(PersistenceErrorCode::MissingField, modifier_path);
-            if (condition.value()->kind != JsonValue::Kind::String)
+        auto modifier_result =
+            decode_note_modifiers(*modifiers.value(), events.size(), path + "/data/modifiers");
+        if (!modifier_result)
+            return runtime::Err(modifier_result.error());
+        auto decoded_modifiers = std::move(modifier_result).value();
+        auto lanes = required(*data.value(), "lanes", path + "/data");
+        if (!lanes)
+            return fail<ClipContent>(PersistenceErrorCode::MissingField, path + "/data");
+        if (lanes.value()->kind != JsonValue::Kind::Array)
+            return fail<ClipContent>(PersistenceErrorCode::UnexpectedType, path + "/data/lanes");
+        if (counts.midi_lanes > limits.max_midi_lanes ||
+            lanes.value()->array.size() > limits.max_midi_lanes - counts.midi_lanes)
+            return fail<ClipContent>(PersistenceErrorCode::LimitExceeded, path + "/data/lanes",
+                                     lanes.value()->begin,
+                                     counts.midi_lanes + lanes.value()->array.size(),
+                                     limits.max_midi_lanes);
+        counts.midi_lanes += lanes.value()->array.size();
+        std::vector<MidiExpressionLane> decoded_lanes;
+        decoded_lanes.reserve(lanes.value()->array.size());
+        for (std::size_t lane_index = 0; lane_index < lanes.value()->array.size(); ++lane_index) {
+            const auto lane_path = path + "/data/lanes/" + std::to_string(lane_index);
+            const auto& lane = lanes.value()->array[lane_index];
+            auto bank = required(lane, "bank", lane_path);
+            auto lane_channel = required(lane, "channel", lane_path);
+            auto group = required(lane, "group", lane_path);
+            auto lane_id = required(lane, "id", lane_path);
+            auto lane_index_field = required(lane, "index", lane_path);
+            auto points = required(lane, "points", lane_path);
+            auto status = required(lane, "status", lane_path);
+            if (!bank || !lane_channel || !group || !lane_id || !lane_index_field || !points ||
+                !status)
+                return fail<ClipContent>(PersistenceErrorCode::MissingField, lane_path);
+            if (points.value()->kind != JsonValue::Kind::Array)
                 return fail<ClipContent>(PersistenceErrorCode::UnexpectedType,
-                                         modifier_path + "/condition");
-            NoteConditionKind decoded_condition{};
-            if (!parse_note_condition(condition.value()->scalar, decoded_condition))
-                return fail<ClipContent>(PersistenceErrorCode::InvalidSchema,
-                                         modifier_path + "/condition");
-            auto decoded_note_id =
-                parse_canonical_u64_string(*note_id.value(), modifier_path + "/note_id");
-            auto decoded_offset =
-                parse_u32_number(*condition_offset.value(), modifier_path + "/condition_offset");
-            auto decoded_period =
-                parse_u32_number(*condition_period.value(), modifier_path + "/condition_period");
-            auto decoded_probability =
-                parse_u32_number(*probability.value(), modifier_path + "/probability");
-            auto decoded_ratchet =
-                parse_u32_number(*ratchet_count.value(), modifier_path + "/ratchet_count");
-            if (!decoded_note_id || !decoded_offset || !decoded_period || !decoded_probability ||
-                !decoded_ratchet ||
-                decoded_offset.value() > std::numeric_limits<std::uint16_t>::max() ||
-                decoded_period.value() > std::numeric_limits<std::uint16_t>::max() ||
-                decoded_probability.value() > std::numeric_limits<std::uint16_t>::max() ||
-                decoded_ratchet.value() > std::numeric_limits<std::uint16_t>::max())
-                return fail<ClipContent>(PersistenceErrorCode::InvalidNumber, modifier_path);
-            decoded_modifiers.push_back(
-                {ItemId{decoded_note_id.value()},
-                 static_cast<std::uint16_t>(decoded_probability.value()),
-                 static_cast<std::uint16_t>(decoded_period.value()),
-                 static_cast<std::uint16_t>(decoded_offset.value()),
-                 static_cast<std::uint16_t>(decoded_ratchet.value()), decoded_condition});
+                                         lane_path + "/points");
+            auto decoded_lane_id = parse_canonical_u64_string(*lane_id.value(), lane_path + "/id");
+            auto decoded_bank = parse_u32_number(*bank.value(), lane_path + "/bank");
+            auto decoded_lane_channel =
+                parse_u32_number(*lane_channel.value(), lane_path + "/channel");
+            auto decoded_group = parse_u32_number(*group.value(), lane_path + "/group");
+            auto decoded_index = parse_u32_number(*lane_index_field.value(), lane_path + "/index");
+            auto decoded_status = parse_u32_number(*status.value(), lane_path + "/status");
+            if (!decoded_lane_id || !decoded_bank || !decoded_lane_channel || !decoded_group ||
+                !decoded_index || !decoded_status ||
+                decoded_bank.value() > std::numeric_limits<std::uint8_t>::max() ||
+                decoded_lane_channel.value() > std::numeric_limits<std::uint8_t>::max() ||
+                decoded_group.value() > std::numeric_limits<std::uint8_t>::max() ||
+                decoded_index.value() > std::numeric_limits<std::uint8_t>::max() ||
+                decoded_status.value() > std::numeric_limits<std::uint8_t>::max())
+                return fail<ClipContent>(PersistenceErrorCode::InvalidNumber, lane_path);
+            if (counts.midi_lane_points > limits.max_midi_lane_points ||
+                points.value()->array.size() >
+                    limits.max_midi_lane_points - counts.midi_lane_points)
+                return fail<ClipContent>(
+                    PersistenceErrorCode::LimitExceeded, lane_path + "/points",
+                    points.value()->begin, counts.midi_lane_points + points.value()->array.size(),
+                    limits.max_midi_lane_points);
+            counts.midi_lane_points += points.value()->array.size();
+            std::vector<MidiLanePoint> decoded_points;
+            decoded_points.reserve(points.value()->array.size());
+            for (std::size_t point_index = 0; point_index < points.value()->array.size();
+                 ++point_index) {
+                const auto point_path = lane_path + "/points/" + std::to_string(point_index);
+                const auto& point = points.value()->array[point_index];
+                auto point_id = required(point, "id", point_path);
+                auto position = required(point, "position_ticks", point_path);
+                auto point_value = required(point, "value", point_path);
+                if (!point_id || !position || !point_value)
+                    return fail<ClipContent>(PersistenceErrorCode::MissingField, point_path);
+                auto decoded_point_id =
+                    parse_canonical_u64_string(*point_id.value(), point_path + "/id");
+                auto decoded_position =
+                    parse_canonical_i64_string(*position.value(), point_path + "/position_ticks");
+                auto decoded_value = parse_u32_number(*point_value.value(), point_path + "/value");
+                if (!decoded_point_id || !decoded_position || !decoded_value)
+                    return fail<ClipContent>(PersistenceErrorCode::InvalidNumber, point_path);
+                decoded_points.push_back({ItemId{decoded_point_id.value()},
+                                          {decoded_position.value()},
+                                          decoded_value.value()});
+            }
+            decoded_lanes.push_back(
+                MidiExpressionLane{ItemId{decoded_lane_id.value()},
+                                   MidiLaneAddress{static_cast<std::uint8_t>(decoded_group.value()),
+                                                   static_cast<std::uint8_t>(
+                                                       decoded_lane_channel.value()),
+                                                   static_cast<std::uint8_t>(
+                                                       decoded_status.value()),
+                                                   static_cast<std::uint8_t>(decoded_bank.value()),
+                                                   static_cast<std::uint8_t>(
+                                                       decoded_index.value())},
+                                   std::move(decoded_points)});
         }
-        auto created = NoteContent::create(std::move(events), std::move(decoded_modifiers),
-                                           decoded_seed.value());
+        auto created = MidiContent::create(std::move(events), std::move(decoded_modifiers),
+                                           decoded_seed.value(), std::move(decoded_lanes));
         if (!created)
             return model_fail<ClipContent>(created.error(), std::move(path));
         return runtime::Result<ClipContent, PersistenceError>(
@@ -371,12 +415,16 @@ decode_clip(const std::shared_ptr<const ParsedJson>& document, const JsonValue& 
     if (!clip_increment)
         return fail<Clip>(PersistenceErrorCode::LimitExceeded, path, value.begin,
                           clip_increment.actual, limits.max_clips);
-    auto data = data_for(value, "pulp.timeline.clip", path);
-    if (!data)
-        return fail<Clip>(data.error().code, data.error().path, data.error().byte_offset);
-    auto id = required(*data.value(), "id", path + "/data");
-    auto range = required(*data.value(), "time_range", path + "/data");
-    auto content_value = required(*data.value(), "content", path + "/data");
+    auto structural = data_for_versions(value, detail::clip_schema_policy.type_name,
+                                        detail::clip_schema_policy.oldest_readable_version,
+                                        detail::clip_schema_policy.current_version, path);
+    if (!structural)
+        return fail<Clip>(structural.error().code, structural.error().path,
+                          structural.error().byte_offset);
+    const auto* data = structural.value().data;
+    auto id = required(*data, "id", path + "/data");
+    auto range = required(*data, "time_range", path + "/data");
+    auto content_value = required(*data, "content", path + "/data");
     if (!id || !range || !content_value)
         return fail<Clip>(PersistenceErrorCode::MissingField, std::move(path));
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
@@ -391,9 +439,9 @@ decode_clip(const std::shared_ptr<const ParsedJson>& document, const JsonValue& 
     if (!content)
         return runtime::Result<Clip, PersistenceError>(runtime::Err(content.error()));
     ClipPlaybackProperties playback;
-    const auto* gain = data.value()->find("gain_linear_bits");
-    const auto* fade_in = data.value()->find("fade_in_duration");
-    const auto* fade_out = data.value()->find("fade_out_duration");
+    const auto* gain = data->find("gain_linear_bits");
+    const auto* fade_in = data->find("fade_in_duration");
+    const auto* fade_out = data->find("fade_out_duration");
     const bool has_any_playback = gain || fade_in || fade_out;
     if (has_any_playback && (!gain || !fade_in || !fade_out))
         return fail<Clip>(PersistenceErrorCode::MissingField, path + "/data");
@@ -407,7 +455,36 @@ decode_clip(const std::shared_ptr<const ParsedJson>& document, const JsonValue& 
             decoded_gain.value() > std::numeric_limits<std::uint32_t>::max())
             return fail<Clip>(PersistenceErrorCode::InvalidNumber, path + "/data");
         playback = {std::bit_cast<float>(static_cast<std::uint32_t>(decoded_gain.value())),
-                    decoded_fade_in.value(), decoded_fade_out.value()};
+                    decoded_fade_in.value(), decoded_fade_out.value(), ClipFadeShape::Linear};
+    }
+    const auto* fade_shape = data->find("fade_shape");
+    if (detail::clip_schema_policy.requires_fade_shape(structural.value().version)) {
+        if (!fade_shape)
+            return fail<Clip>(PersistenceErrorCode::MissingField, path + "/data/fade_shape");
+        if (fade_shape->kind != JsonValue::Kind::String)
+            return fail<Clip>(PersistenceErrorCode::UnexpectedType, path + "/data/fade_shape");
+        if (fade_shape->scalar == "equal_power")
+            playback.fade_shape = ClipFadeShape::EqualPower;
+        else if (fade_shape->scalar != "linear")
+            return fail<Clip>(PersistenceErrorCode::InvalidSchema, path + "/data/fade_shape");
+    } else if (fade_shape) {
+        return fail<Clip>(PersistenceErrorCode::InvalidSchema, path + "/data/fade_shape");
+    }
+    TimeConform time_conform = TimeConform::None;
+    const auto* conform = data->find("time_conform");
+    if (detail::clip_schema_policy.requires_time_conform(structural.value().version)) {
+        if (!conform)
+            return fail<Clip>(PersistenceErrorCode::MissingField, path + "/data/time_conform");
+        if (conform->kind != JsonValue::Kind::String)
+            return fail<Clip>(PersistenceErrorCode::UnexpectedType, path + "/data/time_conform");
+        if (conform->scalar == "resample")
+            time_conform = TimeConform::Resample;
+        else if (conform->scalar == "stretch")
+            time_conform = TimeConform::Stretch;
+        else if (conform->scalar != "none")
+            return fail<Clip>(PersistenceErrorCode::InvalidSchema, path + "/data/time_conform");
+    } else if (conform) {
+        return fail<Clip>(PersistenceErrorCode::InvalidSchema, path + "/data/time_conform");
     }
     runtime::Result<Clip, ModelError> created(runtime::Err(ModelError{}));
     if (kind.value() == "musical") {
@@ -422,7 +499,8 @@ decode_clip(const std::shared_ptr<const ParsedJson>& document, const JsonValue& 
         if (!decoded_start || !decoded_duration)
             return fail<Clip>(PersistenceErrorCode::InvalidNumber, path);
         created = Clip::create({decoded_id.value()}, {decoded_start.value()},
-                               {decoded_duration.value()}, std::move(content).value(), playback);
+                               {decoded_duration.value()}, std::move(content).value(), playback,
+                               time_conform);
     } else if (kind.value() == "absolute") {
         auto start = required(*range.value(), "start_sample", path + "/data/time_range");
         auto count = required(*range.value(), "sample_count", path + "/data/time_range");
@@ -438,7 +516,7 @@ decode_clip(const std::shared_ptr<const ParsedJson>& document, const JsonValue& 
             return fail<Clip>(PersistenceErrorCode::InvalidNumber, path);
         created = Clip::create_absolute({decoded_id.value()}, {decoded_start.value()},
                                         decoded_count.value(), decoded_rate.value(),
-                                        std::move(content).value(), playback);
+                                        std::move(content).value(), playback, time_conform);
     } else {
         return fail<Clip>(PersistenceErrorCode::InvalidSchema, path + "/data/time_range/kind");
     }
@@ -586,8 +664,12 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
     const auto* mixer = data.find("mixer");
     const auto* devices = data.find("device_chain");
     const auto* automation = data.find("automation_lanes");
+    const auto* modulators = data.find("modulators");
+    const auto* macros = data.find("macros");
+    const auto* routes = data.find("modulation_routes");
     const auto* take_lanes = data.find("take_lanes");
     const auto* record = data.find("record_armed");
+    const auto* tuning = data.find("tuning");
     const auto requires_devices =
         detail::track_schema_policy.requires_device_chain(envelope.value().version);
     const auto requires_automation =
@@ -600,6 +682,10 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
         detail::track_schema_policy.supports_freeze(envelope.value().version);
     const auto supports_mixer =
         detail::track_schema_policy.supports_mixer(envelope.value().version);
+    const auto supports_tuning =
+        detail::track_schema_policy.supports_tuning(envelope.value().version);
+    const auto supports_modulation =
+        detail::track_schema_policy.supports_modulation(envelope.value().version);
     if (!id || !name || !clips || clips.value()->kind != JsonValue::Kind::Array ||
         (!requires_devices && devices) ||
         (requires_devices && (!devices || devices->kind != JsonValue::Kind::Array)) ||
@@ -612,8 +698,17 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
         (requires_active_take_lane &&
          (!active_take_lane || active_take_lane->kind != JsonValue::Kind::String)) ||
         (!supports_freeze && freeze) || (freeze && freeze->kind != JsonValue::Kind::Object) ||
-        (!supports_mixer && mixer) || (mixer && mixer->kind != JsonValue::Kind::Object))
+        (!supports_mixer && mixer) || (mixer && mixer->kind != JsonValue::Kind::Object) ||
+        (!supports_tuning && tuning) ||
+        (!supports_modulation && (modulators || macros || routes)))
         return fail<Track>(PersistenceErrorCode::MissingField, std::move(path));
+    std::optional<TuningReference> decoded_tuning;
+    if (tuning) {
+        auto decoded = decode_tuning(*tuning, path + "/data/tuning");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        decoded_tuning = std::move(decoded).value();
+    }
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
     if (!decoded_id)
         return fail<Track>(decoded_id.error().code, decoded_id.error().path,
@@ -661,6 +756,32 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
             return runtime::Err(decoded.error());
         decoded_automation = std::move(decoded).value();
     }
+    // Each collection is optional: absence is the empty one, which is exactly
+    // how a track that authored no modulation is spelled.
+    std::vector<Modulator> decoded_modulators;
+    if (modulators) {
+        auto decoded = detail::decode_modulators(*modulators, limits, counts.modulators,
+                                                 path + "/data/modulators");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        decoded_modulators = std::move(decoded).value();
+    }
+    std::vector<MacroControl> decoded_macros;
+    if (macros) {
+        auto decoded = detail::decode_macro_controls(*macros, limits, counts.macro_controls,
+                                                     path + "/data/macros");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        decoded_macros = std::move(decoded).value();
+    }
+    std::vector<ModulationRoute> decoded_routes;
+    if (routes) {
+        auto decoded = detail::decode_modulation_routes(
+            *routes, limits, counts.modulation_routes, path + "/data/modulation_routes");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        decoded_routes = std::move(decoded).value();
+    }
     std::vector<TakeLane> decoded_take_lanes;
     if (take_lanes) {
         decoded_take_lanes.reserve(take_lanes->array.size());
@@ -693,14 +814,68 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
                                             .clips = std::move(decoded_clips),
                                             .device_chain = std::move(decoded_devices),
                                             .automation_lanes = std::move(decoded_automation),
+                                            .modulators = std::move(decoded_modulators),
+                                            .macros = std::move(decoded_macros),
+                                            .modulation_routes = std::move(decoded_routes),
                                             .take_lanes = std::move(decoded_take_lanes),
                                             .record_armed = decoded_record_armed,
                                             .active_take_lane_id = decoded_active_take_lane,
                                             .freeze = std::move(decoded_freeze).value(),
-                                            .mixer = decoded_mixer.value()});
+                                            .mixer = decoded_mixer.value(),
+                                            .tuning = decoded_tuning});
     if (!created)
         return model_fail<Track>(created.error(), std::move(path));
     return runtime::Result<Track, PersistenceError>(runtime::Ok(std::move(created).value()));
+}
+
+runtime::Result<TuningReference, PersistenceError> decode_tuning(const JsonValue& value,
+                                                                 std::string path) {
+    if (value.kind != JsonValue::Kind::Object)
+        return fail<TuningReference>(PersistenceErrorCode::InvalidSchema, path, value.begin);
+    auto system = string_field(value, "system", path);
+    auto pitch = required(value, "reference_pitch_millihertz", path);
+    const auto* scale = value.find("scale_content");
+    const auto* keyboard = value.find("keyboard_map_content");
+    if (!system)
+        return runtime::Err(system.error());
+    if (!pitch || !scale || !keyboard)
+        return fail<TuningReference>(PersistenceErrorCode::MissingField, std::move(path),
+                                     value.begin);
+    const auto named = detail::tuning_system_from_name(system.value());
+    if (!named)
+        return fail<TuningReference>(PersistenceErrorCode::InvalidSchema, path + "/system",
+                                     value.begin);
+    auto decoded_pitch = parse_u32_number(*pitch.value(), path + "/reference_pitch_millihertz");
+    if (!decoded_pitch)
+        return runtime::Err(decoded_pitch.error());
+    TuningReference tuning;
+    tuning.system = *named;
+    tuning.reference_pitch_millihertz = decoded_pitch.value();
+    // A hash is either the full 64-digit encoding or nothing. A malformed one
+    // is refused rather than decoded as absent, which would silently retune the
+    // document to whatever the fallback is.
+    const auto decode_hash =
+        [&](const JsonValue& encoded, const std::string& field_path,
+            std::optional<ContentHash>& out) -> std::optional<PersistenceErrorCode> {
+        if (encoded.kind == JsonValue::Kind::Null)
+            return std::nullopt;
+        if (encoded.kind != JsonValue::Kind::String)
+            return PersistenceErrorCode::InvalidSchema;
+        auto hash = ContentHash::from_hex(encoded.scalar);
+        if (!hash)
+            return PersistenceErrorCode::InvalidSchema;
+        out = *hash;
+        return std::nullopt;
+    };
+    if (const auto error = decode_hash(*scale, path + "/scale_content", tuning.scale_content))
+        return fail<TuningReference>(*error, path + "/scale_content", scale->begin);
+    if (const auto error =
+            decode_hash(*keyboard, path + "/keyboard_map_content", tuning.keyboard_map_content))
+        return fail<TuningReference>(*error, path + "/keyboard_map_content", keyboard->begin);
+    // The model owns the cross-member rules (which system may name a payload,
+    // and the admitted pitch range); restating them here would be a second copy
+    // that could disagree.
+    return runtime::Ok(tuning);
 }
 
 // A pre-v3 sequence carries no lane member at all, so a null value decodes as
@@ -709,7 +884,8 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
 // ordering the model requires — a document whose harmony is out of order is
 // rejected rather than silently sorted into a different tune.
 runtime::Result<ChordScaleLane, PersistenceError>
-decode_chord_scale_lane(const JsonValue* value, DecodeContext& context, std::string lane_path) {
+decode_chord_scale_lane(const JsonValue* value, MemberPolicy detail_policy,
+                        DecodeContext& context, std::string lane_path) {
     if (!value) {
         auto empty = ChordScaleLane::create({});
         if (!empty)
@@ -754,10 +930,50 @@ decode_chord_scale_lane(const JsonValue* value, DecodeContext& context, std::str
         if (!decoded_chord_root || !decoded_scale_root || decoded_chord_root.value() > 0xffu ||
             decoded_scale_root.value() > 0xffu)
             return fail<ChordScaleLane>(PersistenceErrorCode::InvalidNumber, item_path);
+        // The bass, the extension mask, and the voicing hint arrive together
+        // with the version that introduced them. A payload that carries some
+        // but not all of them, or carries any of them at an older version, is a
+        // contradiction rather than a partial event to be filled in.
+        const auto* bass = encoded.find("chord_bass");
+        const auto* extensions = encoded.find("chord_extensions");
+        const auto* voicing = encoded.find("voicing");
+        const auto present = (bass != nullptr) + (extensions != nullptr) + (voicing != nullptr);
+        if (detail_policy == MemberPolicy::Forbidden ? present != 0
+            : detail_policy == MemberPolicy::Required
+                ? present != 3
+                : present != 0 && present != 3)
+            return fail<ChordScaleLane>(PersistenceErrorCode::MissingField, item_path);
+        std::optional<std::uint8_t> decoded_bass;
+        std::uint16_t decoded_extensions = 0;
+        std::optional<ChordVoicing> decoded_voicing;
+        if (present == 3) {
+            if (bass->kind != JsonValue::Kind::Null) {
+                auto parsed = parse_u32_number(*bass, item_path + "/chord_bass");
+                // Narrowing must not be what makes an out-of-range bass look
+                // valid, for the same reason the roots above are width-checked.
+                if (!parsed || parsed.value() > 0xffu)
+                    return fail<ChordScaleLane>(PersistenceErrorCode::InvalidNumber, item_path);
+                decoded_bass = static_cast<std::uint8_t>(parsed.value());
+            }
+            auto parsed_extensions =
+                parse_u32_number(*extensions, item_path + "/chord_extensions");
+            if (!parsed_extensions || parsed_extensions.value() > 0xffffu)
+                return fail<ChordScaleLane>(PersistenceErrorCode::InvalidNumber, item_path);
+            decoded_extensions = static_cast<std::uint16_t>(parsed_extensions.value());
+            if (voicing->kind != JsonValue::Kind::Null) {
+                if (voicing->kind != JsonValue::Kind::String)
+                    return fail<ChordScaleLane>(PersistenceErrorCode::InvalidSchema, item_path);
+                const auto named = detail::chord_voicing_from_name(voicing->scalar);
+                if (!named)
+                    return fail<ChordScaleLane>(PersistenceErrorCode::InvalidSchema, item_path);
+                decoded_voicing = *named;
+            }
+        }
         events.push_back(
             ChordScaleEvent{timebase::TickPosition{decoded_position.value()}, *decoded_quality,
                             static_cast<std::uint8_t>(decoded_chord_root.value()), *decoded_mode,
-                            static_cast<std::uint8_t>(decoded_scale_root.value())});
+                            static_cast<std::uint8_t>(decoded_scale_root.value()), decoded_bass,
+                            decoded_extensions, decoded_voicing});
     }
     auto created = ChordScaleLane::create(std::move(events));
     if (!created)
@@ -875,6 +1091,7 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
     auto absolute = required(*data, "absolute_duration", path + "/data");
     const auto* chord_lane = data->find("chord_scale_lane");
     const auto* scenes = data->find("scenes");
+    const auto* track_order = data->find("track_order");
     const auto requires_chord_lane =
         sequence_schema_policy.requires_chord_scale_lane(structural.value().version);
     const auto* groove = data->find("groove");
@@ -886,7 +1103,10 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
         (requires_groove && (!groove || groove->kind != JsonValue::Kind::Object)) ||
         (sequence_schema_policy.requires_scenes(structural.value().version) !=
          (scenes != nullptr)) ||
-        (scenes && scenes->kind != JsonValue::Kind::Array))
+        (scenes && scenes->kind != JsonValue::Kind::Array) ||
+        (sequence_schema_policy.requires_track_order(structural.value().version) !=
+         (track_order != nullptr)) ||
+        (track_order && track_order->kind != JsonValue::Kind::Array))
         return fail<Sequence>(PersistenceErrorCode::MissingField, std::move(path));
     std::vector<SequenceMarker> decoded_markers;
     std::vector<SequenceRegion> decoded_regions;
@@ -907,15 +1127,21 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
         }
         decoded_regions.reserve(regions.value()->array.size());
         for (std::size_t index = 0; index < regions.value()->array.size(); ++index) {
-            auto decoded = decode_region(regions.value()->array[index], context,
-                                         path + "/data/regions/" + std::to_string(index));
+            auto decoded = decode_region(
+                regions.value()->array[index],
+                member_policy_for(
+                    sequence_schema_policy.requires_section_role(structural.value().version)),
+                context, path + "/data/regions/" + std::to_string(index));
             if (!decoded)
                 return runtime::Err(decoded.error());
             decoded_regions.push_back(std::move(decoded).value());
         }
     }
-    auto decoded_lane =
-        decode_chord_scale_lane(chord_lane, context, path + "/data/chord_scale_lane");
+    auto decoded_lane = decode_chord_scale_lane(
+        chord_lane,
+        member_policy_for(
+            sequence_schema_policy.requires_chord_detail(structural.value().version)),
+        context, path + "/data/chord_scale_lane");
     if (!decoded_lane)
         return runtime::Err(decoded_lane.error());
     auto decoded_groove = decode_groove(groove, context, path + "/data/groove");
@@ -966,6 +1192,22 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
             decoded_scenes.push_back(std::move(decoded).value());
         }
     }
+    // Whether the order names every track exactly once is the model's rule, so
+    // the ids are decoded here and Sequence::create is left to judge them: a
+    // second copy of that rule here could disagree with the one the editing
+    // paths enforce.
+    std::vector<ItemId> decoded_track_order;
+    if (track_order) {
+        decoded_track_order.reserve(track_order->array.size());
+        for (std::size_t index = 0; index < track_order->array.size(); ++index) {
+            auto decoded = parse_canonical_u64_string(
+                track_order->array[index], path + "/data/track_order/" + std::to_string(index));
+            if (!decoded)
+                return fail<Sequence>(decoded.error().code, decoded.error().path,
+                                      decoded.error().byte_offset);
+            decoded_track_order.push_back(ItemId{decoded.value()});
+        }
+    }
     auto created = Sequence::create(SequenceInput{
         .id = {decoded_id.value()},
         .name = std::move(name).value(),
@@ -977,6 +1219,7 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
         .chord_scale_lane = std::move(decoded_lane).value(),
         .groove = std::move(decoded_groove).value(),
         .scenes = std::move(decoded_scenes),
+        .track_order = std::move(decoded_track_order),
     });
     if (!created)
         return model_fail<Sequence>(created.error(), std::move(path));
@@ -1135,6 +1378,18 @@ runtime::Result<Project, PersistenceError> deserialize_project(std::string_view 
         decoded_session_start =
             SessionStart{timebase::SamplePosition{decoded_start.value()}, decoded_rate.value()};
     }
+    // The tuning arrives only from a payload whose version admits it, on the
+    // same terms as the session origin above.
+    std::optional<TuningReference> decoded_tuning;
+    if (const auto* tuning = data.value()->find("tuning")) {
+        if (!detail::project_schema_policy.supports_tuning(envelope.value().version))
+            return fail<Project>(PersistenceErrorCode::InvalidSchema, "/data/tuning");
+        auto decoded = detail::decode_tuning(*tuning, "/data/tuning");
+        if (!decoded)
+            return fail<Project>(decoded.error().code, decoded.error().path,
+                                 decoded.error().byte_offset);
+        decoded_tuning = std::move(decoded).value();
+    }
     auto created = Project::create(ProjectInput{.id = {decoded_id.value()},
                                                 .name = std::move(name).value(),
                                                 .next_item_id = decoded_next.value(),
@@ -1143,7 +1398,8 @@ runtime::Result<Project, PersistenceError> deserialize_project(std::string_view 
                                                 .sequences = std::move(decoded_sequences),
                                                 .tempo_map = std::move(decoded_tempo_map),
                                                 .meter_map = std::move(decoded_meter_map),
-                                                .session_start = decoded_session_start});
+                                                .session_start = decoded_session_start,
+                                                .tuning = decoded_tuning});
     if (!created)
         return model_fail<Project>(created.error(), "/");
     if (identities) {

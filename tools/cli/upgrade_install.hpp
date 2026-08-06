@@ -7,8 +7,13 @@
 
 #pragma once
 
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -446,6 +451,47 @@ inline std::string mcp_binary_name() {
 #endif
 }
 
+inline std::string import_design_binary_name() {
+#ifdef _WIN32
+    return "pulp-import-design.exe";
+#else
+    return "pulp-import-design";
+#endif
+}
+
+inline std::string browser_capture_runtime_name() {
+    return "browser_capture";
+}
+
+inline std::string browser_capture_runtime_install_name() {
+    return "browser_capture-v1";
+}
+
+// Sized from the list, not by hand: a literal count and a literal list drift
+// apart silently, and the failure lands at capture time as a module that
+// cannot resolve rather than at install time as a short manifest.
+inline constexpr std::array<std::string_view, 14>
+    browser_capture_runtime_files{
+        "browser_process.mjs",
+        "capture.mjs",
+        "health.mjs",
+        "interaction_executor.mjs",
+        "interaction_plan.mjs",
+        "interaction_plan_protocol.json",
+        "lifecycle.mjs",
+        "network_dependencies.mjs",
+        // The capture imports this for the per-node platform-font answer; an
+        // upgraded install missing it fails module resolution at capture time,
+        // not at install time, so the break surfaces as a broken import rather
+        // than a broken upgrade.
+        "platform_fonts.mjs",
+        "renderers.mjs",
+        "security.mjs",
+        "semantics.mjs",
+        "settle.mjs",
+        "tokens.mjs",
+    };
+
 inline bool has_any_exec_bit(const fs::path& path) {
 #ifdef _WIN32
     (void)path;
@@ -462,6 +508,7 @@ inline bool has_any_exec_bit(const fs::path& path) {
 inline bool should_add_exec_permissions(const fs::path& source) {
     const auto name = source.filename().string();
     return name == primary_binary_name() || name == cpp_binary_name() ||
+           name == import_design_binary_name() ||
            has_any_exec_bit(source);
 }
 
@@ -482,21 +529,231 @@ inline bool same_path(const fs::path& a, const fs::path& b) {
     return a.lexically_normal() == b.lexically_normal();
 }
 
+inline bool path_entry_exists(const fs::path& path) {
+    std::error_code ec;
+    return fs::exists(fs::symlink_status(path, ec));
+}
+
+inline void remove_path_best_effort(const fs::path& path) {
+    std::error_code ec;
+    fs::remove_all(path, ec);
+}
+
+inline bool has_complete_capture_runtime(const fs::path& runtime) {
+    for (const auto filename : browser_capture_runtime_files) {
+        std::error_code ec;
+        if (!fs::is_regular_file(runtime / filename, ec) || ec)
+            return false;
+    }
+    return true;
+}
+
+enum class ImportDesignInstallPhase {
+    runtime_available,
+    helper_published,
+};
+
+namespace detail {
+
+inline fs::path create_unique_import_design_transaction(
+    const fs::path& install_dir) {
+    static std::atomic<std::uint64_t> sequence{0};
+    for (std::uint64_t attempt = 0; attempt < 64; ++attempt) {
+        const auto tick = static_cast<std::uint64_t>(
+            std::chrono::steady_clock::now().time_since_epoch().count());
+        const auto nonce = std::to_string(tick) + "-" +
+            std::to_string(sequence.fetch_add(1));
+        const auto candidate = install_dir /
+            (".pulp-import-design-install-" + nonce);
+        std::error_code ec;
+        if (fs::create_directory(candidate, ec)) return candidate;
+        if (ec && ec != std::errc::file_exists) {
+            throw fs::filesystem_error(
+                "could not create import-design transaction directory",
+                candidate, ec);
+        }
+    }
+    throw std::runtime_error(
+        "could not allocate a unique import-design transaction directory");
+}
+
+template <typename PhaseObserver>
+inline void install_import_design_protocol_runtime_impl(
+    const fs::path& install_dir,
+    const fs::path& import_source,
+    const fs::path& runtime_source,
+    PhaseObserver&& observe_phase) {
+    const auto import_name = import_design_binary_name();
+    const auto import_destination = install_dir / import_name;
+    const auto runtime_destination =
+        install_dir / browser_capture_runtime_install_name();
+    const auto transaction =
+        create_unique_import_design_transaction(install_dir);
+    const auto import_staged = transaction / import_name;
+    const auto runtime_staged =
+        transaction / browser_capture_runtime_install_name();
+    const auto runtime_previous = transaction / "previous-runtime";
+    bool preserve_transaction_for_recovery = false;
+
+    try {
+        fs::copy_file(import_source, import_staged,
+                      fs::copy_options::overwrite_existing);
+        add_exec_permissions(import_staged);
+        fs::copy(runtime_source, runtime_staged,
+                 fs::copy_options::recursive |
+                     fs::copy_options::overwrite_existing);
+        if (!has_complete_capture_runtime(runtime_staged)) {
+            throw std::runtime_error(
+                "staged browser capture runtime is incomplete");
+        }
+
+        bool moved_previous_runtime = false;
+        if (path_entry_exists(runtime_destination)) {
+            try {
+                fs::rename(runtime_destination, runtime_previous);
+                moved_previous_runtime = true;
+            } catch (...) {
+                // A concurrent updater may have moved the directory after
+                // our existence check. Other failures must remain visible.
+                if (path_entry_exists(runtime_destination)) {
+                    throw;
+                }
+            }
+        }
+        try {
+            fs::rename(runtime_staged, runtime_destination);
+        } catch (...) {
+            // A concurrent updater may already have published another
+            // complete implementation of the same protocol.
+            if (!has_complete_capture_runtime(runtime_destination)) {
+                if (moved_previous_runtime) {
+                    std::error_code rollback_ec;
+                    fs::rename(
+                        runtime_previous, runtime_destination, rollback_ec);
+                    preserve_transaction_for_recovery = bool(rollback_ec);
+                }
+                throw;
+            }
+        }
+
+        observe_phase(ImportDesignInstallPhase::runtime_available);
+
+#ifdef _WIN32
+        const auto import_backup = transaction / (import_name + ".previous");
+        const bool had_import = path_entry_exists(import_destination);
+        if (had_import) fs::rename(import_destination, import_backup);
+        try {
+            fs::rename(import_staged, import_destination);
+        } catch (...) {
+            if (had_import) {
+                std::error_code rollback_ec;
+                fs::rename(import_backup, import_destination, rollback_ec);
+                preserve_transaction_for_recovery =
+                    preserve_transaction_for_recovery || bool(rollback_ec);
+            }
+            throw;
+        }
+#else
+        fs::rename(import_staged, import_destination);
+#endif
+        observe_phase(ImportDesignInstallPhase::helper_published);
+    } catch (...) {
+        if (!preserve_transaction_for_recovery) {
+            remove_path_best_effort(transaction);
+        }
+        throw;
+    }
+
+    remove_path_best_effort(transaction);
+}
+
+}  // namespace detail
+
+inline void install_import_design_protocol_runtime(
+    const fs::path& install_dir,
+    const fs::path& import_source,
+    const fs::path& runtime_source) {
+    detail::install_import_design_protocol_runtime_impl(
+        install_dir, import_source, runtime_source,
+        [](ImportDesignInstallPhase) {});
+}
+
+inline bool is_import_design_managed_payload(const fs::path& filename) {
+    return filename == import_design_binary_name() ||
+           filename == browser_capture_runtime_name() ||
+           filename == browser_capture_runtime_install_name();
+}
+
 inline std::vector<fs::path> install_sibling_payloads(
     const fs::path& extracted_root,
     const fs::path& install_dir,
     const fs::path& primary_binary,
     const fs::path& downloaded_archive) {
     std::vector<fs::path> installed;
+    fs::path import_source;
+    fs::path runtime_source;
     for (const auto& entry : fs::directory_iterator(extracted_root)) {
-        if (!entry.is_regular_file()) continue;
+        const auto src = entry.path();
+        if (src.filename() == import_design_binary_name()) {
+            import_source = src;
+        } else if (src.filename() == browser_capture_runtime_name()) {
+            runtime_source = src;
+        }
+    }
 
+    if (import_source.empty() != runtime_source.empty()) {
+        throw std::runtime_error(
+            "release archive must contain both " +
+            import_design_binary_name() + " and " +
+            browser_capture_runtime_name());
+    }
+    if (!import_source.empty()) {
+        if (!fs::is_regular_file(import_source) ||
+            !fs::is_directory(runtime_source) ||
+            !has_complete_capture_runtime(runtime_source)) {
+            throw std::runtime_error(
+                "release archive contains an invalid import-design runtime pair");
+        }
+        install_import_design_protocol_runtime(
+            install_dir, import_source, runtime_source);
+        installed.push_back(
+            install_dir / browser_capture_runtime_install_name());
+        installed.push_back(install_dir / import_design_binary_name());
+    }
+
+    for (const auto& entry : fs::directory_iterator(extracted_root)) {
         const auto src = entry.path();
         if (same_path(src, primary_binary) || same_path(src, downloaded_archive)) {
             continue;
         }
+        if (is_import_design_managed_payload(src.filename())) {
+            continue;
+        }
 
         const auto dst = install_dir / src.filename();
+        if (entry.is_directory()) {
+            const auto staged = install_dir /
+                ("." + src.filename().string() + ".tmp");
+            const auto backup = install_dir /
+                ("." + src.filename().string() + ".bak");
+            std::error_code ec;
+            fs::remove_all(staged, ec);
+            fs::remove_all(backup, ec);
+            fs::copy(src, staged,
+                     fs::copy_options::recursive |
+                         fs::copy_options::overwrite_existing);
+            if (fs::exists(dst)) fs::rename(dst, backup);
+            try {
+                fs::rename(staged, dst);
+            } catch (...) {
+                if (fs::exists(backup)) fs::rename(backup, dst);
+                throw;
+            }
+            fs::remove_all(backup, ec);
+            installed.push_back(dst);
+            continue;
+        }
+        if (!entry.is_regular_file()) continue;
         fs::copy_file(src, dst, fs::copy_options::overwrite_existing);
         if (should_add_exec_permissions(src)) {
             add_exec_permissions(dst);

@@ -15,6 +15,13 @@ namespace pulp::view {
 
 class NativeViewHost;
 
+namespace detail {
+/// Observer list behind PluginViewHost::observe_gpu_surface(). Held by
+/// shared_ptr in the host and weak_ptr in each subscription, so neither
+/// destruction order is a use-after-free.
+class GpuSurfaceObserverRegistry;
+}  // namespace detail
+
 // Platform-specific handle types
 #ifdef __APPLE__
 using NativeViewHandle = void*; // NSView* (macOS) or UIView* (iOS)
@@ -33,9 +40,48 @@ public:
         uint32_t height = 300;
     };
 
+    /// How a host presents finished frames (WAH-13).
+    ///
+    /// This was an unexplained `cfg.vsync = false` buried in the Windows host
+    /// and an unexplained `true` elsewhere. Two different hosts had two
+    /// different answers with no shared statement of WHY, which is how a
+    /// measured fix in one place fails to reach the other.
+    enum class PresentPolicy {
+        /// Block until the display's next refresh (Fifo). Correct for a host
+        /// that OWNS its frame loop — a standalone window driven by a display
+        /// link, where pacing to the refresh is the point.
+        vsync,
+        /// Do not block on acquire (Mailbox, then Immediate, then Fifo).
+        /// Correct for an EMBEDDED editor: it renders synchronously from the
+        /// DAW's paint message, on the DAW's UI thread, and the DAW already
+        /// composites at its own cadence. Blocking there stalls the message
+        /// pump that delivers further input.
+        ///
+        /// Measured on the REAPER VM during a knob drag (Perfetto): the frame's
+        /// own work was ~2 ms (paint ~1 ms, submit ~1 ms, present ~0.1 ms)
+        /// while whole frames took 19-45 ms — the difference was all acquire.
+        /// Seven frames were produced across eight drag sweeps.
+        nonblocking,
+    };
+
     struct Options {
         Size size = {400, 300};
         bool use_gpu = false;  ///< Use GPU rendering (Dawn/Skia Graphite) instead of CoreGraphics
+
+        /// Presentation policy for this host. Embedded plug-in editors default
+        /// to `nonblocking` because that is what every plug-in host IS; a
+        /// standalone window host overrides to `vsync`.
+        PresentPolicy present_policy = PresentPolicy::nonblocking;
+
+        /// Enable GPU timing instrumentation (Dawn timestamp queries).
+        ///
+        /// OFF by default, and that default is load-bearing. Dawn gates
+        /// `writeTimestamp` behind the `allow_unsafe_apis` toggle, so
+        /// requesting timestamps silently relaxes the device's validation
+        /// posture for ORDINARY RENDERING. Enabling a diagnostic must be a
+        /// decision, not a side effect of the adapter happening to advertise a
+        /// feature.
+        bool enable_gpu_timing = false;
     };
 
     // Create a plugin view host for the given view tree.
@@ -164,13 +210,119 @@ public:
     // pointer at construction (or via a later attach call) and forwards it
     // to __describeNativeAdapterImpl / __createNativeAdapterImpl /
     // __gpuCanvasConfigureImpl. Without a real surface here, those native
-    // impls return mocks and JS-rendered 3D output is black. Always pass
-    // the GPU surface to WidgetBridge when constructing a scripted GPU view.
+    // impls return mocks and JS-rendered 3D output is black.
+    //
+    // PREFER observe_gpu_surface() over polling this. A one-shot read is only
+    // correct on hosts that build their surface in the constructor (Apple,
+    // Linux); the Windows host cannot create its Dawn surface until the HWND
+    // has its final parent and style, so a read taken at editor-open time is
+    // legitimately null and never becomes non-null on its own.
     //
     // Lifetime: the GpuSurface is owned by the PluginViewHost. Consumers
     // capture the raw pointer; the WidgetBridge must be destroyed before
     // the host.
     virtual render::GpuSurface* gpu_surface() const { return nullptr; }
+
+    // ── GPU-surface lifecycle ───────────────────────────────────────────
+    //
+    // Whether a host HAS a GPU surface is a three-state answer, and the two
+    // "no" states need opposite reactions from a consumer:
+    //
+    //   pending      — this host intends to create one but has not yet. The
+    //                  null from gpu_surface() means "not yet", so a consumer
+    //                  must wait rather than conclude anything. Windows sits
+    //                  here between create() and attach_to_parent().
+    //   ready        — the surface is live; gpu_surface() is non-null.
+    //   unavailable  — there will be no surface: a CPU host, or GPU init that
+    //                  failed. This is the ONLY state in which a "silently fell
+    //                  back to CPU" diagnostic is true.
+    //
+    // Collapsing pending into unavailable is what made the Windows editor log
+    // `gpu-init-failed falling_back=cpu` on every open while actually running
+    // on the GPU, and what left the scripted UI holding the null it sampled
+    // before attach.
+    enum class GpuSurfaceState : uint8_t { pending, ready, unavailable };
+
+    // Reported to observers on every transition, and readable directly.
+    struct GpuSurfaceStatus {
+        render::GpuSurface* surface = nullptr;  ///< non-null iff state==ready
+        GpuSurfaceState state = GpuSurfaceState::unavailable;
+    };
+
+    // Called on the UI thread whenever the host's surface status changes, and
+    // once immediately on subscription with the current status.
+    using GpuSurfaceObserver = std::function<void(const GpuSurfaceStatus&)>;
+
+    // RAII subscription. Destroying (or reset()ing) it guarantees the observer
+    // is never invoked again — including from the host's own destructor, which
+    // publishes `unavailable` to whoever is still subscribed. Safe in either
+    // destruction order: the subscription holds a weak reference to the host's
+    // observer registry, so outliving the host is inert rather than a
+    // use-after-free.
+    class GpuSurfaceSubscription {
+    public:
+        GpuSurfaceSubscription() = default;
+        GpuSurfaceSubscription(const GpuSurfaceSubscription&) = delete;
+        GpuSurfaceSubscription& operator=(const GpuSurfaceSubscription&) = delete;
+        GpuSurfaceSubscription(GpuSurfaceSubscription&& other) noexcept
+            : registry_(std::move(other.registry_)), id_(other.id_) {
+            other.registry_.reset();
+            other.id_ = 0;
+        }
+        GpuSurfaceSubscription& operator=(GpuSurfaceSubscription&& other) noexcept {
+            if (this != &other) {
+                reset();
+                registry_ = std::move(other.registry_);
+                id_ = other.id_;
+                other.registry_.reset();
+                other.id_ = 0;
+            }
+            return *this;
+        }
+        ~GpuSurfaceSubscription() { reset(); }
+
+        void reset() noexcept;
+        bool active() const noexcept { return id_ != 0 && !registry_.expired(); }
+        explicit operator bool() const noexcept { return active(); }
+
+    private:
+        friend class PluginViewHost;
+        GpuSurfaceSubscription(std::weak_ptr<detail::GpuSurfaceObserverRegistry> r,
+                               std::uint64_t id)
+            : registry_(std::move(r)), id_(id) {}
+
+        std::weak_ptr<detail::GpuSurfaceObserverRegistry> registry_;
+        std::uint64_t id_ = 0;
+    };
+
+    // Current surface status. Non-virtual: every host publishes through
+    // publish_gpu_surface(), so this is one stored answer rather than a
+    // per-host convention.
+    GpuSurfaceStatus gpu_surface_status() const noexcept { return gpu_status_; }
+    GpuSurfaceState gpu_surface_state() const noexcept { return gpu_status_.state; }
+
+    // Subscribe to surface transitions. `observer` fires immediately with the
+    // current status (so a late subscriber is never stuck on a state it
+    // missed), then on each change. UI thread only — the host publishes from
+    // attach/detach/destroy, which are UI-thread operations.
+    [[nodiscard]] GpuSurfaceSubscription observe_gpu_surface(
+        GpuSurfaceObserver observer);
+
+protected:
+    // Hosts call this after creating, replacing, or tearing down their surface.
+    // Publishing `ready` with a null pointer, or a non-null pointer with any
+    // other state, is a programming error and is normalized to `unavailable`.
+    // Re-publishing an identical status is a no-op, so a host may call it
+    // defensively.
+    void publish_gpu_surface(render::GpuSurface* surface, GpuSurfaceState state);
+
+    // Shorthand for "this host will create a GPU surface later". Call from a
+    // GPU-capable host's constructor so pre-creation nulls read as `pending`.
+    void mark_gpu_surface_pending() {
+        publish_gpu_surface(nullptr, GpuSurfaceState::pending);
+    }
+
+public:
 
     // Native-frame resize notification. AU v2 has no host size callback — the
     // DAW resizes the returned NSView directly. Hosts invoke this callback
@@ -378,6 +530,15 @@ private:
     void unregister_native_view(NativeViewHost* view);
 
     std::vector<NativeViewHost*> attached_native_views_;
+
+    // ── GPU-surface observers ───────────────────────────────────────────────
+    //
+    // Created lazily on the first observe_gpu_surface(): a host nobody watches
+    // pays nothing. The base destructor publishes `unavailable` before the
+    // derived surface members are gone, so a consumer that outlives the host
+    // still sees the detach edge rather than silently keeping a dead pointer.
+    std::shared_ptr<detail::GpuSurfaceObserverRegistry> gpu_observers_;
+    GpuSurfaceStatus gpu_status_{};
 };
 
 // Install the built-in platform PluginViewHost factory (and matching headless

@@ -42,4 +42,29 @@ runtime::Result<SchemaWriteSuccess, PersistenceError>
 migrate_sequence_v5_to_v4(std::string_view source, BoundedJsonSink& output,
                           const void* context) noexcept;
 
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v5_to_v6(std::string_view source, BoundedJsonSink& output,
+                          const void* context) noexcept;
+
+// Refuses an authored track order that is anything other than the identity
+// order of the track list. A v5 reader adopts identity order, so a downgrade
+// that dropped a reordering would silently rewrite the arrangement the user
+// sees.
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v6_to_v5(std::string_view source, BoundedJsonSink& output,
+                          const void* context) noexcept;
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v6_to_v7(std::string_view source, BoundedJsonSink& output,
+                          const void* context) noexcept;
+
+// Drops every region's section role, and refuses any chord event that carries
+// a bass, an extension, or a voicing hint. The two halves differ on purpose: a
+// role is an annotation beside a name a v6 reader still sees, while dropping a
+// slash bass or an added ninth would leave a v6 reader stating a different
+// chord from the one the document authored.
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v7_to_v6(std::string_view source, BoundedJsonSink& output,
+                          const void* context) noexcept;
+
 } // namespace pulp::timeline::detail

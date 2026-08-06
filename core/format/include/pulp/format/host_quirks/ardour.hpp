@@ -15,7 +15,7 @@
 /// Pulp encounters and there is no fixed release on the horizon, so
 /// `apply_ardour` / `apply_mixbus32c` fire it unconditionally.
 ///
-/// **Reference-Lineage**: cleanroom reproducer=iplug2-quirks-audit-2026-05-25
+/// **Reference-Lineage**: independent reproducer=iplug2-quirks-audit-2026-05-25
 /// docs=https://ardour.org/manual/
 
 #include <pulp/format/host_quirks.hpp>

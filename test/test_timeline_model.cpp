@@ -1,16 +1,41 @@
 #include "../core/timeline/src/identity_directory.hpp"
 #include "../core/timeline/src/identity_transition.hpp"
+#include "../core/timeline/src/sequence_scene_internal.hpp"
+#include <pulp/timeline/asset_path.hpp>
 #include <pulp/timeline/model.hpp>
 #include <pulp/timeline/schema_registry.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <limits>
+#include <string>
 #include <type_traits>
 #include <vector>
 
 using namespace pulp::timeline;
 namespace runtime = pulp::runtime;
+
+TEST_CASE("Package-relative paths reject embedded NUL without C-string aliasing") {
+    const std::string first_asset_name{"x.wav\0a", 7};
+    const std::string second_asset_name{"x.wav\0b", 7};
+
+    REQUIRE(first_asset_name != second_asset_name);
+    REQUIRE_FALSE(package_relative_path_is_lexically_safe(first_asset_name));
+    REQUIRE_FALSE(package_relative_path_is_lexically_safe(second_asset_name));
+    REQUIRE(package_relative_path_is_lexically_safe("media/x.wav"));
+}
+
+TEST_CASE("Persisted locator compatibility is separate from portable publication paths") {
+    for (const auto path : {"media/take:1.wav", "media//take.wav", "media/./take.wav",
+                            "media/trailing. ", "media/CON.wav"}) {
+        INFO("historical package-relative locator: " << path);
+        REQUIRE(package_relative_path_is_lexically_safe(path));
+        REQUIRE_FALSE(package_relative_path_is_portable(path));
+    }
+    REQUIRE(package_relative_path_is_portable("media/take-1.wav"));
+    REQUIRE(package_relative_path_is_lexically_safe("media\\take.wav"));
+    REQUIRE_FALSE(package_relative_path_is_portable("media\\take.wav"));
+}
 
 TEST_CASE("Timeline private identity equality is semantic across insertion histories") {
     pulp::timeline::detail::IdentityDirectory ascending;
@@ -95,8 +120,8 @@ template <typename T> T take_value(pulp::runtime::Result<T, ModelError> result) 
     return std::move(result).value();
 }
 
-NoteContent notes(std::vector<NoteEvent> events) {
-    return take_value(NoteContent::create(std::move(events)));
+MidiContent notes(std::vector<NoteEvent> events) {
+    return take_value(MidiContent::create(std::move(events)));
 }
 
 Clip clip(ItemId id, std::int64_t start, std::int64_t duration,
@@ -178,6 +203,182 @@ TEST_CASE("Timeline track replacement preserves launcher references without a se
     REQUIRE(rejected.error().code == ModelErrorCode::MissingItem);
     REQUIRE(rejected.error().item == ItemId{4});
     REQUIRE(rejected.error().related_item == ItemId{21});
+}
+
+namespace {
+
+Sequence two_track_sequence() {
+    return take_value(Sequence::create({3}, "sequence", TickDuration{400},
+                                       {take_value(Track::create({6}, "first", {})),
+                                        take_value(Track::create({7}, "second", {}))}));
+}
+
+} // namespace
+
+TEST_CASE("Timeline authored track order defaults to the identity order of tracks") {
+    const auto sequence = two_track_sequence();
+    REQUIRE(sequence.track_order().size() == 2);
+    REQUIRE(sequence.track_order()[0] == ItemId{6});
+    REQUIRE(sequence.track_order()[1] == ItemId{7});
+
+    const auto recorded = take_value(Sequence::create(SequenceInput{
+        .id = {3},
+        .name = "sequence",
+        .musical_duration = TickDuration{400},
+        .tracks = {take_value(Track::create({6}, "first", {})),
+                   take_value(Track::create({7}, "second", {}))},
+        .track_order = {{7}, {6}},
+    }));
+    REQUIRE(recorded.track_order()[0] == ItemId{7});
+    REQUIRE(recorded.track_order()[1] == ItemId{6});
+    REQUIRE(recorded.tracks()[0].id() == ItemId{6});
+    REQUIRE(recorded.tracks()[1].id() == ItemId{7});
+
+    auto unknown = Sequence::create(SequenceInput{
+        .id = {3},
+        .name = "sequence",
+        .tracks = {take_value(Track::create({6}, "first", {})),
+                   take_value(Track::create({7}, "second", {}))},
+        .track_order = {{6}, {7}, {99}},
+    });
+    REQUIRE_FALSE(unknown);
+    REQUIRE(unknown.error().code == ModelErrorCode::MissingItem);
+    REQUIRE(unknown.error().item == ItemId{99});
+
+    auto unplaced = Sequence::create(SequenceInput{
+        .id = {3},
+        .name = "sequence",
+        .tracks = {take_value(Track::create({6}, "first", {})),
+                   take_value(Track::create({7}, "second", {}))},
+        .track_order = {{6}},
+    });
+    REQUIRE_FALSE(unplaced);
+    REQUIRE(unplaced.error().code == ModelErrorCode::MissingItem);
+    REQUIRE(unplaced.error().item == ItemId{7});
+
+    auto repeated = Sequence::create(SequenceInput{
+        .id = {3},
+        .name = "sequence",
+        .tracks = {take_value(Track::create({6}, "first", {})),
+                   take_value(Track::create({7}, "second", {}))},
+        .track_order = {{6}, {6}},
+    });
+    REQUIRE_FALSE(repeated);
+    REQUIRE(repeated.error().code == ModelErrorCode::DuplicateItemId);
+    REQUIRE(repeated.error().item == ItemId{6});
+}
+
+TEST_CASE("Timeline track insertion authors a position without moving identity order") {
+    const auto sequence = two_track_sequence();
+    const auto inserted =
+        take_value(sequence.insert_track(take_value(Track::create({8}, "middle", {})), ItemId{7}));
+
+    REQUIRE(inserted.track_order().size() == 3);
+    REQUIRE(inserted.track_order()[0] == ItemId{6});
+    REQUIRE(inserted.track_order()[1] == ItemId{8});
+    REQUIRE(inserted.track_order()[2] == ItemId{7});
+    REQUIRE(inserted.tracks().size() == 3);
+    REQUIRE(inserted.tracks()[0].id() == ItemId{6});
+    REQUIRE(inserted.tracks()[1].id() == ItemId{7});
+    REQUIRE(inserted.tracks()[2].id() == ItemId{8});
+    REQUIRE(inserted.find_track({8}) != nullptr);
+    REQUIRE(inserted.find_track({8})->name() == "middle");
+
+    const auto appended =
+        take_value(inserted.insert_track(take_value(Track::create({9}, "last", {}))));
+    REQUIRE(appended.track_order().size() == 4);
+    REQUIRE(appended.track_order()[3] == ItemId{9});
+    REQUIRE(appended.tracks()[3].id() == ItemId{9});
+
+    REQUIRE(sequence.track_order().size() == 2);
+    REQUIRE(sequence.tracks().size() == 2);
+}
+
+TEST_CASE("Timeline track insertion rejects a missing position or a repeated identity") {
+    const auto sequence = two_track_sequence();
+
+    auto missing_position =
+        sequence.insert_track(take_value(Track::create({8}, "middle", {})), ItemId{99});
+    REQUIRE_FALSE(missing_position);
+    REQUIRE(missing_position.error().code == ModelErrorCode::MissingItem);
+    REQUIRE(missing_position.error().item == ItemId{99});
+    REQUIRE(missing_position.error().related_item == ItemId{3});
+
+    auto repeated = sequence.insert_track(take_value(Track::create({6}, "clash", {})));
+    REQUIRE_FALSE(repeated);
+    REQUIRE(repeated.error().code == ModelErrorCode::DuplicateItemId);
+    REQUIRE(repeated.error().item == ItemId{6});
+
+    auto missing_track = sequence.erase_track({99});
+    REQUIRE_FALSE(missing_track);
+    REQUIRE(missing_track.error().code == ModelErrorCode::MissingItem);
+    REQUIRE(missing_track.error().item == ItemId{99});
+}
+
+TEST_CASE("Timeline track erase reports the removed track and its authored successor") {
+    const auto sequence = two_track_sequence();
+    const auto inserted =
+        take_value(sequence.insert_track(take_value(Track::create({8}, "middle", {})), ItemId{7}));
+
+    auto erased = pulp::timeline::detail::SequenceEditAccess::erase_track(inserted, {8});
+    REQUIRE(erased);
+    REQUIRE(erased->removed.id() == ItemId{8});
+    REQUIRE(erased->removed.name() == "middle");
+    REQUIRE(erased->following == ItemId{7});
+    REQUIRE(erased->sequence.track_order().size() == 2);
+    REQUIRE(erased->sequence.find_track({8}) == nullptr);
+
+    auto authored_last = pulp::timeline::detail::SequenceEditAccess::erase_track(inserted, {7});
+    REQUIRE(authored_last);
+    REQUIRE_FALSE(authored_last->following.has_value());
+
+    // Erasing the first stored track shifts every later identity index down by
+    // one; the remaining lookups must still land on their own tracks.
+    const auto without_first = take_value(inserted.erase_track({6}));
+    REQUIRE(without_first.tracks().size() == 2);
+    REQUIRE(without_first.find_track({6}) == nullptr);
+    REQUIRE(without_first.find_track({7})->name() == "second");
+    REQUIRE(without_first.find_track({8})->name() == "middle");
+    REQUIRE(without_first.track_order().size() == 2);
+    REQUIRE(without_first.track_order()[0] == ItemId{8});
+    REQUIRE(without_first.track_order()[1] == ItemId{7});
+}
+
+TEST_CASE("Timeline track erase refuses to strand a launcher slot on its clip") {
+    const auto sequence = take_value(Sequence::create(SequenceInput{
+        .id = {3},
+        .name = "sequence",
+        .musical_duration = TickDuration{400},
+        .tracks = {take_value(Track::create({6}, "first", {clip({4}, 0, 100)})),
+                   take_value(Track::create({7}, "second", {}))},
+        .scenes = {Scene{{20}, "launch", {Slot{{21}, {4}, launch_immediate(), {}}}}},
+    }));
+
+    auto rejected = sequence.erase_track({6});
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ModelErrorCode::MissingItem);
+    REQUIRE(rejected.error().item == ItemId{4});
+    REQUIRE(rejected.error().related_item == ItemId{21});
+
+    const auto unreferenced = take_value(sequence.erase_track({7}));
+    REQUIRE(unreferenced.find_track({7}) == nullptr);
+    REQUIRE(unreferenced.find_slot({21}) != nullptr);
+}
+
+TEST_CASE("Timeline authored track order survives an insert then erase round trip") {
+    const auto sequence = two_track_sequence();
+    const auto inserted =
+        take_value(sequence.insert_track(take_value(Track::create({8}, "middle", {})), ItemId{7}));
+
+    auto erased = pulp::timeline::detail::SequenceEditAccess::erase_track(inserted, {8});
+    REQUIRE(erased);
+    const auto restored =
+        take_value(erased->sequence.insert_track(erased->removed, erased->following));
+
+    REQUIRE(restored.track_order().size() == inserted.track_order().size());
+    for (std::size_t position = 0; position < inserted.track_order().size(); ++position)
+        REQUIRE(restored.track_order()[position] == inserted.track_order()[position]);
+    REQUIRE(restored.find_track({8})->name() == "middle");
 }
 
 TEST_CASE("Timeline launcher edits path-copy bounded persistent index paths at scale") {
@@ -351,7 +552,7 @@ TEST_CASE("Timeline snapshots retain sorted indexes and immutable note content")
     REQUIRE(track->find_clip({5}) == &track->clips()[1]);
     REQUIRE(track->find_clip({99}) == nullptr);
 
-    const auto& note_content = std::get<NoteContent>(track->find_clip({5})->content());
+    const auto& note_content = std::get<MidiContent>(track->find_clip({5})->content());
     REQUIRE(note_content.notes().size() == 2);
     REQUIRE(note_content.notes()[0].id == ItemId{7});
     REQUIRE(note_content.notes()[1].id == ItemId{8});
@@ -369,7 +570,7 @@ TEST_CASE("Timeline construction rejects invalid ranges identities and reference
     REQUIRE_FALSE(overlap.has_value());
     REQUIRE(overlap.error().code == ModelErrorCode::OverlappingClips);
 
-    auto bad_note = NoteContent::create({{{1}, {0}, {1}, 0xffff, 128, 0}});
+    auto bad_note = MidiContent::create({{{1}, {0}, {1}, 0xffff, 128, 0}});
     REQUIRE_FALSE(bad_note.has_value());
     REQUIRE(bad_note.error().code == ModelErrorCode::InvalidNote);
 
@@ -439,6 +640,29 @@ TEST_CASE("Timeline assets separate content identity from resolution hints") {
     REQUIRE(project.has_value());
     REQUIRE(project.value().assets()[0].content_hash == content_hash('b'));
     REQUIRE(project.value().assets()[0].representations[0].role == "proxy");
+
+    auto safe_package_locators = valid_asset;
+    safe_package_locators.locators = {
+        {AssetLocatorKind::PackageRelative, "media/audio/source.wav"}};
+    auto safe_package_project = Project::create(
+        ProjectInput{{1}, "project", 4, {3}, {safe_package_locators}, {sequence}});
+    REQUIRE(safe_package_project);
+
+    const auto require_invalid_package_hint = [&](std::string hint, bool representation) {
+        auto candidate = valid_asset;
+        auto& locator = representation ? candidate.representations[0].locators[0]
+                                       : candidate.locators.emplace_back();
+        locator = {AssetLocatorKind::PackageRelative, std::move(hint)};
+        auto rejected =
+            Project::create(ProjectInput{{1}, "project", 4, {3}, {candidate}, {sequence}});
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.error().code == ModelErrorCode::InvalidAssetLocator);
+    };
+    for (const auto hint : {"../outside.wav", "/rooted.wav", R"(\rooted.wav)",
+                            "C:/drive-qualified.wav"}) {
+        require_invalid_package_hint(hint, false);
+        require_invalid_package_hint(hint, true);
+    }
 
     asset.locators[0].hint.clear();
     auto bad_locator = Project::create(ProjectInput{{1}, "project", 4, {3}, {asset}, {sequence}});
@@ -767,7 +991,7 @@ TEST_CASE("Timeline remap allocates first then fixes internal references") {
 
     const auto* note_clip = track->find_clip(*remapped.ids.find({5}));
     REQUIRE(note_clip != nullptr);
-    const auto& remapped_notes = std::get<NoteContent>(note_clip->content()).notes();
+    const auto& remapped_notes = std::get<MidiContent>(note_clip->content()).notes();
     REQUIRE(remapped_notes[0].id == *remapped.ids.find({7}));
     REQUIRE(remapped_notes[1].id == *remapped.ids.find({8}));
 

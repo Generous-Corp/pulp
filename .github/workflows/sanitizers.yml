@@ -1,6 +1,6 @@
 name: Sanitizer Tests
 
-# ASan + UBSan on every PR, TSan advisory, RTSan on-demand.
+# ASan + UBSan on every relevant PR and nightly, TSan advisory, RTSan on-demand.
 # Non-Apple RTSan needs Clang 18 from apt.llvm.org.
 # Local equivalents: scripts/run_asan.sh, scripts/run_tsan.sh.
 #
@@ -32,18 +32,11 @@ on:
       - '.github/workflows/sanitizers.yml'
       - 'setup.sh'
       - 'external/**'
-  push:
-    branches: [main]
-    paths:
-      - 'core/**'
-      - 'examples/**'
-      - 'tools/cli/**'
-      - 'test/**'
-      - 'CMakeLists.txt'
-      - 'tools/cmake/**'
-      - '.github/workflows/sanitizers.yml'
-      - 'setup.sh'
-      - 'external/**'
+  # A nightly run is an independent backstop for advisory sanitizer coverage.
+  # Running the same four-job matrix after every merge competes with the next
+  # merge group's required checks while duplicating the relevant-PR run.
+  schedule:
+    - cron: '23 7 * * *'
   workflow_dispatch:
     inputs:
       asan_runner_selector_json:
@@ -74,6 +67,7 @@ concurrency:
 jobs:
   # ── Resolve per-sanitizer runs-on via shared helper ──────────────────────
   resolve-runners:
+    if: github.event_name != 'schedule' || github.repository == 'Generous-Corp/pulp'
     runs-on: ubuntu-latest
     outputs:
       asan_runs_on: ${{ steps.resolve.outputs.asan_runs_on }}
@@ -148,7 +142,7 @@ jobs:
             macos-26 \
             pulp-build,pulp-build-vm)
           # RTSan only runs on workflow_dispatch (see rtsan job's
-          # if:), so skip its selector resolution on pull_request/push
+          # if:), so skip its selector resolution on automatic
           # runs. Previously a malformed `PULP_SANITIZER_RTSAN_RUNS_ON_JSON`
           # (or a debugging mistake on the var) would fail resolve-runners
           # entirely and block ASan/TSan/UBSan for every PR — turning a
@@ -191,11 +185,7 @@ jobs:
         run: |
           cmake -S . -B build-asan \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
-            -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
-            -DCMAKE_OBJCXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
-            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address" \
-            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address" \
+            -DPULP_SANITIZER=address \
             -DPULP_BUILD_TESTS=ON \
             -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_GPU=OFF
@@ -221,11 +211,7 @@ jobs:
         run: |
           cmake -S . -B build-asan-artifact \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
-            -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
-            -DCMAKE_OBJCXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
-            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address" \
-            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address" \
+            -DPULP_SANITIZER=address \
             -DPULP_BUILD_TESTS=ON \
             -DPULP_BUILD_EXAMPLES=ON \
             -DPULP_ENABLE_GPU=OFF
@@ -282,11 +268,7 @@ jobs:
         run: |
           cmake -S . -B build-tsan \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_CXX_FLAGS="-fsanitize=thread" \
-            -DCMAKE_C_FLAGS="-fsanitize=thread" \
-            -DCMAKE_OBJCXX_FLAGS="-fsanitize=thread" \
-            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread" \
-            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=thread" \
+            -DPULP_SANITIZER=thread \
             -DPULP_BUILD_TESTS=ON \
             -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_GPU=OFF
@@ -344,9 +326,7 @@ jobs:
           # can exceed even their generous CTest hang guards.
           cmake -S . -B build-ubsan \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_CXX_FLAGS="-fsanitize=undefined -fno-sanitize-recover=all" \
-            -DCMAKE_C_FLAGS="-fsanitize=undefined -fno-sanitize-recover=all" \
-            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=undefined" \
+            -DPULP_SANITIZER=undefined \
             -DPULP_BUILD_TESTS=ON \
             -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_GPU=OFF
@@ -405,19 +385,7 @@ jobs:
             sudo apt-get install -y clang-18 lld-18
 
       - name: Install Linux dev headers
-        # setup.sh --ci hard-fails when ALSA/X11/Wayland dev headers are
-        # missing. apt-get update + install can flake on mirror 5xx;
-        # retry rather than rebuild the whole workflow.
-        uses: ./.github/actions/retry
-        with:
-          label: 'Install Linux dev headers (rtsan)'
-          run: |
-            sudo apt-get update
-            sudo apt-get install -y \
-              libasound2-dev libdbus-1-dev libdrm-dev libegl1-mesa-dev \
-              libgbm-dev libgl1-mesa-dev libx11-dev libxext-dev libxfixes-dev \
-              libxi-dev libxinerama-dev libxkbcommon-dev libxrandr-dev \
-              libxrender-dev libxss-dev libxtst-dev libwayland-dev wayland-protocols
+        uses: ./.github/actions/install-linux-build-deps
 
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only

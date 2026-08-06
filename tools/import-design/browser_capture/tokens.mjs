@@ -1,0 +1,130 @@
+// SPDX-License-Identifier: MIT
+
+export const TOKEN_EXPRESSION = `(() => {
+  const names = new Set();
+  const visitRules = rules => {
+    for (const rule of rules || []) {
+      try {
+        if (rule.style) {
+          for (const name of rule.style) {
+            if (name.startsWith('--')) names.add(name);
+          }
+        }
+        if (rule.cssRules) visitRules(rule.cssRules);
+      } catch {}
+    }
+  };
+  for (const sheet of document.styleSheets) {
+    try { visitRules(sheet.cssRules); } catch {}
+  }
+  for (const sheet of document.adoptedStyleSheets || []) {
+    try { visitRules(sheet.cssRules); } catch {}
+  }
+  for (const element of document.querySelectorAll('[style]')) {
+    for (const name of element.style) {
+      if (name.startsWith('--')) names.add(name);
+    }
+  }
+  // A design that scopes its palette -- which a themed one does -- declares its
+  // custom properties on the element carrying the theme, not on <html>. Reading
+  // only the document roots returns EMPTY for every token, and the consumer
+  // silently falls back to its own stock colours: a navy track and a white
+  // pointer land on a cream faceplate while every pixel gate stays green,
+  // because the marks are ours and the backdrop still matches.
+  //
+  // Theme-carrying elements come first: a scoped value must win over whatever
+  // the document root happens to inherit.
+  const roots = [
+    ...document.querySelectorAll('[data-theme]'),
+    document.documentElement,
+    document.body,
+  ].filter(Boolean);
+  // Rule-walking above reaches only same-origin sheets whose cssRules we are
+  // allowed to read; a linked sheet the capture serves can throw, and that
+  // throw is swallowed. When it does, NO name is collected and every token
+  // silently resolves empty. Computed style needs no sheet access, so it names
+  // what actually applies -- including anything the walk could not see.
+  // A real CSSStyleDeclaration is iterable, but a stubbed getComputedStyle is
+  // often only array-like (length + item) or a plain object. Iterating it
+  // directly throws "computed is not iterable" outside a browser, so probe the
+  // shape instead of assuming it.
+  const collectName = name => {
+    if (typeof name === 'string' && name.startsWith('--')) names.add(name);
+  };
+  for (const root of roots) {
+    const computed = getComputedStyle(root);
+    if (!computed) continue;
+    if (typeof computed[Symbol.iterator] === 'function') {
+      for (const name of computed) collectName(name);
+    } else if (typeof computed.length === 'number') {
+      for (let i = 0; i < computed.length; i++) {
+        collectName(typeof computed.item === 'function' ? computed.item(i) : computed[i]);
+      }
+    } else {
+      for (const name of Object.keys(computed)) collectName(name);
+    }
+  }
+  const records = [];
+  for (const name of [...names].sort()) {
+    let value = '';
+    for (const root of roots) {
+      value = getComputedStyle(root).getPropertyValue(name).trim();
+      if (value) break;
+    }
+    if (!value) continue;
+    records.push({
+      name,
+      value,
+      is_color: CSS.supports('color', value),
+      px: /^[-+]?(?:\\d+\\.?\\d*|\\.\\d+)px$/i.test(value)
+        ? Number.parseFloat(value)
+        : null
+    });
+  }
+  return records;
+})()`;
+
+function canonicalName(cssName) {
+  return `css/${cssName.replace(/^--/, "")}`;
+}
+
+export async function evaluateDesignTokens(cdp) {
+  const result = await cdp.call("Runtime.evaluate", {
+    expression: TOKEN_EXPRESSION,
+    returnByValue: true,
+  });
+  const records = result.result?.value ?? [];
+  const tokens = {
+    schema: "pulp-browser-tokens-v1",
+    version: 1,
+    colors: {},
+    dimensions: {},
+    strings: {},
+    source_identity: {},
+  };
+  for (const record of records) {
+    const key = canonicalName(record.name);
+    if (record.is_color) {
+      tokens.colors[key] = record.value;
+    } else if (Number.isFinite(record.px)) {
+      tokens.dimensions[key] = record.px;
+    } else {
+      // Percentages, em/rem/vw, calc(), and var() intentionally remain
+      // strings. Treating their numeric prefix as px creates plausible-looking
+      // but incorrect portable documents.
+      tokens.strings[key] = record.value;
+    }
+    tokens.source_identity[key] = {
+      source_id: record.name,
+      source_collection: "css-custom-properties",
+      source_mode: "computed-capture-light",
+      source_adapter: "browser-capture",
+    };
+  }
+  tokens.capture_context = {
+    color_scheme: "light",
+    reduced_motion: "no-preference",
+    scope: "active-computed-values",
+  };
+  return tokens;
+}

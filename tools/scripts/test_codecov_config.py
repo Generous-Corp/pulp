@@ -277,7 +277,8 @@ class CodecovYamlStructure(unittest.TestCase):
         self.assertIn("flags: pulp-react", coverage)
 
         self.assertIn(
-            "if: always() && github.event_name == 'pull_request'",
+            "if: success() && github.event_name == 'pull_request' && "
+            "github.event.pull_request.head.repo.fork != true",
             react,
             "pulp-react-build.yml must not upload Codecov data on push/main; "
             "main uploads belong to coverage.yml so cancelled native Coverage "

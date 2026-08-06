@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Text wrap and weight fixture</title>
+<style>
+  /* Both faces are served from beside this page, so Chrome shapes the same
+     font binaries the repo ships. A fixture that leaned on an installed system
+     font would record advances that only reproduce on the machine that
+     captured it. */
+  @font-face {
+    font-family: 'Pulp Fixture Sans';
+    src: url('Inter-Regular.ttf') format('truetype');
+    font-weight: 400;
+    font-style: normal;
+  }
+  /* One variable file covering 300-800, so 400 and 700 are real instances
+     rather than a synthesised smear of one master. */
+  @font-face {
+    font-family: 'Pulp Fixture Variable';
+    src: url('FunnelDisplay-VariableFont_wght.ttf') format('truetype');
+    font-weight: 300 800;
+    font-style: normal;
+  }
+  html, body { margin: 0; padding: 0; background: #ffffff; }
+  body { width: 640px; height: 360px; position: relative; }
+  .run {
+    position: absolute;
+    left: 24px;
+    color: #101010;
+    font-family: 'Pulp Fixture Sans';
+    font-size: 16px;
+    line-height: 20px;
+  }
+  /* Narrower than its text, so Chrome breaks it into several line boxes whose
+     bounds are all narrower than the block. */
+  #wrapped { top: 24px; width: 220px; white-space: normal; }
+  /* The same text in the same block, forbidden to break. One line box, whose
+     width exceeds the block's. */
+  #unwrapped { top: 140px; width: 220px; white-space: nowrap; }
+  .weight {
+    position: absolute;
+    left: 24px;
+    color: #101010;
+    font-family: 'Pulp Fixture Variable';
+    font-size: 20px;
+    line-height: 24px;
+    white-space: nowrap;
+  }
+  /* Identical text, identical size, one weight apart. The advance difference
+     between these two line boxes is the whole bold-measurement question. */
+  #regular { top: 220px; font-weight: 400; }
+  #bold { top: 260px; font-weight: 700; }
+  /* An inline span splits one visual paragraph into three sibling runs. The
+     run AFTER the span resumes mid-line before returning to the left edge, so
+     its layout box is the union of lines it shares with its siblings and no
+     single box describes where its text goes. Non-ASCII on purpose: the line
+     offsets Chrome reports are UTF-16 code units while the text is UTF-8. */
+  #inline { position: absolute; left: 320px; top: 24px; width: 240px;
+            color: #101010; font-family: 'Pulp Fixture Sans'; font-size: 16px;
+            line-height: 20px; white-space: normal; }
+  #inline b { font-weight: 400; color: #b03030; }
+</style>
+</head>
+<body>
+<div class="run" id="wrapped">Chrome breaks this paragraph across several line boxes because the block is narrower than the text it holds.</div>
+<div class="run" id="unwrapped">Chrome breaks this paragraph across several line boxes because the block is narrower than the text it holds.</div>
+<div class="weight" id="regular">Handgloves 123</div>
+<div class="weight" id="bold">Handgloves 123</div>
+<div id="inline">An inline <b>span — 3×4</b> resumes this sentence mid-line and then returns to the block’s left edge for the rest.</div>
+</body>
+</html>

@@ -39,8 +39,8 @@ bool equal_content(const ClipContent& lhs, const ClipContent& rhs) noexcept {
                 return left.asset_id == right.asset_id && left.source_start == right.source_start &&
                        left.frame_count == right.frame_count;
             },
-            [&](const NoteContent& left) {
-                const auto& other = std::get<NoteContent>(rhs);
+            [&](const MidiContent& left) {
+                const auto& other = std::get<MidiContent>(rhs);
                 const auto right = other.notes();
                 // The modifiers and the seed are part of how the clip plays, so
                 // a change to either is an edit the journal must keep.
@@ -88,7 +88,7 @@ std::size_t clip_retained_size(const Clip& clip) noexcept {
         ClipContentCases{
             [](const EmptyContent&) { return sizeof(Clip); },
             [](const MediaRef&) { return sizeof(Clip); },
-            [](const NoteContent& notes) {
+            [](const MidiContent& notes) {
                 return saturated_add(
                     saturated_add(sizeof(Clip),
                                   saturated_multiply(notes.notes().size(), sizeof(NoteEvent))),
@@ -182,6 +182,32 @@ bool equal_absolute_duration(const std::optional<AbsoluteTimelineDuration>& lhs,
                      lhs->sample_rate == rhs->sample_rate));
 }
 
+// Complete authored track state, so a command carrying a whole track compares
+// every field a caller could have edited. A track lifted out of a sequence and
+// a track read back inside one are the same value and use the same comparison.
+bool equal_track(const Track& lhs, const Track& rhs) noexcept {
+    if (lhs.id() != rhs.id() || lhs.name() != rhs.name() ||
+        lhs.device_chain().size() != rhs.device_chain().size() ||
+        lhs.clips().size() != rhs.clips().size() ||
+        lhs.automation_lanes().size() != rhs.automation_lanes().size() ||
+        lhs.take_lanes().size() != rhs.take_lanes().size() ||
+        lhs.record_armed() != rhs.record_armed() ||
+        lhs.active_take_lane_id() != rhs.active_take_lane_id() || lhs.freeze() != rhs.freeze() ||
+        lhs.mixer() != rhs.mixer() ||
+        !std::equal(lhs.device_chain().begin(), lhs.device_chain().end(),
+                    rhs.device_chain().begin()) ||
+        !std::equal(lhs.take_lanes().begin(), lhs.take_lanes().end(), rhs.take_lanes().begin(),
+                    [](const TakeLane& a, const TakeLane& b) { return equivalent(a, b); }))
+        return false;
+    for (std::size_t clip = 0; clip < lhs.clips().size(); ++clip)
+        if (!equivalent(lhs.clips()[clip], rhs.clips()[clip]))
+            return false;
+    for (std::size_t lane = 0; lane < lhs.automation_lanes().size(); ++lane)
+        if (!equivalent(lhs.automation_lanes()[lane], rhs.automation_lanes()[lane]))
+            return false;
+    return true;
+}
+
 bool equal_sequence(const Sequence& lhs, const Sequence& rhs) noexcept {
     if (lhs.id() != rhs.id() || lhs.name() != rhs.name() || lhs.duration() != rhs.duration() ||
         !equal_absolute_duration(lhs.absolute_duration(), rhs.absolute_duration()) ||
@@ -195,33 +221,27 @@ bool equal_sequence(const Sequence& lhs, const Sequence& rhs) noexcept {
         !std::equal(lhs.regions().begin(), lhs.regions().end(), rhs.regions().begin(),
                     equal_region))
         return false;
-    for (std::size_t index = 0; index < lhs.tracks().size(); ++index) {
-        const auto& left = lhs.tracks()[index];
-        const auto& right = rhs.tracks()[index];
-        if (left.id() != right.id() || left.name() != right.name() ||
-            left.device_chain().size() != right.device_chain().size() ||
-            left.clips().size() != right.clips().size() ||
-            left.automation_lanes().size() != right.automation_lanes().size() ||
-            left.take_lanes().size() != right.take_lanes().size() ||
-            left.record_armed() != right.record_armed() ||
-            left.active_take_lane_id() != right.active_take_lane_id() ||
-            left.freeze() != right.freeze() ||
-            !std::equal(left.device_chain().begin(), left.device_chain().end(),
-                        right.device_chain().begin()) ||
-            !std::equal(left.take_lanes().begin(), left.take_lanes().end(),
-                        right.take_lanes().begin(),
-                        [](const TakeLane& a, const TakeLane& b) {
-                            return equivalent(a, b);
-                        }))
+    for (std::size_t index = 0; index < lhs.tracks().size(); ++index)
+        if (!equal_track(lhs.tracks()[index], rhs.tracks()[index]))
             return false;
-        for (std::size_t clip = 0; clip < left.clips().size(); ++clip)
-            if (!equivalent(left.clips()[clip], right.clips()[clip]))
-                return false;
-        for (std::size_t lane = 0; lane < left.automation_lanes().size(); ++lane)
-            if (!equivalent(left.automation_lanes()[lane], right.automation_lanes()[lane]))
-                return false;
-    }
     return true;
+}
+
+// The heap a track owns, including its clip, automation, and take subtrees. A
+// command that carries a whole track is charged the same bytes the same track
+// costs inside a sequence, so the journal and undo limits cannot be defeated by
+// which command moved it.
+std::size_t track_retained_size(const Track& track) noexcept {
+    auto size = saturated_add(sizeof(Track), track.name().size());
+    size = saturated_add(
+        size, saturated_multiply(track.device_chain().size(), sizeof(DevicePlacement)));
+    for (const auto& clip : track.clips())
+        size = saturated_add(size, clip_retained_size(clip));
+    for (const auto& lane : track.automation_lanes())
+        size = saturated_add(size, automation_lane_retained_size(lane));
+    for (const auto& lane : track.take_lanes())
+        size = saturated_add(size, take_lane_retained_size(lane));
+    return size;
 }
 
 std::size_t sequence_retained_size(const Sequence& sequence) noexcept {
@@ -242,18 +262,8 @@ std::size_t sequence_retained_size(const Sequence& sequence) noexcept {
         size, saturated_multiply(sequence.groove().steps().size(), sizeof(GrooveStep)));
     size = saturated_add(
         size, saturated_multiply(sequence.outgoing_sequence_refs().size(), sizeof(ItemId)));
-    for (const auto& track : sequence.tracks()) {
-        size = saturated_add(size, sizeof(Track));
-        size = saturated_add(size, track.name().size());
-        size = saturated_add(
-            size, saturated_multiply(track.device_chain().size(), sizeof(DevicePlacement)));
-        for (const auto& clip : track.clips())
-            size = saturated_add(size, clip_retained_size(clip));
-        for (const auto& lane : track.automation_lanes())
-            size = saturated_add(size, automation_lane_retained_size(lane));
-        for (const auto& lane : track.take_lanes())
-            size = saturated_add(size, take_lane_retained_size(lane));
-    }
+    for (const auto& track : sequence.tracks())
+        size = saturated_add(size, track_retained_size(track));
     return size;
 }
 
@@ -325,7 +335,8 @@ bool equivalent(const ClipTimeRange& lhs, const ClipTimeRange& rhs) noexcept {
 bool equivalent(const Clip& lhs, const Clip& rhs) noexcept {
     return lhs.id() == rhs.id() && equivalent(lhs.time_range(), rhs.time_range()) &&
            equal_content(lhs.content(), rhs.content()) &&
-           lhs.playback_properties() == rhs.playback_properties();
+           lhs.playback_properties() == rhs.playback_properties() &&
+           lhs.time_conform() == rhs.time_conform();
 }
 
 bool equivalent(const AutomationLane& lhs, const AutomationLane& rhs) noexcept {
@@ -373,6 +384,29 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
                        left.expected_velocity == right.expected_velocity &&
                        left.replacement_velocity == right.replacement_velocity;
             } else if constexpr (std::is_same_v<T, ReplaceNoteContent>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.clip_id == right.clip_id &&
+                       left.expected.size() == right.expected.size() &&
+                       std::equal(left.expected.begin(), left.expected.end(),
+                                  right.expected.begin(), equal_note) &&
+                       left.replacement.size() == right.replacement.size() &&
+                       std::equal(left.replacement.begin(), left.replacement.end(),
+                                  right.replacement.begin(), equal_note) &&
+                       // The idempotency cache returns the first result for a
+                       // repeated transaction id, so two payloads that differ
+                       // only in their modifiers are not the same command:
+                       // calling them equivalent would answer a retry with the
+                       // modifiers of the transaction it did not send.
+                       left.expected_modifiers == right.expected_modifiers &&
+                       left.replacement_modifiers == right.replacement_modifiers;
+            } else if constexpr (std::is_same_v<T, SetNoteEvents>) {
+                // NoteEvent has no operator==, so the generic fallback below
+                // cannot compare these arrays and this arm is not optional.
+                // Both arrays matter to the idempotency cache: two edits of the
+                // same notes that agree on the result but disagree on the value
+                // they started from are different commands with different
+                // inverses, and answering one with the other's cached result
+                // would undo to a value the clip never held.
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.clip_id == right.clip_id &&
                        left.expected.size() == right.expected.size() &&
@@ -443,6 +477,24 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
             } else if constexpr (std::is_same_v<T, RemoveSlot>) {
                 return left.sequence_id == right.sequence_id && left.scene_id == right.scene_id &&
                        left.slot_id == right.slot_id;
+            } else if constexpr (std::is_same_v<T, InsertTrack>) {
+                return left.sequence_id == right.sequence_id &&
+                       equal_track(left.track, right.track) &&
+                       left.before_track_id == right.before_track_id;
+            } else if constexpr (std::is_same_v<T, RemoveTrack>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id;
+            } else if constexpr (std::is_same_v<T, SetTrackName>) {
+                // Byte equality: a rename that differs only in whitespace or
+                // case is an edit the user made and the journal must keep.
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.expected == right.expected && left.replacement == right.replacement;
+            } else if constexpr (std::is_same_v<T, MoveTrack>) {
+                // Both endpoints matter. Two moves of the same track that agree
+                // on the destination but disagree on where it came from are
+                // different edits with different inverses.
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.expected_before_track_id == right.expected_before_track_id &&
+                       left.replacement_before_track_id == right.replacement_before_track_id;
             } else if constexpr (std::is_same_v<T, InsertSequence>) {
                 return equal_sequence(left.sequence, right.sequence);
             } else if constexpr (std::is_same_v<T, CloneSequence>) {
@@ -500,6 +552,11 @@ std::size_t retained_size(const Command& command) noexcept {
                 return saturated_add(
                     saturated_add(sizeof(T), value.scene.name.size()),
                     detail::launcher_slot_list_owned_storage(value.scene.slots));
+            if constexpr (std::is_same_v<T, InsertTrack>)
+                return saturated_add(sizeof(T), track_retained_size(value.track));
+            if constexpr (std::is_same_v<T, SetTrackName>)
+                return saturated_add(sizeof(T),
+                                     saturated_add(value.expected.size(), value.replacement.size()));
             if constexpr (std::is_same_v<T, InsertSequence>)
                 return saturated_add(sizeof(T), sequence_retained_size(value.sequence));
             if constexpr (std::is_same_v<T, CloneSequence>)
@@ -514,6 +571,21 @@ std::size_t retained_size(const Command& command) noexcept {
                                      saturated_multiply(segment_count, sizeof(TakeCompSegment)));
             }
             if constexpr (std::is_same_v<T, ReplaceNoteContent>) {
+                const auto note_count =
+                    saturated_add(value.expected.size(), value.replacement.size());
+                const auto modifier_count = saturated_add(value.expected_modifiers.size(),
+                                                          value.replacement_modifiers.size());
+                return saturated_add(
+                    saturated_add(sizeof(T),
+                                  saturated_multiply(note_count, sizeof(NoteEvent))),
+                    saturated_multiply(modifier_count, sizeof(NoteModifier)));
+            }
+            // Both note arrays are heap storage the journal retains until the
+            // command falls out of undo. Without this arm the dispatch falls
+            // through to a flat `sizeof(T)`, which charges the same handful of
+            // bytes for a hundred-note edit as for a one-note edit and defeats
+            // the retained-byte ceiling it is the only input to.
+            if constexpr (std::is_same_v<T, SetNoteEvents>) {
                 const auto note_count =
                     saturated_add(value.expected.size(), value.replacement.size());
                 return saturated_add(sizeof(T), saturated_multiply(note_count, sizeof(NoteEvent)));

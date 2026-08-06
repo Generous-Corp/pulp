@@ -322,7 +322,7 @@ TEST_CASE("a groove round trips and re-saves byte-identically",
 
     auto first = serialize_project(original, registry);
     REQUIRE(first.has_value());
-    REQUIRE(first.value().json.find("\"type_name\":\"pulp.timeline.sequence\",\"version\":5") !=
+    REQUIRE(first.value().json.find("\"type_name\":\"pulp.timeline.sequence\",\"version\":7") !=
             std::string::npos);
     REQUIRE(first.value().json.find(kShuffleJson) != std::string::npos);
 
@@ -494,8 +494,15 @@ TEST_CASE("a v3 sequence document loads as a sequence with no feel",
     const auto scenes_at = legacy.find(empty_scenes);
     REQUIRE(scenes_at != std::string::npos);
     legacy.erase(scenes_at, empty_scenes.size());
+    // A pre-order document carries no authored track order. Its contents vary
+    // with the track ids, so erase the member by span rather than by literal.
+    const auto order_at = legacy.find(R"("track_order":[)");
+    REQUIRE(order_at != std::string::npos);
+    const auto order_end = legacy.find("],", order_at);
+    REQUIRE(order_end != std::string::npos);
+    legacy.erase(order_at, order_end + 2 - order_at);
     constexpr std::string_view current_version =
-        R"("type_name":"pulp.timeline.sequence","version":5)";
+        R"("type_name":"pulp.timeline.sequence","version":7)";
     const auto version_at = legacy.find(current_version);
     REQUIRE(version_at != std::string::npos);
     legacy.replace(version_at, current_version.size(),

@@ -4,6 +4,7 @@
 #include "owned_identity_traversal.hpp"
 #include "sequence_graph_validation.hpp"
 #include "transaction_automation_internal.hpp"
+#include "transaction_dispatch_internal.hpp"
 #include "transaction_internal.hpp"
 #include "transaction_marker_internal.hpp"
 #include "transaction_scene_internal.hpp"
@@ -11,10 +12,14 @@
 #include "transaction_reduction_support.hpp"
 #include "transaction_sequence_internal.hpp"
 #include "transaction_take_internal.hpp"
+#include "transaction_track_internal.hpp"
 #include "transaction_track_state_internal.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <tuple>
+#include <utility>
+#include <variant>
 
 namespace pulp::timeline {
 
@@ -43,6 +48,36 @@ std::vector<detail::OwnedIdentity> owned_identities(const Clip& clip, ItemId seq
         });
     return result;
 }
+
+// Counts the dispatch branches below that claim `T`, reading the shared lists
+// rather than the `if` chain itself.
+template <typename T>
+constexpr int dispatch_claims() {
+    return static_cast<int>(detail::is_automation_command_type<T>) +
+           static_cast<int>(detail::is_take_command_type<T>) +
+           static_cast<int>(detail::is_marker_command_type<T>) +
+           static_cast<int>(detail::is_scene_command_type<T>) +
+           static_cast<int>(detail::is_track_command_type<T>) +
+           static_cast<int>(detail::is_track_state_command_type<T>) +
+           static_cast<int>(detail::is_sequence_command_type<T>) +
+           static_cast<int>(detail::is_note_command_type<T>) +
+           static_cast<int>(detail::is_inline_command_type<T>);
+}
+
+template <std::size_t... I>
+constexpr bool every_alternative_claimed_once(std::index_sequence<I...>) {
+    return ((dispatch_claims<std::variant_alternative_t<I, Command>>() == 1) && ...);
+}
+
+// An unclaimed alternative reaches the end of the dispatch chain, and this
+// translation unit is compiled -fno-exceptions, so that is a process abort
+// rather than a rejected transaction. Requiring exactly one claim also rejects
+// an alternative two families both handle, which the branch order would
+// otherwise resolve silently.
+static_assert(
+    every_alternative_claimed_once(std::make_index_sequence<std::variant_size_v<Command>>{}),
+    "every Command alternative must be claimed by exactly one reduce dispatch branch; "
+    "declare it in transaction_dispatch_internal.hpp and add the matching branch");
 
 } // namespace
 
@@ -221,6 +256,15 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
             project = std::move(reduced->project);
             inverses.push_back(std::move(reduced->inverse));
             dirty.push_back(reduced->dirty);
+        } else if (detail::is_track_command(envelope.command)) {
+            auto reduced = detail::reduce_track_command(project, envelope.command, transaction,
+                                                        envelope.id, allow_tombstone_restore);
+            if (!reduced)
+                return runtime::Result<ReducedTransaction, TransactionError>(
+                    runtime::Err(reduced.error()));
+            project = std::move(reduced->project);
+            inverses.push_back(std::move(reduced->inverse));
+            dirty.push_back(reduced->dirty);
         } else if (detail::is_track_state_command(envelope.command)) {
             auto reduced = detail::reduce_track_state_command(project, envelope.command,
                                                               transaction, envelope.id);
@@ -373,19 +417,19 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
                 SetGroove{groove->sequence_id, groove->replacement, groove->expected});
             dirty.push_back({groove->sequence_id, {}, groove->sequence_id, DirtyFlags::Context});
             dirty_contexts.push_back({groove->sequence_id, CompileContextKind::Groove});
-        } else {
-            const auto& playback = std::get<SetClipPlaybackProperties>(envelope.command);
+        } else if (const auto* playback =
+                       std::get_if<SetClipPlaybackProperties>(&envelope.command)) {
             if (const auto code = detail::target_error(
-                    project, playback.clip_id,
-                    expected_location(ItemKind::Clip, project, playback.sequence_id,
-                                      playback.track_id, playback.clip_id)))
-                return fail_target(*code, playback.clip_id);
-            const auto* sequence = project.find_sequence(playback.sequence_id);
-            const auto* track = sequence->find_track(playback.track_id);
-            const auto* clip = track->find_clip(playback.clip_id);
-            if (clip->playback_properties() != playback.expected)
-                return fail_target(ConflictCode::ExpectedValueMismatch, playback.clip_id);
-            auto next_clip = clip->with_playback_properties(playback.replacement);
+                    project, playback->clip_id,
+                    expected_location(ItemKind::Clip, project, playback->sequence_id,
+                                      playback->track_id, playback->clip_id)))
+                return fail_target(*code, playback->clip_id);
+            const auto* sequence = project.find_sequence(playback->sequence_id);
+            const auto* track = sequence->find_track(playback->track_id);
+            const auto* clip = track->find_clip(playback->clip_id);
+            if (clip->playback_properties() != playback->expected)
+                return fail_target(ConflictCode::ExpectedValueMismatch, playback->clip_id);
+            auto next_clip = clip->with_playback_properties(playback->replacement);
             if (!next_clip)
                 return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
                     detail::model_failure(transaction, envelope.id, next_clip.error())));
@@ -403,11 +447,19 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
                 return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
                     detail::model_failure(transaction, envelope.id, next_project.error())));
             project = std::move(next_project).value();
-            inverses.emplace_back(SetClipPlaybackProperties{playback.sequence_id, playback.track_id,
-                                                            playback.clip_id, playback.replacement,
-                                                            playback.expected});
+            inverses.emplace_back(SetClipPlaybackProperties{playback->sequence_id, playback->track_id,
+                                                            playback->clip_id, playback->replacement,
+                                                            playback->expected});
             dirty.push_back(
-                {playback.clip_id, playback.track_id, playback.sequence_id, DirtyFlags::Content});
+                {playback->clip_id, playback->track_id, playback->sequence_id,
+                 DirtyFlags::Content});
+        } else {
+            // Unreachable while the exhaustiveness assertion above holds. It is
+            // a rejection and not a bare std::get because this translation unit
+            // is compiled -fno-exceptions: an unhandled alternative there aborts
+            // the process instead of failing the transaction.
+            return detail::reject_reduction<ReducedTransaction>(ConflictCode::ModelInvariant,
+                                                                transaction, envelope.id);
         }
     }
     std::reverse(inverses.begin(), inverses.end());

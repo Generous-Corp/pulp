@@ -1,0 +1,3 @@
+# The DesignIR to build into the plugin is supplied per-checkout: it is a
+# project artifact, often large, and belongs to whoever generated it.
+panel.design.pulp.json

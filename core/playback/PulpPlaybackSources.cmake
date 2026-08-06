@@ -14,20 +14,30 @@ function(pulp_resolve_playback_sources root output)
         compile_executor.cpp
         external_sync_output.cpp
         external_sync_timecode.cpp
+        generated_event_source.cpp
         midi_capture_materializer.cpp
         note_renderer.cpp
+        offline_stretch_artifact.cpp
+        offline_stretch_program_compiler.cpp
         production_class.cpp
         program.cpp
         program_compiler.cpp
+        program_compiler_helpers.cpp
+        program_validator.cpp
+        program_wire.cpp
         recording_commit.cpp
+        realtime_stretch_state_bank.cpp
+        realtime_stretch_renderer.cpp
         sequence_compile_bookkeeping.cpp
         sequence_content_lowerer.cpp
         sequence_dirty_lowering.cpp
         sequence_preflight.cpp
         stable_renderer_shell.cpp
+        tempo_sync.cpp
         track_automation_compiler.cpp
         track_automation_program.cpp
         track_automation_renderer.cpp
+        track_audio_program_compiler.cpp
         transport.cpp
     )
     set(_PULP_PLAYBACK_SOURCES)

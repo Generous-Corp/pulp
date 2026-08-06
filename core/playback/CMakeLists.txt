@@ -28,12 +28,32 @@ if(CMAKE_SYSTEM_NAME STREQUAL "WASI" OR
         PULP_COMPILE_EXECUTOR_DISABLE_THREADS=1)
 endif()
 
+# The adapter target is deliberately separate from pulp-playback: the portable
+# Pulp-owned interface remains installable, while the developer-supplied Link
+# target never enters Pulp's install/export closure.
+if(PULP_HAS_ABLETON_LINK)
+    add_library(pulp_ableton_link_adapter STATIC adapters/ableton_link.cpp)
+    add_library(pulp::ableton-link ALIAS pulp_ableton_link_adapter)
+    target_compile_features(pulp_ableton_link_adapter PUBLIC cxx_std_20)
+    target_include_directories(pulp_ableton_link_adapter
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/adapters/include>
+    )
+    target_link_libraries(pulp_ableton_link_adapter
+        PUBLIC pulp::playback
+        PRIVATE Ableton::Link)
+    target_compile_definitions(pulp_ableton_link_adapter PUBLIC PULP_HAS_ABLETON_LINK=1)
+    set_target_properties(pulp_ableton_link_adapter PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
+
 # Compile the complete portable playback lane exactly as threadless WebAssembly
 # consumers do. This object target is the native compile-only mirror of the
 # curated WAM/WebCLAP closure.
 if(PULP_BUILD_TESTS AND NOT MSVC)
     add_library(timeline-program-threadless-no-exceptions-check OBJECT
         ${_PULP_PLAYBACK_SOURCES}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../audio/src/finite_time_stretch.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../audio/src/realtime_time_stretch.cpp
     )
     target_compile_features(timeline-program-threadless-no-exceptions-check PRIVATE cxx_std_20)
     target_include_directories(timeline-program-threadless-no-exceptions-check PRIVATE

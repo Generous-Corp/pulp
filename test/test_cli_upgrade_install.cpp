@@ -9,11 +9,15 @@
 
 #include "tools/cli/upgrade_install.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <regex>
+#include <set>
 #include <string>
+#include <vector>
 
 #ifdef _WIN32
 #  include <process.h>
@@ -59,13 +63,134 @@ void write_file_create_parent(const fs::path& path, const std::string& body) {
     write_file(path, body);
 }
 
+void write_complete_browser_capture_runtime(
+    const fs::path& runtime, const std::string& capture_body) {
+    for (const auto filename : ui::browser_capture_runtime_files) {
+        write_file_create_parent(
+            runtime / filename,
+            filename == "capture.mjs" ? capture_body : std::string(filename));
+    }
+}
+
+std::vector<std::string> browser_capture_runtime_manifest() {
+    const auto manifest =
+        fs::path{PULP_REPO_ROOT} / "tools" / "import-design" /
+        "browser_capture" / "runtime_manifest.txt";
+    std::ifstream input(manifest);
+    std::vector<std::string> names;
+    std::string line;
+    while (std::getline(input, line)) {
+        const auto first = line.find_first_not_of(" \t\r");
+        if (first == std::string::npos || line[first] == '#') continue;
+        const auto last = line.find_last_not_of(" \t\r");
+        names.push_back(line.substr(first, last - first + 1));
+    }
+    return names;
+}
+
+void copy_source_browser_capture_runtime(const fs::path& runtime) {
+    const auto source =
+        fs::path{PULP_REPO_ROOT} / "tools" / "import-design" /
+        "browser_capture";
+    fs::create_directories(runtime);
+    for (const auto filename : ui::browser_capture_runtime_files) {
+        fs::copy_file(
+            source / filename, runtime / filename,
+            fs::copy_options::overwrite_existing);
+    }
+}
+
+std::string read_file(const fs::path& path);
+
+std::set<fs::path> unresolved_relative_runtime_modules(
+    const fs::path& runtime) {
+    static const std::regex relative_module{
+        R"pulp(["'](\./[^"']+\.mjs)["'])pulp"};
+    std::set<fs::path> unresolved;
+    for (const auto& entry : fs::recursive_directory_iterator(runtime)) {
+        if (!entry.is_regular_file() || entry.path().extension() != ".mjs")
+            continue;
+        const auto source = read_file(entry.path());
+        for (std::sregex_iterator it(
+                 source.begin(), source.end(), relative_module), end;
+             it != end; ++it) {
+            const auto dependency =
+                (entry.path().parent_path() / (*it)[1].str())
+                    .lexically_normal();
+            if (!fs::is_regular_file(dependency)) {
+                unresolved.insert(
+                    dependency.lexically_relative(runtime));
+            }
+        }
+    }
+    return unresolved;
+}
+
 std::string read_file(const fs::path& path) {
     std::ifstream in(path, std::ios::binary);
     return std::string(std::istreambuf_iterator<char>(in),
                        std::istreambuf_iterator<char>());
 }
 
+template <typename Callable>
+std::string exception_message(Callable&& callable) {
+    try {
+        callable();
+    } catch (const std::exception& error) {
+        return error.what();
+    }
+    return {};
+}
+
+bool has_import_design_transaction(const fs::path& install_dir) {
+    for (const auto& entry : fs::directory_iterator(install_dir)) {
+        if (entry.path().filename().string().starts_with(
+                ".pulp-import-design-install-")) {
+            return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace
+
+TEST_CASE("upgrade runtime list matches the canonical browser manifest",
+          "[cli][upgrade][import-design][manifest]") {
+    const auto manifest = browser_capture_runtime_manifest();
+    const std::vector<std::string> cpp_runtime_files{
+        ui::browser_capture_runtime_files.begin(),
+        ui::browser_capture_runtime_files.end()};
+
+    REQUIRE(manifest.size() == 14);
+    CHECK(cpp_runtime_files == manifest);
+}
+
+TEST_CASE("upgrade-installed browser runtime resolves its relative module graph",
+          "[cli][upgrade][import-design][manifest]") {
+    auto incoming = make_tmpdir("browser-runtime-graph-incoming");
+    auto install = make_tmpdir("browser-runtime-graph-install");
+    const auto import_source =
+        incoming / ui::import_design_binary_name();
+    const auto runtime_source =
+        incoming / ui::browser_capture_runtime_name();
+    write_file(import_source, "import-helper");
+    copy_source_browser_capture_runtime(runtime_source);
+
+    ui::install_import_design_protocol_runtime(
+        install, import_source, runtime_source);
+
+    const auto installed_runtime =
+        install / ui::browser_capture_runtime_install_name();
+    const auto unresolved =
+        unresolved_relative_runtime_modules(installed_runtime);
+    for (const auto& module : unresolved) {
+        INFO("missing installed runtime module: " << module);
+    }
+    CHECK(unresolved.empty());
+
+    fs::remove_all(incoming);
+    fs::remove_all(install);
+}
 
 TEST_CASE("upgrade install copies sibling payloads before self replacement",
           "[cli][upgrade][issue-1673]") {
@@ -102,7 +227,7 @@ TEST_CASE("upgrade install copies sibling payloads before self replacement",
     fs::remove_all(install);
 }
 
-TEST_CASE("upgrade install skips directories, primary binary, and downloaded archive",
+TEST_CASE("upgrade install preserves sibling directories and skips primary and archive",
           "[cli][upgrade][issue-643]") {
     auto extracted = make_tmpdir("skip");
     auto install = make_tmpdir("skip-install");
@@ -120,14 +245,279 @@ TEST_CASE("upgrade install skips directories, primary binary, and downloaded arc
 
     auto installed = ui::install_sibling_payloads(extracted, install, primary, archive);
 
-    REQUIRE(installed.size() == 1);
-    REQUIRE(installed[0].filename() == "README.txt");
+    REQUIRE(installed.size() == 2);
     REQUIRE(read_file(install / "README.txt") == "readme");
     REQUIRE_FALSE(fs::exists(install / primary.filename()));
     REQUIRE_FALSE(fs::exists(install / archive.filename()));
-    REQUIRE_FALSE(fs::exists(install / "nested"));
+    REQUIRE(read_file(install / "nested" / "ignored.txt") == "ignored");
 
     fs::remove_all(extracted);
+    fs::remove_all(install);
+}
+
+TEST_CASE("upgrade install publishes versioned runtime before import-design helper",
+          "[cli][upgrade][import-design]") {
+    auto extracted = make_tmpdir("import-pair-extracted");
+    auto install = make_tmpdir("import-pair-install");
+
+    const auto primary = extracted / ui::primary_binary_name();
+    const auto archive = extracted / "pulp-test.tar.gz";
+    const auto import_source = extracted / ui::import_design_binary_name();
+    const auto runtime_source =
+        extracted / ui::browser_capture_runtime_name();
+    write_file(primary, "primary");
+    write_file(archive, "archive");
+    write_file(import_source, "new-import");
+    write_complete_browser_capture_runtime(runtime_source, "new-runtime");
+    write_file_create_parent(
+        runtime_source / "lib" / "health.mjs", "new-health");
+
+    write_file(install / ui::import_design_binary_name(), "old-import");
+    write_file_create_parent(
+        install / ui::browser_capture_runtime_name() / "capture.mjs",
+        "old-runtime");
+    write_file_create_parent(
+        install / "browser_capture-v0" / "capture.mjs",
+        "older-protocol-runtime");
+
+    const auto installed =
+        ui::install_sibling_payloads(extracted, install, primary, archive);
+
+    REQUIRE(read_file(install / ui::import_design_binary_name()) ==
+            "new-import");
+    REQUIRE(read_file(install / ui::browser_capture_runtime_install_name() /
+                      "capture.mjs") == "new-runtime");
+    REQUIRE(read_file(install / ui::browser_capture_runtime_install_name() /
+                      "lib" / "health.mjs") == "new-health");
+    REQUIRE(read_file(install / ui::browser_capture_runtime_name() /
+                      "capture.mjs") == "old-runtime");
+    REQUIRE(read_file(install / "browser_capture-v0" / "capture.mjs") ==
+            "older-protocol-runtime");
+    REQUIRE(std::find(
+                installed.begin(), installed.end(),
+                install / ui::import_design_binary_name()) != installed.end());
+    REQUIRE(std::find(
+                installed.begin(), installed.end(),
+                install / ui::browser_capture_runtime_install_name()) !=
+            installed.end());
+    REQUIRE_FALSE(has_import_design_transaction(install));
+
+#ifndef _WIN32
+    const auto import_perms =
+        fs::status(install / ui::import_design_binary_name()).permissions();
+    REQUIRE((import_perms & fs::perms::owner_exec) != fs::perms::none);
+#endif
+
+    fs::remove_all(extracted);
+    fs::remove_all(install);
+}
+
+TEST_CASE("upgrade install replaces the complete protocol runtime before helper",
+          "[cli][upgrade][import-design]") {
+    auto incoming = make_tmpdir("immutable-import-runtime-incoming");
+    auto install = make_tmpdir("immutable-import-runtime-install");
+
+    const auto import_source =
+        incoming / ui::import_design_binary_name();
+    const auto runtime_source =
+        incoming / ui::browser_capture_runtime_name();
+    write_file(import_source, "new-import");
+    write_complete_browser_capture_runtime(runtime_source, "new-runtime");
+    write_file(runtime_source / "health.mjs", "new-health");
+    write_file_create_parent(
+        install / ui::browser_capture_runtime_install_name() / "capture.mjs",
+        "installed-runtime");
+    write_file_create_parent(
+        install / ui::browser_capture_runtime_install_name() / "obsolete.mjs",
+        "obsolete-runtime-file");
+    write_file(install / ui::import_design_binary_name(), "old-import");
+
+    std::vector<ui::ImportDesignInstallPhase> phases;
+    ui::detail::install_import_design_protocol_runtime_impl(
+        install, import_source, runtime_source,
+        [&](ui::ImportDesignInstallPhase phase) {
+            phases.push_back(phase);
+            if (phase == ui::ImportDesignInstallPhase::runtime_available) {
+                REQUIRE(read_file(
+                            install /
+                            ui::browser_capture_runtime_install_name() /
+                            "capture.mjs") == "new-runtime");
+                REQUIRE(read_file(
+                            install / ui::import_design_binary_name()) ==
+                        "old-import");
+            }
+        });
+
+    REQUIRE(read_file(install / ui::import_design_binary_name()) ==
+            "new-import");
+    REQUIRE(read_file(install / ui::browser_capture_runtime_install_name() /
+                      "capture.mjs") == "new-runtime");
+    REQUIRE(read_file(install / ui::browser_capture_runtime_install_name() /
+                      "health.mjs") == "new-health");
+    REQUIRE_FALSE(fs::exists(
+        install / ui::browser_capture_runtime_install_name() /
+        "obsolete.mjs"));
+    REQUIRE(phases == std::vector{
+                          ui::ImportDesignInstallPhase::runtime_available,
+                          ui::ImportDesignInstallPhase::helper_published});
+    REQUIRE_FALSE(has_import_design_transaction(install));
+
+    fs::remove_all(incoming);
+    fs::remove_all(install);
+}
+
+TEST_CASE("upgrade install allocates unique import-design staging roots",
+          "[cli][upgrade][import-design]") {
+    auto install = make_tmpdir("unique-import-staging");
+
+    const auto first =
+        ui::detail::create_unique_import_design_transaction(install);
+    const auto second =
+        ui::detail::create_unique_import_design_transaction(install);
+
+    REQUIRE(first != second);
+    REQUIRE(fs::is_directory(first));
+    REQUIRE(fs::is_directory(second));
+
+    fs::remove_all(install);
+}
+
+TEST_CASE("upgrade install rejects an incomplete import-design pair before writes",
+          "[cli][upgrade][import-design]") {
+    auto extracted = make_tmpdir("partial-import-pair-extracted");
+    auto install = make_tmpdir("partial-import-pair-install");
+
+    const auto primary = extracted / ui::primary_binary_name();
+    const auto archive = extracted / "pulp-test.tar.gz";
+    write_file(primary, "primary");
+    write_file(archive, "archive");
+    write_file(extracted / ui::import_design_binary_name(), "new-import");
+    write_file(extracted / "README.txt", "new-readme");
+
+    write_file(install / ui::import_design_binary_name(), "old-import");
+    write_file_create_parent(
+        install / ui::browser_capture_runtime_name() / "capture.mjs",
+        "old-runtime");
+    write_file(install / "README.txt", "old-readme");
+
+    const auto error = exception_message([&] {
+        ui::install_sibling_payloads(extracted, install, primary, archive);
+    });
+    REQUIRE(error == "release archive must contain both " +
+                         ui::import_design_binary_name() + " and " +
+                         ui::browser_capture_runtime_name());
+    REQUIRE(read_file(install / ui::import_design_binary_name()) ==
+            "old-import");
+    REQUIRE(read_file(install / ui::browser_capture_runtime_name() /
+                      "capture.mjs") == "old-runtime");
+    REQUIRE(read_file(install / "README.txt") == "old-readme");
+
+    fs::remove_all(extracted);
+    fs::remove_all(install);
+}
+
+TEST_CASE("upgrade install rejects a runtime without capture.mjs before writes",
+          "[cli][upgrade][import-design]") {
+    auto extracted = make_tmpdir("invalid-import-runtime-extracted");
+    auto install = make_tmpdir("invalid-import-runtime-install");
+
+    const auto primary = extracted / ui::primary_binary_name();
+    const auto archive = extracted / "pulp-test.tar.gz";
+    write_file(primary, "primary");
+    write_file(archive, "archive");
+    write_file(extracted / ui::import_design_binary_name(), "new-import");
+    write_file_create_parent(
+        extracted / ui::browser_capture_runtime_name() / "health.mjs",
+        "incomplete-runtime");
+    write_file(extracted / "README.txt", "new-readme");
+
+    write_file(install / ui::import_design_binary_name(), "old-import");
+    write_file(install / "README.txt", "old-readme");
+
+    const auto error = exception_message([&] {
+        ui::install_sibling_payloads(extracted, install, primary, archive);
+    });
+    REQUIRE(error ==
+            "release archive contains an invalid import-design runtime pair");
+    REQUIRE(read_file(install / ui::import_design_binary_name()) ==
+            "old-import");
+    REQUIRE(read_file(install / "README.txt") == "old-readme");
+    REQUIRE_FALSE(fs::exists(
+        install / ui::browser_capture_runtime_install_name()));
+    REQUIRE_FALSE(has_import_design_transaction(install));
+
+    fs::remove_all(extracted);
+    fs::remove_all(install);
+}
+
+TEST_CASE("upgrade install interruption leaves old helper and legacy runtime usable",
+          "[cli][upgrade][import-design]") {
+    auto incoming = make_tmpdir("interrupt-import-runtime-incoming");
+    auto install = make_tmpdir("interrupt-import-runtime-install");
+
+    const auto import_source =
+        incoming / ui::import_design_binary_name();
+    const auto runtime_source =
+        incoming / ui::browser_capture_runtime_name();
+    write_file(import_source, "new-import");
+    write_complete_browser_capture_runtime(runtime_source, "new-runtime");
+
+    const auto import_destination =
+        install / ui::import_design_binary_name();
+    const auto runtime_destination =
+        install / ui::browser_capture_runtime_name();
+    write_file(import_destination, "old-import");
+    write_file_create_parent(
+        runtime_destination / "capture.mjs", "old-runtime");
+
+    bool observed_safe_interruption_point = false;
+    const auto error = exception_message([&] {
+        ui::detail::install_import_design_protocol_runtime_impl(
+            install, import_source, runtime_source,
+            [&](ui::ImportDesignInstallPhase phase) {
+                if (phase == ui::ImportDesignInstallPhase::runtime_available) {
+                    observed_safe_interruption_point =
+                        read_file(import_destination) == "old-import" &&
+                        read_file(runtime_destination / "capture.mjs") ==
+                            "old-runtime" &&
+                        read_file(
+                            install /
+                            ui::browser_capture_runtime_install_name() /
+                            "capture.mjs") == "new-runtime";
+                    throw std::runtime_error("injected interruption");
+                }
+            });
+    });
+
+    REQUIRE(error == "injected interruption");
+    REQUIRE(observed_safe_interruption_point);
+    REQUIRE(read_file(import_destination) == "old-import");
+    REQUIRE(read_file(runtime_destination / "capture.mjs") ==
+            "old-runtime");
+    REQUIRE(read_file(
+                install / ui::browser_capture_runtime_install_name() /
+                "capture.mjs") == "new-runtime");
+    REQUIRE_FALSE(has_import_design_transaction(install));
+
+    std::vector<ui::ImportDesignInstallPhase> phases;
+    ui::detail::install_import_design_protocol_runtime_impl(
+        install, import_source, runtime_source,
+        [&](ui::ImportDesignInstallPhase phase) {
+            phases.push_back(phase);
+            if (phase == ui::ImportDesignInstallPhase::helper_published) {
+                REQUIRE(read_file(import_destination) == "new-import");
+            }
+        });
+
+    REQUIRE(phases == std::vector{
+                          ui::ImportDesignInstallPhase::runtime_available,
+                          ui::ImportDesignInstallPhase::helper_published});
+    REQUIRE(read_file(import_destination) == "new-import");
+    REQUIRE(read_file(runtime_destination / "capture.mjs") ==
+            "old-runtime");
+    REQUIRE_FALSE(has_import_design_transaction(install));
+
+    fs::remove_all(incoming);
     fs::remove_all(install);
 }
 

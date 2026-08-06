@@ -46,7 +46,11 @@ A new repo adds one `.shipyard/vm-image.toml` and the same `tart-provision.sh ma
 Fields: `base`, `disk_gb`, `auto_login`, `[toolchain].xcode` (omit → no Xcode tier), `[toolchain].rust` + `.rust_targets` + `.rosetta` (Intel cross-build layer — omit → not installed), `[brew].packages`, `[pip].packages`, `[caches].ccache_max`, `[[mounts]]`. See `.shipyard/vm-image.toml` (Pulp: Xcode+Skia), `.shipyard/vm-image.intel.toml` (Intel cross-build layer), and `tools/ci/examples/vm-image.rust-repo.toml` (a light Rust profile, no Xcode — proves generalization).
 
 ## Intel (x86_64) cross-build lane — no native Intel hardware needed
-Pulp's `darwin-x64` release leg is native on GitHub's `macos-15-intel` (slow, nightly-gated). For an interactive "does the Intel build still work?" check, an **Apple-Silicon host cross-compiles x86_64 and runs it under Rosetta 2** — no Intel Mac, and nothing installed on the host.
+Pulp's required `darwin-x64` release leg **cross-compiles on Apple Silicon and
+runs under Rosetta 2**. It prefers the dedicated `pulp-build-vm-release` Tart
+pool through `PULP_RELEASE_MACOS_RUNS_ON_JSON`; the native Intel Mac Mini stays
+in the separate advisory/nightly portability lane. The same cross-build recipe
+is available interactively when you need an exact local proof.
 
 - **Golden:** `pulp-intel-build:latest`, baked from `.shipyard/vm-image.intel.toml`. `base = pulp-build-runner:latest` (inherits Xcode + cmake/ninja + baked arm64 Skia) + the Intel layer (`[toolchain].rust` + `rust_targets=["x86_64-apple-darwin"]` + `rosetta`). Do NOT re-declare Xcode in the Intel manifest — it's inherited (re-declaring triggers a multi-hour Xcode re-provision).
   ```
@@ -88,7 +92,7 @@ Skia/Dawn are pinned in `tools/deps/manifest.json` (release-asset URL + sha256 p
 - A persistent operator VM (e.g. `pulp-vm`) on a host consumes 1 of its 2 slots.
 - **Capacity-aware local queue draining is implemented and VM-slot-aware.** The current tartci/Shipyard path shares one rule: a host has free macOS capacity when `running_macos_vms < cap` (cap = 2/host), and only macOS/Darwin guests consume the `macos` VM slot. Linux Tart and Windows QEMU lanes use their own labels, supervisors, and caps; they do not reduce macOS free slots, though CPU/RAM can still need route weights or reservations.
 - **Local-first policy:** Pulp's automatic macOS overflow is disabled with `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON=local-only`. Do not point full-local saturation at GitHub-hosted `macos-15`; let jobs queue for the next local Mac slot. Hosted macOS is an explicit operator fallback for a local fleet outage/unhealthy fleet or a workflow that intentionally wants hosted coverage. Rollback for the old behavior: `gh variable set -R Generous-Corp/pulp PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body '["macos-15"]'`.
-- **Production required macOS route is VM-first (2026-06-10):** `PULP_LOCAL_MACOS_RUNS_ON_JSON=["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]` and `PULP_LOCAL_MAC_RUNNER_LABEL=pulp-build-vm`. The VM supervisors advertise both `pulp-build` and `pulp-build-vm`; bare-metal `pulp-build` runners stay online but are excluded from the default route by the extra `pulp-build-vm` label. Full rollback: restore `PULP_LOCAL_MACOS_RUNS_ON_JSON` to `["self-hosted","pulp-build"]`, restore `PULP_LOCAL_MAC_RUNNER_LABEL=pulp-build`, and unload the VM LaunchAgents if the VM pool itself is unhealthy.
+- **Production required macOS route is fast-VM-only (2026-07-31):** `PULP_LOCAL_MACOS_RUNS_ON_JSON=["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm","pulp-gate-fast"]` and `PULP_LOCAL_MAC_RUNNER_LABEL=pulp-gate-fast`. M3/M5 supervisors advertise `pulp-gate-fast`; M1 retains only the generic `pulp-build-vm` label as the rollback pool and cannot win required-gate placement. The reviewed profile in `.shipyard/ci-profiles/normal-local-fast.toml` must preserve the same selector.
 
 ## Linux + Windows pool runners (join the Actions pool like macOS)
 
@@ -227,7 +231,7 @@ main, reddening every PR's macOS gate.)
 ## Rollout: pilot → graduate
 1. **Additive pilot (safe):** run `tartci serve macos --once` with a **non-required** label (`pulp-build-vm`). Trigger a real job without touching required routing: `gh workflow run build.yml -f macos_runner_selector_json='["self-hosted","pulp-build-vm"]'`. Confirm green.
 2. **Required-label prevalidation (safe):** run a one-shot VM with `pulp-build` **plus a unique proof label**, then dispatch `Build and Test` with `macos_runner_selector_json` requiring both labels. This proves a VM can satisfy the required label while bare-metal `pulp-build` remains online. Verified 2026-06-10: run `27250564395`, runner `tartci-phase6-pulp-build-proof-r2-20260610`, `macOS (ARM64) [operator]` success, `macos` alias success, VM/JIT runner cleaned up. Cancel unrelated Linux/Windows legs after `macos` is green.
-3. **Graduated production default route (active 2026-06-10):** persistent VM supervisors now advertise `self-hosted,macOS,ARM64,pulp-build,pulp-build-vm`, and Pulp's default required macOS selector requires that full set. Real `Build and Test` jobs have drained on both the controller VM runner and the secondary-host VM runner:
+3. **Graduated production default route:** M3/M5 VM supervisors advertise `self-hosted,macOS,ARM64,pulp-build,pulp-build-vm,pulp-gate-fast`, and Pulp's required macOS selector requires that full set. M1 remains a generic `pulp-build-vm` rollback pool.
    - run `27251134234`: default dispatch, no selector override, `pulp-vm-01`, `macOS (ARM64) [local]` success, `macos` alias success; hosted leftovers canceled after `macos` went green.
    - run `27251378268`: real PR, secondary-host `pulp-vm-m5-pilot-01`, `macOS (ARM64) [local]` success, `macos` alias success.
    - run `27251442228`: real PR, controller `pulp-vm-01`, `macOS (ARM64) [local]` success, `macos` alias success.

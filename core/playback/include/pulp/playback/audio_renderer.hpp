@@ -5,6 +5,7 @@
 #include <pulp/audio/rt_safety_contract.hpp>
 #include <pulp/audio/wav_decoder.hpp>
 #include <pulp/playback/audio_renderer_limits.hpp>
+#include <pulp/playback/realtime_stretch_state_bank.hpp>
 #include <pulp/playback/stable_renderer_shell.hpp>
 #include <pulp/playback/transport.hpp>
 #include <pulp/runtime/result.hpp>
@@ -21,6 +22,9 @@ namespace pulp::playback {
 class PlaybackProgram;
 class ProgramCompilerTask;
 class AudioClipConversionArtifact;
+class RealtimeStretchProgramRuntime;
+struct OfflineStretchArtifact;
+struct OfflineStretchProvenance;
 
 enum class AudioRendererErrorCode : std::uint8_t {
     InvalidIdentity,
@@ -33,6 +37,8 @@ enum class AudioRendererErrorCode : std::uint8_t {
     InvalidFade,
     CapacityExceeded,
     InvalidTakeComp,
+    OfflineStretchRequired,
+    OfflineStretchFailed,
 };
 
 struct AudioRendererError {
@@ -46,6 +52,13 @@ struct AudioRendererError {
 struct DecodedAudioAsset {
     timeline::ItemId id;
     std::shared_ptr<const audio::AudioFileData> audio;
+    /// SHA-256 identity of the sealed encoded media bytes that produced audio.
+    /// Legacy non-stretch callers may leave this invalid; offline Stretch
+    /// requires it to match the project's asset identity before cache lookup.
+    timeline::ContentHash content_hash;
+    /// Pool-sealed identity of the decoded sample rate, layout, and PCM bits.
+    /// DecodedAudioAssetPool::create always overwrites this value from audio.
+    timeline::ContentHash decoded_content_hash;
 };
 
 /// Immutable, ID-sorted ownership table prepared off the audio thread.
@@ -72,6 +85,11 @@ class DecodedAudioAssetPool {
 struct AudioClipRendererProgram {
     enum class SourceKind : std::uint8_t { ArrangementClip, TakeCompSegment, FrozenTrack };
     enum class TimeDomain : std::uint8_t { Musical, Absolute };
+    enum class SourceTimeMapping : std::uint8_t {
+        NativeRate,
+        MusicalPhaseResample,
+        OfflineStretchArtifact,
+    };
 
     timeline::ItemId id;
     timeline::ItemId asset_id;
@@ -87,11 +105,15 @@ struct AudioClipRendererProgram {
     float gain_linear = 1.0f;
     std::uint64_t fade_in_frames = 0;
     std::uint64_t fade_out_frames = 0;
+    timeline::ClipFadeShape fade_shape = timeline::ClipFadeShape::Linear;
     SourceKind source_kind = SourceKind::ArrangementClip;
     std::uint32_t source_ordinal = 0;
     TimeDomain time_domain = TimeDomain::Absolute;
     timebase::TickPosition musical_tick_start{};
     timebase::TickPosition musical_tick_end{};
+    SourceTimeMapping source_time_mapping = SourceTimeMapping::NativeRate;
+    std::shared_ptr<const OfflineStretchArtifact> offline_stretch_artifact;
+    std::shared_ptr<const OfflineStretchProvenance> offline_stretch_provenance;
 
     std::int64_t timeline_end() const noexcept;
     bool uses_sample_rate_conversion() const noexcept;
@@ -152,6 +174,13 @@ enum class AudioRenderStatus : std::uint8_t {
     InvalidTransport,
     InvalidOutput,
     CapacityExceeded,
+    RealtimeStretchStateRequired,
+    RealtimeStretchGap,
+    RealtimeStretchStalePublication,
+    RealtimeStretchImpossibleRatio,
+    RealtimeStretchBackpressure,
+    RealtimeStretchUnderflow,
+    RealtimeStretchUnsupportedScrubbing,
 };
 
 /// Renders every arrangement-selected audio track in PlaybackProgram order.
@@ -184,8 +213,8 @@ class ArrangementAudioTrackRenderer {
         : shell_(track_id), apply_track_mixer_(apply_track_mixer) {}
 
     AudioRenderStatus process(const PlaybackProgramBlock& block, const TransportSnapshot& transport,
-                              audio::BufferView<float> output,
-                              AudioRendererLimits limits = {}) noexcept;
+                              audio::BufferView<float> output, AudioRendererLimits limits = {},
+                              RealtimeStretchProgramRuntime* realtime_stretch = nullptr) noexcept;
 
     RendererProgramKey active_key() const noexcept {
         return shell_.active_key();

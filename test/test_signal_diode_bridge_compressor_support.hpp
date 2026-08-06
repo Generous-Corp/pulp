@@ -45,6 +45,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <numbers>
 #include <vector>
 
 using namespace pulp::signal;
@@ -69,7 +70,7 @@ void require_allocates_no_memory(Fn&& fn) {
 /// Coherent DFT magnitude at harmonic `k` of a tone whose period divides the
 /// analysis window exactly — leakage-free, so no window and no correction.
 double harmonic_magnitude(const std::vector<double>& x, double fundamental_hz, int k) {
-    const double w = 2.0 * M_PI * k * fundamental_hz / kSr;
+    const double w = 2.0 * std::numbers::pi * k * fundamental_hz / kSr;
     double re = 0.0, im = 0.0;
     for (std::size_t n = 0; n < x.size(); ++n) {
         re += x[n] * std::cos(w * static_cast<double>(n));
@@ -104,7 +105,8 @@ double settled_peak(Comp& c, double amplitude, double seconds, double tone_hz = 
     const int window = static_cast<int>(kSr * 0.2);
     double peak = 0.0;
     for (int n = 0; n < total; ++n) {
-        const double y = c.process(amplitude * std::sin(2.0 * M_PI * tone_hz * n / kSr));
+        const double y =
+            c.process(amplitude * std::sin(2.0 * std::numbers::pi * tone_hz * n / kSr));
         if (n >= total - window) peak = std::max(peak, std::abs(y));
     }
     return peak;
@@ -175,7 +177,7 @@ StepResponse measure_step(double attack_ms, double release_ms, bool feedback) {
     reduction.reserve(static_cast<std::size_t>(pre + hold + post));
     for (int n = 0; n < pre + hold + post; ++n) {
         const double amplitude = (n < pre) ? quiet : (n < pre + hold ? 1.0 : quiet);
-        c.process(amplitude * std::sin(2.0 * M_PI * kToneHz * n / kSr));
+        c.process(amplitude * std::sin(2.0 * std::numbers::pi * kToneHz * n / kSr));
         reduction.push_back(-c.gain_reduction_db());
     }
 

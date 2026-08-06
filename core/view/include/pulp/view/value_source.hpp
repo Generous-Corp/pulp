@@ -1,18 +1,38 @@
 #pragma once
+#include <cstdint>
+#include <atomic>
 
 /// @file value_source.hpp
 /// Paint-safe host→view value channels. A plugin's audio/host thread publishes
-/// meter levels or a scalar readout; a view reads the latest value paint-safe on
-/// the FrameClock — no lock, no allocation on either side. This is the SDK
+/// meter levels, a scalar readout, or bounded occurrences; a view reads the
+/// latest value paint-safe on the FrameClock — no lock, no allocation on either
+/// side. This is the SDK
 /// default for the pattern every native-import host otherwise hand-rolls (a
 /// reader polled on the frame clock), and the subscription that lets a live
 /// meter keep an editor's frames alive (see needs_continuous_frames).
 
 #include <array>
+#include <cstddef>
+#include <type_traits>
 
 #include <pulp/runtime/triple_buffer.hpp>
 
 namespace pulp::view {
+
+class ValueChannelSet;
+
+namespace detail {
+class ScalarTelemetryState;
+class MeterTelemetryState;
+class VectorTelemetryState;
+class EventTelemetryState;
+
+template <typename T>
+struct PublishedValue {
+    T value{};
+    std::uint64_t publication = 0;
+};
+}  // namespace detail
 
 /// A single multi-channel meter reading. Fixed-capacity and trivially copyable
 /// so it can ride a `TripleBuffer` with no allocation on the publish path.
@@ -28,36 +48,166 @@ struct MeterFrame {
     int channels = 0;
 };
 
+/// Monotonic publish counter, shared by every value source.
+///
+/// Staleness is "the writer stopped publishing", NOT "the value stopped
+/// changing" — and the two are genuinely different. A compressor holding a
+/// steady -6 dB of gain reduction publishes the same number every block and
+/// must keep reading -6; a processor whose audio stopped publishes nothing and
+/// must decay to its neutral. Comparing values cannot tell those apart, so a
+/// reader watches this counter instead.
+class PublishCounter {
+public:
+    /// Writer (audio/host) thread, from publish(). Relaxed: the counter orders
+    /// no other memory, it only has to be monotonic and eventually visible.
+    void note_publish() noexcept { publish_seq_.fetch_add(1, std::memory_order_relaxed); }
+
+    /// Reader (UI) thread. Changes iff the writer published since the last read.
+    std::uint32_t publish_seq() const noexcept {
+        return publish_seq_.load(std::memory_order_relaxed);
+    }
+
+private:
+    std::atomic<std::uint32_t> publish_seq_{0};
+};
+
 /// Lock-free meter channel: the host publishes a `MeterFrame` from the
 /// audio/host thread; the view reads the latest frame paint-safe. Exactly one
 /// writer and one reader thread (the `TripleBuffer` contract).
-class MeterSource {
+class MeterSource : public PublishCounter {
 public:
+    ~MeterSource();
+
     /// Publish the latest reading. Call from the writer (audio/host) thread.
     /// Alloc-free and non-blocking — a fixed-size copy into the back buffer.
-    void publish(const MeterFrame& frame) { buffer_.write(frame); }
+    void publish(const MeterFrame& frame);
 
     /// Read the latest published reading. Call from the reader (UI) thread.
     /// Returns by value so the caller never holds a reference into the buffer.
-    MeterFrame read() { return buffer_.read(); }
+    MeterFrame read();
 
 private:
-    runtime::TripleBuffer<MeterFrame> buffer_;
+    friend class ValueChannelSet;
+    runtime::TripleBuffer<detail::PublishedValue<MeterFrame>> buffer_;
+    detail::MeterTelemetryState* telemetry_ = nullptr;
+    std::uint64_t writer_publication_ = 0;
+};
+
+/// A block of samples for a scope-style display — an envelope curve, a
+/// detector's output, a window of the signal a processor is actually working on.
+///
+/// Fixed capacity with a runtime valid count, the same shape as `MeterFrame`
+/// and `AudioProbeSnapshot`. That is what keeps it trivially copyable, which is
+/// what lets it ride a `TripleBuffer` with no allocation on the publish path and
+/// no new lock-free code to get wrong. The cost is a flat 3 × 16 KB per vector
+/// channel whether or not the publisher fills it; a channel is opt-in, so a
+/// plugin that declares none pays nothing.
+struct VectorFrame {
+    static constexpr int kMaxSamples = 4096;
+    std::array<float, kMaxSamples> samples{};
+    /// Valid samples in `samples`. Consumers must still bound their index by
+    /// `min(count, kMaxSamples)` — `publish()` clamps, but a frame read back
+    /// from anywhere else is not guaranteed to have.
+    int count = 0;
+};
+
+/// One occurrence inside an audio block.
+///
+/// `value` is payload, never presence: an occurrence whose value is zero still
+/// occupies a slot and is therefore distinct from an empty `EventFrame`.
+struct ValueEvent {
+    std::uint32_t frame_index = 0;
+    float value = 0.0f;
+};
+
+static_assert(std::is_trivially_copyable_v<ValueEvent>);
+
+/// A bounded list of occurrences from one audio block.
+///
+/// Fixed capacity keeps the payload trivially copyable for `TripleBuffer`.
+/// Publishers call `publish()` only for blocks they want the UI to observe;
+/// an empty frame is valid but carries no occurrence to dispatch.
+struct EventFrame {
+    static constexpr int kMaxEvents = 1024;
+    std::array<ValueEvent, kMaxEvents> events{};
+    int count = 0;
+    /// Source-owned generation used by a reader to identify this exact block.
+    /// Unlike `PublishCounter`, this travels atomically with the payload, so a
+    /// publish racing the UI snapshot cannot duplicate the newest block.
+    std::uint32_t publication = 0;
+};
+
+static_assert(std::is_trivially_copyable_v<EventFrame>);
+
+/// Lock-free vector channel: the writer publishes a block of samples, the view
+/// reads the latest block paint-safe. Same one-writer/one-reader contract as
+/// `MeterSource`.
+///
+/// Latest-wins, like every channel here: a block the reader never got to is
+/// silently replaced. That is correct for a visualization — a scope shows the
+/// current state of the signal, not a lossless history of it.
+class VectorSource : public PublishCounter {
+public:
+    ~VectorSource();
+
+    /// Publish a block from the writer (audio/host) thread. Alloc-free and
+    /// non-blocking: a bounded copy into the back buffer. More than
+    /// `VectorFrame::kMaxSamples` is truncated rather than rejected, so an
+    /// oversized block still renders its leading window instead of vanishing.
+    void publish(const float* samples, int count);
+
+    /// Read the latest published block from the reader (UI) thread.
+    VectorFrame read();
+
+private:
+    friend class ValueChannelSet;
+    runtime::TripleBuffer<detail::PublishedValue<VectorFrame>> buffer_;
+    detail::VectorTelemetryState* telemetry_ = nullptr;
+    std::uint64_t writer_publication_ = 0;
+};
+
+/// Lock-free event channel: the writer publishes the occurrences from one
+/// audio block and the view reads the latest completed block.
+///
+/// Like the other visualization channels this is latest-wins, not a lossless
+/// queue. A UI that misses an intermediate block observes the newest one.
+class EventSource : public PublishCounter {
+public:
+    ~EventSource();
+
+    /// Publish a block's occurrences from the writer thread. Alloc-free and
+    /// non-blocking. Oversized lists are truncated to their leading events.
+    void publish(const ValueEvent* events, int count);
+
+    /// Read the latest completed block from the reader thread.
+    EventFrame read();
+
+private:
+    friend class ValueChannelSet;
+    runtime::TripleBuffer<detail::PublishedValue<EventFrame>> buffer_;
+    detail::EventTelemetryState* telemetry_ = nullptr;
+    // Single-writer state: only publish() touches this counter.
+    std::uint64_t writer_publication_ = 0;
 };
 
 /// Lock-free scalar channel: a single paint-safe cached number (a readout value,
 /// a modulation ring's base→modulated position). Same one-writer/one-reader
 /// contract as `MeterSource`.
-class ScalarSource {
+class ScalarSource : public PublishCounter {
 public:
+    ~ScalarSource();
+
     /// Publish the latest value from the writer (audio/host) thread.
-    void publish(float value) { buffer_.write(value); }
+    void publish(float value);
 
     /// Read the latest value from the reader (UI) thread.
-    float read() { return buffer_.read(); }
+    float read();
 
 private:
-    runtime::TripleBuffer<float> buffer_{0.0f};
+    friend class ValueChannelSet;
+    runtime::TripleBuffer<detail::PublishedValue<float>> buffer_;
+    detail::ScalarTelemetryState* telemetry_ = nullptr;
+    std::uint64_t writer_publication_ = 0;
 };
 
 } // namespace pulp::view

@@ -35,6 +35,15 @@ pulp_add_test_suite(pulp-test-virtual-grid LIBRARIES pulp::view)
 # Text-accessibility scaffold
 pulp_add_test_suite(pulp-test-text-accessibility LIBRARIES pulp::view)
 # macOS NSAccessibility backend for TextAccessibilityNode
+# macOS menu-bar assembly: app-menu placement, Quit ordering, separator rules.
+# The menu is written once via [NSApp setMainMenu:] and never read back by
+# other code, so nothing else can catch a regression here.
+if(APPLE AND NOT PULP_IOS)
+    add_executable(pulp-test-app-menu-macos test_app_menu_mac.mm)
+    target_link_libraries(pulp-test-app-menu-macos
+        PRIVATE pulp::view Catch2::Catch2WithMain "-framework AppKit")
+    catch_discover_tests(pulp-test-app-menu-macos)
+endif()
 if(APPLE AND NOT PULP_IOS)
     add_executable(pulp-test-text-accessibility-macos test_text_accessibility_macos.mm)
     target_link_libraries(pulp-test-text-accessibility-macos
@@ -81,6 +90,19 @@ pulp_add_test_suite(pulp-test-continuous-frames LIBRARIES pulp::view)
 # frame path transitively.
 pulp_add_test_suite(pulp-test-trace-frame-pipeline LIBRARIES pulp::view)
 
+# Presentation + GPU-diagnostics policy (WAH-13): the embedded-editor
+# non-blocking default that both the Windows and Linux hosts now read from one
+# place, and the opt-in gate on Dawn timestamp queries.
+# pulp::view only: pulp::render does not exist in a no-GPU build, which is
+# the configuration the diff-coverage lane uses. The GpuSurface::Config
+# assertions are __has_include-guarded in the source.
+pulp_add_test_suite(pulp-test-present-policy LIBRARIES pulp::view)
+
+# Shared window->root inverse transform (WAH-10). Round-trip against the
+# forward transform, because that is the property that matters: the point paint
+# places at X must be the point input recovers from a click at X.
+pulp_add_test_suite(pulp-test-design-viewport-inverse LIBRARIES pulp::view)
+
 # Sub-view rect-level partial invalidation: View::request_repaint(Rect) →
 # WindowHost dirty-region accumulation. Pins the local->root mapping, the
 # bounding-box union, and the full-repaint escalations (no-arg, transform,
@@ -91,6 +113,38 @@ pulp_add_test_suite(pulp-test-partial-invalidation LIBRARIES pulp::view)
 # clips the canvas to pending_dirty_bounds() for a bounded frame and paints
 # unclipped for a full one, clearing the pending region after each paint.
 pulp_add_test_suite(pulp-test-dirty-region-consumption LIBRARIES pulp::view)
+
+# PendingDamage's take()/restore() consume-and-return contract — the operation
+# that stops a host from reading three accessors and then clearing a different
+# logical state, and that lets a frame which never reached the screen keep its
+# damage for the retry.
+pulp_add_test_suite(pulp-test-pending-damage LIBRARIES pulp::view)
+
+# PluginViewHost GPU-surface lifecycle notification: delayed creation (the
+# Windows attach-time ordering), detach, destruction, reattach, mid-session
+# recreation, and no-callback-after-unsubscribe. Deliberately does NOT link
+# pulp::render — the contract is about pointer publication, so the suite runs
+# in no-GPU configurations too.
+pulp_add_test_suite(pulp-test-gpu-surface-lifecycle LIBRARIES pulp::view)
+
+# The SHARED adapter binding (bind_gpu_surface) that wires a host's surface
+# lifecycle into a scripted UI session, plus the CPU-fallback diagnostic that
+# must stay silent while the surface is merely `pending`. Five format adapters
+# depend on this one helper.
+pulp_add_test_suite(pulp-test-gpu-surface-binding
+    LIBRARIES pulp::format pulp::view pulp::state)
+
+# The PURE half of the shared Windows/Linux frame pipeline: the damage -> clip
+# decision (hazard model, design-viewport mapping, pixel snapping) and the
+# scene paint body. Skia-free on purpose, so the logic the Windows and Linux
+# hosts share is exercised by the macOS gate.
+pulp_add_test_suite(pulp-test-plugin-frame-clip LIBRARIES pulp::view pulp::canvas)
+
+# The GPU drive on top of it: the visible-frame success contract (a failed
+# native wrap / blit / submit is never a rendered frame), damage retention
+# across a failed frame, and the bounded surface-recreate policy. Compiles to a
+# sentinel without Skia.
+pulp_add_test_suite(pulp-test-plugin-frame-renderer LIBRARIES pulp::view pulp::canvas)
 
 # paint_all compositing-layer contract (WI-27). After the FU-4 decomposition,
 # pins the push_effect_layers / pop_effect_layers save-depth invariant across
@@ -326,7 +380,19 @@ pulp_add_test_suite(pulp-test-background-scanner LIBRARIES pulp::host)
 
 # Right-click routing + root->local coordinate conversion shared by the window
 # hosts (test/test_pointer_dispatch.cpp).
-pulp_add_test_suite(pulp-test-pointer-dispatch LIBRARIES pulp::view)
+# Pointer dispatch, split into four focused suites (WAH-7). The single file
+# was ~1,370 lines spanning focus, coordinate mapping, delivery/capture/
+# reentrancy, and gestures — four subjects with four reasons to change, where a
+# failure in one told you little about where to look. Fixtures stayed LOCAL to
+# each suite rather than moving to a shared helper.
+pulp_add_test_suite(pulp-test-pointer-focus-lifecycle LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-pointer-coordinate-mapping LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-pointer-delivery LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-pointer-gestures LIBRARIES pulp::view)
+# The Windows editor's input state machine. Deliberately NOT gated on WIN32:
+# win_plugin_input_router.hpp carries no <windows.h> dependency precisely so its
+# re-entrancy and capture rules run on the required macOS gate.
+pulp_add_test_suite(pulp-test-win-plugin-input-router LIBRARIES pulp::view)
 
 # Windows plug-in editor host: LPARAM coordinate unpacking, physical->logical
 # scaling, WPARAM modifier mapping, and the GPU surface attach/detach contract
@@ -347,6 +413,16 @@ pulp_add_test_suite(pulp-test-hosting-input-smoke LIBRARIES pulp::view)
 # context delivers — it cannot be expressed with the pre-S11 process-wide
 # statics (test/test_interaction_multiinstance.cpp).
 pulp_add_test_suite(pulp-test-interaction-multiinstance LIBRARIES pulp::view)
+
+# Three REAL plugin instances — a MIDI effect, an instrument, and an audio
+# effect — alive in one process at the same time, the shape macOS gives a DAW
+# that loads a product family into one shared AUHostingServiceXPC. Covers what
+# the two suites above stop short of: live `Processor`s with their own state and
+# concurrent render threads, three editors painting side by side, and the
+# pointer-ROUTING verbs the hosts call (which read the process-global popup
+# mirror, not just the per-root slots) (test/test_multi_plugin_coexistence.cpp).
+pulp_add_test_suite(pulp-test-multi-plugin-coexistence
+    LIBRARIES pulp::view pulp::format pulp::state pulp::audio pulp::midi)
 
 # Browser (Emscripten) window host: the CSS-pixel <-> root coordinate mapping,
 # the HiDPI backing-store rule, browser-event translation, and View-tree routing

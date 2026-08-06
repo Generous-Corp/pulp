@@ -21,6 +21,8 @@
 ///
 /// Deterministic; no allocation after prepare().
 
+#include <pulp/signal/checked_allocation.hpp>
+
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -50,6 +52,15 @@ public:
         /// drums) 3 frames ≈ 8 ms — below any real inter-onset gap.
         int refractory_frames = 3;
     };
+
+    static bool checked_retained_bytes(int fft_size, std::uint64_t target_max_bytes,
+                                       std::uint64_t& bytes) noexcept {
+        CheckedRetainedByteCharge charge(target_max_bytes);
+        if (!charge.add<SampleType>(static_cast<std::uint64_t>(fft_size / 2 + 1)))
+            return false;
+        bytes = charge.total();
+        return true;
+    }
 
     /// RT contract: prepare() allocates the previous-magnitude buffer and is
     /// not audio-thread safe. After prepare(), analyze() and reset() are

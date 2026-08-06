@@ -133,6 +133,10 @@ Before configure/build, `pulp build` also compares the active project's pinned `
 
 When `pulp build` decides a CMake reconfigure is required, it also runs the FetchContent cache preflight from `pulp doctor --caches` first. If the shared cache (`~/Library/Caches/Pulp/fetchcontent-src/` on macOS, `$XDG_CACHE_HOME/pulp/fetchcontent-src/` on Linux, `%LOCALAPPDATA%/Pulp/fetchcontent-src/` on Windows) contains a dangling symlink or stale-commit entry, `pulp build` aborts with a one-screen remediation message instead of letting `cmake` blow up 200 lines into the configure log. Run `pulp doctor --caches --fix` to heal user-owned drift, or set `PULP_SKIP_CACHE_PREFLIGHT=1` to bypass the gate.
 
+For a cold or dependency-pin-stale build of the Pulp source checkout (not a standalone project), `pulp build` runs the pinned dependency bootstrap before CMake. Ordinary CMake-only reconfigures do not rerun the bootstrap. The large, slow-changing dependency sources remain in the machine-wide FetchContent cache and the checkout receives lightweight links. Dependencies patched by Pulp are first materialized into a small build-local mutable copy, so concurrent worktrees never modify the shared source. The cache and checkout may live on different macOS volumes; set `PULP_SHARED_FETCHCONTENT_SOURCE_DIR` to put the shared cache on a specific mounted volume. Configure then requires VST3 and, on macOS, AudioUnitSDK to be detected; it fails instead of silently producing a reduced build and test matrix. Compiled objects and generated files remain isolated in each worktree's build directory. Set `PULP_SKIP_DEPENDENCY_BOOTSTRAP=1` only as an emergency bypass when a developer-managed checkout is already complete but the shared-cache bootstrap itself is unavailable; the fail-closed CMake dependency checks still apply.
+
+When developing a dependency itself, use CMake's explicit `FETCHCONTENT_SOURCE_DIR_<UPPERCASE_NAME>` override to point that dependency at a writable checkout; an explicit source override takes precedence over the shared-cache default. Skia/Dawn development keeps using its specialized build options and cache selection. The automatic bootstrap optimizes the common pinned-dependency path without turning shared cached sources into the only supported workflow.
+
 On Windows, `pulp build` also selects a Visual Studio generator automatically when no active MSVC shell is detected on `PATH`.
 
 ### test
@@ -249,6 +253,8 @@ pulp run MyApp -- --arg1                            # pass arguments to the laun
 pulp run --headless --screenshot ui.png             # CI: render offscreen, save PNG
 pulp run --headless --screenshot ui.png --frames 60 # render N frames before capture
 pulp run --watch                                    # re-launch on source-file changes
+pulp run --inspect                                  # authenticated develop-profile inspector
+pulp run --inspect=observe                          # read-only inspector profile
 pulp run --audio-inspector                          # open the live Audio Inspector window
 pulp run --audio-probe-json probe.json              # dump live probe metrics as JSON, then exit
 pulp run --audio-scope-json scope.json              # dump live scope acquisition/measurements JSON
@@ -283,6 +289,62 @@ These flags are intended for CI auto-validation: any plugin standalone
 that respects `PULP_HEADLESS` / `PULP_SCREENSHOT` / `PULP_FRAMES` (or
 the matching argv flags) can be exercised end-to-end on every PR
 without a real window or virtual display.
+
+A screenshot-only run opens **no audio device** — no audio system, no
+device, no render callback — so it can never make sound on a shared or
+unattended machine. Meters and other live-signal UI therefore read zero
+in the capture, and the Settings tab lists no devices. Two ways to keep
+audio live: ask for a readout in the same run (`--audio-probe-json`,
+`--audio-scope-json`, `--audio-capture-wav`, `--audio-capture-rolling`,
+each produced by the render callback), or opt in explicitly with
+`PULP_SCREENSHOT_KEEP_AUDIO=1` / `StandaloneConfig::screenshot_keeps_audio`
+when the pixels themselves must show live signal.
+
+#### Development Inspector profiles
+
+Shipping is a separate build/package decision from these runtime profiles. See
+[Shipping a Development Inspector Endpoint](../guides/development-inspector-shipping.md)
+for the exact target manifest, binary proof, and the separate unsafe
+`runtime.eval` acknowledgement.
+
+Standalone inspector activation requires a GPU-enabled desktop build and a
+window host that can drain accepted owning-thread work while its event loop
+exits and defer a startup-failure close to a later native event turn. Pulp
+currently supplies that complete host contract in its built-in macOS
+standalone window hosts, for both rendering paths. On Windows and Linux,
+`WindowHost` instances come from an external factory. A factory host that wants
+to support an active inspector profile must override
+`event_loop_supports_exit_drain()`, `run_event_loop_until()`,
+`supports_deferred_close()`, and `request_close_deferred()`. The exit drain must
+keep its owning-thread dispatcher live until the readiness callback returns
+true, and deferred close must never invoke the close callback in the idle-pump
+stack that requested it. Active profiles fail closed when either contract is
+absent. A build with
+`PULP_ENABLE_GPU=OFF`, or a mobile build, keeps the inspector runtime disabled
+even when the protocol/client SDK components are present.
+
+- `--inspect` enables the `develop` profile for this standalone instance.
+- `--inspect=observe|develop` selects a named capability set.
+- `--inspect=custom --inspect-capability <id>...` selects an explicit,
+  nonempty capability set; the capability option is repeatable. A custom set
+  containing `state.write`, `test.input`, or `authoring.tweaks` must also contain
+  `session.control`, because mutations require a controller lease.
+- `--inspect-runtime-eval` is the separate high-risk acknowledgement for
+  arbitrary JavaScript evaluation in the live UI realm. It requires
+  `--inspect=develop`, or `--inspect=custom` with both `runtime.eval` and
+  `session.control`. No profile or saved developer preference implies it.
+- `--inspect=off` is the default and starts no listener or discovery artifact.
+
+The active session binds only to loopback, publishes an owner-private ephemeral
+record and credential, and displays an `INSPECT <profile>` badge in the live
+window. `PULP_INSPECT_PROFILE` and comma-separated
+`PULP_INSPECT_CAPABILITIES` are the equivalent host environment contract.
+The explicit evaluation acknowledgement is forwarded as
+`PULP_INSPECT_RUNTIME_EVAL=1` and is never persisted.
+Plugin scanning, validation, and an ordinary `pulp run` never activate it.
+The standalone runtime supports in-place scripted-UI hot reload. A processor
+that replaces its entire editor at runtime fails inspector startup closed
+because its borrowed sources cannot be reattached atomically.
 
 #### Live Audio Inspector flags
 
@@ -752,14 +814,16 @@ busy; it does not cancel in-flight jobs.
 ```bash
 pulp overflow status
 pulp overflow enable
-pulp overflow enable --to '"namespace-profile-generouscorp-macos"'
+pulp overflow enable --to '"macos-15"'
 pulp overflow disable
 pulp overflow threshold
 pulp overflow threshold 1
 ```
 
-`enable` sets the overflow target, `disable` removes it for future dispatches,
-and `threshold` gets or sets the busy-run count that trips overflow. See
+`enable` sets the overflow target, `disable` sets the `local-only` sentinel for
+future dispatches, and `threshold` gets or sets the busy-run count that trips
+overflow. An unset overflow variable restores the hosted `macos-15` fallback;
+it does not disable overflow. See
 [local-ci.md](../guides/local-ci.md#pulp-overflow-operator-surface) for the
 exact repository variables and rollback notes.
 
@@ -989,7 +1053,12 @@ and are only notarized + verified.
 
 For `.app` inputs, use `--output <dir>` to choose where the generated DMG lands
 instead of `artifacts/`, and `--entitlements <plist>` to override the default
-app-signing entitlements.
+app-signing entitlements. Inspector-capable apps must also pass
+`--ship-inspector`; apps that include `runtime.eval` additionally require the
+distinct `--ship-inspector-runtime-eval` acknowledgement. `share` scans the
+app executable against its adjacent capability sidecar before signing. For a
+prebuilt `.dmg` or `.pkg`, it mounts or expands the container and applies the
+same scan to every contained standalone app before accepting the flags.
 
 `release --dmg`/`--pkg` notarizes and staples the distributable it produces, so
 the artifact it leaves in `artifacts/` is Gatekeeper-ready, not merely signed.
@@ -1244,95 +1313,218 @@ Remaining limitation:
 
 **Status**: experimental
 
-Connect to a running Pulp inspector server. With no `--port`, the CLI
-auto-discovers the newest `pulp-inspector-*.port` file in the system temp
-directory.
+Authenticated low-level client for an explicitly enabled inspector session.
+Use `pulp run --inspect` (or `--inspect=<profile>`) in a GPU-enabled desktop
+build to activate a standalone; normal `pulp run`, GPU-off/mobile builds, and
+plugin-format launches start no endpoint. The client reads
+owner-private ephemeral discovery records, selects
+an exact non-reusable publication when requested, and proves possession of the
+session credential before sending a request.
+The offline `audit` subcommand is the exception: it ships even when
+`PULP_ENABLE_INSPECTOR=OFF`, never connects to a session, and blocks empty or
+unauditable targets. Artifact and manifest symlinks are rejected rather than
+followed, so an audit cannot escape the directory containing its evidence.
 
 ```bash
-pulp inspect
-pulp inspect --port 49152
-pulp inspect --command DOM.getDocument
-pulp inspect --command State.getParameters
+pulp inspect profiles --json
+pulp inspect audit path/to/MyProduct --json
+pulp inspect doctor --json
+pulp inspect list --json
+pulp inspect capabilities --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+pulp inspect --session SESSION_ID --instance INSTANCE_ID \
+  --publication PUBLICATION_ID --command State.getParameters
+pulp inspect set-parameter --id 7 --value 0.75 --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+pulp inspect inject-midi --kind note_on --channel 1 --note 60 --velocity 100 \
+  --duration-ms 250 --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+pulp inspect set-transport --playing true --position-samples 0 --tempo-bpm 120 --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
 ```
+
+The named commands are the stable orientation surface:
+
+| Command | Result |
+|---|---|
+| `profiles` | Declared `off`, `observe`, and `develop` capability sets. |
+| `audit ARTIFACT` | Read-only artifact check: canonical control manifest, profile/digest markers, declared capabilities, and known external surfaces. The artifact is never loaded. |
+| `list` | Live publications, including the exact session, instance, and non-reusable publication IDs needed by every operation. |
+| `capabilities` | Authenticated available/effective authority for one exact publication; all three identity options are required. |
+| `doctor` | Discovery runtime directory, live-session count, and issues. |
+| `screenshot` | Decode and save the selected standalone's in-process whole-window PNG. Missing host capability is an explicit unsupported result (exit 3), never an empty file. |
+| `set-parameter` | One bounded numeric parameter mutation under `state.write`. |
+| `inject-midi` | One bounded note-on/off event under `test.input`. |
+| `set-transport` | One idempotent partial standalone transport update under `test.input`. |
+
+Each supports human output and `--json`; JSON includes `schemaVersion: 1`.
+The installed Rust `pulp` forwards `inspect` to its installed sibling
+`pulp-cpp`, so these commands do not require source-build paths.
 
 Options:
 
-- `--host HOST` - connect to a host other than `127.0.0.1`
-- `--port PORT` - connect to an explicit inspector port
+- `--session ID` - select the exact live session
+- `--instance ID` - disambiguate an exact instance when a session ID is shared
+- `--publication ID` - pin one non-reusable publication generation; requires
+  `--session` and `--instance`
+- `--host HOST` - filter discovery by loopback host
+- `--port PORT` - filter discovery by port; this never bypasses authentication
 - `--command METHOD` - send one inspector command and print the response
 - `--params JSON` - JSON params for `--command`
 - `--output FILE` - write a one-shot command response to a file
+- `--out FILE` - write decoded PNG bytes for `screenshot`
+- `--id`, `--value`, `--normalized` - typed `set-parameter` fields
+- `--kind`, `--channel`, `--note`, `--velocity`, `--duration-ms` - bounded
+  `inject-midi` fields; note-on duration is 1 through 2000 ms
+- `--playing`, `--position-samples`, `--tempo-bpm` - partial `set-transport` fields
+- `--json` - stable JSON for named commands
 
-`Runtime.evaluate`, `Capture.screenshot`, and `Capture.screenshotNode` are
-reserved inspector protocol methods, but currently return explicit unavailable
-errors until script-engine and host-capture references are wired into the
-inspector domain.
+`audit` is the Phase 1 authoring spelling; it needs only an artifact path and
+does not use live-session options. It exits 0 for `pass`, 1 for `block`, and 2
+for invalid invocation. JSON uses `pulp.control.audit.v1`. A later `pulp
+control audit` command may become the canonical spelling; this command remains
+the no-activation developer preflight. Sidecars are capped at 1 MiB. Directory
+mode rejects absolute or traversing artifact identities and reads each candidate
+executable once; direct-file mode applies the same safe-identity rules and
+requires an exact-named sidecar's target or product identity to match the
+artifact filename. Canonical directory sidecars must also use the manifest
+target as their stem and cannot fall back to a uniquely marker-bearing renamed
+sibling. Plugin-format subtrees never count as standalone evidence. The same
+immutable bytes are used for selection,
+known-surface detection, marker verification, `artifactDigest`, and
+`consentIdentity`.
+
+Typed parameter, MIDI, and transport mutations require the exact three-part
+publication identity and a same-connection controller lease. `inject-midi`
+accepts only note-on/off events on public channels 1–16 with byte-range note
+and velocity values. A note-on requires a bounded duration and the client sends
+the matching note-off on the same connection before releasing its lease; a
+separate note-off is only an individual cleanup event. `set-transport` requires at least one of play state,
+nonnegative sample position, or finite tempo from 20 through 400 BPM. Their
+schema versions are `pulp.inspect.set-parameter.v1`,
+`pulp.inspect.inject-midi.v1`, and `pulp.inspect.set-transport.v1`.
+
+This is not a preset/filesystem or raw-event API. Parameter writes remain under
+`state.write`; transient authoring controls remain under `authoring.tweaks`;
+generic preset/filesystem operations, raw MIDI, and arbitrary scripting remain
+unavailable. Injected notes are released on lease loss, disconnect, or teardown.
+None of these typed commands routes through `Runtime.evaluate`.
+
+The transport is loopback-only, token-authenticated, bounded, and
+capability-enforced. Mutations additionally require the controller lease.
+If a sent request times out or the connection closes while awaiting its
+response, the client reports `{"mayHaveApplied":true}`; a timeout also fences
+the connection. Do not automatically retry that operation: the server may
+already have executed it.
+
+Use the named capture command when the artifact itself is wanted:
+
+```bash
+pulp inspect screenshot --out artifacts/live.png
+# Pin a specific publication when more than one app is live:
+pulp inspect screenshot --out artifacts/live.png \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+```
+
+The command requests `Capture.screenshot` inside the running app, decodes the
+base64 response, verifies the PNG signature and dimensions, and atomically
+writes the output. It therefore works from an SSH shell without granting the
+shell or `sshd` macOS Screen Recording permission. It prefers the selected
+Pulp standalone's readable back buffer and otherwise uses Pulp's in-process
+`capture_view()` renderer (portable Skia/GPU or a registered provider). It does
+not capture a plugin editor as composited by Logic, REAPER, or another external
+host. An active design viewport requires live back-buffer capture; Pulp does not
+re-layout that live tree at window size and mislabel the result as the visible
+frame. If neither capture route is available, or the view contains an
+OS-composited native overlay, the app does not advertise `capture.image`; the
+command reports `unsupported`, exits 3, and writes nothing. `--json` uses the
+`pulp.inspect.screenshot.v1` schema. Capability publication reflects the initial
+tree. If an in-place UI reload later introduces a native overlay or another
+unsupported requirement, the existing session remains stable but the request
+returns `capture_unavailable` instead of emitting an incomplete frame.
+
+The underlying `Capture.screenshot` response contains a base64 PNG plus the
+selected standalone window's dimensions. Screenshot-capable sessions and
+clients use a bounded 16 MiB message ceiling (large enough for ordinary
+multi-megabyte window PNGs); larger responses fail explicitly.
+`Capture.screenshotNode` remains explicitly unavailable.
+`Runtime.evaluate` is unavailable in normal launches, but an explicitly wired
+and enabled custom fixture can evaluate code; treat that opt-in as remote code
+execution.
+
+Installed `pulp-mcp` uses the same in-process typed client rather than spawning
+the CLI. Its `pulp_inspect_profiles`, `pulp_inspect_list`,
+`pulp_inspect_capabilities`, and `pulp_inspect_doctor` tools provide orientation;
+operational tools require the exact identity returned by `list`. Success
+payloads include that identity, and errors use
+`structuredContent: {ok:false,error:{code,message,data}}`.
 
 ### motion
 
 **Status**: experimental
 
-Agent-facing wrappers around the inspector `Motion.*` protocol. Start the
-host with `PULP_MOTION_SERVER=1`, then use `pulp motion` to record traces,
-inspect active traces, replay `.motion.jsonl` fixtures, and toggle motion-cost
-sampling from a terminal.
+Experimental wrappers around the inspector `Motion.*` protocol. Normal Pulp
+launches do not start this endpoint, and `PULP_MOTION_SERVER` is not
+implemented. The live commands require a Pulp source checkout plus a custom
+fixture that explicitly constructs and wires the inspector server.
 
 ```bash
 pulp motion record --view Card --out card-fade.motion.jsonl
-pulp motion stop --trace-id 1
+# copy the exact stop command printed by record:
+pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE --publication PUBLICATION
 pulp motion snapshot
 pulp motion list-traces
-pulp motion load-fixture card-fade.motion.jsonl
-pulp motion scrub 30
-pulp motion play
-pulp motion pause
-pulp motion cost enable
-pulp motion cost disable
+pulp motion scrub 30 --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp motion play --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp motion pause --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp motion cost enable --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp motion cost disable --session SESSION --instance INSTANCE --publication PUBLICATION
 ```
 
 Options:
 
-- `--host HOST` - inspector host, defaulting to `127.0.0.1`
-- `--port PORT` - inspector port; defaults to auto-discovery from the same temp-file hint as `pulp inspect`
+- `--port PORT` - inspector port; defaults to owner-private authenticated discovery
+- `--session ID --instance ID --publication ID` - select one exact
+  authenticated publication; all three are required for stop, scrub, play,
+  pause, and cost mutations
 - `--json` - emit JSON where the subcommand supports it
 
 Subcommands:
 
 | Subcommand | Inspector method | Description |
 |------------|------------------|-------------|
-| `record [--view NAME] [--out FILE] [--fps N] [--metrics SPEC]` | `Motion.startTrace` | Start a trace and print the trace id. `--out` names the intended fixture path and prints sink guidance; the CLI does not write JSONL itself. |
-| `stop [--trace-id N]` | `Motion.stopTrace` | Release an active trace. |
+| `record [--view NAME] [--out FILE] [--fps N] [--metrics SPEC]` | `Motion.startTrace` | Resolve one exact publication, start a trace against it, and print the trace id plus a pinned stop command. `--out` names the intended fixture path and prints sink guidance; the CLI does not write JSONL itself. |
+| `stop [--trace-id N] --session ID --instance ID --publication ID` | `Motion.stopTrace` | Release an active trace on the exact publication selected by `record`; the full selector is required. |
 | `snapshot` | `Motion.snapshot` | Print tracing, active-trace, emitted-event, and cost-attribution state. |
 | `list-traces` | `Motion.listTraces` | List inspector-owned trace ids. |
-| `load-fixture PATH` | `Motion.loadFixture` | Load a `.motion.jsonl` fixture into the scrubber. |
-| `scrub FRAME` | `Motion.scrubTo` | Move the scrubber playhead to a frame. |
-| `play` / `pause` | `Motion.play` / `Motion.pause` | Control fixture playback. |
-| `cost enable` / `cost disable` | `Motion.enableCost` / `Motion.disableCost` | Toggle the cost-attribution channel for the session. |
+| `scrub FRAME --session ID --instance ID --publication ID` | `Motion.scrubTo` | Move the exact publication's scrubber playhead to a frame. |
+| `play` / `pause` with exact selection | `Motion.play` / `Motion.pause` | Control fixture playback without rediscovering a replacement process. |
+| `cost enable` / `cost disable` with exact selection | `Motion.enableCost` / `Motion.disableCost` | Toggle the cost-attribution channel for the exact publication. |
 
 See [Motion Observability](../guides/motion-observability.md) for the full
 runtime trace, fixture replay, and cost-attribution workflow.
+`Motion.loadFixture` is intentionally unavailable over an authenticated
+inspector because its server-side path parameter would grant filesystem
+authority. Load replay fixtures inside an explicitly owned test host instead.
 
 ### trace
 
 **Status**: experimental
 
-Agent-facing wrappers around the inspector `Trace.*` Perfetto-tracing
-protocol. Start the host with `PULP_TRACE_SERVER=1`, then use `pulp trace` to
-start/stop a tracing session, run SQL over the captured `.pftrace`, run L0
-preset queries, or ask for a one-shot narrated root cause. Motion tells you
-*what changed* on screen; tracing tells you *where the time went*.
+The live-session `Trace.*` wrappers are experimental. Normal Pulp launches do
+not start their endpoint, and `PULP_TRACE_SERVER` is not implemented. They
+require a Pulp source checkout plus an explicitly owned host that constructs
+`InspectorServer`, wires `DomainHandler`, and publishes authenticated
+discovery. Offline
+`query --trace`, `fetch`, `doctor`, and `open` remain usable without a live
+inspector session.
 
 ```bash
-pulp trace start --categories dsp,render --out /tmp/x.pftrace
-pulp trace stop                                   # → prints the .pftrace path
-pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20"
-pulp trace query "SELECT count(*) FROM slice" --trace /tmp/x.pftrace   # offline, no live session
-pulp trace query --preset dsp-hotspots
-pulp trace slowest-frames
-pulp trace xruns
-pulp trace layout-vs-paint
+pulp trace start --categories dsp,render --ring-mb 128
+# copy the exact stop command printed by start:
+pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION  # → prints the .pftrace path
+pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20" --trace /tmp/x.pftrace
 pulp trace snapshot
-pulp trace explain "why is my plugin slow to open?"
 pulp trace doctor                                 # readiness: inspector + build + trace_processor
 pulp trace fetch                                  # download the pinned trace_processor (zero-install offline query)
 pulp trace open /tmp/x.pftrace                    # serve on loopback + open in the Perfetto UI
@@ -1340,25 +1532,27 @@ pulp trace open /tmp/x.pftrace                    # serve on loopback + open in 
 
 Options:
 
-- `--port PORT` - inspector port; defaults to `9147` / `$PULP_INSPECTOR_PORT`
+- `--port PORT` - optional filter for owner-private authenticated discovery;
+  `$PULP_INSPECTOR_PORT` supplies the same explicit filter
+- `--session ID --instance ID --publication ID` - select one exact
+  authenticated publication; all three are required for `stop` and for the
+  reserved live `query` / `explain` methods. An unqualified `start` resolves
+  the selector before mutating and prints the pinned follow-up command.
+  Publication IDs are non-reusable across server restarts.
 - `--json` - emit the raw inspector JSON response instead of the pretty form
 
 Subcommands:
 
 | Subcommand | Inspector method | Description |
 |------------|------------------|-------------|
-| `start [--categories LIST] [--out FILE.pftrace] [--ring-mb N]` | `Trace.startSession` | Begin a session recording the selected span categories into an in-process ring. |
+| `start [--categories LIST] [--ring-mb 1..512]` | `Trace.startSession` | Begin a session recording the selected span categories into a bounded in-process ring. The host owns the flushed trace destination; remote clients cannot select a filesystem path. |
 | `stop` | `Trace.stopSession` | Flush the session and print the `.pftrace` path. |
-| `query "<sql>" [--format json\|table\|csv]` | `Trace.query` | Run SQL over the live captured trace; JSON by default. |
+| `query "<sql>" [--format json\|table\|csv]` | `Trace.query` | Reserved live surface; currently fails with `capability_unavailable`. |
 | `query "<sql>" --trace FILE.pftrace` | `trace_processor` (offline) | Run SQL against a flushed `.pftrace` without a live session, via `trace_processor_shell` (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`; see `pulp trace fetch` / `doctor`). Returns trace_processor's native table; `--format`/`--preset` are live-path only. |
-| `query --preset <name>` | `Trace.query` | Run a named trace-stdlib preset. |
-| `slowest-frames` | `Trace.query` | L0 preset: frames over the vsync budget, worst first. |
-| `xruns` | `Trace.query` | L0 preset: audio xrun / deadline-miss events. |
-| `dsp-hotspots` | `Trace.query` | L0 preset: per-node DSP cost, most expensive first. |
-| `layout-vs-paint` | `Trace.query` | L0 preset: one-row-per-category frame cost split. |
-| `snapshot` | `Trace.snapshot` | Print `{tracing_active, categories, ring_bytes, out_path}`. |
-| `explain "<question>"` | `Trace.explain` | One-shot narrated root cause + chain of evidence + fix. |
-| `doctor` | client-side + `Trace.snapshot` | Readiness check. Aggregates inspector reachability and `trace_processor` availability (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`) with the inspector's `compiled_in` / `active` / `last_trace_path`, then reports `ready_to_capture` and `ready_to_query`. `--json` emits the flat readiness object. |
+| `query --preset <name>` and named preset verbs | `Trace.query` | Reserved; currently fail with `capability_unavailable`. |
+| `snapshot` | `Trace.snapshot` | Print `compiled_in`, process-global `active`, per-publication `trace_control_available`, and the optional `last_trace_path`. |
+| `explain "<question>"` | `Trace.explain` | Reserved; currently fails with `capability_unavailable`. Use the `trace-analysis` skill with a flushed `.pftrace`. |
+| `doctor` | client-side + `Trace.snapshot` | Readiness check. Uses the authenticated `Trace.snapshot` request as its inspector availability check, then combines it with `trace_processor` availability (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`) and the inspector's `compiled_in` / `active` / `trace_control_available` / `last_trace_path` to report `ready_to_capture` and `ready_to_query`. `--json` emits the flat readiness object. |
 | `fetch` | client-side | Download + SHA-256-verify the pinned `trace_processor_shell` (Perfetto v57.2) into `$PULP_HOME` so offline `query --trace` works zero-install. Idempotent (no-op when present). `--json` emits `{version, platform, path, already_present}`. |
 | `open <file.pftrace> [--no-browser] [--keep-alive-seconds N]` | client-side | Serve the trace from a loopback-only HTTP server and open it in the Perfetto UI via `?url=` (browsers block `file://`). `--no-browser` prints the URLs to paste; `--keep-alive-seconds` bounds how long the server waits for the UI to fetch. `--json` emits `{trace_path, serve_url, perfetto_url, browser_opened, served}`. |
 
@@ -1423,8 +1617,9 @@ file error.
 **Status**: partial
 
 Import designs from local Figma `.fig` files, Figma REST/file JSON, the Pulp
-Figma plugin, Stitch, v0, Pencil, Claude Design, React JSX, or Google DESIGN.md
-source files into generated Pulp UI code.
+Figma plugin, Stitch, v0, Pencil, Claude Design, generic runnable HTML, React
+JSX, or Google DESIGN.md source files into generated Pulp UI code. Runnable
+HTML auto-detects its source, so `--from` is optional for that lane.
 
 ```bash
 pulp import-design --from fig --file design.fig --outline
@@ -1437,12 +1632,14 @@ pulp import-design --from v0 --url 'https://v0.dev/t/abc123' --output ui.js
 pulp import-design --from pencil --file ui.json --output ui.js --tokens tokens.json
 pulp import-design --from v0 --file card.tsx --dry-run
 pulp import-design --from claude --file design.html --classnames classnames.json
+pulp import-design --file design.html --output ui.js
 pulp import-design --from designmd --file DESIGN.md --tokens out.json
 pulp import-design --from jsx --file bundle.js --mode live --emit js --output live-ui.js
 pulp import-design --from jsx --file bundle.js --mode baked --emit cpp --output imported_ui.cpp
 ```
 
-Accepted `--from` values: `fig`, `figma`, `figma-plugin`, `stitch`, `v0`, `pencil`, `claude`, `designmd`, `jsx`.
+Accepted `--from` values: `fig`, `figma`, `figma-plugin`, `stitch`, `v0`,
+`pencil`, `claude`, `html`, `designmd`, `jsx`.
 
 Supports `--url` (fetched through an argv-safe `curl` invocation into a unique temporary file), `--frame` (Figma frame selection; required guid or name for `--from fig` unless using `--outline`), `--outline` / `--page` for local `.fig` files, and `--screen` (Stitch screen selection). See [Design Import API Reference](design-import.md) for the full flag list.
 
@@ -1455,7 +1652,8 @@ per-stage timing breakdown on stdout:
 
 `decode` covers everything that produces the parseable envelope content (for
 `--from fig` that includes the offline Node decode subprocess); `render`
-appears only when `--validate` actually rendered. Durations print as `123ms`
+appears whenever validation rendered. Runnable browser-backed HTML validates
+automatically; other lanes require `--validate`. Durations print as `123ms`
 below one second and `4.47s` at or above it; the total is measured to the
 moment of printing, so it also absorbs writes and reports.
 
@@ -1474,6 +1672,10 @@ exit codes, diagnostics, and current limitations).
 | `--mode {live\|baked}` | Select the import runtime model. Built-in default: `live`; persistent default: `import_design.default_mode`. `baked` emits canonical IR or baked C++ via `--emit ir-json\|cpp`. |
 | `--snapshot-semantics {fail\|warn\|accept}` | JSX baked snapshot policy. `fail` rejects dynamic APIs by default, `warn` proceeds with diagnostics, and `accept` proceeds silently. |
 | `--allow-network-fetch` | Allow DesignIR asset-manifest HTTP(S) fetches at import time. |
+| `--browser <path>` | Explicit Chromium/Chrome executable for browser-solved HTML import; overrides `PULP_DESIGN_BROWSER`, browser mode, managed Chrome for Testing, and system discovery. |
+| `--browser-interactions <json>` | Apply a `pulp-browser-interactions-v1` click/type/wait plan before browser evidence capture. Without it, capture remains on the settled initial state. |
+| `--offline` | Explicitly use the lower-fidelity static HTML parser instead of Chromium. |
+| `--allow-browser-network` | Permit only public HTTPS origins declared by the source document during browser evaluation; local/private destinations remain blocked and fetched content is recorded in capture provenance. |
 | `--asset-cache <path>` | Asset cache directory for HTTP(S) imports. Defaults to `PULP_IMPORT_ASSET_CACHE` or the user cache. |
 | `--asset-timeout-ms <ms>` | Per-request network asset timeout. |
 | `--asset-hash <uri=sha256>` | Expected content hash for an asset URI; may be repeated. |
@@ -1482,7 +1684,8 @@ exit codes, diagnostics, and current limitations).
 | `--no-emit-classnames` | Skip the classname artifact for the run. |
 | `--tokens <path>` | Output token file (default: `tokens.json`; `theme.css` for `--format css-variables`). |
 | `--emit-w3c-tokens <path>` | Additionally write the imported tokens as a W3C Design Tokens (DTCG) document (`-` = stdout). `/` in token names nests into DTCG groups, dimensions use the `{"value": N, "unit": "px"}` object form, and variable provenance (id/collection/mode/adapter) lands under `$extensions["dev.pulp.source"]`. String tokens whose names clearly denote a font family (segments like `fontFamily`/`typeface`/`font`, split on `/` or `.`) emit as `$type: "fontFamily"` (comma-separated stacks become the DTCG array form); all other strings are parked losslessly under the document-root `$extensions["dev.pulp.nonStandardTokens"]` with their provenance, so every emitted token carries a standard DTCG `$type`. Additive — no other output changes. |
-| `--screenshot-backend {skia\|coregraphics}` | `--validate` render backend. `skia` (default) composites file-backed images; `coregraphics` draws an image's filename placeholder, so it is not faithful for asset-rich designs. |
+| `--validate` | Render generated JS and validate layout. Browser-backed HTML always runs its required browser-to-DesignIR A/B validation; this flag additionally publishes convenience render/diff files beside the primary output. |
+| `--screenshot-backend {skia\|coregraphics}` | Validation render backend; browser-backed HTML uses it for the automatic A/B gate. `skia` (default) composites file-backed images; `coregraphics` draws an image's filename placeholder, so it is not faithful for asset-rich designs. |
 | `--knob-style {silver\|sprite\|auto\|standard\|default}` | Knob rendering mode. The default is the native silver/vector path; `sprite` opts into PNG sprite skinning. |
 | `--fader-style {skin\|skinned\|default\|plain}` | Fader rendering mode. The default is derived skinning; `default` and `plain` opt out to the unskinned native look. |
 | `--meter-style {skin\|skinned\|default\|plain}` | Meter rendering mode. The default is derived skinning; `default` and `plain` opt out to the unskinned native look. |
@@ -1505,6 +1708,13 @@ Set `import_design.default_emit cpp` for baked C++ by default. If only
 session overrides, use `PULP_IMPORT_DESIGN_DEFAULT_MODE` and
 `PULP_IMPORT_DESIGN_DEFAULT_EMIT`; direct CLI flags override the matching
 config and environment value. `pulp status` shows the effective defaults.
+
+Browser selection is `--browser` > `PULP_DESIGN_BROWSER` >
+`PULP_DESIGN_BROWSER_MODE` / `import_design.browser` > an explicitly installed
+managed Chrome for Testing > system Chrome/Chromium. The default is `auto`;
+imports never download a browser. Use `pulp tool install
+chrome-for-testing`, `pulp tool doctor chrome-for-testing --run`, and `pulp
+tool uninstall chrome-for-testing` for the opt-in managed lifecycle.
 
 With `--from jsx --mode live --emit js`, the CLI writes the precompiled JSX
 runtime bundle verbatim for runtime import. That pass-through path rejects
@@ -1544,6 +1754,13 @@ pulp seq schema
 pulp seq validate song.pulpseq.json
 pulp seq explain song.pulpseq.json [--sample-rate 48000]
 pulp seq apply song.pulpseq.json commands.json [--out changed.pulpseq.json]
+pulp seq export song.pulpseq.json --format smf --plan
+pulp seq export song.pulpseq.json --format smf --out song-smf \
+  [--accept-loss concept-id]...
+pulp seq export song.pulpseq.json --format dawproject --out song.dawproject \
+  [--accept-loss concept-id]...
+pulp seq import song.mid --format smf --out imported-song
+pulp seq import song.dawproject --format dawproject --out imported-song
 ```
 
 `apply` accepts an array of typed command envelopes. It prints the committed
@@ -1551,6 +1768,29 @@ project and revision as JSON; `--out` also writes the canonical project member
 through a sibling temporary file. Invalid projects, unknown command types,
 precondition conflicts, and empty command batches fail without publishing a
 partial edit.
+
+`export` first plans conversion against the selected format and stops unless
+every reported lossy concept has its own repeated `--accept-loss <concept-id>`
+argument. There is deliberately no force or accept-all switch: a newly
+introduced loss stops an unattended pipeline until that exact concept is
+reviewed. Unknown concept IDs are rejected. `--plan` rejects `--out` and
+`--accept-loss`, always writes nothing, and returns the canonical manifest plus
+`required_consent`, including for a lossless project that could otherwise
+export immediately. Publishing requires `--out`. Normal refusal and successful
+export results carry the same manifest object.
+
+Import publishes only to a new directory. SMF export likewise publishes a new
+artifact directory containing `project.mid` and the canonical interchange
+manifest. DAWproject export instead publishes one standard `.dawproject` ZIP
+containing root `project.xml`, the manifest, and referenced media entries (for
+example under `audio/`). Every destination, including a symlink, must not
+already exist. Staging is private and publication is atomic and no-replace.
+
+SMF import accepts a MIDI file. DAWproject import accepts a `.dawproject` ZIP,
+requires a bounded root `project.xml`, rejects unsafe, duplicate, encrypted, or
+symlink entries, and resolves media only from safe package-relative entries.
+Both imports create `project.json` in the new destination plus sealed media
+where the imported document references it.
 
 `explain` reports the compiled track plan, including clip IDs, note-event and
 audio-region counts, and automation presence. Plugin latency is a host-binding
@@ -1567,7 +1807,8 @@ compiler lowers today is produced in band, so tracks report `synchronous`.
 
 See [One typed edit through CLI and MCP](../guides/timeline-sdk.md#one-typed-edit-through-cli-and-mcp)
 for a generated-schema lookup, complete command envelope, transactional apply,
-validation, explanation, render, and the equivalent five-tool MCP flow.
+validation, explanation, render, import/export interchange, and the equivalent
+ten-tool MCP flow.
 
 ### render
 
@@ -1973,7 +2214,7 @@ Subcommands:
 | `install <url>` | Clone an add-on importer from a git URL with the user's own git credentials, read its `tool.json` + terms **from the cloned repo** (never from anything the SDK ships), enforce the SPI version window, run the accept-to-run terms gate, and install the tree under `~/.pulp/tools/<id>/` with an install record. Detection merges the installed importer's own `known-frameworks.json` on the next `pulp import detect`. A private repo works exactly when the user can `git clone` it. |
 | `uninstall <id>` | Remove an installed importer by id: deletes the install tree under `~/.pulp/tools/<id>/`, the install record under `~/.pulp/importers/`, and any installed skill. |
 | `inspect --from <fw> <dir>` | Resolve the importer (tool registry or `--importer-cmd`) and run its SPI `analyze` verb to produce a ProjectIR. When no importer is resolvable, prints the install hint and exits non-zero. ProjectIR can include `integration_requirements` for optional packages, SDK/provider options, and source assets the scaffold needs to preserve. |
-| `emit --from <fw> <dir> --output <out>` | Resolves the importer, runs its SPI `analyze` then `emit` verbs to get an **EmissionManifest**, then the **SDK writes** a buildable Pulp migration scaffold under `<out>`. The importer only proposes files (generated/stub carry inline content; verbatim portable-core copies and safe source assets carry an absolute `copy_from`); the SDK materialises them, runs a clean-room output scan over every generated file, and writes `migration_status.json` + a `.pulp-import-provenance.json` marker. Skewed/symmetric source parameter curves emit as shaped `ParamRange`s (skew + symmetric fields), no longer downgraded to linear. |
+| `emit --from <fw> <dir> --output <out>` | Resolves the importer, runs its SPI `analyze` then `emit` verbs to get an **EmissionManifest**, then the **SDK writes** a buildable Pulp migration scaffold under `<out>`. The importer only proposes files (generated/stub carry inline content; verbatim portable-core copies and safe source assets carry an absolute `copy_from`); the SDK materialises them, runs a framework-source output scan over every generated file, and writes `migration_status.json` + a `.pulp-import-provenance.json` marker. Skewed/symmetric source parameter curves emit as shaped `ParamRange`s (skew + symmetric fields), no longer downgraded to linear. |
 
 **`install` flags:** `--accept-importer-terms` accepts the terms non-interactively for CI (still recorded under `~/.pulp`); `--force` reinstalls even when an up-to-date record already exists.
 
@@ -1996,7 +2237,7 @@ Subcommands:
 
 The importer is resolved against `tools/packages/tool-registry.json`: an importer tool declares the `frameworks` it handles plus `spi_min` / `spi_max` (the SPI version window) and `sdk_min` / `sdk_max`. The SDK negotiates the SPI version on every call and fails loudly on a mismatch ("upgrade Pulp" / "upgrade the importer") rather than misbehaving silently. The data contracts are `tools/import/schemas/project-import-ir-v0.schema.json` and `tools/import/schemas/import-spi-v0.schema.json`.
 
-**Who writes what (clean-room boundary).** The importer is a separate add-on and never writes into the user's tree — it returns an EmissionManifest over the SPI `emit` verb. The **SDK** writes every file, and before writing each `generated` file it runs a clean-room output denylist scan (sourced from the known-frameworks content markers) that rejects framework source or vendor banners; a `copied-user-file` is the user's own DSP, copied verbatim and recorded in provenance, so it is exempt. A misbehaving importer therefore cannot smuggle framework code into the scaffold. The SDK also writes `migration_status.json` (the migration verdict + unresolved notes) and `.pulp-import-provenance.json` (importer id, framework, SPI version, emit timestamp, source-tree hash, per-file provenance).
+**Who writes what (provenance boundary).** The importer is a separate add-on and never writes into the user's tree — it returns an EmissionManifest over the SPI `emit` verb. The **SDK** writes every file, and before writing each `generated` file it runs a framework-source OUTPUT denylist scan (sourced from the known-frameworks content markers) that rejects framework source or vendor banners; a `copied-user-file` is the user's own DSP, copied verbatim and recorded in provenance, so it is exempt. A misbehaving importer therefore cannot smuggle framework code into the scaffold. The SDK also writes `migration_status.json` (the migration verdict + unresolved notes) and `.pulp-import-provenance.json` (importer id, framework, SPI version, emit timestamp, source-tree hash, per-file provenance).
 
 ### identity
 
@@ -2118,6 +2359,9 @@ Supported import-design keys:
   `--emit`. `PULP_IMPORT_DESIGN_DEFAULT_EMIT` overrides this value for one
   environment/session. If the default mode is `baked` and this key is unset,
   Pulp implies `ir-json`.
+- `import_design.browser` — `auto | managed | system` (default `auto`).
+  `PULP_DESIGN_BROWSER_MODE` overrides the config value; `PULP_DESIGN_BROWSER`
+  and `--browser` are higher-precedence explicit executable paths.
 
 Supported Claude Code plugin keys:
 
@@ -2189,6 +2433,31 @@ graph's sample rate — is absent rather than present-and-wrong. Two catalogs
 build their params from a spec table at construction time; those nodes are
 marked `baked_params_computed_at_runtime` instead of being reported as having
 no controls.
+
+### forge
+
+**Status**: experimental
+
+Exports the semantic Forge catalog as JSON without parsing Pulp's C++ headers:
+
+```bash
+pulp forge catalog export --json
+pulp forge catalog export --check
+pulp forge catalog export --write
+```
+
+Each node includes its stable key, label, description, finite realization axes,
+and concrete realizations with `type_id` plus explicit axis settings. Parameter
+vocabulary includes realization-scoped named choices and one numeric
+`min`/`max`/`default` contract per applicable realization. Those numbers are
+joined from every constructed baked node at export time; descriptors
+intentionally do not duplicate them.
+
+SDK installs carry the checked snapshot at
+`share/pulp/forge-catalog.json`. Forge should read that file from the selected
+SDK prefix so the vocabulary and numeric contract always match the SDK it
+builds against. `--check` fails if the committed snapshot is stale or if an
+expected semantic node is missing from the export.
 
 ### minos
 

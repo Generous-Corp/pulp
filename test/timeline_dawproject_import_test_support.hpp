@@ -166,7 +166,7 @@ PlaybackTrace play_imported_project(std::shared_ptr<const Project> project,
     const auto note_track =
         std::find_if(sequence->tracks().begin(), sequence->tracks().end(), [](const Track& track) {
             const auto clips = track.clips();
-            return !clips.empty() && std::holds_alternative<NoteContent>(clips[0].content());
+            return !clips.empty() && std::holds_alternative<MidiContent>(clips[0].content());
         });
     REQUIRE(note_track != sequence->tracks().end());
     ArrangementNoteRenderer notes(note_track->id());

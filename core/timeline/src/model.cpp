@@ -1,3 +1,4 @@
+#include <pulp/timeline/asset_path.hpp>
 #include <pulp/timeline/model.hpp>
 #include <pulp/timeline/schema_json.hpp>
 
@@ -11,7 +12,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cmath>
 #include <limits>
 #include <utility>
 
@@ -70,6 +70,13 @@ bool valid_locator_kind(AssetLocatorKind kind) noexcept {
     return false;
 }
 
+bool valid_locator(const AssetLocator& locator) noexcept {
+    if (!valid_locator_kind(locator.kind) || locator.hint.empty())
+        return false;
+    return locator.kind != AssetLocatorKind::PackageRelative ||
+           package_relative_path_is_lexically_safe(locator.hint);
+}
+
 // Validates a media asset and canonicalizes its representation order. Shared by
 // project construction and asset-append so both paths enforce the identical
 // sealed-identity invariant: an asset with an invalid or empty ContentHash is
@@ -85,7 +92,7 @@ std::optional<ModelError> validate_media_asset(MediaAsset& asset) {
     if (!valid_storage_policy(asset.storage_policy))
         return ModelError{ModelErrorCode::InvalidAssetStoragePolicy, asset.id, {}};
     for (const auto& locator : asset.locators)
-        if (!valid_locator_kind(locator.kind) || locator.hint.empty())
+        if (!valid_locator(locator))
             return ModelError{ModelErrorCode::InvalidAssetLocator, asset.id, {}};
     std::vector<std::string_view> roles;
     roles.reserve(asset.representations.size());
@@ -102,7 +109,7 @@ std::optional<ModelError> validate_media_asset(MediaAsset& asset) {
         roles.push_back(representation.role);
         hashes.push_back(representation.content_hash);
         for (const auto& locator : representation.locators)
-            if (!valid_locator_kind(locator.kind) || locator.hint.empty())
+            if (!valid_locator(locator))
                 return ModelError{ModelErrorCode::InvalidAssetLocator, asset.id, {}};
     }
     std::sort(roles.begin(), roles.end());
@@ -213,19 +220,25 @@ runtime::Result<ItemId, ModelError> ItemIdAllocator::allocate() noexcept {
     return runtime::Result<ItemId, ModelError>(runtime::Ok(id));
 }
 
-runtime::Result<NoteContent, ModelError> NoteContent::create(std::vector<NoteEvent> notes) {
-    return create(std::move(notes), {}, 0);
+runtime::Result<MidiContent, ModelError> MidiContent::create(std::vector<NoteEvent> notes) {
+    return create(std::move(notes), {}, 0, {});
 }
 
-runtime::Result<NoteContent, ModelError> NoteContent::create(std::vector<NoteEvent> notes,
+runtime::Result<MidiContent, ModelError> MidiContent::create(std::vector<NoteEvent> notes,
                                                              std::vector<NoteModifier> modifiers,
                                                              std::uint64_t modifier_seed) {
+    return create(std::move(notes), std::move(modifiers), modifier_seed, {});
+}
+
+runtime::Result<MidiContent, ModelError>
+MidiContent::create(std::vector<NoteEvent> notes, std::vector<NoteModifier> modifiers,
+                    std::uint64_t modifier_seed, std::vector<MidiExpressionLane> lanes) {
     for (const auto& note : notes) {
         if (!note.id.valid())
-            return fail<NoteContent>(ModelErrorCode::InvalidItemId, note.id);
+            return fail<MidiContent>(ModelErrorCode::InvalidItemId, note.id);
         if (!positive_range(note.start.value, note.duration.value) || note.pitch > 127 ||
             note.channel > 15)
-            return fail<NoteContent>(ModelErrorCode::InvalidNote, note.id);
+            return fail<MidiContent>(ModelErrorCode::InvalidNote, note.id);
     }
     std::vector<ItemId> note_ids;
     note_ids.reserve(notes.size());
@@ -234,35 +247,86 @@ runtime::Result<NoteContent, ModelError> NoteContent::create(std::vector<NoteEve
     std::sort(note_ids.begin(), note_ids.end());
     if (const auto duplicate = std::adjacent_find(note_ids.begin(), note_ids.end());
         duplicate != note_ids.end())
-        return fail<NoteContent>(ModelErrorCode::DuplicateItemId, *duplicate);
+        return fail<MidiContent>(ModelErrorCode::DuplicateItemId, *duplicate);
     std::sort(notes.begin(), notes.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
         return std::pair(lhs.start.value, lhs.id.value) < std::pair(rhs.start.value, rhs.id.value);
     });
     for (const auto& modifier : modifiers) {
         if (!modifier.note_id.valid())
-            return fail<NoteContent>(ModelErrorCode::InvalidItemId, modifier.note_id);
+            return fail<MidiContent>(ModelErrorCode::InvalidItemId, modifier.note_id);
         // A neutral entry describes a note that already plays that way, so
         // admitting it would give one document two byte encodings.
         if (!note_modifier_well_formed(modifier) || note_modifier_is_neutral(modifier))
-            return fail<NoteContent>(ModelErrorCode::InvalidNoteModifier, modifier.note_id);
+            return fail<MidiContent>(ModelErrorCode::InvalidNoteModifier, modifier.note_id);
         if (!std::binary_search(note_ids.begin(), note_ids.end(), modifier.note_id))
-            return fail<NoteContent>(ModelErrorCode::MissingItem, modifier.note_id);
+            return fail<MidiContent>(ModelErrorCode::MissingItem, modifier.note_id);
     }
     if (const auto duplicate =
             first_duplicate(modifiers, [](const NoteModifier& entry) { return entry.note_id; }))
-        return fail<NoteContent>(ModelErrorCode::DuplicateItemId, *duplicate);
+        return fail<MidiContent>(ModelErrorCode::DuplicateItemId, *duplicate);
     std::sort(modifiers.begin(), modifiers.end(),
               [](const NoteModifier& lhs, const NoteModifier& rhs) {
                   return lhs.note_id.value < rhs.note_id.value;
               });
+    // Lane and point identities share the document's one ItemId space with the
+    // notes above them, so `owned` accumulates all three: an identity reused
+    // between a note and a lane point would make a later remap ambiguous about
+    // which object it just renamed.
+    auto owned = std::move(note_ids);
+    for (const auto& lane : lanes) {
+        if (!lane.id.valid())
+            return fail<MidiContent>(ModelErrorCode::InvalidItemId, lane.id);
+        if (!midi_lane_address_well_formed(lane.address))
+            return fail<MidiContent>(ModelErrorCode::InvalidMidiLane, lane.id);
+        owned.push_back(lane.id);
+        for (const auto& point : lane.points) {
+            if (!point.id.valid())
+                return fail<MidiContent>(ModelErrorCode::InvalidItemId, point.id);
+            if (point.position.value < 0)
+                return fail<MidiContent>(ModelErrorCode::InvalidMidiLane, point.id);
+            owned.push_back(point.id);
+        }
+    }
+    std::sort(owned.begin(), owned.end());
+    if (const auto duplicate = std::adjacent_find(owned.begin(), owned.end());
+        duplicate != owned.end())
+        return fail<MidiContent>(ModelErrorCode::DuplicateItemId, *duplicate);
+    for (auto& lane : lanes)
+        std::sort(lane.points.begin(), lane.points.end(),
+                  [](const MidiLanePoint& lhs, const MidiLanePoint& rhs) {
+                      return std::pair(lhs.position.value, lhs.id.value) <
+                             std::pair(rhs.position.value, rhs.id.value);
+                  });
+    std::sort(lanes.begin(), lanes.end(),
+              [](const MidiExpressionLane& lhs, const MidiExpressionLane& rhs) {
+                  return std::pair(lhs.address, lhs.id.value) <
+                         std::pair(rhs.address, rhs.id.value);
+              });
+    // Addresses are compared after the sort, so the duplicate reported is the
+    // second lane claiming a stream rather than whichever was supplied later.
+    for (std::size_t index = 1; index < lanes.size(); ++index)
+        if (lanes[index].address == lanes[index - 1].address)
+            return fail<MidiContent>(ModelErrorCode::DuplicateMidiLaneAddress, lanes[index].id,
+                                     lanes[index - 1].id);
     auto data = std::make_shared<Data>();
     data->notes = std::move(notes);
     data->modifiers = std::move(modifiers);
     data->modifier_seed = modifier_seed;
-    return runtime::Result<NoteContent, ModelError>(runtime::Ok(NoteContent(std::move(data))));
+    data->lanes = std::move(lanes);
+    return runtime::Result<MidiContent, ModelError>(runtime::Ok(MidiContent(std::move(data))));
 }
 
-const NoteModifier* NoteContent::modifier_for(ItemId note_id) const noexcept {
+const MidiExpressionLane* MidiContent::lane_for(const MidiLaneAddress& address) const noexcept {
+    const auto& lanes = data_->lanes;
+    const auto found = std::lower_bound(lanes.begin(), lanes.end(), address,
+                                        [](const MidiExpressionLane& lane,
+                                           const MidiLaneAddress& wanted) {
+                                            return lane.address < wanted;
+                                        });
+    return found != lanes.end() && found->address == address ? &*found : nullptr;
+}
+
+const NoteModifier* MidiContent::modifier_for(ItemId note_id) const noexcept {
     const auto& modifiers = data_->modifiers;
     const auto found = std::lower_bound(modifiers.begin(), modifiers.end(), note_id.value,
                                         [](const NoteModifier& entry, std::uint64_t wanted) {
@@ -271,17 +335,17 @@ const NoteModifier* NoteContent::modifier_for(ItemId note_id) const noexcept {
     return found != modifiers.end() && found->note_id == note_id ? &*found : nullptr;
 }
 
-runtime::Result<NoteContent, ModelError> NoteContent::replace_note(NoteEvent note) const {
+runtime::Result<MidiContent, ModelError> MidiContent::replace_note(NoteEvent note) const {
     if (!note.id.valid() || note.duration.value <= 0 || note.pitch > 127 || note.channel > 15)
-        return fail<NoteContent>(ModelErrorCode::InvalidNote, note.id);
+        return fail<MidiContent>(ModelErrorCode::InvalidNote, note.id);
     auto replacement = data_->notes;
     const auto found =
         std::find_if(replacement.begin(), replacement.end(),
                      [&](const NoteEvent& candidate) { return candidate.id == note.id; });
     if (found == replacement.end() || found->id != note.id)
-        return fail<NoteContent>(ModelErrorCode::MissingItem, note.id);
+        return fail<MidiContent>(ModelErrorCode::MissingItem, note.id);
     *found = note;
-    return create(std::move(replacement), data_->modifiers, data_->modifier_seed);
+    return create(std::move(replacement), data_->modifiers, data_->modifier_seed, data_->lanes);
 }
 
 runtime::Result<OpaqueContent, ModelError>
@@ -313,140 +377,6 @@ OpaqueContent::create(SchemaIdentity schema, std::string raw_json, OpaqueContent
         runtime::Ok(OpaqueContent(std::move(schema), std::move(raw_json), limits)));
 }
 
-struct Clip::Data {
-    ItemId id;
-    ClipTimeRange range;
-    ClipContent content;
-    ClipPlaybackProperties playback;
-};
-
-bool valid_playback_properties(ClipPlaybackProperties playback, std::uint64_t duration) noexcept {
-    if (!std::isfinite(playback.gain_linear) || playback.gain_linear < 0.0f)
-        return false;
-    return playback.fade_in_duration <= duration && playback.fade_out_duration <= duration;
-}
-
-runtime::Result<Clip, ModelError> Clip::create(ItemId id, timebase::TickPosition start,
-                                               timebase::TickDuration duration, ClipContent content,
-                                               ClipPlaybackProperties playback) {
-    if (!id.valid())
-        return fail<Clip>(ModelErrorCode::InvalidItemId, id);
-    if (!positive_range(start.value, duration.value))
-        return fail<Clip>(ModelErrorCode::InvalidDuration, id);
-    if (!valid_playback_properties(playback, static_cast<std::uint64_t>(duration.value)))
-        return fail<Clip>(ModelErrorCode::InvalidClipPlaybackProperties, id);
-    if (const auto* media = std::get_if<MediaRef>(&content)) {
-        if (!media->asset_id.valid() || media->source_start.value < 0 || media->frame_count == 0 ||
-            static_cast<std::uint64_t>(media->source_start.value) >
-                std::numeric_limits<std::uint64_t>::max() - media->frame_count)
-            return fail<Clip>(ModelErrorCode::InvalidMediaRange, id, media->asset_id);
-    }
-    if (const auto* reference = std::get_if<SequenceRef>(&content)) {
-        if (!reference->sequence_id.valid() || reference->source_start.value < 0)
-            return fail<Clip>(ModelErrorCode::MissingSequenceReference, id, reference->sequence_id);
-        if (duration.value >
-            std::numeric_limits<std::int64_t>::max() - reference->source_start.value)
-            return fail<Clip>(ModelErrorCode::InvalidDuration, id, reference->sequence_id);
-    }
-    return runtime::Result<Clip, ModelError>(runtime::Ok(Clip(std::make_shared<const Data>(
-        Data{id, MusicalTimeRange{start, duration}, std::move(content), playback}))));
-}
-
-runtime::Result<Clip, ModelError> Clip::create_absolute(ItemId id, timebase::SamplePosition start,
-                                                        std::uint64_t sample_count,
-                                                        timebase::RationalRate sample_rate,
-                                                        ClipContent content,
-                                                        ClipPlaybackProperties playback) {
-    if (!id.valid())
-        return fail<Clip>(ModelErrorCode::InvalidItemId, id);
-    if (!sample_rate.valid())
-        return fail<Clip>(ModelErrorCode::InvalidSampleRate, id);
-    if (sample_count == 0 ||
-        sample_count > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) ||
-        start.value >
-            std::numeric_limits<std::int64_t>::max() - static_cast<std::int64_t>(sample_count))
-        return fail<Clip>(ModelErrorCode::InvalidDuration, id);
-    if (!valid_playback_properties(playback, sample_count))
-        return fail<Clip>(ModelErrorCode::InvalidClipPlaybackProperties, id);
-    if (const auto* media = std::get_if<MediaRef>(&content)) {
-        if (!media->asset_id.valid() || media->source_start.value < 0 || media->frame_count == 0 ||
-            static_cast<std::uint64_t>(media->source_start.value) >
-                std::numeric_limits<std::uint64_t>::max() - media->frame_count)
-            return fail<Clip>(ModelErrorCode::InvalidMediaRange, id, media->asset_id);
-    }
-    if (const auto* reference = std::get_if<SequenceRef>(&content))
-        return fail<Clip>(ModelErrorCode::InvalidDuration, id, reference->sequence_id);
-    return runtime::Result<Clip, ModelError>(runtime::Ok(Clip(std::make_shared<const Data>(
-        Data{id, AbsoluteTimeRange{start, sample_count, sample_rate.normalized()},
-             std::move(content), playback}))));
-}
-
-ItemId Clip::id() const noexcept {
-    return data_->id;
-}
-ClipTimeAnchor Clip::time_anchor() const noexcept {
-    return std::holds_alternative<MusicalTimeRange>(data_->range) ? ClipTimeAnchor::Musical
-                                                                  : ClipTimeAnchor::Absolute;
-}
-const ClipTimeRange& Clip::time_range() const noexcept {
-    return data_->range;
-}
-timebase::TickPosition Clip::start() const noexcept {
-    const auto* range = std::get_if<MusicalTimeRange>(&data_->range);
-    return range ? range->start : timebase::TickPosition{};
-}
-timebase::TickDuration Clip::duration() const noexcept {
-    const auto* range = std::get_if<MusicalTimeRange>(&data_->range);
-    return range ? range->duration : timebase::TickDuration{};
-}
-timebase::TickPosition Clip::end() const noexcept {
-    return start() + duration();
-}
-timebase::SamplePosition Clip::absolute_start() const noexcept {
-    const auto* range = std::get_if<AbsoluteTimeRange>(&data_->range);
-    return range ? range->start : timebase::SamplePosition{};
-}
-std::uint64_t Clip::absolute_duration_samples() const noexcept {
-    const auto* range = std::get_if<AbsoluteTimeRange>(&data_->range);
-    return range ? range->sample_count : 0;
-}
-timebase::RationalRate Clip::absolute_sample_rate() const noexcept {
-    const auto* range = std::get_if<AbsoluteTimeRange>(&data_->range);
-    return range ? range->sample_rate : timebase::RationalRate{0, 1};
-}
-timebase::SamplePosition Clip::absolute_end() const noexcept {
-    return {absolute_start().value + static_cast<std::int64_t>(absolute_duration_samples())};
-}
-const ClipContent& Clip::content() const noexcept {
-    return data_->content;
-}
-ClipPlaybackProperties Clip::playback_properties() const noexcept {
-    return data_->playback;
-}
-
-runtime::Result<Clip, ModelError> Clip::with_time_range(ClipTimeRange range) const {
-    if (const auto* musical = std::get_if<MusicalTimeRange>(&range))
-        return create(id(), musical->start, musical->duration, content(), playback_properties());
-    const auto& absolute = std::get<AbsoluteTimeRange>(range);
-    return create_absolute(id(), absolute.start, absolute.sample_count, absolute.sample_rate,
-                           content(), playback_properties());
-}
-
-runtime::Result<Clip, ModelError> Clip::with_content(ClipContent replacement) const {
-    if (time_anchor() == ClipTimeAnchor::Musical)
-        return create(id(), start(), duration(), std::move(replacement), playback_properties());
-    return create_absolute(id(), absolute_start(), absolute_duration_samples(),
-                           absolute_sample_rate(), std::move(replacement), playback_properties());
-}
-
-runtime::Result<Clip, ModelError>
-Clip::with_playback_properties(ClipPlaybackProperties playback) const {
-    if (time_anchor() == ClipTimeAnchor::Musical)
-        return create(id(), start(), duration(), content(), playback);
-    return create_absolute(id(), absolute_start(), absolute_duration_samples(),
-                           absolute_sample_rate(), content(), playback);
-}
-
 struct Project::Data {
     ItemId id;
     std::string name;
@@ -457,6 +387,7 @@ struct Project::Data {
     timebase::TempoMap tempo_map;
     timebase::MeterMap meter_map;
     std::optional<SessionStart> session_start;
+    std::optional<TuningReference> tuning;
     detail::IdentityDirectory identities;
     std::uint64_t sequence_compile_structure_token = 0;
 };
@@ -504,11 +435,12 @@ detail::ProjectStateAccess::restore_identities(Project project,
         const auto valid_shape = [&] {
             // Parent is canonical and, except for lane/scene-owned children,
             // recomputable from the item's own coordinates. An AutomationPoint,
-            // Take, or Slot carries its automation lane, take lane, or scene only
-            // in parent_id; ownership below validates it without circularly
-            // re-deriving it from (sequence, track, clip).
+            // Take, MidiLanePoint, or Slot carries its automation lane, take
+            // lane, expression lane, or scene only in parent_id; ownership below
+            // validates it without circularly re-deriving it from
+            // (sequence, track, clip).
             if (location.kind != ItemKind::AutomationPoint && location.kind != ItemKind::Take &&
-                location.kind != ItemKind::Slot &&
+                location.kind != ItemKind::MidiLanePoint && location.kind != ItemKind::Slot &&
                 location.parent_id != immediate_parent_id(location.kind, project.id(),
                                                           location.sequence_id, location.track_id,
                                                           location.clip_id))
@@ -541,14 +473,28 @@ detail::ProjectStateAccess::restore_identities(Project project,
                        location.sequence_id != entry.item && location.track_id != entry.item &&
                        location.clip_id == entry.item;
             case ItemKind::Note:
+            case ItemKind::MidiLane:
                 return location.sequence_id.valid() && location.track_id.valid() &&
                        location.clip_id.valid() && location.sequence_id != location.track_id &&
                        location.sequence_id != location.clip_id &&
                        location.track_id != location.clip_id &&
                        entry.item != location.sequence_id && entry.item != location.track_id &&
                        entry.item != location.clip_id;
+            case ItemKind::MidiLanePoint:
+                // parent_id is the owning expression lane (validated below); the
+                // clip stays a coordinate because a lane never outlives its clip.
+                return location.sequence_id.valid() && location.track_id.valid() &&
+                       location.clip_id.valid() && location.parent_id.valid() &&
+                       location.sequence_id != location.track_id &&
+                       location.sequence_id != location.clip_id &&
+                       location.track_id != location.clip_id &&
+                       entry.item != location.sequence_id && entry.item != location.track_id &&
+                       entry.item != location.clip_id && entry.item != location.parent_id;
             case ItemKind::DevicePlacement:
             case ItemKind::AutomationLane:
+            case ItemKind::Modulator:
+            case ItemKind::MacroControl:
+            case ItemKind::ModulationRoute:
             case ItemKind::TakeLane:
                 return location.sequence_id.valid() && location.track_id.valid() &&
                        location.sequence_id != location.track_id &&
@@ -592,7 +538,8 @@ detail::ProjectStateAccess::restore_identities(Project project,
                 return track && track->location.kind == ItemKind::Track &&
                        track->location.parent_id == location.sequence_id;
             }
-            case ItemKind::Note: {
+            case ItemKind::Note:
+            case ItemKind::MidiLane: {
                 const auto* clip = find_entry(location.parent_id);
                 if (!clip || clip->location.kind != ItemKind::Clip ||
                     clip->location.parent_id != location.track_id ||
@@ -604,6 +551,9 @@ detail::ProjectStateAccess::restore_identities(Project project,
             }
             case ItemKind::DevicePlacement:
             case ItemKind::AutomationLane:
+            case ItemKind::Modulator:
+            case ItemKind::MacroControl:
+            case ItemKind::ModulationRoute:
             case ItemKind::TakeLane: {
                 const auto* track = find_entry(location.parent_id);
                 return track && track->location.kind == ItemKind::Track &&
@@ -628,6 +578,13 @@ detail::ProjectStateAccess::restore_identities(Project project,
                 const auto* track = find_entry(lane->location.parent_id);
                 return track && track->location.kind == ItemKind::Track &&
                        track->location.parent_id == location.sequence_id;
+            }
+            case ItemKind::MidiLanePoint: {
+                const auto* lane = find_entry(location.parent_id);
+                return lane && lane->location.kind == ItemKind::MidiLane &&
+                       lane->location.sequence_id == location.sequence_id &&
+                       lane->location.track_id == location.track_id &&
+                       lane->location.clip_id == location.clip_id;
             }
             }
             return false;
@@ -675,6 +632,8 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
             return fail<Project>(ModelErrorCode::InvalidSessionStart, input.id);
         input.session_start->sample_rate = input.session_start->sample_rate.normalized();
     }
+    if (input.tuning && !valid_tuning_reference(*input.tuning))
+        return fail<Project>(ModelErrorCode::InvalidTuningReference, input.id);
     visit_project_identities(input, [&](ItemId id, ItemLocation item_location) {
         identity_entries.push_back({id, item_location});
     });
@@ -715,6 +674,7 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
              .tempo_map = std::move(input.tempo_map),
              .meter_map = std::move(input.meter_map),
              .session_start = input.session_start,
+             .tuning = input.tuning,
              .identities = std::move(identities),
              .sequence_compile_structure_token = next_sequence_compile_structure_token()}))));
 }
@@ -742,6 +702,9 @@ const timebase::TempoMap& Project::tempo_map() const noexcept {
 }
 const std::optional<SessionStart>& Project::session_start() const noexcept {
     return data_->session_start;
+}
+const std::optional<TuningReference>& Project::tuning() const noexcept {
+    return data_->tuning;
 }
 const timebase::MeterMap& Project::meter_map() const noexcept {
     return data_->meter_map;
@@ -880,6 +843,7 @@ Project::append_asset(MediaAsset asset, std::span<const IdentityMutation> mutati
              .tempo_map = data_->tempo_map,
              .meter_map = data_->meter_map,
              .session_start = data_->session_start,
+             .tuning = data_->tuning,
              .identities = std::move(identities),
              .sequence_compile_structure_token = data_->sequence_compile_structure_token}))));
 }
@@ -926,6 +890,7 @@ Project::remove_asset(ItemId asset_id, std::span<const IdentityMutation> mutatio
              .tempo_map = data_->tempo_map,
              .meter_map = data_->meter_map,
              .session_start = data_->session_start,
+             .tuning = data_->tuning,
              .identities = std::move(identities),
              .sequence_compile_structure_token = data_->sequence_compile_structure_token}))));
 }

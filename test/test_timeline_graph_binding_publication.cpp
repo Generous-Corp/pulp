@@ -1,5 +1,9 @@
 #include "support/timeline_graph_binding_test_support.hpp"
 
+#include <pulp/playback/realtime_stretch_renderer.hpp>
+
+#include "support/thread_progress.hpp"
+
 TEST_CASE("timeline automation exact ingress stays pinned across stable plugin nodes") {
     const auto map = tempo_map();
     auto empty_assets = take(DecodedAudioAssetPool::create({}));
@@ -7,8 +11,7 @@ TEST_CASE("timeline automation exact ingress stays pinned across stable plugin n
     automated_programs.publish(automation_project(*map), map, empty_assets, 1);
     auto automated = automated_programs.store.read();
     ProgramHarness next_programs;
-    next_programs.publish(
-        automation_project(*map, 0.5f, 0.9f), map, empty_assets, 2);
+    next_programs.publish(automation_project(*map, 0.5f, 0.9f), map, empty_assets, 2);
     auto next = next_programs.store.read();
     REQUIRE(automated);
     REQUIRE(next);
@@ -20,19 +23,15 @@ TEST_CASE("timeline automation exact ingress stays pinned across stable plugin n
     const auto plugin = graph.add_plugin_node(std::move(recorder), 1, 1);
     REQUIRE(graph.prepare(48'000.0, 64));
     const std::array devices{TimelineDeviceGraphRoute{{20}, plugin}};
-    const std::array routes{TimelineTrackGraphRoute{
-        {10}, output, 0, 0, devices}};
+    const std::array routes{TimelineTrackGraphRoute{{10}, output, 0, 0, devices}};
     TimelineGraphPlaybackBinding binding(graph, automated_programs.store);
     const auto admission = binding.prepare(*automated, routes, config(1), 48'000.0, 64);
-    INFO("admission code " << static_cast<int>(admission.code)
-         << " actual " << admission.actual);
+    INFO("admission code " << static_cast<int>(admission.code) << " actual " << admission.actual);
     REQUIRE(admission);
 
     BindingPublishPause pause;
-    binding.set_before_binding_publish_hook_for_test(
-        &BindingPublishPause::hook, &pause);
-    std::atomic<TimelineGraphAdmissionCode> code{
-        TimelineGraphAdmissionCode::GraphPrepareFailed};
+    binding.set_before_binding_publish_hook_for_test(&BindingPublishPause::hook, &pause);
+    std::atomic<TimelineGraphAdmissionCode> code{TimelineGraphAdmissionCode::GraphPrepareFailed};
     std::thread preparer([&] {
         code.store(binding.prepare(*next, routes, config(1), 48'000.0, 64).code,
                    std::memory_order_release);
@@ -41,26 +40,20 @@ TEST_CASE("timeline automation exact ingress stays pinned across stable plugin n
     Buffer input(1, 32);
     Buffer output_buffer(1, 32);
     auto output_view = output_buffer.view();
-    REQUIRE(binding.process(
-        output_view, input.const_view(), snapshot(*automated, 32)));
-    REQUIRE(std::any_of(
-        observed->received.begin(),
-        observed->received.begin() + observed->event_count,
-        [](const auto& event) { return event.value == 0.75f; }));
-    REQUIRE(std::none_of(
-        observed->received.begin(),
-        observed->received.begin() + observed->event_count,
-        [](const auto& event) { return event.value == 0.9f; }));
+    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*automated, 32)));
+    REQUIRE(std::any_of(observed->received.begin(),
+                        observed->received.begin() + observed->event_count,
+                        [](const auto& event) { return event.value == 0.75f; }));
+    REQUIRE(std::none_of(observed->received.begin(),
+                         observed->received.begin() + observed->event_count,
+                         [](const auto& event) { return event.value == 0.9f; }));
     pause.released.store(true, std::memory_order_release);
     preparer.join();
-    REQUIRE(code.load(std::memory_order_acquire) ==
-            TimelineGraphAdmissionCode::Accepted);
-    REQUIRE(binding.process(
-        output_view, input.const_view(), snapshot(*next, 32)));
-    REQUIRE(std::any_of(
-        observed->received.begin(),
-        observed->received.begin() + observed->event_count,
-        [](const auto& event) { return event.value == 0.9f; }));
+    REQUIRE(code.load(std::memory_order_acquire) == TimelineGraphAdmissionCode::Accepted);
+    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*next, 32)));
+    REQUIRE(std::any_of(observed->received.begin(),
+                        observed->received.begin() + observed->event_count,
+                        [](const auto& event) { return event.value == 0.9f; }));
 }
 
 TEST_CASE("timeline graph binding publishes coherent state during live reprepare") {
@@ -80,10 +73,8 @@ TEST_CASE("timeline graph binding publishes coherent state during live reprepare
     REQUIRE(graph.connect(gain_one, 0, output_node, 0));
     REQUIRE(graph.connect(gain_two, 0, output_node, 0));
     TimelineGraphPlaybackBinding binding(graph, programs.store);
-    const std::array route_one{
-        TimelineTrackGraphRoute{{10}, gain_one, 0, 0}};
-    const std::array route_two{
-        TimelineTrackGraphRoute{{10}, gain_two, 0, 0}};
+    const std::array route_one{TimelineTrackGraphRoute{{10}, gain_one, 0, 0}};
+    const std::array route_two{TimelineTrackGraphRoute{{10}, gain_two, 0, 0}};
     REQUIRE(binding.prepare(*program, route_one, config(1), 48'000.0, 32));
 
     std::atomic<bool> stop{false};
@@ -99,16 +90,14 @@ TEST_CASE("timeline graph binding publishes coherent state during live reprepare
         while (!stop.load(std::memory_order_acquire)) {
             auto transport = snapshot(*program, 32, 0);
             transport.ranges[0].discontinuity = true;
-            const auto result = binding.process(output_view, input.const_view(),
-                                                transport);
+            const auto result = binding.process(output_view, input.const_view(), transport);
             if (!result) {
                 invalid_blocks.fetch_add(1, std::memory_order_relaxed);
                 continue;
             }
             const float first = output.storage[0][0];
-            const bool coherent = std::all_of(
-                output.storage[0].begin(), output.storage[0].end(),
-                [first](float sample) { return sample == first; });
+            const bool coherent = std::all_of(output.storage[0].begin(), output.storage[0].end(),
+                                              [first](float sample) { return sample == first; });
             if (!coherent) {
                 invalid_blocks.fetch_add(1, std::memory_order_relaxed);
             } else if (first == 1.0f) {
@@ -122,14 +111,43 @@ TEST_CASE("timeline graph binding publishes coherent state during live reprepare
         allocations.store(probe.allocation_count(), std::memory_order_relaxed);
     });
 
-    for (int iteration = 0; iteration < 64; ++iteration) {
+    // Recorded rather than asserted inline: a Catch2 assertion here throws past
+    // audio_thread.join(), which destroys a joinable thread and terminates the
+    // process instead of reporting the failure.
+    bool all_reprepares_succeeded = true;
+    int iteration = 0;
+    const auto reprepare_one = [&] {
         const auto& route = (iteration & 1) == 0 ? route_two : route_one;
-        REQUIRE(binding.prepare(*program, route, config(1), 48'000.0, 32));
-    }
-    for (int spin = 0;
-         spin < 10'000 && two_blocks.load(std::memory_order_relaxed) == 0; ++spin) {
-        std::this_thread::yield();
-    }
+        all_reprepares_succeeded =
+            binding.prepare(*program, route, config(1), 48'000.0, 32)
+            && all_reprepares_succeeded;
+        ++iteration;
+    };
+    for (int i = 0; i < 64; ++i) reprepare_one();
+
+    // Both counters must be non-zero, and 64 reprepares do not establish that:
+    // nothing orders the audio thread's first block inside them. Nor can a wait
+    // that only re-polls help — the loop ends on route_one, so route_two is
+    // never published again and `two_blocks` could not move no matter how long
+    // it spun. Keep alternating routes until both have been observed, under a
+    // deadline so a binding that genuinely never publishes one fails the REQUIRE
+    // instead of hanging.
+    //
+    // The pump is deliberately slow and the deadline short: tearing down the
+    // reprepared bindings costs superlinearly in their count, so a full-rate
+    // 10s wait would spend 10s waiting and then ~30s in teardown — long enough
+    // to present as a CTest timeout instead of the failure it is.
+    (void)pulp::test::pump_until(
+        [&] {
+            return one_blocks.load(std::memory_order_relaxed) > 0
+                && two_blocks.load(std::memory_order_relaxed) > 0;
+        },
+        [&] {
+            reprepare_one();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        },
+        std::chrono::seconds(2));
+    REQUIRE(all_reprepares_succeeded);
     stop.store(true, std::memory_order_release);
     audio_thread.join();
 
@@ -151,11 +169,9 @@ TEST_CASE("timeline graph binding publishes node-set generations atomically") {
     SignalGraph graph;
     const auto output_node = graph.add_output_node(1);
     TimelineGraphPlaybackBinding binding(graph, two_programs.store);
-    const std::array two_routes{
-        TimelineTrackGraphRoute{{10}, output_node, 0, 0},
-        TimelineTrackGraphRoute{{11}, output_node, 0, 0}};
-    const std::array one_route{
-        TimelineTrackGraphRoute{{10}, output_node, 0, 0}};
+    const std::array two_routes{TimelineTrackGraphRoute{{10}, output_node, 0, 0},
+                                TimelineTrackGraphRoute{{11}, output_node, 0, 0}};
+    const std::array one_route{TimelineTrackGraphRoute{{10}, output_node, 0, 0}};
     REQUIRE(binding.prepare(*two, two_routes, config(1), 48'000.0, 64));
 
     Buffer input(1, 32);
@@ -165,8 +181,7 @@ TEST_CASE("timeline graph binding publishes node-set generations atomically") {
     REQUIRE(output.storage[0][0] == 1.5f);
 
     BindingPublishPause remove_pause;
-    binding.set_before_binding_publish_hook_for_test(&BindingPublishPause::hook,
-                                                     &remove_pause);
+    binding.set_before_binding_publish_hook_for_test(&BindingPublishPause::hook, &remove_pause);
     std::atomic<TimelineGraphAdmissionCode> remove_code{
         TimelineGraphAdmissionCode::GraphPrepareFailed};
     std::thread remover([&] {
@@ -178,14 +193,12 @@ TEST_CASE("timeline graph binding publishes node-set generations atomically") {
     REQUIRE(output.storage[0][0] == 1.5f);
     remove_pause.released.store(true, std::memory_order_release);
     remover.join();
-    REQUIRE(remove_code.load(std::memory_order_acquire) ==
-            TimelineGraphAdmissionCode::Accepted);
+    REQUIRE(remove_code.load(std::memory_order_acquire) == TimelineGraphAdmissionCode::Accepted);
     REQUIRE(binding.process(output_view, input.const_view(), snapshot(*one, 32)));
     REQUIRE(output.storage[0][0] == 1.0f);
 
     BindingPublishPause add_pause;
-    binding.set_before_binding_publish_hook_for_test(&BindingPublishPause::hook,
-                                                     &add_pause);
+    binding.set_before_binding_publish_hook_for_test(&BindingPublishPause::hook, &add_pause);
     std::atomic<TimelineGraphAdmissionCode> add_code{
         TimelineGraphAdmissionCode::GraphPrepareFailed};
     std::thread adder([&] {
@@ -197,8 +210,7 @@ TEST_CASE("timeline graph binding publishes node-set generations atomically") {
     REQUIRE(output.storage[0][0] == 1.0f);
     add_pause.released.store(true, std::memory_order_release);
     adder.join();
-    REQUIRE(add_code.load(std::memory_order_acquire) ==
-            TimelineGraphAdmissionCode::Accepted);
+    REQUIRE(add_code.load(std::memory_order_acquire) == TimelineGraphAdmissionCode::Accepted);
     REQUIRE(binding.process(output_view, input.const_view(), snapshot(*two, 32)));
     REQUIRE(output.storage[0][0] == 1.5f);
     binding.set_before_binding_publish_hook_for_test(nullptr);
@@ -229,19 +241,111 @@ TEST_CASE("timeline graph binding publishes content generations atomically") {
     std::atomic<TimelineGraphAdmissionCode> adoption_code{
         TimelineGraphAdmissionCode::GraphPrepareFailed};
     std::thread adopter([&] {
-        adoption_code.store(binding.adopt_program(*second).code,
-                            std::memory_order_release);
+        adoption_code.store(binding.adopt_program(*second).code, std::memory_order_release);
     });
     REQUIRE(pause.wait_until_entered());
     REQUIRE(binding.process(output_view, input.const_view(), snapshot(*first, 32, 32)));
     REQUIRE(output.storage[0][0] == 1.0f);
     pause.released.store(true, std::memory_order_release);
     adopter.join();
-    REQUIRE(adoption_code.load(std::memory_order_acquire) ==
-            TimelineGraphAdmissionCode::Accepted);
+    REQUIRE(adoption_code.load(std::memory_order_acquire) == TimelineGraphAdmissionCode::Accepted);
     REQUIRE(binding.process(output_view, input.const_view(), snapshot(*second, 32, 64)));
     REQUIRE(output.storage[0][0] == 0.5f);
     binding.set_before_binding_publish_hook_for_test(nullptr);
+}
+
+TEST_CASE("timeline graph binding publishes an exact live-Stretch program/runtime pair") {
+    const auto map = tempo_map();
+    constexpr std::uint64_t kFrames = 32'768;
+    const auto sealed_assets = [&](float value) {
+        const auto hash = ContentHash::from_hex(std::string(64, 'a'));
+        REQUIRE(hash);
+        return take(DecodedAudioAssetPool::create(
+            {DecodedAudioAsset{{3}, audio_data(std::vector<float>(kFrames, value)), *hash, {}}}));
+    };
+    ProgramHarness programs;
+    programs.publish(stretch_sibling_project(*map, kFrames), map, sealed_assets(1.0f), 1);
+    auto first = programs.store.read();
+    REQUIRE(first);
+    SignalGraph graph;
+    const auto output_node = graph.add_output_node(1);
+    TimelineGraphPlaybackBinding binding(graph, programs.store);
+    const std::array routes{TimelineTrackGraphRoute{{10}, output_node, 0, 0},
+                            TimelineTrackGraphRoute{{11}, output_node, 0, 0}};
+    REQUIRE(binding.prepare(*first, routes, config(1), 48'000.0, 128));
+
+    const auto mapped = [](const PlaybackProgram& program, std::int64_t start) {
+        auto transport = snapshot(program, 128, start);
+        auto& range = transport.ranges[0];
+        range.host_beat_mapping = true;
+        range.has_precise_host_ticks = true;
+        range.host_tick_start =
+            static_cast<double>(program.tempo_map().fractional_samples_to_ticks(start));
+        range.host_tick_end =
+            static_cast<double>(program.tempo_map().fractional_samples_to_ticks(start + 128));
+        return transport;
+    };
+
+    programs.publish(stretch_sibling_project(*map, kFrames), map, sealed_assets(0.5f), 2);
+    auto second = programs.store.read();
+    REQUIRE(second);
+    BindingPublishPause pause;
+    binding.set_before_binding_publish_hook_for_test(&BindingPublishPause::hook, &pause);
+    std::atomic<TimelineGraphAdmissionCode> adoption_code{
+        TimelineGraphAdmissionCode::GraphPrepareFailed};
+    std::thread adopter([&] {
+        adoption_code.store(binding.adopt_program(*second).code, std::memory_order_release);
+    });
+    REQUIRE(pause.wait_until_entered());
+
+    Buffer input(1, 128);
+    Buffer output(1, 128, 7.0f);
+    auto output_view = output.view();
+    const auto old_result = binding.process(output_view, input.const_view(), mapped(*first, 0));
+    REQUIRE(old_result.code == TimelineGraphProcessCode::RealtimeStretchGap);
+    REQUIRE(old_result.code != TimelineGraphProcessCode::RealtimeStretchStalePublication);
+    pause.released.store(true, std::memory_order_release);
+    adopter.join();
+    REQUIRE(adoption_code.load(std::memory_order_acquire) == TimelineGraphAdmissionCode::Accepted);
+
+    const auto new_result = binding.process(output_view, input.const_view(), mapped(*second, 0));
+    REQUIRE(new_result.code == TimelineGraphProcessCode::RealtimeStretchGap);
+    REQUIRE(new_result.code != TimelineGraphProcessCode::RealtimeStretchStalePublication);
+    binding.set_before_binding_publish_hook_for_test(nullptr);
+
+    // An impossible live-Stretch lane is rejected by the whole-program
+    // preflight before the sibling note renderer or graph can advance. Retrying
+    // the exact position with a valid mapping must still emit the sibling's
+    // events, and subsequent blocks must become audible after declared PDC.
+    auto impossible = mapped(*second, 0);
+    impossible.ranges[0].host_tick_end = impossible.ranges[0].host_tick_start + 0.001;
+    std::fill(output.storage[0].begin(), output.storage[0].end(), 7.0f);
+    const auto rejected = binding.process(output_view, input.const_view(), impossible);
+    REQUIRE(rejected.code == TimelineGraphProcessCode::RealtimeStretchImpossibleRatio);
+    REQUIRE(rejected.emitted_note_events == 0);
+    REQUIRE(std::all_of(output.storage[0].begin(), output.storage[0].end(),
+                        [](float sample) { return sample == 0.0f; }));
+
+    const auto retried = binding.process(output_view, input.const_view(), mapped(*second, 0));
+    REQUIRE(retried.code == TimelineGraphProcessCode::RealtimeStretchGap);
+    REQUIRE(retried.emitted_note_events > 0);
+    bool heard_sibling = false;
+    RealtimeStretchProgramRuntime latency_oracle;
+    REQUIRE(latency_oracle.prepare(*second, 48'000.0, 128, 1, second->audio_limits()));
+    const auto latency = latency_oracle.latency_samples();
+    REQUIRE(latency > 0);
+    const auto warm_blocks = latency / 128u + 3u;
+    for (std::uint32_t index = 1; index < warm_blocks; ++index) {
+        const auto result =
+            binding.process(output_view, input.const_view(),
+                            mapped(*second, static_cast<std::int64_t>(index) * 128));
+        REQUIRE((result.code == TimelineGraphProcessCode::Ok ||
+                 result.code == TimelineGraphProcessCode::RealtimeStretchGap));
+        heard_sibling =
+            heard_sibling || std::any_of(output.storage[0].begin(), output.storage[0].end(),
+                                         [](float sample) { return std::abs(sample) > 1.0e-6f; });
+    }
+    REQUIRE(heard_sibling);
 }
 
 // Render continuity across a structural edit. The transport runs unbroken while
@@ -269,8 +373,8 @@ TEST_CASE("timeline graph binding renders gap-free across a structural edit with
 
     SignalGraph graph;
     const auto input_node = graph.add_input_node(1);
-    const auto latency_node = graph.add_plugin_node(
-        std::make_unique<ReportedLatencySilence>(), 1, 1, "PDC anchor");
+    const auto latency_node =
+        graph.add_plugin_node(std::make_unique<ReportedLatencySilence>(), 1, 1, "PDC anchor");
     const auto output_node = graph.add_output_node(1);
     REQUIRE(graph.connect(input_node, 0, latency_node, 0));
     REQUIRE(graph.connect(latency_node, 0, output_node, 0));

@@ -92,21 +92,11 @@ jobs:
           python -m venv .sandbox-e2e-venv
           .sandbox-e2e-venv/bin/python -m pip install --upgrade pip pytest
 
-      # Linux-only: install the system deps the Pulp C++ CLI build
-      # needs. SDL3 pulls in alsa / X11 / Wayland headers; without
-      # these the cmake configure fails with "SDL could not find X11
-      # or Wayland development libraries". The list mirrors what the
-      # `build.yml` workflow installs for the regular Ubuntu build.
       - name: Install Linux build deps
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libasound2-dev libdbus-1-dev libdrm-dev libegl1-mesa-dev \
-            libgbm-dev libgl1-mesa-dev libx11-dev libxext-dev libxfixes-dev \
-            libxi-dev libxinerama-dev libxkbcommon-dev libxrandr-dev \
-            libxrender-dev libxcursor-dev libxss-dev libfreetype-dev \
-            pkg-config
+        uses: ./.github/actions/install-linux-build-deps
+        with:
+          extra-packages: libxcursor-dev libfreetype-dev pkg-config
 
       - name: Install Rust (only when experimental/pulp-rs/ is present)
         id: rust-toolchain

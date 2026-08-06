@@ -16,6 +16,26 @@ def fail(message: str) -> int:
     return 1
 
 
+def run_rpc(binary: Path, requests: list[dict[str, object]]) -> list[dict[str, object]]:
+    payload = "\n".join(json.dumps(request, separators=(",", ":")) for request in requests) + "\n"
+    rpc = subprocess.run(
+        [str(binary)], input=payload, check=False, text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30,
+    )
+    if rpc.returncode != 0:
+        raise RuntimeError(
+            f"stdio RPC exited {rpc.returncode}: stdout={rpc.stdout!r} stderr={rpc.stderr!r}"
+        )
+    return [json.loads(line) for line in rpc.stdout.splitlines() if line]
+
+
+def tool_call(request_id: int, name: str, arguments: dict[str, object]) -> dict[str, object]:
+    return {
+        "jsonrpc": "2.0", "id": request_id, "method": "tools/call",
+        "params": {"name": name, "arguments": arguments},
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("binary", type=Path)
@@ -89,6 +109,45 @@ def main() -> int:
     names = {tool.get("name") for tool in tools if isinstance(tool, dict)}
     if "pulp_compat" not in names:
         return fail(f"tools/list response missing pulp_compat: {tools_list!r}")
+
+    timeline_names = {
+        "pulp_timeline_project_open", "pulp_timeline_command_apply", "pulp_timeline_diff",
+        "pulp_timeline_undo", "pulp_timeline_redo", "pulp_timeline_validate",
+        "pulp_timeline_explain", "pulp_timeline_render", "pulp_timeline_export",
+        "pulp_timeline_import",
+    }
+    advertised_timeline_names = timeline_names & names
+    if advertised_timeline_names and advertised_timeline_names != timeline_names:
+        return fail(
+            "tools/list exposed only part of the Timeline surface: "
+            f"{sorted(advertised_timeline_names)!r}"
+        )
+    if not advertised_timeline_names:
+        return 0
+
+    # A handle from a terminated server must never alias the first session in
+    # its replacement. These are two real OS processes, not two stores in one
+    # test binary, so this pins the restart boundary clients actually cross.
+    project = Path(__file__).parent / "fixtures" / "timeline" / "v1" / "minimal.json"
+    project_json = project.read_text(encoding="utf-8")
+    try:
+        first = run_rpc(binary, [tool_call(10, "pulp_timeline_project_open", {"project": project_json})])
+        old_handle = first[0]["result"]["structuredContent"]["session_id"]
+        second = run_rpc(
+            binary,
+            [
+                tool_call(11, "pulp_timeline_project_open", {"project": project_json}),
+                tool_call(12, "pulp_timeline_diff", {"session_id": old_handle}),
+            ],
+        )
+        new_handle = second[0]["result"]["structuredContent"]["session_id"]
+        stale_result = second[1]["result"]
+    except (KeyError, IndexError, json.JSONDecodeError, OSError, RuntimeError) as exc:
+        return fail(f"two-process timeline session regression failed to run: {exc}")
+    if old_handle == new_handle:
+        return fail(f"timeline session handle aliased across server processes: {old_handle!r}")
+    if not stale_result.get("isError") or "unknown or expired" not in json.dumps(stale_result):
+        return fail(f"replacement server accepted prior process handle: {stale_result!r}")
 
     return 0
 

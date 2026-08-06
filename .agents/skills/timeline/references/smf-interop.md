@@ -5,6 +5,14 @@ timeline `Project` through the tempo and meter maps. The public header is
 `core/timeline/include/pulp/timeline/smf.hpp`; the implementation lives in the
 dedicated `pulp::smf-interop` target, not in `pulp::timeline`.
 
+The consent-gated surface is a separate installed target and header:
+`pulp::smf-interchange` / `<pulp/smf/interchange.hpp>`. It exposes only
+`pulp::smf::writer()`, a format-bound `FormatBoundExportWriter` handle. Callers
+must create `Format::Smf` plans and execute them through `run_export()`; the plan owns the
+immutable project snapshot and the central runner owns the reserved, versioned
+`pulp-loss-manifest.json` artifact. Do not add project arguments to the adapter
+or let it serialize a caller-captured document.
+
 - Keep the conversion in the musical domain end to end. An SMF has its own
   timebase — a header division in ticks per quarter note plus Set Tempo and
   Time Signature meta-events — so scale those ticks onto
@@ -47,3 +55,11 @@ dedicated `pulp::smf-interop` target, not in `pulp::timeline`.
   `MeterMap::create`, and a tempo below roughly 3.58 bpm has no Set Tempo
   representation (the event's period field is 24 bits of microseconds). Surface
   both as typed errors rather than clamping.
+- Keep raw and consented behavior distinct. Raw `export_smf` strictly rejects
+  unsupported clip, event, and grid shapes it visits, but it does not census
+  unrelated mixer, device, take, asset, or marker state.
+  The interchange adapter may, after exact concept consent, omit unsupported
+  clips/state, strip note modifiers, step continuous tempo ramps at their
+  authored points, and quantize non-representable 16-bit velocity to the nearest
+  nonzero 7-bit value. Each policy branch must be driven from the plan's concrete
+  losses; there is no blanket lossy mode.

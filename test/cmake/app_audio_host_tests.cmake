@@ -98,6 +98,9 @@ pulp_add_test_suite(pulp-test-buffering-reader LIBRARIES pulp::audio)
 # AudioWorkgroup tests
 pulp_add_test_suite(pulp-test-workgroup LIBRARIES pulp::audio)
 
+# Public route-timing contract and control-thread latency composition.
+pulp_add_test_suite(pulp-test-audio-io-timing LIBRARIES pulp::audio)
+
 # AudioWorkgroup ↔ AudioDevice wiring.
 pulp_add_test_suite(pulp-test-audio-workgroup-wiring
     SOURCES test_audio_workgroup_wiring.cpp
@@ -115,6 +118,13 @@ if(APPLE AND NOT PULP_IOS)
         SOURCES test_coreaudio_input_only.mm
         LIBRARIES pulp::audio)
     target_link_libraries(pulp-test-coreaudio-input-only PRIVATE "-framework CoreAudio")
+    # The RT-safety case reads the device source to assert the render callback
+    # actually USES the clamp — arithmetic alone would keep passing if the call
+    # site went back to requesting the raw frame count, which is the bug.
+    target_include_directories(pulp-test-coreaudio-input-only PRIVATE
+        ${CMAKE_SOURCE_DIR}/core/audio/platform/mac)
+    target_compile_definitions(pulp-test-coreaudio-input-only PRIVATE
+        PULP_COREAUDIO_DEVICE_SOURCE="${CMAKE_SOURCE_DIR}/core/audio/platform/mac/coreaudio_device.mm")
 endif()
 
 # Plugin matrix tests (sample rate/buffer size/edge case sweep)
@@ -764,3 +774,10 @@ pulp_add_test_suite(pulp-test-widget-gallery LIBRARIES pulp::view)
 # can compute its whole geometry with no canvas and no paint, and a label whose
 # inline editor is a real child view.
 pulp_add_test_suite(pulp-test-widget-metrics LIBRARIES pulp::view)
+
+# The Forge semantic-descriptor contract: descriptors must agree with the DSP
+# they annotate, in both directions. Carries the negative controls that prove
+# the audit fails closed on a grown, shrunk, or mislabelled catalog node.
+pulp_add_test_suite(pulp-test-forge-descriptor-audit LIBRARIES pulp::host)
+target_compile_definitions(pulp-test-forge-descriptor-audit PRIVATE
+    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

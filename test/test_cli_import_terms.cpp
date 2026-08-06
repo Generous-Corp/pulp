@@ -382,7 +382,7 @@ const char* kScanIndex = R"({
 })";
 }  // namespace
 
-TEST_CASE("provenance check PASSES a well-formed clean-room marker",
+TEST_CASE("provenance check PASSES a well-formed provenance marker",
           "[cli][import][provenance][shellout]") {
     TempDir proj("pulp-prov-good");
     write_file(proj.path / ".pulp-import-provenance.json", good_marker());
@@ -443,7 +443,7 @@ TEST_CASE("provenance check FAILS framework source in a generated file",
     auto r = run_provenance(proj.path, idx);
     INFO("stdout=" << r.stdout_output << " stderr=" << r.stderr_output);
     REQUIRE(r.exit_code != 0);
-    REQUIRE(r.stderr_output.find("clean-room contract") != std::string::npos);
+    REQUIRE(r.stderr_output.find("provenance contract") != std::string::npos);
 }
 #endif  // PULP_SOURCE_DIR && !_WIN32
 

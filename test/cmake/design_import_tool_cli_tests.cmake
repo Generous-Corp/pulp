@@ -1,6 +1,92 @@
 # Design import tool and CLI test registrations.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+# Browser-solved HTML capture discovery, subprocess argv, cleanup, and artifact
+# freshness. The launcher fixture behaves like the configured Node executable,
+# so these tests exercise ChildProcess without depending on a real browser.
+add_executable(pulp-browser-capture-launcher-fixture
+    fixtures/browser_capture_launcher_fixture.cpp)
+add_executable(pulp-test-browser-capture-backend
+    test_browser_capture_backend.cpp
+    # Node.js discovery: PATH plus the standard install locations, so a
+    # GUI-launched app (minimal PATH) resolves the same Node a terminal does.
+    test_node_runtime.cpp)
+target_link_libraries(pulp-test-browser-capture-backend PRIVATE
+    pulp::browser-capture-backend
+    Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-browser-capture-backend PRIVATE
+    PULP_BROWSER_CAPTURE_FIXTURE_PATH="$<TARGET_FILE:pulp-browser-capture-launcher-fixture>")
+add_dependencies(pulp-test-browser-capture-backend
+    pulp-browser-capture-launcher-fixture)
+catch_discover_tests(pulp-test-browser-capture-backend
+    PROPERTIES LABELS "parser-import;browser-capture")
+
+# Dependency-free Node capture helpers: staged-root containment, tokenized
+# loopback serving, snapshot redaction, network policy, and profile cleanup.
+if(_PULP_NODE_FOR_TESTS)
+    file(GLOB _PULP_BROWSER_CAPTURE_NODE_TESTS CONFIGURE_DEPENDS
+         ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture/*.test.mjs)
+    add_test(NAME pulp-browser-capture-node-unit
+             COMMAND ${_PULP_NODE_FOR_TESTS} --test
+                     ${_PULP_BROWSER_CAPTURE_NODE_TESTS})
+    set_tests_properties(pulp-browser-capture-node-unit PROPERTIES
+        TIMEOUT 180
+        LABELS "parser-import;browser-capture;node")
+endif()
+
+# Pure capture-envelope lowering and HTML-shape dispatch. These stay separate
+# from the subprocess/backend target so protocol validation and intake policy
+# can be tested without launching Chromium.
+add_executable(pulp-test-browser-capture-import
+    test_browser_capture_backdrop_filter.cpp
+    test_browser_capture_ir.cpp
+    test_browser_knob_sprites.cpp
+    test_browser_capture_text_metrics.cpp
+    test_browser_capture_tree.cpp
+    test_browser_capture_svg_render.cpp
+    test_browser_import_cli.cpp
+    test_html_intake.cpp
+    test_html_project_stager.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/browser_import_cli.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/browser_import_session.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_ir.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/browser_knob_sprites.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_styles.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_tree.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_validation.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/svg_shape_lowering.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/browser_html_import.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_workspace.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/claude_html_dependencies.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/html_project_stager.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/html_intake.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/sprite_skins.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/import_png_codec.cpp)
+target_include_directories(pulp-test-browser-capture-import PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/external/miniz)
+# A real Chromium capture of a panel built from oklab colours, gradients, and
+# layered shadows. Kept byte-verbatim (the envelope carries the screenshot's
+# sha256) so the computed-style lowering is proven against what Chrome actually
+# serializes rather than against hand-written JSON that agrees with the parser.
+# Three more real Chromium captures, one per shape where the emitted tree's
+# clip and CSS's clip can disagree: a node escaping an `overflow: hidden`
+# ancestor along the containing-block chain, a node hoisted out from under the
+# ancestor that clips it, and a transformed subtree where neither happens. Each
+# keeps the source HTML next to the capture so the document under test is
+# readable without replaying the browser. Two more cover the value forms a
+# stylesheet reaches paint through rather than the tree's shape: generated
+# `content` on ::before / ::after, and a non-blur `backdrop-filter` list.
+target_compile_definitions(pulp-test-browser-capture-import PRIVATE
+    PULP_BROWSER_CAPTURE_STYLE_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/test/fixtures/browser-capture-computed-style"
+    PULP_BROWSER_CAPTURE_FIXTURE_ROOT="${CMAKE_SOURCE_DIR}/test/fixtures")
+target_link_libraries(pulp-test-browser-capture-import PRIVATE
+    pulp::browser-capture-backend
+    pulp::view
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-browser-capture-import
+    PROPERTIES LABELS "parser-import;browser-capture")
+
 # Claude Design bundle envelope parser (base64+gzip JSON
 # envelope unpacking, template script-order resolution).
 add_executable(pulp-test-design-import-claude-bundle test_design_import_claude_bundle.cpp)
@@ -70,6 +156,17 @@ catch_discover_tests(pulp-test-cli-import-design
         ENVIRONMENT "PULP_REPO_ROOT=${CMAKE_SOURCE_DIR}"
         LABELS "parser-import")
 
+# `pulp design {lint,diff,compile,lint-adherence}` must reject partial
+# DESIGN.md parse results before analyzing or emitting artifacts.
+add_executable(pulp-test-cli-designmd-subcommands
+    test_cli_designmd_subcommands.cpp)
+target_link_libraries(pulp-test-cli-designmd-subcommands
+    PRIVATE pulp::platform Catch2::Catch2WithMain)
+# The GPU-enabled desktop configure attaches the real CLI binary and build
+# dependency after `pulp-cli` is declared in tools/cli/CMakeLists.txt.
+catch_discover_tests(pulp-test-cli-designmd-subcommands
+    PROPERTIES LABELS "parser-import")
+
 # Direct shell-out coverage for the standalone import-design tool
 # executable. These tests hit tools/import-design/pulp_import_design.cpp
 # without going through the top-level pulp CLI delegate.
@@ -86,7 +183,9 @@ add_executable(pulp-test-import-design-tool test_import_design_tool.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/fig_lane.cpp
     # fig_lane's multi-state merge lives here (and is shared with the
     # repeated---file lane), so the in-process fig_lane cases need it linked.
-    ${CMAKE_SOURCE_DIR}/tools/import-design/envelope_merge.cpp)
+    ${CMAKE_SOURCE_DIR}/tools/import-design/envelope_merge.cpp
+    # fig_lane resolves the Node decoder through the shared search.
+    ${CMAKE_SOURCE_DIR}/tools/import-design/node_runtime.cpp)
 target_include_directories(pulp-test-import-design-tool PRIVATE
     ${CMAKE_SOURCE_DIR}/external/miniz
     ${CMAKE_SOURCE_DIR}/tools/import-design

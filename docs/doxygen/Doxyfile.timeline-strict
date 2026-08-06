@@ -1,0 +1,16 @@
+@INCLUDE               = Doxyfile
+
+PROJECT_NAME           = "Pulp Timeline API contract check"
+OUTPUT_DIRECTORY       = ../../build/api-docs-timeline-check
+INPUT                  = ../../core/timeline/include
+
+EXTRACT_ALL            = YES
+GENERATE_HTML          = NO
+GENERATE_LATEX         = NO
+GENERATE_XML           = YES
+QUIET                  = YES
+
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = NO
+WARN_AS_ERROR          = FAIL_ON_WARNINGS

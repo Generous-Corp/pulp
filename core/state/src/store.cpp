@@ -4,6 +4,7 @@
 #include <functional>
 #include <mutex>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 #include <pulp/events/event_loop.hpp>
 #include <pulp/events/main_thread_dispatcher.hpp>
@@ -24,6 +25,8 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
         std::uint64_t id = 0;
         ParamChangeCallback callback;
         ListenerThread thread = ListenerThread::Main;
+        ListenerRestoreBehavior restore_behavior =
+            ListenerRestoreBehavior::Silent;
     };
 
     // Reads the current (live atomic) value for a parameter, or nullopt if
@@ -35,7 +38,28 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
     // bogus default.
     std::function<std::optional<float>(ParamID)> value_getter;
 
-    using EntryList = std::vector<Entry>;
+    struct EntryList {
+        EntryList() = default;
+        explicit EntryList(std::vector<Entry> values)
+            : entries(std::move(values)) {
+            by_id.reserve(entries.size());
+            for (std::size_t i = 0; i < entries.size(); ++i)
+                by_id.emplace(entries[i].id, i);
+        }
+
+        bool empty() const noexcept { return entries.empty(); }
+        std::size_t size() const noexcept { return entries.size(); }
+        auto begin() const noexcept { return entries.begin(); }
+        auto end() const noexcept { return entries.end(); }
+
+        const Entry* find(std::uint64_t id) const noexcept {
+            const auto it = by_id.find(id);
+            return it == by_id.end() ? nullptr : &entries[it->second];
+        }
+
+        std::vector<Entry> entries;
+        std::unordered_map<std::uint64_t, std::size_t> by_id;
+    };
     using SharedEntries = std::shared_ptr<const EntryList>;
 
     // CoW model: mutators rebuild and atomically swap a new shared_ptr.
@@ -106,15 +130,16 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
         reclaim_retired_rt_entries_if_idle();
     }
 
-    std::uint64_t add(ParamChangeCallback cb, ListenerThread thread) {
+    std::uint64_t add(ParamChangeCallback cb, ListenerThread thread,
+                      ListenerRestoreBehavior restore_behavior) {
         const auto id = next_id.fetch_add(1, std::memory_order_relaxed);
         std::lock_guard lock(entries_mutex);
         auto current =
             std::atomic_load_explicit(&entries, std::memory_order_acquire);
-        EntryList copy;
+        std::vector<Entry> copy;
         copy.reserve((current ? current->size() : 0) + 1);
-        if (current) copy = *current;
-        copy.push_back({id, std::move(cb), thread});
+        if (current) copy = current->entries;
+        copy.push_back({id, std::move(cb), thread, restore_behavior});
         publish_snapshot(std::make_shared<const EntryList>(std::move(copy)),
                          std::move(current));
         return id;
@@ -126,7 +151,7 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
         auto current =
             std::atomic_load_explicit(&entries, std::memory_order_acquire);
         if (!current) return;
-        EntryList copy;
+        std::vector<Entry> copy;
         copy.reserve(current->size());
         for (const auto& e : *current) {
             if (e.id != id) copy.push_back(e);
@@ -140,16 +165,16 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
 
     // Re-look-up + invoke at dispatch time so a token reset between
     // EventLoop enqueue and drain cancels the queued call.
-    void invoke_if_present(std::uint64_t entry_id, ParamID param_id, float value) {
+    bool invoke_if_present(std::uint64_t entry_id, ParamID param_id, float value) {
         auto snap = load_snapshot();
-        if (!snap) return;
-        for (const auto& entry : *snap) {
-            if (entry.id == entry_id) {
-                if (entry.callback) entry.callback(param_id, value);
-                return;
-            }
+        if (!snap) return false;
+        const auto* entry = snap->find(entry_id);
+        if (entry && entry->callback) {
+            entry->callback(param_id, value);
+            return true;
         }
         // Entry was removed between dispatch and drain — drop the call.
+        return false;
     }
 
     void notify(ParamID param_id, float value) {
@@ -259,6 +284,30 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
             }
         }
         return drained;
+    }
+
+    std::size_t reconcile_restore_listeners(std::span<const ParamInfo> params) {
+        const auto snap = load_snapshot();
+        if (!snap || snap->empty()) return 0;
+
+        std::vector<std::uint64_t> listener_ids;
+        listener_ids.reserve(snap->size());
+        for (const auto& entry : *snap) {
+            if (entry.callback && entry.thread == ListenerThread::Main
+                && entry.restore_behavior == ListenerRestoreBehavior::Reconcile)
+                listener_ids.push_back(entry.id);
+        }
+
+        std::size_t invoked = 0;
+        for (const auto& param : params) {
+            const auto current =
+                value_getter ? value_getter(param.id) : std::nullopt;
+            if (!current) continue;
+            for (const auto listener_id : listener_ids)
+                if (invoke_if_present(listener_id, param.id, *current))
+                    ++invoked;
+        }
+        return invoked;
     }
 
     RtListenerQueueTelemetry rt_queue_telemetry() const {
@@ -434,6 +483,21 @@ std::size_t StateStore::pump_listeners() {
     return registry_->drain_main_listeners();
 }
 
+std::size_t StateStore::reconcile_restore_listeners() {
+    if (!registry_) return 0;
+    const auto revision = state_restore_revision_.load(std::memory_order_acquire);
+    auto reconciled =
+        reconciled_state_restore_revision_.load(std::memory_order_acquire);
+    while (reconciled != revision) {
+        if (reconciled_state_restore_revision_.compare_exchange_weak(
+                reconciled, revision, std::memory_order_acq_rel,
+                std::memory_order_acquire)) {
+            return registry_->reconcile_restore_listeners(params_);
+        }
+    }
+    return 0;
+}
+
 RtListenerQueueTelemetry StateStore::rt_listener_queue_telemetry() const {
     if (!registry_) return {};
     return registry_->rt_queue_telemetry();
@@ -558,6 +622,10 @@ void StateStore::begin_gesture(ParamID id) {
         assert(false && "StateStore::begin_gesture called off the host main "
                         "thread; use run_gesture_on_main()");
     }
+    // A retired realm can leave its host end queued until the next UI pump.
+    // Close that old bracket before a replacement realm opens the same
+    // parameter, otherwise the queued end would terminate the new gesture.
+    flush_deferred_gesture_release(id);
     // Preserve the direct API's duplicate-suppression contract while sharing
     // host ownership with lease-based editor bindings.
     if (!direct_gestures_.insert(id).second) return;
@@ -580,6 +648,9 @@ void StateStore::end_gesture(ParamID id) {
 }
 
 void StateStore::acquire_gesture(ParamID id) {
+    // See begin_gesture(): replacement leases must not overtake a queued end
+    // for the same host parameter.
+    flush_deferred_gesture_release(id);
     auto& leases = gesture_leases_[id];
     if (leases++ != 0) return;
     if (open_gestures_.insert(id).second && on_begin_gesture_)
@@ -594,6 +665,65 @@ void StateStore::release_gesture(ParamID id) {
     if (direct_gestures_.find(id) != direct_gestures_.end()) return;
     if (open_gestures_.erase(id) != 0 && on_end_gesture_)
         on_end_gesture_(id);
+}
+
+void StateStore::defer_gesture_release(ParamID id) {
+    const auto found = gesture_leases_.find(id);
+    if (found == gesture_leases_.end()) return;
+    const bool final_lease = found->second == 1;
+    const bool should_end = final_lease &&
+        direct_gestures_.find(id) == direct_gestures_.end() &&
+        open_gestures_.find(id) != open_gestures_.end() &&
+        static_cast<bool>(on_end_gesture_);
+    // Allocate before mutating lease/open state. If allocation fails, the
+    // caller can still abandon a deadline reset with the gesture intact.
+    if (should_end)
+        deferred_gesture_releases_.push_back(id);
+    if (!final_lease) {
+        --found->second;
+        return;
+    }
+    gesture_leases_.erase(found);
+    if (direct_gestures_.find(id) == direct_gestures_.end())
+        open_gestures_.erase(id);
+}
+
+void StateStore::flush_deferred_gesture_releases() noexcept {
+    auto pending = std::move(deferred_gesture_releases_);
+    deferred_gesture_releases_.clear();
+    for (const auto id : pending) {
+#if defined(__cpp_exceptions)
+        try {
+#endif
+            if (on_end_gesture_)
+                on_end_gesture_(id);
+#if defined(__cpp_exceptions)
+        } catch (...) {
+            // Bookkeeping was already closed when the release was deferred.
+            // One hostile host callback must not suppress later queued ends.
+        }
+#endif
+    }
+}
+
+void StateStore::flush_deferred_gesture_release(ParamID id) noexcept {
+    const auto found = std::find(
+        deferred_gesture_releases_.begin(),
+        deferred_gesture_releases_.end(),
+        id);
+    if (found == deferred_gesture_releases_.end()) return;
+    deferred_gesture_releases_.erase(found);
+#if defined(__cpp_exceptions)
+    try {
+#endif
+        if (on_end_gesture_)
+            on_end_gesture_(id);
+#if defined(__cpp_exceptions)
+    } catch (...) {
+        // The retired owner's bookkeeping is already closed. Match the bulk
+        // flush contract: a hostile host callback cannot strand later work.
+    }
+#endif
 }
 
 void StateStore::release_open_gestures() {
@@ -640,10 +770,18 @@ void StateStore::set_main_loop(pulp::events::EventLoop* loop) {
 }
 
 ListenerToken StateStore::add_listener(ParamChangeCallback callback,
-                                       ListenerThread thread) {
+                                       ListenerThread thread,
+                                       ListenerRestoreBehavior restore_behavior) {
     if (!registry_) return ListenerToken{};
-    const auto id = registry_->add(std::move(callback), thread);
+    const auto id =
+        registry_->add(std::move(callback), thread, restore_behavior);
     return ListenerToken(std::weak_ptr<detail::ListenerRegistry>(registry_), id);
+}
+
+ListenerToken StateStore::add_listener(ParamChangeCallback callback,
+                                       ListenerThread thread) {
+    return add_listener(std::move(callback), thread,
+                        ListenerRestoreBehavior::Silent);
 }
 
 ListenerToken StateStore::add_audio_listener(ParamChangeCallback callback) {
@@ -821,6 +959,7 @@ bool StateStore::deserialize(std::span<const uint8_t> data) {
         }
     }
 
+    state_restore_revision_.fetch_add(1, std::memory_order_release);
     return true;
 }
 

@@ -97,7 +97,7 @@ std::shared_ptr<const Project> note_scale_project() {
                              static_cast<std::uint8_t>(48 + note_index % 24),
                              0});
         }
-        auto content = take(NoteContent::create(std::move(notes)));
+        auto content = take(MidiContent::create(std::move(notes)));
         auto clip = take(Clip::create(
             {100 + track_index}, {0},
             {static_cast<std::int64_t>(kNotesPerClip * kTicksPerQuarter / 4)}, std::move(content)));
@@ -307,7 +307,7 @@ TEST_CASE("full note scale compiles five million events with one hundred thousan
     REQUIRE(project->locate({1'000 + total_notes - 1}));
     const auto* final_track = project->find_sequence({2})->find_track({10 + kNoteTrackCount - 1});
     REQUIRE(final_track);
-    REQUIRE(std::get<NoteContent>(final_track->clips()[0].content()).notes().size() ==
+    REQUIRE(std::get<MidiContent>(final_track->clips()[0].content()).notes().size() ==
             kNotesPerClip);
 
     PlaybackProgramStore store;

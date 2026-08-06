@@ -44,17 +44,6 @@ Project project_without_session_start() {
     return take(Project::create(ProjectInput{{1}, "no-origin", 4, {2}, {}, {sequence}}));
 }
 
-// The lone sequence envelope inside a whole-project snapshot, as raw bytes.
-std::string sequence_envelope(const std::string& snapshot) {
-    const auto parsed = take(parse_json(snapshot));
-    const auto* data = parsed->root().find("data");
-    REQUIRE(data != nullptr);
-    const auto* sequences = data->find("sequences");
-    REQUIRE(sequences != nullptr);
-    REQUIRE(sequences->array.size() == 1);
-    return std::string(parsed->raw(sequences->array[0]));
-}
-
 } // namespace
 
 TEST_CASE("Timeline markers and regions round trip through a snapshot") {
@@ -114,10 +103,13 @@ TEST_CASE("Timeline v4 marker fixture upgrades without requiring scenes") {
     REQUIRE(original.find(R"("type_name":"pulp.timeline.sequence","version":4)") !=
             std::string::npos);
     REQUIRE(original.find(R"("scenes")") == std::string::npos);
-    REQUIRE(resaved.find(R"("type_name":"pulp.timeline.sequence","version":5)") !=
+    REQUIRE(resaved.find(R"("type_name":"pulp.timeline.sequence","version":7)") !=
             std::string::npos);
     REQUIRE(resaved.find(R"("groove":{"name":"","step":"0","steps":[])") != std::string::npos);
     REQUIRE(resaved.find(R"("scenes":[])") != std::string::npos);
+    // The fixture recorded no authored order, so re-saving states the identity
+    // order of its track list rather than leaving the field empty.
+    REQUIRE(resaved.find(R"("scenes":[],"track_order":["3"],"tracks":[)") != std::string::npos);
 }
 
 TEST_CASE("Timeline sequence upgrades to markers and regions and downgrades back") {
@@ -149,12 +141,14 @@ TEST_CASE("Timeline sequence downgrade refuses to discard authored annotations")
     DecodeLimits limits;
     const auto populated =
         sequence_envelope(take(serialize_project(annotated_project(), registry)).json);
-    // The chain walks 5 -> 4 (the empty scene list drops cleanly), then 4 -> 3
-    // (the straight groove drops cleanly), then 3 -> 2 (the empty chord lane
-    // drops cleanly), and finally refuses at 2 -> 1, where the authored
-    // annotations would be lost.
+    // The chain walks 7 -> 6 (the section roles drop, and the chord lane states
+    // no detail to refuse over), then 6 -> 5 (the authored order is the identity
+    // order, so it drops cleanly), then 5 -> 4 (the empty scene list drops
+    // cleanly), then 4 -> 3 (the straight groove drops cleanly), then 3 -> 2
+    // (the empty chord lane drops cleanly), and finally refuses at 2 -> 1,
+    // where the authored annotations would be lost.
     auto refused =
-        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 5, 1, populated, limits);
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 7, 1, populated, limits);
     REQUIRE_FALSE(refused);
     REQUIRE(refused.error().code == PersistenceErrorCode::MigrationFailed);
 }
@@ -169,7 +163,7 @@ TEST_CASE("Timeline version-one sequences decode with no markers or regions") {
     // Re-saving lifts the sequence to the current schema version.
     const auto resaved = take(serialize_project(decoded, registry)).json;
     REQUIRE(resaved.find(R"("markers":[],"musical_duration")") != std::string::npos);
-    REQUIRE(resaved.find(R"("type_name":"pulp.timeline.sequence","version":5)") !=
+    REQUIRE(resaved.find(R"("type_name":"pulp.timeline.sequence","version":7)") !=
             std::string::npos);
 }
 
@@ -202,10 +196,10 @@ TEST_CASE("Timeline snapshots reject malformed marker and region payloads") {
 
     // A version-one sequence carrying markers is a contradiction, not a hint.
     auto mismatched = snapshot;
-    const auto version = mismatched.find(R"("type_name":"pulp.timeline.sequence","version":5)");
+    const auto version = mismatched.find(R"("type_name":"pulp.timeline.sequence","version":7)");
     REQUIRE(version != std::string::npos);
     mismatched.replace(
-        version, std::string_view(R"("type_name":"pulp.timeline.sequence","version":5)").size(),
+        version, std::string_view(R"("type_name":"pulp.timeline.sequence","version":7)").size(),
         R"("type_name":"pulp.timeline.sequence","version":1)");
     auto rejected_version = deserialize_project(mismatched, registry);
     REQUIRE_FALSE(rejected_version);
@@ -241,7 +235,7 @@ TEST_CASE("Timeline project downgrade refuses to discard a session origin") {
     const auto populated = take(serialize_project(annotated_project(), registry)).json;
     REQUIRE(populated.find(R"("session_start")") != std::string::npos);
     auto refused =
-        registry.migrate(SchemaDomain::Document, "pulp.timeline.project", 2, 1, populated, limits);
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.project", 3, 1, populated, limits);
     REQUIRE_FALSE(refused);
     REQUIRE(refused.error().code == PersistenceErrorCode::MigrationFailed);
 
@@ -249,7 +243,7 @@ TEST_CASE("Timeline project downgrade refuses to discard a session origin") {
     const auto plain = take(serialize_project(project_without_session_start(), registry)).json;
     REQUIRE(plain.find(R"("session_start")") == std::string::npos);
     const auto lowered = take(
-        registry.migrate(SchemaDomain::Document, "pulp.timeline.project", 2, 1, plain, limits));
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.project", 3, 1, plain, limits));
     REQUIRE(lowered.find(R"("type_name":"pulp.timeline.project","version":1)") !=
             std::string::npos);
 }
@@ -260,10 +254,10 @@ TEST_CASE("Timeline snapshots reject malformed session origins and colours") {
 
     // A session origin on a version-one project is a contradiction.
     auto mismatched = snapshot;
-    const auto version = mismatched.find(R"("type_name":"pulp.timeline.project","version":2)");
+    const auto version = mismatched.find(R"("type_name":"pulp.timeline.project","version":3)");
     REQUIRE(version != std::string::npos);
     mismatched.replace(
-        version, std::string_view(R"("type_name":"pulp.timeline.project","version":2)").size(),
+        version, std::string_view(R"("type_name":"pulp.timeline.project","version":3)").size(),
         R"("type_name":"pulp.timeline.project","version":1)");
     auto rejected_version = deserialize_project(mismatched, registry);
     REQUIRE_FALSE(rejected_version);
@@ -318,4 +312,103 @@ TEST_CASE("Timeline session origin normalizes its rate and rejects an invalid on
     auto negative = Project::create(input);
     REQUIRE_FALSE(negative);
     REQUIRE(negative.error().code == ModelErrorCode::InvalidSessionStart);
+}
+
+TEST_CASE("a section role round trips on regions and defaults on older documents",
+          "[timeline][marker][persistence]") {
+    const auto registry = builtins();
+    auto track = take(Track::create({3}, "root track", {}));
+    auto sequence = take(Sequence::create(
+        {2}, "root", TickDuration{8 * kTicksPerQuarter}, std::nullopt, {track}, {},
+        {SequenceRegion{{6}, "A", {0}, {4 * kTicksPerQuarter}, std::nullopt, SectionRole::Verse},
+         SequenceRegion{{7}, "B", {4 * kTicksPerQuarter}, {2 * kTicksPerQuarter}, 0x00c08040u,
+                        SectionRole::Chorus},
+         SequenceRegion{{8}, "?", {6 * kTicksPerQuarter}, {kTicksPerQuarter}, std::nullopt}}));
+    const auto project =
+        take(Project::create(ProjectInput{{1}, "roles", 9, {2}, {}, {sequence}}));
+
+    const auto encoded = take(serialize_project(project, registry)).json;
+    const auto decoded = take(deserialize_project(encoded, registry));
+    const auto regions = decoded.find_sequence({2})->regions();
+    REQUIRE(regions.size() == 3);
+    REQUIRE(regions[0].role == SectionRole::Verse);
+    REQUIRE(regions[1].role == SectionRole::Chorus);
+    // A region that claims no part states Unspecified rather than nothing, so
+    // the absence is a value the round trip carries rather than a gap.
+    REQUIRE(regions[2].role == SectionRole::Unspecified);
+    REQUIRE(take(serialize_project(decoded, registry)).json == encoded);
+
+    // A region whose role is outside the vocabulary is refused, not clamped.
+    auto invalid = SequenceRegion{{6}, "A", {0}, {kTicksPerQuarter}, std::nullopt};
+    invalid.role = static_cast<SectionRole>(99);
+    const auto rejected = Sequence::create({2}, "root", TickDuration{8 * kTicksPerQuarter},
+                                           std::nullopt, {track}, {}, {invalid});
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ModelErrorCode::InvalidRegion);
+
+    // The v4 fixture predates roles entirely; every region it carries upgrades
+    // to Unspecified, which is what a reader without roles already saw.
+    const auto legacy = take(deserialize_project(marker_fixture("v4/sequence-markers.json"),
+                                                 registry));
+    for (const auto& region : legacy.find_sequence({2})->regions())
+        REQUIRE(region.role == SectionRole::Unspecified);
+}
+
+TEST_CASE("the section-role downgrade drops the role and keeps the region",
+          "[timeline][marker][migration]") {
+    const auto registry = builtins();
+    DecodeLimits limits;
+    auto track = take(Track::create({3}, "root track", {}));
+    auto sequence = take(Sequence::create(
+        {2}, "root", TickDuration{8 * kTicksPerQuarter}, std::nullopt, {track}, {},
+        {SequenceRegion{{6}, "A", {0}, {4 * kTicksPerQuarter}, 0x00c08040u,
+                        SectionRole::Bridge}}));
+    const auto project = take(Project::create(ProjectInput{{1}, "roles", 7, {2}, {}, {sequence}}));
+    const auto encoded = take(serialize_project(project, registry)).json;
+
+    const auto envelope = sequence_envelope(encoded);
+
+    // Unlike the chord detail, a role is an annotation beside a name the older
+    // reader still sees, so the downgrade drops it instead of refusing.
+    const auto lowered = take(
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 7, 6, envelope, limits));
+    REQUIRE(lowered.find(R"("role")") == std::string::npos);
+    // The region itself survives: same identity, name, colour, and span. A v6
+    // reader sees the same music with one fewer label on it.
+    REQUIRE(lowered.find(R"("name":"A")") != std::string::npos);
+    REQUIRE(lowered.find(R"("color":12615744)") != std::string::npos);
+    REQUIRE(lowered.find(R"("id":"6")") != std::string::npos);
+    const auto span = encoded.find(R"("duration":")");
+    REQUIRE(span != std::string::npos);
+    REQUIRE(lowered.find(encoded.substr(span, encoded.find(',', span) - span)) !=
+            std::string::npos);
+
+    // The upgrade puts the default back, so a v6 document reads as a region
+    // that claims no part rather than as a broken one.
+    const auto raised = take(
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 6, 7, lowered, limits));
+    REQUIRE(raised.find(R"("role":"unspecified")") != std::string::npos);
+}
+
+TEST_CASE("a sequence older than section roles may not carry one",
+          "[timeline][marker][persistence]") {
+    const auto registry = builtins();
+    auto track = take(Track::create({3}, "root track", {}));
+    auto sequence = take(Sequence::create(
+        {2}, "root", TickDuration{8 * kTicksPerQuarter}, std::nullopt, {track}, {},
+        {SequenceRegion{{6}, "A", {0}, {4 * kTicksPerQuarter}, std::nullopt,
+                        SectionRole::Verse}}));
+    auto mislabelled =
+        take(serialize_project(take(Project::create(ProjectInput{{1}, "roles", 7, {2}, {},
+                                                                {sequence}})),
+                               registry))
+            .json;
+    constexpr std::string_view stamp = R"("type_name":"pulp.timeline.sequence","version":7)";
+    const auto at = mislabelled.find(stamp);
+    REQUIRE(at != std::string::npos);
+    mislabelled.replace(at, stamp.size(),
+                        R"("type_name":"pulp.timeline.sequence","version":6)");
+    auto rejected = deserialize_project(mislabelled, registry);
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == PersistenceErrorCode::InvalidSchema);
 }

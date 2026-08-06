@@ -38,7 +38,12 @@ SchemaRegistry registry_with_replaced_track_migration() {
     for (const auto& original : source.types()) {
         auto copy = original;
         if (copy.type_name == "pulp.timeline.track") {
-            REQUIRE(copy.upgrades.size() == 6);
+            // The edge being replaced is v1 to v2, so name that rather than a
+            // literal edge count that every schema bump has to come back for.
+            // The count still has to be complete, expressed against the version
+            // range it must span.
+            REQUIRE(copy.upgrades.size() == copy.current_version - 1);
+            REQUIRE(copy.upgrades[0].from_version == 1);
             copy.upgrades[0].migrate = rewrite_track_identity;
         }
         REQUIRE(builder.register_type(std::move(copy)).has_value());
@@ -59,7 +64,7 @@ void require_invalid_identity(const std::string& snapshot) {
 TEST_CASE("Timeline device chains round trip in authored order") {
     const auto registry = builtins();
     const auto encoded = take(serialize_project(project_with_devices(), registry));
-    REQUIRE(encoded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":7") !=
+    REQUIRE(encoded.json.find(track_version_stamp()) !=
             std::string::npos);
     REQUIRE(encoded.json.find("\"type_name\":\"pulp.timeline.device_placement\"") !=
             std::string::npos);
@@ -145,7 +150,7 @@ TEST_CASE("Timeline permanent fixtures cover Track versions one and two") {
     const auto old_project = take(deserialize_project(fixture("v1/track.json"), registry));
     REQUIRE(old_project.sequences()[0].tracks()[0].device_chain().empty());
     const auto upgraded = take(serialize_project(old_project, registry));
-    REQUIRE(upgraded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":7") !=
+    REQUIRE(upgraded.json.find(track_version_stamp()) !=
             std::string::npos);
 
     const auto current = take(deserialize_project(fixture("v2/device-chain.json"), registry));
@@ -191,8 +196,20 @@ TEST_CASE("Timeline device chain envelopes reject mislabeled structural versions
         REQUIRE(decoded.error().code == expected);
     };
 
+    // Two cases, because they fail differently. Exactly one past the newest
+    // readable version is the tight boundary, and deriving it means the
+    // assertion moves with the range instead of naming a number the schema
+    // later grows into — which is how this case once stopped testing anything:
+    // the decoder accepted the "mislabeled" envelope and failed later for an
+    // unrelated reason, so it still failed, but no longer for its own reason.
     reject(replace_once(current, "pulp.timeline.track\",\"version\":2",
-                        "pulp.timeline.track\",\"version\":8"),
+                        "pulp.timeline.track\",\"version\":" +
+                            std::to_string(current_schema_version("pulp.timeline.track") + 1)),
+           PersistenceErrorCode::UnsupportedSchemaVersion);
+    // And far past any version the registry will plausibly reach, which stays
+    // meaningful even if the boundary case above is ever weakened.
+    reject(replace_once(current, "pulp.timeline.track\",\"version\":2",
+                        "pulp.timeline.track\",\"version\":9999"),
            PersistenceErrorCode::UnsupportedSchemaVersion);
     reject(replace_once(current, "pulp.timeline.track\",\"version\":2",
                         "pulp.timeline.track\",\"version\":1"),

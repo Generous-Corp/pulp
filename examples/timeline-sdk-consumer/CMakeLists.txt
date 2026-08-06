@@ -1,9 +1,13 @@
 cmake_minimum_required(VERSION 3.24)
 project(PulpTimelineSdkConsumer VERSION 0.1.0 LANGUAGES CXX)
 
-find_package(Pulp REQUIRED COMPONENTS timebase timeline playback dawproject-import)
+find_package(Pulp REQUIRED COMPONENTS
+    timebase timeline project-package playback
+    dawproject-import dawproject-export smf-interop smf-interchange)
 
-foreach(_component timebase timeline playback dawproject-import)
+foreach(_component
+        timebase timeline project-package playback
+        dawproject-import dawproject-export smf-interop smf-interchange)
     if(NOT Pulp_${_component}_FOUND)
         message(FATAL_ERROR "Pulp did not report required component ${_component}")
     endif()
@@ -16,9 +20,31 @@ target_link_libraries(pulp-timeline-sdk-consumer PRIVATE
     Pulp::playback
 )
 
+add_executable(pulp-timeline-cookbook-consumer cookbook.cpp)
+target_link_libraries(pulp-timeline-cookbook-consumer PRIVATE
+    Pulp::timebase
+    Pulp::timeline
+    Pulp::playback
+)
+
+add_executable(pulp-project-package-sdk-consumer project_package.cpp)
+target_link_libraries(pulp-project-package-sdk-consumer PRIVATE
+    Pulp::project-package
+)
+
 add_executable(pulp-dawproject-import-sdk-consumer dawproject_import.cpp)
 target_link_libraries(pulp-dawproject-import-sdk-consumer PRIVATE
     Pulp::dawproject-import
+)
+
+add_executable(pulp-dawproject-export-sdk-consumer dawproject_export.cpp)
+target_link_libraries(pulp-dawproject-export-sdk-consumer PRIVATE
+    Pulp::dawproject-export
+)
+
+add_executable(pulp-smf-interchange-sdk-consumer smf_interchange.cpp)
+target_link_libraries(pulp-smf-interchange-sdk-consumer PRIVATE
+    Pulp::smf-interchange
 )
 
 # Audit the installed target graph, not a hand-maintained dependency list.
@@ -96,6 +122,105 @@ foreach(_forbidden
 endforeach()
 
 set_property(GLOBAL PROPERTY PULP_TIMELINE_SDK_CLOSURE "")
+_pulp_collect_dependencies(Pulp::project-package)
+get_property(_actual_project_package_closure GLOBAL PROPERTY PULP_TIMELINE_SDK_CLOSURE)
+list(REMOVE_DUPLICATES _actual_project_package_closure)
+list(SORT _actual_project_package_closure)
+set(_expected_project_package_closure
+    Pulp::everest
+    Pulp::hwy
+    Pulp::mbedcrypto
+    Pulp::mbedtls
+    Pulp::mbedx509
+    Pulp::p256m
+    Pulp::platform
+    Pulp::project-package
+    Pulp::runtime
+    Pulp::timebase
+    Pulp::timeline
+)
+list(SORT _expected_project_package_closure)
+if(NOT _actual_project_package_closure STREQUAL _expected_project_package_closure)
+    message(FATAL_ERROR
+        "Project-package SDK closure drifted.\n"
+        "Expected: ${_expected_project_package_closure}\n"
+        "Actual:   ${_actual_project_package_closure}")
+endif()
+
+set_property(GLOBAL PROPERTY PULP_TIMELINE_SDK_CLOSURE "")
+_pulp_collect_dependencies(Pulp::smf-interop)
+get_property(_actual_smf_codec_closure GLOBAL PROPERTY PULP_TIMELINE_SDK_CLOSURE)
+list(REMOVE_DUPLICATES _actual_smf_codec_closure)
+list(SORT _actual_smf_codec_closure)
+
+set(_expected_smf_codec_closure
+    Pulp::everest
+    Pulp::hwy
+    Pulp::mbedcrypto
+    Pulp::mbedtls
+    Pulp::mbedx509
+    Pulp::p256m
+    Pulp::platform
+    Pulp::runtime
+    Pulp::smf-interop
+    Pulp::timebase
+    Pulp::timeline
+)
+list(SORT _expected_smf_codec_closure)
+if(NOT _actual_smf_codec_closure STREQUAL _expected_smf_codec_closure)
+    message(FATAL_ERROR
+        "SMF codec SDK closure drifted.\n"
+        "Expected: ${_expected_smf_codec_closure}\n"
+        "Actual:   ${_actual_smf_codec_closure}")
+endif()
+
+set_property(GLOBAL PROPERTY PULP_TIMELINE_SDK_CLOSURE "")
+_pulp_collect_dependencies(Pulp::smf-interchange)
+get_property(_actual_smf_adapter_closure GLOBAL PROPERTY PULP_TIMELINE_SDK_CLOSURE)
+list(REMOVE_DUPLICATES _actual_smf_adapter_closure)
+list(SORT _actual_smf_adapter_closure)
+set(_expected_smf_adapter_closure
+    ${_expected_smf_codec_closure}
+    Pulp::interchange
+    Pulp::smf-interchange
+)
+list(REMOVE_DUPLICATES _expected_smf_adapter_closure)
+list(SORT _expected_smf_adapter_closure)
+if(NOT _actual_smf_adapter_closure STREQUAL _expected_smf_adapter_closure)
+    message(FATAL_ERROR
+        "SMF interchange SDK closure drifted.\n"
+        "Expected: ${_expected_smf_adapter_closure}\n"
+        "Actual:   ${_actual_smf_adapter_closure}")
+endif()
+
+set_property(GLOBAL PROPERTY PULP_TIMELINE_SDK_CLOSURE "")
+_pulp_collect_dependencies(Pulp::dawproject-export)
+get_property(_actual_daw_export_closure GLOBAL PROPERTY PULP_TIMELINE_SDK_CLOSURE)
+list(REMOVE_DUPLICATES _actual_daw_export_closure)
+list(SORT _actual_daw_export_closure)
+set(_expected_daw_export_closure
+    Pulp::dawproject-export
+    Pulp::everest
+    Pulp::hwy
+    Pulp::interchange
+    Pulp::mbedcrypto
+    Pulp::mbedtls
+    Pulp::mbedx509
+    Pulp::p256m
+    Pulp::platform
+    Pulp::runtime
+    Pulp::timebase
+    Pulp::timeline
+)
+list(SORT _expected_daw_export_closure)
+if(NOT _actual_daw_export_closure STREQUAL _expected_daw_export_closure)
+    message(FATAL_ERROR
+        "DAWproject exporter SDK closure drifted.\n"
+        "Expected: ${_expected_daw_export_closure}\n"
+        "Actual:   ${_actual_daw_export_closure}")
+endif()
+
+set_property(GLOBAL PROPERTY PULP_TIMELINE_SDK_CLOSURE "")
 _pulp_collect_dependencies(Pulp::dawproject-import)
 get_property(_actual_importer_closure GLOBAL PROPERTY PULP_TIMELINE_SDK_CLOSURE)
 list(REMOVE_DUPLICATES _actual_importer_closure)
@@ -106,11 +231,11 @@ set(_expected_importer_closure
     Pulp::sample-bank-manifest
     Pulp::dawproject-import
     Pulp::events
-    Pulp::everest
-    Pulp::hwy
     # The importer's refusal sites derive from the interchange capability table,
     # so interchange is part of its installed closure, not an internal detail.
     Pulp::interchange
+    Pulp::everest
+    Pulp::hwy
     Pulp::mbedcrypto
     Pulp::mbedtls
     Pulp::mbedx509
@@ -123,6 +248,9 @@ set(_expected_importer_closure
     Pulp::timebase
     Pulp::timeline
 )
+# Normalize both sides identically. The actual closure is de-duplicated above,
+# so an accidentally repeated entry here would make the comparison unsatisfiable
+# — which is exactly what a second `Pulp::interchange` used to do.
 list(REMOVE_DUPLICATES _expected_importer_closure)
 list(SORT _expected_importer_closure)
 if(NOT _actual_importer_closure STREQUAL _expected_importer_closure)

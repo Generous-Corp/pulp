@@ -26,6 +26,7 @@
 // over 5 ms, so a finer read would be discarded, and a block-rate read would
 // make a knob sweep step audibly at large buffer sizes.
 
+#include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 
 #include <pulp/signal/fdn_reverb.hpp>
@@ -171,6 +172,61 @@ inline CustomNodeType make_fdn_reverb_node(fdn::Mode mode) {
             }
         };
     return t;
+}
+
+inline ForgeNodeDescriptor fdn_reverb_descriptor() {
+    ForgeNodeDescriptor d;
+    d.key = "fdn_reverb";
+    d.label = "FDN Reverb";
+    d.description = "True-stereo multirate feedback-delay-network reverb with five musical "
+                    "voicings and a wet-only output.";
+    d.axes = {{"mode",
+               "Mode",
+               "A complete voicing of the shared tank, including its starting "
+               "parameter values and output damping.",
+               {{"room", "Room", 0.0f},
+                {"hall", "Hall", 1.0f},
+                {"galaxy", "Galaxy", 2.0f},
+                {"shimmer", "Shimmer", 3.0f},
+                {"lofi", "Lo-Fi", 4.0f}}}};
+    d.realizations = {
+        {"room", kRoomTypeId, {{"mode", "room"}}},
+        {"hall", kHallTypeId, {{"mode", "hall"}}},
+        {"galaxy", kGalaxyTypeId, {{"mode", "galaxy"}}},
+        {"shimmer", kShimmerTypeId, {{"mode", "shimmer"}}},
+        {"lofi", kLofiTypeId, {{"mode", "lofi"}}},
+    };
+    d.params = {
+        {"decay", kDecay, "Decay", "s", "Reverberation decay time.", ForgeParamKind::continuous,
+         ForgeParamCurve::logarithmic},
+        {"size", kSize, "Size", "%", "Scales the tank's delay-line lengths.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"predelay", kPredelay, "Predelay", "ms",
+         "Time between the dry event and the start of the reverberant field.",
+         ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+        {"damp_hi", kDampHi, "High Damping", "%", "Shortens the decay of high frequencies.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"damp_lo", kDampLo, "Low Damping", "%", "Shortens the decay of low frequencies.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"diffusion", kDiffusion, "Diffusion", "%",
+         "Controls echo density and the smoothness of the tail.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"mod", kMod, "Modulation", "%",
+         "Modulates tank delay lengths to soften static resonances.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"shimmer", kShimmer, "Shimmer", "%",
+         "Amount of pitch-raised energy recirculated through the tank.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"drive", kDrive, "Drive", "%", "Nonlinear drive within the reverberant return.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"bloom", kBloom, "Bloom", "%", "Builds late-tail energy after the initial reflections.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"width", kWidth, "Width", "%", "Stereo spread of the wet return.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"tank_rate", kTankRate, "Tank Rate", "Hz", "Internal multirate tank processing frequency.",
+         ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+    };
+    return d;
 }
 
 }  // namespace pulp::host::forge_fdn

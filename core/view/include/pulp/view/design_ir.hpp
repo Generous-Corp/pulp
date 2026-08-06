@@ -36,7 +36,8 @@ enum class DesignSource {
     claude,   // Anthropic Claude Design — manual HTML/zip export, no Anthropic API
     designmd, // Google DESIGN.md (Apache-2.0) — YAML frontmatter + Markdown body
     jsx,           // Single-file React JSX instrument — compiled via esbuild + bundled React/ReactDOM
-    figma_plugin   // Pulp's "Design for Pulp" Figma plugin export envelope
+    figma_plugin,  // Pulp's "Design for Pulp" Figma plugin export envelope
+    html           // Generic runnable HTML evaluated by the isolated browser lane
 };
 
 // ── Normalized Intermediate Representation ──────────────────────────────
@@ -117,6 +118,31 @@ struct IRStyle {
     // consume these; sources that carry them — and Figma mask
     // layers once the extractor emits a clip-path — survive the IR.
     std::optional<std::string> clip_path;
+    // The clip an importer resolved for THIS node, in the node's own
+    // coordinate space (origin at its top-left, same space as `clip_path`).
+    //
+    // Carried per node rather than inherited from a clipping parent, because
+    // CSS clips along the containing-block chain while a tree clips by
+    // parentage, and the two disagree in both directions: an absolutely
+    // positioned node can escape an `overflow: hidden` ancestor it sits inside,
+    // and a node moved to a new parent must keep the clip its old one gave it.
+    // A rectangle attached to the node travels with the node, so re-parenting
+    // cannot change what it clips. The engine (View::set_ancestor_clip_rect)
+    // applies it to the node's OWN ink only — every descendant carries its own.
+    //
+    // The corner radii belong to the clip, not to the node: CSS clips overflow
+    // to the clipper's ROUNDED padding box, so a square-cornered child inside a
+    // rounded card is cut to the card's curve. Without them a rounded card whose
+    // media area is a plain rectangle paints that rectangle square into the
+    // corner, and the card reads as unrounded even though its own border curves.
+    // A radius applies only where the clip's corner is still the clipper's own —
+    // a corner cut by a second, tighter clipper is square, so the resolver drops
+    // the radius there rather than rounding a corner nothing rounded.
+    struct ClipRect {
+        float x = 0, y = 0, width = 0, height = 0;
+        float radius_tl = 0, radius_tr = 0, radius_br = 0, radius_bl = 0;
+    };
+    std::optional<ClipRect> clip_rect;
     std::optional<std::string> mask;                   // `mask` shorthand
     std::optional<std::string> mask_image;
     std::optional<std::string> mask_size;
@@ -138,6 +164,16 @@ struct IRStyle {
     std::optional<std::string> text_overflow;
     std::optional<std::string> overflow;               // hidden, scroll, auto
     std::optional<std::string> cursor;
+    /// CSS `pointer-events`. Captured alongside `cursor` and lowered onto
+    /// View::PointerEvents.
+    ///
+    /// It is load-bearing on a designed panel, which is not obvious: a design
+    /// stacks decorative bands (glows, gradient washes, vignettes) over its
+    /// controls and opts them out of hit-testing. Drop this and every one of
+    /// those bands eats the presses meant for the control beneath it, so the
+    /// panel renders correctly and responds to nothing — and the author has no
+    /// escape hatch, because saying `pointer-events: none` does nothing.
+    std::optional<std::string> pointer_events;         // auto, none
     std::optional<std::string> position;               // absolute, relative
     std::optional<float> top, left, right, bottom;
     std::optional<int> z_index;
@@ -286,6 +322,43 @@ struct IRProvenance {
 /// (a bold word, a colored span, a different size mid-string) becomes an ordered
 /// list of these so codegen can emit per-range <span>s instead of collapsing to
 /// the first-char dominant style.
+/// One line box Chrome laid a text run out on, kept as CACHED LAYOUT beside the
+/// paragraph rather than in place of it.
+///
+/// The node stays one semantic paragraph — full text, one style, one container
+/// box — and these describe how the browser broke it. A renderer that finds the
+/// cache valid draws these verbatim, so no disagreement between our advances
+/// and Blink's can move a line; a renderer that finds it stale reflows and the
+/// paragraph behaves like any other text.
+///
+/// `rect` is relative to the node's own box. `start` / `length` are UTF-16 code
+/// units into `text_content`, because that is how the capture protocol indexes
+/// strings — see `utf16_slice` in the importer.
+struct IRTextLineBox {
+    float left = 0.0f;
+    float top = 0.0f;
+    float width = 0.0f;
+    float height = 0.0f;
+    int start = 0;
+    int length = 0;
+};
+
+/// What the cached line boxes above were laid out AGAINST.
+///
+/// The cache is only usable if the conditions that produced it still hold, and
+/// this records them so the check is against captured fact rather than against
+/// an assumption. Deliberately conservative: any difference reflows, because a
+/// wrongly-reused cache is the bug this exists to prevent while a wrongly-
+/// discarded one costs only a reflow.
+struct IRTextLayoutBasis {
+    /// The container width Chrome broke the text at.
+    float width = 0.0f;
+    /// The face Blink actually shaped with — a PostScript name, not the
+    /// requested family. Empty when the capture recorded no platform font,
+    /// which makes the cache unusable rather than usable-on-trust.
+    std::string resolved_face;
+};
+
 struct IRTextRun {
     int start = 0;
     int end = 0;
@@ -303,10 +376,16 @@ struct IRTextRun {
 // materialization. `faithful_svg` means: render this node's own SVG export
 // (svg_asset_id) pixel-faithfully via DesignFrameView, and overlay native
 // interaction from `interactive_elements` (source-side semantics — NOT guessed
-// from the SVG). Per-node so faithful-vector and sprite nodes coexist.
+// from the SVG). `faithful_capture` is the browser-evaluated HTML lane: render
+// the captured raster named by capture_asset_id while separately carrying the
+// browser's evidence-ranked semantic report. Keeping it distinct from a normal
+// image makes the fidelity/interaction boundary explicit and prevents a
+// screenshot-backed import from masquerading as a fully-native reconstruction.
+// Per-node so faithful-vector, browser-capture, and native nodes can coexist.
 enum class NodeRenderMode {
     normal,
     faithful_svg,
+    faithful_capture,
 };
 
 // The kind of an interactive overlay on a faithful_svg node. Deliberately
@@ -473,6 +552,12 @@ struct IRNode {
     std::string name;
     std::string text_content;            // For text nodes
     std::vector<IRTextRun> text_runs;    // Per-range style overrides (mixed text)
+    /// Chrome's own line breaking for `text_content`, cached. Empty when the
+    /// capture carried none or the run fit on one line.
+    std::vector<IRTextLineBox> text_line_boxes;
+    /// The conditions `text_line_boxes` was captured under. Absent means the
+    /// cache cannot be validated and must not be used.
+    std::optional<IRTextLayoutBasis> text_layout_basis;
     IRStyle style;
     IRLayout layout;
     AudioWidgetType audio_widget = AudioWidgetType::none;
@@ -511,12 +596,17 @@ struct IRNode {
 
     // ── Faithful-vector import ───────────────────────────────────────────
     /// How this node materializes. `faithful_svg` renders `svg_asset_id` via
-    /// DesignFrameView and overlays `interactive_elements`; `normal` keeps the
-    /// existing widget/sprite path. Per-node so the two lanes coexist.
+    /// DesignFrameView and overlays `interactive_elements`; `faithful_capture`
+    /// renders `capture_asset_id` as browser-solved visual backing; `normal`
+    /// keeps the existing widget/sprite path. Per-node so the lanes coexist.
     NodeRenderMode render_mode = NodeRenderMode::normal;
     /// Asset id (into IRAssetManifest) of this node's SVG export, when
     /// render_mode == faithful_svg. The asset's mime is image/svg+xml.
     std::optional<std::string> svg_asset_id;
+    /// Asset id (into IRAssetManifest) of the browser screenshot backing when
+    /// render_mode == faithful_capture. Kept separate from svg_asset_id so
+    /// consumers never infer the payload type from a generic render-mode flag.
+    std::optional<std::string> capture_asset_id;
     /// Source-identified interactive overlays for a faithful_svg render.
     /// Empty for `normal` nodes.
     std::vector<IRInteractiveElement> interactive_elements;

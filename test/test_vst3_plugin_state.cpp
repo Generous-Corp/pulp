@@ -1,4 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+#include <pulp/format/host_parameter_edit.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/format/vst3_adapter.hpp>
 #include <pulp/format/vst3_plug_view.hpp>
@@ -736,6 +738,12 @@ TEST_CASE("VST3 retained editor observes processor-owner teardown",
     ScopedEnv headless("PULP_HEADLESS");
     ScopedEnv test_mode("PULP_TEST_MODE");
     ScopedEnv ci("CI");
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    ScopedEnv display("DISPLAY");
+    ScopedEnv wayland("WAYLAND_DISPLAY");
+    display.set(":99");
+    wayland.unset();
+#endif
     disable_editor.unset();
     headless.unset();
     test_mode.unset();
@@ -766,8 +774,9 @@ public:
         begins.push_back(id);
         return Steinberg::kResultOk;
     }
-    Steinberg::tresult PLUGIN_API performEdit(Steinberg::Vst::ParamID,
-                                              Steinberg::Vst::ParamValue) override {
+    Steinberg::tresult PLUGIN_API performEdit(Steinberg::Vst::ParamID id,
+                                              Steinberg::Vst::ParamValue value) override {
+        edits.push_back({id, value});
         return Steinberg::kResultOk;
     }
     Steinberg::tresult PLUGIN_API endEdit(Steinberg::Vst::ParamID id) override {
@@ -790,8 +799,13 @@ public:
     Steinberg::uint32 PLUGIN_API addRef() override { return 1; }
     Steinberg::uint32 PLUGIN_API release() override { return 1; }
 
+    struct Edit {
+        Steinberg::Vst::ParamID id;
+        Steinberg::Vst::ParamValue value;
+    };
     std::vector<Steinberg::Vst::ParamID> begins;
     std::vector<Steinberg::Vst::ParamID> ends;
+    std::vector<Edit> edits;
 };
 }  // namespace
 
@@ -804,6 +818,12 @@ TEST_CASE("VST3 editor removed mid-gesture releases the open beginEdit",
     ScopedEnv headless("PULP_HEADLESS");
     ScopedEnv test_mode("PULP_TEST_MODE");
     ScopedEnv ci("CI");
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    ScopedEnv display("DISPLAY");
+    ScopedEnv wayland("WAYLAND_DISPLAY");
+    display.set(":99");
+    wayland.unset();
+#endif
     disable_editor.unset();
     headless.unset();
     test_mode.unset();
@@ -833,6 +853,148 @@ TEST_CASE("VST3 editor removed mid-gesture releases the open beginEdit",
     REQUIRE(recorder.ends == std::vector<Steinberg::Vst::ParamID>{kGainParamId});
     REQUIRE(store.open_gesture_count() == 0);
 
+    view->release();
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 does not echo host automation back during an open gesture",
+          "[vst3][editor][gesture][automation][wah-5]") {
+    // The adapter used to decide "did the editor write this?" by checking
+    // whether a gesture was OPEN. Host automation arriving while the user holds
+    // a knob satisfies that test, so the host's own value was reported straight
+    // back at it through performEdit() — a fight for control, a spurious
+    // automation write, or a bogus undo entry, depending on the host.
+    //
+    // This drives the REAL adapter (not just HostParameterEditBridge in
+    // isolation) to prove the wiring, not only the policy.
+    ScopedEnv disable_editor("PULP_DISABLE_PLUGIN_EDITOR");
+    ScopedEnv headless("PULP_HEADLESS");
+    ScopedEnv test_mode("PULP_TEST_MODE");
+    ScopedEnv ci("CI");
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    ScopedEnv display("DISPLAY");
+    ScopedEnv wayland("WAYLAND_DISPLAY");
+    display.set(":99");
+    wayland.unset();
+#endif
+    disable_editor.unset();
+    headless.unset();
+    test_mode.unset();
+    ci.unset();
+
+    reset_test_processor();
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    GestureEditRecorder recorder;
+    REQUIRE(processor.setComponentHandler(&recorder) == Steinberg::kResultOk);
+
+    auto* raw_view = processor.createView(Steinberg::Vst::ViewType::kEditor);
+    REQUIRE(raw_view != nullptr);
+    auto* view = static_cast<pulp::format::vst3::PulpPlugView*>(raw_view);
+    auto& store = pulp::format::vst3::PulpPlugViewTestAccess::store(*view);
+
+    // Mouse-down, then the user moves the knob: one begin, one reported value.
+    store.begin_gesture(kGainParamId);
+    store.set_normalized(kGainParamId, 0.7f);
+    const size_t edits_after_user_move = recorder.edits.size();
+    REQUIRE(edits_after_user_move >= 1);
+    REQUIRE(recorder.edits.back().value == Catch::Approx(0.7));
+
+    // Host automation lands while the gesture is still open.
+    {
+        const pulp::format::ScopedHostParameterWrite host_write;
+        store.set_normalized(kGainParamId, 0.1f);
+        store.set_normalized(kGainParamId, 0.2f);
+    }
+
+    // Nothing new reported: the host's own values were not echoed.
+    REQUIRE(recorder.edits.size() == edits_after_user_move);
+
+    // And the editor can still report after the automation burst.
+    store.set_normalized(kGainParamId, 0.9f);
+    REQUIRE(recorder.edits.size() == edits_after_user_move + 1);
+    REQUIRE(recorder.edits.back().value == Catch::Approx(0.9));
+
+    store.end_gesture(kGainParamId);
+    REQUIRE(recorder.ends == std::vector<Steinberg::Vst::ParamID>{kGainParamId});
+    // The final value is reported BEFORE the gesture closes, so a host that
+    // latches on endEdit records where the control actually landed.
+    REQUIRE(recorder.edits.back().value == Catch::Approx(0.9));
+
+    REQUIRE(view->removed() == Steinberg::kResultOk);
+    view->release();
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 setState reports a preset restore to nobody",
+          "[vst3][editor][automation][wah-5]") {
+    // A preset/session restore rewrites every parameter on the MAIN thread —
+    // the same thread the editor writes from — so the editor-thread check alone
+    // could not tell it apart from a user edit. `setState` therefore runs
+    // inside a ScopedHostParameterWrite.
+    //
+    // Honest scope note: TODAY that scope is belt-and-braces, because
+    // StateStore::deserialize() writes `values_[i].set(...)` directly and
+    // notifies no listeners at all — so this case would pass even with the
+    // provenance check removed. It is kept as a FORWARD guard: the moment
+    // deserialize starts notifying (an entirely plausible change), an
+    // unmarked restore would be echoed to the host as a burst of user
+    // automation, and this fails. The discriminating coverage for the
+    // provenance rule itself lives in test_host_parameter_edit.cpp.
+    ScopedEnv disable_editor("PULP_DISABLE_PLUGIN_EDITOR");
+    ScopedEnv headless("PULP_HEADLESS");
+    ScopedEnv test_mode("PULP_TEST_MODE");
+    ScopedEnv ci("CI");
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    ScopedEnv display("DISPLAY");
+    ScopedEnv wayland("WAYLAND_DISPLAY");
+    display.set(":99");
+    wayland.unset();
+#endif
+    disable_editor.unset();
+    headless.unset();
+    test_mode.unset();
+    ci.unset();
+
+    reset_test_processor();
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    GestureEditRecorder recorder;
+    REQUIRE(processor.setComponentHandler(&recorder) == Steinberg::kResultOk);
+
+    // Capture a state, then restore it.
+    // VectorStream is this file's existing in-memory IBStream (see above); the
+    // SDK's MemoryStream is not linked into the test binary.
+    VectorStream saved;
+    REQUIRE(processor.getState(&saved) == Steinberg::kResultOk);
+    saved.seek(0, Steinberg::IBStream::kIBSeekSet, nullptr);
+
+    // Move the parameter AWAY from the captured value first. Restoring an
+    // identical state changes nothing, fires no listener, and would let this
+    // test pass even with the provenance check removed entirely.
+    auto* raw_view = processor.createView(Steinberg::Vst::ViewType::kEditor);
+    REQUIRE(raw_view != nullptr);
+    auto* view = static_cast<pulp::format::vst3::PulpPlugView*>(raw_view);
+    auto& store = pulp::format::vst3::PulpPlugViewTestAccess::store(*view);
+    const float captured = store.get_normalized(kGainParamId);
+    store.set_normalized(kGainParamId, captured > 0.5f ? 0.1f : 0.9f);
+    REQUIRE(store.get_normalized(kGainParamId) != Catch::Approx(captured));
+
+    recorder.edits.clear();
+    recorder.begins.clear();
+    REQUIRE(processor.setState(&saved) == Steinberg::kResultOk);
+
+    // The restore genuinely moved the parameter back...
+    REQUIRE(store.get_normalized(kGainParamId) == Catch::Approx(captured));
+    // ...and reported nothing to the host as an editor edit.
+    REQUIRE(recorder.edits.empty());
+    REQUIRE(recorder.begins.empty());
+
+    REQUIRE(view->removed() == Steinberg::kResultOk);
     view->release();
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }

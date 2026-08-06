@@ -3,6 +3,7 @@
 #include <miniz.h>
 #include "envelope_merge.hpp"
 #include "fig_lane.hpp"
+#include "node_runtime.hpp"
 #include "render_artifact_path.hpp"
 
 #include <iostream>
@@ -319,7 +320,7 @@ TEST_CASE("pulp-import-design reports help and argument diagnostics",
         auto r = run_import_design({});
         REQUIRE_FALSE(r.timed_out);
         REQUIRE(r.exit_code != 0);
-        REQUIRE(r.stderr_output.find("--from <source> is required") != std::string::npos);
+        REQUIRE(r.stderr_output.find("could not infer the design source") != std::string::npos);
         REQUIRE(r.stdout_output.find("Usage:") != std::string::npos);
     }
 
@@ -515,6 +516,7 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
         const auto source_url = std::string("https://example.test/screens/screen.json");
         const auto asset_url = std::string("https://example.test/screens/assets/icon.svg");
         auto fetched = run_import_design({"--from", "stitch",
+                                          "--offline",
                                           "--url", source_url,
                                           "--emit", "ir-json",
                                           "--output", ir_output.string(),
@@ -775,6 +777,7 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
         REQUIRE(snapshot.stderr_output.find("unsupported --snapshot-semantics value") != std::string::npos);
 
         auto baked = run_import_design({"--from", "stitch",
+                                        "--offline",
                                         "--file", input.string(),
                                         "--mode", "baked",
                                         "--snapshot-semantics", "warn"});
@@ -795,6 +798,7 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
 
         const auto baked_output = tmp.path / "config-default.out.json";
         auto baked = run_import_design({"--from", "stitch",
+                                        "--offline",
                                         "--file", input.string(),
                                         "--output", baked_output.string()});
         REQUIRE_FALSE(baked.timed_out);
@@ -804,6 +808,7 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
 
         const auto live_output = tmp.path / "config-default-live.js";
         auto live_override = run_import_design({"--from", "stitch",
+                                                "--offline",
                                                 "--file", input.string(),
                                                 "--mode", "live",
                                                 "--emit", "js",
@@ -827,6 +832,7 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
         const auto cpp_output = tmp.path / "env-default.cpp";
         const auto header_output = tmp.path / "env-default.hpp";
         auto cpp = run_import_design({"--from", "stitch",
+                                      "--offline",
                                       "--file", input.string(),
                                       "--output", cpp_output.string()});
         REQUIRE_FALSE(cpp.timed_out);
@@ -986,6 +992,7 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
     SECTION("legacy classnames emit vocabulary remains accepted") {
         const auto output = tmp.path / "generated" / "legacy.js";
         auto r = run_import_design({"--from", "stitch",
+                                    "--offline",
                                     "--file", input.string(),
                                     "--output", output.string(),
                                     "--emit", "classnames",
@@ -1030,6 +1037,7 @@ TEST_CASE("pulp-import-design writes a web-compat Stitch import to nested output
                "</body></html>");
 
     auto r = run_import_design({"--from", "stitch",
+                                "--offline",
                                 "--file", input.string(),
                                 "--output", output.string(),
                                 "--emit", "js",
@@ -1068,7 +1076,8 @@ TEST_CASE("pulp-import-design handles literal file paths and rejects unsafe URLs
             tmp.path / "design (1) [draft]! $not-expanded.html";
         write_text(literal, "<div>literal path</div>");
 
-        auto r = run_import_design({"--from", "stitch", "--file", literal.string(),
+        auto r = run_import_design({"--from", "stitch", "--offline",
+                                    "--file", literal.string(),
                                     "--dry-run"});
 
         REQUIRE_FALSE(r.timed_out);
@@ -1082,6 +1091,7 @@ TEST_CASE("pulp-import-design handles literal file paths and rejects unsafe URLs
         write_text(input, "<!doctype html><h1>Literal path</h1>");
 
         auto r = run_import_design({"--from", "stitch",
+                                    "--offline",
                                     "--file", input.string(),
                                     "--output", output.string(),
                                     "--no-comments",
@@ -1147,6 +1157,7 @@ TEST_CASE("pulp-import-design URL fetch uses a unique temp file and argv-safe cu
     auto old_path = read_env_var("PATH").value_or("");
     ScopedEnvVar path_override("PATH", bin.string() + ":" + old_path);
     auto r = run_import_design({"--from", "stitch",
+                                "--offline",
                                 "--url", "https://example.test/screen.html?node-id=1&mode=dev",
                                 "--output", output.string(),
                                 "--no-comments",
@@ -1177,6 +1188,7 @@ TEST_CASE("pulp-import-design debug report names the default bridge-native mode"
                "</body></html>");
 
     auto r = run_import_design({"--from", "stitch",
+                                "--offline",
                                 "--file", input.string(),
                                 "--output", output.string(),
                                 "--debug-output", debug.string(),
@@ -2725,7 +2737,9 @@ TEST_CASE("pulp-import-design --emit swiftui gives each view a distinct theme (n
 namespace {
 
 bool node_available() {
-    return pulp::platform::find_on_path("node").has_value();
+    // Matches what the fig lane itself resolves, so these cases are not
+    // skipped on a machine whose Node.js lives off PATH.
+    return pulp::import_design::browser_capture::resolve_node().ok();
 }
 
 // Point the CLI at the in-tree decoder regardless of the runner's cwd.
@@ -2750,6 +2764,16 @@ TEST_CASE("pulp-import-design --from fig decodes a local .fig offline",
     static FigDecodeEnv fig_env;
     const std::string fixture = PULP_FIG_FIXTURE;
     REQUIRE_FALSE(fixture.empty());
+
+    // Private temp root, same as the scratch-sweep case below. Every emit
+    // section spawns the CLI, and each spawn sweeps its temp root for stale
+    // scratch dirs — so on the shared system temp dir the cost of this case is
+    // set by however many entries the whole machine happens to have there, not
+    // by anything the decode does. On a developer box that had grown to ~148k
+    // entries each spawn took tens of seconds against a 30s harness timeout and
+    // the case failed with exit_code -1, in a different section each run. A
+    // private root keeps the sweep proportional to this case's own scratch.
+    ScopedTempRoot private_tmp("fig-decode-root");
 
     SECTION("--outline lists pages and frames") {
         auto r = run_import_design({"--from", "fig", "--file", fixture, "--outline"});
@@ -3320,6 +3344,7 @@ TEST_CASE("pulp-import-design --fail-below requires --reference to compare again
     const auto output = tmp.path / "ui.js";
 
     auto r = run_import_design({"--from", "claude",
+                               "--offline",
                                "--file", input.string(),
                                "--output", output.string(),
                                "--validate",

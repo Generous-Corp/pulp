@@ -162,6 +162,7 @@ nav:
       - Plugin Interrogation: guides/plugin-interrogation.md
       - Sampler Playback Chooser: guides/sampler-playback.md
       - Creative Timeline Engine SDK: guides/timeline-sdk.md
+      - Timeline Cookbook: guides/timeline-cookbook.md
       - Sample Stream Service: guides/sample-stream-service.md
       - Streaming Sample Source: guides/streaming-sample-source.md
       - Web Plugins: guides/web-plugins.md
@@ -174,6 +175,8 @@ nav:
   - Policies:
       - Code Style: policies/code-style.md
       - Agent Rules: policies/agent-contribution-rules.md
+      - Non-goals: policies/non-goals.md
+      - Plugin Collaboration Decision: policies/plugin-collaboration.md
       - Licensing & Acknowledgements: reference/licensing.md
 
 extra:

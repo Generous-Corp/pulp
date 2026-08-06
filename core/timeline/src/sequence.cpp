@@ -3,6 +3,7 @@
 #include "sequence_scene_internal.hpp"
 
 #include <algorithm>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -21,6 +22,24 @@ runtime::Result<T, ModelError> fail(ModelErrorCode code, ItemId item = {}, ItemI
 bool marker_less(const SequenceMarker& lhs, const SequenceMarker& rhs) noexcept {
     return std::pair(lhs.position.value, lhs.id.value) <
            std::pair(rhs.position.value, rhs.id.value);
+}
+
+constexpr bool valid_section_role(SectionRole role) noexcept {
+    switch (role) {
+    case SectionRole::Unspecified:
+    case SectionRole::Intro:
+    case SectionRole::Verse:
+    case SectionRole::PreChorus:
+    case SectionRole::Chorus:
+    case SectionRole::Bridge:
+    case SectionRole::Breakdown:
+    case SectionRole::Drop:
+    case SectionRole::Solo:
+    case SectionRole::Interlude:
+    case SectionRole::Outro:
+        return true;
+    }
+    return false;
 }
 
 bool region_less(const SequenceRegion& lhs, const SequenceRegion& rhs) noexcept {
@@ -56,6 +75,8 @@ validate_regions(const std::vector<SequenceRegion>& regions,
         if (region.duration.value <= 0 ||
             !within_musical_span(region.position.value, region.duration.value, musical))
             return ModelError{ModelErrorCode::InvalidRegion, region.id, {}};
+        if (!valid_section_role(region.role))
+            return ModelError{ModelErrorCode::InvalidRegion, region.id, {}};
     }
     return std::nullopt;
 }
@@ -90,6 +111,38 @@ std::optional<ModelError> validate_track_span(
     return std::nullopt;
 }
 
+std::vector<ItemId> identity_track_order(std::span<const Track> tracks) {
+    std::vector<ItemId> order;
+    order.reserve(tracks.size());
+    for (const auto& track : tracks)
+        order.push_back(track.id());
+    return order;
+}
+
+// A recorded authored order is a permutation of the track identities: it may
+// not name an unknown track, repeat one, or leave one unplaced. `track_id_index`
+// is already sorted by identity, so one merge walk reports the first offender.
+std::optional<ModelError>
+validate_track_order(std::vector<ItemId> named,
+                     const std::vector<std::pair<ItemId, std::size_t>>& track_id_index,
+                     ItemId sequence_id) {
+    std::sort(named.begin(), named.end());
+    const auto duplicate = std::adjacent_find(named.begin(), named.end());
+    if (duplicate != named.end())
+        return ModelError{ModelErrorCode::DuplicateItemId, *duplicate, sequence_id};
+    std::size_t position = 0;
+    for (const auto& entry : track_id_index) {
+        if (position == named.size() || entry.first < named[position])
+            return ModelError{ModelErrorCode::MissingItem, entry.first, sequence_id};
+        if (named[position] < entry.first)
+            return ModelError{ModelErrorCode::MissingItem, named[position], sequence_id};
+        ++position;
+    }
+    if (position != named.size())
+        return ModelError{ModelErrorCode::MissingItem, named[position], sequence_id};
+    return std::nullopt;
+}
+
 std::vector<ItemId> canonical_sequence_refs(std::span<const Track> tracks) {
     std::vector<ItemId> result;
     for (const auto& track : tracks)
@@ -107,6 +160,10 @@ std::vector<ItemId> canonical_sequence_refs(const Track& track) {
 
 } // namespace
 
+// Every edit but `create` builds its successor by copying this value and naming
+// the fields it changes, never by listing all of them positionally. Two of the
+// fields — `track_order` and `outgoing_sequence_refs` — have the same type, so a
+// positional list can transpose them and still compile.
 struct Sequence::Data {
     ItemId id;
     std::string name;
@@ -114,6 +171,10 @@ struct Sequence::Data {
     std::optional<AbsoluteTimelineDuration> absolute_duration;
     std::vector<Track> tracks;
     std::vector<std::pair<ItemId, std::size_t>> track_id_index;
+    // Authored top-to-bottom order, always naming every track exactly once.
+    // Held beside `tracks` so a reorder never disturbs the identity order the
+    // compile, census, and render paths index.
+    std::vector<ItemId> track_order;
     std::vector<SequenceMarker> markers;
     std::vector<SequenceRegion> regions;
     ChordScaleLane chord_scale_lane;
@@ -209,14 +270,21 @@ runtime::Result<Sequence, ModelError> Sequence::create(SequenceInput input) {
                            [](const auto& lhs, const auto& rhs) { return lhs.first == rhs.first; });
     if (duplicate != track_id_index.end())
         return fail<Sequence>(ModelErrorCode::DuplicateItemId, duplicate->first);
+    if (!input.track_order.empty()) {
+        if (const auto invalid = validate_track_order(input.track_order, track_id_index, input.id))
+            return runtime::Err(*invalid);
+    } else {
+        input.track_order = identity_track_order(input.tracks);
+    }
     auto launcher = detail::build_launcher(std::move(input.scenes), input.tracks);
     if (!launcher)
         return runtime::Err(launcher.error());
     auto outgoing_sequence_refs = canonical_sequence_refs(input.tracks);
     return runtime::Ok(Sequence(std::make_shared<const Data>(
         Data{input.id, std::move(input.name), input.musical_duration, input.absolute_duration,
-             std::move(input.tracks), std::move(track_id_index), std::move(input.markers),
-             std::move(input.regions), std::move(*input.chord_scale_lane), std::move(*input.groove),
+             std::move(input.tracks), std::move(track_id_index), std::move(input.track_order),
+             std::move(input.markers), std::move(input.regions),
+             std::move(*input.chord_scale_lane), std::move(*input.groove),
              std::move(launcher).value(), std::make_shared<const std::uint8_t>(0),
              std::move(outgoing_sequence_refs)})));
 }
@@ -235,6 +303,9 @@ std::optional<AbsoluteTimelineDuration> Sequence::absolute_duration() const noex
 }
 std::span<const Track> Sequence::tracks() const noexcept {
     return data_->tracks;
+}
+std::span<const ItemId> Sequence::track_order() const noexcept {
+    return data_->track_order;
 }
 std::span<const ItemId> Sequence::outgoing_sequence_refs() const noexcept {
     return data_->outgoing_sequence_refs;
@@ -311,10 +382,10 @@ Sequence::with_annotations(std::vector<SequenceMarker> markers,
         return fail<Sequence>(ModelErrorCode::DuplicateItemId, *duplicate, data_->id);
     std::sort(markers.begin(), markers.end(), marker_less);
     std::sort(regions.begin(), regions.end(), region_less);
-    return runtime::Ok(Sequence(std::make_shared<const Data>(Data{
-        data_->id, data_->name, data_->musical_duration, data_->absolute_duration, data_->tracks,
-        data_->track_id_index, std::move(markers), std::move(regions), data_->chord_scale_lane,
-        data_->groove, data_->launcher, data_->compile_structure, data_->outgoing_sequence_refs})));
+    auto next = *data_;
+    next.markers = std::move(markers);
+    next.regions = std::move(regions);
+    return runtime::Ok(Sequence(std::make_shared<const Data>(std::move(next))));
 }
 
 runtime::Result<Sequence, ModelError> Sequence::insert_marker(SequenceMarker marker) const {
@@ -354,11 +425,9 @@ Sequence::insert_scene(Scene scene, std::optional<ItemId> before_scene_id) const
                                                data_->tracks);
     if (!launcher)
         return runtime::Err(launcher.error());
-    return runtime::Ok(Sequence(std::make_shared<const Data>(
-        Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
-             data_->tracks, data_->track_id_index, data_->markers, data_->regions,
-             data_->chord_scale_lane, data_->groove, std::move(launcher).value(),
-             data_->compile_structure, data_->outgoing_sequence_refs})));
+    auto next = *data_;
+    next.launcher = std::move(launcher).value();
+    return runtime::Ok(Sequence(std::make_shared<const Data>(std::move(next))));
 }
 runtime::Result<Sequence, ModelError> Sequence::erase_scene(ItemId id) const {
     auto erased = detail::SequenceEditAccess::erase_scene(*this, id);
@@ -377,11 +446,9 @@ Sequence::insert_slot(ItemId scene_id, Slot slot, std::optional<ItemId> before_s
                                               before_slot_id, data_->tracks);
     if (!launcher)
         return runtime::Err(launcher.error());
-    return runtime::Ok(Sequence(std::make_shared<const Data>(
-        Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
-             data_->tracks, data_->track_id_index, data_->markers, data_->regions,
-             data_->chord_scale_lane, data_->groove, std::move(launcher).value(),
-             data_->compile_structure, data_->outgoing_sequence_refs})));
+    auto next = *data_;
+    next.launcher = std::move(launcher).value();
+    return runtime::Ok(Sequence(std::make_shared<const Data>(std::move(next))));
 }
 runtime::Result<Sequence, ModelError> Sequence::erase_slot(ItemId scene_id, ItemId slot_id) const {
     auto erased = detail::SequenceEditAccess::erase_slot(*this, scene_id, slot_id);
@@ -400,12 +467,9 @@ detail::SequenceEditAccess::erase_scene(const Sequence& source, ItemId id) {
     if (!erased)
         return runtime::Err(erased.error());
     auto result = std::move(erased).value();
-    auto sequence = Sequence(std::make_shared<const Sequence::Data>(Sequence::Data{
-        source.data_->id, source.data_->name, source.data_->musical_duration,
-        source.data_->absolute_duration, source.data_->tracks, source.data_->track_id_index,
-        source.data_->markers, source.data_->regions, source.data_->chord_scale_lane,
-        source.data_->groove, std::move(result.store), source.data_->compile_structure,
-        source.data_->outgoing_sequence_refs}));
+    auto next = *source.data_;
+    next.launcher = std::move(result.store);
+    auto sequence = Sequence(std::make_shared<const Sequence::Data>(std::move(next)));
     return runtime::Ok(SequenceSceneEraseResult{
         std::move(sequence), removed,
         result.following.valid() ? std::optional<ItemId>{result.following} : std::nullopt});
@@ -423,15 +487,126 @@ detail::SequenceEditAccess::erase_slot(const Sequence& source, ItemId scene_id, 
     if (!erased)
         return runtime::Err(erased.error());
     auto result = std::move(erased).value();
-    auto sequence = Sequence(std::make_shared<const Sequence::Data>(Sequence::Data{
-        source.data_->id, source.data_->name, source.data_->musical_duration,
-        source.data_->absolute_duration, source.data_->tracks, source.data_->track_id_index,
-        source.data_->markers, source.data_->regions, source.data_->chord_scale_lane,
-        source.data_->groove, std::move(result.store), source.data_->compile_structure,
-        source.data_->outgoing_sequence_refs}));
+    auto next = *source.data_;
+    next.launcher = std::move(result.store);
+    auto sequence = Sequence(std::make_shared<const Sequence::Data>(std::move(next)));
     return runtime::Ok(SequenceSlotEraseResult{
         std::move(sequence), removed,
         result.following.valid() ? std::optional<ItemId>{result.following} : std::nullopt});
+}
+
+runtime::Result<Sequence, ModelError>
+Sequence::insert_track(Track track, std::optional<ItemId> before_track_id) const {
+    const ItemId track_id = track.id();
+    if (!track_id.valid())
+        return fail<Sequence>(ModelErrorCode::InvalidItemId, track_id, data_->id);
+    if (before_track_id && !find_track(*before_track_id))
+        return fail<Sequence>(ModelErrorCode::MissingItem, *before_track_id, data_->id);
+    const auto entry = std::lower_bound(
+        data_->track_id_index.begin(), data_->track_id_index.end(), track_id,
+        [](const auto& candidate, ItemId wanted) { return candidate.first < wanted; });
+    if (entry != data_->track_id_index.end() && entry->first == track_id)
+        return fail<Sequence>(ModelErrorCode::DuplicateItemId, track_id, data_->id);
+    if (const auto invalid = validate_track_span(track, data_->musical_duration,
+                                                 data_->absolute_duration, data_->id))
+        return runtime::Err(*invalid);
+
+    const auto index_position = std::distance(data_->track_id_index.begin(), entry);
+
+    auto next = *data_;
+    const auto placement =
+        before_track_id
+            ? std::find(next.track_order.begin(), next.track_order.end(), *before_track_id)
+            : next.track_order.end();
+    next.track_order.insert(placement, track_id);
+    // Appending leaves every existing identity-order index valid, so only the
+    // new track needs an index entry.
+    next.tracks.push_back(std::move(track));
+    next.track_id_index.insert(next.track_id_index.begin() + index_position,
+                               {track_id, next.tracks.size() - 1});
+    next.outgoing_sequence_refs = canonical_sequence_refs(next.tracks);
+    next.compile_structure = std::make_shared<const std::uint8_t>(0);
+    return runtime::Ok(Sequence(std::make_shared<const Data>(std::move(next))));
+}
+
+runtime::Result<Sequence, ModelError>
+Sequence::move_track(ItemId track_id, std::optional<ItemId> before_track_id) const {
+    // Membership is read from the order this edit rewrites, not from the
+    // identity index, so the position found and the position erased cannot
+    // disagree even if the two ever drifted.
+    const auto& order = data_->track_order;
+    const auto placed = std::find(order.begin(), order.end(), track_id);
+    if (placed == order.end())
+        return fail<Sequence>(ModelErrorCode::MissingItem, track_id, data_->id);
+    if (before_track_id) {
+        // Naming the moved track as its own destination describes no position:
+        // the track is lifted out before the destination is located, so the
+        // request would silently land at the end instead.
+        if (*before_track_id == track_id)
+            return fail<Sequence>(ModelErrorCode::InvalidItemId, track_id, data_->id);
+        if (std::find(order.begin(), order.end(), *before_track_id) == order.end())
+            return fail<Sequence>(ModelErrorCode::MissingItem, *before_track_id, data_->id);
+    }
+
+    // Authored order is the only field a reorder may touch. `tracks`, the
+    // identity index, and the outgoing-reference index all stay put, and the
+    // compile-structure token carries over so a reorder does not invalidate a
+    // compiled program that never observed display order.
+    auto next = *data_;
+    next.track_order.erase(next.track_order.begin() + std::distance(order.begin(), placed));
+    const auto placement =
+        before_track_id
+            ? std::find(next.track_order.begin(), next.track_order.end(), *before_track_id)
+            : next.track_order.end();
+    next.track_order.insert(placement, track_id);
+    return runtime::Ok(Sequence(std::make_shared<const Data>(std::move(next))));
+}
+
+runtime::Result<Sequence, ModelError> Sequence::erase_track(ItemId id) const {
+    auto erased = detail::SequenceEditAccess::erase_track(*this, id);
+    if (!erased)
+        return runtime::Err(erased.error());
+    return runtime::Ok(std::move(erased).value().sequence);
+}
+
+runtime::Result<detail::SequenceTrackEraseResult, ModelError>
+detail::SequenceEditAccess::erase_track(const Sequence& source, ItemId id) {
+    const auto& index = source.data_->track_id_index;
+    const auto entry = std::lower_bound(
+        index.begin(), index.end(), id,
+        [](const auto& candidate, ItemId wanted) { return candidate.first < wanted; });
+    if (entry == index.end() || entry->first != id)
+        return fail<SequenceTrackEraseResult>(ModelErrorCode::MissingItem, id, source.id());
+    const std::size_t position = entry->second;
+    const Track removed = source.data_->tracks[position];
+    // A launcher slot sources a clip by identity; dropping the track that owns
+    // one would leave the slot pointing outside the sequence.
+    for (const auto& clip : removed.clips())
+        if (const auto slot = launcher_clip_source(*source.data_->launcher, clip.id()))
+            return fail<SequenceTrackEraseResult>(ModelErrorCode::MissingItem, clip.id(), *slot);
+
+    const auto index_position = std::distance(index.begin(), entry);
+
+    auto next = *source.data_;
+    next.tracks.erase(next.tracks.begin() + static_cast<std::ptrdiff_t>(position));
+    next.track_id_index.erase(next.track_id_index.begin() + index_position);
+    for (auto& remaining : next.track_id_index)
+        if (remaining.second > position)
+            --remaining.second;
+
+    const auto placed = std::find(next.track_order.begin(), next.track_order.end(), id);
+    std::optional<ItemId> following;
+    if (placed != next.track_order.end()) {
+        const auto after = std::next(placed);
+        if (after != next.track_order.end())
+            following = *after;
+        next.track_order.erase(placed);
+    }
+
+    next.outgoing_sequence_refs = canonical_sequence_refs(next.tracks);
+    next.compile_structure = std::make_shared<const std::uint8_t>(0);
+    auto sequence = Sequence(std::make_shared<const Sequence::Data>(std::move(next)));
+    return runtime::Ok(SequenceTrackEraseResult{std::move(sequence), removed, following});
 }
 
 runtime::Result<Sequence, ModelError> Sequence::replace_track(Track track) const {
@@ -456,17 +631,13 @@ runtime::Result<Sequence, ModelError> Sequence::replace_track(Track track) const
     const auto replacement_references = canonical_sequence_refs(track);
     const bool topology_unchanged = previous_references == replacement_references;
     const bool compile_structure_unchanged = previous.shares_compile_structure_with(track);
-    auto tracks = data_->tracks;
-    tracks[found->second] = std::move(track);
-    auto outgoing_sequence_refs =
-        topology_unchanged ? data_->outgoing_sequence_refs : canonical_sequence_refs(tracks);
-    return runtime::Ok(Sequence(std::make_shared<const Data>(
-        Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
-             std::move(tracks), data_->track_id_index, data_->markers, data_->regions,
-             data_->chord_scale_lane, data_->groove, data_->launcher,
-             compile_structure_unchanged ? data_->compile_structure
-                                         : std::make_shared<const std::uint8_t>(0),
-             std::move(outgoing_sequence_refs)})));
+    auto next = *data_;
+    next.tracks[found->second] = std::move(track);
+    if (!topology_unchanged)
+        next.outgoing_sequence_refs = canonical_sequence_refs(next.tracks);
+    if (!compile_structure_unchanged)
+        next.compile_structure = std::make_shared<const std::uint8_t>(0);
+    return runtime::Ok(Sequence(std::make_shared<const Data>(std::move(next))));
 }
 
 const GrooveTemplate& Sequence::groove() const noexcept {
@@ -476,17 +647,14 @@ const ChordScaleLane& Sequence::chord_scale_lane() const noexcept {
     return data_->chord_scale_lane;
 }
 Sequence Sequence::with_chord_scale_lane(ChordScaleLane lane) const {
-    return Sequence(std::make_shared<const Data>(Data{
-        data_->id, data_->name, data_->musical_duration, data_->absolute_duration, data_->tracks,
-        data_->track_id_index, data_->markers, data_->regions, std::move(lane), data_->groove,
-        data_->launcher, data_->compile_structure, data_->outgoing_sequence_refs}));
+    auto next = *data_;
+    next.chord_scale_lane = std::move(lane);
+    return Sequence(std::make_shared<const Data>(std::move(next)));
 }
 Sequence Sequence::with_groove(GrooveTemplate groove) const {
-    return Sequence(std::make_shared<const Data>(
-        Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
-             data_->tracks, data_->track_id_index, data_->markers, data_->regions,
-             data_->chord_scale_lane, std::move(groove), data_->launcher, data_->compile_structure,
-             data_->outgoing_sequence_refs}));
+    auto next = *data_;
+    next.groove = std::move(groove);
+    return Sequence(std::make_shared<const Data>(std::move(next)));
 }
 
 bool Sequence::shares_launcher_storage_with(const Sequence& other) const noexcept {

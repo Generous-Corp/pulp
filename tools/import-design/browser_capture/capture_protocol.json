@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://www.generouscorp.com/pulp/schemas/pulp-browser-capture-v1.json",
+  "title": "Pulp browser capture envelope",
+  "type": "object",
+  "required": [
+    "schema",
+    "version",
+    "provenance",
+    "documents",
+    "assets",
+    "semantics",
+    "tokens",
+    "states",
+    "reference"
+  ],
+  "properties": {
+    "schema": {
+      "const": "pulp-browser-capture-v1"
+    },
+    "version": {
+      "const": 1
+    },
+    "provenance": {
+      "type": "object",
+      "required": [
+        "capture_method",
+        "browser",
+        "source",
+        "viewport",
+        "locale",
+        "timezone",
+        "color_scheme",
+        "reduced_motion",
+        "settle",
+        "network"
+      ],
+      "properties": {
+        "interactions": {
+          "type": "object",
+          "required": [
+            "schema",
+            "version",
+            "report",
+            "report_sha256",
+            "plan_sha256",
+            "action_count"
+          ],
+          "properties": {
+            "schema": {
+              "const": "pulp-browser-interactions-v1"
+            },
+            "version": {
+              "const": 1
+            },
+            "report": {
+              "const": "interaction-report.json"
+            },
+            "report_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "plan_sha256": {
+              "type": "string",
+              "description": "SHA-256 of the canonical plan with typed text replaced by its length",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "action_count": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "documents": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "node_count",
+          "layout_count",
+          "paint_order",
+          "snapshot_asset"
+        ]
+      }
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "mime_type",
+          "path",
+          "sha256"
+        ]
+      }
+    },
+    "semantics": {
+      "type": "object",
+      "required": [
+        "schema",
+        "report",
+        "candidate_count",
+        "resolved_count",
+        "unresolved_count"
+      ]
+    },
+    "tokens": {
+      "type": "object",
+      "required": [
+        "schema",
+        "report",
+        "color_count",
+        "dimension_count",
+        "string_count"
+      ]
+    },
+    "platform_fonts": {
+      "type": "object",
+      "description": "The typefaces Blink resolved for the captured text, as opposed to the families the style rows requested. Optional: captures taken before this sidecar existed carry no such record, and they are still valid captures.",
+      "required": [
+        "schema",
+        "report",
+        "text_run_count",
+        "resolved_run_count",
+        "face_count"
+      ]
+    },
+    "states": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "reference_asset_id"
+        ]
+      }
+    },
+    "reference": {
+      "type": "object",
+      "required": [
+        "asset_id",
+        "path",
+        "logical_width",
+        "logical_height",
+        "device_scale_factor"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

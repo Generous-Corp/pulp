@@ -1,5 +1,7 @@
 #include <pulp/timeline/document_session.hpp>
 
+#include "document_session_internal.hpp"
+
 #include "journal_internal.hpp"
 #include "session_nonce_test_access.hpp"
 #include "transaction_internal.hpp"
@@ -159,6 +161,7 @@ struct DocumentSession::Impl {
             break;
         case GesturePhase::Update:
         case GesturePhase::End:
+        case GesturePhase::Cancel:
             if (!open_gesture || !transaction.undo_group ||
                 open_gesture->writer != transaction.id.writer ||
                 open_gesture->group != *transaction.undo_group)
@@ -196,7 +199,8 @@ struct DocumentSession::Impl {
             candidate.writer = transaction.id.writer;
             candidate.group = transaction.undo_group;
             candidate.closed = transaction.gesture_phase == GesturePhase::Single ||
-                               transaction.gesture_phase == GesturePhase::End;
+                               transaction.gesture_phase == GesturePhase::End ||
+                               transaction.gesture_phase == GesturePhase::Cancel;
             for (const auto& envelope : transaction.commands)
                 candidate.forward.push_back(envelope.command);
             candidate.inverse = reduced->inverses;
@@ -250,7 +254,7 @@ struct DocumentSession::Impl {
             std::make_shared<const PublishedState>(PublishedState{published, next_revision});
         auto initial_snapshot = detail::JournalAccess::prepare_append(journal, *current->snapshot);
 
-        CommitResult result{published, next_revision, reduced->dirty, {}};
+        CommitResult result{published, next_revision, reduced->dirty, {}, current->snapshot};
         result.applied_commands.reserve(transaction.commands.size());
         for (const auto& envelope : transaction.commands)
             result.applied_commands.push_back(envelope.id);
@@ -295,7 +299,8 @@ struct DocumentSession::Impl {
             undo_bytes = saturated_add(undo_bytes, undo_added_bytes);
             if (transaction.gesture_phase == GesturePhase::Begin)
                 open_gesture = OpenGesture{transaction.id.writer, *transaction.undo_group};
-            else if (transaction.gesture_phase == GesturePhase::End)
+            else if (transaction.gesture_phase == GesturePhase::End ||
+                     transaction.gesture_phase == GesturePhase::Cancel)
                 open_gesture.reset();
             if (clear_redo) {
                 redo.clear();
@@ -568,6 +573,47 @@ bool DocumentSession::checkpoint(DocumentRevision durable_revision) {
     }
     impl_->journal = std::move(checkpointed);
     return true;
+}
+
+runtime::Result<ReducedTransaction, TransactionError>
+detail::DocumentSessionPreviewAccess::undo(const DocumentSession& session) {
+    return preview(session, Direction::Undo);
+}
+
+runtime::Result<ReducedTransaction, TransactionError>
+detail::DocumentSessionPreviewAccess::redo(const DocumentSession& session) {
+    return preview(session, Direction::Redo);
+}
+
+runtime::Result<ReducedTransaction, TransactionError>
+detail::DocumentSessionPreviewAccess::preview(const DocumentSession& session,
+                                              Direction direction) {
+    std::lock_guard lock(session.impl_->mutex);
+    const auto current =
+        std::atomic_load_explicit(&session.impl_->published, std::memory_order_relaxed);
+    if (session.impl_->open_gesture) {
+        TransactionError value;
+        value.code = ConflictCode::GestureState;
+        value.current_revision = current->revision;
+        return failure<ReducedTransaction>(value);
+    }
+    const bool is_undo = direction == Direction::Undo;
+    const auto& history = is_undo ? session.impl_->undo : session.impl_->redo;
+    if (history.empty()) {
+        TransactionError value;
+        value.code = is_undo ? ConflictCode::NothingToUndo : ConflictCode::NothingToRedo;
+        value.current_revision = current->revision;
+        return failure<ReducedTransaction>(value);
+    }
+    Transaction transaction;
+    transaction.id = {{1}, 1};
+    transaction.expected_revision = current->revision;
+    const auto& commands = is_undo ? history.back().inverse : history.back().forward;
+    transaction.commands.reserve(commands.size());
+    std::uint64_t sequence = 1;
+    for (const auto& command : commands)
+        transaction.commands.push_back({{{1}, sequence++}, command});
+    return detail::reduce_transaction(*current->snapshot, transaction, true);
 }
 
 } // namespace pulp::timeline

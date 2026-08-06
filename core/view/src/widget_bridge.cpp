@@ -2,7 +2,6 @@
 #include "widget_bridge/registrars.hpp"
 #include "widget_bridge/gpu_common.hpp"
 #include "widget_bridge/bridge_dispatch.hpp"
-#include "widget_bridge/value_widget_access.hpp"
 #include <pulp/view/animation.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/motion.hpp>
@@ -10,6 +9,7 @@
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/css_gradient.hpp>
+#include <pulp/view/drag_drop.hpp>
 #include <pulp/view/native_view_host.hpp>
 #include <pulp/view/modal.hpp>
 #include <pulp/runtime/log.hpp>
@@ -25,6 +25,7 @@
 #include <optional>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace pulp::view {
 
@@ -331,11 +332,8 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
                            render::GpuSurface* gpu_surface,
                            CapabilitySet granted_capabilities)
     : engine_(engine), root_(root), store_(store),
-      granted_capabilities_(granted_capabilities), gpu_surface_(gpu_surface) {
-    {
-        std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
-        all_bridges_set().insert(this);
-    }
+      granted_capabilities_(granted_capabilities), gpu_surface_(gpu_surface),
+      widgets_(owned_widgets_) {
     if (detail::widget_bridge_gpu_info(gpu_surface_).native_bridge) {
         native_gpu_bridge_state_ = std::make_unique<NativeGpuBridgeState>();
     }
@@ -412,22 +410,135 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     // `var window = {...}` reassignment performed by the preludes above
     // (notably web-compat-document.js). See kWindowListenerShim comment.
     eval_or_throw(engine_, "kWindowListenerShim", kWindowListenerShim);
+    // Publish only after every fallible construction step succeeds. A throwing
+    // constructor does not run ~WidgetBridge(), so earlier registration would
+    // leave a dangling pointer in the process-global dispatch registry.
+    {
+        std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
+        all_bridges_set().insert(this);
+    }
 }
 
 WidgetBridge::~WidgetBridge() {
-    {
-        std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
-        all_bridges_set().erase(this);
-    }
+    unregister_global_dispatch();
     if (callback_alive_) callback_alive_->store(false, std::memory_order_release);
     release_all_param_gesture_routes();
-    root_.on_global_click = {};
+    // quarantine_realm() already detached this bridge's callback. A replacement
+    // realm may have installed its own callback on the shared root while this
+    // bridge awaited owner teardown, so do not erase it here.
+    if (!realm_quarantined_ && !realm_retired_)
+        root_.on_global_click = {};
+    if (realm_quarantined_)
+        end_root_quarantine();
+}
+
+void WidgetBridge::unregister_global_dispatch() noexcept {
+    std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
+    all_bridges_set().erase(this);
+}
+
+void WidgetBridge::unregister_global_dispatch(
+    const DeadlineCheck& deadline_check) {
+    std::unique_lock<std::recursive_mutex> lock(
+        all_bridges_mutex(), std::defer_lock);
+    if (deadline_check) {
+        while (!lock.try_lock()) {
+            deadline_check();
+            std::this_thread::yield();
+        }
+    } else {
+        lock.lock();
+    }
+    all_bridges_set().erase(this);
+}
+
+std::vector<WidgetBridge::BridgeWidgetState>
+WidgetBridge::foreign_owned_widget_states() const {
+    std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
+    std::size_t count = 0;
+    for (const auto* bridge : all_bridges_set()) {
+        // Only successive realms attached to this exact View tree can own
+        // descendants that must survive our retirement. Other roots may live
+        // on other UI threads; their containers are deliberately out of scope.
+        if (bridge != this && &bridge->root_ == &root_)
+            count += bridge->owned_widgets_.size();
+    }
+    std::vector<BridgeWidgetState> foreign;
+    foreign.reserve(count);
+    for (const auto* bridge : all_bridges_set()) {
+        if (bridge == this || &bridge->root_ != &root_)
+            continue;
+        foreign.insert(foreign.end(), bridge->owned_widgets_.begin(),
+                       bridge->owned_widgets_.end());
+    }
+    return foreign;
+}
+
+void WidgetBridge::begin_root_quarantine() noexcept {
+    if (realm_quarantined_)
+        root_.refresh_visibility_quarantine();
+    else
+        root_.begin_visibility_quarantine();
+    realm_quarantined_ = true;
+}
+
+void WidgetBridge::end_root_quarantine() noexcept {
+    root_.end_visibility_quarantine();
+}
+
+void WidgetBridge::invalidate_cached_subtrees_everywhere(
+    const std::vector<View*>& nodes,
+    const DeadlineCheck& deadline_check) {
+    std::unordered_set<std::uint64_t> removed_instance_ids;
+    const auto collect = [&](auto&& self, View* candidate) -> void {
+        if (deadline_check) deadline_check();
+        if (candidate == nullptr)
+            return;
+        removed_instance_ids.insert(candidate->import_binding_instance_id());
+        for (std::size_t index = 0; index < candidate->child_count(); ++index)
+            self(self, candidate->child_at(index));
+    };
+    for (auto* node : nodes)
+        collect(collect, node);
+
+    std::unique_lock<std::recursive_mutex> lock(
+        all_bridges_mutex(), std::defer_lock);
+    if (deadline_check) {
+        while (!lock.try_lock()) {
+            deadline_check();
+            std::this_thread::yield();
+        }
+    } else {
+        lock.lock();
+    }
+    std::vector<std::pair<WidgetBridge*, std::string>> removals;
+    for (auto* bridge : all_bridges_set()) {
+        // Cache entries can only refer to nodes in the bridge's own root.
+        // Restricting cleanup to that root also preserves the one-UI-thread
+        // ownership boundary for widgets_ and registrations_.
+        if (&bridge->root_ != &root_)
+            continue;
+        if (deadline_check) deadline_check();
+        for (const auto& [id, state] : bridge->widgets_) {
+            if (deadline_check) deadline_check();
+            const auto removed = removed_instance_ids.contains(
+                state.instance_id);
+            if (removed)
+                removals.emplace_back(bridge, id);
+        }
+    }
+    if (deadline_check) deadline_check();
+    for (const auto& [bridge, id] : removals) {
+        bridge->widgets_.erase(id);
+        bridge->forget_widget_registrations(id);
+    }
 }
 
 // Late-attach of the GpuSurface for the common case where ScriptedUiSession /
 // ViewBridge is constructed before the PluginViewHost and therefore before the
 // surface exists. Mirrors the fourth constructor argument and is idempotent.
 void WidgetBridge::attach_gpu_surface(render::GpuSurface* gpu_surface) {
+    if (realm_quarantined_) return;
     if (gpu_surface_ == gpu_surface) return;
     gpu_surface_ = gpu_surface;
     const auto gpu_info = detail::widget_bridge_gpu_info(gpu_surface_);
@@ -586,7 +697,7 @@ View* WidgetBridge::widget(const std::string& id) {
             // `cached` lives under root_, and add_child never detaches, so it must
             // still be there. Only remove_child bumps the generation (and a fresh
             // entry carries the 0 sentinel), forcing the authoritative walk below.
-            const std::uint64_t gen = View::structure_generation();
+            const std::uint64_t gen = root_.root_structure_generation();
             if (it->second.validated_generation == gen) {
                 return cached;
             }
@@ -599,7 +710,7 @@ View* WidgetBridge::widget(const std::string& id) {
     }
 
     if (auto* live = find_view_by_id(root_, id)) {
-        widgets_[id] = live;
+        widgets_.cache(id, live);
         return live;
     }
 
@@ -654,11 +765,11 @@ std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,
     // nullptr for any non-widget tag so __domAppend falls through to its
     // container/HTML defaults (div/span/canvas/svg-prims/input are handled by
     // their own branches before this is consulted).
+    // No widget gets a caption here: `id` is an addressing handle (`__el_N__`
+    // through the web-compat DOM) and widgets paint their label.
     std::unique_ptr<View> w;
     if (tag == "knob") {
-        auto k = std::make_unique<Knob>();
-        k->set_label(id);  // match createKnob's default label
-        w = std::move(k);
+        w = std::make_unique<Knob>();
     } else if (tag == "fader") {
         w = std::make_unique<Fader>();
     } else if (tag == "toggle") {
@@ -698,83 +809,6 @@ std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,
     return w;
 }
 
-void WidgetBridge::clear() {
-    pending_frame_ids_.clear();
-    shortcuts_.clear();
-    release_all_param_gesture_routes();
-    param_bindings_.clear();  // bindings reference widgets torn down below
-    ComboBox::close_active_popup();
-    while (root_.child_count() > 0) {
-        auto* child = root_.child_at(root_.child_count() - 1);
-        auto removed = root_.remove_child(child);
-        forget_widget_subtree(removed.get());
-    }
-    widgets_.clear();
-    registrations_.clear();
-}
-
-void WidgetBridge::snapshot_values(std::unordered_map<std::string, float>& out) const {
-    for (auto& [id, view] : widgets_) {
-        float value = 0.0f;
-        if (try_get_scalar_value(view, value)) out[id] = value;
-    }
-}
-
-void WidgetBridge::restore_values(const std::unordered_map<std::string, float>& snapshot) {
-    for (auto& [id, val] : snapshot) {
-        auto it = widgets_.find(id);
-        if (it == widgets_.end()) continue;
-        try_set_scalar_value(it->second, val);
-    }
-}
-
-void WidgetBridge::snapshot_values(WidgetReloadSnapshot& out) const {
-    for (auto& [id, state] : widgets_) {
-        View* view = state.view;
-        float value = 0.0f;
-        if (try_get_scalar_value(view, value)) out.scalar_values[id] = value;
-        // Selection controls: their selected INDEX is reload state too — without
-        // this a dev reload silently resets the user's dropdown / segment choice
-        // (item 1.4 coverage gap). Stored as the index-as-float in scalar_values;
-        // restore keys by id so the type is unambiguous.
-        else if (auto* combo = dynamic_cast<ComboBox*>(view)) out.scalar_values[id] = static_cast<float>(combo->selected());
-        else if (auto* seg = dynamic_cast<SegmentedControl*>(view)) out.scalar_values[id] = static_cast<float>(seg->selected());
-        else if (auto* xy = dynamic_cast<XYPad*>(view)) out.xy_values[id] = {.x = xy->x_value(), .y = xy->y_value()};
-        // Custom widget-declared state (item 1.4b): independent of the built-in
-        // type match above — a custom widget opts in via save_reload_state.
-        // Built-in widgets return false (View default), so this stays empty for
-        // them and adds no per-widget cost beyond one virtual call.
-        std::string blob;
-        if (view->save_reload_state(blob)) out.custom_state[id] = std::move(blob);
-    }
-}
-
-void WidgetBridge::restore_values(const WidgetReloadSnapshot& snapshot) {
-    for (auto& [id, val] : snapshot.scalar_values) {
-        auto it = widgets_.find(id);
-        if (it == widgets_.end()) continue;
-        if (try_set_scalar_value(it->second, val)) continue;
-        // Selection controls — restore the index SILENTLY so re-applying it during
-        // a reload doesn't fire the widget's on_change as if the user clicked.
-        if (auto* combo = dynamic_cast<ComboBox*>(it->second.view)) combo->set_selected_silent(static_cast<int>(std::lround(val)));
-        else if (auto* seg = dynamic_cast<SegmentedControl*>(it->second.view)) seg->set_selected_silent(static_cast<int>(std::lround(val)));
-    }
-    for (auto& [id, val] : snapshot.xy_values) {
-        auto it = widgets_.find(id);
-        if (it == widgets_.end()) continue;
-        if (auto* xy = dynamic_cast<XYPad*>(it->second.view)) { xy->set_x(val.x); xy->set_y(val.y); }
-    }
-    // Custom widget-declared state (item 1.4b): hand each saved blob back to the
-    // widget that still lives under the same script id. A widget whose id/type
-    // changed across the reload simply won't match (find fails or the virtual
-    // ignores an unfamiliar blob) — fail-safe, no throw.
-    for (auto& [id, blob] : snapshot.custom_state) {
-        auto it = widgets_.find(id);
-        if (it == widgets_.end()) continue;
-        (void)it->second->restore_reload_state(blob);
-    }
-}
-
 void WidgetBridge::poll_async_results() {
     std::vector<AsyncExecResult> pending;
     {
@@ -800,6 +834,12 @@ void WidgetBridge::poll_async_results() {
 void WidgetBridge::service_frame_callbacks() {
     // Declarative bindings first: pure C++ store→widget push, no JS crossing.
     service_param_bindings();
+    // Then paramchange subscriptions, so a handler that inspects a bound
+    // widget sees it already holding this frame's value.
+    service_param_subscriptions();
+    // Event-channel handlers also run on the frame tick, never on the writer's
+    // audio thread.
+    service_event_bindings();
     engine_.pump_message_loop();
     // Drain any expired native-tracked setTimeout/setInterval timers so
     // consumers do not need a JS shim around the frame loop.

@@ -532,7 +532,8 @@ ShapedText TextRunPlanner::shape(std::string_view text,
         // populated by downstream consumers when they need glyph output; this
         // pass only needs each run's sub-string width so `total_width` is the
         // sum of run widths, not a re-measurement of the whole input.
-        auto prepared = shaper.prepare(segment_view, family_str, opts.size);
+        auto prepared = shaper.prepare(segment_view, family_str, opts.size,
+                                       static_cast<int>(opts.weight));
         run.advance_total  = prepared.total_width();
         run.metrics.ascent  = prepared.ascent();
         run.metrics.descent = prepared.descent();

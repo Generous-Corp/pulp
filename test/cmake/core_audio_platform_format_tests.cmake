@@ -51,35 +51,51 @@ pulp_add_test_suite(pulp-test-audio-excerpt LIBRARIES pulp::audio)
 # Repo-level audio tooling tests
 pulp_add_test_suite(pulp-test-audio-tools LIBRARIES pulp::tool-audio)
 
-# MCP server protocol tests
-add_executable(pulp-test-mcp-server test_mcp_server.cpp)
-target_link_libraries(pulp-test-mcp-server PRIVATE
-    pulp-mcp-core
-    Catch2::Catch2WithMain)
-target_compile_definitions(pulp-test-mcp-server PRIVATE
-    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-target_include_directories(pulp-test-mcp-server PRIVATE
-    "${CMAKE_SOURCE_DIR}/inspect/include")
-catch_discover_tests(pulp-test-mcp-server)
+if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
+    # MCP server protocol tests
+    add_executable(pulp-test-mcp-server test_mcp_server.cpp)
+    target_link_libraries(pulp-test-mcp-server PRIVATE
+        pulp-mcp-core
+        Catch2::Catch2WithMain)
+    if(TARGET pulp::inspect-runtime)
+        target_link_libraries(pulp-test-mcp-server PRIVATE pulp::inspect-runtime)
+        target_compile_definitions(pulp-test-mcp-server PRIVATE
+            PULP_TEST_INSPECTOR_RUNTIME=1)
+    else()
+        target_compile_definitions(pulp-test-mcp-server PRIVATE
+            PULP_TEST_INSPECTOR_RUNTIME=0)
+    endif()
+    target_compile_definitions(pulp-test-mcp-server PRIVATE
+        PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    target_include_directories(pulp-test-mcp-server PRIVATE
+        "${CMAKE_SOURCE_DIR}/inspect/include")
+    catch_discover_tests(pulp-test-mcp-server
+        PROPERTIES LABELS "mcp-server")
 
-# Timeline MCP operations have their own bounded suite so media/render fixtures
-# do not keep expanding the legacy protocol test translation unit.
-# Links pulp-mcp-core rather than compiling mcp_timeline_tools.cpp directly:
-# the agent loop hands its rendered variants to pulp_audio_compare, whose
-# handler lives in the same library, and compiling one of its translation units
-# a second time here would duplicate those symbols.
-add_executable(pulp-test-mcp-timeline-tools test_mcp_timeline_tools.cpp)
-target_link_libraries(pulp-test-mcp-timeline-tools PRIVATE
-    pulp-mcp-core
-    pulp::audio
-    pulp::playback
-    pulp::timeline
-    pulp::tool-timeline
-    Catch2::Catch2WithMain)
-# pulp_audio_compare resolves its delegated CLI from a project root.
-target_compile_definitions(pulp-test-mcp-timeline-tools PRIVATE
-    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-catch_discover_tests(pulp-test-mcp-timeline-tools)
+    if(PULP_ENABLE_PROJECT_PACKAGE)
+        # Timeline MCP operations have their own bounded suite so media/render
+        # fixtures do not keep expanding the legacy protocol test translation
+        # unit. Package-stripped MCP keeps its independent tools but omits this
+        # package-publishing surface.
+        add_executable(pulp-test-mcp-timeline-tools
+            test_mcp_timeline_sessions.cpp
+            test_mcp_timeline_tools.cpp)
+        target_link_libraries(pulp-test-mcp-timeline-tools PRIVATE
+            pulp-mcp-core
+            pulp::audio
+            pulp::interchange
+            pulp::playback
+            pulp::timeline
+            pulp::tool-timeline
+            Catch2::Catch2WithMain)
+        # pulp_audio_compare resolves its delegated CLI from a project root.
+        target_compile_definitions(pulp-test-mcp-timeline-tools PRIVATE
+            PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+        target_include_directories(pulp-test-mcp-timeline-tools PRIVATE
+            ${CMAKE_SOURCE_DIR}/external/miniz)
+        catch_discover_tests(pulp-test-mcp-timeline-tools)
+    endif()
+endif()
 
 # MIDI tests
 pulp_add_test_suite(pulp-test-midi LIBRARIES pulp::midi)
@@ -92,6 +108,10 @@ pulp_add_test_suite(pulp-test-tuning LIBRARIES pulp::midi)
 pulp_add_test_suite(pulp-test-state
     SOURCES test_state.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::state pulp::events)
+
+# The one parameter payload (param_json) and the pin that keeps its wire field
+# set from drifting — the bridge and the inspector both serialize through it.
+pulp_add_test_suite(pulp-test-param-json LIBRARIES pulp::state)
 
 # Binding tests
 pulp_add_test_suite(pulp-test-binding LIBRARIES pulp::state)
@@ -118,8 +138,19 @@ pulp_add_test_suite(pulp-test-step-grid-view LIBRARIES pulp::view pulp::state)
 pulp_add_test_suite(pulp-test-headless LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-format-hardening LIBRARIES pulp::format)
 
+# Editor parameter-write provenance: host automation interleaved with editor
+# edits during an open gesture, exact begin/value/end ordering, one normalized
+# snapshot per reported edit, and no host-originated echo.
+pulp_add_test_suite(pulp-test-host-parameter-edit LIBRARIES pulp::format pulp::state)
+
 # Plugin registry: legacy single global slot + keyed multi-plugin-bundle table.
 pulp_add_test_suite(pulp-test-plugin-registry LIBRARIES pulp::format)
+
+# The device quota table: monotonicity across both axes, clamping of values cast
+# in from outside the enumerators, and that the row is keyed by capability rung
+# rather than by the lane that observed it. Header-only over pulp::format —
+# linked for the include path only.
+pulp_add_test_suite(pulp-test-device-quotas LIBRARIES pulp::format)
 
 # Standalone host render-path RT-safety guard. Drives the extracted
 # StandaloneApp::render_audio_block() seam for one steady-state block under

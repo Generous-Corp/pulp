@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pulp/view/pending_damage.hpp>
 #include <pulp/view/view.hpp>
 #include <algorithm>
 #include <set>
@@ -25,6 +26,10 @@ enum class WindowType;  // Forward-declared from window_manager.hpp
 
 struct WindowOptions {
     struct MenuCommand {
+        /// Top-level menu to place this command under. Leave EMPTY to place it
+        /// in the application menu — the one titled after the app itself,
+        /// where it appears above Quit. Any other value names (and creates on
+        /// first use) a menu-bar submenu such as "Window" or "View".
         std::string menu;
         std::string title;
         KeyCode key = KeyCode::unknown;
@@ -152,20 +157,26 @@ public:
     // (the first frame is always full) and after any no-arg mark_dirty();
     // becomes false once clear_pending_dirty() runs and only bounded
     // mark_dirty(rect) calls have arrived since.
-    bool pending_repaint_is_full() const { return dirty_full_; }
+    bool pending_repaint_is_full() const { return damage_.is_full(); }
 
     // Bounding box (root coords) of the bounded mark_dirty(rect) calls since the
     // last clear_pending_dirty(). Only meaningful when pending_repaint_is_full()
     // is false and has_pending_dirty_bounds() is true.
-    bool has_pending_dirty_bounds() const { return have_dirty_bounds_; }
-    Rect pending_dirty_bounds() const { return dirty_bounds_; }
+    bool has_pending_dirty_bounds() const { return damage_.has_bounds(); }
+    Rect pending_dirty_bounds() const { return damage_.bounds(); }
 
     // Reset the accumulated dirty region. A host calls this after it has
     // painted and submitted the frame (mirrors DirtyTracker::clear()).
-    void clear_pending_dirty() {
-        dirty_full_ = false;
-        have_dirty_bounds_ = false;
-        dirty_bounds_ = {};
+    void clear_pending_dirty() { damage_.clear(); }
+
+    // Read this frame's damage and clear it in one step, so a host cannot
+    // consult the accessors above and then clear a different logical state.
+    // A frame that does NOT reach its intended output hands the snapshot back
+    // with restore_pending_dirty(). Same contract as PluginViewHost — both
+    // hosts share one PendingDamage.
+    PendingDamage::Snapshot take_pending_dirty() { return damage_.take(); }
+    void restore_pending_dirty(const PendingDamage::Snapshot& snapshot) {
+        damage_.restore(snapshot);
     }
 
     // Consume the accumulated dirty region and paint `root`, then clear the
@@ -457,6 +468,36 @@ public:
         return true;
     }
 
+    /// Inverse of compute_design_viewport_transform: map a HOST/window-space
+    /// point back into ROOT (design) space.
+    ///
+    /// Every plug-in editor host needs this to hit-test a click against the
+    /// widget the user visually pointed at, and every one of them had its own
+    /// byte-identical copy — the macOS GPU and CPU plug-in hosts, the iOS host,
+    /// and the Windows host (WAH-10). Four copies of an inverse letterbox
+    /// transform is four chances for one of them to drift from the paint-side
+    /// transform, and the symptom of that drift is clicks landing on the wrong
+    /// control, which is not obviously a coordinate bug when you hit it.
+    ///
+    /// Returns `pt` unchanged when no design viewport is active, which is the
+    /// identity every caller wants for the un-pinned case.
+    ///
+    /// `top_align` MUST match the value used at paint, or input misaligns
+    /// vertically — the same coupling documented on the forward transform.
+    static Point design_viewport_window_to_root(Point pt,
+                                                float window_w, float window_h,
+                                                float design_w, float design_h,
+                                                bool top_align = false) {
+        float sx, sy, tx, ty;
+        if (!compute_design_viewport_transform(window_w, window_h,
+                                               design_w, design_h,
+                                               sx, sy, tx, ty, top_align)) {
+            return pt;
+        }
+        if (sx <= 0.0f || sy <= 0.0f) return pt;
+        return {(pt.x - tx) / sx, (pt.y - ty) / sy};
+    }
+
     // Report the active design-viewport transform that maps ROOT (design-space)
     // coordinates to HOST (window-space) coordinates:
     //   x' = x*sx + tx,  y' = y*sy + ty,  w' = w*sx,  h' = h*sy
@@ -512,6 +553,48 @@ public:
     // inserting a virtual among existing methods would shift every later slot.
     virtual bool is_gpu_backed() const { return gpu_surface() != nullptr; }
 
+    /// True only when request_close_deferred() schedules close handling for a
+    /// later native event-loop turn. External standalone hosts must override
+    /// both methods when inspector startup can occur from an idle callback.
+    virtual bool supports_deferred_close() const {
+        return false;
+    }
+
+    /// Schedule request_close() for a later native event-loop turn. The base
+    /// implementation deliberately does not close synchronously.
+    virtual void request_close_deferred() {
+        note_unsupported_feature("request_close_deferred");
+    }
+
+    /// True when capture_png() returns pixels from the visible compositor
+    /// rather than a deterministic host-managed back buffer.
+    virtual bool supports_compositor_capture() const { return false; }
+
+    /// Browser hosts override this query because their page-owned loop returns
+    /// immediately. Stack-owned runtime state may use it to fail closed.
+    virtual bool event_loop_blocks_until_close() const { return true; }
+
+    /// True only when run_event_loop_until() continues dispatching accepted
+    /// main-thread work after the native loop receives its stop signal.
+    virtual bool event_loop_supports_exit_drain() const {
+        return false;
+    }
+
+    /// Run the event loop, then keep dispatching main-thread work until
+    /// `ready_to_return` reports that stack-borrowed state may be destroyed.
+    /// Hosts advertising exit-drain support must override this fallback.
+    virtual void run_event_loop_until(std::function<bool()> ready_to_return) {
+        run_event_loop();
+        if (ready_to_return)
+            (void)ready_to_return();
+    }
+
+    /// True when capture_back_buffer_png() is implemented by this host.
+    /// Kept independent from compositor capture: an SSH-safe back-buffer path
+    /// must not be inferred from the ability to capture a visible window.
+    /// Appended at the public vtable tail for downstream WindowHost ABI safety.
+    virtual bool supports_back_buffer_capture() const { return false; }
+
     /// True once `note_unsupported_feature(method)` has fired for `method` on
     /// this host — i.e. a window feature was requested that this host silently
     /// no-ops (the base-class default ran because the host did not override it).
@@ -543,10 +626,10 @@ private:
     render::RenderLoop* render_loop_ = nullptr;
 
     // Accumulated dirty region for the pending frame (root/window coords).
-    // dirty_full_ starts true so the first frame is always a full repaint.
-    bool dirty_full_ = true;
-    bool have_dirty_bounds_ = false;
-    Rect dirty_bounds_{};
+    // The SAME abstraction the plug-in host uses (PluginViewHost::damage_) —
+    // this used to be three hand-rolled fields plus a copy of the union logic,
+    // which is how the two hosts drifted apart on what "damage" even means.
+    PendingDamage damage_;
 
 private:
     // ── Attached-view registry ──────────────────────────────────────────────

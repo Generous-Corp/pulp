@@ -124,7 +124,17 @@ sync with `tools/scripts/cli_sync_check.py` and
 `tools/scripts/cli_mcp_parity_baseline.json`.
 
 **Commands that DO have slash commands** (list for cross-reference, not exhaustive — `ls .claude/commands/` is authoritative):
-build, test, run, validate, ship, version, doctor, create, docs, status, design, import-design, inspect, pr, ci, ci-host, upgrade, prototype-loop, motion, trace, audio-harness, audio-inspect, audio-compare
+build, test, run, validate, ship, version, doctor, create, docs, status, design, import-design, inspect, pr, ci, ci-host, upgrade, prototype-loop, motion, trace, seq, audio-harness, audio-inspect, audio-compare
+
+`/seq` is the agent workflow for the top-level `pulp seq` timeline command. It
+wraps schema discovery, validate, explain, typed-command apply, import, and
+consent-gated export. Keep its examples aligned with `cmd_seq.cpp`, the `seq`
+entry in `docs/status/cli-commands.yaml`, `docs/reference/cli.md#seq`, and the
+timeline skill. The export workflow must plan first and may pass only repeated
+exact `--accept-loss <concept-id>` values when publishing; outputless `--plan`
+rejects both `--out` and `--accept-loss`, while publishing requires `--out`.
+Never document a force, wildcard, or accept-all shortcut. `seq` therefore must not return to
+`SKIP_SLASH_COMMANDS` in `cli_sync_check.py`.
 
 `audio-harness` is a workflow slash command (wraps the audio observability harness `ctest` targets + the `audio-harness` skill) — it is NOT a `pulp` CLI subcommand. Note the distinction from the `pulp audio` CLI: that command owns the model/bundle tooling (model/excerpt-find/read-bundle), the offline `pulp audio validate <verb>` harness CLI (summarize/doctor/compare/assert, `tools/cli/cmd_audio_validate.cpp`, over captured WAVs / `audio-run/` bundles — no live plugin), AND `pulp audio render` (`tools/cli/cmd_audio_render.cpp` driver + `cmd_audio_render_parse.cpp` pure parser + the header-only `cmd_audio_render_step.hpp` block stepper), which DOES load a plugin: it renders an explicit `--plugin <bundle>` offline through `pulp::host::PluginSlot` and emits a WAV + the same metrics manifest the `validate` verbs read. Three `render` gotchas: `--param <id>=<value>` is the **PLAIN** parameter domain (native min..max, NOT normalized `[0,1]` — the `PluginSlot::set_parameter` arg name `normalized_value` is a misnomer; every loader treats it as plain); `--param @frame` is **sample-accurate** — the per-block queue the stepper builds is forwarded straight to `PluginSlot::process` (all four loaders apply `param_events` at the sample offset; LV2 block-rate by its control-port nature) and the driver does NOT also call `set_parameter` (that double-applies); and the stepper is a deliberate callback-driven parallel to `OfflineRenderHost::render` (PluginSlot has no `ProcessContext`, so it can't reuse the core renderer) guarded by a block-partition-invariance test. `pulp audio` intentionally has no slash command of its own; the `/audio-harness` command documents the `validate` and `render` verbs. Keep the live boundary in sync with the `audio-harness` skill: live Audio Inspector use is landed under `/audio-inspect` / `pulp run --audio-inspector`, and live capture-to-WAV is landed in two modes — `pulp run --audio-capture-wav` (earliest-window int16 dump — good for `validate summarize`/`assert`) and `pulp run --audio-capture-rolling` (last-N via `RollingAudioCaptureBuffer` — the steady-state window `doctor`/`compare` want — float by default, or int24 via `--audio-capture-rolling-format int24`). When adding a `run` capture flag, mirror slice A/A2's surfaces: `cmd_run.hpp`/`cmd_run_parse.cpp`/`cmd_run.cpp`, the standalone `detail/standalone_audio_capture_*` writer + `standalone_environment.hpp` env+predicate, `docs/status/cli-commands.yaml` (under `run`), `docs/reference/cli.md#run`, and both the `audio-harness` and this skill. When adding a `validate` or `render` flag, update the matching `cmd_audio_*.cpp`, `docs/status/cli-commands.yaml` (nested under `audio`), `docs/reference/cli.md#audio`, and both skills. WAV writing is `write_wav_file(path, data, WavBitDepth)` — `Int16` (default overload), `Int24`, or `Float32`. `pulp audio render` is also exposed as the `pulp_audio_render` MCP tool (`tools/mcp/mcp_tools.cpp` handler + `pulp_mcp.cpp` tools_list/dispatch + `test/test_mcp_server.cpp` membership/required-arg coverage + the `docs/guides/claude-code-plugin.md` tool table); it takes a single `param`/`midi` token (the hand-rolled MCP JSON has no array extractor), returns the metrics JSON, and defaults `--out` to a temp WAV. When adding a render flag worth exposing, mirror it there too.
 
@@ -186,6 +196,52 @@ commands), but a new MCP sub-tool still needs its baseline `mcp_only` entry. Dis
 gate-oriented `pulp audio validate compare` (null/spectral diff, nonzero exit): `pulp audio
 compare` is an advisory *judgment*, never a gate.
 
+**The inspector server binds loopback and nothing else — do not "fix" this.**
+`InspectorServer::start` hands `InterprocessConnectionServer` an explicit
+`127.0.0.1:<port>` endpoint. A bare port string means *all interfaces* to that
+general-purpose class (a deliberate capability it tests, via
+`start_socket_server_on_any_interface`), which is the wrong one here: the
+inspector transport mutually authenticates with nonce/HMAC proof backed by an
+owner-private per-session credential, but its protocol can still expose
+high-authority operations. Loopback is a separate, non-negotiable
+defense-in-depth boundary. `pulp inspect --host` is the *client* side and
+stays — it is how you reach a remote machine's loopback through an SSH tunnel.
+`test_inspector_server.cpp`'s `[security]` case pins this: loopback must connect
+(the control) and the host's real IPv4 must be refused.
+
+Normal Pulp standalone and plugin-format launches do **not** construct this
+server. `pulp inspect` is currently an experimental client for an explicitly
+hosted custom/test fixture, and the inspector-proxy MCP tools additionally
+shell through a Pulp source checkout's build-tree CLI. Do not describe either
+surface as an installed-user or ordinary `pulp run` workflow. Keep
+`tools/cli/pulp_cli.cpp`, `cmd_inspect.cpp`,
+`experimental/pulp-rs/src/help.rs`, the slash commands, MCP tool descriptions,
+`docs/reference/cli.md`, and
+`docs/reference/development-inspector-capabilities.md` aligned; the
+`inspector_truth_check.py` mutation gate protects selected documentation and
+client-description claims, including these shipped agent workflows, but does
+not prove runtime construction sites.
+
+**`pulp inspect audit ARTIFACT` is different from every live Inspector
+subcommand.** It is a read-only Phase 1 artifact preflight and must never load,
+execute, connect to, or activate the target. It reads the canonical
+`dev.pulp.control/artifact-manifest@1` sidecar and verifies its profile,
+build ID, frozen-registry digest, SHA-256 binary marker, declared capability markers, endpoint/eval boundaries,
+and known external-surface markers. JSON is `pulp.control.audit.v1`; exit 0 is
+pass, 1 is a fail-closed block, and 2 is invocation error. It remains compiled
+when `PULP_ENABLE_INSPECTOR=OFF`; live commands still report unavailable. Keep
+directory and direct-file identity checks equivalent: target and product names
+must be safe sibling basenames, and an exact-named sidecar must still match the
+artifact filename (with the supported `.exe` form) before consent is bound. Keep
+canonical sidecar stems equal to their manifest target, never use a
+marker-bearing sibling fallback for canonical evidence, and exclude
+plugin-format subtrees from standalone scanning in every traversal. Keep
+`cmd_inspect.cpp`, `cmd_inspect_unavailable.cpp`, `inspector_shipping_report.*`,
+`docs/guides/development-inspector-shipping.md`, `docs/reference/cli.md`, and
+`docs/status/cli-commands.yaml` aligned. It intentionally has no MCP tool until
+the shared Product A client and canonical control-audit namespace land; do not wrap
+the CLI as an MCP side door.
+
 **Inspector-proxy MCP tools use a different, lighter pattern than the
 `mcp_tools.cpp`-handler tools above.** `pulp_motion_*` and `pulp_trace_*` do NOT
 have `mcp_tools.cpp` handlers — they **inline-forward** in `pulp_mcp.cpp`'s
@@ -233,6 +289,26 @@ from `experimental/pulp-rs/src/main.rs`. `check_cli_mcp_parity.py` uses the
 same installed-command model by default, so a Rust-only command still needs
 either a matching `pulp_<command>` MCP tool or an explicit
 `tools/scripts/cli_mcp_parity_baseline.json` reason.
+
+### `pulp forge catalog export` — selected-SDK semantic catalog
+
+This repo-maintenance command joins `ForgeNodeDescriptor` vocabulary to the
+constructed node's `CustomNodeBakedParam` ranges/defaults and emits
+`pulp.forge-catalog.v1` JSON. Descriptors must remain number-free; adding a
+range or default there creates a second authority and defeats the export.
+The JSON keeps one numeric contract per applicable concrete realization,
+explicit realization-axis settings, and realization-scoped named choices; do
+not collapse differing factory defaults/ranges into one representative row.
+
+`--json` is checkout-independent and prints the compiled projection. `--check`
+and `--write` operate on `docs/status/forge-catalog.json`; the install rules
+copy that checked snapshot to `share/pulp/forge-catalog.json`, which Forge reads
+from its selected SDK prefix. Keep `cmd_forge.cpp`,
+`forge_catalog_json.{hpp,cpp}`, `docs/status/cli-commands.yaml`,
+`docs/reference/cli.md`, the Rust help inventory, the installed artifact, and
+the hosting skill's descriptor contract aligned. The command intentionally has
+no MCP tool: agents consume the committed/installed artifact, so keep its
+`cli_only` parity reason current.
 
 ### 8. Decide: does this need an MCP tool?
 
@@ -310,14 +386,37 @@ the tool takes arguments:
   inspector method returns a real payload.
 - **The scripted-UI runtime inspector IS wired now.** `Runtime.evaluate`,
   `Runtime.getCapabilities`, `Runtime.interrupt`, and `Console.getMessages`
-  (device-log cursor poll) reach the live JS engine when a host calls
-  `DomainHandler::set_script_inspector(session.script_inspector())`. Evaluate is
+  (device-log cursor poll) reach the live JS engine when a host retains the
+  result of `make_script_runtime_evaluator(session.script_inspector())` and
+  passes its borrowed pointer through
+  `DomainHandler::handle_runtime_with_evaluator()` for the exact request.
+  Destroy the evaluator before destroying the scripted-UI session. Evaluate is
   marshaled onto the engine thread by `ScriptInspectorBridge` — single in-flight,
-  ~2 s timeout, auto-interrupt on hang. It is an honest evaluate/inspect console,
+  ~2 s timeout, auto-interrupt on hang. The standalone server uses one owned,
+  bounded asynchronous worker so the same authenticated controller connection
+  can deliver `Runtime.interrupt`, and its shutdown fence includes that worker.
+  It is an honest evaluate/inspect console,
   NOT a step debugger: mainline QuickJS has no breakpoint protocol, so
   `getCapabilities` reports `canBreak/canStep/canInspectLocals=false`. Cover these
   in `test_inspector_domains.cpp`. See `docs/reference/scripted-ui-inspector.md`
   and the `engine` skill's interrupt section.
+- **A read-only inspector tool that describes something the scripted-UI bridge
+  ALSO describes must share one serializer.** `State.getValueChannels` and the
+  bridge's `listValueChannels()` both emit `{name, unit, shape, neutral}` and
+  both call `core/view/value_channel_json` — the bridge's hand-rolled copy was
+  deleted when the inspector gained the method. Two implementations drift the
+  day either side gains a field, and a UI built against one shape then silently
+  mis-reads the other; the same reason `param_json` backs both
+  `getParamMetadata` and `State.getParameters`. Assert the two payloads are
+  byte-identical (and not vacuously equal on two empty results) in
+  `test_inspector_domains.cpp`. Keep its binder guidance complete as shapes
+  land: `meter` → `bindMeter`, `vector` → `bindScope`, and `events` →
+  `bindEvents`.
+- **An inspector-proxy tool that reads an optional processor surface returns the
+  EMPTY value, not an error, when the processor declares none** — e.g.
+  `State.getValueChannels` yields `[]` for a processor that never overrode
+  `value_channels()`, which is most of them. An error there would make callers
+  special-case the common case.
 - **Mutating tools must go through a typed inspector method** (e.g.
   `State.setParameter`) with validation + gesture wrapping in
   `StateInspector`/`DomainHandler` — never via `Runtime.evaluate`. Cover the
@@ -447,6 +546,15 @@ Do not point new docs at `./build/tools/cli/pulp`; that path was the old
 C++ default. Use `pulp-cpp` only when documenting fallthrough, rollback, or
 debug comparisons.
 
+Config keys consumed by a C++ leaf command still require user-surface parity
+across `experimental/pulp-rs/src/config.rs`,
+`experimental/pulp-rs/src/cmd/config.rs`, and `tools/cli/cmd_config.cpp`.
+For example, browser-backed design import owns
+`import_design.browser=auto|managed|system`; its one-session override is
+`PULP_DESIGN_BROWSER_MODE`, while an explicit executable path remains a
+separate higher-precedence override. Update both help implementations and add
+validation tests when introducing a cross-language key.
+
 ### `pulp import` — framework-importer substrate
 
 `pulp import` (`tools/cli/cmd_import.cpp` + `import_run.{hpp,cpp}` +
@@ -461,7 +569,7 @@ Gotchas / invariants when touching this surface:
 - **`cmd_import.cpp` is arg-parse + dispatch only.** The SPI-verb orchestration
   (`run_detect` / `run_inspect` / `run_emit` and their shared helpers —
   framework-index + importer resolution, the SPI request/response envelope
-  `run_verb`, the analyze/emit payload builders, the clean-room output gate,
+  `run_verb`, the analyze/emit payload builders, the independent output gate,
   and scaffold materialisation) lives in `import_run.{hpp,cpp}` under namespace
   `pulp::cli::import_run`. `cmd_import.cpp` only parses flags into
   `import_run::ImportOptions` and calls the three `run_*` entry points. Keep new
@@ -502,7 +610,7 @@ Gotchas / invariants when touching this surface:
   `detect`/`inspect`/`emit` are all real. `emit` runs `analyze` → ProjectIR
   then the SPI `emit` verb → an **EmissionManifest** (the importer PROPOSES
   files, never writes them). The SDK then: parses the manifest
-  (`import_emit::parse_manifest`), runs the clean-room **output denylist scan**
+  (`import_emit::parse_manifest`), runs the independent **output denylist scan**
   (`import_emit_scan::scan_manifest`) over every `generated`/`stub` file,
   computes a write-plan that rejects any path escaping `--output`
   (`compute_write_plan`), writes each file (inline `content`, or a verbatim
@@ -510,7 +618,7 @@ Gotchas / invariants when touching this surface:
   `migration_status.json` + `.pulp-import-provenance.json`. Parse / write-plan /
   scan are **pure functions over structs** so they unit-test without spawning;
   the spawn/IO is a thin shell in `cmd_import.cpp`.
-- **The output scan is data-driven, not hardcoded.** Keep the clean-room
+- **The output scan is data-driven, not hardcoded.** Keep the independent
   denylist vendor-free: `denylist_from_known_frameworks()` builds it from the
   known-frameworks index's `content_match` markers (the ONE place real tells
   live). Do NOT hardcode `juce`/`iplug`/… tokens in `import_emit_scan.cpp` — the
@@ -540,7 +648,7 @@ Gotchas / invariants when touching this surface:
   without a real TTY or clock.
 - **Provenance PR-check is `tools/scripts/check_import_provenance.py`** (neutral,
   vendor-free), the audit that a migrated project landing in a PR was produced
-  clean-room: marker present + well-formed, valid per-file `provenance` values,
+  independent: marker present + well-formed, valid per-file `provenance` values,
   and no framework-source marker in any file the marker labels `generated`/`stub`
   (`copied-user-file` is exempt). The content denylist is DATA from the
   known-frameworks index (`$PULP_KNOWN_FRAMEWORKS` or `tools/import/`); with no
@@ -852,6 +960,20 @@ command begins with a quoted path, wrap the ENTIRE command in one extra pair of
 double quotes (`command = "\"" + command + "\"";`) so `cmd` strips exactly that
 pair and runs the remainder verbatim.
 
+**Binary-command delegation must bypass `cmd.exe` on Windows (2026-08-02):**
+`delegate_to_build_binary` forwards user-controlled arguments, including URLs
+and design data whose `%`, `&`, `|`, or literal quotes must survive byte-for-byte.
+The outer-quote workaround above fixes `cmd /c`'s leading-quote rule, but it does
+not stop percent expansion or make CRT quoting safe from shell metacharacters.
+Launch the resolved helper with `CreateProcess` and the existing CRT-correct
+`shell_quote` output as its command line. Preserve transparent delegation by
+duplicating each valid parent standard handle as inheritable; substitute an
+inheritable `NUL` handle independently for a missing stdin, stdout, or stderr.
+Do not replace this with `runtime::run_process`: that helper captures unbounded
+output until the child exits, regressing streaming and parent memory use. The
+shell-out coverage pins both the release-smoke `import-design --help` invocation
+and a literal `%PULP_DELEGATE_EXPAND%` argument so a return to `cmd.exe` fails.
+
 ### A CLI subcommand that renders shells out to `pulp-screenshot`
 
 `pulp design gallery` renders each tagged card by spawning the sibling
@@ -1112,28 +1234,29 @@ Reference: `feature/ship-oneoff-notarize` (2026-06-01). Files:
 selection, `share`), `test/test_cli_ship_shellout.cpp` `[oneoff]` cases,
 `.claude/commands/ship.md`, `.agents/skills/ship/SKILL.md`.
 
-### SDK build strips the dev authoring surface (§6a)
+### SDK build disables dev authoring features (§6a)
 
-`cli_sdk.cpp`'s release configure deliberately disables the developer-only
-surfaces so shipped SDKs / plugins don't carry them: it passes
-`-DPULP_ENABLE_AUDIO_PROBES=OFF` **and** `-DPULP_ENABLE_INSPECTOR=OFF` (the
-inspector is the in-plugin authoring / MCP-reachable surface). The scaffolded
-project templates (`tools/templates/.../build.gradle.kts.template`) mirror this.
+`cli_sdk.cpp`'s release configure passes
+`-DPULP_ENABLE_AUDIO_PROBES=OFF` **and** `-DPULP_ENABLE_INSPECTOR=OFF`. The
+scaffolded project templates (`tools/templates/.../build.gradle.kts.template`)
+mirror this. These flags disable their guarded behavior; they do not by
+themselves prove archive stripping, unlinkage, or endpoint reachability.
 
 Keep the two flags together when editing the SDK configure command. A developer
-who deliberately wants an inspectable / MCP-reachable plugin re-enables it in
-their own plugin build with `-DPULP_ENABLE_INSPECTOR=ON`. The standalone `pulp`
-CLI and the MCP server (`tools/mcp/pulp_mcp.cpp`) are **separate binaries** —
-not compiled into a plugin — so this flag never strips them; bundling them
-alongside a plugin distribution is a packaging choice.
+can re-enable the guarded inspector components with
+`-DPULP_ENABLE_INSPECTOR=ON`, but that still does not create a normal runtime
+endpoint: a custom host must explicitly construct and own `InspectorServer`.
+The standalone `pulp` CLI and the MCP server (`tools/mcp/pulp_mcp.cpp`) are
+**separate binaries** — not compiled into a plugin — so this flag never strips
+them; bundling them alongside a plugin distribution is a packaging choice.
 
 The SDK build also passes `-DPULP_ENABLE_DESIGN_IMPORT=OFF`, which strips the
 design-import authoring cluster (importers, codegen, `lock_to_source`,
 `jsx_lock`, `token_lock`, runtime design-import) from shipped plugins. The
 runtime W3C token pair (`importDesignTokens` / `exportDesignTokens`, via
 `core/view/src/w3c_tokens.cpp`) stays compiled; `WidgetBridge::install_runtime_import_handlers()`
-becomes a no-op stub. Keep all three strip flags (audio-probes / inspector /
-design-import) together in the SDK configure command. Building the test suite
+becomes a no-op stub. Keep all three feature-configuration flags (audio-probes /
+inspector / design-import) together in the SDK configure command. Building the test suite
 requires `PULP_ENABLE_DESIGN_IMPORT=ON` (the CMake gate hard-errors otherwise);
 a stripped build uses `PULP_BUILD_TESTS=OFF`.
 
@@ -1295,7 +1418,7 @@ When this is the right tool vs. `shipyard rescue`:
 | Var | Purpose |
 |-----|---------|
 | `PULP_LOCAL_MACOS_RUNS_ON_JSON` | Selector when local has capacity |
-| `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` | Selector when local is saturated (overflow target; despite the historical name, this is the generic overflow var) |
+| `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | Generic selector when local is saturated; bare `local-only` disables overflow |
 | `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` | BUSY count that trips overflow |
 
 Surfaces:
@@ -1306,15 +1429,13 @@ Surfaces:
 - `pulp overflow enable [--to <selector>]` — set the overflow target.
   Default `--to "macos-15"` for free GH-hosted; pass
   `--to '"namespace-profile-generouscorp-macos"'` for paid Namespace.
-- `pulp overflow disable` — delete the overflow var. Note this only
-  changes future dispatches; in-flight cloud runs keep running.
+- `pulp overflow disable` — write the bare `local-only` sentinel. Note this
+  only changes future dispatches; in-flight cloud runs keep running.
 - `pulp overflow threshold [N]` — get (no arg) or set the BUSY count.
 
-The variable is named `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` for
-historical reasons (Plan B in `planning/2026-05-13-namespace-overflow-
-implementation.md` originally targeted Namespace exclusively). It now
-holds the overflow target regardless of provider — rename tracked as a
-future cleanup.
+Unset and empty overflow values restore `build.yml`'s GitHub-hosted
+`macos-15` default; they do not disable overflow. Namespace-specific selectors
+remain separate break-glass variables for explicit operator routing.
 
 ## `pulp upgrade --check-only`
 
@@ -1365,6 +1486,11 @@ orders in lockstep.
 - `--watch` — re-launch the binary on file changes via the existing
   `watch_loop` plumbing. Composes with the headless flags so dev
   loops can render PNGs on every save.
+- `--inspect-runtime-eval` — a literal, high-risk acknowledgement for
+  `runtime.eval`, forwarded as argv and `PULP_INSPECT_RUNTIME_EVAL=1`. It
+  requires `--inspect=develop`, or a custom profile that also names
+  `runtime.eval` and `session.control`. Never infer it from a profile, an
+  all-capabilities shorthand, or persisted standalone preferences.
 - `--audio-inspector` — open the live Audio Inspector. Forwarded as
   `--audio-inspector` and `PULP_AUDIO_INSPECTOR=1`.
 - `--audio-probe-json <path>` — write live probe metrics JSON and exit.
@@ -2491,6 +2617,16 @@ Fix: split into adjacent raw-string literals — `)JSON" R"JSON(` — which the
 compiler concatenates (output byte-identical). Keep each chunk well under 16 KB;
 when you add MCP tools, watch the literal size.
 
+Generated timeline iteration tools are stateful within one `pulp-mcp` process:
+`pulp_timeline_project_open` returns a bounded session identifier consumed by
+apply/diff/undo/redo. Seven timeline operations retain stateless
+`pulp::tool-timeline` entry points; diff/undo/redo are MCP-local
+`DocumentSession` operations with no `pulp seq` session subtools. Keep their
+generated names, explicit typed handler bindings, MCP-only parity rows,
+membership tests, and required-argument tests aligned; do not
+reimplement undo from a serialized project because the real undo groups live in
+`DocumentSession`.
+
 ## `pulp validate --json` carries machine-readable evidence
 
 The `--json` / `--report` output of `pulp validate` is a consumer contract, not
@@ -2680,3 +2816,21 @@ Note `tools/cli/cli_fs_util.cpp` carries a third `path_is_within` used for
 archive-extraction containment. It is still lexical-only; its callers currently
 pass pre-canonicalized paths, but it is the same fail-open shape if that ever
 stops being true.
+
+## A new browser-capture module must be registered for `pulp upgrade`
+
+`tools/import-design/browser_capture/` is a module graph the capture imports at
+run time, and `pulp upgrade` copies it file-by-file from a hard-coded list —
+`browser_capture_runtime_files` in `tools/cli/upgrade_install.hpp`. Adding a
+`.mjs` there and not adding it to that list produces an installed runtime with
+a hole in it.
+
+The reason this is worth a note rather than being obvious: **the break does not
+surface where the mistake was made.** The source tree is complete, every test
+that runs the capture from source passes, and the install itself reports
+success. It fails later, on an upgraded machine, as a module-resolution error
+during a capture — which reads as a broken import rather than a short manifest.
+
+The array's size is a literal beside the literal list, so bump both. Two tests
+hold the line: one compares the C++ list against the on-disk manifest, the
+other resolves the installed graph.

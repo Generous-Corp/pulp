@@ -34,6 +34,8 @@
 ///
 /// No allocation or locks after prepare().
 
+#include <pulp/signal/detail/fractional_synthesis_hop_accumulator.hpp>
+#include <pulp/signal/realtime_pitch_time_geometry.hpp>
 #include <pulp/signal/freeze_hold.hpp>
 #include <pulp/signal/latency_aware_control_smoother.hpp>
 #include <pulp/signal/multichannel_phase_coordinator.hpp>
@@ -48,52 +50,10 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace pulp::signal {
-
-enum class PitchTimeQuality { quality, low_latency };
-enum class PitchTimeMode { realtime_pitch, time_stretch };
-enum class FormantMode { follow, preserve };
-
-struct RealtimePitchTimeConfig {
-    PitchTimeMode mode = PitchTimeMode::realtime_pitch;
-    PitchTimeQuality quality = PitchTimeQuality::quality;
-    int channels = 1;
-    int max_block = 4096;
-    float max_pitch_semitones = 12.0f;     // sizing bound, |pitch| clamp
-    float max_time_ratio = 2.0f;           // sizing bound for time_stretch
-    float pitch_smoothing_seconds = 0.03f; // semitone-domain attack/release
-    FormantMode formant_mode = FormantMode::follow;
-    int true_envelope_iterations = 3;      // formant-path quality
-    /// Phase reset at detected transients (Röbel DAFx 2003) — keeps
-    /// attacks sharp under shift/stretch.
-    bool transient_preservation = true;
-    /// Transient-detector sensitivity (0 = engine default 1.0). Higher fires the
-    /// Röbel phase reset on more onsets, so percussion keeps EVERY hit sharp
-    /// (a conservative detector softens some hits -> "transients move around").
-    /// OfflineStretch raises this for percussive material.
-    float transient_sensitivity = 0.0f;
-    /// Route the noise component (STN decomposition) through NoiseMorpher
-    /// instead of phase propagation, so stretched/shifted noise and
-    /// textures stay natural instead of "tonalizing." Adds an STN pass per
-    /// frame; off by default to keep the baseline path unchanged.
-    bool noise_morphing = false;
-    /// Read the stretched stream with a Kaiser-windowed sinc kernel instead
-    /// of Catmull-Rom cubic — far deeper stopband, so the resample step of
-    /// pitch shifting folds back much less aliasing on large shifts and
-    /// bright material. Costs 2*half taps per output sample; off by default.
-    bool sinc_resampling = false;
-    /// Optional STFT geometry override (offline use). 0 = derive from `quality`
-    /// (4096/512). Set both to force a window/overlap suited to the material:
-    /// large windows (e.g. 8192/512 = 16× overlap) resolve closely-spaced low
-    /// partials so bass stretches without wobble; small windows (1024/128) give
-    /// the time resolution that keeps percussive transients natural. `fft_size`
-    /// must be a power of two ≥ 256; `analysis_hop` must divide it for COLA.
-    /// The realtime path leaves these 0; OfflineStretch picks them per input.
-    int fft_size = 0;
-    int analysis_hop = 0;
-};
 
 template <typename SampleType = float>
 class RealtimePitchTimeProcessorT {
@@ -105,41 +65,38 @@ public:
     /// not audio-thread safe. After prepare(), process(), feed(),
     /// read_stretched(), reset(), control setters, and accessors are
     /// allocation-free for blocks no larger than config.max_block and the
-    /// prepared channel count.
-    void prepare(double sample_rate, const RealtimePitchTimeConfig& config) {
-        assert(sample_rate > 0.0);
-        assert(config.channels >= 1);
+    /// prepared channel count. target_max_bytes defaults to the native address
+    /// limit and may be lowered to validate a narrower deployment target.
+    PitchTimePrepareStatus prepare(
+        double sample_rate,
+        const RealtimePitchTimeConfig& config,
+        std::uint64_t target_max_bytes = kTargetAddressMaximumBytes) {
+        if (!std::isfinite(sample_rate) || !(sample_rate > 0.0))
+            return PitchTimePrepareStatus::invalid_sample_rate;
+        if (config.channels < 1 || config.channels > kRealtimePitchTimeMaximumChannels)
+            return PitchTimePrepareStatus::invalid_channel_count;
+        if (config.max_block <= 0) return PitchTimePrepareStatus::invalid_max_block;
+        if (config.mode == PitchTimeMode::time_stretch
+            && (!std::isfinite(config.max_time_ratio) || config.max_time_ratio < 1.0f))
+            return PitchTimePrepareStatus::invalid_max_time_ratio;
+        const double max_pitch_ratio =
+            std::exp2(static_cast<double>(config.max_pitch_semitones) / 12.0);
+        if (!std::isfinite(config.max_pitch_semitones) || config.max_pitch_semitones < 0.0f
+            || !std::isfinite(max_pitch_ratio))
+            return PitchTimePrepareStatus::invalid_max_pitch_semitones;
+
+        RealtimePitchTimePreparedGeometry<SampleType> geometry;
+        const auto geometry_status = checked_realtime_pitch_time_prepared_geometry(
+            config, max_pitch_ratio, target_max_bytes, geometry);
+        if (geometry_status != PitchTimePrepareStatus::prepared) return geometry_status;
+        const bool quality = config.quality == PitchTimeQuality::quality;
+
         config_ = config;
         sample_rate_ = sample_rate;
-
-        assert(config.channels <= kMaxChannels);
-        const bool quality = config.quality == PitchTimeQuality::quality;
-        fft_size_ = quality ? 4096 : 1024;
-        analysis_hop_ = quality ? 512 : 256;
-        // Offline geometry override (material-adaptive window/overlap). Only
-        // honored when both are set and valid; the realtime path leaves them 0.
-        if (config.fft_size >= 256
-            && (config.fft_size & (config.fft_size - 1)) == 0
-            && config.analysis_hop > 0
-            && (config.fft_size % config.analysis_hop) == 0) {
-            fft_size_ = config.fft_size;
-            analysis_hop_ = config.analysis_hop;
-        }
-
-        const float max_ratio = std::exp2(config.max_pitch_semitones / 12.0f);
-        const float max_stretch =
-            config.mode == PitchTimeMode::time_stretch
-                ? std::max(config.max_time_ratio, 1.0f)
-                : max_ratio;
-
-        SpectralFrameEngineConfig engine_config;
-        engine_config.fft_size = fft_size_;
-        engine_config.analysis_hop = analysis_hop_;
-        engine_config.channels = config.channels;
-        engine_config.max_block = std::max(config.max_block, analysis_hop_);
-        engine_config.max_synthesis_hop =
-            static_cast<int>(std::ceil(max_stretch * analysis_hop_)) + 1;
-        engine_.prepare(engine_config);
+        fft_size_ = geometry.fft_size;
+        analysis_hop_ = geometry.analysis_hop;
+        maximum_stream_output_lag_samples_ = geometry.maximum_stream_output_lag_samples;
+        engine_.prepare(geometry.engine_config);
 
         coordinator_.prepare(fft_size_, config.channels);
 
@@ -169,18 +126,22 @@ public:
 
         // Stretched-stream ring: must span the read-to-write gap
         // (latency * ratio) plus one engine drain burst and one block.
-        const float span = static_cast<float>(fft_size_ + 2 * analysis_hop_
-                                              + engine_config.max_block)
-                           * std::max(max_stretch, 1.0f)
-                         + static_cast<float>(fft_size_) + 64.0f;
-        ring_size_ = 1;
-        while (ring_size_ < static_cast<int>(span)) ring_size_ <<= 1;
+        ring_size_ = geometry.ring_size;
         ring_mask_ = ring_size_ - 1;
-        stretch_ring_.assign(static_cast<size_t>(config.channels) * ring_size_, SampleType{0});
+        stretch_ring_.assign(static_cast<std::size_t>(geometry.stretch_ring_elements),
+                             SampleType{0});
 
-        drain_buf_.assign(static_cast<size_t>(config.channels)
-                          * engine_config.max_synthesis_hop * 4, SampleType{0});
+        drain_buf_.assign(static_cast<std::size_t>(geometry.drain_elements), SampleType{0});
         drain_ptrs_.resize(static_cast<size_t>(config.channels));
+        finalize_zero_buf_.assign(static_cast<std::size_t>(geometry.finalize_zero_elements),
+                                  SampleType{0});
+        finalize_zero_ptrs_.resize(static_cast<size_t>(config.channels));
+        for (int ch = 0; ch < config.channels; ++ch)
+            finalize_zero_ptrs_[static_cast<size_t>(ch)] =
+                finalize_zero_buf_.data()
+                + static_cast<size_t>(ch)
+                    * static_cast<size_t>(geometry.engine_config.max_block);
+        max_synthesis_hop_ = geometry.engine_config.max_synthesis_hop;
 
         // Noise-morphing front end: STN decomposition over the spectrum
         // plus one NoiseMorpher per channel. The STN mask is computed from
@@ -213,6 +174,7 @@ public:
             tap_scratch_.assign(static_cast<size_t>(resampler_.taps()), SampleType{0});
         }
         reset();
+        return PitchTimePrepareStatus::prepared;
     }
 
     /// Fixed pipeline delay of process() in realtime_pitch mode.
@@ -297,12 +259,20 @@ public:
         }
     }
 
-    /// time_stretch mode: push input; stretched output accumulates.
-    void feed(const SampleType* const* in, int num_samples) {
-        assert(config_.mode == PitchTimeMode::time_stretch);
+    /// time_stretch mode: atomically push one bounded input block. The call
+    /// accepts all samples or none; a backpressure result leaves every stream
+    /// counter and DSP state unchanged. Drain output and retry the same block.
+    PitchTimeStreamFeedStatus feed(const SampleType* const* in, int num_samples) {
+        if (config_.mode != PitchTimeMode::time_stretch || in == nullptr || num_samples < 0
+            || num_samples > config_.max_block)
+            return PitchTimeStreamFeedStatus::invalid_request;
+        if (input_closed_) return PitchTimeStreamFeedStatus::input_closed;
+        if (num_samples == 0) return PitchTimeStreamFeedStatus::accepted;
+        if (!can_accept_input(num_samples)) return PitchTimeStreamFeedStatus::backpressure;
         feed_engine(in, num_samples);
         pitch_smoother_.advance(num_samples);
         formant_smoother_.advance(num_samples);
+        return PitchTimeStreamFeedStatus::accepted;
     }
 
     /// time_stretch mode: stretched samples ready to read.
@@ -310,9 +280,106 @@ public:
         return static_cast<int>(stretch_written_ - stretch_read_);
     }
 
+    /// Remaining prepared output-ring capacity. A producer can drain output
+    /// and retry after feed()/finalize() reports backpressure.
+    int output_free_space() const {
+        if (config_.mode != PitchTimeMode::time_stretch) return 0;
+        return static_cast<int>(static_cast<std::int64_t>(ring_size_)
+                                - (stretch_written_ - stretch_read_));
+    }
+
+    /// Input required before the first final stretched sample can become
+    /// readable. The pull stream itself has no silence prefix: output sample
+    /// zero is aligned to input sample zero.
+    int input_priming_samples() const { return fft_size_ + analysis_hop_; }
+    int output_alignment_samples() const { return 0; }
+    /// Admission-time causal stream delay bound in output samples for every
+    /// ratio accepted by set_time_ratio(). A fixed-latency driver may stage by
+    /// this amount without deriving DSP geometry itself.
+    int maximum_stream_output_lag_samples() const noexcept {
+        return maximum_stream_output_lag_samples_;
+    }
+
+    /// Samples remaining before the next analysis frame completes. This is
+    /// exposed for finite-stream drivers that must apply control changes at
+    /// analysis boundaries independently of their own feed quantum.
+    /// Returns zero outside prepared time_stretch mode.
+    int samples_until_next_analysis_frame() const noexcept {
+        return config_.mode == PitchTimeMode::time_stretch && ring_size_ > 0
+                   ? engine_.samples_until_next_frame()
+                   : 0;
+    }
+
+    /// Seal the finite input stream and advance at most one prepared input
+    /// block of zero padding. Repeat after draining output until complete.
+    /// The final output count is derived from the same frame map used by the
+    /// realtime reader, so constant and varying feed schedules produce the
+    /// same hop-quantized duration. No caller-authored silence is required.
+    PitchTimeStreamFinalizeStatus finalize() {
+        return finalize(config_.max_block);
+    }
+
+    /// Allocation-free, non-mutating preflight for bounded finalization. A
+    /// `ready` plan is guaranteed admissible until another stream operation
+    /// mutates the processor. Drivers can therefore resolve a boundary control
+    /// exactly once only after rejected/terminal work has been ruled out.
+    PitchTimeStreamFinalizePlan plan_finalize(int max_samples) const noexcept {
+        if (config_.mode != PitchTimeMode::time_stretch)
+            return {PitchTimeStreamFinalizePlanStatus::invalid_mode, 0};
+        if (max_samples <= 0 || max_samples > config_.max_block)
+            return {PitchTimeStreamFinalizePlanStatus::invalid_request, 0};
+        if (final_output_limit_ >= 0 && stretch_written_ >= final_output_limit_) {
+            return {available_stretched() == 0 ? PitchTimeStreamFinalizePlanStatus::complete
+                                               : PitchTimeStreamFinalizePlanStatus::needs_drain,
+                    0};
+        }
+        const int padding_remaining = input_closed_
+                                          ? finalize_padding_remaining_
+                                          : fft_size_ + 2 * analysis_hop_;
+        const int run = std::min(max_samples, padding_remaining);
+        if (run <= 0 || !can_accept_input(run))
+            return {PitchTimeStreamFinalizePlanStatus::needs_drain, 0};
+        return {PitchTimeStreamFinalizePlanStatus::ready, run};
+    }
+
+    /// Bounded finalization variant. Advances no more than `max_samples` of
+    /// prepared zero padding, so a driver can stop exactly at the next analysis
+    /// boundary and update per-frame controls before continuing.
+    PitchTimeStreamFinalizeStatus finalize(int max_samples) {
+        if (config_.mode != PitchTimeMode::time_stretch)
+            return PitchTimeStreamFinalizeStatus::invalid_mode;
+        if (max_samples <= 0 || max_samples > config_.max_block)
+            return PitchTimeStreamFinalizeStatus::invalid_request;
+        if (!input_closed_) {
+            input_closed_ = true;
+            final_input_count_ = input_count_;
+            finalize_padding_remaining_ = fft_size_ + 2 * analysis_hop_;
+        }
+        if (final_output_limit_ >= 0 && stretch_written_ >= final_output_limit_)
+            return available_stretched() == 0 ? PitchTimeStreamFinalizeStatus::complete
+                                              : PitchTimeStreamFinalizeStatus::draining;
+
+        const int run = std::min(max_samples, finalize_padding_remaining_);
+        if (run <= 0) return PitchTimeStreamFinalizeStatus::backpressure;
+        if (!can_accept_input(run)) return PitchTimeStreamFinalizeStatus::backpressure;
+
+        feed_engine(finalize_zero_ptrs_.data(), run);
+        pitch_smoother_.advance(run);
+        formant_smoother_.advance(run);
+        finalize_padding_remaining_ -= run;
+
+        if (final_output_limit_ >= 0 && stretch_written_ >= final_output_limit_)
+            return available_stretched() == 0 ? PitchTimeStreamFinalizeStatus::complete
+                                              : PitchTimeStreamFinalizeStatus::draining;
+        return PitchTimeStreamFinalizeStatus::draining;
+    }
+
     /// time_stretch mode: pop stretched samples (caller respects
-    /// available_stretched(); excess is zero-filled without advancing).
-    void read_stretched(SampleType* const* out, int num_samples) {
+    /// available_stretched(); excess is zero-filled without advancing). Returns
+    /// the number of real stream samples copied.
+    int read_stretched(SampleType* const* out, int num_samples) {
+        if (out == nullptr || num_samples <= 0) return 0;
+        int read = 0;
         for (int i = 0; i < num_samples; ++i) {
             const bool valid = stretch_read_ < stretch_written_;
             const auto idx = static_cast<size_t>(stretch_read_ & ring_mask_);
@@ -320,8 +387,12 @@ public:
                 out[ch][i] = valid
                                  ? stretch_ring_[static_cast<size_t>(ch) * ring_size_ + idx]
                                  : SampleType{0};
-            if (valid) ++stretch_read_;
+            if (valid) {
+                ++stretch_read_;
+                ++read;
+            }
         }
+        return read;
     }
 
     void reset() {
@@ -336,7 +407,7 @@ public:
         std::fill(stretch_ring_.begin(), stretch_ring_.end(), SampleType{0});
         pitch_smoother_.set_immediate(pitch_smoother_.target());
         formant_smoother_.set_immediate(formant_smoother_.target());
-        synth_accum_ = 0.0;
+        synth_hop_accumulator_.reset();
         synth_accum_int_ = 0;
         frames_done_ = 0;
         stretch_written_ = 0;
@@ -346,6 +417,10 @@ public:
                   static_cast<std::int64_t>(0));
         out_count_ = 0;
         input_count_ = 0;
+        input_closed_ = false;
+        final_input_count_ = 0;
+        final_output_limit_ = -1;
+        finalize_padding_remaining_ = 0;
     }
 
 private:
@@ -387,16 +462,15 @@ private:
 
         // Integer synthesis hop from the fractional accumulator, so the
         // average hop tracks stretch * analysis_hop exactly.
-        synth_accum_ += static_cast<double>(stretch) * analysis_hop_;
-        int hop = static_cast<int>(std::llround(synth_accum_) - synth_accum_int_);
-        hop = std::clamp(hop, 1, static_cast<int>(std::ceil(
-                                     static_cast<double>(stretch) * analysis_hop_))
-                                 + 1);
+        const int hop = synth_hop_accumulator_.advance(
+            static_cast<double>(stretch) * static_cast<double>(analysis_hop_),
+            1, max_synthesis_hop_);
         // Record this frame's stretched start position for the reader's
         // input-time -> stretched-position map.
         frame_starts_[static_cast<size_t>(frames_done_ & kFrameMapMask)] = synth_accum_int_;
         synth_accum_int_ += hop;
         ++frames_done_;
+        update_final_output_limit();
 
         // Freeze first: held frames look like live steady-state input, so
         // pitch/formant control downstream keeps working over the hold.
@@ -490,15 +564,43 @@ private:
                     drain_buf_.data() + static_cast<size_t>(ch)
                     * (drain_buf_.size() / static_cast<size_t>(config_.channels));
             engine_.read_output(drain_ptrs_.data(), chunk);
+            int publish = chunk;
+            if (config_.mode == PitchTimeMode::time_stretch && final_output_limit_ >= 0)
+                publish = static_cast<int>(std::min<std::int64_t>(
+                    publish, std::max<std::int64_t>(0, final_output_limit_ - stretch_written_)));
+            if (config_.mode == PitchTimeMode::time_stretch)
+                assert(publish <= output_free_space());
             for (int ch = 0; ch < config_.channels; ++ch) {
                 const SampleType* src = drain_ptrs_[static_cast<size_t>(ch)];
                 SampleType* ring = stretch_ring_.data() + static_cast<size_t>(ch) * ring_size_;
-                for (int i = 0; i < chunk; ++i)
+                for (int i = 0; i < publish; ++i)
                     ring[static_cast<size_t>((stretch_written_ + i) & ring_mask_)] = src[i];
             }
-            stretch_written_ += chunk;
+            stretch_written_ += publish;
             avail -= chunk;
         }
+    }
+
+    bool can_accept_input(int num_samples) const {
+        const auto frames = static_cast<std::int64_t>(num_samples / analysis_hop_ + 2);
+        const auto worst_output = frames * static_cast<std::int64_t>(max_synthesis_hop_);
+        return worst_output <= output_free_space();
+    }
+
+    void update_final_output_limit() {
+        if (!input_closed_ || final_output_limit_ >= 0) return;
+        const auto hop = static_cast<std::int64_t>(analysis_hop_);
+        const auto frame = final_input_count_ / hop;
+        if (frames_done_ <= frame + 1) return;
+        const auto s0 = frame_starts_[static_cast<size_t>(frame & kFrameMapMask)];
+        const auto s1 = frame_starts_[static_cast<size_t>((frame + 1) & kFrameMapMask)];
+        const auto offset = final_input_count_ - frame * hop;
+        const long double mapped = static_cast<long double>(s0)
+                                 + static_cast<long double>(s1 - s0)
+                                       * static_cast<long double>(offset)
+                                       / static_cast<long double>(hop);
+        final_output_limit_ = static_cast<std::int64_t>(std::llround(mapped));
+        assert(final_output_limit_ >= stretch_written_);
     }
 
     // Fractional read of the stretched ring at read_pos_ — Catmull-Rom
@@ -587,10 +689,11 @@ private:
     std::vector<SampleType> stretch_ring_;
     std::vector<SampleType> drain_buf_;
     std::vector<SampleType*> drain_ptrs_;
-    static constexpr int kMaxChannels = 64;
-    const SampleType* in_ptrs_scratch_[kMaxChannels] = {};
+    std::vector<SampleType> finalize_zero_buf_;
+    std::vector<const SampleType*> finalize_zero_ptrs_;
+    const SampleType* in_ptrs_scratch_[kRealtimePitchTimeMaximumChannels] = {};
 
-    double synth_accum_ = 0.0;
+    detail::FractionalSynthesisHopAccumulator synth_hop_accumulator_;
     std::int64_t synth_accum_int_ = 0;
     std::int64_t frames_done_ = 0;
     std::int64_t stretch_written_ = 0;
@@ -600,6 +703,12 @@ private:
     std::int64_t out_count_ = 0;
     std::int64_t input_count_ = 0;
     int offset_in_block_ = 0;
+    int max_synthesis_hop_ = 0;
+    int maximum_stream_output_lag_samples_ = 0;
+    bool input_closed_ = false;
+    std::int64_t final_input_count_ = 0;
+    std::int64_t final_output_limit_ = -1;
+    int finalize_padding_remaining_ = 0;
 };
 
 using RealtimePitchTimeProcessor = RealtimePitchTimeProcessorT<float>;

@@ -22,6 +22,9 @@ target_sources(pulp-host PRIVATE
     src/background_scanner.cpp
     src/isolated_scanner.cpp
     src/node_pack.cpp
+    src/forge_descriptor_audit.cpp
+    src/forge_catalog_export.cpp
+    src/forge_catalog_json.cpp
     src/signal_graph_executor_routing.cpp
     src/baked_graph_processor.cpp
     src/baked_graph_param_injection.cpp
@@ -32,6 +35,7 @@ target_sources(pulp-host PRIVATE
     src/anticipation_lane.cpp
     src/timeline_automation_delivery.cpp
     src/timeline_graph_binding.cpp
+    src/timeline_graph_stretch_policy.cpp
 )
 
 target_link_libraries(pulp-host PUBLIC pulp::audio pulp::format pulp::graph pulp::midi pulp::playback pulp::runtime pulp::state)

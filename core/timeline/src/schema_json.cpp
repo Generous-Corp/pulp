@@ -45,6 +45,11 @@ DecodeLimits DecodeLimits::web_defaults() noexcept {
     limits.max_audio_loop_tags = 25'000;
     limits.max_automation_lanes = 25'000;
     limits.max_automation_points = 1'000'000;
+    limits.max_modulators = 25'000;
+    limits.max_macro_controls = 25'000;
+    // A route per source-destination pair, so the ceiling tracks the point
+    // ceilings rather than the entity ones.
+    limits.max_modulation_routes = 250'000;
     limits.max_take_lanes = 25'000;
     limits.max_takes = 1'000'000;
     limits.max_take_comp_segments = 1'000'000;
@@ -54,6 +59,8 @@ DecodeLimits DecodeLimits::web_defaults() noexcept {
     limits.max_slots = 250'000;
     limits.max_chord_scale_events = 250'000;
     limits.max_groove_steps = 25'000;
+    limits.max_midi_lanes = 25'000;
+    limits.max_midi_lane_points = 1'000'000;
     return limits;
 }
 

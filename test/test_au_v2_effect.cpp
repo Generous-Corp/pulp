@@ -24,6 +24,8 @@
 #include <pulp/midi/message.hpp>
 #include <pulp/midi/ump_sysex7_reassembler.hpp>
 
+#include "support/thread_progress.hpp"
+
 #include <AudioUnitSDK/AUPlugInDispatch.h>
 #include <AudioToolbox/AudioUnit.h>
 
@@ -781,9 +783,13 @@ TEST_CASE("AU v2 MIDI out: callback pair publishes atomically (no torn pair)",
     });
 
     writer.join();
-    // Let the reader observe a bit more, then stop.
-    while (reads.load(std::memory_order_relaxed) < 1000 &&
-           !torn.load(std::memory_order_relaxed)) { /* spin briefly */ }
+    // Let the reader observe a bit more, then stop. Bounded: an unbounded spin
+    // here would hang the suite outright if the reader never observed a publish,
+    // where the REQUIRE below reports it as the failure it is.
+    (void)pulp::test::wait_for_condition([&] {
+        return reads.load(std::memory_order_relaxed) >= 1000
+            || torn.load(std::memory_order_relaxed);
+    });
     stop.store(true, std::memory_order_relaxed);
     reader.join();
 
@@ -959,6 +965,34 @@ TEST_CASE("AU v2 effect clears OutputIsSilence when the processor generates outp
     REQUIRE((flags & kAudioUnitRenderAction_PreRender) != 0);
 
     effect.DoCleanup();
+}
+
+TEST_CASE("AU v2 shared state restore publishes a UI reconciliation edge",
+          "[au][au-v2][state-restore]")
+{
+    DcEffectProcessor processor;
+    pulp::state::StateStore store;
+    store.add_parameter({
+        .id = 1,
+        .name = "Gain",
+        .range = {-24.0f, 24.0f, 0.0f, 0.1f},
+    });
+    pulp::format::StateRestoreGate gate;
+
+    store.set_value(1, -12.0f);
+    CFPropertyListRef preset = nullptr;
+    REQUIRE(pulp::format::au::save_pulp_state(
+                store, processor, &preset) == noErr);
+    REQUIRE(preset != nullptr);
+
+    store.set_value(1, 6.0f);
+    const auto restore_revision = store.state_restore_revision();
+    REQUIRE(pulp::format::au::restore_pulp_state(
+                store, processor, gate, preset) == noErr);
+    REQUIRE(store.state_restore_revision() == restore_revision + 1);
+    REQUIRE(store.get_value(1) == -12.0f);
+
+    CFRelease(preset);
 }
 
 // ===========================================================================

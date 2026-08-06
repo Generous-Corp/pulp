@@ -20,6 +20,11 @@ view::ScriptedUiSession* safe_active_scripted_ui(Processor& processor) noexcept 
     PULP_CATCH_ALL { return nullptr; }
 }
 
+bool safe_supports_in_place_scripted_ui_reload(Processor& processor) noexcept {
+    PULP_TRY { return processor.supports_in_place_scripted_ui_reload(); }
+    PULP_CATCH_ALL { return false; }
+}
+
 ViewSize safe_view_size(Processor& processor) noexcept {
     PULP_TRY { return processor.view_size(); }
     PULP_CATCH_ALL { return {}; }
@@ -68,6 +73,7 @@ ViewBridge::ViewBridge(Processor& processor, state::StateStore& store,
       supports_editor_reload_(processor.supports_editor_reload()),
       owner_alive_(owner_alive ? std::move(owner_alive)
                                : local_owner_alive_.capture()),
+      last_state_restore_revision_(store.state_restore_revision()),
       size_hints_(safe_view_size(processor)) {
     width_ = size_hints_.preferred_width;
     height_ = size_hints_.preferred_height;
@@ -98,11 +104,17 @@ bool ViewBridge::open(std::string* error) {
     if (custom) {
         view_ = std::move(custom);
         if (safe_active_scripted_ui(processor_)) {
+            in_place_scripted_ui_reload_ =
+                safe_supports_in_place_scripted_ui_reload(processor_);
             uses_script_ui_ = true;
         }
     } else {
         // Fall back to the scripted-UI or AutoUi default.
-        auto instance = build_editor_ui(store_, options_.enable_hot_reload, &last_error_);
+        auto value_channel_access =
+            processor_value_channel_access(processor_, owner_alive_);
+        auto instance = build_editor_ui_with_value_channel_access(
+            store_, options_.enable_hot_reload, &last_error_,
+            std::move(value_channel_access));
         if (!instance.root) {
             if (error) *error = last_error_.empty() ? "ViewBridge: failed to build editor UI" : last_error_;
             return false;
@@ -173,6 +185,15 @@ bool ViewBridge::open(std::string* error) {
     return true;
 }
 
+bool ViewBridge::poll_state_restore() {
+    if (!owner_is_alive() || !view_raw_) return false;
+    const auto revision = store_.state_restore_revision();
+    if (revision == last_state_restore_revision_) return false;
+    last_state_restore_revision_ = revision;
+    store_.reconcile_restore_listeners();
+    return true;
+}
+
 bool ViewBridge::poll_editor_reload() {
     // supports_editor_reload() is a static property of the processor, cached at
     // construction. The idle pump that calls this runs from the display link and
@@ -196,6 +217,25 @@ bool ViewBridge::poll_editor_reload() {
 
 bool ViewBridge::rebuild_primary_view() {
     if (!owner_is_alive() || !view_raw_) return false;
+    // A custom processor-owned ScriptedUiSession already owns the live root,
+    // inspector bridge, and GPU-surface attachment. Reload it in place instead
+    // of calling create_view(), which would replace the session and strand raw
+    // host subscriptions on the destroyed instance. Keep this mode cached from
+    // open() so a failed reload cannot change the retry path.
+    if (in_place_scripted_ui_reload_) {
+        std::string reload_error;
+        bool reloaded = false;
+        PULP_TRY { reloaded = processor_.reload_active_scripted_ui_in_place(&reload_error); }
+        PULP_CATCH_ALL { return false; }
+        if (!reloaded) {
+            last_error_ = reload_error;
+            return false;
+        }
+        size_hints_ = safe_view_size(processor_);
+        width_ = size_hints_.preferred_width;
+        height_ = size_hints_.preferred_height;
+        return true;
+    }
     // Re-run create_view() on the (hot-swapped) processor to get the new editor.
     auto fresh = safe_create_view(processor_);
     if (!fresh) return false;
@@ -251,6 +291,34 @@ const view::ScriptedUiSession* ViewBridge::scripted_ui() const {
     PULP_CATCH_ALL { return nullptr; }
 }
 
+void ViewBridge::visit_scripted_ui(
+    const std::function<void(view::ScriptedUiSession*)>& visitor) {
+    if (!visitor) return;
+    if (scripted_ui_) {
+        visitor(scripted_ui_.get());
+        return;
+    }
+    if (!owner_is_alive()) {
+        visitor(nullptr);
+        return;
+    }
+    processor_.visit_active_scripted_ui(visitor);
+}
+
+void ViewBridge::visit_scripted_ui(
+    const std::function<void(const view::ScriptedUiSession*)>& visitor) const {
+    if (!visitor) return;
+    if (scripted_ui_) {
+        visitor(scripted_ui_.get());
+        return;
+    }
+    if (!owner_is_alive()) {
+        visitor(nullptr);
+        return;
+    }
+    static_cast<const Processor&>(processor_).visit_active_scripted_ui(visitor);
+}
+
 void ViewBridge::notify_attached() {
     if (!view_raw_ || attached_) return;
     attached_ = true;
@@ -301,6 +369,7 @@ void ViewBridge::close() {
     view_.reset();          // no-op if already released
     host_param_surface_.reset();
     view_raw_ = nullptr;
+    in_place_scripted_ui_reload_ = false;
     uses_script_ui_ = false;
     uses_auto_ui_ = false;
     released_ = false;

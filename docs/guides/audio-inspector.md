@@ -21,14 +21,14 @@ question you're asking:
 |---|---|---|---|
 | **Audio Inspector** | A floating **developer** window in the standalone host (this guide). | Pulp's *own* running plugin/standalone, at the output-boundary probe. | No — time-domain levels/counters/waveform only. |
 | **Audio Scope** | A **mode of the Audio Inspector** (see "Signal mode vs Scope mode" below), not a separate tool. | Same probe as the Inspector. | No — triggered, measurable time-domain trace. |
-| **Spectrum Analyzer** | A **shippable FX example plugin** (clean-room, MIT, in its own repo: [pulp-spectrum-analyzer](https://github.com/danielraffel/pulp-spectrum-analyzer)) with a GPU spectrogram and a cross-instance before/after spectral **diff**. | *Any* signal in a host chain, including third-party plugins — not limited to Pulp's own plugins. | Yes — FFT-based spectrum, computed off the audio callback. |
+| **Spectrum Analyzer** | A **shippable FX example plugin** (independent, MIT, in its own repo: [pulp-spectrum-analyzer](https://github.com/danielraffel/pulp-spectrum-analyzer)) with a GPU spectrogram and a cross-instance before/after spectral **diff**. | *Any* signal in a host chain, including third-party plugins — not limited to Pulp's own plugins. | Yes — FFT-based spectrum, computed off the audio callback. |
 
 The Audio Inspector is deliberately a time-domain developer diagnostic and does
 **not** do frequency-domain analysis; the Spectrum Analyzer example is the
 frequency-domain, end-user-facing counterpart. They are different deployments
 answering different questions: the Inspector debugs *your* Pulp plugin while you
 build it; the Spectrum Analyzer is an insert you ship that can compare *any*
-chain. The Spectrum Analyzer is an independent clean-room implementation built on
+chain. The Spectrum Analyzer is an independent independent implementation built on
 Pulp SDK primitives (FFT, lock-free `TripleBuffer`/`SpscQueue` publication, the
 `SpectrumView`/`SpectrogramView` widgets); see Pulp's licensing and attribution
 notes at <https://www.generouscorp.com/pulp/licensing.html>.
@@ -160,6 +160,17 @@ can capture the panel for visual regression.
 # Headless: capture the main UI AND the inspector panel
 pulp run --audio-inspector --screenshot ui.png
 # → ui.png and ui.audio-inspector.png
+```
+
+A screenshot-only run opens no audio device, so that capture proves the panel
+loaded and laid out — its meters read zero because nothing is rendering. Add a
+readout (`--audio-probe-json`, `--audio-scope-json`, `--audio-capture-wav`,
+`--audio-capture-rolling`) or `PULP_SCREENSHOT_KEEP_AUDIO=1` when the captured
+panel must show live values:
+
+```bash
+# Headless: capture the panel showing real signal
+PULP_SCREENSHOT_KEEP_AUDIO=1 pulp run --audio-inspector --screenshot ui.png
 ```
 
 ## Dev-on / ship-off gating

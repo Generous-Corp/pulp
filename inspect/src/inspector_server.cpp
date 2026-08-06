@@ -1,226 +1,1357 @@
 // inspector_server.cpp — TCP server for remote inspector access
 
 #include <pulp/inspect/inspector_server.hpp>
-#include <pulp/runtime/system.hpp>
+#include <pulp/inspect/authentication.hpp>
+#include <pulp/runtime/crypto.hpp>
+#include <choc/text/choc_JSON.h>
+
+#include "inspector_connected_client.hpp"
+#include "inspector_async_request_executor.hpp"
+#include "inspector_publication.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
-#include <fstream>
-#include <iostream>
+#include <functional>
+#include <map>
+#include <set>
 #include <thread>
+#include <unordered_set>
 #include <utility>
-
-#ifdef _WIN32
-#include <process.h>
-#define getpid _getpid
-#else
-#include <unistd.h>
-#endif
 
 namespace pulp::inspect {
 
-static constexpr int kDefaultPort = 9147;
+struct InspectorServerShutdownFence::State {
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::set<std::thread::id> worker_threads;
+    std::size_t outstanding_workers = 0;
+    std::size_t active_stop_transitions = 0;
+    std::size_t deferred_teardowns = 0;
+    std::size_t active_server_callbacks = 0;
+    std::size_t accepted_posted_closures = 0;
+    std::atomic<bool> ready{false};
+
+    bool ready_locked() const noexcept {
+        return outstanding_workers == 0 && active_stop_transitions == 0 &&
+               deferred_teardowns == 0 && active_server_callbacks == 0 &&
+               accepted_posted_closures == 0;
+    }
+
+    void publish_ready_locked() noexcept {
+        ready.store(ready_locked(), std::memory_order_release);
+    }
+
+    void begin_stop_transition() {
+        std::lock_guard lock(mutex);
+        ++active_stop_transitions;
+        publish_ready_locked();
+    }
+
+    void end_stop_transition() {
+        {
+            std::lock_guard lock(mutex);
+            --active_stop_transitions;
+            publish_ready_locked();
+        }
+        cv.notify_all();
+    }
+
+    void begin_deferred_teardown() {
+        std::lock_guard lock(mutex);
+        ++deferred_teardowns;
+        publish_ready_locked();
+    }
+
+    void end_deferred_teardown() {
+        {
+            std::lock_guard lock(mutex);
+            --deferred_teardowns;
+            publish_ready_locked();
+        }
+        cv.notify_all();
+    }
+
+    void begin_server_callback() {
+        std::lock_guard lock(mutex);
+        ++active_server_callbacks;
+        publish_ready_locked();
+    }
+
+    void end_server_callback() {
+        {
+            std::lock_guard lock(mutex);
+            --active_server_callbacks;
+            publish_ready_locked();
+        }
+        cv.notify_all();
+    }
+
+    void begin_posted_closure() {
+        std::lock_guard lock(mutex);
+        ++accepted_posted_closures;
+        publish_ready_locked();
+    }
+
+    void end_posted_closure() {
+        {
+            std::lock_guard lock(mutex);
+            --accepted_posted_closures;
+            publish_ready_locked();
+        }
+        cv.notify_all();
+    }
+
+    void reserve_worker() {
+        std::lock_guard lock(mutex);
+        ++outstanding_workers;
+        publish_ready_locked();
+    }
+
+    void cancel_worker_reservation() {
+        {
+            std::lock_guard lock(mutex);
+            --outstanding_workers;
+            publish_ready_locked();
+        }
+        cv.notify_all();
+    }
+
+    void mark_worker_started() {
+        std::lock_guard lock(mutex);
+        worker_threads.insert(std::this_thread::get_id());
+        publish_ready_locked();
+    }
+
+    void mark_worker_exited() {
+        {
+            std::lock_guard lock(mutex);
+            worker_threads.erase(std::this_thread::get_id());
+            --outstanding_workers;
+            publish_ready_locked();
+        }
+        cv.notify_all();
+    }
+};
+
+bool InspectorServerShutdownFence::ready() const noexcept {
+    if (!state_)
+        return true;
+    return state_->ready.load(std::memory_order_acquire);
+}
+
+bool InspectorServerShutdownFence::wait() const {
+    if (!state_)
+        return true;
+    std::unique_lock lock(state_->mutex);
+    if (!state_->ready_locked() &&
+        state_->worker_threads.contains(std::this_thread::get_id())) {
+        return false;
+    }
+    state_->cv.wait(lock, [&] { return state_->ready_locked(); });
+    return true;
+}
+
+bool InspectorServerShutdownFence::wait_for(
+    std::chrono::milliseconds timeout) const {
+    if (!state_)
+        return true;
+    std::unique_lock lock(state_->mutex);
+    if (!state_->ready_locked() &&
+        state_->worker_threads.contains(std::this_thread::get_id())) {
+        return false;
+    }
+    return state_->cv.wait_for(lock, timeout,
+                               [&] { return state_->ready_locked(); });
+}
+
+namespace {
+
+constexpr std::size_t kMaxJsonNestingDepth = 64;
+constexpr std::size_t kMinimumMessageBytes = 1024;
+
+bool should_send_response(const InspectorMessage& response) {
+    return response.id != 0 || !response.method.empty();
+}
+
+class SensitiveTokenWiper {
+public:
+    explicit SensitiveTokenWiper(std::vector<std::uint8_t>& token)
+        : token_(&token) {}
+
+    ~SensitiveTokenWiper() noexcept {
+        if (token_ && !token_->empty())
+            pulp::runtime::secure_zero_memory(
+                token_->data(), token_->size());
+    }
+
+    SensitiveTokenWiper(const SensitiveTokenWiper&) = delete;
+    SensitiveTokenWiper& operator=(const SensitiveTokenWiper&) = delete;
+
+    void disarm() noexcept {
+        token_ = nullptr;
+    }
+
+private:
+    std::vector<std::uint8_t>* token_;
+};
+
+bool json_nesting_is_bounded(std::string_view text) {
+    std::size_t depth = 0;
+    bool in_string = false;
+    bool escaped = false;
+    for (const char character : text) {
+        if (in_string) {
+            if (escaped) {
+                escaped = false;
+            } else if (character == '\\') {
+                escaped = true;
+            } else if (character == '"') {
+                in_string = false;
+            }
+            continue;
+        }
+        if (character == '"') {
+            in_string = true;
+        } else if (character == '{' || character == '[') {
+            if (++depth > kMaxJsonNestingDepth)
+                return false;
+        } else if ((character == '}' || character == ']') && depth > 0) {
+            --depth;
+        }
+    }
+    return true;
+}
+
+} // namespace
 
 // ── Server implementation using InterprocessConnectionServer ────────────
 
-class InspectorServer::Impl {
+class InspectorServer::Impl
+    : public std::enable_shared_from_this<InspectorServer::Impl> {
 public:
     events::InterprocessConnectionServer server;
-    std::vector<events::InterprocessConnection*> client_ptrs;
-    std::vector<std::unique_ptr<events::InterprocessConnection>> owned_clients;
-    std::vector<std::pair<events::InterprocessConnection*, std::chrono::steady_clock::time_point>> disconnected_at;
+    std::map<events::InterprocessConnection*,
+             std::shared_ptr<detail::InspectorConnectedClient>> clients;
+    std::vector<std::shared_ptr<detail::InspectorOutboundClient>>
+        retired_outbound_clients;
     std::mutex clients_mutex;
     std::condition_variable cleanup_cv;
     std::thread cleanup_thread;
+    std::atomic<bool> cleanup_thread_claimed{false};
+    std::shared_ptr<detail::InspectorAsyncRequestExecutor>
+        asynchronous_executor;
+    std::shared_ptr<InspectorServerShutdownFence::State> cleanup_fence =
+        std::make_shared<InspectorServerShutdownFence::State>();
     bool stopping_cleanup = false;
+    bool stopping_callbacks = true;
+    std::size_t active_callbacks = 0;
+    std::map<std::thread::id, std::size_t> callback_threads;
+    std::atomic<std::uint64_t> next_client_id{1};
+    std::atomic<std::uint64_t> session_generation{0};
+    std::size_t max_clients = 16;
+    std::unordered_set<std::string> asynchronous_methods;
+    std::atomic<int> port{0};
+    InspectorSession* session = nullptr;
+    std::shared_ptr<InspectorMainThreadRpc> main_thread_rpc;
+    detail::InspectorPublication publication;
+    std::vector<std::uint8_t> token;
+    std::chrono::milliseconds authentication_timeout =
+        std::chrono::seconds(3);
+    std::mutex lifecycle_mutex;
+    // Publication lease destruction is extension code and may synchronously
+    // re-enter stop(); recursive serialization keeps that teardown idempotent.
+    std::recursive_mutex transition_mutex;
+    std::atomic<bool> stop_requested{false};
+    std::atomic<bool> transition_waiting_for_callbacks{false};
+    std::atomic<bool> deferred_stop_started{false};
+    std::size_t max_message_bytes = 1024u * 1024u;
 
-    Impl() {
-        cleanup_thread = std::thread([this]() { cleanup_loop(); });
-        server.on_client_connected = [this](std::unique_ptr<events::InterprocessConnection> conn) {
-            prune_disconnected_clients();
-            auto* raw = conn.get();
-            raw->set_on_text_message([this, raw](std::string_view msg) {
-                on_message(std::string(msg), raw);
-            });
-            raw->set_on_disconnected([this, raw]() {
-                std::lock_guard lock(clients_mutex);
-                client_ptrs.erase(std::remove(client_ptrs.begin(), client_ptrs.end(), raw), client_ptrs.end());
-                auto it = std::find_if(disconnected_at.begin(), disconnected_at.end(),
-                                       [raw](const auto& entry) { return entry.first == raw; });
-                if (it == disconnected_at.end())
-                    disconnected_at.emplace_back(raw, std::chrono::steady_clock::now());
-                else
-                    it->second = std::chrono::steady_clock::now();
-                cleanup_cv.notify_one();
-            });
+    class CallbackGuard {
+    public:
+        explicit CallbackGuard(std::shared_ptr<Impl> candidate)
+            : impl(std::move(candidate)) {
+            std::lock_guard lock(impl->clients_mutex);
+            if (!impl->stopping_callbacks) {
+                ++impl->active_callbacks;
+                ++impl->callback_threads[std::this_thread::get_id()];
+                impl->cleanup_fence->begin_server_callback();
+            } else {
+                impl.reset();
+            }
+        }
+
+        ~CallbackGuard() {
+            if (!impl)
+                return;
+            {
+                std::lock_guard lock(impl->clients_mutex);
+                --impl->active_callbacks;
+                const auto thread = std::this_thread::get_id();
+                if (auto found = impl->callback_threads.find(thread);
+                    found != impl->callback_threads.end() &&
+                    --found->second == 0) {
+                    impl->callback_threads.erase(found);
+                }
+            }
+            impl->cleanup_fence->end_server_callback();
+            impl->cleanup_cv.notify_all();
+        }
+
+        explicit operator bool() const { return impl != nullptr; }
+
+    private:
+        std::shared_ptr<Impl> impl;
+    };
+
+    Impl() = default;
+
+    void initialize() {
+        const std::weak_ptr<Impl> weak_self = shared_from_this();
+        server.on_client_connected =
+            [weak_self](std::unique_ptr<events::InterprocessConnection> conn) {
+                if (const auto self = weak_self.lock())
+                    self->accept_client(std::move(conn));
+            };
+        // Start the strong-self workers only after callback installation. Each
+        // reservation is rolled back on construction failure; if the second
+        // launch fails, stop and join the already-started cleanup worker.
+        const auto cleanup_owner = shared_from_this();
+        cleanup_fence->reserve_worker();
+        try {
+            cleanup_thread = std::thread(
+                [cleanup_owner] { cleanup_owner->cleanup_loop(); });
+        } catch (...) {
+            cleanup_fence->cancel_worker_reservation();
+            throw;
+        }
+        try {
+            const auto fence = cleanup_fence;
+            asynchronous_executor =
+                detail::InspectorAsyncRequestExecutor::create({
+                    .acquire_iteration_lifetime = [weak_self]() {
+                        const auto self = weak_self.lock();
+                        if (!self)
+                            return std::shared_ptr<void>{};
+                        auto guard = std::make_shared<CallbackGuard>(self);
+                        if (!static_cast<bool>(*guard))
+                            return std::shared_ptr<void>{};
+                        return std::static_pointer_cast<void>(guard);
+                    },
+                    .execute = [weak_self](const auto& request) {
+                        if (const auto self = weak_self.lock())
+                            self->execute_asynchronous_request(request);
+                    },
+                    .reserve_worker = [fence] {
+                        fence->reserve_worker();
+                    },
+                    .cancel_worker_reservation = [fence] {
+                        fence->cancel_worker_reservation();
+                    },
+                    .worker_started = [fence] {
+                        fence->mark_worker_started();
+                    },
+                    .worker_exited = [fence] {
+                        fence->mark_worker_exited();
+                    },
+                });
+        } catch (...) {
+            stop_cleanup();
+            throw;
+        }
+    }
+
+    void accept_client(
+        std::unique_ptr<events::InterprocessConnection> conn) {
+            auto client =
+                std::shared_ptr<events::InterprocessConnection>(std::move(conn));
+            auto* raw = client.get();
+            if (!session) {
+                raw->disconnect();
+                return;
+            }
+            const auto challenge = make_inspector_auth_challenge(
+                session->info().session_id,
+                session->info().instance_id,
+                publication.publication_id(),
+                session->info().protocol_version);
+            if (!challenge) {
+                raw->disconnect();
+                return;
+            }
+            const auto client_id =
+                "client-" + std::to_string(next_client_id.fetch_add(1));
             {
                 std::lock_guard lock(clients_mutex);
-                client_ptrs.push_back(raw);
-                owned_clients.push_back(std::move(conn));
+                if (stopping_callbacks) {
+                    client.reset();
+                    return;
+                }
+                if (clients.size() >= max_clients) {
+                    client.reset();
+                    return;
+                }
+                clients.insert_or_assign(
+                    raw,
+                    detail::InspectorConnectedClient::create(
+                        client,
+                        std::make_unique<InspectorAuthVerifier>(
+                            token, *challenge),
+                        client_id,
+                        std::chrono::steady_clock::now() +
+                            authentication_timeout,
+                        session_generation.load(
+                            std::memory_order_acquire)));
             }
-        };
+            const std::weak_ptr<events::InterprocessConnection> weak = client;
+            const std::weak_ptr<Impl> weak_self = shared_from_this();
+            raw->set_on_disconnected([weak_self, weak, raw]() {
+                const auto self = weak_self.lock();
+                const auto keep_alive = weak.lock();
+                if (!self || !keep_alive)
+                    return;
+                CallbackGuard callback(self);
+                if (!callback)
+                    return;
+                std::string authenticated_client;
+                std::shared_ptr<detail::InspectorConnectedClient> client;
+                {
+                    std::lock_guard lock(self->clients_mutex);
+                    if (const auto found = self->clients.find(raw);
+                        found != self->clients.end()) {
+                        client = std::move(found->second);
+                        self->clients.erase(found);
+                        if (client->authenticated)
+                            authenticated_client = client->client_id;
+                        client->outbound->request_stop();
+                        self->retired_outbound_clients.push_back(
+                            client->outbound);
+                    }
+                }
+                InspectorSession* disconnected_session = self->session;
+                const bool defer_disconnect = client && disconnected_session &&
+                    !authenticated_client.empty() &&
+                    self->asynchronous_executor->cancel_queued_for_client(
+                        client,
+                        [disconnected_session, authenticated_client] {
+                            disconnected_session->disconnect(
+                                authenticated_client);
+                        });
+                if (!authenticated_client.empty() && disconnected_session &&
+                    !defer_disconnect) {
+                    disconnected_session->disconnect(authenticated_client);
+                }
+                self->cleanup_cv.notify_one();
+            });
+            raw->set_on_text_message([weak_self, weak, raw](std::string_view msg) {
+                const auto self = weak_self.lock();
+                const auto keep_alive = weak.lock();
+                if (!self || !keep_alive)
+                    return;
+                CallbackGuard callback(self);
+                if (!callback)
+                    return;
+                self->on_message_received(std::string(msg), raw);
+            });
+                auto params = choc::value::createObject("");
+                params.addMember(
+                    "scheme",
+                    choc::value::createString(challenge->scheme));
+                params.addMember(
+                    "nonce",
+                    choc::value::createString(challenge->nonce_hex));
+                params.addMember(
+                    "sessionId",
+                    choc::value::createString(challenge->session_id));
+                params.addMember(
+                    "instanceId",
+                    choc::value::createString(challenge->instance_id));
+                params.addMember(
+                    "publicationId",
+                    choc::value::createString(challenge->publication_id));
+                params.addMember(
+                    "protocolVersion",
+                    choc::value::createString(challenge->protocol_version));
+                const auto event = make_event(
+                    methods::kSessionAuthChallenge,
+                    choc::json::toString(params, false));
+                if (!raw->send_message(encode_message(event)))
+                    raw->disconnect();
     }
 
     ~Impl() {
+        stop_cleanup();
+        stop_asynchronous();
+    }
+
+    void stop_cleanup() {
         {
             std::lock_guard lock(clients_mutex);
             stopping_cleanup = true;
         }
         cleanup_cv.notify_one();
-        if (cleanup_thread.joinable())
+        bool expected = false;
+        if (!cleanup_thread_claimed.compare_exchange_strong(
+                expected, true, std::memory_order_acq_rel)) {
+            return;
+        }
+        if (!cleanup_thread.joinable())
+            return;
+        bool cannot_join =
+            cleanup_thread.get_id() == std::this_thread::get_id();
+        if (!cannot_join) {
+            std::shared_ptr<InspectorMainThreadRpc> rpc;
+            {
+                std::lock_guard lifecycle_lock(lifecycle_mutex);
+                rpc = main_thread_rpc;
+            }
+            cannot_join = rpc && rpc->executing_on_current_thread();
+        }
+        if (cannot_join) {
+            // The worker closure retains Impl until cleanup_loop exits. Hosts
+            // use shutdown_fence(), not wrapper destruction alone, as the
+            // dynamic-module unload and attached-source teardown boundary.
+            cleanup_thread.detach();
+        } else {
             cleanup_thread.join();
+        }
     }
 
     void cleanup_loop() {
+        const auto fence = cleanup_fence;
+        fence->mark_worker_started();
+        struct WorkerGuard {
+            std::shared_ptr<InspectorServerShutdownFence::State> fence;
+            ~WorkerGuard() { fence->mark_worker_exited(); }
+        } worker_guard{fence};
         std::unique_lock lock(clients_mutex);
-        while (!stopping_cleanup) {
-            if (disconnected_at.empty()) {
-                cleanup_cv.wait(lock, [this] {
-                    return stopping_cleanup || !disconnected_at.empty();
-                });
-                continue;
-            }
+        while (true) {
             cleanup_cv.wait_for(lock, std::chrono::milliseconds(50), [this] {
-                return stopping_cleanup;
+                return stopping_cleanup ||
+                       !retired_outbound_clients.empty();
             });
-            if (!stopping_cleanup)
-                prune_disconnected_clients_locked();
+            const bool should_stop = stopping_cleanup;
+            auto retired = std::move(retired_outbound_clients);
+            const auto now = std::chrono::steady_clock::now();
+            std::vector<std::shared_ptr<events::InterprocessConnection>> expired;
+            if (!should_stop) {
+                for (const auto& [raw, client] : clients) {
+                    (void)raw;
+                    if (!client->authenticated &&
+                        now >= client->deadline) {
+                        expired.push_back(client->connection);
+                    }
+                }
+            }
+            lock.unlock();
+            for (const auto& outbound : retired) {
+                if (outbound)
+                    outbound->shutdown();
+            }
+            for (const auto& client : expired) {
+                if (client)
+                    client->disconnect();
+            }
+            if (!should_stop) {
+                const auto refresh_generation =
+                    session_generation.load(std::memory_order_acquire);
+                if (!publication.refresh_if_due(now))
+                    stop_generation(refresh_generation);
+            }
+            if (should_stop)
+                break;
+            lock.lock();
         }
     }
 
-    void prune_disconnected_clients() {
-        std::lock_guard lock(clients_mutex);
-        prune_disconnected_clients_locked();
-    }
-
-    void prune_disconnected_clients_locked() {
-        client_ptrs.erase(std::remove_if(client_ptrs.begin(), client_ptrs.end(),
-                                         [](auto* c) { return !c || !c->is_connected(); }),
-                          client_ptrs.end());
-
-        const auto now = std::chrono::steady_clock::now();
-        std::vector<events::InterprocessConnection*> reclaimable;
-        for (const auto& [client, disconnected] : disconnected_at) {
-            if (now - disconnected >= std::chrono::milliseconds(50))
-                reclaimable.push_back(client);
+    void stop_asynchronous() {
+        if (!asynchronous_executor)
+            return;
+        bool cannot_join = asynchronous_executor->on_worker_thread();
+        if (!cannot_join) {
+            std::shared_ptr<InspectorMainThreadRpc> rpc;
+            {
+                std::lock_guard lifecycle_lock(lifecycle_mutex);
+                rpc = main_thread_rpc;
+            }
+            cannot_join = rpc && rpc->executing_on_current_thread();
         }
-
-        owned_clients.erase(
-            std::remove_if(owned_clients.begin(), owned_clients.end(),
-                           [&reclaimable](const auto& c) {
-                               return c && !c->is_connected() &&
-                                      std::find(reclaimable.begin(), reclaimable.end(), c.get()) !=
-                                          reclaimable.end();
-                           }),
-            owned_clients.end());
-        disconnected_at.erase(
-            std::remove_if(disconnected_at.begin(), disconnected_at.end(),
-                           [&reclaimable](const auto& entry) {
-                               return std::find(reclaimable.begin(), reclaimable.end(), entry.first) !=
-                                      reclaimable.end();
-                           }),
-            disconnected_at.end());
+        asynchronous_executor->stop(cannot_join);
     }
 
-    std::function<void(const std::string&, events::InterprocessConnection*)> on_message;
+    void execute_asynchronous_request(
+        const detail::InspectorAsyncRequestExecutor::Request& work);
+
+    bool start_authenticated(InspectorServerConfig config);
+    void stop();
+    void stop_generation(std::uint64_t expected_generation);
+    void stop_locked();
+    void broadcast(const InspectorMessage& event);
+    InspectorTargetedEventResult send_to_client(
+        std::string_view client_id,
+        const InspectorMessage& event,
+        std::string_view loss_owner);
+    std::size_t cancel_client_events(std::string_view client_id,
+                                     std::string_view loss_owner);
+    int client_count();
+    void on_message_received(const std::string& data,
+                             events::InterprocessConnection* sender);
+    bool dispatch_asynchronous_request(
+        std::shared_ptr<detail::InspectorConnectedClient> client,
+        InspectorMessage request, std::uint64_t generation);
+    bool enqueue_response(
+        const std::shared_ptr<detail::InspectorConnectedClient>& client,
+        const InspectorMessage& response);
+    bool send_response(events::InterprocessConnection* sender,
+                       const InspectorMessage& response);
 };
 
-InspectorServer::InspectorServer() : impl_(std::make_unique<Impl>()) {
-    impl_->on_message = [this](const std::string& data, events::InterprocessConnection* sender) {
-        on_message_received(data, sender);
-    };
+InspectorServer::InspectorServer() : impl_(std::make_shared<Impl>()) {
+    impl_->initialize();
 }
 
 InspectorServer::~InspectorServer() {
-    stop();
+    auto impl = std::move(impl_);
+    impl->stop();
+    impl->stop_cleanup();
+    impl->stop_asynchronous();
 }
 
-bool InspectorServer::start(int port) {
-    if (port == 0) {
-        // Check env var
-        if (auto env = pulp::runtime::get_env("PULP_INSPECTOR_PORT")) {
-            try { port = std::stoi(*env); } catch (...) {}
-        }
-        if (port == 0) port = kDefaultPort;
-    }
-
-    port_ = port;
-
-    if (!impl_->server.start(std::to_string(port), events::IpcTransport::Socket)) {
-        return false;
-    }
-
-    advertise_port();
-    return true;
+bool InspectorServer::start_authenticated(InspectorServerConfig config) {
+    return impl_->start_authenticated(std::move(config));
 }
 
 void InspectorServer::stop() {
-    impl_->server.stop();
-    std::vector<std::unique_ptr<events::InterprocessConnection>> clients;
-    {
-        std::lock_guard lock(impl_->clients_mutex);
-        impl_->client_ptrs.clear();
-        clients = std::move(impl_->owned_clients);
-    }
-    clients.clear();
+    impl_->stop();
 }
 
-void InspectorServer::set_request_handler(RequestHandler handler) {
-    handler_ = std::move(handler);
+InspectorServerShutdownFence InspectorServer::shutdown_fence() const {
+    return InspectorServerShutdownFence(impl_->cleanup_fence);
 }
 
 void InspectorServer::broadcast(const InspectorMessage& event) {
-    auto json = encode_message(event);
-    std::lock_guard lock(impl_->clients_mutex);
-    impl_->prune_disconnected_clients_locked();
-    for (auto* client : impl_->client_ptrs) {
-        client->send_message(json.data(), json.size());
-    }
+    impl_->broadcast(event);
+}
+
+InspectorTargetedEventResult InspectorServer::send_to_client(
+    std::string_view client_id,
+    const InspectorMessage& event,
+    std::string_view loss_owner) {
+    return impl_->send_to_client(client_id, event, loss_owner);
+}
+
+std::size_t InspectorServer::cancel_client_events(
+    std::string_view client_id, std::string_view loss_owner) {
+    return impl_->cancel_client_events(client_id, loss_owner);
 }
 
 int InspectorServer::client_count() const {
-    std::lock_guard lock(impl_->clients_mutex);
-    impl_->prune_disconnected_clients_locked();
-    return static_cast<int>(impl_->client_ptrs.size());
+    return impl_->client_count();
 }
 
-void InspectorServer::advertise_port() const {
-    // Write port file so CLI tools can discover us
-    std::string tmp_dir;
-#ifdef _WIN32
-    if (auto env = pulp::runtime::get_env("TEMP")) tmp_dir = *env;
-    else tmp_dir = ".";
-#else
-    if (auto env = pulp::runtime::get_env("TMPDIR")) tmp_dir = *env;
-    else tmp_dir = "/tmp";
-#endif
+int InspectorServer::port() const {
+    return impl_->port.load(std::memory_order_acquire);
+}
 
-    auto port_file = tmp_dir + "/pulp-inspector-" + std::to_string(getpid()) + ".port";
-    std::ofstream f(port_file);
-    if (f.good()) {
-        f << port_;
+void InspectorServer::Impl::execute_asynchronous_request(
+    const detail::InspectorAsyncRequestExecutor::Request& work) {
+    InspectorSession* active_session = nullptr;
+    bool client_is_connected = false;
+    if (work.client && work.client->connection) {
+        std::lock_guard clients_lock(clients_mutex);
+        const auto found = clients.find(work.client->connection.get());
+        client_is_connected =
+            found != clients.end() && found->second == work.client &&
+            found->second->authenticated;
+    }
+    if (client_is_connected) {
+        std::lock_guard lifecycle_lock(lifecycle_mutex);
+        if (session_generation.load(std::memory_order_acquire) ==
+            work.generation) {
+            active_session = session;
+        }
+    }
+    if (!active_session)
+        return;
+    const auto response = active_session->handle(
+        work.client->client_id, work.message);
+    if (session_generation.load(std::memory_order_acquire) ==
+            work.generation &&
+        should_send_response(response)) {
+        enqueue_response(work.client, response);
     }
 }
 
-void InspectorServer::on_message_received(const std::string& data,
-                                           events::InterprocessConnection* sender) {
+bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
+    SensitiveTokenWiper config_token_wiper(config.token);
+    {
+        std::lock_guard lifecycle_lock(lifecycle_mutex);
+        if (main_thread_rpc &&
+            main_thread_rpc->executing_on_current_thread()) {
+            return false;
+        }
+    }
+    std::lock_guard transition_lock(transition_mutex);
+    stop_requested.store(false, std::memory_order_release);
+    stop_locked();
+    if (stop_requested.load(std::memory_order_acquire))
+        return false;
+    if (!config.session || !config.discovery ||
+        config.token.size() != inspector_token_size ||
+        config.heartbeat_interval <= std::chrono::milliseconds(0) ||
+        config.heartbeat_interval >
+            std::chrono::milliseconds::max() / 3 ||
+        config.session->info().protocol_version != "1" ||
+        config.record.session_id != config.session->info().session_id ||
+        config.record.instance_id != config.session->info().instance_id ||
+        config.record.plugin_id != config.session->info().plugin_id) {
+        return false;
+    }
+    std::unordered_set<std::string> configured_asynchronous_methods;
+    for (auto& method : config.asynchronous_methods) {
+        const auto* descriptor = find_inspector_method(method);
+        if (method.empty() || !descriptor ||
+            descriptor->kind != InspectorMethodKind::Request ||
+            !configured_asynchronous_methods.insert(method).second) {
+            return false;
+        }
+    }
+    auto binding_registrations = config.domain_bindings
+        ? config.domain_bindings->publication_bindings()
+        : std::vector<InspectorPublicationBindingRegistration>{};
+    std::vector<InspectorCapability> bound_capabilities;
+    std::vector<std::shared_ptr<InspectorPublicationBinding>>
+        publication_bindings;
+    for (auto& registration : binding_registrations) {
+        if (!registration.binding ||
+            std::find(
+                bound_capabilities.begin(),
+                bound_capabilities.end(),
+                registration.capability) != bound_capabilities.end()) {
+            return false;
+        }
+        bound_capabilities.push_back(registration.capability);
+        if (std::none_of(
+                publication_bindings.begin(),
+                publication_bindings.end(),
+                [&registration](const auto& binding) {
+                    return binding.get() == registration.binding.get();
+                })) {
+            publication_bindings.push_back(
+                std::move(registration.binding));
+        }
+    }
+    for (const auto& descriptor : inspector_capability_registry()) {
+        if (config.session->policy().is_granted(
+                descriptor.capability) &&
+            capability_requires_publication_binding(
+                descriptor.capability) &&
+            std::find(
+                bound_capabilities.begin(),
+                bound_capabilities.end(),
+                descriptor.capability) == bound_capabilities.end()) {
+            return false;
+        }
+    }
+    asynchronous_executor->configure(config.max_asynchronous_requests);
+    {
+        std::lock_guard lifecycle_lock(lifecycle_mutex);
+        session = config.session;
+        asynchronous_methods =
+            std::move(configured_asynchronous_methods);
+        main_thread_rpc = config.main_thread_rpc
+            ? std::move(config.main_thread_rpc)
+            : std::make_shared<InspectorMainThreadRpc>();
+        if (!main_thread_rpc->active()) {
+            session = nullptr;
+            main_thread_rpc.reset();
+            return false;
+        }
+        const auto fence = cleanup_fence;
+        if (!main_thread_rpc->set_posted_lifetime_callbacks(
+                [fence] { fence->begin_posted_closure(); },
+                [fence] { fence->end_posted_closure(); })) {
+            session = nullptr;
+            main_thread_rpc.reset();
+            return false;
+        }
+        session->set_main_thread_rpc(main_thread_rpc);
+        session->resume_dispatches();
+        token = std::move(config.token);
+        config_token_wiper.disarm();
+        session_generation.fetch_add(1, std::memory_order_acq_rel);
+    }
+    authentication_timeout =
+        std::max(config.authentication_timeout, std::chrono::milliseconds(1));
+    max_message_bytes = std::clamp<std::size_t>(
+        config.max_message_bytes, kMinimumMessageBytes,
+        16u * 1024u * 1024u);
+    server.set_max_message_bytes(max_message_bytes);
+    server.set_write_timeout(std::chrono::seconds(3));
+    server.set_frame_read_timeout(
+        std::max(config.frame_read_timeout, std::chrono::milliseconds(1)));
+    {
+        std::lock_guard lock(clients_mutex);
+        max_clients =
+            std::clamp<std::size_t>(config.max_clients, 1, 64);
+        stopping_callbacks = false;
+    }
+    if (!server.start("127.0.0.1:0", events::IpcTransport::Socket)) {
+        stop_locked();
+        return false;
+    }
+    if (stop_requested.load(std::memory_order_acquire)) {
+        stop_locked();
+        return false;
+    }
+    port.store(server.bound_port(), std::memory_order_release);
+    if (port.load(std::memory_order_acquire) == 0) {
+        stop_locked();
+        return false;
+    }
+    config.record.endpoint =
+        "127.0.0.1:" +
+        std::to_string(port.load(std::memory_order_acquire));
+    config.record.protocol_version = session->info().protocol_version;
+    config.record.profile = session->policy().profile();
+    if (!publication.publish(
+            *config.discovery, config.record, token,
+            config.heartbeat_interval,
+            std::move(publication_bindings))) {
+        stop_locked();
+        return false;
+    }
+    if (stop_requested.load(std::memory_order_acquire)) {
+        stop_locked();
+        return false;
+    }
+    return true;
+}
+
+void InspectorServer::Impl::stop() {
+    // Keep the shared teardown state alive if this call is the last owner and
+    // must defer to a transition that is waiting for the current callback.
+    const auto keep_alive = shared_from_this();
+    stop_requested.store(true, std::memory_order_release);
+    std::shared_ptr<InspectorMainThreadRpc> rpc;
+    InspectorSession* active_session = nullptr;
+    {
+        std::lock_guard lifecycle_lock(lifecycle_mutex);
+        rpc = main_thread_rpc;
+        active_session = session;
+    }
+    if (rpc && rpc->executing_on_current_thread()) {
+        // InterprocessConnectionServer::stop() joins its reader callbacks. The
+        // reader that issued this RPC is waiting for the current main-thread
+        // operation, so joining it here would deadlock. Close admission now,
+        // retain Impl, and perform the exact teardown after this operation's
+        // completion lets its causal reader callback unwind.
+        rpc->cancel();
+        if (active_session)
+            active_session->close_dispatch_admission();
+        asynchronous_executor->clear();
+        {
+            std::lock_guard lock(clients_mutex);
+            stopping_callbacks = true;
+        }
+        bool expected = false;
+        if (deferred_stop_started.compare_exchange_strong(
+                expected, true, std::memory_order_acq_rel)) {
+            cleanup_fence->begin_deferred_teardown();
+            struct DeferredRegistrationGuard {
+                std::shared_ptr<InspectorServerShutdownFence::State> fence;
+                std::atomic<bool>* started;
+                bool registered = false;
+                ~DeferredRegistrationGuard() {
+                    if (!registered) {
+                        started->store(false, std::memory_order_release);
+                        fence->end_deferred_teardown();
+                    }
+                }
+            } registration{cleanup_fence, &deferred_stop_started};
+            const bool deferred = rpc->after_current_operation(
+                [keep_alive, active_session, fence = cleanup_fence] {
+                    auto finish = [keep_alive, fence] {
+                        struct DeferredTeardownGuard {
+                            std::shared_ptr<
+                                InspectorServerShutdownFence::State> fence;
+                            ~DeferredTeardownGuard() {
+                                fence->end_deferred_teardown();
+                            }
+                        } teardown{fence};
+                        keep_alive->stop();
+                        keep_alive->deferred_stop_started.store(
+                            false, std::memory_order_release);
+                    };
+                    if (active_session) {
+                        active_session->after_concurrent_dispatches(
+                            std::move(finish));
+                    } else {
+                        finish();
+                    }
+                });
+            registration.registered = deferred;
+        }
+        return;
+    }
+    std::unique_lock transition_lock(transition_mutex, std::defer_lock);
+    if (!transition_lock.try_lock()) {
+        bool called_from_callback = false;
+        {
+            std::lock_guard lock(clients_mutex);
+            called_from_callback =
+                callback_threads.contains(std::this_thread::get_id());
+        }
+        if (called_from_callback) {
+            while (!transition_lock.try_lock()) {
+                if (transition_waiting_for_callbacks.load(
+                        std::memory_order_acquire))
+                    return;
+                std::this_thread::yield();
+            }
+        } else {
+            transition_lock.lock();
+        }
+    }
+    stop_locked();
+}
+
+void InspectorServer::Impl::stop_generation(
+    std::uint64_t expected_generation) {
+    std::lock_guard transition_lock(transition_mutex);
+    if (session_generation.load(std::memory_order_acquire) !=
+        expected_generation) {
+        return;
+    }
+    stop_requested.store(true, std::memory_order_release);
+    stop_locked();
+}
+
+void InspectorServer::Impl::stop_locked() {
+    struct StopTransitionGuard {
+        std::shared_ptr<InspectorServerShutdownFence::State> fence;
+        explicit StopTransitionGuard(
+            std::shared_ptr<InspectorServerShutdownFence::State> state)
+            : fence(std::move(state)) {
+            fence->begin_stop_transition();
+        }
+        ~StopTransitionGuard() { fence->end_stop_transition(); }
+    } stop_transition{cleanup_fence};
+    session_generation.fetch_add(1, std::memory_order_acq_rel);
+    transition_waiting_for_callbacks.store(true, std::memory_order_release);
+    std::shared_ptr<InspectorMainThreadRpc> rpc_to_cancel;
+    {
+        std::lock_guard lifecycle_lock(lifecycle_mutex);
+        rpc_to_cancel = main_thread_rpc;
+    }
+    if (rpc_to_cancel)
+        rpc_to_cancel->cancel();
+    asynchronous_executor->clear();
+    if (session)
+        session->suspend_dispatches();
+    std::vector<std::shared_ptr<events::InterprocessConnection>>
+        connections_to_interrupt;
+    {
+        std::lock_guard lock(clients_mutex);
+        stopping_callbacks = true;
+        connections_to_interrupt.reserve(clients.size());
+        for (const auto& [raw, client] : clients) {
+            (void)raw;
+            connections_to_interrupt.push_back(client->connection);
+        }
+    }
+    // Wake remote callers before draining their already-started handlers. The
+    // session and all publication wiring remain attached until the drain below
+    // reaches true operation completion.
+    for (const auto& connection : connections_to_interrupt) {
+        if (connection)
+            connection->disconnect();
+    }
+    if (rpc_to_cancel)
+        rpc_to_cancel->cancel_and_wait();
+    server.stop();
+    port.store(0, std::memory_order_release);
+    std::vector<std::shared_ptr<detail::InspectorConnectedClient>>
+        clients_to_stop;
+    std::vector<std::shared_ptr<detail::InspectorOutboundClient>>
+        retired_to_stop;
+    std::vector<std::string> authenticated_clients;
+    {
+        std::lock_guard lock(clients_mutex);
+        for (auto& [raw, client] : clients) {
+            (void)raw;
+            if (client->authenticated)
+                authenticated_clients.push_back(client->client_id);
+            clients_to_stop.push_back(std::move(client));
+        }
+        clients.clear();
+        retired_to_stop = std::move(retired_outbound_clients);
+        retired_outbound_clients.clear();
+    }
+    for (const auto& client : clients_to_stop) {
+        if (client->connection)
+            client->connection->disconnect();
+    }
+    for (const auto& client : clients_to_stop) {
+        if (client->outbound)
+            client->outbound->shutdown();
+    }
+    for (const auto& outbound : retired_to_stop) {
+        if (outbound)
+            outbound->shutdown();
+    }
+    {
+        std::unique_lock lock(clients_mutex);
+        const auto current = callback_threads.find(
+            std::this_thread::get_id());
+        const auto current_callbacks =
+            current == callback_threads.end() ? 0 : current->second;
+        cleanup_cv.wait(lock, [this, current_callbacks] {
+            return active_callbacks <= current_callbacks;
+        });
+    }
+    transition_waiting_for_callbacks.store(false, std::memory_order_release);
+    clients_to_stop.clear();
+    // Publication callbacks acquire lifecycle_mutex so detach the callback
+    // before taking that mutex. The generation check makes a delayed loss
+    // notification inert after a subsequent start.
+    publication.clear_after_endpoint_stop();
+    InspectorSession* disconnected_session = nullptr;
+    {
+        std::lock_guard lifecycle_lock(lifecycle_mutex);
+        disconnected_session = session;
+        if (session)
+            session->set_main_thread_rpc({});
+        session = nullptr;
+        main_thread_rpc.reset();
+        asynchronous_methods.clear();
+        pulp::runtime::secure_zero_memory(token.data(), token.size());
+        token.clear();
+    }
+    // Domain cleanup is arbitrary host code. Run it only after lifecycle state
+    // has been detached and the lifecycle mutex released, so callbacks may
+    // safely query/re-enter the server without self-deadlocking.
+    if (disconnected_session) {
+        for (const auto& client_id : authenticated_clients)
+            disconnected_session->disconnect(client_id);
+    }
+}
+
+void InspectorServer::Impl::broadcast(const InspectorMessage& event) {
+    const auto* descriptor = find_inspector_method(event.method);
+    if (event.id != 0 || !descriptor ||
+        descriptor->kind != InspectorMethodKind::Event) {
+        return;
+    }
+    std::uint64_t generation = 0;
+    {
+        std::lock_guard lifecycle_lock(lifecycle_mutex);
+        if (!session ||
+            !session->policy().is_available(descriptor->capability) ||
+            !session->policy().is_granted(descriptor->capability)) {
+            return;
+        }
+        generation =
+            session_generation.load(std::memory_order_acquire);
+    }
+
+    auto json = encode_message(event);
+    std::vector<std::shared_ptr<events::InterprocessConnection>> overflowed;
+    {
+        std::lock_guard lock(clients_mutex);
+        if (session_generation.load(std::memory_order_acquire) !=
+            generation) {
+            return;
+        }
+        for (const auto& [raw, client] : clients) {
+            (void)raw;
+            if (client->authenticated &&
+                client->generation == generation &&
+                client->outbound->enqueue(
+                    json, inspector_event_is_lossy(event.method)) ==
+                    detail::EventQueuePushResult::ReliableOverflow) {
+                overflowed.push_back(client->connection);
+            }
+        }
+    }
+    for (const auto& client : overflowed)
+        client->disconnect();
+}
+
+InspectorTargetedEventResult InspectorServer::Impl::send_to_client(
+    std::string_view client_id,
+    const InspectorMessage& event,
+    std::string_view loss_owner) {
+    const auto* descriptor = find_inspector_method(event.method);
+    if (client_id.empty() || event.id != 0 || !descriptor ||
+        descriptor->kind != InspectorMethodKind::Event) {
+        return InspectorTargetedEventResult::EventUnavailable;
+    }
+
+    std::uint64_t generation = 0;
+    std::size_t message_limit = 0;
+    {
+        std::lock_guard lifecycle_lock(lifecycle_mutex);
+        if (!session ||
+            !session->policy().is_available(descriptor->capability) ||
+            !session->policy().is_granted(descriptor->capability)) {
+            return InspectorTargetedEventResult::EventUnavailable;
+        }
+        generation = session_generation.load(std::memory_order_acquire);
+        message_limit = max_message_bytes;
+    }
+
+    auto json = encode_message(event);
+    if (json.size() > message_limit)
+        return InspectorTargetedEventResult::MessageTooLarge;
+
+    auto result = InspectorTargetedEventResult::ClientNotFound;
+    std::shared_ptr<events::InterprocessConnection> overflowed;
+    {
+        std::lock_guard lock(clients_mutex);
+        if (session_generation.load(std::memory_order_acquire) != generation)
+            return InspectorTargetedEventResult::EventUnavailable;
+        for (const auto& [raw, client] : clients) {
+            (void)raw;
+            if (!client->authenticated ||
+                client->generation != generation ||
+                client->client_id != client_id) {
+                continue;
+            }
+            bool evicted_lossy = false;
+            switch (client->outbound->enqueue_targeted(
+                std::move(json), inspector_event_is_lossy(event.method),
+                loss_owner.empty() ? event.method : std::string(loss_owner),
+                &evicted_lossy)) {
+                case detail::EventQueuePushResult::Queued:
+                    result = evicted_lossy
+                        ? InspectorTargetedEventResult::QueuedAfterLossyEviction
+                        : InspectorTargetedEventResult::Queued;
+                    break;
+                case detail::EventQueuePushResult::DroppedLossy:
+                    result = InspectorTargetedEventResult::DroppedLossy;
+                    break;
+                case detail::EventQueuePushResult::ReliableOverflow:
+                    result = InspectorTargetedEventResult::ReliableOverflow;
+                    overflowed = client->connection;
+                    break;
+            }
+            break;
+        }
+    }
+    if (overflowed)
+        overflowed->disconnect();
+    return result;
+}
+
+std::size_t InspectorServer::Impl::cancel_client_events(
+    std::string_view client_id, std::string_view loss_owner) {
+    if (client_id.empty() || loss_owner.empty())
+        return 0;
+    const auto generation = session_generation.load(std::memory_order_acquire);
+    std::shared_ptr<detail::InspectorOutboundClient> outbound;
+    {
+        std::lock_guard lock(clients_mutex);
+        if (session_generation.load(std::memory_order_acquire) != generation)
+            return 0;
+        for (const auto& [raw, client] : clients) {
+            (void)raw;
+            if (client->authenticated && client->generation == generation
+                && client->client_id == client_id) {
+                outbound = client->outbound;
+                break;
+            }
+        }
+    }
+    // The outbound cancellation barrier may wait for an active send. Never
+    // retain clients_mutex across that wait: a failed send synchronously enters
+    // the disconnect callback and needs the same registry lock.
+    return outbound ? outbound->cancel_targeted_owner(loss_owner) : 0;
+}
+
+int InspectorServer::Impl::client_count() {
+    std::lock_guard lock(clients_mutex);
+    return static_cast<int>(std::count_if(
+        clients.begin(), clients.end(),
+        [](const auto& entry) {
+            return entry.second->authenticated;
+        }));
+}
+
+bool InspectorServer::Impl::send_response(
+    events::InterprocessConnection* sender,
+    const InspectorMessage& response) {
+    auto payload = encode_message(response);
+    if (payload.size() > max_message_bytes) {
+        payload = encode_message(make_error(
+            response.id,
+            "Inspector response exceeds the message-size limit",
+            "response_too_large"));
+    }
+    if (payload.size() > max_message_bytes ||
+        !sender->send_message(payload)) {
+        sender->disconnect();
+        return false;
+    }
+    return true;
+}
+
+bool InspectorServer::Impl::enqueue_response(
+    const std::shared_ptr<detail::InspectorConnectedClient>& client,
+    const InspectorMessage& response) {
+    if (!client || !client->outbound)
+        return false;
+    auto payload = encode_message(response);
+    if (payload.size() > max_message_bytes) {
+        payload = encode_message(make_error(
+            response.id,
+            "Inspector response exceeds the message-size limit",
+            "response_too_large"));
+    }
+    if (payload.size() > max_message_bytes) {
+        if (client->connection)
+            client->connection->disconnect();
+        return false;
+    }
+    if (client->outbound->enqueue(std::move(payload), false) ==
+        detail::EventQueuePushResult::Queued) {
+        return true;
+    }
+    if (client->connection)
+        client->connection->disconnect();
+    return false;
+}
+
+bool InspectorServer::Impl::dispatch_asynchronous_request(
+    std::shared_ptr<detail::InspectorConnectedClient> client,
+    InspectorMessage request, std::uint64_t generation) {
+    if (!asynchronous_executor->submit({client, request, generation})) {
+        const auto response = make_error(
+            request.id,
+            "Inspector asynchronous request queue is full",
+            "dispatch_queue_full");
+        return !should_send_response(response) ||
+               enqueue_response(client, response);
+    }
+    return true;
+}
+
+void InspectorServer::Impl::on_message_received(
+    const std::string& data,
+    events::InterprocessConnection* sender) {
+    if (!json_nesting_is_bounded(data)) {
+        send_response(sender, make_error(
+            0,
+            "Inspector message exceeds the JSON nesting limit",
+            "message_too_deep"));
+        sender->disconnect();
+        return;
+    }
     InspectorMessage request;
     if (!decode_message(data, request)) {
         // Invalid JSON — send error
         auto err = make_error(0, "Invalid JSON message");
-        auto json = encode_message(err);
-        sender->send_message(json.data(), json.size());
+        send_response(sender, err);
         return;
     }
 
-    if (handler_) {
-        auto response = handler_(request);
-        if (response.id != 0 || !response.method.empty()) {
-            auto json = encode_message(response);
-            sender->send_message(json.data(), json.size());
+    if (session) {
+        std::string client_id;
+        std::shared_ptr<detail::InspectorConnectedClient> connected_client;
+        bool authenticated = false;
+        {
+            std::lock_guard lock(clients_mutex);
+            const auto found = clients.find(sender);
+            if (found == clients.end()) {
+                sender->disconnect();
+                return;
+            }
+            connected_client = found->second;
+            client_id = found->second->client_id;
+            authenticated = found->second->authenticated;
         }
+
+        if (!authenticated) {
+            if (request.method != methods::kSessionAuthenticate ||
+                request.id == 0) {
+                const auto response = make_error(
+                    request.id,
+                    "Authenticate before issuing inspector requests",
+                    "authentication_required");
+                send_response(sender, response);
+                sender->disconnect();
+                return;
+            }
+            std::string proof;
+            try {
+                const auto params = choc::json::parse(request.params_json);
+                proof = std::string(params["proof"].getString());
+            } catch (...) {
+            }
+            std::optional<std::string> server_proof;
+            {
+                std::lock_guard lock(clients_mutex);
+                const auto found = clients.find(sender);
+                if (found != clients.end() &&
+                    found->second->verifier &&
+                    std::chrono::steady_clock::now() <
+                        found->second->deadline) {
+                    server_proof =
+                        found->second->verifier->authenticate(proof);
+                    found->second->verifier.reset();
+                    found->second->authenticated =
+                        server_proof.has_value();
+                }
+            }
+            if (!server_proof) {
+                const auto response =
+                    make_error(request.id,
+                               "Inspector authentication failed",
+                               "authentication_failed");
+                send_response(sender, response);
+                sender->disconnect();
+                return;
+            }
+            auto result = choc::value::createObject("");
+            result.addMember("authenticated",
+                             choc::value::createBool(true));
+            result.addMember(
+                "serverProof",
+                choc::value::createString(*server_proof));
+            send_response(sender,
+                          make_response(
+                              request.id,
+                              choc::json::toString(result, false)));
+            return;
+        }
+
+        bool dispatch_asynchronously = false;
+        std::uint64_t generation = 0;
+        {
+            std::lock_guard lifecycle_lock(lifecycle_mutex);
+            dispatch_asynchronously =
+                asynchronous_methods.contains(request.method);
+            generation = session_generation.load(
+                std::memory_order_acquire);
+        }
+        if (dispatch_asynchronously) {
+            (void)dispatch_asynchronous_request(
+                std::move(connected_client), std::move(request), generation);
+            return;
+        }
+
+        const auto response = session->handle(client_id, request);
+        if (should_send_response(response))
+            send_response(sender, response);
+        return;
     }
+
+    send_response(
+        sender,
+        make_error(request.id,
+                   "No authenticated inspector session is active",
+                   "session_inactive"));
 }
 
 } // namespace pulp::inspect

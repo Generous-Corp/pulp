@@ -22,7 +22,7 @@ Commands:
   version        Show, bump, or check version info
   dev            Unified dev loop: watch, build, test, run
   loop           Leveraged-prototype focus marker + watch loop
-  inspect        Connect to a running plugin inspector
+  inspect        Connect to an explicitly hosted inspector fixture
   scan           List VST3 / AU / AUv3 / CLAP / LV2 plug-ins
   host           Load a plug-in and run a synthetic audio block through it
   import         Detect a framework project and emit a Pulp migration scaffold
@@ -43,7 +43,7 @@ Commands:
   design-debug   Headless design debug runner
   import-design  Import designs from Figma/Stitch/v0/Pencil
   export-tokens  Export theme as W3C Design Tokens
-  audit          License and clean-room audit
+  audit          License and provenance audit
   add            Add a component to the project
   help           Show this help
 

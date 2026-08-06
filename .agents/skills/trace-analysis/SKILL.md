@@ -43,12 +43,13 @@ named query primitives. This harness decides *what to ask*; `trace-sql` is
 
 | Tier | Who | Entry | This skill's role |
 |---|---|---|---|
-| **L0** | novice, no agent | `pulp trace slowest-frames`, `--preset dsp-hotspots`/`xruns` | not needed — canned preset → plain table |
-| **L1** | novice, one-shot | `pulp trace explain "<q>"` · `pulp_trace_explain` · `/trace "<q>"` | **run this protocol autonomously**, return narrated root cause + evidence + fix |
-| **L2** | expert, iterative | `pulp trace query "<sql>"` + this skill + `trace-sql` loaded | drive the full loop by hand on hard/multi-bottleneck cases |
+| **L0** | novice, no agent | Planned named presets | not available yet |
+| **L1** | novice, one-shot | A `.pftrace` plus a question | **run this protocol autonomously**, return narrated root cause + evidence + fix |
+| **L2** | expert, iterative | `pulp trace query "<sql>" --trace FILE` + this skill + `trace-sql` loaded | drive the full loop by hand on hard/multi-bottleneck cases |
 
-L0 needs no agent. L1 is the headline: you run the whole protocol and hand back
-prose. L2 is the same protocol, interactive, for cases the presets cannot crack.
+The live `Trace.query` / `Trace.explain` methods and named preset verbs are
+reserved and currently return `capability_unavailable`; do not treat them as
+successful analysis. L1 runs this workflow over real offline queries.
 
 ---
 
@@ -63,10 +64,17 @@ available for offline SQL:
 pulp trace doctor            # human report; add --json for {ready_to_capture, ready_to_query, …}
 ```
 
-`ready_to_capture:false` usually means the inspector is unreachable (start it
-with `PULP_TRACE_SERVER=1`) or tracing was compiled out; `ready_to_query:false`
-means no `trace_processor` (on `$PULP_TRACE_PROCESSOR`, the pinned Pulp-fetched
-build, or `$PATH`) or no captured trace yet. For zero-install, run
+`ready_to_capture:false` usually means no eligible inspector session was found
+or tracing was compiled out. Normal launches create no endpoint; capture
+requires an explicitly wired custom fixture published through authenticated discovery.
+When more than one live session exists—or when a capture spans separate CLI
+invocations—pass the same `--session ID --instance ID --publication ID`
+selector to `doctor`, `start`, and `stop`. The non-reusable
+publication ID pins the exact authenticated publication instead of allowing a
+replacement process that reuses the other IDs to inherit the operation.
+`ready_to_query:false` means no `trace_processor` (on
+`$PULP_TRACE_PROCESSOR`, the pinned Pulp-fetched build, or `$PATH`) or no
+captured trace yet. For zero-install, run
 `pulp trace fetch` once — it downloads the pinned `trace_processor_shell`
 (Perfetto v57.2), SHA-256-verified, into `$PULP_HOME`. (`pulp tool install
 trace-processor` fetches the same pinned artifact via the tool registry.)
@@ -74,7 +82,7 @@ trace-processor` fetches the same pinned artifact via the tool registry.)
 ```bash
 pulp trace start --categories render,gpu,text,js,layout   # pick the categories the question implicates
 # ... reproduce (open the editor, sweep the knob, run the offline render) ...
-pulp trace stop                                           # → /tmp/pulp-<ts>.pftrace
+pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION
 ```
 
 Or accept a `--trace FILE.pftrace` the user hands you. Choose categories from
@@ -209,8 +217,8 @@ deterministic — no real-time hazard, works regardless of the DSP story.
 ```bash
 pulp trace start --categories render,gpu,text,js,layout
 # ... open the editor ...
-pulp trace stop
-pulp trace explain "why is my plugin slow to open?"
+pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION
+# Investigate the printed .pftrace using the offline query loop below.
 ```
 
 A good answer reads like this:
@@ -306,6 +314,33 @@ build shell—must receive `PULP_TRACE_PATH` and `PULP_TRACE_SECONDS`. If the
 plug-in loads but produces no file, distinguish an untraced installed SDK from
 a session that merely has not flushed before changing instrumentation.
 
+### The auto-flush timer is owned, joined, and generation-tagged
+
+`PULP_TRACE_SECONDS` used to arm a DETACHED `std::thread` that slept and
+then called back into process-global tracing state. Two consequences you
+may still see in older builds:
+
+- **A capture that truncates early.** Close and reopen the editor inside
+  the window and the FIRST session's timer stopped the SECOND session.
+  Timeouts now carry the session generation they were armed for and
+  refuse to act on any other, so a re-opened editor gets its full window.
+- **A crash on plug-in unload.** Nothing joined the sleeping thread, so
+  `FreeLibrary` / `dlclose` could pull the module out from under it. The
+  final `Tracing::detach()` now cancels and JOINS the timer before it
+  flushes.
+
+Practical consequence for capture: the last detach is a synchronous
+flush + join. If you are scripting a capture, let the host finish
+unloading the plug-in rather than killing the process — a `SIGKILL`
+still loses the trace, but a clean unload no longer races the timer.
+
+Adapters attach via RAII (`runtime::ScopedTracingAttachment`), and
+tracing is now wired into **VST3, CLAP, AU v2, AU v3, AAX, and
+Standalone** — it used to be VST3-only, so a Perfetto capture of any
+other format recorded nothing while the API claimed to be
+process-global. If a capture is empty, check the format is one of those
+before suspecting the environment.
+
 ### Always instrument the blocking call
 
 A frame span whose children sum to ~2 ms while the frame itself takes 45 ms
@@ -326,3 +361,106 @@ tscon <session-id> /dest:console     # session stays Active, RDP client detaches
 
 Pair with auto-logon so a session exists after reboot, and run long builds under
 Task Scheduler (S4U) — an SSH drop otherwise kills `cmake`/MSBuild mid-build.
+
+## A capture with NO render spans — read this before investigating
+
+A trace containing `layout_children` and `wm_mousemove` but **no** `frame`,
+`paint`, `gpu_acquire`, `gpu_submit` or `gpu_present` is the single most
+misleading result this harness produces. It looks like a broken capture or a
+frame-time regression and is usually neither. Work the ladder in order; each
+step is seconds, and step 1 explains most cases.
+
+### 1. Which host did the plug-in actually get?
+
+The five render spans live on the **GPU** paint path. A plug-in that does not
+ask for a GPU editor never enters it, paints correctly on CPU raster, and emits
+none of them — by design, on every platform.
+
+The adapter logs its decision at editor attach:
+
+```
+[plugin-gpu-host] adapter mode=autoui use_gpu=false wants_gpu=false
+                  scripted=false requires_gpu_host=false …
+VST3 editor: attached (536x230, mode=autoui, gpu=false)
+```
+
+`decide_gpu_host()` (`core/format/include/pulp/format/gpu_host_select.hpp`, no
+platform guards — this is cross-platform) computes:
+
+```cpp
+d.wants_gpu = scripted || view_wants;      // view_wants = requires_gpu_host()
+d.use_gpu   = d.wants_gpu && !env_off;
+```
+
+So `mode=autoui` with `wants_gpu=false` means the editor is neither scripted nor
+declares `requires_gpu_host()`. **That is a complete explanation for zero render
+spans.** Do not go looking for a fallback, a broken adapter or a regression: a
+CPU-raster editor is not a degraded GPU editor, and its frame times are not
+comparable to a GPU capture's. `mode=` is the first thing to read.
+
+On Windows the CPU branch is explicit — `handle_wm_paint()` calls
+`render_frame()` only `if (gpu_surface_ && skia_surface_)`, else
+`raster_render_rgba()`, which carries no instrumentation and is labelled in
+source as "the VM proof path".
+
+### 2. Which host + platform emits which spans?
+
+Coverage is **not uniform**, and only the Windows plug-in editor has the full
+set. Verified by span-site inspection:
+
+| host | `frame` / `paint` | `gpu_acquire` |
+|---|---|---|
+| Windows plug-in editor (`plugin_view_host_win.cpp`) | yes | yes (shared `PluginFrameRenderer`) |
+| Linux plug-in editor (`plugin_view_host_linux.cpp`) | **no** | yes (shared renderer) |
+| macOS plug-in editor (`plugin_view_host_mac.mm`) | **no** | **no** — it has its own `render_frame()` and no `PULP_TRACE` sites |
+| macOS standalone app (`window_host_mac.mm`) | yes | no |
+
+`gpu_submit` comes from `core/render/src/skia_surface*.cpp` and `gpu_present`
+from `gpu_surface_dawn.cpp`, i.e. the render layer rather than the host, so they
+can appear where the host-level spans do not.
+
+The practical consequence: **do not read a missing `frame` span on a macOS
+plug-in editor as a regression** — that host has never emitted one. Instrument
+the host before measuring it, or measure the standalone app instead.
+
+### 3. Read the plug-in's log before theorising
+
+On Windows Pulp's log sink is `OutputDebugStringA`, which nothing captures by
+default — so `[plugin-gpu-host]`, GPU-init failures and the CPU-fallback
+diagnostic are all invisible unless you attach a listener FIRST.
+
+There is no need for Sysinternals: a `DBWIN` listener is ~40 lines. Create the
+`DBWIN_BUFFER` file mapping plus the `DBWIN_BUFFER_READY` / `DBWIN_DATA_READY`
+events, then loop `SetEvent(ready)` → `WaitForSingleObject(data)` → read the pid
+from the first 4 bytes and the message after it. Start it **before** the host
+process and it captures everything from plug-in load onward. This is what turns
+"no spans, cause unknown" into one line of fact.
+
+On macOS the same information comes from `log stream` — see the `ios` skill for
+a working predicate that includes `[plugin-gpu-host]`.
+
+### 4. Only then suspect the capture
+
+If `mode=scripted`/`custom` with `use_gpu=true` and the spans are still missing,
+the earlier Windows blockers and the flush-lifetime notes above apply.
+
+Related but different: the section below concerns `gpu_render_time`, an opt-in
+timing COUNTER. Missing `gpu_render_time` and missing render SPANS have
+unrelated causes; do not treat one as evidence about the other.
+
+## GPU render time is now OPT-IN (WAH-13)
+
+`SkiaSurface::gpu_render_timing_available()` reporting false is no longer
+evidence of an adapter that lacks `timestamp-query`. Timestamps are requested
+only when the host asks, via `PluginViewHost::Options::enable_gpu_timing`
+(default OFF), rather than whenever the adapter advertises the feature.
+
+That default is deliberate and worth understanding before you "fix" it: Dawn
+gates `writeTimestamp` behind the `allow_unsafe_apis` toggle on every backend,
+so requesting the feature forces that toggle on — and it applies to the DEVICE,
+not to the diagnostic. Ordinary rendering was silently running with relaxed
+validation on every machine whose adapter happened to offer timestamps.
+
+If you need per-recording GPU time in a capture, enable it explicitly on the
+host's Options. If a trace shows no `gpu_render_time`, check that flag before
+suspecting the adapter.

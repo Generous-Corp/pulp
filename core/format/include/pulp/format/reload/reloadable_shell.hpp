@@ -117,6 +117,43 @@ public:
         return slot_.with_active([](Processor& p) { return p.create_view(); });
     }
 
+    // A raw pointer cannot carry the hot-swap slot's lifetime lease beyond this
+    // call. Fail closed for legacy callers; reload-aware consumers use the
+    // visitor below, which keeps the active generation alive through the work.
+    view::ValueChannelSet* value_channels() override {
+        return nullptr;
+    }
+
+    void visit_value_channels(
+        const std::function<void(view::ValueChannelSet*)>& visitor) override {
+        const bool visited = slot_.with_active([&](Processor& p) {
+            p.visit_value_channels(visitor);
+            return true;
+        });
+        if (!visited && visitor) visitor(nullptr);
+    }
+
+    view::ScriptedUiSession* active_scripted_ui() override { return nullptr; }
+    const view::ScriptedUiSession* active_scripted_ui() const override { return nullptr; }
+
+    void visit_active_scripted_ui(
+        const std::function<void(view::ScriptedUiSession*)>& visitor) override {
+        const bool visited = slot_.with_active([&](Processor& p) {
+            p.visit_active_scripted_ui(visitor);
+            return true;
+        });
+        if (!visited && visitor) visitor(nullptr);
+    }
+
+    void visit_active_scripted_ui(
+        const std::function<void(const view::ScriptedUiSession*)>& visitor) const override {
+        const bool visited = slot_.with_active([&](Processor& p) {
+            static_cast<const Processor&>(p).visit_active_scripted_ui(visitor);
+            return true;
+        });
+        if (!visited && visitor) visitor(nullptr);
+    }
+
     // Live-swap 1.9: this shell's editor rebuilds IN PLACE on each hot-swap. The
     // ViewBridge hosts create_view() under a stable root container and rebuilds
     // its content whenever editor_reload_generation() changes — polled on the

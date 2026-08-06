@@ -24,6 +24,126 @@ pulp import-design --from pencil --file design.json --dry-run
 pulp export-tokens --tokens tokens.json
 ```
 
+### Runnable HTML and Claude Design
+
+For Claude project archives, `.dc.html` design components, standalone HTML, or
+ordinary runnable HTML, pass the file directly:
+
+```bash
+pulp import-design --file design.html
+```
+
+The CLI detects the export shape and uses one path: isolated Chromium evaluates
+the real DOM, CSS, fonts, canvas, SVG, and JavaScript; Pulp records a DPR-2
+reference plus CSS custom-property tokens and semantic evidence; DesignIR keeps
+that evaluated visual as a portable `faithful_capture`; and Skia immediately
+renders it for A/B comparison. That validation is required even without
+`--validate`, and its proof remains in the durable browser-capture evidence
+directory. Pass `--validate` to additionally publish convenient render and diff
+copies beside the requested output. Authored controls—including custom knob
+artwork—remain authored pixels and are not replaced by Pulp widget skins.
+
+The default artifact is deliberately a **pixel-exact static frame**. Semantic
+evidence is captured for future reconstruction, but browser interactions do not
+become live Pulp controls unless a runtime bridge is added. Extracted CSS custom
+properties describe the active light / no-preference computed capture mode;
+they are not presented as a complete multi-theme authored token system.
+Only custom properties whose active computed value is visible on
+`documentElement` or `body` are promoted; component-scoped values remain in the
+captured source evidence rather than being misrepresented as global tokens.
+
+Local relative assets load from the input folder. External requests are denied
+by default. If the health report identifies a reviewed CDN dependency, retry
+with `--allow-browser-network`. That consent is limited to public HTTPS origins
+declared by the source; loopback, private/link-local addresses, WebSockets, and
+undeclared redirect origins remain blocked. Successful external response
+content is hashed into capture provenance. Use `--browser <path>` for a
+nonstandard Chrome/Chromium installation. `--offline` explicitly selects the
+older partial static/QuickJS fallback and may lose layout or runtime content.
+
+Browser selection is deterministic:
+
+1. `--browser <path>`
+2. `PULP_DESIGN_BROWSER=<path>`
+3. `PULP_DESIGN_BROWSER_MODE=auto|managed|system`, then
+   `import_design.browser` in `~/.pulp/config.toml`
+4. the explicitly installed managed Chrome for Testing
+5. system Chrome/Chromium
+
+The default `auto` mode therefore behaves exactly like system discovery until
+you explicitly install the managed browser:
+
+```bash
+pulp tool install chrome-for-testing
+pulp tool doctor chrome-for-testing --run
+pulp tool update chrome-for-testing
+pulp tool uninstall chrome-for-testing
+
+pulp config set import_design.browser auto     # managed if installed, else system
+pulp config set import_design.browser system   # never use the managed copy
+pulp config set import_design.browser managed  # require the managed copy
+```
+
+An import never downloads Chrome. The installer verifies a committed SHA-256
+pin, extracts the complete official archive transactionally under
+`$PULP_HOME/tools/chrome-for-testing/<version>/<platform>/`, and publishes the
+exact selection through `current.json`. Google currently publishes no Linux
+arm64 Chrome-for-Testing archive; on that host install system Chromium and use
+`system` mode or set `PULP_DESIGN_BROWSER` explicitly.
+
+Runnable sources with asynchronous initialization may expose
+`globalThis.__pulpCaptureReady` as a Promise or a function returning one. Pulp
+awaits it after the initial layout observation window and fails the import if
+it rejects. This is optional; sources without the contract use bounded
+DOM/network/compositor settling.
+
+To import a secondary screen instead of the landing state, describe the route
+with a bounded interaction plan:
+
+```bash
+pulp import-design --file prototype.html \
+  --browser-interactions patch-composer.json
+```
+
+The `pulp-browser-interactions-v1` JSON plan supports `click`, `type`,
+`wait-for`, and `wait-ms`. Prefer `wait-for` with a visible selector after a
+click; strings in hidden or inert DOM are not proof that a screen rendered.
+Each completed action is recorded in `interaction-report.json`; typed text is
+represented only by its length, without plaintext or a per-action text hash.
+Typed text still becomes rendered prototype state and can appear in the
+screenshot, DOM/semantic evidence, or tokens. Never put passwords, credentials,
+private drafts, or other secrets in a plan. Plans cannot execute arbitrary
+JavaScript or open popup pages, and action timeouts cannot extend the
+capture-wide deadline. If the final interacted state has a distinct
+asynchronous completion boundary, expose `globalThis.__pulpInteractionReady`
+as a Promise or one-shot function. Pulp awaits it after the final action
+without invoking the initial `__pulpCaptureReady` contract again.
+
+Chrome/Chromium and Node.js 22 are import-time tools only. Generated DesignIR,
+JavaScript, and C++ artifacts do not embed or require them.
+
+Node.js does not have to be on `PATH`. An app launched from Finder or Explorer
+inherits a minimal `PATH` that excludes every common Node.js install location,
+so Pulp searches `PATH` first and then the standard locations directly:
+`/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, and the mise, nvm, fnm, and
+asdf version-manager roots under your home directory, taking the first
+installation that is version 22 or newer. When no installation qualifies, the
+error names the Node.js versions it found or the locations it searched.
+
+Portable image paths are resolved by the runtime that opens the artifact.
+`ScriptedUiSession` anchors JavaScript assets to the generated script directory,
+and native DesignIR callers pass the document directory through
+`NativeMaterializeOptions::asset_base_directory`. Generated C++ exposes
+`build_imported_ui(asset_base_directory)` for production plugins and apps; pass
+the deployed resource directory there. Its zero-argument overload resolves
+beside the generated source and is a source-tree development convenience, not
+a deployment resource lookup.
+
+For browser-backed HTML, `--dry-run` is a diagnostic preview: its printed
+capture paths and absolute backing-image path are transient and disappear when
+the command exits. Run without `--dry-run` to publish a portable artifact and
+its verified evidence.
+
 ## How It Works
 
 The import pipeline has three layers:
@@ -33,6 +153,7 @@ Local Figma .fig file --.
 Figma REST/file JSON ----.
 Figma plugin .pulp.zip --|
 Stitch HTML / directory -|--> Normalized IR --> JS / DesignIR / baked native artifacts
+Runnable HTML ------------|    (Chromium-evaluated faithful capture)
 v0 / Figma Make TSX ----|
 Pencil/OpenPencil JSON --'
 
@@ -184,15 +305,17 @@ into Pulp; pair it with a screen importer (Figma, Stitch, Pencil, v0,
 Claude) when you also need a UI.
 
 The parser handles the canonical frontmatter keys (`version`, `name`,
-`description`, `colors`, `typography`, `rounded`, `spacing`,
+`description`, `omitted`, `colors`, `typography`, `rounded`, `spacing`,
 `components`), resolves `{group.key}` references at parse time, and
 preserves composite typography references inside `components.*`
 verbatim so downstream tooling can resolve them in widget context.
-It tracks the upstream format spec at tag `0.3.0`: color values may be
+It tracks the upstream format spec at tag `0.4.0`: color values may be
 any valid CSS color (hex, named, `rgb()`/`hsl()`/`oklch()`/`color-mix()`,
-…), token groups nest to arbitrary depth (keyed on the dot-joined path),
+…), token groups nest up to 20 levels (keyed on the dot-joined path),
 `spacing` accepts bare numbers, and an unrecognized top-level key is
-flagged with a warning rather than silently dropped.
+flagged with a warning rather than silently dropped. Intentional
+`omitted` sections suppress their matching lint findings; typography
+property typos and flattened token-name collisions are reported.
 
 Detection is strict: filename must be `DESIGN.md`, the frontmatter
 fence must be present, and the frontmatter must declare `name:` plus
@@ -207,17 +330,32 @@ for the full reference.
 
 ### Claude Design
 
-Claude Design exports are standalone HTML files with an inline bundler
-script tag. Pulp detects them via the `__bundler/template` script type
-and parses the loader shell:
+Claude Design can export project folders, `.dc.html` design components, and
+standalone HTML bundles. Pass any of those HTML files directly; Pulp detects
+the shape and evaluates the runnable page in isolated Chromium:
 
 ```bash
-pulp import-design --from claude --file design.html --classnames classnames.json
+pulp import-design --file design.html --validate --screenshot-backend skia
 ```
 
-The `classnames.json` artifact maps every plain-classname `<style>`
-rule to its camelCase CSS properties, for downstream merge into
-inline styles. See [`reference/cli.md#import-design`](../reference/cli.md#import-design).
+This produces a pixel-exact default frame in portable DesignIR, a browser
+reference image, a Skia render, a visual diff, computed CSS tokens, and
+semantic evidence. Browser validation itself is automatic; `--validate` in the
+example requests convenient render/diff copies beside the primary output.
+`--from claude` remains accepted for compatibility but is not required.
+External browser requests remain denied unless the reviewed source requires an
+explicit `--allow-browser-network` retry.
+
+When the desired Claude screen is not the landing state, add
+`--browser-interactions <plan.json>` using the bounded
+`pulp-browser-interactions-v1` schema described above. Do not infer success
+from strings found in the HTML or DOM snapshot; require a `wait-for` action on
+a selector that is actually visible.
+
+The older static/QuickJS parser remains available through `--offline` for
+diagnostics and environments without Chromium. Its optional
+`classnames.json` sidecar maps plain-classname rules for that legacy path; it
+is not the authoritative layout evaluator.
 
 ## Audio Widget Detection
 

@@ -67,32 +67,15 @@ void WindowHost::set_resize_callback(ResizeCallback cb) {
 // render_loop_ can never be non-null there and mark_dirty() is always a
 // plain repaint(); the PULP_VIEW_HAS_RENDER_LOOP guard keeps it buildable.
 void WindowHost::mark_dirty() {
-    dirty_full_ = true;
+    damage_.mark_full();
     schedule_repaint();
 }
 
-// Bounded dirty mark. A dirty region only shrinks a full repaint on a frame
-// that started clean (clear_pending_dirty() ran); dirty_full_ is sticky within
-// a frame, so a bounded mark after a full mark (or on the first frame) leaves
-// the repaint full — never widening coverage is what keeps this always safe.
+// Bounded dirty mark. The union / sticky-full / degenerate-rect rules all live
+// in PendingDamage::mark() — the same code the plug-in host runs — so the two
+// hosts cannot disagree about what a bounded mark means.
 void WindowHost::mark_dirty(const Rect& root_rect) {
-    if (root_rect.width <= 0 || root_rect.height <= 0) {
-        mark_dirty();  // empty region → be conservative, repaint in full
-        return;
-    }
-    if (!dirty_full_) {
-        if (!have_dirty_bounds_) {
-            dirty_bounds_ = root_rect;
-            have_dirty_bounds_ = true;
-        } else {
-            // Union into the running bounding box.
-            const float nx = std::min(dirty_bounds_.x, root_rect.x);
-            const float ny = std::min(dirty_bounds_.y, root_rect.y);
-            dirty_bounds_ = {nx, ny,
-                             std::max(dirty_bounds_.right(), root_rect.right()) - nx,
-                             std::max(dirty_bounds_.bottom(), root_rect.bottom()) - ny};
-        }
-    }
+    damage_.mark(root_rect);
     schedule_repaint();
 }
 
@@ -113,19 +96,23 @@ void WindowHost::paint_root(canvas::Canvas& canvas, View& root,
     // tree — the safe default that can never blank static chrome. (width/height
     // are already positive here: mark_dirty() escalates empty/zero rects to full,
     // so the size checks are belt-and-suspenders.)
-    const bool bounded = surface_preserves_outside_clip &&
-                         !dirty_full_ && have_dirty_bounds_ &&
-                         dirty_bounds_.width > 0.0f && dirty_bounds_.height > 0.0f;
+    //
+    // take() reads AND clears in one step, so this cannot paint one region and
+    // then clear a different one — the frame is composed against exactly the
+    // snapshot it consumed. This host paints straight onto a caller-supplied
+    // canvas with no present stage that can fail, so the snapshot is never
+    // restored.
+    const PendingDamage::Snapshot frame = damage_.take();
+    const bool bounded = surface_preserves_outside_clip && frame.is_bounded() &&
+                         frame.bounds().width > 0.0f &&
+                         frame.bounds().height > 0.0f;
     if (bounded) {
         canvas.save();
-        canvas.clip_rect(dirty_bounds_.x, dirty_bounds_.y,
-                         dirty_bounds_.width, dirty_bounds_.height);
+        canvas.clip_rect(frame.bounds().x, frame.bounds().y,
+                         frame.bounds().width, frame.bounds().height);
     }
     root.paint_all(canvas);
     if (bounded) canvas.restore();
-    // The frame is composed; the next frame starts clean (a fresh full mark
-    // until bounded marks arrive).
-    clear_pending_dirty();
 }
 
 #if !defined(__APPLE__)

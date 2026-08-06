@@ -32,6 +32,51 @@
 
 // SDK / Config
 
+bool source_checkout_dependencies_enabled(const fs::path& project_root,
+                                          const fs::path& cache_path) {
+    std::ifstream contract_file(project_root / "tools/deps/shared-source-contract.txt");
+    std::ifstream cache(cache_path);
+    if (!contract_file || !cache) return false;
+    std::string expected_contract;
+    std::getline(contract_file, expected_contract);
+    expected_contract = trim(expected_contract);
+    if (expected_contract.empty()) return false;
+
+    bool has_vst3 = false;
+    bool requires_dependencies = false;
+    bool has_ausdk = false;
+    bool has_ausdk_requirement = false;
+    bool requires_ausdk = false;
+    bool contract_matches = false;
+    std::string line;
+    while (std::getline(cache, line)) {
+        const auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        const auto key = trim(line.substr(0, eq));
+        auto value = trim(line.substr(eq + 1));
+        if (key == "PULP_CHECKOUT_DEPENDENCY_CONTRACT:INTERNAL") {
+            contract_matches = value == expected_contract;
+            continue;
+        }
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        const bool enabled = value == "on" || value == "true" || value == "1" || value == "yes";
+        if (key == "PULP_HAS_VST3:INTERNAL") has_vst3 = enabled;
+        if (key == "PULP_REQUIRE_CHECKOUT_DEPENDENCIES:BOOL") requires_dependencies = enabled;
+        if (key == "PULP_HAS_AUSDK:INTERNAL") has_ausdk = enabled;
+        if (key == "PULP_CHECKOUT_REQUIRES_AUSDK:INTERNAL") {
+            has_ausdk_requirement = true;
+            requires_ausdk = enabled;
+        }
+    }
+    const bool vst3_link_ready = fs::exists(project_root / "external/vst3sdk/pluginterfaces");
+    const bool ausdk_link_ready = !requires_ausdk
+        || fs::exists(project_root / "external/AudioUnitSDK/include/AudioUnitSDK/AUBase.h");
+    return contract_matches && requires_dependencies && has_vst3 && has_ausdk_requirement
+        && vst3_link_ready && ausdk_link_ready && (!requires_ausdk || has_ausdk);
+}
+
 fs::path pulp_home() {
     if (auto pulp_home_env = pulp::runtime::get_env("PULP_HOME"))
         return fs::path(*pulp_home_env);
@@ -304,6 +349,13 @@ fs::path ensure_sdk(const std::string& version) {
 }
 
 int ensure_checkout_dependencies(const fs::path& repo_root) {
+    if (const char* skip = std::getenv("PULP_SKIP_DEPENDENCY_BOOTSTRAP");
+        skip && std::string(skip) != "0") {
+        print_warn("Skipping checkout dependency bootstrap because "
+                   "PULP_SKIP_DEPENDENCY_BOOTSTRAP is set");
+        return 0;
+    }
+
     auto script = repo_root /
 #ifdef _WIN32
         "setup.ps1";
@@ -317,9 +369,10 @@ int ensure_checkout_dependencies(const fs::path& repo_root) {
 
 #ifdef _WIN32
     std::string cmd = "powershell -NoProfile -ExecutionPolicy Bypass -File "
-        + shell_quote(script) + " --deps-only";
+        + shell_quote(script) + " --deps-only --non-interactive";
 #else
-    std::string cmd = "cd " + shell_quote(repo_root) + " && ./setup.sh --deps-only";
+    std::string cmd = "cd " + shell_quote(repo_root)
+        + " && ./setup.sh --deps-only --non-interactive";
 #endif
     return run_with_spinner(cmd, "Preparing checkout dependencies");
 }
@@ -346,11 +399,9 @@ fs::path ensure_checkout_sdk(const fs::path& repo_root, const std::string& versi
         + " -DPULP_BUILD_TESTS=OFF"
         + " -DPULP_BUILD_EXAMPLES=OFF"
         + " -DPULP_ENABLE_AUDIO_PROBES=OFF"
-        // Strip the dev inspector (the in-plugin authoring / MCP-reachable
-        // surface) from the shipped SDK. A developer who deliberately wants an
-        // inspectable / MCP-reachable plugin re-enables it in their own plugin
-        // build with -DPULP_ENABLE_INSPECTOR=ON. The pulp CLI / MCP server are
-        // separate binaries and are unaffected by this flag.
+        // Disable the standalone visual Cmd+I overlay in this local SDK build.
+        // This option does not itself prove endpoint or archive stripping; GPU
+        // is disabled separately below.
         + " -DPULP_ENABLE_INSPECTOR=OFF"
         // Strip the design-import authoring subsystem (importers, codegen, lock,
         // runtime design-import) from the shipped SDK. The runtime W3C token API

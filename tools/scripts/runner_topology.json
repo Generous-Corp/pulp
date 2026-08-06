@@ -1,12 +1,13 @@
 {
   "$schema": "Declarative runner-routing contract. Each lane binds a GitHub repo variable (`*_RUNS_ON_JSON`) to the label set it is INTENDED to route to, and to the kind of runner expected to serve it. Consumed by tools/scripts/runner_topology_check.py, which reconciles this file against the LIVE repo variables and the LIVE registered runners. A lane whose labels no runner can satisfy is a routing black hole: jobs queue forever and GitHub reports no error. Editing a repo variable without editing its lane here is drift, and the checker fails on it. Docs: docs/guides/local-ci.md.",
-  "_note_expect": "`expect` records the label set the lane is CONTRACTED to route to. It is the reviewed artifact: changing a repo variable is only legitimate when this file changes with it. `expect` is not automatically correct \u2014 a lane can be contracted to labels nothing serves, which is exactly the failure this checker exists to surface.",
+  "_note_expect": "`expect` records the label set or declared off-switch sentinel the lane is CONTRACTED to use. It is the reviewed artifact: changing a repo variable is only legitimate when this file changes with it. `expect` is not automatically correct \u2014 a lane can be contracted to labels nothing serves, which is exactly the failure this checker exists to surface.",
   "github_hosted_labels": [
     "ubuntu-latest",
     "ubuntu-24.04",
     "ubuntu-22.04",
     "macos-26",
     "macos-15",
+    "macos-15-intel",
     "macos-14",
     "macos-13",
     "windows-latest",
@@ -18,6 +19,13 @@
     "local-only"
   ],
   "_note_sentinels": "Magic values that mean 'this lane is deliberately switched off', not a label to route to. `build.yml` documents `local-only` as the explicit off switch for macOS overflow \u2014 emptiness cannot disable it, because GitHub treats unset and empty identically and the workflow's `||` default re-fills it.",
+  "routing_controls": {
+    "PULP_LOCAL_MAC_RUNNER_LABEL": {
+      "expect": "pulp-gate-fast",
+      "unset_fallback": "pulp-gate-fast"
+    }
+  },
+  "_note_routing_controls": "Exact-value controls that affect routing without being runs-on selectors. The overflow idle probe must target the same fast runner class as the required macOS selector; otherwise an idle rollback-only M1 can suppress overflow for work it cannot serve.",
   "service_evidence": {
     "lookback_hours": 720,
     "runs_per_workflow": 20,
@@ -37,21 +45,17 @@
   "lanes": [
     {
       "variable": "PULP_LOCAL_MACOS_RUNS_ON_JSON",
-      "purpose": "The REQUIRED macOS gate. Every PR merge depends on this lane resolving.",
+      "purpose": "The REQUIRED macOS gate. Every PR merge depends on this lane resolving. Routed to ephemeral tartci VMs (`pulp-build-vm`), NOT the persistent `pulp-build-studio` runners: a VM is clean per job, so the gate cannot inherit a warm build dir from an unrelated branch. That reuse is what produced the 2026-06-07 random-SEGFAULT cluster across many PRs at once, and `build.yml` sets `clean: false` on self-hosted, so the persistent runners keep their dirs by design.",
       "expect": [
         "self-hosted",
         "macOS",
         "ARM64",
         "pulp-build",
-        "pulp-build-studio"
+        "pulp-build-vm",
+        "pulp-gate-fast"
       ],
-      "provisioning": "persistent",
-      "severity": "required",
-      "hosts": [
-        "pulp-studio-01",
-        "pulp-studio-02",
-        "pulp-studio-03"
-      ]
+      "provisioning": "ephemeral",
+      "severity": "required"
     },
     {
       "variable": "PULP_PREAMBLE_RUNS_ON_JSON",
@@ -73,17 +77,12 @@
     },
     {
       "variable": "PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON",
-      "purpose": "macOS build overflow \u2014 the relief valve when the Studio pool is saturated (BUSY >= PULP_LOCAL_MAC_OVERFLOW_THRESHOLD). A black hole here is invisible: overflow reports healthy and relieves nothing.",
-      "expect": [
-        "self-hosted",
-        "macOS",
-        "ARM64",
-        "pulp-build",
-        "pulp-build-vm"
-      ],
+      "purpose": "macOS build overflow is deliberately disabled. The `local-only` sentinel keeps saturated required work on the fast local JIT pool; unsetting the variable would re-enable the hosted macos-15 fallback.",
+      "expect": "local-only",
       "unset_fallback": [
         "macos-15"
       ],
+      "require_explicit_value": true,
       "provisioning": "ephemeral",
       "severity": "required",
       "hosts": []
@@ -113,6 +112,24 @@
       "provisioning": "ephemeral",
       "severity": "required",
       "hosts": []
+    },
+    {
+      "variable": "PULP_NATIVE_INTEL_RUNS_ON_JSON",
+      "purpose": "Advisory native Intel build and test lane on the dedicated physical Mac mini. Its labels cannot match the required Apple-Silicon gate, and unsetting the variable immediately restores the hosted macos-15-intel fallback.",
+      "expect": [
+        "self-hosted",
+        "macOS",
+        "X64",
+        "pulp-intel-native",
+        "pulp-host-macmini"
+      ],
+      "unset_fallback": "macos-15-intel",
+      "provisioning": "ephemeral",
+      "severity": "advisory",
+      "supervisor": "native-intel-launchd",
+      "hosts": [
+        "macmini"
+      ]
     },
     {
       "variable": "PULP_SANITIZER_TSAN_RUNS_ON_JSON",
@@ -157,18 +174,74 @@
     },
     {
       "variable": "PULP_LOCAL_LINUX_RUNS_ON_JSON",
-      "purpose": "Linux build lane (advisory check), served by ephemeral Tart Linux VMs on the Mac Studio host.",
+      "purpose": "Operator-dispatched Linux build lane for build.yml's `Linux (x64)` leg, served by ephemeral Proxmox VMs on the macpro host. Automatic PR runs remain GitHub-hosted until runner-group access control is enforced. NATIVE x86_64 — the job is an x64 build, so the earlier ARM64/Tart plan for this lane would have changed its architecture rather than relocating it. Clones come from the `pulp-linux-golden` template (deps + prebuilt Skia + warm ccache baked in) and are destroyed per job.",
       "expect": [
         "self-hosted",
         "Linux",
-        "ARM64",
-        "pulp-build-linux",
-        "pulp-host-macstudio"
+        "X64",
+        "pulp-build-linux-x64",
+        "pulp-host-macpro"
+      ],
+      "provisioning": "ephemeral",
+      "dispatch_only": true,
+      "severity": "advisory",
+      "supervisor": "proxmox-systemd",
+      "hosts": [
+        "macpro"
+      ]
+    },
+    {
+      "variable": "PULP_LOCAL_GCC_RUNS_ON_JSON",
+      "purpose": "GCC compile gate (advisory). Native x86_64 Linux on the macpro Proxmox host; falls back to ubuntu-latest when unset.",
+      "expect": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "pulp-build-linux-x64",
+        "pulp-host-macpro"
       ],
       "provisioning": "ephemeral",
       "severity": "advisory",
+      "unset_fallback": "ubuntu-latest",
+      "supervisor": "proxmox-systemd",
       "hosts": [
-        "macstudio"
+        "macpro"
+      ]
+    },
+    {
+      "variable": "PULP_LOCAL_IWYU_RUNS_ON_JSON",
+      "purpose": "IWYU advisory lane. Native x86_64 Linux on macpro; falls back to ubuntu-24.04 when unset.",
+      "expect": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "pulp-build-linux-x64",
+        "pulp-host-macpro"
+      ],
+      "provisioning": "ephemeral",
+      "severity": "advisory",
+      "unset_fallback": "ubuntu-24.04",
+      "supervisor": "proxmox-systemd",
+      "hosts": [
+        "macpro"
+      ]
+    },
+    {
+      "variable": "PULP_LOCAL_HEADERS_RUNS_ON_JSON",
+      "purpose": "Public-headers-compile-standalone advisory lane. Native x86_64 Linux on macpro; falls back to ubuntu-24.04 when unset.",
+      "expect": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "pulp-build-linux-x64",
+        "pulp-host-macpro"
+      ],
+      "provisioning": "ephemeral",
+      "severity": "advisory",
+      "unset_fallback": "ubuntu-24.04",
+      "supervisor": "proxmox-systemd",
+      "hosts": [
+        "macpro"
       ]
     },
     {

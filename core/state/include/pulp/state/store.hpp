@@ -247,6 +247,10 @@ public:
     /// **Main-thread only** — see @c begin_gesture().
     void acquire_gesture(ParamID id);
     void release_gesture(ParamID id);
+    /// Release a lease without synchronously entering host code. The matching
+    /// host end callback is queued for flush_deferred_gesture_releases().
+    void defer_gesture_release(ParamID id);
+    void flush_deferred_gesture_releases() noexcept;
 
     /// Close every gesture still open and report each end to the host.
     ///
@@ -309,6 +313,10 @@ public:
     ///                  callback through the installed @c EventLoop;
     ///                  @c ListenerThread::Audio runs it inline on the
     ///                  firing thread and asserts caller RT-safety.
+    /// @param restore_behavior  @c ListenerRestoreBehavior::Silent preserves
+    ///                  deserialize's listener-silent contract. UI bindings
+    ///                  whose cached presentation must follow restored state
+    ///                  opt into @c ListenerRestoreBehavior::Reconcile.
     ///
     /// @note Main-thread listeners fed by the real-time path
     ///       (@c set_value_rt / @c set_normalized_rt, drained by
@@ -326,6 +334,12 @@ public:
     ListenerToken add_listener(ParamChangeCallback callback,
                                ListenerThread thread);
 
+    /// Subscribe with explicit state-restore behavior.
+    [[nodiscard]]
+    ListenerToken add_listener(ParamChangeCallback callback,
+                               ListenerThread thread,
+                               ListenerRestoreBehavior restore_behavior);
+
     /// Convenience for opting into real-time-safe inline invocation.
     /// Equivalent to @c add_listener(cb, ListenerThread::Audio).
     [[nodiscard]]
@@ -342,6 +356,26 @@ public:
     ///
     /// @return Number of changes drained from the queue.
     std::size_t pump_listeners();
+
+    /// Reconcile opted-in Main listeners with the current parameter snapshot.
+    ///
+    /// State restore writes parameter atomics without invoking listeners
+    /// because the host may deserialize on a non-UI thread. ViewBridge calls
+    /// this from its main-thread idle tick after observing a successful
+    /// deserialize edge. Only listeners registered with
+    /// @c ListenerRestoreBehavior::Reconcile participate; ordinary Main and
+    /// Audio listeners are never invoked.
+    ///
+    /// The restore revision is consumed store-wide, so multiple ViewBridges
+    /// sharing this store do not replay the same callbacks. Each bridge still
+    /// tracks the edge independently so every attached view repaints.
+    ///
+    /// Listener additions and removals during callbacks are safe. A listener
+    /// removed before its turn is skipped, and a listener added during this
+    /// pass participates only in the next reconciliation.
+    ///
+    /// @return Number of Main-listener callbacks invoked.
+    std::size_t reconcile_restore_listeners();
 
     /// Latest telemetry for the RT-to-main listener queue used by
     /// @c set_value_rt() / @c pump_listeners().
@@ -374,6 +408,25 @@ public:
     /// only the embedded StateStore payload here.
     /// @return True if deserialization succeeded.
     bool deserialize(std::span<const uint8_t> data);
+
+    /// Monotonic reconciliation edge published after each successful
+    /// deserialize().
+    ///
+    /// Deserialization deliberately does not dispatch parameter listeners:
+    /// format hosts may restore from a thread where author/UI callbacks are
+    /// unsafe. An attached ViewBridge polls this revision on its main-thread
+    /// idle tick and schedules one editor repaint, whose paint boundary can
+    /// then reconcile listener-silent control state.
+    ///
+    /// This is an edge, not a count of host-level restore successes. A
+    /// higher-level restore that applies parameter state and then rejects its
+    /// plugin-owned payload may deserialize the previous parameter snapshot as
+    /// rollback, advancing this revision twice. Consumers compare for
+    /// inequality and may coalesce either advance into one refresh of the final
+    /// state.
+    std::uint64_t state_restore_revision() const noexcept {
+        return state_restore_revision_.load(std::memory_order_acquire);
+    }
 
     /// Set the schema version embedded in serialized state.
     /// Increment this when the parameter layout changes between plugin versions.
@@ -413,6 +466,8 @@ private:
     mutable std::mutex parameter_display_mutex_;
     std::shared_ptr<const ParameterDisplayNames> parameter_display_names_;
     std::atomic<std::uint64_t> parameter_display_revision_{0};
+    std::atomic<std::uint64_t> state_restore_revision_{0};
+    std::atomic<std::uint64_t> reconciled_state_restore_revision_{0};
     // Indices (into values_/params_) of trigger / momentary parameters, cached
     // at registration so reset_triggers_rt() is allocation-free on the audio
     // thread. Empty for the overwhelmingly common no-trigger store.
@@ -435,6 +490,11 @@ private:
     // union that is actually open toward the host.
     std::unordered_set<ParamID> direct_gestures_;
     std::unordered_map<ParamID, std::size_t> gesture_leases_;
+    std::vector<ParamID> deferred_gesture_releases_;
+
+    // Close a retired owner's pending host bracket before a replacement owner
+    // is allowed to begin the same parameter again.
+    void flush_deferred_gesture_release(ParamID id) noexcept;
 
     // Off-main-thread gesture-misuse counter. Bumped (relaxed) by
     // begin_gesture/end_gesture when a MainThreadDispatcher backend is live but
@@ -459,6 +519,7 @@ public:
         open_gestures_.clear();
         direct_gestures_.clear();
         gesture_leases_.clear();
+        deferred_gesture_releases_.clear();
     }
 };
 

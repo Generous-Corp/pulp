@@ -1,0 +1,176 @@
+#include <pulp/view/css_effect_parse.hpp>
+
+#include <cctype>
+#include <cstdlib>
+#include <string_view>
+#include <unordered_map>
+
+namespace pulp::view {
+namespace {
+
+using FilterChainEntry = canvas::Canvas::FilterChainEntry;
+
+/// The argument of one filter function, as the spec's relative amount.
+///
+/// `50%` and `0.5` are the same value; a unit suffix (`px`, `deg`) is left for
+/// the caller to interpret, since `strtof` stops at it. Returns nothing when
+/// there is no number at all, which is how a malformed function is rejected
+/// without rejecting its neighbours.
+std::optional<float> filter_amount(const std::string& argument) {
+    const char* begin = argument.c_str();
+    char* end = nullptr;
+    const float value = std::strtof(begin, &end);
+    if (end == begin) return std::nullopt;
+    while (end != nullptr && *end != '\0' &&
+           std::isspace(static_cast<unsigned char>(*end)) != 0) {
+        ++end;
+    }
+    return (end != nullptr && *end == '%') ? value / 100.0f : value;
+}
+
+}  // namespace
+
+std::optional<float> css_blur_radius(const std::string& filter) {
+    const auto open = filter.find("blur(");
+    if (open == std::string::npos) return std::nullopt;
+    const auto close = filter.find(')', open);
+    if (close == std::string::npos) return std::nullopt;
+    const auto inner = filter.substr(open + 5, close - open - 5);
+    try {
+        const float radius = std::stof(inner);  // stof stops at the unit
+        if (!(radius > 0.0f)) return std::nullopt;
+        return radius;
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+std::vector<canvas::Canvas::FilterChainEntry> css_filter_chain(
+    const std::string& filter) {
+    using Kind = FilterChainEntry::Kind;
+    static const std::unordered_map<std::string, Kind> kFunctions{
+        {"blur", Kind::blur},
+        {"brightness", Kind::brightness},
+        {"contrast", Kind::contrast},
+        {"grayscale", Kind::grayscale},
+        {"greyscale", Kind::grayscale},
+        {"hue-rotate", Kind::hue_rotate},
+        {"invert", Kind::invert},
+        {"opacity", Kind::opacity},
+        {"saturate", Kind::saturate},
+        {"sepia", Kind::sepia},
+    };
+
+    std::vector<FilterChainEntry> chain;
+    size_t cursor = 0;
+    while (cursor < filter.size()) {
+        const auto open = filter.find('(', cursor);
+        if (open == std::string::npos) break;
+        // Nested parentheses do not occur in the functions above, but a
+        // `drop-shadow(0 0 2px rgb(0,0,0))` in the same list does contain them.
+        // Matching the FIRST close would then leave `)` as the next token and
+        // desynchronize every function after it, so the depth is tracked.
+        size_t close = open;
+        int depth = 0;
+        for (; close < filter.size(); ++close) {
+            if (filter[close] == '(') ++depth;
+            else if (filter[close] == ')' && --depth == 0) break;
+        }
+        if (close >= filter.size()) break;
+
+        auto name = filter.substr(cursor, open - cursor);
+        const auto first = name.find_first_not_of(" \t\n\r");
+        name = first == std::string::npos ? std::string{} : name.substr(first);
+        for (auto& c : name) c = static_cast<char>(
+            std::tolower(static_cast<unsigned char>(c)));
+
+        const auto known = kFunctions.find(name);
+        const auto amount =
+            filter_amount(filter.substr(open + 1, close - open - 1));
+        if (known != kFunctions.end() && amount) {
+            FilterChainEntry entry;
+            entry.kind = known->second;
+            // `hue-rotate` is the one function whose argument is an angle
+            // rather than an amount, and it is carried in its own field.
+            if (entry.kind == Kind::hue_rotate) entry.angle_deg = *amount;
+            else entry.amount = *amount;
+            chain.push_back(entry);
+        }
+        cursor = close + 1;
+    }
+    return chain;
+}
+
+std::optional<canvas::Canvas::BlendMode> css_blend_mode(const std::string& keyword) {
+    using BlendMode = canvas::Canvas::BlendMode;
+    static const std::unordered_map<std::string, BlendMode> kModes{
+        {"normal", BlendMode::normal},
+        {"multiply", BlendMode::multiply},
+        {"screen", BlendMode::screen},
+        {"overlay", BlendMode::overlay},
+        {"darken", BlendMode::darken},
+        {"lighten", BlendMode::lighten},
+        {"color-dodge", BlendMode::color_dodge},
+        {"color-burn", BlendMode::color_burn},
+        {"hard-light", BlendMode::hard_light},
+        {"soft-light", BlendMode::soft_light},
+        {"difference", BlendMode::difference},
+        {"exclusion", BlendMode::exclusion},
+        {"hue", BlendMode::hue},
+        {"saturation", BlendMode::saturation},
+        {"color", BlendMode::color},
+        {"luminosity", BlendMode::luminosity},
+        // The CSS Compositing and Blending Level 2 additive pair. Both lower
+        // to `lighter` (SkBlendMode::kPlus), which is the same lowering the
+        // scripted lane's `setMixBlendMode` uses and the same pair the IR's
+        // supported-blend table admits — so a design that adds light composites
+        // identically through the native tree and the scripted one. Level 2
+        // specifies plus-darker as a distinct multiplicative variant, but Skia
+        // and Chromium both ship kPlus for it, and mirroring them is nearer the
+        // authored intent than dropping the mode.
+        //
+        // Dropping them is not a subtle loss: `plus-lighter` is how a lit bar
+        // or a bloom ADDS light to what is behind it, so a normal-composited
+        // fallback paints the source colour flat and every glow goes dull.
+        {"plus-lighter", BlendMode::lighter},
+        {"plus-darker", BlendMode::lighter},
+    };
+    const auto it = kModes.find(keyword);
+    return it == kModes.end() ? std::nullopt
+                              : std::optional<BlendMode>(it->second);
+}
+
+std::optional<float> css_transform_rotation(const std::string& transform) {
+    if (transform.empty()) return std::nullopt;
+    constexpr std::string_view kRotate = "rotate(";
+    const auto open = transform.find(kRotate);
+    if (open == std::string::npos) return std::nullopt;
+    const auto argument = open + kRotate.size();
+    const auto close = transform.find(')', argument);
+    if (close == std::string::npos) return std::nullopt;
+    // A transform LIST is refused whole. `rotate(30deg) scale(2)` would apply
+    // the rotation to a box that already carries the scale, which is the
+    // double-application this parser's whole contract is about avoiding — and
+    // an element at the right angle and twice the size is harder to recognize
+    // as a transform bug than one that simply did not rotate.
+    const auto rest = transform.find_first_not_of(" \t", close + 1);
+    if (rest != std::string::npos) return std::nullopt;
+    if (transform.find_first_not_of(" \t") != open) return std::nullopt;
+
+    const char* begin = transform.c_str() + argument;
+    char* end = nullptr;
+    const float degrees = std::strtof(begin, &end);
+    if (end == begin) return std::nullopt;
+    // Computed style always serializes degrees, and both importers write
+    // `deg`. A `rad` / `turn` / `grad` authored value is refused rather than
+    // read as degrees, which would be off by a factor of 57.
+    std::string unit(static_cast<const char*>(end), transform.c_str() + close);
+    unit.erase(0, unit.find_first_not_of(" \t"));
+    while (!unit.empty() &&
+           std::isspace(static_cast<unsigned char>(unit.back())) != 0)
+        unit.pop_back();
+    if (!unit.empty() && unit != "deg") return std::nullopt;
+    return degrees;
+}
+
+}  // namespace pulp::view

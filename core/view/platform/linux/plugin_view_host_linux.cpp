@@ -22,6 +22,7 @@
 // CopyFromParent so colormap/depth match the parent.
 
 #include <pulp/view/plugin_view_host.hpp>
+#include <pulp/view/plugin_frame_renderer.hpp>  // shared with the Windows host
 #include <pulp/view/repaint_damage.hpp>  // compute_effective_damage (platform-free)
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/drag_drop.hpp>
@@ -67,7 +68,14 @@ namespace {
 
 class X11PluginViewHost : public PluginViewHost {
 public:
-    X11PluginViewHost(View& root, Size size) : root_(root), size_(size) {
+    X11PluginViewHost(View& root, const Options& options)
+        : root_(root), size_(options.size), options_(options) {
+#ifdef PULP_HAS_SKIA
+        // This host builds its surface in the constructor (unlike Windows,
+        // which must wait for reparenting), but the window between here and
+        // init_gpu() is still a legitimate "not yet" rather than "never".
+        mark_gpu_surface_pending();
+#endif
         // Our own X connection (proof-level). Xlib must be touched from a single
         // thread; this host is created and driven on the UI thread.
         display_ = XOpenDisplay(nullptr);
@@ -82,7 +90,7 @@ public:
         // DAW's editor window in attach_to_parent(). CopyFromParent matches the
         // parent's visual/depth/colormap.
         child_ = XCreateSimpleWindow(
-            display_, root_win, 0, 0, size.width, size.height, 0,
+            display_, root_win, 0, 0, size_.width, size_.height, 0,
             BlackPixel(display_, screen_), BlackPixel(display_, screen_));
         if (!child_) {
             runtime::log_warn("X11PluginViewHost: XCreateSimpleWindow failed");
@@ -98,15 +106,22 @@ public:
         XFlush(display_);
         scale_ = detect_dpi_scale(display_, screen_);
 #ifdef PULP_HAS_SKIA
-        init_gpu(static_cast<float>(size.width), static_cast<float>(size.height));
+        init_gpu(static_cast<float>(size_.width), static_cast<float>(size_.height));
+        // Fresh editor session: the recreate budget starts clean. Deliberately
+        // NOT inside init_gpu(), which the mid-session recreate path also
+        // calls — resetting there would let a surface that rebuilds cleanly but
+        // never presents recreate forever instead of falling back to raster.
+        if (gpu_surface_ && skia_surface_) frame_renderer_.note_surfaces_created();
 #endif
     }
 
     ~X11PluginViewHost() override {
         root_.set_plugin_view_host(nullptr);
 #ifdef PULP_HAS_SKIA
-        skia_surface_.reset();
-        gpu_surface_.reset();
+        // Publish the teardown before the surfaces die, so a consumer holding
+        // the raw pointer drops it here instead of on its next frame. This host
+        // is going away for good, hence `unavailable`.
+        release_gpu_surfaces(GpuSurfaceState::unavailable);
 #endif
         if (display_) {
             if (gc_) XFreeGC(display_, gc_);
@@ -296,6 +311,9 @@ public:
 private:
     View& root_;
     Size size_;        // LOGICAL (DPI-independent) size; layout coordinate space
+    // Presentation + diagnostics policy from the caller (WAH-13), shared
+    // verbatim with the Windows host.
+    Options options_{};
     Display* display_ = nullptr;
     int screen_ = 0;
     Window child_ = 0;
@@ -793,146 +811,108 @@ private:
     std::unique_ptr<render::GpuSurface> gpu_surface_;
     std::unique_ptr<render::SkiaSurface> skia_surface_;
     render::GpuSurface::X11NativeHandle x11_handle_{};
+    PluginFrameRenderer frame_renderer_;
+
+    // Tear the surface pair down and tell every consumer BEFORE the objects
+    // die. Same contract as the Windows host — consumers hold a raw
+    // GpuSurface*, so publishing after the reset would leave a window in which
+    // the pointer is dangling but still "current".
+    //
+    // `next_state` matters: `unavailable` is what the CPU-fallback diagnostic
+    // warns on, so a teardown that will rebuild must publish `pending`.
+    void release_gpu_surfaces(GpuSurfaceState next_state) {
+        publish_gpu_surface(nullptr, next_state);
+        skia_surface_.reset();
+        gpu_surface_.reset();
+    }
+
+    // Rebuild the surface pair in place after a drawable goes bad mid-session.
+    void recreate_gpu_surfaces() {
+        release_gpu_surfaces(GpuSurfaceState::pending);
+        init_gpu(static_cast<float>(size_.width),
+                 static_cast<float>(size_.height));
+    }
 
     void init_gpu(float width, float height) {
-        if (!display_ || !child_) return;
-        gpu_surface_ = render::GpuSurface::create_dawn();
-        if (!gpu_surface_) {
-            runtime::log_warn("X11PluginViewHost: gpu create_dawn failed; cpu raster only");
+        if (!display_ || !child_) {
+            publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
             return;
         }
         x11_handle_.display = display_;
         x11_handle_.window = static_cast<unsigned long>(child_);
-        render::GpuSurface::Config cfg{};
-        // GPU surface at PHYSICAL pixels (logical × scale); view tree stays
-        // logical.
-        cfg.width = pixel_w();
-        cfg.height = pixel_h();
-        cfg.native_surface_handle = &x11_handle_;  // typed X11 handle
-        if (!gpu_surface_->initialize(cfg)) {
-            runtime::log_warn("X11PluginViewHost: gpu initialize failed; cpu raster only");
-            gpu_surface_.reset();
+
+        FrameGeometry geometry = frame_geometry();
+        geometry.width = width;    // the caller may be mid-resize
+        geometry.height = height;
+        const char* env = std::getenv("PULP_PARTIAL_REPAINT");
+        auto surfaces = create_editor_surfaces(
+            &x11_handle_, geometry, options_.present_policy,
+            options_.enable_gpu_timing, env && env[0] == '1', "X11PluginViewHost");
+
+        partial_repaint_enabled_ = surfaces.partial_repaint;
+        gpu_surface_ = std::move(surfaces.gpu);
+        skia_surface_ = std::move(surfaces.skia);
+        if (!surfaces.ok()) {
+            publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
             return;
         }
-        render::SkiaSurface::Config scfg{};
-        scfg.width = static_cast<uint32_t>(width);   // LOGICAL
-        scfg.height = static_cast<uint32_t>(height);  // LOGICAL
-        scfg.scale_factor = scale_;
-        skia_surface_ = render::SkiaSurface::create(*gpu_surface_, scfg);
-        if (const char* env = std::getenv("PULP_PARTIAL_REPAINT"))
-            partial_repaint_enabled_ = (env[0] == '1');
-        // The swapchain does not preserve content between frames, so a clipped
-        // repaint needs a retained scene target; without one, never clip.
-        if (partial_repaint_enabled_ && skia_surface_ &&
-            !skia_surface_->set_persistent_scene(true))
-            partial_repaint_enabled_ = false;
+
         damage_.mark_full();  // a new surface has no previous frame to preserve
-        if (!skia_surface_) {
-            runtime::log_warn("X11PluginViewHost: skia surface create failed; cpu raster only");
-            gpu_surface_.reset();
-        }
+        publish_gpu_surface(gpu_surface_.get(), GpuSurfaceState::ready);
+    }
+
+    // The size/scale/viewport this frame paints against. Shared shape with the
+    // Windows host so both feed the same renderer.
+    FrameGeometry frame_geometry() const {
+        FrameGeometry g;
+        g.width = static_cast<float>(size_.width);
+        g.height = static_cast<float>(size_.height);
+        g.scale = scale_;
+        g.design_width = design_viewport_w_;
+        g.design_height = design_viewport_h_;
+        g.design_top_align = design_top_align_;
+        return g;
     }
 
     void paint_scene(canvas::Canvas& canvas, const Rect* clip = nullptr) {
-        // FU-2: clip the ENTIRE body, background fill included — everything
-        // outside the clip must stay the retained scene's previous pixels, so
-        // an unclipped background fill would erase them.
-        const int clip_save = canvas.save_count();
-        if (clip) {
-            canvas.save();
-            canvas.clip_rect(clip->x, clip->y, clip->width, clip->height);
-        }
-        const float w = static_cast<float>(size_.width);
-        const float h = static_cast<float>(size_.height);
-        canvas.set_fill_color(pulp::canvas::Color::rgba8(30, 30, 46));
-        canvas.fill_rect(0, 0, w, h);
-
-        float sx, sy, tx, ty;
-        const bool has_viewport =
-            design_viewport_w_ > 0.0f && design_viewport_h_ > 0.0f &&
-            WindowHost::compute_design_viewport_transform(
-                w, h, design_viewport_w_, design_viewport_h_, sx, sy, tx, ty,
-                design_top_align_);
-        if (has_viewport) {
-            root_.set_bounds({0, 0, design_viewport_w_, design_viewport_h_});
-            root_.layout_children();
-            const int saved = canvas.save_count();
-            canvas.save();
-            canvas.translate(tx, ty);
-            canvas.scale(sx, sy);
-            root_.paint_all(canvas);
-            View::paint_overlays(canvas, &root_);
-            canvas.restore_to_count(saved);
-        } else {
-            root_.set_bounds({0, 0, w, h});
-            root_.layout_children();
-            root_.paint_all(canvas);
-            View::paint_overlays(canvas, &root_);
-        }
-        if (clip) canvas.restore_to_count(clip_save);
+        paint_plugin_scene(canvas, root_, frame_geometry(), clip);
     }
 
     bool render_frame_gpu(std::vector<uint8_t>* cap, uint32_t* cap_w, uint32_t* cap_h) {
         if (!gpu_surface_ || !skia_surface_) return false;
-        if (idle_callback_) idle_callback_();
-        if (!gpu_surface_->begin_frame()) return false;
-        auto* canvas = skia_surface_->begin_frame();
-        if (!canvas) {
-            gpu_surface_->end_frame();
-            return false;
+
+        PluginFrameRenderer::Request request;
+        request.root = &root_;
+        request.geometry = frame_geometry();
+        request.partial_repaint = partial_repaint_enabled_;
+        request.idle = idle_callback_;
+        request.capture = cap;
+        request.capture_width = cap_w;
+        request.capture_height = cap_h;
+
+        const auto frame =
+            frame_renderer_.render(*gpu_surface_, *skia_surface_, damage_, request);
+
+        // Identical failure policy to the Windows host, because it is the same
+        // code. Only the native reaction differs (X11 has no InvalidateRect;
+        // the caller falls through to the raster path on a false return).
+        if (frame.should_recreate_surface) {
+            runtime::log_warn(
+                "X11PluginViewHost: frame did not reach the drawable "
+                "(attempt {} of {}); recreating GPU surfaces",
+                frame_renderer_.consecutive_recreates(),
+                PluginFrameRenderer::kMaxConsecutiveRecreates);
+            recreate_gpu_surfaces();
+        } else if (frame.gpu_path_exhausted) {
+            runtime::log_error(
+                "X11PluginViewHost: GPU presentation failed {} times in a row; "
+                "falling back to CPU raster for this editor",
+                PluginFrameRenderer::kMaxConsecutiveRecreates);
+            release_gpu_surfaces(GpuSurfaceState::unavailable);
         }
-        // Same damage decision as the Windows host: only clip when partial
-        // repaint is enabled, the pending damage is bounded, and the hazard
-        // model says a clipped repaint is pixel-identical to a full one.
-        // Skipped under a design viewport (letterbox scale+translate).
-        Rect clip_rect{};
-        const Rect* clip = nullptr;
-        if (partial_repaint_enabled_ && !pending_repaint_is_full() &&
-            has_pending_dirty_bounds()) {
-            const auto b = pending_dirty_bounds();
-            // Hazard model runs in ROOT space, where the damage was produced.
-            const auto decision = compute_effective_damage(root_, b, scale_);
-            if (!decision.full) {
-                clip_rect = decision.bounds;
-                // Map through the design-viewport letterbox transform: the clip
-                // is installed in SURFACE space, before paint applies
-                // translate(tx,ty)+scale(sx,sy). Plug-in editors always set a
-                // design viewport, so without this they could not use partial
-                // repaint at all.
-                float sx, sy, tx, ty;
-                if (design_viewport_w_ > 0.0f && design_viewport_h_ > 0.0f &&
-                    WindowHost::compute_design_viewport_transform(
-                        static_cast<float>(size_.width),
-                        static_cast<float>(size_.height),
-                        design_viewport_w_, design_viewport_h_,
-                        sx, sy, tx, ty, design_top_align_) &&
-                    sx > 0.0f && sy > 0.0f) {
-                    clip_rect = Rect{tx + clip_rect.x * sx,
-                                     ty + clip_rect.y * sy,
-                                     clip_rect.width * sx,
-                                     clip_rect.height * sy};
-                    const float x0 = std::floor(clip_rect.x);
-                    const float y0 = std::floor(clip_rect.y);
-                    clip_rect = Rect{x0, y0,
-                                     std::ceil(clip_rect.x + clip_rect.width) - x0,
-                                     std::ceil(clip_rect.y + clip_rect.height) - y0};
-                }
-                clip = &clip_rect;
-            }
-        }
-        paint_scene(*canvas, clip);
-        if (cap) {
-            // read_current_rgba finalizes + submits the open frame's recording
-            // before readback (see SkiaSurface contract), so no separate flush.
-            uint32_t pw = 0, ph = 0;
-            skia_surface_->read_current_rgba(*cap, pw, ph);
-            if (cap_w) *cap_w = pw;
-            if (cap_h) *cap_h = ph;
-        }
-        skia_surface_->end_frame();
-        gpu_surface_->end_frame();
-        clear_pending_dirty();  // frame painted + submitted
-        return true;
+
+        if (!frame.reached_output()) return false;
+        return cap ? frame.readback_ok : true;
     }
 
     // Render the scene to RGBA via pure Skia raster (no GPU). The buffer is
@@ -942,40 +922,33 @@ private:
     // matches the GPU surface's pixel resolution. out_w/out_h get the pixel
     // dims. Empty on failure.
     std::vector<uint8_t> raster_render(uint32_t* out_w, uint32_t* out_h) {
-        const uint32_t w = pixel_w(), h = pixel_h();
-        if (w == 0 || h == 0) return {};
         if (idle_callback_) idle_callback_();
-        auto cs = SkColorSpace::MakeSRGB();
-        SkImageInfo info = SkImageInfo::Make(w, h, kRGBA_8888_SkColorType,
-                                             kPremul_SkAlphaType, cs);
-        auto surface = SkSurfaces::Raster(info);
-        if (!surface) return {};
-        auto* sk_canvas = surface->getCanvas();
-        if (!sk_canvas) return {};
-        if (scale_ != 1.0f) sk_canvas->scale(scale_, scale_);
-        pulp::canvas::SkiaCanvas canvas(sk_canvas);
-        paint_scene(canvas);
-        std::vector<uint8_t> pixels(static_cast<size_t>(w) * h * 4u);
-        SkPixmap pixmap(info, pixels.data(), static_cast<size_t>(w) * 4u);
-        if (!surface->readPixels(pixmap, 0, 0)) return {};
-        if (out_w) *out_w = w;
-        if (out_h) *out_h = h;
-        return pixels;
+        return raster_plugin_scene_rgba(root_, frame_geometry(), out_w, out_h);
     }
 
     // Live CPU present: raster the scene, convert RGBA -> the X visual's pixel
     // format (assume 32-bit BGRX TrueColor, the common case), and XPutImage.
     void present_raster() {
+        // Same contract as the GPU path: consume the damage for this frame and
+        // put it back on any path that does not reach XPutImage, so a failed
+        // raster frame does not silently retire a region nobody presented.
+        const PendingDamage::Snapshot consumed = damage_.take();
         uint32_t w = 0, h = 0;
         auto rgba = raster_render(&w, &h);
-        if (rgba.empty()) return;
+        if (rgba.empty()) {
+            damage_.restore(consumed);
+            return;
+        }
 
         Visual* visual = DefaultVisual(display_, screen_);
         int depth = DefaultDepth(display_, screen_);
         // Build a 32-bit BGRA buffer for XImage (X expects BGRX on little-endian
         // TrueColor visuals). XDestroyImage frees this buffer.
         auto* buf = static_cast<char*>(malloc(static_cast<size_t>(w) * h * 4u));
-        if (!buf) return;
+        if (!buf) {
+            damage_.restore(consumed);
+            return;
+        }
         for (size_t i = 0; i < static_cast<size_t>(w) * h; ++i) {
             uint8_t r = rgba[i * 4 + 0], g = rgba[i * 4 + 1], b = rgba[i * 4 + 2];
             buf[i * 4 + 0] = static_cast<char>(b);
@@ -987,6 +960,7 @@ private:
                                    ZPixmap, 0, buf, w, h, 32, 0);
         if (!img) {
             free(buf);
+            damage_.restore(consumed);
             return;
         }
         XPutImage(display_, child_, gc_, img, 0, 0, 0, 0, w, h);
@@ -994,20 +968,6 @@ private:
         XDestroyImage(img);  // frees buf
     }
 
-    static std::vector<uint8_t> encode_rgba_png(const std::vector<uint8_t>& rgba,
-                                                uint32_t w, uint32_t h) {
-        if (rgba.empty() || w == 0 || h == 0) return {};
-        SkImageInfo info = SkImageInfo::Make(w, h, kRGBA_8888_SkColorType,
-                                             kPremul_SkAlphaType,
-                                             SkColorSpace::MakeSRGB());
-        SkPixmap pixmap(info, rgba.data(), static_cast<size_t>(w) * 4u);
-        // 2-arg pixmap overload returns sk_sp<SkData> (the 3-arg SkWStream*
-        // overload returns bool).
-        sk_sp<SkData> png = SkPngEncoder::Encode(pixmap, SkPngEncoder::Options{});
-        if (!png || png->isEmpty()) return {};
-        const auto* p = static_cast<const uint8_t*>(png->data());
-        return std::vector<uint8_t>(p, p + png->size());
-    }
 #endif  // PULP_HAS_SKIA
 };
 
@@ -1023,7 +983,7 @@ void register_platform_plugin_view_host() {
         PluginViewHost::set_factory(
             [](View& root, const PluginViewHost::Options& opts)
                 -> std::unique_ptr<PluginViewHost> {
-                return std::make_unique<X11PluginViewHost>(root, opts.size);
+                return std::make_unique<X11PluginViewHost>(root, opts);
             });
     });
 }

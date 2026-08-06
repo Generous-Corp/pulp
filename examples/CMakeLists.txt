@@ -3,10 +3,9 @@
 
 # A designated initializer whose fields are out of declaration order is a hard
 # ERROR under GCC (ISO C++), but Clang only WARNS and builds on. So a reordered
-# `.field` init in an example compiles clean on a macOS/Clang dev box and on the
-# macOS CI legs, then breaks BOTH Linux legs of the release build — where the
-# example is compiled only by release-cli.yml (the required PR gate builds with
-# PULP_BUILD_EXAMPLES=OFF). That asymmetry once shipped an unpublishable tag.
+# `.field` init in an example can compile clean on a macOS/Clang dev box and then
+# break a Linux release build. The path-filtered example-validation workflow now
+# builds the example target aggregate on Linux and macOS before release.
 #
 # Promote the diagnostic to an error under Clang so it fails here, early and on
 # every compiler, exactly as GCC already does. Scoped to the example targets in
@@ -24,6 +23,9 @@ endif()
 
 # PulpGain: minimal gain effect plugin
 add_subdirectory(pulp-gain)
+add_subdirectory(design-panel-plugin)
+add_subdirectory(design-panel-instrument)
+add_subdirectory(design-panel-midi-effect)
 add_subdirectory(eq-curve-demo)
 
 # PulpRustGain — a Rust DSP core packaged as a CLAP plugin (native-components
@@ -41,6 +43,8 @@ add_subdirectory(pulp-tone)
 
 # PulpEffect: filter with parameters and state
 add_subdirectory(pulp-effect)
+# Pulp Delay: stereo character delay with tempo and in-loop tone controls
+add_subdirectory(pulp-delay)
 # Combined-bundle demo: ONE binary per format exposing TWO plugins via
 # pulp_add_plugin_bundle() (multi-plugin packaging surface).
 add_subdirectory(combined-bundle-demo)
@@ -85,6 +89,9 @@ add_subdirectory(PulpDrums)
 
 # StepSequencer: synth-class step sequencer (UI <-> channel <-> Processor proof)
 add_subdirectory(StepSequencer)
+
+# TimelinePluginProof: DocumentSession <-> editor host <-> plugin-state proof
+add_subdirectory(timeline-plugin-proof)
 
 # Phase-1 Creative Timeline Engine proofs. These are desktop/headless adapters
 # over pulp::host, which is intentionally unavailable in the iOS build.
@@ -261,4 +268,17 @@ endif()
 # developer-supplied Rack SDK, which is GPLv3 and never vendored here.
 if(PULP_HAS_RACK)
     add_subdirectory(forge-modular)
+endif()
+
+# A named aggregate lets CI compile every example-owned artifact without also
+# building the unrelated core-test tree or custom install/utility targets.
+include("${PULP_ROOT_DIR}/tools/cmake/PulpCollectTargets.cmake")
+pulp_collect_targets_recursive(
+    pulp_example_targets
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    TYPES EXECUTABLE STATIC_LIBRARY SHARED_LIBRARY MODULE_LIBRARY OBJECT_LIBRARY
+)
+add_custom_target(pulp-examples-all)
+if(pulp_example_targets)
+    add_dependencies(pulp-examples-all ${pulp_example_targets})
 endif()

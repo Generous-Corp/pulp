@@ -219,6 +219,12 @@ Key rules, each learned the hard way:
 
 Tests: `test/test_plugin_registry.cpp` (portable registry contract) and `test/test_au_bundle_entry.cpp` (two `aumf` plugins in one binary via the macros; asserts the mismatched-`.factory` override).
 
+### Every plugin needs its OWN `PLUGIN_CODE` — the build now enforces it
+
+macOS keys the AudioComponent registry on the **(type, subtype, manufacturer)** triple. Two plugins in one project that share `PLUGIN_CODE` are therefore ONE component to a host: only one can ever load, and which one is undefined. The same pair also names the Cocoa view-factory ObjC class (`PulpAUCocoaViewFactory_<mfr>_<code>`), so a duplicate puts two implementations of one ObjC class into any process that loads both — a shipping product family is exactly that process.
+
+`_pulp_metadata_claim_au_component` (tools/cmake/PulpPluginMetadata.cmake) claims the triple per target at configure time and fails naming the conflicting target. Re-claiming from the SAME target is legal, so `FORMATS AU AUv3` on one plugin is fine — one plugin publishes one identity. Pinned by `test/cmake/test_au_v2_type_selection.cmake`.
+
 ## Recent changes
 
 ### Param-events sidecar + RT-safety guard
@@ -553,6 +559,11 @@ main thread, behind the `logic_au_v2_container_resize` host quirk. Do not enable
 that hierarchy mutation for GarageBand or an unverified AU host merely because
 it also embeds the returned NSView.
 
+The Cocoa view builds its `ViewBridge` from
+`ViewBridge::Options::hosted_editor()` — never a hand-assembled `Options`; a
+structural test enforces that every hosted adapter uses the factory. See the
+`view-bridge` skill.
+
 The transaction publishes the proposed `ViewBridge` preferred size before the
 native resize because Logic may synchronously query the Audio Unit during the
 frame change. It commits the design viewport only when both the returned editor
@@ -719,6 +730,25 @@ plugin whose UI uses Three.js or raw WebGPU JS renders black — the JS
 shim silently falls back to mocks. See the `view-bridge` skill's
 "GpuSurface plumbing into WidgetBridge" section for the cross-platform
 contract.
+
+**Updated (WAH-1): subscribe, do not sample.** The one-shot
+`attach_gpu_surface(host->gpu_surface())` read this section used to
+describe is GONE. It only worked on hosts that build their surface in
+the constructor; the Windows host creates its Dawn surface inside
+`attach_to_parent()`, so the read returned `nullptr` forever and every
+Windows editor fell back to mock WebGPU. Adapters now call the shared
+helper once:
+
+```cpp
+gpu_surface_binding_ = bind_gpu_surface(*host, bridge->scripted_ui(),
+                                        gpu_decision, "AU v2");
+```
+
+It follows `PluginViewHost::observe_gpu_surface()`, forwards creation
+AND teardown into the session, and owns the CPU-fallback diagnostic
+(which no longer fires on a pre-attach `pending` state). Reset the
+returned subscription in the editor-close path, before the bridge that
+owns the session is destroyed.
 
 ## Host-quirks consumption
 
@@ -950,3 +980,45 @@ All three AU v2 classes own a `state_restore_gate_` and gate their render:
 
 If you add a new AU v2 class, give it a gate and pass it to
 `restore_pulp_state()`; the parameter is not optional.
+
+### Tracing attaches for this format now (WAH-4)
+
+Perfetto tracing used to be wired into **VST3 only**. A capture of a AU v2
+session recorded nothing while `Tracing`'s API described itself as
+process-global — so an empty `.pftrace` looked like an environment problem
+rather than a missing call.
+
+This adapter now holds a `runtime::ScopedTracingAttachment` (`PulpAUEffect::tracing_`). Two
+things follow:
+
+- **It is RAII, not a hand-balanced attach/detach pair.** A leaked attachment
+  is not benign: the `.pftrace` is only written by the FINAL detach, so one
+  unbalanced instance means the capture silently produces nothing.
+- **Declaration order is load-bearing.** It must outlive every span this
+  instance can emit, so it is declared to destroy LAST. The final detach also
+  cancels and JOINS the auto-flush timer, which is what makes plug-in module
+  unload safe — a detached timer thread that wakes after `FreeLibrary` /
+  `dlclose` runs freed code.
+
+No-op unless the build is configured `PULP_TRACING=ON`.
+
+### A publish-race test must bound its own wait
+
+`test_au_v2_effect.cpp` proves the MIDI-output callback pair publishes
+atomically: a reader thread snapshots `(callback, userdata)` while a writer
+republishes 200k times, and the test asserts the reader never saw a crossed
+pair. That assertion is only meaningful if the reader actually read, so the
+test waits for `reads` to reach a floor before stopping it.
+
+Bound that wait. An unbounded `while (reads < N) {}` closes the flake — a
+loaded host can otherwise spend the entire writer loop before the reader is
+scheduled, leaving `reads == 0` — but it replaces the flake with a **hang**:
+if the publish path genuinely stopped handing the reader a value, the loop
+never exits and the suite parks instead of reporting. Removing the reader's
+counter increment ran the unbounded version past a 30s cap with no verdict;
+the deadline-bounded form (`pulp::test::wait_for_condition`, in
+`test/support/thread_progress.hpp`) fails the REQUIRE in ~10s.
+
+The rule generalizes to any adapter test asserting a worker thread reached a
+specific call: wait for the outcome, never for a fixed budget, and always
+under a deadline.

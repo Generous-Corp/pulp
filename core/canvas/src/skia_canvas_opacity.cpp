@@ -170,15 +170,25 @@ void SkiaCanvas::save_layer_with_bloom(float x, float y, float w, float h,
 // The `opacity()` filter function affects the layer alpha rather than
 // a color matrix (matches how CSS treats it — multiplicative on the
 // already-composited layer).
-void SkiaCanvas::save_layer_with_filters(float x, float y, float w, float h,
-                                          float opacity,
-                                          const FilterChainEntry* chain,
-                                          int count) {
-    if (!canvas_) { save(); return; }
-
-    // Walk the chain. Build a single composed image filter per CSS
-    // semantics: filters are applied in source order, so chain[0] is
-    // the inner-most input to chain[1], etc.
+// One composed SkImageFilter for a CSS filter list, shared by the element
+// layer (`filter`) and the backdrop layer (`backdrop-filter`) so the two
+// cannot drift into disagreeing about what `saturate(0.15)` means.
+//
+// `reduces_coverage` reports whether the chain can drive the layer's
+// destination below full opacity even when the layer's own alpha is 1 — a
+// `Kind::opacity` entry reduces alpha via a colour matrix INSIDE the composed
+// filter, and drop-shadow adds partially-transparent pixels. Text painted into
+// such a layer needs greyscale AA rather than LCD subpixel, same as a plain
+// opacity layer; without it, glyphs inside `filter: opacity(0.5)` render
+// LCD-fringed while plain `opacity: 0.5` is correct. Only the element layer
+// consumes it — a backdrop layer's own contents are drawn after the filter has
+// already been applied to the surface behind them.
+static sk_sp<SkImageFilter> compose_css_filter_chain(
+    const Canvas::FilterChainEntry* chain, int count,
+    bool& reduces_coverage) {
+    using FilterChainEntry = Canvas::FilterChainEntry;
+    // Filters apply in source order, so chain[0] is the inner-most input to
+    // chain[1], and so on.
     sk_sp<SkImageFilter> composed;
     auto compose = [&composed](sk_sp<SkImageFilter> next) {
         if (!next) return;
@@ -186,16 +196,7 @@ void SkiaCanvas::save_layer_with_filters(float x, float y, float w, float h,
             ? SkImageFilters::Compose(std::move(next), std::move(composed))
             : std::move(next);
     };
-
-    // A filter chain can drive the layer's destination below full opacity even
-    // when the `opacity` parameter is 1 — a `Kind::opacity` entry reduces alpha
-    // via a color matrix INSIDE the composed filter, and drop-shadow adds
-    // partially-transparent pixels. Text painted into such a layer needs
-    // greyscale AA (not LCD subpixel), same as a plain opacity layer. Track it
-    // so push_layer marks the layer non-opaque. Without this, glyphs inside
-    // `filter: opacity(0.5)` render LCD-fringed while plain `opacity: 0.5` is
-    // correct.
-    bool reduces_coverage = false;
+    reduces_coverage = false;
 
     for (int i = 0; i < count; ++i) {
         const FilterChainEntry& f = chain[i];
@@ -376,7 +377,16 @@ void SkiaCanvas::save_layer_with_filters(float x, float y, float w, float h,
             }
         }
     }
+    return composed;
+}
 
+void SkiaCanvas::save_layer_with_filters(float x, float y, float w, float h,
+                                          float opacity,
+                                          const FilterChainEntry* chain,
+                                          int count) {
+    if (!canvas_) { save(); return; }
+    bool reduces_coverage = false;
+    auto composed = compose_css_filter_chain(chain, count, reduces_coverage);
     push_layer(x, y, w, h, opacity, /*blur=*/0.0f, Canvas::BlendMode::normal,
                std::move(composed), /*force_non_opaque=*/reduces_coverage);
 }
@@ -456,8 +466,46 @@ void SkiaCanvas::save_backdrop_filter(float x, float y, float w, float h,
     }
 
     SkRect bounds = SkRect::MakeXYWH(x, y, w, h);
+    // Crop the blur to the node's own rect. Without it the filter samples and
+    // writes outside those bounds — a frosted deck at the bottom of a panel
+    // smeared the title at the top, and the reach grew with the radius, which
+    // is what identified it. `backdrop-filter` must affect what is behind THIS
+    // element and nothing else.
     auto backdrop = SkImageFilters::Blur(blur_radius, blur_radius,
-                                         SkTileMode::kClamp, nullptr);
+                                         SkTileMode::kClamp, nullptr, &bounds);
+
+    SkCanvas::SaveLayerRec rec(&bounds, /*paint=*/nullptr, backdrop.get(), 0);
+    canvas_->saveLayer(rec);
+}
+
+void SkiaCanvas::save_backdrop_filter_chain(float x, float y, float w, float h,
+                                            const FilterChainEntry* chain,
+                                            int count) {
+    // `backdrop-filter` beyond blur — `saturate()`, `brightness()`, `invert()`,
+    // and any composition of them. Structurally identical to the blur case: the
+    // composed filter becomes the layer's backdrop, so the layer opens holding
+    // the parent surface already filtered.
+    if (!canvas_) { save(); return; }
+
+    SkRect bounds = SkRect::MakeXYWH(x, y, w, h);
+    bool reduces_coverage = false;
+    auto backdrop = compose_css_filter_chain(chain, count, reduces_coverage);
+    // Confine the WHOLE chain to the element's own rect, not just its blur. A
+    // backdrop filter reads the surface behind this element and must write
+    // nowhere else — and a colour matrix with a non-zero translation column
+    // (invert, contrast, sepia) reports UNBOUNDED output, so saveLayer treats
+    // its bounds argument as a hint and grows the layer to the device clip.
+    // The filtered result then composites over everything already painted,
+    // which reads as the whole panel flooding with one colour.
+    if (backdrop) backdrop = SkImageFilters::Crop(bounds, std::move(backdrop));
+    if (!backdrop) {
+        // Nothing in the list this backend can express — a list of no-ops, or
+        // one that parsed to nothing. A plain save() keeps the restore()
+        // balanced and leaves the backdrop untouched, which is the honest
+        // answer: an unfiltered backdrop rather than a wrongly filtered one.
+        canvas_->save();
+        return;
+    }
 
     SkCanvas::SaveLayerRec rec(&bounds, /*paint=*/nullptr, backdrop.get(), 0);
     canvas_->saveLayer(rec);

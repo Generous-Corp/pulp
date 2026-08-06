@@ -148,6 +148,7 @@ it through the governor), not the machine's core count.
 ./build/pulp version             # show SDK and project version
 ./build/pulp version bump patch  # bump version
 ./build/pulp version check       # verify version consistency
+./build/pulp forge catalog export --json  # emit selected-SDK Forge metadata
 ./build/pulp sdk install --local --profile forge-dev --print-path
                                 # immutable arm64 SDK for local Forge iteration
                                 # Forge configure must opt in; ship/release refuses it
@@ -311,7 +312,7 @@ deliberate call: hosting a **commercial competitor's** plugin and iterating a
 model until it matches — plugin EULAs commonly forbid reverse
 engineering/benchmarking (hardware carries no such clause), and an automated
 "iterate until it matches product X" loop drifts from measuring a fact toward
-producing a derivative. Hold the repo's clean-room line.
+producing a derivative. Hold the repo's independent line.
 
 Non-obvious things that cost real time when you don't know them:
 
@@ -597,18 +598,51 @@ If an exploration doesn't work out, delete the worktree. No trace in main. No em
 
 Use git worktrees aggressively for parallel development:
 
+Full Pulp worktrees and their build directories are not temporary-file-sized:
+**never put them under `/tmp` or `/private/tmp`**. Use
+`PULP_WORKTREES_ROOT` when the host declares it; otherwise use a sibling of the
+primary checkout as shown below. This is a per-machine storage decision:
+
+- M3 (`Daniels-Mac-Studio`) must declare
+  `PULP_WORKTREES_ROOT=/Volumes/Workshop/Code/agent-worktrees`. Stop rather than
+  falling back if that volume or declaration is unavailable. M3 keeps code,
+  builds, and Tart VMs on Workshop so its internal boot disk cannot fill.
+- M1 and M5 intentionally use their internal disk, so a sibling of the primary
+  checkout remains their default.
+
+Before creating parallel lanes, report the resolved root and current free
+space. Do not move an active worktree; let its build finish, capture its git
+state/results, then remove that worktree through `git worktree remove`.
+
 ```bash
+# M3: exported persistently by the host; M1/M5: sibling default.
+if [ "$(hostname -s)" = "Daniels-Mac-Studio" ]; then
+  : "${PULP_WORKTREES_ROOT:?M3 requires PULP_WORKTREES_ROOT=/Volumes/Workshop/Code/agent-worktrees}"
+  [ "$PULP_WORKTREES_ROOT" = "/Volumes/Workshop/Code/agent-worktrees" ] || {
+    echo "M3 worktree root must be /Volumes/Workshop/Code/agent-worktrees" >&2
+    exit 1
+  }
+  mount | grep -F " on /Volumes/Workshop (" >/dev/null || {
+    echo "Workshop is not mounted; refusing to create an internal-disk fallback" >&2
+    exit 1
+  }
+else
+  PULP_WORKTREES_ROOT="${PULP_WORKTREES_ROOT:-$(dirname "$(git rev-parse --show-toplevel)")}"
+fi
+mkdir -p "$PULP_WORKTREES_ROOT"
+df -h "$PULP_WORKTREES_ROOT"
+
 # Create exploration worktree
-git worktree add ../pulp-explore-render explore/render-engine
+git worktree add "$PULP_WORKTREES_ROOT/pulp-explore-render" explore/render-engine
 
 # Create phase implementation worktree
-git worktree add ../pulp-phase-audio phase/audio-io
+git worktree add "$PULP_WORKTREES_ROOT/pulp-phase-audio" phase/audio-io
 
 # List active worktrees
 git worktree list
 
 # Clean up after landing
-git worktree remove ../pulp-phase-audio
+git worktree remove "$PULP_WORKTREES_ROOT/pulp-phase-audio"
 ```
 
 Multiple explorations can run simultaneously. Multiple phases can be implemented in parallel if they don't share subsystems. The worktree-manager plugin handles this.
@@ -788,6 +822,14 @@ Reach for the tool whose *use when* matches your need; open its `skill`
 for the real guidance. If nothing here fits, say so — then hand-roll.
 
 **visual-compare** — compare a render against its source / a baseline
+- Regression-guard the native design path — run it after touching capture, lowering or paint. → `tools/import-validation/check_agent_panel_invariants.py`
+  - ⚠ **Cannot see:** Skips rather than fails without the importer or a design pack, so a green run is only meaningful if it printed PASS lines. A skip is not a pass.
+- Assert named elements are present in a rendered panel rather than eyeballing a screenshot. → `tools/import-validation/check_panel_presence.py`
+  - ⚠ **Cannot see:** Presence is not correctness — an element can be present, misplaced and unreadable.
+- Prove each hop of the agent-HTML -> Chromium -> DesignIR pipeline actually ran, before trusting any fidelity number from the same panel. → `tools/import-validation/check_pipeline_stages.py`
+  - ⚠ **Cannot see:** Asserts MECHANISM, not quality. A panel can pass every stage and still render badly — that is score-native-panel's job. Conversely a high similarity score says nothing about whether Chromium ran at all, which is exactly the confusion this exists to end.
+- Get Chrome's own answer for a CSS gradient when the native paint disagrees. → `tools/import-validation/chrome_gradient_oracle.py`
+  - ⚠ **Cannot see:** Needs a local Chrome, like the rest of the browser-capture lane. The oracle is Chrome's interpretation, which is the target here but is not the CSS spec.
 - Get one similarity score + verdict BEFORE showing the user any native screenshot. → `tools/import-validation/diff_against_reference.py`
   - ⚠ **Cannot see:** POSITION-BLIND. The score is histogram cosine similarity (gross colour distribution), so a design with every element in the wrong place scores identically to a correct one — same pixels, different arrangement. It catches obviously-broken only. Never read a high score as 'laid out right'; that is layout-parity's job.
 - A whole-image score is hiding a broken sub-region (empty canvas, broken chrome). → `tools/import-validation/diff_against_reference_regions.py`
@@ -798,6 +840,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Exact-pixel differencing across two DIFFERENT rasterizers, so anti-aliasing and sub-pixel placement register as real differences. Its ranking finds where to LOOK; it does not adjudicate right vs wrong. A busy diff can be a faithful import.
 - Prove an importer change didn't silently regress a design that already imported correctly. → `tools/import-validation/golden_regression.py`
   - ⚠ **Cannot see:** Compares against OUR OWN prior render, never the design. It is change-detection, not fidelity — a baseline captured while the import was wrong stays green forever, and every bug found on 2026-07-16 would have passed it. Use it to prove you changed nothing you did not mean to; never to prove the import is right.
+- Measure whether the offline/native HTML importer is converging on Chromium without changing canonical import output. → `tools/import-validation/importer_differential_lab.py analyze-corpus`
+  - ⚠ **Cannot see:** Development-only and advisory. Chromium remains authoritative, production native promotion is disabled, and the checked-in fixtures calibrate the lenses rather than proving general web equivalence.
 - An import "looks off" and you need the NODE and the exact pixel delta, not a score. → `tools/import-design/layout_parity.py`
   - ⚠ **Cannot see:** BOXES only, never the ink inside them. It went GREEN on a change that displaced glyph ink within correct boxes — a clean run means the boxes are right, never that the render is. For material (colour/opacity/gradients/shadows) nothing here helps; look at pixels.
 - An import renders "wrong" but nothing failed, and you need to know whether a declared material property (stroke, shadow, blend, corner radius) reached the render at all. Run it FIRST on any fidelity complaint — it is deterministic, needs no reference image, and answers "was it dropped?" before you spend time on "is it drawn right?". → `tools/import-design/material_audit.mjs`
@@ -806,10 +850,22 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Nothing — it renders no verdict at all. Building a montage is not verifying one; a montage nobody looked at is decoration. It is the instrument of last resort precisely because a human is the only thing that reads it.
 - Render an import at the design's OWN canvas size (a mismatched size voids every score). → `tools/scripts/render-figma-import.sh`
   - ⚠ **Cannot see:** It renders; it judges nothing. Producing a render is not evidence about it — the render is the INPUT every checker above reads, and each of those has its own blind spot. Its one real guarantee is size fidelity; render at any other size and every score downstream is measuring a reshaped design.
+- Iterate on the RENDERER against real generated markup without paying for a model call each round. → `tools/import-validation/replay-agent-panel.sh`
+  - ⚠ **Cannot see:** Needs a design pack for the fixture's stylesheet and fonts; without one the page imports unstyled and every number is meaningless. Says so rather than scoring.
+- Attribute a natively rendered panel's failing pixels to the nodes that own them, against the Chromium capture that is its oracle. → `tools/import-validation/score_native_panel.py`
+  - ⚠ **Cannot see:** A blank render scores WELL against a dark design, so the area-weighted number is not a fidelity measure without a companion coverage statistic; per-node scores are not yet usable as a gate.
 - Triage an import's GROSS colour against Figma's own raster, offline, with no API call. Advisory only — never a gate. → `tools/import-design/thumb_parity.py`
   - ⚠ **Cannot see:** MATERIAL-BLIND by construction. It compares block MEANS, so it cannot see any error that preserves a region's mean — a flattened gradient matches its own mean exactly, 20%-vs-100% white thin strokes average out, a soft shadow on a dark panel vanishes. At ~0.4x it also cannot resolve features under ~3 design px. For geometry use layout-parity; for material survival use the material audit.
+- Prove the emitted ui.js artifact renders like the importer output it claims to ship. → `tools/import-validation/verify_rendered_panel.py`
+  - ⚠ **Cannot see:** Compares the emitted artifact to the importer's DesignIR render, not to a browser capture; it does not prove browser fidelity, and --skip-colour-check deliberately omits palette enforcement.
 
 **design-import** — get a design into Pulp
+- Check agent-authored panel HTML before importing it — the one entry point that runs all three contract gates. → `tools/import-design/check_contracts.py`
+  - ⚠ **Cannot see:** Static text analysis, so it proves the markup keeps its side of the contract — never that the panel renders well. It is deliberately the check a pixel diff CANNOT make: a meter authored with invented children draws the same empty box in the browser and in Skia, so an A/B comparison scores it 100% identical and PASS while the control is dead. Without --macros the macro contract is SKIPPED (and says so) — a green run that checked two gates of three.
+- A render matches its reference pixel for pixel and still reads wrong — a screaming accent, a label you cannot read. Pixel comparison scores agreement with the source, so a palette defect the source already had survives every visual gate. → `tools/import-validation/check_palette_health.py (--tokens`
+  - ⚠ **Cannot see:** Judges declared token values, which are an upper bound — anything composited under the type (shadow, accent bloom) only lowers real contrast. parse_color has no color-mix()/relative-color support, so a token defined that way is skipped rather than judged; ink-signal's light --accent is one, and the emitted note names --accent-text as the unresolvable token rather than the --accent it failed on.
+- Catch a panel that invents component classes or child parts the design system never defined. → `tools/import-design/component_contract.py`
+  - ⚠ **Cannot see:** Derives the contract from CSS rules, so a component nothing styles is a component it cannot police. Commented-out rules deliberately do not license a class.
 - Decode a local .fig file offline — no Figma desktop, no REST quota. → `tools/import-design/fig_decode.mjs emit`
 - A vector ILLUSTRATION group imported as a flat stack of boxes instead of art. → `tools/import-design/figma_rasterize_vector_frames.py`
 - Pull a Figma frame headlessly (CI) — the LAST resort; local lanes have no rate limit. → `tools/import-design/figma_rest_export.py`
@@ -873,6 +929,40 @@ What "CI green is enough" cost us on 2026-04-16: a UMP-cursor-advance P1 bug (`#
 
 **The only acceptable "no test in this PR" justification** is: pre-existing historical coverage gap in a subsystem you are not modifying. In that case, file a follow-up issue linked to `#290` and reference it in the commit trailer. Anything else — ship the test.
 
+### Confirm the failure — a green test proves nothing on its own
+
+A test that passes may be asserting the same thing the code assumes, or never
+reaching the code at all. Before believing a new test covers its fix, **break the
+fix and watch that test fail.** This has repeatedly caught tests that could not
+fail: a guard that skips its check when the thing it needs is absent, an
+assertion that restates the code's own assumption, a probe whose inputs never
+reach the changed path.
+
+Run that loop with **`tools/scripts/confirm_failure.sh`** rather than by hand:
+
+```bash
+tools/scripts/confirm_failure.sh \
+  --file core/midi/include/pulp/midi/synthesiser.hpp \
+  --break "perl -0pi -e 's/policy\.priority/0/'" \
+  --build-dir build --target pulp-test-synthesiser \
+  --test ./build/test/pulp-test-synthesiser
+# 0 CONFIRMED · 1 NOT CONFIRMED (the test does not cover it) · 2 INCONCLUSIVE
+```
+
+**Do not run it by hand with `cp`/`.bak` and `touch`.** Restoring or editing a
+source and rebuilding within the same filesystem second leaves make comparing
+equal mtimes, so the object is judged current and the binary keeps the OLD code —
+`touch` does not reliably fix this, because the touch lands in the same second.
+Both directions give a wrong answer, and the quiet one is worse: a stale object
+during the *break* step makes the control falsely pass, which reads as "my test
+does not cover this" and sends you off to rewrite a test that was already fine.
+The script restores through git, deletes the objects, and refuses to report a
+verdict unless it observed the recompile in the build log. `"Built target"` is
+not evidence; a compile line for your file is.
+
+Its own coverage is `tools/scripts/test_confirm_failure.sh`, registered as the
+`confirm-failure-harness` ctest so it is executed rather than merely present.
+
 **Test hygiene:**
 
 - Catch2 tag names cannot contain `#` (reserved). Use `[issue-NNN]` not `[#NNN]`.
@@ -900,13 +990,23 @@ What "CI green is enough" cost us on 2026-04-16: a UMP-cursor-advance P1 bug (`#
 Not every test runs on the per-PR required gate. Tests route by CTest `LABELS`:
 `slow` (long, e.g. iOS try-compile) and `validation` (the **example** plugins'
 real-host `pluginval`/`auval`/`clap-dlopen` validators — the only users of that
-label) are **excluded** from the required gate and enforced elsewhere. Example
-*compile* is still gated (the gate builds `PULP_BUILD_EXAMPLES=ON`); example
-runtime *validation* runs on the path-filtered `example-validation` lane (blocks
-PRs that touch `examples/**`) and nightly. Before moving any test off the required
-gate by labeling it `slow`/`validation`, confirm something still enforces it — the
-nightly is an informational backstop, not a gate. Full model, label taxonomy, and
-how to add tests: **[docs/guides/test-lanes.md](docs/guides/test-lanes.md)**.
+label) are **excluded** from the required gate. They are reported by the
+advisory `example-validation` lane and do not block until that context is
+promoted to required.
+`build.yml`'s required `macos` Actions job configures examples OFF. Shipyard's
+separate `[validation.default]` remains blocking and deliberately keeps
+`PULP_BUILD_EXAMPLES=ON` until the path-filtered `example-validation` context is
+promoted to a required check. That dedicated lane compiles
+the full examples tree on Linux and compiles plus runs the available hosted
+validators on macOS (auval and built-in CLAP dlopen checks; pluginval and
+clap-validator require an operator-dispatched advisory image);
+it reports on relevant example, the state/format headers and core CMake source
+lists they depend on, and shared dependency PRs, but remains advisory until
+promoted into `required_status_checks`. Before moving any
+test off the required gate by labeling it `slow`/`validation`, confirm something
+still enforces it — the nightly is an informational backstop, not a gate. Full
+model, label taxonomy, and how to add tests:
+**[docs/guides/test-lanes.md](docs/guides/test-lanes.md)**.
 
 ### Automated Testing Process
 
@@ -1093,12 +1193,12 @@ Shipyard is pinned in `tools/shipyard.toml` and auto-discovers Pulp's `tools/scr
 
 | Trailer                                                                                  |
 |------------------------------------------------------------------------------------------|
-| `Reference-Lineage: cleanroom reproducer=#<issue> docs=<url>`                           |
+| `Reference-Lineage: independent reproducer=#<issue> docs=<url>`                           |
 
 DAW-quirk fixes must be reached independently from host vendor docs + a
 reproducer Pulp issue — never by transcribing the reference framework's
 workaround. The trailer is the audit trail that proves the
-implementation is clean-room. See
+implementation is independent. See
 `planning/2026-05-24-daw-host-quirks-inheritance.md` for the
 license-hygiene contract and the catalog of accommodations the
 HostQuirks struct dispatches.
@@ -1303,7 +1403,8 @@ tools/scripts/clean_build_cov.sh          # dry-run: list + total reclaimable
 tools/scripts/clean_build_cov.sh --yes    # delete (idle-gated; skips an in-flight build)
 ```
 
-It only ever removes dirs literally named `build-cov` / `build-coverage` (never
+It only ever removes dirs named `build-cov` / `build-coverage` or their
+hyphen-suffixed variants such as `build-cov-phase6-gpu` (never
 a source tree or the primary `build/`), scans sibling worktrees by default
 (override with `PULP_WORKTREES_ROOT`), and skips any coverage dir a live build
 process is using. Tested by `tools/scripts/test_clean_build_cov.py`.
@@ -1365,9 +1466,10 @@ RepoPrompt's `context_builder`, `file_search`, and `get_code_structure` read fil
 git fetch origin main
 git log --oneline origin/main | head -10
 
-# For thorough exploration, create a fresh worktree from origin/main
-git worktree add /tmp/pulp-audit origin/main
-# Then point all searches at /tmp/pulp-audit, NOT the main repo dir
+# For thorough exploration, create a fresh worktree from origin/main. Resolve
+# PULP_WORKTREES_ROOT using the host policy under "Parallel Work via Worktrees".
+git worktree add "$PULP_WORKTREES_ROOT/pulp-audit" origin/main
+# Then point all searches at that fresh worktree, NOT the main repo dir
 ```
 
 **Never trust "file not found" from RepoPrompt without checking which branch you're on.** Multiple worktrees (feature branches, depth-pass branches, etc.) can cause RepoPrompt to explore the wrong code.
@@ -1531,6 +1633,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | Skill | Purpose |
 |-------|---------|
 | `aax` | Optional AAX format: developer-supplied Avid SDK, CMake enablement, DigiShell/AAX Validator workflows |
+| `ableton-link` | Optional desktop Link tempo sync: developer-supplied SDK, licensing boundary, realtime host-time mapping, loud-SKIP validation |
 | `android` | Android NDK builds, Oboe audio, Dawn/Skia GPU, JNI bridge, emulator smoke, platform gotchas |
 | `ara` | Optional ARA support: developer-supplied SDK, companion APIs, adapter wiring, validation |
 | `audio-harness` | Prove/debug what a Processor emits: signal generators, metrics, assertions, RenderScenario, contracts + offline Audio Doctor (response, THD, group delay) |
@@ -1541,9 +1644,12 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `clap` | CLAP adapter: param / mod / sidechain routing, MIDI 1.0 + UMP + sysex + note-expression, ARA hook |
 | `cli-maintenance` | CLI command add/modify/remove checklist — keeps source, slash commands, docs, skills in sync |
 | `cmajor-external` | MIT-safe Cmajor lane: source-owned patches, external `cmaj` toolchain, generated-artifact flow |
-| `code-comments` | How to write durable source comments + test names/tags (and what to never write); grounds the no-phase/PR/clean-room-breadcrumb rule with concrete rewrite examples |
+| `code-comments` | How to write durable source comments + test names/tags (and what to never write); grounds the no-phase/PR/provenance-breadcrumb rule with concrete rewrite examples |
 | `content` | Validate, preview, install, update, list, rescan, remove, and reveal data-only content packs |
+| `contrib-intake` | Maintainer side of an outside contribution — find it, adopt it into an in-repo branch with authorship intact, review, ship |
+| `contribute` | Contribute to Pulp/Forge without Shipyard/Tart/VMs or write access — routing, local build+test, `contributor_check.sh`, patch/bundle handoff format |
 | `daw-smoke` | Real-DAW (REAPER) functional smoke for reload/editor/format-adapter changes — opt-in, scoped, headless-safe, zero-pollution |
+| `decide` | Put a blocked decision in front of the user as selectable options with a recommendation and honest pros/cons, instead of burying it in prose |
 | `engine` | JS engine backend selection (QuickJS / JavaScriptCore / V8) with recommendations per workload |
 | `faust` | FAUST DSP plugins: offline codegen, pre-generated C++ headers, FaustProcessor wrapper |
 | `forge-app-delivery` | Building and shipping a Forge app as an installer somebody else can use: the Forge/Pulp seam, what a green signal does not prove, shipping the runtime not just the binary, wiring gaps |
@@ -1676,17 +1782,22 @@ operator-dispatched break-glass option, but it is OFF by default and must never
 be auto-routed. Keep `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` (and the
 Linux/Windows equivalents) **UNSET**, and **never hijack that variable to point
 at self-hosted runners** — doing so dumps the high-volume sanitizer/coverage
-lanes onto the Mac Studio runners that host the required `macos` gate and breaks
-it across PRs (the 2026-06-07 lesson). This matches `.shipyard/config.toml`
+lanes onto the local Macs that host the required `macos` gate and breaks it
+across PRs (the 2026-06-07 lesson). This matches `.shipyard/config.toml`
 ("Namespace macOS routing is disabled for cost control").
+
+The generic build-overflow variable is separate:
+`PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON=local-only`. Do not delete it to
+disable overflow; unset restores the hosted `macos-15` fallback.
 
 macOS runs on **local Macs + GitHub-hosted**, in this order:
 
-1. **Mac Studio** (`pulp-studio-01/02/03`, `PULP_LOCAL_MACOS_RUNS_ON_JSON`) — the
-   primary required `macos` gate.
-2. **M5 Mac** (`pulp-build-m5`, `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`) — local
-   overflow when the Studio runners are saturated
-   (>= `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` busy).
+1. **Fast JIT VM pool on M3 + M5**
+   (`pulp-build-vm,pulp-gate-fast`, `PULP_LOCAL_MACOS_RUNS_ON_JSON`) — the
+   primary required `macos` gate. M1 retains the generic `pulp-build-vm` label
+   for rollback/non-required work but cannot win required-gate placement.
+2. **Local overflow is disabled**:
+   `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON=local-only`.
 3. **GitHub-hosted macOS** — sanitizers, coverage, release-cli, and the
    build-overflow fallback (each via its own `PULP_SANITIZER_*` /
    `PULP_COVERAGE_MACOS` var). UBSan uses `macos-26` so it runs against the
@@ -1696,8 +1807,11 @@ macOS runs on **local Macs + GitHub-hosted**, in this order:
 4. **Namespace macOS cloud** — break-glass ONLY, operator-dispatched, never
    automatic.
 
-Linux and Windows use GitHub-hosted runners (advisory). SSH Ubuntu/Windows only
-when a human explicitly asks — and they are **no longer declared** in
+Operator-dispatched Linux runs use clean-per-job x86_64 Proxmox VMs on the Mac
+Pro when the local selector is set; automatic PR runs stay GitHub-hosted until
+runner-group access control is enforced. Windows remains GitHub-hosted
+(advisory). SSH Ubuntu/Windows only when a human explicitly asks —
+and they are **no longer declared** in
 `.shipyard/config.toml`, so Shipyard does not probe them and
 `--skip-target ubuntu --skip-target windows` is no longer needed. To opt one
 machine into a local SSH lane, uncomment the target block in

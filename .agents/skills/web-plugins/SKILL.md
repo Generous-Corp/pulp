@@ -46,6 +46,16 @@ contain `pulp-build*` or `pulp-preamble*`, and must carry a
 and `pulp-advisory-gpu` label. Do not add that advisory label to a required
 runner, and do not use Orchard.
 
+That isolation was being defeated by the workflow's trigger list, not by its
+runner selector: `web-plugins.yml` also ran on `merge_group`, so
+`GPU audio proof (macOS, real WebGPU)` claimed a macOS runner on **every merge-
+queue entry** while gating nothing — GitHub validates one merge group at a time,
+so that competed directly with the required `macos` gate for the same Mac pool.
+The workflow now runs on `pull_request` only. Capacity isolation is a claim about
+*when* a job runs as much as *where*: an advisory job must not appear on
+`merge_group`, because nothing there is advisory in effect — it either gates the
+merge or it just slows the queue down.
+
 `examples/web-demos/gpu-audio/` runs SuperConvolver's convolution as a **WGSL
 compute shader on the browser's real WebGPU device**. Do not repeat the old line
 that this is impossible or unstarted. But be equally precise about its shape,
@@ -136,6 +146,105 @@ Two things that WILL bite:
   activates — before the page's handler exists. Without a latch (and a replay on
   subscribe) that first publish is lost, and the consumer waits for a change that
   already happened.
+
+## A Worker and a worklet share no heap — a program crosses as bytes
+
+A Worker's wasm and a worklet's wasm are **separate linear memories**, so a
+pointer either one writes is meaningless in the other. That is why a compiled
+`playback::PlaybackProgram` — a graph of `shared_ptr` and `std::vector` — can
+never be published from a compiler Worker to a realtime worklet directly, and
+why `pulp/playback/program_wire.hpp` exists: it is the flat, pointer-free,
+versioned byte range that crossing form takes, with a validating decoder that
+allocates nothing and borrows typed spans straight out of the buffer.
+
+Consequences for anything on the web lane that publishes program state:
+
+- Size the destination with `program_wire_encoded_size` and write into a
+  caller-owned span. Both the encoder and the decoder allocate nothing, which is
+  what lets a producer write straight into a `SharedArrayBuffer` ring and a
+  worklet adopt without touching the allocator.
+- The buffer's base must be eight-byte aligned or the decoder rejects it — a
+  ring's slot stride has to be a multiple of eight, not merely large enough.
+- Payloads crossing this boundary are **untrusted input**. Never hand a worklet
+  bytes it has not run through `decode_program_wire`; the decoder is where
+  truncation, a spliced length, an unknown section, and an out-of-range index
+  all become typed rejections instead of an out-of-bounds read in the render
+  callback.
+- A rejected generation must leave the previously adopted program playing.
+  Adoption is `decode` then swap, never swap then validate.
+- **Adopt on `(producer_epoch, generation)`, never on `generation` alone.** A
+  differing epoch means a different producer: reset carried cursor state and
+  adopt unconditionally, because generations from two producers are not
+  comparable. This is the case a page hits whenever it rebuilds its Worker while
+  the `AudioContext` survives — the new Worker republishes generation 1, and a
+  consumer comparing generations alone refuses every publish from then on and
+  renders a stale program with no diagnostic to distinguish it from silence.
+- **Decide a lane `Unchanged` on its `instance_token` too, not on
+  `(lane_id, generation)`.** The epoch separates producers; it does not separate
+  two programs from one producer, and that is the common case — a worklet's
+  Worker recompiling. `generation` is supplied by the caller rather than minted
+  per compile, so everything else about the lane can be identical. Each
+  `ProgramWireAutomationLaneRecord` carries the producer's own token for exactly
+  this; compare it for equality only, and only against a token from the same
+  `producer_epoch`. Keeping cursor state on a lane whose token moved renders the
+  stale curve with nothing malformed for the decoder to reject.
+
+## Capability tiers are shared with mobile — do not mint a browser-local enum
+
+When a browser lane needs to say "this page can only do the degraded thing",
+the tier vocabulary already exists and is **not** browser-specific:
+`core/platform/include/pulp/platform/device_capability.hpp` declares one
+`DeviceCapabilityTier` (`Constrained` / `Standard` / `Full`) that the browser
+lane's Tier A/B/C and the mobile lane's M-A/M-B/M-C both name. Use it. A
+second, browser-local `TierA | TierB | TierC` looks harmless in isolation and
+then permanently forks the ladder, because mobile and playback quotas will be
+reading the shared one.
+
+The seam is `DeviceCapabilityInputs::realtime_render_available`. The header
+deliberately never names `crossOriginIsolated`, `SharedArrayBuffer`, or worklet
+module support: **the browser probe collapses those three observations into
+that one boolean** and hands over neutral inputs, because a type consumed by
+iOS and Android must not carry web-platform spellings. Keep the probe's
+vocabulary in the probe.
+
+Two consequences worth knowing before you tune anything:
+
+- **No realtime render path caps the page at `Constrained`**, whatever its
+  memory and core count — the rungs above it are defined by rendering locally.
+  That is the controller-mode shape, and it is why a Tier-A page should refuse
+  to construct the worklet path with a typed diagnostic rather than build it
+  and catch a throw.
+- **A lane with no thermal API tops out at `Standard`.** Browsers expose no
+  thermal signal, so a browser page cannot currently reach `Full`. This is a
+  deliberate policy in `project_device_capability_tier` — the top rung's quotas
+  assume the platform will report heat so the consumer can step down — not an
+  oversight. Revisit it when the browser lane actually needs the top rung, and
+  change it in the shared header rather than routing around it.
+
+### The tier is in `platform`; the quota table is not
+
+`pulp::format::device_quotas(tier, thermal)`
+(`core/format/include/pulp/format/device_quotas.hpp`) is the matching table
+(voices, nodes, simultaneous editors, preview quality). It deliberately does
+**not** sit next to the tier enum, and reaching for
+`pulp::platform::DeviceQuotas` will not compile.
+
+`core/platform` is named in every row of the engine's declared dependency
+floors (`tools/scripts/timeline_engine_dependency_floor_check.py`), so anything
+placed there is reachable by every module and no floor row can object to it.
+That is right for a shared vocabulary and wrong for a budget over render-graph
+nodes and editing surfaces. `core/format` appears in no floor row, so an engine
+module that reaches for the quota header is rejected by the gate.
+
+Consumption runs one way: every enforcement point the table names already takes
+its ceilings as injected configuration (`playback::AudioRendererLimits`,
+`timeline::SessionLimits`, `graph::GraphRuntimeLimits`,
+`format::PrepareResourceLimits`), so the table's consumer is the shell that
+*constructs* those — which a browser lane already is. No engine module needs to
+see it.
+
+It is a declaration today: nothing enforces it yet, so reading it is safe and
+*relying* on someone else having enforced it is not.
 
 ## The worklet has no second thread
 
@@ -228,6 +337,31 @@ Both live in the `skia-gpu-build` skill's wasm section; know they exist:
   both pass while every string measures at **zero width**. Probe font usability
   by drawing a glyph (`unicharToGlyph('A') != 0`), never by counting families.
 
+### The bundled-font list exists TWICE, and the web copy is the one that breaks
+
+There is no platform font manager in a browser, so embedded blobs ARE the font
+stack. Two files declare which faces get embedded:
+
+- `core/canvas/CMakeLists.txt` for desktop
+- `tools/cmake/PulpWebUi.cmake` for web / WASM
+
+`core/canvas/src/bundled_fonts.cpp` names every blob symbol directly and is
+compiled into BOTH. So adding a face to the desktop list and not the web one is
+not a missing glyph at runtime, it is a **compile error**:
+
+```
+error: no member named 'Jost_Regular_ttf' in namespace 'pulp_bundled_fonts'
+```
+
+in a lane nobody runs locally, discovered by CI on a PR about something else.
+The desktop list carries a comment telling you to keep it aligned with
+`bundled_fonts.cpp`; the web copy had no comment and no way to know it existed.
+
+Guarded now by the `bundled-font-lists-agree` ctest
+(`tools/scripts/check_bundled_font_lists.py`), which compares the two lists and
+names the file to fix. If you add a font, add it in both places and the lint
+will tell you when you have not.
+
 ## Browser-host rules
 
 - **Probe for WebGL2; a browser without it is a shipping configuration.**
@@ -319,25 +453,44 @@ per-ABI entry point for it.** Go through the plugin's own state:
   change must touch the web lists — and keep new small render-path helpers
   header-only when they have no state to define, so the closure surface does not
   grow for free.
+  Musical `TimeConform::Resample` follows the same existing portable playback
+  units: its stateless source-phase mapping and analytic tempo-ramp inverse add
+  no translation unit, allocation, thread, or web-specific adapter.
+  `TimeConform::Stretch` adds the finite artifact compiler and the prepared
+  realtime stream behind the audio-domain boundary; both audio translation
+  units belong in the WAM and WebCLAP portable dependency inventories. This
+  keeps persisted projects and playback compilation portable, but does not by
+  itself create a JavaScript authoring surface or a browser timeline host.
   These builds also share Timeline's persistent indexes: initial Track/Project
   construction and identity restoration bulk-build sorted balanced trees,
   while ordinary edits path-copy only the changed search paths. Do not replace
   bulk construction with repeated persistent insertion; wasm's tighter memory
   ceiling makes the transient allocation growth especially costly.
 
-- A new `core/timeline` translation unit belongs in **two** places, not four.
-  `core/timeline/CMakeLists.txt`, `PulpWam.cmake`, and `PulpWclap.cmake` all
-  resolve their timeline sources through `pulp_resolve_timeline_sources()` in
-  `core/timeline/PulpTimelineSources.cmake`, so adding the file to that one
-  function covers the native target and both web lanes at once. The second place
-  is the `pulp-test-timeline-no-exceptions` OBJECT library in
-  `test/cmake/timeline_tests.cmake`, which still enumerates sources by hand.
-  `web-timeline-source-closure` compares only the WAM and WebCLAP lanes — both
-  fed by the shared function — so a missing no-exceptions entry passes that check
-  and surfaces instead as an undefined symbol when the no-exceptions target
-  links. A portable unit added to the shared function but not to the
-  no-exceptions library is the failure mode to watch for; the reverse cannot
-  happen silently.
+- A new `core/timeline` translation unit belongs in exactly **one** place.
+  `core/timeline/CMakeLists.txt`, `PulpWam.cmake`, `PulpWclap.cmake`, and the
+  `pulp-test-timeline-no-exceptions` OBJECT library in
+  `test/cmake/timeline_tests.cmake` all resolve their sources through
+  `pulp_resolve_timeline_sources()` in `core/timeline/PulpTimelineSources.cmake`,
+  so one edit to that function covers the native target, both web lanes, and the
+  no-exceptions proof together. Hand-editing any of the four consumer lists for a
+  timeline unit is not just unnecessary, it is wrong.
+
+- **This skill owns the engines' web-ABI source closure, not the engines.**
+  `skill_path_map.json` maps `web-plugins` to
+  `core/timeline/PulpTimelineSources.cmake`,
+  `core/playback/PulpPlaybackSources.cmake`, `PulpWam.cmake` (which carries the
+  literal `core/timebase/src` list) and `PulpWclap.cmake` — the surfaces that
+  decide what the browser lanes compile. It does **not** claim
+  `core/timebase/**`, `core/timeline/**`, or `core/playback/**` wholesale.
+  Adding or splitting an engine TU still lands on this skill, because it edits
+  one of those lists; editing an existing engine TU does not, because nothing
+  here goes stale. Whole-subsystem claims made the gate fire on every engine
+  edit, which trains reflexive `Skill-Update: skip` trailers — and that reflex
+  is how a genuinely missed skill update gets waved through. `web-timeline-
+  source-closure` (a ctest, not this gate) is what proves the closure itself.
+  `tools/scripts/test_skill_sync.py::RealSkillPathMapOwnershipTests` asserts
+  the boundary from both sides, so widening it back fails a test.
 
 - Sequence-level document state (markers, regions) is portable engine data, so
   its migration and reducer units — `sequence_schema_migrations.cpp`,
@@ -352,20 +505,25 @@ per-ABI entry point for it.** Go through the plugin's own state:
   (`core/dawproject`, `core/smf`) that the browser lanes deliberately do not
   build. The closure checker scans sources, so adding such a header is
   correct even though it touches `core/timeline`.
-- A new `core/timeline` translation unit belongs in **two** source lists:
-  `core/timeline/PulpTimelineSources.cmake` and the
-  `pulp-test-timeline-no-exceptions` OBJECT library in
-  `test/cmake/timeline_tests.cmake`. The native target
-  (`core/timeline/CMakeLists.txt`), `PulpWam.cmake`, and `PulpWclap.cmake` all
-  call `pulp_resolve_timeline_sources()`, so one edit to the resolver feeds all
-  three and hand-editing the web lists for a timeline unit is not just
-  unnecessary, it is wrong. Timeline is the exception here: engine units from
-  other modules are still hand-listed per lane, so check which shape the module
-  uses before assuming either one. `web-timeline-source-closure` compares only
-  the WAM and WebCLAP lanes — which the resolver satisfies automatically — so a
-  missing no-exceptions entry passes that check and surfaces instead as an
-  undefined symbol when the no-exceptions target links. That target is the only
-  list a timeline TU can actually be missed from.
+
+- **The editor rung is not in the browser lanes at all.** `core/timeline_editor`
+  (`SequencerUiHost`, `EditIntent`, `lower_edit_intent`) is its own target with
+  its own source list; the WAM/WebCLAP lanes compile `core/timeline/src` directly
+  and never link it, so a browser plugin has commands and transactions but no
+  gesture verbs. If a browser editor needs to lower intents, link
+  `pulp::timeline-editor` — do **not** add `edit_intent.cpp` back to
+  `PulpTimelineSources.cmake`. That would put the editor's vocabulary into the
+  document model's source list, which is the exact placement
+  `timeline-engine-dependency-floor` exists to prevent, and the closure checker
+  would not object because it only asks whether every `core/timeline/src` TU is
+  listed, never whether a listed TU belongs there.
+- Timeline is the exception in list shape: engine units from other modules are
+  still hand-listed per lane, so check which shape the module uses before
+  assuming the resolver covers it. `web-timeline-source-closure` only asks
+  whether every TU under `core/timeline/src` reaches the WAM and WebCLAP lanes —
+  which the resolver satisfies automatically — so it can neither catch a
+  hand-listed module's omission nor object to a TU that is listed but does not
+  belong in the document model's list at all.
 
 - The browser lanes inherit transport behavior for free, including behavior that
   did not exist when the ABI lists were written. Playhead scrubbing is the worked
@@ -418,6 +576,15 @@ per-ABI entry point for it.** Go through the plugin's own state:
   `ProgramCompileRequest::maximum_note_events_per_track`: wasm's memory ceiling
   makes an unbounded ratchet fan-out especially dangerous. This engine support
   does not by itself add a JavaScript authoring surface.
+
+- Sequence groove rendering and compile-context invalidation are equally
+  portable. Built-in MIDI subscribes to `CompileContextKind::Groove`; its owner
+  sequence timing displacement and velocity accent are compiled before the
+  bounded ratchet expansion. WAM and WebCLAP therefore inherit the same note
+  program without browser-only math. Keep `CommitResult` predecessor provenance,
+  registry snapshots, and MIDI compile-structure tokens in the shared timeline /
+  playback lane so sparse reuse cannot publish stale browser programs. This also
+  does not create a JavaScript authoring surface by itself.
 
 - A compile-time guard in a portable timeline header fires in the browser lanes
   too. `core/timeline`'s `AutomationTarget` carries a `static_assert` on its
@@ -549,6 +716,14 @@ The lane pins emsdk (never `latest`) and fetches the Skia wasm slice from
 `tools/deps/manifest.json` — see the `ci` skill's `web-plugins.yml` section
 before touching either.
 
+`web-plugins.yml` also carries a second, unrelated job:
+`Timeline fixture corpus (WASM)`, which builds `pulp-fixture-runner` under
+emscripten and runs the timeline conformance corpus through it. It shares the
+file only for the emsdk pin — it needs no Skia, no Chrome, no wasi-sdk, no npm,
+so keep it a separate job rather than a step in the lane above, or a one-minute
+check starts waiting on a fifteen-minute one. It is not a browser lane; if you
+are here for WAM/WebCLAP behavior, it is not the job you want.
+
 ### Landmine: `pulp_add_wclap(Foo)` declares the target as `Foo-wclap`
 
 Not `Foo`. `cmake --build … --target Foo` is a hard **"No rule to make target"**,
@@ -670,6 +845,13 @@ new file is the same failure mode as a split file: `value_source_binding.cpp` (d
 not to `PulpWebUi.cmake`, and `view.cpp` — already in the wasm list — referenced it, so every web
 UI module link-failed and blocked the queue. Whoever adds a `core/view/**` or `core/canvas/**`
 `.cpp` must mirror it into `PulpWebUi.cmake` in the same change, or the whole PR queue wedges.
+
+This includes small internal policy/helper TUs, not only visible widget or renderer splits.
+`yoga_layout.cpp` was refactored to call `yoga_measurement_internal.cpp`; native view-core and
+all native tests stayed green, but the required WebCLAP build failed at `wasm-ld` with undefined
+`sanitize_yoga_measurement` / `resolve_yoga_measure_dimension` until the helper was added to
+`_PULP_WEBUI_VIEW_SOURCES`. Treat every new out-of-line dependency of an already-listed wasm UI
+source as a paired `PulpWebUi.cmake` edit, even when the helper has no web-specific code.
 
 When you hit it: don't chase symbols one build at a time. Read the symbol's namespace, find the
 defining TU (`git grep -l 'Thing::method' -- core/.../src`), and **mirror what the native build
@@ -894,3 +1076,40 @@ module has no archive to fall back on.
 The same applies to any sibling file the adapter calls into: `PulpWclap.cmake`
 already lists `clap_remote_controls.cpp` and `clap_note_name.cpp` next to
 `clap_adapter.cpp` for exactly this reason.
+
+## The source list covers `core/runtime/` too — not just the adapter's TUs
+
+The rule above ("a new CLAP adapter TU must be added to `PulpWclap.cmake`")
+generalises further than it reads: `PulpWclap.cmake`'s list is the wasm module's
+**entire world**, because it does not link `pulp::runtime` either. So a symbol
+the adapter merely *references* has to be there as well.
+
+Concretely: `clap_adapter.cpp` gained a `runtime::ScopedTracingAttachment`, which
+calls `Tracing::attach()` / `detach()`. Under the default `PULP_TRACING=OFF`
+those compile to no-op stubs — but the symbols still have to exist, and
+`core/runtime/src/trace.cpp` was not in the list. Native builds linked fine
+(they get it out of the `pulp::runtime` archive); every WebCLAP target failed
+with `wasm-ld: undefined symbol: pulp::runtime::Tracing::attach()`.
+
+The failure mode is what makes this expensive: it is invisible locally and on
+the required macOS gate, and surfaces only in the `Build + prove` lane. When you
+add ANY dependency to a TU on this list — not just a new TU — check whether its
+definition is in the list too.
+
+## The Ganesh/WebGL surface reports a frame outcome now (WAH-2)
+
+`SkiaSurface::end_frame()` returns `render::FrameOutcome` instead of
+`void`. On the browser backend (`skia_surface_ganesh.cpp`):
+
+- a normal flush reports `presented` — the browser composites the canvas
+  element itself, so a successful `flushAndSubmit()` IS the frame
+  reaching its output;
+- a LOST WebGL context reports `recreate`, not `failed`: the caller must
+  rebuild against the restored context before the frame means anything;
+- `has_presentable_target()` is always `true` here — there is no
+  offscreen-by-design mode on this backend.
+
+Hosts gate damage retirement on `render::frame_reached_output(outcome)`,
+so a backend that misreports makes the UI either repaint forever
+(false failure) or go stale (false success). If you add a web render
+path, return an honest outcome rather than defaulting to `presented`.

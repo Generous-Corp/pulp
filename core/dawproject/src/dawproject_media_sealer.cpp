@@ -25,7 +25,7 @@ bool declared_duration_matches_frames(long double declared_frames,
 
 } // namespace
 
-DawProjectMediaSealer::DawProjectMediaSealer(DawProjectMediaResolver resolver,
+DawProjectMediaSealer::DawProjectMediaSealer(DawProjectMediaViewResolver resolver,
                                              const DawProjectImportLimits& limits,
                                              std::uint64_t& next_item_id)
     : resolver_(std::move(resolver)), limits_(limits), next_item_id_(next_item_id) {}
@@ -48,7 +48,7 @@ std::optional<DawProjectImportError> DawProjectMediaSealer::seal(const pugi::xml
     if (path_view.size() > limits_.max_package_path_bytes)
         return import_error(DawProjectImportErrorCode::LimitExceeded,
                             "<File path> exceeds max_package_path_bytes");
-    if (!package_relative_path_is_lexically_safe(path_view))
+    if (!package_relative_path_is_portable(path_view))
         return import_error(DawProjectImportErrorCode::InvalidValue,
                             "<File path> must be a safe package-relative path");
     const std::string path(path_view);

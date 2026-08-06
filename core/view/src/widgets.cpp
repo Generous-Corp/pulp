@@ -644,8 +644,11 @@ void Knob::paint(canvas::Canvas& canvas) {
             canvas.stroke_arc(cx, cy, ring_r, start_angle, end_angle);
         }
 
-        // Raised body disc
-        auto body_color = resolve_color("bg.elevated", canvas::Color::rgba8(38, 44, 54));
+        // Raised body disc. A design that styled this control keeps its own
+        // cap; painting the stock fill over it is what made designed panels
+        // come back wearing our knobs. The token answers when it said nothing.
+        auto body_color = has_background_color() ? background_color()
+            : resolve_color("bg.elevated", canvas::Color::rgba8(38, 44, 54));
         canvas.set_fill_color(body_color);
         canvas.fill_circle(cx, cy, body_r);
 
@@ -741,6 +744,37 @@ void Knob::paint(canvas::Canvas& canvas) {
 // ── Fader ────────────────────────────────────────────────────────────────────
 
 void Fader::paint(canvas::Canvas& canvas) {
+    // A paint delegate installed on this fader or on any ancestor gets first
+    // refusal, exactly as Knob::paint gives it. It declines by default, in which
+    // case the stock rendering below runs unchanged.
+    //
+    // WidgetPainter::paint_linear existed with no caller, so a delegate could be
+    // installed on a fader and never consulted: the install compiled, ran, and
+    // moved zero pixels. An imported fader whose design already painted its own
+    // track therefore still drew the stock track, fill and thumb on top of it.
+    if (auto* p = effective_painter()) {
+        LinearPaintState s;
+        s.bounds = local_bounds();
+        s.enabled = enabled();
+        s.hovered = is_hovered();
+        s.pressed = dragging_;
+        s.focused = has_focus();
+        s.horizontal = orientation_ == Orientation::horizontal;
+        // The delegate normalizes thumb_pos across [track_min, track_max], so a
+        // 0..1 track hands it position_for_value() unchanged — including the
+        // skew, which is what keeps a skewed fader's skin agreeing with its
+        // stock rendering.
+        s.thumb_pos = position_for_value();
+        s.track_min = 0.0f;
+        s.track_max = 1.0f;
+        s.thumb_size = orientation_ == Orientation::horizontal ? thumb_width_
+                                                               : thumb_height_;
+        s.value = value_;
+        s.value_min = 0.0;
+        s.value_max = 1.0;
+        if (p->paint_linear(canvas, s, *this)) return;
+    }
+
     auto b = local_bounds();
     float shader_time = frame_clock() ? frame_clock()->time() : 0.0f;
 
@@ -1117,14 +1151,27 @@ void RangeSlider::paint(canvas::Canvas& canvas) {
 
 // ── Toggle ───────────────────────────────────────────────────────────────────
 
+// Vertical space the caption occupies: its 10px font sits on a baseline 6px off
+// the bottom edge, so the glyphs need roughly the ascent plus that offset. The
+// switch is centred in what remains rather than in the whole widget.
+constexpr float kToggleCaptionStrip = 14.0f;
+
 void Toggle::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
     float shader_time = frame_clock() ? frame_clock()->time() : 0.0f;
 
     float switch_w = std::min(b.width, 40.0f);
-    float switch_h = std::min(b.height * 0.6f, 20.0f);
+    // Size AND centre the switch within the space above the caption, not within
+    // the whole widget. The caption sits on a baseline 6px off the bottom, so a
+    // switch measured against the full height grows down into the text and the
+    // label ends up printed across the thumb on a short toggle. Deriving the
+    // height from the remaining area keeps them apart at every size; an
+    // unlabelled toggle reserves nothing and is unchanged.
+    const float caption_strip = label_.empty() ? 0.0f : kToggleCaptionStrip;
+    const float switch_area = std::max(1.0f, b.height - caption_strip);
+    float switch_h = std::min(switch_area * 0.6f, 20.0f);
     float sx = (b.width - switch_w) * 0.5f;
-    float sy = (b.height - switch_h) * 0.5f;
+    float sy = (switch_area - switch_h) * 0.5f;
 
     if (!widget_schema_.empty()) {
         render_schema(canvas, widget_schema_, b.width, b.height, on_ ? 1.0f : 0.0f, *this);

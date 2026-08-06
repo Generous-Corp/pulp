@@ -1,0 +1,70 @@
+# Timeline conformance corpus.
+#
+# One entry per line: `<kind> <relative path>`.
+#
+# The corpus is enumerated here rather than discovered by walking directories,
+# because directory iteration is unreliable in the WASM and Android emulator
+# lanes this corpus exists to serve, and because an explicit index turns an
+# unreferenced fixture into a visible omission rather than a silent one.
+#
+# Kinds — the corpus holds more than one shape of artifact, and nothing in the
+# files themselves says which is which:
+#
+#   document  A complete `pulp.timeline.project` envelope, validated against a
+#             sibling `<path>.expect` manifest on four axes: structural
+#             summary, interchange concept census, the ordered identities of
+#             every collection in the arrangement, and serialize idempotence.
+#
+#             The order axis is what makes the other three more than a
+#             head count. Counts say how many survived; the identity orders say
+#             which ones and in what sequence, so a dropped authored ordering or
+#             a remapped identity is visible. Idempotence is deliberately not
+#             one of those checks: it compares the pipeline against itself and
+#             therefore cannot see an error both directions share.
+#
+#             Leaf content below a track — notes, automation points, MIDI lane
+#             points, takes, comp segments — is still covered only by counts and
+#             the census.
+#   fragment  A single entity envelope (not a project), used for entity-level
+#             migration tests. Declared so it is accounted for; entity-level
+#             validation is not yet implemented, so it is reported as skipped
+#             rather than silently ignored.
+#   payload   A raw byte blob that is never parsed as timeline JSON — it is
+#             embedded as OpaqueContent to prove unknown content round-trips
+#             byte for byte. Deliberately never decoded.
+#   ignore    Present in the tree but not part of this corpus — a foreign-format
+#             interchange input, or a golden owned by a specific test. Listed so
+#             the index stays exhaustive, which is what lets a completeness
+#             check treat any unlisted file as an omission.
+#
+# Every entry is opened, including the kinds that are not validated: an entry
+# reported as skipped but never touched would let a rename silently degrade the
+# index into a comment while the run stayed green.
+#
+# Regenerate document manifests with:
+#   pulp-fixture-runner --corpus <dir> --update
+#
+# A new schema version must add fixtures here. Keep entries grouped by version.
+
+document v1/minimal.json
+document v1/track.json
+document v1/note-content.json
+document v1/track-opaque.json
+document v2/device-chain.json
+document v2/midi-content-degenerate.json
+document v3/automation-lane.json
+document v3/clip-fade-shape.json
+document v3/midi-content-lanes.json
+document v4/sequence-markers.json
+document v6/sequence-track-order.json
+document v6/track-take-lanes.json
+document v6/sequence-launcher-scenes.json
+document v7/sequence-roles-and-tuning.json
+
+fragment v4/sequence-before-scenes.json
+
+payload v1/unknown-content-envelope.json
+
+ignore v1/replay-render.golden
+ignore dawproject/linear_subset.dawproject.xml
+ignore dawproject/out_of_subset.dawproject.xml

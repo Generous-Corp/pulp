@@ -143,11 +143,14 @@ TEST_CASE("chord/scale lane round trips and re-saves byte-identically",
 
     auto first = serialize_project(original, registry);
     REQUIRE(first.has_value());
-    REQUIRE(first.value().json.find("\"type_name\":\"pulp.timeline.sequence\",\"version\":5") !=
+    REQUIRE(first.value().json.find("\"type_name\":\"pulp.timeline.sequence\",\"version\":7") !=
             std::string::npos);
+    // Canonical order is alphabetical, so the bass and the extension mask sort
+    // before the quality and the voicing hint sorts last. An event that states
+    // none of them writes them as null and zero rather than omitting them.
     REQUIRE(
         first.value().json.find(
-            R"("chord_scale_lane":[{"chord_quality":"minor7","chord_root":9,"position":"0","scale_mode":"dorian","scale_root":9})") !=
+            R"("chord_scale_lane":[{"chord_bass":null,"chord_extensions":0,"chord_quality":"minor7","chord_root":9,"position":"0","scale_mode":"dorian","scale_root":9,"voicing":null})") !=
         std::string::npos);
 
     const auto decoded = take(deserialize_project(first.value().json, registry));
@@ -286,10 +289,17 @@ TEST_CASE("a pre-lane sequence document loads as a sequence with no harmony",
     const auto scenes_at = legacy.find(R"("scenes":[],)");
     REQUIRE(scenes_at != std::string::npos);
     legacy.erase(scenes_at, std::string_view(R"("scenes":[],)").size());
-    const auto version_at = legacy.find(R"("type_name":"pulp.timeline.sequence","version":5)");
+    // A pre-order document carries no authored track order. Its contents vary
+    // with the track ids, so erase the member by span rather than by literal.
+    const auto order_at = legacy.find(R"("track_order":[)");
+    REQUIRE(order_at != std::string::npos);
+    const auto order_end = legacy.find("],", order_at);
+    REQUIRE(order_end != std::string::npos);
+    legacy.erase(order_at, order_end + 2 - order_at);
+    const auto version_at = legacy.find(R"("type_name":"pulp.timeline.sequence","version":7)");
     REQUIRE(version_at != std::string::npos);
     legacy.replace(version_at,
-                   std::string_view(R"("type_name":"pulp.timeline.sequence","version":5)").size(),
+                   std::string_view(R"("type_name":"pulp.timeline.sequence","version":7)").size(),
                    R"("type_name":"pulp.timeline.sequence","version":2)");
 
     const auto decoded = take(deserialize_project(legacy, registry));
@@ -320,4 +330,139 @@ TEST_CASE("a set_chord_scale_lane command round trips through its schema envelop
     const std::string unordered =
         R"({"data":{"expected":[],"replacement":[{"chord_quality":"major","chord_root":0,"position":"480","scale_mode":"major","scale_root":0},{"chord_quality":"major","chord_root":0,"position":"0","scale_mode":"major","scale_root":0}],"sequence_id":"2"},"type_name":"pulp.timeline.command.set_chord_scale_lane","version":1})";
     REQUIRE_FALSE(deserialize_commands("[" + unordered + "]", registry));
+}
+
+TEST_CASE("a widened chord event round trips and orders as before",
+          "[timeline][context-lane][persistence]") {
+    const auto registry = builtins();
+    ChordScaleEvent slash{{0}, ChordQuality::Major7, 5, ScaleMode::Lydian, 0};
+    slash.chord_bass = 9;
+    slash.chord_extensions = kChordExtensionNinth | kChordExtensionSharpEleventh;
+    slash.voicing = ChordVoicing::Rootless;
+    ChordScaleEvent plain{{50}, ChordQuality::Minor, 2, ScaleMode::Dorian, 2};
+
+    const auto project = project_with_chord_lane(lane_of({slash, plain}));
+    const auto encoded = take(serialize_project(project, registry)).json;
+    const auto decoded = take(deserialize_project(encoded, registry));
+    const auto& events = decoded.find_sequence({2})->chord_scale_lane().events();
+    REQUIRE(events.size() == 2);
+    // Order is still position order: the added members sort after position in
+    // the struct and so cannot reorder a lane that only orders by position.
+    REQUIRE(events[0] == slash);
+    REQUIRE(events[1] == plain);
+    REQUIRE(take(serialize_project(decoded, registry)).json == encoded);
+
+    // An event that states none of the detail encodes it as absent rather than
+    // as some invented default, and comes back the same way.
+    REQUIRE_FALSE(events[1].chord_bass.has_value());
+    REQUIRE(events[1].chord_extensions == 0);
+    REQUIRE_FALSE(events[1].voicing.has_value());
+}
+
+TEST_CASE("chord detail outside its declared vocabulary is refused",
+          "[timeline][context-lane]") {
+    ChordScaleEvent out_of_octave{{0}, ChordQuality::Major, 0, ScaleMode::Major, 0};
+    out_of_octave.chord_bass = 12;
+    REQUIRE_FALSE(ChordScaleLane::create({out_of_octave}));
+
+    // An undefined extension bit would survive a round trip and mean something
+    // different to the next reader that defines it.
+    ChordScaleEvent undefined_extension{{0}, ChordQuality::Major, 0, ScaleMode::Major, 0};
+    undefined_extension.chord_extensions = static_cast<std::uint16_t>(kChordExtensionMask + 1);
+    const auto rejected = ChordScaleLane::create({undefined_extension});
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ModelErrorCode::InvalidChordScaleEvent);
+
+    ChordScaleEvent unknown_voicing{{0}, ChordQuality::Major, 0, ScaleMode::Major, 0};
+    unknown_voicing.voicing = static_cast<ChordVoicing>(99);
+    REQUIRE_FALSE(ChordScaleLane::create({unknown_voicing}));
+
+    // Every declared bit together is admitted, so the mask is a ceiling rather
+    // than an accidental single-bit test.
+    ChordScaleEvent every_extension{{0}, ChordQuality::Major, 0, ScaleMode::Major, 0};
+    every_extension.chord_extensions = kChordExtensionMask;
+    REQUIRE(ChordScaleLane::create({every_extension}));
+}
+
+TEST_CASE("the sequence chord-detail migration defaults old events and refuses to drop new ones",
+          "[timeline][context-lane][migration]") {
+    const auto registry = builtins();
+    DecodeLimits limits;
+
+    const auto plain = take(serialize_project(project_with_chord_lane(two_bar_lane()), registry));
+    const auto lowered = take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 7,
+                                               6, sequence_envelope(plain.json), limits));
+    // A v6 event has no detail members at all.
+    REQUIRE(lowered.find(R"("chord_bass")") == std::string::npos);
+    REQUIRE(lowered.find(R"("voicing")") == std::string::npos);
+    REQUIRE(lowered.find(R"("type_name":"pulp.timeline.sequence","version":6)") !=
+            std::string::npos);
+
+    // The upgrade puts back exactly what the downgrade removed, so a v6
+    // document states the same harmony a v7 one does.
+    const auto raised = take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 6,
+                                              7, lowered, limits));
+    REQUIRE(raised == sequence_envelope(plain.json));
+
+    // A bass, an extension, or a voicing hint has no v6 spelling, and dropping
+    // one would leave a v6 reader stating a different chord.
+    ChordScaleEvent rich{{0}, ChordQuality::Dominant7, 7, ScaleMode::Mixolydian, 0};
+    rich.chord_bass = 11;
+    const auto authored =
+        take(serialize_project(project_with_chord_lane(lane_of({rich})), registry));
+    auto refused = registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 7, 6,
+                                    sequence_envelope(authored.json), limits);
+    REQUIRE_FALSE(refused);
+    REQUIRE(refused.error().code == PersistenceErrorCode::MigrationFailed);
+}
+
+TEST_CASE("a set_chord_scale_lane command may omit or carry the chord detail",
+          "[timeline][context-lane][persistence]") {
+    const auto registry = builtins();
+    // Commands are authored input with no version-gated migration path of their
+    // own, so an omitted member keeps meaning what it meant before the field
+    // existed rather than making the command undecodable.
+    const std::string without =
+        R"({"data":{"expected":[],"replacement":[{"chord_quality":"major","chord_root":0,"position":"0","scale_mode":"major","scale_root":0}],"sequence_id":"2"},"type_name":"pulp.timeline.command.set_chord_scale_lane","version":1})";
+    auto omitted = deserialize_commands("[" + without + "]", registry);
+    REQUIRE(omitted.has_value());
+    const auto* plain = std::get_if<SetChordScaleLane>(&omitted.value()[0]);
+    REQUIRE(plain != nullptr);
+    REQUIRE_FALSE(plain->replacement.events()[0].chord_bass.has_value());
+    REQUIRE(plain->replacement.events()[0].chord_extensions == 0);
+
+    const std::string with =
+        R"({"data":{"expected":[],"replacement":[{"chord_bass":4,"chord_extensions":32,"chord_quality":"major","chord_root":0,"position":"0","scale_mode":"major","scale_root":0,"voicing":"shell"}],"sequence_id":"2"},"type_name":"pulp.timeline.command.set_chord_scale_lane","version":1})";
+    auto carried = deserialize_commands("[" + with + "]", registry);
+    REQUIRE(carried.has_value());
+    const auto* rich = std::get_if<SetChordScaleLane>(&carried.value()[0]);
+    REQUIRE(rich != nullptr);
+    REQUIRE(rich->replacement.events()[0].chord_bass == std::uint8_t{4});
+    REQUIRE(rich->replacement.events()[0].chord_extensions == kChordExtensionThirteenth);
+    REQUIRE(rich->replacement.events()[0].voicing == ChordVoicing::Shell);
+
+    // Half the detail is neither spelling, and decoding it would invent the
+    // rest rather than read it.
+    const std::string partial =
+        R"({"data":{"expected":[],"replacement":[{"chord_bass":4,"chord_quality":"major","chord_root":0,"position":"0","scale_mode":"major","scale_root":0}],"sequence_id":"2"},"type_name":"pulp.timeline.command.set_chord_scale_lane","version":1})";
+    REQUIRE_FALSE(deserialize_commands("[" + partial + "]", registry));
+}
+
+TEST_CASE("a sequence older than the chord detail may not carry it",
+          "[timeline][context-lane][persistence]") {
+    const auto registry = builtins();
+    const auto current = take(serialize_project(project_with_chord_lane(two_bar_lane()), registry));
+    // Stamping an older version onto a payload that carries the detail is a
+    // contradiction, not a document to read the detail out of. Both the
+    // structural preflight and the decoder are asked, so neither can be the
+    // only thing standing between a mislabelled document and a decode.
+    auto mislabelled = current.json;
+    constexpr std::string_view stamp = R"("type_name":"pulp.timeline.sequence","version":7)";
+    const auto at = mislabelled.find(stamp);
+    REQUIRE(at != std::string::npos);
+    mislabelled.replace(at, stamp.size(),
+                        R"("type_name":"pulp.timeline.sequence","version":6)");
+    auto rejected = deserialize_project(mislabelled, registry);
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == PersistenceErrorCode::InvalidSchema);
 }

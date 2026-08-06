@@ -77,8 +77,15 @@ instrument vendor and cannot be inferred from display names.
 # Our engine, and a reference effect, through the identical source.
 ./build/tools/audio/pulp-au-effect-ab --pulp bbd --time-ms 375 --feedback 0.45 \
     --out /tmp/pulp-bbd.wav
-./build/tools/audio/pulp-au-effect-ab --au aumf:MeBr:Artu --out /tmp/ref.wav
+./build/tools/audio/pulp-au-effect-ab --au TYPE:SUBT:MANU --out /tmp/ref.wav
 ```
+
+A plugin that models several devices usually exposes each one as a **factory
+preset** rather than as a host parameter, so a fresh headless instance comes up
+with nothing engaged and no parameter set will engage it. Use `--list-presets`
+to enumerate and `--preset N` to select before rendering. If a plugin reports
+zero factory presets, its selection lives in opaque state and the only headless
+route is a saved `.aupreset` restored through `PluginSlot::restore_state()`.
 
 An AU is addressed by **identity** (`TYPE:SUBT:MANU`) rather than by scanning.
 The identity is the complete loader descriptor, so this never walks every

@@ -159,10 +159,19 @@ public:
         //   typically advertises it.
         std::vector<wgpu::FeatureName> required_device_features;
         bool timestamp_query_requested = false;
-        if (adapter_.HasFeature(wgpu::FeatureName::TimestampQuery)) {
+        // Adapter SUPPORT is not consent. Requesting this feature forces the
+        // `allow_unsafe_apis` toggle on below, which changes the device's
+        // validation posture for ordinary rendering — so it is gated on the
+        // caller explicitly asking for timing, not on the adapter offering it.
+        if (config.enable_gpu_timing &&
+            adapter_.HasFeature(wgpu::FeatureName::TimestampQuery)) {
             required_device_features.push_back(wgpu::FeatureName::TimestampQuery);
             timestamp_query_requested = true;
             runtime::log_info("GpuSurface: enabling timestamp-query (GPU render time gated on Graphite supportedGpuStats)");
+        } else if (adapter_.HasFeature(wgpu::FeatureName::TimestampQuery)) {
+            runtime::log_info(
+                "GpuSurface: adapter offers timestamp-query but GPU timing was "
+                "not requested — keeping full device validation");
         }
         if (adapter_.HasFeature(wgpu::FeatureName::IndirectFirstInstance)) {
             required_device_features.push_back(wgpu::FeatureName::IndirectFirstInstance);

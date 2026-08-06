@@ -300,3 +300,53 @@ FROM f WHERE nts IS NOT NULL;
 Query 1 is what identified the Windows knob-drag regression: frames of 19-45 ms
 whose children summed to ~2 ms. Small gaps plus large unaccounted time means the
 thread is blocked *inside* the frame, not idle between frames.
+
+## An empty capture may be a missing attachment, not a bad query (WAH-4)
+
+Before reaching for `trace_processor`, confirm the session actually recorded.
+Tracing attach/detach was wired into **VST3 only** until WAH-4; a capture of a
+CLAP, AU v2, AU v3, AAX or Standalone session produced an empty `.pftrace`
+while every command looked correct. All six formats now attach via
+`runtime::ScopedTracingAttachment`.
+
+Two other capture-shaping facts worth knowing before you blame a query:
+
+- **The trace is written by the FINAL detach.** A leaked attachment means it is
+  never written at all. Let the host finish unloading the plug-in rather than
+  killing the process.
+- **`PULP_TRACE_SECONDS` timeouts are tagged with a session generation.** They
+  used to be untagged, so closing and reopening an editor inside the window let
+  the FIRST session's timer stop the SECOND one — a capture that looks
+  mysteriously truncated mid-gesture. A stale timer is now a no-op.
+- **Zero rows for `frame`/`gpu_*` can mean the host never emitted them.** A
+  query over render spans returning nothing is not automatically a bad query or
+  a bad capture: an editor that is neither scripted nor declares
+  `requires_gpu_host()` runs on CPU raster and emits none of them, and
+  host-level `frame`/`paint` exist only on the Windows plug-in editor and the
+  macOS standalone host. Check the shape of what you DID capture before
+  rewriting SQL —
+
+  ```sql
+  select name, count(*) from slice group by name order by 2 desc;
+  ```
+
+  A result of only `layout_children` + `wm_mousemove` is the signature. The
+  `trace-analysis` skill has the coverage matrix and the `[plugin-gpu-host]
+  … mode=` line that names the host you actually got.
+
+## GPU render time is now OPT-IN (WAH-13)
+
+`SkiaSurface::gpu_render_timing_available()` reporting false is no longer
+evidence of an adapter that lacks `timestamp-query`. Timestamps are requested
+only when the host asks, via `PluginViewHost::Options::enable_gpu_timing`
+(default OFF), rather than whenever the adapter advertises the feature.
+
+That default is deliberate and worth understanding before you "fix" it: Dawn
+gates `writeTimestamp` behind the `allow_unsafe_apis` toggle on every backend,
+so requesting the feature forces that toggle on — and it applies to the DEVICE,
+not to the diagnostic. Ordinary rendering was silently running with relaxed
+validation on every machine whose adapter happened to offer timestamps.
+
+If you need per-recording GPU time in a capture, enable it explicitly on the
+host's Options. If a trace shows no `gpu_render_time`, check that flag before
+suspecting the adapter.

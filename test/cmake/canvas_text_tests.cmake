@@ -153,6 +153,16 @@ endif()
 # with every other GPU test and contend for a process-global resource, which
 # surfaces as an intermittent short readback: the frame composites fewer
 # pixels than the assertion expects, on a PR that changed nothing related.
+# Renderer-owned retained compositing layers (WAH-12): keyed lookup, typed
+# owner identity, pruning of sealed-but-never-drawn non-cacheable layers, and a
+# bounded LRU budget. Raster-only — none of this needs a GPU.
+if(PULP_HAS_SKIA)
+    pulp_add_test_suite(pulp-test-retained-layer-store
+        LIBRARIES pulp::canvas
+        INCLUDE_DIRS ${SKIA_INCLUDE_DIRS}
+        COMPILE_DEFINITIONS PULP_HAS_SKIA=1)
+endif()
+
 if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
     add_executable(pulp-test-font-rendering-goldens-gpu
         test_font_rendering_goldens_gpu.cpp)
@@ -215,6 +225,22 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
     target_include_directories(pulp-test-partial-repaint-gpu PRIVATE
         ${SKIA_INCLUDE_DIRS})
     catch_discover_tests(pulp-test-partial-repaint-gpu
+        PROPERTIES RESOURCE_LOCK pulp_gpu)
+
+    # Visible-frame success contract on a LIVE Dawn/Graphite surface (WAH-2).
+    # The fake-surface unit tests pin how a host REACTS to each FrameOutcome;
+    # this pins which outcome the real backend produces — in particular that a
+    # captured frame (whose recording read_current_rgba already flushed) still
+    # reports as having reached its output. Soft-skips without a real adapter.
+    add_executable(pulp-test-skia-frame-outcome-gpu test_skia_frame_outcome_gpu.cpp)
+    target_link_libraries(pulp-test-skia-frame-outcome-gpu PRIVATE
+        pulp::canvas pulp::render
+        Catch2::Catch2WithMain skia::skia)
+    target_compile_definitions(pulp-test-skia-frame-outcome-gpu PRIVATE
+        PULP_HAS_SKIA=1)
+    target_include_directories(pulp-test-skia-frame-outcome-gpu PRIVATE
+        ${SKIA_INCLUDE_DIRS})
+    catch_discover_tests(pulp-test-skia-frame-outcome-gpu
         PROPERTIES RESOURCE_LOCK pulp_gpu)
 
     # Embedded-host smoke (mac GPU lane): attaches the GPU host to a hidden

@@ -72,8 +72,9 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 #include <complex>
+#include <limits>
+#include <numbers>
 #include <vector>
 
 using namespace pulp::signal;
@@ -97,7 +98,7 @@ std::vector<float> tone(double hz, double amplitude, int n) {
     std::vector<float> v(static_cast<std::size_t>(n));
     for (int k = 0; k < n; ++k)
         v[static_cast<std::size_t>(k)] =
-            static_cast<float>(amplitude * std::sin(2.0 * M_PI * hz * k / kSr));
+            static_cast<float>(amplitude * std::sin(2.0 * std::numbers::pi * hz * k / kSr));
     return v;
 }
 
@@ -120,7 +121,7 @@ std::vector<double> spectrum_of(const std::vector<float>& x, int skip) {
     std::vector<std::complex<double>> buffer(static_cast<std::size_t>(kFftSize));
     for (int k = 0; k < kFftSize; ++k) {
         const double window =
-            0.5 - 0.5 * std::cos(2.0 * M_PI * k / static_cast<double>(kFftSize - 1));
+            0.5 - 0.5 * std::cos(2.0 * std::numbers::pi * k / static_cast<double>(kFftSize - 1));
         buffer[static_cast<std::size_t>(k)] = {
             static_cast<double>(x[static_cast<std::size_t>(skip + k)]) * window, 0.0};
     }

@@ -2,6 +2,7 @@
 
 #include "serialize_automation_decode.hpp"
 #include "serialize_decode_context.hpp"
+#include "serialize_decode_support.hpp"
 
 #include <array>
 #include <bit>
@@ -59,9 +60,23 @@ decode_command_playback_properties(const JsonValue& value, std::string path) {
     if (!decoded_gain || !decoded_fade_in || !decoded_fade_out ||
         decoded_gain.value() > std::numeric_limits<std::uint32_t>::max())
         return fail<ClipPlaybackProperties>(PersistenceErrorCode::InvalidNumber, std::move(path));
+    // Optional, unlike the document field. Commands are authored input with no
+    // version-gated migration path of their own, so an omitted shape has to keep
+    // meaning what it meant before the field existed.
+    ClipFadeShape fade_shape = ClipFadeShape::Linear;
+    if (const auto* shape = value.find("fade_shape")) {
+        if (shape->kind != JsonValue::Kind::String)
+            return fail<ClipPlaybackProperties>(PersistenceErrorCode::UnexpectedType,
+                                                path + "/fade_shape");
+        if (shape->scalar == "equal_power")
+            fade_shape = ClipFadeShape::EqualPower;
+        else if (shape->scalar != "linear")
+            return fail<ClipPlaybackProperties>(PersistenceErrorCode::InvalidSchema,
+                                                path + "/fade_shape");
+    }
     return runtime::Ok(ClipPlaybackProperties{
         std::bit_cast<float>(static_cast<std::uint32_t>(decoded_gain.value())),
-        decoded_fade_in.value(), decoded_fade_out.value()});
+        decoded_fade_in.value(), decoded_fade_out.value(), fade_shape});
 }
 
 runtime::Result<std::vector<NoteEvent>, PersistenceError>
@@ -108,7 +123,7 @@ decode_command_notes(const JsonValue& value, DecodeContext& context, std::string
                          static_cast<std::uint8_t>(decoded_channel.value())});
     }
     count += notes.size();
-    auto validated = NoteContent::create(std::move(notes));
+    auto validated = MidiContent::create(std::move(notes));
     if (!validated)
         return model_fail<std::vector<NoteEvent>>(validated.error(), std::move(path));
     return runtime::Ok(std::vector<NoteEvent>(validated->notes().begin(),
@@ -334,9 +349,54 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
             decode_command_notes(*replacement.value(), context, data_path + "/replacement");
         if (!decoded_replacement)
             return runtime::Err(decoded_replacement.error());
+        // Optional, like the fade shape above and for the same reason: a
+        // command carries no migration path, so an envelope written before
+        // these fields existed has to keep decoding to what it meant then —
+        // omitted arrays, and a reducer that derives the surviving modifiers
+        // from the clip.
+        std::vector<NoteModifier> expected_modifiers;
+        std::vector<NoteModifier> replacement_modifiers;
+        if (const auto* value = command.find("expected_modifiers")) {
+            auto modifiers = decode_note_modifiers(*value, decoded_expected.value().size(),
+                                                   data_path + "/expected_modifiers");
+            if (!modifiers)
+                return runtime::Err(modifiers.error());
+            expected_modifiers = std::move(modifiers).value();
+        }
+        if (const auto* value = command.find("replacement_modifiers")) {
+            auto modifiers = decode_note_modifiers(*value, decoded_replacement.value().size(),
+                                                   data_path + "/replacement_modifiers");
+            if (!modifiers)
+                return runtime::Err(modifiers.error());
+            replacement_modifiers = std::move(modifiers).value();
+        }
         return runtime::Ok(Command(ReplaceNoteContent{
             decoded.value()[0], decoded.value()[1], decoded.value()[2],
-            std::move(decoded_expected).value(), std::move(decoded_replacement).value()}));
+            std::move(decoded_expected).value(), std::move(decoded_replacement).value(),
+            std::move(expected_modifiers), std::move(replacement_modifiers)}));
+    }
+    if (type.value() == "pulp.timeline.command.set_note_events") {
+        auto decoded = ids();
+        auto expected = required(command, "expected", data_path);
+        auto replacement = required(command, "replacement", data_path);
+        if (!decoded || !expected || !replacement)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        // Both arrays are note arrays, decoded exactly as a clip's notes are, so
+        // a malformed note is rejected here rather than at the reducer. Whether
+        // the two arrays pair up is a reduction question, not a decode one: it
+        // needs the clip they name.
+        auto decoded_expected =
+            decode_command_notes(*expected.value(), context, data_path + "/expected");
+        if (!decoded_expected)
+            return runtime::Err(decoded_expected.error());
+        auto decoded_replacement =
+            decode_command_notes(*replacement.value(), context, data_path + "/replacement");
+        if (!decoded_replacement)
+            return runtime::Err(decoded_replacement.error());
+        return runtime::Ok(Command(SetNoteEvents{decoded.value()[0], decoded.value()[1],
+                                                 decoded.value()[2],
+                                                 std::move(decoded_expected).value(),
+                                                 std::move(decoded_replacement).value()}));
     }
     if (type.value() == "pulp.timeline.command.set_clip_playback_properties") {
         auto decoded = ids();
@@ -482,9 +542,11 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
             replacement.value()->kind != JsonValue::Kind::Array)
             return fail<Command>(PersistenceErrorCode::MissingField, data_path);
         auto decoded_expected =
-            decode_chord_scale_lane(expected.value(), context, data_path + "/expected");
+            decode_chord_scale_lane(expected.value(), MemberPolicy::Optional, context,
+                                    data_path + "/expected");
         auto decoded_replacement =
-            decode_chord_scale_lane(replacement.value(), context, data_path + "/replacement");
+            decode_chord_scale_lane(replacement.value(), MemberPolicy::Optional, context,
+                                    data_path + "/replacement");
         if (!decoded_expected)
             return runtime::Err(decoded_expected.error());
         if (!decoded_replacement)
@@ -515,7 +577,8 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
         auto region = required(command, "region", data_path);
         if (!sequence || !region)
             return fail<Command>(PersistenceErrorCode::MissingField, data_path);
-        auto decoded = decode_region(*region.value(), context, data_path + "/region");
+        auto decoded = decode_region(*region.value(), MemberPolicy::Optional, context,
+                                     data_path + "/region");
         if (!decoded)
             return runtime::Err(decoded.error());
         return runtime::Ok(Command(InsertRegion{sequence.value(), std::move(decoded).value()}));
@@ -609,6 +672,63 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
         return runtime::Ok(
             Command(SetTrackFreeze{sequence.value(), track.value(), std::move(expected).value(),
                                    std::move(replacement).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.insert_track") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto before = decode_optional_command_item_id(command, "before_track_id", data_path);
+        auto track = required(command, "track", data_path);
+        if (!sequence)
+            return runtime::Err(sequence.error());
+        if (!before)
+            return runtime::Err(before.error());
+        if (!track)
+            return runtime::Err(track.error());
+        auto decoded =
+            decode_track(document, *track.value(), registry, context, data_path + "/track");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        return runtime::Ok(
+            Command(InsertTrack{sequence.value(), std::move(decoded).value(), before.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.remove_track") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        if (!sequence || !track)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        return runtime::Ok(Command(RemoveTrack{sequence.value(), track.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.set_track_name") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        if (!sequence || !track)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto expected = detail::decode_string_field(command, "expected", data_path);
+        auto replacement = detail::decode_string_field(command, "replacement", data_path);
+        if (!expected)
+            return runtime::Err(expected.error());
+        if (!replacement)
+            return runtime::Err(replacement.error());
+        return runtime::Ok(Command(SetTrackName{sequence.value(), track.value(),
+                                                std::move(expected).value(),
+                                                std::move(replacement).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.move_track") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        if (!sequence || !track)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        // Both endpoints are absent when a track moves from last to last, so an
+        // absent member is a position rather than a missing field.
+        auto expected =
+            decode_optional_command_item_id(command, "expected_before_track_id", data_path);
+        auto replacement =
+            decode_optional_command_item_id(command, "replacement_before_track_id", data_path);
+        if (!expected)
+            return runtime::Err(expected.error());
+        if (!replacement)
+            return runtime::Err(replacement.error());
+        return runtime::Ok(Command(MoveTrack{sequence.value(), track.value(), expected.value(),
+                                             replacement.value()}));
     }
     if (type.value() == "pulp.timeline.command.insert_sequence") {
         auto sequence = required(command, "sequence", data_path);

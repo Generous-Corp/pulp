@@ -51,7 +51,7 @@ TEST_CASE("DAWproject import maps the linear subset into the timeline model") {
     REQUIRE(lead_clips.size() == 1);
     REQUIRE(lead_clips[0].start().value == 4 * kBeat);
     REQUIRE(lead_clips[0].duration().value == 4 * kBeat);
-    const auto& notes = std::get<NoteContent>(lead_clips[0].content()).notes();
+    const auto& notes = std::get<MidiContent>(lead_clips[0].content()).notes();
     REQUIRE(notes.size() == 2);
     REQUIRE(notes[0].start.value == 0);
     REQUIRE(notes[0].duration.value == 1 * kBeat);
@@ -64,6 +64,23 @@ TEST_CASE("DAWproject import maps the linear subset into the timeline model") {
     // Sequence duration spans the latest clip end (8 beats on both tracks).
     REQUIRE(sequence.duration().has_value());
     REQUIRE(sequence.duration()->value == 8 * kBeat);
+}
+
+TEST_CASE("DAWproject import preserves a positioned empty clip") {
+    const auto result = import_dawproject_xml(
+        R"(<Project version="1.0"><Structure><Track id="t" name="Empty"/></Structure>)"
+        R"(<Arrangement><Lanes timeUnit="beats"><Lanes track="t"><Clips>)"
+        R"(<Clip id="empty" time="2" duration="3"/>)"
+        R"(</Clips></Lanes></Lanes></Arrangement></Project>)");
+
+    REQUIRE(result.has_value());
+    const auto& tracks = result.value().sequences()[0].tracks();
+    REQUIRE(tracks.size() == 1);
+    REQUIRE(tracks[0].clips().size() == 1);
+    const auto& clip = tracks[0].clips()[0];
+    REQUIRE(clip.start().value == 2 * kBeat);
+    REQUIRE(clip.duration().value == 3 * kBeat);
+    REQUIRE(std::holds_alternative<EmptyContent>(clip.content()));
 }
 
 TEST_CASE("DAWproject audio import requires media bytes to seal durable identity") {

@@ -422,11 +422,47 @@ TEST_CASE("Skinned Meter gradient samples low→high across stops",
     auto lo = meter.gradient_color_at(0.0f);
     auto hi = meter.gradient_color_at(1.0f);
     auto mid = meter.gradient_color_at(0.5f);
-    REQUIRE_THAT(lo.g, WithinAbs(1.0, 0.01));
-    REQUIRE_THAT(hi.r, WithinAbs(1.0, 0.01));
+    REQUIRE(lo.has_value());
+    REQUIRE(hi.has_value());
+    REQUIRE(mid.has_value());
+    REQUIRE_THAT(lo->g, WithinAbs(1.0, 0.01));
+    REQUIRE_THAT(hi->r, WithinAbs(1.0, 0.01));
     // Midpoint is an even blend.
-    REQUIRE_THAT(mid.r, WithinAbs(0.5, 0.02));
-    REQUIRE_THAT(mid.g, WithinAbs(0.5, 0.02));
+    REQUIRE_THAT(mid->r, WithinAbs(0.5, 0.02));
+    REQUIRE_THAT(mid->g, WithinAbs(0.5, 0.02));
+}
+
+TEST_CASE("a Meter with no gradient has no colour to give",
+          "[view][widget][tokens]") {
+    // Sampling an unset gradient used to answer a built-in green
+    // (rgba8(80,200,80)) — a colour no design chose, on a public method any
+    // caller can reach. Nothing is the honest answer, and it is why the type
+    // is optional: a transparent Color would be just as wrong the moment a
+    // caller ignored the alpha and painted it black.
+    Meter meter;
+    CHECK_FALSE(meter.gradient_color_at(0.0f).has_value());
+    CHECK_FALSE(meter.gradient_color_at(0.5f).has_value());
+    CHECK_FALSE(meter.gradient_color_at(1.0f).has_value());
+
+    // Same after a skin is cleared — the meter must not keep a colour it no
+    // longer has stops for.
+    meter.set_skin_gradient({Color::rgba8(0, 255, 0), Color::rgba8(255, 0, 0)});
+    REQUIRE(meter.gradient_color_at(0.5f).has_value());
+    meter.clear_skin();
+    CHECK_FALSE(meter.gradient_color_at(0.5f).has_value());
+}
+
+TEST_CASE("a Meter with one stop answers that stop, not a blend",
+          "[view][widget][tokens]") {
+    // A single stop is a colour the design did state, so it is returned as
+    // given rather than refused.
+    Meter meter;
+    meter.set_skin_gradient({Color::rgba8(196, 98, 42)});
+    const auto only = meter.gradient_color_at(0.7f);
+    REQUIRE(only.has_value());
+    CHECK(only->r8() == 196);
+    CHECK(only->g8() == 98);
+    CHECK(only->b8() == 42);
 }
 
 TEST_CASE("derive_meter_skin samples a synthetic gradient bottom→top",
@@ -2883,5 +2919,182 @@ TEST_CASE("Draw-time shader failure paints the default widget body, logging once
     // A second paint keeps the latch set (no per-frame re-log).
     knob.paint(canvas);
     REQUIRE(knob.shader_draw_failure_logged());
+}
+#endif  // PULP_HAS_SKIA
+
+TEST_CASE("a labelled Toggle never paints its switch over its caption",
+          "[view][widget][layout]") {
+    // The reported symptom: on a short toggle the caption was drawn across the
+    // thumb. Assert the painted geometry -- the track rect and the text
+    // baseline -- rather than any layout constant, so this fails if the switch
+    // ever grows or slides back into the text regardless of how it got there.
+    const float font_px = 10.0f;  // Toggle draws its caption at 10px
+
+    for (float h : {24.0f, 30.0f, 40.0f, 60.0f}) {
+        Toggle toggle;
+        toggle.set_bounds({0, 0, 50, h});
+        toggle.set_label("Bypass");
+        toggle.set_on(true);
+
+        RecordingCanvas canvas;
+        toggle.paint(canvas);
+
+        const DrawCommand* track = nullptr;
+        const DrawCommand* caption = nullptr;
+        for (const auto& c : canvas.commands()) {
+            if (c.type == DrawCommand::Type::fill_rounded_rect && track == nullptr)
+                track = &c;
+            if (c.type == DrawCommand::Type::fill_text && caption == nullptr)
+                caption = &c;
+        }
+        REQUIRE(track != nullptr);
+        REQUIRE(caption != nullptr);
+
+        const float track_bottom = track->f[1] + track->f[3];
+        // The caption's glyphs rise about one font-size above their baseline.
+        const float caption_top = caption->f[1] - font_px;
+
+        INFO("height " << h << ": track bottom " << track_bottom
+                       << " vs caption top " << caption_top);
+        CHECK(track_bottom <= caption_top);
+    }
+}
+
+TEST_CASE("an unlabelled Toggle still centres its switch in the full height",
+          "[view][widget][layout]") {
+    // Guard the other direction: reserving caption space must not shrink or
+    // shift a toggle that has no caption to make room for.
+    Toggle toggle;
+    toggle.set_bounds({0, 0, 50, 30});
+    toggle.set_on(true);
+
+    RecordingCanvas canvas;
+    toggle.paint(canvas);
+
+    const DrawCommand* track = nullptr;
+    for (const auto& c : canvas.commands())
+        if (c.type == DrawCommand::Type::fill_rounded_rect) { track = &c; break; }
+    REQUIRE(track != nullptr);
+
+    const float top_gap = track->f[1];
+    const float bottom_gap = 30.0f - (track->f[1] + track->f[3]);
+    CHECK(std::abs(top_gap - bottom_gap) < 0.01f);
+}
+
+#ifdef PULP_HAS_SKIA
+// The lit bar and the unlit track are two rects covering the same box, so
+// they must end on the same edge. A cross-axis inset on the fill leaves a
+// 1px rail of track colour down both sides of the bar — on a wide meter
+// (an imported design's level box) that rail reads as a rasterisation seam.
+// Asserted on device pixels at the exact box edge, at a FRACTIONAL origin,
+// so it also covers the case where the box edge is not on the pixel grid.
+namespace {
+
+struct MeterRaster {
+    sk_sp<SkSurface> surface;
+
+    // Peeked per call: an SkPixmap is a non-owning view, so keeping one as a
+    // member would tie its validity to how this struct is returned/copied.
+    SkColor at(int x, int y) const {
+        SkPixmap pixmap;
+        REQUIRE(surface->peekPixels(&pixmap));
+        return pixmap.getColor(x, y);
+    }
+};
+
+// Rasterise a Meter at `origin` (logical px, deliberately fractional) into a
+// 2x device-scale surface with a margin of `pad` logical px around the box.
+MeterRaster raster_meter(Meter& meter, float origin_x, float origin_y,
+                         float w, float h, float pad, float scale) {
+    const int device_w = static_cast<int>((w + 2 * pad) * scale);
+    const int device_h = static_cast<int>((h + 2 * pad) * scale);
+    SkImageInfo info = SkImageInfo::Make(device_w, device_h, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    MeterRaster out;
+    out.surface = SkSurfaces::Raster(info);
+    REQUIRE(out.surface != nullptr);
+    out.surface->getCanvas()->clear(SK_ColorBLUE);
+    out.surface->getCanvas()->scale(scale, scale);
+    out.surface->getCanvas()->translate(origin_x, origin_y);
+
+    SkiaCanvas canvas(out.surface->getCanvas());
+    meter.set_bounds({origin_x, origin_y, w, h});
+    meter.paint(canvas);
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("a vertical Meter's lit bar shares the box's left and right edge",
+          "[view][widget][skia][seam]") {
+    // Geometry of an imported design's level box: 65x66 at a fractional y,
+    // half lit, drawn at 2x. The GROWTH axis is off the pixel grid (as a
+    // solved design's is) while the CROSS axis is on it, so the left and
+    // right columns are fully covered and a partial pixel there can only
+    // come from the paint geometry, never from honest antialiasing.
+    const float scale = 2.0f, pad = 2.0f, w = 65.0f, h = 66.0f;
+    const float origin_x = 2.0f, origin_y = 0.625f;
+
+    Meter meter;
+    meter.set_level(0.5f, 0.0f);
+    auto raster = raster_meter(meter, origin_x, origin_y, w, h, pad, scale);
+
+    // Device columns: the box spans [4, 134); the lit half spans device rows
+    // [67.25, 133.25), so row 100 is safely inside it.
+    const int left_edge = static_cast<int>(origin_x * scale);           // 4
+    const int right_edge = static_cast<int>((origin_x + w) * scale) - 1; // 133
+    const int mid_x = (left_edge + right_edge) / 2;
+    const int lit_y = 100;
+    const int unlit_y = 20;
+
+    const SkColor fill = raster.at(mid_x, lit_y);
+    const SkColor track = raster.at(mid_x, unlit_y);
+
+    // The sample is only meaningful if track and fill differ, and if the
+    // columns named really are the box's outermost ones.
+    INFO("fill=" << fill << " track=" << track
+                 << " outside=" << raster.at(left_edge - 1, lit_y));
+    REQUIRE(fill != track);
+    REQUIRE(raster.at(left_edge - 1, lit_y) == SK_ColorBLUE);
+    REQUIRE(raster.at(right_edge + 1, lit_y) == SK_ColorBLUE);
+
+    // No seam: every column of the lit band, edge to edge, is the fill.
+    for (int x = left_edge; x <= right_edge; ++x) {
+        INFO("column " << x);
+        REQUIRE(raster.at(x, lit_y) == fill);
+    }
+}
+
+TEST_CASE("a horizontal Meter's lit bar shares the box's top and bottom edge",
+          "[view][widget][skia][seam]") {
+    // Mirror of the vertical case: growth axis fractional, cross axis on the
+    // pixel grid.
+    const float scale = 2.0f, pad = 2.0f, w = 66.0f, h = 65.0f;
+    const float origin_x = 0.625f, origin_y = 2.0f;
+
+    Meter meter;
+    meter.set_orientation(Meter::Orientation::horizontal);
+    meter.set_level(0.5f, 0.0f);
+    auto raster = raster_meter(meter, origin_x, origin_y, w, h, pad, scale);
+
+    const int top_edge = static_cast<int>(origin_y * scale);            // 4
+    const int bottom_edge = static_cast<int>((origin_y + h) * scale) - 1; // 133
+    const int mid_y = (top_edge + bottom_edge) / 2;
+    const int lit_x = 10;    // inside the lit half (grows from the left)
+    const int unlit_x = 125; // beyond the lit half
+
+    const SkColor fill = raster.at(lit_x, mid_y);
+    const SkColor track = raster.at(unlit_x, mid_y);
+
+    INFO("fill=" << fill << " track=" << track);
+    REQUIRE(fill != track);
+    REQUIRE(raster.at(lit_x, top_edge - 1) == SK_ColorBLUE);
+    REQUIRE(raster.at(lit_x, bottom_edge + 1) == SK_ColorBLUE);
+
+    for (int y = top_edge; y <= bottom_edge; ++y) {
+        INFO("row " << y);
+        REQUIRE(raster.at(lit_x, y) == fill);
+    }
 }
 #endif  // PULP_HAS_SKIA

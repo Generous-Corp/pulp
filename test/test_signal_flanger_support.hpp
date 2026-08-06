@@ -48,6 +48,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <numbers>
 #include <vector>
 
 using namespace pulp::signal;
@@ -84,7 +85,7 @@ constexpr double kCenterMs = 3.0;
 constexpr double kDepthMs = 1.5;
 
 double magnitude_at(const std::vector<double>& x, double hz) {
-    const double w = 2.0 * M_PI * hz / kSr;
+    const double w = 2.0 * std::numbers::pi * hz / kSr;
     double re = 0.0, im = 0.0;
     for (std::size_t n = 0; n < x.size(); ++n) {
         re += x[n] * std::cos(w * static_cast<double>(n));
@@ -119,7 +120,7 @@ double transfer(Fl& flanger, double hz, int analysis = kAnalysisLen,
     std::vector<double> in(static_cast<std::size_t>(kSettle + analysis));
     std::vector<double> out(in.size());
     for (std::size_t n = 0; n < in.size(); ++n)
-        in[n] = amplitude * std::sin(2.0 * M_PI * hz * static_cast<double>(n) / kSr);
+        in[n] = amplitude * std::sin(2.0 * std::numbers::pi * hz * static_cast<double>(n) / kSr);
     flanger.process(in.data(), out.data(), static_cast<int>(in.size()));
     const std::vector<double> segment(out.begin() + kSettle, out.end());
     return magnitude_at(segment, hz) / amplitude;
@@ -147,8 +148,8 @@ Fl held(double delay_ms, double feedback, Polarity polarity, double mix = 0.5) {
 /// not transparent, and at 0.9 feedback a 0.05 % loop-gain error is a 0.4 %
 /// error in the resonant peak.
 std::complex<double> dc_blocker_response(double hz) {
-    const double pole = std::exp(-2.0 * M_PI * Fl::kDcBlockHz / kSr);
-    const std::complex<double> z = std::polar(1.0, -2.0 * M_PI * hz / kSr);
+    const double pole = std::exp(-2.0 * std::numbers::pi * Fl::kDcBlockHz / kSr);
+    const std::complex<double> z = std::polar(1.0, -2.0 * std::numbers::pi * hz / kSr);
     return (1.0 - z) / (1.0 - pole * z);
 }
 
@@ -167,7 +168,8 @@ double comb_magnitude(double hz, double delay_ms, double feedback, Polarity pola
     Fl::mix_gains(mix, dry_gain, wet_gain);
     const double sign = polarity == Polarity::negative ? -1.0 : 1.0;
     const double delay_samples = delay_ms * 0.001 * kSr;
-    const std::complex<double> e = std::polar(1.0, -2.0 * M_PI * hz * delay_samples / kSr);
+    const std::complex<double> e =
+        std::polar(1.0, -2.0 * std::numbers::pi * hz * delay_samples / kSr);
     const std::complex<double> wet = e / (1.0 - feedback * sign * e * dc_blocker_response(hz));
     return std::abs(dry_gain + wet_gain * sign * wet);
 }

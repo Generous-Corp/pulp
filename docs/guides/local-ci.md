@@ -7,6 +7,338 @@ Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) before
 > + first-run gotchas (git-lfs hook conflict, Xcode license,
 > Apple Clang version skew).
 
+## Fork routing in YAML is defense in depth, not access control
+
+The macOS runner is chosen by the resolver in `build.yml`, which normally honors
+`PULP_LOCAL_MACOS_RUNS_ON_JSON` and routes to the fast M3/M5 VM pool. For a pull
+request whose head branch lives in **another repository**,
+both self-hosted selectors are ignored and the leg falls through to the
+GitHub-hosted `macos-15` label.
+
+This checked-in routing is useful defense in depth, but it is not a security
+boundary: pull-request workflow YAML is contributor-controlled and can remove
+its own guard. The local Macs hold the Developer ID signing keychain and the
+notary key (`~/.config/pulp/secrets/`), and
+`PULP_LOCAL_MACOS_RUNS_ON_JSON` is a repo **variable** — variables, unlike
+secrets, *do* resolve for fork runs. Without the guard, one "Approve and run"
+click on a fork pull request could otherwise execute contributor code on the
+credentialed machines. The real boundary must be an organization runner group
+restricted to selected trusted workflow refs (or an equivalent trusted
+dispatcher). Until then, do not add private pools to automatic PR routing.
+
+The leg is rerouted rather than skipped, so a fork contributor still gets a real
+macOS result on a clean throwaway runner. Note that the required `macos` check
+is posted by the local lane, so a fork PR still cannot merge on its own — the
+maintainer adopts the commits onto an in-repo `contrib/*` branch and ships that.
+
+Same-repo pull requests, pushes, and `workflow_dispatch` runs are unaffected.
+Covered as defense in depth by `tools/scripts/test_fork_pr_runner_routing.py`
+(ctest: `fork-pr-runner-routing`), which runs the resolver the workflow actually
+embeds; that test does not prove the runners are inaccessible.
+
+## The physical Intel lane is advisory and isolated
+
+The Intel Mac mini serves `nightly-intel.yml` through an ephemeral JIT
+supervisor, not the persistent required-gate pool. Its selector is exact:
+
+```text
+self-hosted,macOS,X64,pulp-intel-native,pulp-host-macmini
+```
+
+`PULP_NATIVE_INTEL_RUNS_ON_JSON` is intentionally unset until the host passes
+`tools/ci/native-intel-runner.sh --check` and a manual dispatch proves a cold
+workspace can claim and finish the job. While unset, the native job uses
+`macos-15-intel`. To pilot without changing the variable, dispatch
+`nightly-intel.yml` with `use_physical_intel` enabled; that boolean maps
+internally to the exact selector above and cannot target another pool. To roll
+back after enabling it, unset the variable and redispatch any job
+already queued for the local labels; GitHub does not reroute an assigned job.
+
+Before starting the supervisor, create a dedicated organization runner group
+for the Mac mini, restrict it to `Generous-Corp/pulp` and the protected
+default-branch `.github/workflows/nightly-intel.yml`, and set its numeric ID as
+`PULP_NATIVE_INTEL_RUNNER_GROUP_ID` in the LaunchAgent. The supervisor refuses
+the default group and an unset/non-numeric ID, then reads the organization
+runner-group API and requires the group to contain only this repository and
+only `nightly-intel.yml@refs/heads/main`. The GitHub credential therefore needs
+runner-group read access as well as repository runner administration. Prove that
+a workflow revision from a PR branch cannot target the group before enabling
+the repository selector; labels alone are not an access boundary.
+
+The GitHub credential and controller must never share a uid with workflow jobs.
+The login account runs only the controller and holds `gh`/`ghapp` auth. Jobs run
+as the fixed hidden service identity `pulp-ci` (uid 499, primary group `staff`),
+which owns only its current disposable job root. Its directory-service home is
+the root-owned `/var/empty`, its login shell and authentication are disabled,
+and the worker supplies a new private `HOME` and `TMPDIR` for each job. It must
+not be an administrator and must not be able to write the controller checkout
+or worker shim. Do not copy the controller account's GitHub credential into it.
+
+Creating that OS boundary is a one-time administrator operation:
+
+1. Confirm uid 499 is unused, then create the fixed non-login identity. These
+   are deliberate directory-service writes, so inspect the first command before
+   continuing; do not choose another uid and weaken the fixed-identity check.
+
+   ```sh
+   dscl . -list /Users UniqueID | awk '$2 == 499 { print; found=1 } END { exit found ? 1 : 0 }'
+   sudo dscl . -create /Users/pulp-ci
+   sudo dscl . -create /Users/pulp-ci RealName 'Pulp native Intel CI worker'
+   sudo dscl . -create /Users/pulp-ci UniqueID 499
+   sudo dscl . -create /Users/pulp-ci PrimaryGroupID 20
+   sudo dscl . -create /Users/pulp-ci NFSHomeDirectory /var/empty
+   sudo dscl . -create /Users/pulp-ci UserShell /usr/bin/false
+   sudo dscl . -create /Users/pulp-ci IsHidden 1
+   sudo dscl . -create /Users/pulp-ci AuthenticationAuthority ';DisabledUser;'
+   sudo dscl . -create /Users/pulp-ci Password '*'
+   ```
+
+   Do not create `/Users/pulp-ci`, enable automatic login, or enable remote
+   login for this identity.
+2. Put the shared, Apple-signed Xcode at `/Applications/Xcode.app` and accept
+   its license once. Put a verified, **unconfigured** GitHub Actions runner
+   archive at `/usr/local/share/pulp-native-intel/actions-runner-mini`, verified
+   CMake, Ninja, ccache, and Git LFS tools under
+   `/usr/local/share/pulp-native-intel`, and a prewarmed cache at
+   `/usr/local/share/pulp-native-intel/ccache`. The commands exposed in `bin/`
+   may be relative symlinks into the same trusted root (for example, into a
+   complete CMake bundle); no link may escape it. Recursively set Xcode and this
+   entire trusted root to `root:wheel`, then remove group/world write bits:
+
+   ```sh
+   sudo chmod -RN /Applications/Xcode.app \
+     /usr/local/share/pulp-native-intel
+   sudo chown -R root:wheel /Applications/Xcode.app \
+     /usr/local/share/pulp-native-intel
+   sudo chmod -R go-w /Applications/Xcode.app \
+     /usr/local/share/pulp-native-intel
+   ```
+
+   The golden runner must never be configured or run in place. Jobs consume the
+   warm ccache read-only with ccache depend mode explicitly disabled through
+   `CCACHE_NODEPEND=1` (decision
+   20); they use an ephemeral writable temp directory and cannot poison the
+   cache. To refresh it, stop the LaunchAgent, build a new cache in a staging
+   directory, install that directory as `root:wheel` without group/world write,
+   run `--check`, and only then restart the controller.
+3. Install the checked-in lifecycle shim immutably:
+
+   ```sh
+   sudo install -d -o root -g wheel -m 0755 /usr/local/libexec
+   sudo install -o root -g wheel -m 0755 \
+     tools/ci/native-intel-runner-worker.sh \
+     /usr/local/libexec/pulp-native-intel-worker
+   ```
+
+4. Use `sudo visudo -f /etc/sudoers.d/pulp-native-intel` to install this narrow
+   rule, replacing `daniel` only if the controller login is different:
+
+   ```text
+   daniel ALL=(root) NOPASSWD: /usr/local/libexec/pulp-native-intel-worker --check, /usr/local/libexec/pulp-native-intel-worker --clean, /usr/local/libexec/pulp-native-intel-worker --run
+   ```
+
+The root-owned shim accepts only those three fixed operations. Before each job
+it removes any job-installed crontab, kills leftover uid-499 processes, removes
+that uid's state from the host's mutable data roots (including macOS temp roots,
+`/Users/Shared`, and `/Library/Caches`), removes the fixed job root, and copies
+the immutable golden runner into it. The private per-job `HOME`, `TMPDIR`, ccache temp directory, runner, and
+workspace are all uid-owned only for the lifetime of that job. After the runner
+exits the shim kills leftovers and removes all of them again. Runner executables
+never survive into the next job; only the root-owned read-only warm ccache does.
+The worker also requires macOS's `com.apple.atrun` service to remain disabled
+and removes any uid-499 `at`/`batch` jobs before serving another workflow.
+JIT registration,
+runner-group verification, stale-registration removal, and all authenticated
+GitHub API calls remain in the controller. The shim receives only the ephemeral
+one-job JIT payload on standard input, drops to `pulp-ci`, runs `run.sh` with a clean environment,
+and contains no GitHub client or persistent credential. Both sides fail closed
+if the fixed account identity is absent or altered, the worker is mutable or
+has a write-granting ACL,
+passwordless delegation is absent, the shared Xcode/tools/cache have unsafe
+ownership, permissions, or escaping symlinks, or group verification fails.
+Xcode signature, Gatekeeper, license, `xcodebuild`, and clang probes run only
+after dropping to uid 499, so a root-only success cannot mask an unusable worker
+toolchain. A later identity, ownership, signature, or toolchain validation
+failure returns a terminal configuration status and leaves the controller alive
+but its lane offline; launchd therefore does not turn an integrity failure into
+a restart/retry storm. Restart the controller only after correcting the failed
+preflight.
+
+The LaunchAgent template is
+`tools/launchd/pulp-native-intel-runner.plist.template`. `RunAtLoad` and
+`KeepAlive` restore the controller after the login account logs in. FileVault prevents the
+startup volume from mounting unattended after a cold power cycle, so the host
+is not available until a person unlocks it. Keep this lane advisory and do not
+weaken FileVault or give it any of the required ARM64 gate labels.
+The controller prefers `ghapp` when it is installed and otherwise uses its own
+authenticated rootless `gh`. The job account receives neither client nor token.
+
+## The dispatch-only Linux x64 lane runs on macpro (Proxmox)
+
+Operator-dispatched `build.yml` runs may route the `Linux (x64)` leg via
+`PULP_LOCAL_LINUX_RUNS_ON_JSON` to ephemeral Proxmox VMs on **macpro** — a
+Late-2013 Mac Pro (Xeon E5-1650 v2, 6c/12t, 31 GB) repurposed as a Linux CI
+host. Automatic PR runs remain on GitHub-hosted Linux until an organization
+runner group provides the private-pool access boundary. The pool is native
+x86_64, which the job requires: the lane's earlier ARM64/Tart declaration would
+have changed its architecture rather than relocating it, silently deleting the
+only x64 Linux coverage.
+
+That external boundary is a prerequisite, not a workflow TODO: create a
+dedicated organization runner group containing only the Mac Pro ephemeral
+runners, grant it to `Generous-Corp/pulp` only, and restrict workflow access to
+the protected default-branch copy of `.github/workflows/build.yml`. Then prove
+that a pull request changing its own workflow cannot target the group before
+enabling automatic PR or merge-group routing. Repository variables, event-name
+conditions, and tests in this repository are not substitutes for that control.
+
+`resolve-provider` exposes the configured selector separately from the selector
+authorized for the current event. Its `linux_route_reason` output is one of
+`explicit-dispatch`, `security-hosted`, or `unconfigured-hosted`; the Linux
+matrix provider is derived from the selector that actually resolved. An
+operator dispatch with a configured selector fails instead of silently falling
+back to hosted Linux.
+
+```
+ssh macpro                       # 192.168.86.43, Proxmox VE 8.4
+qm list                          # 9xxx = pulp-linux-golden* (templates)
+systemctl status 'pulp-ephemeral-pool@*'
+journalctl -u 'pulp-ephemeral-pool@1' -f
+```
+
+The supervisor and its systemd unit are versioned here as
+`tools/ci/proxmox-ephemeral-runner-linux.sh` and `tools/ci/pulp-ephemeral-pool@.service`;
+the host copies live at `/usr/local/sbin/` and `/etc/systemd/system/`. The script's
+`GOLDEN=` names the template in use — read it rather than trusting a number written
+down here, since re-baking a warmer golden mints a new id.
+
+**Golden + disposable clone.** The golden carries the dependency set, prebuilt
+Skia (`external/skia-build/.../libskia.a`), a warm ccache, the uncredentialed
+`gh` executable used by preamble/alias jobs, and the shared FetchContent
+**source** cache that `setup.sh` consults via
+`PULP_SHARED_FETCHCONTENT_SOURCE_DIR`. That last one is not optional: with it
+empty, every job re-clones three.js (~2.2 GB of history) before it can compile.
+Each job gets a
+linked clone (copy-on-write, ~28 s to boot), registers a `--ephemeral` runner, takes
+exactly one job, and the clone is destroyed. Nothing accumulates, so nothing needs
+cleaning — and the cache a job inherits cannot be poisoned by the job before it.
+This closes the reused-build-dir class outright, which matters because `build.yml`
+sets `clean: false` on self-hosted runners.
+
+Two slots run via `pulp-ephemeral-pool@{1,2}.service`; systemd restarting a slot is
+what provisions the next clone. Add a slot by enabling `@3` — but check the governor
+first.
+
+The three clone VMIDs have deterministic network identities: `200..202` map to
+`192.168.86.251..253` and stable locally administered MAC addresses. Do not return
+to random clone MACs. Each short-lived MAC retains a DHCP lease after its VM is
+destroyed, and normal CI volume exhausted the LAN lease pool on 2026-08-02.
+The GitHub runner registration remains unique per invocation; stable network
+identity must not become a static Actions runner name.
+
+**Resource governance**, mirroring the tiers in `CLAUDE.md`:
+
+- *Tier 0* — per-VM `cores=4 cpulimit=4 cpuunits=50 balloon=0`, hypervisor-enforced.
+  `cpuunits=50` is below the default so build VMs yield to the host; `balloon=0`
+  pins memory so a build is never squeezed mid-link.
+- *Tier 1* — `/usr/local/sbin/macpro-governor.sh` (`status` / `can-start-new`).
+  Reserves 2 threads + 4 GB for the hypervisor. **Memory is a hard limit; CPU allows
+  1.5x overcommit.** That asymmetry is deliberate: an OOM mid-link yields a
+  truncated object file that reads like a compiler bug, while CPU contention only
+  costs time. Every clone is admitted through it, so nothing can oversubscribe the
+  host.
+
+**Rollback:** unset `PULP_LOCAL_LINUX_RUNS_ON_JSON`; operator-dispatched runs
+then use GitHub-hosted Linux. Automatic PR runs already use GitHub-hosted Linux.
+`runs-on` has no live fallback after a dispatched job is assigned, so if macpro
+is down or its pool is stopped, unset the variable and redispatch rather than
+waiting.
+
+Registration uses a fine-grained PAT at
+`/root/.config/pulp/secrets/gh-runner-pat` (mode 600, root) with only
+`Administration: read/write`, minting a single-use registration token per job.
+That host credential never enters a guest. Jobs that call `gh` authenticate with
+the short-lived `GITHUB_TOKEN` injected by Actions; the golden must not contain a
+persistent `gh` login in any supported config or credential store.
+## Routing the Linux advisory lanes to macpro
+
+Three advisory Linux lanes can run on the self-hosted x86_64 host instead of
+GitHub's pool. Measured cost on hosted runners, per PR:
+
+| Lane | Variable | Hosted wait | Hosted run |
+|---|---|---|---|
+| GCC compile (core, Linux) | `PULP_LOCAL_GCC_RUNS_ON_JSON` | 63.2m | 11.3m |
+| IWYU (Linux, Clang) | `PULP_LOCAL_IWYU_RUNS_ON_JSON` | 4.2m | 5.2m |
+| Public headers standalone | `PULP_LOCAL_HEADERS_RUNS_ON_JSON` | 9.7m | 2.9m |
+
+About 96 job-minutes of hosted load per PR. None is a required check, so a red
+result here never blocks a merge — which is why they are the right lanes to move
+first.
+
+Each falls back to its GitHub-hosted label when the variable is unset, so the
+workflow change is inert until a variable is set. **Flip them one at a time and
+watch a full cycle**: `runs-on` has no automatic fallback once a variable *is*
+set, so a lane pointed at a stopped pool queues indefinitely rather than erroring.
+Rollback is unsetting the variable.
+
+```sh
+gh variable set PULP_LOCAL_IWYU_RUNS_ON_JSON \
+  --repo Generous-Corp/pulp \
+  --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]'
+```
+
+Start with IWYU: it is the cheapest of the three, so a mistake costs the least.
+Check capacity first — `ssh macpro /usr/local/sbin/macpro-governor.sh status` — and
+remember the pool is two slots, so three routed lanes plus `Linux (x64)` will queue
+against each other before they queue against GitHub.
+## Windows runs nightly, not per merge
+
+Windows is billed at **2x** on GitHub-hosted runners and **gates nothing** — no
+Windows context appears in `main`'s required checks, so the merge queue never waits
+for it. Measured across 12 runs it was roughly **90% of billable Actions spend**,
+and with `max_entries_to_build=2` each merge cycle ran it twice.
+
+It now runs on `schedule` and `workflow_dispatch` only. Coverage did not move to
+nobody: `cross-platform-check.yml` already builds and tests Windows nightly, and its
+`tracking-issues` job find-or-creates a per-platform issue on failure, reopens a
+closed one, and auto-closes it on recovery. So a Windows regression is caught,
+filed as a work item, and picked up deliberately — instead of consuming queue
+capacity that the required checks are waiting behind.
+
+Need Windows on a specific change before the nightly? Dispatch it:
+
+```sh
+ghapp workflow run build.yml --ref <branch>
+```
+
+This is a deliberate trade: up to ~24 h of latency on a Windows regression, in
+exchange for merge-queue capacity and spend. Revisit if Windows parity becomes an
+active workstream rather than a background one.
+## The FetchContent cache had to point at a real path
+
+`build.yml` restored and saved three FetchContent paths and none of them ever
+populated — a different reason on each platform. On Linux the cached
+`~/.cache/Pulp/...` did not match CMake's lowercase `~/.cache/pulp/...`; on Windows
+the cached path carried an extra `Cache/` segment versus `$LOCALAPPDATA/Pulp/fc`;
+and off Windows the sources never left `<build>/_deps` anyway, because
+`pulp_configure_fetchcontent_base_dir` returns early unless `WIN32` (it is a
+MAX_PATH workaround for MSBuild, not a cache).
+
+The fix caches `<build>/_deps` — where FetchContent already writes — rather than
+relocating it. **Do not "improve" this by setting `FETCHCONTENT_BASE_DIR` to a
+path outside the build tree.** `PulpWclap.cmake` and `PulpWebUi.cmake` resolve
+CHOC from `<root>/build*/_deps/choc-src`; moving it produces
+`ERROR: configured CHOC source not found under build-macos/_deps` and fails the
+**required** macOS gate. That was tried and reverted.
+
+Worth it because three.js is a 2.2 GB git clone, fetched whenever
+`PULP_BUILD_TESTS` and `PULP_ENABLE_GPU` are both ON — the default on
+`pull_request` and `merge_group`. Measured on an ephemeral Linux runner with an
+otherwise identical tree: **414 s cold configure against 119 s warm**.
+
+If a dependency pin changes and a stale cache is suspected, the key includes
+`hashFiles('setup.sh')`; bump that or clear the Actions cache to force a refetch.
+
 ## Primary: Shipyard
 
 [Shipyard](https://github.com/danielraffel/Shipyard) is Pulp's primary CI tool. It delivers exact SHAs via git bundles, runs your build/test commands on each platform, and gates merges on per-SHA evidence.
@@ -15,8 +347,8 @@ The required `macos` gate runs the shipyard `mac` target
 (`.shipyard/config.toml`, `[validation.default]`). Its `test` step is
 `ctest ... --repeat until-pass:2 --label-exclude "validation|slow|performance|bench|quality-lab"`
 — it excludes the long `slow` tests, the example plugins' `validation`
-format-validators (these gate on the path-filtered `example-validation` lane
-instead), and the relative-timing / CPU-budget / benchmark tests
+format-validators (reported by the path-filtered, currently advisory
+`example-validation` lane), and the relative-timing / CPU-budget / benchmark tests
 (`performance|bench|quality-lab`), and retries a single flake once so timing-flakes
 don't redden the gate. The perf/ratio tests are excluded (2026-07-21, mirrors
 build.yml) because they tolerate steady load but flake under the load *variance*
@@ -24,6 +356,13 @@ of the Studio's 2 concurrent build VMs (cap=2) — a perf gate can't live on a
 cap=2 runner; it belongs in a dedicated cap=1 nightly/perf lane. The full lane model —
 what runs where, the label taxonomy, and how to route a new test — is
 [docs/guides/test-lanes.md](test-lanes.md).
+
+The same profile resolves its CMake interpreter through
+`tools/ci/find_python311.py` and passes the result as `Python3_EXECUTABLE`.
+Apple's command-line tools still expose Python 3.9, which can configure the
+project but cannot run the `tomllib`-based decisions-contract tests; the
+selector uses an installed 3.11+ interpreter or an existing `uv` 3.12 runtime
+and fails before the hour-long Debug build if neither exists.
 
 ```bash
 ./tools/install-shipyard.sh              # install pinned version
@@ -57,10 +396,8 @@ investigating or just within the usual range?" Humans can use the same commands
 for high-level platform comparisons, but no observability service is required.
 
 The `shipyard metrics` commands require a Shipyard build that includes the
-metrics subcommand. Pulp's current pinned source-checkout version in
-`tools/shipyard.toml` is `v0.68.0`, which does not include that surface yet. Use
-a newer Shipyard binary or source checkout for this optional metrics workflow
-until the Pulp pin is bumped.
+metrics subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.81.4`, which
+provides it, so no separate binary is needed.
 
 ```bash
 # Enable VM runtime records on tartci hosts or LaunchAgents.
@@ -234,6 +571,22 @@ with the `SHIPYARD_VERSION` every workflow declares.
 Nothing about it is required: a public cloner runs `install-shipyard.sh` once
 and never thinks about this again. It exists for the local Macs.
 
+v0.81.0 also gives the fleet watchdog an expected-host inventory independent of
+ephemeral runner names. Pulp declares the MacPro and Mac Mini active in
+`.shipyard/config.toml`; absence or insufficient online matches produces
+`expected_host_unavailable`. The planned MacBook Air is declared with
+`active = false`, so it remains visible without claiming capacity. Matching uses
+stable label subsets (`pulp-host-macpro`, `pulp-host-macmini`, and architecture),
+never a JIT runner identity. Inspect the combined view with:
+
+```bash
+shipyard runner fleet-status --repo Generous-Corp/pulp --json
+```
+
+The same report calls out Tart disk-floor and ccache-size admission failures and
+merge-group Linux jobs left on `ubuntu-latest` while online self-hosted Linux x64
+capacity is idle.
+
 ```bash
 # What would happen, without touching anything:
 python3 tools/scripts/shipyard_autoupdate.py --check --json
@@ -338,6 +691,51 @@ line. Host-side setup and the deeper lease/role/memory-axis mechanics live in
 the [tartci](https://github.com/danielraffel/tartci) repo (`scripts/leases.py`,
 `scripts/host_profile.py`, `tartci host-profile` / `tartci leases`).
 
+## Lane timeouts — and why a timeout looks like a broken PR
+
+`[targets.<name>] timeout_secs` in `.shipyard/config.toml` bounds how long a
+validation lane may run. The mac lane is **7200s (2h)** as of 2026-07-27, raised
+from 3600s.
+
+The reason the value matters more than it looks: when a lane hits it, Shipyard
+reports
+
+```
+✗ Validation failed. PR #NNNN not merged.
+    Target:  mac
+    Error:   Validation timed out
+```
+
+with **no per-target diagnostics**. That is indistinguishable from a genuinely
+broken branch, and the natural response — re-push, or start debugging the diff —
+is wrong in both directions. Always read the lane log before believing the
+verdict:
+
+```bash
+tail -40 "~/Library/Application Support/shipyard/logs/<job-id>/mac.log"
+grep -c "error:" "~/Library/Application Support/shipyard/logs/<job-id>/mac.log"
+```
+
+A log that ends mid-build at some percentage with **zero** `error:` lines was
+killed by the clock, not by your code.
+
+Two properties worth knowing when reading a timeout:
+
+- **Queue wait is not charged against the budget.** The clock starts when the
+  lane starts, so a job that sat pending for 40 minutes still gets its full
+  window. Check `started_at` vs `completed_at` in `queue.json` to tell queueing
+  apart from a slow build.
+- **Warm build dirs are the difference between passing and timing out.** On one
+  loaded afternoon, a small change against a warm dir finished in 41 min and
+  passed, while a broad `core/view` change was killed at 98% after 62 min and
+  again at 67% after 113 min on a cold dir. Whether a branch lands should not
+  depend on that, which is why the ceiling was raised rather than left to look
+  like flakiness.
+
+If you are running heavy work on the same machine — a VM, a parallel build — it
+competes with the lane directly. Shutting it down is a legitimate first move
+when a lane is timing out marginally.
+
 ## Validation Profiles
 
 Shipyard validates from a profile (`shipyard run --pipeline <name>`).
@@ -400,10 +798,10 @@ Each trigger runs a deliberately different slice of the matrix:
 | | PR run | `merge_group` run | `push: main` cache run |
 |---|---|---|---|
 | macOS matrix leg | yes | yes | **no** — omitted by `resolve-provider` |
-| Linux matrix leg | yes | yes | yes (publishes the cache) |
-| Windows matrix leg | **no** — see below | yes | yes (publishes the cache) |
-| `windows-{msvc-release,midi2,ble}-gate` | **no** — see below | yes | no |
-| `macos` / `linux` / `windows` alias jobs | yes | yes | no |
+| Linux matrix leg | yes | **no** — PR-head result is reused | yes (publishes the cache) |
+| Windows matrix leg | **no** — see below | **no** — see below | yes (publishes the cache) |
+| `windows-{msvc-release,midi2,ble}-gate` | **no** — see below | **no** — see below | no |
+| required `macos` alias | yes | yes, after the macOS build completes | no |
 | Writes to GitHub's cloud cache | no | no | Linux + Windows only |
 
 The macOS leg is dropped because macOS builds on the **self-hosted** Macs that
@@ -441,39 +839,35 @@ its entry in `AWAITING_CHECKS` until the ruleset's check-response timeout
 expires, evicts it, and nothing lands at all. macOS is never implicated: it
 runs on the self-hosted Macs, which sit outside the hosted pool.
 
-So Windows runs where it actually gates:
+So Windows runs where it supplies independent value without blocking every merge:
 
-- **`merge_group`** — the serial queue validation, which builds PR ∪ main.
-  This is strictly better coverage than a PR-head build, and being serial it
-  costs at most one run's worth of Windows jobs at a time.
+- **nightly cross-platform validation** — catches Windows regressions as
+  follow-up work without consuming the merge queue's hosted slots.
 - **`push: main`** — publishes the Windows ccache.
 - **`workflow_dispatch`** — explicit reruns when you want Windows early.
 
-A PR head keeps macOS (self-hosted) and Linux (self-hosted Linux VMs) for fast
-signal; neither competes for the hosted pool. The advisory `windows` alias job
+A PR head keeps macOS on the self-hosted Macs and Linux on GitHub-hosted Linux
+for fast signal. The Linux leg therefore does consume hosted capacity; the
+security boundary above deliberately prevents automatic PRs from reaching the
+private Mac Pro VMs. The advisory `windows` alias job
 short-circuits to green on `pull_request` — without that it would fail closed
 looking for a matrix leg that deliberately did not run.
 
-The trade is later Windows feedback: a Windows-only break is caught when the PR
-reaches the queue rather than on the PR head, costing one eviction and a
-requeue. That is cheaper than the failure it replaces, where *no* PR could
-merge at all. Dispatch `build.yml` manually against the branch if you want
-Windows before enqueueing.
+The trade is later Windows feedback. Dispatch `build.yml` manually against the
+branch when a Windows-touching change needs proof before merge.
 
 `tools/scripts/test_windows_runner_policy.py` locks this in: it executes
-`resolve-provider`'s matrix resolver for each event and asserts the Windows leg
-is absent on `pull_request` and present on `merge_group` / `workflow_dispatch`,
-that all three compile gates skip `pull_request`, and — as a negative control —
-that macOS and Linux still run on the PR head.
+`resolve-provider`'s matrix resolver for each event and asserts hosted Linux and
+Windows are absent on `merge_group`, Windows remains reachable through
+`workflow_dispatch`, and macOS plus Linux still run on the PR head.
 
-## Reporting aliases never pin the shared hosted pool
+## The required macOS alias never long-polls on the merge queue
 
-The `macos` / `linux` / `windows` alias jobs all resolve their runner from
-`PULP_PREAMBLE_RUNS_ON_JSON` rather than naming `ubuntu-latest` directly.
-
-For `macos` that keeps the *required* gate off a pool it can be starved on. For
-`linux` and `windows` — both advisory — the reason is sharper, and it is a
-failure mode rather than a preference.
+Branch protection requires the stable `macos` alias so local/overflow provider
+changes cannot rename the gate. On `merge_group`, the build matrix contains only
+the real self-hosted macOS leg and the alias depends on that completed build.
+The hosted alias therefore runs only long enough to report the result; it does
+not occupy a hosted slot while polling through the native compile/test.
 
 An alias is the **last job in the run**: it waits for the matrix leg and reports
 the outcome. Starve it of a runner and it never starts, so the *run* never
@@ -616,49 +1010,52 @@ python3 tools/scripts/runner_topology_check.py --mode=hint
 > **Namespace is OFF (cost).** We build macOS on **local Macs + GitHub-hosted**
 > only. `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` is kept **UNSET**, so the
 > Namespace overflow described here never fires — it's a documented break-glass
-> option, not the active path. The required gate is the **bare-metal Mac
-> Studios** on m3 (`PULP_LOCAL_MACOS_RUNS_ON_JSON`); the overflow tier is the
-> **local JIT VM pool** on m1 + m5 (`PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`).
+> option, not the active path. The required gate is the clean-per-job **JIT VM
+> pool** on M3 + M5 (`PULP_LOCAL_MACOS_RUNS_ON_JSON`), selected by the
+> `pulp-gate-fast` label. M1 keeps the generic `pulp-build-vm` label as a
+> rollback/non-required lane but cannot randomly win the serial required gate.
 > Do **not** repurpose the Namespace var to point at self-hosted runners (see
 > CLAUDE.md "Runner priority").
 
 **Read the live variable, not this page's defaults.** A routing var describes
 reality; `build.yml`'s `||` fallback is only what happens when the var is unset.
 The two disagree: `build.yml` defaults macOS overflow to GitHub-hosted
-`["macos-15"]`, while the live variable sends it to the local VM pool. Confirm
-before reasoning about a route:
+`["macos-15"]`, while the live variable is the `local-only` sentinel and
+disables overflow. Confirm before reasoning about a route:
 
 ```bash
 gh variable list -R Generous-Corp/pulp | grep RUNS_ON_JSON
 ```
 
-### Live routing state (verified 2026-07-16)
+### Live routing state
 
-| Variable | Value | Lane |
-|---|---|---|
-| `PULP_LOCAL_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build","pulp-build-studio"]` | bare-metal Studios (m3) — required gate |
-| `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]` | JIT VMs (m1 + m5) |
-| `PULP_RELEASE_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build-vm-release"]` | JIT VMs (m1 + m5) |
-| `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build-vm-release"]` | JIT VMs |
-| `PULP_COVERAGE_MACOS_RUNS_ON_JSON` | `"macos-15"` | GitHub-hosted |
-| `PULP_ADVISORY_MACOS_RUNS_ON_JSON` | (unset; hosted `macos-15`) | example and format validation; required-pool labels rejected |
-| `PULP_ADVISORY_GPU_MACOS_RUNS_ON_JSON` | (unset; proof skipped) | distinct self-hosted GPU advisory lane; required-pool labels rejected |
-| `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` | `3` | busy count that triggers overflow |
-| `PULP_LOCAL_LINUX_PRIMARY_RUNS_ON_JSON` | `[…,"pulp-build-linux","pulp-host-macstudio"]` | capacity 1 |
-| `PULP_LOCAL_LINUX_OVERFLOW_RUNS_ON_JSON` | `[…,"pulp-build-linux","pulp-host-m5"]` | capacity 1 |
+Do not maintain another selector table here. The reviewed source is
+`tools/scripts/runner_topology.json`; the live source is the GitHub repo
+variables. Reconcile the two with:
+
+```bash
+PATH="$HOME/.config/tartci/ghapp-shim:$PATH" \
+  python3 tools/scripts/runner_topology_check.py --mode=report
+```
+
+As of 2026-07-31, the required macOS contract selects the fast M3/M5 JIT class,
+overflow is contracted to the `local-only` sentinel, and Namespace variables
+remain unset. Exact labels and hosts belong only in the JSON contract.
 
 When the local self-hosted Mac runner is saturated, `build.yml`'s
-`resolve-provider` job *could* route new macOS legs to a Namespace cloud runner
-instead of queueing on local — but only if the Namespace var is set, which it is
-not. Snap-back is automatic — once local clears, fresh dispatches return to
-local. Source of truth:
-`planning/2026-05-13-namespace-overflow-implementation.md` (Plan B,
-reviewed by `/codex` 2026-05-13).
+`resolve-provider` job can route new PR or workflow-dispatch macOS legs to the
+configured generic overflow target. Live policy sets that target to the
+`local-only` sentinel, so overflow is disabled. Namespace remains an explicit,
+paid break-glass option and is never selected automatically.
 
 **Precedence** (highest first, resolved per dispatch):
 
 1. **Operator override** — `gh workflow run build.yml --field macos_runner_selector_json='"<label>"'`. Always wins.
-2. **Overflow** — `BUSY >= PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` (default `2`) AND `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` is set AND the trigger is `pull_request`. Routes to `namespace-profile-generouscorp-macos`.
+2. **Overflow** — for PR and workflow-dispatch events, an idle registered local
+   runner keeps the local route. Otherwise `BUSY >=
+   PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` (default `2`) selects
+   `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`. The `local-only` sentinel disables
+   this branch; an unset variable restores the hosted `macos-15` fallback.
 3. **Local default** — `PULP_LOCAL_MACOS_RUNS_ON_JSON`. For the current label set, read the lane in `tools/scripts/runner_topology.json` — that file is checked against the live fleet, so it cannot drift the way a value quoted here can.
 
 **Tuning knobs** (repo variables):
@@ -666,16 +1063,17 @@ reviewed by `/codex` 2026-05-13).
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` | `2` | BUSY count that triggers overflow. Raise when Plan A's 2nd local runner lands. |
-| `PULP_LOCAL_MAC_RUNNER_LABEL` | `sanitizer` | Label the busy probe filters runners by. Must match `PULP_LOCAL_MACOS_RUNS_ON_JSON`'s target label. |
-| `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` | (unset) | Namespace selector JSON, e.g. `"namespace-profile-generouscorp-macos"`. When empty, overflow is disabled — everything stays local. |
+| `PULP_LOCAL_MAC_RUNNER_LABEL` | `pulp-gate-fast` | Label the busy probe filters runners by. It must match the required gate class so rollback-only M1 capacity cannot suppress overflow. |
+| `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | `["macos-15"]` when unset | Generic overflow selector JSON, or the bare sentinel `local-only` to keep work local. |
 
-**Disabling overflow** (revert to local-only):
+**Disabling overflow** (the live state):
 
 ```bash
-gh variable delete PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON --repo Generous-Corp/pulp
+gh variable set PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON \
+  --body local-only --repo Generous-Corp/pulp
 ```
 
-The next PR's `resolve-provider` falls through to local since condition #2 fails.
+The next PR's `resolve-provider` keeps the macOS leg on the local selector.
 
 **Inspecting routing decisions:** `resolve-provider`'s stderr prints a one-line summary, e.g. `resolve-provider: macOS route = overflow (BUSY=2 >= 2); selector = "namespace-profile-generouscorp-macos"`. Find it via the GitHub Actions UI under the `resolve-provider` job's log, or:
 
@@ -696,7 +1094,7 @@ pulp overflow status
 
 # Turn overflow on (defaults to free GH-hosted "macos-15"):
 pulp overflow enable
-pulp overflow enable --to '"namespace-profile-generouscorp-macos"'   # paid Namespace
+pulp overflow enable --to '"macos-15"'
 
 # Turn overflow off — every macOS leg goes to the local target.
 # In-flight cloud jobs continue to completion; only new dispatches change.
@@ -707,8 +1105,9 @@ pulp overflow threshold
 pulp overflow threshold 1
 ```
 
-`pulp overflow disable` does not cancel in-flight cloud runs — it's a
-config-change only. To force a currently-routed-to-cloud PR back to local,
+`pulp overflow disable` writes the `local-only` sentinel; deleting the variable
+would restore the hosted default. It does not cancel in-flight cloud runs. To
+force a currently-routed-to-cloud PR back to local,
 use `pulp macos retarget --pr N --to local` (see "Per-PR macOS retargeting"
 below).
 
@@ -952,7 +1351,8 @@ automated process dereferences it on a schedule and alarms on failure.
 ### Off-fleet merge-stall watchdog (`merge-stall-check.yml`)
 
 `.github/workflows/merge-stall-check.yml` sweeps every 30 minutes and opens a
-tracking issue when PRs are **merge-ready but not merging**. It runs on
+tracking issue when PRs are **merge-ready but not merging** or the GitHub merge
+queue has stopped advancing. It runs on
 `ubuntu-latest` for the same reason as the queue-age watchdog: the wedge it
 catches lives in whatever presses the merge button (Shipyard's per-host
 queue-tick), so an on-fleet guard would die with the thing it watches.
@@ -970,8 +1370,9 @@ hours with 34 PRs open and nothing merging while every check was green.)
 
 1. **Required checks green** — every check in the repo's REQUIRED set. That set
    is read from branch protection at runtime, not hardcoded; if the token cannot
-   read protection rules it falls back to the documented `main` set (`macos`,
-   `Enforce version & skill sync`).
+   read protection rules it falls back to the complete documented `main` set:
+   `macos`, `Enforce version & skill sync`, `Build + prove + (owner-gated)
+   deploy`, `Vellum trusted freeze`, and `Vellum freeze`.
 2. **`mergeStateStatus` in `{CLEAN, BEHIND}`** — GitHub's own merge verdict.
    `DIRTY` (conflicts), `BLOCKED` (a required check red/missing/review pending),
    and `UNSTABLE` (a non-required check still moving) are excluded — those wait
@@ -994,23 +1395,33 @@ reaches the second observation, so it never trips. The cross-sweep memory is the
 set of stuck PR numbers, persisted as a workflow artifact — crash-safe, held by
 GitHub independently of this repo or any host.
 
+**Merge-queue predicate.** Once the queue is non-empty, the watchdog also reads
+its GraphQL `MergeQueue.entries` head and the latest `merge_group` Actions run.
+It alarms when the head has waited at least 30 minutes and no new merge-group
+batch has started in that window. The age window is already the anti-flap
+period, so this condition alarms on its first observed sweep. The report names
+the head PR, queue depth/state, last batch start, and any required check that is
+missing, queued, in progress, or red. This catches the incident where a required
+hosted alias waited behind advisory work while matching self-hosted build
+capacity was idle.
+
 The issue is edited in place each sweep and closes automatically once no PR is
 stuck merge-ready — the same open/update/auto-close contract as the release
-watchdogs (see [release-watchdog.md](release-watchdog.md)).
+watchdogs (see [release-watchdog.md](release-watchdog.md)). A degraded API sweep
+never closes an existing tracker; only a complete snapshot can prove recovery.
 
 Analysis and the predicate live in `tools/scripts/merge_stall_watchdog.py`,
 tested by `tools/scripts/test_merge_stall_watchdog.py` — which pins the
 must-stay-quiet cases (young PR, DIRTY, BLOCKED, no auto-merge, single-sweep
 blip) as regressions so a future edit that would make the guard cry wolf fails
-at PR time. The script also carries an inert, clearly-marked stub for a **second
-condition to add once a GitHub merge queue is enabled** ("queue depth > 0 AND no
-`merge_group` check started in 30 min" — a wedged *queue*, distinct from a wedged
-auto-merger); it stays off until the queue is live.
+at PR time. Queue-specific tests pin empty/young/recent-batch cases quiet and an
+old head plus old batch as an immediate alarm.
 
 ```bash
 # Dry-run a sweep by hand (log findings, do not touch the issue)
 gh workflow run merge-stall-check.yml -f dry_run=true
 gh workflow run merge-stall-check.yml -f threshold_minutes=60
+gh workflow run merge-stall-check.yml -f queue_threshold_minutes=30
 
 # Replay a recorded snapshot offline (no API calls, verdict pinned to capture time)
 python3 tools/scripts/merge_stall_watchdog.py --snapshot snapshot.json --prev-state state.json
@@ -1365,9 +1776,9 @@ label such as `pulp-coverage-vm-macos`; do not point coverage at `pulp-build`,
 | `PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON` | Namespace | `gh variable set PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON --body '["namespace-profile-generouscorp"]'` |
 | `PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON` | Namespace | `gh variable set PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON --body '["namespace-profile-generouscorp-windows"]'` |
 | `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` | Namespace (optional) | `gh variable set PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON --body '"namespace-profile-generouscorp-macos"'` |
-| `PULP_LOCAL_MACOS_RUNS_ON_JSON` | Local macOS ARM64 primary pool (bare-metal Studios; see the live table under "macOS overflow routing") | `gh variable set PULP_LOCAL_MACOS_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-build","pulp-build-studio"]'` |
-| `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | Local macOS ARM64 JIT VM overflow pool. Unset → `build.yml` falls back to GitHub-hosted `["macos-15"]`; `local-only` disables overflow. | `gh variable set PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]'` |
-| `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Local Linux ARM64 VM pool | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","ARM64","pulp-build-linux","pulp-host-macstudio"]'` |
+| `PULP_LOCAL_MACOS_RUNS_ON_JSON` | Fast local macOS ARM64 JIT VM pool; see the live table under "macOS overflow routing" | `gh variable set PULP_LOCAL_MACOS_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm","pulp-gate-fast"]'` |
+| `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | Overflow is disabled live with `local-only`. Unset → `build.yml` falls back to GitHub-hosted `["macos-15"]`; another reviewed selector re-enables overflow. | `gh variable set PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body 'local-only'` |
+| `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Dispatch-only Linux x86_64 Proxmox VM pool; automatic PR routing requires the external runner-group boundary above | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]'` |
 | `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` | Local Windows ARM64 QEMU pool | `gh variable set PULP_LOCAL_WINDOWS_RUNS_ON_JSON --body '["self-hosted","Windows","ARM64","pulp-build-windows","pulp-host-macstudio"]'` |
 
 The Linux and Windows label sets include a `pulp-host-*` label that pins the
@@ -1418,6 +1829,11 @@ and Visual Studio generation do not move underneath the complete runtime
 suite. The standalone MSVC release-path, MIDI 2, and BLE compile gates remain
 on `windows-latest`; release builds and the nightly Intel safety net also keep
 tracking the newest hosted image.
+The MSVC release-path configure intentionally enables
+`PULP_ENABLE_INSPECTOR` while keeping runtime inspector endpoints off. Starting
+at the release product matrix's `inspector_sdk_floor`, published SDKs promise
+the split inspector archive family, so the Windows compile gate must match the
+tagged release configuration or it can miss an expensive packaging failure.
 `tools/scripts/test_windows_runner_policy.py` enforces this split across the
 actual build, release, coverage, and nightly workflows plus the release runner
 resolver and Shipyard mirror. It runs in `workflow-lint`, including when the
@@ -1434,8 +1850,23 @@ nightly Intel workflow unless this one is deliberately retired.
 
 ### `sanitizers.yml` — per-sanitizer target selection
 
+The automatic matrix runs on every relevant pull request and once nightly.
+It deliberately does not rerun after every push to `main`: that duplicated
+four hosted jobs after each merge and competed with the next merge group's
+required checks. The nightly schedule is the independent post-merge backstop;
+`workflow_dispatch` remains available for an immediate operator run.
+
 Each sanitizer job resolves independently. Setting one variable moves
 exactly that sanitizer; the others stay on their defaults.
+
+ASan, TSan, and UBSan configure through `PULP_SANITIZER=<kind>`, including
+ASan's example-bundle lifecycle build. Besides applying the compiler and linker
+flags, the named option marks sanitizer bundles as test-only instrumentation so
+relocatability validation permits the compiler-injected Xcode runtime.
+Installed-SDK consumer fixtures carry the matching instrumentation flags
+because instrumented static libraries retain runtime references. The strict
+shipping verifier remains unchanged and still rejects external compiler
+runtimes for ordinary release artifacts.
 
 | Variable | Default label when unset | Example (dedicated sanitizer VM label) |
 |---|---|---|
@@ -1508,6 +1939,18 @@ boot a local coverage VM.
 `windows_runner_selector_json`, and `macos_runner_selector_json` inputs.
 These are the same inputs already documented above; they are listed
 here for completeness alongside the repo-variable knobs.
+
+For a trusted Linux-only Mac Pro proof during hosted saturation, disable the
+otherwise-default hosted Windows leg explicitly:
+
+```bash
+gh workflow run build.yml --ref <trusted-branch> \
+  -f linux_runner_selector_json='["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]' \
+  -f run_windows=false
+```
+
+This switch affects only `workflow_dispatch`; automatic events keep their
+documented matrix policy, and ordinary manual dispatches still include Windows.
 
 ### Reverting
 
@@ -2589,6 +3032,80 @@ You can also keep the SSH targets enabled and request Mac-only while iterating:
 ```bash
 pulp ci-local run --targets mac
 ```
+
+## Compiler coverage: which lanes use which compiler
+
+Worth knowing before you trust a green PR, because the answer is not symmetric.
+
+Native Linux workflows install their shared system prerequisites through
+`.github/actions/install-linux-build-deps`, backed by the portable
+`tools/ci/install_linux_build_deps.py` resolver and
+`tools/ci/linux_build_deps.json`. Profiles describe capabilities (`native` and
+`native-webview`); compiler versions, analysis tools, caches, and other
+lane-specific packages stay explicit at each call site. The workflow policy
+file enumerates adopters and reviewed exclusions, and workflow-lint rejects a
+new direct apt workflow that has no owner. Update the manifest once when a
+native dependency changes instead of copying the package into individual
+build, coverage, sanitizer, release, or portability lanes.
+
+Every Linux lane in PR CI compiles with **Clang** — "Public headers compile
+standalone (Linux Clang)", "IWYU (Linux, Clang)", "RealtimeSanitizer (Linux
+x86_64, Clang 18)". macOS is Clang by definition. Windows is MSVC.
+
+That left **GCC** compiled in exactly one place: `release-path-pr-gate.yml`,
+which is *path-triggered* on release files (Skia pins, `tools/deps/manifest.json`,
+`tools/cmake/Pulp*.cmake`, the top-level `CMakeLists.txt`). Most PRs never
+trigger it, so a GCC-only error inside `core/` could sit on `main` indefinitely.
+
+It did, and not once. `core/host/src/signal_graph.cpp` keeps acquiring two
+identical `.custom_latency_for` entries in one designated-initializer list —
+Clang accepts that and silently takes the last, so nothing on the Apple or
+Clang-Linux lanes notices. `git log -S '.custom_latency_for'` shows the same
+defect fixed **four separate times**:
+
+```
+4371eebce  fix(host): remove a duplicate binder designator that GCC rejects
+1bdd0434a  fix(host): drop the duplicated custom-latency binder
+402620df4  fix(host): drop a duplicate designator that breaks every non-Apple release build
+077ffabda  build(host): drop a duplicate designator that breaks the MSVC build
+```
+
+Every one of those was caught *late* — by MSVC, by a non-Apple release build, or
+by the release-path gate firing on an unrelated PR. The binder list is long and
+sits where merges collide, so the duplicate keeps coming back; what was missing
+was a PR-time lane that says so immediately.
+
+`gcc-compile-gate.yml` closes that hole. It runs on every PR and compiles the
+core libraries with `g++` and nothing else:
+
+| Option | Value | Why |
+|---|---|---|
+| `PULP_ENABLE_GPU` | `OFF` | no Dawn/Skia fetch or build — this is what keeps the gate in minutes rather than a full release build |
+| `PULP_BUILD_TESTS` | `OFF` | the gate asks "does `core/` compile under GCC", not "does it work" |
+| `PULP_BUILD_EXAMPLES` | `OFF` | same |
+| `PULP_ENABLE_DESIGN_IMPORT` | `OFF` | authoring subsystem, not core portability |
+| `PULP_ENABLE_INSPECTOR` | `OFF` | dev surface, not core portability |
+
+**Read a failure here literally.** The lane runs no tests and touches no
+hardware, so it cannot flake on load or timing the way the GPU-perf lanes can.
+A red result is a real compiler divergence. Clang accepting the same code does
+not make it portable.
+
+**What it deliberately does not cover:** GCC *behavior*. Nothing is executed, so
+a construct both compilers accept but implement differently is still only caught
+by the Clang test lanes. Widening this to run tests under GCC is a separate
+decision with a real time cost.
+
+**It also guards one option combination.** The lane configures with
+`PULP_ENABLE_DESIGN_IMPORT=OFF`, which is the option's own documented
+"release/ship OFF" setting — and that configuration was once unlinkable, because
+`tools/import-design` was added unconditionally while the `pulp::view` design-IR
+sources it links sit behind that option. The discovery step now runs
+`--assert-absent pulp-import-design` against the codemodel the lane already
+produces, so a re-broken guard fails here immediately instead of surfacing as an
+undefined-reference wall in someone's release build. It costs no extra configure
+time. Because the guard lives in the top-level `CMakeLists.txt`, that file is
+one of the lane's path triggers alongside `core/**`.
 
 ## For contributors
 

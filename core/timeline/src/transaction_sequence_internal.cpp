@@ -3,9 +3,11 @@
 #include "media_reference_validation.hpp"
 #include "owned_identity_traversal.hpp"
 #include "sequence_graph_validation.hpp"
+#include "transaction_dispatch_internal.hpp"
 #include "transaction_reduction_support.hpp"
 
 #include <utility>
+#include <variant>
 
 namespace pulp::timeline::detail {
 namespace {
@@ -161,26 +163,44 @@ reduce_set_reference(const Project& project, const SetClipSequenceRef& set_refer
 } // namespace
 
 bool is_sequence_command(const Command& command) noexcept {
-    return std::holds_alternative<InsertSequence>(command) ||
-           std::holds_alternative<CloneSequence>(command) ||
-           std::holds_alternative<RemoveSequence>(command) ||
-           std::holds_alternative<SetClipSequenceRef>(command);
+    return std::visit([]<typename T>(const T&) { return is_sequence_command_type<T>; }, command);
 }
 
 runtime::Result<SequenceCommandReduction, TransactionError>
 reduce_sequence_command(const Project& project, const Command& command,
                         const Transaction& transaction, CommandId command_id,
                         bool allow_tombstone_restore) {
-    if (const auto* insert = std::get_if<InsertSequence>(&command))
-        return reduce_insert(project, *insert, transaction, command_id, allow_tombstone_restore);
-    if (const auto* clone = std::get_if<CloneSequence>(&command))
-        return reduce_clone(project, *clone, transaction, command_id, allow_tombstone_restore);
-    if (const auto* remove = std::get_if<RemoveSequence>(&command))
-        return reduce_remove(project, *remove, transaction, command_id);
-    if (const auto* set_reference = std::get_if<SetClipSequenceRef>(&command))
-        return reduce_set_reference(project, *set_reference, transaction, command_id);
-    return reject_reduction<SequenceCommandReduction>(ConflictCode::ModelInvariant, transaction,
-                                                      command_id);
+    // The family predicate above this call and the arms below it are two
+    // statements of the same list, and a chain of get_if proves nothing about
+    // its own coverage. Visiting puts a claimed-but-unhandled command in front
+    // of the compiler, which is where the outer dispatch already resolves it.
+    return std::visit(
+        [&]<typename T>(
+            const T& value) -> runtime::Result<SequenceCommandReduction, TransactionError> {
+            if constexpr (std::is_same_v<T, InsertSequence>)
+                return reduce_insert(project, value, transaction, command_id,
+                                     allow_tombstone_restore);
+            else if constexpr (std::is_same_v<T, CloneSequence>)
+                return reduce_clone(project, value, transaction, command_id,
+                                    allow_tombstone_restore);
+            else if constexpr (std::is_same_v<T, RemoveSequence>)
+                return reduce_remove(project, value, transaction, command_id);
+            else if constexpr (std::is_same_v<T, SetClipSequenceRef>)
+                return reduce_set_reference(project, value, transaction, command_id);
+            else {
+                static_assert(!is_sequence_command_type<T>,
+                              "a command claimed by is_sequence_command_type in "
+                              "transaction_dispatch_internal.hpp has no arm here; add "
+                              "one, or drop it from the claim list");
+                // Reached only by an alternative no family claims, which the
+                // caller's predicate already excludes. Kept as a rejection rather
+                // than std::unreachable(): this TU is -fno-exceptions, so being
+                // wrong here would abort the process, not fail one transaction.
+                return reject_reduction<SequenceCommandReduction>(ConflictCode::ModelInvariant,
+                                                                  transaction, command_id);
+            }
+        },
+        command);
 }
 
 } // namespace pulp::timeline::detail

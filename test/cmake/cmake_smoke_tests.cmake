@@ -11,7 +11,7 @@ if(APPLE AND NOT PULP_IOS)
     # ordinary PR lane and catches iOS-only source breakage without linking.
     add_test(NAME cmake-ios-source-syntax
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_ios_source_syntax.sh
-                ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR})
+                "${CMAKE_SOURCE_DIR}" "${CMAKE_BINARY_DIR}" "${choc_SOURCE_DIR}")
     set_tests_properties(cmake-ios-source-syntax PROPERTIES
         SKIP_RETURN_CODE 77
         LABELS "cmake;ios;compile"
@@ -100,18 +100,78 @@ add_test(NAME cmake-fetchcontent-base-dir
 set_tests_properties(cmake-fetchcontent-base-dir PROPERTIES
     LABELS "cmake;fetchcontent;windows;issue-4039"
     TIMEOUT 30)
-# Installed-SDK Windows Skia runtime contract. The ICU data file is a required
-# module sidecar, not optional packaging metadata: omitting it makes the first
-# SkParagraph label render trap inside a host such as REAPER. This source-level
-# smoke stays runnable on every platform and guards both the fail-fast check and
-# the post-build copy rule used by downstream plug-ins/apps.
+# IMPLEMENTATION LINT ONLY — deliberately not the runtime proof.
+#
+# This reads the TEXT of PulpWebGpuImportedTarget.cmake and asserts the
+# fail-fast check and copy rule are still written there. It is cheap and it
+# catches an accidental deletion, but it cannot tell you whether an installed
+# SDK exposes icudtl.dat, whether the staging helper is invoked for any format
+# target, or whether anything reached a bundle. The behavioral proof of all
+# three is cmake-installed-sdk-runtime-staging below, which builds a real
+# consumer against a real installed SDK. Do not cite this test as evidence that
+# shipped bundles carry their sidecars.
 add_test(NAME cmake-windows-skia-runtime-sidecar
     COMMAND ${CMAKE_COMMAND}
         -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_windows_skia_runtime_sidecar.cmake)
 set_tests_properties(cmake-windows-skia-runtime-sidecar PROPERTIES
-    LABELS "cmake;sdk;skia;windows;runtime"
+    LABELS "cmake;sdk;skia;windows;runtime;lint"
     TIMEOUT 30)
+
+# SOURCE LINT: every format helper that produces a loadable module/app calls
+# pulp_stage_runtime_dependencies(). Needed because the helper is
+# consumer-only — in a Pulp source build the `if(COMMAND ...)` guard around
+# every call site is false, so a format that forgets the call configures,
+# builds and tests clean here and only breaks in a downstream bundle.
+add_test(NAME cmake-runtime-staging-call-sites
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_runtime_staging_call_sites.cmake)
+set_tests_properties(cmake-runtime-staging-call-sites PROPERTIES
+    LABELS "cmake;sdk;runtime;lint"
+    TIMEOUT 30)
+
+# Installed-SDK runtime-sidecar proof (WAH-3). Installs this build as an SDK,
+# configures and BUILDS tools/validation/sdk-smoke against it with Standalone +
+# VST3 + CLAP, and lets the SDK's own pulp_verify_runtime_dependencies_staged()
+# POST_BUILD check assert the sidecars exist beside each produced module. On
+# Windows that includes Skia's icudtl.dat; elsewhere it is the wgpu-native
+# runtime — the invocation plumbing under test breaks platform-independently,
+# and a `_WIN32`-only test would never run on Pulp's required macOS gate.
+#
+# Installed static libraries from an instrumented producer retain references
+# to the sanitizer/coverage runtime. External consumer fixtures must therefore
+# use the producer's instrumentation at link time. Keep this shared with the
+# Timeline SDK consumer below so every real installed-SDK proof models that
+# requirement consistently.
+set(_sdk_consumer_instrumentation_compile_flags
+    ${PULP_SANITIZER_COMPILE_FLAGS}
+    ${PULP_COVERAGE_COMPILE_FLAGS})
+set(_sdk_consumer_instrumentation_link_flags
+    ${PULP_SANITIZER_LINK_FLAGS}
+    ${PULP_COVERAGE_LINK_FLAGS})
+string(JOIN " " _sdk_consumer_instrumentation_compile_flags
+    ${_sdk_consumer_instrumentation_compile_flags})
+string(JOIN " " _sdk_consumer_instrumentation_link_flags
+    ${_sdk_consumer_instrumentation_link_flags})
+
+add_test(NAME cmake-installed-sdk-runtime-staging
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DPULP_PARENT_BUILD_TYPE=$<CONFIG>
+        "-DPULP_PARENT_SANITIZER=${PULP_SANITIZER}"
+        "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+        "-DPULP_PARENT_C_FLAGS=${CMAKE_C_FLAGS}"
+        "-DPULP_PARENT_OBJCXX_FLAGS=${CMAKE_OBJCXX_FLAGS}"
+        "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+        "-DPULP_PARENT_SHARED_LINKER_FLAGS=${CMAKE_SHARED_LINKER_FLAGS}"
+        "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
+        "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_installed_sdk_runtime_staging.cmake)
+set_tests_properties(cmake-installed-sdk-runtime-staging PROPERTIES
+    LABELS "cmake;sdk;skia;windows;runtime;slow"
+    TIMEOUT 1800)
 # Install-layout regression: when the SDK is
 # installed via `cmake --install`, the Python encoder MUST be bundled
 # alongside PulpUtils.cmake so find_package(Pulp) consumers can call
@@ -129,34 +189,45 @@ set_tests_properties(cmake-pulp-install-layout PROPERTIES
     LABELS "cmake;binary-data;issue-905;slow"
     TIMEOUT 120)
 
-# Installed Creative Timeline Engine consumer. The fixture requests the three
-# public engine components plus the optional DAWproject importer, builds and
-# runs outside the source tree, and audits both target closures for forbidden
-# UI/GPU/host baggage.
-set(_timeline_consumer_instrumentation_compile_flags
-    ${PULP_SANITIZER_COMPILE_FLAGS}
-    ${PULP_COVERAGE_COMPILE_FLAGS})
-set(_timeline_consumer_instrumentation_link_flags
-    ${PULP_SANITIZER_LINK_FLAGS}
-    ${PULP_COVERAGE_LINK_FLAGS})
-string(JOIN " " _timeline_consumer_instrumentation_compile_flags
-    ${_timeline_consumer_instrumentation_compile_flags})
-string(JOIN " " _timeline_consumer_instrumentation_link_flags
-    ${_timeline_consumer_instrumentation_link_flags})
+# Installed Creative Timeline Engine consumer. The fixture requests the
+# optional project-package component, so a package-stripped SDK correctly omits
+# this consumer while the compile-out gate proves that requesting the missing
+# component fails.
+if(PULP_ENABLE_PROJECT_PACKAGE)
+    add_test(NAME cmake-timeline-sdk-consumer
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            "-DPULP_PARENT_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+            "-DPULP_PARENT_SANITIZER=${PULP_SANITIZER}"
+            "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+            "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+            "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
+            "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_timeline_sdk_consumer.cmake)
+    set_tests_properties(cmake-timeline-sdk-consumer PROPERTIES
+        LABELS "cmake;sdk;timeline;slow"
+        TIMEOUT 180)
+endif()
 
-add_test(NAME cmake-timeline-sdk-consumer
-    COMMAND ${CMAKE_COMMAND}
-        -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
-        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
-        "-DPULP_PARENT_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
-        "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
-        "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
-        "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_timeline_consumer_instrumentation_compile_flags}"
-        "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_timeline_consumer_instrumentation_link_flags}"
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_timeline_sdk_consumer.cmake)
-set_tests_properties(cmake-timeline-sdk-consumer PROPERTIES
-    LABELS "cmake;sdk;timeline;slow"
-    TIMEOUT 180)
+# Installed inspector component consumer. This compiles the public headers,
+# links every optional CPU inspector archive through find_package(Pulp), and
+# executes the result outside the source tree.
+if(PULP_ENABLE_INSPECTOR)
+    add_test(NAME cmake-inspector-sdk-consumer
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+            "-DPULP_PARENT_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+            "-DPULP_PARENT_SANITIZER=${PULP_SANITIZER}"
+            "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+            "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+            "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
+            "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_inspector_sdk_consumer.cmake)
+    set_tests_properties(cmake-inspector-sdk-consumer PROPERTIES
+        LABELS "cmake;sdk;inspect;slow"
+        TIMEOUT 180)
+endif()
 
 # Min-OS floor propagation to find_package(Pulp) consumers. PulpMinOs.cmake must
 # pin the consumer's deployment target when it runs AFTER project() (where the
@@ -294,6 +365,18 @@ if(UNIX)
     add_test(NAME ensure-signing-ready
         COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/test_ensure_signing_ready.sh)
     set_tests_properties(ensure-signing-ready PROPERTIES TIMEOUT 60)
+    # contributor_check.sh gates outside contributions on a plain Mac, so its
+    # own logic is the thing that must not rot. Builds throwaway git repos; no
+    # network, no build, no dependency on this checkout's state.
+    add_test(NAME contributor-check
+        COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/test_contributor_check.sh)
+    set_tests_properties(contributor-check PROPERTIES TIMEOUT 120)
+    # Builds four throwaway CMake fixtures, so it is slower than a text check
+    # and worth every second: the vacuous-test case is the one that proves the
+    # harness reports a test that cannot fail rather than blessing it.
+    add_test(NAME confirm-failure-harness
+        COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/test_confirm_failure.sh)
+    set_tests_properties(confirm-failure-harness PROPERTIES TIMEOUT 300)
     add_test(NAME pulp-installer-mcp-contract
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_pulp_installer_mcp_contract.sh)
     # The suite drives the installer once per scenario, so its wall time tracks
@@ -305,11 +388,15 @@ if(UNIX)
     set_tests_properties(pulp-installer-mcp-contract PROPERTIES TIMEOUT 120)
 endif()
 if(Python3_Interpreter_FOUND)
-    add_test(NAME pulp-mcp-binary-smoke
-        COMMAND ${Python3_EXECUTABLE}
-                ${CMAKE_CURRENT_SOURCE_DIR}/test_pulp_mcp_binary_smoke.py
-                $<TARGET_FILE:pulp-mcp>)
-    set_tests_properties(pulp-mcp-binary-smoke PROPERTIES TIMEOUT 90)
+    # tools/mcp is added after test/, so TARGET is necessarily false here even
+    # in the normal build. Mirror its platform/top-level admission instead.
+    if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
+        add_test(NAME pulp-mcp-binary-smoke
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test_pulp_mcp_binary_smoke.py
+                    $<TARGET_FILE:pulp-mcp>)
+        set_tests_properties(pulp-mcp-binary-smoke PROPERTIES TIMEOUT 90)
+    endif()
     # Visual-fidelity diff harness unit + integration tests (PIL-based). The
     # tool (tools/import-design/fidelity_diff.py) measures how close an
     # imported + rendered design is to its captured Figma references. The
@@ -323,6 +410,18 @@ if(Python3_Interpreter_FOUND)
         SKIP_RETURN_CODE 77
         LABELS "import;fidelity;slow"
         TIMEOUT 120)
+
+    # Pure comparison-protocol tests for the Chromium-oracle differential lab.
+    # Corpus execution is intentionally not a unit test: it launches the
+    # importer and a browser, while this test keeps schemas, matching, scoring,
+    # promotion policy, and visual artifacts deterministic and fast.
+    add_test(NAME importer-differential-lab
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_importer_differential_lab.py)
+    set_tests_properties(importer-differential-lab PROPERTIES
+        SKIP_RETURN_CODE 77
+        LABELS "import;fidelity"
+        TIMEOUT 30)
 
     # Golden re-import regression tool (tools/import-validation/golden_regression.py)
     # — self-test for its structural edge map. Guards the uint8-wraparound fix
@@ -538,6 +637,43 @@ set_tests_properties(cmake-examples-reorder-init-guard PROPERTIES
     SKIP_RETURN_CODE 77
     LABELS "cmake;examples"
     TIMEOUT 60)
+
+# Inbound link-floor check. The gate itself (tools/cmake/PulpLinkFloor.cmake)
+# runs at configure time over CMake's resolved link graph, so a configure that
+# reached this point is already its verdict — and a verdict is worth nothing
+# without evidence the checker can still say no. The selftest configures fixture
+# projects with known graphs and asserts both the verdict and the reason given;
+# --mutate then weakens the checker itself eleven ways and requires each
+# weakening to be caught, so a green run cannot be the walk failing to arrive.
+#
+# What this selftest does NOT cover is the configuration axis: it configures its
+# own fixture projects, so it stays green on a desktop tree while the real gate
+# is failing under a narrower configure (iOS, or PULP_ENABLE_GPU=OFF) that
+# reaches fewer modules than a debt list was recorded against. Reading a green
+# selftest as "the link floor is healthy everywhere" is the mistake it invites.
+#
+# Note what the configure-time verdict does and does not cover: the assertion on
+# a plugin lives in that plugin's CMakeLists, so it is evaluated only where
+# examples are configured — the Shipyard mac/windows lanes
+# (PULP_BUILD_EXAMPLES=ON) and ordinary dev builds, not the GitHub-hosted legs
+# of build.yml, which configure with PULP_BUILD_EXAMPLES=OFF. The selftest below
+# runs everywhere.
+if(Python3_Interpreter_FOUND)
+    add_test(NAME cmake-link-floor-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/link_floor_selftest.py --mutate)
+    set_tests_properties(cmake-link-floor-selftest PROPERTIES
+        LABELS "cmake;gate"
+        TIMEOUT 600)
+endif()
+
+add_test(NAME cmake-inspector-shipping-scanner
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/inspector-shipping-scanner
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_inspector_shipping_scanner.cmake)
+set_tests_properties(cmake-inspector-shipping-scanner PROPERTIES
+    LABELS "cmake;inspect;ship" TIMEOUT 30)
 
 # Validation contract tests — schema and reality snapshot
 add_executable(pulp-test-validation-contract test_validation_contract.cpp)

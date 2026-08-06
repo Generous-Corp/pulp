@@ -42,8 +42,12 @@ Run:
 
 from __future__ import annotations
 
+import json
+import os
 import re
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -53,6 +57,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SIGN_AND_RELEASE = REPO_ROOT / ".github" / "workflows" / "sign-and-release.yml"
 RELEASE_CLI = REPO_ROOT / ".github" / "workflows" / "release-cli.yml"
+RELEASE_DRY_RUN = REPO_ROOT / ".github" / "workflows" / "release-dry-run.yml"
 RELEASE_PUBLISH = REPO_ROOT / ".github" / "workflows" / "release-publish.yml"
 RELEASE_PATH_PR_GATE = REPO_ROOT / ".github" / "workflows" / "release-path-pr-gate.yml"
 BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
@@ -61,6 +66,7 @@ WATCHDOG_REAPER = REPO_ROOT / ".github" / "workflows" / "watchdog-reaper.yml"
 VERSION_SKILL_CHECK = REPO_ROOT / ".github" / "workflows" / "version-skill-check.yml"
 POST_TAG_SYNC = REPO_ROOT / ".github" / "workflows" / "post-tag-sync.yml"
 RELEASE_SIGNING_HELPER = REPO_ROOT / "tools" / "scripts" / "configure_release_bot_ssh_signing.sh"
+SHIPYARD_CONFIG = REPO_ROOT / ".shipyard" / "config.toml"
 
 
 class SignAndReleaseNoTestGate(unittest.TestCase):
@@ -211,6 +217,131 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
             "CLI and SDK release configure steps.",
         )
 
+    def test_cli_and_sdk_build_ship_inspector_sdk(self) -> None:
+        self.assertGreaterEqual(
+            self.text.count("-DPULP_ENABLE_INSPECTOR=ON"),
+            2,
+            "release-cli.yml must enable the inspector component for both "
+            "release configure steps because release_product_matrix.json "
+            "promises the installed pulp-inspect archive family.",
+        )
+        matrix = json.loads(
+            (REPO_ROOT / "tools/scripts/release_product_matrix.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        floor = matrix["inspector_sdk_floor"]
+        self.assertGreaterEqual(self.text.count(floor), 2)
+        self.assertIn(
+            'selected["inspector_sdk_floor"] = authoritative["inspector_sdk_floor"]',
+            self.text,
+        )
+        for step_name in (
+            "Configure (CLI, no WebView on Linux)",
+            "Prepare SDK build dir (Linux)",
+        ):
+            workflow = yaml.safe_load(self.text)
+            step = next(
+                step
+                for step in workflow["jobs"]["build-cli"]["steps"]
+                if step.get("name") == step_name
+            )
+            self.assertEqual(
+                step["env"]["RELEASE_TAG"],
+                "${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}",
+            )
+
+    def test_release_path_gate_matches_inspector_sdk_flag(self) -> None:
+        gate = RELEASE_PATH_PR_GATE.read_text(encoding="utf-8")
+        self.assertIn(
+            "-DPULP_ENABLE_INSPECTOR=ON",
+            gate,
+            "the PR-time release-path configure must match the tagged release "
+            "inspector SDK flag.",
+        )
+
+    def test_sdk_archives_are_stamped_from_the_selected_prefix(self) -> None:
+        unix_start = self.text.index("- name: Build SDK tarball (Unix)")
+        windows_start = self.text.index("- name: Build SDK tarball (Windows)")
+        verify_start = self.text.index(
+            "- name: Verify release archive product matrix (Unix)"
+        )
+        unix_block = self.text[unix_start:windows_start]
+        windows_block = self.text[windows_start:verify_start]
+        self.assertIn('"$PULP_SDK_PROVENANCE_HELPER" stamp', unix_block)
+        self.assertIn("$env:PULP_SDK_PROVENANCE_HELPER stamp", windows_block)
+        self.assertIn("--prefix sdk-staging", self.text)
+        self.assertIn("--build-dir build-sdk", self.text)
+
+    def test_sdk_stamp_passes_release_tag_through_the_environment(self) -> None:
+        unix_start = self.text.index("- name: Build SDK tarball (Unix)")
+        windows_start = self.text.index("- name: Build SDK tarball (Windows)")
+        verify_start = self.text.index(
+            "- name: Verify release archive product matrix (Unix)"
+        )
+        unix_block = self.text[unix_start:windows_start]
+        windows_block = self.text[windows_start:verify_start]
+        self.assertIn('--release-tag "$RELEASE_TAG"', unix_block)
+        self.assertNotIn('--release-tag "${{', unix_block)
+        self.assertIn("$releaseTag = $env:RELEASE_TAG", windows_block)
+        self.assertNotIn("$releaseTag = '${{", windows_block)
+
+    def test_historical_source_substitution_skips_exact_tag_stamping(self) -> None:
+        unix_start = self.text.index("- name: Build SDK tarball (Unix)")
+        windows_start = self.text.index("- name: Build SDK tarball (Windows)")
+        verify_start = self.text.index(
+            "- name: Verify release archive product matrix (Unix)"
+        )
+        unix_block = self.text[unix_start:windows_start]
+        windows_block = self.text[windows_start:verify_start]
+        self.assertIn("SOURCE_REF: ${{ inputs.source_ref || '' }}", unix_block)
+        self.assertIn('[ -z "$SOURCE_REF" ]', unix_block)
+        self.assertIn("SOURCE_REF: ${{ inputs.source_ref || '' }}", windows_block)
+        self.assertIn(
+            "[string]::IsNullOrEmpty($env:SOURCE_REF)",
+            windows_block,
+        )
+
+    def test_pre_floor_verifiers_do_not_receive_unknown_source_sha_flag(self) -> None:
+        unix_start = self.text.index(
+            "- name: Verify release archive product matrix (Unix)"
+        )
+        windows_start = self.text.index(
+            "- name: Verify release archive product matrix (Windows)"
+        )
+        floor_start = self.text.index("- name: Record macOS release floor")
+        unix_block = self.text[unix_start:windows_start]
+        windows_block = self.text[windows_start:floor_start]
+        self.assertIn(
+            'PULP_RELEASE_CONTENT_VERIFIER" --help',
+            unix_block,
+        )
+        self.assertIn("grep -q -- '--source-sha'", unix_block)
+        self.assertIn('"${source_sha_args[@]}"', unix_block)
+        self.assertIn(
+            "PULP_RELEASE_CONTENT_VERIFIER --help",
+            windows_block,
+        )
+        self.assertIn("$verifierHelp.Contains('--source-sha')", windows_block)
+        self.assertIn("@sourceShaArgs", windows_block)
+
+    def test_marker_era_source_substitution_is_rejected_before_build(self) -> None:
+        self.assertIn("Reject marker-era source substitution", self.text)
+        self.assertIn("sdk_provenance_floor", self.text)
+        self.assertIn("cannot substitute source_ref", self.text)
+        guard = self.text.index("- name: Reject marker-era source substitution")
+        checkout = self.text.index("- uses: actions/checkout@v5", guard)
+        self.assertLess(
+            guard,
+            checkout,
+            "The marker-era source_ref guard must run before the selected ref "
+            "can replace the working tree.",
+        )
+        guard_block = self.text[guard:checkout]
+        self.assertIn("github.event.repository.default_branch", guard_block)
+        self.assertIn("application/vnd.github.raw+json", guard_block)
+        self.assertIn("authoritative-release-product-matrix.json", guard_block)
+
 
 class BuildWorkflowReleaseGate(unittest.TestCase):
     """build.yml release-path PR gate must match release-cli.yml invariants."""
@@ -246,9 +377,13 @@ class BuildWorkflowReleaseGate(unittest.TestCase):
         run_block = self._find_step_run("Configure (matches release-cli.yml)")
         self.assertIn("-DPULP_ENABLE_AUDIO_PROBES=OFF", run_block)
 
+    def test_windows_release_gate_ships_inspector_sdk(self) -> None:
+        run_block = self._find_step_run("Configure (matches release-cli.yml)")
+        self.assertIn("-DPULP_ENABLE_INSPECTOR=ON", run_block)
+
 
 class ReleasePathPrGateMacosRouting(unittest.TestCase):
-    """release-path-pr-gate.yml must route darwin via the release macOS var."""
+    """release-path-pr-gate.yml must have a release-priority-safe selector."""
 
     def setUp(self) -> None:
         self.assertTrue(
@@ -259,7 +394,13 @@ class ReleasePathPrGateMacosRouting(unittest.TestCase):
 
     def test_darwin_leg_uses_release_macos_runner_resolver(self) -> None:
         self.assertIn("resolve-macos-runner:", self.text)
+        self.assertIn("PULP_RELEASE_PR_GATE_MACOS_RUNS_ON_JSON", self.text)
         self.assertIn("PULP_RELEASE_MACOS_RUNS_ON_JSON", self.text)
+        self.assertLess(
+            self.text.index("PULP_RELEASE_PR_GATE_MACOS_RUNS_ON_JSON"),
+            self.text.index("PULP_RELEASE_MACOS_RUNS_ON_JSON"),
+            "the PR-gate-specific selector must win before the legacy shared fallback",
+        )
         self.assertIn("needs: resolve-macos-runner", self.text)
         self.assertIn(
             "matrix.os == 'macos-15' && fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) || matrix.os",
@@ -296,19 +437,71 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
 
     def test_unix_package_step_bundles_cpp_delegate(self) -> None:
         run_block = self._find_step_run("Package CLI (Unix)")
-        self.assertIn("tools/scripts/package_cli.py", run_block)
+        self.assertIn('"$PULP_RELEASE_PACKAGER"', run_block)
         self.assertRegex(run_block, r"--binary\s+build/pulp")
         self.assertRegex(run_block, r"--cpp-binary\s+build/tools/cli/pulp-cpp")
         self.assertRegex(run_block, r"--mcp-binary\s+build/tools/mcp/pulp-mcp")
+        self.assertRegex(
+            run_block,
+            r"--import-design-binary\s+build/tools/import-design/pulp-import-design")
+        self.assertRegex(
+            run_block,
+            r"--import-design-runtime-dir\s+build/tools/import-design/browser_capture-v1")
+        self.assertIn("[ -x build/tools/import-design/pulp-import-design ]", run_block)
+        self.assertIn('"${import_design_args[@]}"', run_block)
         self.assertRegex(run_block, r"--out\s+pulp-\$\{\{\s*matrix\.platform\s*\}\}\.tar\.gz")
+
+    def test_unix_strip_treats_import_design_as_versioned_payload(self) -> None:
+        step_start = self.text.index("- name: Strip binaries (Unix)")
+        step_end = self.text.index("- name: Install Linux rpath helper")
+        step_block = self.text[step_start:step_end]
+        run_block = self._find_step_run("Strip binaries (Unix)")
+        self.assertIn(
+            "shell: bash",
+            step_block,
+            "The Ubuntu container defaults to sh, which cannot parse Bash arrays.",
+        )
+        self.assertIn(
+            "release_bins=(build/pulp build/tools/cli/pulp-cpp "
+            "build/tools/mcp/pulp-mcp)",
+            run_block,
+        )
+        self.assertIn(
+            "[ -f build/tools/import-design/pulp-import-design ]",
+            run_block,
+        )
+        self.assertIn(
+            "release_bins+=(build/tools/import-design/pulp-import-design)",
+            run_block,
+        )
+        self.assertIn('for bin in "${release_bins[@]}"', run_block)
 
     def test_windows_package_step_bundles_cpp_delegate(self) -> None:
         run_block = self._find_step_run("Package CLI (Windows)")
-        self.assertIn("tools/scripts/package_cli.py", run_block)
+        self.assertIn("$env:PULP_RELEASE_PACKAGER", run_block)
         self.assertRegex(run_block, r"--binary\s+build/pulp\.exe")
         self.assertRegex(run_block, r"--cpp-binary\s+build/tools/cli/Release/pulp-cpp\.exe")
         self.assertRegex(run_block, r"--mcp-binary\s+build/tools/mcp/Release/pulp-mcp\.exe")
+        self.assertRegex(
+            run_block,
+            r"'--import-design-binary',\s*"
+            r"'build/tools/import-design/Release/pulp-import-design\.exe'")
+        self.assertRegex(
+            run_block,
+            r"'--import-design-runtime-dir',\s*"
+            r"'build/tools/import-design/Release/browser_capture-v1'")
+        self.assertIn(
+            "Test-Path build/tools/import-design/Release/pulp-import-design.exe",
+            run_block,
+        )
+        self.assertIn("@importDesignArgs", run_block)
         self.assertRegex(run_block, r"--out\s+pulp-\$\{\{\s*matrix\.platform\s*\}\}\.zip")
+
+    def test_dry_run_package_step_uses_versioned_browser_runtime(self) -> None:
+        dry_run = RELEASE_DRY_RUN.read_text(encoding="utf-8")
+        self.assertRegex(
+            dry_run,
+            r"--import-design-runtime-dir\s+build/tools/import-design/browser_capture-v1")
 
     def test_unix_preswap_backfills_alias_cpp_cli_to_primary_binary(self) -> None:
         run_block = self._find_step_run("Normalize CLI binary layout (Unix)")
@@ -326,21 +519,31 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
 
     def test_unix_smoke_step_exercises_all_cli_binaries(self) -> None:
         run_block = self._find_step_run(
-            "Smoke `pulp help` + `pulp-cpp help` + `pulp-mcp --version` (Unix)"
+            "Smoke CLI, delegates, MCP, and import-design runtime (Unix)"
         )
-        self.assertRegex(run_block, r"for\s+ART\s+in\s+pulp\s+pulp-cpp\s+pulp-mcp")
+        self.assertIn("CLI_ARTIFACTS=(pulp pulp-cpp pulp-mcp)", run_block)
+        self.assertIn("CLI_ARTIFACTS+=(pulp-import-design)", run_block)
+        self.assertIn('for ART in "${CLI_ARTIFACTS[@]}"', run_block)
         self.assertIn('pulp-mcp) echo "--version"', run_block)
+        self.assertIn('pulp-import-design) echo "--help"', run_block)
+        self.assertIn("browser_capture/capture.mjs", run_block)
+        self.assertIn("pulp import-design --help", run_block)
         self.assertIn('"$BIN" $CMD', run_block)
         self.assertIn("Library not loaded", run_block)
         self.assertIn("cannot open shared object", run_block)
 
     def test_windows_smoke_step_exercises_all_cli_binaries(self) -> None:
         run_block = self._find_step_run(
-            "Smoke `pulp help` + `pulp-cpp help` + `pulp-mcp --version` (Windows)"
+            "Smoke CLI, delegates, MCP, and import-design runtime (Windows)"
         )
         self.assertIn('"pulp.exe"      = "help"', run_block)
         self.assertIn('"pulp-cpp.exe"  = "help"', run_block)
         self.assertIn('"pulp-mcp.exe"  = "--version"', run_block)
+        self.assertIn(
+            '$artCmd["pulp-import-design.exe"] = "--help"', run_block
+        )
+        self.assertIn("browser_capture\\capture.mjs", run_block)
+        self.assertIn("import-design --help", run_block)
         self.assertIn("-ArgumentList $cmd", run_block)
         self.assertIn("DLL was not found", run_block)
         self.assertIn("missing.*\\.dll", run_block)
@@ -389,6 +592,58 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
             "checked-out tag can predate the release-pipeline fixes.",
         )
 
+    def test_marker_era_backfill_refuses_current_main_source_overlays(self) -> None:
+        step_block = self._find_step_block(
+            "Overlay latest release-pipeline files (workflow_dispatch backfill)"
+        )
+        run_block = self._find_step_run(
+            "Overlay latest release-pipeline files (workflow_dispatch backfill)"
+        )
+        self.assertIn("sdk_provenance_floor", run_block)
+        self.assertIn("refusing current-main source overlays", run_block)
+        self.assertIn("RELEASE_VERSION: ${{ inputs.version }}", step_block)
+        self.assertNotIn("release_version='${{ inputs.version }}'", run_block)
+        self.assertNotIn("${repo}", run_block)
+        self.assertIn(
+            'curl -fsSL "$matrix_url" -o "$matrix_file"',
+            run_block,
+        )
+        self.assertIn(
+            'release_era="$(python3 - "$RELEASE_VERSION" "$matrix_file"',
+            run_block,
+        )
+        self.assertIn('if [[ "$release_era" == "marker-era" ]]', run_block)
+        self.assertNotIn(
+            'if curl -fsSL "$matrix_url" | python3',
+            run_block,
+            "Matrix download or parsing failures must abort instead of selecting "
+            "the legacy overlay path.",
+        )
+        refusal = run_block.index("refusing current-main source overlays")
+        first_overlay = run_block.index("tools/scripts/fetch_skia_for_release.py")
+        self.assertLess(
+            refusal,
+            first_overlay,
+            "The marker-era guard must run before any source file is overlaid.",
+        )
+    def test_linux_dependency_action_is_available_before_use(self) -> None:
+        ensure_name = "Ensure shared Linux dependency action exists"
+        install_name = "Install Linux dependencies"
+        self.assertLess(
+            self.text.index(f"- name: {ensure_name}"),
+            self.text.index(f"- name: {install_name}"),
+        )
+        run_block = self._find_step_run(ensure_name)
+        self.assertIn(
+            ".github/actions/install-linux-build-deps/action.yml", run_block
+        )
+        self.assertIn("tools/ci/install_linux_build_deps.py", run_block)
+        self.assertIn("tools/ci/linux_build_deps.json", run_block)
+        self.assertNotIn("tools/ci/linux_build_deps_workflows.json", run_block)
+        self.assertIn("workflow_sha='${{ github.workflow_sha }}'", run_block)
+        self.assertIn("${repo}/${workflow_sha}/${path}", run_block)
+        self.assertNotIn("${repo}/main/${path}", run_block)
+
     def test_backfill_overlay_keeps_cli_cmake_source_list_from_tag(self) -> None:
         run_block = self._find_step_run(
             "Overlay latest release-pipeline files (workflow_dispatch backfill)"
@@ -402,6 +657,7 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
         overlay_paths = loop_match.group("body")
         self.assertIn("tools/scripts/fetch_skia_for_release.py", overlay_paths)
         self.assertIn("tools/scripts/package_cli.py", overlay_paths)
+        self.assertIn("tools/scripts/release_artifact_contents.py", overlay_paths)
         self.assertIn("core/canvas/CMakeLists.txt", overlay_paths)
         self.assertIn("tools/deps/manifest.json", overlay_paths)
         self.assertNotIn(
@@ -421,6 +677,136 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
         self.assertIn("_PULP_CLI_FONTCONFIG", run_block)
         self.assertIn("path.write_text(text", run_block)
         self.assertNotIn("package_analyzer_descriptors.cpp", run_block)
+
+    def test_manual_dispatch_uses_current_verifier_and_stamper_with_selected_matrix(
+        self,
+    ) -> None:
+        run_block = self._find_step_run(
+            "Ensure release-content verifier helpers exist"
+        )
+        self.assertIn(
+            "[ '${{ github.event_name }}' = 'workflow_dispatch' ]",
+            run_block,
+        )
+        self.assertIn(
+            "[ \"$path\" = tools/scripts/release_artifact_contents.py ]",
+            run_block,
+        )
+        self.assertIn(
+            "[ \"$path\" = tools/scripts/package_cli.py ]",
+            run_block,
+        )
+        self.assertIn(
+            "[ \"$path\" = tools/scripts/sdk_provenance.py ]",
+            run_block,
+        )
+        self.assertIn(
+            "[ \"$path\" = tools/cmake/PulpSdkProvenance.cmake ]",
+            run_block,
+        )
+        self.assertIn("tools/scripts/release_product_matrix.json", run_block)
+        self.assertIn(
+            "Overlaying current backfill compatibility engine",
+            run_block,
+        )
+        self.assertIn(
+            'curl -fsSL "$url" -o "$compat_path"',
+            run_block,
+        )
+        self.assertIn(
+            'compat_path="$compat_dir/tools/scripts/package_cli.py"',
+            run_block,
+        )
+        self.assertIn(
+            'ln -s ../../tools/import-design "$compat_dir/tools/import-design"',
+            run_block,
+        )
+        self.assertIn(
+            'cp tools/scripts/release_product_matrix.json',
+            run_block,
+        )
+
+    def test_release_content_helper_shell_is_syntactically_valid(self) -> None:
+        """Catch heredoc indentation that only fails on tagged Linux jobs."""
+        workflow = yaml.safe_load(self.text)
+        step = next(
+            step
+            for step in workflow["jobs"]["build-cli"]["steps"]
+            if step.get("name")
+            == "Ensure release-content verifier helpers exist"
+        )
+        result = subprocess.run(
+            ["bash", "-n"],
+            input=step["run"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_manual_dispatch_compatibility_helpers_do_not_dirty_tracked_source(
+        self,
+    ) -> None:
+        ensure_block = self._find_step_run(
+            "Ensure release-content verifier helpers exist"
+        )
+        unix_stamp = self._find_step_run("Build SDK tarball (Unix)")
+        windows_stamp = self._find_step_run("Build SDK tarball (Windows)")
+        unix_verify = self._find_step_run(
+            "Verify release archive product matrix (Unix)"
+        )
+        windows_verify = self._find_step_run(
+            "Verify release archive product matrix (Windows)"
+        )
+        unix_package = self._find_step_run("Package CLI (Unix)")
+        windows_package = self._find_step_run("Package CLI (Windows)")
+        self.assertIn("compat_dir=.release-backfill-helpers", ensure_block)
+        self.assertIn("PULP_RELEASE_CONTENT_VERIFIER=", ensure_block)
+        self.assertIn("PULP_SDK_PROVENANCE_HELPER=", ensure_block)
+        self.assertIn("PULP_RELEASE_PACKAGER=", ensure_block)
+        self.assertIn("PULP_SDK_PROVENANCE_CMAKE=", ensure_block)
+        self.assertIn(
+            "PULP_RELEASE_PACKAGER=$compat_dir/tools/scripts/package_cli.py",
+            ensure_block,
+        )
+        self.assertIn('"$PULP_SDK_PROVENANCE_HELPER" stamp', unix_stamp)
+        self.assertIn("$env:PULP_SDK_PROVENANCE_HELPER stamp", windows_stamp)
+        self.assertIn('"$PULP_RELEASE_CONTENT_VERIFIER"', unix_verify)
+        self.assertIn("$env:PULP_RELEASE_CONTENT_VERIFIER", windows_verify)
+        self.assertIn('"$PULP_RELEASE_PACKAGER"', unix_package)
+        self.assertIn("$env:PULP_RELEASE_PACKAGER", windows_package)
+        self.assertIn(
+            'install -m 0644 "$PULP_SDK_PROVENANCE_CMAKE"',
+            unix_stamp,
+        )
+        self.assertIn(
+            "Copy-Item -Force $env:PULP_SDK_PROVENANCE_CMAKE",
+            windows_stamp,
+        )
+        self.assertLess(
+            unix_stamp.index('install -m 0644 "$PULP_SDK_PROVENANCE_CMAKE"'),
+            unix_stamp.index('"$PULP_SDK_PROVENANCE_HELPER" stamp'),
+        )
+        self.assertLess(
+            windows_stamp.index(
+                "Copy-Item -Force $env:PULP_SDK_PROVENANCE_CMAKE"
+            ),
+            windows_stamp.index("$env:PULP_SDK_PROVENANCE_HELPER stamp"),
+        )
+
+    def test_official_sdk_stamp_cannot_silently_skip_a_missing_helper(self) -> None:
+        unix_block = self._find_step_run("Build SDK tarball (Unix)")
+        windows_block = self._find_step_run("Build SDK tarball (Windows)")
+        self.assertIn('if [ -z "$SOURCE_REF" ]; then', unix_block)
+        self.assertNotIn("-f \"$PULP_SDK_PROVENANCE_HELPER\"", unix_block)
+        self.assertIn(
+            "if ([string]::IsNullOrEmpty($env:SOURCE_REF))",
+            windows_block,
+        )
+        self.assertNotIn(
+            "Test-Path $env:PULP_SDK_PROVENANCE_HELPER",
+            windows_block,
+        )
 
 
 class SingleOwnerReleasePublication(unittest.TestCase):
@@ -512,6 +898,35 @@ class SingleOwnerReleasePublication(unittest.TestCase):
         self.assertLess(self.text.index(generate), self.text.index(publish))
         self.assertLess(self.text.index(verify), self.text.index(publish))
         self.assertLess(self.text.index(upload), self.text.index(publish))
+
+    def test_release_finalizer_uses_authoritative_provenance_floors(self) -> None:
+        steps = self.workflow["jobs"]["release"]["steps"]
+        finalizer = next(
+            step
+            for step in steps
+            if step.get("name") == "Verify assets, generate SHA256SUMS, publish"
+        )
+        self.assertEqual(
+            finalizer["env"]["DEFAULT_BRANCH"],
+            "${{ github.event.repository.default_branch }}",
+        )
+        run_block = finalizer["run"]
+        self.assertIn(
+            "authoritative-release-product-matrix.json",
+            run_block,
+        )
+        self.assertIn(
+            'selected["sdk_provenance_floor"] = '
+            'authoritative["sdk_provenance_floor"]',
+            run_block,
+        )
+        self.assertIn(
+            'selected["inspector_sdk_floor"] = '
+            'authoritative["inspector_sdk_floor"]',
+            run_block,
+        )
+        self.assertIn('--matrix "$publication_matrix"', run_block)
+        self.assertNotIn('--matrix "$matrix"', run_block)
 
     def test_every_user_facing_asset_is_required_before_publish(self) -> None:
         for asset in self.REQUIRED_RELEASE_ASSETS:
@@ -708,6 +1123,63 @@ class EveryLegIsIndividuallyRoutable(unittest.TestCase):
         steps = self.workflow["jobs"]["resolve-macos-runner"]["steps"]
         self.assertTrue(str(steps[0].get("uses", "")).startswith("actions/checkout"))
 
+    def test_darwin_x64_prefers_the_dedicated_release_tart_pool(self) -> None:
+        steps = self.workflow["jobs"]["resolve-macos-runner"]["steps"]
+        resolver = next(step for step in steps if step.get("id") == "resolve")
+        selector = resolver["env"]["DARWIN_X64"]
+        per_leg = selector.index("PULP_RELEASE_DARWIN_X64_RUNS_ON_JSON")
+        release_pool = selector.index("PULP_RELEASE_MACOS_RUNS_ON_JSON")
+        legacy_intel = selector.index("PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON")
+        self.assertLess(per_leg, release_pool)
+        self.assertLess(release_pool, legacy_intel)
+
+    def test_darwin_x64_remains_an_arm_cross_compile_not_native_intel(self) -> None:
+        for job in ("build-cli", "smoke-cli"):
+            rows = self.workflow["jobs"][job]["strategy"]["matrix"]["include"]
+            darwin_x64 = next(
+                row for row in rows if row["platform"] == "darwin-x64"
+            )
+            self.assertEqual(darwin_x64["os"], "macos-15-xcompile")
+            self.assertNotEqual(darwin_x64["os"], "macos-15-intel")
+
+
+class TrustedReleaseControlPlaneRouting(unittest.TestCase):
+    """Only trusted release resolver jobs may reuse persistent Linux capacity."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.release_text = RELEASE_CLI.read_text(encoding="utf-8")
+        cls.sign_text = SIGN_AND_RELEASE.read_text(encoding="utf-8")
+        cls.release = yaml.safe_load(cls.release_text)
+        cls.sign = yaml.safe_load(cls.sign_text)
+
+    def test_resolvers_prefer_dedicated_then_existing_linux_selector(self) -> None:
+        for workflow in (self.release, self.sign):
+            with self.subTest(workflow=workflow["name"]):
+                runs_on = workflow["jobs"]["resolve-macos-runner"]["runs-on"]
+                dedicated = runs_on.index("PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON")
+                existing = runs_on.index("PULP_LOCAL_LINUX_RUNS_ON_JSON")
+                fallback = runs_on.index('"ubuntu-latest"')
+                self.assertLess(dedicated, existing)
+                self.assertLess(existing, fallback)
+
+    def test_release_control_workflows_never_accept_untrusted_pr_events(self) -> None:
+        for text in (self.release_text, self.sign_text):
+            with self.subTest(workflow=text.splitlines()[0]):
+                trigger_block = text.split("\n# Never cancel", 1)[0]
+                self.assertNotIn("pull_request:", trigger_block)
+                self.assertNotIn("merge_group:", trigger_block)
+
+    def test_release_resolver_checks_out_trusted_main_control_code(self) -> None:
+        steps = self.release["jobs"]["resolve-macos-runner"]["steps"]
+        checkouts = [step for step in steps if "uses" in step]
+        self.assertGreaterEqual(len(checkouts), 1)
+        for checkout in checkouts:
+            self.assertEqual(
+                checkout["with"]["ref"],
+                "${{ github.event.repository.default_branch }}",
+            )
+
 
 class SignAndReleaseCannotTouchTheRelease(unittest.TestCase):
     """sign-and-release.yml must be structurally incapable of gating a release.
@@ -860,14 +1332,68 @@ class ReleaseBotSshSigning(unittest.TestCase):
         cls.auto_release = AUTO_RELEASE.read_text(encoding="utf-8")
         cls.post_tag_sync = POST_TAG_SYNC.read_text(encoding="utf-8")
         cls.helper = RELEASE_SIGNING_HELPER.read_text(encoding="utf-8")
+        cls.shipyard_config = SHIPYARD_CONFIG.read_text(encoding="utf-8")
 
     def test_signing_helper_requires_release_bot_private_key_secret(self) -> None:
         self.assertIn("RELEASE_BOT_SSH_SIGNING_KEY:?RELEASE_BOT_SSH_SIGNING_KEY", self.helper)
-        self.assertIn("git config --global gpg.format ssh", self.helper)
-        self.assertIn("git config --global user.signingkey", self.helper)
-        self.assertIn("git config --global commit.gpgsign true", self.helper)
-        self.assertIn("git config --global tag.gpgSign true", self.helper)
+        self.assertIn("git config --local gpg.format ssh", self.helper)
+        self.assertIn('git config --local gpg.ssh.program "${ssh_program}"', self.helper)
+        self.assertIn("git config --local user.signingkey", self.helper)
+        self.assertIn("git config --local commit.gpgsign true", self.helper)
+        self.assertIn("git config --local tag.gpgSign true", self.helper)
+        self.assertNotIn("git config --global", self.helper)
         self.assertIn(self.BOT_EMAIL, self.helper)
+
+    def test_signing_helper_overrides_inherited_program_without_global_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = root / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True)
+            key = root / "source-key"
+            subprocess.run(
+                ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)],
+                check=True,
+            )
+            global_config = root / "global.gitconfig"
+            subprocess.run(
+                ["git", "config", "--file", str(global_config), "gpg.ssh.program", "/bin/false"],
+                check=True,
+            )
+            env = os.environ.copy()
+            env.update(
+                {
+                    "GIT_CONFIG_GLOBAL": str(global_config),
+                    "RELEASE_BOT_SSH_SIGNING_KEY": key.read_text(encoding="utf-8"),
+                    "RUNNER_TEMP": str(root / "runner-temp"),
+                }
+            )
+
+            subprocess.run(["bash", str(RELEASE_SIGNING_HELPER)], cwd=repo, env=env, check=True)
+
+            effective = subprocess.run(
+                ["git", "config", "--get", "gpg.ssh.program"],
+                cwd=repo,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            self.assertEqual(effective, subprocess.run(
+                ["sh", "-c", "command -v ssh-keygen"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip())
+            self.assertEqual(
+                subprocess.run(
+                    ["git", "config", "--file", str(global_config), "gpg.ssh.program"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip(),
+                "/bin/false",
+            )
 
     def test_auto_release_signs_version_tags(self) -> None:
         self.assertIn("name: Configure release bot SSH signing", self.auto_release)
@@ -882,9 +1408,13 @@ class ReleaseBotSshSigning(unittest.TestCase):
         )
 
     def test_post_tag_sync_commits_use_signed_bot_identity(self) -> None:
+        self.assertIn(
+            'ssh_signing_setup_script = "tools/scripts/configure_release_bot_ssh_signing.sh"',
+            self.shipyard_config,
+        )
         self.assertIn("name: Configure release bot SSH signing", self.post_tag_sync)
         self.assertIn("RELEASE_BOT_SSH_SIGNING_KEY: ${{ secrets.RELEASE_BOT_SSH_SIGNING_KEY }}", self.post_tag_sync)
-        self.assertIn("bash tools/scripts/configure_release_bot_ssh_signing.sh", self.post_tag_sync)
+        self.assertIn("bash -- tools/scripts/configure_release_bot_ssh_signing.sh", self.post_tag_sync)
 
 
 class StrandedReleaseTrackerWorkflow(unittest.TestCase):

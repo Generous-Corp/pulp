@@ -5,7 +5,7 @@ TEST_CASE("Timeline project summary scans metadata and counts without resolving 
     auto snapshot = take(serialize_project(mixed_project(), registry)).json;
 
     const auto summary = take(peek_project_summary(snapshot, registry));
-    REQUIRE(summary.schema_version == 2);
+    REQUIRE(summary.schema_version == 3);
     REQUIRE(summary.project_id == ItemId{1});
     REQUIRE(summary.name == "mixed");
     REQUIRE(summary.next_item_id == 12);
@@ -187,6 +187,44 @@ TEST_CASE("Timeline JSON rejects ambiguous malformed and oversized input") {
     REQUIRE_FALSE(input.has_value());
     REQUIRE(input.error().code == PersistenceErrorCode::LimitExceeded);
 }
+
+TEST_CASE("Parsed JSON raw views require exact node provenance") {
+    STATIC_REQUIRE(std::is_aggregate_v<JsonValue>);
+    STATIC_REQUIRE_FALSE(std::is_default_constructible_v<ParsedJson>);
+    STATIC_REQUIRE_FALSE(std::is_copy_constructible_v<ParsedJson>);
+    STATIC_REQUIRE_FALSE(std::is_move_constructible_v<ParsedJson>);
+
+    const auto first = take(parse_json(R"({"nested":[17],"other":null})"));
+    const auto second = take(parse_json(R"({"nested":[17],"other":null})"));
+    const auto* nested = first->root().find("nested");
+    REQUIRE(nested != nullptr);
+    REQUIRE(nested->array.size() == 1);
+
+    REQUIRE(first->raw(first->root()) == R"({"nested":[17],"other":null})");
+    REQUIRE(first->raw(*nested) == "[17]");
+    REQUIRE(first->raw(nested->array[0]) == "17");
+
+    // Equal source and in-range offsets do not make another DOM's node ours.
+    REQUIRE(first->raw(second->root()).empty());
+    const auto* second_nested = second->root().find("nested");
+    REQUIRE(second_nested != nullptr);
+    REQUIRE(first->raw(*second_nested).empty());
+
+    // Copying a node preserves its data and offsets, but not its identity in the
+    // immutable parse tree.
+    const JsonValue copied = nested->array[0];
+    REQUIRE(copied.begin == nested->array[0].begin);
+    REQUIRE(copied.end == nested->array[0].end);
+    REQUIRE(first->raw(copied).empty());
+
+    JsonValue forged;
+    forged.kind = JsonValue::Kind::Number;
+    forged.scalar = "17";
+    forged.begin = nested->array[0].begin;
+    forged.end = nested->array[0].end;
+    REQUIRE(first->raw(forged).empty());
+}
+
 TEST_CASE("Timeline decoder enforces canonical integers model validity and object limits") {
     const auto registry = builtins();
     auto snapshot = take(serialize_project(project_with(), registry)).json;
@@ -584,8 +622,8 @@ TEST_CASE("Timeline future built-in notes content remains opaque and quota-termi
     // knows at a version it does not. Raise this whenever the notes content
     // schema is bumped, or the case silently stops testing the opaque path.
     const std::string raw =
-        R"({"data":{"notes":[{},{}]},"type_name":"pulp.timeline.content.notes","version":3})";
-    auto opaque = take(OpaqueContent::create({"pulp.timeline.content.notes", 3}, raw));
+        R"({"data":{"notes":[{},{}]},"type_name":"pulp.timeline.content.notes","version":4})";
+    auto opaque = take(OpaqueContent::create({"pulp.timeline.content.notes", 4}, raw));
     const auto registry = builtins();
     auto snapshot = take(serialize_project(project_with(std::move(opaque)), registry));
     DecodeLimits limits;

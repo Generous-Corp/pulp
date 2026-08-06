@@ -13,11 +13,49 @@
 #include <cmath>
 #include <complex>
 #include <cstdlib>
+#include <limits>
 #include <new>
 #include <vector>
 
 using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
+
+TEST_CASE("SpectralFrameEngine geometry validator catches target-byte overflows",
+          "[signal][spectral-frame-engine][capacity]") {
+    SpectralFrameEngineConfig config;
+    config.fft_size = 1024;
+    config.analysis_hop = 256;
+    config.channels = 8;
+    config.max_block = 200'000'000;
+    config.max_synthesis_hop = 257; // ratio 1 plus the pitch/time hop guard sample
+
+    const auto wide = checked_spectral_frame_engine_geometry<float>(
+        config, std::numeric_limits<std::uint64_t>::max());
+    REQUIRE(wide.has_value());
+    REQUIRE(wide->ring_size == 536'870'912);
+    REQUIRE(wide->output_ring_elements == 4'294'967'296ULL);
+
+    constexpr std::uint64_t wasm32_max_bytes =
+        std::numeric_limits<std::uint32_t>::max();
+    REQUIRE_FALSE(checked_spectral_frame_engine_geometry<float>(config,
+                                                                 wasm32_max_bytes));
+
+    config.max_block = 100'000'000;
+    const auto count_fits_but_bytes_do_not = checked_spectral_frame_engine_geometry<float>(
+        config, std::numeric_limits<std::uint64_t>::max());
+    REQUIRE(count_fits_but_bytes_do_not.has_value());
+    REQUIRE(count_fits_but_bytes_do_not->ring_size == 268'435'456);
+    REQUIRE(count_fits_but_bytes_do_not->output_ring_elements == 2'147'483'648ULL);
+    REQUIRE(count_fits_but_bytes_do_not->output_ring_elements <= wasm32_max_bytes);
+    REQUIRE_FALSE(checked_spectral_frame_engine_geometry<float>(config,
+                                                                 wasm32_max_bytes));
+
+    const auto float_output_bytes =
+        count_fits_but_bytes_do_not->output_ring_elements * sizeof(float);
+    REQUIRE(checked_spectral_frame_engine_geometry<float>(config, float_output_bytes));
+    REQUIRE_FALSE(checked_spectral_frame_engine_geometry<double>(config,
+                                                                  float_output_bytes));
+}
 
 // ── allocation sentinel ─────────────────────────────────────────────────────
 // Replaces global operator new/delete for this test binary so realtime-path

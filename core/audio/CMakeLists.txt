@@ -16,6 +16,7 @@ target_include_directories(pulp-audio
 target_sources(pulp-audio PRIVATE
     src/analyzer_provider.cpp
     src/audio_file.cpp
+    src/finite_time_stretch.cpp
     ${_PULP_AUDIO_WAV_SOURCES}
     src/audio_focus.cpp
     src/audio_probe_json.cpp
@@ -54,6 +55,7 @@ target_sources(pulp-audio PRIVATE
     src/streaming_sample_source.cpp
     src/zone_layer_select.cpp
     src/realtime_sample_recorder.cpp
+    src/realtime_time_stretch.cpp
     src/rolling_audio_capture_buffer.cpp
     src/sample_asset_io.cpp
     src/sample_bank_materializer.cpp
@@ -85,6 +87,7 @@ target_sources(pulp-audio PRIVATE
     src/waveform_overview_serialization.cpp
     src/wav_metadata.cpp
     src/audio_device_manager.cpp
+    src/audio_io_timing.cpp
     src/audio_probe.cpp
     src/audio_boundary_report.cpp
 )
@@ -147,6 +150,7 @@ target_include_directories(pulp-audio PRIVATE
 if(APPLE AND NOT IOS)
     target_sources(pulp-audio PRIVATE
         platform/mac/coreaudio_device.mm
+        platform/mac/coreaudio_io_timing.mm
     )
     target_link_libraries(pulp-audio PRIVATE
         "-framework CoreAudio"

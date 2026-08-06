@@ -21,7 +21,7 @@ Project project_with_modifiers() {
     every_fourth.condition_offset = 1;
 
     auto content =
-        take(NoteContent::create({{{7}, {0}, {2}, 0xffff, 60, 0}, {{6}, {4}, {2}, 0x8000, 64, 1}},
+        take(MidiContent::create({{{7}, {0}, {2}, 0xffff, 60, 0}, {{6}, {4}, {2}, 0x8000, 64, 1}},
                                  {every_fourth, ratcheted_chance(6, 0x4000, 3)}, kModifierSeed));
     auto clip = take(Clip::create({4}, {0}, {100}, std::move(content)));
     auto track = take(Track::create({3}, "track", {clip}));
@@ -29,10 +29,10 @@ Project project_with_modifiers() {
     return take(Project::create(ProjectInput{{1}, "project", 12, {2}, {}, {sequence}}));
 }
 
-const NoteContent& only_note_content(const Project& project) {
+const MidiContent& only_note_content(const Project& project) {
     const auto* sequence = project.find_sequence({2});
     REQUIRE(sequence != nullptr);
-    return std::get<NoteContent>(sequence->tracks()[0].clips()[0].content());
+    return std::get<MidiContent>(sequence->tracks()[0].clips()[0].content());
 }
 
 } // namespace
@@ -109,7 +109,14 @@ TEST_CASE("A version-one note fixture upgrades and then re-saves canonically",
 
     const auto encoded = take(serialize_project(decoded, registry));
     REQUIRE(encoded.json.find(R"("modifier_seed":"0","modifiers":[])") != std::string::npos);
-    REQUIRE(encoded.json.find(R"("version":2)") != std::string::npos);
+    // Qualified by type name on purpose. This was a bare `"version":2`, which
+    // named no type and so matched whichever envelope happened to sit at that
+    // version -- the project's, not the note content this case is about. It
+    // would have passed with the note content at any version at all, and it
+    // broke when an unrelated project bump moved the envelope it was really
+    // watching.
+    REQUIRE(encoded.json.find(R"("type_name":"pulp.timeline.content.notes","version":3)") !=
+            std::string::npos);
     const auto reloaded = take(deserialize_project(encoded.json, registry));
     REQUIRE(take(serialize_project(reloaded, registry)).json == encoded.json);
 }

@@ -4,11 +4,15 @@
 #include <pulp/state/listener_token.hpp>
 #include <pulp/state/parameter.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/view/value_channel_telemetry.hpp>
 
 #include <chrono>
 #include <mutex>
+#include <span>
 #include <string>
 #include <vector>
+
+namespace pulp::view { class ValueChannelSet; }
 
 namespace pulp::inspect {
 
@@ -22,6 +26,22 @@ using namespace pulp::state;
 class StateInspector {
 public:
     explicit StateInspector(StateStore& store);
+
+    /// The store this inspector observes. Exposed so protocol serialization can
+    /// go through pulp::state::param_json rather than hand-rolling a second
+    /// parameter payload that would drift from the bridge's.
+    StateStore& store() const noexcept { return store_; }
+
+    /// Snapshot the hosting processor's declared value-channel metadata. The
+    /// inspector owns its copy so a reloadable processor can retire the source
+    /// set immediately after this call without leaving a dangling catalog.
+    void set_value_channels(view::ValueChannelSet* channels);
+    void set_value_channels(std::span<const view::ValueChannelInfo> channels) {
+        value_channels_.assign(channels.begin(), channels.end());
+    }
+    std::span<const view::ValueChannelInfo> value_channels() const noexcept {
+        return value_channels_;
+    }
     ~StateInspector();
 
     StateInspector(const StateInspector&) = delete;
@@ -67,6 +87,7 @@ public:
 
 private:
     StateStore& store_;
+    std::vector<view::ValueChannelInfo> value_channels_;
     mutable std::mutex changes_mutex_;
     std::vector<ParamChange> changes_;
     ListenerToken listener_token_;

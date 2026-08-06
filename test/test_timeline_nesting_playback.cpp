@@ -1,4 +1,9 @@
 #include "timeline_nesting_test_support.hpp"
+#include "../core/playback/src/sequence_content_lowerer.hpp"
+
+#include <array>
+#include <cstdint>
+#include <utility>
 
 TEST_CASE("Nested notes compile like a hand-flattened track and fan out dirty children") {
     const auto nested = nested_note_project(false, 2);
@@ -33,6 +38,12 @@ TEST_CASE("Nested notes compile like a hand-flattened track and fan out dirty ch
     const auto metadata_lowered = resolve_dirty_tracks(nested, {2}, child_metadata, index);
     REQUIRE_FALSE(metadata_lowered.all);
     REQUIRE(metadata_lowered.tracks.empty());
+
+    const DirtySet child_groove_edit({DirtyItem{{10}, {}, {10}, DirtyFlags::Context}},
+                                     {{{10}, CompileContextKind::Groove}});
+    const auto groove_lowered = resolve_dirty_tracks(nested, {2}, child_groove_edit, index);
+    REQUIRE_FALSE(groove_lowered.all);
+    REQUIRE(groove_lowered.tracks == std::vector<ItemId>{{3}, {5}});
 
     const DirtySet root_metadata({DirtyItem{{31}, {}, {2}, DirtyFlags::Marker}});
     const auto root_metadata_lowered = resolve_dirty_tracks(nested, {2}, root_metadata, index);
@@ -136,7 +147,7 @@ TEST_CASE("Nested compile refuses unsupported child state and expansion overflow
     REQUIRE(scan_compiler.status().last_error.item == ItemId{14});
     REQUIRE_FALSE(scan_store.has_value());
 
-    auto skipped_notes = take(NoteContent::create(
+    auto skipped_notes = take(MidiContent::create(
         {NoteEvent{{20}, {20}, {10}, 40'000, 64, 0}, NoteEvent{{21}, {40}, {10}, 40'000, 64, 0}}));
     auto note_scan_clip = take(Clip::create({12}, {0}, {100}, std::move(skipped_notes)));
     auto note_scan_child = take(Sequence::create({10}, "note scan child", TickDuration{100},
@@ -160,7 +171,7 @@ TEST_CASE("Nested compile refuses unsupported child state and expansion overflow
     REQUIRE(note_scan_compiler.status().last_error.item == ItemId{12});
     REQUIRE_FALSE(note_scan_store.has_value());
 
-    auto invalid_notes = take(NoteContent::create({NoteEvent{{20}, {90}, {20}, 40'000, 64, 0}}));
+    auto invalid_notes = take(MidiContent::create({NoteEvent{{20}, {90}, {20}, 40'000, 64, 0}}));
     auto invalid_note_clip = take(Clip::create({12}, {0}, {100}, invalid_notes));
     auto invalid_child =
         take(Sequence::create({10}, "child", TickDuration{100}, {track(11, {invalid_note_clip})}));
@@ -415,7 +426,7 @@ TEST_CASE("Nested note clipping consumes compile slice work units") {
     for (std::uint64_t index = 0; index < 128; ++index)
         notes.push_back(
             {{1'000 + index}, {static_cast<std::int64_t>(index * 100)}, {50}, 40'000, 64, 0});
-    auto content = take(NoteContent::create(std::move(notes)));
+    auto content = take(MidiContent::create(std::move(notes)));
     auto child_clip = take(Clip::create({12}, {0}, {12'800}, content));
     auto child =
         take(Sequence::create({10}, "child", TickDuration{12'800}, {track(11, {child_clip})}));
@@ -528,6 +539,86 @@ TEST_CASE("Nested audio trimming preserves fractional sample-rate conversion off
     REQUIRE(nested_output.storage == direct_output.storage);
 }
 
+TEST_CASE("Nested conforming audio refuses partial source windows") {
+    std::vector<float> source(24'000, 1.0f);
+    const auto data = audio_data({source});
+    const auto assets = pool({{{50}, data}});
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+
+    // Spelled rather than deduced: `std::int64_t` is `long` on LP64 Linux and
+    // `long long` on Darwin, so a bare `0LL` sibling deduces a different
+    // `std::pair` there and class-template argument deduction for the array
+    // fails on one platform only.
+    using TrimWindow = std::pair<std::int64_t, std::int64_t>;
+    const std::array<TrimWindow, 3> windows{
+        TrimWindow{kTicksPerQuarter / 4, 3 * kTicksPerQuarter / 4}, // left trim only
+        TrimWindow{0, 3 * kTicksPerQuarter / 4},                    // right trim only
+        TrimWindow{kTicksPerQuarter / 4, kTicksPerQuarter / 2},     // both sides
+    };
+    for (const auto conform : {TimeConform::Resample, TimeConform::Stretch}) {
+        for (const auto [source_start, duration] : windows) {
+            auto child_media = musical_media_clip(12, 0, kTicksPerQuarter, 50, source.size(), {},
+                                                   conform);
+            auto child = take(Sequence::create({10}, "child", TickDuration{kTicksPerQuarter},
+                                               {track(11, {child_media})}));
+            auto root = take(Sequence::create(
+                {2}, "root", std::nullopt,
+                {track(3, {nested_clip(4, 10, 0, duration, source_start)})}));
+            auto project = shared(take(Project::create(
+                ProjectInput{{1}, "partial nested conform", 100, {2},
+                             {{50, "source", source.size(), {48'000, 1}, hash}}, {root, child}})));
+
+            PlaybackProgramStore store;
+            InlineExecutor executor;
+            PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+            ProgramCompileRequest request;
+            request.project = std::move(project);
+            request.sequence_id = {2};
+            request.tempo_map = map_120();
+            request.document_revision = 1;
+            request.dirty.all = true;
+            request.audio_assets = assets;
+            REQUIRE(compiler.submit(std::move(request)));
+            REQUIRE(compiler.status().has_error);
+            REQUIRE(compiler.status().last_error.code ==
+                    CompileErrorCode::NestedSequenceUnsupported);
+            REQUIRE(compiler.status().last_error.item == ItemId{12});
+            REQUIRE_FALSE(store.has_value());
+        }
+    }
+}
+
+TEST_CASE("Complete nested media preserves authored time conform intent") {
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+    for (const auto conform : {TimeConform::Resample, TimeConform::Stretch}) {
+        auto child_media =
+            musical_media_clip(12, 0, kTicksPerQuarter, 50, 24'000, {}, conform);
+        auto child = take(Sequence::create({10}, "child", TickDuration{kTicksPerQuarter},
+                                           {track(11, {child_media})}));
+        auto root = take(Sequence::create(
+            {2}, "root", std::nullopt,
+            {track(3, {nested_clip(4, 10, 0, kTicksPerQuarter, 0)})}));
+        auto project = take(Project::create(
+            ProjectInput{{1}, "complete nested conform", 100, {2},
+                         {{50, "source", 24'000, {48'000, 1}, hash}}, {root, child}}));
+        const auto tempo = map_120();
+        SequenceContentLowerer lowerer(project, *tempo, 100, 100);
+        std::vector<LoweredClip> lowered;
+        const auto begun = lowerer.begin_track(*project.find_sequence({2})->find_track({3}), lowered);
+        REQUIRE_FALSE(begun.error);
+        for (;;) {
+            const auto step = lowerer.step();
+            REQUIRE_FALSE(step.error);
+            if (step.complete)
+                break;
+        }
+        REQUIRE(lowered.size() == 2);
+        REQUIRE(lowered[0].clip.id() == ItemId{4});
+        REQUIRE(lowered[0].clip.time_conform() == TimeConform::None);
+        REQUIRE(lowered[1].clip.time_conform() == conform);
+    }
+}
+
 namespace {
 
 // A child sequence whose single note clip carries modifiers and an authored
@@ -539,7 +630,7 @@ Project modified_nested_project(std::vector<NoteModifier> modifiers, std::uint64
                                 std::int64_t child_note_duration = 240,
                                 std::int64_t reference_source_start = 0,
                                 std::int64_t reference_duration = 960) {
-    auto notes = take(NoteContent::create(
+    auto notes = take(MidiContent::create(
         {NoteEvent{{13}, {child_note_start}, {child_note_duration}, 40'000, 64, 0},
          NoteEvent{{15}, {600}, {120}, 40'000, 67, 0}},
         std::move(modifiers), seed));
@@ -564,7 +655,68 @@ NoteModifier certain_ratchet(std::uint64_t note_id, std::uint16_t ratchets) {
     return modifier;
 }
 
+GrooveTemplate one_step_groove(std::int64_t timing_offset, std::int32_t velocity_scale) {
+    GrooveTemplateInput input;
+    input.step = TickDuration{100};
+    input.steps = {GrooveStep{TickDuration{timing_offset}, velocity_scale}};
+    return take(GrooveTemplate::create(std::move(input)));
+}
+
+Project nested_groove_project(bool trim_child = false) {
+    auto child_clip = take(Clip::create({12}, {0}, {960}, note_content(13)));
+    SequenceInput child_input;
+    child_input.id = {10};
+    child_input.name = "child";
+    child_input.musical_duration = TickDuration{960};
+    child_input.tracks = {track(11, {child_clip})};
+    child_input.groove = one_step_groove(20, 500);
+    auto child = take(Sequence::create(std::move(child_input)));
+
+    auto direct_clip = take(Clip::create({20}, {0}, {960}, note_content(21)));
+    const auto reference_duration = trim_child ? 480 : 960;
+    SequenceInput root_input;
+    root_input.id = {2};
+    root_input.name = "root";
+    root_input.tracks = {
+        track(3, {nested_clip(4, 10, 480, reference_duration)}),
+        track(5, {direct_clip}),
+    };
+    root_input.groove = one_step_groove(80, 2000);
+    auto root = take(Sequence::create(std::move(root_input)));
+
+    ProjectInput input;
+    input.id = {1};
+    input.name = "nested groove";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.sequences = {root, child};
+    return take(Project::create(std::move(input)));
+}
+
+CompileError compile_error_for(const Project& project);
+
 } // namespace
+
+TEST_CASE("Nested MIDI reads exactly its owning sequence groove") {
+    const auto program = compile(shared(nested_groove_project()));
+    const auto nested_events = program->find_track({3})->arrangement_note_events();
+    REQUIRE(nested_events.size() == 2);
+    REQUIRE(nested_events[0].tick == TickPosition{620});
+    REQUIRE(nested_events[0].velocity == 20'000);
+    REQUIRE(nested_events[1].tick == TickPosition{860});
+
+    const auto root_events = program->find_track({5})->arrangement_note_events();
+    REQUIRE(root_events.size() == 2);
+    REQUIRE(root_events[0].tick == TickPosition{200});
+    REQUIRE(root_events[0].velocity == 0xffff);
+    REQUIRE(root_events[1].tick == TickPosition{440});
+}
+
+TEST_CASE("A trimmed nested MIDI leaf with authored groove is explicitly refused") {
+    const auto error = compile_error_for(nested_groove_project(true));
+    REQUIRE(error.code == CompileErrorCode::TrimmedGrooveUnsupported);
+    REQUIRE(error.item == ItemId{12});
+}
 
 TEST_CASE("A nested note clip keeps its modifiers and authored seed") {
     // Ratchet is authored rather than drawn, so it is observable in the compiled
@@ -586,7 +738,7 @@ TEST_CASE("A nested note clip keeps its modifiers and authored seed") {
 TEST_CASE("A nested note clip drops modifiers whose notes were trimmed away") {
     // The reference starts one tick after note 13 ends, so note 13 is entirely
     // outside the audible window and is removed by clipping. Its modifier must
-    // be dropped with it: NoteContent::create refuses a modifier that names an
+    // be dropped with it: MidiContent::create refuses a modifier that names an
     // absent note, so passing the companion array through unfiltered would turn
     // this nested sequence into a compile error rather than a valid lowering.
     const auto project = modified_nested_project(
@@ -685,4 +837,126 @@ TEST_CASE("A nested child track with a transparent mixer still lowers") {
     auto program = compile(shared(project));
     const auto events = program->find_track({3})->arrangement_note_events();
     REQUIRE_FALSE(events.empty());
+}
+
+namespace {
+
+// One controller stream a clip can carry beside its notes. The address is a
+// plain channel-voice controller, and the identities stay clear of the note
+// identity the builders below use.
+MidiExpressionLane controller_lane() {
+    return MidiExpressionLane{
+        {20}, MidiLaneAddress{0, 0, 11, 0, 74}, {{{21}, {0}, 0}, {{22}, {240}, 0xffffffff}}};
+}
+
+// A flat track holding one MIDI clip, with or without a controller lane, so the
+// refusal and its control differ in exactly the lane.
+Project flat_note_project(std::vector<MidiExpressionLane> lanes) {
+    auto content = take(MidiContent::create({NoteEvent{{13}, {120}, {240}, 40'000, 64, 0}}, {}, 0,
+                                            std::move(lanes)));
+    auto clip = take(Clip::create({12}, {0}, {960}, std::move(content)));
+    auto root = take(Sequence::create({2}, "root", TickDuration{960}, {track(3, {clip})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "flat notes";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.sequences = {root};
+    return take(Project::create(std::move(input)));
+}
+
+// A lane-bearing child clip the placement trims: the reference admits the first
+// half of the child, so the retained window ends before the child does.
+Project trimmed_nested_lane_project() {
+    auto content = take(MidiContent::create({NoteEvent{{13}, {120}, {240}, 40'000, 64, 0}}, {}, 0,
+                                            {controller_lane()}));
+    auto child_clip = take(Clip::create({12}, {0}, {960}, std::move(content)));
+    auto child =
+        take(Sequence::create({10}, "child", TickDuration{960}, {track(11, {child_clip})}));
+    auto root = take(
+        Sequence::create({2}, "root", std::nullopt, {track(3, {nested_clip(4, 10, 480, 480)})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "trimmed nested lane";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.sequences = {root, child};
+    return take(Project::create(std::move(input)));
+}
+
+} // namespace
+
+TEST_CASE("A clip carrying expression lanes is refused instead of compiled without them") {
+    // The compiler reads only the notes, so compiling this clip would publish a
+    // program whose controllers silently stopped existing. The refusal names the
+    // clip that carries them, and nothing reaches the store: a published
+    // lane-less program is the loss this guard exists to prevent, so the empty
+    // store is the assertion that matters as much as the code.
+    PlaybackProgramStore store;
+    InlineExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    ProgramCompileRequest request;
+    request.project = shared(flat_note_project({controller_lane()}));
+    request.sequence_id = {2};
+    request.tempo_map = map_120();
+    request.document_revision = 1;
+    request.dirty.all = true;
+    REQUIRE(compiler.submit(std::move(request)));
+    const auto status = compiler.status();
+    REQUIRE(status.has_error);
+    REQUIRE(status.last_error.code == CompileErrorCode::MidiExpressionLaneUnsupported);
+    REQUIRE(status.last_error.item == ItemId{12});
+    REQUIRE_FALSE(store.has_value());
+}
+
+TEST_CASE("A clip with no expression lanes still compiles") {
+    // The positive control for the refusal above: a guard that rejected every
+    // MIDI clip would pass the refusal test just as well.
+    const auto program = compile(shared(flat_note_project({})));
+    const auto events = program->find_track({3})->arrangement_note_events();
+    REQUIRE(events.size() == 2);
+}
+
+TEST_CASE("Trimming a lane-bearing nested clip keeps its own refusal") {
+    // Lowering refuses the trim before the compiler ever sees the clip, and it
+    // says something different: the inherited value at a trim boundary is
+    // undefined, which outlives the missing lane support the code above names.
+    const auto error = compile_error_for(trimmed_nested_lane_project());
+    REQUIRE(error.code == CompileErrorCode::TrimmedMidiLaneUnsupported);
+    REQUIRE(error.item == ItemId{12});
+}
+
+TEST_CASE("Trimming a nested clip shortens its fades and keeps their shape") {
+    auto child_clip = take(Clip::create({12}, {0}, {960}, note_content(13),
+                                        {.gain_linear = 1.0f,
+                                         .fade_in_duration = 480,
+                                         .fade_out_duration = 240,
+                                         .fade_shape = ClipFadeShape::EqualPower}));
+    auto child = take(Sequence::create({10}, "child", TickDuration{960}, {track(11, {child_clip})}));
+    // Plays [120, 840) of a 960-tick child, so the flattened clip is trimmed by
+    // 120 ticks on each side.
+    auto root =
+        take(Sequence::create({2}, "root", std::nullopt, {track(3, {nested_clip(4, 10, 0, 720, 120)})}));
+    auto project =
+        take(Project::create(ProjectInput{{1}, "trimmed fade", 100, {2}, {}, {root, child}}));
+    const auto tempo = map_120();
+    SequenceContentLowerer lowerer(project, *tempo, 100, 100);
+    std::vector<LoweredClip> lowered;
+    const auto begun = lowerer.begin_track(*project.find_sequence({2})->find_track({3}), lowered);
+    REQUIRE_FALSE(begun.error);
+    for (;;) {
+        const auto step = lowerer.step();
+        REQUIRE_FALSE(step.error);
+        if (step.complete)
+            break;
+    }
+    // The reference placement itself, then the flattened child it expands to.
+    REQUIRE(lowered.size() == 2);
+    REQUIRE(lowered[0].clip.id() == ItemId{4});
+    const auto playback = lowered[1].clip.playback_properties();
+    REQUIRE(playback.fade_in_duration == 360);
+    REQUIRE(playback.fade_out_duration == 120);
+    // The shape is not a duration and a trim must not reinterpret it: a clip
+    // trimmed to nothing but a fade still fades the way it was authored to.
+    REQUIRE(playback.fade_shape == ClipFadeShape::EqualPower);
 }

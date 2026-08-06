@@ -42,6 +42,7 @@ std::optional<DesignSource> parse_design_source(const std::string& name) {
     if (name == "v0")       return DesignSource::v0;
     if (name == "pencil")   return DesignSource::pencil;
     if (name == "claude")   return DesignSource::claude;
+    if (name == "html")     return DesignSource::html;
     if (name == "designmd") return DesignSource::designmd;
     if (name == "jsx")      return DesignSource::jsx;
     if (name == "figma-plugin") return DesignSource::figma_plugin;
@@ -55,6 +56,7 @@ const char* design_source_name(DesignSource source) {
         case DesignSource::v0:       return "v0";
         case DesignSource::pencil:   return "Pencil";
         case DesignSource::claude:   return "Claude Design";
+        case DesignSource::html:     return "HTML";
         case DesignSource::designmd: return "DESIGN.md";
         case DesignSource::jsx:          return "JSX instrument";
         case DesignSource::figma_plugin: return "Figma plugin export";
@@ -81,6 +83,7 @@ const char* design_source_vendor_key(DesignSource source) {
         case DesignSource::v0:       return "v0";
         case DesignSource::pencil:   return "pencil";
         case DesignSource::claude:   return "claude";
+        case DesignSource::html:     return "html";
         case DesignSource::designmd: return "designmd";
         case DesignSource::jsx:      return "jsx";
         case DesignSource::figma_plugin: return "figma-plugin";
@@ -90,6 +93,25 @@ const char* design_source_vendor_key(DesignSource source) {
 
 WidgetPromotionSignal classify_interactive_signal(const IRNode& node) {
     if (node.type != "frame") {
+        return WidgetPromotionSignal::none;
+    }
+
+    // A node lowered from a browser capture carries `paint_class`, and its
+    // appearance is the browser's own solved appearance — the whole contract of
+    // that lane is that the panel is reproduced, not re-designed. Promoting it
+    // to a widget hands it the widget's DEFAULT chrome, which paints over the
+    // captured fill instead of alongside it: a green `STEREO` toggle and a
+    // borderless nav icon both come out as the same grey rounded box.
+    //
+    // `cursor: pointer` is the signal that does the damage, because in a web
+    // design it is on EVERY clickable thing — tabs, cards, nav items, mode
+    // switches — none of which the browser draws any differently for it. It is
+    // a hover affordance, not ink.
+    //
+    // Interactivity on that lane does not come from sniffing appearance
+    // anyway: the semantic report names the controls, and they are lowered
+    // separately by `lower_semantic_controls`.
+    if (node.attributes.count("paint_class")) {
         return WidgetPromotionSignal::none;
     }
 

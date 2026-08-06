@@ -158,6 +158,9 @@ std::string input(const std::string& prompt, const std::string& default_value = 
 
 int fuzzy_score(const std::string& text, const std::string& query);
 
+bool source_checkout_dependencies_enabled(const fs::path& project_root,
+                                          const fs::path& cache_path);
+
 // ── Command Forward Declarations (for cross-command calls) ──────────────────
 
 int cmd_build(const std::vector<std::string>& args);
@@ -176,8 +179,10 @@ int cmd_design(const std::vector<std::string>& args);
 int cmd_cache(const std::vector<std::string>& args);
 int cmd_upgrade(const std::vector<std::string>& args);
 int cmd_audio(const std::vector<std::string>& args);
+#if PULP_ENABLE_PROJECT_PACKAGE
 int cmd_seq(const std::vector<std::string>& args);
 int cmd_render(const std::vector<std::string>& args);
+#endif
 int cmd_sdk(const std::vector<std::string>& args);
 int cmd_version(const std::vector<std::string>& args);
 int cmd_dev(const std::vector<std::string>& args);
@@ -192,6 +197,7 @@ int cmd_project(const std::vector<std::string>& args);
 int cmd_config(const std::vector<std::string>& args);
 int cmd_coverage(const std::vector<std::string>& args);
 int cmd_dsp(const std::vector<std::string>& args);
+int cmd_forge(const std::vector<std::string>& args);
 int cmd_minos(const std::vector<std::string>& args);
 int cmd_macos(const std::vector<std::string>& args);
 int cmd_ci_host(const std::vector<std::string>& args);

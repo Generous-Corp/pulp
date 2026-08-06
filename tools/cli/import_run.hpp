@@ -2,7 +2,7 @@
 //
 // This unit owns the verb runners and their shared helpers (framework-index
 // resolution, importer resolution, the SPI request/response envelope handling,
-// payload builders, the clean-room output gate, and scaffold materialisation).
+// payload builders, the independent output gate, and scaffold materialisation).
 // `cmd_import.cpp` is reduced to argument parsing + dispatch into these
 // entry points.
 //
@@ -48,7 +48,7 @@ int run_detect(const fs::path& dir);
 int run_inspect(const ImportOptions& o);
 
 // `pulp import emit --from <fw> <dir> --output <out>` — analyze → emit →
-// clean-room scan → materialise a buildable scaffold + provenance marker.
+// framework-source scan → materialise a buildable scaffold + provenance marker.
 int run_emit(const ImportOptions& o);
 
 }  // namespace pulp::cli::import_run

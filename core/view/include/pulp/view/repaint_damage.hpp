@@ -12,8 +12,18 @@
 // preserve.
 //
 // It has no GPU, canvas, or platform dependency and is unit-tested directly
-// (test/test_partial_repaint_equivalence.cpp). The mac GPU host is the only
-// consumer today, gated behind PULP_PARTIAL_REPAINT=1.
+// (test/test_partial_repaint_equivalence.cpp). Three hosts consume it, all
+// gated behind PULP_PARTIAL_REPAINT=1: the macOS GPU WINDOW host, and the
+// Windows and Linux PLUG-IN hosts via `compute_frame_clip()` in
+// plugin_frame_renderer.hpp.
+//
+// One thing that decision does NOT do, and callers must: this function works in
+// ROOT logical coordinates, because that is the space damage is produced in. A
+// host that paints through a design-viewport letterbox installs its clip in
+// SURFACE space, BEFORE that transform is applied — so the returned rect has to
+// be mapped through the same translate+scale and re-snapped to whole surface
+// pixels before use. `compute_frame_clip()` does that; a host that skips it
+// clips the wrong region rather than failing visibly.
 
 namespace pulp::view {
 

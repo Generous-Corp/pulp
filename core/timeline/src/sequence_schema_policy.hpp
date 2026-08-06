@@ -13,6 +13,9 @@ struct SequenceSchemaVersionPolicy {
     std::uint32_t chord_scale_lane_introduced_version;
     std::uint32_t groove_introduced_version;
     std::uint32_t scenes_introduced_version;
+    std::uint32_t track_order_introduced_version;
+    std::uint32_t chord_detail_introduced_version;
+    std::uint32_t section_role_introduced_version;
 
     // Markers and regions entered the sequence schema together, so one predicate
     // governs both arrays: a version that carries either must carry both.
@@ -31,10 +34,28 @@ struct SequenceSchemaVersionPolicy {
     [[nodiscard]] constexpr bool requires_scenes(std::uint32_t version) const noexcept {
         return version >= scenes_introduced_version;
     }
+
+    [[nodiscard]] constexpr bool requires_track_order(std::uint32_t version) const noexcept {
+        return version >= track_order_introduced_version;
+    }
+
+    // The bass, extension mask, and voicing hint a chord event carries beyond
+    // its quality and root. They entered together and are always written
+    // together, so one predicate governs all three.
+    [[nodiscard]] constexpr bool requires_chord_detail(std::uint32_t version) const noexcept {
+        return version >= chord_detail_introduced_version;
+    }
+
+    [[nodiscard]] constexpr bool requires_section_role(std::uint32_t version) const noexcept {
+        return version >= section_role_introduced_version;
+    }
 };
 
+// Chord detail and section roles entered the schema in the same version. They
+// are separate predicates rather than one because they govern different arrays
+// and a later version may move only one of them.
 inline constexpr SequenceSchemaVersionPolicy sequence_schema_policy{
-    "pulp.timeline.sequence", 1, 5, 2, 3, 4, 5,
+    "pulp.timeline.sequence", 1, 7, 2, 3, 4, 5, 6, 7, 7,
 };
 static_assert(sequence_schema_policy.oldest_readable_version > 0 &&
               sequence_schema_policy.oldest_readable_version <=
@@ -69,6 +90,30 @@ static_assert(sequence_schema_policy.groove_introduced_version >
                   sequence_schema_policy.scenes_introduced_version - 1) &&
               sequence_schema_policy.requires_scenes(
                   sequence_schema_policy.scenes_introduced_version));
+static_assert(sequence_schema_policy.track_order_introduced_version >
+                  sequence_schema_policy.scenes_introduced_version &&
+              sequence_schema_policy.track_order_introduced_version <=
+                  sequence_schema_policy.current_version &&
+              !sequence_schema_policy.requires_track_order(
+                  sequence_schema_policy.track_order_introduced_version - 1) &&
+              sequence_schema_policy.requires_track_order(
+                  sequence_schema_policy.track_order_introduced_version));
+static_assert(sequence_schema_policy.chord_detail_introduced_version >
+                  sequence_schema_policy.track_order_introduced_version &&
+              sequence_schema_policy.chord_detail_introduced_version <=
+                  sequence_schema_policy.current_version &&
+              !sequence_schema_policy.requires_chord_detail(
+                  sequence_schema_policy.chord_detail_introduced_version - 1) &&
+              sequence_schema_policy.requires_chord_detail(
+                  sequence_schema_policy.chord_detail_introduced_version) &&
+              sequence_schema_policy.section_role_introduced_version >
+                  sequence_schema_policy.track_order_introduced_version &&
+              sequence_schema_policy.section_role_introduced_version <=
+                  sequence_schema_policy.current_version &&
+              !sequence_schema_policy.requires_section_role(
+                  sequence_schema_policy.section_role_introduced_version - 1) &&
+              sequence_schema_policy.requires_section_role(
+                  sequence_schema_policy.section_role_introduced_version));
 
 // The groove a sequence carries when it states no feel, in canonical field
 // order. The upgrade that introduces the field writes exactly this, and the

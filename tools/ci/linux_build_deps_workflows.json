@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "action": "./.github/actions/install-linux-build-deps",
+  "adopters": {
+    ".github/workflows/build.yml": 1,
+    ".github/workflows/coverage.yml": 1,
+    ".github/workflows/cross-platform-check.yml": 2,
+    ".github/workflows/examples-validation.yml": 1,
+    ".github/workflows/gcc-compile-gate.yml": 1,
+    ".github/workflows/header-self-contained.yml": 1,
+    ".github/workflows/install-consumer-smoke.yml": 1,
+    ".github/workflows/iwyu.yml": 1,
+    ".github/workflows/release-cli.yml": 1,
+    ".github/workflows/release-path-pr-gate.yml": 1,
+    ".github/workflows/sandbox-e2e.yml": 1,
+    ".github/workflows/sanitizers.yml": 1,
+    ".github/workflows/timeline-fuzz.yml": 2,
+    ".github/workflows/timeline-hardening.yml": 1,
+    ".github/workflows/tracing-build.yml": 1
+  },
+  "exclusions": {
+    ".github/workflows/docs-deploy.yml": {
+      "owner": "docs",
+      "reason": "Installs only the Doxygen documentation utility; it does not compile native Pulp targets.",
+      "review_after": "2027-01-29"
+    },
+    ".github/workflows/docs-material.yml": {
+      "owner": "docs",
+      "reason": "Installs only the Doxygen documentation utility; it does not compile native Pulp targets.",
+      "review_after": "2027-01-29"
+    },
+    ".github/workflows/web-plugins.yml": {
+      "owner": "web",
+      "reason": "Installs Python only for a browser capability probe; native Linux Pulp dependencies are not used.",
+      "review_after": "2027-01-29"
+    }
+  }
+}

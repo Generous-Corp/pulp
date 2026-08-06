@@ -5,6 +5,15 @@ from the first commit on `main` to 14 downloadable assets on the Releases page
 (including the Intel `darwin-x64` pair, cross-compiled on Apple Silicon — see
 the assets section).
 
+Starting at the SDK provenance floor in
+`tools/scripts/release_product_matrix.json`, every SDK archive carries an
+`official-release` marker binding its version tag to the exact clean source
+commit and archive platform, and proving inspector/audio-probe features were
+disabled. The release finalizer verifies that marker against the resolved tag
+SHA before publication. Marker-era manual runs cannot substitute `source_ref`
+or overlay current `main`; repair the source and create a new tag instead.
+Historical pre-marker backfills retain their compatibility path.
+
 If you're hunting a specific layer:
 
 - **Tag creation logic** → `auto-release.yml`, plus [versioning.md](versioning.md) for the version-bump gates.
@@ -65,11 +74,14 @@ PR merge to main
 │                                                          │
 │ For each platform: configure → build → strip → fix       │
 │ rpaths → package `pulp-${PLATFORM}.tar.gz` → repackage   │
-│ the SDK as `pulp-sdk-${PLATFORM}.tar.gz` → attest →      │
+│ the SDK as `pulp-sdk-${PLATFORM}.tar.gz` → stamp and     │
+│ verify positive SDK provenance → verify the exact        │
+│ product/format matrix → attest →                         │
 │ upload as an Actions artifact. The `smoke-cli` matrix    │
 │ then extracts each tarball on a fresh runner and runs    │
-│ `pulp help`, `pulp-cpp help`, `pulp-mcp --version` to    │
-│ catch missing-symbol / bad-rpath bugs before publish.    │
+│ `pulp help`, `pulp-cpp help`, `pulp-mcp --version`, and  │
+│ `pulp import-design --help`; it also checks the browser  │
+│ capture runtime, catching missing delegates/rpaths.      │
 │                                                          │
 │ Final `release` job — the SOLE writer of the release:    │
 │   1. Download all 12 matrix artifacts.                   │
@@ -81,8 +93,10 @@ PR merge to main
 │   4. Create the release as a DRAFT and attach all 13     │
 │      assets. (A published release is immutable, so       │
 │      assets can only land while it is still a draft.)    │
-│   5. Verify the EXACT required asset set, generate and   │
-│      upload SHA256SUMS.                                  │
+│   5. Download the draft assets back and verify their     │
+│      internal product matrix (targets, formats, version, │
+│      executable modes); verify the EXACT outer asset set,│
+│      generate and upload SHA256SUMS.                     │
 │   6. Publish — claiming /releases/latest only if this    │
 │      tag is the greatest published SemVer.               │
 │                                                          │
@@ -142,12 +156,28 @@ tools/scripts/release_routing.sh github linux-arm64        # -> back to GitHub
 GitHub-hosted. So `github <leg>` is a complete revert and takes effect on the next
 tag. If the local pool is down, getting back to GitHub is one command.
 
+The lightweight resolver jobs in `release-cli.yml` and `sign-and-release.yml`
+also reuse trusted Linux capacity. They prefer
+`PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON`, then the existing
+`PULP_LOCAL_LINUX_RUNS_ON_JSON` selector, and fall back to `ubuntu-latest` when
+both are unset. These workflows accept only a version-tag push or maintainer
+dispatch; pull-request and merge-queue code never reaches this persistent pool.
+The artifact-consuming build, smoke, signing, and publication jobs keep their
+separate routing and security boundaries.
+
 **Why this exists.** Only the macOS legs used to be variable-driven; every other leg
 fell through to `|| matrix.os` — a literal GitHub-hosted label. That single
 fallthrough is the *entire* reason Linux and Windows releases could not use the
 self-hosted VMs that were already booted and idle. Measured on v0.663.1: the local
 macOS VM built `darwin-arm64` in **6.4 min after a 0.8 min wait**, while the hosted
 legs took **39-72 min to execute** and `darwin-x64` sat **127 minutes** in the queue.
+
+Both Darwin rows now prefer the dedicated
+`PULP_RELEASE_MACOS_RUNS_ON_JSON` Tart pool. For `darwin-x64`, the precedence is
+the per-leg `PULP_RELEASE_DARWIN_X64_RUNS_ON_JSON` override, the shared release
+pool, the legacy `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` override, then hosted
+`macos-15`. The x64 row still cross-compiles on ARM and smokes under Rosetta;
+the native Intel Mac Mini remains a separate advisory/nightly portability lane.
 
 ### What can and cannot go local
 
@@ -237,7 +267,7 @@ including the Intel `darwin-x64` CLI+SDK pair, which is now a REQUIRED leg
 | Asset | Purpose |
 |-------|---------|
 | `appcast.xml` | Sparkle auto-update feed; consumed by `pulp upgrade --check-only` |
-| `pulp-darwin-arm64.tar.gz` | CLI tarball (`pulp`, `pulp-cpp`, `pulp-mcp`, and runtime library) |
+| `pulp-darwin-arm64.tar.gz` | CLI tarball (`pulp`, `pulp-cpp`, `pulp-mcp`, `pulp-import-design`, browser-capture runtime, and GPU runtime library) |
 | `pulp-darwin-x64.tar.gz` | Intel (x86_64) CLI tarball — cross-compiled on Apple Silicon |
 | `pulp-linux-arm64.tar.gz` | " |
 | `pulp-linux-x64.tar.gz` | " |
@@ -250,6 +280,17 @@ including the Intel `darwin-x64` CLI+SDK pair, which is now a REQUIRED leg
 | `pulp-sdk-windows-arm64.tar.gz` | " |
 | `pulp-sdk-windows-x64.tar.gz` | " |
 | `SHA256SUMS` | SHA-256 manifest for every user-facing release asset above (13 base) |
+
+The asset table is only the outer contract. Before publication,
+`release_artifact_contents.py` opens those exact downloaded draft assets and
+enforces the internal product matrix: the complete public Pulp library target
+set, VST3/CLAP/LV2 development surfaces on every SDK, Audio Unit on Darwin,
+matching version and Release markers, exact CLI payloads, safe paths, and Unix
+executable modes. Each native build leg runs the same verifier before upload;
+Darwin additionally performs real strict code-signature verification after
+re-signing installed Mach-O files whose RPATHs changed during install. This is
+what prevents a green publisher from shipping a correctly named archive full of
+stale or incomplete products.
 
 **Intel `darwin-x64` — cross-compiled, required.** `release-cli.yml`'s
 `darwin-x64` build+smoke legs (`os: macos-15-xcompile`) cross-compile the x86_64

@@ -1,7 +1,9 @@
 #include <pulp/timeline/serialize.hpp>
 
 #include "asset_schema_policy.hpp"
+#include "clip_schema_policy.hpp"
 #include "chord_scale_names.hpp"
+#include "document_enum_names.hpp"
 #include "project_schema_policy.hpp"
 #include "project_state_access.hpp"
 #include "schema_json_write_internal.hpp"
@@ -135,12 +137,22 @@ const char* item_kind_name(ItemKind value) noexcept {
         return "clip";
     case ItemKind::Note:
         return "note";
+    case ItemKind::MidiLane:
+        return "midi_lane";
+    case ItemKind::MidiLanePoint:
+        return "midi_lane_point";
     case ItemKind::DevicePlacement:
         return "device_placement";
     case ItemKind::AutomationLane:
         return "automation_lane";
     case ItemKind::AutomationPoint:
         return "automation_point";
+    case ItemKind::Modulator:
+        return "modulator";
+    case ItemKind::MacroControl:
+        return "macro_control";
+    case ItemKind::ModulationRoute:
+        return "modulation_route";
     case ItemKind::TakeLane:
         return "take_lane";
     case ItemKind::Take:
@@ -331,9 +343,44 @@ bool write_content(EncodeContext& context, const ClipContent& content) {
                            context.writer.character('}');
                 });
             },
-            [&](const NoteContent& note_content) {
-                return write_envelope(context, "pulp.timeline.content.notes", 2, [&] {
-                    if (!context.writer.append("{\"modifier_seed\":") ||
+            [&](const MidiContent& note_content) {
+                return write_envelope(context, "pulp.timeline.content.notes", 3, [&] {
+                    if (!context.writer.append("{\"lanes\":["))
+                        return false;
+                    for (std::size_t lane_index = 0; lane_index < note_content.lanes().size();
+                         ++lane_index) {
+                        const auto& lane = note_content.lanes()[lane_index];
+                        if ((lane_index != 0 && !context.writer.character(',')) ||
+                            !context.writer.append("{\"bank\":") ||
+                            !context.writer.u64(lane.address.bank) ||
+                            !context.writer.append(",\"channel\":") ||
+                            !context.writer.u64(lane.address.channel) ||
+                            !context.writer.append(",\"group\":") ||
+                            !context.writer.u64(lane.address.group) ||
+                            !context.writer.append(",\"id\":") ||
+                            !context.writer.u64(lane.id.value, true) ||
+                            !context.writer.append(",\"index\":") ||
+                            !context.writer.u64(lane.address.index) ||
+                            !context.writer.append(",\"points\":["))
+                            return false;
+                        for (std::size_t point_index = 0; point_index < lane.points.size();
+                             ++point_index) {
+                            const auto& point = lane.points[point_index];
+                            if ((point_index != 0 && !context.writer.character(',')) ||
+                                !context.writer.append("{\"id\":") ||
+                                !context.writer.u64(point.id.value, true) ||
+                                !context.writer.append(",\"position_ticks\":") ||
+                                !context.writer.i64(point.position.value, true) ||
+                                !context.writer.append(",\"value\":") ||
+                                !context.writer.u64(point.value) || !context.writer.character('}'))
+                                return false;
+                        }
+                        if (!context.writer.append("],\"status\":") ||
+                            !context.writer.u64(lane.address.status) ||
+                            !context.writer.character('}'))
+                            return false;
+                    }
+                    if (!context.writer.append("],\"modifier_seed\":") ||
                         !context.writer.u64(note_content.modifier_seed(), true) ||
                         !context.writer.append(",\"modifiers\":["))
                         return false;
@@ -400,16 +447,42 @@ bool write_content(EncodeContext& context, const ClipContent& content) {
 }
 
 bool write_clip(EncodeContext& context, const Clip& clip) {
-    return write_envelope(context, "pulp.timeline.clip", 1, [&] {
+    return write_envelope(context, detail::clip_schema_policy.type_name,
+                          detail::clip_schema_policy.current_version, [&] {
         const auto playback = clip.playback_properties();
+        std::string_view time_conform;
+        switch (clip.time_conform()) {
+            case TimeConform::None:
+                time_conform = "none";
+                break;
+            case TimeConform::Resample:
+                time_conform = "resample";
+                break;
+            case TimeConform::Stretch:
+                time_conform = "stretch";
+                break;
+        }
+        std::string_view fade_shape;
+        switch (playback.fade_shape) {
+            case ClipFadeShape::Linear:
+                fade_shape = "linear";
+                break;
+            case ClipFadeShape::EqualPower:
+                fade_shape = "equal_power";
+                break;
+        }
         if (!context.writer.append("{\"content\":") || !write_content(context, clip.content()) ||
             !context.writer.append(",\"fade_in_duration\":") ||
             !context.writer.u64(playback.fade_in_duration, true) ||
             !context.writer.append(",\"fade_out_duration\":") ||
             !context.writer.u64(playback.fade_out_duration, true) ||
+            !context.writer.append(",\"fade_shape\":") ||
+            !context.writer.quoted(fade_shape) ||
             !context.writer.append(",\"gain_linear_bits\":") ||
             !context.writer.u64(std::bit_cast<std::uint32_t>(playback.gain_linear), true) ||
             !context.writer.append(",\"id\":") || !context.writer.u64(clip.id().value, true) ||
+            !context.writer.append(",\"time_conform\":") ||
+            !context.writer.quoted(time_conform) ||
             !context.writer.append(",\"time_range\":"))
             return false;
         if (clip.time_anchor() == ClipTimeAnchor::Musical)
@@ -488,6 +561,73 @@ bool write_automation_lane(EncodeContext& context, const AutomationLane& lane) {
     });
 }
 
+// A target's envelope. Modulation and automation address the same parameters,
+// so the two share one spelling on the wire; what differs is the entity that
+// carries it. Every alternative owes an envelope: a target kind that fell off
+// the end of this dispatch would be a route saved without what it drives, so
+// the visit is exhaustive by construction rather than by a trailing else.
+bool write_modulation_target(EncodeContext& context, const ModulationTarget& target) {
+    return std::visit(
+        ModulationTargetCases{
+            [&](const DeviceParameterTarget& device) {
+                return write_envelope(
+                    context, "pulp.timeline.automation_target.device_parameter", 1, [&] {
+                        return context.writer.append("{\"device_placement_id\":") &&
+                               context.writer.u64(device.device_placement_id.value, true) &&
+                               context.writer.append(",\"parameter_id\":") &&
+                               context.writer.u64(device.param_id) &&
+                               context.writer.character('}');
+                    });
+            },
+            [&](const TrackMixerTarget& mixer) {
+                return write_envelope(
+                    context, "pulp.timeline.automation_target.track_mixer", 1, [&] {
+                        return context.writer.append("{\"parameter\":") &&
+                               context.writer.quoted(
+                                   track_mixer_parameter_name(mixer.parameter)) &&
+                               context.writer.character('}');
+                    });
+            },
+        },
+        target);
+}
+
+bool write_modulator(EncodeContext& context, const Modulator& modulator) {
+    return write_envelope(context, "pulp.timeline.modulator", 1, [&] {
+        return context.writer.append("{\"id\":") && context.writer.u64(modulator.id.value, true) &&
+               context.writer.append(",\"kind\":") &&
+               context.writer.quoted(modulator_kind_name(modulator.kind)) &&
+               context.writer.append(",\"name\":") && context.writer.quoted(modulator.name) &&
+               context.writer.character('}');
+    });
+}
+
+bool write_macro_control(EncodeContext& context, const MacroControl& macro) {
+    return write_envelope(context, "pulp.timeline.macro_control", 1, [&] {
+        return context.writer.append("{\"id\":") && context.writer.u64(macro.id.value, true) &&
+               context.writer.append(",\"name\":") && context.writer.quoted(macro.name) &&
+               context.writer.append(",\"value_bits\":") &&
+               context.writer.u64(std::bit_cast<std::uint32_t>(macro.value), true) &&
+               context.writer.character('}');
+    });
+}
+
+bool write_modulation_route(EncodeContext& context, const ModulationRoute& route) {
+    return write_envelope(context, "pulp.timeline.modulation_route", 1, [&] {
+        return context.writer.append("{\"depth_bits\":") &&
+               context.writer.u64(std::bit_cast<std::uint32_t>(route.depth), true) &&
+               context.writer.append(",\"enabled\":") &&
+               context.writer.append(route.enabled ? "true" : "false") &&
+               context.writer.append(",\"id\":") && context.writer.u64(route.id.value, true) &&
+               context.writer.append(",\"source_id\":") &&
+               context.writer.u64(route.source.id.value, true) &&
+               context.writer.append(",\"source_kind\":") &&
+               context.writer.quoted(modulation_source_kind_name(route.source.kind)) &&
+               context.writer.append(",\"target\":") &&
+               write_modulation_target(context, route.target) && context.writer.character('}');
+    });
+}
+
 bool write_take(EncodeContext& context, const Take& take) {
     return write_envelope(context, "pulp.timeline.take", 1, [&] {
         return context.writer.append("{\"asset_id\":") &&
@@ -532,6 +672,30 @@ bool write_take_lane(EncodeContext& context, const TakeLane& lane) {
                 return false;
         return context.writer.append("]}");
     });
+}
+
+// A tuning object always carries all four members, writing the unused hashes as
+// null. The object is only ever reached through an optional member that is
+// omitted entirely when the document states no tuning, so a fixed inner shape
+// costs nothing and keeps the decoder from having to distinguish "no keyboard
+// map" from "member forgotten".
+bool write_tuning(EncodeContext& context, const TuningReference& tuning) {
+    const auto system = detail::tuning_system_name(tuning.system);
+    if (system.empty() || !context.writer.append("{\"keyboard_map_content\":"))
+        return false;
+    if (tuning.keyboard_map_content
+            ? !context.writer.quoted(tuning.keyboard_map_content->to_hex())
+            : !context.writer.append("null"))
+        return false;
+    if (!context.writer.append(",\"reference_pitch_millihertz\":") ||
+        !context.writer.u64(tuning.reference_pitch_millihertz) ||
+        !context.writer.append(",\"scale_content\":"))
+        return false;
+    if (tuning.scale_content ? !context.writer.quoted(tuning.scale_content->to_hex())
+                             : !context.writer.append("null"))
+        return false;
+    return context.writer.append(",\"system\":") && context.writer.quoted(system) &&
+           context.writer.character('}');
 }
 
 bool write_track(EncodeContext& context, const Track& track) {
@@ -579,6 +743,20 @@ bool write_track(EncodeContext& context, const Track& track) {
             }
             if (!context.writer.append(",\"id\":") || !context.writer.u64(track.id().value, true))
                 return false;
+            // Empty modulation collections are written as absence, so a
+            // document that authored no modulation stays byte-identical to its
+            // pre-modulation form. `macros` sorts before `mixer`; the other two
+            // sort after it, so this member interleaves with the mixer below.
+            if (!track.macros().empty()) {
+                if (!context.writer.append(",\"macros\":["))
+                    return false;
+                for (std::size_t index = 0; index < track.macros().size(); ++index)
+                    if ((index != 0 && !context.writer.character(',')) ||
+                        !write_macro_control(context, track.macros()[index]))
+                        return false;
+                if (!context.writer.character(']'))
+                    return false;
+            }
             // A default mixer is written as absence, so a document that never
             // touched a fader stays byte-identical to its pre-mixer form.
             if (track.mixer() != TrackMixer{}) {
@@ -590,6 +768,26 @@ bool write_track(EncodeContext& context, const Track& track) {
                     !context.writer.character('}'))
                     return false;
             }
+            if (!track.modulation_routes().empty()) {
+                if (!context.writer.append(",\"modulation_routes\":["))
+                    return false;
+                for (std::size_t index = 0; index < track.modulation_routes().size(); ++index)
+                    if ((index != 0 && !context.writer.character(',')) ||
+                        !write_modulation_route(context, track.modulation_routes()[index]))
+                        return false;
+                if (!context.writer.character(']'))
+                    return false;
+            }
+            if (!track.modulators().empty()) {
+                if (!context.writer.append(",\"modulators\":["))
+                    return false;
+                for (std::size_t index = 0; index < track.modulators().size(); ++index)
+                    if ((index != 0 && !context.writer.character(',')) ||
+                        !write_modulator(context, track.modulators()[index]))
+                        return false;
+                if (!context.writer.character(']'))
+                    return false;
+            }
             if (!context.writer.append(",\"name\":") || !context.writer.quoted(track.name()) ||
                 !context.writer.append(",\"record_armed\":") ||
                 !context.writer.append(track.record_armed() ? "true" : "false") ||
@@ -599,7 +797,12 @@ bool write_track(EncodeContext& context, const Track& track) {
                 if ((index != 0 && !context.writer.character(',')) ||
                     !write_take_lane(context, track.take_lanes()[index]))
                     return false;
-            return context.writer.append("]}");
+            if (!context.writer.character(']'))
+                return false;
+            if (track.tuning() && (!context.writer.append(",\"tuning\":") ||
+                                   !write_tuning(context, *track.tuning())))
+                return false;
+            return context.writer.character('}');
         });
 }
 
@@ -608,8 +811,20 @@ bool write_chord_scale_lane(EncodeContext& context, const ChordScaleLane& lane) 
         return false;
     for (std::size_t index = 0; index < lane.events().size(); ++index) {
         const auto& event = lane.events()[index];
+        // Canonical order is alphabetical, so the bass and the extension mask
+        // sort before chord_quality and the voicing hint sorts last. The
+        // optional members are written as null rather than omitted: a v7 event
+        // always carries every member, so the version gate stays a presence
+        // test rather than a per-member guess.
         if ((index != 0 && !context.writer.character(',')) ||
-            !context.writer.append("{\"chord_quality\":") ||
+            !context.writer.append("{\"chord_bass\":"))
+            return false;
+        if (event.chord_bass ? !context.writer.u64(*event.chord_bass)
+                             : !context.writer.append("null"))
+            return false;
+        if (!context.writer.append(",\"chord_extensions\":") ||
+            !context.writer.u64(event.chord_extensions) ||
+            !context.writer.append(",\"chord_quality\":") ||
             !context.writer.quoted(detail::chord_quality_name(event.chord_quality)) ||
             !context.writer.append(",\"chord_root\":") || !context.writer.u64(event.chord_root) ||
             !context.writer.append(",\"position\":") ||
@@ -617,7 +832,19 @@ bool write_chord_scale_lane(EncodeContext& context, const ChordScaleLane& lane) 
             !context.writer.append(",\"scale_mode\":") ||
             !context.writer.quoted(detail::scale_mode_name(event.scale_mode)) ||
             !context.writer.append(",\"scale_root\":") || !context.writer.u64(event.scale_root) ||
-            !context.writer.character('}'))
+            !context.writer.append(",\"voicing\":"))
+            return false;
+        // The model validated the voicing, so an empty name here would mean a
+        // value outside the enum reached the writer. Fail rather than emit an
+        // empty string the decoder would reject on the way back in.
+        if (event.voicing) {
+            const auto name = detail::chord_voicing_name(*event.voicing);
+            if (name.empty() || !context.writer.quoted(name))
+                return false;
+        } else if (!context.writer.append("null")) {
+            return false;
+        }
+        if (!context.writer.character('}'))
             return false;
     }
     return context.writer.character(']');
@@ -644,12 +871,17 @@ bool write_region(EncodeContext& context, const SequenceRegion& region) {
         if (region.color && (!context.writer.append("\"color\":") ||
                              !context.writer.u64(*region.color) || !context.writer.character(',')))
             return false;
+        const auto role = detail::section_role_name(region.role);
+        if (role.empty())
+            return false;
         return context.writer.append("\"duration\":") &&
                context.writer.i64(region.duration.value, true) &&
                context.writer.append(",\"id\":") && context.writer.u64(region.id.value, true) &&
                context.writer.append(",\"name\":") && context.writer.quoted(region.name) &&
                context.writer.append(",\"position\":") &&
-               context.writer.i64(region.position.value, true) && context.writer.character('}');
+               context.writer.i64(region.position.value, true) &&
+               context.writer.append(",\"role\":") && context.writer.quoted(role) &&
+               context.writer.character('}');
     });
 }
 
@@ -801,6 +1033,12 @@ bool write_sequence(EncodeContext& context, const Sequence& sequence) {
                     !write_scene(context, scene))
                     return false;
             }
+            if (!context.writer.append("],\"track_order\":["))
+                return false;
+            for (std::size_t index = 0; index < sequence.track_order().size(); ++index)
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !context.writer.u64(sequence.track_order()[index].value, true))
+                    return false;
             if (!context.writer.append("],\"tracks\":["))
                 return false;
             for (std::size_t index = 0; index < sequence.tracks().size(); ++index)
@@ -946,8 +1184,13 @@ serialize_project(const Project& project, const SchemaRegistry& registry,
                  !context.writer.i64(project.session_start()->start.value, true) ||
                  !context.writer.character('}')))
                 return false;
-            return context.writer.append(",\"tempo_map\":") &&
-                   write_tempo_map(context, project.tempo_map()) && context.writer.character('}');
+            if (!context.writer.append(",\"tempo_map\":") ||
+                !write_tempo_map(context, project.tempo_map()))
+                return false;
+            if (project.tuning() && (!context.writer.append(",\"tuning\":") ||
+                                     !write_tuning(context, *project.tuning())))
+                return false;
+            return context.writer.character('}');
         });
     if (!wrote) {
         if (context.failure)

@@ -7,6 +7,7 @@
 // / PulpAccessibilityElement when a shipped binary defines
 // PULP_VIEW_OBJC_SUFFIX). Must precede the first reference to those classes.
 #include "pulp_mac_objc_names.h"
+#include "accessibility_mac_host_lifetime.hpp"
 
 #include <pulp/canvas/cg_canvas.hpp>
 #include <pulp/runtime/log.hpp>
@@ -104,42 +105,73 @@ extern "C" void pulp_mac_plugin_text_input_client_category_anchor();
 
 // ── Accessibility element wrapping a Pulp View ──────────────────────────────
 
-@interface PulpAccessibilityElement : NSAccessibilityElement
-@property (nonatomic, assign) pulp::view::View* pulpView;
-@property (nonatomic, assign) PulpPluginView* hostView;
+@interface PulpAccessibilityElement : NSAccessibilityElement {
+@private
+    pulp::view::ViewCapture _viewCapture;
+    pulp::view::View* _rootView;
+    std::weak_ptr<const std::uint64_t> _rootLifetime;
+    std::weak_ptr<const std::uint8_t> _hostLifetime;
+    PulpPluginView* _hostView;  // non-owning; guarded by _hostLifetime
+}
+- (void)captureView:(pulp::view::View*)view host:(PulpPluginView*)host;
+- (pulp::view::View*)liveView;
 @end
 
 @implementation PulpAccessibilityElement
+- (void)captureView:(pulp::view::View*)view host:(PulpPluginView*)host {
+    _viewCapture.set(view);
+    _rootView = host ? host.rootView : nullptr;
+    _rootLifetime = _rootView
+                        ? _rootView->import_binding_lifetime_token()
+                        : std::weak_ptr<const std::uint64_t>{};
+    _hostLifetime = pulp::view::capture_accessibility_host_lifetime(host);
+    _hostView = host;
+}
+
+- (pulp::view::View*)liveView {
+    // AppKit may retain this element after the plug-in NSView is gone. Reject
+    // that case from the root's weak lifetime token before messaging the
+    // unretained native host or dereferencing either cached C++ pointer.
+    if (!_rootView || _rootLifetime.expired() || _hostLifetime.expired())
+        return nullptr;
+    return _viewCapture.live_in(*_rootView);
+}
+
 - (NSAccessibilityRole)accessibilityRole {
-    if (!_pulpView) return NSAccessibilityGroupRole;
+    auto* view = [self liveView];
+    if (!view) return NSAccessibilityGroupRole;
     // Shared table with the standalone window host — see
     // platform/ns_role_mapping.hpp. Views with AccessRole::none never reach
     // here (collectAccessibleChildren: skips them).
-    return pulp::view::ns_role_for_access_role(_pulpView->access_role());
+    return pulp::view::ns_role_for_access_role(view->access_role());
 }
 
 - (NSString*)accessibilityLabel {
-    if (!_pulpView || _pulpView->access_label().empty()) return nil;
-    return [NSString stringWithUTF8String:_pulpView->access_label().c_str()];
+    auto* view = [self liveView];
+    if (!view || view->access_label().empty()) return nil;
+    return [NSString stringWithUTF8String:view->access_label().c_str()];
 }
 
 - (id)accessibilityValue {
-    if (!_pulpView) return nil;
+    auto* view = [self liveView];
+    if (!view) return nil;
     // Same shared resolver as the standalone window host
     // (accessibility_mac.mm): value interface → text interface → access_value.
-    const std::string value = pulp::view::accessibility_value_string(*_pulpView);
+    const std::string value = pulp::view::accessibility_value_string(*view);
     if (value.empty()) return nil;
     return [NSString stringWithUTF8String:value.c_str()];
 }
 
 - (NSRect)accessibilityFrame {
-    if (!_pulpView || !_hostView) return NSZeroRect;
-    auto b = _pulpView->bounds();
+    auto* view = [self liveView];
+    PulpPluginView* host = _hostView;
+    if (!view || !host) return NSZeroRect;
+    auto b = view->bounds();
     NSRect localRect = NSMakeRect(b.x, b.y, b.width, b.height);
-    return [_hostView convertRect:localRect toView:nil];
+    return [host convertRect:localRect toView:nil];
 }
 
-- (BOOL)isAccessibilityElement { return YES; }
+- (BOOL)isAccessibilityElement { return [self liveView] != nullptr; }
 @end
 
 // ── Shared mouse-input dispatch for embedded plugin views ────────────────────
@@ -178,30 +210,48 @@ static pulp::view::View* pulp_plugin_cancel_marked_text_and_revalidate(
 // underneath — this mirrors the standalone host's active_popup_ bypass so
 // dropdown selection + wheel-scroll work in an EMBEDDED plugin editor (Logic/AU
 // etc.), not just the standalone window. `configure` fills the event-specific
-// fields. Returns the routed combo, or nullptr when nothing was handled.
-pulp::view::ComboBox* pulp_plugin_route_to_open_popup(
+// fields. Returns whether the event was routed. Target liveness is reported
+// separately through `capture`; a handled event must never fall through merely
+// because its callback removed the combo.
+bool pulp_plugin_route_to_open_popup(
     pulp::view::View* root, pulp::view::Point pt,
-    const std::function<void(pulp::view::MouseEvent&)>& configure) {
-    auto* combo = pulp::view::ComboBox::active_popup_;
-    if (!combo || !root) return nullptr;
+    const std::function<void(pulp::view::MouseEvent&)>& configure,
+    pulp::view::ViewCapture* capture = nullptr) {
+    if (!root) return false;
+    // Scoped to THIS editor's root. Several Pulp plugins can be open in one AU
+    // hosting-service process; the process-wide `active_popup_` mirror would
+    // hand this editor's click/wheel/hover to another plugin's open dropdown
+    // whenever the rects overlap, and would leave the drag capture pointing
+    // into a tree this host does not own.
+    auto* combo = pulp::view::ComboBox::active_popup_in(*root);
+    if (!combo) return false;
     float ddx = 0, ddy = 0, ddw = 0, ddh = 0;
-    if (!combo->dropdown_window_rect(ddx, ddy, ddw, ddh)) return nullptr;
-    if (pt.x < ddx || pt.x > ddx + ddw || pt.y < ddy || pt.y > ddy + ddh) return nullptr;
+    if (!combo->dropdown_window_rect(ddx, ddy, ddw, ddh)) return false;
+    if (pt.x < ddx || pt.x > ddx + ddw || pt.y < ddy || pt.y > ddy + ddh) return false;
     pulp::view::MouseEvent me;
     me.position = pulp::view::mac_geometry::to_local(pt, combo, root);
     me.window_position = pt;
     configure(me);
-    combo->on_mouse_event(me);
-    return combo;
+    if (capture) capture->set(combo);
+    try {
+        combo->on_mouse_event(me);
+    } catch (...) {
+        // Publishing before dispatch makes removal re-entrancy safe, but a
+        // failed press never completed and must not leave a drag captured.
+        if (capture) capture->reset();
+        throw;
+    }
+    if (capture && !capture->live_in(*root)) capture->reset();
+    return true;
 }
 
 void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event,
-                            pulp::view::Point pt, pulp::view::View** drag_target) {
+                            pulp::view::Point pt, pulp::view::ViewCapture* drag_target) {
   try {
     if (!root) return;
     // Route a click inside an open dropdown to the combo BEFORE hit_test (which
     // would otherwise land on the sibling view the menu overlays).
-    if (auto* combo = pulp_plugin_route_to_open_popup(
+    if (pulp_plugin_route_to_open_popup(
             root, pt, [&](pulp::view::MouseEvent& me) {
                 me.button = pulp::view::MouseButton::left;
                 me.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(
@@ -209,8 +259,7 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
                 me.is_down = true;
                 me.phase = pulp::view::MousePhase::press;
                 me.click_count = static_cast<int>(event.clickCount);
-            })) {
-        *drag_target = combo;
+            }, drag_target)) {
         return;
     }
 
@@ -224,61 +273,28 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
     gesture_event.phase = pulp::view::MousePhase::press;
     gesture_event.click_count = static_cast<int>(event.clickCount);
     if (pulp::view::should_yield_to_gesture(*root, gesture_event)) {
-        *drag_target = nullptr;
+        drag_target->reset();
         return;
     }
 
-    *drag_target = root->hit_test(pt);
-    pulp::view::ComboBox::notify_global_click(*drag_target);
-    if (!*drag_target) return;
+    drag_target->set(root->hit_test(pt));
+    pulp::view::ComboBox::notify_global_click(drag_target->live_in(*root));
+    if (!drag_target->live_in(*root)) return;
     using namespace pulp::view::mac_geometry;
-    // Focus-change protocol — mirror the standalone host (window_host_mac.mm).
-    // Claiming input focus alone (the old behavior) routed typing to the widget
-    // but never set its VISUAL focus state, so an embedded text field showed no
-    // highlight border and no blinking caret in a DAW. Run the full protocol:
-    // blur the previously-focused widget, then focus the new one via
-    // on_focus_changed(true) (sets has_focus_ → border + caret-blink clock) and
-    // claim_input_focus (routes text). Scoped to THIS root (focused_input_ is
-    // process-global; never touch another open editor's focus).
+    // Cancel marked text through the native host first, then use the shared
+    // focus protocol. Focus callbacks may synchronously replace either the
+    // target or the current focus owner, so all later work resolves captures.
     {
         auto* prev = pulp_focus_under_root(root);
         if (auto* te = dynamic_cast<pulp::view::TextEditor*>(prev); te && te->has_marked_text()) {
-            prev = pulp_plugin_cancel_marked_text_and_revalidate(root, host, prev);
-            *drag_target = root->hit_test(pt);
-            if (!*drag_target) return;
-            if (!prev) prev = pulp_focus_under_root(root);
+            pulp_plugin_cancel_marked_text_and_revalidate(root, host, prev);
+            drag_target->set(root->hit_test(pt));
+            if (!drag_target->live_in(*root)) return;
         }
-        if ((*drag_target)->focusable()) {
-            if (prev && prev != *drag_target) {
-                if (!view_is_in_tree(*drag_target, root)) {
-                    *drag_target = nullptr;
-                    return;
-                }
-                if (prev && prev != *drag_target) {
-                    prev->release_input_focus();
-                    prev->on_focus_changed(false);
-                    if (!view_is_in_tree(*drag_target, root)) {
-                        *drag_target = nullptr;
-                        return;
-                    }
-                }
-            }
-            (*drag_target)->on_focus_changed(true);
-            (*drag_target)->claim_input_focus();
-        } else if (prev) {
-            // A click on a non-focusable target commits/closes any open type-in.
-            if (!view_is_in_tree(*drag_target, root)) {
-                *drag_target = nullptr;
-                return;
-            }
-            if (prev) {
-                prev->release_input_focus();
-                prev->on_focus_changed(false);
-                if (!view_is_in_tree(*drag_target, root)) {
-                    *drag_target = nullptr;
-                    return;
-                }
-            }
+        auto* target = drag_target->live_in(*root);
+        if (!target || !pulp::view::transfer_input_focus(*root, target)) {
+            drag_target->reset();
+            return;
         }
     }
 
@@ -289,10 +305,10 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
     // legacy channel without re-validating after the modern handler could have
     // unmounted the target — a latent UAF the shared verb closes). Clear the
     // captured target if a handler unmounted it mid-dispatch.
-    if (!pulp::view::deliver_mouse_down(*root, *drag_target, pt,
+    if (!pulp::view::deliver_mouse_down(*root, drag_target->live_in(*root), pt,
                                         modifiers_from_ns_flags(event.modifierFlags),
                                         static_cast<int>(event.clickCount)))
-        *drag_target = nullptr;
+        drag_target->reset();
   } catch (const std::exception& e) {
     std::fprintf(stderr, "[plugin-view-host] mouseDown handler threw: %s\n", e.what());
   } catch (...) {
@@ -308,7 +324,7 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
 // headlessly testable) — see pointer_dispatch.hpp for the ordering contract.
 void pulp_plugin_mouse_drag(pulp::view::View* root, NSEvent* event,
                             pulp::view::Point pt,
-                            pulp::view::View** drag_target) {
+                            pulp::view::ViewCapture* drag_target) {
   try {
     using namespace pulp::view::mac_geometry;
     if (!root) return;
@@ -320,21 +336,22 @@ void pulp_plugin_mouse_drag(pulp::view::View* root, NSEvent* event,
     gesture_event.modifiers = mods;
     gesture_event.is_down = true;
     gesture_event.phase = pulp::view::MousePhase::drag;
+    if (!drag_target->live_in(*root)) drag_target->reset();
     if (pulp::view::should_yield_to_gesture(*root, gesture_event)) {
         // Claim landed mid-drag: hand the pointer to the gesture, but close the
         // bracket the delivered press opened, and drop the target so the widget
         // cannot silently resume dragging (with a position jump) if the gesture
         // later goes terminal.
         //
-        auto* handoff_target = *drag_target;
-        *drag_target = nullptr;
+        auto* handoff_target = drag_target->live_in(*root);
+        drag_target->reset();
         pulp::view::deliver_gesture_handoff(*root, handoff_target, pt, mods,
                                             static_cast<int>(event.clickCount));
         return;
     }
-    if (!*drag_target) return;
-    if (!view_is_in_tree(*drag_target, root)) { *drag_target = nullptr; return; }
-    pulp::view::deliver_mouse_drag(*root, *drag_target, pt, mods,
+    auto* live_target = drag_target->live_in(*root);
+    if (!live_target) return;
+    pulp::view::deliver_mouse_drag(*root, live_target, pt, mods,
                                    static_cast<int>(event.clickCount));
   } catch (const std::exception& e) {
     std::fprintf(stderr, "[plugin-view-host] mouseDragged handler threw: %s\n", e.what());
@@ -344,7 +361,7 @@ void pulp_plugin_mouse_drag(pulp::view::View* root, NSEvent* event,
 }
 
 void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
-                          pulp::view::Point pt, pulp::view::View** drag_target) {
+                          pulp::view::Point pt, pulp::view::ViewCapture* drag_target) {
   try {
     using namespace pulp::view::mac_geometry;
     if (!root) return;
@@ -356,6 +373,7 @@ void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
     gesture_event.is_down = false;
     gesture_event.phase = pulp::view::MousePhase::release;
     gesture_event.click_count = static_cast<int>(event.clickCount);
+    if (!drag_target->live_in(*root)) drag_target->reset();
     if (pulp::view::should_yield_to_gesture(*root, gesture_event)) {
         // A recognizer can only claim on this release (a double-tap reaches
         // `ended` on the SECOND release), by which point the press was already
@@ -364,15 +382,15 @@ void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
         // enabled relative-mouse mode, and only on_mouse_up clears them, so the
         // host keeps beginEdit open with no endEdit and the DAW holds an
         // automation touch. Close it before bailing.
-        auto* handoff_target = *drag_target;
-        *drag_target = nullptr;
+        auto* handoff_target = drag_target->live_in(*root);
+        drag_target->reset();
         pulp::view::deliver_gesture_handoff(
             *root, handoff_target, pt, modifiers_from_ns_flags(event.modifierFlags),
             static_cast<int>(event.clickCount));
         return;
     }
-    if (!*drag_target) return;
-    if (!view_is_in_tree(*drag_target, root)) { *drag_target = nullptr; return; }
+    auto* live_target = drag_target->live_in(*root);
+    if (!live_target) return;
     // Routing — legacy up, modern release, the W3C pointerup bubble, and the
     // same-target click-suppression decision — is the portable
     // pulp::view::deliver_mouse_up, shared with the standalone host. The plug-in
@@ -384,16 +402,16 @@ void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
                             const std::string& /*clicked_id*/, uint16_t /*mods*/) {
         if (click_handler) click_handler();
     };
-    pulp::view::deliver_mouse_up(*root, *drag_target, pt,
+    pulp::view::deliver_mouse_up(*root, live_target, pt,
                                  modifiers_from_ns_flags(event.modifierFlags),
                                  static_cast<int>(event.clickCount), up_host);
-    *drag_target = nullptr;
+    drag_target->reset();
   } catch (const std::exception& e) {
     std::fprintf(stderr, "[plugin-view-host] mouseUp handler threw: %s\n", e.what());
-    if (drag_target) *drag_target = nullptr;
+    if (drag_target) drag_target->reset();
   } catch (...) {
     std::fprintf(stderr, "[plugin-view-host] mouseUp handler threw (unknown)\n");
-    if (drag_target) *drag_target = nullptr;
+    if (drag_target) drag_target->reset();
   }
 }
 
@@ -601,7 +619,19 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event) 
 // view leaves hosts like Logic with dead keyboard routing (Musical Typing
 // stays silent after a type-in commit until the user resets the track).
 static NSResponder* pulp_plugin_live_prior_responder(NSResponder* saved, NSWindow* win) {
-    if (saved == nil || saved == (NSResponder*)win || win.contentView == nil) return nil;
+    if (win.contentView == nil) return nil;
+    // Nothing worth restoring — but NOT nothing to restore TO. Handing the
+    // keyboard to nil makes the window itself first responder, and a window is
+    // the end of the line: Logic's Musical Typing never sees the key. That is
+    // invisible while the editor is backgrounded (the host's own window is key
+    // and routes normally) and dead the moment it comes forward, which is
+    // exactly how it was reported.
+    //
+    // `saved == win` is the common way in: foreground the editor with nothing
+    // focused, click the composer, and the responder captured at grab time IS
+    // the window. Falling back to the host's content view puts the keyboard
+    // back inside the host's own responder chain instead of at its end.
+    if (saved == nil || saved == (NSResponder*)win) return win.contentView;
     NSMutableArray<NSView*>* stack = [NSMutableArray arrayWithObject:win.contentView];
     while (stack.count > 0) {
         NSView* v = stack.lastObject;
@@ -609,7 +639,10 @@ static NSResponder* pulp_plugin_live_prior_responder(NSResponder* saved, NSWindo
         if (v == (NSView*)saved) return saved;
         [stack addObjectsFromArray:v.subviews];
     }
-    return nil;
+    // The saved responder is gone from the tree (the host tore down whatever
+    // held it). Same rule as above: hand the keyboard back into the host's
+    // chain, never to the window.
+    return win.contentView;
 }
 
 // Keep CPU and GPU embedded views on one responder-transfer contract. A text
@@ -696,9 +729,8 @@ void pulp_plugin_apply_hover_cursor(pulp::view::View* root, pulp::view::Point lo
     // Route hover over an OPEN dropdown to the combo so every row highlights —
     // the menu overlays sibling views, so a plain hit_test/simulate_hover would
     // land on the sibling under the lower rows and they'd never highlight.
-    if (auto* combo = pulp_plugin_route_to_open_popup(
+    if (pulp_plugin_route_to_open_popup(
             root, local, [&](pulp::view::MouseEvent&) {})) {
-        (void)combo;
         [[NSCursor arrowCursor] set];
         return;
     }
@@ -771,7 +803,7 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 } // namespace
 
 @implementation PulpPluginView {
-    pulp::view::View* _dragTarget;  // captured at mouseDown, re-validated each event
+    pulp::view::ViewCapture _dragTarget;
     NSResponder* _priorResponder;   // identity-validated before use, never deref'd
     NSTrackingArea* _trackingArea;  // hover tracking for the i-beam over text fields
 }
@@ -951,8 +983,7 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     if (!view || !view->visible()) return;
     if (pulp::view::is_accessibility_element(*view)) {
         PulpAccessibilityElement* elem = [PulpAccessibilityElement new];
-        elem.pulpView = view;
-        elem.hostView = self;
+        [elem captureView:view host:self];
         [elem setAccessibilityParent:self];
         [array addObject:elem];
     }
@@ -1137,6 +1168,7 @@ public:
         // would invoke the block on freed memory → host crash. Mirrors the
         // #2502 deferred-click teardown pattern.
         @autoreleasepool {
+            view_.rootView = nullptr;
             view_.pointTransform = nil;
             view_.onResize = nil;
             view_.onWindowChange = nil;
@@ -1423,16 +1455,14 @@ public:
     }
 
     Point window_to_root_point(Point pt) const override {
-        float sx, sy, tx, ty;
-        if (!WindowHost::compute_design_viewport_transform(
-                static_cast<float>(size_.width),
-                static_cast<float>(size_.height),
-                design_viewport_w_, design_viewport_h_,
-                sx, sy, tx, ty, design_top_align_)) {
-            return pt;
-        }
-        if (sx <= 0.0f || sy <= 0.0f) return pt;
-        return { (pt.x - tx) / sx, (pt.y - ty) / sy };
+        // One shared inverse (WAH-10). This was byte-identical in the two
+        // macOS plug-in hosts, the iOS host and the Windows host; four copies
+        // of an inverse letterbox transform is four chances to drift from the
+        // paint-side transform, and that drift shows up as clicks landing on
+        // the wrong control rather than as an obvious coordinate bug.
+        return WindowHost::design_viewport_window_to_root(
+            pt, static_cast<float>(size_.width), static_cast<float>(size_.height),
+            design_viewport_w_, design_viewport_h_, design_top_align_);
     }
 
     // Forward design->host transform for embedded native children. The CPU
@@ -1531,7 +1561,7 @@ private:
 @end
 
 @implementation PulpGpuPluginView {
-    pulp::view::View* _dragTarget;  // captured at mouseDown, re-validated each event
+    pulp::view::ViewCapture _dragTarget;
     NSResponder* _priorResponder;   // identity-validated before use, never deref'd
     NSTrackingArea* _trackingArea;  // hover tracking for the i-beam over text fields
 }
@@ -1798,6 +1828,10 @@ public:
                 this->on_native_frame_changed(w, h);
             };
 
+            // This host builds its surface right here, but say "not yet"
+            // first so a consumer that observes mid-construction never reads
+            // the null as "this editor is CPU".
+            mark_gpu_surface_pending();
             init_gpu(static_cast<float>(size.width), static_cast<float>(size.height));
         }
     }
@@ -1819,6 +1853,10 @@ public:
             metal_view_.onBackingChange = nil;
             metal_view_.onResize = nil;
         }
+        // Publish the teardown while the surfaces are still alive, so a
+        // consumer holding the raw pointer drops it here rather than on its
+        // next frame.
+        publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
         skia_surface_.reset();
         gpu_surface_.reset();
         metal_view_.rootView = nullptr;
@@ -1981,16 +2019,14 @@ public:
     }
 
     Point window_to_root_point(Point pt) const override {
-        float sx, sy, tx, ty;
-        if (!WindowHost::compute_design_viewport_transform(
-                static_cast<float>(size_.width),
-                static_cast<float>(size_.height),
-                design_viewport_w_, design_viewport_h_,
-                sx, sy, tx, ty, design_top_align_)) {
-            return pt;
-        }
-        if (sx <= 0.0f || sy <= 0.0f) return pt;
-        return { (pt.x - tx) / sx, (pt.y - ty) / sy };
+        // One shared inverse (WAH-10). This was byte-identical in the two
+        // macOS plug-in hosts, the iOS host and the Windows host; four copies
+        // of an inverse letterbox transform is four chances to drift from the
+        // paint-side transform, and that drift shows up as clicks landing on
+        // the wrong control rather than as an obvious coordinate bug.
+        return WindowHost::design_viewport_window_to_root(
+            pt, static_cast<float>(size_.width), static_cast<float>(size_.height),
+            design_viewport_w_, design_viewport_h_, design_top_align_);
     }
 
     // Forward design->host transform for embedded native children — mirrors
@@ -2051,6 +2087,7 @@ private:
         if (!gpu_surface_) {
             fprintf(stderr, "[plugin-gpu-host] gpu init failed reason=create_dawn_null "
                             "falling_back=cpu-paint\n");
+            publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
             return;
         }
 
@@ -2069,6 +2106,7 @@ private:
             fprintf(stderr, "[plugin-gpu-host] gpu init failed reason=initialize "
                             "falling_back=cpu-paint\n");
             gpu_surface_.reset();
+            publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
             return;
         }
 
@@ -2082,8 +2120,12 @@ private:
             fprintf(stderr, "[plugin-gpu-host] gpu init failed reason=skia_create_null "
                             "falling_back=cpu-paint\n");
             gpu_surface_.reset();
+            publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
             return;
         }
+        // The surface is live. Consumers subscribed via observe_gpu_surface()
+        // learn about it here rather than having to poll gpu_surface().
+        publish_gpu_surface(gpu_surface_.get(), GpuSurfaceState::ready);
         fprintf(stderr, "[plugin-gpu-host] init requested size=%.0fx%.0f scale=%.1f "
                         "gpu=%ux%u\n", width, height, scale, phys_w, phys_h);
     }

@@ -1,6 +1,8 @@
 # Core runtime, canvas, scheduler, and signal-graph test registrations.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpInspectorShipping.cmake)
+
 # Analytics tests
 pulp_add_test_suite(pulp-test-analytics LIBRARIES pulp::runtime)
 
@@ -18,6 +20,12 @@ pulp_add_test_suite(pulp-test-tracing LIBRARIES pulp::runtime)
 # Session lifecycle + macro smoke. Config-agnostic: OFF verifies the no-op
 # contract; ON emits spans from two threads and byte-checks the flushed trace.
 pulp_add_test_suite(pulp-test-tracing-session LIBRARIES pulp::runtime)
+
+# Perfetto auto-flush timeout: cancel-before-deadline, join-on-cancel (the
+# property that makes plug-in module unload safe), re-arm replacing rather than
+# adding a timer, and the session-generation guard that stops a stale timer
+# truncating a later capture. Runs in the DEFAULT PULP_TRACING=OFF build.
+pulp_add_test_suite(pulp-test-trace-timeout LIBRARIES pulp::runtime)
 if(NOT PULP_TRACING AND NOT WIN32)
     add_custom_command(TARGET pulp-test-tracing POST_BUILD
         COMMAND ${CMAKE_COMMAND}
@@ -119,7 +127,9 @@ pulp_add_test_suite(pulp-test-xml-zip LIBRARIES pulp::runtime)
 pulp_add_test_suite(pulp-test-simd LIBRARIES pulp::runtime pulp::signal)
 
 # Drag-and-drop tests
-pulp_add_test_suite(pulp-test-dnd SOURCES test_drag_drop.cpp LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-dnd
+    SOURCES test_drag_drop.cpp test_drag_session_lifetime.cpp
+    LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-musical-typing SOURCES test_musical_typing.cpp LIBRARIES pulp::view)
 
 # OSC tests
@@ -180,7 +190,12 @@ pulp_add_test_suite(pulp-test-frequency-response LIBRARIES pulp::signal)
 # WindowFunction / FFT / Convolver TEST_CASE clusters moved verbatim.
 pulp_add_test_suite(pulp-test-signal-spectral LIBRARIES pulp::signal)
 # Spectral primitives: STFT/WOLA engine, pitch/time, formant, smoothing.
-pulp_add_test_suite(pulp-test-spectral-primitives SOURCES test_spectral_frame_engine.cpp test_realtime_pitch_time.cpp test_transient_freeze_delay.cpp test_spectral_matrix.cpp test_stn_stretch.cpp test_sinc_pitch.cpp LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-spectral-primitives
+    SOURCES test_spectral_frame_engine.cpp test_realtime_pitch_time.cpp
+            test_realtime_pitch_time_stream_contract.cpp test_finite_stretch_builder.cpp
+            test_transient_freeze_delay.cpp test_spectral_matrix.cpp test_stn_stretch.cpp
+            test_sinc_pitch.cpp
+    LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-stn-decomposer LIBRARIES pulp::signal)
 # Offline time-stretch/pitch engine (orchestrates the spectral primitives).
 pulp_add_test_suite(pulp-test-offline-stretch LIBRARIES pulp::signal)
@@ -315,8 +330,154 @@ pulp_add_test_suite(pulp-test-test-signal LIBRARIES pulp::standalone)
 # hazard as pulp-test-audio above, so they get the same PROCESSORS reservation.
 pulp_add_test_suite(pulp-test-standalone-editor-chrome LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
+if(TARGET pulp::inspect AND NOT IOS)
+    pulp_add_test_suite(pulp-test-standalone-inspector
+        SOURCES test_standalone_inspector.cpp
+        LIBRARIES pulp::standalone-inspector-runtime-eval
+        PROPERTIES PROCESSORS 8)
+    target_compile_definitions(pulp-standalone-inspector-runtime-eval PRIVATE
+        PULP_STANDALONE_INSPECTOR_TEST_HOOKS=1)
+    target_compile_definitions(pulp-standalone-inspector PRIVATE
+        PULP_STANDALONE_INSPECTOR_TEST_HOOKS=1)
+    target_compile_definitions(pulp-test-standalone-inspector PRIVATE
+        PULP_TEST_STANDALONE_INSPECTOR=1
+        PULP_STANDALONE_INSPECTOR_TEST_HOOKS=1)
+    target_link_libraries(pulp-test-standalone-inspector PRIVATE
+        pulp::inspect-client)
+
+    pulp_add_test_suite(pulp-test-standalone-runtime-eval
+        SOURCES test_standalone_runtime_eval.cpp
+        LIBRARIES pulp::standalone-inspector-runtime-eval pulp::inspect-client
+        PROPERTIES PROCESSORS 8)
+    target_compile_definitions(pulp-test-standalone-runtime-eval PRIVATE
+        PULP_TEST_STANDALONE_INSPECTOR=1
+        PULP_STANDALONE_INSPECTOR_TEST_HOOKS=1)
+else()
+    pulp_add_test_suite(pulp-test-standalone-inspector
+        SOURCES test_standalone_inspector.cpp
+        LIBRARIES pulp::standalone
+        PROPERTIES PROCESSORS 8)
+    target_compile_definitions(pulp-test-standalone-inspector PRIVATE
+        PULP_TEST_STANDALONE_INSPECTOR=0)
+endif()
+if(APPLE AND PULP_ENABLE_GPU AND PULP_HAS_SKIA AND TARGET pulp::inspect
+   AND PROJECT_IS_TOP_LEVEL)
+    set_source_files_properties(
+        fixtures/standalone_inspector_process_fixture.cpp
+        PROPERTIES LANGUAGE OBJCXX)
+    add_executable(pulp-standalone-inspector-process-fixture
+        fixtures/standalone_inspector_process_fixture.cpp)
+    set(PULP_pulp-standalone-inspector-process-fixture_CONTROL_PROFILE
+        developer-local)
+    set(PULP_pulp-standalone-inspector-process-fixture_CONTROL_CAPABILITIES
+        dev.pulp.instance/read@1 dev.pulp.state/read@1
+        dev.pulp.ui/observe@1 dev.pulp.diagnostics/read@1
+        dev.pulp.logs/read@1 dev.pulp.ui/capture@1
+        dev.pulp.telemetry/subscribe@1)
+    set(PULP_pulp-standalone-inspector-process-fixture_INSPECTOR_MANIFEST_DIRECTORY
+        "${CMAKE_BINARY_DIR}/pulp-inspector-test-manifests")
+    _pulp_configure_inspector_shipping(
+        pulp-standalone-inspector-process-fixture
+        "com.pulp.test.inspector-developer-edition"
+        "Inspector Developer Edition")
+    target_compile_definitions(pulp-standalone-inspector-process-fixture PRIVATE
+        PULP_STANDALONE_INSPECTOR_TEST_HOOKS=1)
+    target_link_libraries(pulp-standalone-inspector-process-fixture PRIVATE
+        pulp::standalone-inspector)
+    _pulp_attach_inspector_shipping(
+        pulp-standalone-inspector-process-fixture
+        pulp-standalone-inspector-process-fixture)
+
+    pulp_add_test_suite(pulp-test-standalone-inspector-process
+        SOURCES test_standalone_inspector_process.cpp
+        LIBRARIES pulp::standalone pulp::inspect-client pulp::platform pulp::view
+        PROPERTIES RESOURCE_LOCK pulp_gpu PROCESSORS 8)
+    target_compile_definitions(pulp-test-standalone-inspector-process PRIVATE
+        "PULP_STANDALONE_INSPECTOR_PROCESS_FIXTURE=\"$<TARGET_FILE:pulp-standalone-inspector-process-fixture>\"")
+    add_dependencies(pulp-test-standalone-inspector-process
+        pulp-standalone-inspector-process-fixture)
+
+    set_source_files_properties(
+        fixtures/standalone_inspector_workflow_process_fixture.cpp
+        PROPERTIES LANGUAGE OBJCXX)
+    add_executable(pulp-standalone-inspector-workflow-process-fixture
+        fixtures/standalone_inspector_workflow_process_fixture.cpp)
+    set(PULP_pulp-standalone-inspector-workflow-process-fixture_SHIP_INSPECTOR TRUE)
+    set(PULP_pulp-standalone-inspector-workflow-process-fixture_SHIP_INSPECTOR_RUNTIME_EVAL TRUE)
+    set(PULP_pulp-standalone-inspector-workflow-process-fixture_INSPECTOR_CAPABILITIES
+        session.describe session.control state.read ui.read diagnostics.read
+        logs.read capture.image state.write test.input authoring.tweaks
+        telemetry.stream runtime.eval)
+    set(PULP_pulp-standalone-inspector-workflow-process-fixture_INSPECTOR_MANIFEST_DIRECTORY
+        "${CMAKE_BINARY_DIR}/pulp-inspector-test-manifests")
+    _pulp_configure_inspector_shipping(
+        pulp-standalone-inspector-workflow-process-fixture
+        "com.pulp.test.standalone-inspector-workflow"
+        "Standalone Inspector Workflow Fixture")
+    target_link_libraries(pulp-standalone-inspector-workflow-process-fixture PRIVATE
+        pulp::standalone-inspector-runtime-eval pulp::inspect-client)
+    _pulp_attach_inspector_shipping(
+        pulp-standalone-inspector-workflow-process-fixture
+        pulp-standalone-inspector-workflow-process-fixture)
+
+    pulp_add_test_suite(pulp-test-standalone-inspector-workflow-process
+        SOURCES test_standalone_inspector_workflow_process.cpp
+        LIBRARIES pulp::standalone pulp::inspect-client pulp::platform pulp::runtime pulp::view
+        PROPERTIES RESOURCE_LOCK pulp_gpu PROCESSORS 8)
+    target_compile_definitions(pulp-test-standalone-inspector-workflow-process PRIVATE
+        "PULP_STANDALONE_INSPECTOR_WORKFLOW_PROCESS_FIXTURE=\"$<TARGET_FILE:pulp-standalone-inspector-workflow-process-fixture>\"")
+    add_dependencies(pulp-test-standalone-inspector-workflow-process
+        pulp-standalone-inspector-workflow-process-fixture)
+
+    function(_pulp_register_packaged_inspector_clients_test)
+        get_property(python_executable GLOBAL
+            PROPERTY PULP_PACKAGED_INSPECTOR_CLIENTS_PYTHON)
+        if(NOT CMAKE_CROSSCOMPILING
+           AND python_executable
+           AND TARGET pulp-rust-cli
+           AND TARGET pulp-cli
+           AND TARGET pulp-mcp)
+            add_custom_target(pulp-test-packaged-inspector-clients
+                DEPENDS
+                    pulp-rust-cli
+                    pulp-cli
+                    pulp-mcp
+                    pulp-standalone-inspector-workflow-process-fixture)
+            add_test(
+                NAME packaged-inspector-clients-reach-real-standalone-workflow
+                COMMAND "${python_executable}"
+                    "${PROJECT_SOURCE_DIR}/test/test_packaged_inspector_clients.py"
+                    --rust "${CMAKE_BINARY_DIR}/pulp${CMAKE_EXECUTABLE_SUFFIX}"
+                    --cpp "$<TARGET_FILE:pulp-cli>"
+                    --mcp "$<TARGET_FILE:pulp-mcp>"
+                    --fixture "$<TARGET_FILE:pulp-standalone-inspector-workflow-process-fixture>"
+                    --packager "${PROJECT_SOURCE_DIR}/tools/scripts/package_cli.py"
+                    --mcp-config "${PROJECT_SOURCE_DIR}/.mcp.json"
+                    --build-dir "${CMAKE_BINARY_DIR}")
+            set_tests_properties(
+                packaged-inspector-clients-reach-real-standalone-workflow
+                PROPERTIES
+                    LABELS "slow;installed;inspect;workflow;gpu"
+                    PROCESSORS 8
+                    RESOURCE_LOCK pulp_gpu
+                    TIMEOUT 120)
+        endif()
+    endfunction()
+    if(Python3_Interpreter_FOUND)
+        # CLI and MCP targets are declared after the test subtree, so defer the
+        # cross-artifact registration until the root directory is complete.
+        set_property(GLOBAL PROPERTY PULP_PACKAGED_INSPECTOR_CLIENTS_PYTHON
+            "${Python3_EXECUTABLE}")
+        cmake_language(DEFER DIRECTORY "${PROJECT_SOURCE_DIR}"
+            CALL _pulp_register_packaged_inspector_clients_test)
+    endif()
+endif()
 pulp_add_test_suite(pulp-test-standalone-apply-config LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
+# Screenshot-only launches skip the audio backend; the device lifecycle is
+# asserted through an injected fake system, so this one opens no real device
+# and needs no PROCESSORS reservation.
+pulp_add_test_suite(pulp-test-standalone-capture-audio LIBRARIES pulp::standalone pulp::audio)
 pulp_add_test_suite(pulp-test-standalone-audio-capture-wav LIBRARIES pulp::standalone pulp::audio PROPERTIES PROCESSORS 8)
 pulp_add_test_suite(pulp-test-standalone-audio-capture-rolling-wav LIBRARIES pulp::standalone pulp::audio PROPERTIES PROCESSORS 8)
 pulp_add_test_suite(pulp-test-standalone-transport-midi LIBRARIES pulp::standalone
@@ -346,6 +507,11 @@ pulp_add_test_suite(pulp-test-dbus LIBRARIES pulp::platform)
 
 # Platform tests
 pulp_add_test_suite(pulp-test-platform LIBRARIES pulp::platform)
+
+# Device capability tier and thermal ladder. The quota table they index is
+# policy and lives above the engine, so it is registered with the format tests
+# instead. Header-only over pulp::platform — linked for the include path only.
+pulp_add_test_suite(pulp-test-device-capability LIBRARIES pulp::platform)
 
 # Permissions tests
 pulp_add_test_suite(pulp-test-permissions LIBRARIES pulp::platform)

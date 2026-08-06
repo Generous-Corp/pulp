@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.753.0
+    VERSION 0.788.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -80,6 +80,9 @@ else()
 endif()
 option(PULP_BUILD_EXAMPLES "Build example projects" ON)
 option(PULP_ENABLE_GPU "Enable GPU rendering (Dawn/Skia)" ON)
+option(PULP_ENABLE_PROJECT_PACKAGE
+       "Build and export the durable project-package subsystem and dependent C++ timeline authoring tools"
+       ON)
 option(PULP_ENABLE_SCENE3D "Enable opt-in native no-JS 3D scene/glTF renderer spikes" OFF)
 # Opt-in lane for the native-component Rust contract proof: builds a Cargo
 # `staticlib` reference core (with an RT-checking global allocator) and links
@@ -100,6 +103,16 @@ option(PULP_REQUIRE_GPU_FOR_SDK
        "Fail configure if PULP_ENABLE_GPU=ON but Skia was not found. \
         Set ON in .github/workflows/release-cli.yml to prevent silently \
         shipping CG-only SDKs."
+       OFF)
+# Source-checkout safety net. `pulp build` enables this after provisioning the
+# checkout's pinned shared dependencies. It prevents a cold first configure
+# from silently disabling plug-in formats when the shared-cache symlinks have
+# not been created yet. Direct CMake consumers remain opt-in; as with any CMake
+# option, direct CMake consumers can explicitly select a reduced checkout with
+# `-DPULP_REQUIRE_CHECKOUT_DEPENDENCIES=OFF`; `pulp build` always enables the
+# safety gate for source checkouts.
+option(PULP_REQUIRE_CHECKOUT_DEPENDENCIES
+       "Fail configure when source-checkout VST3 or platform AudioUnit SDK dependencies are missing."
        OFF)
 # Tier-0 Intel canary. When ON, a sub-second static lint runs at configure
 # time and FAILS the configure on any of five cross-arch (x86_64) portability
@@ -177,23 +190,13 @@ if(PULP_ENABLE_SWIFT)
         "helpers such as pulp_add_ios_host_app(), which enable Swift when "
         "Swift sources are present.")
 endif()
-# Dev inspector (Cmd+I overlay) in the standalone host. Default ON for
-# dev/examples builds. Release / standalone-ship builds should configure
-# with -DPULP_ENABLE_INSPECTOR=OFF so a shipped standalone app does not
-# expose the developer inspector to end users. Plugin formats never link
-# the inspector, so this is standalone-only. The inspector also requires
-# GPU + desktop (PULP_HAS_INSPECT), which gates linking; this flag gates
-# the source-side wiring on top of that.
-#
-# Authoring-strip policy (§6a): the inspector is the in-plugin authoring /
-# MCP-reachable surface. The SDK release build (`pulp` CLI cli_sdk.cpp) and the
-# scaffolded project templates default it OFF so shipped plugins don't carry it
-# (smaller binary, smaller attack surface). A developer who deliberately wants an
-# inspectable / MCP-reachable plugin opts back in with -DPULP_ENABLE_INSPECTOR=ON
-# in their own plugin build. The standalone `pulp` CLI and the MCP server are
-# separate binaries and are NOT affected by this flag — bundling them alongside a
-# plugin distribution is a packaging choice, not a compile-time strip.
-option(PULP_ENABLE_INSPECTOR "Wire the dev inspector into the standalone host (dev/examples ON, release-ship OFF; the in-plugin authoring/MCP surface)" ON)
+# Optional development-inspector SDK components. This controls build presence
+# only: protocol/client/runtime libraries and the desktop visual overlay are
+# available when ON, while every network endpoint still defaults to runtime
+# profile `off`. Ordinary plugin targets never link these components.
+option(PULP_ENABLE_INSPECTOR
+       "Build optional development-inspector SDK components"
+       ON)
 # RT output-boundary audio probe in the standalone host — the data source for
 # the dev Audio Inspector window. Default ON for dev/examples; release /
 # standalone-ship builds configure -DPULP_ENABLE_AUDIO_PROBES=OFF. The probe's
@@ -206,6 +209,7 @@ option(PULP_ENABLE_AUDIO_PROBES "Wire the RT output-boundary probe into the stan
 option(PULP_ENABLE_AAX "Enable optional AAX support with a developer-supplied SDK" OFF)
 option(PULP_ENABLE_RACK "Enable optional VCV Rack module support with a developer-supplied SDK" OFF)
 set(PULP_RACK_SDK_DIR "" CACHE PATH "Path to a developer-supplied VCV Rack SDK (kept outside the source tree)")
+option(PULP_ENABLE_ABLETON_LINK "Enable optional desktop Ableton Link support with a developer-supplied SDK" OFF)
 option(PULP_ENABLE_ARA "Enable optional ARA 2.x support with a developer-supplied Celemony SDK" OFF)
 option(PULP_ENABLE_MTS_ESP "Enable optional ODDSound MTS-ESP microtuning client integration" OFF)
 option(PULP_ENABLE_SCALA_TUNING "Enable optional Scala .scl/.kbm microtuning support via Surge Synth Team tuning-library" OFF)
@@ -224,6 +228,7 @@ endif()
 option(PULP_REAL_PLUGIN_TESTS "Build the opt-in real-plugin integration suite (item 4.2)" OFF)
 set(PULP_SHARED_FETCHCONTENT_SOURCE_DIR "" CACHE PATH "Machine-local shared source cache root for FetchContent dependencies")
 set(PULP_AAX_SDK_DIR "" CACHE PATH "Path to a developer-supplied AAX SDK kept outside the Pulp source tree")
+set(PULP_ABLETON_LINK_SDK_DIR "" CACHE PATH "Path to a developer-supplied desktop Ableton/link SDK kept outside the Pulp source tree")
 set(PULP_ARA_SDK_DIR "" CACHE PATH "Path to a developer-supplied Celemony ARA SDK. Enables ARA 2.x when PULP_ENABLE_ARA=ON.")
 
 # ── Compiler Warnings ──────────────────────────────────────────────────────
@@ -242,6 +247,31 @@ else()
         "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wextra>"
         "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wpedantic>"
         "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wno-unused-parameter>")
+
+    # Two designated-initializer diagnostics promoted to ERRORS, because the
+    # class of defect they catch is one GCC rejects outright while clang only
+    # warns — and Pulp's REQUIRED gate is macOS/clang.
+    #
+    # This is not hypothetical. A duplicate `.custom_latency_for` designator in
+    # `signal_graph.cpp` reached main: clang emitted BOTH of these warnings on
+    # the required gate and nobody reads a green job's log, while the Linux job
+    # (the only GCC lane, and advisory) failed and was merged past. The defect
+    # was detected twice, displayed twice, and shipped anyway.
+    #
+    # Promoting them costs nothing — clang already emits them by default, so
+    # this cannot fail on anything that was not already a real defect — and it
+    # moves the catch onto the gate that actually blocks, at compile time,
+    # instead of relying on someone reading a warning or on an advisory lane's
+    # verdict being honoured.
+    #
+    # clang-only: GCC spells the override diagnostic `-Woverride-init` and
+    # rejects duplicate designators as a hard error regardless, so it needs no
+    # help here.
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        add_compile_options(
+            "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Werror=reorder-init-list>"
+            "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Werror=initializer-overrides>")
+    endif()
 endif()
 
 # ── Windows runtime library ────────────────────────────────────────────────
@@ -273,16 +303,27 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/Ccache.cmake)
 # Sanitizers via PULP_SANITIZER=address|thread|undefined|memory|realtime
 # Coverage via PULP_ENABLE_COVERAGE=ON (Clang only, mutually exclusive
 # with PULP_SANITIZER).
+# Coverage-guided fuzz targets via PULP_ENABLE_FUZZING=ON. Off by default
+# because -fsanitize=fuzzer needs a compiler runtime Apple's clang does not
+# ship; the properties those targets check are also driven by deterministic
+# replays in the normal test suite, which need no special toolchain.
+option(PULP_ENABLE_FUZZING "Build libFuzzer targets (requires a libFuzzer runtime)" OFF)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/Sanitizers.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstrumentation.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAAX.cmake)
 pulp_configure_aax_sdk()
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpRack.cmake)
 pulp_configure_rack_sdk()
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAbletonLink.cmake)
+pulp_configure_ableton_link_sdk()
 
 # ── Third-Party Dependencies ────────────────────────────────────────────────
 # Shared dependency setup lives in tools/cmake/PulpDependencies.cmake.
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpDependencies.cmake)
+# After PulpDependencies: the runtime-staging entry point DELEGATES the wgpu
+# copy to the upstream FetchContent package's target_copy_webgpu_binaries(),
+# so that function has to exist first.
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpRuntimeStaging.cmake)
 
 # ── Android NDK Support ───────────────────────────────────────────────────
 if(ANDROID)
@@ -301,6 +342,15 @@ add_subdirectory(core/platform)
 add_subdirectory(core/runtime)
 add_subdirectory(core/timebase)
 add_subdirectory(core/timeline)
+if(PULP_ENABLE_PROJECT_PACKAGE)
+    add_subdirectory(core/project_package)
+else()
+    message(STATUS
+        "Pulp: project-package disabled; atomic Timeline authoring targets and "
+        "the corresponding pulp-cpp/pulp-mcp commands will not be built")
+endif()
+add_subdirectory(core/timeline_agent_view)
+add_subdirectory(core/timeline_editor)
 add_subdirectory(core/playback)
 add_subdirectory(core/events)
 add_subdirectory(core/sample_bank_manifest)
@@ -326,6 +376,9 @@ endif()
 # enabled. The transport itself is GPU-agnostic and builds regardless.
 add_subdirectory(core/gpu_audio)
 add_subdirectory(core/view)
+# The arranger rung sits above both the editor kernel and the view stack, so it
+# is added after core/view rather than beside core/timeline_editor.
+add_subdirectory(core/timeline_view)
 add_subdirectory(core/osc)
 add_subdirectory(core/native-components)
 # pulp-host is a plugin HOST library — iOS App Store policy disallows dlopen
@@ -345,36 +398,91 @@ if(ANDROID)
     pulp_wire_android_sources()
 endif()
 
-add_library(pulp-standalone STATIC
+set(_pulp_standalone_sources
     core/format/src/standalone.cpp
     core/format/src/standalone_musical_typing.cpp
     core/format/src/test_signal.cpp
-    core/format/src/settings_panel.cpp
-)
+    core/format/src/settings_panel.cpp)
+add_library(pulp-standalone STATIC ${_pulp_standalone_sources})
 add_library(pulp::standalone ALIAS pulp-standalone)
-target_include_directories(pulp-standalone
-    PUBLIC
+function(_pulp_configure_standalone_target target)
+    target_include_directories(${target} PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/format/include>
-        $<INSTALL_INTERFACE:include>
-)
-target_link_libraries(pulp-standalone
-    PUBLIC
-        pulp::format
-        pulp::view
-        $<BUILD_INTERFACE:yogacore>
-        $<INSTALL_INTERFACE:Pulp::yogacore>
-        $<BUILD_INTERFACE:SDL3::SDL3-static>
-        $<INSTALL_INTERFACE:Pulp::sdl3-static>
-)
+        $<INSTALL_INTERFACE:include>)
+    target_link_libraries(${target} PUBLIC
+        pulp::format pulp::view
+        $<BUILD_INTERFACE:yogacore> $<INSTALL_INTERFACE:Pulp::yogacore>
+        $<BUILD_INTERFACE:SDL3::SDL3-static> $<INSTALL_INTERFACE:Pulp::sdl3-static>)
+endfunction()
+_pulp_configure_standalone_target(pulp-standalone)
+target_compile_definitions(pulp-standalone PRIVATE PULP_ENABLE_INSPECTOR=0)
 
-if(PULP_ENABLE_GPU AND NOT ANDROID)
-    add_subdirectory(inspect)
+# The control manifest and protocol registry are CPU-only audit data and remain
+# available even when live Inspector support is disabled. inspect/CMakeLists.txt
+# returns after that foundation in production-stripped configurations.
+add_subdirectory(inspect)
+
+# Inspector-capable standalone archives are optional SDK components. The
+# ordinary `pulp::standalone` target above is deliberately inspector-free;
+# pulp_add_plugin selects one of these only after an exact shipping declaration.
+if(PULP_ENABLE_INSPECTOR AND TARGET pulp::inspect AND NOT IOS)
+    set(_pulp_standalone_inspector_sources
+        ${_pulp_standalone_sources}
+        core/format/src/standalone_inspector.cpp
+        core/format/src/standalone_inspector_capture.cpp
+        core/format/src/standalone_inspector_policy.cpp
+        core/format/src/standalone_runtime_eval_dispatch.cpp)
+    add_library(pulp-standalone-inspector STATIC
+        ${_pulp_standalone_inspector_sources})
+    add_library(pulp::standalone-inspector ALIAS pulp-standalone-inspector)
+    _pulp_configure_standalone_target(pulp-standalone-inspector)
+    target_link_libraries(pulp-standalone-inspector PRIVATE pulp::inspect)
+    target_compile_definitions(pulp-standalone-inspector PRIVATE
+        PULP_ENABLE_INSPECTOR=1 PULP_HAS_INSPECT=1
+        PULP_STANDALONE_RUNTIME_EVAL_COMPONENT=0)
+
+    add_library(pulp-standalone-inspector-runtime-eval STATIC
+        ${_pulp_standalone_inspector_sources})
+    add_library(pulp::standalone-inspector-runtime-eval ALIAS
+        pulp-standalone-inspector-runtime-eval)
+    _pulp_configure_standalone_target(pulp-standalone-inspector-runtime-eval)
+    target_link_libraries(pulp-standalone-inspector-runtime-eval PRIVATE
+        pulp::inspect pulp::inspect-runtime-eval)
+    target_compile_definitions(pulp-standalone-inspector-runtime-eval PRIVATE
+        PULP_ENABLE_INSPECTOR=1 PULP_HAS_INSPECT=1
+        PULP_STANDALONE_RUNTIME_EVAL_COMPONENT=1)
+
+    get_target_property(_ordinary_standalone_links pulp-standalone LINK_LIBRARIES)
+    get_target_property(_inspector_standalone_links pulp-standalone-inspector LINK_LIBRARIES)
+    get_target_property(_eval_standalone_links
+        pulp-standalone-inspector-runtime-eval LINK_LIBRARIES)
+    if("pulp::inspect" IN_LIST _ordinary_standalone_links OR
+       "pulp::inspect-runtime-eval" IN_LIST _ordinary_standalone_links)
+        message(FATAL_ERROR "ordinary pulp::standalone inherited an inspector component")
+    endif()
+    if("pulp::inspect-runtime-eval" IN_LIST _inspector_standalone_links)
+        message(FATAL_ERROR "generic inspector standalone inherited runtime.eval")
+    endif()
+    if(NOT "pulp::inspect" IN_LIST _inspector_standalone_links OR
+       NOT "pulp::inspect-runtime-eval" IN_LIST _eval_standalone_links)
+        message(FATAL_ERROR "declared standalone inspector component graph is incomplete")
+    endif()
+    unset(_ordinary_standalone_links)
+    unset(_inspector_standalone_links)
+    unset(_eval_standalone_links)
+    unset(_pulp_standalone_inspector_sources)
 endif()
+unset(_pulp_standalone_sources)
 add_subdirectory(ship)
 # tools/audio (offline Audio Doctor CLI) is a dev tool — only when top-level.
+# tools/timeline publishes through core/project_package, so the target does not
+# exist in a package-stripped build.
 if(PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/audio)
-    add_subdirectory(tools/timeline)
+    add_subdirectory(tools/design-ab)
+    if(PULP_ENABLE_PROJECT_PACKAGE)
+        add_subdirectory(tools/timeline)
+    endif()
 endif()
 
 # ── Testing ─────────────────────────────────────────────────────────────────
@@ -416,12 +524,17 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
 include(PulpUtils)
 
-# ── CLI Tool (desktop only, requires GPU stack via cmd_inspect) ───────────
-# pulp-cli unconditionally links pulp::inspect (for `pulp inspect`), and
-# pulp::inspect depends on pulp::render which is GPU-only. Without the
-# GPU guard, PULP_ENABLE_GPU=OFF builds (sanitizer matrix in
-# .github/workflows/sanitizers.yml) fail at CMake configure with
-# "Target ... links to pulp::inspect but the target was not found".
+# Inbound link-floor check. Reads the resolved link graph, so it has to be
+# included after the module targets exist and before the consumers that assert
+# a bound over them (examples/, tools/).
+include(PulpLinkFloor)
+
+# ── CLI Tool (desktop only) ────────────────────────────────────────────────
+# The CLI already requires the desktop GPU stack for render/audio authoring
+# commands. Inspector commands use the CPU-only client/authoring targets when
+# the optional component exists and compile explicit unavailable stubs when it
+# does not; the CLI never links the visual pulp::inspect overlay. Its optional
+# Timeline authoring commands follow PULP_ENABLE_PROJECT_PACKAGE inside tools/cli.
 if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/cli)
 endif()
@@ -431,13 +544,10 @@ endif()
 # CMake build graph. Coexists with pulp-cli (the C++ binary) — both
 # install side-by-side under `${CMAKE_INSTALL_BINDIR}`.
 #
-# Mirror the EXACT desktop guard used for tools/cli above — both the
-# `NOT ANDROID AND NOT IOS` mobile-skip AND the `PULP_ENABLE_GPU`
-# desktop-CLI-lane guard. Without the GPU guard, sanitizer-style
-# GPU-off jobs still pull cargo into the default `all` build whenever
-# cargo happens to be on PATH, introducing unrelated Rust-toolchain
-# / network failures (and minutes of cargo build time) in lanes that
-# intentionally disable the CLI/GPU paths.
+# Mirror the desktop/GPU guard used for tools/cli above. The Rust binary itself
+# has no link dependency on pulp::tool-timeline or project-package: delegated
+# commands already degrade explicitly when the optional pulp-cpp sibling is
+# absent, so a package-stripped build still keeps the unrelated native Rust CLI.
 # PROJECT_IS_TOP_LEVEL: Pulp's own experimental CLI builds only when Pulp is the
 # top-level project. A consumer that vendors Pulp via add_subdirectory() wants the
 # libraries + pulp_add_plugin(), not Pulp's dev CLIs.
@@ -447,7 +557,9 @@ if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU AND PROJECT_IS_TOP_LEVEL
 endif()
 
 # ── MCP Server (desktop only) ─────────────────────────────────────────────
-# Dev tools below build only when Pulp is top-level (see PROJECT_IS_TOP_LEVEL).
+# pulp-mcp keeps its package-independent tools in package-stripped builds; its
+# optional Timeline registrations follow PULP_ENABLE_PROJECT_PACKAGE internally.
+# Dev tools build only when Pulp is top-level (see PROJECT_IS_TOP_LEVEL).
 if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/mcp)
 endif()
@@ -470,7 +582,14 @@ endif()
 # ── Import Design Tool ────────────────────────────────────────────────────
 # Dev tool — only when Pulp is the top-level project (see PROJECT_IS_TOP_LEVEL
 # note above); an embedding consumer doesn't build Pulp's authoring CLIs.
-if(PROJECT_IS_TOP_LEVEL)
+#
+# Also gated on PULP_ENABLE_DESIGN_IMPORT: this tool links the `pulp::view`
+# design-IR sources, and those are themselves behind that option (see
+# core/view/CMakeLists.txt). Adding the executable while its implementation is
+# compiled out leaves the `all` target unlinkable — which broke the option's
+# own documented "release/ship OFF" configuration. The tool wraps the
+# subsystem, so building it without the subsystem has no meaning.
+if(PROJECT_IS_TOP_LEVEL AND PULP_ENABLE_DESIGN_IMPORT)
     add_subdirectory(tools/import-design)
 endif()
 
@@ -603,28 +722,21 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstallRules.cmake)
 # at the END of every consumer's link line. No-op on macOS/Windows/Android.
 if(UNIX AND NOT APPLE AND NOT ANDROID)
     include("${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpLinkFontconfig.cmake")
-
-    function(_pulp_collect_executables_recursive out_var dir)
-        get_property(_sub_dirs DIRECTORY "${dir}" PROPERTY SUBDIRECTORIES)
-        get_property(_dir_targets DIRECTORY "${dir}" PROPERTY BUILDSYSTEM_TARGETS)
-        set(_acc "")
-        foreach(_t ${_dir_targets})
-            if(TARGET ${_t})
-                get_target_property(_ttype ${_t} TYPE)
-                if(_ttype STREQUAL "EXECUTABLE")
-                    list(APPEND _acc ${_t})
-                endif()
-            endif()
-        endforeach()
-        foreach(_s ${_sub_dirs})
-            _pulp_collect_executables_recursive(_inner "${_s}")
-            list(APPEND _acc ${_inner})
-        endforeach()
-        set(${out_var} "${_acc}" PARENT_SCOPE)
-    endfunction()
-
-    _pulp_collect_executables_recursive(_all_executables "${PULP_ROOT_DIR}")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpCollectTargets.cmake")
+    pulp_collect_targets_recursive(
+        _all_executables
+        "${PULP_ROOT_DIR}"
+        TYPES EXECUTABLE
+    )
     foreach(_exec ${_all_executables})
         pulp_link_fontconfig_after_skia(${_exec})
     endforeach()
 endif()
+
+# Optional design pack for the agent-panel invariant test. The fixture links a
+# stylesheet that lives with the design system rather than in Pulp, so the test
+# skips without it instead of importing an unstyled page and reporting green.
+set(PULP_DESIGN_PANEL_PACK_CSS "" CACHE FILEPATH
+    "Design-pack stylesheet for test/fixtures/agent-panels")
+set(PULP_DESIGN_PANEL_PACK_FONTS "" CACHE PATH
+    "Directory of the design pack's @font-face files")

@@ -187,6 +187,15 @@ void uninstall_inspector_hooks() {
     View::set_inspector_cursor_hook({});
 }
 
+InspectorOverlay::~InspectorOverlay() {
+    // The process-wide View hooks borrow this overlay. Tear them down when this
+    // is still the active owner so failed host startup and ordinary destruction
+    // cannot leave g_active_inspector pointing at freed storage. An older
+    // overlay must not uninstall hooks subsequently adopted by a newer one.
+    if (g_active_inspector == this)
+        uninstall_inspector_hooks();
+}
+
 void InspectorOverlay::set_active(bool active) {
     active_ = active;
     if (active) {

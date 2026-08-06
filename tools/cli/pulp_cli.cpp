@@ -43,18 +43,21 @@ static const Command commands[] = {
     {"design",   "Launch the AI design tool",             cmd_design},
     {"docs",     "Browse local documentation",            cmd_docs},
     {"dsp", "DSP capability registry (collisions + snapshot freshness)", cmd_dsp},
+    {"forge", "Export Forge catalog integration data", cmd_forge},
     {"clean",    "Remove build directory",                cmd_clean},
     {"fmt",      "Run clang-format on the source tree",   cmd_fmt},
     {"cache",    "Manage SDK and asset cache",            cmd_cache},
     {"audio",    "Repo-level audio model and bundle tooling", cmd_audio},
+#if PULP_ENABLE_PROJECT_PACKAGE
     {"seq",      "Inspect and edit timeline projects",    cmd_seq},
     {"render",   "Render a timeline project to WAV",      cmd_render},
+#endif
     {"sdk",      "Manage the Pulp SDK installation",      cmd_sdk},
     {"upgrade",  "Update the CLI to the latest version",  cmd_upgrade},
     {"version",  "Show, bump, or check version info",     cmd_version},
     {"dev",      "Unified dev loop: watch, build, test, run", cmd_dev},
     {"loop",     "Leveraged-prototype focus marker + watch loop", cmd_loop},
-    {"inspect",  "Connect to a running plugin inspector", cmd_inspect},
+    {"inspect",  "Connect to an explicitly hosted inspector fixture", cmd_inspect},
     {"scan",     "List VST3 / AU / AUv3 / CLAP / LV2 plug-ins", cmd_scan},
     {"host",     "Load a plug-in and run a synthetic audio block through it", cmd_host},
     {"import",   "Detect a framework project and emit a Pulp migration scaffold", cmd_import},
@@ -160,7 +163,7 @@ static void print_usage() {
         std::cout << "  " << std::left << std::setw(14) << binary_commands[i].name
                   << " " << binary_commands[i].summary << "\n";
     }
-    std::cout << "  " << std::left << std::setw(14) << "audit" << " License and clean-room audit\n";
+    std::cout << "  " << std::left << std::setw(14) << "audit" << " License and provenance audit\n";
     std::cout << "  " << std::left << std::setw(14) << "add" << " Add a component to the project\n";
     std::cout << "  " << std::left << std::setw(14) << "remove" << " Remove a previously added package\n";
     std::cout << "  " << std::left << std::setw(14) << "list" << " Show installed packages\n";

@@ -13,6 +13,7 @@ createImage	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 setImageSource	widget_assets	function	core/view/src/widget_bridge/widget_assets_api.cpp
 setKnobSpriteStrip	widget_assets	function	core/view/src/widget_bridge/widget_assets_api.cpp
 setKnobSpriteCore	widget_assets	function	core/view/src/widget_bridge/widget_assets_api.cpp
+setKnobCapturedIndicator	widget_assets	function	core/view/src/widget_bridge/widget_assets_api.cpp
 setFaderSkin	widget_assets	function	core/view/src/widget_bridge/widget_assets_api.cpp
 setFaderTrackWidth	widget_assets	function	core/view/src/widget_bridge/widget_assets_api.cpp
 setFaderTrackBorder	widget_assets	function	core/view/src/widget_bridge/widget_assets_api.cpp
@@ -33,10 +34,23 @@ setOrientation	widget_value	function	core/view/src/widget_bridge/widget_value_co
 setAccentColor	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
 setToggleOn	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
 setRadioGroup	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
+onParamChanged	state_binding	preamble_function	core/view/src/widget_bridge/state_binding_api.cpp	internal
+offParamChanged	state_binding	preamble_function	core/view/src/widget_bridge/state_binding_api.cpp	internal
+bindEvents	state_binding	preamble_function	core/view/src/widget_bridge/state_binding_api.cpp	internal
+unbindEvents	state_binding	preamble_function	core/view/src/widget_bridge/state_binding_api.cpp	internal
+__subscribeParam__	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
+__unsubscribeParam__	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
+__bindEvents__	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
+__unbindEvents__	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
+getParamMetadata	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
+formatParamValue	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
+parseParamValue	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
 getParam	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
 setParam	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
 bindWidgetToParam	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
 bindMeter	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
+bindScope	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
+listValueChannels	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
 unbindWidget	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
 animate	animation	function	core/view/src/widget_bridge/animation_api.cpp
 setMotionToken	tokens	function	core/view/src/widget_bridge/tokens_api.cpp
@@ -47,6 +61,7 @@ setVisible	css_style	function	core/view/src/widget_bridge/style_visibility_api.c
 setAccessibilityLabel	accessibility	function	core/view/src/widget_bridge/accessibility_api.cpp
 setAccessibilityRole	accessibility	function	core/view/src/widget_bridge/accessibility_api.cpp
 setAccessibilityState	accessibility	function	core/view/src/widget_bridge/accessibility_api.cpp
+on	events	preamble_function	core/view/src/widget_bridge.cpp	event:names
 registerHover	events	function	core/view/src/widget_bridge/event_api.cpp
 createGrid	layout	function	core/view/src/widget_bridge/layout_api.cpp
 setGrid	layout	function	core/view/src/widget_bridge/layout_api.cpp

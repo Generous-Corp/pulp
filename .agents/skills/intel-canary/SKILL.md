@@ -19,15 +19,36 @@ Pulp ships macOS arm64 as `usable` and macOS x86_64 / universal as
 silently regressing. The full design, tiering, and the honest catch/miss list
 live in `docs/guides/intel-support.md` — read it first.
 
+## The Tier-1 Rosetta lane measures logic, not speed
+
+`intel-portability.yml` runs x86_64 binaries under Rosetta on an arm64 runner, at
+roughly a third of native speed. Anything asserting a wall-clock budget therefore
+reports the emulator.
+
+That lane went red for seven consecutive runs on exactly three of 16,314 tests,
+all timing-bound: `heritage-performance` (labels `performance quality-lab`), a
+`CompiledTempoMap` randomized-map **Timeout**, and `process-deadline-selftest`.
+None was an x86_64 defect.
+
+The cause was a drifted exclusion list: `build.yml` excludes
+`performance|bench|quality-lab` on PR runs, this lane excluded only
+`validation|slow`. When adding a timing-sensitive label or a deadline test, update
+both — and remember `--repeat until-pass:2` only absorbs a *single* flake, so a
+consistently slow test fails twice and reds the lane.
+
+A red here is advisory and blocks nothing, which is precisely why it can sit red
+for days while burning ~52 minutes of hosted macOS per triggering PR.
+
 ## What this skill covers
 
 - `tools/scripts/intel_canary_lint.py` — the Tier-0 static lint (5 classes).
 - `tools/scripts/intel_canary_allowlist.txt` — its exemption list.
 - `tools/scripts/test_intel_canary_lint.py` — the lint's self-test.
 - The `PULP_INTEL_CANARY` option in the root `CMakeLists.txt`.
-- The Tier 0-3 workflows: `build.yml` (canary step), `intel-portability.yml`
+- The Tier 0-4 workflows: `build.yml` (canary step), `intel-portability.yml`
   (Tier 1 advisory PR lane), `nightly-intel.yml` (Tier 2), and the
-  `universal-crosscheck` job in `nightly-intel.yml` (Tier 3, nightly).
+  `universal-crosscheck` job in `nightly-intel.yml` (Tier 3, nightly), plus the
+  dedicated physical Intel selector and supervisor (Tier 4, advisory).
 
 Note: the Tier-3 universal check only *validates* a universal build — it publishes
 nothing, and the release ships THIN per-arch binaries. It lives in
@@ -95,13 +116,27 @@ as the Tier-2 nightly's native-silicon signal. See `docs/guides/intel-support.md
   clean; a new file that forgets it is caught. This is documented as a `MISSES`
   limitation in the guide.
 - **`macos-15-intel` is real but flaky** (linker-image errors, CPU-peg). It is
-  quarantined to Tier-2 job A with `timeout-minutes: 120` and an infra-vs-product
-  watchdog classifier. Never route it to a per-PR required lane, and never route
-  ANY Intel work to the self-hosted Studios or to Namespace.
+  the fallback for Tier-2 job A, which has an infra-vs-product watchdog
+  classifier. The physical Tier-4 runner uses only
+  `pulp-intel-native,pulp-host-macmini`; never give it the required Studio pool
+  labels and never route Intel work to Namespace.
 - **A universal wgpu dylib must be re-signed after `lipo`** (G3 lesson): a raw
   fat dylib fails `codesign --verify` and the arm64 slice is killed at load. The
   Tier-2/3 `check_bundle_architectures.py --strict` assertions verify BOTH
   `lipo -archs` and `codesign --verify` on every embedded dylib for this reason.
+- **A JIT workspace is not a credential boundary.** The physical Tier-4 host
+  keeps `gh`/`ghapp` and runner-group administration in the login-account
+  controller, but executes `run.sh` and workflow steps as the non-admin
+  `pulp-ci` account through a root-owned, fixed-operation worker shim. Never
+  install controller credentials in the build account or make the shim/job
+  checkout writable by it. Every cycle starts from a root-owned runner/tool
+  golden and deletes the complete job root plus leftover account processes;
+  cleaning `_work` alone permits runner persistence. Activation requires the
+  fixed hidden uid-499 account, Xcode, immutable read-only warm cache, shim, and
+  narrow sudoers setup documented in `docs/guides/local-ci.md`. The worker gives
+  each job a private ephemeral home and temp root, then kills and removes all
+  uid-owned residue before serving the next job. Its protected warm cache is
+  read-only to jobs and sets `CCACHE_NODEPEND=1`.
 
 ## Editing checklist
 
@@ -143,13 +178,18 @@ two hours of a scarce Intel runner nightly.
 **Fix pattern: bound the work in the STEP, not with the job timeout.**
 
 ```bash
-if timeout 75m cmake --build "$BUILD_DIR" -- -k 0 2>&1 | tee build.log; then
+if python3 tools/ci/run_with_timeout.py 4500 \
+    cmake --build "$BUILD_DIR" -- -k 0 2>&1 | tee build.log; then
   echo "status=pass" >> "$GITHUB_OUTPUT"
 elif [ "${PIPESTATUS[0]}" = "124" ]; then     # WE killed it, not GitHub
   echo "::warning::runner pegged — INFRA, not a product failure"
   echo "status=infra-timeout" >> "$GITHUB_OUTPUT"
 fi
 ```
+
+Use the repository helper rather than GNU `timeout`: macOS does not provide the
+latter, and the helper terminates the whole compiler process group before
+returning the same exit-124 contract.
 
 The job then finishes **normally** with a loud, explicit infra-skip, and the run can
 reach a conclusive success/failure. Do **not** reach for job-level `continue-on-error`

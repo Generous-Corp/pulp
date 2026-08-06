@@ -5,7 +5,7 @@
 namespace {
 
 Project session_project(std::string scene_name = "verse") {
-    auto notes = take(NoteContent::create({}));
+    auto notes = take(MidiContent::create({}));
     auto clip = take(
         Clip::create({4}, TickPosition{0}, TickDuration{kTicksPerQuarter}, ClipContent{notes}));
     auto track = take(Track::create({3}, "drums", {clip}));
@@ -37,7 +37,7 @@ Project all_follow_kinds_project() {
         FollowActionKind::Last,     FollowActionKind::Any,  FollowActionKind::Other,
         FollowActionKind::Jump,
     };
-    auto notes = take(NoteContent::create({}));
+    auto notes = take(MidiContent::create({}));
     auto clip = take(
         Clip::create({4}, TickPosition{0}, TickDuration{kTicksPerQuarter}, ClipContent{notes}));
     auto track = take(Track::create({3}, "drums", {clip}));
@@ -67,6 +67,28 @@ Project all_follow_kinds_project() {
         .scenes = {Scene{{5}, "all follows", std::move(slots)}},
     }));
     return take(Project::create(ProjectInput{{1}, "all follows", 17, {2}, {}, {sequence}}));
+}
+
+// Three tracks stored 9, 3, 12 -- deliberately not ascending, because tracks()
+// preserves the order the caller supplied and never sorts by identity. An
+// authored order of 12, 9, 3 then differs from both the stored order and the
+// ascending order, so an assertion about one cannot pass by reading the other.
+Project three_track_project(std::vector<ItemId> authored_order = {}) {
+    auto first = take(Track::create({9}, "bass", {}));
+    auto second = take(Track::create({3}, "drums", {}));
+    auto third = take(Track::create({12}, "keys", {}));
+    auto sequence = take(Sequence::create(SequenceInput{
+        .id = {2},
+        .name = "root",
+        .musical_duration = TickDuration{8 * kTicksPerQuarter},
+        .tracks = {first, second, third},
+        .track_order = std::move(authored_order),
+    }));
+    return take(Project::create(ProjectInput{{1}, "reordered", 13, {2}, {}, {sequence}}));
+}
+
+Project reordered_tracks_project() {
+    return three_track_project({{12}, {9}, {3}});
 }
 
 std::string only_sequence(const std::string& snapshot) {
@@ -160,7 +182,12 @@ TEST_CASE("Timeline sequence v4 scene migration is lossless only for an empty sc
     REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 5, 4,
                                   fixture_upgrade, limits)) == legacy_fixture);
 
-    const auto current = only_sequence(take(serialize_project(session_project(), registry)).json);
+    // A saved sequence is current-version, its chord lane states no detail, and
+    // its authored order is the identity order, so the steps down to v5 are
+    // lossless and leave the scene list as the only thing v4 cannot represent.
+    const auto saved = only_sequence(take(serialize_project(session_project(), registry)).json);
+    const auto current = take(
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 7, 5, saved, limits));
     auto refused =
         registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 5, 4, current, limits);
     REQUIRE_FALSE(refused);
@@ -182,6 +209,164 @@ TEST_CASE("Timeline sequence v4 scene migration is lossless only for an empty sc
     REQUIRE(restored_result);
     const auto restored = std::move(restored_result).value();
     REQUIRE(restored == empty);
+}
+
+TEST_CASE("Timeline authored track order survives a save and reload") {
+    const auto registry = builtins();
+    const auto encoded = take(serialize_project(reordered_tracks_project(), registry));
+    REQUIRE(encoded.json.find(R"("track_order":["12","9","3"])") != std::string::npos);
+
+    const auto decoded = take(deserialize_project(encoded.json, registry));
+    const auto* sequence = decoded.find_sequence({2});
+    REQUIRE(sequence);
+    const std::vector<ItemId> authored(sequence->track_order().begin(),
+                                       sequence->track_order().end());
+    REQUIRE(authored == std::vector<ItemId>{{12}, {9}, {3}});
+    // Identity order is what compile, census, and render index, and reordering
+    // for display must leave it alone.
+    std::vector<ItemId> identity;
+    for (const auto& track : sequence->tracks())
+        identity.push_back(track.id());
+    REQUIRE(identity == std::vector<ItemId>{{9}, {3}, {12}});
+    REQUIRE(take(serialize_project(decoded, registry)).json == encoded.json);
+}
+
+TEST_CASE("Timeline sequence without a recorded order loads with its identity order") {
+    const auto registry = builtins();
+    DecodeLimits limits;
+    const auto snapshot = take(serialize_project(three_track_project(), registry)).json;
+
+    // A document saved before the field existed is reproduced by stepping its
+    // sequence envelope back one version in place, so the decode path sees the
+    // real v5 shape rather than a hand-written approximation of it.
+    const auto current_sequence = only_sequence(snapshot);
+    auto legacy = snapshot;
+    const auto at = legacy.find(current_sequence);
+    REQUIRE(at != std::string::npos);
+    legacy.replace(at, current_sequence.size(),
+                   take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 7, 5,
+                                         current_sequence, limits)));
+    REQUIRE(legacy.find(R"("track_order")") == std::string::npos);
+
+    const auto decoded = take(deserialize_project(legacy, registry));
+    const auto* sequence = decoded.find_sequence({2});
+    REQUIRE(sequence);
+    const std::vector<ItemId> authored(sequence->track_order().begin(),
+                                       sequence->track_order().end());
+    REQUIRE(authored == std::vector<ItemId>{{9}, {3}, {12}});
+    // Re-saving states that adopted order explicitly rather than leaving the
+    // field empty for the next reader to resolve again.
+    REQUIRE(take(serialize_project(decoded, registry)).json.find(
+                R"("track_order":["9","3","12"])") != std::string::npos);
+}
+
+TEST_CASE("Timeline sequence v5 track order migration is lossless only for the identity order") {
+    const auto registry = builtins();
+    DecodeLimits limits;
+    const auto authored =
+        only_sequence(take(serialize_project(reordered_tracks_project(), registry)).json);
+    const auto identity =
+        only_sequence(take(serialize_project(three_track_project(), registry)).json);
+
+    // The upgrade records no authored order, which is exactly how a v5 reader
+    // already understood the document.
+    const auto legacy = take(
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 7, 5, identity, limits));
+    const auto upgraded = take(
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 5, 6, legacy, limits));
+    REQUIRE(upgraded.find(R"("scenes":[],"track_order":[],"tracks":[)") != std::string::npos);
+    REQUIRE(upgraded.find(R"("version":6)") != std::string::npos);
+    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 6, 5, upgraded,
+                                  limits)) == legacy);
+
+    // A reordering is authored intent, and a v5 reader resolves the absent
+    // field to the identity order, so dropping it would rewrite what the user
+    // arranged rather than losing something inert.
+    auto refused =
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 7, 5, authored, limits);
+    REQUIRE_FALSE(refused);
+    REQUIRE(refused.error().code == PersistenceErrorCode::MigrationFailed);
+}
+
+TEST_CASE("Timeline snapshot decode rejects an authored track order that is not a permutation") {
+    const auto registry = builtins();
+    const auto snapshot = take(serialize_project(reordered_tracks_project(), registry)).json;
+    constexpr std::string_view authored = R"("track_order":["12","9","3"])";
+
+    const auto with_order = [&](std::string_view replacement, DecodeLimits limits = {}) {
+        auto mutated = snapshot;
+        const auto at = mutated.find(authored);
+        REQUIRE(at != std::string::npos);
+        mutated.replace(at, authored.size(), replacement);
+        return deserialize_project(mutated, registry, limits);
+    };
+
+    auto omits = with_order(R"("track_order":["12","9"])");
+    REQUIRE_FALSE(omits);
+    REQUIRE(omits.error().code == PersistenceErrorCode::ModelRejected);
+    REQUIRE(omits.error().model_error->code == ModelErrorCode::MissingItem);
+    REQUIRE(omits.error().model_error->item == ItemId{3});
+
+    auto repeats = with_order(R"("track_order":["12","9","9"])");
+    REQUIRE_FALSE(repeats);
+    REQUIRE(repeats.error().code == PersistenceErrorCode::ModelRejected);
+    REQUIRE(repeats.error().model_error->code == ModelErrorCode::DuplicateItemId);
+    REQUIRE(repeats.error().model_error->item == ItemId{9});
+
+    auto invents = with_order(R"("track_order":["12","9","3","99"])");
+    REQUIRE_FALSE(invents);
+    REQUIRE(invents.error().code == PersistenceErrorCode::ModelRejected);
+    REQUIRE(invents.error().model_error->code == ModelErrorCode::MissingItem);
+    REQUIRE(invents.error().model_error->item == ItemId{99});
+
+    // The entries are canonical identity strings, so a number, a malformed
+    // identity, and a wrong-shaped array are all refusals rather than guesses.
+    // The paths pin which layer refused: structural preflight for a shape, the
+    // decoder for an unparseable identity.
+    auto unquoted = with_order(R"("track_order":[12,"9","3"])");
+    REQUIRE_FALSE(unquoted);
+    REQUIRE(unquoted.error().code == PersistenceErrorCode::InvalidSchema);
+    REQUIRE(unquoted.error().path == "/data/sequences/0/data/track_order/0");
+    auto malformed = with_order(R"("track_order":["012","9","3"])");
+    REQUIRE_FALSE(malformed);
+    REQUIRE(malformed.error().code == PersistenceErrorCode::InvalidNumber);
+    REQUIRE(malformed.error().path == "/data/sequences/0/data/track_order/0");
+    auto not_an_array = with_order(R"("track_order":"12")");
+    REQUIRE_FALSE(not_an_array);
+    REQUIRE(not_an_array.error().code == PersistenceErrorCode::InvalidSchema);
+    REQUIRE(not_an_array.error().path == "/data/sequences/0/data/track_order");
+
+    // The order carries its own entry quota rather than sharing the track one,
+    // so a sequence may still hold the full track budget.
+    DecodeLimits exactly_three;
+    exactly_three.max_tracks = 3;
+    REQUIRE(with_order(authored, exactly_three));
+    auto over_quota = with_order(R"("track_order":["12","9","3","99"])", exactly_three);
+    REQUIRE_FALSE(over_quota);
+    REQUIRE(over_quota.error().code == PersistenceErrorCode::LimitExceeded);
+    REQUIRE(over_quota.error().path == "/data/sequences/0/data/track_order");
+}
+
+TEST_CASE("Timeline sequence decode pins the track order to the versions that declare it") {
+    const auto registry = builtins();
+    const auto snapshot = take(serialize_project(reordered_tracks_project(), registry)).json;
+    constexpr std::string_view current = R"("type_name":"pulp.timeline.sequence","version":7)";
+
+    // A v5 envelope carrying an authored order, and a v6 envelope missing one,
+    // are both contradictions rather than hints about what the writer meant.
+    auto declared_too_early = snapshot;
+    const auto at = declared_too_early.find(current);
+    REQUIRE(at != std::string::npos);
+    declared_too_early.replace(at, current.size(),
+                               R"("type_name":"pulp.timeline.sequence","version":5)");
+    REQUIRE_FALSE(deserialize_project(declared_too_early, registry));
+
+    auto omitted = snapshot;
+    constexpr std::string_view authored = R"("track_order":["12","9","3"],)";
+    const auto order_at = omitted.find(authored);
+    REQUIRE(order_at != std::string::npos);
+    omitted.erase(order_at, authored.size());
+    REQUIRE_FALSE(deserialize_project(omitted, registry));
 }
 
 TEST_CASE("Timeline session model rejects a slot that names a missing clip") {
@@ -376,4 +561,14 @@ TEST_CASE("Timeline session remap preserves scene ownership and launch reference
     REQUIRE(scene->slots[0].clip_id == clip_id);
     REQUIRE(scene->slots[0].follow.active()[0].target == jump_target);
     REQUIRE(remapped.project.locate(slot_id)->parent_id == scene_id);
+}
+
+TEST_CASE("Timeline remap carries the authored track order onto the new identities") {
+    const auto remapped = take(remap_ids(reordered_tracks_project(), 100));
+    const auto* sequence = remapped.project.find_sequence(*remapped.ids.find({2}));
+    REQUIRE(sequence);
+    const std::vector<ItemId> authored(sequence->track_order().begin(),
+                                       sequence->track_order().end());
+    REQUIRE(authored == std::vector<ItemId>{*remapped.ids.find({12}), *remapped.ids.find({9}),
+                                            *remapped.ids.find({3})});
 }

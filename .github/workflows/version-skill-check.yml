@@ -76,6 +76,16 @@ jobs:
               --config tools/scripts/versioning.json \
               --mode=report
 
+      - name: Skill-path-map lint
+        # skill-sync is only as good as its map. A pattern matching no tracked
+        # file reports nothing, which reads as a clean run — three sat on main
+        # unnoticed. Whole-tree for the rules that catch rot, diff-scoped for
+        # the one that catches a subsystem claim being widened.
+        run: |
+          python3 tools/scripts/skill_path_map_lint.py \
+              --base "${{ steps.base.outputs.ref }}" \
+              --mode=report
+
       - name: Screenshot-sync check
         # Authoritative gate for the screenshot-sync pattern: in a repo carrying
         # .pulp/screenshots.toml, a UX-path change must ship a refreshed
@@ -281,6 +291,9 @@ jobs:
           python3 tools/scripts/test_screenshot_sync_check.py
           python3 tools/scripts/test_check_cli_mcp_parity.py
           python3 tools/scripts/test_intel_canary_lint.py
+          python3 tools/scripts/test_designated_initializer_lint.py
+          python3 tools/scripts/test_win32_include_lint.py
+          python3 tools/scripts/win32_include_lint.py
           python3 tools/scripts/single_backend_guard.py --selftest
           python3 tools/scripts/processing_model_terms_lint.py --selftest
           python3 tools/scripts/conflict_marker_check.py --selftest

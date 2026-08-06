@@ -161,6 +161,47 @@ echo "== git_worktree_is_complete"
     git_worktree_is_complete "$tmp/r" && r=yes || r=no
     check "$r" "no" "a checkout with a deleted file reads as incomplete"
 
+    git -C "$tmp/r" checkout -q -- f.txt
+    printf 'developer modification\n' > "$tmp/r/f.txt"
+    printf 'untracked\n' > "$tmp/r/other.txt"
+    git_worktree_is_complete "$tmp/r" && r=yes || r=no
+    check "$r" "yes" "modified or untracked files do not authorize cache deletion"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== retry discards a cache whose commit exists but worktree is incomplete"
+(
+    load_setup_lib
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    export FETCHCONTENT_CACHE_ROOT="$tmp/cache"
+    mkdir -p "$FETCHCONTENT_CACHE_ROOT/dep-v2"
+    git init -q "$FETCHCONTENT_CACHE_ROOT/dep-v2"
+    git -C "$FETCHCONTENT_CACHE_ROOT/dep-v2" config user.email t@t.t
+    git -C "$FETCHCONTENT_CACHE_ROOT/dep-v2" config user.name t
+    printf 'complete\n' > "$FETCHCONTENT_CACHE_ROOT/dep-v2/tracked.txt"
+    git -C "$FETCHCONTENT_CACHE_ROOT/dep-v2" add tracked.txt
+    git -C "$FETCHCONTENT_CACHE_ROOT/dep-v2" commit -qm fixture
+    ref="$(git -C "$FETCHCONTENT_CACHE_ROOT/dep-v2" rev-parse HEAD)"
+    rm "$FETCHCONTENT_CACHE_ROOT/dep-v2/tracked.txt"
+
+    calls=0
+    ensure_shared_git_source() {
+        calls=$((calls + 1))
+        if [ "$calls" -eq 1 ]; then
+            return 1
+        fi
+        [ ! -e "$FETCHCONTENT_CACHE_ROOT/dep-v2" ] || return 2
+        mkdir -p "$FETCHCONTENT_CACHE_ROOT/dep-v2"
+        return 0
+    }
+    sleep() { :; }
+    PULP_PRIMING_RETRY_ATTEMPTS=2
+    rc=0
+    ensure_shared_git_source_with_retry "Dep" fixture "$ref" dep-v2 >/dev/null 2>&1 || rc=$?
+    check "$rc" "0" "an incomplete worktree is scrubbed before the retry"
+    check "$calls" "2" "the clean retry runs exactly once"
+
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))
 
@@ -331,6 +372,253 @@ echo "== git_checkout_matches_cache: an unknowable tree is never called drifted"
     git_checkout_matches_cache "$tmp/real" "$tmp/cache/missing" && r=yes || r=no
     check "$r" "yes" "an unprovisioned cache is treated as matching"
 
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== the three.js seed and the CMake registration agree on a cache directory"
+(
+    load_setup_lib
+    repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
+
+    # three.js is the largest FetchContent source. Its ref lives in setup.sh (to
+    # seed the shared cache) and in PulpDependencies.cmake (to register the
+    # override). If those drift, nothing fails loudly — the cache is populated
+    # under one directory name, CMake looks for another, and every build dir
+    # silently re-clones ~2.2 GB forever. Pin the agreement.
+    cmake_ref="$(sed -n 's/.*pulp_register_fetchcontent_source(threejs REF \([0-9a-f]*\)).*/\1/p' \
+        "$repo_root/tools/cmake/PulpDependencies.cmake" | head -1)"
+    setup_ref="$(grep -A2 'mrdoob/three\.js\.git' "$repo_root/setup.sh" \
+        | grep -oE '[0-9a-f]{40}' | head -1)"
+
+    check "$(test -n "$cmake_ref" && echo found || echo missing)" "found" \
+        "PulpDependencies.cmake registers a threejs ref"
+    check "$(test -n "$setup_ref" && echo found || echo missing)" "found" \
+        "setup.sh seeds a three.js source"
+    check "$setup_ref" "$cmake_ref" "setup.sh and PulpDependencies.cmake pin the same three.js ref"
+    contract_ref="$(tr ';' '\n' < "$repo_root/tools/deps/shared-source-contract.txt" \
+        | sed -n 's/^threejs=//p' | head -1)"
+    check "$contract_ref" "$cmake_ref" "dependency contract records three.js pin"
+
+    # And the directory name setup.sh writes must be the one CMake reads.
+    check "$(fetchcontent_cache_dir_name "threejs" "$setup_ref")" "threejs-$cmake_ref" \
+        "the seeded cache directory is the one the CMake override resolves to"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== all shared FetchContent registrations seeded by setup agree with CMake"
+(
+    load_setup_lib
+    repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
+    deps="$repo_root/tools/cmake/PulpDependencies.cmake"
+    root_cmake="$repo_root/CMakeLists.txt"
+    contract="$repo_root/tools/deps/shared-source-contract.txt"
+
+    registered_ref() {
+        local name="$1" file="$2"
+        sed -n "s/.*pulp_register_fetchcontent_source(${name}\( DIR [^ ]*\)\{0,1\} REF \([^)]*\)).*/\2/p" "$file" | head -1
+    }
+    seeded_ref() {
+        local url_pattern="$1"
+        grep -A1 "$url_pattern" "$repo_root/setup.sh" \
+            | tail -1 | sed -n 's/.*"\([^"]*\)" "$(fetchcontent.*/\1/p'
+    }
+    contract_ref() {
+        local name="$1"
+        tr ';' '\n' < "$contract" | sed -n "s/^${name}=//p" | head -1
+    }
+
+    seeded_names="$(grep -oE 'fetchcontent_cache_dir_name "[^"]+"' "$repo_root/setup.sh" \
+        | cut -d'"' -f2 | grep -v '^\$' | sort -fu | tr '\n' ' ' | sed 's/ $//')"
+    check "$seeded_names" "AudioUnitSDK catch2 choc clap lv2 sdl3 threejs vst3sdk webgpu yoga" \
+        "pin guard enumerates every statically named setup source seed"
+    contract_names="$(tr ';' '\n' < "$contract" | sed -n 's/^\([^=]*\)=.*/\1/p' \
+        | sort -fu | tr '\n' ' ' | sed 's/ $//')"
+    check "$contract_names" "ausdk catch2 choc clap lv2 sdl3 threejs vst3 webgpu wgpu-native yoga" \
+        "dependency contract enumerates every provisioned source and runtime"
+
+    # These two previously drifted while the three.js-only contract remained
+    # green. Setup then populated a cache directory CMake never consulted, so
+    # every build directory could silently clone another dependency copy.
+    choc_cmake_ref="$(sed -n 's/.*pulp_register_fetchcontent_source(choc REF \([^)]*\)).*/\1/p' "$deps" | head -1)"
+    choc_setup_cache_ref="$(grep -A1 'danielraffel/choc\.git' "$repo_root/setup.sh" \
+        | grep -oE '[0-9a-f]{40}' | head -1)"
+    clap_cmake_ref="$(registered_ref clap "$deps")"
+    clap_setup_ref="$(seeded_ref 'free-audio/clap\.git')"
+
+    check "$(test -n "$choc_cmake_ref" && echo found || echo missing)" "found" \
+        "PulpDependencies.cmake registers a CHOC ref"
+    check "$(test -n "$choc_setup_cache_ref" && echo found || echo missing)" "found" \
+        "setup.sh names a CHOC cache ref"
+    check "$choc_setup_cache_ref" "$choc_cmake_ref" \
+        "setup.sh and PulpDependencies.cmake pin the same CHOC cache"
+    check "$(contract_ref choc)" "$choc_cmake_ref" "dependency contract records CHOC pin"
+    check "$(test -n "$clap_cmake_ref" && echo found || echo missing)" "found" \
+        "PulpDependencies.cmake registers a CLAP ref"
+    check "$(test -n "$clap_setup_ref" && echo found || echo missing)" "found" \
+        "setup.sh seeds a CLAP source"
+    check "$clap_setup_ref" "$clap_cmake_ref" \
+        "setup.sh and PulpDependencies.cmake pin the same CLAP source"
+    check "$(contract_ref clap)" "$clap_cmake_ref" "dependency contract records CLAP pin"
+
+    for spec in \
+        'webgpu|eliemichel/WebGPU-distribution\.git|webgpu|tools' \
+        'SDL3|libsdl-org/SDL\.git|SDL3|tools' \
+        'lv2|github.com/lv2/lv2\.git|lv2|tools' \
+        'yoga|facebook/yoga\.git|yoga|tools' \
+        'Catch2|catchorg/Catch2\.git|Catch2|root'; do
+        IFS='|' read -r display url name cmake_file <<< "$spec"
+        if [ "$cmake_file" = "root" ]; then
+            expected="$(registered_ref "$name" "$root_cmake")"
+        else
+            expected="$(registered_ref "$name" "$deps")"
+        fi
+        actual="$(seeded_ref "$url")"
+        check "$(test -n "$expected" && test -n "$actual" && echo found || echo missing)" "found" \
+            "$display has both a setup seed and CMake registration"
+        check "$actual" "$expected" "$display setup and CMake pins agree"
+        check "$(contract_ref "$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')")" "$expected" \
+            "$display pin is recorded in the dependency contract"
+    done
+
+    check "$(contract_ref wgpu-native)" "$(grep '^WGPU_NATIVE_VERSION=' "$repo_root/setup.sh" | head -1 | cut -d'"' -f2)" \
+        "dependency contract records wgpu-native runtime pin"
+    check "$(contract_ref vst3)" "$(grep '^VST3_SDK_REF=' "$repo_root/setup.sh" | head -1 | cut -d'"' -f2)" \
+        "dependency contract records VST3 pin"
+    check "$(contract_ref ausdk)" "$(grep '^    AU_SDK_REF=' "$repo_root/setup.sh" | head -1 | cut -d'"' -f2)" \
+        "dependency contract records AudioUnitSDK pin"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== non-interactive setup never accepts an install prompt"
+(
+    load_setup_lib
+    NON_INTERACTIVE=true
+    CI_MODE=false
+    prompt_yn "install fixture" && result=yes || result=no
+    check "$result" "no" "--non-interactive declines package installation"
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== dependency-only status ignores unrelated earlier audit findings"
+(
+    load_setup_lib
+    CI_MODE=false
+    ERRORS=4
+    DEPENDENCY_ERRORS_START=$ERRORS
+    check "$(dependency_bootstrap_error_count)" "0" \
+        "earlier environment findings do not fail dependency bootstrap"
+    ERRORS=$((ERRORS + 1))
+    check "$(dependency_bootstrap_error_count)" "1" \
+        "a provisioning failure still fails dependency bootstrap"
+    check "$(dependency_bootstrap_exit_error_count)" "1" \
+        "local dependency-only exit ignores earlier host audit findings"
+    CI_MODE=true
+    check "$(dependency_bootstrap_exit_error_count)" "5" \
+        "CI dependency-only host admission preserves every audit failure"
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== shared cache location is machine-configurable"
+(
+    load_setup_lib
+    PLATFORM=macOS
+    PULP_SHARED_FETCHCONTENT_SOURCE_DIR="/example/mounted-volume/pulp-cache"
+    check "$(fetchcontent_cache_root)" "$PULP_SHARED_FETCHCONTENT_SOURCE_DIR" \
+        "explicit cache root wins without machine-name or checkout-path assumptions"
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== explicit source override below the cache root remains developer-managed"
+(
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    mkdir -p "$tmp/cache/choc-dev" "$tmp/src"
+    printf 'developer edit\n' > "$tmp/cache/choc-dev/value.txt"
+    cat > "$tmp/src/CMakeLists.txt" <<EOF
+cmake_minimum_required(VERSION 3.24)
+project(explicit_override NONE)
+set(PULP_SHARED_FETCHCONTENT_SOURCE_DIR "$tmp/cache")
+set(PULP_USE_SHARED_FETCHCONTENT_SOURCES ON)
+set(FETCHCONTENT_SOURCE_DIR_CHOC "$tmp/cache/choc-dev" CACHE PATH "")
+include("$REPO_ROOT/tools/cmake/PulpFetchContent.cmake")
+pulp_register_fetchcontent_source(choc REF fixture)
+pulp_materialize_mutable_fetchcontent_source(choc PATCH_KEY fixture)
+file(WRITE "\${CMAKE_BINARY_DIR}/selected.txt" "\${FETCHCONTENT_SOURCE_DIR_CHOC}")
+EOF
+    cmake -S "$tmp/src" -B "$tmp/build" >/dev/null 2>&1
+    check "$(cat "$tmp/build/selected.txt")" "$tmp/cache/choc-dev" \
+        "an explicit override is not replaced with a frozen build-local copy"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== a warm build follows shared cache pin changes without exposing the cache"
+(
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    mkdir -p "$tmp/cache/choc-v1" "$tmp/cache/choc-v2" "$tmp/src"
+    printf 'v1\n' > "$tmp/cache/choc-v1/value.txt"
+    printf 'v2\n' > "$tmp/cache/choc-v2/value.txt"
+    cat > "$tmp/src/CMakeLists.txt" <<EOF
+cmake_minimum_required(VERSION 3.24)
+project(shared_pin_change NONE)
+set(PULP_SHARED_FETCHCONTENT_SOURCE_DIR "$tmp/cache")
+set(PULP_USE_SHARED_FETCHCONTENT_SOURCES ON)
+include("$REPO_ROOT/tools/cmake/PulpFetchContent.cmake")
+pulp_register_fetchcontent_source(choc REF "\${TEST_REF}")
+pulp_materialize_mutable_fetchcontent_source(choc PATCH_KEY "\${TEST_REF}")
+file(WRITE "\${CMAKE_BINARY_DIR}/selected.txt" "\${FETCHCONTENT_SOURCE_DIR_CHOC}")
+EOF
+    cmake -S "$tmp/src" -B "$tmp/build" -DTEST_REF=v1 >/dev/null 2>&1
+    cmake -S "$tmp/src" -B "$tmp/build" -DTEST_REF=v2 >/dev/null 2>&1
+    selected="$(cat "$tmp/build/selected.txt")"
+    check "$selected" "$tmp/build/_deps/pulp-mutable-choc-src" \
+        "a pin bump keeps the patched dependency build-local"
+    check "$(cat "$selected/value.txt")" "v2" \
+        "the build-local copy refreshes from the newly pinned cache"
+    check "$(grep '^FETCHCONTENT_SOURCE_DIR_CHOC:PATH=' "$tmp/build/CMakeCache.txt" | cut -d= -f2-)" \
+        "$tmp/cache/choc-v2" "the automatic cache selection advances to the new pin"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== shared dependency links are location-independent"
+(
+    load_setup_lib
+    PLATFORM=macOS
+    temp_root="${TMPDIR:-/tmp}"
+    checkout_root="${PULP_TEST_SECOND_VOLUME_ROOT:-$temp_root}"
+    shared="$(mktemp -d "$temp_root/pulp-shared-cache-fixture.XXXXXX")"
+    checkout="$(mktemp -d "$checkout_root/pulp-worktree-fixture.XXXXXX")"
+    trap 'rm -rf "$shared" "$checkout"' EXIT
+    mkdir -p "$shared/marker" "$checkout/external"
+    printf 'shared\n' > "$shared/marker/value"
+    git init -q "$shared"
+    git -C "$shared" config user.email fixture@pulp.audio
+    git -C "$shared" config user.name fixture
+    git -C "$shared" add marker/value
+    git -C "$shared" commit -qm fixture
+
+    ERRORS=0
+    reuse_shared_git_source "location-independent fixture" "$shared" \
+        "$checkout/external/dependency" "marker/value" >/dev/null
+    check "$(cat "$checkout/external/dependency/marker/value")" "shared" \
+        "worktree link resolves a cache outside the checkout"
+    check "$ERRORS" "0" "location-independent link reports no setup error"
+    if [ -n "${PULP_TEST_SECOND_VOLUME_ROOT:-}" ]; then
+        if stat -f '%d' "$shared" >/dev/null 2>&1; then
+            shared_device="$(stat -f '%d' "$shared")"
+            checkout_device="$(stat -f '%d' "$checkout")"
+        else
+            shared_device="$(stat -c '%d' "$shared")"
+            checkout_device="$(stat -c '%d' "$checkout")"
+        fi
+        if [ "$shared_device" != "$checkout_device" ]; then
+            ok "explicit second-volume fixture really crosses filesystems"
+        else
+            bad "PULP_TEST_SECOND_VOLUME_ROOT must identify a different filesystem"
+        fi
+    fi
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))
 

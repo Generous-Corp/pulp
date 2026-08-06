@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "event_id": "20260730-windows-editor-host-modularization",
+  "kind": "change",
+  "created_at": "2026-07-30T01:00:00Z",
+  "slices": [
+    "canvas-kernel",
+    "render-skia-dawn",
+    "retained-ui-kernel"
+  ],
+  "rationale": "Three corrections to the Windows plug-in editor that share one seam. The pointer/keyboard state machine left the Windows-only host for a header with no <windows.h> dependency, so its capture bracket, generation guard and terminal protocol run on the required macOS gate instead of being verified only by shipping; the host went 1429 -> 956 lines and the native side effects became named operations the host implements. The Skia retained-layer store was an unbounded map with no owner check, so a layer recorded against one backend could be handed back after that backend was gone and nothing ever evicted; it is now owner-tagged, LRU-bounded and prunes abandoned non-cacheable layers at end_frame(). Presentation became a declared PresentPolicy translated in exactly one pure function: the Windows host hardcoded a non-blocking present while the Linux host set nothing and silently inherited the blocking Fifo default, which is wrong for an editor rendering synchronously on a DAW's UI thread (measured on the REAPER VM: ~2 ms of real frame work inside 19-45 ms frames). Sharing the surface constructor makes that policy true for both hosts by construction, and the raster/PNG paths that Windows and Linux had byte-identical copies of are now one implementation. These originate in Pulp's own canvas, renderer and view hosts and have no counterpart framework backport.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-design-viewport-inverse",
+    "pulp-test-plugin-frame-clip",
+    "pulp-test-plugin-frame-renderer",
+    "pulp-test-present-policy",
+    "pulp-test-retained-layer-store",
+    "pulp-test-win-plugin-input-router"
+  ],
+  "disposition": "pulp-only"
+}

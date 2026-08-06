@@ -1,7 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
-#include <pulp/format/gpu_host_select.hpp>
+#include <pulp/format/editor_idle_pump.hpp>
+#include <pulp/format/editor_ui.hpp>
 #include <pulp/format/detail/au_v2_editor_resize.hpp>
+#include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/runtime/message_channel.hpp>
@@ -10,17 +12,29 @@
 #include <pulp/view/auto_ui.hpp>
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/host_param_surface.hpp>
+#include <pulp/view/parameter_binding.hpp>
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/view/window_host.hpp>
+#include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <chrono>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
+
+#ifndef PULP_REPO_ROOT
+#define PULP_REPO_ROOT "."
+#endif
 
 using namespace pulp;
 
@@ -70,6 +84,18 @@ private:
     std::optional<std::string> previous_;
 };
 
+class CountingWindowHost final : public view::WindowHost {
+public:
+    void show() override {}
+    void hide() override {}
+    bool is_visible() const override { return true; }
+    void repaint() override { ++repaint_count; }
+    void set_close_callback(std::function<void()>) override {}
+    void run_event_loop() override {}
+
+    int repaint_count = 0;
+};
+
 class StubProcessor : public format::Processor {
 public:
     int opened_count = 0;
@@ -106,6 +132,36 @@ public:
     }
 };
 
+class BoundControlsView final : public view::View {
+public:
+    explicit BoundControlsView(state::StateStore& store) {
+        auto knob = std::make_unique<view::Knob>();
+        knob_ = knob.get();
+        bindings_.push_back(view::bind_parameter(*knob_, store, 1));
+        add_child(std::move(knob));
+
+        auto fader = std::make_unique<view::Fader>();
+        fader_ = fader.get();
+        bindings_.push_back(view::bind_parameter(*fader_, store, 1));
+        add_child(std::move(fader));
+    }
+
+    view::Knob* knob_ = nullptr;
+    view::Fader* fader_ = nullptr;
+    std::vector<view::ParameterBinding> bindings_;
+};
+
+class MultiBoundProcessor final : public StubProcessor {
+public:
+    std::unique_ptr<view::View> create_view() override {
+        auto controls = std::make_unique<BoundControlsView>(state());
+        views.push_back(controls.get());
+        return controls;
+    }
+
+    std::vector<BoundControlsView*> views;
+};
+
 class ScriptedCustomViewProcessor : public StubProcessor {
 public:
     view::ScriptedUiSession* active_scripted_ui() override {
@@ -124,6 +180,13 @@ public:
     }
 
     std::unique_ptr<view::ScriptedUiSession> scripted_session;
+};
+
+class ThrowingInPlaceOptInProcessor final : public ScriptedCustomViewProcessor {
+public:
+    bool supports_in_place_scripted_ui_reload() const override {
+        throw std::runtime_error("fixture opt-in failure");
+    }
 };
 
 // Uses the AutoUi default editor with NO processor-declared size (unlike
@@ -335,6 +398,19 @@ TEST_CASE("ViewBridge detects processor-owned scripted custom views",
 
     const auto& const_bridge = bridge;
     REQUIRE(const_bridge.scripted_ui() == p.scripted_session.get());
+}
+
+TEST_CASE("ViewBridge contains throwing scripted reload opt-in callbacks",
+          "[view_bridge][scripted-ui][exceptions]") {
+    ThrowingInPlaceOptInProcessor p;
+    state::StateStore store;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+    REQUIRE(bridge.uses_script_ui());
+    REQUIRE(bridge.scripted_ui() == p.scripted_session.get());
 }
 
 TEST_CASE("Processor scripted UI accessors default to null", "[view_bridge][scripted-ui]") {
@@ -656,6 +732,129 @@ TEST_CASE("ViewBridge destructor closes view", "[view_bridge]") {
     REQUIRE(p.closed_count == 1);
 }
 
+TEST_CASE("ViewBridge idle pump reconciles bound widgets after state restore",
+          "[view_bridge][state-restore][repaint]") {
+    StubProcessor processor;
+    state::StateStore store;
+    processor.set_state_store(&store);
+    processor.define_parameters(store);
+    auto controls = std::make_unique<BoundControlsView>(store);
+    auto* knob = controls->knob_;
+    auto* fader = controls->fader_;
+    processor.custom_view = std::move(controls);
+
+    format::ViewBridge bridge(processor, store);
+    REQUIRE(bridge.open());
+    bridge.notify_attached();
+    CountingWindowHost host;
+    bridge.view()->set_window_host(&host);
+
+    store.set_value(1, -12.0f);
+    const auto preset =
+        format::plugin_state_io::serialize(store, processor);
+    store.set_value(1, 6.0f);
+    REQUIRE(knob->value() == Catch::Approx(store.get_normalized(1)));
+    REQUIRE(fader->value() == Catch::Approx(store.get_normalized(1)));
+    const auto revision = store.state_restore_revision();
+    host.repaint_count = 0;
+
+    REQUIRE(format::plugin_state_io::deserialize(
+        preset, store, processor));
+    REQUIRE(store.state_restore_revision() == revision + 1);
+    REQUIRE(host.repaint_count == 0);
+    REQUIRE(knob->value() != Catch::Approx(store.get_normalized(1)));
+    REQUIRE(fader->value() != Catch::Approx(store.get_normalized(1)));
+
+    int audio_callbacks = 0;
+    auto audio_listener = store.add_audio_listener(
+        [&audio_callbacks](state::ParamID, float) { ++audio_callbacks; });
+
+    state::ListenerToken removed_listener;
+    int removed_callbacks = 0;
+    auto removing_listener = store.add_listener(
+        [&removed_listener](state::ParamID, float) {
+            removed_listener.reset();
+        },
+        state::ListenerThread::Main,
+        state::ListenerRestoreBehavior::Reconcile);
+    removed_listener = store.add_listener(
+        [&removed_callbacks](state::ParamID, float) { ++removed_callbacks; },
+        state::ListenerThread::Main,
+        state::ListenerRestoreBehavior::Reconcile);
+
+    auto pump = format::make_editor_idle_pump(bridge);
+    pump();
+    REQUIRE(host.repaint_count > 0);
+    REQUIRE(knob->value() == Catch::Approx(store.get_normalized(1)));
+    REQUIRE(fader->value() == Catch::Approx(store.get_normalized(1)));
+    REQUIRE(audio_callbacks == 0);
+    REQUIRE(removed_callbacks == 0);
+    const auto repaint_count = host.repaint_count;
+    pump();
+    REQUIRE(host.repaint_count == repaint_count);
+}
+
+TEST_CASE("shared StateStore reconciles one restore once across ViewBridges",
+          "[view_bridge][state-restore][multi-view]") {
+    MultiBoundProcessor processor;
+    state::StateStore store;
+    processor.set_state_store(&store);
+    processor.define_parameters(store);
+
+    format::ViewBridge first(processor, store);
+    format::ViewBridge second(processor, store);
+    REQUIRE(first.open());
+    REQUIRE(second.open());
+    REQUIRE(processor.views.size() == 2);
+
+    CountingWindowHost first_host;
+    CountingWindowHost second_host;
+    first.view()->set_window_host(&first_host);
+    second.view()->set_window_host(&second_host);
+
+    store.set_value(1, -18.0f);
+    const auto preset = store.serialize();
+    store.set_value(1, 6.0f);
+
+    int restore_callbacks = 0;
+    const auto restore_probe = store.add_listener(
+        [&restore_callbacks](state::ParamID, float) {
+            ++restore_callbacks;
+        },
+        state::ListenerThread::Main,
+        state::ListenerRestoreBehavior::Reconcile);
+    int ordinary_callbacks = 0;
+    const auto ordinary_probe = store.add_listener(
+        [&ordinary_callbacks](state::ParamID, float) {
+            ++ordinary_callbacks;
+        },
+        state::ListenerThread::Main);
+
+    first_host.repaint_count = 0;
+    second_host.repaint_count = 0;
+    REQUIRE(store.deserialize(preset));
+    auto first_pump = format::make_editor_idle_pump(first);
+    auto second_pump = format::make_editor_idle_pump(second);
+    first_pump();
+
+    REQUIRE(restore_callbacks == 1);
+    REQUIRE(ordinary_callbacks == 0);
+    for (const auto* controls : processor.views) {
+        REQUIRE(controls->knob_->value()
+                == Catch::Approx(store.get_normalized(1)));
+        REQUIRE(controls->fader_->value()
+                == Catch::Approx(store.get_normalized(1)));
+    }
+    REQUIRE(first_host.repaint_count > 0);
+    REQUIRE(second_host.repaint_count > 0);
+
+    const auto second_repaints_before_own_pump = second_host.repaint_count;
+    second_pump();
+    REQUIRE(restore_callbacks == 1);
+    REQUIRE(ordinary_callbacks == 0);
+    REQUIRE(second_host.repaint_count > second_repaints_before_own_pump);
+}
+
 TEST_CASE("ViewBridge tolerates the host freeing the Processor before the bridge",
           "[view_bridge][crash][lifecycle]") {
     // AU gives the audio unit (the Processor) and the view controller (which
@@ -676,7 +875,7 @@ TEST_CASE("ViewBridge tolerates the host freeing the Processor before the bridge
     REQUIRE(bridge.open());
     bridge.notify_attached();  // editor open + attached, as in a host
 
-    auto pump = format::make_scripted_idle_pump(bridge);
+    auto pump = format::make_editor_idle_pump(bridge);
 
     // The adapter's contract: signal death BEFORE freeing the Processor.
     bridge.notify_processor_destroyed();
@@ -710,6 +909,85 @@ TEST_CASE("dev_editor_hot_reload_enabled honors PULP_DEV_HOT_RELOAD", "[format][
     }
 }
 
+// Every host-embedded editor derives its Options from this one factory, so the
+// developer opt-in reaches all of them and a new option lands in one place.
+TEST_CASE("ViewBridge::Options::hosted_editor tracks the developer opt-in",
+          "[format][view-bridge][hot-reload]") {
+    ScopedEnvVar hot_reload("PULP_DEV_HOT_RELOAD");
+
+    hot_reload.unset();
+    CHECK_FALSE(format::ViewBridge::Options::hosted_editor().enable_hot_reload);
+
+    hot_reload.set("1");
+    CHECK(format::ViewBridge::Options::hosted_editor().enable_hot_reload);
+
+    // The role is what makes this the *primary editor* factory; an auxiliary
+    // panel must not silently pick it up.
+    CHECK(format::ViewBridge::Options::hosted_editor().role == format::ViewRole::Editor);
+}
+
+// Structural guard. VST3 and CLAP shipped without scripted-UI hot reload because
+// they built their ViewBridge from the no-Options constructor, so a sweep over
+// call sites that named `enable_hot_reload` never reached them. Grepping for a
+// field name cannot find a call site that omits it — so assert the positive
+// instead: every format adapter that embeds an editor in a host constructs its
+// bridge from Options::hosted_editor().
+//
+// The standalone host is the one deliberate exception: it forces hot reload on
+// unconditionally because it is itself the dev tool.
+TEST_CASE("every hosted format adapter builds its editor from hosted_editor()",
+          "[format][view-bridge][hot-reload]") {
+    namespace fs = std::filesystem;
+    const fs::path repo_root{PULP_REPO_ROOT};
+
+    struct AdapterSource {
+        const char* path;
+        const char* why;
+    };
+    // Each of these constructs a ViewBridge for an editor embedded in a host.
+    // Adding a new format adapter with an editor means adding it here.
+    const AdapterSource hosted[] = {
+        {"core/format/include/pulp/format/clap_entry.hpp", "CLAP gui_create"},
+        {"core/format/src/vst3_plug_view.cpp", "VST3 IPlugView"},
+        {"core/format/src/au_view_controller_mac.mm", "AU v3 macOS"},
+        {"core/format/src/au_view_controller_ios.mm", "AU v3 iOS"},
+        {"core/format/src/au_v2_cocoa_view.mm", "AU v2 Cocoa"},
+        {"core/format/src/aax_effect_gui.cpp", "AAX effect GUI"},
+    };
+
+    for (const auto& adapter : hosted) {
+        const auto path = repo_root / adapter.path;
+        INFO("hosted adapter: " << adapter.why << " (" << adapter.path << ")");
+        REQUIRE(fs::exists(path));
+
+        std::ifstream in(path);
+        REQUIRE(in.good());
+        const std::string source{std::istreambuf_iterator<char>(in),
+                                 std::istreambuf_iterator<char>()};
+
+        // Positive: it uses the shared factory.
+        INFO("does not construct its ViewBridge from Options::hosted_editor()");
+        CHECK(source.find("Options::hosted_editor()") != std::string::npos);
+
+        // Negative: it does not hand-assemble the flag, which is how the two
+        // adapters drifted in the first place.
+        INFO("hand-assembles enable_hot_reload instead of using the factory");
+        CHECK(source.find("enable_hot_reload") == std::string::npos);
+    }
+
+    // Negative control: prove the scan can actually observe the thing it
+    // asserts. The standalone host genuinely does hand-assemble the flag, so a
+    // scan that reports "clean" for it is a scan that is not reading anything.
+    const auto standalone = repo_root / "core/format/src/standalone.cpp";
+    REQUIRE(fs::exists(standalone));
+    std::ifstream standalone_in(standalone);
+    REQUIRE(standalone_in.good());
+    const std::string standalone_source{std::istreambuf_iterator<char>(standalone_in),
+                                        std::istreambuf_iterator<char>()};
+    INFO("standalone no longer hand-assembles Options — the scan above proves nothing");
+    CHECK(standalone_source.find("enable_hot_reload") != std::string::npos);
+}
+
 // ── Live editor reload (live-swap 1.9) ───────────────────────────────────────
 // A processor whose editor rebuilds in place when its logic hot-swaps: it
 // reports supports_editor_reload() and bumps editor_reload_generation(), and its
@@ -739,6 +1017,53 @@ public:
 
     // Simulate a hot-swap: new logic content + a bumped generation.
     void hot_swap_to(int v) { variant = v; ++gen; }
+};
+
+class LegacyReloadingScriptedProcessor final : public ScriptedCustomViewProcessor {
+public:
+    std::uint64_t generation = 0;
+    int create_count = 0;
+
+    bool supports_editor_reload() const override { return true; }
+    std::uint64_t editor_reload_generation() const override { return generation; }
+    std::unique_ptr<view::View> create_view() override {
+        ++create_count;
+        return ScriptedCustomViewProcessor::create_view();
+    }
+    void on_view_closed(view::View&) override { scripted_session.reset(); }
+};
+
+class ReloadingScriptedProcessor final : public StubProcessor {
+public:
+    explicit ReloadingScriptedProcessor(std::filesystem::path script_path)
+        : script_path(std::move(script_path)) {}
+
+    std::uint64_t generation = 0;
+    int create_count = 0;
+    bool allow_in_place_reload = false;
+    std::filesystem::path script_path;
+    std::unique_ptr<view::ScriptedUiSession> session;
+
+    bool supports_editor_reload() const override { return true; }
+    std::uint64_t editor_reload_generation() const override { return generation; }
+    bool supports_in_place_scripted_ui_reload() const override { return true; }
+    bool reload_active_scripted_ui_in_place(std::string* error) override {
+        return allow_in_place_reload && session != nullptr && session->reload(error);
+    }
+    view::ScriptedUiSession* active_scripted_ui() override { return session.get(); }
+    const view::ScriptedUiSession* active_scripted_ui() const override {
+        return session.get();
+    }
+    std::unique_ptr<view::View> create_view() override {
+        ++create_count;
+        auto root = std::make_unique<view::View>();
+        session = std::make_unique<view::ScriptedUiSession>(
+            *root, state(), view::ScriptedUiOptions{.script_path = script_path});
+        std::string error;
+        if (!session->load(&error)) return nullptr;
+        return root;
+    }
+    void on_view_closed(view::View&) override { session.reset(); }
 };
 }  // namespace
 
@@ -782,6 +1107,86 @@ TEST_CASE("ViewBridge rebuilds the open editor in place on reload", "[view_bridg
     REQUIRE(dynamic_cast<view::Label*>(root->child_at(0))->text() == "B");
 }
 
+TEST_CASE("ViewBridge reloads processor-owned scripted sessions in place",
+          "[view_bridge][reload][scripted-ui]") {
+    const auto temp_dir = std::filesystem::temp_directory_path()
+        / ("pulp-view-bridge-scripted-reload-"
+           + std::to_string(std::chrono::steady_clock::now()
+                                .time_since_epoch().count()));
+    struct TempDirCleanup {
+        std::filesystem::path path;
+        ~TempDirCleanup() {
+            std::error_code ignored;
+            std::filesystem::remove_all(path, ignored);
+        }
+    } cleanup{temp_dir};
+    REQUIRE(std::filesystem::create_directories(temp_dir));
+    const auto script_path = temp_dir / "ui.js";
+    {
+        std::ofstream script(script_path);
+        script << R"(createLabel("reload-label", "before", "root");)";
+        REQUIRE(script.good());
+    }
+
+    state::StateStore store;
+    ReloadingScriptedProcessor proc(script_path);
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    format::ViewBridge bridge(proc, store);
+    REQUIRE(bridge.open());
+    bridge.notify_attached();
+    auto* stable_root = bridge.view();
+    auto* stable_session = proc.session.get();
+    REQUIRE(stable_root != nullptr);
+    REQUIRE(stable_session != nullptr);
+    REQUIRE(proc.create_count == 1);
+    REQUIRE(stable_root->child_count() == 1);
+    REQUIRE(dynamic_cast<view::Label*>(stable_root->child_at(0))->text()
+            == "before");
+
+    {
+        std::ofstream script(script_path, std::ios::trunc);
+        script << R"(createLabel("reload-label", "after", "root");)";
+        REQUIRE(script.good());
+    }
+    ++proc.generation;
+    REQUIRE_FALSE(bridge.poll_editor_reload());
+    REQUIRE(proc.create_count == 1);
+    REQUIRE(proc.session.get() == stable_session);
+    proc.allow_in_place_reload = true;
+    REQUIRE(bridge.poll_editor_reload());
+    REQUIRE(proc.create_count == 1);
+    REQUIRE(bridge.view() == stable_root);
+    REQUIRE(proc.session.get() == stable_session);
+    REQUIRE(proc.active_scripted_ui() == bridge.scripted_ui());
+    REQUIRE(stable_root->child_count() == 1);
+    REQUIRE(dynamic_cast<view::Label*>(stable_root->child_at(0))->text()
+            == "after");
+    bridge.close();
+    REQUIRE(proc.session == nullptr);
+}
+
+TEST_CASE("ViewBridge keeps legacy scripted processors on create-view reload",
+          "[view_bridge][reload][scripted-ui]") {
+    state::StateStore store;
+    LegacyReloadingScriptedProcessor proc;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    format::ViewBridge bridge(proc, store);
+    REQUIRE(bridge.open());
+    bridge.notify_attached();
+    auto* stable_root = bridge.view();
+    REQUIRE(stable_root != nullptr);
+    REQUIRE(proc.create_count == 1);
+
+    ++proc.generation;
+    REQUIRE(bridge.poll_editor_reload());
+    REQUIRE(bridge.view() == stable_root);
+    REQUIRE(proc.create_count == 2);
+    bridge.close();
+    REQUIRE(proc.scripted_session == nullptr);
+}
+
 TEST_CASE("ViewBridge editor reload is inert for a normal processor", "[view_bridge][reload][issue-1_9]") {
     state::StateStore store;
     StubProcessor proc;  // supports_editor_reload() == false by default
@@ -795,6 +1200,48 @@ TEST_CASE("ViewBridge editor reload is inert for a normal processor", "[view_bri
     REQUIRE_FALSE(bridge.poll_editor_reload());
 }
 
+TEST_CASE("processor value-channel access fails closed after owner destruction",
+          "[view_bridge][value-channel][owner-lifetime][lifecycle]") {
+    runtime::AliveToken owner_alive;
+    view::ValueChannelAccess access;
+    int processor_visits = 0;
+
+    struct ChannelProcessor final : StubProcessor {
+        explicit ChannelProcessor(int& visits) : visits_(visits) {
+            channels_.declare_meter("level");
+        }
+        void visit_value_channels(
+            const std::function<void(view::ValueChannelSet*)>& visitor) override {
+            ++visits_;
+            visitor(&channels_);
+        }
+        int& visits_;
+        view::ValueChannelSet channels_;
+    };
+
+    {
+        ChannelProcessor processor(processor_visits);
+        access = format::processor_value_channel_access(
+            processor, owner_alive.capture());
+        bool saw_channels = false;
+        access([&](view::ValueChannelSet* channels) {
+            saw_channels = channels != nullptr;
+        });
+        CHECK(saw_channels);
+        CHECK(processor_visits == 1);
+
+        // The owner contract retires the token before releasing Processor.
+        owner_alive.retire();
+    }
+
+    bool saw_channels_after_destruction = true;
+    access([&](view::ValueChannelSet* channels) {
+        saw_channels_after_destruction = channels != nullptr;
+    });
+    CHECK_FALSE(saw_channels_after_destruction);
+    CHECK(processor_visits == 1);
+}
+
 // Regression: the GPU display-link scripted-idle pump is dispatched to the main
 // queue and can run AFTER its ViewBridge is destroyed — a host reloading the
 // embedded view replaces the bridge while the host still holds the pump, and
@@ -802,12 +1249,12 @@ TEST_CASE("ViewBridge editor reload is inert for a normal processor", "[view_bri
 // liveness token, the pump dereferenced the freed bridge (store()/scripted_ui())
 // → EXC_BAD_ACCESS crash embedding the AU in Ableton Live. The pump must now
 // read the token and no-op once the bridge is gone.
-TEST_CASE("scripted idle pump no-ops after its bridge is destroyed (no UAF)",
+TEST_CASE("editor idle pump no-ops after its bridge is destroyed (no UAF)",
           "[view_bridge][idle-pump][crash]") {
     StubProcessor p;
     state::StateStore store;
     auto bridge = std::make_unique<format::ViewBridge>(p, store);
-    auto pump = format::make_scripted_idle_pump(*bridge);
+    auto pump = format::make_editor_idle_pump(*bridge);
     pump();                 // bridge alive: safe
     bridge.reset();         // destroy the bridge out from under the pump
     pump();                 // must NOT touch the freed bridge — token is false
@@ -818,7 +1265,7 @@ TEST_CASE("scripted idle pump no-ops after its bridge is destroyed (no UAF)",
 // retain its editor after destroying that instance. The bridge itself is still
 // alive in this ordering, so its bridge-lifetime token cannot protect the store.
 // The adapter-owned token must fail closed before either referenced object dies.
-TEST_CASE("scripted idle pump no-ops after its processor owner is destroyed",
+TEST_CASE("editor idle pump no-ops after its processor owner is destroyed",
           "[view_bridge][idle-pump][crash][owner-lifetime][lifecycle]") {
     struct Owner {
         state::StateStore store;
@@ -829,7 +1276,7 @@ TEST_CASE("scripted idle pump no-ops after its processor owner is destroyed",
     auto owner = std::make_unique<Owner>();
     auto bridge = std::make_unique<format::ViewBridge>(
         owner->processor, owner->store, owner->alive.capture());
-    auto pump = format::make_scripted_idle_pump(*bridge);
+    auto pump = format::make_editor_idle_pump(*bridge);
 
     pump();
     owner.reset();  // Processor + StateStore are now dangling bridge references.
@@ -855,7 +1302,7 @@ TEST_CASE("scripted editor teardown-order matrix rejects every stale callback",
         std::unique_ptr<format::ViewBridge> bridge =
             std::make_unique<format::ViewBridge>(
                 *processor, *store, owner_alive.capture());
-        std::function<void()> pump = format::make_scripted_idle_pump(*bridge);
+        std::function<void()> pump = format::make_editor_idle_pump(*bridge);
 
         void retire_owner() { owner_alive.retire(); }
     };
@@ -1157,7 +1604,7 @@ TEST_CASE("host automation moves an imported design's control",
     store.set_normalized_rt(1, 0.75f);
 
     // The production editor idle pump runs on the UI thread.
-    auto pump = format::make_scripted_idle_pump(bridge);
+    auto pump = format::make_editor_idle_pump(bridge);
     pump();
 
     CHECK(proc.last_frame->element_value(0) == Catch::Approx(0.75f));
@@ -1175,7 +1622,7 @@ TEST_CASE("the host pull reaches a design frame nested below the root",
     REQUIRE(proc.last_frame != nullptr);
 
     store.set_normalized_rt(1, 0.5f);
-    format::make_scripted_idle_pump(bridge)();
+    format::make_editor_idle_pump(bridge)();
 
     CHECK(proc.last_frame->element_value(0) == Catch::Approx(0.5f));
     // ...and reached exactly that one frame, not the containers above it.
@@ -1199,7 +1646,7 @@ TEST_CASE("the host pull is silent: it never echoes back as a gesture",
     proc.last_frame->on_gesture_end = [&](int) { ++ends; };
 
     store.set_normalized_rt(1, 0.4f);
-    auto pump = format::make_scripted_idle_pump(bridge);
+    auto pump = format::make_editor_idle_pump(bridge);
     pump();
 
     CHECK(proc.last_frame->element_value(0) == Catch::Approx(0.4f));
@@ -1222,7 +1669,7 @@ TEST_CASE("repeated pulls converge and do not drift the host value",
 
     // A value that does NOT sit on a quantization boundary.
     store.set_normalized_rt(1, 0.3f);
-    auto pump = format::make_scripted_idle_pump(bridge);
+    auto pump = format::make_editor_idle_pump(bridge);
     pump();
 
     const float settled_view = proc.last_frame->element_value(0);
@@ -1244,7 +1691,7 @@ TEST_CASE("a user gesture still wins while the pull is live",
     proc.define_parameters(store);
     format::ViewBridge bridge(proc, store);
     REQUIRE(bridge.open());
-    auto pump = format::make_scripted_idle_pump(bridge);
+    auto pump = format::make_editor_idle_pump(bridge);
     pump();
 
     proc.last_frame->simulate_drag({20, 20}, {20, 5});   // user turns the knob up
@@ -1323,7 +1770,7 @@ TEST_CASE("a discrete pull settles on the host's own value, across the range",
         proc.define_parameters(store);
         format::ViewBridge bridge(proc, store);
         REQUIRE(bridge.open());
-        auto pump = format::make_scripted_idle_pump(bridge);
+        auto pump = format::make_editor_idle_pump(bridge);
 
         for (int step = 0; step <= 200; ++step) {
             const float v = step / 200.0f;
@@ -1613,4 +2060,87 @@ TEST_CASE("AU v2 editor resize commits only an exact native Cocoa size",
 
     p.set_editor_resize_handler(owner, nullptr);
     REQUIRE_FALSE(p.request_editor_resize(900, 700));
+}
+
+// ── Toggle parameter gestures ───────────────────────────────────────────────
+//
+// A Toggle was the one interactive widget wire_callbacks() never handed to
+// wire_parameter_gestures(): Knob, Fader and RangeSlider all did, Toggle did
+// not. Two things followed, and both are user-visible.
+//
+// First, a toggle's edit was never bracketed by a host gesture, so a host had
+// no undo group and no touch/release for it — a knob's click-drag was recorded
+// and a switch's click was not.
+//
+// Second, and worse: apply_param_binding re-asserts the bound store value onto
+// the widget EVERY frame, and its only escape is `w->is_gesture_active()`. A
+// Toggle has no drag lifecycle, so that predicate was permanently false and the
+// binding could overwrite the click on the very next frame — a switch that
+// visibly refused to move.
+
+TEST_CASE("a bound Toggle brackets its click in a host parameter gesture",
+          "[view-bridge][host-param]") {
+    using namespace pulp::view;
+    ScriptEngine engine;
+    View root;
+    pulp::state::StateStore store;
+    store.add_parameter({.id = 1, .name = "freeze", .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+
+    std::vector<std::string> events;
+    store.set_gesture_callbacks(
+        [&](pulp::state::ParamID id) { events.push_back("begin:" + std::to_string(id)); },
+        [&](pulp::state::ParamID id) { events.push_back("end:" + std::to_string(id)); });
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(
+        "createToggle('freeze', '');"
+        "bindWidgetToParam('freeze', 'freeze');"
+        "on('freeze', 'toggle', function (v) { setParam('freeze', v ? 1 : 0); });");
+
+    auto* toggle = dynamic_cast<Toggle*>(bridge.widget("freeze"));
+    REQUIRE(toggle != nullptr);
+
+    toggle->on_mouse_down({10.0f, 10.0f});
+
+    // The edit reached the parameter...
+    CHECK(toggle->is_on());
+    CHECK(store.get_normalized(1) == Catch::Approx(1.0f));
+    // ...bracketed by exactly one gesture, and closed.
+    CHECK(events == std::vector<std::string>{"begin:1", "end:1"});
+    CHECK(store.open_gesture_count() == 0);
+
+    // A second click is its own gesture, not a continuation of the first.
+    toggle->on_mouse_down({10.0f, 10.0f});
+    CHECK(!toggle->is_on());
+    CHECK(store.get_normalized(1) == Catch::Approx(0.0f));
+    CHECK(events.size() == 4);
+    CHECK(store.open_gesture_count() == 0);
+}
+
+TEST_CASE("an unbound Toggle still dispatches without opening a gesture",
+          "[view-bridge][host-param]") {
+    // No binding means no parameter to bracket. The click must still reach the
+    // script rather than being swallowed by the gesture plumbing.
+    using namespace pulp::view;
+    ScriptEngine engine;
+    View root;
+    pulp::state::StateStore store;
+
+    int begins = 0;
+    store.set_gesture_callbacks([&](pulp::state::ParamID) { ++begins; },
+                                [](pulp::state::ParamID) {});
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(
+        "var seen = 0;"
+        "createToggle('plain', '');"
+        "on('plain', 'toggle', function (v) { seen = seen + 1; });");
+
+    auto* toggle = dynamic_cast<Toggle*>(bridge.widget("plain"));
+    REQUIRE(toggle != nullptr);
+    toggle->on_mouse_down({10.0f, 10.0f});
+
+    CHECK(toggle->is_on());
+    CHECK(begins == 0);
+    CHECK(store.open_gesture_count() == 0);
 }

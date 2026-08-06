@@ -1013,6 +1013,58 @@ TEST_CASE("tool install all succeeds with cached binary and python tools",
     REQUIRE(output.out.str().find("Installed UV 3.0.0") != std::string::npos);
 }
 
+TEST_CASE("explicit-only tool is skipped by install all but named install works",
+          "[cli][tool-registry][install]") {
+    TempDir tmp;
+    ScopedEnv home{"PULP_HOME", tmp.path / "home"};
+    fs::create_directories(tmp.path / "repo" / "tools" / "packages");
+    ScopedCurrentPath cwd{tmp.path / "repo"};
+
+    const auto platform = current_platform_key();
+    write_file(
+        tmp.path / "repo" / "tools" / "packages" / "tool-registry.json",
+        std::string(R"({
+  "schema_version": 1,
+  "tools": {
+    "named-only": {
+      "display_name": "Named Only",
+      "description": "Must require an explicit name",
+      "install_method": "binary_download",
+      "pinned_version": "1.0.0",
+      "explicit_install_only": true,
+      "binary_sources": {
+        ")") + platform + R"(": {
+          "url_template": "https://example.invalid/named-only-${version}.zip",
+          "archive_format": "zip",
+          "binary_name": "named-only"
+        }
+      }
+    }
+  }
+}
+)");
+    const auto binary = managed_binary_path(
+        tools_install_home(), "named-only", "1.0.0", "named-only");
+    touch_file(binary);
+    write_file(
+        binary.parent_path() / "manifest.json",
+        "{\"version\":\"1.0.0\",\"tool_id\":\"named-only\"}\n");
+
+    {
+        ScopedOutput output;
+        REQUIRE(cmd_tool({"install", "--all"}) == 0);
+        CHECK(output.out.str().find("Named Only") == std::string::npos);
+        CHECK(output.err.str().empty());
+    }
+    {
+        ScopedOutput output;
+        REQUIRE(cmd_tool({"install", "named-only"}) == 0);
+        CHECK(output.out.str().find("Installed Named Only 1.0.0")
+              != std::string::npos);
+        CHECK(output.err.str().empty());
+    }
+}
+
 TEST_CASE("tool uninstall removes managed binary and python tool roots",
           "[cli][tool-registry][uninstall][issue-643]") {
     TempDir tmp;

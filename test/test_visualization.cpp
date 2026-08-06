@@ -2,6 +2,8 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/visualization_bridge.hpp>
 #include <pulp/view/widgets.hpp>
+
+#include "support/thread_progress.hpp"
 #include <cmath>
 #include <vector>
 #include <thread>
@@ -268,6 +270,15 @@ TEST_CASE("VisualizationBridge lock-free stress test", "[view][vizbridge]") {
 
     // Run for 500ms — enough for even slow VMs (ARM64 x64 emulation)
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    // That window is a duration budget, not an ordering guarantee: nothing puts
+    // either thread's first iteration inside it, so a saturated host can spend
+    // the whole window before they are scheduled and leave both counts at zero.
+    // Wait for the floor the assertions below need; the deadline turns a bridge
+    // that genuinely never advances into a failed REQUIRE rather than a hang.
+    (void)pulp::test::wait_for_condition([&] {
+        return write_count.load(std::memory_order_relaxed) > 5
+            && read_count.load(std::memory_order_relaxed) > 5;
+    });
     running.store(false, std::memory_order_relaxed);
 
     audio_thread.join();

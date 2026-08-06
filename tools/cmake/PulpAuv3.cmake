@@ -39,6 +39,9 @@ function(_pulp_add_auv3 target name bundle_id version manufacturer category plug
     set(au_type "${_pulp_auv3_meta_TYPE}")
     set(au_tag "${_pulp_auv3_meta_TAG}")
     set(_au_version_int "${_pulp_auv3_meta_VERSION_INT}")
+    _pulp_metadata_claim_au_component("${target}"
+        "pulp_add_plugin(${target}) AUv3"
+        "${au_type}" "${plugin_code}" "${manufacturer_code}")
 
     # Find per-plugin AU v3 entry (convention: au_v3_entry.cpp in plugin
     # source dir). Uses PULP_AUV3_PLUGIN to register the processor factory
@@ -135,9 +138,13 @@ function(_pulp_add_auv3_macos_framework target name bundle_id version auv3_entry
         INSTALL_NAME_DIR "@rpath"
     )
 
-    if(COMMAND target_copy_webgpu_binaries)
-        target_copy_webgpu_binaries(${fw_target})
-    endif()
+    # Runtime sidecars: the wgpu runtime, the Apple @loader_path rpath, and
+    # Skia's icudtl.dat on Windows. Unguarded on purpose —
+    # pulp_stage_runtime_dependencies() is defined in both the source and
+    # installed-SDK builds, and the old `if(COMMAND ...)` guard is what let
+    # a missing definition silently skip staging entirely.
+    pulp_stage_runtime_dependencies(${fw_target})
+    pulp_assert_runtime_dependencies_staged(${fw_target})
     _pulp_attach_plugin_runtime_manifest(${target} ${fw_target})
 endfunction()
 
@@ -445,9 +452,13 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
         PULP_AUV3_BUNDLE_ID         "${bundle_id}"
     )
 
-    if(COMMAND target_copy_webgpu_binaries)
-        target_copy_webgpu_binaries(${target}_AUv3)
-    endif()
+    # Runtime sidecars: the wgpu runtime, the Apple @loader_path rpath, and
+    # Skia's icudtl.dat on Windows. Unguarded on purpose —
+    # pulp_stage_runtime_dependencies() is defined in both the source and
+    # installed-SDK builds, and the old `if(COMMAND ...)` guard is what let
+    # a missing definition silently skip staging entirely.
+    pulp_stage_runtime_dependencies(${target}_AUv3)
+    pulp_assert_runtime_dependencies_staged(${target}_AUv3)
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_AUv3)
 
     # Embed three.iife.js + web-compat-three-shim.js into the .appex

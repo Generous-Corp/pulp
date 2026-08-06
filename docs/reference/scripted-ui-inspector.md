@@ -1,11 +1,11 @@
 # Scripted-UI runtime inspector
 
-Pulp's scripted UIs (JS via `@pulp/react` on QuickJS / JavaScriptCore / V8) can
-be inspected at runtime over the existing inspector protocol: evaluate
-expressions against the live engine, read honest debug capabilities, tail device
-logs, and abort a runaway evaluation. This is a **runtime inspector / debug
-console**, not a step debugger — see [runtime capabilities](#runtimegetcapabilities)
-for why.
+Pulp contains reusable scripted-UI inspector components for QuickJS,
+JavaScriptCore, and V8. A standalone launched with an explicit Development
+Inspector profile attaches those components to its authenticated local session.
+Inspector-off standalones and every normal plugin-format launch construct no
+endpoint. The surface is a **runtime inspector / debug console**, not a step
+debugger.
 
 ## Why not a step debugger (yet)
 
@@ -21,8 +21,11 @@ backend, or the Chrome DevTools inspector that JSC/V8 expose), gated behind the
 
 ## Protocol methods
 
-All methods speak the standard inspector JSON-RPC (`Domain.method` + `params`),
-reachable via `pulp inspect --command … --params …` or any inspector client.
+The component methods use the inspector JSON message shape (`Domain.method` +
+`params`). They are reachable only after `pulp run --inspect` (or another
+explicit profile) in a GPU-enabled desktop build constructs and wires the
+standalone server; `pulp inspect`
+is the experimental low-level client.
 
 ### `Runtime.getCapabilities`
 
@@ -55,16 +58,37 @@ A client MUST branch on these flags rather than assuming DAP-shaped features.
 Evaluates against `globalThis` on the engine thread. The request is **marshaled
 from the inspector's background thread onto the UI/engine thread** and runs at a
 safe point in the frame loop (never mid-paint/layout). One evaluation is in
-flight at a time — a concurrent request returns a `busy` error. A JS exception
+flight at a time — a concurrent direct dispatch returns `busy`, while the
+standalone transport's single-slot worker rejects another queued evaluation.
+A JS exception
 returns an error carrying the thrown message. A hung evaluation times out (~2 s)
 and is interrupted automatically. The result is always valid JSON — a non-finite
 number (`1/0`) is reported as `null` rather than a bare `NaN`/`Infinity` token.
+Decoded code is capped at 64 KiB. Serialized results and complete encoded
+responses are each capped at 1 MiB. QuickJS enforces the result byte, depth,
+and cycle limits while walking the value rather than materializing an
+unbounded intermediate object.
+
+After every evaluation, the host rebuilds the scripted-UI realm from its
+source while preserving widget values. The response still describes the live
+realm at the evaluation safe point, but global mutations, timers, animation
+frames, Promise jobs, and event callbacks created by evaluated code are
+discarded before another frame pump can execute them outside the request
+deadline. Realm reconstruction gets a fixed 500 ms cleanup grace after the
+two-second evaluation deadline; the enclosing main-thread RPC still bounds the
+complete operation at three seconds. If that reset fails, the host detaches and
+destroys the scripted engine instead of leaving the evaluated realm active.
 
 **Opt-in required.** Evaluate is arbitrary code execution in the plugin's JS
 context, so it is **off by default** even when the debug console is wired: a host
-must call `DomainHandler::set_runtime_eval_enabled(true)` for a trusted dev
-session. Until then, `Runtime.evaluate` / `Runtime.interrupt` return a "disabled"
-error and `getCapabilities` reports `canEvaluate:false`.
+must separately enable it for a trusted dev session. The live
+`ScriptedUiSession` must also have an empty effectful `ReloadCapability` grant
+set. Any `exec`, clipboard, filesystem, storage, AI, runtime-import, or network
+grant refuses evaluation; `getCapabilities` reports `canEvaluate:false` plus
+`evaluateDeniedReason`. Pulp does not mask those globals in place. A custom
+production host can explicitly pass an empty
+`ScriptedUiOptions::granted_capabilities`; the stock `build_editor_ui` path
+retains its historical all-capabilities posture and is therefore ineligible.
 
 ### `Runtime.interrupt`
 
@@ -75,10 +99,11 @@ error and `getCapabilities` reports `canEvaluate:false`.
 Cooperatively aborts the in-flight evaluation (QuickJS host interrupt). A no-op
 (`interrupted:false`) when nothing is running, so it can never spuriously abort
 the *next* evaluation. Requires the same `set_runtime_eval_enabled(true)` opt-in
-as evaluate. Because the inspector handles requests synchronously on one
-connection's reader thread, a client that is blocked in `Runtime.evaluate`
-cannot send `Runtime.interrupt` on the *same* connection — use a second
-connection, or rely on the automatic ~2 s timeout-interrupt for a runaway eval.
+as evaluate. The server runs `Runtime.evaluate` through one bounded asynchronous
+worker, leaving the authenticated connection reader free to deliver
+`Runtime.interrupt` from that same controller connection. The session still
+performs its normal capability, controller-lease, and audit checks on both
+requests.
 
 ### `Console.getMessages`
 
@@ -97,34 +122,56 @@ now each carrying its `seq`.
 
 ## Wiring a host
 
-The runtime inspector reaches the live UI only when a host connects its
-`ScriptedUiSession` to the inspector's `DomainHandler`:
+The runtime inspector reaches the live UI only when a host links the optional
+runtime-eval component and connects its `ScriptedUiSession` to the inspector's
+`DomainHandler`:
 
 ```cpp
-// The session owns the bridge and pumps it once per poll() on the UI thread.
-handler.set_script_inspector(session.script_inspector());
+#include <pulp/inspect/runtime_eval_component.hpp>
+
+// Retain this adapter while DomainHandler borrows its pointer. The session owns
+// the bridge and pumps it once per poll() on the UI thread.
+auto evaluator = pulp::inspect::make_script_runtime_evaluator(
+    session.script_inspector());
+handler.set_runtime_evaluator(evaluator.get());
 handler.set_console_capture(&console);            // for Console.getMessages
 handler.set_runtime_eval_enabled(true);           // opt in to evaluate (dev/loopback only)
 ```
 
 **Teardown ordering:** the bridge lives as long as the `ScriptedUiSession`, but
-its methods are called from the inspector's background reader thread. Before
-destroying the session, stop the `InspectorServer` reader thread and call
-`handler.set_script_inspector(nullptr)` so no background call outlives the bridge.
+its methods are called from inspector worker threads. Ordinary owner-thread
+teardown destroys `InspectorServer` synchronously, then calls
+`handler.set_runtime_evaluator(nullptr)` and destroys `evaluator` before
+destroying the session. If a
+publication or domain callback may destroy the server wrapper, capture
+`server.shutdown_fence()` first. Retain the bridge and other attached sources,
+then wait on that fence from a non-callback thread before clearing them or
+unloading the module. The fence remains closed through any causal server
+callback still unwinding after deferred teardown and until the dispatcher
+releases every accepted main-thread RPC callable. A custom dispatcher must
+therefore destroy cancelled queued callables even though they are inert.
+Waiting on either owned server worker itself returns `false` instead of
+deadlocking.
 
 `ScriptInspectorBridge` re-attaches to the engine across hot reloads, so the
 debug console survives a reload. Without this wiring, `Runtime.evaluate` /
 `Runtime.interrupt` report the engine as unavailable and `getCapabilities`
 returns `attached:false`.
+This guarantee covers reloads within one `ScriptedUiSession`. A processor that
+replaces its entire editor/session currently causes standalone inspector startup
+to fail closed until all borrowed sources can be reattached atomically.
 
 ## Security
 
 Evaluate is remote code execution against the plugin UI's JS context, and the
-inspector transport is unauthenticated. Two consequences:
+authenticated inspector transport therefore treats it as a separately gated,
+high-risk capability. Two consequences:
 
 - Evaluate/interrupt are **off by default** — a host must explicitly
   `set_runtime_eval_enabled(true)`, and should only do so for a trusted, local
   dev session. Read-only surfaces (logs, DOM, state) are unaffected.
-- The inspector server currently binds all interfaces; do not enable eval on a
-  host reachable from an untrusted network. Evaluation is serialized and never
-  runs on the audio thread.
+- The production TCP server binds loopback only and requires a fresh
+  nonce/HMAC proof in each direction, with role-separated transcripts using
+  an owner-private per-session credential discovered through an ephemeral
+  record/token pair. Do not enable eval outside a controlled custom-host
+  fixture. Evaluation is serialized and never runs on the audio thread.

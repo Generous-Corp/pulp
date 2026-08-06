@@ -308,8 +308,10 @@ independently and Pulp redistributes it directly.
 
 Add a new bundled font the same way as any other dep:
 
-1. Vendor the file under `external/fonts/<Name>.ttf` (use `git add -f`
-   if `.gitignore` covers `/external/*/`).
+1. Vendor the file under `external/fonts/<Name>.ttf`. `.gitignore` has an
+   `!/external/fonts/` exception; before it existed the tracked fonts had all
+   been `git add -f`'d past `/external/*/`, so a new one looked ignored while
+   its siblings were tracked.
 2. Add a row in `external/fonts/README.md` with the SHA-256, source URL,
    and any gating notes (e.g. `Noto Color Emoji` is gated by
    `PULP_BUNDLE_NOTO_COLOR_EMOJI` and ships in its own
@@ -323,6 +325,24 @@ Add a new bundled font the same way as any other dep:
    accompanying C++ TU that calls
    `pulp::canvas::register_font(...)` or
    `pulp::canvas::register_emoji_fallback(...)` at startup.
+
+`bundled_blobs()` in `core/canvas/src/bundled_fonts.cpp` is an
+`std::array<BundledBlob, N>` — grow N, and bump the `bundled_font_count()`
+expectation in `test/test_canvas_fonts.cpp`, which exists to catch an
+accidental drop.
+
+**Bundling a face does not make it PAINT.** There are two resolution paths and
+they are bridged separately. `FontResolver` (measurement, and `make_font`) sees
+the bundled faces; SkParagraph — which is what `fill_text` actually draws
+through — resolves from a `FontCollection` built in
+`core/canvas/src/text_font_context.cpp`. Until 2026-08-02 that collection only
+learned the bundled faces when the platform had no font database of its own, so
+on macOS a bundled family measured correctly and painted as a system fallback.
+The symptom is silent and looks like anything but a font bug: correct advances,
+correct wrap points, one universal painted face. If you add a font and the
+render does not change, measure the painted ink per family rather than trusting
+the resolver — four families that measure four widths and paint one is the
+signature.
 
 Gate large bundles (≥ 1 MB) behind a CMake option that defaults `OFF`
 where the platform provides a usable equivalent (e.g. emoji typefaces

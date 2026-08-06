@@ -4,21 +4,80 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened, edited]
   merge_group:
+  # Manual re-run. This check is REQUIRED and posts its own commit status, so a
+  # wedged or cancelled run leaves a PR unmergeable with no way back except
+  # pushing a commit to fire `synchronize` — which rewrites the history under
+  # review. Dispatch is restricted to users with write access.
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to evaluate
+        required: true
+        type: string
 
 permissions:
   contents: read
   statuses: write
 
+# A PR title/body edit can emit another pull_request_target event without
+# changing the head SHA. Keep the in-flight required check alive, retain only
+# the newest pending run for that PR, and give each merge-group ref its own
+# independent group.
+concurrency:
+  group: vellum-trusted-${{ github.event.pull_request.number || inputs.pr_number || github.ref }}
+  cancel-in-progress: false
+
 jobs:
   trusted-gate:
     name: Trusted base executor
-    if: github.event_name == 'pull_request_target'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request_target' && github.event.pull_request.state == 'open')
     runs-on: ubuntu-latest
     steps:
+      # Resolve before checkout: the checkout below needs the base sha, and on a
+      # dispatch there is no event payload to read it from. For
+      # pull_request_target this just echoes what the event already carries, so
+      # both paths converge on one set of values.
+      - name: Resolve pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_BASE: ${{ github.event.pull_request.base.sha }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
+          EVENT_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_STATE: ${{ github.event.pull_request.state }}
+          DISPATCH_PR: ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            pr_json="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$DISPATCH_PR")"
+            state="$(printf '%s' "$pr_json" | jq -r .state)"
+            if [ "$state" != "open" ]; then
+              echo "PR #$DISPATCH_PR is $state — refusing to post a status to a closed PR" >&2
+              exit 1
+            fi
+            base="$(printf '%s' "$pr_json" | jq -r .base.sha)"
+            head="$(printf '%s' "$pr_json" | jq -r .head.sha)"
+            number="$DISPATCH_PR"
+          else
+            if [ "$EVENT_STATE" != "open" ]; then
+              echo "PR #$EVENT_NUMBER is $EVENT_STATE — refusing to post a status to a closed PR" >&2
+              exit 1
+            fi
+            base="$EVENT_BASE"; head="$EVENT_HEAD"; number="$EVENT_NUMBER"
+          fi
+          {
+            echo "base_sha=$base"
+            echo "head_sha=$head"
+            echo "number=$number"
+          } >> "$GITHUB_OUTPUT"
+          echo "evaluating PR #$number: base=$base head=$head" >&2
+
       - name: Check out trusted base controls
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ steps.pr.outputs.base_sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -50,9 +109,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VELLUM_READER_TOKEN: ${{ steps.vellum-reader-token.outputs.token }}
           VELLUM_READER_APP_JWT: ${{ steps.vellum-reader-jwt.outputs.app_jwt }}
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BASE: ${{ steps.pr.outputs.base_sha }}
+          PR_HEAD: ${{ steps.pr.outputs.head_sha }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
           STATUS_REPOSITORY: ${{ github.repository }}
           STATUS_TARGET: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -64,8 +123,20 @@ jobs:
               -f description="$2" \
               -f target_url="$STATUS_TARGET" >/dev/null
           }
+          # A permanently opaque red row teaches readers to ignore the whole
+          # check list, so carry the actual reason into the status description
+          # (GitHub truncates at 140 chars) instead of a fixed generic string.
+          # The validators all prefix their diagnostics with `<tool>:`, so the
+          # last such line is the failure that stopped the run.
+          log="$RUNNER_TEMP/vellum-trusted-validation.log"
+          : >"$log"
           failed() {
-            post_status failure 'Trusted Vellum authority validation failed'
+            reason=$(grep -oE '^[a-z0-9-]+: .*' "$log" | tail -n 1 | cut -c1-120)
+            if [ -n "$reason" ]; then
+              post_status failure "$reason"
+            else
+              post_status failure 'Trusted Vellum authority validation failed'
+            fi
           }
           trap failed EXIT
           post_status pending 'Validating with base-branch controls'
@@ -76,25 +147,56 @@ jobs:
             "$PR_BASE" \
             "refs/pull/$PR_NUMBER/head"
           git cat-file -e "$PR_HEAD^{commit}"
-          git worktree add --detach "$proposed_tree" "$PR_HEAD"
 
-          python3 "$trusted_root/tools/scripts/vellum_freeze_check.py" \
+          # Evaluate the MERGE RESULT, not the raw branch head.
+          #
+          # `$PR_BASE` is the base-branch tip, which advances as other PRs land.
+          # Diffing it against the raw head reports every file that reached main
+          # after this branch forked as *deleted by this PR*, so an outbox event
+          # somebody else added trips the append-only rule and the author is told
+          # they deleted a file they never touched. The PR-side `Vellum freeze`
+          # job lacks this bug because it evaluates `$GITHUB_SHA`, the merge
+          # commit — so the two jobs disagree on identical code, which is exactly
+          # what a trusted re-run exists to rule out.
+          #
+          # Mirror the PR-side contract: head = merge result, source-head = the
+          # real PR commit (event provenance is validated against that).
+          if git fetch --no-tags origin \
+               "refs/pull/$PR_NUMBER/merge:refs/vellum/pr-merge" 2>/dev/null; then
+            proposed_head=$(git rev-parse refs/vellum/pr-merge)
+          else
+            # GitHub publishes the merge ref only for a mergeable PR. Absent it,
+            # say so: a conflicted PR must not be reported as a freeze violation.
+            echo "vellum-trusted-gate: refs/pull/$PR_NUMBER/merge is unavailable;" \
+                 "the PR likely has merge conflicts. Resolve them and re-run." >&2
+            exit 1
+          fi
+          git worktree add --detach "$proposed_tree" "$proposed_head"
+
+          # `set -e` (the default shell) plus PIPESTATUS keeps a validator's
+          # failure fatal while still teeing its diagnostics to the log.
+          run_validator() {
+            "$@" 2>&1 | tee -a "$log"
+            return "${PIPESTATUS[0]}"
+          }
+
+          run_validator python3 "$trusted_root/tools/scripts/vellum_freeze_check.py" \
             --repo "$proposed_tree" \
             --base "$PR_BASE" \
-            --head "$PR_HEAD" \
+            --head "$proposed_head" \
             --source-head "$PR_HEAD" \
             --verify-authority \
             --output "$RUNNER_TEMP/vellum-trusted-outbox.json"
-          python3 "$trusted_root/tools/scripts/pulp_tooling_disposition.py" \
+          run_validator python3 "$trusted_root/tools/scripts/pulp_tooling_disposition.py" \
             --root "$proposed_tree" \
             --map "$proposed_tree/docs/status/pulp-tooling-disposition.json"
-          python3 "$trusted_root/tools/scripts/generate_vellum_cut_manifest.py" \
+          run_validator python3 "$trusted_root/tools/scripts/generate_vellum_cut_manifest.py" \
             --repo "$proposed_tree" \
             --source-commit 2ccff748f0d59da34b01ce1fbceabcf19f452731 \
             --selection docs/contracts/vellum-initial-cut-paths.txt \
             --output docs/contracts/vellum-initial-cut-manifest.json \
             --verify
-          python3 "$trusted_root/tools/scripts/generate_vellum_ownership_projection.py" \
+          run_validator python3 "$trusted_root/tools/scripts/generate_vellum_ownership_projection.py" \
             --repo "$proposed_tree" \
             --manifest docs/contracts/vellum-initial-cut-manifest.json \
             --output .github/vellum-ownership.json \

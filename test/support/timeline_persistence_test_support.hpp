@@ -1,5 +1,7 @@
 #pragma once
 
+#include "timeline_schema_version.hpp"
+
 #include <pulp/timeline/command.hpp>
 #include <pulp/timeline/serialize.hpp>
 
@@ -14,6 +16,9 @@
 
 using namespace pulp::timeline;
 using namespace pulp::timebase;
+using timeline_test_support::current_schema_version;
+using timeline_test_support::track_version_stamp;
+using timeline_test_support::version_stamp;
 namespace runtime = pulp::runtime;
 
 namespace {
@@ -25,6 +30,18 @@ template <typename T, typename E> T take(runtime::Result<T, E> value) {
 
 ContentHash hash(char digit) {
     return *ContentHash::from_hex(std::string(64, digit));
+}
+
+// The lone sequence envelope inside a whole-project snapshot, as raw bytes, so
+// a test can hand exactly one envelope to registry.migrate.
+std::string sequence_envelope(const std::string& snapshot) {
+    const auto parsed = take(parse_json(snapshot));
+    const auto* data = parsed->root().find("data");
+    REQUIRE(data != nullptr);
+    const auto* sequences = data->find("sequences");
+    REQUIRE(sequences != nullptr);
+    REQUIRE(sequences->array.size() == 1);
+    return std::string(parsed->raw(sequences->array[0]));
 }
 
 Project project_with(ClipContent content = EmptyContent{}) {
@@ -49,7 +66,7 @@ Project project_with(ClipContent content = EmptyContent{}) {
 Project mixed_project() {
     auto media = take(Clip::create({4}, {0}, {10}, MediaRef{{2}, {25}, 10}));
     auto note_content =
-        take(NoteContent::create({{{7}, {4}, {2}, 0x8000, 64, 1}, {{6}, {1}, {2}, 0xffff, 60, 0}}));
+        take(MidiContent::create({{{7}, {4}, {2}, 0x8000, 64, 1}, {{6}, {1}, {2}, 0xffff, 60, 0}}));
     auto notes = take(Clip::create({5}, {20}, {10}, std::move(note_content)));
     auto musical_track = take(Track::create({3}, "musical", {notes, media}));
     auto musical_sequence = take(Sequence::create({8}, "root", TickDuration{100}, {musical_track}));
@@ -76,6 +93,8 @@ Project mixed_project() {
 SchemaRegistry builtins() {
     return take(make_builtin_timeline_registry());
 }
+
+
 
 runtime::Result<std::shared_ptr<const void>, PersistenceError>
 decode_counter(const JsonValue& data, const void*) noexcept {

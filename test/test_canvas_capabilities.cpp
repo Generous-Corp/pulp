@@ -41,6 +41,7 @@ constexpr CanvasCapability kAllCaps[] = {
     CanvasCapability::filter_chain,
     CanvasCapability::mask_layer,
     CanvasCapability::backdrop_filter,
+    CanvasCapability::backdrop_filter_chain,
     CanvasCapability::bloom_layer,
     CanvasCapability::sksl_draw,
     CanvasCapability::sksl_post_effect,

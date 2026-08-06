@@ -44,6 +44,29 @@ inline bool parse_nonnegative_int(std::string_view value, int& out) {
 }
 
 inline StandaloneConfig standalone_config_from_environment(StandaloneConfig config) {
+    if (auto profile = runtime::get_env("PULP_INSPECT_PROFILE");
+        profile && config.inspector_profile.empty()) {
+        config.inspector_profile = *profile;
+    }
+    if (config.inspector_profile.empty() &&
+        standalone_env_truthy("PULP_INSPECTOR")) {
+        config.inspector_profile = "local";
+    }
+    if (auto capabilities = runtime::get_env("PULP_INSPECT_CAPABILITIES");
+        capabilities && config.inspector_capabilities.empty()) {
+        std::string_view remaining = *capabilities;
+        while (!remaining.empty()) {
+            const auto comma = remaining.find(',');
+            auto capability = remaining.substr(0, comma);
+            if (!capability.empty())
+                config.inspector_capabilities.emplace_back(capability);
+            if (comma == std::string_view::npos) break;
+            remaining.remove_prefix(comma + 1);
+        }
+    }
+    if (standalone_env_truthy("PULP_INSPECT_RUNTIME_EVAL"))
+        config.inspector_runtime_eval = true;
+
     if (standalone_env_truthy("PULP_HEADLESS")
         || standalone_env_truthy("PULP_TEST_MODE")
         || standalone_env_truthy("CI")) {
@@ -136,7 +159,25 @@ inline StandaloneConfig standalone_config_from_environment(StandaloneConfig conf
     if (!config.screenshot_path.empty())
         config.headless = true;
 
+    if (standalone_env_truthy("PULP_SCREENSHOT_KEEP_AUDIO"))
+        config.screenshot_keeps_audio = true;
+
     return config;
+}
+
+// True when this launch is a pure screenshot capture and therefore needs no
+// audio backend at all: it paints a few frames, writes a PNG, and exits, so the
+// device callback could only ever push silence at the user's speakers. Any
+// readout that reads the live render path (probe JSON, scope JSON, capture WAV)
+// keeps audio, as does an explicit `screenshot_keeps_audio` opt-in.
+inline bool standalone_capture_skips_audio(const StandaloneConfig& config) {
+    if (config.screenshot_path.empty()) return false;
+    if (config.screenshot_keeps_audio) return false;
+    if (!config.audio_probe_json_path.empty()) return false;
+    if (!config.audio_scope_json_path.empty()) return false;
+    if (!config.audio_capture_wav_path.empty()) return false;
+    if (!config.audio_capture_rolling_path.empty()) return false;
+    return true;
 }
 
 inline bool standalone_headless_requires_screenshot(const StandaloneConfig& config) {

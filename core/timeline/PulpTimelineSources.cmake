@@ -7,6 +7,8 @@ function(pulp_resolve_timeline_sources root output)
         automation_curve.cpp
         automation_document_internal.cpp
         automation_lane.cpp
+        clip.cpp
+        clip_schema_migrations.cpp
         command.cpp
         compile_context.cpp
         document_session.cpp
@@ -16,6 +18,7 @@ function(pulp_resolve_timeline_sources root output)
         json_span_reader.cpp
         media_reference_validation.cpp
         model.cpp
+        modulation_document_internal.cpp
         sequence.cpp
         sequence_context.cpp
         sequence_scene_internal.cpp
@@ -30,6 +33,7 @@ function(pulp_resolve_timeline_sources root output)
         transaction_sequence_internal.cpp
         transaction_note_internal.cpp
         transaction_take_internal.cpp
+        transaction_track_internal.cpp
         transaction_track_state_internal.cpp
         transaction_reduction_support.cpp
         undo.cpp
@@ -46,6 +50,7 @@ function(pulp_resolve_timeline_sources root output)
         serialize_asset_loop_decode.cpp
         serialize_automation_decode.cpp
         serialize_decode_support.cpp
+        serialize_modulation_decode.cpp
         serialize_decode.cpp
         serialize_project_decode.cpp
         serialize_command_decode.cpp

@@ -56,6 +56,10 @@ endif()
 string(STRIP "${_consumer_cxx_flags}" _consumer_cxx_flags)
 string(STRIP "${_consumer_linker_flags}" _consumer_linker_flags)
 
+if(PULP_PARENT_SANITIZER)
+    list(APPEND _consumer_configure_args
+        "-DPULP_SANITIZER=${PULP_PARENT_SANITIZER}")
+endif()
 if(_consumer_cxx_flags)
     list(APPEND _consumer_configure_args
         "-DCMAKE_CXX_FLAGS=${_consumer_cxx_flags}")
@@ -101,6 +105,63 @@ endif()
 execute_process(COMMAND "${_executable}" RESULT_VARIABLE _run_result)
 if(NOT _run_result EQUAL 0)
     message(FATAL_ERROR "Timeline SDK consumer exited ${_run_result}")
+endif()
+
+set(_smf_executable
+    "${_consumer_build}/pulp-smf-interchange-sdk-consumer${_executable_suffix}")
+if(NOT EXISTS "${_smf_executable}")
+    set(_smf_executable
+        "${_consumer_build}/${_producer_config}/pulp-smf-interchange-sdk-consumer${_executable_suffix}")
+endif()
+execute_process(COMMAND "${_smf_executable}" RESULT_VARIABLE _smf_run_result)
+if(NOT _smf_run_result EQUAL 0)
+    message(FATAL_ERROR "SMF interchange SDK consumer exited ${_smf_run_result}")
+endif()
+
+set(_daw_export_executable
+    "${_consumer_build}/pulp-dawproject-export-sdk-consumer${_executable_suffix}")
+if(NOT EXISTS "${_daw_export_executable}")
+    set(_daw_export_executable
+        "${_consumer_build}/${_producer_config}/pulp-dawproject-export-sdk-consumer${_executable_suffix}")
+endif()
+execute_process(COMMAND "${_daw_export_executable}" RESULT_VARIABLE _daw_export_run_result)
+if(NOT _daw_export_run_result EQUAL 0)
+    message(FATAL_ERROR "DAWproject exporter SDK consumer exited ${_daw_export_run_result}")
+endif()
+
+# The cookbook walks the authoring surface end to end -- transaction commit,
+# undo/redo, scene insert, compile+publish, capture prepare -- and returns a
+# distinct code per step. Building it only proves the headers and the installed
+# link closure are usable; every runtime claim in the guide it backs is
+# unverified unless the binary actually RUNS. So run it, and map the code back
+# to the step so a failure names what broke instead of just a number.
+set(_cookbook_executable
+    "${_consumer_build}/pulp-timeline-cookbook-consumer${_executable_suffix}")
+if(NOT EXISTS "${_cookbook_executable}")
+    set(_cookbook_executable
+        "${_consumer_build}/${_producer_config}/pulp-timeline-cookbook-consumer${_executable_suffix}")
+endif()
+execute_process(COMMAND "${_cookbook_executable}" RESULT_VARIABLE _cookbook_run_result)
+if(NOT _cookbook_run_result EQUAL 0)
+    set(_cookbook_steps
+        "1=build project"
+        "2=open DocumentSession"
+        "3=register writer"
+        "4=resolve the authored clip"
+        "5=commit the MoveClip transaction"
+        "6=undo then redo"
+        "7=allocate scene and slot ids"
+        "8=commit the InsertScene transaction"
+        "9=compile and publish"
+        "10=prepare capture")
+    set(_cookbook_step "unknown step")
+    foreach(_entry IN LISTS _cookbook_steps)
+        if(_entry MATCHES "^${_cookbook_run_result}=(.*)$")
+            set(_cookbook_step "${CMAKE_MATCH_1}")
+        endif()
+    endforeach()
+    message(FATAL_ERROR
+        "Timeline cookbook consumer exited ${_cookbook_run_result} (${_cookbook_step})")
 endif()
 
 set(_importer_executable

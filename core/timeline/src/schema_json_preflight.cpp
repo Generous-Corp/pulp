@@ -1,6 +1,7 @@
 #include <pulp/timeline/serialize.hpp>
 
 #include "asset_schema_policy.hpp"
+#include "clip_schema_policy.hpp"
 #include "bounded_increment.hpp"
 #include "json_span_reader.hpp"
 #include "project_schema_policy.hpp"
@@ -226,6 +227,23 @@ class StructuralScanner {
         return false;
     }
 
+    // Rejects a payload that carries a member its declared version predates.
+    bool forbid_members(Span object, std::initializer_list<std::string_view> names,
+                        const std::string& path) {
+        for (const auto name : names) {
+            Span value;
+            bool found = false;
+            if (!member(object, name, value, found))
+                return false;
+            if (found) {
+                set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0,
+                          path + "/" + std::string(name));
+                return false;
+            }
+        }
+        return true;
+    }
+
     bool require_shape(const detail::JsonSpanMember& member, std::uint8_t allowed,
                        std::size_t object_offset, const std::string& path,
                        PersistenceErrorCode missing_code = PersistenceErrorCode::InvalidSchema) {
@@ -295,6 +313,7 @@ class StructuralScanner {
             detail::JsonSpanMember{"root_sequence_id"},
             detail::JsonSpanMember{"sequences"},
             detail::JsonSpanMember{"session_start"},
+            detail::JsonSpanMember{"tuning"},
         };
         if (!members(data, requested))
             return false;
@@ -332,6 +351,16 @@ class StructuralScanner {
                 set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
                           "/data/session_start");
             return false;
+        }
+        // The tuning is optional on the same terms as the session origin above.
+        if (requested[7].found) {
+            if (!detail::project_schema_policy.supports_tuning(version)) {
+                set_error(PersistenceErrorCode::InvalidSchema, requested[7].span.begin, 0, 0,
+                          "/data/tuning");
+                return false;
+            }
+            if (!walk_tuning(requested[7].span, "/data/tuning"))
+                return false;
         }
         if (has_assets &&
             !governed_array(assets, counts_.assets, limits_.max_assets, "/data/assets",
@@ -497,6 +526,7 @@ class StructuralScanner {
             detail::JsonSpanMember{"name"},
             detail::JsonSpanMember{"regions"},
             detail::JsonSpanMember{"scenes"},
+            detail::JsonSpanMember{"track_order"},
             detail::JsonSpanMember{"tracks"},
         };
         // These indices are positional into `requested`, which is in canonical
@@ -556,7 +586,19 @@ class StructuralScanner {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0, data_path + "/scenes");
             return false;
         }
-        if (!requested[9].found) {
+        const auto requires_section_role =
+            detail::sequence_schema_policy.requires_section_role(version);
+        const auto requires_chord_detail =
+            detail::sequence_schema_policy.requires_chord_detail(version);
+        const auto requires_track_order =
+            detail::sequence_schema_policy.requires_track_order(version);
+        if (requires_track_order != requested[9].found ||
+            (requested[9].found && !has_shape(requested[9].span, ArrayShape))) {
+            set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
+                      data_path + "/track_order");
+            return false;
+        }
+        if (!requested[10].found) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0, path + "/data/tracks");
             return false;
         }
@@ -564,6 +606,7 @@ class StructuralScanner {
             !governed_array(markers, counts_.markers, limits_.max_markers, data_path + "/markers",
                             [&](Span element, std::size_t index) {
                                 return walk_annotation(element, "pulp.timeline.marker", false,
+                                                       false,
                                                        data_path + "/markers/" +
                                                            std::to_string(index));
                             }))
@@ -572,6 +615,7 @@ class StructuralScanner {
             !governed_array(regions, counts_.regions, limits_.max_regions, data_path + "/regions",
                             [&](Span element, std::size_t index) {
                                 return walk_annotation(element, "pulp.timeline.region", true,
+                                                       requires_section_role,
                                                        data_path + "/regions/" +
                                                            std::to_string(index));
                             }))
@@ -582,11 +626,23 @@ class StructuralScanner {
                 data_path + "/chord_scale_lane", [&](Span event, std::size_t index) {
                     const auto event_path =
                         data_path + "/chord_scale_lane/" + std::to_string(index);
-                    return require_member(event, "chord_quality", StringShape, event_path) &&
-                           require_member(event, "chord_root", NumberShape, event_path) &&
-                           require_member(event, "position", StringShape, event_path) &&
-                           require_member(event, "scale_mode", StringShape, event_path) &&
-                           require_member(event, "scale_root", NumberShape, event_path);
+                    if (!require_member(event, "chord_quality", StringShape, event_path) ||
+                        !require_member(event, "chord_root", NumberShape, event_path) ||
+                        !require_member(event, "position", StringShape, event_path) ||
+                        !require_member(event, "scale_mode", StringShape, event_path) ||
+                        !require_member(event, "scale_root", NumberShape, event_path))
+                        return false;
+                    if (requires_chord_detail)
+                        return require_member(event, "chord_bass", NumberShape | NullShape,
+                                              event_path) &&
+                               require_member(event, "chord_extensions", NumberShape,
+                                              event_path) &&
+                               require_member(event, "voicing", StringShape | NullShape,
+                                              event_path);
+                    // An older version carrying the detail is a contradiction,
+                    // not a document to read the detail out of.
+                    return forbid_members(event, {"chord_bass", "chord_extensions", "voicing"},
+                                          event_path);
                 }))
             return false;
         if (requested[8].found &&
@@ -596,7 +652,22 @@ class StructuralScanner {
                                                   data_path + "/scenes/" + std::to_string(index));
                             }))
             return false;
-        const auto tracks = requested[9].span;
+        // The order names existing tracks, so it can never legitimately hold more
+        // entries than a sequence may hold tracks. The count is local rather than
+        // shared with counts_.tracks: charging both arrays to one quota would
+        // halve how many tracks a document may actually carry.
+        std::size_t order_entries = 0;
+        if (requested[9].found &&
+            !governed_array(requested[9].span, order_entries, limits_.max_tracks,
+                            data_path + "/track_order", [&](Span entry, std::size_t index) {
+                                if (has_shape(entry, StringShape))
+                                    return true;
+                                set_error(PersistenceErrorCode::InvalidSchema, entry.begin, 0, 0,
+                                          data_path + "/track_order/" + std::to_string(index));
+                                return false;
+                            }))
+            return false;
+        const auto tracks = requested[10].span;
         return governed_array(tracks, counts_.tracks, limits_.max_tracks, path + "/data/tracks",
                               [&](Span element, std::size_t index) {
                                   return walk_track(element,
@@ -665,10 +736,24 @@ class StructuralScanner {
             });
     }
 
+    // The four members a tuning object always carries. The two payload hashes
+    // are written as null when unused rather than omitted, so both are required
+    // members whose shape admits null.
+    bool walk_tuning(Span value, const std::string& path) {
+        if (!has_shape(value, ObjectShape)) {
+            set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0, path);
+            return false;
+        }
+        return require_member(value, "keyboard_map_content", StringShape | NullShape, path) &&
+               require_member(value, "reference_pitch_millihertz", NumberShape, path) &&
+               require_member(value, "scale_content", StringShape | NullShape, path) &&
+               require_member(value, "system", StringShape, path);
+    }
+
     // Markers and regions share an envelope shape; a region additionally carries
-    // its span length.
+    // its span length and, from the sequence version that introduced it, a role.
     bool walk_annotation(Span value, std::string_view expected_type, bool has_duration,
-                         const std::string& path) {
+                         bool requires_role, const std::string& path) {
         EnvelopeView annotation;
         if (!structural_envelope(value, expected_type, path, annotation))
             return false;
@@ -684,6 +769,15 @@ class StructuralScanner {
             return false;
         if (has_color && !has_shape(color, NumberShape)) {
             set_error(PersistenceErrorCode::InvalidSchema, color.begin, 0, 0, data_path + "/color");
+            return false;
+        }
+        Span role;
+        bool has_role = false;
+        if (!member(annotation.data, "role", role, has_role))
+            return false;
+        if (requires_role != has_role || (has_role && !has_shape(role, StringShape))) {
+            set_error(PersistenceErrorCode::InvalidSchema, annotation.data.begin, 0, 0,
+                      data_path + "/role");
             return false;
         }
         return true;
@@ -708,6 +802,13 @@ class StructuralScanner {
             detail::JsonSpanMember{"name"},
             detail::JsonSpanMember{"record_armed"},
             detail::JsonSpanMember{"take_lanes"},
+            // Appended rather than inserted alphabetically: the reads below
+            // index this array positionally, so a new name in the middle would
+            // silently re-point every later one.
+            detail::JsonSpanMember{"tuning"},
+            detail::JsonSpanMember{"modulators"},
+            detail::JsonSpanMember{"macros"},
+            detail::JsonSpanMember{"modulation_routes"},
         };
         if (!members(data, requested))
             return false;
@@ -725,6 +826,12 @@ class StructuralScanner {
         const auto has_mixer = requested[5].found;
         const auto has_record_armed = requested[7].found;
         const auto has_take_lanes = requested[8].found;
+        const auto modulators = requested[10].span;
+        const auto macros = requested[11].span;
+        const auto routes = requested[12].span;
+        const auto has_modulators = requested[10].found;
+        const auto has_macros = requested[11].found;
+        const auto has_routes = requested[12].found;
         if (!require_shape(requested[4], StringShape, data.begin, data_path) ||
             !require_shape(requested[6], StringShape, data.begin, data_path))
             return false;
@@ -733,6 +840,25 @@ class StructuralScanner {
         const auto requires_takes = detail::track_schema_policy.requires_takes(version);
         const auto supports_freeze = detail::track_schema_policy.supports_freeze(version);
         const auto supports_mixer = detail::track_schema_policy.supports_mixer(version);
+        // The tuning is optional at and above its introducing version, and
+        // forbidden below it.
+        if (requested[9].found) {
+            if (!detail::track_schema_policy.supports_tuning(version)) {
+                set_error(PersistenceErrorCode::InvalidSchema, requested[9].span.begin, 0, 0,
+                          data_path + "/tuning");
+                return false;
+            }
+            if (!walk_tuning(requested[9].span, data_path + "/tuning"))
+                return false;
+        }
+        const auto supports_modulation = detail::track_schema_policy.supports_modulation(version);
+        if (!supports_modulation && (has_modulators || has_macros || has_routes)) {
+            set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
+                      data_path + (has_modulators   ? "/modulators"
+                                   : has_macros ? "/macros"
+                                                : "/modulation_routes"));
+            return false;
+        }
         if (!has_clips || requires_devices != has_devices ||
             requires_automation != has_automation || requires_takes != has_take_lanes ||
             requires_takes != has_record_armed || (!supports_freeze && has_freeze) ||
@@ -794,12 +920,60 @@ class StructuralScanner {
                                                                           std::to_string(index));
                             }))
             return false;
+        // Every optional modulation array is charged against its own quota here,
+        // so an untrusted document cannot spend unbounded memory on routes the
+        // way it cannot on notes or automation points.
+        if (has_modulators &&
+            !governed_array(modulators, counts_.modulators, limits_.max_modulators,
+                            path + "/data/modulators", [&](Span element, std::size_t index) {
+                                return walk_modulation_entry(
+                                    element, "pulp.timeline.modulator",
+                                    path + "/data/modulators/" + std::to_string(index));
+                            }))
+            return false;
+        if (has_macros &&
+            !governed_array(macros, counts_.macro_controls, limits_.max_macro_controls,
+                            path + "/data/macros", [&](Span element, std::size_t index) {
+                                return walk_modulation_entry(
+                                    element, "pulp.timeline.macro_control",
+                                    path + "/data/macros/" + std::to_string(index));
+                            }))
+            return false;
+        if (has_routes &&
+            !governed_array(routes, counts_.modulation_routes, limits_.max_modulation_routes,
+                            path + "/data/modulation_routes",
+                            [&](Span element, std::size_t index) {
+                                return walk_modulation_entry(
+                                    element, "pulp.timeline.modulation_route",
+                                    path + "/data/modulation_routes/" + std::to_string(index));
+                            }))
+            return false;
         return !has_take_lanes ||
                governed_array(take_lanes, counts_.take_lanes, limits_.max_take_lanes,
                               path + "/data/take_lanes", [&](Span element, std::size_t index) {
                                   return walk_take_lane(element, path + "/data/take_lanes/" +
                                                                      std::to_string(index));
                               });
+    }
+
+    // Preflight bounds a document's size; it does not re-validate every field,
+    // which the decoder does against the registry. Checking the envelope keeps
+    // an array of the wrong element type from being counted as modulation.
+    bool walk_modulation_entry(Span value, std::string_view expected_type,
+                               const std::string& path) {
+        std::string type;
+        std::uint32_t version = 0;
+        Span data;
+        bool valid_shape = false;
+        if (!envelope(value, type, version, data, valid_shape))
+            return false;
+        if (type != expected_type || !require_structural_shape(valid_shape, version, path,
+                                                               value.begin, 1, 1)) {
+            if (!has_error_)
+                set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0, path);
+            return false;
+        }
+        return true;
     }
 
     bool walk_take_lane(Span value, const std::string& path) {
@@ -952,22 +1126,43 @@ class StructuralScanner {
         bool valid_shape = false;
         if (!envelope(value, type, version, data, valid_shape))
             return false;
-        if (type != "pulp.timeline.clip") {
+        if (type != detail::clip_schema_policy.type_name) {
             set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0, path);
             return false;
         }
-        if (!require_structural_shape(valid_shape, version, path, value.begin))
+        if (!require_structural_shape(valid_shape, version, path, value.begin,
+                                      detail::clip_schema_policy.oldest_readable_version,
+                                      detail::clip_schema_policy.current_version))
             return false;
+        const auto clip_version = version;
         const auto data_path = path + "/data";
         std::array requested{
             detail::JsonSpanMember{"content"},
+            detail::JsonSpanMember{"fade_shape"},
             detail::JsonSpanMember{"id"},
+            detail::JsonSpanMember{"time_conform"},
             detail::JsonSpanMember{"time_range"},
         };
         if (!members(data, requested) ||
-            !require_shape(requested[1], StringShape, data.begin, data_path) ||
-            !require_shape(requested[2], ObjectShape, data.begin, data_path))
+            !require_shape(requested[2], StringShape, data.begin, data_path) ||
+            !require_shape(requested[4], ObjectShape, data.begin, data_path))
             return false;
+        if (detail::clip_schema_policy.requires_time_conform(clip_version)) {
+            if (!require_shape(requested[3], StringShape, data.begin, data_path))
+                return false;
+        } else if (requested[3].found) {
+            set_error(PersistenceErrorCode::InvalidSchema, requested[3].span.begin, 0, 0,
+                      data_path + "/time_conform");
+            return false;
+        }
+        if (detail::clip_schema_policy.requires_fade_shape(clip_version)) {
+            if (!require_shape(requested[1], StringShape, data.begin, data_path))
+                return false;
+        } else if (requested[1].found) {
+            set_error(PersistenceErrorCode::InvalidSchema, requested[1].span.begin, 0, 0,
+                      data_path + "/fade_shape");
+            return false;
+        }
         if (!requested[0].found) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
                       path + "/data/content");
@@ -997,7 +1192,7 @@ class StructuralScanner {
                    require_member(content_data, "source_start", StringShape, content_path);
         }
         const bool is_notes = content_type == "pulp.timeline.content.notes";
-        if (!is_notes || version > 2 || version == 0) {
+        if (!is_notes || version > 3 || version == 0) {
             const auto* schema =
                 registry_ ? registry_->find(SchemaDomain::Content, content_type) : nullptr;
             const auto raw_size = content.end - content.begin;
@@ -1018,9 +1213,59 @@ class StructuralScanner {
                       path + "/data/content/data/notes");
             return false;
         }
+        // The lane container arrived with v3, so an older envelope must still
+        // preflight without it — the migration is what adds the member.
+        if (version >= 3) {
+            const auto content_path = path + "/data/content/data";
+            if (!require_member(content_data, "lanes", ArrayShape, content_path))
+                return false;
+            Span lanes;
+            bool has_lanes = false;
+            if (!member(content_data, "lanes", lanes, has_lanes))
+                return false;
+            if (!governed_array(
+                    lanes, counts_.midi_lanes, limits_.max_midi_lanes, content_path + "/lanes",
+                    [&](Span lane, std::size_t lane_index) {
+                        const auto lane_path =
+                            content_path + "/lanes/" + std::to_string(lane_index);
+                        if (!has_shape(lane, ObjectShape)) {
+                            set_error(PersistenceErrorCode::InvalidSchema, lane.begin, 0, 0,
+                                      lane_path);
+                            return false;
+                        }
+                        if (!require_member(lane, "bank", NumberShape, lane_path) ||
+                            !require_member(lane, "channel", NumberShape, lane_path) ||
+                            !require_member(lane, "group", NumberShape, lane_path) ||
+                            !require_member(lane, "id", StringShape, lane_path) ||
+                            !require_member(lane, "index", NumberShape, lane_path) ||
+                            !require_member(lane, "points", ArrayShape, lane_path) ||
+                            !require_member(lane, "status", NumberShape, lane_path))
+                            return false;
+                        Span points;
+                        bool has_points = false;
+                        if (!member(lane, "points", points, has_points))
+                            return false;
+                        return governed_array(
+                            points, counts_.midi_lane_points, limits_.max_midi_lane_points,
+                            lane_path + "/points", [&](Span point, std::size_t point_index) {
+                                const auto point_path =
+                                    lane_path + "/points/" + std::to_string(point_index);
+                                if (!has_shape(point, ObjectShape)) {
+                                    set_error(PersistenceErrorCode::InvalidSchema, point.begin, 0,
+                                              0, point_path);
+                                    return false;
+                                }
+                                return require_member(point, "id", StringShape, point_path) &&
+                                       require_member(point, "position_ticks", StringShape,
+                                                      point_path) &&
+                                       require_member(point, "value", NumberShape, point_path);
+                            });
+                    }))
+                return false;
+        }
         // The modifier companion array arrived with v2, so a v1 envelope must
         // still preflight without it — the migration is what adds the members.
-        if (version == 2) {
+        if (version >= 2) {
             const auto content_path = path + "/data/content/data";
             if (!require_member(content_data, "modifier_seed", StringShape, content_path) ||
                 !require_member(content_data, "modifiers", ArrayShape, content_path))

@@ -7,6 +7,16 @@ target_link_libraries(pulp-test-build-check PRIVATE pulp::platform pulp::runtime
 add_test(NAME build-check COMMAND pulp-test-build-check)
 
 if(Python3_Interpreter_FOUND)
+    add_test(NAME ci-python-selector-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_find_python311.py")
+    add_test(NAME inspector-protocol-registry-complete
+        COMMAND ${Python3_EXECUTABLE}
+            ${PROJECT_SOURCE_DIR}/tools/scripts/check_inspector_protocol_registry.py
+            --root ${PROJECT_SOURCE_DIR})
+    add_test(NAME inspector-protocol-registry-check-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            ${PROJECT_SOURCE_DIR}/tools/scripts/check_inspector_protocol_registry.py
+            --self-test)
     add_test(NAME auval-helper-worker-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_run_auval_component.py")
     if(UNIX)
@@ -47,6 +57,13 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME thread-safe-assertions COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/thread_assert_check.py")
 
+    # Unbounded-wait lint: a test wait that cannot time out turns a real
+    # regression into a CI job timeout with no output. The selftest is the
+    # load-bearing part — it scans the SAME wait unbounded and bounded, so the
+    # gate is proven to distinguish them rather than proven to be quiet.
+    add_test(NAME unbounded-wait-lint-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_unbounded_wait_lint.py")
+
     # Build-parallelism guard: fail on a bare `--parallel` / `-j` (no job count)
     # in any tracked build command. Bare `--parallel` maps to unbounded `make
     # -j`, which can exhaust memory / oversubscribe cores on a shared machine.
@@ -54,6 +71,27 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/build_parallelism_guard.py")
     add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
+    # A fork's code must never be routed onto the self-hosted Macs, which hold
+    # the signing keychain. Runs the resolver build.yml actually embeds.
+    add_test(NAME fork-pr-runner-routing COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_fork_pr_runner_routing.py")
+    set_tests_properties(fork-pr-runner-routing PROPERTIES TIMEOUT 120)
+    # Workflow-lint installs PyYAML and owns the YAML-dependent throughput
+    # contracts. Do not register that script here: required macOS CTest hosts
+    # lack PyYAML, and a skipped unittest suite would report a false green.
+    add_test(NAME example-validation-paths COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_example_validation_paths.py")
+    set_tests_properties(example-validation-paths PROPERTIES TIMEOUT 120)
+    # Both Vellum gates post or gate a required check and grew a manual
+    # dispatch path. Runs the resolve step the workflow actually embeds.
+    add_test(NAME vellum-workflow-dispatch COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_workflow_dispatch.py")
+    set_tests_properties(vellum-workflow-dispatch PROPERTIES TIMEOUT 120)
+
+    # Development-inspector truth gate: mutation tests prove capability/profile
+    # and user-facing runtime claims fail when either side drifts.
+    add_test(NAME inspector-truth-check-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_inspector_truth_check.py")
 
     # Governed-build wrapper: the bound on Shipyard's `local` mac backend, which
     # runs the build string directly on the host and so never sees the pulp
@@ -74,6 +112,14 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME combined-installer-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_combined_installer.py")
     endif()
+
+    # An Info.plist template reachable by a format helper but absent from the
+    # SDK install list does not error — PulpPluginFormats selects with
+    # `elseif(EXISTS ...)`, so the helper falls through and consumer builds get
+    # bundles with an empty CFBundleIdentifier. Pure text comparison, so it runs
+    # everywhere rather than only on Apple.
+    add_test(NAME sdk-plist-templates-installed COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_sdk_plist_templates_installed.py")
 
     # TART_HOME resolution: the Tart VM store is a per-host value, so the VM
     # tooling must read it from the host (env, else the tartci profile) and hard
@@ -103,6 +149,14 @@ if(Python3_Interpreter_FOUND)
     # that invariant breaks with no commit involved.
     add_test(NAME runner-topology-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_runner_topology_check.py")
+    add_test(NAME native-intel-runner-group-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_verify_native_intel_runner_group.py")
+    if(UNIX)
+        add_test(NAME native-intel-runner-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_native_intel_runner.py")
+        add_test(NAME portable-ci-timeout-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_run_with_timeout.py")
+    endif()
 
     # Silent-revert guard: reject a push whose diff byte-exactly restores the
     # pre-landing bytes of every file a recent commit changed. Includes a replay
@@ -148,6 +202,15 @@ if(Python3_Interpreter_FOUND)
     # the advisory selector.
     add_test(NAME advisory-macos-runner-policy COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_advisory_macos_runner_policy.py")
+
+    # DSP vocabulary: derives what pulp::signal exposes by parsing its headers,
+    # for anything that has to tell a model or a generator which DSP exists.
+    # The parse is regex-based, so a break would shrink the vocabulary silently
+    # and its consumers would quietly stop reaching for the SDK -- which has
+    # happened. The self-test pins a floor on the totals and on the classes
+    # that are actually depended on.
+    add_test(NAME dsp-vocabulary-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/test_dsp_vocabulary.py")
 
     # Version-at-land: single-writer version assignment on main. Drives
     # plan_assignments over throwaway git ranges, asserting it reproduces the
@@ -224,6 +287,30 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/tools_registry_check.py" --check)
     add_test(NAME tools-registry-check-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_tools_registry_check.py")
+    add_test(NAME verify-rendered-panel-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_rendered_panel.py")
+    # Presence checks over a rendered panel: every one of the five is proved in
+    # both directions on a synthetic capture — green on the reference as its
+    # own render, red on the same render with one defect painted in. A check
+    # nobody has watched fail is not known to be able to fail, which is how
+    # several instruments in this area read as clean while measuring nothing.
+    # 77 is SKIPPED, not passed: without numpy and Pillow not one of the seeded
+    # defects can be painted, and a green tick over a suite that ran nothing is
+    # the exact failure this suite exists to rule out.
+    add_test(NAME check-panel-presence-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/import-validation/test_check_panel_presence.py")
+    set_tests_properties(check-panel-presence-selftest PROPERTIES
+        TIMEOUT 300 SKIP_RETURN_CODE 77)
+
+    # The agent-panel gate's own failure classifier. The negative fixture
+    # passes by being REFUSED, so which of three verdicts this returns is the
+    # only thing between "the clipping gate still fires" and "nobody noticed it
+    # stopped". Pure Python, no fixtures, no browser -- so unlike the gate it
+    # guards, this one always runs.
+    add_test(NAME agent-panel-gate-classifier-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/import-validation/test_check_agent_panel_invariants.py")
+    set_tests_properties(agent-panel-gate-classifier-selftest PROPERTIES
+        TIMEOUT 120)
 
     # Fidelity harness: pure-Python diff-core self-test (always runs) +
     # the end-to-end gallery visual regression (skips=77 without binary/Pillow).

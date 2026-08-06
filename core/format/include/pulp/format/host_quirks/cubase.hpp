@@ -34,7 +34,7 @@
 /// (`make_quirks_for` maps `HostType::Nuendo` here) — Nuendo 10
 /// inherits the Cubase 10 row, Nuendo 8/9 inherits Cubase 9's row.
 ///
-/// **Reference-Lineage**: cleanroom reproducer=macos-plan-item-5.2/5.3
+/// **Reference-Lineage**: independent reproducer=macos-plan-item-5.2/5.3
 /// docs=https://steinbergmedia.github.io/vst3_dev_portal/pages/Technical+Documentation/Technical+Documentation.html
 
 #include <pulp/format/host_quirks.hpp>

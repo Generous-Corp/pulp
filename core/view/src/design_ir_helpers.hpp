@@ -17,13 +17,18 @@
 #pragma once
 
 #include <pulp/view/design_import.hpp>
+#include <pulp/runtime/log.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -79,9 +84,15 @@ inline std::optional<std::string> first_asset_id(const IRNode& node) {
 // already-self-contained original URI (data / resource / memory). A remote URI
 // is NOT returned — nothing downstream fetches it — so the caller sees "" and
 // treats the asset as unresolved.
-inline std::string asset_uri(const IRAssetRef& asset) {
-    if (asset.local_path && !asset.local_path->empty())
-        return "file://" + *asset.local_path;
+inline std::string asset_uri(
+    const IRAssetRef& asset,
+    const std::filesystem::path& asset_base_directory = {}) {
+    if (asset.local_path && !asset.local_path->empty()) {
+        auto path = std::filesystem::path(*asset.local_path);
+        if (path.is_relative() && !asset_base_directory.empty())
+            path = asset_base_directory / path;
+        return "file://" + path.lexically_normal().generic_string();
+    }
     if (!asset.original_uri.empty() &&
         (asset.original_uri.rfind("data:", 0) == 0 ||
          asset.original_uri.rfind("resource:", 0) == 0 ||
@@ -89,6 +100,174 @@ inline std::string asset_uri(const IRAssetRef& asset) {
         return asset.original_uri;
     }
     return {};
+}
+
+// ── On-disk asset resolution ─────────────────────────────────────────────
+//
+// asset_uri() above is the *compile-time* lowering: it names where the bytes
+// are supposed to be, for a generated program that will run somewhere else.
+// The functions below are the *runtime* counterpart — they only ever name a
+// file that is actually readable right now, and they recover from a manifest
+// whose local_path is wrong.
+//
+// The recovery matters because local_path is not always a usable path. A
+// writer that stores a bare `<content_hash>.<ext>` filename produces an entry
+// that resolves against the document's own directory, while the bytes were
+// materialized into a shared, content-addressed asset folder alongside it.
+// Assets ARE content-addressed, so the hash is enough to find them again.
+
+// True when `path` names a readable regular file. Never throws: a permission
+// or I/O failure reads as "not a candidate" rather than aborting resolution.
+inline std::optional<std::filesystem::path> existing_asset_file(
+    const std::filesystem::path& path) {
+    if (path.empty()) return std::nullopt;
+    std::error_code ec;
+    if (std::filesystem::is_regular_file(path, ec))
+        return path.lexically_normal();
+    return std::nullopt;
+}
+
+// The bare digest of a content hash: `sha256:abc…` and `abc…` both yield
+// `abc…`, which is the stem content-addressed writers name files by.
+inline std::string asset_content_hash_stem(const IRAssetRef& asset) {
+    const auto separator = asset.content_hash.find_last_of(':');
+    return separator == std::string::npos
+        ? asset.content_hash
+        : asset.content_hash.substr(separator + 1);
+}
+
+// The extension (including the dot) of a URI or path, ignoring any query or
+// fragment; "" when there is none.
+inline std::string asset_uri_extension(std::string_view uri) {
+    const auto cut = uri.find_first_of("?#");
+    if (cut != std::string_view::npos) uri = uri.substr(0, cut);
+    const auto slash = uri.find_last_of("/\\");
+    if (slash != std::string_view::npos) uri = uri.substr(slash + 1);
+    const auto dot = uri.find_last_of('.');
+    if (dot == std::string_view::npos || dot + 1 == uri.size()) return {};
+    return std::string(uri.substr(dot));
+}
+
+// Directories a content-addressed asset may have been materialized into,
+// given the directory the DesignIR document was loaded from: the document
+// directory itself, a `design-assets/` folder inside it, and a
+// `design-assets/` folder beside it (assets shared across sibling documents).
+inline std::vector<std::filesystem::path> asset_search_roots(
+    const std::filesystem::path& asset_base_directory) {
+    std::vector<std::filesystem::path> roots;
+    if (asset_base_directory.empty()) return roots;
+    roots.push_back(asset_base_directory);
+    roots.push_back(asset_base_directory / "design-assets");
+    const auto parent = asset_base_directory.parent_path();
+    if (!parent.empty() && parent != asset_base_directory)
+        roots.push_back(parent / "design-assets");
+    return roots;
+}
+
+// The readable file backing a manifest asset, or nullopt when none of the
+// candidates exist. Order: the recorded local_path (absolute, or relative to
+// the document directory), then a `file://` original_uri, then the
+// content-addressed `<hash><ext>` under each search root. Recovering by hash
+// is logged — a manifest path that no longer points at its bytes is a defect
+// upstream, and one diagnosable line is what keeps it from reading as a
+// rendering bug.
+inline std::optional<std::filesystem::path> resolve_asset_file(
+    const IRAssetRef& asset,
+    const std::filesystem::path& asset_base_directory = {}) {
+    if (asset.local_path && !asset.local_path->empty()) {
+        auto path = std::filesystem::path(*asset.local_path);
+        if (path.is_relative() && !asset_base_directory.empty())
+            path = asset_base_directory / path;
+        if (auto found = existing_asset_file(path)) return found;
+    }
+    if (asset.original_uri.rfind("file://", 0) == 0) {
+        if (auto found =
+                existing_asset_file(std::filesystem::path(asset.original_uri.substr(7))))
+            return found;
+    }
+
+    const auto stem = asset_content_hash_stem(asset);
+    if (stem.empty()) return std::nullopt;
+
+    std::vector<std::string> extensions;
+    for (std::string_view candidate :
+         {asset.local_path ? std::string_view(*asset.local_path) : std::string_view{},
+          std::string_view(asset.original_uri)}) {
+        auto extension = asset_uri_extension(candidate);
+        if (!extension.empty() &&
+            std::find(extensions.begin(), extensions.end(), extension) == extensions.end()) {
+            extensions.push_back(std::move(extension));
+        }
+    }
+    extensions.emplace_back();  // a hash-named file with no extension
+
+    for (const auto& root : asset_search_roots(asset_base_directory)) {
+        for (const auto& extension : extensions) {
+            if (auto found = existing_asset_file(root / (stem + extension))) {
+                runtime::log_warn(
+                    "design-import: asset '{}' recovered by content hash at '{}' — "
+                    "manifest local_path '{}' does not resolve under '{}'",
+                    asset.asset_id,
+                    found->generic_string(),
+                    asset.local_path.value_or(std::string{}),
+                    asset_base_directory.generic_string());
+                return found;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+// One diagnosable line for an asset that named a file and reached none of them.
+// A recorded-but-absent path is the interesting case: an asset with no
+// local_path at all was never materialized and is not a defect.
+inline void log_unresolvable_asset(const IRAssetRef& asset,
+                                   const std::filesystem::path& asset_base_directory) {
+    if (!asset.local_path || asset.local_path->empty()) return;
+    runtime::log_warn(
+        "design-import: asset '{}' is unresolvable — manifest local_path '{}' "
+        "does not exist under '{}', and no content-addressed file matched hash '{}'",
+        asset.asset_id,
+        *asset.local_path,
+        asset_base_directory.generic_string(),
+        asset.content_hash);
+}
+
+// A loadable URI for a manifest asset at RUNTIME: a `file://` URI only for a
+// file that exists, else an already-self-contained original URI (data /
+// resource / memory). A manifest path that resolves to nothing yields "" and a
+// logged line — never a `file://` URI naming a file that isn't there, because
+// the loader downstream drops that silently and the design just renders wrong.
+inline std::string resolved_asset_uri(
+    const IRAssetRef& asset,
+    const std::filesystem::path& asset_base_directory = {}) {
+    if (auto file = resolve_asset_file(asset, asset_base_directory))
+        return "file://" + file->generic_string();
+    if (!asset.original_uri.empty() &&
+        (asset.original_uri.rfind("data:", 0) == 0 ||
+         asset.original_uri.rfind("resource:", 0) == 0 ||
+         asset.original_uri.rfind("memory:", 0) == 0)) {
+        return asset.original_uri;
+    }
+    log_unresolvable_asset(asset, asset_base_directory);
+    return {};
+}
+
+// The backing file's bytes as text, or "" plus a logged line when nothing
+// resolves. Host-side / codegen-time only — does file I/O; never the
+// audio/render thread.
+inline std::string read_asset_text(
+    const IRAssetRef& asset,
+    const std::filesystem::path& asset_base_directory = {}) {
+    auto file = resolve_asset_file(asset, asset_base_directory);
+    if (!file) {
+        log_unresolvable_asset(asset, asset_base_directory);
+        return {};
+    }
+    std::ifstream input(*file, std::ios::binary);
+    if (!input) return {};
+    return std::string(std::istreambuf_iterator<char>(input),
+                       std::istreambuf_iterator<char>());
 }
 
 // ── Pure helpers ─────────────────────────────────────────────────────────
