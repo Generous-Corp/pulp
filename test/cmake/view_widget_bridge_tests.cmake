@@ -369,6 +369,8 @@ if(TARGET pulp-render)
 endif()
 pulp_add_test_suite(pulp-test-widget-bridge LIBRARIES ${_pulp_widget_bridge_test_libs})
 pulp_add_test_suite(pulp-test-widget-bridge-capabilities LIBRARIES ${_pulp_widget_bridge_test_libs})
+pulp_add_test_suite(pulp-test-widget-bridge-removal-lifetime
+    LIBRARIES ${_pulp_widget_bridge_test_libs})
 
 # Widget bridge — source-level API contract. Keeps JS-native registrations
 # unique and matched to the reviewed bridge API manifest so future registrar

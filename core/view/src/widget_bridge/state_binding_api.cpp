@@ -78,10 +78,12 @@ void WidgetBridge::wire_parameter_gestures(const std::string& widget_id,
     param_gesture_routes_[widget_id] = std::make_shared<ParamGestureRoute>();
     auto alive = callback_alive_;
     auto begin = [this, alive, widget_id] {
+        BridgeCallbackScope scope(alive);
         if (!alive || !alive->load(std::memory_order_acquire)) return;
         begin_param_gesture(widget_id);
     };
     auto end = [this, alive, widget_id] {
+        BridgeCallbackScope scope(alive);
         if (!alive || !alive->load(std::memory_order_acquire)) return;
         end_param_gesture(widget_id);
     };
