@@ -1571,7 +1571,11 @@ def render_inventory(inv: dict, prefer: str | None = None) -> str:
                             isinstance(q.get("max"), (int, float)):
                         s = f"{q['id']}={q['name']}[{q['min']:g}..{q['max']:g}"
                         if isinstance(q.get("default"), (int, float)):
-                            s += f", default {q['default']:g}"
+                            # This token appears more than fifteen thousand
+                            # times in a measured full inventory. Keep the
+                            # value and compact only its repeated label; the
+                            # contract defines `d=` once beside the inventory.
+                            s += f",d={q['default']:g}"
                         s += "]"
                         if str(q.get("unit", "")).strip():
                             import param_units                 # noqa: PLC0415

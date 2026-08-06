@@ -15,6 +15,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import generate  # noqa: E402
+import patch  # noqa: E402
 
 
 class GeneratedSlugSafety(unittest.TestCase):
@@ -82,6 +83,23 @@ class GeneratedSlugSafety(unittest.TestCase):
         self.assertEqual(manifest["modules"][0]["slug"], "FreshVoice")
         self.assertEqual((self.pack / "src" / "FreshVoice.cpp").read_text(),
                          "// dsp\n")
+
+
+class PromptBudgetSafety(unittest.TestCase):
+    def test_repeated_defaults_use_the_contracts_compact_lossless_form(self) -> None:
+        inventory = {"Fixture": {"name": "Fixture", "modules": {
+            "Voice": {"name": "Voice", "params": [
+                {"id": 3, "name": "Level", "min": 0.0, "max": 1.0,
+                 "default": 0.5},
+            ]},
+        }}}
+
+        rendered = patch.render_inventory(inventory)
+        contract = pathlib.Path(patch.CONTRACT).read_text()
+
+        self.assertIn("3=Level[0..1,d=0.5]", rendered)
+        self.assertNotIn(", default ", rendered)
+        self.assertIn("`d=` is that knob's default value", contract)
 
 
 if __name__ == "__main__":

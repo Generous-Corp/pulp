@@ -127,5 +127,6 @@ rejection will name the connection you left out.
 Only these. Where port indices are listed, they are exact — use them. Where a
 module shows no ports, its indices are **not known**, so prefer a module that
 has them; if you must use it, keep to index 0 and say so in the `why` block.
+In a parameter range, `d=` is that knob's default value.
 
 <!--INVENTORY-->
