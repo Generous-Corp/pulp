@@ -1244,6 +1244,20 @@ def check_named_sounds() -> int:
     entries = knowledge.load()
     bad = 0
 
+    def contract_for(prompt: str) -> str:
+        """EXACTLY the block patch.py substitutes, branch and all.
+
+        The first version of this test called `patch_vocabulary.for_prompt`
+        directly and passed while the feature did nothing. patch.py chooses
+        between two blocks, and a request that names a SOUND resolves to no
+        idiom -- so it takes the OTHER branch, the one the catalogue lookup was
+        not in. Testing the function proved the function worked. Nobody had
+        tested the path.
+        """
+        claimed = idiom_check.resolve_intent(prompt, idioms)
+        return (patch_vocabulary.for_prompt(prompt, idioms) if claimed.slug
+                else patch_vocabulary.render(idioms))
+
     settings = {e["id"]: e for e in entries.values()
                 if e.get("kind") == "settings"}
     if len(settings) < 40:
@@ -1257,7 +1271,7 @@ def check_named_sounds() -> int:
                          ("a warm trumpet sound", "trumpet"),
                          ("something like a bell", "bell")]:
         got = knowledge.for_prompt(prompt, entries)
-        text = patch_vocabulary.for_prompt(prompt, idioms)
+        text = contract_for(prompt)
         hit = [e for e in got if want in e["names"]]
         if not hit:
             print(f"  WRONG  {prompt!r} matched {[e['id'] for e in got]}, "
@@ -1267,6 +1281,8 @@ def check_named_sounds() -> int:
         # The values, in the contract, not merely in the match.
         nums = [n["value"] for n in hit[0].get("numbers") or []]
         missing = [v for v in nums if v.split(",")[0] not in text]
+        if want not in text.lower():
+            missing.append(f"the name {want!r} itself")
         if not nums:
             print(f"  WRONG  the {want} record carries no values")
             bad += 1

@@ -118,6 +118,40 @@ def render(idioms: dict | None = None) -> str:
                     out.append(f"      - {m.get('message', m.get('id', ''))}")
             out.append("")
         out.append("")
+
+    # THE NAMED SOUNDS BELONG IN THE LIBRARY DUMP TOO, and leaving them out
+    # was a hole shaped exactly like the request that needs them most.
+    #
+    # `patch.py` picks between two blocks: this one when NOTHING resolved, and
+    # `for_prompt` when an idiom did. A request that names a SOUND rather than
+    # a structure -- "make me a cello" -- resolves to no idiom, so it lands
+    # here. The catalogue lookup lived in the other branch, so seventy recipes
+    # were unreachable by precisely the requests they answer. The first fix
+    # connected them inside `for_prompt` and was tested there, which is the
+    # same mistake one level up: the function was right and the path the model
+    # takes never called it.
+    #
+    # Listed COMPACTLY -- name and measured values, no prose. A request that
+    # named no instrument must pull in no recipe, and dumping each record's
+    # description here would put all seventy in front of every unresolved
+    # request, which is how a patch gets steered toward a sound nobody asked
+    # for.
+    try:
+        import knowledge                                 # noqa: PLC0415
+        sounds = [e for e in knowledge.load().values()
+                  if e.get("kind") == "settings" and e.get("numbers")]
+    except Exception:                                    # noqa: BLE001
+        sounds = []
+    if sounds:
+        out += ["## named sounds",
+                "Settings measured from a synthesis catalogue. If the request "
+                "names one of these, start from its values and then use your "
+                "ears.", ""]
+        for e in sorted(sounds, key=lambda x: x["names"][0]):
+            vals = "; ".join(f"{n['quantity']} {n['value']}"
+                             for n in e["numbers"])
+            out.append(f"- {e['names'][0]}: {vals}")
+        out.append("")
     return "\n".join(out).rstrip() + "\n"
 
 
