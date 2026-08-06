@@ -105,6 +105,10 @@ TEST_CASE("Explicit standalone subprocess serves its deterministic back-buffer f
     const auto exit_png = scratch.path / "exit.png";
     pulp::platform::ProcessOptions options;
     options.timeout_ms = 15'000;
+    // The child is polled before wait(), so captured GPU logs would not be
+    // drained and can fill a pipe before the Inspector publishes discovery.
+    options.capture_stdout = false;
+    options.capture_stderr = false;
     pulp::platform::ChildProcess child;
     REQUIRE(child.start(
         PULP_STANDALONE_INSPECTOR_PROCESS_FIXTURE,
@@ -229,6 +233,8 @@ TEST_CASE("Application quit drains an in-flight inspector request before teardow
 
     pulp::platform::ProcessOptions options;
     options.timeout_ms = 10'000;
+    options.capture_stdout = false;
+    options.capture_stderr = false;
     const auto arm = scratch.path / "arm-quit";
     const auto accepted = scratch.path / "accepted-quit";
     pulp::platform::ChildProcess child;
@@ -292,6 +298,8 @@ TEST_CASE("Window close drains an accepted pending inspector request before tear
     const auto accepted = scratch.path / "accepted-close";
     pulp::platform::ProcessOptions options;
     options.timeout_ms = 10'000;
+    options.capture_stdout = false;
+    options.capture_stderr = false;
     pulp::platform::ChildProcess child;
     REQUIRE(child.start(
         PULP_STANDALONE_INSPECTOR_PROCESS_FIXTURE,

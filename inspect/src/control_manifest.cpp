@@ -15,88 +15,136 @@ namespace pulp::inspect {
 namespace {
 
 constexpr std::array<std::string_view, 7> kPermissionTerms{
-    "implemented",
-    "built",
-    "host_available",
-    "activated",
-    "policy_eligible",
-    "client_granted",
-    "session_live",
+    "implemented",     "built",          "host_available", "activated",
+    "policy_eligible", "client_granted", "session_live",
 };
 
-#define PULP_SCHEMA_EMPTY \
+#define PULP_SCHEMA_EMPTY                                                                          \
     R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{},"type":"object"})"
-#define PULP_OPERATION(symbol, slug, input, output, result) \
-    ControlOperationDescriptor{"dev.pulp." slug "@1", InspectorCapability::symbol, \
-        "dev.pulp.schema/" slug "-input@1", input, \
-        "dev.pulp.schema/" slug "-output@1", output, result}
-constexpr auto kControlOperations = std::to_array<ControlOperationDescriptor>({
-    PULP_OPERATION(SessionDescribe, "instance/read", PULP_SCHEMA_EMPTY,
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"build_id":{"maxLength":128,"minLength":1,"type":"string"},"format":{"maxLength":64,"type":"string"},"host":{"maxLength":256,"type":"string"},"liveness_generation":{"minimum":0,"type":"integer"},"plugin_id":{"maxLength":255,"minLength":1,"type":"string"}},"required":["plugin_id","build_id","host","format","liveness_generation"],"type":"object"})", "response"),
-    PULP_OPERATION(SessionControl, "session/control",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"action":{"enum":["acquire","renew","release"]}},"required":["action"],"type":"object"})",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"expires_at_ms":{"minimum":0,"type":"integer"},"lease_id":{"maxLength":128,"minLength":1,"type":"string"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"}},"required":["receipt_id","lease_id","expires_at_ms"],"type":"object"})", "receipt"),
-    PULP_OPERATION(StateRead, "state/read",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"include_sensitive":{"default":false,"type":"boolean"},"parameter_ids":{"items":{"maximum":4294967295,"minimum":0,"type":"integer"},"maxItems":4096,"type":"array"}},"type":"object"})",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"generation":{"minimum":0,"type":"integer"},"parameters":{"items":{"additionalProperties":false,"properties":{"id":{"maximum":4294967295,"minimum":0,"type":"integer"},"normalized":{"maximum":1,"minimum":0,"type":"number"},"sensitive":{"type":"boolean"}},"required":["id","normalized","sensitive"],"type":"object"},"maxItems":4096,"type":"array"}},"required":["generation","parameters"],"type":"object"})", "response"),
-    PULP_OPERATION(RenderOffline, "render/offline",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"input_artifact_id":{"maxLength":128,"minLength":1,"type":"string"},"max_frames":{"maximum":11520000,"minimum":1,"type":"integer"},"timeout_ms":{"maximum":300000,"minimum":1,"type":"integer"}},"required":["input_artifact_id","max_frames","timeout_ms"],"type":"object"})",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"artifact_id":{"maxLength":128,"minLength":1,"type":"string"},"frames":{"minimum":0,"type":"integer"},"sha256":{"pattern":"^[0-9a-f]{64}$","type":"string"}},"required":["artifact_id","frames","sha256"],"type":"object"})", "artifact"),
-    PULP_OPERATION(UiRead, "ui/observe",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"include_geometry":{"default":true,"type":"boolean"},"selector":{"maxLength":1024,"type":"string"}},"type":"object"})",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"generation":{"minimum":0,"type":"integer"},"tree":{"additionalProperties":false,"properties":{"nodes":{"items":{"additionalProperties":false,"properties":{"height":{"minimum":0,"type":"number"},"id":{"maxLength":256,"minLength":1,"type":"string"},"label":{"maxLength":1024,"type":"string"},"type":{"maxLength":128,"type":"string"},"width":{"minimum":0,"type":"number"},"x":{"type":"number"},"y":{"type":"number"}},"required":["id","type","x","y","width","height"],"type":"object"},"maxItems":10000,"type":"array"}},"required":["nodes"],"type":"object"}},"required":["generation","tree"],"type":"object"})", "response"),
-    PULP_OPERATION(DiagnosticsRead, "diagnostics/read", PULP_SCHEMA_EMPTY,
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"items":{"items":{"additionalProperties":false,"properties":{"id":{"maxLength":256,"minLength":1,"type":"string"},"status":{"enum":["ok","warning","error","unavailable"]},"summary":{"maxLength":4096,"type":"string"}},"required":["id","status","summary"],"type":"object"},"maxItems":1024,"type":"array"},"sampled_at_ms":{"minimum":0,"type":"integer"}},"required":["items","sampled_at_ms"],"type":"object"})", "response"),
-    PULP_OPERATION(LogsRead, "logs/read",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"after_sequence":{"maximum":9007199254740991,"minimum":0,"type":"integer"},"limit":{"default":200,"maximum":2000,"minimum":1,"type":"integer"}},"type":"object"})",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"entries":{"items":{"additionalProperties":false,"properties":{"message":{"maxLength":16384,"type":"string"},"sequence":{"minimum":0,"type":"integer"},"severity":{"enum":["debug","info","warning","error"]},"source":{"maxLength":256,"type":"string"}},"required":["sequence","severity","source","message"],"type":"object"},"maxItems":2000,"type":"array"},"next_sequence":{"minimum":0,"type":"integer"}},"required":["entries","next_sequence"],"type":"object"})", "response"),
-    PULP_OPERATION(CaptureImage, "ui/capture",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","oneOf":[{"additionalProperties":false,"properties":{"format":{"const":"png"},"target":{"const":"window"}},"required":["target","format"],"type":"object"},{"additionalProperties":false,"properties":{"format":{"const":"png"},"node_id":{"maxLength":256,"minLength":1,"type":"string"},"target":{"const":"node"}},"required":["target","format","node_id"],"type":"object"}]})",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"artifact_id":{"maxLength":128,"minLength":1,"type":"string"},"byte_count":{"minimum":0,"type":"integer"},"mime_type":{"const":"image/png"},"sha256":{"pattern":"^[0-9a-f]{64}$","type":"string"}},"required":["artifact_id","mime_type","sha256","byte_count"],"type":"object"})", "artifact"),
-    PULP_OPERATION(UiInput, "ui/input",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","oneOf":[{"additionalProperties":false,"properties":{"event":{"additionalProperties":false,"properties":{"button":{"maximum":7,"minimum":0,"type":"integer"},"phase":{"enum":["down","move","up"]},"x":{"maximum":1000000,"minimum":-1000000,"type":"number"},"y":{"maximum":1000000,"minimum":-1000000,"type":"number"}},"required":["phase","x","y"],"type":"object"},"kind":{"const":"pointer"},"target_id":{"maxLength":256,"minLength":1,"type":"string"}},"required":["kind","target_id","event"],"type":"object"},{"additionalProperties":false,"properties":{"event":{"additionalProperties":false,"properties":{"key":{"maxLength":64,"minLength":1,"type":"string"},"phase":{"enum":["down","up"]},"repeat":{"type":"boolean"}},"required":["phase","key","repeat"],"type":"object"},"kind":{"const":"keyboard"},"target_id":{"maxLength":256,"minLength":1,"type":"string"}},"required":["kind","target_id","event"],"type":"object"},{"additionalProperties":false,"properties":{"event":{"additionalProperties":false,"properties":{"focused":{"type":"boolean"}},"required":["focused"],"type":"object"},"kind":{"const":"focus"},"target_id":{"maxLength":256,"minLength":1,"type":"string"}},"required":["kind","target_id","event"],"type":"object"}]})",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"applied":{"type":"boolean"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"}},"required":["receipt_id","applied"],"type":"object"})", "receipt"),
-    PULP_OPERATION(TraceControl, "trace/control",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","oneOf":[{"additionalProperties":false,"properties":{"action":{"enum":["performance-enable-tracking","audio-enable-metering","motion-play","motion-pause","motion-enable-cost","motion-disable-cost"]}},"required":["action"],"type":"object"},{"additionalProperties":false,"properties":{"action":{"const":"motion-stop-trace"},"trace_id":{"maximum":9007199254740991,"minimum":0,"type":"integer"}},"required":["action","trace_id"],"type":"object"},{"additionalProperties":false,"properties":{"action":{"const":"motion-scrub-to"},"frame":{"maximum":9007199254740991,"minimum":0,"type":"integer"}},"required":["action","frame"],"type":"object"},{"additionalProperties":false,"properties":{"action":{"const":"motion-start-trace"},"fps":{"default":15,"maximum":240,"minimum":1,"type":"integer"},"metrics":{"items":{"oneOf":[{"additionalProperties":false,"properties":{"kind":{"const":"geometry"},"name":{"maxLength":128,"minLength":1,"type":"string"},"node_id":{"maxLength":256,"minLength":1,"type":"string"},"properties":{"items":{"enum":["minX","minY","maxX","maxY","midX","midY","width","height"]},"maxItems":8,"type":"array","uniqueItems":true},"source":{"enum":["layout","presentation"]},"space":{"enum":["view-local","view-global","window","screen"]}},"required":["kind","node_id"],"type":"object"},{"additionalProperties":false,"properties":{"kind":{"enum":["scroll-geometry","scrollGeometry"]},"name":{"maxLength":128,"minLength":1,"type":"string"},"node_id":{"maxLength":256,"minLength":1,"type":"string"},"properties":{"items":{"enum":["contentOffsetX","contentOffsetY","visibleRectMinX","visibleRectMinY","visibleRectWidth","visibleRectHeight","contentSizeWidth","contentSizeHeight","insetTop","insetBottom","insetLeft","insetRight","scrollableMaxX","scrollableMaxY"]},"maxItems":14,"type":"array","uniqueItems":true}},"required":["kind","node_id"],"type":"object"}]},"maxItems":32,"minItems":1,"type":"array"},"view_name":{"maxLength":128,"minLength":1,"type":"string"}},"required":["action","metrics"],"type":"object"}]})",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","oneOf":[{"additionalProperties":false,"properties":{"action":{"const":"motion-start-trace"},"applied":{"type":"boolean"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"},"trace_id":{"maximum":9007199254740991,"minimum":0,"type":"integer"}},"required":["action","receipt_id","applied","trace_id"],"type":"object"},{"additionalProperties":false,"properties":{"action":{"enum":["performance-enable-tracking","audio-enable-metering","motion-stop-trace","motion-scrub-to","motion-play","motion-pause","motion-enable-cost","motion-disable-cost"]},"applied":{"type":"boolean"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"}},"required":["action","receipt_id","applied"],"type":"object"}]})", "receipt"),
-    PULP_OPERATION(TraceSessionControl, "trace/session-control",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","oneOf":[{"additionalProperties":false,"properties":{"action":{"const":"start"},"categories":{"items":{"maxLength":128,"minLength":1,"type":"string","x-pulp-maxUtf8Bytes":128},"maxItems":128,"type":"array","uniqueItems":true},"ring_mb":{"default":80,"maximum":512,"minimum":1,"type":"integer"}},"required":["action"],"type":"object"},{"additionalProperties":false,"properties":{"action":{"const":"stop"}},"required":["action"],"type":"object"}]})",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","oneOf":[{"additionalProperties":false,"properties":{"active":{"const":true},"compiled_in":{"type":"boolean"},"ok":{"const":true}},"required":["compiled_in","active","ok"],"type":"object"},{"additionalProperties":false,"properties":{"ok":{"const":true},"out_path":{"maxLength":4096,"minLength":1,"type":"string"},"trace_bytes":{"minimum":0,"type":"integer"}},"required":["ok","out_path","trace_bytes"],"type":"object"}]})", "response"),
-    PULP_OPERATION(StateWrite, "state/parameter-gesture",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"idempotency_key":{"maxLength":128,"minLength":1,"type":"string"},"normalized_value":{"maximum":1,"minimum":0,"type":"number"},"parameter_id":{"maximum":4294967295,"minimum":0,"type":"integer"}},"required":["parameter_id","normalized_value","idempotency_key"],"type":"object"})",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"applied":{"type":"boolean"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"},"state_generation":{"minimum":0,"type":"integer"}},"required":["receipt_id","state_generation","applied"],"type":"object"})", "receipt"),
-    PULP_OPERATION(TestInput, "test/input",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","oneOf":[{"additionalProperties":false,"properties":{"channel":{"maximum":15,"minimum":0,"type":"integer"},"kind":{"enum":["note-on","note-off"]},"note":{"maximum":127,"minimum":0,"type":"integer"},"sequence":{"maximum":9007199254740991,"minimum":0,"type":"integer"},"velocity":{"maximum":1,"minimum":0,"type":"number"}},"required":["sequence","kind","channel","note","velocity"],"type":"object"},{"additionalProperties":false,"properties":{"kind":{"const":"transport"},"playing":{"type":"boolean"},"position_beats":{"maximum":1000000000000,"minimum":0,"type":"number"},"sequence":{"maximum":9007199254740991,"minimum":0,"type":"integer"},"tempo_bpm":{"maximum":400,"minimum":20,"type":"number"}},"required":["sequence","kind","playing","position_beats","tempo_bpm"],"type":"object"}]})",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"accepted_sequence":{"minimum":0,"type":"integer"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"}},"required":["receipt_id","accepted_sequence"],"type":"object"})", "receipt"),
-    PULP_OPERATION(AuthoringTweaks, "authoring/tweaks",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"allOf":[{"if":{"properties":{"changes":{"anyOf":[{"required":["bypass"]},{"required":["lock"]}]}}},"then":{"required":["anchor_id"]}}],"properties":{"anchor_id":{"maxLength":256,"minLength":1,"type":"string"},"changes":{"additionalProperties":false,"maxProperties":5,"minProperties":1,"properties":{"bypass":{"type":"boolean"},"constants":{"additionalProperties":{"maximum":1000000,"minimum":-1000000,"type":"number"},"maxProperties":128,"propertyNames":{"maxLength":128,"pattern":"^[A-Za-z_][A-Za-z0-9_.-]*$"},"type":"object"},"highlight_node_id":{"maxLength":256,"minLength":1,"type":"string","x-pulp-maxUtf8Bytes":256},"lock":{"type":"boolean"},"repaint_flash":{"type":"boolean"}},"type":"object"},"idempotency_key":{"maxLength":128,"minLength":1,"type":"string"}},"required":["changes","idempotency_key"],"type":"object"})",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"generation":{"minimum":0,"type":"integer"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"}},"required":["receipt_id","generation"],"type":"object"})", "receipt"),
-    PULP_OPERATION(TelemetryStream, "telemetry/subscribe",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"buffer_samples":{"maximum":65536,"minimum":1,"type":"integer"},"channel_ids":{"items":{"maxLength":128,"minLength":1,"type":"string"},"maxItems":32,"minItems":1,"type":"array","uniqueItems":true},"max_hz":{"maximum":240,"minimum":1,"type":"number"}},"required":["channel_ids","max_hz","buffer_samples"],"type":"object"})",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"accepted_hz":{"maximum":240,"minimum":1,"type":"number"},"stream_id":{"maxLength":128,"minLength":1,"type":"string"}},"required":["stream_id","accepted_hz"],"type":"object"})", "stream"),
-    PULP_OPERATION(RuntimeReload, "runtime/reload",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"idempotency_key":{"maxLength":128,"minLength":1,"type":"string"},"source_revision":{"maxLength":128,"minLength":1,"type":"string"}},"required":["source_revision","idempotency_key"],"type":"object"})",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"completed":{"type":"boolean"},"generation":{"minimum":0,"type":"integer"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"}},"required":["receipt_id","generation","completed"],"type":"object"})", "receipt"),
-    PULP_OPERATION(RuntimeEval, "runtime/evaluate",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"idempotency_key":{"maxLength":128,"minLength":1,"type":"string"},"source":{"maxLength":65536,"minLength":1,"pattern":"^[^\\u0000]*$","type":"string","x-pulp-maxUtf8Bytes":65536},"timeout_ms":{"maximum":2000,"minimum":1,"type":"integer"}},"required":["source","timeout_ms","idempotency_key"],"type":"object"})",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"completed":{"type":"boolean"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"},"result_json":{"maxLength":262144,"type":"string"}},"required":["receipt_id","result_json","completed"],"type":"object"})", "receipt"),
-    PULP_OPERATION(ArtifactRead, "artifact/read",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"artifact_id":{"maxLength":128,"minLength":1,"type":"string"},"max_bytes":{"maximum":1048576,"minimum":1,"type":"integer"},"offset":{"maximum":9007199254740991,"minimum":0,"type":"integer"}},"required":["artifact_id","offset","max_bytes"],"type":"object"})",
-        R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"artifact_id":{"maxLength":128,"minLength":1,"type":"string"},"chunk_base64":{"maxLength":1398104,"type":"string"},"eof":{"type":"boolean"},"sha256":{"pattern":"^[0-9a-f]{64}$","type":"string"}},"required":["artifact_id","chunk_base64","eof","sha256"],"type":"object"})", "artifact"),
-});
+#define PULP_OPERATION(symbol, slug, input, output, result)                                        \
+    ControlOperationDescriptor {                                                                   \
+        "dev.pulp." slug "@1", 1, InspectorCapability::symbol, "dev.pulp.schema/" slug "-input@1", \
+            input, "dev.pulp.schema/" slug "-output@1", output, result, {}, {}                     \
+    }
+#define PULP_RECEIPT_OPERATION(symbol, slug, input, output, result)                                \
+    ControlOperationDescriptor {                                                                   \
+        "dev.pulp." slug "@1", 1, InspectorCapability::symbol, "dev.pulp.schema/" slug "-input@1", \
+            input, "dev.pulp.schema/" slug "-output@1", output, "receipt", {},                     \
+            {true, "receipt_id"}                                                                   \
+    }
+#define PULP_PRODUCED_ARTIFACT_OPERATION(symbol, slug, input, output, bytes, media)                \
+    ControlOperationDescriptor {                                                                   \
+        "dev.pulp." slug "@1", 1, InspectorCapability::symbol, "dev.pulp.schema/" slug "-input@1", \
+            input, "dev.pulp.schema/" slug "-output@1", output, "artifact",                        \
+            {true, "artifact_id", "sha256", bytes, media}, {}                                      \
+    }
+constexpr auto kControlOperations =
+    std::to_array<ControlOperationDescriptor>({
+        PULP_OPERATION(
+            SessionDescribe, "instance/read", PULP_SCHEMA_EMPTY,
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"build_id":{"maxLength":128,"minLength":1,"type":"string"},"format":{"maxLength":64,"type":"string"},"host":{"maxLength":256,"type":"string"},"liveness_generation":{"minimum":0,"type":"integer"},"plugin_id":{"maxLength":255,"minLength":1,"type":"string"}},"required":["plugin_id","build_id","host","format","liveness_generation"],"type":"object"})",
+            "response"),
+        PULP_RECEIPT_OPERATION(
+            SessionControl, "session/control",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"action":{"enum":["acquire","renew","release"]}},"required":["action"],"type":"object"})",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"expires_at_ms":{"minimum":0,"type":"integer"},"lease_id":{"maxLength":128,"minLength":1,"type":"string"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"}},"required":["receipt_id","lease_id","expires_at_ms"],"type":"object"})",
+            "receipt"),
+        PULP_OPERATION(
+            StateRead, "state/read",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"include_sensitive":{"default":false,"type":"boolean"},"parameter_ids":{"items":{"maximum":4294967295,"minimum":0,"type":"integer"},"maxItems":4096,"type":"array"}},"type":"object"})",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"generation":{"minimum":0,"type":"integer"},"parameters":{"items":{"additionalProperties":false,"properties":{"id":{"maximum":4294967295,"minimum":0,"type":"integer"},"normalized":{"maximum":1,"minimum":0,"type":"number"},"sensitive":{"type":"boolean"}},"required":["id","normalized","sensitive"],"type":"object"},"maxItems":4096,"type":"array"}},"required":["generation","parameters"],"type":"object"})",
+            "response"),
+        PULP_PRODUCED_ARTIFACT_OPERATION(
+            RenderOffline, "render/offline",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"input_artifact_id":{"maxLength":128,"minLength":1,"type":"string"},"max_frames":{"maximum":11520000,"minimum":1,"type":"integer"},"timeout_ms":{"maximum":300000,"minimum":1,"type":"integer"}},"required":["input_artifact_id","max_frames","timeout_ms"],"type":"object"})",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"artifact_id":{"maxLength":128,"minLength":1,"type":"string"},"frames":{"minimum":0,"type":"integer"},"sha256":{"pattern":"^[0-9a-f]{64}$","type":"string"}},"required":["artifact_id","frames","sha256"],"type":"object"})",
+            "", ""),
+        PULP_PRODUCED_ARTIFACT_OPERATION(
+            UiRead, "ui/observe",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"include_geometry":{"default":true,"type":"boolean"},"selector":{"maxLength":1024,"type":"string"}},"type":"object"})",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"artifact_id":{"maxLength":128,"minLength":1,"type":"string"},"byte_count":{"minimum":0,"type":"integer"},"generation":{"minimum":0,"type":"integer"},"mime_type":{"const":"application/vnd.pulp.ui-tree+json"},"node_count":{"maximum":10000,"minimum":0,"type":"integer"},"sha256":{"pattern":"^[0-9a-f]{64}$","type":"string"}},"required":["artifact_id","mime_type","sha256","byte_count","generation","node_count"],"type":"object"})",
+            "byte_count", "mime_type"),
+        PULP_PRODUCED_ARTIFACT_OPERATION(
+            DiagnosticsRead, "diagnostics/read", PULP_SCHEMA_EMPTY,
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"artifact_id":{"maxLength":128,"minLength":1,"type":"string"},"byte_count":{"minimum":0,"type":"integer"},"item_count":{"maximum":1024,"minimum":0,"type":"integer"},"mime_type":{"const":"application/vnd.pulp.diagnostics+json"},"sampled_at_ms":{"minimum":0,"type":"integer"},"sha256":{"pattern":"^[0-9a-f]{64}$","type":"string"}},"required":["artifact_id","mime_type","sha256","byte_count","item_count","sampled_at_ms"],"type":"object"})",
+            "byte_count", "mime_type"),
+        PULP_PRODUCED_ARTIFACT_OPERATION(
+            LogsRead, "logs/read",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"after_sequence":{"maximum":9007199254740991,"minimum":0,"type":"integer"},"limit":{"default":200,"maximum":2000,"minimum":1,"type":"integer"}},"type":"object"})",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"artifact_id":{"maxLength":128,"minLength":1,"type":"string"},"byte_count":{"minimum":0,"type":"integer"},"entry_count":{"maximum":2000,"minimum":0,"type":"integer"},"mime_type":{"const":"application/vnd.pulp.logs+json"},"next_sequence":{"minimum":0,"type":"integer"},"sha256":{"pattern":"^[0-9a-f]{64}$","type":"string"}},"required":["artifact_id","mime_type","sha256","byte_count","entry_count","next_sequence"],"type":"object"})",
+            "byte_count", "mime_type"),
+        PULP_PRODUCED_ARTIFACT_OPERATION(CaptureImage,
+                                         "ui/capture", R"({"$schema":"https://json-schema.org/draft/2020-12/schema","oneOf":[{"additionalProperties":false,"properties":{"format":{"const":"png"},"target":{"const":"window"}},"required":["target","format"],"type":"object"},{"additionalProperties":false,"properties":{"format":{"const":"png"},"node_id":{"maxLength":256,"minLength":1,"type":"string"},"target":{"const":"node"}},"required":["target","format","node_id"],"type":"object"}]})", R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"artifact_id":{"maxLength":128,"minLength":1,"type":"string"},"byte_count":{"minimum":0,"type":"integer"},"mime_type":{"const":"image/png"},"sha256":{"pattern":"^[0-9a-f]{64}$","type":"string"}},"required":["artifact_id","mime_type","sha256","byte_count"],"type":"object"})",
+                                         "byte_count", "mime_type"),
+        PULP_RECEIPT_OPERATION(
+            UiInput, "ui/input",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","oneOf":[{"additionalProperties":false,"properties":{"event":{"additionalProperties":false,"properties":{"button":{"maximum":7,"minimum":0,"type":"integer"},"phase":{"enum":["down","move","up"]},"x":{"maximum":1000000,"minimum":-1000000,"type":"number"},"y":{"maximum":1000000,"minimum":-1000000,"type":"number"}},"required":["phase","x","y"],"type":"object"},"kind":{"const":"pointer"},"target_id":{"maxLength":256,"minLength":1,"type":"string"}},"required":["kind","target_id","event"],"type":"object"},{"additionalProperties":false,"properties":{"event":{"additionalProperties":false,"properties":{"key":{"maxLength":64,"minLength":1,"type":"string"},"phase":{"enum":["down","up"]},"repeat":{"type":"boolean"}},"required":["phase","key","repeat"],"type":"object"},"kind":{"const":"keyboard"},"target_id":{"maxLength":256,"minLength":1,"type":"string"}},"required":["kind","target_id","event"],"type":"object"},{"additionalProperties":false,"properties":{"event":{"additionalProperties":false,"properties":{"focused":{"type":"boolean"}},"required":["focused"],"type":"object"},"kind":{"const":"focus"},"target_id":{"maxLength":256,"minLength":1,"type":"string"}},"required":["kind","target_id","event"],"type":"object"}]})", R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"applied":{"type":"boolean"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"}},"required":["receipt_id","applied"],"type":"object"})",
+            "receipt"),
+        PULP_RECEIPT_OPERATION(
+            TraceControl, "trace/control",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","oneOf":[{"additionalProperties":false,"properties":{"action":{"enum":["performance-enable-tracking","audio-enable-metering","motion-play","motion-pause","motion-enable-cost","motion-disable-cost"]}},"required":["action"],"type":"object"},{"additionalProperties":false,"properties":{"action":{"const":"motion-stop-trace"},"trace_id":{"maximum":9007199254740991,"minimum":0,"type":"integer"}},"required":["action","trace_id"],"type":"object"},{"additionalProperties":false,"properties":{"action":{"const":"motion-scrub-to"},"frame":{"maximum":9007199254740991,"minimum":0,"type":"integer"}},"required":["action","frame"],"type":"object"},{"additionalProperties":false,"properties":{"action":{"const":"motion-start-trace"},"fps":{"default":15,"maximum":240,"minimum":1,"type":"integer"},"metrics":{"items":{"oneOf":[{"additionalProperties":false,"properties":{"kind":{"const":"geometry"},"name":{"maxLength":128,"minLength":1,"type":"string"},"node_id":{"maxLength":256,"minLength":1,"type":"string"},"properties":{"items":{"enum":["minX","minY","maxX","maxY","midX","midY","width","height"]},"maxItems":8,"type":"array","uniqueItems":true},"source":{"enum":["layout","presentation"]},"space":{"enum":["view-local","view-global","window","screen"]}},"required":["kind","node_id"],"type":"object"},{"additionalProperties":false,"properties":{"kind":{"enum":["scroll-geometry","scrollGeometry"]},"name":{"maxLength":128,"minLength":1,"type":"string"},"node_id":{"maxLength":256,"minLength":1,"type":"string"},"properties":{"items":{"enum":["contentOffsetX","contentOffsetY","visibleRectMinX","visibleRectMinY","visibleRectWidth","visibleRectHeight","contentSizeWidth","contentSizeHeight","insetTop","insetBottom","insetLeft","insetRight","scrollableMaxX","scrollableMaxY"]},"maxItems":14,"type":"array","uniqueItems":true}},"required":["kind","node_id"],"type":"object"}]},"maxItems":32,"minItems":1,"type":"array"},"view_name":{"maxLength":128,"minLength":1,"type":"string"}},"required":["action","metrics"],"type":"object"}]})",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","oneOf":[{"additionalProperties":false,"properties":{"action":{"const":"motion-start-trace"},"applied":{"type":"boolean"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"},"trace_id":{"maximum":9007199254740991,"minimum":0,"type":"integer"}},"required":["action","receipt_id","applied","trace_id"],"type":"object"},{"additionalProperties":false,"properties":{"action":{"enum":["performance-enable-tracking","audio-enable-metering","motion-stop-trace","motion-scrub-to","motion-play","motion-pause","motion-enable-cost","motion-disable-cost"]},"applied":{"type":"boolean"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"}},"required":["action","receipt_id","applied"],"type":"object"}]})",
+            "receipt"),
+        PULP_OPERATION(
+            TraceSessionControl, "trace/session-control",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","oneOf":[{"additionalProperties":false,"properties":{"action":{"const":"start"},"categories":{"items":{"maxLength":128,"minLength":1,"type":"string","x-pulp-maxUtf8Bytes":128},"maxItems":128,"type":"array","uniqueItems":true},"ring_mb":{"default":80,"maximum":512,"minimum":1,"type":"integer"}},"required":["action"],"type":"object"},{"additionalProperties":false,"properties":{"action":{"const":"stop"}},"required":["action"],"type":"object"}]})", R"({"$schema":"https://json-schema.org/draft/2020-12/schema","oneOf":[{"additionalProperties":false,"properties":{"active":{"const":true},"compiled_in":{"type":"boolean"},"ok":{"const":true}},"required":["compiled_in","active","ok"],"type":"object"},{"additionalProperties":false,"properties":{"ok":{"const":true},"out_path":{"maxLength":4096,"minLength":1,"type":"string"},"trace_bytes":{"minimum":0,"type":"integer"}},"required":["ok","out_path","trace_bytes"],"type":"object"}]})",
+            "response"),
+        PULP_RECEIPT_OPERATION(
+            StateWrite, "state/parameter-gesture",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"idempotency_key":{"maxLength":128,"minLength":1,"type":"string"},"normalized_value":{"maximum":1,"minimum":0,"type":"number"},"parameter_id":{"maximum":4294967295,"minimum":0,"type":"integer"}},"required":["parameter_id","normalized_value","idempotency_key"],"type":"object"})",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"applied":{"type":"boolean"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"},"state_generation":{"minimum":0,"type":"integer"}},"required":["receipt_id","state_generation","applied"],"type":"object"})",
+            "receipt"),
+        PULP_RECEIPT_OPERATION(
+            TestInput, "test/input",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","oneOf":[{"additionalProperties":false,"properties":{"channel":{"maximum":15,"minimum":0,"type":"integer"},"kind":{"enum":["note-on","note-off"]},"note":{"maximum":127,"minimum":0,"type":"integer"},"sequence":{"maximum":9007199254740991,"minimum":0,"type":"integer"},"velocity":{"maximum":1,"minimum":0,"type":"number"}},"required":["sequence","kind","channel","note","velocity"],"type":"object"},{"additionalProperties":false,"properties":{"kind":{"const":"transport"},"playing":{"type":"boolean"},"position_beats":{"maximum":1000000000000,"minimum":0,"type":"number"},"sequence":{"maximum":9007199254740991,"minimum":0,"type":"integer"},"tempo_bpm":{"maximum":400,"minimum":20,"type":"number"}},"required":["sequence","kind","playing","position_beats","tempo_bpm"],"type":"object"}]})", R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"accepted_sequence":{"minimum":0,"type":"integer"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"}},"required":["receipt_id","accepted_sequence"],"type":"object"})",
+            "receipt"),
+        PULP_RECEIPT_OPERATION(
+            AuthoringTweaks, "authoring/tweaks",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"allOf":[{"if":{"properties":{"changes":{"anyOf":[{"required":["bypass"]},{"required":["lock"]}]}}},"then":{"required":["anchor_id"]}}],"properties":{"anchor_id":{"maxLength":256,"minLength":1,"type":"string"},"changes":{"additionalProperties":false,"maxProperties":5,"minProperties":1,"properties":{"bypass":{"type":"boolean"},"constants":{"additionalProperties":{"maximum":1000000,"minimum":-1000000,"type":"number"},"maxProperties":128,"propertyNames":{"maxLength":128,"pattern":"^[A-Za-z_][A-Za-z0-9_.-]*$"},"type":"object"},"highlight_node_id":{"maxLength":256,"minLength":1,"type":"string","x-pulp-maxUtf8Bytes":256},"lock":{"type":"boolean"},"repaint_flash":{"type":"boolean"}},"type":"object"},"idempotency_key":{"maxLength":128,"minLength":1,"type":"string"}},"required":["changes","idempotency_key"],"type":"object"})", R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"generation":{"minimum":0,"type":"integer"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"}},"required":["receipt_id","generation"],"type":"object"})",
+            "receipt"),
+        PULP_OPERATION(
+            TelemetryStream, "telemetry/subscribe",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"buffer_samples":{"maximum":65536,"minimum":1,"type":"integer"},"channel_ids":{"items":{"maxLength":128,"minLength":1,"type":"string"},"maxItems":32,"minItems":1,"type":"array","uniqueItems":true},"max_hz":{"maximum":240,"minimum":1,"type":"number"}},"required":["channel_ids","max_hz","buffer_samples"],"type":"object"})",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"accepted_hz":{"maximum":240,"minimum":1,"type":"number"},"stream_id":{"maxLength":128,"minLength":1,"type":"string"}},"required":["stream_id","accepted_hz"],"type":"object"})",
+            "stream"),
+        PULP_RECEIPT_OPERATION(
+            RuntimeReload, "runtime/reload",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"idempotency_key":{"maxLength":128,"minLength":1,"type":"string"},"source_revision":{"maxLength":128,"minLength":1,"type":"string"}},"required":["source_revision","idempotency_key"],"type":"object"})",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"completed":{"type":"boolean"},"generation":{"minimum":0,"type":"integer"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"}},"required":["receipt_id","generation","completed"],"type":"object"})",
+            "receipt"),
+        PULP_RECEIPT_OPERATION(
+            RuntimeEval, "runtime/evaluate",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"idempotency_key":{"maxLength":128,"minLength":1,"type":"string"},"source":{"maxLength":65536,"minLength":1,"pattern":"^[^\\u0000]*$","type":"string","x-pulp-maxUtf8Bytes":65536},"timeout_ms":{"maximum":2000,"minimum":1,"type":"integer"}},"required":["source","timeout_ms","idempotency_key"],"type":"object"})", R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"completed":{"type":"boolean"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"},"result_json":{"maxLength":262144,"type":"string","x-pulp-maxUtf8Bytes":262144}},"required":["receipt_id","result_json","completed"],"type":"object"})",
+            "receipt"),
+        PULP_OPERATION(
+            ArtifactRead, "artifact/read",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"artifact_id":{"maxLength":128,"minLength":1,"type":"string"},"max_bytes":{"maximum":1048576,"minimum":1,"type":"integer"},"offset":{"maximum":9007199254740991,"minimum":0,"type":"integer"}},"required":["artifact_id","offset","max_bytes"],"type":"object"})",
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"artifact_id":{"maxLength":128,"minLength":1,"type":"string"},"chunk_base64":{"maxLength":1398104,"pattern":"^[A-Za-z0-9+/]*={0,2}$","type":"string","x-pulp-maxUtf8Bytes":1398104},"eof":{"type":"boolean"},"sha256":{"pattern":"^[0-9a-f]{64}$","type":"string"}},"required":["artifact_id","chunk_base64","eof","sha256"],"type":"object"})",
+            "artifact-chunk"),
+    });
 consteval bool control_operations_are_unique_and_complete() {
     for (std::size_t i = 0; i < kControlOperations.size(); ++i) {
         const auto& operation = kControlOperations[i];
-        if (operation.id.empty() || operation.input_schema_id.empty() ||
-            operation.input_schema_json.empty() ||
-            operation.output_schema_id.empty() ||
-            operation.output_schema_json.empty() ||
-            operation.result_kind.empty())
+        if (operation.id.empty() || operation.version == 0 || operation.input_schema_id.empty() ||
+            operation.input_schema_json.empty() || operation.output_schema_id.empty() ||
+            operation.output_schema_json.empty() || operation.result_kind.empty())
+            return false;
+        const auto& binding = operation.artifact_binding;
+        if (binding.produced != (operation.result_kind == "artifact") ||
+            (binding.produced &&
+             (binding.artifact_id_field.empty() || binding.sha256_field.empty())) ||
+            (!binding.produced &&
+             (!binding.artifact_id_field.empty() || !binding.sha256_field.empty() ||
+              !binding.byte_count_field.empty() || !binding.media_type_field.empty())))
+            return false;
+        const auto& receipt_binding = operation.receipt_binding;
+        if (receipt_binding.bound != (operation.result_kind == "receipt") ||
+            (receipt_binding.bound && receipt_binding.receipt_id_field.empty()) ||
+            (!receipt_binding.bound && !receipt_binding.receipt_id_field.empty()))
             return false;
         for (std::size_t j = i + 1; j < kControlOperations.size(); ++j) {
             const auto& other = kControlOperations[j];
-            if (operation.capability == other.capability ||
-                operation.id == other.id ||
+            if (operation.capability == other.capability || operation.id == other.id ||
                 operation.input_schema_id == other.input_schema_id ||
                 operation.output_schema_id == other.output_schema_id)
                 return false;
@@ -107,6 +155,8 @@ consteval bool control_operations_are_unique_and_complete() {
 static_assert(control_operations_are_unique_and_complete(),
               "Product A operation and schema IDs must be complete and unique");
 #undef PULP_OPERATION
+#undef PULP_RECEIPT_OPERATION
+#undef PULP_PRODUCED_ARTIFACT_OPERATION
 #undef PULP_SCHEMA_EMPTY
 
 constexpr std::array<std::string_view, 12> kManifestFields{
@@ -130,21 +180,35 @@ std::string json_escape(std::string_view value) {
     constexpr char hex[] = "0123456789abcdef";
     for (const unsigned char character : value) {
         switch (character) {
-            case '"': out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\b': out += "\\b"; break;
-            case '\f': out += "\\f"; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            default:
-                if (character < 0x20) {
-                    out += "\\u00";
-                    out.push_back(hex[character >> 4]);
-                    out.push_back(hex[character & 0x0f]);
-                } else {
-                    out.push_back(static_cast<char>(character));
-                }
+        case '"':
+            out += "\\\"";
+            break;
+        case '\\':
+            out += "\\\\";
+            break;
+        case '\b':
+            out += "\\b";
+            break;
+        case '\f':
+            out += "\\f";
+            break;
+        case '\n':
+            out += "\\n";
+            break;
+        case '\r':
+            out += "\\r";
+            break;
+        case '\t':
+            out += "\\t";
+            break;
+        default:
+            if (character < 0x20) {
+                out += "\\u00";
+                out.push_back(hex[character >> 4]);
+                out.push_back(hex[character & 0x0f]);
+            } else {
+                out.push_back(static_cast<char>(character));
+            }
         }
     }
     return out;
@@ -156,18 +220,19 @@ void append_csv_json_array(std::ostringstream& out, std::string_view values) {
     while (!values.empty()) {
         const auto comma = values.find(',');
         const auto value = values.substr(0, comma);
-        if (!first) out << ",";
+        if (!first)
+            out << ",";
         first = false;
         out << "\"" << json_escape(value) << "\"";
-        if (comma == std::string_view::npos) break;
+        if (comma == std::string_view::npos)
+            break;
         values.remove_prefix(comma + 1);
     }
     out << "]";
 }
 
-bool read_required_string(const choc::value::ValueView& root,
-                          std::string_view field, std::string& out,
-                          std::string& error) {
+bool read_required_string(const choc::value::ValueView& root, std::string_view field,
+                          std::string& out, std::string& error) {
     const auto value = root[field];
     if (!value.isString()) {
         error = std::string(field) + " is required and must be a string";
@@ -177,8 +242,7 @@ bool read_required_string(const choc::value::ValueView& root,
     return true;
 }
 
-bool read_required_bool(const choc::value::ValueView& root,
-                        std::string_view field, bool& out,
+bool read_required_bool(const choc::value::ValueView& root, std::string_view field, bool& out,
                         std::string& error) {
     const auto value = root[field];
     if (!value.isBool()) {
@@ -189,8 +253,8 @@ bool read_required_bool(const choc::value::ValueView& root,
     return true;
 }
 
-bool read_schema_version(const choc::value::ValueView& root,
-                         std::uint32_t& out, std::string& error) {
+bool read_schema_version(const choc::value::ValueView& root, std::uint32_t& out,
+                         std::string& error) {
     const auto value = root["schema_version"];
     if (!value.isInt32() && !value.isInt64()) {
         error = "schema_version is required and must be an integer";
@@ -211,8 +275,7 @@ bool read_schema_version(const choc::value::ValueView& root,
 
 void collect_unknown_fields(const choc::value::ValueView& root,
                             ControlManifestDiagnostics& diagnostics) {
-    root.visitObjectMembers([&](std::string_view name,
-                                const choc::value::ValueView&) {
+    root.visitObjectMembers([&](std::string_view name, const choc::value::ValueView&) {
         if (std::find(kManifestFields.begin(), kManifestFields.end(), name) ==
             kManifestFields.end())
             diagnostics.unknown_fields.emplace_back(name);
@@ -220,7 +283,8 @@ void collect_unknown_fields(const choc::value::ValueView& root,
 }
 
 bool permission_terms_match(const choc::value::ValueView& value) {
-    if (!value.isArray() || value.size() != kPermissionTerms.size()) return false;
+    if (!value.isArray() || value.size() != kPermissionTerms.size())
+        return false;
     for (std::size_t index = 0; index < kPermissionTerms.size(); ++index) {
         const auto term = value[static_cast<std::uint32_t>(index)];
         if (!term.isString() || term.getString() != kPermissionTerms[index])
@@ -229,8 +293,8 @@ bool permission_terms_match(const choc::value::ValueView& value) {
     return true;
 }
 
-std::vector<InspectorCapability> sorted_capabilities(
-    std::span<const InspectorCapability> capabilities) {
+std::vector<InspectorCapability>
+sorted_capabilities(std::span<const InspectorCapability> capabilities) {
     std::vector<InspectorCapability> sorted(capabilities.begin(), capabilities.end());
     std::sort(sorted.begin(), sorted.end(), [](auto left, auto right) {
         return capability_contract_id(left) < capability_contract_id(right);
@@ -238,18 +302,17 @@ std::vector<InspectorCapability> sorted_capabilities(
     return sorted;
 }
 
-bool contains_capability(const ControlManifest& manifest,
-                         InspectorCapability capability) {
-    return std::find(manifest.capabilities.begin(), manifest.capabilities.end(),
-                     capability) != manifest.capabilities.end();
+bool contains_capability(const ControlManifest& manifest, InspectorCapability capability) {
+    return std::find(manifest.capabilities.begin(), manifest.capabilities.end(), capability) !=
+           manifest.capabilities.end();
 }
 
 bool valid_build_id(std::string_view value) {
     constexpr std::string_view prefix = "build:";
     if (!value.starts_with(prefix) || value.size() != prefix.size() + 32)
         return false;
-    return std::all_of(value.begin() + static_cast<std::ptrdiff_t>(prefix.size()),
-                       value.end(), [](unsigned char character) {
+    return std::all_of(value.begin() + static_cast<std::ptrdiff_t>(prefix.size()), value.end(),
+                       [](unsigned char character) {
                            return (character >= '0' && character <= '9') ||
                                   (character >= 'a' && character <= 'f');
                        });
@@ -259,11 +322,16 @@ bool valid_build_id(std::string_view value) {
 
 std::string_view control_profile_id(ControlBuildProfile profile) {
     switch (profile) {
-        case ControlBuildProfile::ProductionStripped: return "production-stripped";
-        case ControlBuildProfile::DeveloperLocal: return "developer-local";
-        case ControlBuildProfile::TestDeterministic: return "test-deterministic";
-        case ControlBuildProfile::SupportDiagnostics: return "support-diagnostics";
-        case ControlBuildProfile::ResearchUnsafe: return "research-unsafe";
+    case ControlBuildProfile::ProductionStripped:
+        return "production-stripped";
+    case ControlBuildProfile::DeveloperLocal:
+        return "developer-local";
+    case ControlBuildProfile::TestDeterministic:
+        return "test-deterministic";
+    case ControlBuildProfile::SupportDiagnostics:
+        return "support-diagnostics";
+    case ControlBuildProfile::ResearchUnsafe:
+        return "research-unsafe";
     }
     return {};
 }
@@ -271,72 +339,87 @@ std::string_view control_profile_id(ControlBuildProfile profile) {
 std::optional<ControlBuildProfile> control_profile_from_id(std::string_view id) {
     if (id == "production-stripped")
         return ControlBuildProfile::ProductionStripped;
-    if (id == "developer-local") return ControlBuildProfile::DeveloperLocal;
+    if (id == "developer-local")
+        return ControlBuildProfile::DeveloperLocal;
     if (id == "test-deterministic")
         return ControlBuildProfile::TestDeterministic;
     if (id == "support-diagnostics")
         return ControlBuildProfile::SupportDiagnostics;
-    if (id == "research-unsafe") return ControlBuildProfile::ResearchUnsafe;
+    if (id == "research-unsafe")
+        return ControlBuildProfile::ResearchUnsafe;
     return std::nullopt;
 }
 
 std::string_view control_manifest_error_id(ControlManifestError error) {
     switch (error) {
-        case ControlManifestError::None: return "none";
-        case ControlManifestError::Parse: return "manifest.parse";
-        case ControlManifestError::RootType: return "manifest.root-type";
-        case ControlManifestError::UnknownField: return "manifest.unknown-field";
-        case ControlManifestError::MissingOrInvalidField:
-            return "manifest.invalid-field";
-        case ControlManifestError::UnsupportedSchema:
-            return "manifest.unsupported-schema";
-        case ControlManifestError::VersionDowngrade:
-            return "manifest.version-downgrade";
-        case ControlManifestError::VersionTooNew:
-            return "manifest.version-too-new";
-        case ControlManifestError::UnknownProfile:
-            return "manifest.unknown-profile";
-        case ControlManifestError::PermissionTermsMismatch:
-            return "manifest.permission-terms-mismatch";
-        case ControlManifestError::CapabilityLimit:
-            return "manifest.capability-limit";
-        case ControlManifestError::UnknownCapability:
-            return "manifest.unknown-capability";
-        case ControlManifestError::InvalidCapabilitySet:
-            return "manifest.invalid-capability-set";
-        case ControlManifestError::MissingCapabilityDependency:
-            return "manifest.missing-capability-dependency";
-        case ControlManifestError::ProfileViolation:
-            return "manifest.profile-violation";
-        case ControlManifestError::InvalidProfile:
-            return "manifest.invalid-profile";
-        case ControlManifestError::InvalidIdentity:
-            return "manifest.invalid-identity";
-        case ControlManifestError::RegistryMismatch:
-            return "manifest.registry-mismatch";
-        case ControlManifestError::EndpointMismatch:
-            return "manifest.endpoint-mismatch";
-        case ControlManifestError::UnsafeAcknowledgementMismatch:
-            return "manifest.unsafe-acknowledgement-mismatch";
+    case ControlManifestError::None:
+        return "none";
+    case ControlManifestError::Parse:
+        return "manifest.parse";
+    case ControlManifestError::RootType:
+        return "manifest.root-type";
+    case ControlManifestError::UnknownField:
+        return "manifest.unknown-field";
+    case ControlManifestError::MissingOrInvalidField:
+        return "manifest.invalid-field";
+    case ControlManifestError::UnsupportedSchema:
+        return "manifest.unsupported-schema";
+    case ControlManifestError::VersionDowngrade:
+        return "manifest.version-downgrade";
+    case ControlManifestError::VersionTooNew:
+        return "manifest.version-too-new";
+    case ControlManifestError::UnknownProfile:
+        return "manifest.unknown-profile";
+    case ControlManifestError::PermissionTermsMismatch:
+        return "manifest.permission-terms-mismatch";
+    case ControlManifestError::CapabilityLimit:
+        return "manifest.capability-limit";
+    case ControlManifestError::UnknownCapability:
+        return "manifest.unknown-capability";
+    case ControlManifestError::InvalidCapabilitySet:
+        return "manifest.invalid-capability-set";
+    case ControlManifestError::MissingCapabilityDependency:
+        return "manifest.missing-capability-dependency";
+    case ControlManifestError::ProfileViolation:
+        return "manifest.profile-violation";
+    case ControlManifestError::InvalidProfile:
+        return "manifest.invalid-profile";
+    case ControlManifestError::InvalidIdentity:
+        return "manifest.invalid-identity";
+    case ControlManifestError::RegistryMismatch:
+        return "manifest.registry-mismatch";
+    case ControlManifestError::EndpointMismatch:
+        return "manifest.endpoint-mismatch";
+    case ControlManifestError::UnsafeAcknowledgementMismatch:
+        return "manifest.unsafe-acknowledgement-mismatch";
     }
     return "manifest.parse";
 }
 
 std::string_view control_denial_reason_id(ControlDenialReason reason) {
     switch (reason) {
-        case ControlDenialReason::UnknownCapability: return "unknown-capability";
-        case ControlDenialReason::NotImplemented: return "not-implemented";
-        case ControlDenialReason::NotBuilt: return "not-built";
-        case ControlDenialReason::HostUnavailable: return "host-unavailable";
-        case ControlDenialReason::NotActivated: return "not-activated";
-        case ControlDenialReason::PolicyIneligible: return "policy-ineligible";
-        case ControlDenialReason::ClientNotGranted: return "client-not-granted";
-        case ControlDenialReason::SessionNotLive: return "session-not-live";
-        case ControlDenialReason::ProfileForbidden: return "profile-forbidden";
-        case ControlDenialReason::UnsupportedExecutor:
-            return "unsupported-executor";
-        case ControlDenialReason::PublicationMismatch:
-            return "publication-mismatch";
+    case ControlDenialReason::UnknownCapability:
+        return "unknown-capability";
+    case ControlDenialReason::NotImplemented:
+        return "not-implemented";
+    case ControlDenialReason::NotBuilt:
+        return "not-built";
+    case ControlDenialReason::HostUnavailable:
+        return "host-unavailable";
+    case ControlDenialReason::NotActivated:
+        return "not-activated";
+    case ControlDenialReason::PolicyIneligible:
+        return "policy-ineligible";
+    case ControlDenialReason::ClientNotGranted:
+        return "client-not-granted";
+    case ControlDenialReason::SessionNotLive:
+        return "session-not-live";
+    case ControlDenialReason::ProfileForbidden:
+        return "profile-forbidden";
+    case ControlDenialReason::UnsupportedExecutor:
+        return "unsupported-executor";
+    case ControlDenialReason::PublicationMismatch:
+        return "publication-mismatch";
     }
     return "unknown-capability";
 }
@@ -345,11 +428,11 @@ std::span<const std::string_view> control_permission_terms() {
     return kPermissionTerms;
 }
 
-ControlPermissionDecision evaluate_control_permission(
-    const ControlPermissionInputs& inputs) {
+ControlPermissionDecision evaluate_control_permission(const ControlPermissionInputs& inputs) {
     if (!inputs.implemented)
         return {false, ControlDenialReason::NotImplemented};
-    if (!inputs.built) return {false, ControlDenialReason::NotBuilt};
+    if (!inputs.built)
+        return {false, ControlDenialReason::NotBuilt};
     if (!inputs.host_available)
         return {false, ControlDenialReason::HostUnavailable};
     if (!inputs.activated)
@@ -363,8 +446,7 @@ ControlPermissionDecision evaluate_control_permission(
     return {true, std::nullopt};
 }
 
-ControlManifestValidation validate_control_manifest_detailed(
-    const ControlManifest& manifest) {
+ControlManifestValidation validate_control_manifest_detailed(const ControlManifest& manifest) {
     const auto fail = [](ControlManifestError code, std::string error) {
         return ControlManifestValidation{false, code, std::move(error)};
     };
@@ -372,18 +454,16 @@ ControlManifestValidation validate_control_manifest_detailed(
         return fail(ControlManifestError::InvalidProfile,
                     "profile value is not defined by schema version 1");
     if (manifest.schema_version != kControlManifestSchemaVersion) {
-        return fail(ControlManifestError::UnsupportedSchema,
-                    "schema_version must equal 1");
+        return fail(ControlManifestError::UnsupportedSchema, "schema_version must equal 1");
     }
-    if (manifest.target.empty() || manifest.target.size() > 128 ||
-        manifest.product_name.empty() || manifest.product_name.size() > 256 ||
-        manifest.bundle_id.size() > 255 ||
+    if (manifest.target.empty() || manifest.target.size() > 128 || manifest.product_name.empty() ||
+        manifest.product_name.size() > 256 || manifest.bundle_id.size() > 255 ||
         !valid_build_id(manifest.build_id)) {
-        return fail(ControlManifestError::InvalidIdentity,
-                    "target, product_name, or bundle_id exceeds identity bounds, or build_id is invalid");
+        return fail(
+            ControlManifestError::InvalidIdentity,
+            "target, product_name, or bundle_id exceeds identity bounds, or build_id is invalid");
     }
-    if (manifest.bundle_id.empty() &&
-        manifest.profile != ControlBuildProfile::ProductionStripped) {
+    if (manifest.bundle_id.empty() && manifest.profile != ControlBuildProfile::ProductionStripped) {
         return fail(ControlManifestError::InvalidIdentity,
                     "bundle_id is required for a control-enabled profile");
     }
@@ -409,13 +489,11 @@ ControlManifestValidation validate_control_manifest_detailed(
         return fail(ControlManifestError::EndpointMismatch,
                     "endpoint_included must match whether capabilities are built");
     }
-    const bool contains_eval =
-        contains_capability(manifest, InspectorCapability::RuntimeEval);
+    const bool contains_eval = contains_capability(manifest, InspectorCapability::RuntimeEval);
     const bool contains_controller =
         contains_capability(manifest, InspectorCapability::SessionControl);
     for (const auto capability : manifest.capabilities) {
-        if (capability_requires_controller_lease(capability) &&
-            !contains_controller) {
+        if (capability_requires_controller_lease(capability) && !contains_controller) {
             return fail(ControlManifestError::MissingCapabilityDependency,
                         std::string(capability_contract_id(capability)) +
                             " requires dev.pulp.session/control@1");
@@ -444,8 +522,7 @@ ControlManifestValidation validate_control_manifest_detailed(
             InspectorCapability::LogsRead,
         };
         for (const auto capability : manifest.capabilities) {
-            if (std::find(allowed.begin(), allowed.end(), capability) ==
-                allowed.end()) {
+            if (std::find(allowed.begin(), allowed.end(), capability) == allowed.end()) {
                 return fail(ControlManifestError::ProfileViolation,
                             "support-diagnostics contains a non-diagnostic capability");
             }
@@ -454,15 +531,14 @@ ControlManifestValidation validate_control_manifest_detailed(
     return {true, ControlManifestError::None, {}};
 }
 
-bool validate_control_manifest(const ControlManifest& manifest,
-                               std::string& error) {
+bool validate_control_manifest(const ControlManifest& manifest, std::string& error) {
     const auto result = validate_control_manifest_detailed(manifest);
     error = result.error;
     return result.valid;
 }
 
-std::optional<ControlManifest> parse_control_manifest(
-    std::string_view json, ControlManifestDiagnostics* diagnostics) {
+std::optional<ControlManifest> parse_control_manifest(std::string_view json,
+                                                      ControlManifestDiagnostics* diagnostics) {
     ControlManifestDiagnostics local;
     auto& result = diagnostics ? *diagnostics : local;
     result = {};
@@ -476,8 +552,8 @@ std::optional<ControlManifest> parse_control_manifest(
         collect_unknown_fields(root, result);
         if (!result.unknown_fields.empty()) {
             result.code = ControlManifestError::UnknownField;
-            result.error = "control manifest contains unknown field '" +
-                result.unknown_fields.front() + "'";
+            result.error =
+                "control manifest contains unknown field '" + result.unknown_fields.front() + "'";
             return std::nullopt;
         }
 
@@ -485,10 +561,9 @@ std::optional<ControlManifest> parse_control_manifest(
         if (!read_schema_version(root, manifest.schema_version, result.error)) {
             const auto version = root["schema_version"];
             result.code = version.isInt32() || version.isInt64()
-                ? (version.getInt64() < 1
-                       ? ControlManifestError::VersionDowngrade
-                       : ControlManifestError::VersionTooNew)
-                : ControlManifestError::MissingOrInvalidField;
+                              ? (version.getInt64() < 1 ? ControlManifestError::VersionDowngrade
+                                                        : ControlManifestError::VersionTooNew)
+                              : ControlManifestError::MissingOrInvalidField;
             return std::nullopt;
         }
         std::string schema;
@@ -514,19 +589,15 @@ std::optional<ControlManifest> parse_control_manifest(
         }
         manifest.profile = *parsed_profile;
         if (!read_required_string(root, "target", manifest.target, result.error) ||
-            !read_required_string(root, "product_name", manifest.product_name,
+            !read_required_string(root, "product_name", manifest.product_name, result.error) ||
+            !read_required_string(root, "bundle_id", manifest.bundle_id, result.error) ||
+            !read_required_string(root, "build_id", manifest.build_id, result.error) ||
+            !read_required_string(root, "registry_digest", manifest.registry_digest,
                                   result.error) ||
-            !read_required_string(root, "bundle_id", manifest.bundle_id,
-                                  result.error) ||
-            !read_required_string(root, "build_id", manifest.build_id,
-                                  result.error) ||
-            !read_required_string(root, "registry_digest",
-                                  manifest.registry_digest, result.error) ||
-            !read_required_bool(root, "endpoint_included",
-                                manifest.endpoint_included, result.error) ||
+            !read_required_bool(root, "endpoint_included", manifest.endpoint_included,
+                                result.error) ||
             !read_required_bool(root, "unsafe_runtime_eval_acknowledged",
-                                manifest.unsafe_runtime_eval_acknowledged,
-                                result.error)) {
+                                manifest.unsafe_runtime_eval_acknowledged, result.error)) {
             result.code = ControlManifestError::MissingOrInvalidField;
             return std::nullopt;
         }
@@ -558,8 +629,8 @@ std::optional<ControlManifest> parse_control_manifest(
             const auto capability = capability_from_contract_id(value.getString());
             if (!capability) {
                 result.code = ControlManifestError::UnknownCapability;
-                result.error = "unknown capability contract '" +
-                    std::string(value.getString()) + "'";
+                result.error =
+                    "unknown capability contract '" + std::string(value.getString()) + "'";
                 return std::nullopt;
             }
             manifest.capabilities.push_back(*capability);
@@ -580,7 +651,8 @@ std::optional<ControlManifest> parse_control_manifest(
 
 std::string serialize_control_manifest(const ControlManifest& manifest) {
     std::string error;
-    if (!validate_control_manifest(manifest, error)) return {};
+    if (!validate_control_manifest(manifest, error))
+        return {};
     const auto capabilities = sorted_capabilities(manifest.capabilities);
     std::ostringstream out;
     out << "{\n"
@@ -591,20 +663,20 @@ std::string serialize_control_manifest(const ControlManifest& manifest) {
         << "  \"product_name\": \"" << json_escape(manifest.product_name) << "\",\n"
         << "  \"bundle_id\": \"" << json_escape(manifest.bundle_id) << "\",\n"
         << "  \"build_id\": \"" << json_escape(manifest.build_id) << "\",\n"
-        << "  \"registry_digest\": \""
-        << json_escape(manifest.registry_digest) << "\",\n"
-        << "  \"endpoint_included\": "
-        << (manifest.endpoint_included ? "true" : "false") << ",\n"
+        << "  \"registry_digest\": \"" << json_escape(manifest.registry_digest) << "\",\n"
+        << "  \"endpoint_included\": " << (manifest.endpoint_included ? "true" : "false") << ",\n"
         << "  \"unsafe_runtime_eval_acknowledged\": "
         << (manifest.unsafe_runtime_eval_acknowledged ? "true" : "false")
         << ",\n  \"permission_terms\": [";
     for (std::size_t index = 0; index < kPermissionTerms.size(); ++index) {
-        if (index != 0) out << ", ";
+        if (index != 0)
+            out << ", ";
         out << "\"" << kPermissionTerms[index] << "\"";
     }
     out << "],\n  \"capabilities\": [";
     for (std::size_t index = 0; index < capabilities.size(); ++index) {
-        if (index != 0) out << ", ";
+        if (index != 0)
+            out << ", ";
         out << "\"" << capability_contract_id(capabilities[index]) << "\"";
     }
     out << "]\n}\n";
@@ -613,20 +685,29 @@ std::string serialize_control_manifest(const ControlManifest& manifest) {
 
 std::string control_manifest_digest(const ControlManifest& manifest) {
     const auto canonical = serialize_control_manifest(manifest);
-    if (canonical.empty()) return {};
+    if (canonical.empty())
+        return {};
     return runtime::sha256_hex(canonical);
 }
 
 std::string control_consent_identity(std::string_view manifest_digest,
                                      std::string_view artifact_digest) {
-    if (manifest_digest.size() != 64 || artifact_digest.size() != 64) return {};
+    if (manifest_digest.size() != 64 || artifact_digest.size() != 64)
+        return {};
     return runtime::sha256_hex("dev.pulp.control/consent-identity@1:" +
-                               std::string(manifest_digest) + ":" +
-                               std::string(artifact_digest));
+                               std::string(manifest_digest) + ":" + std::string(artifact_digest));
 }
 
 std::span<const ControlOperationDescriptor> control_operation_registry() {
     return kControlOperations;
+}
+
+const ControlOperationDescriptor* resolve_control_operation(std::string_view id,
+                                                            std::uint32_t version) {
+    const auto found = std::ranges::find_if(kControlOperations, [&](const auto& candidate) {
+        return candidate.id == id && candidate.version == version;
+    });
+    return found == kControlOperations.end() ? nullptr : &*found;
 }
 
 std::string serialize_control_registry() {
@@ -635,34 +716,27 @@ std::string serialize_control_registry() {
         << "  \"schema_version\": 1,\n  \"capabilities\": [";
     bool first_capability = true;
     for (const auto& descriptor : inspector_capability_registry()) {
-        if (descriptor.capability == InspectorCapability::Unavailable) continue;
-        if (!first_capability) out << ",";
+        if (descriptor.capability == InspectorCapability::Unavailable)
+            continue;
+        if (!first_capability)
+            out << ",";
         first_capability = false;
-        out << "\n    {\"id\":\"" << descriptor.contract_id
-            << "\",\"adapter_id\":\"" << descriptor.id
-            << "\",\"risk\":\"" << capability_risk_id(descriptor.risk)
-            << "\",\"side_effect\":\""
-            << side_effect_id(descriptor.side_effect)
-            << "\",\"executor\":\"" << executor_id(descriptor.executor)
-            << "\",\"evidence\":\"" << evidence_id(descriptor.evidence)
-            << "\",\"required_build_feature\":\""
-            << descriptor.required_build_feature
-            << "\",\"runtime_contexts\":";
+        out << "\n    {\"id\":\"" << descriptor.contract_id << "\",\"adapter_id\":\""
+            << descriptor.id << "\",\"risk\":\"" << capability_risk_id(descriptor.risk)
+            << "\",\"side_effect\":\"" << side_effect_id(descriptor.side_effect)
+            << "\",\"executor\":\"" << executor_id(descriptor.executor) << "\",\"evidence\":\""
+            << evidence_id(descriptor.evidence) << "\",\"required_build_feature\":\""
+            << descriptor.required_build_feature << "\",\"runtime_contexts\":";
         append_csv_json_array(out, descriptor.runtime_contexts);
         out << ",\"host_tiers\":";
         append_csv_json_array(out, descriptor.host_tiers);
-        out << ",\"activation\":\"" << descriptor.activation
-            << "\",\"policy_predicates\":\""
-            << descriptor.policy_predicates
-            << "\",\"grant_scope\":\"" << descriptor.grant_scope
-            << "\",\"cancellation\":\"" << descriptor.cancellation
-            << "\",\"timeout\":\"" << descriptor.timeout
-            << "\",\"compatibility\":\"" << descriptor.compatibility
+        out << ",\"activation\":\"" << descriptor.activation << "\",\"policy_predicates\":\""
+            << descriptor.policy_predicates << "\",\"grant_scope\":\"" << descriptor.grant_scope
+            << "\",\"cancellation\":\"" << descriptor.cancellation << "\",\"timeout\":\""
+            << descriptor.timeout << "\",\"compatibility\":\"" << descriptor.compatibility
             << "\",\"deprecation\":\"" << descriptor.deprecation
-            << "\",\"grantable\":"
-            << (descriptor.grantable ? "true" : "false")
-            << ",\"publication_bound\":"
-            << (descriptor.publication_bound ? "true" : "false")
+            << "\",\"grantable\":" << (descriptor.grantable ? "true" : "false")
+            << ",\"publication_bound\":" << (descriptor.publication_bound ? "true" : "false")
             << ",\"operation\":";
         const ControlOperationDescriptor* contract = nullptr;
         for (const auto& operation : kControlOperations) {
@@ -672,34 +746,51 @@ std::string serialize_control_registry() {
             }
         }
         if (contract) {
-            out << "{\"id\":\"" << contract->id
-                << "\",\"input_schema_id\":\"" << contract->input_schema_id
-                << "\",\"input_schema_digest\":\""
+            out << "{\"id\":\"" << contract->id << "\",\"input_schema_id\":\""
+                << contract->input_schema_id << "\",\"input_schema_digest\":\""
                 << runtime::sha256_hex(contract->input_schema_json)
                 << "\",\"input_schema\":" << contract->input_schema_json
                 << ",\"output_schema_id\":\"" << contract->output_schema_id
                 << "\",\"output_schema_digest\":\""
                 << runtime::sha256_hex(contract->output_schema_json)
-                << "\",\"output_schema\":" << contract->output_schema_json
-                << ",\"result_kind\":\"" << contract->result_kind << "\"}";
+                << "\",\"output_schema\":" << contract->output_schema_json << ",\"result_kind\":\""
+                << contract->result_kind << "\",\"artifact_binding\":";
+            if (contract->artifact_binding.produced) {
+                out << "{\"kind\":\"produced\",\"artifact_id_field\":\""
+                    << contract->artifact_binding.artifact_id_field << "\",\"sha256_field\":\""
+                    << contract->artifact_binding.sha256_field << "\",\"byte_count_field\":\""
+                    << contract->artifact_binding.byte_count_field << "\",\"media_type_field\":\""
+                    << contract->artifact_binding.media_type_field << "\"}";
+            } else {
+                out << "null";
+            }
+            out << ",\"receipt_binding\":";
+            if (contract->receipt_binding.bound) {
+                out << "{\"kind\":\"durable-receipt\",\"receipt_id_field\":\""
+                    << contract->receipt_binding.receipt_id_field << "\"}";
+            } else {
+                out << "null";
+            }
+            out << "}";
         } else {
             out << "null";
         }
         out << ",\"adapter_operations\":[";
         bool first_operation = true;
         for (const auto& operation : inspector_method_registry()) {
-            if (operation.capability != descriptor.capability) continue;
-            if (!first_operation) out << ",";
+            if (operation.capability != descriptor.capability)
+                continue;
+            if (!first_operation)
+                out << ",";
             first_operation = false;
-            out << "{\"method\":\"" << json_escape(operation.method)
-                << "\",\"kind\":\""
-                << (operation.kind == InspectorMethodKind::Request ? "request"
-                                                                   : "event")
+            out << "{\"method\":\"" << json_escape(operation.method) << "\",\"kind\":\""
+                << (operation.kind == InspectorMethodKind::Request ? "request" : "event")
                 << "\",\"encoding\":\"legacy-inspector-json-v1\"}";
         }
         out << "]}";
     }
-    if (!first_capability) out << "\n  ";
+    if (!first_capability)
+        out << "\n  ";
     out << "]\n}\n";
     return out.str();
 }

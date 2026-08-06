@@ -10,6 +10,8 @@ PULP_INSPECT_METHOD(kSessionAcquireController, "Session.acquireController", Sess
 PULP_INSPECT_METHOD(kSessionRenewController, "Session.renewController", SessionControl, Request)
 PULP_INSPECT_METHOD(kSessionReleaseController, "Session.releaseController", SessionControl, Request)
 
+PULP_INSPECT_METHOD(kControlDispatch, "Control.dispatch", Unavailable, Request)
+
 PULP_INSPECT_METHOD(kInspectorEnable, "Inspector.enable", AuthoringTweaks, Request)
 PULP_INSPECT_METHOD(kInspectorDisable, "Inspector.disable", AuthoringTweaks, Request)
 PULP_INSPECT_METHOD(kInspectorGetInfo, "Inspector.getInfo", SessionDescribe, Request)

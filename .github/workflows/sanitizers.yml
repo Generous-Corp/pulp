@@ -24,6 +24,7 @@ on:
     # workflow-YAML-only PRs skip the 30-min matrix. #412 step 5.
     paths:
       - 'core/**'
+      - 'inspect/**'
       - 'examples/**'
       - 'tools/cli/**'
       - 'test/**'
@@ -298,7 +299,7 @@ jobs:
           ctest --test-dir build-tsan --output-on-failure -j1 \
             --repeat until-pass:2 \
             --timeout 120 \
-            --tests-regex 'AudioWorkgroup|EventLoop|StateStore|Timer|TripleBuffer|SeqLock|SpscQueue|ParamValue|MidiBuffer|MpeTracker|UmpCursor|AsyncUpdater|InterprocessConnection|ChildProcessManager|Osc|WebSocket|Channel|Atomic|Mutex|Concurrent|Race|Workgroup|AudioBridge|RingBuffer|Lockfree' \
+            --tests-regex 'AudioWorkgroup|EventLoop|StateStore|Timer|TripleBuffer|SeqLock|SpscQueue|ParamValue|MidiBuffer|MpeTracker|UmpCursor|AsyncUpdater|InterprocessConnection|ChildProcessManager|Osc|WebSocket|Channel|Control|Broker|Grant|Admission|Receipt|Artifact|control protocol|control artifact|control service|control client|control main-thread|per-call|Atomic|Mutex|Concurrent|Race|Workgroup|AudioBridge|RingBuffer|Lockfree' \
             --exclude-regex 'AudioWorkgroup'  # Timer race fixed by the Timer::start/stop shared_ptr fix (#414)
 
   ubsan:

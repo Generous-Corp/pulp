@@ -67,15 +67,65 @@ control and collaboration are unavailable there.
 ## Implemented foundation and current boundary
 
 The optional control foundation now composes broker identity, exact T0/T1
-registration, and client-scoped grants behind one dormant `ControlBroker`
-owner without opening a listener or routing an operation. Verified peer identity binds UID/SID, PID, process generation,
+registration, client-scoped grants, typed admission, and durable operation and
+artifact state behind one dormant `ControlBroker` owner. Its installed
+`ControlService` and `ControlClient` expose a typed, connection-bound transport
+seam without opening a listener or activating a runtime. The transport owns the
+authenticated peer and client lineage, so artifact reads cannot substitute a
+client identifier. The temporary `InspectorClient` compatibility constructor
+supports envelope dispatch only and fails artifact reads closed; Phase 3c owns
+the canonical carrier rather than extending the legacy Inspector session/server.
+Verified peer identity binds UID/SID, PID, process generation,
 executable identity, publisher, and role; same-UID membership and payload claims
 are not proof. Launcher bootstrap material is single-use, short-lived,
 peer-bound, and wiped. Registrations validate a canonical manifest plus the
 exact artifact digest and expose only that manifest's bounded capability set.
 Interactive trusted-consent decisions reject replay, while an existing user
-policy may be deliberately reusable. All stores have explicit capacity and
-expiry limits, and their security audit contains metadata and reason codes only.
+policy may be deliberately reusable.
+
+Control envelopes are closed, versioned, size-bounded, valid UTF-8 JSON with a
+canonical request hash. Every `ControlService::Session` negotiates its own
+protocol version and mandatory receipt support before it may dispatch a request
+or cancellation. Progress is emitted only when that session negotiated it;
+artifact-producing operations and artifact reads likewise require negotiated
+artifact support.
+Admission validates parameters against the resolved operation's input schema,
+then validates every persisted string as UTF-8 and commits the complete authority
+binding and idempotency receipt before `should_dispatch`. Unknown or malformed
+schema keywords fail closed. A
+successful executor result is validated against that same operation's output
+schema before the receipt can become `completed` or
+`completed-after-revocation`. Content drift under one idempotency key fails,
+while exact replay returns the existing receipt without executing again.
+
+Per-client and exact registration/instance active-operation quotas are enforced
+atomically. Deadlines are checked before admission and execution; cancellation
+intent is durable, first-wins, and observed at execution boundaries. Once an
+executor reports successful application, a later cancellation request remains
+receipt metadata and cannot rewrite that success as cancellation. If legal-thread
+work has started but misses the response deadline, the caller sees
+`unknown-needs-refresh`, but the durable receipt remains `running` and continues
+to consume its active-operation quota until the deferred completion settles it.
+Progress is monotonically sequenced, bounded, and backpressured. Grant, client,
+and instance teardown request cancellation for affected live receipts.
+
+Phase 3b contains only the minimal broker artifact store needed by later
+adapters. It durably publishes each bounded blob before opaque lineage metadata,
+and a terminal receipt may name only an already-published artifact with matching
+producer lineage. Broker-mediated retrieval rechecks the original producer
+grant, peer, client, registration, session, instance, publication, operation,
+terminal receipt, content metadata, and expiry. A new grant cannot inherit old
+artifact access. This is not the Phase 7 artifact system: there is no aggregate
+artifact quota, retention collector, deletion audit, redaction transform, or
+generalized ACL policy yet. Expiry removes publication metadata lazily; shared
+content-addressed blobs may remain orphaned until the Phase 7 collector exists.
+
+Owner-private directories and files exclude other OS users, but they do not
+provide at-rest secrecy from another malicious process running as the same OS
+user. Such a process may be able to read the store directly if it discovers the
+path. The lineage and grant checks above are guarantees of the broker API, not
+encryption or a same-UID filesystem sandbox. The security audit remains bounded
+to metadata and reason codes rather than operation or artifact contents.
 
 The first broker-carrier slice extends the existing length-prefixed IPC stack
 with an OS-local stream; it does not introduce a second framing protocol. Its
@@ -91,8 +141,10 @@ missing PID generation, signature failure, and any expectation mismatch fail
 closed. Other platforms do not yet mint a verified control peer.
 
 This remains a dormant composition root, not a running broker. The installed
-per-user service activation, trusted consent UI, operation dispatcher, receipts, and
-artifact ACLs are still required. Only Pulp-owned T0 offline jobs and T1
+per-user service activation, trusted consent UI, operation-specific runtime
+adapters, and Inspector/Remote View migration are still required. The typed
+service accepts only a carrier-verified peer and connection-bound client ID; its
+injected executor is inert by default. Only Pulp-owned T0 offline jobs and T1
 standalone hosts are admissible at this stage. Shared-host slots and direct
 AUv3 access fail closed as `host-unavailable`; plugin-rendered consent and
 environment-delivered bootstrap credentials remain rejected.
@@ -105,16 +157,16 @@ environment-delivered bootstrap credentials remain rejected.
 | Confused deputy asks a trusted client to control another instance | Exact session/instance/publication selection; client-scoped grants; capability and operation binding; no newest-instance fallback |
 | PID reuse, restart, stale project intent, or stale grant | Kernel-origin process generation where available, process-start recheck across code-signature inspection, opaque publication IDs, heartbeat/expiry, disconnect revocation; restore creates fresh grants only after revalidation |
 | Malicious plugin claims another publisher, slot, service, or capability | Signed artifact/declaration verification plus trusted host slot attestation; manifest is only an upper bound; broker rejects self-asserted identity |
-| Compromised or over-broad client | Least-privilege client grants, controller leases, expiry, explicit revocation, typed schemas, idempotency keys, bounded receipts, artifact ACLs |
+| Compromised or over-broad client | Least-privilege client grants, controller leases, expiry, explicit revocation, per-operation input/output schemas, idempotency keys, bounded receipts, and exact original-lineage checks on broker-mediated artifact reads; generalized artifact ACL policy remains Phase 7 |
 | Plugin or client bypasses policy with raw transport | No generic message or peer socket SDK; one broker transport; generated typed bindings; legacy Remote View mutation removed; raw host/port authority deleted by the broker migration |
-| Artifact or private-data exfiltration | Grant-checked artifact handles, provenance, retention/quota limits, redaction classes, no ambient filesystem paths, no payload values in policy audit logs |
+| Artifact or private-data exfiltration | Phase 3b uses opaque handles, exact producer lineage, original-grant reauthorization, per-blob/chunk limits, and metadata-only audit, but makes no same-UID at-rest secrecy claim; aggregate quota, retention collection, redaction, and deletion audit remain Phase 7 |
 | Runtime evaluation becomes a mutation shortcut | Separate high-risk component and capability, `research-unsafe` profile, exact acknowledgement, dedicated evaluator, realm and size/time limits; never an implementation path for typed operations |
-| Denial of service against broker, host, or audio thread | Bounded clients, frames, queues, rates, subscriptions, jobs, artifacts, timeouts, cancellation and expiry; no JSON/network work on the audio thread; host-main execution is bounded and fenced |
+| Denial of service against broker, host, or audio thread | Bounded clients, frames, queues, rates, subscriptions, jobs, receipts, and per-blob/chunk artifact sizes; timeouts, cancellation, and expiry; no JSON/network work on the audio thread; aggregate artifact quota and collection remain Phase 7 |
 | Grant revoked while work is queued or executing | Admission and pre-apply revalidation, cancellable staged operations, truthful `mayHaveApplied`/receipt state, no automatic retry of ambiguous mutation |
 | Schema downgrade or scope smuggling | Namespaced versioned IDs, canonical serialization and digest, unknown-field rejection, no permissive downgrade, explicit manifest changes for new fields/directions/rates |
 | Removed build authority survives reconfiguration | Per-target profile, capability, and unsafe-evaluation declarations force-refresh on every configure; a two-configure regression proves critical authority is withdrawn without deleting the build tree |
 | Artifact changes between discovery and verification | One cached byte snapshot per candidate drives selection, surface detection, marker verification, hashing, and consent identity; sidecar-derived names must remain safe basenames beside the sidecar; artifact and sidecar symlinks are rejected rather than followed |
-| Empty identity or oversized typed payload bypasses policy accounting | Required identity and idempotency strings are nonempty; every schema string and collection is bounded; discriminated operations use closed request variants; executor-specific limits are frozen in the registry, including byte-based UTF-8 limits that JSON Schema character counts cannot express |
+| Empty identity, malformed UTF-8/JSON, or oversized typed payload bypasses policy accounting | Required identity and idempotency strings are nonempty; every schema string and collection is bounded; the decoder validates UTF-8 and complete string tokens before the JSON parser; discriminated operations use closed request variants; executor-specific limits are frozen in the registry, including byte-based UTF-8 limits that JSON Schema character counts cannot express |
 | Update installs a second or untrusted broker | One active Pulp-owned per-user service, one signed update/bootstrap path, version negotiation, old service drain and credential invalidation |
 | Cross-vendor route appears from compatibility alone | Compatibility only makes a route offer possible; user/publisher policy and a visible integration action admit it; paired revocable grants are issued only after both exact endpoints are revalidated |
 | A blocked publisher communicates through another allowed route | Publisher deny policy wins before route creation and on restore/reconnect; active routes are inspectable and revoked when policy changes |
@@ -151,9 +203,11 @@ Project files store inert route intent, never credentials or durable grants.
 
 Changes to this boundary require tests for unknown fields and versions,
 permission-term denial, identity forgery and reuse, replay, grant expiry and
-revocation, cancellation races, artifact ACLs, queue/rate limits, broker
-restart/update, incremental reconfiguration, path traversal, immutable artifact
-snapshot use, schema boundary values, and negative binary scans. The dedicated
+revocation, cancellation races, original-lineage artifact authorization,
+queue/rate limits, broker restart/update, incremental reconfiguration, path
+traversal, immutable artifact snapshot use, schema boundary values, and negative
+binary scans. Phase 7 separately adds aggregate artifact quota, retention,
+redaction, deletion-audit, and generalized ACL tests. The dedicated
 platform-sandbox review is accepted with binding T0/T1-only restrictions. It
 rejects direct AUv3 access, self-attested shared-host slots, plugin-rendered
 consent, and environment bootstrap credentials. Any later host tier must close

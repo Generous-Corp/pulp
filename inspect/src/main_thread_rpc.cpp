@@ -6,8 +6,8 @@
 #include <atomic>
 #include <condition_variable>
 #include <exception>
-#include <mutex>
 #include <map>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -16,8 +16,7 @@ namespace pulp::inspect {
 namespace {
 
 InspectorMessage cancelled(std::int64_t request_id) {
-    return make_error(request_id,
-                      "Inspector dispatch was cancelled during teardown",
+    return make_error(request_id, "Inspector dispatch was cancelled during teardown",
                       "dispatch_cancelled");
 }
 
@@ -26,13 +25,10 @@ InspectorMessage run_operation(std::int64_t request_id,
     try {
         return operation();
     } catch (const std::exception& error) {
-        return make_error(request_id,
-                          std::string("Inspector dispatch failed: ") + error.what(),
+        return make_error(request_id, std::string("Inspector dispatch failed: ") + error.what(),
                           "dispatch_failed");
     } catch (...) {
-        return make_error(request_id,
-                          "Inspector dispatch failed",
-                          "dispatch_failed");
+        return make_error(request_id, "Inspector dispatch failed", "dispatch_failed");
     }
 }
 
@@ -46,12 +42,9 @@ void run_completion(InspectorMainThreadRpc::Completion completion) noexcept {
 }
 
 struct PendingCall {
-    PendingCall(std::int64_t id,
-                InspectorMainThreadRpc::Operation pending_operation,
+    PendingCall(std::int64_t id, InspectorMainThreadRpc::Operation pending_operation,
                 InspectorMainThreadRpc::Completion done)
-        : request_id(id),
-          operation(std::move(pending_operation)),
-          completion(std::move(done)) {}
+        : request_id(id), operation(std::move(pending_operation)), completion(std::move(done)) {}
 
     std::int64_t request_id = 0;
     std::mutex mutex;
@@ -69,7 +62,7 @@ struct PendingCall {
 } // namespace
 
 class InspectorMainThreadRpc::Impl {
-public:
+  public:
     struct PostedLifetimeCallbacks {
         InspectorMainThreadRpc::Completion begin;
         InspectorMainThreadRpc::Completion end;
@@ -87,8 +80,7 @@ public:
     std::size_t posted_lifetime_count = 0;
     std::shared_ptr<const PostedLifetimeCallbacks> posted_lifetime_callbacks;
     std::map<std::thread::id, std::size_t> operation_threads;
-    std::map<std::thread::id, std::vector<InspectorMainThreadRpc::Completion>>
-        after_operation;
+    std::map<std::thread::id, std::vector<InspectorMainThreadRpc::Completion>> after_operation;
 
     void begin_operation() {
         std::lock_guard lock(pending_mutex);
@@ -132,21 +124,21 @@ public:
     }
 
     class OperationGuard {
-    public:
-        explicit OperationGuard(std::shared_ptr<Impl> owner)
-            : impl(std::move(owner)) {
+      public:
+        explicit OperationGuard(std::shared_ptr<Impl> owner) : impl(std::move(owner)) {
             impl->begin_operation();
         }
-        ~OperationGuard() { impl->end_operation(); }
+        ~OperationGuard() {
+            impl->end_operation();
+        }
 
-    private:
+      private:
         std::shared_ptr<Impl> impl;
     };
 
     class PostedLifetime {
-    public:
-        explicit PostedLifetime(std::shared_ptr<Impl> owner)
-            : impl(std::move(owner)) {
+      public:
+        explicit PostedLifetime(std::shared_ptr<Impl> owner) : impl(std::move(owner)) {
             {
                 std::lock_guard lock(impl->pending_mutex);
                 ++impl->posted_lifetime_count;
@@ -172,27 +164,24 @@ public:
             }
         }
 
-    private:
+      private:
         std::shared_ptr<Impl> impl;
         std::shared_ptr<const PostedLifetimeCallbacks> callbacks;
     };
 
     bool register_call(const std::shared_ptr<PendingCall>& call) {
         std::lock_guard lock(pending_mutex);
-        pending.erase(
-            std::remove_if(pending.begin(), pending.end(),
-                           [](const auto& item) { return item.expired(); }),
-            pending.end());
-        if (!accepting.load(std::memory_order_acquire) ||
-            pending_count >= config.max_pending)
+        pending.erase(std::remove_if(pending.begin(), pending.end(),
+                                     [](const auto& item) { return item.expired(); }),
+                      pending.end());
+        if (!accepting.load(std::memory_order_acquire) || pending_count >= config.max_pending)
             return false;
         pending.emplace_back(call);
         ++pending_count;
         return true;
     }
 
-    void complete_call(const std::shared_ptr<PendingCall>& call,
-                       InspectorMessage response) {
+    void complete_call(const std::shared_ptr<PendingCall>& call, InspectorMessage response) {
         bool notify = false;
         bool release_slot = false;
         InspectorMainThreadRpc::Operation retired_operation;
@@ -222,18 +211,14 @@ public:
         std::lock_guard lock(pending_mutex);
         if (pending_count > 0)
             --pending_count;
-        pending.erase(
-            std::remove_if(pending.begin(), pending.end(),
-                           [](const auto& item) { return item.expired(); }),
-            pending.end());
+        pending.erase(std::remove_if(pending.begin(), pending.end(),
+                                     [](const auto& item) { return item.expired(); }),
+                      pending.end());
         pending_cv.notify_all();
     }
 
-    void fail_post_admission(
-        const std::shared_ptr<PendingCall>& call,
-        std::int64_t request_id,
-        std::string message,
-        std::string code) {
+    void fail_post_admission(const std::shared_ptr<PendingCall>& call, std::int64_t request_id,
+                             std::string message, std::string code) {
         InspectorMainThreadRpc::Operation retired_operation;
         bool complete_before_start = false;
         bool notify_started_failure = false;
@@ -242,12 +227,9 @@ public:
             if (call->response_ready)
                 return;
             const bool may_have_applied = call->started;
-            call->response = make_error(
-                request_id,
-                std::move(message),
-                std::move(code),
-                std::string(R"({"mayHaveApplied":)") +
-                    (may_have_applied ? "true}" : "false}"));
+            call->response = make_error(request_id, std::move(message), std::move(code),
+                                        std::string(R"({"mayHaveApplied":)") +
+                                            (may_have_applied ? "true}" : "false}"));
             call->response_ready = true;
             if (call->started) {
                 notify_started_failure = true;
@@ -269,22 +251,18 @@ public:
     }
 };
 
-InspectorMainThreadRpc::InspectorMainThreadRpc()
-    : InspectorMainThreadRpc(Config{}) {}
+InspectorMainThreadRpc::InspectorMainThreadRpc() : InspectorMainThreadRpc(Config{}) {}
 
 InspectorMainThreadRpc::InspectorMainThreadRpc(Config config)
     : InspectorMainThreadRpc(
           config,
           [](std::function<void()> task) {
-              return pulp::events::MainThreadDispatcher::call_async(
-                  std::move(task));
+              return pulp::events::MainThreadDispatcher::call_async(std::move(task));
           },
           [] { return pulp::events::MainThreadDispatcher::is_main_thread(); }) {}
 
-InspectorMainThreadRpc::InspectorMainThreadRpc(
-    Config config,
-    Post post,
-    IsMainThread is_main_thread)
+InspectorMainThreadRpc::InspectorMainThreadRpc(Config config, Post post,
+                                               IsMainThread is_main_thread)
     : impl_(std::make_shared<Impl>()) {
     impl_->config = config;
     if (impl_->config.timeout <= std::chrono::milliseconds(0))
@@ -299,36 +277,77 @@ InspectorMainThreadRpc::~InspectorMainThreadRpc() {
     cancel();
 }
 
-InspectorMessage InspectorMainThreadRpc::call(
-    std::int64_t request_id,
-    Operation operation) {
+InspectorMessage InspectorMainThreadRpc::call(std::int64_t request_id, Operation operation) {
     return call(request_id, std::move(operation), {});
 }
 
-InspectorMessage InspectorMainThreadRpc::call(
-    std::int64_t request_id,
-    Operation operation,
-    Completion completion) {
+std::chrono::milliseconds InspectorMainThreadRpc::default_timeout() const {
+    return impl_->config.timeout;
+}
+
+InspectorMessage InspectorMainThreadRpc::call(std::int64_t request_id, Operation operation,
+                                              Completion completion) {
+    return call(request_id, std::move(operation), std::move(completion), impl_->config.timeout);
+}
+
+InspectorMessage InspectorMainThreadRpc::call(std::int64_t request_id, Operation operation,
+                                              Completion completion,
+                                              std::chrono::milliseconds timeout) {
+    return call_with_inline_policy(request_id, std::move(operation), std::move(completion), timeout,
+                                   true);
+}
+
+InspectorMessage InspectorMainThreadRpc::call_queued_only(std::int64_t request_id,
+                                                          Operation operation,
+                                                          Completion completion,
+                                                          std::chrono::milliseconds timeout) {
+    return call_with_inline_policy(request_id, std::move(operation), std::move(completion), timeout,
+                                   false);
+}
+
+InspectorMessage InspectorMainThreadRpc::call_with_inline_policy(std::int64_t request_id,
+                                                                 Operation operation,
+                                                                 Completion completion,
+                                                                 std::chrono::milliseconds timeout,
+                                                                 bool allow_inline) {
     const auto impl = impl_;
+    if (timeout <= std::chrono::milliseconds::zero())
+        timeout = std::chrono::milliseconds(1);
     if (!operation) {
         run_completion(std::move(completion));
-        return make_error(request_id,
-                          "Inspector dispatch operation is empty",
-                          "invalid_dispatch");
+        return make_error(request_id, "Inspector dispatch operation is empty", "invalid_dispatch");
     }
     if (impl->is_main_thread && impl->is_main_thread()) {
+        if (!allow_inline) {
+            run_completion(std::move(completion));
+            return make_error(request_id,
+                              "Queued-only Inspector dispatch cannot originate on the main thread",
+                              "direct_main_thread_forbidden", R"({"mayHaveApplied":false})");
+        }
+        const auto started_at = std::chrono::steady_clock::now();
         std::unique_lock operation_lock(impl->operation_mutex);
         if (!impl->accepting.load(std::memory_order_acquire)) {
             run_completion(std::move(completion));
             return cancelled(request_id);
         }
+        if (std::chrono::steady_clock::now() - started_at >= timeout) {
+            run_completion(std::move(completion));
+            operation_lock.unlock();
+            return make_error(request_id, "Inspector main-thread dispatch timed out",
+                              "main_thread_timeout", R"({"mayHaveApplied":false})");
+        }
         Impl::OperationGuard running(impl);
         auto response = run_operation(request_id, operation);
         run_completion(std::move(completion));
+        const bool timed_out = std::chrono::steady_clock::now() - started_at >= timeout;
         // after_current_operation callbacks may drain transports whose reader
         // threads are waiting to enter this serialized RPC. Release the
         // serialization mutex before OperationGuard runs those callbacks.
         operation_lock.unlock();
+        if (timed_out) {
+            return make_error(request_id, "Inspector main-thread dispatch timed out",
+                              "main_thread_timeout", R"({"mayHaveApplied":true})");
+        }
         return response;
     }
     if (!impl->accepting.load(std::memory_order_acquire)) {
@@ -336,14 +355,13 @@ InspectorMessage InspectorMainThreadRpc::call(
         return cancelled(request_id);
     }
 
-    auto pending = std::make_shared<PendingCall>(
-        request_id, std::move(operation), std::move(completion));
+    auto pending =
+        std::make_shared<PendingCall>(request_id, std::move(operation), std::move(completion));
     if (!impl->register_call(pending)) {
         auto response = !impl->accepting.load(std::memory_order_acquire)
-            ? cancelled(request_id)
-            : make_error(request_id,
-                         "Inspector main-thread queue is full",
-                         "dispatch_queue_full");
+                            ? cancelled(request_id)
+                            : make_error(request_id, "Inspector main-thread queue is full",
+                                         "dispatch_queue_full");
         {
             std::lock_guard lock(pending->mutex);
             pending->slot_held = false;
@@ -352,44 +370,43 @@ InspectorMessage InspectorMainThreadRpc::call(
         return response;
     }
 
-    std::function<void()> posted_task =
-        [lifetime = std::make_shared<Impl::PostedLifetime>(impl),
-         impl, pending, request_id]() mutable {
-            (void)lifetime;
-            std::unique_lock operation_lock(impl->operation_mutex);
-            bool should_run = false;
-            bool cancelled_before_start = false;
-            Operation operation;
-            {
-                std::lock_guard lock(pending->mutex);
-                cancelled_before_start = pending->cancelled_before_start;
-                if (cancelled_before_start) {
-                    operation = std::move(pending->operation);
-                } else if (impl->accepting.load(std::memory_order_acquire)) {
-                    pending->started = true;
-                    operation = std::move(pending->operation);
-                    should_run = true;
-                } else {
-                    pending->cancelled_before_start = true;
-                    operation = std::move(pending->operation);
-                }
-            }
+    std::function<void()> posted_task = [lifetime = std::make_shared<Impl::PostedLifetime>(impl),
+                                         impl, pending, request_id]() mutable {
+        (void)lifetime;
+        std::unique_lock operation_lock(impl->operation_mutex);
+        bool should_run = false;
+        bool cancelled_before_start = false;
+        Operation operation;
+        {
+            std::lock_guard lock(pending->mutex);
+            cancelled_before_start = pending->cancelled_before_start;
             if (cancelled_before_start) {
-                operation = {};
-                return;
+                operation = std::move(pending->operation);
+            } else if (impl->accepting.load(std::memory_order_acquire)) {
+                pending->started = true;
+                operation = std::move(pending->operation);
+                should_run = true;
+            } else {
+                pending->cancelled_before_start = true;
+                operation = std::move(pending->operation);
             }
-            if (!should_run) {
-                operation = {};
-                impl->complete_call(pending, cancelled(request_id));
-                return;
-            }
-            Impl::OperationGuard running(impl);
-            auto response = run_operation(request_id, operation);
-            impl->complete_call(pending, std::move(response));
-            // See the direct path above: deferred teardown must not wait for a
-            // reader that is itself blocked on this mutex.
-            operation_lock.unlock();
-        };
+        }
+        if (cancelled_before_start) {
+            operation = {};
+            return;
+        }
+        if (!should_run) {
+            operation = {};
+            impl->complete_call(pending, cancelled(request_id));
+            return;
+        }
+        Impl::OperationGuard running(impl);
+        auto response = run_operation(request_id, operation);
+        impl->complete_call(pending, std::move(response));
+        // See the direct path above: deferred teardown must not wait for a
+        // reader that is itself blocked on this mutex.
+        operation_lock.unlock();
+    };
     bool posted = false;
     bool post_threw = false;
     try {
@@ -400,29 +417,21 @@ InspectorMessage InspectorMainThreadRpc::call(
     }
     posted_task = {};
     if (post_threw) {
-        impl->fail_post_admission(
-            pending,
-            request_id,
-            "Main-thread dispatcher admission threw an exception",
-            "dispatch_failed");
+        impl->fail_post_admission(pending, request_id,
+                                  "Main-thread dispatcher admission threw an exception",
+                                  "dispatch_failed");
     } else if (!posted) {
-        impl->fail_post_admission(
-            pending,
-            request_id,
-            "No main-thread dispatcher accepted the request",
-            "main_thread_unavailable");
+        impl->fail_post_admission(pending, request_id,
+                                  "No main-thread dispatcher accepted the request",
+                                  "main_thread_unavailable");
     }
 
     std::unique_lock lock(pending->mutex);
-    if (!pending->cv.wait_for(lock, impl->config.timeout,
-                              [&] { return pending->response_ready; })) {
+    if (!pending->cv.wait_for(lock, timeout, [&] { return pending->response_ready; })) {
         const bool may_have_applied = pending->started;
         auto timeout_response = make_error(
-            request_id,
-            "Inspector main-thread dispatch timed out",
-            "main_thread_timeout",
-            std::string(R"({"mayHaveApplied":)") +
-                (may_have_applied ? "true}" : "false}"));
+            request_id, "Inspector main-thread dispatch timed out", "main_thread_timeout",
+            std::string(R"({"mayHaveApplied":)") + (may_have_applied ? "true}" : "false}"));
         if (may_have_applied) {
             // The posted task owns the pending state and operation capture.
             // Fence this caller at the deadline; complete_call() will release
@@ -447,8 +456,7 @@ void InspectorMainThreadRpc::cancel() {
     const auto impl = impl_;
     if (!impl)
         return;
-    const bool was_accepting =
-        impl->accepting.exchange(false, std::memory_order_acq_rel);
+    const bool was_accepting = impl->accepting.exchange(false, std::memory_order_acq_rel);
     if (!was_accepting)
         return;
 
@@ -483,13 +491,11 @@ void InspectorMainThreadRpc::cancel_and_wait() {
     if (!impl || impl->executing_here())
         return;
     std::unique_lock lock(impl->pending_mutex);
-    impl->pending_cv.wait(lock, [&] {
-        return impl->pending_count == 0 && impl->operation_threads.empty();
-    });
+    impl->pending_cv.wait(
+        lock, [&] { return impl->pending_count == 0 && impl->operation_threads.empty(); });
 }
 
-bool InspectorMainThreadRpc::set_posted_lifetime_callbacks(
-    Completion begin, Completion end) {
+bool InspectorMainThreadRpc::set_posted_lifetime_callbacks(Completion begin, Completion end) {
     const auto impl = impl_;
     if (!impl)
         return false;
@@ -497,8 +503,7 @@ bool InspectorMainThreadRpc::set_posted_lifetime_callbacks(
     callbacks->begin = std::move(begin);
     callbacks->end = std::move(end);
     std::lock_guard lock(impl->pending_mutex);
-    if (impl->posted_lifetime_count != 0 ||
-        impl->posted_lifetime_callbacks)
+    if (impl->posted_lifetime_count != 0 || impl->posted_lifetime_callbacks)
         return false;
     impl->posted_lifetime_callbacks = std::move(callbacks);
     return true;
