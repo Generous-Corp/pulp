@@ -167,6 +167,9 @@ pulp_add_test_suite(pulp-test-signal-mod-event-api LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-mod-sources LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-mod-source-api LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-mod-tools LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-modulation-language
+    SOURCES test_modulation_language.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-mod-events LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-mod-voice LIBRARIES pulp::signal)
 # Alias/passband claims here are measured with the shared tone-projection
