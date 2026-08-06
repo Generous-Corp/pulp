@@ -72,10 +72,13 @@ quantizer's beat/frame arithmetic.
   metadata in the dependency-lower grid range and match playback's half-open,
   floor-to-frame rule. Range-local proportions are not callback invariant when
   a loop boundary's output count was rounded. Retain one `HostGridAnchor`
-  (source tick, absolute frame, ticks per frame) across the continuous session
-  interval, give each range its absolute first frame and loop-pass
+  (normalized source tick, absolute frame, ticks per frame) across the continuous
+  session interval, give each range its absolute first frame and loop-pass
   document-to-source offset, and floor on that stable clock before clamping to
-  the owning half-open range. Never feed such a range through
+  the owning half-open range. Initialize the source tick from the first resolved
+  range in a normalization epoch, not from an absolute host beat that the
+  transport has already wrapped into document coordinates; reset the anchor on
+  an epoch or slope discontinuity. Never feed such a range through
   `CompiledTempoMap::ticks_to_samples()`: session tempo is independent of the
   document tempo, including on split loop ranges.
 - `LoopRegion` (`<pulp/timebase/loop_region.hpp>`) is two document positions plus
