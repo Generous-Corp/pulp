@@ -1300,6 +1300,22 @@ static void emit_js_audio_widget(const NativeEmit& e) {
                        << kattr_f("art_core_x") << ", " << kattr_f("art_core_y")
                        << ", " << cw << ", " << ch << ");\n";
                 }
+                // The design's OWN pointer, when the importer recovered it —
+                // fractions of the disc half-extent, the same data the native
+                // materializer forwards. Without this the scripted path draws
+                // the generic notch over the design's disc while the
+                // materialized path draws the design's pointer: one import,
+                // two different knobs.
+                if (auto c = node.attributes.find("knob_ind_color");
+                    node.attributes.count("knob_ind_r_out") != 0) {
+                    ss << ind << "setKnobCapturedIndicator('" << id << "', "
+                       << kattr_f("knob_ind_r_in") << ", "
+                       << kattr_f("knob_ind_r_out") << ", "
+                       << kattr_f("knob_ind_w") << ", '"
+                       << js_single_quote_escape(
+                              c != node.attributes.end() ? c->second : "")
+                       << "');\n";
+                }
             }
         }
         emit_style(id);

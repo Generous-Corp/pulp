@@ -13,6 +13,7 @@ createImage	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 setImageSource	widget_assets	function	core/view/src/widget_bridge/widget_assets_api.cpp
 setKnobSpriteStrip	widget_assets	function	core/view/src/widget_bridge/widget_assets_api.cpp
 setKnobSpriteCore	widget_assets	function	core/view/src/widget_bridge/widget_assets_api.cpp
+setKnobCapturedIndicator	widget_assets	function	core/view/src/widget_bridge/widget_assets_api.cpp
 setFaderSkin	widget_assets	function	core/view/src/widget_bridge/widget_assets_api.cpp
 setFaderTrackWidth	widget_assets	function	core/view/src/widget_bridge/widget_assets_api.cpp
 setFaderTrackBorder	widget_assets	function	core/view/src/widget_bridge/widget_assets_api.cpp

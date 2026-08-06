@@ -107,6 +107,24 @@ _expect_metadata_failure(
     "include(\"${_metadata}\")\n_pulp_metadata_resolve_au(_bad \"bad-version\" \"Effect\" 0 \"1foo\" \"PGan\" \"Pulp\")\n"
     "VERSION must be numeric major")
 
+# ── AudioComponent identity uniqueness ──────────────────────────────────────
+# macOS resolves an Audio Unit by (type, subtype, manufacturer). Two plugins
+# from one project that share PLUGIN_CODE therefore collapse into one component
+# — a product family loaded together in a DAW is exactly where that bites, and
+# it is silent without a configure-time claim.
+_pulp_metadata_claim_au_component("AlphaFx" "test(alpha)" "aufx" "PAlp" "Pulp")
+_pulp_metadata_claim_au_component("BetaFx" "test(beta)" "aufx" "PBet" "Pulp")
+# Same target re-claiming its own identity is legal: AU v2 and AUv3 of one
+# plugin deliberately publish the same component.
+_pulp_metadata_claim_au_component("AlphaFx" "test(alpha auv3)" "aufx" "PAlp" "Pulp")
+# A different AU TYPE with the same code is a distinct component.
+_pulp_metadata_claim_au_component("AlphaSynth" "test(alpha synth)" "aumu" "PAlp" "Pulp")
+
+_expect_metadata_failure(
+    "duplicate-au-component"
+    "include(\"${_metadata}\")\n_pulp_metadata_claim_au_component(\"One\" \"dup\" \"aufx\" \"PDup\" \"Pulp\")\n_pulp_metadata_claim_au_component(\"Two\" \"dup\" \"aufx\" \"PDup\" \"Pulp\")\n"
+    "is already used by target 'One'")
+
 if(_fail)
     message(FATAL_ERROR "AU metadata resolver smoke failed.")
 endif()

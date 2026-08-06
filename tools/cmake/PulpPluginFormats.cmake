@@ -447,6 +447,9 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
             "${category}" "${accepts_midi}" "${version}"
             "${plugin_code}" "${manufacturer_code}")
         set(PULP_AU_TYPE "${_pulp_au_meta_TYPE}")
+        _pulp_metadata_claim_au_component("${target}"
+            "pulp_add_plugin(${target}) AU"
+            "${PULP_AU_TYPE}" "${plugin_code}" "${manufacturer_code}")
         # Factory function name follows the AUSDK_COMPONENT_ENTRY convention
         set(PULP_AU_FACTORY_NAME "${target}AUFactory")
         set(PULP_AU_VERSION_INT "${_pulp_au_meta_VERSION_INT}")

@@ -96,8 +96,8 @@
     "text": {
       "strong": { "value": "#F3F6F9", "type": "color" },
       "default":{ "value": "#D6DCE4", "type": "color" },
-      "muted":  { "value": "#939CA9", "type": "color" },
-      "faint":  { "value": "#646D7A", "type": "color" }
+      "muted":  { "value": "#B6BCC5", "type": "color" },
+      "faint":  { "value": "#838A95", "type": "color" }
     },
     "line": {
       "soft":   { "value": "rgba(220,232,250,0.07)", "type": "color" },
@@ -126,8 +126,8 @@
     "text": {
       "strong": { "value": "#14171C", "type": "color" },
       "default":{ "value": "#2C313A", "type": "color" },
-      "muted":  { "value": "#5A636F", "type": "color" },
-      "faint":  { "value": "#939BA8", "type": "color" }
+      "muted":  { "value": "#4D555F", "type": "color" },
+      "faint":  { "value": "#767C86", "type": "color" }
     },
     "line": {
       "soft":   { "value": "rgba(20,28,40,0.06)", "type": "color" },

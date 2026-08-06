@@ -62,6 +62,7 @@ if(WIN32)
 endif()
 
 add_library(pulp-inspect-control
+    src/control_broker.cpp
     src/control_grants.cpp
     src/control_identity.cpp
     src/control_peer.cpp)
