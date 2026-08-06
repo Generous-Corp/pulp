@@ -257,7 +257,36 @@ usually means the processor emitted (almost) nothing, which is the finding.
   Pulp callbacks, `ScopedFlushDenormals` still governs the finite subnormal range
   and may flush it to zero, matching the platform standard in that FP mode. A
   replacement needs a repeatable Release benchmark over pitch and audio-rate FM
-  domains as well as dense numerical and product-level error proofs.
+  domains as well as dense numerical and product-level error proofs. Reproduce
+  the current comparison with:
+  ```bash
+  cmake -S . -B build-exp2-bench -DCMAKE_BUILD_TYPE=Release \
+    -DPULP_BENCHMARK=ON -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_EXAMPLES=OFF
+  tools/ci/governed-build.sh cmake --build build-exp2-bench \
+    --target pulp-fast-exp2-benchmark --parallel 4
+  ./build-exp2-bench/test/pulp-fast-exp2-benchmark
+  ```
+  The optional, non-ctest target covers pitch `[-16,16]`, audio-rate FM
+  `[-8,8]`, and the normal float exponent range `[-126,127]`. Its
+  `prior_pulp_cubic_exp2` is explicitly benchmark-only historical Pulp code;
+  observable checksums prevent either lane from being optimized away. Record
+  repeated medians from a Release binary (`-O3 -DNDEBUG` on the supported Apple
+  Clang configuration); timing is evidence, never a CI pass/fail threshold.
+
+  Advisory evidence snapshot (2026-08-06, non-portable): three consecutive
+  executions on `Daniels-Mac-Studio` (Apple M3 Ultra, arm64, macOS 26.5.2,
+  Apple Clang 21.0.0) from the configuration above produced these
+  median-nanoseconds-per-call ranges:
+
+  | Domain | `FastMath::exp2` (std delegate) | Prior Pulp cubic | Prior / current |
+  |--------|-------------------------------:|-----------------:|----------------:|
+  | pitch `[-16,16]` | 1.399-1.401 | 1.678-1.730 | 1.200-1.235x |
+  | FM `[-8,8]` | 1.427-1.436 | 1.684-1.709 | 1.175-1.191x |
+  | normal `[-126,127]` | 1.401-1.480 | 1.678-1.798 | 1.195-1.215x |
+
+  All three executions reproduced identical per-domain checksums for each lane.
+  These numbers document this host/compiler decision; rerun before drawing a
+  conclusion on another architecture or toolchain.
 - **Grade discontinuity correctors against the shipped baseline.** A minBLEP
   table needs a reproducible generator and a freshness check, but table
   provenance alone does not prove audio quality. Render free-running and synced
