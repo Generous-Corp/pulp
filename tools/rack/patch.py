@@ -3535,6 +3535,48 @@ def silence_advice(report: str, patch: dict, inv: dict, runs: list) -> list:
     return lines
 
 
+def keep_what_works(achieved: list, patch: dict) -> str:
+    """What a retry must NOT break, and why it should edit rather than rebuild.
+
+    Measured across one run's five attempts:
+
+        01  PressedDuck StepWave Zephyr           silent (Zephyr dead)
+        02  PressedDuck StepWave Ouros            SILENCE FIXED, missed the idiom
+        03  Arrange Decima Dunes Node Triton Zephyr   rebuilt; Zephyr BACK
+        04  Dunes Node Ouros StepWave Triton      silent again (Node dead)
+        05  EnvelopeArray Ouros StepWave Triton   back to attempt 2's shape
+
+    Two behaviours, one cause. Attempt 2 fixed the silence by swapping ONE
+    module; attempt 3 threw that patch away, rebuilt from scratch, and brought
+    back the oscillator attempt 1 had already proven dead. And the run
+    alternated -- silent, idiom, silent, silent, idiom -- because each retry
+    carried only the latest complaint, so a fix for one constraint was free to
+    break the other.
+
+    A retry cannot see the run. It arrives knowing its own rejection and
+    nothing else, so "you already solved this, do not undo it" is a fact only
+    the loop holds. Saying it is most of the fix.
+    """
+    lines = [
+        "EDIT THIS PATCH. DO NOT REBUILD IT.",
+        "Return the same patch with the SMALLEST change that fixes what is "
+        "named above. Every other module and every other cable was checked and "
+        "is correct: keep them exactly as they are, with the same ids.",
+    ]
+    if achieved:
+        lines.append("")
+        lines.append("ALREADY SATISFIED BY THIS PATCH. A change that breaks "
+                     "one of these is not a fix, it is a trade:")
+        lines += [f"  - {a}" for a in achieved]
+    mods = len(patch.get("modules", []))
+    cables = len(patch.get("cables", []))
+    lines.append("")
+    lines.append(f"You are editing {mods} modules and {cables} cables. A reply "
+                 f"that replaces most of them is a rebuild, and a rebuild "
+                 f"loses the parts that already work.")
+    return "\n".join(lines)
+
+
 def stuck_note(missing: list, patch: dict, runs: list) -> list:
     """Say when a run is going round in a circle, and name what to change.
 
@@ -3887,6 +3929,16 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
     # rejection.
     silent_runs: list = []
     missed_runs: list = []
+    # WHAT THIS RUN HAS ALREADY GOT RIGHT, so a retry is not free to trade one
+    # constraint for the other. The run this comes from went silent, idiom,
+    # silent, silent, idiom -- fixing each complaint in turn and re-breaking
+    # the one before, because no attempt was ever told what it had solved.
+    achieved: list = []
+
+    def won(claim: str) -> None:
+        if claim not in achieved:
+            achieved.append(claim)
+
 
     for attempt in range(retries + 1):
         parts = [contract, library_brief(prompt, inv),
@@ -3978,6 +4030,7 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
             for e in errs[:5]:
                 print(f"    {e}", flush=True)
             ctx = "The patch was rejected:\n" + "\n".join(errs)
+            ctx += "\n\n" + keep_what_works(achieved, patch)
             continue
 
         # Point the audio interface somewhere audible BEFORE gating, so the
@@ -4004,6 +4057,8 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
         # covered the crash and nothing else, so a machine with no SDK -- where
         # the check equally never ran -- took the OTHER branch and printed
         # nothing at all, and the run read as though audibility had passed.
+        if verdict == AUDIBLE:
+            won("it makes a sound: something reaches the audio interface")
         crashed = verdict == UNMEASURED
         if crashed:
             keep_attempt(patch, report, attempt + 1, "unmeasured")
@@ -4059,7 +4114,8 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                            f"{idioms[claimed.slug].get('is', '')}\n\n"
                            "It is missing:\n" +
                            "\n".join(f"  - {m}" if not m.startswith("  ")
-                                     else f"  {m}" for m in told))
+                                     else f"  {m}" for m in told) +
+                           "\n\n" + keep_what_works(achieved, patch))
                     # Kept for the same reason a silent one is: "wrong idiom"
                     # names the requirement and not the wiring that missed it,
                     # and without the patch the only way to see what was
@@ -4072,6 +4128,7 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                         f"it is not a {claimed.slug} patch", told, 0,
                         misses=len(missing)))
                     continue
+                won(f"it is wired as a {claimed.slug} patch")
                 # Topology can hold while the music does not exist: the
                 # sequencer can be clocked, reach the oscillator and fire the
                 # envelope with every step still sitting at its default —
@@ -4093,7 +4150,8 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                         print(f"    - {m}")
                     ctx = (f"The wiring is right for a {claimed.slug} patch, but "
                            "the values that make it MUSIC are missing:\n" +
-                           "\n".join(f"  - {m}" for m in unwritten))
+                           "\n".join(f"  - {m}" for m in unwritten) +
+                           "\n\n" + keep_what_works(achieved, patch))
                     kept = keep_attempt(patch, "music not written:\n" +
                                         "\n".join(f"  - {m}" for m in unwritten),
                                         attempt + 1, "music-not-written")
@@ -4150,7 +4208,8 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                "whose CV input reads 0 was never opened, an envelope at 0.000 "
                "was never gated, a sequencer stuck on one value is never "
                "clocked. Then give that module the thing that starts it, "
-               "rather than adding more modules after it.")
+               "rather than adding more modules after it.\n\n" +
+               keep_what_works(achieved, patch))
     # OUT OF ATTEMPTS IS NOT THE SAME AS NOTHING TO SHOW.
     #
     # This used to raise here, and the run ended with five generated patches on

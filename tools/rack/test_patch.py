@@ -3208,6 +3208,7 @@ def main():
     import test_handover
     hand_bad = hand_ran = 0
     for _check in (test_handover.check_retry_names_a_real_jack,
+                   test_handover.check_a_retry_edits_and_keeps_what_works,
                    test_handover.check_a_specific_word_beats_a_generic_one,
                    test_handover.check_a_widened_role_accuses_nobody,
                    test_handover.check_the_dead_module_is_named,

@@ -910,6 +910,52 @@ def check_a_stuck_idiom_escalates_too() -> tuple:
     return bad, 3
 
 
+def check_a_retry_edits_and_keeps_what_works() -> tuple:
+    """A retry must be told to EDIT, and told what it already solved.
+
+    From the same run's module churn: attempt 2 fixed the silence by swapping
+    one module, attempt 3 discarded that patch, rebuilt from scratch and
+    brought back the oscillator attempt 1 had proven dead. The run then went
+    silent, idiom, silent, silent, idiom -- fixing each complaint in turn and
+    re-breaking the one before, because every retry carried only the latest
+    rejection.
+
+    A retry cannot see the run. "You already solved this" is a fact only the
+    loop holds, and it was telling nobody.
+    """
+    bad = 0
+    pch = _patch_using("CVfunk", "PentaSequencer")
+
+    said = P.keep_what_works(["it makes a sound"], pch)
+    for want, why in (("EDIT THIS PATCH", "the instruction to edit"),
+                      ("DO NOT REBUILD", "the instruction not to rebuild"),
+                      ("it makes a sound", "what was already solved"),
+                      ("2 modules", "the size of what it is editing")):
+        if want not in said:
+            bad += 1
+            print(f"  WRONG  the retry frame is missing {why} ({want!r})")
+    if not bad:
+        print("  ok     a retry is told to edit, what it already solved, and "
+              "how big the patch it is editing is")
+
+    # NOTHING SOLVED YET IS NOT THE SAME AS NOTHING TO SAY. The first rejection
+    # has no achievement to protect, and claiming one would be inventing a
+    # constraint the model then defends for no reason.
+    before = bad
+    first = P.keep_what_works([], pch)
+    if "ALREADY SATISFIED" in first:
+        bad += 1
+        print(f"  WRONG  the first rejection claims something was already "
+              f"satisfied:\n{first}")
+    elif "EDIT THIS PATCH" not in first:
+        bad += 1
+        print("  WRONG  the first rejection is not told to edit either")
+    if bad == before:
+        print("  ok     with nothing solved yet, it still says edit and "
+              "claims no achievement")
+    return bad, 2
+
+
 class _Intent:
     """What claim_idiom returns. Local, so the loop can be driven without a
     prompt that happens to word itself into the right idiom."""
@@ -1017,6 +1063,27 @@ def check_the_loop_gives_up_holding_a_patch() -> tuple:
                 print("  ok     the shortfall carries the requirement it "
                       "missed")
 
+            # WHAT IT SOLVED REACHES THE NEXT PROMPT. This run is
+            # audible on every attempt, so from the second rejection onward
+            # every prompt must carry that as a thing not to trade away. The
+            # real run threw exactly this away on attempt 3.
+            kept = [p for p in seen if "ALREADY SATISFIED" in p]
+            if len(seen) > 1 and not kept:
+                bad += 1
+                print("  WRONG  no retry is told what the patch already got "
+                      "right, so a fix is free to break it")
+            elif kept and not all("makes a sound" in p for p in kept):
+                bad += 1
+                print("  WRONG  a retry lists achievements but not the one "
+                      "this run actually measured")
+            elif kept and not all("DO NOT REBUILD" in p for p in kept):
+                bad += 1
+                print("  WRONG  a retry is not told to edit rather than "
+                      "rebuild, which is how a solved silence gets discarded")
+            else:
+                print(f"  ok     {len(kept)} retries carry what the patch "
+                      f"already solved, and say to edit not rebuild")
+
             # THE RETRY ESCALATED. The first prompt cannot name the jack --
             # nothing has failed yet -- and every later one must.
             retries = [p for p in seen if "REJECTED" in p]
@@ -1042,19 +1109,19 @@ def check_the_loop_gives_up_holding_a_patch() -> tuple:
                       f"jack, and says the module in hand cannot do it")
 
             # The attempts are on disk, not only in the return value.
-            kept = shortfall.kept if shortfall else ""
-            if not kept or not os.path.exists(kept):
+            disk = shortfall.kept if shortfall else ""
+            if not disk or not os.path.exists(disk):
                 bad += 1
                 print("  WRONG  the run kept no attempt on disk")
             else:
                 print(f"  ok     the attempts are on disk "
-                      f"({len(os.listdir(os.path.dirname(kept)))} files)")
+                      f"({len(os.listdir(os.path.dirname(disk)))} files)")
     finally:
         for k, v in saved.items():
             setattr(P, k, v)
         I.check_any = saved_check_any
         P._ATTEMPTS_DIR = saved_dir
-    return bad, 4
+    return bad, 5
 
 
 def check_registered_before_the_skip() -> tuple:
@@ -1092,6 +1159,7 @@ def check_registered_before_the_skip() -> tuple:
 
 
 CHECKS = (check_retry_names_a_real_jack,
+          check_a_retry_edits_and_keeps_what_works,
           check_a_specific_word_beats_a_generic_one,
           check_a_widened_role_accuses_nobody,
           check_the_dead_module_is_named,
