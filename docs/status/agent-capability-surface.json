@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 1,
+  "inventory_version": 2,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -33,15 +33,15 @@
   ],
   "counts": {
     "public_headers": 345,
-    "reviewed_headers": 6,
-    "legacy_unreviewed_headers": 339,
-    "unsupported_headers": 0,
+    "reviewed_headers": 7,
+    "legacy_unreviewed_headers": 338,
+    "unsupported_headers": 1,
     "by_disposition": {
       "capability_entrypoint": 6,
       "capability_support": 0,
       "infrastructure": 0,
-      "legacy_unreviewed": 339,
-      "unsupported_capability": 0
+      "legacy_unreviewed": 338,
+      "unsupported_capability": 1
     },
     "by_domain": {
       "audio": {
@@ -64,9 +64,9 @@
       },
       "signal": {
         "public_headers": 194,
-        "reviewed_headers": 1,
-        "legacy_unreviewed_headers": 193,
-        "unsupported_headers": 0
+        "reviewed_headers": 2,
+        "legacy_unreviewed_headers": 192,
+        "unsupported_headers": 1
       },
       "timebase": {
         "public_headers": 6,
@@ -2228,11 +2228,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/harmony_engine.hpp",
-      "fingerprint": "sha256:e701093ba3ff00d76e19b404027746b5f45e7d83c39f878ce4ed53682ea069ab",
+      "fingerprint": "sha256:edf2c597ddeb7b31f07c7cf094e4cfb2b833b4f4fb6b00376b36635d11734f79",
       "include": "pulp/signal/harmony_engine.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "unsupported_capability",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "The harmonizer is a public DSP API, but it does not yet have the typed bindings, lifecycle contract, parameter semantics, and link probe required for a generator-facing capability claim."
     },
     {
       "domain": "signal",

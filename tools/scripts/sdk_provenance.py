@@ -12,6 +12,14 @@ import sys
 import tempfile
 from pathlib import Path
 
+from sdk_capability_handoff import (
+    HandoffError,
+    HANDOFF_PATH,
+    build_handoff,
+    verify_handoff,
+    write_atomically as write_handoff_atomically,
+)
+
 
 SCHEMA = "pulp.sdk-provenance.v1"
 PROFILE = "official-release"
@@ -19,6 +27,7 @@ SHA_RE = re.compile(r"[0-9a-f]{40}")
 VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 PLATFORM_RE = re.compile(r"(?:darwin|linux|windows)-(?:arm64|x64)")
 INSPECTOR_SDK_FLOOR = (0, 772, 0)
+PRODUCT_MATRIX = Path(__file__).with_name("release_product_matrix.json")
 
 
 class ProvenanceError(RuntimeError):
@@ -29,6 +38,17 @@ def _version_tuple(value: str) -> tuple[int, int, int]:
     if not VERSION_RE.fullmatch(value):
         raise ProvenanceError(f"invalid SDK version: {value!r}")
     return tuple(int(part) for part in value.split("."))  # type: ignore[return-value]
+
+
+def _capability_handoff_required(prefix: Path) -> bool:
+    try:
+        matrix = json.loads(PRODUCT_MATRIX.read_text(encoding="utf-8"))
+        floor = str(matrix["capability_handoff_floor"])
+    except (KeyError, TypeError, OSError, json.JSONDecodeError) as exc:
+        raise ProvenanceError(
+            f"cannot determine capability handoff floor from {PRODUCT_MATRIX}: {exc}"
+        ) from exc
+    return _version_tuple(_read_text(prefix / "version.txt")) >= _version_tuple(floor)
 
 
 def _read_text(path: Path) -> str:
@@ -224,21 +244,45 @@ def main(argv: list[str] | None = None) -> int:
                 source_sha=args.source_sha,
                 platform=args.platform,
             )
+            handoff = None
+            if _capability_handoff_required(args.prefix):
+                handoff = build_handoff(
+                    args.prefix,
+                    sdk_source_sha=args.source_sha,
+                    platform=args.platform,
+                )
             write_atomically(args.prefix / "sdk-provenance.json", marker)
+            if handoff is not None:
+                write_handoff_atomically(args.prefix / HANDOFF_PATH, handoff)
             verify_release_marker(
                 args.prefix,
                 expected_platform=args.platform,
                 expected_source_sha=args.source_sha,
             )
-            print(f"OK: stamped official SDK provenance in {args.prefix}")
+            if handoff is not None:
+                verify_handoff(
+                    args.prefix,
+                    expected_platform=args.platform,
+                    expected_sdk_source_sha=args.source_sha,
+                )
+            suffix = " and capability handoff" if handoff is not None else ""
+            print(f"OK: stamped official SDK provenance{suffix} in {args.prefix}")
         else:
             verify_release_marker(
                 args.prefix,
                 expected_platform=args.platform,
                 expected_source_sha=args.source_sha,
             )
-            print(f"OK: verified official SDK provenance in {args.prefix}")
-    except (ProvenanceError, OSError) as exc:
+            required = _capability_handoff_required(args.prefix)
+            if required:
+                verify_handoff(
+                    args.prefix,
+                    expected_platform=args.platform,
+                    expected_sdk_source_sha=args.source_sha,
+                )
+            suffix = " and capability handoff" if required else ""
+            print(f"OK: verified official SDK provenance{suffix} in {args.prefix}")
+    except (ProvenanceError, HandoffError, OSError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
     return 0

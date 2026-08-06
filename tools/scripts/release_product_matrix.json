@@ -1,6 +1,7 @@
 {
   "contract_floor": "0.759.1",
   "sdk_provenance_floor": "0.764.0",
+  "capability_handoff_floor": "0.790.1",
   "inspector_sdk_floor": "0.772.0",
   "platforms": [
     "darwin-arm64",

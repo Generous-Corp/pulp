@@ -1,7 +1,7 @@
 {
   "schema": "pulp.agent-capability-legacy-baseline.v1",
-  "frozen_count": 339,
-  "entries_digest": "sha256:880d2694d8dab7fdb041297ea4d7fe2c70c7b8bd53ca6bf7b47cd9954bbdd8c7",
+  "frozen_count": 338,
+  "entries_digest": "sha256:c0739388ee0662998961374a53e5c803be0f4e2e16d8b105e8011c4d126cae1c",
   "entries": [
     {
       "include": "pulp/audio/analyzer_provider.hpp",
@@ -942,10 +942,6 @@
     {
       "include": "pulp/signal/halfband_iir.hpp",
       "fingerprint": "sha256:2c82382d9cdd84e5b349e3929f9b29f33d4c9c5976f842c009ab2f6f7004b143"
-    },
-    {
-      "include": "pulp/signal/harmony_engine.hpp",
-      "fingerprint": "sha256:e701093ba3ff00d76e19b404027746b5f45e7d83c39f878ce4ed53682ea069ab"
     },
     {
       "include": "pulp/signal/iir_design.hpp",
