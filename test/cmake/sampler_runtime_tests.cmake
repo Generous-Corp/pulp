@@ -23,6 +23,9 @@ pulp_add_test_suite(pulp-test-dsp-runtime-no-alloc
 # Deterministic multi-block offline rendering over HeadlessHost.
 pulp_add_test_suite(pulp-test-offline-render-host LIBRARIES pulp::format)
 
+# Fixed-capacity authored rhythm projection over the shared tick domain.
+pulp_add_test_suite(pulp-test-timebase-trigger-grid LIBRARIES pulp::timebase TIMEOUT 60)
+
 # Portable host/runtime matrix for automation, buses, events, state, latency, and offline bounce.
 pulp_add_test_suite(pulp-test-host-runtime-matrix LIBRARIES pulp::format)
 

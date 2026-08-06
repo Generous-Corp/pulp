@@ -1129,6 +1129,31 @@ identical ones. A disabled loop keeps its bounds, so turning looping off and bac
 on returns the user to the region they set up and a view keeps drawing it
 meanwhile.
 
+`TriggerGrid` is the allocation-free authored rhythm counterpart: fixed-capacity
+track×step cells carry velocity, exact rational probability, and bounded
+microtiming. Projection is a pure mapping of one caller-supplied cycle into a
+half-open tick window. The caller also supplies one stable random word per grid
+coordinate, so probability decisions do not depend on audio callback partition.
+The grid deliberately does not own transport advancement, groove or swing,
+mutable RNG state, generative pattern algorithms, or note lifetime.
+
+```cpp
+#include <pulp/timebase/trigger_grid.hpp>
+
+#include <array>
+#include <cstdint>
+
+pulp::timebase::TriggerGrid<8, 16> grid;
+grid.configure(2, 16, {pulp::timebase::kTicksPerQuarter / 4});
+grid.set_cell(0, 0, {.enabled = true, .velocity = 112});
+
+std::array<std::uint64_t, 32> coordinate_draws{};
+std::array<pulp::timebase::TriggerEvent, 32> events{};
+const auto projected = grid.project_window({0}, {0},
+                                            {pulp::timebase::kTicksPerQuarter},
+                                            coordinate_draws, events);
+```
+
 ## timeline
 
 Immutable document-model foundations and a bounded typed editing core for musical timelines. `Project`,
