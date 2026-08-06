@@ -96,8 +96,8 @@ template <std::size_t MaximumMappings = 32> class ControllerMapper {
                 if (!state.initialized || rule.smoothing_seconds <= 0.0f || sample_rate <= 0.0) {
                     current = target;
                 } else {
-                    const auto event_sample =
-                        saturating_sample_add(block_start.value, event.sample_offset);
+                    const auto event_sample = utility_detail::saturating_sample_add(
+                        block_start.value, event.sample_offset);
                     const auto elapsed =
                         nonnegative_sample_distance(event_sample, state.last_sample);
                     const double coefficient =
@@ -113,7 +113,8 @@ template <std::size_t MaximumMappings = 32> class ControllerMapper {
                 state.target = target;
                 state.current = current;
                 state.initialized = true;
-                state.last_sample = saturating_sample_add(block_start.value, event.sample_offset);
+                state.last_sample =
+                    utility_detail::saturating_sample_add(block_start.value, event.sample_offset);
                 const int value =
                     static_cast<int>(std::lround(std::clamp(current, 0.0, 1.0) * 127.0));
                 auto mapped_event = MidiEvent::cc(rule.output_channel, rule.output_cc,
@@ -145,15 +146,6 @@ template <std::size_t MaximumMappings = 32> class ControllerMapper {
     }
 
   private:
-    static constexpr std::int64_t saturating_sample_add(std::int64_t position,
-                                                        std::int32_t offset) noexcept {
-        if (offset > 0 && position > std::numeric_limits<std::int64_t>::max() - offset)
-            return std::numeric_limits<std::int64_t>::max();
-        if (offset < 0 && position < std::numeric_limits<std::int64_t>::min() - offset)
-            return std::numeric_limits<std::int64_t>::min();
-        return position + offset;
-    }
-
     static constexpr std::uint64_t nonnegative_sample_distance(std::int64_t later,
                                                                std::int64_t earlier) noexcept {
         if (later <= earlier)

@@ -33,7 +33,7 @@ template <std::size_t MaximumActiveNotes = 128> class NoteLengthShaper {
             return {0, input.size(), 0, false};
         utility_detail::clear_output(output);
         current_block_start_ = block_start.value;
-        last_block_samples_ = std::max<std::int64_t>(0, block_samples);
+        const auto block_sample_count = std::max<std::int64_t>(0, block_samples);
         MidiUtilityProcessReport report;
         if (!utility_detail::ready(output)) {
             account_unprocessed_input(input);
@@ -49,7 +49,8 @@ template <std::size_t MaximumActiveNotes = 128> class NoteLengthShaper {
         }
         emit_due(output, report, block_start);
         for (const auto& event : input) {
-            const auto absolute = saturating_add(block_start.value, event.sample_offset);
+            const auto absolute =
+                utility_detail::saturating_sample_add(block_start.value, event.sample_offset);
             emit_due(output, report, {absolute});
             const bool is_note = event.is_note_on() || event.is_note_off();
             const int event_key =
@@ -85,10 +86,14 @@ template <std::size_t MaximumActiveNotes = 128> class NoteLengthShaper {
                 }
                 if (next_serial_ == std::numeric_limits<std::uint32_t>::max())
                     rebase_slot_serials();
-                *slot = {event.channel(),   event.note(),
-                         event.velocity(),  saturating_add(absolute, spec_.length_samples),
-                         block_start.value, event.sample_offset,
-                         next_serial_++,    true};
+                *slot = {event.channel(),
+                         event.note(),
+                         event.velocity(),
+                         utility_detail::saturating_sample_add(absolute, spec_.length_samples),
+                         block_start.value,
+                         event.sample_offset,
+                         next_serial_++,
+                         true};
             } else if (event.is_note_off()) {
                 const int key = event_key;
                 if (suppressed_depth_[key] != 0) {
@@ -102,8 +107,9 @@ template <std::size_t MaximumActiveNotes = 128> class NoteLengthShaper {
                 utility_detail::emit(output, event, report);
             }
         }
-        const auto last_sample = last_block_samples_ > 0 ? last_block_samples_ - 1 : 0;
-        emit_due(output, report, {saturating_add(block_start.value, last_sample)});
+        const auto last_sample = block_sample_count > 0 ? block_sample_count - 1 : 0;
+        emit_due(output, report,
+                 {utility_detail::saturating_sample_add(block_start.value, last_sample)});
         utility_detail::copy_sidecars(input, output, report);
         output.sort();
         return report;
@@ -193,14 +199,6 @@ template <std::size_t MaximumActiveNotes = 128> class NoteLengthShaper {
         std::uint32_t serial = 0;
         bool active = false;
     };
-
-    static constexpr std::int64_t saturating_add(std::int64_t a, std::int64_t b) noexcept {
-        if (b > 0 && a > std::numeric_limits<std::int64_t>::max() - b)
-            return std::numeric_limits<std::int64_t>::max();
-        if (b < 0 && a < std::numeric_limits<std::int64_t>::min() - b)
-            return std::numeric_limits<std::int64_t>::min();
-        return a + b;
-    }
 
     template <typename Counter> static bool increment_checked(Counter& value) noexcept {
         if (value != std::numeric_limits<Counter>::max()) {
@@ -352,7 +350,6 @@ template <std::size_t MaximumActiveNotes = 128> class NoteLengthShaper {
     std::array<bool, 16 * 128> quarantined_{};
     std::uint32_t next_serial_ = 1;
     std::int64_t current_block_start_ = 0;
-    std::int64_t last_block_samples_ = 0;
 };
 
 enum class MonophonicPriority : std::uint8_t { Low, High, Last };

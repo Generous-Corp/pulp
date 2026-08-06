@@ -56,6 +56,14 @@ inline int key_index(std::uint8_t channel, std::uint8_t note) noexcept {
     return static_cast<int>(channel & 0x0f) * 128 + static_cast<int>(note & 0x7f);
 }
 
+constexpr std::int64_t saturating_sample_add(std::int64_t position, std::int64_t offset) noexcept {
+    if (offset > 0 && position > std::numeric_limits<std::int64_t>::max() - offset)
+        return std::numeric_limits<std::int64_t>::max();
+    if (offset < 0 && position < std::numeric_limits<std::int64_t>::min() - offset)
+        return std::numeric_limits<std::int64_t>::min();
+    return position + offset;
+}
+
 inline bool emit(MidiBuffer& output, const MidiEvent& event, MidiUtilityProcessReport& report) {
     if (!output.realtime_capacity_limited()) {
         ++report.dropped;
