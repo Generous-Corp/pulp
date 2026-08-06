@@ -7,6 +7,7 @@ import copy
 import importlib.util
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -33,17 +34,14 @@ def cache_value(cache: str, name: str) -> str | None:
     return None
 
 
-def expected_target(include: str) -> str:
-    parts = include.split("/")
-    if len(parts) < 3 or parts[0] != "pulp":
-        raise RuntimeError(f"advertised include has no public subsystem owner: {include}")
-    return f"Pulp::{parts[1]}"
-
-
-def validate_target_ownership(document: dict) -> None:
+def validate_target_ownership(document: dict, owners: dict[str, str]) -> None:
     for row in document.get("capabilities", []):
         for binding in row.get("bindings", []):
-            owner = expected_target(binding["include"])
+            owner = owners.get(binding["include"])
+            if owner is None:
+                raise RuntimeError(
+                    f"{row['key']} binding {binding['include']} has no reviewed minimal owner"
+                )
             if binding["target"] != owner:
                 raise RuntimeError(
                     f"{row['key']} binding {binding['include']} declares "
@@ -51,7 +49,7 @@ def validate_target_ownership(document: dict) -> None:
                 )
 
 
-def load_installed_manifest(prefix: pathlib.Path) -> dict:
+def load_installed_manifest(prefix: pathlib.Path, owners: dict[str, str]) -> dict:
     shared = prefix / "share/pulp"
     path = shared / "agent-capabilities.json"
     if not path.is_file():
@@ -76,7 +74,7 @@ def load_installed_manifest(prefix: pathlib.Path) -> dict:
             header = prefix / "include" / binding["include"]
             if not header.is_file():
                 raise RuntimeError(f"advertised installed header missing: {header}")
-    validate_target_ownership(document)
+    validate_target_ownership(document, owners)
     return document
 
 
@@ -94,7 +92,7 @@ def binding_source(row: dict, binding: dict) -> str:
     )
 
 
-def load_probes(source_root: pathlib.Path) -> dict[str, str]:
+def load_source_contract(source_root: pathlib.Path) -> tuple[dict[str, str], dict[str, str]]:
     path = source_root / "tools/scripts/agent_capability_manifest.py"
     spec = importlib.util.spec_from_file_location("pulp_agent_capability_source", path)
     if spec is None or spec.loader is None:
@@ -112,7 +110,7 @@ def load_probes(source_root: pathlib.Path) -> dict[str, str]:
         row["key"]: module.render_link_probe(row)
         for row in module.EXPORTS
     }
-    return probes
+    return probes, dict(module.REVIEWED_MINIMAL_TARGETS)
 
 
 def capability_source(row: dict, probe: str) -> str:
@@ -140,13 +138,15 @@ def configure_consumer(
     generator_options: list[str],
     configuration: str | None,
 ) -> subprocess.CompletedProcess[str]:
+    config_files = sorted(prefix.rglob("PulpConfig.cmake"))
+    if len(config_files) != 1:
+        raise RuntimeError(f"expected one installed PulpConfig.cmake, got {config_files}")
     project.mkdir(parents=True, exist_ok=True)
     (project / "main.cpp").write_text(source)
     (project / "CMakeLists.txt").write_text(
         "cmake_minimum_required(VERSION 3.20)\n"
         "project(pulp_agent_capability_consumer LANGUAGES CXX)\n"
-        "find_package(Pulp CONFIG REQUIRED NO_DEFAULT_PATH "
-        "PATHS \"${PULP_SDK_PREFIX}/lib/cmake/Pulp\")\n"
+        "find_package(Pulp CONFIG REQUIRED)\n"
         f"if(NOT TARGET {target})\n"
         f"  message(FATAL_ERROR \"Declared capability target is absent: {target}\")\n"
         "endif()\n"
@@ -171,6 +171,7 @@ def configure_consumer(
         "-DFETCHCONTENT_FULLY_DISCONNECTED=ON",
         "-DFETCHCONTENT_UPDATES_DISCONNECTED=ON",
         f"-DPULP_SDK_PREFIX={prefix}",
+        f"-DPulp_DIR={config_files[0].parent}",
     ])
     if configuration:
         command.append(f"-DCMAKE_BUILD_TYPE={configuration}")
@@ -259,6 +260,16 @@ def inspect_isolation(
         for fragment in group.get("compileCommandFragments", [])
         if isinstance(fragment, dict) and isinstance(fragment.get("fragment"), str)
     ]
+    link_fragments = [
+        fragment["fragment"]
+        for fragment in target.get("link", {}).get("commandFragments", [])
+        if isinstance(fragment, dict) and isinstance(fragment.get("fragment"), str)
+    ]
+    artifact_paths = [
+        artifact["path"]
+        for artifact in target.get("artifacts", [])
+        if isinstance(artifact, dict) and isinstance(artifact.get("path"), str)
+    ]
     prefix_root = prefix.resolve()
     for entry in include_dirs:
         path = pathlib.Path(entry).resolve()
@@ -266,10 +277,29 @@ def inspect_isolation(
             raise AssertionError(f"exported include directory escapes install prefix: {entry}")
 
     joined_include_dirs = ";".join(include_dirs)
-    evaluated_compile_inputs = joined_include_dirs + ";" + ";".join(compile_fragments)
+    export_files = sorted(prefix.rglob("PulpTargets*.cmake"))
+    if not export_files:
+        raise AssertionError("installed SDK has no discoverable PulpTargets export")
+    export_metadata = "\n".join(path.read_text() for path in export_files)
+    for raw_location in re.findall(
+        r'IMPORTED_LOCATION(?:_[A-Z0-9_]+)?\s+"([^"]+)"', export_metadata
+    ):
+        expanded = raw_location.replace("${_IMPORT_PREFIX}", str(prefix))
+        location = pathlib.Path(expanded)
+        if location.is_absolute():
+            resolved = location.resolve()
+            if not resolved.is_relative_to(prefix_root):
+                raise AssertionError(
+                    f"imported artifact escapes install prefix: {raw_location}"
+                )
+            if not resolved.is_file():
+                raise AssertionError(f"imported artifact is missing: {raw_location}")
+    evaluated_inputs = ";".join(
+        [joined_include_dirs, *compile_fragments, *link_fragments, *artifact_paths, export_metadata]
+    )
     for forbidden in forbidden_roots:
         if any(
-            spelling in evaluated_compile_inputs
+            spelling in evaluated_inputs
             for spelling in {str(forbidden), str(forbidden.resolve())}
         ):
             raise AssertionError(f"consumer compile inputs leak checkout path: {forbidden}")
@@ -347,7 +377,7 @@ def main() -> int:
     if source_line is None:
         raise RuntimeError("build CMakeCache.txt does not identify its source checkout")
     source_root = pathlib.Path(source_line.split("=", 1)[1]).resolve()
-    probes = load_probes(source_root)
+    probes, owners = load_source_contract(source_root)
     generator = args.generator or ("Ninja" if shutil.which("ninja") else None)
     generator_options: list[str] = []
     forwarded_definitions: set[str] = set()
@@ -413,7 +443,7 @@ def main() -> int:
         installed = run(install_command, cwd=root)
         if installed.returncode != 0:
             raise RuntimeError(f"SDK install failed:\n{installed.stdout}\n{installed.stderr}")
-        document = load_installed_manifest(prefix)
+        document = load_installed_manifest(prefix, owners)
         installed_keys = {row["key"] for row in document["capabilities"]}
         if set(probes) != installed_keys:
             raise RuntimeError("consumer link probes do not exactly cover installed capabilities")
@@ -422,7 +452,7 @@ def main() -> int:
         held_schema = schema.with_suffix(".held")
         schema.rename(held_schema)
         try:
-            expect_failure("missing installed schema", lambda: load_installed_manifest(prefix))
+            expect_failure("missing installed schema", lambda: load_installed_manifest(prefix, owners))
         finally:
             held_schema.rename(schema)
 
@@ -430,7 +460,7 @@ def main() -> int:
         held_manifest = manifest.with_suffix(".held")
         manifest.rename(held_manifest)
         try:
-            expect_failure("missing installed manifest", lambda: load_installed_manifest(prefix))
+            expect_failure("missing installed manifest", lambda: load_installed_manifest(prefix, owners))
         finally:
             held_manifest.rename(manifest)
 
@@ -440,13 +470,116 @@ def main() -> int:
         held_header = header.with_suffix(header.suffix + ".held")
         header.rename(held_header)
         try:
-            expect_failure("missing advertised header", lambda: load_installed_manifest(prefix))
+            expect_failure("missing advertised header", lambda: load_installed_manifest(prefix, owners))
         finally:
             held_header.rename(header)
 
         wrong_target = copy.deepcopy(document)
         wrong_target["capabilities"][0]["bindings"][0]["target"] = "Pulp::platform"
-        expect_failure("wrong minimal target", lambda: validate_target_ownership(wrong_target))
+        expect_failure("wrong minimal target", lambda: validate_target_ownership(wrong_target, owners))
+
+        # Export metadata is part of the isolation boundary too. Pointing an
+        # imported target at a real checkout archive would otherwise configure,
+        # link, and run successfully while silently bypassing the installed SDK.
+        export_config = next(
+            path for path in prefix.rglob("PulpTargets-*.cmake")
+            if 'Import target "Pulp::audio"' in path.read_text()
+        )
+        original_export = export_config.read_text()
+        imported_match = re.search(
+            r'Import target "Pulp::audio".*?IMPORTED_LOCATION(?:_[A-Z0-9_]+)?\s+"([^"]+)"',
+            original_export,
+            re.DOTALL,
+        )
+        if imported_match is None:
+            raise RuntimeError("could not locate installed pulp-audio imported artifact")
+        archive_name = pathlib.Path(imported_match.group(1)).name
+        archive_candidates = [
+            path.resolve() for path in build_dir.rglob(archive_name) if path.is_file()
+        ]
+        if configuration:
+            configured_candidates = [
+                path for path in archive_candidates if configuration in path.parts
+            ]
+            if configured_candidates:
+                archive_candidates = configured_candidates
+        if len(archive_candidates) != 1:
+            raise RuntimeError(
+                f"expected one build-tree artifact for Pulp::audio, got {archive_candidates}"
+            )
+        audio_archive = archive_candidates[0]
+        export_config.write_text(
+            original_export.replace(imported_match.group(1), audio_archive.as_posix())
+        )
+        leaked_archive_project = root / "leaked-imported-archive"
+        try:
+            configured = configure_consumer(
+                args.cmake, prefix, leaked_archive_project,
+                source=binding_source(first, first_binding),
+                target=first_binding["target"], generator=generator,
+                generator_options=generator_options, configuration=configuration,
+            )
+            if configured.returncode != 0 or build_consumer(
+                args.cmake, leaked_archive_project, configuration
+            ).returncode != 0:
+                raise RuntimeError("build-tree archive mutation did not otherwise build")
+            expect_failure(
+                "imported target points at build-tree archive",
+                lambda: inspect_isolation(
+                    prefix, leaked_archive_project, configuration, [source_root, build_dir]
+                ),
+            )
+        finally:
+            export_config.write_text(original_export)
+
+        specialized = [
+            (
+                "pulp/signal/fft_backend.hpp", "Pulp::signal-fft-backend",
+                "#include <pulp/signal/fft_backend.hpp>\nint main(){ auto *volatile p = &pulp::signal::fft_backend_name; return p(pulp::signal::FftBackend::auto_) == nullptr; }\n",
+            ),
+            (
+                "pulp/signal/modal_spec.hpp", "Pulp::signal-modal-spec",
+                "#include <pulp/signal/modal_spec.hpp>\nint main(){ auto *volatile p = &pulp::signal::parse_modal_spec; return p(\"{}\", nullptr).has_value(); }\n",
+            ),
+        ]
+        for index, (include, target, source) in enumerate(specialized):
+            if owners.get(include) != target:
+                raise AssertionError(f"specialized owner drift for {include}")
+            configure_build_run(
+                args.cmake, prefix, root / f"specialized-owner-{index}", source,
+                target, generator, generator_options, configuration,
+                [source_root, build_dir],
+            )
+            generic_project = root / f"specialized-wrong-generic-{index}"
+            configured = configure_consumer(
+                args.cmake, prefix, generic_project, source=source,
+                target="Pulp::signal", generator=generator,
+                generator_options=generator_options, configuration=configuration,
+            )
+            if configured.returncode == 0 and build_consumer(
+                args.cmake, generic_project, configuration
+            ).returncode == 0:
+                raise AssertionError(f"generic signal target unexpectedly owns {include}")
+
+        # CMAKE_PREFIX_PATH discovery must not assume a literal lib directory.
+        config_exports = sorted(prefix.rglob("PulpTargets.cmake"))
+        if len(config_exports) != 1:
+            raise RuntimeError(f"expected one installed PulpTargets.cmake, got {config_exports}")
+        config_dir = config_exports[0].parent
+        alternate_config = prefix / "sdk-config/cmake/Pulp"
+        if alternate_config == config_dir:
+            alternate_config = prefix / "portable-config/cmake/Pulp"
+        alternate_config.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(config_dir), str(alternate_config))
+        try:
+            configure_build_run(
+                args.cmake, prefix, root / "lib64-layout",
+                binding_source(first, first_binding), first_binding["target"],
+                generator, generator_options, configuration, [source_root, build_dir],
+            )
+        finally:
+            config_dir.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(alternate_config), str(config_dir))
 
         forbidden = [source_root, build_dir]
         leaked_flag_project = root / "leaked-compiler-flag"
@@ -525,7 +658,10 @@ def main() -> int:
                 "volatile missing-function reference unexpectedly linked"
             )
 
-        targets = prefix / "lib/cmake/Pulp/PulpTargets.cmake"
+        target_exports = sorted(prefix.rglob("PulpTargets.cmake"))
+        if len(target_exports) != 1:
+            raise RuntimeError(f"expected one installed PulpTargets.cmake, got {target_exports}")
+        targets = target_exports[0]
         held_targets = targets.with_suffix(".held")
         targets.rename(held_targets)
         try:
@@ -582,7 +718,7 @@ def main() -> int:
 
     print(
         "agent-capabilities-installed-sdk: "
-        f"8 negative/install controls and {proofs} independent capability/binding "
+        f"14 negative/install controls and {proofs} independent capability/binding "
         f"configure-build-run proofs passed with {generator or 'default generator'} "
         f"in {configuration or 'the default single configuration'}"
     )
