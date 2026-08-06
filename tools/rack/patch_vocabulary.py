@@ -135,8 +135,30 @@ def for_prompt(prompt: str, idioms: dict | None = None) -> str:
     read = resolve_all(prompt, idioms)
     intent = read.primary
     slug = intent.slug
+
+    # WHAT SOUND WAS ASKED FOR, resolved from the request and not from the
+    # idiom. These are two different questions and only one of them used to be
+    # asked: "make me a cello" names no idiom at all, so this function returned
+    # an empty string and the catalogue of named sounds — 74 recipes, every
+    # number verified — reached nothing. A request can name a sound, a
+    # structure, or both, and each is looked up its own way.
+    named_sounds = ""
+    try:
+        import knowledge                                 # noqa: PLC0415
+        heard = knowledge.for_prompt(prompt)
+        if heard:
+            named_sounds = (
+                "The request names a sound this library has settings for. "
+                "These are a starting point measured from a synthesis "
+                "catalogue, not a target — match them and then use your ears:"
+                "\n\n" + "\n\n".join(knowledge.render(e) for e in heard))
+    except Exception:                                    # noqa: BLE001
+        named_sounds = ""
+
     if not slug:
-        return ""
+        # No structure named, but a sound was. Better than nothing, which is
+        # what this used to return.
+        return named_sounds + "\n" if named_sounds else ""
     idiom = idioms[slug]
     # How firmly this is put depends on how it was reached. Telling the model
     # "this IS a krell patch" when we only matched a word pushes it to satisfy
@@ -245,6 +267,8 @@ def for_prompt(prompt: str, idioms: dict | None = None) -> str:
         known = ""
     if known:
         lines += ["", known.rstrip()]
+    if named_sounds:
+        lines += ["", named_sounds.rstrip()]
 
     listen = idiom.get("listen_for") or {}
     if listen.get("sounds_like"):

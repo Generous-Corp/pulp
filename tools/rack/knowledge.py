@@ -176,6 +176,73 @@ def for_idiom(slug: str, entries: dict | None = None,
     return [entries[i] for i in idiom.get("realises", []) if i in entries]
 
 
+#: A family word in a request, and how many of that family to offer. Capped
+#: because a request for "a bassline" wanting seven bass recipes is a wall of
+#: settings rather than help.
+_FAMILY_WORDS = {
+    "brass": "brass", "string": "strings", "strings": "strings",
+    "woodwind": "woodwinds", "woodwinds": "woodwinds", "wind": "woodwinds",
+    "keyboard": "keyboards", "keys": "keyboards", "vocal": "vocals",
+    "choir": "vocals", "percussion": "untuned percussion",
+    "drum": "untuned percussion", "drums": "untuned percussion",
+    "bass": "bass", "bassline": "bass", "pad": "pads", "pads": "pads",
+    "lead": "leads",
+}
+# WORDS DELIBERATELY NOT HERE, because in a synthesizer they mean something
+# else. "voice" is the architecture of one note ("a subtractive voice"), not a
+# request for a choir — it summoned three vocal recipes for a request that had
+# nothing to do with singing. "effect" and "effects" are what every module
+# does. A recipe surfaced for a sound nobody asked for is worse than none: it
+# pushes the patch toward settings for the wrong instrument, and it does it
+# confidently.
+FAMILY_LIMIT = 3
+
+
+def for_prompt(prompt: str, entries: dict | None = None) -> list[dict]:
+    """The named sounds a request is asking for.
+
+    KEYED BY THE SOUND, NOT BY AN IDIOM, which is the whole point and was the
+    whole bug. The catalogue is indexed by instrument name; the only lookup
+    that existed took an idiom slug. So 74 recipes sat in the tree, complete
+    and verified, and "make me a cello" returned nothing — the wiring LOOKED
+    present, because `knowledge` was imported and `render_for` was called, and
+    it could never have matched.
+
+    Whole words only. "cello" must not fire on "mandocello", and a substring
+    search would have made half the catalogue match half the requests, which is
+    worse than matching nothing: a recipe surfaced for a sound nobody asked for
+    pushes the patch toward settings for the wrong instrument.
+
+    A family word is a fallback, not an addition. "a brass stab" names no
+    recipe in the book and should still land somewhere sensible, but only when
+    nothing was named outright.
+    """
+    import re                                          # noqa: PLC0415
+    entries = entries if entries is not None else load()
+    words = set(re.findall(r"[a-z]+", prompt.lower()))
+    if not words:
+        return []
+
+    named = []
+    for entry in entries.values():
+        if entry.get("kind") != "settings":
+            continue
+        for name in entry.get("names", []):
+            parts = set(name.split())
+            if parts and parts <= words:
+                named.append(entry)
+                break
+    if named:
+        return sorted(named, key=lambda e: -len(max(e["names"], key=len)))[:FAMILY_LIMIT]
+
+    families = {_FAMILY_WORDS[w] for w in words if w in _FAMILY_WORDS}
+    if not families:
+        return []
+    kin = [e for e in entries.values()
+           if e.get("kind") == "settings" and e.get("family") in families]
+    return sorted(kin, key=lambda e: e["id"])[:FAMILY_LIMIT]
+
+
 def render(entry: dict) -> str:
     """One entry, as the model should read it."""
     out = [f"### {entry['id']}", f"    {entry['what']}",

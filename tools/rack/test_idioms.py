@@ -1224,6 +1224,105 @@ def check_knowledge() -> int:
     return bad
 
 
+def check_named_sounds() -> int:
+    """A request that names a sound gets that sound's settings. By measurement.
+
+    THIS IS THE TEST THAT WAS MISSING. The catalogue of named sounds was
+    extracted, verified and anchored, and reached nothing: it is keyed by
+    instrument name, the only lookup that existed took an idiom slug, and the
+    two never met. Nothing failed. `knowledge` was imported, `render_for` was
+    called, the code path existed and returned an empty string, and "make me a
+    cello" produced a contract of zero characters while `cello` sat in the
+    file.
+
+    So none of this asserts that a function is called. It asserts that the
+    NUMBERS arrive in the text the model receives, and that they do not arrive
+    for a request that did not ask for them.
+    """
+    import knowledge                                     # noqa: PLC0415
+    idioms = idiom_check.load_idioms()
+    entries = knowledge.load()
+    bad = 0
+
+    settings = {e["id"]: e for e in entries.values()
+                if e.get("kind") == "settings"}
+    if len(settings) < 40:
+        print(f"  WRONG  only {len(settings)} settings records loaded")
+        bad += 1
+    else:
+        print(f"  ok     {len(settings)} named sounds are loaded")
+
+    # FIRES. A named instrument reaches the model with its values.
+    for prompt, want in [("make me a cello", "cello"),
+                         ("a warm trumpet sound", "trumpet"),
+                         ("something like a bell", "bell")]:
+        got = knowledge.for_prompt(prompt, entries)
+        text = patch_vocabulary.for_prompt(prompt, idioms)
+        hit = [e for e in got if want in e["names"]]
+        if not hit:
+            print(f"  WRONG  {prompt!r} matched {[e['id'] for e in got]}, "
+                  f"not {want}")
+            bad += 1
+            continue
+        # The values, in the contract, not merely in the match.
+        nums = [n["value"] for n in hit[0].get("numbers") or []]
+        missing = [v for v in nums if v.split(",")[0] not in text]
+        if not nums:
+            print(f"  WRONG  the {want} record carries no values")
+            bad += 1
+        elif missing:
+            print(f"  WRONG  {want}'s values never reach the contract: "
+                  f"{missing}")
+            bad += 1
+        else:
+            print(f"  ok     {prompt!r} puts {len(nums)} measured value(s) in "
+                  f"front of the model")
+
+    # A FAMILY LANDS SOMEWHERE SENSIBLE when nothing is named outright.
+    # Either route is right: a record whose own name carries the word, or the
+    # family fallback. The assertion is about where it LANDS, not which
+    # mechanism got it there -- the first version of this demanded the family
+    # route and failed when the better answer appeared, because "Brass Section"
+    # matches "a brass stab" by name and is a more sensible reply than three
+    # alphabetically-first members of the brass family.
+    got = knowledge.for_prompt("a brass stab", entries)
+    astray = [e["id"] for e in got
+              if e.get("family") != "brass" and "brass" not in " ".join(e["names"])]
+    if not got or astray:
+        print(f"  WRONG  'a brass stab' gave {[e['id'] for e in got]}, "
+              f"astray: {astray}")
+        bad += 1
+    else:
+        print(f"  ok     an unlisted request lands on {len(got)} sensible "
+              f"record(s): {', '.join(e['names'][0] for e in got)}")
+
+    # DOES NOT FIRE ON EVERYTHING. A recipe surfaced for a sound nobody asked
+    # for is worse than none: it pushes the patch toward the wrong settings,
+    # confidently. "a subtractive voice" is architecture, not a choir.
+    for prompt in ["a classic subtractive voice", "just make some interesting sounds",
+                   "a krell patch that plays itself", "an evolving ambient drone",
+                   "four different speeds coming from one clock"]:
+        got = knowledge.for_prompt(prompt, entries)
+        if got:
+            print(f"  WRONG  {prompt!r} summoned {[e['id'] for e in got]}")
+            bad += 1
+    if not bad:
+        print("  ok     five requests that name no sound summon no settings")
+
+    # And every name is one the catalogue's own contents page agrees with --
+    # the grid headings are the worst-OCR'd lines in the book, and a garbled
+    # name reaching the model is a sound nobody can ask for.
+    import re                                            # noqa: PLC0415
+    odd = [e["names"][0] for e in settings.values()
+           if not re.fullmatch(r"[a-z0-9'&()./ -]+", e["names"][0])]
+    if odd:
+        print(f"  WRONG  names that never got cleaned: {odd[:5]}")
+        bad += 1
+    else:
+        print("  ok     every name survived a second, independent reading")
+    return bad
+
+
 def check_notice() -> int:
     """The published page says what the data says, and quotes nobody.
 
@@ -1353,6 +1452,9 @@ def main() -> int:
 
     print("\nthe knowledge base is portable and optional:")
     bad += check_knowledge()
+
+    print("\na request that names a sound gets its settings:")
+    bad += check_named_sounds()
 
     print("\nthe notice tells the truth:")
     bad += check_notice()

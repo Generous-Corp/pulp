@@ -103,12 +103,42 @@ def _pairs(line: str):
     return out
 
 
+def index_names(text: str) -> list:
+    """The instrument names as the catalogue's own contents pages spell them.
+
+    A SECOND, INDEPENDENT READING of every name, used to repair the first. The
+    grid headings are the worst-OCR'd lines in the book -- "Harmonica" arrives
+    as "arrnoruca" and passes any plausibility test you can write, because it
+    has no single letters and no punctuation. The contents pages set the same
+    names in a cleaner face, so a grid name that closely matches an index entry
+    is corrected to the index spelling, and one that matches nothing is
+    dropped. Two readings agreeing is evidence; one reading looking reasonable
+    is not.
+    """
+    names = []
+    for ln in text.split("\n"):
+        hits = re.findall(r"([A-Za-z][A-Za-z'&./ -]{2,24}?)\s{2,}(\d{2,3})", ln)
+        if len(hits) >= 2:                 # a multi-column contents line
+            for n, _ in hits:
+                n = n.strip()
+                if 2 < len(n) < 26:
+                    names.append(n)
+    return names
+
+
 def parse(text: str) -> tuple[list, list]:
     """(recipes, complaints). Every grid is reported one way or the other."""
     lines = text.split("\n")
-    starts = [i for i, l in enumerate(lines) if re.search(r"cillator 1", l)]
+    # Anchored on the one label every grid carries exactly once and the OCR
+    # does not damage. Matching the "Oscillator 1" header instead missed every
+    # grid whose header was mangled — Trumpet's arrived as "ill at o r 1" — and
+    # missed them SILENTLY, since a grid that is never a candidate cannot be
+    # reported as rejected.
+    starts = [i - 1 for i, l in enumerate(lines) if re.search(r"Routing\s*:", l)]
     recipes, bad = [], []
     section = None
+    import difflib                                       # noqa: PLC0415
+    index = index_names(text)
 
     for i in starts:
         for j in range(max(0, i - 40), i):
@@ -119,7 +149,7 @@ def parse(text: str) -> tuple[list, list]:
         # The name is the last non-empty line above the grid that is not a page
         # number, a banner or part of the grid itself.
         name = None
-        for j in range(i - 1, max(0, i - 6), -1):
+        for j in range(i - 1, max(0, i - 7), -1):
             cand = lines[j].strip().strip("\x0c").strip()
             if not cand or cand.isdigit():
                 continue
@@ -132,12 +162,30 @@ def parse(text: str) -> tuple[list, list]:
             bad.append(f"a grid at line {i} has no readable name")
             continue
         words = name.split()
-        if len(words) > 4 or any(len(w) == 1 and w.upper() not in "AI"
+        if len(words) > 6 or any(len(w) == 1 and w.upper() not in "AI"
                                  for w in words) \
                 or not re.fullmatch(r"[A-Za-z0-9'&()./ -]+", name):
             bad.append(f"{name!r}: the OCR mangled this name, so the recipe "
                        f"would be unaskable")
             continue
+        # Corrected against the contents pages, or dropped. This is what
+        # catches a mangling that LOOKS like a word: "arrnoruca" survives every
+        # plausibility test and is Harmonica.
+        near = difflib.get_close_matches(name, index, n=1, cutoff=0.72)
+        if near:
+            name = near[0]                 # repaired to the cleaner spelling
+        else:
+            # The contents pages split some names the grids join ("Guitar
+            # Acoustic" is indexed under Acoustic), so a whole-name match is
+            # too strict on its own. One word agreeing with the index is
+            # enough to believe the name was read; nothing agreeing means it
+            # was not.
+            words_ok = [w for w in name.split()
+                        if difflib.get_close_matches(w, index, n=1, cutoff=0.85)]
+            if not words_ok:
+                bad.append(f"{name!r}: nothing in the catalogue's own contents "
+                           f"resembles this, so the name was misread")
+                continue
 
         rec = {"name": name, "section": section}
         anchor = None
@@ -242,9 +290,12 @@ def to_entries(recipes: list) -> list:
             continue
         out.append({
             "kind": "settings",
+            "family": (r.get("section") or "").lower() or None,
             "id": "instrument-" + re.sub(r"[^a-z0-9]+", "-",
                                          r["name"].lower()).strip("-"),
-            "names": [r["name"].lower()],
+            "names": sorted({r["name"].lower()} |
+                            {w for w in r["name"].lower().split()
+                             if len(w) > 3}),
             "what": what,
             "why": why,
             "listen_for": {
