@@ -196,6 +196,7 @@ struct CompiledProgram {
         request.project = std::move(project);
         request.sequence_id = {2};
         request.tempo_map = tempo_map ? std::move(tempo_map) : wire_tempo_map();
+        request.sample_rate = request.tempo_map->sample_rate();
         request.document_revision = 7;
         request.dirty = {.all = true};
         request.audio_assets = std::move(assets);
