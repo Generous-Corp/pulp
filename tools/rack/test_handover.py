@@ -722,6 +722,75 @@ def check_the_dead_module_is_named() -> tuple:
     return bad, 5
 
 
+def check_a_dead_gate_on_a_live_sequencer_is_named() -> tuple:
+    """A live pitch output must not hide the silent gate that killed audio."""
+    report = """per-module output activity:
+        SEQ ch=1 out0=1.000 out1=0.000
+        ENV ch=1 out0=0.000
+        VCO ch=1 out0=2.000
+        VCA ch=1 out0=0.000
+        AudioInterface2 (not instantiated)
+  FAIL listener silent
+"""
+    patch = {"modules": [
+        {"id": 1, "plugin": "ForgeModular", "model": "SEQ"},
+        {"id": 2, "plugin": "ForgeModular", "model": "ENV"},
+        {"id": 3, "plugin": "ForgeModular", "model": "VCO"},
+        {"id": 4, "plugin": "ForgeModular", "model": "VCA"},
+        {"id": 5, "plugin": "Core", "model": "AudioInterface2"},
+    ], "cables": [
+        {"outputModuleId": 1, "outputId": 1, "inputModuleId": 2, "inputId": 0},
+        {"outputModuleId": 2, "outputId": 0, "inputModuleId": 4, "inputId": 0},
+        {"outputModuleId": 3, "outputId": 0, "inputModuleId": 4, "inputId": 1},
+        {"outputModuleId": 4, "outputId": 0, "inputModuleId": 5, "inputId": 0},
+    ]}
+    inv = {"ForgeModular": {"modules": {
+        "SEQ": {"inputs": ["Clock"], "roles_in": ["Clock"],
+                "outputs": ["Pitch CV", "Gate"], "tags": ["Sequencer"]},
+        "ENV": {"inputs": ["Gate"], "roles_in": ["Gate"],
+                "outputs": ["Envelope"], "tags": ["Envelope generator"]},
+        "VCO": {"inputs": ["Pitch"], "roles_in": ["Pitch"],
+                "outputs": ["Saw"], "tags": ["Oscillator"]},
+        "VCA": {"inputs": ["CV", "Audio"], "roles_in": ["Cv", "Audio"],
+                "outputs": ["Audio"], "tags": ["Amplifier"]},
+    }}}
+    lines = "\n".join(P.silence_advice(report, patch, inv, []))
+    bad = 0
+    if "ForgeModular/SEQ out1 'Gate'" not in lines:
+        bad += 1
+        print(f"  WRONG  the live sequencer's silent gate is not named:\n{lines}")
+    elif "other outputs are active" not in lines:
+        bad += 1
+        print(f"  WRONG  the advice hides that the sequencer itself is partly live:\n{lines}")
+    elif "ForgeModular/VCA" in lines or "ForgeModular/ENV" in lines:
+        bad += 1
+        print(f"  WRONG  a downstream consequence was blamed:\n{lines}")
+    else:
+        print("  ok     a live sequencer's silent Gate output is named upstream of the VCA")
+
+    # Zero volts on a pitch cable is a valid note, not a silent source. A
+    # control-blind graph walk would blame SEQ out0 here instead of the VCO
+    # whose audio output is actually dead.
+    pitch_report = report.replace("SEQ ch=1 out0=1.000 out1=0.000",
+                                  "SEQ ch=1 out0=0.000 out1=1.000")
+    pitch_report = pitch_report.replace("ENV ch=1 out0=0.000",
+                                        "ENV ch=1 out0=1.000")
+    pitch_report = pitch_report.replace("VCO ch=1 out0=2.000",
+                                        "VCO ch=1 out0=0.000")
+    pitch_patch = {"modules": patch["modules"], "cables": [
+        {"outputModuleId": 1, "outputId": 0, "inputModuleId": 3, "inputId": 0},
+        {"outputModuleId": 3, "outputId": 0, "inputModuleId": 4, "inputId": 1},
+        {"outputModuleId": 4, "outputId": 0, "inputModuleId": 5, "inputId": 0},
+    ]}
+    lines = "\n".join(P.silence_advice(pitch_report, pitch_patch, inv, []))
+    if "ForgeModular/VCO" not in lines or "ForgeModular/SEQ" in lines:
+        bad += 1
+        print(f"  WRONG  a valid zero-volt pitch was blamed for silence:\n{lines}")
+    else:
+        print("  ok     zero-volt pitch stays a valid note and the silent VCO is blamed")
+    return bad, 2
+
+
 def check_a_repeat_escalates_to_replacement() -> tuple:
     """The same dead module twice must say REPLACE, not retune.
 
@@ -1163,6 +1232,7 @@ CHECKS = (check_retry_names_a_real_jack,
           check_a_specific_word_beats_a_generic_one,
           check_a_widened_role_accuses_nobody,
           check_the_dead_module_is_named,
+          check_a_dead_gate_on_a_live_sequencer_is_named,
           check_a_repeat_escalates_to_replacement,
           check_the_reader_refuses_to_guess,
           check_a_stuck_idiom_escalates_too,

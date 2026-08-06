@@ -3221,6 +3221,7 @@ def main():
                    test_handover.check_a_specific_word_beats_a_generic_one,
                    test_handover.check_a_widened_role_accuses_nobody,
                    test_handover.check_the_dead_module_is_named,
+                   test_handover.check_a_dead_gate_on_a_live_sequencer_is_named,
                    test_handover.check_a_repeat_escalates_to_replacement,
                    test_handover.check_the_reader_refuses_to_guess,
                    test_handover.check_a_stuck_idiom_escalates_too,
@@ -3314,4 +3315,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-

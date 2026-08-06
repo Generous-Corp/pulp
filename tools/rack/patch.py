@@ -3530,33 +3530,9 @@ def dead_module(report: str, patch: dict) -> dict | None:
     silent as a consequence, and blaming the last one in the chain sends the
     model to fix the wrong thing.
     """
-    rows = activity_rows(report)
-    mods = patch.get("modules", [])
-    if not rows:
-        return None
-    # Matched BY POSITION, and then verified. The gate prints one row per
-    # module in the patch's own order, so position survives two modules of the
-    # same model in one patch where a name lookup could not tell them apart.
-    # Verified because a silently wrong pairing would name an innocent module.
-    named = []
-    for i, (name, outs) in enumerate(rows):
-        if i >= len(mods) or mods[i].get("model") != name:
-            named = []
-            break
-        named.append((mods[i], outs))
+    named = module_activity(report, patch)
     if not named:
-        # Fall back to unambiguous names only. A model appearing twice cannot
-        # be resolved this way, and guessing which one is dead is worse than
-        # saying nothing.
-        by_model = {}
-        for m in mods:
-            by_model.setdefault(m.get("model"), []).append(m)
-        for name, outs in rows:
-            hits = by_model.get(name) or []
-            if len(hits) != 1:
-                return None
-            named.append((hits[0], outs))
-
+        return None
     dead_ids = {m.get("id") for m, outs in named if all(v == 0.0 for v in outs)}
     if not dead_ids:
         return None
@@ -3582,6 +3558,129 @@ def dead_module(report: str, patch: dict) -> dict | None:
         if m.get("id") in dead_ids:
             return entry(m, outs)
     return None
+
+
+def module_activity(report: str, patch: dict) -> list:
+    """Activity rows paired with their exact patch modules, or no guess."""
+    rows = activity_rows(report)
+    mods = patch.get("modules", [])
+    if not rows:
+        return []
+    # Matched BY POSITION, and then verified. The gate prints one row per
+    # module in the patch's own order, so position survives two modules of the
+    # same model in one patch where a name lookup could not tell them apart.
+    # Verified because a silently wrong pairing would name an innocent module.
+    named = []
+    for i, (name, outs) in enumerate(rows):
+        if i >= len(mods) or mods[i].get("model") != name:
+            named = []
+            break
+        named.append((mods[i], outs))
+    if not named:
+        # Fall back to unambiguous names only. A model appearing twice cannot
+        # be resolved this way, and guessing which one is dead is worse than
+        # saying nothing.
+        by_model = {}
+        for m in mods:
+            by_model.setdefault(m.get("model"), []).append(m)
+        for name, outs in rows:
+            hits = by_model.get(name) or []
+            if len(hits) != 1:
+                return []
+            named.append((hits[0], outs))
+    return named
+
+
+def dead_output(report: str, patch: dict, inv: dict) -> dict | None:
+    """The specific silent output upstream of the listener, even on a live module.
+
+    A sequencer can emit pitch while its gate output stays at zero. Treating
+    only an all-zero *module* as dead walks past that cause and blames the
+    envelope or VCA downstream. Trace silent cable outputs backward from the
+    audio interface so the retry can name `SEQ out1 'Gate'`, while preserving
+    the older whole-module answer when every output is zero.
+    """
+    named = module_activity(report, patch)
+    activity = {m.get("id"): (m, outs) for m, outs in named}
+    if not activity:
+        return None
+    incoming: dict[int, list[tuple[int, int, int]]] = {}
+    listener_sources = []
+    modules = {m.get("id"): m for m in patch.get("modules", [])}
+    for c in patch.get("cables", []):
+        src = (c.get("outputModuleId"), c.get("outputId"))
+        incoming.setdefault(c.get("inputModuleId"), []).append(
+            (*src, c.get("inputId")))
+        dst = modules.get(c.get("inputModuleId")) or {}
+        if (dst.get("plugin") == "Core" or
+                "audiointerface" in str(dst.get("model", "")).lower()):
+            listener_sources.append(src)
+
+    def value(pair):
+        got = activity.get(pair[0])
+        if not got or not isinstance(pair[1], int):
+            return None
+        outs = got[1]
+        return outs[pair[1]] if 0 <= pair[1] < len(outs) else None
+
+    def causal_input(module_id, input_id):
+        """Whether zero on this input can explain a silent module output.
+
+        Zero volts is a perfectly valid pitch and reset value, so following
+        every silent control cable would confidently blame innocent upstream
+        modules. Audio inputs always carry the signal path; amplifier CV and
+        envelope gate/trigger inputs are the two control paths whose zero is
+        itself a mute.
+        """
+        module = modules.get(module_id) or {}
+        entry = (inv.get(module.get("plugin"), {}).get("modules", {})
+                     .get(module.get("model"), {}))
+        names = entry.get("inputs") or []
+        roles = entry.get("roles_in") or []
+        name = str(names[input_id] if isinstance(input_id, int) and
+                   0 <= input_id < len(names) else "").lower()
+        role = str(roles[input_id] if isinstance(input_id, int) and
+                   0 <= input_id < len(roles) else "").lower()
+        tags = {str(t).lower() for t in (entry.get("tags") or [])}
+        if role == "audio" or name in ("audio", "signal", "in", "input"):
+            return True
+        if any("amplifier" in tag or tag == "vca" for tag in tags):
+            return role == "cv" or name in ("cv", "level cv", "amplitude cv")
+        if any("envelope" in tag for tag in tags):
+            return role in ("gate", "trigger") or "gate" in name or "trig" in name
+        return False
+
+    def walk(pair, seen):
+        if pair in seen or value(pair) != 0.0:
+            return None
+        seen = seen | {pair}
+        for source_module, source_output, input_id in incoming.get(pair[0], []):
+            if not causal_input(pair[0], input_id):
+                continue
+            found = walk((source_module, source_output), seen)
+            if found:
+                return found
+        return pair
+
+    pair = None
+    for source in listener_sources:
+        pair = walk(source, set())
+        if pair:
+            break
+    if pair is None:
+        return None
+    module, outs = activity[pair[0]]
+    output = pair[1]
+    entry = (inv.get(module.get("plugin"), {}).get("modules", {})
+                 .get(module.get("model"), {}))
+    names = entry.get("outputs") or []
+    label = names[output] if output < len(names) else ""
+    whole = all(v == 0.0 for v in outs)
+    base = f"{module.get('plugin')}/{module.get('model')}"
+    return {"id": module.get("id"), "plugin": module.get("plugin"),
+            "model": module.get("model"), "outs": outs, "output": output,
+            "output_label": label, "whole_module": whole,
+            "key": base if whole else f"{base} out{output}"}
 
 
 def _alternatives_for(inv: dict, dead: dict, limit: int = 4) -> list:
@@ -3615,12 +3714,26 @@ def silence_advice(report: str, patch: dict, inv: dict, runs: list) -> list:
     was told the same thing, so nothing about the fourth differed from the
     first. Repetition is a fact about the run, and a fact the model can act on.
     """
-    dead = dead_module(report, patch)
+    specific = dead_output(report, patch, inv)
+    # The existing whole-module graph walk is intentionally broader and has
+    # years of fixtures behind it. This new path exists for the missing case:
+    # one silent output on an otherwise live module. Do not replace the proven
+    # all-zero diagnosis with a shallower listener-path guess.
+    dead = (specific if specific and not specific.get("whole_module")
+            else dead_module(report, patch) or specific)
     if not dead:
         return []
-    outs = ", ".join(f"out{i}={v:.3f}" for i, v in enumerate(dead["outs"]))
-    lines = [f"{dead['key']} PRODUCED NOTHING: {outs}. Nothing downstream of "
-             f"it can make a sound, whatever else is wired correctly."]
+    if dead.get("whole_module", True):
+        measured = ", ".join(f"out{i}={v:.3f}"
+                             for i, v in enumerate(dead["outs"]))
+        subject = dead["key"]
+    else:
+        output = dead["output"]
+        label = f" '{dead['output_label']}'" if dead.get("output_label") else ""
+        measured = f"out{output}{label}={dead['outs'][output]:.3f}; other outputs are active"
+        subject = f"{dead['plugin']}/{dead['model']} out{output}{label}"
+    lines = [f"{subject} PRODUCED NOTHING: {measured}. Nothing downstream of "
+             f"that output can make a sound, whatever else is wired correctly."]
     # How many attempts IN A ROW ended here, this one included.
     repeats = 1
     for key in reversed(runs):
