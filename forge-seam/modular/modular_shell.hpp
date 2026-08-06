@@ -20,6 +20,7 @@
 #include "forge/mention_overlay.hpp"
 #include "forge/patch_explanation.hpp"
 #include "forge/rack_preview.hpp"
+#include "forge/settings.hpp"
 
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/widgets.hpp>
@@ -78,7 +79,11 @@ public:
     /// unlike merely not-yet-running.
     virtual bool available() const = 0;
     virtual bool ensure_running() = 0;
-    virtual void submit(const std::string& prompt, bool patch_mode) = 0;
+    virtual void submit(const std::string& prompt, bool patch_mode,
+                        const forge::ModelSelection& model) = 0;
+    /// Stop only the generation launched by this engine. Implementations must
+    /// never use a broad process-name match for cancellation.
+    virtual void cancel_generation() {}
     /// Why the last submit did nothing; empty when it started. A Build that
     /// silently does nothing is the worst available outcome, and it shipped once.
     virtual std::string last_error() const { return {}; }
@@ -102,9 +107,8 @@ public:
     virtual std::string log_path() const { return {}; }
 
     /// True when a generator is running right now, whoever launched it —
-    /// including one left over from a previous launch of the app, which
-    /// survives by design (nohup + setsid) and which the shell's own `busy()`
-    /// therefore cannot see.
+    /// including one launched by another editor. The shell's own `busy()`
+    /// only describes the run whose log this shell is following.
     virtual bool generator_running() const { return false; }
 
     /// Atomically reserve the process-wide generation launch slot.
@@ -267,6 +271,10 @@ public:
 
     /// The one path every build route funnels through.
     std::string start_build_with(const std::string& prompt);
+
+    /// Stop the exact run this shell launched. This is the composer's primary
+    /// action while generation is in flight.
+    void stop_build();
 
     /// Ask about the artifact without changing it. Distinct from Build because
     /// an Ask that could rewrite the artifact would destroy work on a misread
@@ -523,10 +531,14 @@ private:
     /// a shell that is merely watching and has started nothing. Using it as
     /// the lock refused the FIRST build of every session.
     bool in_flight_ = false;
+    bool composer_refresh_pending_ = false;
     /// A run has failed and its report is worth offering. Cleared when the
     /// next build starts: a Copy control that hands over the PREVIOUS run's
     /// failure while a new one is in flight is worse than no control.
     bool failed_report_ = false;
+    /// The last terminal failure can be resolved by choosing another agent or
+    /// model, so the composer offers a direct route to the Agents tab.
+    bool agent_error_ = false;
     PatchExplanation* explanation_ = nullptr;
     ModuleSummary* module_summary_ = nullptr;
     void refresh_module_summary();

@@ -67,14 +67,25 @@ def find_claude() -> str:
     `FileNotFoundError: [Errno 2] ... 'claude'` as the entire explanation of
     why nothing was generated. Every beta user's machine is that machine.
     """
-    # An explicit choice beats a search. Both agents drive this generator, and
-    # a shim may be the only thing named `claude` on either one's PATH.
-    for var in ("FORGE_CLAUDE_BIN", "FORGE_CODEX_BIN", "CODEX_BIN"):
+    provider = os.environ.get("FORGE_MODEL_PROVIDER")
+    if provider is not None and provider not in ("claude", "codex"):
+        raise SystemExit(
+            f"unsupported model provider {provider!r}; choose 'claude' or 'codex'")
+
+    # An explicit UI choice is a contract, not a preference. When present,
+    # search only that provider and fail closed if it is unavailable. Falling
+    # through to the other installed CLI is how a saved Codex selection spent
+    # Claude quota instead.
+    variables = (("FORGE_CLAUDE_BIN",) if provider == "claude" else
+                 ("FORGE_CODEX_BIN", "CODEX_BIN") if provider == "codex" else
+                 ("FORGE_CLAUDE_BIN", "FORGE_CODEX_BIN", "CODEX_BIN"))
+    names = ((provider,) if provider else ("claude", "codex"))
+    for var in variables:
         chosen = os.environ.get(var)
         if chosen and os.path.isfile(chosen) and os.access(chosen, os.X_OK):
             return chosen
 
-    for name in ("claude", "codex"):
+    for name in names:
         found = shutil.which(name, path=enriched_path())
         if found:
             return found
@@ -86,14 +97,22 @@ def find_claude() -> str:
     # Named and actionable, never a traceback. This is a real prerequisite:
     # the model is not bundled and there is no API-key path, so without it
     # nothing generates -- not a module, not even a patch.
+    selected = f"the selected {provider.title()} CLI" if provider else "the model CLI"
+    if provider == "codex":
+        remedy = (
+            "  Open Forge Settings > Providers to choose an installed agent, or\n"
+            "  install Codex, sign in once, then try again. If it is installed\n"
+            "  somewhere unusual, point Forge at it:\n"
+            "      export FORGE_CODEX_BIN=/full/path/to/codex\n")
+    else:
+        remedy = (
+            "  Open Forge Settings > Providers to choose an installed agent, or\n"
+            "  install Claude Code, run `claude` once to sign in, then try again:\n"
+            "      https://claude.com/claude-code\n"
+            "  If it is installed somewhere unusual, point Forge at it:\n"
+            "      export FORGE_CLAUDE_BIN=/full/path/to/claude\n")
     raise SystemExit(
-        "the model CLI is not installed, so nothing can be generated.\n"
-        "  Forge Modular writes patches and modules with Claude Code, which is\n"
-        "  a separate free download and not something we can ship for you.\n"
-        "  Install it, run `claude` once to sign in, then try again:\n"
-        "      https://claude.com/claude-code\n"
-        "  If it is already installed somewhere unusual, point us at it:\n"
-        "      export FORGE_CLAUDE_BIN=/full/path/to/claude\n"
+        f"{selected} is not installed, so nothing can be generated.\n" + remedy +
         "  Looked on PATH and in:\n    " + "\n    ".join(TOOL_DIRS))
 
 
@@ -143,10 +162,11 @@ def missing_prerequisites() -> list:
     out = []
     try:
         find_claude()
-    except SystemExit:
-        out.append(
-            "Claude Code (the model that writes the patch) is not installed. "
-            "It is a free separate download: https://claude.com/claude-code")
+    except SystemExit as exc:
+        # Preserve the selected provider's actionable remedy. Replacing every
+        # resolver failure with "Claude Code" is how a missing Codex install
+        # sent users to change the provider they had explicitly not selected.
+        out.append(str(exc))
 
     # python3 is running this, so it is present by definition -- but on macOS
     # /usr/bin/python3 is the Xcode shim, and the SAME missing component means

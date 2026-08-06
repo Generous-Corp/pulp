@@ -39,6 +39,17 @@ namespace forge_modular {
 
 namespace {
 
+bool looks_like_agent_problem(std::string text) {
+    for (auto& c : text)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    for (const char* phrase : {"model call failed", "weekly limit", "quota",
+                               "model cli", "agent provider", "authentication",
+                               "selected agent", "cli is not installed",
+                               "sign in", "not logged in"})
+        if (text.find(phrase) != std::string::npos) return true;
+    return false;
+}
+
 /// The generator shipped inside whatever bundle is running us, or "".
 ///
 /// Walks up from the executable to the .app/.component/.vst3/.clap and looks
@@ -589,6 +600,28 @@ forge::ComposerRow ForgeModularShell::composer_row() {
                 pulp::platform::Clipboard::set_text(failure_report());
             },
         });
+    }
+    if (agent_error_) {
+        row.left.push_back({
+            .label = "Agent settings",
+            .access_label = "Choose a different agent or model",
+            .icon = forge::ComposerAction::Icon::none,
+            .primary = false,
+            .on_click = [this] {
+                if (auto* c = chrome()) c->open_provider_settings();
+            },
+        });
+    }
+
+    if (in_flight_) {
+        row.right.push_back({
+            .label = "Stop",
+            .access_label = "Stop the current generation",
+            .icon = forge::ComposerAction::Icon::none,
+            .primary = true,
+            .on_click = [this] { stop_build(); },
+        });
+        return row;
     }
 
     // Ask and Build differ in one bit and it is carried, not inferred: an Ask
@@ -1480,15 +1513,13 @@ std::string ForgeModularShell::start_build_with(const std::string& prompt) {
     // happened to mention first. Reported as "it opened an existing one" and
     // "Rack showed a different patch name".
     //
-    // `busy()` alone is not enough: a generation is launched with nohup +
-    // setsid so it survives the window closing, so after a restart the shell
-    // believes nothing is running while a generator is still writing. The
-    // engine is asked about the actual process too.
+    // `busy()` alone is not enough: the processor-owned generation survives
+    // an editor window closing, and another editor/process may also own a run.
+    // The engine is asked about the actual process too.
     // Two questions, because neither answers alone.
     //
     // The engine knows about a generator process whoever started it, including
-    // one left over from a previous launch of the app — a generation survives
-    // the window closing by design. But there is a moment after submit before
+    // one owned by another editor/process. But there is a moment after submit before
     // the process exists. The engine's atomic claim covers that launch window
     // across every editor; `in_flight_` covers the longer run for this shell:
     // a build it started, on a log it is watching, that has not reported an
@@ -1528,6 +1559,7 @@ std::string ForgeModularShell::start_build_with(const std::string& prompt) {
         failed_report_ = false;
         c->refresh_composer_row();
     }
+    agent_error_ = false;
     c->set_status_note({});
     c->set_status_activity({});
     c->set_active_stage(-1);
@@ -1575,12 +1607,22 @@ std::string ForgeModularShell::start_build_with(const std::string& prompt) {
     last_request_ = prompt;
     if (explanation_) explanation_->set_request(last_request_);
     if (input) input->set_text("");
-    engine_->submit(prompt, artifact_ == Artifact::patch);
+    engine_->submit(prompt, artifact_ == Artifact::patch,
+                    forge::Settings::instance().dsp_model_selection());
     if (const auto why = engine_->last_error(); !why.empty()) {
         engine_->release_generation_claim();
+        if (looks_like_agent_problem(why)) {
+            agent_error_ = true;
+            c->narrate(why, /*alarming=*/true);
+            composer_refresh_pending_ = true;
+        }
         return why;
     }
     in_flight_ = true;
+    // The Build button's mouse handler is still on the stack here. Replacing
+    // its row synchronously frees the very view dispatching this click. The
+    // host poll is the next safe turn and swaps Build for Stop there.
+    composer_refresh_pending_ = true;
     // Follow the file this run actually chose. The engine gives every run its
     // own, so a shell still tailing the previous one would report the previous
     // run's outcome for the whole of this one.
@@ -1591,6 +1633,16 @@ std::string ForgeModularShell::start_build_with(const std::string& prompt) {
         watching_ = true;
     }
     return engine_->last_error();
+}
+
+void ForgeModularShell::stop_build() {
+    if (!in_flight_ || !engine_) return;
+    engine_->cancel_generation();
+    // Keep following the log: the engine writes a terminal cancellation line,
+    // and the normal outcome path owns the final transcript and UI cleanup.
+    if (auto* c = chrome()) {
+        c->set_status_activity("Stopping generation…");
+    }
 }
 
 std::string ForgeModularShell::open_patch_file(const std::string& path) {
@@ -1938,6 +1990,10 @@ void ForgeModularShell::poll_surfaces() {
 }
 
 void ForgeModularShell::on_poll() {
+    if (composer_refresh_pending_) {
+        composer_refresh_pending_ = false;
+        if (auto* c = chrome()) c->refresh_composer_row();
+    }
     poll_surfaces();
     // A way to ask for a build from OUTSIDE the window, for proving that a
     // generation works when it is spawned from inside a host.
@@ -2084,8 +2140,10 @@ void ForgeModularShell::on_poll() {
     // previous session, and timing it from when this window opened would put
     // an invented duration on the card.
     const bool ours = in_flight_;
-    if (watching_ && outcome != BuildOutcome::running)
+    if (watching_ && outcome != BuildOutcome::running) {
         in_flight_ = false;
+        if (auto* c = chrome()) c->refresh_composer_row();
+    }
     if (watching_ && outcome != BuildOutcome::running &&
         outcome != reported_outcome_) {
         reported_outcome_ = outcome;
@@ -2128,6 +2186,8 @@ void ForgeModularShell::on_poll() {
                 case BuildOutcome::refused:
                     c->set_skeleton_caption("stopped");
                     c->set_status_activity({});
+                    agent_error_ = looks_like_agent_problem(monitor_.headline());
+                    c->refresh_composer_row();
                     break;   // the refusal itself already went to the chat
                 case BuildOutcome::failed: {
                     c->set_skeleton_caption("build failed");
@@ -2177,6 +2237,7 @@ void ForgeModularShell::on_poll() {
                     // And make the whole thing copyable. Last, so the control
                     // appears once everything it would copy has been said.
                     failed_report_ = true;
+                    agent_error_ = looks_like_agent_problem(failure_report());
                     c->refresh_composer_row();
                     break;
                 }

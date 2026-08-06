@@ -250,26 +250,16 @@ def ask_model(prompt: str, retry_context: str | None = None) -> str:
             "Return the two blocks again, corrected. Do not explain.\n\n"
             "```\n" + retry_context[:6000] + "\n```")
     full = "\n".join(parts)
-    # The enriched environment matters twice over: to find `claude` at all,
-    # and because claude runs its own plugin hooks with `node`, which a host-
-    # launched process has no PATH to find either.
-    import toolpaths
-    r = subprocess.run([find_claude(), "-p", "--strict-mcp-config", full],
-                       capture_output=True,
-                       text=True, timeout=600, env=toolpaths.tool_env())
-    if r.returncode != 0:
-        # Built from BOTH streams, via the shared formatter.
-        #
-        # This read `r.stderr` alone and printed "model call failed (1):" with
-        # nothing after the colon -- because `claude` reports its errors on
-        # STDOUT and exits 1 with an empty stderr. patch.py already had a
-        # formatter written for exactly that, and this path never got it, so
-        # module builds gave a blank where the reason was while patch builds
-        # explained themselves. A message that names only the exit code tells
-        # the reader what they could already see.
-        import patch
-        raise SystemExit(patch.model_failure(r.stdout, r.stderr))
-    return r.stdout
+    # Module generation and patch generation use the same selected-provider
+    # protocol. Keeping a second, Claude-only subprocess here meant choosing
+    # Codex in Forge Settings still launched it with Claude's flags, and exact
+    # model selections were ignored. The shared call also keeps streaming,
+    # timeout and provider-specific response parsing identical in both paths.
+    import patch
+    code, answer, errors = patch.ask_model(find_claude(), full, 600.0)
+    if code != 0:
+        raise SystemExit(patch.model_failure(answer, errors))
+    return answer
 
 
 def parse_blocks(text: str):

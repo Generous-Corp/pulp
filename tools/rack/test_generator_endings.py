@@ -28,6 +28,8 @@ GENERATORS = [os.path.join(HERE, "patch.py"), os.path.join(HERE, "generate.py")]
 # Everything else that writes into the log the app watches. The monitor's rules
 # match sentences from all of these, not only the two entry points.
 LOG_WRITERS = GENERATORS + [
+    os.path.join(HERE, "..", "..", "forge-seam", "modular",
+                 "process_engine.cpp"),                 # app-owned cancellation
     os.path.join(HERE, "forge_modular.py"),      # panel + manifest emitter
     os.path.join(HERE, "patch_gate.cpp"),        # the audio gate
     os.path.join(HERE, "behaviour_gate.cpp"),    # the module gate

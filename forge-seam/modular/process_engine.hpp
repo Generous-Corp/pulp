@@ -15,6 +15,7 @@
 
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -28,10 +29,13 @@ public:
     /// `runs/`. Passing an empty `log_path` keeps a fixed path (tests that
     /// hand-write a log rely on the path not moving under them).
     ProcessEngine(std::string tools_dir, std::string log_path);
+    ~ProcessEngine() override;
 
     bool available() const override;
     bool ensure_running() override;
-    void submit(const std::string& prompt, bool patch_mode) override;
+    void submit(const std::string& prompt, bool patch_mode,
+                const forge::ModelSelection& model) override;
+    void cancel_generation() override;
     std::string last_error() const override { return error_; }
 
     /// Answer a question about a patch from the patch itself.
@@ -41,7 +45,7 @@ public:
     /// cannot claim a cable that is not in it. That property is worth more here
     /// than fluency -- a confident answer about a connection that does not
     /// exist is worse than no answer.
-    std::string explain(const std::string& patch_path) const;
+    std::string explain(const std::string& patch_path) const override;
 
     /// Same, off the UI thread. `done` is called with the answer on a worker,
     /// so the caller must marshal it back before touching any view. The
@@ -69,10 +73,8 @@ public:
     /// True when a generator process is running RIGHT NOW, whoever started it.
     ///
     /// Distinct from the shell's `busy()`, which only knows about runs this
-    /// editor has watched. A generation outlives the window — it is launched
-    /// with nohup + setsid precisely so closing the app does not kill it — so
-    /// after a restart the shell believes nothing is happening while a
-    /// generator is still writing.
+    /// editor has watched. The processor-owned child outlives an editor window
+    /// but is cancelled when the processor/app itself is destroyed.
     bool generator_running() const override;
     bool try_claim_generation() override;
     void release_generation_claim() override;
@@ -102,6 +104,11 @@ public:
                         const std::string& working_dir = {});
 
 private:
+    struct RunState;
+    static void append_terminal(const std::shared_ptr<RunState>& state,
+                                const std::string& line);
+    static void cancel_run(const std::shared_ptr<RunState>& state,
+                           bool mark_inactive_cancelled);
     std::string tools_dir_;
     std::string log_path_;
     /// Directory the per-run logs go in; empty pins log_path_ where it is.
@@ -115,6 +122,7 @@ private:
     mutable std::atomic<int> available_{-1};   // -1 unknown, 0 no, 1 yes
     std::atomic<int> python_ok_{-1};
     std::atomic<bool> claimed_by_this_{false};
+    std::shared_ptr<RunState> run_state_;
 };
 
 }  // namespace forge_modular

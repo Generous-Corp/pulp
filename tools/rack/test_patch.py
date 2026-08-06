@@ -2847,8 +2847,101 @@ else:
     else:
         print("  ok     FORGE_CODEX_BIN identifies an arbitrarily named wrapper")
 
+    # The selected provider owns its own exact model override. Exercise an
+    # arbitrarily named Claude executable so both halves of the routing contract
+    # are held here: FORGE_CLAUDE_BIN identifies the protocol, and only
+    # FORGE_CLAUDE_MODEL contributes the --model argument. A Codex model present
+    # in the same environment must not bleed across provider roles.
+    claude_model_wrapper = os.path.join(home, "claude-model-wrapper")
+    with open(claude_model_wrapper, "w") as f:
+        f.write("""#!/usr/bin/env python3
+import json
+import sys
+
+expected = ["-p", "--strict-mcp-config", "--verbose",
+            "--output-format=stream-json", "--include-partial-messages",
+            "--model", "claude-opus-5"]
+if sys.argv[1:] != expected:
+    print("wrong Claude protocol: " + repr(sys.argv[1:]), file=sys.stderr)
+    raise SystemExit(64)
+sys.stdin.read()
+print(json.dumps({"type": "result", "subtype": "success",
+                  "result": "exact Claude response"}))
+""")
+    os.chmod(claude_model_wrapper,
+             os.stat(claude_model_wrapper).st_mode | stat.S_IEXEC)
+    saved_model_env = {
+        name: os.environ.get(name)
+        for name in ("FORGE_CLAUDE_BIN", "FORGE_CODEX_BIN",
+                     "FORGE_CLAUDE_MODEL", "FORGE_CODEX_MODEL")
+    }
+    os.environ["FORGE_CLAUDE_BIN"] = claude_model_wrapper
+    os.environ["FORGE_CODEX_BIN"] = codex
+    os.environ["FORGE_CLAUDE_MODEL"] = "claude-opus-5"
+    os.environ["FORGE_CODEX_MODEL"] = "gpt-should-not-reach-claude"
+    try:
+        code, text, why = P.ask_model(
+            claude_model_wrapper, "hello Claude", 30.0, tick=0.0)
+    finally:
+        for name, value in saved_model_env.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+    if code != 0 or text != "exact Claude response" or why:
+        bad += 1
+        print(f"  WRONG  Claude executable/model routing drifted: "
+              f"{code} {text!r} {why!r}")
+    else:
+        print("  ok     Claude gets its exact executable and model only")
+
+    old_claude_model = os.environ.get("FORGE_CLAUDE_MODEL")
+    os.environ["FORGE_CLAUDE_MODEL"] = "   "
+    try:
+        P.ask_model(stub, "hello", 30.0)
+    except SystemExit as e:
+        refused = "set but empty" in str(e)
+    else:
+        refused = False
+    finally:
+        if old_claude_model is None:
+            os.environ.pop("FORGE_CLAUDE_MODEL", None)
+        else:
+            os.environ["FORGE_CLAUDE_MODEL"] = old_claude_model
+    if not refused:
+        bad += 1
+        print("  WRONG  an empty FORGE_CLAUDE_MODEL was silently accepted")
+    else:
+        print("  ok     an empty FORGE_CLAUDE_MODEL fails closed")
+
+    os.environ["FORGE_CLAUDE_MODEL"] = "--profile unexpected"
+    try:
+        P.ask_model(stub, "hello", 30.0)
+    except SystemExit as e:
+        refused = "is malformed" in str(e)
+    else:
+        refused = False
+    finally:
+        if old_claude_model is None:
+            os.environ.pop("FORGE_CLAUDE_MODEL", None)
+        else:
+            os.environ["FORGE_CLAUDE_MODEL"] = old_claude_model
+    if not refused:
+        bad += 1
+        print("  WRONG  a malformed FORGE_CLAUDE_MODEL was passed as CLI args")
+    else:
+        print("  ok     a malformed FORGE_CLAUDE_MODEL fails closed")
+
     old_codex_model = os.environ.get("FORGE_CODEX_MODEL")
+    old_claude_model = os.environ.get("FORGE_CLAUDE_MODEL")
+    saved_provider_bins = {
+        name: os.environ.get(name)
+        for name in ("FORGE_CLAUDE_BIN", "FORGE_CODEX_BIN")
+    }
+    os.environ["FORGE_CLAUDE_BIN"] = claude_model_wrapper
+    os.environ["FORGE_CODEX_BIN"] = codex
     os.environ["FORGE_CODEX_MODEL"] = "gpt-5.6-sol"
+    os.environ["FORGE_CLAUDE_MODEL"] = "claude-should-not-reach-codex"
     try:
         code, text, why = P.ask_model(
             codex, "hello codex", 30.0, tick=0.0)
@@ -2857,6 +2950,15 @@ else:
             os.environ.pop("FORGE_CODEX_MODEL", None)
         else:
             os.environ["FORGE_CODEX_MODEL"] = old_codex_model
+        if old_claude_model is None:
+            os.environ.pop("FORGE_CLAUDE_MODEL", None)
+        else:
+            os.environ["FORGE_CLAUDE_MODEL"] = old_claude_model
+        for name, value in saved_provider_bins.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
     if code != 0 or text != "exact final response\n" or why:
         bad += 1
         print(f"  WRONG  an exact Codex model was not passed through: "
@@ -2899,7 +3001,7 @@ else:
         print("  WRONG  a malformed FORGE_CODEX_MODEL was passed as CLI args")
     else:
         print("  ok     a malformed FORGE_CODEX_MODEL fails closed")
-    ran += 16
+    ran += 19
 
     real = P.SETTINGS_PATH
     try:

@@ -41,7 +41,8 @@ BuildLine::Kind BuildMonitor::classify(const std::string& line) {
         // Classified as a refusal so the run reaches a verdict: as ordinary
         // progress it never terminates, and the app spins on a build that
         // exited immediately.
-        contains(lower, "already running against this module pack")) {
+        contains(lower, "already running against this module pack") ||
+        contains(lower, "generation cancelled by user")) {
         return BuildLine::Kind::refusal;
     }
 
@@ -76,6 +77,7 @@ BuildLine::Kind BuildMonitor::classify(const std::string& line) {
         // generators' own SystemExit strings in step.
         contains(lower, "gave up after") ||
         contains(lower, "model call failed") ||
+        contains(lower, "generation stop failed") ||
         contains(lower, "model cli is not logged in") ||
         contains(lower, "could not fetch the library catalog") ||
         contains(lower, "could not fetch the module index") ||
@@ -86,7 +88,7 @@ BuildLine::Kind BuildMonitor::classify(const std::string& line) {
         // Command Line Tools. Both are a real stop, and both are things the
         // person can fix in a minute once they are told.
         contains(lower, "is missing something") ||
-        contains(lower, "model cli is not installed") ||
+        contains(lower, "is not installed, so nothing can be generated") ||
         contains(lower, "the rack sdk is not installed") ||
         contains(lower, "rack sdk not found") ||
         contains(lower, "could not download the rack sdk") ||

@@ -50,6 +50,8 @@ using Catch::Approx;
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <signal.h>
+#include <unistd.h>
 #include <filesystem>
 #include <functional>
 #include <fstream>
@@ -66,6 +68,16 @@ namespace {
 
 constexpr double kSr = 48000.0;
 constexpr int kFrames = 256;
+
+bool process_is_running(pid_t pid) {
+    std::string state;
+    if (pid <= 1 || forge_modular::ProcessEngine::run_tool(
+                        "ps", {"-p", std::to_string(pid), "-o", "state="},
+                        state) != 0)
+        return false;
+    const auto first = state.find_first_not_of(" \t\r\n");
+    return first != std::string::npos && state[first] != 'Z';
+}
 
 std::filesystem::path baseline_dir() {
     // Beside the test source, so the baselines travel with the repo rather than
@@ -4835,7 +4847,8 @@ TEST_CASE("pressing Build through a real click does not tear itself down",
         bool submitted = false;
         bool available() const override { return true; }
         bool ensure_running() override { return true; }
-        void submit(const std::string&, bool) override { submitted = true; }
+        void submit(const std::string&, bool,
+                    const forge::ModelSelection&) override { submitted = true; }
     } engine;
 
     HermeticProjects isolated;
@@ -4950,7 +4963,8 @@ TEST_CASE("a build can be asked for without driving the screen",
         std::vector<std::string> prompts;
         bool available() const override { return true; }
         bool ensure_running() override { return true; }
-        void submit(const std::string& p, bool) override { prompts.push_back(p); }
+        void submit(const std::string& p, bool,
+                    const forge::ModelSelection&) override { prompts.push_back(p); }
     } engine;
 
     HermeticProjects isolated;
@@ -5418,12 +5432,17 @@ struct FakeEngine : forge_modular::EngineClient {
     bool starts = true;
     std::string error;
     std::vector<std::pair<std::string, bool>> submissions;
+    std::vector<forge::ModelSelection> models;
+    int cancellations = 0;
 
     bool available() const override { return installed; }
     bool ensure_running() override { return starts; }
-    void submit(const std::string& prompt, bool patch_mode) override {
+    void submit(const std::string& prompt, bool patch_mode,
+                const forge::ModelSelection& model) override {
         submissions.emplace_back(prompt, patch_mode);
+        models.push_back(model);
     }
+    void cancel_generation() override { ++cancellations; }
     std::string last_error() const override { return error; }
 };
 
@@ -5457,9 +5476,15 @@ TEST_CASE("every composer control changes something observable",
     }
 
     SECTION("Build submits, moves to the Build screen and clears the prompt") {
+        forge::Settings::instance().set_dsp_model_selection(
+            {.provider_id = "codex", .model = "gpt-5.6"});
         input->set_text("a 12 HP wavefolder");
         CHECK(shell.start_build().empty());
         REQUIRE(engine.submissions.size() == 1);
+        REQUIRE(engine.models.size() == 1);
+        CHECK(engine.models.front() == (forge::ModelSelection{
+                                           .provider_id = "codex",
+                                           .model = "gpt-5.6"}));
         CHECK(engine.submissions[0].first == "a 12 HP wavefolder");
         CHECK_FALSE(engine.submissions[0].second);      // module mode
         // Staying on Home after pressing Build is the reported failure: a user
@@ -5477,6 +5502,33 @@ TEST_CASE("every composer control changes something observable",
         CHECK(engine.submissions[0].second);            // patch mode
     }
 
+    SECTION("Build becomes Stop and Stop reaches the owned engine") {
+        input->set_text("a patch that takes a while");
+        REQUIRE(shell.start_build().empty());
+        const auto row = shell.composer_row();
+        REQUIRE(row.right.size() == 1);
+        CHECK(row.right.front().label == "Stop");
+        CHECK(row.right.front().access_label == "Stop the current generation");
+        REQUIRE(row.right.front().on_click);
+        row.right.front().on_click();
+        CHECK(engine.cancellations == 1);
+    }
+
+    SECTION("closing and reopening only the editor preserves the run and Stop") {
+        input->set_text("a long-running patch");
+        REQUIRE(shell.start_build().empty());
+        shell.on_view_closed(*view);
+        view.reset();
+        CHECK(engine.cancellations == 0);
+
+        auto reopened = shell.create_view();
+        REQUIRE(reopened != nullptr);
+        const auto row = shell.composer_row();
+        REQUIRE(row.right.size() == 1);
+        CHECK(row.right.front().label == "Stop");
+        shell.on_view_closed(*reopened);
+    }
+
     SECTION("a missing generator is reported, not swallowed") {
         engine.installed = false;
         input->set_text("anything");
@@ -5491,6 +5543,17 @@ TEST_CASE("every composer control changes something observable",
         input->set_text("anything");
         CHECK(shell.start_build() == "the helper crashed on launch");
         CHECK(engine.submissions.empty());
+    }
+
+    SECTION("a synchronous agent error offers its settings shortcut") {
+        engine.error = "unsupported agent provider 'future-provider'";
+        input->set_text("anything");
+        CHECK(shell.start_build() == engine.error);
+        shell.on_poll();  // the safe turn swaps the clicked Build row
+        const auto row = shell.composer_row();
+        CHECK(std::any_of(row.left.begin(), row.left.end(), [](const auto& item) {
+            return item.label == "Agent settings";
+        }));
     }
 
     SECTION("Ask never reaches the generator") {
@@ -5527,7 +5590,8 @@ TEST_CASE("Ask uses the non-blocking explanation seam", "[phase6][ask][async]") 
         mutable std::function<void(std::string)> completion;
         bool available() const override { return true; }
         bool ensure_running() override { return true; }
-        void submit(const std::string&, bool) override {}
+        void submit(const std::string&, bool,
+                    const forge::ModelSelection&) override {}
         std::string explain(const std::string&) const override {
             ++synchronous_calls;
             return "synchronous answer";
@@ -6677,7 +6741,8 @@ std::string lifetime_patch(const std::filesystem::path& dir, const char* stem) {
 struct WillingLifetimeEngine : forge_modular::EngineClient {
     bool available() const override { return true; }
     bool ensure_running() override { return true; }
-    void submit(const std::string&, bool) override {}
+    void submit(const std::string&, bool,
+                const forge::ModelSelection&) override {}
 };
 
 }  // namespace
@@ -9173,6 +9238,45 @@ TEST_CASE("a second build is refused while one is still running",
     std::filesystem::remove_all(dir, ec);
 }
 
+TEST_CASE("an agent failure offers the Providers settings tab",
+          "[build][agent-settings]") {
+    HermeticProjects isolated;
+    std::error_code ec;
+    const auto dir = std::filesystem::temp_directory_path() / "fm-agent-error";
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto log = dir / "run.log";
+    { std::ofstream f(log); }
+
+    forge_modular::ForgeModularShell shell;
+    FakeEngine engine;
+    shell.set_engine(&engine);
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    shell.watch_build_log(log.string());
+    REQUIRE(shell.start_build_with("a patch").empty());
+
+    { std::ofstream f(log, std::ios::app);
+      f << "model call failed: You've hit your weekly limit\n"; }
+    shell.on_poll();
+    REQUIRE(shell.build_outcome() == forge_modular::BuildOutcome::failed);
+
+    const auto row = shell.composer_row();
+    const auto action = std::find_if(row.left.begin(), row.left.end(),
+        [](const auto& item) { return item.label == "Agent settings"; });
+    REQUIRE(action != row.left.end());
+    REQUIRE(action->on_click);
+    action->on_click();
+    REQUIRE(shell.chrome() != nullptr);
+    CHECK(shell.chrome()->settings_open());
+    CHECK(shell.chrome()->settings_active_tab() == 1);
+
+    std::filesystem::remove_all(dir, ec);
+}
+
 TEST_CASE("two editor shells share one atomic generation launch claim",
           "[build][lock]") {
     struct SharedClaimEngine final : forge_modular::EngineClient {
@@ -9186,7 +9290,8 @@ TEST_CASE("two editor shells share one atomic generation launch claim",
             return true;
         }
         void release_generation_claim() override { claimed = false; }
-        void submit(const std::string&, bool) override { ++submissions; }
+        void submit(const std::string&, bool,
+                    const forge::ModelSelection&) override { ++submissions; }
     } engine;
 
     HermeticProjects isolated;
@@ -9221,9 +9326,9 @@ TEST_CASE("two editor shells share one atomic generation launch claim",
 
 TEST_CASE("every run writes its own log", "[build][lock]") {
     // The lock stops a second build from THIS shell. It cannot stop a run left
-    // over from a previous launch of the app, which survives by design — a
-    // generation is started with nohup + setsid so closing the window does not
-    // kill it. While every run redirected into one `last-run.log`, that
+    // over from another editor/process. Closing and reopening an editor does
+    // not destroy its processor-owned run. While every run redirected into
+    // one `last-run.log`, that
     // leftover wrote over the new run's transcript from offset zero, and the
     // app reads its outcome, its stage and its artifact path out of that file.
     //
@@ -9246,9 +9351,11 @@ TEST_CASE("every run writes its own log", "[build][lock]") {
     const auto first_default = engine.log_path();
     CHECK(first_default == (dir / "last-run.log").string());
 
-    engine.submit("an acid line with accent and slide", /*patch_mode=*/true);
+    engine.submit("an acid line with accent and slide", /*patch_mode=*/true,
+                  {.provider_id = "codex", .model = "gpt-5.6"});
     const auto a = engine.log_path();
-    engine.submit("an ambient generative drone", /*patch_mode=*/true);
+    engine.submit("an ambient generative drone", /*patch_mode=*/true,
+                  {.provider_id = "codex", .model = "gpt-5.6"});
     const auto b = engine.log_path();
 
     INFO("first run's log:  " << a);
@@ -9283,6 +9390,160 @@ TEST_CASE("process engines atomically share the launch window",
     CHECK(second.try_claim_generation());
     second.release_generation_claim();
 
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST_CASE("the process engine passes the exact selected provider and model",
+          "[build][provider][process]") {
+    std::error_code ec;
+    const auto dir = std::filesystem::temp_directory_path() / "fm-provider-route";
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    { std::ofstream f(dir / "patch.py");
+      f << "import os, pathlib, sys\n"
+           "pathlib.Path(sys.argv[2]).write_text('|'.join([\n"
+           " os.environ.get('FORGE_MODEL_PROVIDER', ''),\n"
+           " os.environ.get('FORGE_CODEX_MODEL', ''),\n"
+           " os.environ.get('FORGE_CLAUDE_MODEL', '')]))\n"; }
+    { std::ofstream f(dir / "generate.py");
+      f << "import os, pathlib, sys\n"
+           "pathlib.Path(sys.argv[1]).write_text('|'.join([\n"
+           " os.environ.get('FORGE_MODEL_PROVIDER', ''),\n"
+           " os.environ.get('FORGE_CODEX_MODEL', ''),\n"
+           " os.environ.get('FORGE_CLAUDE_MODEL', '')]))\n"; }
+
+    forge_modular::ProcessEngine engine(dir.string(), (dir / "run.log").string());
+    const auto codex_out = dir / "codex.env";
+    engine.submit(codex_out.string(), true,
+                  {.provider_id = "codex", .model = "gpt-5.6"});
+    for (int i = 0; i < 200 && !std::filesystem::exists(codex_out); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    REQUIRE(std::filesystem::exists(codex_out));
+    { std::ifstream f(codex_out);
+      std::string value((std::istreambuf_iterator<char>(f)), {});
+      CHECK(value == "codex|gpt-5.6|"); }
+
+    const auto claude_out = dir / "claude.env";
+    engine.submit(claude_out.string(), true,
+                  {.provider_id = "claude", .model = "claude-opus-5"});
+    for (int i = 0; i < 200 && !std::filesystem::exists(claude_out); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    REQUIRE(std::filesystem::exists(claude_out));
+    { std::ifstream f(claude_out);
+      std::string value((std::istreambuf_iterator<char>(f)), {});
+      CHECK(value == "claude||claude-opus-5"); }
+
+    const auto module_out = dir / "module.env";
+    engine.submit(module_out.string(), false,
+                  {.provider_id = "codex", .model = "gpt-5.6"});
+    for (int i = 0; i < 200 && !std::filesystem::exists(module_out); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    REQUIRE(std::filesystem::exists(module_out));
+    { std::ifstream f(module_out);
+      std::string value((std::istreambuf_iterator<char>(f)), {});
+      CHECK(value == "codex|gpt-5.6|"); }
+
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST_CASE("Stop kills the exact owned generator tree and leaves a decoy",
+          "[build][stop][process]") {
+    std::error_code ec;
+    const auto dir = std::filesystem::temp_directory_path() / "fm-stop-tree";
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto pids = dir / "pids";
+    { std::ofstream f(dir / "patch.py");
+      f << "import os, pathlib, subprocess, sys, time\n"
+           "child = subprocess.Popen([sys.executable, '-c', "
+           "'import time; time.sleep(30)'])\n"
+           "pathlib.Path(sys.argv[2]).write_text(f'{os.getpid()} {child.pid}')\n"
+           "time.sleep(30)\n"; }
+    { std::ofstream f(dir / "generate.py"); f << "pass\n"; }
+
+    std::string decoy_out;
+    REQUIRE(forge_modular::ProcessEngine::run(
+                "nohup /bin/sleep 30 >/dev/null 2>&1 & echo $!", decoy_out) == 0);
+    const pid_t decoy = static_cast<pid_t>(std::stol(decoy_out));
+
+    forge_modular::ProcessEngine engine(dir.string(), (dir / "run.log").string());
+    engine.submit(pids.string(), true,
+                  {.provider_id = "codex", .model = "gpt-5.6"});
+    pid_t root = 0, child = 0;
+    for (int i = 0; i < 200 && (root <= 1 || child <= 1); ++i) {
+        std::ifstream f(pids);
+        f >> root >> child;
+        if (root <= 1 || child <= 1)
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    REQUIRE(root > 1);
+    REQUIRE(child > 1);
+    CHECK(::getpgid(root) == root);
+    CHECK(::getpgid(child) == root);
+
+    engine.cancel_generation();
+    for (int i = 0; i < 200 &&
+                    (process_is_running(root) || process_is_running(child)); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    CHECK_FALSE(process_is_running(root));
+    CHECK_FALSE(process_is_running(child));
+    CHECK(process_is_running(decoy));  // a broad process-name kill fails here
+
+    std::ifstream transcript(engine.log_path());
+    const std::string log((std::istreambuf_iterator<char>(transcript)), {});
+    CHECK(log.find("generation cancelled by user") != std::string::npos);
+    forge_modular::BuildMonitor stopped;
+    stopped.watch(engine.log_path());
+    stopped.poll();
+    CHECK(stopped.outcome() == forge_modular::BuildOutcome::refused);
+    ::kill(decoy, SIGKILL);
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST_CASE("destroying the process engine stops its owned generator",
+          "[build][quit][process]") {
+    std::error_code ec;
+    const auto dir = std::filesystem::temp_directory_path() / "fm-quit-tree";
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto pids = dir / "pids";
+    { std::ofstream f(dir / "patch.py");
+      f << "import os, pathlib, subprocess, sys, time\n"
+           "child = subprocess.Popen([sys.executable, '-c', "
+           "'import time; time.sleep(30)'])\n"
+           "pathlib.Path(sys.argv[2]).write_text(f'{os.getpid()} {child.pid}')\n"
+           "time.sleep(30)\n"; }
+    { std::ofstream f(dir / "generate.py"); f << "pass\n"; }
+
+    pid_t root = 0, child = 0;
+    std::string quit_log;
+    {
+        forge_modular::ProcessEngine engine(dir.string(),
+                                             (dir / "run.log").string());
+        engine.submit(pids.string(), true,
+                      {.provider_id = "claude", .model = "claude-opus-5"});
+        quit_log = engine.log_path();
+        for (int i = 0; i < 200 && (root <= 1 || child <= 1); ++i) {
+            std::ifstream f(pids);
+            f >> root >> child;
+            if (root <= 1 || child <= 1)
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        REQUIRE(root > 1);
+        REQUIRE(child > 1);
+        CHECK(::getpgid(root) == root);
+        CHECK(::getpgid(child) == root);
+    }  // the app-owned engine is destroyed during normal app/plugin quit
+
+    for (int i = 0; i < 200 &&
+                    (process_is_running(root) || process_is_running(child)); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    CHECK_FALSE(process_is_running(root));
+    CHECK_FALSE(process_is_running(child));
+    forge_modular::BuildMonitor stopped;
+    stopped.watch(quit_log);
+    stopped.poll();
+    CHECK(stopped.outcome() == forge_modular::BuildOutcome::refused);
     std::filesystem::remove_all(dir, ec);
 }
 
@@ -9353,7 +9614,8 @@ TEST_CASE("a generation does not launch when its log cannot be claimed",
     forge_modular::ProcessEngine engine(
         dir.string(), "/dev/null/cannot-have-a-child/last-run.log");
     REQUIRE(engine.try_claim_generation());
-    engine.submit("a build whose transcript has nowhere to go", true);
+    engine.submit("a build whose transcript has nowhere to go", true,
+                  {.provider_id = "codex", .model = "gpt-5.6"});
 
     CHECK_FALSE(engine.last_error().empty());
     CHECK(engine.log_path() == "/dev/null/cannot-have-a-child/last-run.log");

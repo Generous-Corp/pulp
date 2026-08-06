@@ -2826,6 +2826,22 @@ def _ask_model(claude: str, prompt: str, seconds: float, tick: float,
 
     import toolpaths
 
+    def exact_model(env_name: str, provider: str):
+        raw = _os.environ.get(env_name)
+        if raw is None:
+            return None
+        model = raw.strip()
+        if not model:
+            raise SystemExit(
+                f"{env_name} is set but empty; name an exact {provider} "
+                "model or unset it to use the CLI default")
+        if not _re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]*", model):
+            raise SystemExit(
+                f"{env_name} is malformed; use a model identifier "
+                "containing only letters, digits, dot, underscore, colon, "
+                "slash, or hyphen")
+        return model
+
     # THE PROMPT GOES ON STDIN, NOT IN ARGV. It carries the inventory, and the
     # inventory grows with every module anybody cartographs -- so passing it
     # as an argument works until it does not, and then fails for a reason that
@@ -2835,23 +2851,14 @@ def _ask_model(claude: str, prompt: str, seconds: float, tick: float,
     # rather than a prompt somebody wrote. stdin has no such ceiling.
     answer_path = None
     if protocol == "claude":
+        claude_model = exact_model("FORGE_CLAUDE_MODEL", "Claude")
         command = [claude, "-p", "--strict-mcp-config", "--verbose",
                    "--output-format=stream-json",
                    "--include-partial-messages"]
+        if claude_model is not None:
+            command.extend(["--model", claude_model])
     else:
-        codex_model = _os.environ.get("FORGE_CODEX_MODEL")
-        if codex_model is not None:
-            codex_model = codex_model.strip()
-            if not codex_model:
-                raise SystemExit(
-                    "FORGE_CODEX_MODEL is set but empty; name an exact Codex "
-                    "model or unset it to use the CLI default")
-            if not _re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]*",
-                                 codex_model):
-                raise SystemExit(
-                    "FORGE_CODEX_MODEL is malformed; use a model identifier "
-                    "containing only letters, digits, dot, underscore, "
-                    "colon, slash, or hyphen")
+        codex_model = exact_model("FORGE_CODEX_MODEL", "Codex")
         answer_file = tempfile.NamedTemporaryFile(
             prefix="forge-model-answer-", suffix=".txt", delete=False)
         answer_path = answer_file.name

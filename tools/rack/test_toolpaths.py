@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -124,6 +125,60 @@ def main() -> int:
         bad += 1
     else:
         print("  ok     the tool environment can find what the tool shells out to")
+
+    # A provider selected in Forge Settings is exact. With both CLIs installed,
+    # selection must win; with only the other CLI installed, it must refuse
+    # instead of silently spending the wrong provider's quota.
+    with tempfile.TemporaryDirectory() as td:
+        for name in ("claude", "codex"):
+            path = os.path.join(td, name)
+            with open(path, "w") as f:
+                f.write("#!/bin/sh\nexit 0\n")
+            os.chmod(path, 0o755)
+        old = dict(os.environ)
+        old_tool_dirs = toolpaths.TOOL_DIRS
+        try:
+            toolpaths.TOOL_DIRS = [td]
+            os.environ.clear()
+            os.environ.update({"PATH": td, "FORGE_MODEL_PROVIDER": "codex"})
+            chosen = toolpaths.find_claude()
+            if os.path.basename(chosen) != "codex":
+                print(f"  WRONG  selected Codex resolved to {chosen}")
+                bad += 1
+            else:
+                print("  ok     selected Codex wins when both CLIs exist")
+
+            os.unlink(os.path.join(td, "codex"))
+            try:
+                toolpaths.find_claude()
+                print("  WRONG  missing selected Codex fell back to Claude")
+                bad += 1
+            except SystemExit as exc:
+                message = str(exc)
+                if "FORGE_CODEX_BIN" not in message or "Claude Code" in message:
+                    print("  WRONG  missing Codex gives another provider's remedy")
+                    bad += 1
+                else:
+                    print("  ok     missing selected Codex fails closed with its remedy")
+            prereqs = toolpaths.missing_prerequisites()
+            joined = "\n".join(prereqs)
+            if "FORGE_CODEX_BIN" not in joined or "Claude Code" in joined:
+                print("  WRONG  preflight rewrote missing Codex as Claude")
+                bad += 1
+            else:
+                print("  ok     preflight preserves the selected Codex remedy")
+
+            os.environ["FORGE_MODEL_PROVIDER"] = "not-a-provider"
+            try:
+                toolpaths.find_claude()
+                print("  WRONG  unsupported provider did not fail closed")
+                bad += 1
+            except SystemExit:
+                print("  ok     unsupported provider fails closed")
+        finally:
+            toolpaths.TOOL_DIRS = old_tool_dirs
+            os.environ.clear()
+            os.environ.update(old)
 
     print("\nFAILED" if bad else "\nall good")
     return 1 if bad else 0

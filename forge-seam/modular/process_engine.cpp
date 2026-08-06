@@ -3,6 +3,7 @@
 #include <pulp/platform/child_process.hpp>
 
 #include <fcntl.h>
+#include <signal.h>
 #include <unistd.h>
 
 #include <array>
@@ -12,6 +13,8 @@
 #include <chrono>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
+#include <mutex>
 #include <sstream>
 #include <thread>
 
@@ -36,8 +39,36 @@ std::string shell_quote(const std::string& s) {
 
 }  // namespace
 
+struct ProcessEngine::RunState {
+    std::atomic<pid_t> pid{0};
+    std::atomic<bool> cancel_requested{false};
+    std::atomic<int> launch_state{-1};  // -1 idle, 0 pending, 1 started, 2 failed
+    std::atomic<bool> terminal_written{false};
+    std::mutex details_mutex;
+    std::mutex cancel_mutex;
+    std::shared_ptr<pulp::platform::ChildProcess> child;
+    std::string expected_script;
+    std::string log_path;
+    std::string provider;
+};
+
+void ProcessEngine::append_terminal(const std::shared_ptr<RunState>& state,
+                                    const std::string& line) {
+    if (state->terminal_written.exchange(true, std::memory_order_acq_rel)) return;
+    std::string log;
+    {
+        std::lock_guard lock(state->details_mutex);
+        log = state->log_path;
+    }
+    if (!log.empty()) {
+        std::ofstream f(log, std::ios::app);
+        f << "\n" << line << "\n";
+    }
+}
+
 ProcessEngine::ProcessEngine(std::string tools_dir, std::string log_path)
-    : tools_dir_(std::move(tools_dir)), log_path_(std::move(log_path)) {
+    : tools_dir_(std::move(tools_dir)), log_path_(std::move(log_path)),
+      run_state_(std::make_shared<RunState>()) {
     // `runs/` beside the log the shell starts on. Kept beside it rather than
     // in a temp directory because a generation costs minutes and its
     // transcript is the only record of what the model was asked and answered;
@@ -45,6 +76,18 @@ ProcessEngine::ProcessEngine(std::string tools_dir, std::string log_path)
     if (!log_path_.empty())
         log_base_ = (std::filesystem::path(log_path_).parent_path() / "runs")
                         .string();
+}
+
+ProcessEngine::~ProcessEngine() {
+    // This engine is owned by the processor/app, not by an editor view. Thus a
+    // window may close and reopen without interrupting a build, while normal
+    // app/plugin teardown reliably stops the exact process this engine owns.
+    run_state_->cancel_requested.store(true, std::memory_order_release);
+    for (int i = 0; i < 100 &&
+                    run_state_->launch_state.load(std::memory_order_acquire) == 0; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    if (run_state_->launch_state.load(std::memory_order_acquire) == 1)
+        cancel_run(run_state_, /*mark_inactive_cancelled=*/false);
 }
 
 int ProcessEngine::run_tool(const std::string& executable,
@@ -153,7 +196,8 @@ void ProcessEngine::release_generation_claim() {
         g_generation_launch_claim.store(false, std::memory_order_release);
 }
 
-void ProcessEngine::submit(const std::string& prompt, bool patch_mode) {
+void ProcessEngine::submit(const std::string& prompt, bool patch_mode,
+                           const forge::ModelSelection& model) {
     error_.clear();
     artifact_.clear();
 
@@ -211,11 +255,34 @@ void ProcessEngine::submit(const std::string& prompt, bool patch_mode) {
     const std::string tool = patch_mode ? "patch.py" : "generate.py";
     const std::string verb = patch_mode ? " build " : " ";
 
+    if (model.provider_id != "claude" && model.provider_id != "codex") {
+        error_ = "unsupported agent provider '" + model.provider_id + "'";
+        release_generation_claim();
+        return;
+    }
+    if (model.model.empty()) {
+        error_ = "the selected agent has no model";
+        release_generation_claim();
+        return;
+    }
+
+    const auto script = (std::filesystem::path(tools_dir_) / tool).string();
+    {
+        std::lock_guard lock(run_state_->details_mutex);
+        run_state_->expected_script = script;
+        run_state_->log_path = log_path_;
+        run_state_->provider = model.provider_id;
+    }
+    run_state_->pid.store(0, std::memory_order_release);
+    run_state_->cancel_requested.store(false, std::memory_order_release);
+    run_state_->launch_state.store(0, std::memory_order_release);
+    run_state_->terminal_written.store(false, std::memory_order_release);
+
     std::ostringstream cmd;
-    // nohup + setsid: a generation takes minutes, and without this it is a
-    // child of the app's process group -- quitting the window SIGHUPs it
-    // mid-build. Observed: a run died right after "manifest + panel
-    // validated", never reaching "compiled", because the app was closed.
+    // The processor, not the editor view, owns this non-blocking ChildProcess.
+    // It therefore remains alive across editor-window closure, while the
+    // engine destructor explicitly cancels its retained PID on app/plugin
+    // teardown, so quitting cannot leave an agent running.
     // -u, because Python BLOCK-BUFFERS stdout when it is not a terminal.
     //
     // The transcript is redirected to a file, so without this nothing reaches
@@ -225,11 +292,22 @@ void ProcessEngine::submit(const std::string& prompt, bool patch_mode) {
     // minutes: observed at 4m50s into a generation with a 0-byte log and a
     // healthy python. Indistinguishable, from the outside, from a run that
     // died on the first line -- which is the reading it invites.
-    cmd << "cd " << shell_quote(tools_dir_) << " && "
-        << "nohup python3 -u " << tool << verb << shell_quote(prompt)
+    const std::string bootstrap =
+        "import os,sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])";
+    cmd << "exec /usr/bin/env "
+        << "-u FORGE_CLAUDE_MODEL -u FORGE_CODEX_MODEL "
+        << "FORGE_MODEL_PROVIDER=" << shell_quote(model.provider_id) << " "
+        << (model.provider_id == "codex" ? "FORGE_CODEX_MODEL="
+                                           : "FORGE_CLAUDE_MODEL=")
+        << shell_quote(model.model) << " "
+        // The bootstrap makes the retained root the leader of a private
+        // session/process group before patch.py can spawn the model CLI. Stop
+        // can therefore freeze and signal the whole owned group atomically.
+        << "python3 -c " << shell_quote(bootstrap)
+        << " python3 -u " << shell_quote(script) << verb << shell_quote(prompt)
         // Truncate: BuildMonitor treats a shrinking file as a new run, so the
         // transcript starts clean rather than replaying the previous build.
-        << " > " << shell_quote(log_path_) << " 2>&1 &";
+        << " > " << shell_quote(log_path_) << " 2>&1";
     // On a worker, not the UI thread. Even backgrounded, this forks a shell and
     // touches tools_dir_ -- which may live on a removable, network-backed or
     // TCC-gated volume, where either can block for seconds. That is what made
@@ -237,12 +315,113 @@ void ProcessEngine::submit(const std::string& prompt, bool patch_mode) {
     // least willing to believe it is still alive.
     const bool releases_claim =
         claimed_by_this_.exchange(false, std::memory_order_acq_rel);
-    std::thread([command = cmd.str(), releases_claim]() {
-        std::string out;
-        run(command, out);
+    auto state = run_state_;
+    const auto working_dir = tools_dir_;
+    std::thread([command = cmd.str(), working_dir, releases_claim, state]() {
+        auto child = std::make_shared<pulp::platform::ChildProcess>();
+        pulp::platform::ProcessOptions opts;
+        opts.working_directory = working_dir;
+        opts.capture_stdout = false;
+        opts.capture_stderr = false;
+        const bool started = child->start("/bin/sh", {"-c", command}, opts);
+        if (started) {
+            {
+                std::lock_guard lock(state->details_mutex);
+                state->child = child;
+            }
+            state->pid.store(static_cast<pid_t>(child->process_id()),
+                             std::memory_order_release);
+            state->launch_state.store(1, std::memory_order_release);
+        } else {
+            state->launch_state.store(2, std::memory_order_release);
+            std::string provider;
+            {
+                std::lock_guard lock(state->details_mutex);
+                provider = state->provider;
+            }
+            append_terminal(state, "model call failed: could not launch the selected " +
+                                       provider + " agent");
+        }
         if (releases_claim)
             g_generation_launch_claim.store(false, std::memory_order_release);
+        if (state->cancel_requested.load(std::memory_order_acquire) && started)
+            ProcessEngine::cancel_run(state, true);  // Stop during launch is not lost.
     }).detach();
+}
+
+void ProcessEngine::cancel_generation() {
+    run_state_->cancel_requested.store(true, std::memory_order_release);
+    // submit() deliberately does the launch off the UI thread. Stop or app
+    // quit can therefore arrive after the user action but before the worker
+    // has published `$!`. Wait only for that bounded handoff; the worker also
+    // observes cancel_requested, so a slow or failed launch cannot escape.
+    for (int i = 0; i < 100 &&
+                    run_state_->pid.load(std::memory_order_acquire) <= 1 &&
+                    run_state_->launch_state.load(std::memory_order_acquire) == 0; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    if (run_state_->launch_state.load(std::memory_order_acquire) == 2) return;
+    cancel_run(run_state_, /*mark_inactive_cancelled=*/true);
+}
+
+void ProcessEngine::cancel_run(const std::shared_ptr<RunState>& state,
+                               bool mark_inactive_cancelled) {
+    std::lock_guard cancelling(state->cancel_mutex);
+    const pid_t pid = state->pid.load(std::memory_order_acquire);
+    if (pid <= 1) {
+        if (mark_inactive_cancelled)
+            append_terminal(state, "generation cancelled by user");
+        return;
+    }
+
+    std::string expected;
+    std::shared_ptr<pulp::platform::ChildProcess> child;
+    {
+        std::lock_guard lock(state->details_mutex);
+        expected = state->expected_script;
+        child = state->child;
+    }
+    if (!child || child->process_id() != pid || !child->is_running()) {
+        state->pid.store(0, std::memory_order_release);
+        if (mark_inactive_cancelled)
+            append_terminal(state, "generation cancelled by user");
+        return;
+    }
+    std::string command;
+    if (run_tool("ps", {"-p", std::to_string(pid), "-o", "command="}, command) != 0 ||
+        expected.empty() || command.find(expected) == std::string::npos) {
+        // The child already ended or the PID was reused. Never turn a stale
+        // integer into permission to kill an unrelated process.
+        state->pid.store(0, std::memory_order_release);
+        append_terminal(state,
+                        "generation stop failed: could not safely identify the owned run");
+        return;
+    }
+
+    // patch.py became the leader of a private process group before it could
+    // spawn a model CLI. Never use a negative PID unless that invariant is
+    // live now: signalling the app's own process group would be catastrophic.
+    pid_t pgid = ::getpgid(pid);
+    for (int i = 0; i < 100 && pgid != pid && child->is_running(); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        pgid = ::getpgid(pid);
+    }
+    if (pgid != pid) {
+        state->pid.store(0, std::memory_order_release);
+        append_terminal(state,
+                        "generation stop failed: owned process group was not established");
+        return;
+    }
+    ::kill(-pgid, SIGSTOP);
+    ::kill(-pgid, SIGTERM);
+    ::kill(-pgid, SIGCONT);  // deliver TERM after the group-wide freeze
+    for (int i = 0; i < 20; ++i) {
+        if (::kill(pid, 0) != 0) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+    if (::kill(pid, 0) == 0) ::kill(-pgid, SIGKILL);
+    state->pid.store(0, std::memory_order_release);
+
+    append_terminal(state, "generation cancelled by user");
 }
 
 std::string ProcessEngine::explain(const std::string& patch_path) const {
