@@ -87,6 +87,13 @@ quantizer's beat/frame arithmetic.
   an epoch or slope discontinuity. Never feed such a range through
   `CompiledTempoMap::ticks_to_samples()`: session tempo is independent of the
   document tempo, including on split loop ranges.
+- `project_ratchet_interval()` treats the hit count as including the onset and
+  excludes the later clock boundary. It distributes integer-tick remainders
+  from the original interval coordinates on every projection; do not advance a
+  floating-point phase or carry remainder state between callbacks. Half-open
+  windows must concatenate to the same schedule as one whole-window call. Reject
+  a hit count greater than the integer-tick span rather than emitting duplicate
+  positions.
 - `LoopRegion` (`<pulp/timebase/loop_region.hpp>`) is two document positions plus
   whether they are in force, and it lives here rather than beside a consumer
   because that is the whole of it. `playback::LoopRegion` is an alias of it and
