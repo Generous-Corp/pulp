@@ -4280,6 +4280,10 @@
         "disposition": "excluded"
       },
       {
+        "name": "agent-capabilities",
+        "disposition": "excluded"
+      },
+      {
         "name": "android",
         "disposition": "candidate-shared-later"
       },

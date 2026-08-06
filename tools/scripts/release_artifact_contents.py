@@ -23,6 +23,16 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from sdk_capability_handoff import (
+    CAPABILITIES_PATH,
+    CAPABILITIES_SCHEMA_PATH,
+    HANDOFF_PATH,
+    HANDOFF_SCHEMA_PATH,
+    HandoffError,
+    importer_path,
+    verify_payload as verify_capability_handoff_payload,
+)
+
 
 DEFAULT_MATRIX_PATH = Path(__file__).with_name("release_product_matrix.json")
 LEGACY_CLI_BINARY_STEMS = frozenset({"pulp", "pulp-cpp", "pulp-mcp"})
@@ -61,6 +71,7 @@ def version_tuple(value: str) -> tuple[int, int, int]:
 class ProductMatrix:
     contract_floor: str
     sdk_provenance_floor: str
+    capability_handoff_floor: str
     inspector_sdk_floor: str
     platforms: tuple[str, ...]
     cli_contract_declared: bool
@@ -90,6 +101,9 @@ class ProductMatrix:
                 # historical matrix requires the marker", not malformed data.
                 sdk_provenance_floor=str(
                     doc.get("sdk_provenance_floor", "999999.0.0")
+                ),
+                capability_handoff_floor=str(
+                    doc.get("capability_handoff_floor", "999999.0.0")
                 ),
                 inspector_sdk_floor=str(
                     doc.get("inspector_sdk_floor", "999999.0.0")
@@ -121,6 +135,7 @@ class ProductMatrix:
             raise ContentError(f"invalid release product matrix {path}: empty contract")
         version_tuple(matrix.contract_floor)
         version_tuple(matrix.sdk_provenance_floor)
+        version_tuple(matrix.capability_handoff_floor)
         version_tuple(matrix.inspector_sdk_floor)
         return matrix
 
@@ -291,6 +306,19 @@ def cli_members(
     )
 
 
+def sdk_import_design_runtime_members(
+    matrix: ProductMatrix = DEFAULT_MATRIX,
+    version: str | None = None,
+) -> frozenset[str]:
+    _binaries, resources = effective_cli_contract(matrix, version)
+    prefix = "browser_capture/"
+    return frozenset(
+        f"pulp-sdk/bin/browser_capture-v1/{member.removeprefix(prefix)}"
+        for member in resources
+        if member.startswith(prefix)
+    )
+
+
 def sdk_binary_members(platform: str) -> frozenset[str]:
     suffix = ".exe" if platform.startswith("windows-") else ""
     names = {f"pulp-sdk/bin/{name}{suffix}" for name in ("pulp", "pulp-cpp", "pulp-mcp", "pulp-scan-worker")}
@@ -352,6 +380,20 @@ def required_sdk_members(
         and version_tuple(version) >= version_tuple(matrix.sdk_provenance_floor)
     ):
         required.add("pulp-sdk/sdk-provenance.json")
+    if (
+        version is not None
+        and version_tuple(version) >= version_tuple(matrix.capability_handoff_floor)
+    ):
+        required.update(
+            {
+                f"pulp-sdk/{HANDOFF_PATH.as_posix()}",
+                f"pulp-sdk/{HANDOFF_SCHEMA_PATH.as_posix()}",
+                f"pulp-sdk/{CAPABILITIES_PATH.as_posix()}",
+                f"pulp-sdk/{CAPABILITIES_SCHEMA_PATH.as_posix()}",
+                f"pulp-sdk/{importer_path(platform).as_posix()}",
+            }
+        )
+        required.update(sdk_import_design_runtime_members(matrix, version))
     return frozenset(required)
 
 
@@ -487,6 +529,50 @@ def verify_sdk_archive(
                 raise ContentError(
                     f"{path.name}: unsafe SDK provenance contract: {mismatches}"
                 )
+        if version_tuple(version) >= version_tuple(matrix.capability_handoff_floor):
+            prefix = "pulp-sdk/"
+            expected_runtime = sdk_import_design_runtime_members(matrix, version)
+            runtime_prefix = "pulp-sdk/bin/browser_capture-v1/"
+            actual_runtime = {
+                name for name in names if name.startswith(runtime_prefix)
+            }
+            if actual_runtime != expected_runtime:
+                raise ContentError(
+                    f"{path.name}: importer runtime matrix mismatch; "
+                    f"missing={sorted(expected_runtime - actual_runtime)}, "
+                    f"stale_or_unexpected={sorted(actual_runtime - expected_runtime)}"
+                )
+            try:
+                verify_capability_handoff_payload(
+                    handoff_bytes=archive.read(
+                        prefix + HANDOFF_PATH.as_posix(), limit=16 * 1024 * 1024
+                    ),
+                    handoff_schema_bytes=archive.read(
+                        prefix + HANDOFF_SCHEMA_PATH.as_posix()
+                    ),
+                    importer_bytes=archive.read(
+                        prefix + importer_path(platform).as_posix(),
+                        limit=512 * 1024 * 1024,
+                    ),
+                    importer_runtime_bytes={
+                        member.removeprefix(prefix): archive.read(member)
+                        for member in expected_runtime
+                    },
+                    capability_bytes=archive.read(
+                        prefix + CAPABILITIES_PATH.as_posix(),
+                        limit=16 * 1024 * 1024,
+                    ),
+                    capability_schema_bytes=archive.read(
+                        prefix + CAPABILITIES_SCHEMA_PATH.as_posix(),
+                        limit=16 * 1024 * 1024,
+                    ),
+                    expected_sdk_source_sha=source_sha,
+                    expected_platform=platform,
+                )
+            except HandoffError as exc:
+                raise ContentError(
+                    f"{path.name}: invalid agent capability handoff: {exc}"
+                ) from exc
         if not platform.startswith("windows-"):
             require_executable(archive, sdk_binary_members(platform))
 

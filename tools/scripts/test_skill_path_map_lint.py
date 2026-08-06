@@ -68,6 +68,13 @@ class JsonSchemaLiteTests(unittest.TestCase):
             ({"type": "string", "minLength": 2}, "ab", "a"),
             ({"type": "string", "maxLength": 2}, "ab", "abc"),
             ({"type": "string", "pattern": "^a+$"}, "aaa", "aab"),
+            ({"type": "integer", "minimum": 0}, 0, -1),
+            ({"type": "number", "maximum": 1.5}, 1.5, 2.0),
+            (
+                {"oneOf": [{"const": "a"}, {"const": "b"}]},
+                "a",
+                "c",
+            ),
             ({"type": "array", "minItems": 1}, [1], []),
             ({"type": "array", "maxItems": 1}, [1], [1, 2]),
             ({"type": "array", "uniqueItems": True}, [1, 2], [1, 1]),

@@ -539,6 +539,146 @@ The `pulp` CLI wraps common development workflows.
 
 ---
 
+## Agent capability manifest
+
+SDK installs include `share/pulp/agent-capabilities.json`, a versioned,
+multi-domain inventory of public APIs intended for generators and agents. Each
+curated row provides a stable key, per-capability contract version and digest,
+support status, evolution state, typed C++ bindings and exported targets, RT
+class, lifecycle, state and seed model, data domains, units, and
+latency/tail/scheduling categories. Signal rows may reference a semantic node
+key in `forge-catalog.json`; they never copy that catalog's numeric ranges,
+defaults, choices, or product policy.
+
+Official release SDKs additionally include
+`share/pulp/agent-capability-handoff.json`. This schema-validated marker binds
+the release's exact source commit and platform to the SHA-256 of the installed
+`bin/pulp-import-design` executable and to both the exact installed capability
+manifest content and its byte hash. Release packaging and archive inspection
+fail closed if the handoff, importer, the importer's required
+`bin/browser_capture-v1/` runtime, manifest, or either installed schema is
+missing, or if any bound payload disagrees. Consumers should verify this marker
+from their selected SDK rather than combining a manifest or importer from
+another checkout.
+
+Schema minor 1 adds the required feature `determinism-contract-v1`. Its
+per-row `determinism` object is deliberately separate from `seed_model` and
+answers four different questions:
+
+- `repeatability` is `bit_exact`, `tolerance_bounded`, `statistical`, or
+  `not_promised` for identical declared inputs and initial state;
+- `block_partition` says whether results are `invariant`, require the same
+  `fixed_partition_only`, or are `not_applicable` to the API;
+- `platform_scope` limits the promise to `cross_platform`, `same_backend`, or
+  `same_build`; and
+- `transport_history` says whether prior transport is an `input` or
+  `irrelevant`.
+
+`tolerance_bounded` is a determinism class, not a universal numeric tolerance;
+the algorithm's typed contract and tests remain authoritative for its actual
+error bounds. Minor-0 documents still parse against the installed schema and a
+missing `determinism` field means **unspecified**, not deterministic. A consumer
+that requires determinism must require `determinism-contract-v1`, reject a
+manifest that does not advertise it, and reject every unknown entry in
+`required_features`. When the feature is advertised, every live row must carry
+all four fields; the installed schema enforces that implication while retaining
+an explicit minor-0 branch for the pre-determinism document.
+
+The initial six promises are intentionally no broader than their implementation
+and tests support:
+
+| Key | Repeatability | Partition | Platform | Transport | Basis |
+|---|---|---|---|---|---|
+| `audio.instrument-voice-allocator` | `bit_exact` | `not_applicable` | `cross_platform` | `irrelevant` | Integer, fixed-slot event state machine; no floating-point or external history |
+| `midi.mpe-voice-tracker` | `not_promised` | `not_applicable` | `same_build` | `irrelevant` | Synchronous event state machine, but floating expression normalization has neither a published numerical bound nor a whole-sequence repeatability proof |
+| `sequence.host-transport-projector` | `not_promised` | `fixed_partition_only` | `same_build` | `input` | Floating beat/tick projection depends on callback partition and prior transport state, without a published repeatability bound or repeated-history proof |
+| `signal.saturator` | `bit_exact` | `not_applicable` | `same_build` | `irrelevant` | Per-sample API whose reset/re-render test is bit-identical across every shape and alias policy; same-build scope contains platform math-library variance |
+| `timebase.swing` | `bit_exact` | `not_applicable` | `cross_platform` | `irrelevant` | Pure rational/integer tick transform with tested bounded integer recovery |
+| `timebase.tick` | `bit_exact` | `not_applicable` | `cross_platform` | `irrelevant` | Fixed-width integer value type with saturating arithmetic |
+
+The first inventory covers representative public signal processing, instrument
+voice allocation, MPE note ownership, exact tick/swing timebase types, and host
+transport projection. Swing projection uses an exact rational ratio; inverse
+recovery is bounded by integer-tick rounding rather than exact. A checked C++
+fixture mechanically references every advertised type or function. A separate
+acceptance test installs the SDK, configures outside consumers, reads the
+installed manifest and schema, and independently compiles, links, and runs each
+capability and each binding against only its declared minimal exported target.
+The maintenance surface ledger and its schema are intentionally not installed.
+
+Coverage is explicitly `partial`. An absent key means **unknown**, not
+unsupported. A live row's `status` is the positive support claim; an
+`unsupported_capability` surface disposition is an explicit negative claim;
+`legacy_unreviewed` means only that the public header has not yet received a
+machine-readable capability review.
+
+`docs/status/agent-capability-surface.json` is the maintenance ledger for all
+public headers in the covered audio, MIDI, signal, timebase, and sequence roots.
+It records SHA-256 file fingerprints and reviewed dispositions. The original
+unreviewed surface is frozen in
+`tools/agent-capabilities/legacy-unreviewed-baseline.json`: that set may shrink
+as headers are reviewed but may never grow. Consequently, CI fails closed when
+a public header is added, removed, or changed—including a new symbol inside an
+existing header—until the owner explicitly registers a capability, classifies
+the header as support/infrastructure/unsupported, or records a removal
+tombstone.
+
+For a new generator-facing algorithm, add a curated row and typed binding; the
+tool deliberately does not guess from a header or class name. Start a new key at
+contract version `1.0`. Increase the minor version for compatible additions and
+the major version for removed/renamed bindings or incompatible semantic changes.
+Any installed-manifest change also increases `manifest_revision`; any ledger
+change increases its `inventory_version`. Removed keys and headers leave
+permanent tombstones, so consumers can distinguish removal from an incomplete
+inventory and stable keys cannot be silently reused.
+
+Determinism participates in each row's canonical `contract_digest`. An additive
+or stronger promise requires at least a capability minor increase. Weakening or
+removing an existing promise is a breaking same-key change and requires a major
+increase; alternatively, retain the original key and publish the weaker
+semantics under a new successor key. The evolution selftests exercise every
+determinism axis, missing-field downgrade, strengthening, and successor-key
+paths.
+
+Capability removal has a published-window rule: a live capability must first
+ship with both `status: deprecated` and `evolution.state: deprecated` in the
+protected base revision. Its introduction and deprecation versions must be
+ordered within its last contract version. Only a later manifest revision may
+replace it with a `status: removed` tombstone. Replacement keys must name live
+capabilities and may not form self-references or cycles.
+
+`tools/agent-capabilities/contract-history.json` is the append-only maintenance
+history. Normal `--check` validates every recorded transition and compares its
+prefix plus the current manifest and ledger directly with the protected Git tip
+(fetching the immutable GitHub base SHA in shallow CI checkouts).
+Editing generator source, current snapshots, and local history together cannot
+bypass a published tombstone, key-reuse prohibition, version increase, or
+deprecation-window rule.
+
+This is a design-time discovery contract. Runtime operations, grants, policy,
+risk decisions, instances, activation, sessions, revocation, and receipts remain
+owned by the unified control platform and are rejected if added here.
+
+Maintainers validate or regenerate the checked artifacts with:
+
+```bash
+python3 tools/scripts/agent_capability_manifest.py --check
+python3 tools/scripts/agent_capability_manifest.py --json
+python3 tools/scripts/agent_capability_manifest.py --write
+```
+
+Use the `agent-capabilities` skill for the add/change/remove workflow. The
+surface ledger currently uses a conservative full-header byte fingerprint. A
+future pinned-Clang AST inventory may reduce non-semantic churn, but it must
+retain the same fail-closed mutation coverage.
+
+`tools/dsp_vocabulary.py` remains available with its exact signal-only JSON and
+Markdown output while consumers migrate. That renderer reads the complete
+compatibility projection stored in the manifest; its private header scan is
+used only to regenerate and freshness-check that payload.
+
+---
+
 ## Shipping / Release
 
 | Capability | Status | Module | Docs |

@@ -12,7 +12,6 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-
 SCRIPT = Path(__file__).with_name("sdk_provenance.py")
 spec = importlib.util.spec_from_file_location("sdk_provenance", SCRIPT)
 assert spec and spec.loader
@@ -85,6 +84,64 @@ class SdkProvenanceTests(unittest.TestCase):
             stat.S_IMODE((self.prefix / "sdk-provenance.json").stat().st_mode),
             0o644,
         )
+
+    def test_stamp_command_emits_capability_handoff(self) -> None:
+        shared = self.prefix / "share/pulp"
+        binary = self.prefix / "bin"
+        shared.mkdir(parents=True)
+        binary.mkdir()
+        (binary / "pulp-import-design").write_bytes(b"importer fixture")
+        for value in provenance._importer_runtime_paths():
+            path = Path(value)
+            (self.prefix / path).parent.mkdir(parents=True, exist_ok=True)
+            (self.prefix / path).write_bytes(f"fixture {path.name}".encode())
+        capabilities = {"schema": "fixture.capabilities.v1"}
+        (shared / "agent-capabilities.json").write_text(
+            json.dumps(capabilities) + "\n", encoding="utf-8"
+        )
+        (shared / "agent-capabilities.schema.json").write_text(
+            json.dumps(
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["schema"],
+                    "properties": {
+                        "schema": {"const": "fixture.capabilities.v1"}
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        handoff_schema = (
+            SCRIPT.parents[2]
+            / "docs/status/agent-capability-handoff.schema.json"
+        )
+        (shared / handoff_schema.name).write_bytes(handoff_schema.read_bytes())
+        self.assertEqual(
+            provenance.main(
+                [
+                    "stamp",
+                    "--prefix",
+                    str(self.prefix),
+                    "--build-dir",
+                    str(self.build),
+                    "--source-dir",
+                    str(self.source),
+                    "--release-tag",
+                    f"v{VERSION}",
+                    "--source-sha",
+                    self.sha,
+                    "--platform",
+                    "linux-x64",
+                ]
+            ),
+            0,
+        )
+        emitted = json.loads(
+            (shared / "agent-capability-handoff.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(emitted["sdk_source_sha"], self.sha)
+        self.assertEqual(emitted["agent_capabilities"]["content"], capabilities)
 
     def test_stamp_succeeds_without_posix_fchmod(self) -> None:
         marker = self.marker()
