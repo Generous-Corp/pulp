@@ -4,6 +4,11 @@
 pulp_add_test_suite(pulp-test-transport-quantizer LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-timebase LIBRARIES pulp::timebase TIMEOUT 60)
 pulp_add_test_suite(pulp-test-timebase-continuous LIBRARIES pulp::timebase TIMEOUT 60)
+pulp_add_test_suite(pulp-test-timebase-groove-kernels
+    SOURCES test_timebase_groove_kernels.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::timebase pulp::playback pulp::timeline
+    TIMEOUT 60)
+pulp_add_test_suite(pulp-test-timebase-ratchet LIBRARIES pulp::timebase TIMEOUT 60)
 
 # Sample asset drop target adapter over cheap extension classification.
 pulp_add_test_suite(pulp-test-sample-asset-drop-target LIBRARIES pulp::view)
@@ -18,6 +23,9 @@ pulp_add_test_suite(pulp-test-dsp-runtime-no-alloc
 
 # Deterministic multi-block offline rendering over HeadlessHost.
 pulp_add_test_suite(pulp-test-offline-render-host LIBRARIES pulp::format)
+
+# Fixed-capacity authored rhythm projection over the shared tick domain.
+pulp_add_test_suite(pulp-test-timebase-trigger-grid LIBRARIES pulp::timebase TIMEOUT 60)
 
 # Portable host/runtime matrix for automation, buses, events, state, latency, and offline bounce.
 pulp_add_test_suite(pulp-test-host-runtime-matrix LIBRARIES pulp::format)

@@ -757,7 +757,7 @@ worked patches: the [modulation toolkit](modulation-toolkit.md).
 | VCA | `vca.hpp` | Control-driven gain with linear or ~40 dB exponential response and a built-in de-clicking control lag; exactly unity at full |
 | Low-pass gate | `lpg.hpp` | Vactrol-modelled Buchla gate — loudness and brightness move together, and a re-strike mid-decay accumulates the way a real roll does |
 | Mod matrix | `mod_matrix.hpp` | Fixed-capacity source-to-destination routing with depth and a `via` slot; trivially copyable, so it hot-swaps through a `TripleBuffer` |
-| Unit conversions | `units.hpp` | dB, MIDI pitch, cents, one-pole and T60 coefficients, tapers, and the one shared musical-division table (straight, dotted, triplet) |
+| Unit conversions | `units.hpp` | dB, MIDI pitch, cents, one-pole and T60 coefficients, tapers, and compatibility spellings for the canonical timebase musical divisions (straight, dotted, triplet) |
 | Chaos | `chaos.hpp` | `LogisticMapT` — one control-rate source that runs from periodic to chaotic on a single knob |
 
 `ModalBank::prepare()` allocates its fixed-capacity storage and therefore runs
@@ -950,6 +950,14 @@ sample domain. When a requested sample lies outside the image of the tick
 domain, `resolve_sample()` reports `exact == false`, a nearest canonical edge
 representation, and the actual sample error.
 
+`project_ratchet_interval()` subdivides two adjacent clock boundaries into a
+bounded number of exact integer-tick hits. Its hit count includes the onset and
+the later boundary is excluded, so adjacent intervals neither duplicate nor
+orphan a clock-edge event. A count that would collapse multiple hits onto one
+integer tick is rejected. Projection into half-open windows is allocation-free
+and callback-partition invariant, including across non-divisible spans and the
+full signed tick domain.
+
 **Link:** `pulp::timebase` · **Include prefix:** `<pulp/timebase/...>`
 
 ```cpp
@@ -971,6 +979,59 @@ const auto sample = tempo.ticks_to_samples({4 * kTicksPerQuarter});
 clock; the transport owns advancement while timeline positions may seek or
 wrap. `CompiledMeterMap` provides the corresponding validated meter lookup.
 
+`BeatDivision` is an append-only persisted vocabulary for straight, dotted, and
+triplet values from whole notes through sixty-fourth notes. `beat_fraction()`
+returns the reduced rational quarter-note value and `division_ticks()` converts
+it to the exact document lattice, failing explicitly if a future division is
+invalid, out of range, or not exactly representable. The older
+`signal::units::Division` spellings retain their public names and persisted
+ordinals, but convert to `BeatDivision` and derive beat values from this table;
+new divisions must be appended to both vocabularies with exhaustive parity
+coverage.
+
+`project_grid()` projects those divisions through explicit
+`GridProjectionRange` values. Each range carries its document sample/tick
+anchors and its independent monotonic anchors, matching the clock domains a
+transport publishes without introducing a dependency on playback. A pre-loop
+range uses its ordinary document interval; every loop pass reuses the loop's
+document sample interval and advances only the monotonic anchor; a seek may
+replace the document anchor without resetting the monotonic clock.
+Timeline-anchored grids retain global phase and bar-anchored grids restart at
+exact bar boundaries. A stopped request emits no points. Callers provide output
+storage; insufficient capacity reports the required count without modifying it,
+and malformed ranges or sample/tick overflow fail explicitly. A block is bounded
+to 65,536 candidate and projected points, with an overflow-safe preflight before
+enumeration. Host-beat-mapped ranges retain their precise fractional tick
+endpoints and project ticks proportionally into output frames, so session tempo
+may differ from the document tempo without silently falling back to the document
+sample map. Their `HostGridAnchor` names one normalized source tick at one
+absolute output frame plus the source-ticks-per-frame slope; loop ranges add
+their document-to-source pass offset. Callers initialize that coordinate from
+the first resolved range in a normalization epoch, not from an absolute host
+beat that the transport has already wrapped, and reset it when the epoch or
+slope changes. Reusing that anchor across callbacks keeps a rounded loop split
+from moving a grid tick by one frame when callback partitioning changes. For
+document-clock ranges the rounded tick end is
+inclusive only as a candidate search bound; the half-open document sample
+interval is authoritative. This preserves a grid point in a one-frame range
+even when a sparse tick map rounds both range endpoints to the same tick,
+without duplicating it in the next range.
+
+`OrderPreservingGrooveKernel` is not the canonical, named, sequence-owned
+`timeline::GrooveTemplate`. It is a fixed-capacity realtime projection kernel
+for the stricter non-reordering subset of that model. Its independent swing and
+table grids, 0..1000 strengths, 0..4000 velocity accents, and 1024-step ceiling
+match the timeline value domains so callers can adapt existing authored values
+without inventing another format. Timing strength scales both swing and table,
+making zero a complete identity. Construction checks the combined
+configured transform over a bounded joint period and rejects reorder or a
+period too large to validate. Application reports range failure rather than
+saturating a document-visible tick.
+
+`coordinate_random()` and `coordinate_chance()` derive deterministic values
+from seed, tick, lane, loop cycle, and stream, rather than callback-local mutable
+RNG state.
+
 `LoopRegion` is the loop bounds a transport honours, in document ticks. It lives
 here rather than beside either consumer because that is all it is — two document
 positions and whether they are in force — so the rung that runs the transport
@@ -979,6 +1040,31 @@ positions and whether they are in force — so the rung that runs the transport
 identical ones. A disabled loop keeps its bounds, so turning looping off and back
 on returns the user to the region they set up and a view keeps drawing it
 meanwhile.
+
+`TriggerGrid` is the allocation-free authored rhythm counterpart: fixed-capacity
+track×step cells carry velocity, exact rational probability, and bounded
+microtiming. Projection is a pure mapping of one caller-supplied cycle into a
+half-open tick window. The caller also supplies one stable random word per grid
+coordinate, so probability decisions do not depend on audio callback partition.
+The grid deliberately does not own transport advancement, groove or swing,
+mutable RNG state, generative pattern algorithms, or note lifetime.
+
+```cpp
+#include <pulp/timebase/trigger_grid.hpp>
+
+#include <array>
+#include <cstdint>
+
+pulp::timebase::TriggerGrid<8, 16> grid;
+grid.configure(2, 16, {pulp::timebase::kTicksPerQuarter / 4});
+grid.set_cell(0, 0, {.enabled = true, .velocity = 112});
+
+std::array<std::uint64_t, 32> coordinate_draws{};
+std::array<pulp::timebase::TriggerEvent, 32> events{};
+const auto projected = grid.project_window({0}, {0},
+                                            {pulp::timebase::kTicksPerQuarter},
+                                            coordinate_draws, events);
+```
 
 ## timeline
 

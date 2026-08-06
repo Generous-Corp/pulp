@@ -9,7 +9,7 @@ modules:
     docs: reference/modules.md#playback
 
   - name: timebase
-    summary: Strong musical tick sample and bar positions editable tempo and meter maps compiled exact lookup and streaming transport cursors
+    summary: Strong musical tick sample and bar positions editable tempo and meter maps compiled exact lookup streaming transport cursors exact rational beat divisions transport-range grid projection order-preserving groove kernels coordinate-seeded randomness fixed-capacity authored trigger-grid projection and bounded clock-locked ratchet subdivision
     status: experimental
     dependencies: [runtime]
     docs: reference/modules.md#timebase
@@ -139,7 +139,7 @@ modules:
   - name: signal
     summary: 30+ DSP processors — filters (biquad, fixed-capacity transactional SOS cascade, IIR design, FIR, SVF, ladder, measured analog VCF voicings, Linkwitz-Riley), oscillators (legacy signal::Oscillator plus the pulp::signal::osc VA/VCO/DCO/WT suite and fixed-capacity minBLEP primitive), convolution, compressor, limiter, reverb (including the multirate FDN reverb), chorus, delay, oversampling, FFT (vDSP), extended analysis windows, contiguous fixed-capacity DSP history, SIMD ops, dry/wet mixer, standard-semantics exp2 and explicitly labeled fast approximations, plus the modulation and utility toolkit (deterministic RNG, LFO, slew/sample-hold/quantizer control tools, trigger and gate kit, envelope family, VCA, low-pass gate, mod matrix, unit conversions)
     status: usable
-    dependencies: [music, runtime]
+    dependencies: [music, runtime, timebase]
     docs: reference/modules.md#signal
 
   - name: state

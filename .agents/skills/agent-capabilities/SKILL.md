@@ -106,6 +106,14 @@ For removal:
 - Coverage is currently `partial`, so an absent key means unknown, not
   unsupported.
 
+For timebase work, do not fold every tick-consuming primitive into
+`timebase.tick` or every groove operation into `timebase.swing`. Those keys
+protect the value/arithmetic and rational forward/inverse contracts
+respectively. Stateful, seeded, transport-mapped, fixed-capacity, or authored
+projection APIs need their own capability keys so their RT, lifecycle,
+determinism, scheduling, latency, and tail promises remain independently
+versioned.
+
 ## Regenerate and validate
 
 Do not use the bootstrap or unpublished-migration switches during normal work.
