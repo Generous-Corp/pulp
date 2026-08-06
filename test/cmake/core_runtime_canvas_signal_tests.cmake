@@ -189,6 +189,14 @@ pulp_add_test_suite(pulp-test-frequency-response LIBRARIES pulp::signal)
 # Signal spectral tests extracted from test_signal.cpp.
 # WindowFunction / FFT / Convolver TEST_CASE clusters moved verbatim.
 pulp_add_test_suite(pulp-test-signal-spectral LIBRARIES pulp::signal)
+# Window coefficient, spectral-shape, STFT-consumer, and RT apply contracts.
+pulp_add_test_suite(pulp-test-windowing
+    SOURCES test_windowing.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
+# Fixed-capacity single-thread history and its STFT consumer contract.
+pulp_add_test_suite(pulp-test-mirrored-history-buffer
+    SOURCES test_mirrored_history_buffer.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
 # Spectral primitives: STFT/WOLA engine, pitch/time, formant, smoothing.
 pulp_add_test_suite(pulp-test-spectral-primitives
     SOURCES test_spectral_frame_engine.cpp test_realtime_pitch_time.cpp

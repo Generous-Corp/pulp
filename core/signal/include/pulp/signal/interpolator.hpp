@@ -3,6 +3,8 @@
 /// @file interpolator.hpp
 /// High-quality sample interpolation for delay lines and resampling.
 
+#include <pulp/signal/windowing.hpp>
+
 #include <cmath>
 #include <algorithm>
 #include <cstddef>
@@ -116,13 +118,8 @@ private:
         if (std::abs(x) >= half_width) return SampleType{0.0f};
         SampleType n = (x / half_width + SampleType{1.0f}) *
                        SampleType{0.5f}; // normalize to [0, 1]
-        constexpr SampleType a0 = SampleType{0.35875f};
-        constexpr SampleType a1 = SampleType{0.48829f};
-        constexpr SampleType a2 = SampleType{0.14128f};
-        constexpr SampleType a3 = SampleType{0.01168f};
         SampleType t = SampleType{2.0f} * pi<SampleType> * n;
-        return a0 - a1 * std::cos(t) + a2 * std::cos(SampleType{2.0f} * t) -
-               a3 * std::cos(SampleType{3.0f} * t);
+        return detail::blackman_harris_window(t);
     }
 
     template <typename SampleType>

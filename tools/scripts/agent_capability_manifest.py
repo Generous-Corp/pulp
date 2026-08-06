@@ -195,6 +195,111 @@ EXPORTS = [
         ],
     ),
     capability(
+        key="signal.bounded-sample-history",
+        domain="signal",
+        summary=(
+            "Prepared fixed-capacity sample history with a contiguous "
+            "oldest-to-newest view."
+        ),
+        rt_class="mixed",
+        lifecycle={
+            "construction": "control",
+            "prepare": "control",
+            "process": "audio",
+            "reset": "audio",
+            "release": "destruction-off-audio",
+        },
+        state_model=(
+            "prepare allocates two mirrored copies of a fixed capacity; push, "
+            "window, reset, and accessors allocate no memory afterward. The "
+            "state is single-thread DSP history, not a synchronization primitive."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "same_build",
+            "transport_history": "irrelevant",
+        },
+        input_domain="sample values and prepared sample capacity",
+        output_domain="contiguous oldest-to-newest sample history",
+        units=["samples", "sample count"],
+        latency="zero",
+        tail="capacity-sample-history-until-overwritten-or-reset",
+        scheduling="sample-synchronous single-thread use",
+        bindings=[
+            binding(
+                role="entrypoint",
+                kind="cpp_type",
+                include="pulp/signal/mirrored_history_buffer.hpp",
+                qualified_name="pulp::signal::MirroredHistoryBuffer<float>",
+                target="Pulp::signal",
+                header_fingerprint=(
+                    "sha256:a008193b186b53f91576d23e8bd82209599f39c159587e8bae28f106e5374802"
+                ),
+            )
+        ],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::signal::MirroredHistoryBuffer<float>",
+            "operation": "member_call",
+            "member": "prepare",
+            "arguments": "8",
+        }],
+    ),
+    capability(
+        key="signal.window-functions",
+        domain="signal",
+        summary=(
+            "Reusable analysis-window generation and allocation-free in-place "
+            "application."
+        ),
+        rt_class="mixed",
+        lifecycle={
+            "construction": "none",
+            "prepare": "control",
+            "process": "audio-with-precomputed-window",
+            "reset": "none",
+            "release": "generated-vector-destruction-off-audio",
+        },
+        state_model=(
+            "Stateless static utility; generate returns caller-owned allocated "
+            "coefficients and apply mutates caller-owned samples without allocation."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "not_applicable",
+            "platform_scope": "same_build",
+            "transport_history": "irrelevant",
+        },
+        input_domain="window size, window family, optional Kaiser parameter, and samples",
+        output_domain="window coefficients or in-place windowed samples",
+        units=["samples", "sample count", "normalized ratio"],
+        latency="zero",
+        tail="none",
+        scheduling="control-generated and sample-array-applied",
+        bindings=[
+            binding(
+                role="entrypoint",
+                kind="cpp_type",
+                include="pulp/signal/windowing.hpp",
+                qualified_name="pulp::signal::WindowFunction",
+                target="Pulp::signal",
+                header_fingerprint=(
+                    "sha256:672043aa1a9a0d0a0cd28a82cd7b7d81e57de035b963e0226c23b85b42ce1f7f"
+                ),
+            )
+        ],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::signal::WindowFunction",
+            "operation": "member_call",
+            "member": "generate",
+            "arguments": "8, pulp::signal::WindowFunction::Type::hann",
+        }],
+    ),
++    capability(
         key="signal.saturator",
         contract_version={"major": 1, "minor": 1},
         domain="signal",
@@ -603,6 +708,40 @@ EXPORTS = [
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {
+        "include": "pulp/signal/interpolator.hpp",
+        "fingerprint": "sha256:87600671e64ed34870e2302ca2765b3539d3ec23116db02b85ef813a43916952",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.window-functions"],
+        "rationale": (
+            "The interpolator reuses the window implementation internally but "
+            "does not add a distinct generator-facing window contract."
+        ),
+    },
+    {
+        "include": "pulp/signal/resampler.hpp",
+        "fingerprint": "sha256:1bd78bf7111b9bfe5b1fd923ba0304390956ddf92337ed788b06a0b865a196e8",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.bounded-sample-history"],
+        "rationale": (
+            "The resampler adopts the bounded history primitive for its delay "
+            "storage; this slice does not introduce a new resampler contract."
+        ),
+    },
++    {
+        "include": "pulp/signal/stft.hpp",
+        "fingerprint": "sha256:a326b986439d9382932a05682db29f862c0fb371a27acf701eea41d3ec873a32",
+        "disposition": "capability_support",
+        "capability_keys": [
+            "signal.bounded-sample-history",
+            "signal.window-functions",
+        ],
+        "rationale": (
+            "STFT consumes both reusable primitives while retaining its existing "
+            "analysis API; it is not a newly claimed capability in this slice."
+        ),
+    },
+     {
     {
         "include": "pulp/signal/fast_math.hpp",
         "fingerprint": "sha256:040569eb66723784d089120ecb679b78df4f206678a77a2f2881e0a874456de4",

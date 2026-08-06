@@ -944,12 +944,49 @@ fft.forward_real(audio_buffer, freq.data());
 | `hann` | General-purpose spectral analysis |
 | `hamming` | FIR filter design |
 | `blackman` | High dynamic range spectral analysis |
+| `blackman_harris` | Minimum four-term Blackman-Harris window for approximately −92 dB peak sidelobes |
+| `blackman_nuttall` | Four-term Blackman-Nuttall window for approximately −98 dB peak sidelobes |
 | `flat_top` | Amplitude-accurate measurements |
 | `kaiser` | Adjustable main-lobe/side-lobe tradeoff (set `param` = beta, default 3.0) |
+
+The four-term coefficients follow the published cosine-sum families described
+by [Harris](https://doi.org/10.1109/PROC.1978.10837) and
+[Nuttall](https://doi.org/10.1109/TASSP.1981.1163506). Both trade a wider main
+lobe for a substantially lower leakage floor than Hann or ordinary Blackman.
 
 **Sample rate dependency:** None.
 
 **Caveat:** `generate()` allocates a vector. Call during `prepare()`, not on the audio thread. `apply()` is real-time safe when passed a precomputed window.
+
+---
+
+### MirroredHistoryBuffer
+
+`MirroredHistoryBuffer<T>` keeps a fixed number of recent samples physically
+contiguous even when its write cursor wraps. The returned window is always
+ordered oldest to newest, which lets FIR, resampling, and spectral processors
+walk history without a per-element modulo operation or a wrap-time move.
+
+```cpp
+signal::MirroredHistoryBuffer<float> history;
+history.prepare(1024); // allocates two mirrored copies
+
+// In process(): fixed two-write cost, no allocation.
+history.push(input_sample);
+std::span<const float> oldest_to_newest = history.window();
+```
+
+| Method | Description |
+|---|---|
+| `prepare(size_t capacity)` | Allocate and zero fixed mirrored storage. Not real-time safe. Zero capacity is valid. |
+| `push(T sample)` | Append one sample with deterministic work independent of wrap position. |
+| `window()` | Return a zero-copy contiguous view of the complete oldest-to-newest history. |
+| `reset()` | Restore zero-filled history without changing capacity. |
+
+This is single-thread DSP history, not a producer/consumer queue. Do not use it
+for communication between the audio, UI, or worker threads; use the runtime
+SPSC publication primitives for those ownership boundaries. After `prepare()`,
+`push()`, `window()`, and `reset()` are allocation-free.
 
 ---
 
