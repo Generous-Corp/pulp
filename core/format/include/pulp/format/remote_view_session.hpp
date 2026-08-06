@@ -35,8 +35,10 @@ public:
     /// URL (or descriptive label) this session was opened against.
     const std::string& url() const { return url_; }
 
-    /// Sends a `view.param_set` notification to the remote and updates
-    /// the shared StateStore. Returns false if the channel is closed.
+    /// Trusted host-side update: changes the shared StateStore and publishes
+    /// `view.param_changed` to the remote renderer. This is not remote write
+    /// authority; the protocol deliberately has no inbound `view.param_set`.
+    /// Returns false if the channel is closed.
     bool set_parameter(uint32_t id, float normalized);
 
     /// Sends a `view.param_get` request, returning the remote's most

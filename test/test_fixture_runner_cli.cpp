@@ -51,6 +51,25 @@ constexpr const char* kMinimalProject =
     R"("type_name":"pulp.timeline.sequence","version":1}]},)"
     R"("type_name":"pulp.timeline.project","version":1})";
 
+/// A project whose authored track order is deliberately NOT the order its
+/// tracks are stored in: `track_order` names 12, 9, 3 while `tracks` holds
+/// 9, 3, 12. Written literally for the same reason as kMinimalProject, and
+/// because the difference between those two orders is the entire property the
+/// order cases below assert.
+constexpr const char* kTrackOrderProject =
+    R"JSON({"data":{"assets":[],"id":"1","identities":[{"active":true,"clip_id":"0","id":"1","kind":"project","parent_id":"0","sequence_id":"0","track_id":"0"},{"active":true,"clip_id":"0","id":"2","kind":"sequence","parent_id":"1","sequence_id":"2","track_id":"0"},{"active":true,"clip_id":"0","id":"3","kind":"track","parent_id":"2","sequence_id":"2","track_id":"3"},{"active":true,"clip_id":"0","id":"9","kind":"track","parent_id":"2","sequence_id":"2","track_id":"9"},{"active":true,"clip_id":"0","id":"12","kind":"track","parent_id":"2","sequence_id":"2","track_id":"12"}],"meter_map":[{"denominator":4,"numerator":4,"tick":"0"}],"name":"track order","next_item_id":"13","root_sequence_id":"2","sequences":[{"data":{"absolute_duration":null,"chord_scale_lane":[],"groove":{"name":"","step":"0","steps":[],"swing_denominator":"2","swing_grid":"0","swing_numerator":"1","timing_strength":1000,"velocity_strength":1000},"id":"2","markers":[],"musical_duration":"7680","name":"root","regions":[],"scenes":[],"track_order":["12","9","3"],"tracks":[{"data":{"active_take_lane_id":"0","automation_lanes":[],"clips":[],"device_chain":[],"id":"9","name":"bass","record_armed":false,"take_lanes":[]},"type_name":"pulp.timeline.track","version":7},{"data":{"active_take_lane_id":"0","automation_lanes":[],"clips":[],"device_chain":[],"id":"3","name":"drums","record_armed":false,"take_lanes":[]},"type_name":"pulp.timeline.track","version":7},{"data":{"active_take_lane_id":"0","automation_lanes":[],"clips":[],"device_chain":[],"id":"12","name":"keys","record_armed":false,"take_lanes":[]},"type_name":"pulp.timeline.track","version":7}]},"type_name":"pulp.timeline.sequence","version":6}],"tempo_map":[{"bpm_bits":"4638144666238189568","curve":"constant","tick":"0"}]},"type_name":"pulp.timeline.project","version":2})JSON";
+
+/// Returns the value of `key` in a manifest, or empty when absent.
+std::string manifest_value(const std::string& manifest, const std::string& key) {
+    const auto line_start = manifest.find("\n" + key + " ");
+    if (line_start == std::string::npos)
+        return {};
+    const auto value_start = line_start + key.size() + 2;
+    const auto line_end = manifest.find('\n', value_start);
+    return manifest.substr(value_start, line_end == std::string::npos ? line_end
+                                                                     : line_end - value_start);
+}
+
 struct TempCorpus {
     fs::path root;
 
@@ -234,6 +253,55 @@ TEST_CASE("fixture runner rejects a structural count that drifted", "[cli][fixtu
     REQUIRE(result.exit_code == 1);
     REQUIRE(result.stderr_output.find("counts.sequences: expected 7, got 1") !=
             std::string::npos);
+}
+
+TEST_CASE("fixture runner rejects an authored order that collapsed to identity order",
+          "[cli][fixture-runner]") {
+    // The regression this guards is not a lost entity but a lost *ordering*. A
+    // decoder that drops an authored track order keeps every count intact and
+    // re-serializes consistently, so counts, census, and idempotence all still
+    // agree — the sequence just silently adopts the identity order of its
+    // tracks. Only comparing the recorded order can see it.
+    TempCorpus corpus;
+    REQUIRE(fs::create_directories(corpus.root / "v6"));
+    corpus.write("v6/track-order.json", kTrackOrderProject);
+    corpus.write("corpus.index", "document v6/track-order.json\n");
+    REQUIRE(update(corpus).exit_code == 0);
+
+    auto manifest = corpus.read("v6/track-order.json.expect");
+    const auto authored = std::string("order.sequence.2.track_order 12,9,3");
+    const auto position = manifest.find(authored);
+    REQUIRE(position != std::string::npos);
+    manifest.replace(position, authored.size(), "order.sequence.2.track_order 9,3,12");
+    corpus.write("v6/track-order.json.expect", manifest);
+
+    const auto result = check(corpus);
+    REQUIRE(result.exit_code == 1);
+    INFO("stderr=" << result.stderr_output);
+    REQUIRE(result.stderr_output.find(
+                "order.sequence.2.track_order: expected 9,3,12, got 12,9,3") != std::string::npos);
+}
+
+TEST_CASE("shipped corpus records an authored order that differs from identity order",
+          "[cli][fixture-runner]") {
+    // An order assertion only detects a collapse while the two orders actually
+    // differ. `--update` regenerates manifests from observed output without
+    // comparing, so regenerating against a regressed decoder would bake the
+    // identity order into both keys and leave a gate that still runs and can no
+    // longer fail. Assert the difference in the shipped manifest directly, so
+    // that collapse is a red test rather than a quiet one.
+    const fs::path manifest_path =
+        fs::path(PULP_TIMELINE_CORPUS_DIR) / "v6" / "sequence-track-order.json.expect";
+    std::ifstream stream(manifest_path, std::ios::binary);
+    REQUIRE(stream.good());
+    const std::string manifest((std::istreambuf_iterator<char>(stream)),
+                               std::istreambuf_iterator<char>());
+
+    const auto identity = manifest_value(manifest, "order.sequence.2.tracks");
+    const auto authored = manifest_value(manifest, "order.sequence.2.track_order");
+    REQUIRE_FALSE(identity.empty());
+    REQUIRE_FALSE(authored.empty());
+    REQUIRE(identity != authored);
 }
 
 TEST_CASE("fixture runner rejects a manifest entry with no observed value",

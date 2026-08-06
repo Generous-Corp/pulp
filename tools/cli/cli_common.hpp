@@ -158,6 +158,9 @@ std::string input(const std::string& prompt, const std::string& default_value = 
 
 int fuzzy_score(const std::string& text, const std::string& query);
 
+bool source_checkout_dependencies_enabled(const fs::path& project_root,
+                                          const fs::path& cache_path);
+
 // ── Command Forward Declarations (for cross-command calls) ──────────────────
 
 int cmd_build(const std::vector<std::string>& args);

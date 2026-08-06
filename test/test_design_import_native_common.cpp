@@ -14,10 +14,13 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <utility>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -332,6 +335,63 @@ TEST_CASE("native resolver keeps asset diagnostics deterministic across JSON ord
     REQUIRE(background_pos != std::string::npos);
     REQUIRE(src_pos != std::string::npos);
     REQUIRE(background_pos < src_pos);
+}
+
+TEST_CASE("CSS clip-path polygon becomes SVG path data",
+          "[view][import][native-resolver][clip-path]") {
+    // View::set_clip_path takes SVG path data; CSS gives a shape function.
+    // Nobody had written the translation, so the raw "polygon(...)" text
+    // reached the path parser, failed, and the clip silently did nothing: an
+    // element meant to be clipped to an ADSR curve painted as a full rectangle
+    // over its own labels. Silent because a clip that does not clip still
+    // renders something.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+
+    IRNode clipped;
+    clipped.type = "frame";
+    clipped.name = "Envelope";
+    clipped.style.width = 200.0f;
+    clipped.style.height = 100.0f;
+    clipped.style.clip_path = "polygon(0% 100%, 50% 0%, 100% 100%)";
+    ir.root.children.push_back(clipped);
+
+    auto root = build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 1);
+    const auto& d = root->child_at(0)->clip_path();
+
+    INFO("clip path emitted: " << d);
+    // Percentages resolve against the element's own box, so this is geometry
+    // rather than a string swap: 50% of 200 is 100, 100% of 100 is 100.
+    REQUIRE_FALSE(d.empty());
+    CHECK(d.find("polygon") == std::string::npos);
+    CHECK(d.rfind("M ", 0) == 0);
+    CHECK(d.find("100 0") != std::string::npos);   // apex: 50% x, 0% y
+    CHECK(d.find("200 100") != std::string::npos); // bottom-right corner
+    CHECK(d.back() == 'Z');
+}
+
+TEST_CASE("an unparseable clip-path shape is dropped rather than passed through",
+          "[view][import][native-resolver][clip-path]") {
+    // Handing a shape function the path parser cannot read is what produced
+    // the original bug. If a polygon cannot be converted, emitting nothing is
+    // honest; emitting the CSS text only looks like it did something.
+    DesignIR ir;
+    ir.root.type = "frame";
+
+    IRNode bad;
+    bad.type = "frame";
+    bad.style.width = 200.0f;
+    bad.style.height = 100.0f;
+    bad.style.clip_path = "polygon(nonsense)";
+    ir.root.children.push_back(bad);
+
+    auto root = build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 1);
+    CHECK(root->child_at(0)->clip_path().empty());
 }
 
 TEST_CASE("clear_baked_knob_antenna removes the antenna without notching the disc",
@@ -996,6 +1056,63 @@ TEST_CASE("build_native_view_tree opts the imported root into sub-pixel layout",
     auto root = build_native_view_tree(ir, {}, {});
     REQUIRE(root != nullptr);
     REQUIRE(root->subpixel_layout());
+}
+
+TEST_CASE("sub-pixel layout keeps concentric siblings on one centre",
+          "[view][import][native][subpixel]") {
+    // The property the flag exists to protect, asserted on solved geometry
+    // rather than on the flag: two siblings that share a centre at
+    // fractional coordinates must still share it after layout. Yoga's
+    // whole-pixel grid rounding moves each box independently, which
+    // de-centres a knob's value ring from its body.
+    auto make_pair = [](bool subpixel) {
+        auto root = std::make_unique<View>();
+        root->set_subpixel_layout(subpixel);
+        root->set_bounds({0, 0, 200, 200});
+
+        // Outer 81x81 at (10.25, 20.25); inner 40x40 sharing its centre. All
+        // four edge coordinates are off the pixel grid, and none of them is a
+        // rounding tie, so snapping moves the two boxes by different amounts.
+        struct Box { float x, y, size; };
+        const Box outer{10.25f, 20.25f, 81.0f};
+        const Box inner{outer.x + (outer.size - 40.0f) * 0.5f,
+                        outer.y + (outer.size - 40.0f) * 0.5f,
+                        40.0f};
+        for (const auto& box : {outer, inner}) {
+            auto child = std::make_unique<View>();
+            child->set_position(View::Position::absolute);
+            child->set_left(box.x);
+            child->set_top(box.y);
+            child->flex().preferred_width = box.size;
+            child->flex().preferred_height = box.size;
+            child->flex().dim_width = {box.size, DimensionUnit::px};
+            child->flex().dim_height = {box.size, DimensionUnit::px};
+            root->add_child(std::move(child));
+        }
+        root->layout_children();
+        return root;
+    };
+
+    auto centre = [](const View& v) {
+        const auto b = v.bounds();
+        return std::pair<float, float>{b.x + b.width * 0.5f, b.y + b.height * 0.5f};
+    };
+
+    auto subpixel = make_pair(true);
+    const auto outer_c = centre(*subpixel->child_at(0));
+    const auto inner_c = centre(*subpixel->child_at(1));
+    CHECK(std::abs(outer_c.first - inner_c.first) < 0.001f);
+    CHECK(std::abs(outer_c.second - inner_c.second) < 0.001f);
+    // The fractional geometry itself survived — nothing snapped it.
+    CHECK(std::abs(subpixel->child_at(0)->bounds().y - 20.25f) < 0.001f);
+
+    // Negative control: with the pixel grid on, the same tree drifts, so the
+    // check above is measuring the flag and not an invariant of the layout.
+    auto snapped = make_pair(false);
+    const auto snapped_outer = centre(*snapped->child_at(0));
+    const auto snapped_inner = centre(*snapped->child_at(1));
+    CHECK((std::abs(snapped_outer.first - snapped_inner.first) > 0.001f ||
+           std::abs(snapped_outer.second - snapped_inner.second) > 0.001f));
 }
 
 TEST_CASE("an imported design names the widget colours it did not state",

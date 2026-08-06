@@ -618,3 +618,31 @@ TEST_CASE("pulp run parses Development Inspector launcher profiles",
     REQUIRE_FALSE(parse_run_options({"--inspect=custom",
                                      "--inspect-capability=state.write,session.control"}).error.empty());
 }
+
+TEST_CASE("pulp run requires a separate runtime evaluation acknowledgement",
+          "[cli][run][inspect][runtime-eval]") {
+    auto develop = parse_run_options({"--inspect=develop", "--inspect-runtime-eval"});
+    REQUIRE(develop.error.empty());
+    REQUIRE(develop.inspector_runtime_eval);
+    REQUIRE(assemble_launch_args(develop) ==
+            std::vector<std::string>{"--inspect-runtime-eval"});
+
+    auto custom = parse_run_options({
+        "--inspect=custom",
+        "--inspect-capability=session.control",
+        "--inspect-capability=runtime.eval",
+        "--inspect-runtime-eval",
+    });
+    REQUIRE(custom.error.empty());
+    REQUIRE(custom.inspector_runtime_eval);
+
+    REQUIRE_FALSE(parse_run_options({"--inspect-runtime-eval"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--inspect=observe",
+                                     "--inspect-runtime-eval"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--inspect=custom",
+                                     "--inspect-capability=session.control",
+                                     "--inspect-capability=runtime.eval"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--inspect=custom",
+                                     "--inspect-capability=runtime.eval",
+                                     "--inspect-runtime-eval"}).error.empty());
+}

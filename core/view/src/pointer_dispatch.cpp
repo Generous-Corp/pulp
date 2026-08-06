@@ -51,7 +51,8 @@ Point point_to_local(Point root_pos, View* target, View* root) {
 bool dispatch_context_menu(View& root, Point root_pos) {
     View* target = root.hit_test(root_pos);
     if (!target || !target->on_context_menu) return false;
-    target->on_context_menu(point_to_local(root_pos, target, &root));
+    auto callback = target->on_context_menu;
+    callback(point_to_local(root_pos, target, &root));
     return true;
 }
 
@@ -77,16 +78,29 @@ bool still_in_tree(View* needle, View* root) {
     return false;
 }
 
+std::vector<ViewCapture> capture_path_to_root(View* view) {
+    std::vector<ViewCapture> path;
+    for (auto* current = view; current; current = current->parent()) {
+        ViewCapture capture;
+        capture.set(current);
+        path.push_back(capture);
+    }
+    return path;
+}
+
 // Blur every root-local focus holder except `keep`. Focus callbacks may
 // synchronously claim a replacement (IME commit is the common case), so a
 // single snapshot is insufficient. The bounded fallback guarantees hostile
 // callbacks cannot spin forever while still leaving a focus slot latched.
-bool drain_root_focus(View& root, View* keep, View* protected_target) {
+bool drain_root_focus(View& root, const ViewCapture& protected_target,
+                      bool keep_protected_target) {
     constexpr size_t kMaxReentrantFocusHops = 64;
     for (size_t hop = 0; hop < kMaxReentrantFocusHops; ++hop) {
-        if (protected_target &&
-            !still_in_tree(protected_target, &root))
-            return false;
+        View* live_target = protected_target.has_value()
+                                ? protected_target.live_in(root)
+                                : nullptr;
+        if (protected_target.has_value() && !live_target) return false;
+        View* keep = keep_protected_target ? live_target : nullptr;
 
         auto& focus = root.interaction().focused_input;
         View* current = focus;
@@ -98,26 +112,37 @@ bool drain_root_focus(View& root, View* keep, View* protected_target) {
             continue;
         }
 
+        ViewCapture current_capture;
+        current_capture.set(current);
         current->release_input_focus();
-        current->on_focus_changed(false);
+        if (View* live_current = current_capture.live_in(root))
+            live_current->on_focus_changed(false);
     }
 
     // Pathological focus callbacks can form a cycle. Do not call the virtual
     // callback again here; force-clear the final root slot and base visual
     // state without giving the cycle another chance to relatch.
     auto& focus = root.interaction().focused_input;
+    View* live_target = protected_target.has_value()
+                            ? protected_target.live_in(root)
+                            : nullptr;
+    if (protected_target.has_value() && !live_target) return false;
+    View* keep = keep_protected_target ? live_target : nullptr;
     View* current = focus;
     if (current && current != keep) {
         if (still_in_tree(current, &root)) {
+            ViewCapture current_capture;
+            current_capture.set(current);
             current->release_input_focus();
-            current->View::on_focus_changed(false);
+            if (View* live_current = current_capture.live_in(root))
+                live_current->View::on_focus_changed(false);
         } else {
             focus = nullptr;
             if (View::focused_input_ == current)
                 View::focused_input_ = nullptr;
         }
     }
-    return !protected_target || still_in_tree(protected_target, &root);
+    return !protected_target.has_value() || protected_target.live_in(root);
 }
 }  // namespace
 
@@ -138,20 +163,26 @@ bool yield_to_gesture_with_handoff(View& root, View*& drag_target,
 
 bool transfer_input_focus(View& root, View* target) {
     if (target && !still_in_tree(target, &root)) return false;
+    ViewCapture target_capture;
+    target_capture.set(target);
     const bool target_focusable = target && target->focusable();
-    View* keep = target_focusable ? target : nullptr;
-    if (!drain_root_focus(root, keep, target)) return false;
+    if (!drain_root_focus(root, target_capture, target_focusable)) return false;
     if (!target) return false;
-    if (!target_focusable) return still_in_tree(target, &root);
+    target = target_capture.live_in(root);
+    if (!target) return false;
+    if (!target_focusable) return true;
     if (root.interaction().focused_input == target) return true;
 
     target->on_focus_changed(true);
-    if (!still_in_tree(target, &root)) return false;
+    target = target_capture.live_in(root);
+    if (!target) return false;
     // A gain callback may also claim a replacement. The explicit clicked
     // target still wins; blur that replacement before publishing the target.
-    if (!drain_root_focus(root, target, target)) return false;
+    if (!drain_root_focus(root, target_capture, true)) return false;
+    target = target_capture.live_in(root);
+    if (!target) return false;
     target->claim_input_focus();
-    return true;
+    return target_capture.live_in(root) != nullptr;
 }
 
 View* focused_input_under_root(View& root) {
@@ -179,6 +210,9 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
                         MouseButton button, const PointerAttributes& pointer) {
     if (!still_in_tree(target, &root)) return;
 
+    ViewCapture target_capture;
+    target_capture.set(target);
+    const auto bubble_path = capture_path_to_root(target->parent());
     const Point local = point_to_local(root_pt, target, &root);
 
     // 1. Modern channel. This is the only place a drag carries its modifiers.
@@ -193,6 +227,8 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
     me.pointer_type = pointer.type;
     me.pressure = pointer.pressure;
     me.pointer_id = pointer.pointer_id;
+    me.altitude_angle = pointer.altitude_angle;
+    me.azimuth_angle = pointer.azimuth_angle;
     target->on_mouse_event(me);
 
     // The legacy callbacks carry no button identity and historically mean the
@@ -202,19 +238,25 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
 
     // A modern handler may unmount the tree it was dispatched into (a state
     // change that destroys the widget). Re-validate before the legacy hop.
-    if (!still_in_tree(target, &root)) return;
+    target = target_capture.live_in(root);
+    if (!target) return;
 
     // 2. Legacy channel (bare Point; no modifiers). Kept for compatibility.
     target->on_mouse_drag(local);
-    if (!still_in_tree(target, &root)) return;
-    if (target->on_drag) target->on_drag(local);
-    if (!still_in_tree(target, &root)) return;
+    target = target_capture.live_in(root);
+    if (!target) return;
+    auto target_drag = target->on_drag;
+    if (target_drag) target_drag(local);
+    if (!target_capture.live_in(root)) return;
 
     // 3. Ancestor bubbling: a presentational leaf is often the hit target while
     // the drag handler lives on an outer wrapper.
-    for (auto* b = target->parent(); b; b = b->parent()) {
-        if (!b->on_drag) continue;
-        b->on_drag(point_to_local(root_pt, b, &root));
+    for (const auto& capture : bubble_path) {
+        auto* b = capture.live_in(root);
+        if (!b) continue;
+        auto callback = b->on_drag;
+        if (!callback) continue;
+        callback(point_to_local(root_pt, b, &root));
     }
 }
 
@@ -247,6 +289,9 @@ bool deliver_mouse_down(View& root, View* target, Point root_pt,
         return !host.should_continue || host.should_continue();
     };
 
+    ViewCapture target_capture;
+    target_capture.set(target);
+    const auto bubble_path = capture_path_to_root(target->parent());
     const Point local = point_to_local(root_pt, target, &root);
 
     // 1. Modern channel (press): the only channel carrying modifiers/click_count.
@@ -261,29 +306,36 @@ bool deliver_mouse_down(View& root, View* target, Point root_pt,
     me.pointer_type = pointer.type;
     me.pressure = pointer.pressure;
     me.pointer_id = pointer.pointer_id;
+    me.altitude_angle = pointer.altitude_angle;
+    me.azimuth_angle = pointer.azimuth_angle;
     target->on_mouse_event(me);
 
     // A modern handler may unmount the tree it was dispatched into. Re-validate
     // before the legacy hop and the bubble so no channel derefs a freed view.
-    if (!should_continue() || !still_in_tree(target, &root)) return false;
+    target = target_capture.live_in(root);
+    if (!should_continue() || !target) return false;
 
     // 2. Legacy channel (bare Point). It has no button identity, so it remains
     // left-only; right/middle continue to the modern ancestor bubble below.
     if (button == MouseButton::left) {
         target->on_mouse_down(local);
-        if (!should_continue() || !still_in_tree(target, &root)) return false;
+        target = target_capture.live_in(root);
+        if (!should_continue() || !target) return false;
     }
 
     // 3. W3C pointerdown bubble: a wrap-div around a canvas child (which wins
     // hit_test) never sees the press otherwise. Each ancestor gets a copy of the
     // press re-localized to its own space.
     if (bubble) {
-        for (auto* b = target->parent(); b; b = b->parent()) {
-            if (!b->on_pointer_event) continue;
+        for (const auto& capture : bubble_path) {
+            auto* b = capture.live_in(root);
+            if (!b) continue;
+            auto callback = b->on_pointer_event;
+            if (!callback) continue;
             MouseEvent bme = me;
             bme.position = point_to_local(root_pt, b, &root);
-            b->on_pointer_event(bme);
-            if (!should_continue() || !still_in_tree(target, &root))
+            callback(bme);
+            if (!should_continue() || !target_capture.live_in(root))
                 return false;
         }
     }
@@ -304,32 +356,52 @@ void deliver_mouse_up(View& root, View* target, Point root_pt,
                      PointerAttributes{});
 }
 
-void deliver_mouse_up(View& root, View* target, Point root_pt,
-                      uint16_t modifiers, int click_count,
-                      const MouseUpHost& host, MouseButton button,
-                      const PointerAttributes& pointer) {
+namespace {
+enum class PointerTerminalKind { release, cancel };
+
+void deliver_pointer_terminal(View& root, View* target, Point root_pt,
+                              uint16_t modifiers, int click_count,
+                              const MouseUpHost& host, MouseButton button,
+                              const PointerAttributes& pointer,
+                              PointerTerminalKind kind) {
     if (!still_in_tree(target, &root)) return;
 
+    const bool cancelled = kind == PointerTerminalKind::cancel;
+
+    ViewCapture target_capture;
+    target_capture.set(target);
+    const auto bubble_path = capture_path_to_root(target->parent());
     const Point local = point_to_local(root_pt, target, &root);
 
     // Capture the click decision inputs BEFORE any delivery. `on_mouse_up` can
     // unmount `target`; the deferred/standalone click still needs the handler,
     // id, and the same-target verdict from before it ran.
-    View* released = root.hit_test(root_pt);
-    View* click_target = target;
-    while (click_target && !click_target->on_click) click_target = click_target->parent();
-    std::function<void()> click_handler =
-        click_target ? click_target->on_click : std::function<void()>{};
-    const std::string clicked_id = target->id();
+    const bool released_on_target = !cancelled && root.hit_test(root_pt) == target;
+    std::function<void()> click_handler;
+    std::string clicked_id;
+    if (!cancelled) {
+        View* click_target = target;
+        while (click_target && !click_target->on_click)
+            click_target = click_target->parent();
+        click_handler = click_target ? click_target->on_click
+                                     : std::function<void()>{};
+        clicked_id = target->id();
+    }
 
     // 1. Legacy channel (up is legacy-before-modern, unlike drag). The legacy
     // API has no button field and therefore remains primary/left-only.
-    if (button == MouseButton::left) target->on_mouse_up(local);
+    if (button == MouseButton::left) {
+        if (cancelled)
+            target->on_mouse_cancel(local);
+        else
+            target->on_mouse_up(local);
+    }
 
     // 2. Modern channel (release). Re-validate — on_mouse_up may have unmounted
     // the target (a React flush on release), which would leave the modern deref
     // and the bubble dangling.
-    if (still_in_tree(target, &root)) {
+    target = target_capture.live_in(root);
+    if (target) {
         MouseEvent me;
         me.position = local;
         me.window_position = root_pt;
@@ -338,18 +410,26 @@ void deliver_mouse_up(View& root, View* target, Point root_pt,
         me.click_count = click_count;
         me.is_down = false;
         me.phase = MousePhase::release;
+        me.is_cancelled = cancelled;
         me.pointer_type = pointer.type;
         me.pressure = pointer.pressure;
         me.pointer_id = pointer.pointer_id;
+        me.altitude_angle = pointer.altitude_angle;
+        me.azimuth_angle = pointer.azimuth_angle;
         target->on_mouse_event(me);
 
         // 3. W3C pointerup bubble (mirrors the pointerdown bubble).
-        if (still_in_tree(target, &root)) {
-            for (auto* b = target->parent(); b; b = b->parent()) {
-                if (!b->on_pointer_event) continue;
+        if (target_capture.live_in(root)) {
+            for (const auto& capture : bubble_path) {
+                auto* b = capture.live_in(root);
+                if (!b) continue;
+                auto callback = b->on_pointer_event;
+                if (!callback) continue;
                 MouseEvent bme = me;
                 bme.position = point_to_local(root_pt, b, &root);
-                b->on_pointer_event(bme);
+                callback(bme);
+                if (!target_capture.live_in(root))
+                    break;
             }
         }
     }
@@ -358,8 +438,27 @@ void deliver_mouse_up(View& root, View* target, Point root_pt,
     // press target. The decision uses the captured pointers (matches the host
     // behavior of comparing the captured drag-target), independent of any
     // unmount during delivery — the host's fire_click owns post-teardown safety.
-    if (released == target && host.fire_click)
+    if (released_on_target && host.fire_click)
         host.fire_click(click_handler, clicked_id, modifiers);
+}
+}  // namespace
+
+void deliver_mouse_up(View& root, View* target, Point root_pt,
+                      uint16_t modifiers, int click_count,
+                      const MouseUpHost& host, MouseButton button,
+                      const PointerAttributes& pointer) {
+    deliver_pointer_terminal(root, target, root_pt, modifiers, click_count,
+                             host, button, pointer,
+                             PointerTerminalKind::release);
+}
+
+void deliver_mouse_cancel(View& root, View* target, Point root_pt,
+                          uint16_t modifiers, int click_count,
+                          MouseButton button,
+                          const PointerAttributes& pointer) {
+    deliver_pointer_terminal(root, target, root_pt, modifiers, click_count,
+                             MouseUpHost{}, button, pointer,
+                             PointerTerminalKind::cancel);
 }
 
 void deliver_mouse_wheel(View& root, Point root_pt,
@@ -372,7 +471,10 @@ void deliver_mouse_wheel(View& root, Point root_pt,
     // dropdown paints as an overlay with no view backing, so a plain hit_test
     // lands on the sibling underneath — this mirrors the popup bypass so the
     // wheel scrolls the open menu, not the page behind it.
-    if (auto* combo = ComboBox::active_popup_) {
+    // THIS root's popup, never the process-wide mirror: a second editor in the
+    // same host process must not eat this one's wheel just because it opened a
+    // dropdown whose rect happens to overlap the pointer.
+    if (auto* combo = ComboBox::active_popup_in(root)) {
         float ddx = 0, ddy = 0, ddw = 0, ddh = 0;
         if (combo->dropdown_window_rect(ddx, ddy, ddw, ddh) &&
             root_pt.x >= ddx && root_pt.x <= ddx + ddw &&
@@ -396,6 +498,8 @@ void deliver_mouse_wheel(View& root, Point root_pt,
         // the scroll container the cursor is over so scrolling works anywhere in
         // the pane without a click first.
         if (auto* scroll = find_wheel_scroll_view_at(root, root_pt)) {
+            ViewCapture scroll_capture;
+            scroll_capture.set(scroll);
             MouseEvent me;
             me.position = root_pt;
             me.window_position = root_pt;
@@ -403,7 +507,8 @@ void deliver_mouse_wheel(View& root, Point root_pt,
             me.scroll_delta_x = scroll_delta_x;
             me.scroll_delta_y = scroll_delta_y;
             scroll->on_mouse_event(me);
-            scroll->layout_children();
+            if (auto* live_scroll = scroll_capture.live_in(root))
+                live_scroll->layout_children();
             repaint();
         }
         return;
@@ -439,10 +544,14 @@ void deliver_mouse_wheel(View& root, Point root_pt,
     // pointer events, so the wheel never reached the ancestor wrap-div that
     // registered the zoom handler. A wants_wheel_scroll ancestor still wins and
     // terminates the walk.
-    for (auto* v = target; v; v = v->parent()) {
+    const auto bubble_path = capture_path_to_root(target);
+    for (const auto& capture : bubble_path) {
+        auto* v = capture.live_in(root);
+        if (!v) continue;
         if (v->wants_wheel_scroll()) {
             v->on_mouse_event(me);
-            v->layout_children();
+            if (auto* live_scroll = capture.live_in(root))
+                live_scroll->layout_children();
             repaint();
             return;
         }
@@ -450,7 +559,8 @@ void deliver_mouse_wheel(View& root, Point root_pt,
     }
     // 5. No ancestor handled the wheel — deliver to the deepest hit so any
     // default behavior still runs.
-    target->on_mouse_event(me);
+    if (auto* live_target = bubble_path.front().live_in(root))
+        live_target->on_mouse_event(me);
     repaint();
 }
 

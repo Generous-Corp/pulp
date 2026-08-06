@@ -198,6 +198,18 @@ pub fn build_with<S: Spawner>(
     spawner: &S,
     out: &mut impl Write,
 ) -> Result<i32> {
+    let skip_dependency_bootstrap =
+        std::env::var_os("PULP_SKIP_DEPENDENCY_BOOTSTRAP").is_some_and(|value| value != "0");
+    build_with_dependency_policy(proj, args, spawner, out, skip_dependency_bootstrap)
+}
+
+fn build_with_dependency_policy<S: Spawner>(
+    proj: &ActiveProject,
+    args: &BuildArgs,
+    spawner: &S,
+    out: &mut impl Write,
+    skip_dependency_bootstrap: bool,
+) -> Result<i32> {
     if args.skip_validation && !args.install {
         return Err(CliError::BadUsage(
             "--skip-validation only applies with --install".to_owned(),
@@ -282,12 +294,35 @@ pub fn build_with<S: Spawner>(
         }
     }
 
-    if !proj.is_configured() {
+    let needs_configure =
+        !proj.is_configured() || (!proj.standalone && !proj.checkout_dependencies_enabled());
+    if needs_configure {
+        if !proj.standalone {
+            if skip_dependency_bootstrap {
+                writeln!(
+                    out,
+                    "Warning: skipping checkout dependency bootstrap because \
+                     PULP_SKIP_DEPENDENCY_BOOTSTRAP is set"
+                )
+                .map_err(io_err)?;
+            } else {
+                let setup = checkout_dependency_invocation(proj)?;
+                writeln!(out, "Preparing shared checkout dependencies").map_err(io_err)?;
+                let rc = spawner.run(&setup)?;
+                if rc != 0 {
+                    return Ok(rc);
+                }
+            }
+        }
+
         let mut cfg = Invocation::new("cmake")
             .arg("-B")
             .arg(proj.build_dir.to_string_lossy().into_owned())
             .arg("-S")
             .arg(proj.root.to_string_lossy().into_owned());
+        if !proj.standalone {
+            cfg = cfg.arg("-DPULP_REQUIRE_CHECKOUT_DEPENDENCIES=ON");
+        }
         if let Some(ref e) = args.js_engine {
             cfg = cfg.arg(format!("-DPULP_JS_ENGINE={e}"));
         }
@@ -317,6 +352,43 @@ pub fn build_with<S: Spawner>(
         return spawner.run(&test);
     }
     Ok(rc)
+}
+
+/// Build the platform bootstrap invocation used before the first configure of
+/// a Pulp source checkout. The bootstrap owns dependency pins and links their
+/// shared source cache into this worktree.
+fn checkout_dependency_invocation(proj: &ActiveProject) -> Result<Invocation> {
+    #[cfg(windows)]
+    {
+        let script = proj.root.join("setup.ps1");
+        if !script.is_file() {
+            return Err(CliError::Other(format!(
+                "checkout dependency bootstrap not found at {}",
+                script.display()
+            )));
+        }
+        Ok(Invocation::new("powershell")
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(script.to_string_lossy().into_owned())
+            .arg("--deps-only")
+            .arg("--non-interactive")
+            .cwd(&proj.root))
+    }
+    #[cfg(not(windows))]
+    {
+        let script = proj.root.join("setup.sh");
+        if !script.is_file() {
+            return Err(CliError::Other(format!(
+                "checkout dependency bootstrap not found at {}",
+                script.display()
+            )));
+        }
+        Ok(Invocation::new("bash")
+            .arg(script.to_string_lossy().into_owned())
+            .arg("--deps-only")
+            .arg("--non-interactive")
+            .cwd(&proj.root))
+    }
 }
 
 /// Build a web plugin format (`wam` or `wclap`) for the project.
@@ -420,9 +492,9 @@ pub fn test<S: Spawner>(
 
 /// Run `pulp-rs test` against a resolved project.
 ///
-/// If `build/CMakeCache.txt` is missing, a build is kicked off first
-/// (matching `cmd_test.cpp`). Any extra args on the command line pass
-/// through to `ctest` verbatim.
+/// If `build/CMakeCache.txt` is missing or a source checkout's dependency
+/// contract is stale, a build is kicked off first (matching `cmd_test.cpp`).
+/// Any extra args on the command line pass through to `ctest` verbatim.
 ///
 /// # Errors
 ///
@@ -433,8 +505,12 @@ pub fn test_with<S: Spawner>(
     spawner: &S,
     out: &mut impl Write,
 ) -> Result<i32> {
-    if !proj.is_configured() {
-        writeln!(out, "Build directory not found, building first...").map_err(io_err)?;
+    if !proj.is_configured() || (!proj.standalone && !proj.checkout_dependencies_enabled()) {
+        writeln!(
+            out,
+            "Build configuration missing or stale, building first..."
+        )
+        .map_err(io_err)?;
         let rc = build_with(proj, &BuildArgs::default(), spawner, out)?;
         if rc != 0 {
             return Ok(rc);
@@ -772,7 +848,8 @@ fn write_run_help(out: &mut impl Write) -> Result<()> {
         out,
         "pulp run — launch a standalone Pulp application\n\n\
          Usage: pulp run [target] [--headless] [--screenshot <file>] [--frames <n>]\n\
-                [--watch] [--inspect[=<profile>]] [--audio-inspector] [--audio-probe-json <file>]\n\
+                [--watch] [--inspect[=<profile>]] [--inspect-runtime-eval]\n\
+                [--audio-inspector] [--audio-probe-json <file>]\n\
                 [--audio-scope-json <file>] [--audio-scope-window <n>]\n\
                 [--audio-scope-trigger <mode>] [--audio-scope-channel <n>]\n\
                 [--audio-capture-wav <file>] [--audio-capture-frames <n>] [-- args...]\n\n\
@@ -794,6 +871,9 @@ fn write_run_help(out: &mut impl Write) -> Result<()> {
                                  off, observe, develop, custom.\n  \
          --inspect-capability <id>\n                          \
                                  Add a capability to --inspect=custom; repeatable.\n  \
+         --inspect-runtime-eval  Enable arbitrary JavaScript evaluation in the live UI realm.\n                          \
+                                 HIGH RISK: code runs in the host process. Requires develop,\n                          \
+                                 or custom with runtime.eval and session.control. Never implied.\n  \
          Composes with --headless / --screenshot.\n  \
          --audio-inspector       Open the live Audio Inspector window.\n                          \
          (Forwarded as --audio-inspector and PULP_AUDIO_INSPECTOR=1.)\n  \
@@ -1479,6 +1559,12 @@ mod tests {
         std::fs::create_dir_all(root.join("test")).unwrap();
         std::fs::write(root.join("test/test_foo.cpp"), "").unwrap();
         std::fs::write(root.join("test/test_bar.cpp"), "").unwrap();
+        std::fs::create_dir_all(root.join("tools/deps")).unwrap();
+        std::fs::write(
+            root.join("tools/deps/shared-source-contract.txt"),
+            "fixture-contract-v1\n",
+        )
+        .unwrap();
         std::fs::create_dir_all(root.join("examples/a")).unwrap();
         std::fs::create_dir_all(root.join("examples/b")).unwrap();
     }
@@ -1497,6 +1583,11 @@ mod tests {
     fn configure_build(proj: &ActiveProject) {
         std::fs::create_dir_all(&proj.build_dir).unwrap();
         std::fs::write(proj.build_dir.join("CMakeCache.txt"), "").unwrap();
+    }
+
+    fn write_setup_scripts(root: &Path) {
+        std::fs::write(root.join("setup.sh"), "#!/bin/bash\n").unwrap();
+        std::fs::write(root.join("setup.ps1"), "# fixture\n").unwrap();
     }
 
     fn make_run_binary(proj: &ActiveProject, name: &str) -> PathBuf {
@@ -1594,6 +1685,97 @@ mod tests {
         assert_eq!(calls[0].program, "cmake");
         assert!(calls[0].args.iter().any(|a| a == "-B"));
         assert!(calls[1].args.iter().any(|a| a == "--build"));
+    }
+
+    #[test]
+    fn source_tree_build_prepares_dependencies_before_required_configure() {
+        let td = tempfile::tempdir().unwrap();
+        source_tree_fixture(td.path());
+        write_setup_scripts(td.path());
+        let proj = ActiveProject::new(td.path().to_path_buf(), false);
+        let spawner = RecordingSpawner::with_codes(vec![0, 0, 0]);
+        let mut out = Vec::new();
+
+        let rc = build_with(&proj, &BuildArgs::default(), &spawner, &mut out).unwrap();
+
+        assert_eq!(rc, 0);
+        let calls = spawner.calls.borrow();
+        assert_eq!(calls.len(), 3);
+        assert_eq!(
+            calls[0].program,
+            if cfg!(windows) { "powershell" } else { "bash" }
+        );
+        assert!(calls[0].args.iter().any(|a| a == "--deps-only"));
+        assert!(calls[0].args.iter().any(|a| a == "--non-interactive"));
+        assert_eq!(calls[0].cwd.as_deref(), Some(proj.root.as_path()));
+        assert_eq!(calls[1].program, "cmake");
+        assert!(calls[1]
+            .args
+            .iter()
+            .any(|a| a == "-DPULP_REQUIRE_CHECKOUT_DEPENDENCIES=ON"));
+        assert!(calls[2].args.iter().any(|a| a == "--build"));
+    }
+
+    #[test]
+    fn source_tree_build_stops_when_dependency_bootstrap_fails() {
+        let td = tempfile::tempdir().unwrap();
+        source_tree_fixture(td.path());
+        write_setup_scripts(td.path());
+        let proj = ActiveProject::new(td.path().to_path_buf(), false);
+        let spawner = RecordingSpawner::with_codes(vec![23]);
+        let mut out = Vec::new();
+
+        let rc = build_with(&proj, &BuildArgs::default(), &spawner, &mut out).unwrap();
+
+        assert_eq!(rc, 23);
+        assert_eq!(spawner.calls.borrow().len(), 1);
+    }
+
+    #[test]
+    fn source_tree_build_can_skip_bootstrap_but_keeps_fail_closed_configure() {
+        let td = tempfile::tempdir().unwrap();
+        source_tree_fixture(td.path());
+        let proj = ActiveProject::new(td.path().to_path_buf(), false);
+        let spawner = RecordingSpawner::with_codes(vec![0, 0]);
+        let mut out = Vec::new();
+
+        let rc =
+            build_with_dependency_policy(&proj, &BuildArgs::default(), &spawner, &mut out, true)
+                .unwrap();
+
+        assert_eq!(rc, 0);
+        let calls = spawner.calls.borrow();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].program, "cmake");
+        assert!(calls[0]
+            .args
+            .iter()
+            .any(|a| a == "-DPULP_REQUIRE_CHECKOUT_DEPENDENCIES=ON"));
+        assert!(String::from_utf8(out)
+            .unwrap()
+            .contains("PULP_SKIP_DEPENDENCY_BOOTSTRAP"));
+    }
+
+    #[test]
+    fn source_tree_build_repairs_a_configure_that_omitted_dependencies() {
+        let td = tempfile::tempdir().unwrap();
+        source_tree_fixture(td.path());
+        write_setup_scripts(td.path());
+        let proj = ActiveProject::new(td.path().to_path_buf(), false);
+        configure_build(&proj); // Empty cache represents the old false-green.
+        let spawner = RecordingSpawner::with_codes(vec![0, 0, 0]);
+        let mut out = Vec::new();
+
+        let rc = build_with(&proj, &BuildArgs::default(), &spawner, &mut out).unwrap();
+
+        assert_eq!(rc, 0);
+        let calls = spawner.calls.borrow();
+        assert_eq!(calls.len(), 3);
+        assert!(calls[0].args.iter().any(|a| a == "--deps-only"));
+        assert!(calls[1]
+            .args
+            .iter()
+            .any(|a| a == "-DPULP_REQUIRE_CHECKOUT_DEPENDENCIES=ON"));
     }
 
     #[test]
@@ -1786,6 +1968,32 @@ mod tests {
         // configure + build + ctest
         assert_eq!(calls.len(), 3);
         assert_eq!(calls[2].program, "ctest");
+    }
+
+    #[test]
+    fn test_repairs_a_stale_source_dependency_contract_before_ctest() {
+        let td = tempfile::tempdir().unwrap();
+        source_tree_fixture(td.path());
+        write_setup_scripts(td.path());
+        let proj = ActiveProject::new(td.path().to_path_buf(), false);
+        std::fs::create_dir_all(&proj.build_dir).unwrap();
+        std::fs::write(
+            proj.build_dir.join("CMakeCache.txt"),
+            "PULP_CHECKOUT_DEPENDENCY_CONTRACT:INTERNAL=fixture-contract-v0\n\
+             PULP_REQUIRE_CHECKOUT_DEPENDENCIES:BOOL=ON\n\
+             PULP_HAS_VST3:INTERNAL=TRUE\n\
+             PULP_CHECKOUT_REQUIRES_AUSDK:INTERNAL=FALSE\n",
+        )
+        .unwrap();
+        let spawner = RecordingSpawner::with_codes(vec![0, 0, 0, 0]);
+        let mut out = Vec::new();
+
+        test_with(&proj, &[], &spawner, &mut out).unwrap();
+
+        let calls = spawner.calls.borrow();
+        assert_eq!(calls.len(), 4); // setup + configure + build + ctest
+        assert!(calls[0].args.iter().any(|a| a == "--deps-only"));
+        assert_eq!(calls[3].program, "ctest");
     }
 
     #[test]
@@ -2246,6 +2454,8 @@ mod tests {
         assert!(spawner.calls.borrow().is_empty());
         let help = String::from_utf8(out).unwrap();
         assert!(help.contains("GPU-enabled"));
+        assert!(help.contains("--inspect-runtime-eval"));
+        assert!(help.contains("HIGH RISK"));
         assert!(help.contains("--audio-inspector"));
         assert!(help.contains("--audio-probe-json"));
         assert!(help.contains("--audio-scope-json"));

@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -22,6 +23,27 @@ namespace {
 
 using pulp::view::motion::SampleEvent;
 using pulp::view::motion::Sink;
+
+std::optional<std::int64_t> schema_integer(
+    choc::value::ValueView value, std::int64_t minimum,
+    std::int64_t maximum) {
+    if (value.isInt32() || value.isInt64()) {
+        const auto integer = value.isInt32()
+            ? static_cast<std::int64_t>(value.getInt32())
+            : value.getInt64();
+        if (integer >= minimum && integer <= maximum) return integer;
+        return std::nullopt;
+    }
+    if (!value.isFloat32() && !value.isFloat64()) return std::nullopt;
+    const auto number = value.isFloat64()
+        ? value.getFloat64()
+        : static_cast<double>(value.getFloat32());
+    if (!std::isfinite(number) || std::trunc(number) != number ||
+        number < static_cast<double>(minimum) ||
+        number > static_cast<double>(maximum))
+        return std::nullopt;
+    return static_cast<std::int64_t>(number);
+}
 
 const char* sample_kind_to_string(SampleEvent::Kind k) {
     switch (k) {
@@ -308,14 +330,18 @@ InspectorMessage MotionScrubber::handle_scrub_to(const InspectorMessage& req) {
     if (!params.isObject() || !params.hasObjectMember("frame")) {
         return make_error(req.id, "Motion.scrubTo: 'frame' required");
     }
-    const int64_t raw = params["frame"].getInt64();
-    if (raw < 0) {
-        return make_error(req.id, "Motion.scrubTo: 'frame' must be >= 0");
-    }
+    constexpr std::int64_t kMaximumJsonSafeInteger = 9007199254740991LL;
+    const auto parsed = schema_integer(
+        params["frame"], 0, kMaximumJsonSafeInteger);
+    if (!parsed)
+        return make_error(
+            req.id,
+            "Motion.scrubTo: 'frame' must be a nonnegative JSON-safe integer",
+            "invalid_params");
     if (!loaded()) {
         return make_error(req.id, "Motion.scrubTo: no fixture loaded");
     }
-    const auto frame = static_cast<std::uint64_t>(raw);
+    const auto frame = static_cast<std::uint64_t>(*parsed);
     const std::size_t emitted = scrub_to(frame);
 
     auto out = choc::value::createObject("");

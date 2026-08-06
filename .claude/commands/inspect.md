@@ -37,9 +37,16 @@ Follow this evidence loop:
 5. Only when `session.control` and `state.write` are effective, perform a typed
    `State.setParameter` request using an ID and legal value from the read. Never
    use `Runtime.evaluate` as a mutation shortcut.
-6. Repeat the read, and optionally request `Capture.screenshot`. Save the JSON
-   or screenshot response with `--output FILE` and report the exact three-part
-   identity, requested method, before/after values, and artifact path.
+6. Repeat the read, and optionally save a whole-window PNG directly:
+
+   ```bash
+   pulp inspect screenshot --out capture.png \
+     --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+   ```
+
+   Report the exact three-part identity, requested method, before/after values,
+   and artifact path. Exit 3 means the selected host explicitly does not
+   support capture; do not treat it as a blank successful screenshot.
 
 Every live operation must keep the same exact identity. If the publication
 disappears or changes, stop and rediscover; publication IDs are non-reusable.
@@ -72,7 +79,11 @@ Installed `pulp-mcp` exposes the same flow as `pulp_inspect_profiles`,
 `pulp_inspect_doctor`. MCP success payloads include the exact session identity;
 failures return `structuredContent.ok=false` with `code`, `message`, and `data`.
 
-Whole-window capture is available only when the selected standalone host
-provides compositor capture. `Capture.screenshotNode` remains unavailable.
+Whole-window capture prefers deterministic host back-buffer readback and falls
+back to Pulp's in-process `capture_view()` Skia/GPU/provider renderer. The named
+command captures inside the app, so an SSH client does not need macOS Screen
+Recording permission. It does not capture an editor composited by an external
+plugin host.
+`Capture.screenshotNode` remains unavailable.
 Standalone profiles do not grant `runtime.eval`; a separately wired custom host
 that enables it exposes remote code execution and must be treated accordingly.

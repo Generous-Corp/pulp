@@ -1,6 +1,7 @@
 #pragma once
 
-// InterprocessConnection — bidirectional IPC over named pipes or TCP sockets.
+// InterprocessConnection — bidirectional IPC over named pipes, TCP sockets,
+// or credential-bearing OS-local sockets.
 // Provides length-prefixed message framing, connection lifecycle callbacks,
 // and background receive thread. Used for crash-isolated plugin scanning,
 // multi-process architectures, and standalone↔plugin communication.
@@ -12,6 +13,7 @@
 #include <vector>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <atomic>
 #include <thread>
 #include <mutex>
@@ -21,7 +23,7 @@
 namespace pulp::events {
 
 /// Transport type for IPC
-enum class IpcTransport { NamedPipe, Socket };
+enum class IpcTransport { NamedPipe, Socket, LocalSocket };
 
 /// Connection state
 enum class IpcState { Disconnected, Connecting, Connected, Error };
@@ -35,10 +37,11 @@ public:
 
     // ── Connection lifecycle ────────────────────────────────────────────
 
-    /// Connect as client to a named pipe or TCP socket.
+    /// Connect as client to a named pipe, TCP socket, or OS-local socket.
     /// For pipes: name is the pipe name (e.g., "pulp_scanner").
     /// For sockets: name is "host:port" (e.g., "127.0.0.1:9100").
-    /// A positive timeout bounds the TCP connect phase.
+    /// For local sockets: name is an absolute filesystem endpoint path.
+    /// A positive timeout bounds the socket connect phase.
     bool connect(
         std::string_view name,
         IpcTransport transport = IpcTransport::NamedPipe,
@@ -57,6 +60,10 @@ public:
 
     /// Current state.
     IpcState state() const { return state_.load(); }
+
+    /// Kernel-observed credentials for the process on the other end of a
+    /// connected local socket. Request payloads cannot influence this result.
+    std::optional<runtime::LocalPeerCredentials> local_peer_credentials() const;
 
     // ── Messaging ───────────────────────────────────────────────────────
 
@@ -170,7 +177,7 @@ public:
     bool is_running() const { return running_.load(); }
 
     /// Actual TCP port after binding, including an OS-assigned port requested
-    /// with `host:0`. Returns zero for non-socket or unbound servers.
+    /// with `host:0`. Returns zero for local, pipe, or unbound servers.
     std::uint16_t bound_port() const;
 
     /// Called when a new client connects. Override to handle.

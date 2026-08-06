@@ -291,6 +291,15 @@ export interface PulpTimelineCommandSetMeterMap {
   replacement: readonly unknown[];
 }
 
+/** `pulp.timeline.command.set_note_events` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetNoteEvents {
+  clip_id: number | string;
+  expected: readonly unknown[];
+  replacement: readonly unknown[];
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
 /** `pulp.timeline.command.set_note_velocity` — domain Command, schema version 1. */
 export interface PulpTimelineCommandSetNoteVelocity {
   clip_id: number | string;
@@ -567,6 +576,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.set_clip_sequence_ref"
   | "pulp.timeline.command.set_groove"
   | "pulp.timeline.command.set_meter_map"
+  | "pulp.timeline.command.set_note_events"
   | "pulp.timeline.command.set_note_velocity"
   | "pulp.timeline.command.set_record_arm"
   | "pulp.timeline.command.set_take_comp"
@@ -636,6 +646,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.set_clip_sequence_ref": PulpTimelineCommandSetClipSequenceRef;
   "pulp.timeline.command.set_groove": PulpTimelineCommandSetGroove;
   "pulp.timeline.command.set_meter_map": PulpTimelineCommandSetMeterMap;
+  "pulp.timeline.command.set_note_events": PulpTimelineCommandSetNoteEvents;
   "pulp.timeline.command.set_note_velocity": PulpTimelineCommandSetNoteVelocity;
   "pulp.timeline.command.set_record_arm": PulpTimelineCommandSetRecordArm;
   "pulp.timeline.command.set_take_comp": PulpTimelineCommandSetTakeComp;

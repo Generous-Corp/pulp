@@ -114,6 +114,14 @@ agent is driving an MCP server (see
 Stream of events: `Motion.start`, `Motion.sample` (one per change), `Motion.end`
 (with deltas).
 
+`Motion.startTrace` is a closed, bounded request. It accepts 1–32 metrics;
+view and metric names are 1–128 Unicode codepoints; node IDs are 1–256; and
+geometry/scroll property arrays contain only unique members of their published
+enums. Unknown fields, invalid spaces or sources, and malformed property arrays
+return `invalid_params` before a trace is created. When extending the wire
+shape, update the frozen control schema, executor validation, negative
+no-trace tests, this skill, and the motion guide together.
+
 ### 4. Trigger the interaction
 
 Drive the app — click, hover, type, fire whatever causes the suspected

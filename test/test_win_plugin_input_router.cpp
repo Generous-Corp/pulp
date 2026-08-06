@@ -43,7 +43,10 @@ public:
         ops.emplace_back("release");
         capture_held = false;
     }
-    void input_take_keyboard_focus() override { ops.emplace_back("focus"); }
+    void input_take_keyboard_focus() override {
+        ops.emplace_back("focus");
+        if (on_focus) on_focus();
+    }
     bool input_begin_mouse_leave_tracking() override {
         ops.emplace_back("track-leave");
         return leave_tracking_succeeds;
@@ -64,6 +67,8 @@ public:
     bool leave_tracking_succeeds = true;
     /// Re-entrancy hook: Windows delivers messages from inside SetCapture.
     std::function<void()> on_capture;
+    /// Re-entrancy hook: focus transfer can synchronously pump host callbacks.
+    std::function<void()> on_focus;
 
 private:
     View& root_;
@@ -76,16 +81,18 @@ public:
     // left-only by design, so `presses` is what a non-left gesture shows up in.
     void on_mouse_event(const MouseEvent& e) override {
         if (e.phase == MousePhase::press) presses.push_back(e.button);
+        if (e.is_cancelled) ++cancelled_events;
     }
     void on_mouse_down(Point) override {
         ++downs;
         if (on_down_cb) on_down_cb();
     }
     void on_mouse_up(Point) override { ++ups; }
+    void on_mouse_cancel(Point) override { ++cancels; }
     void on_mouse_drag(Point) override { ++drags; }
 
     std::vector<MouseButton> presses;
-    int downs = 0, ups = 0, drags = 0;
+    int downs = 0, ups = 0, cancels = 0, cancelled_events = 0, drags = 0;
     std::function<void()> on_down_cb;
 };
 
@@ -163,8 +170,25 @@ TEST_CASE("a press that hits nothing captures nothing",
 
     REQUIRE_FALSE(router.gesture_active());
     REQUIRE(host.count("capture") == 0);
-    REQUIRE(router.captured_target() == nullptr);
+    REQUIRE_FALSE(router.has_captured_target());
     REQUIRE(fx.probe->downs == 0);
+}
+
+TEST_CASE("a target removed during native focus transfer is not dereferenced",
+          "[win-input-router][runtime-eval]") {
+    Fixture fx;
+    RecordingHost host(fx.root);
+    PluginInputRouter router(host);
+    host.on_focus = [&] {
+        auto retired = fx.root.remove_child(fx.probe);
+        fx.probe = nullptr;
+        retired.reset();
+    };
+
+    router.on_mouse_down({10, 10}, MouseButton::left, 0);
+
+    CHECK_FALSE(router.gesture_active());
+    CHECK_FALSE(router.has_captured_target());
 }
 
 TEST_CASE("a second button closes the first bracket rather than overwriting it",
@@ -178,13 +202,14 @@ TEST_CASE("a second button closes the first bracket rather than overwriting it",
 
     router.on_mouse_down({10, 10}, MouseButton::left, 0);
     REQUIRE(probe->downs == 1);
-    const int ups_before = probe->ups;
+    const int cancels_before = probe->cancels;
 
     router.on_mouse_down({12, 12}, MouseButton::right, 0);
 
-    // The left bracket was cancelled (its target got a balancing up), and the
+    // The left bracket was cancelled, and the
     // right one is now the live gesture.
-    REQUIRE(probe->ups == ups_before + 1);
+    REQUIRE(probe->cancels == cancels_before + 1);
+    REQUIRE(probe->cancelled_events == 1);
     REQUIRE(router.gesture_active());
     REQUIRE(router.gesture_button() == MouseButton::right);
 }
@@ -264,7 +289,7 @@ TEST_CASE("a gesture cancelled from inside SetCapture delivers no press",
     REQUIRE(reentered);
     REQUIRE_FALSE(router.gesture_active());
     REQUIRE(probe->downs == 0);
-    REQUIRE(router.captured_target() == nullptr);
+    REQUIRE_FALSE(router.has_captured_target());
 }
 
 TEST_CASE("capture lost mid-drag ends the gesture and balances the target",
@@ -283,8 +308,29 @@ TEST_CASE("capture lost mid-drag ends the gesture and balances the target",
     router.on_capture_lost();
 
     REQUIRE_FALSE(router.gesture_active());
-    REQUIRE(probe->ups == 1);  // balanced, not abandoned
-    REQUIRE(router.captured_target() == nullptr);
+    REQUIRE(probe->cancels == 1);  // cancelled, not abandoned
+    REQUIRE(probe->cancelled_events == 1);
+    REQUIRE_FALSE(router.has_captured_target());
+}
+
+TEST_CASE("a target retired between pointer messages is not dereferenced",
+          "[win-input-router][runtime-eval]") {
+    Fixture fx;
+    RecordingHost host(fx.root);
+    PluginInputRouter router(host);
+
+    router.on_mouse_down({10, 10}, MouseButton::left, 0);
+    REQUIRE(router.gesture_active());
+    auto retired = fx.root.remove_child(fx.probe);
+    fx.probe = nullptr;
+    retired.reset();
+
+    router.on_mouse_move({20, 20}, kLeftHeld, 0);
+    router.on_mouse_up({20, 20}, MouseButton::left, 0);
+
+    CHECK_FALSE(router.gesture_active());
+    CHECK_FALSE(router.has_captured_target());
+    CHECK(host.count("release") == 1);
 }
 
 TEST_CASE("a button released outside the window ends the drag on the next move",
@@ -303,7 +349,8 @@ TEST_CASE("a button released outside the window ends the drag on the next move",
     router.on_mouse_move({30, 30}, kNoButtons, 0);
 
     REQUIRE_FALSE(router.gesture_active());
-    REQUIRE(probe->ups == 1);
+    REQUIRE(probe->cancels == 1);
+    REQUIRE(probe->cancelled_events == 1);
     REQUIRE(host.count("release") == 1);
 }
 
@@ -515,7 +562,8 @@ TEST_CASE("cancelling a live gesture releases capture and balances the target",
     router.cancel_gesture();
 
     REQUIRE_FALSE(router.gesture_active());
-    REQUIRE(probe->ups == 1);
+    REQUIRE(probe->cancels == 1);
+    REQUIRE(probe->cancelled_events == 1);
     REQUIRE(host.count("release") == 1);
     REQUIRE_FALSE(host.capture_held);
 }

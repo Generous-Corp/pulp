@@ -175,6 +175,8 @@ nav:
   - Policies:
       - Code Style: policies/code-style.md
       - Agent Rules: policies/agent-contribution-rules.md
+      - Non-goals: policies/non-goals.md
+      - Plugin Collaboration Decision: policies/plugin-collaboration.md
       - Licensing & Acknowledgements: reference/licensing.md
 
 extra:

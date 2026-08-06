@@ -1,0 +1,56 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>svg icons</title>
+<style>
+  html,body{margin:0;padding:0}
+  body{width:420px;height:150px;background:#101418;font-family:system-ui}
+  .row{display:flex;gap:14px;padding:20px}
+  .cell{width:72px;height:52px;border-radius:8px;background:#1b2229;
+        display:flex;align-items:center;justify-content:center;color:#7cd6c1}
+  svg{display:block}
+  /* Styled by a stylesheet rule, not a presentation attribute: only the
+     browser's resolved value carries it. */
+  .themed path{fill:#c86ad0;stroke:#f5f0ff;stroke-width:1.4}
+</style></head>
+<body>
+  <div class="row">
+    <!-- stroke-only, non-square viewBox, distinct fill and stroke roles -->
+    <div class="cell"><svg width="54" height="36" viewBox="0 0 24 16" fill="none"
+        stroke="#e8b552" stroke-width="1.8">
+      <path d="M1 15 L5 3 L9 13 L13 1 L17 11 L23 6"/>
+      <circle cx="13" cy="1" r="1.6" fill="#d4544a" stroke="none"/>
+    </svg></div>
+
+    <!-- fill AND stroke on one path, plus currentColor on a rounded rect -->
+    <div class="cell"><svg width="56" height="35" viewBox="0 0 32 20">
+      <path d="M2 18 L10 2 L18 18 Z" fill="#4a90d4" stroke="#ffffff" stroke-width="1.2"/>
+      <rect x="21" y="5" width="9" height="10" rx="2" fill="currentColor"/>
+    </svg></div>
+
+    <!-- compound path with a hole: only even-odd winding renders the ring -->
+    <div class="cell"><svg width="36" height="36" viewBox="0 0 24 24">
+      <path fill-rule="evenodd" fill="#63b3ed"
+            d="M12 2 A10 10 0 1 1 11.99 2 Z M12 7 A5 5 0 1 0 12.01 7 Z"/>
+      <polygon points="3,22 8,14 13,22" fill="#f0a04b"/>
+    </svg></div>
+
+    <!-- colour from a stylesheet rule; half-transparent via fill-opacity -->
+    <div class="cell themed"><svg width="40" height="30" viewBox="0 0 20 15">
+      <path d="M2 13 L10 2 L18 13 Z"/>
+      <path d="M6 13 L10 7 L14 13 Z" fill-opacity="0.45"/>
+    </svg></div>
+
+    <!-- REFUSES: fill references a paint server defined in <defs> -->
+    <div class="cell"><svg width="40" height="28" viewBox="0 0 20 14">
+      <defs><linearGradient id="g"><stop offset="0" stop-color="#ff0"/>
+        <stop offset="1" stop-color="#0ff"/></linearGradient></defs>
+      <rect x="1" y="1" width="18" height="12" fill="url(#g)"/>
+    </svg></div>
+
+    <!-- REFUSES: a group transform the vector lowering carries no matrix for -->
+    <div class="cell"><svg width="34" height="34" viewBox="0 0 20 20">
+      <g transform="rotate(20 10 10)">
+        <rect x="4" y="4" width="12" height="12" fill="#8fd694"/>
+      </g>
+    </svg></div>
+  </div>
+</body></html>

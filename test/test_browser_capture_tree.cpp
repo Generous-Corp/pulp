@@ -14,6 +14,7 @@
 // does, so "the node is present" cannot prove the structure survived.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "tools/import-design/browser_capture_ir.hpp"
@@ -190,6 +191,11 @@ struct SnapshotSpec {
     std::string texts;
     /// The property list every style row is parallel to.
     std::string computed_names = R"(["background-image","display"])";
+    /// The string table every index above resolves through. Empty takes the
+    /// shared one below; a case needing values the shared table does not hold
+    /// supplies its own rather than appending to a table whose indices a
+    /// hundred other cases already depend on.
+    std::string strings;
 };
 
 /// The shared string table, in index order:
@@ -213,6 +219,8 @@ struct SnapshotSpec {
 ///   50 visible   51 hidden   52 static   53 relative   54 absolute
 ///   55 0px       56 1px      57 circle(50%)
 ///   58 rgba(0, 0, 0, 0.5) 0px 0px 30px 0px
+///   59 12px      60 "12px 12px 0px 0px"
+///   61 matrix(0.866025, 0.5, -0.5, 0.866025, 0, 0)          — 30° rotation
 /// so a style row of [11,14] is `background-image: none; display: block`.
 constexpr std::string_view kSnapshotStrings =
     R"J("#document","HTML","BODY","DIV","svg","path","CANVAS","IMG",)J"
@@ -231,7 +239,8 @@ constexpr std::string_view kSnapshotStrings =
     R"J("matrix(2, 0, 0, 2, 0, 0)","SPAN",)J"
     R"J("visible","hidden","static","relative","absolute",)J"
     R"J("0px","1px","circle(50%)","rgba(0, 0, 0, 0.5) 0px 0px 30px 0px",)J"
-    R"J("12px","12px 12px 0px 0px")J";
+    R"J("12px","12px 12px 0px 0px",)J"
+    R"J("matrix(0.866025, 0.5, -0.5, 0.866025, 0, 0)")J";
 
 /// The property list the clip cases are parallel to. `overflow` decides what
 /// clips; `position` and `transform` decide what a clip applies TO; the border
@@ -269,7 +278,10 @@ std::string build_snapshot(const SnapshotSpec& spec) {
         texts += "]";
     }
     std::string json;
-    json += R"({"strings":[)" + std::string(kSnapshotStrings) + "],";
+    json += R"({"strings":[)" +
+            (spec.strings.empty() ? std::string(kSnapshotStrings)
+                                  : spec.strings) +
+            "],";
     json += R"("computedStyleNames":)" + spec.computed_names + ",";
     json += R"("documents":[{"nodes":{"parentIndex":)" + spec.parents +
             R"(,"nodeType":)" + spec.node_types +
@@ -451,6 +463,56 @@ TEST_CASE("native lowering places nodes at Chrome's solved boxes verbatim",
         CHECK(*entry.node->style.width > 0.0f);
         CHECK(*entry.node->style.height > 0.0f);
     }
+}
+
+// A layout engine places an absolutely positioned child against its parent's
+// PADDING box, so the parent's border width is added to every child offset.
+// Chrome's boxes already include it once — they are measured from the page
+// origin — so an offset taken from the parent's BORDER box gets it counted
+// twice, and every descendant of a bordered node lands one border-width down
+// and to the right of where the browser put it. On a real panel that is a
+// card's fill sliding out from under its own frame.
+TEST_CASE("a bordered parent does not shift its children",
+          "[browser-capture][native-lowering]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV(3px border), 4 DIV(child).
+    // The child's page box is (30,30); the parent's is (20,20), so the offset
+    // between them is 10. A layout engine then adds the parent's 3px border
+    // when it places the child against the padding box, so the value emitted
+    // has to be 7 for the sum to land back on Chrome's 30.
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,3]",
+            .node_types = "[9,1,1,1,1]",
+            .parents = "[-1,0,1,2,3]",
+            .attributes = "[[],[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3,4]",
+            // Index 34 is "3px"; 11 is "none", which records no width at all.
+            .styles = "[[11,14,11,11,11,11],[11,14,11,11,11,11],"
+                      "[11,14,11,11,11,11],[11,14,34,34,34,34],"
+                      "[11,14,11,11,11,11]]",
+            .bounds = "[[0,0,200,200],[0,0,200,200],[0,0,200,200],"
+                      "[20,20,100,100],[30,30,40,40]]",
+            .paint_orders = "[0,1,1,2,3]",
+            .computed_names =
+                R"(["background-image","display","border-top-width",)"
+                R"("border-right-width","border-bottom-width",)"
+                R"("border-left-width"])",
+        },
+        "bordered-parent-offset");
+    const auto* parent = find_node(lowered.root, [](const IRNode& n) {
+        return n.style.border_top_width.value_or(0.0f) > 0.0f;
+    });
+    REQUIRE(parent != nullptr);
+    REQUIRE(parent->children.size() == 1);
+    const IRNode& child = parent->children.front();
+    CHECK_THAT(child.style.left.value_or(-1.0f),
+               Catch::Matchers::WithinAbs(7.0, 1e-4));
+    CHECK_THAT(child.style.top.value_or(-1.0f),
+               Catch::Matchers::WithinAbs(7.0, 1e-4));
+    // And the parent itself is untouched — the compensation belongs to the
+    // child's offset, not to the box the border is drawn on.
+    CHECK_THAT(parent->style.width.value_or(0.0f),
+               Catch::Matchers::WithinAbs(100.0, 1e-4));
 }
 
 TEST_CASE("parent-relative offsets compose to Chrome's absolute boxes",
@@ -818,8 +880,14 @@ TEST_CASE("a control over a native panel restates its body contract",
 // above pin snapshot DECODING against what Chrome really serializes, and these
 // pin the tree logic layered on top of the same loader.
 
-TEST_CASE("an svg subtree pools into one capture-fallback node",
-          "[browser-capture][native-lowering]") {
+TEST_CASE("an svg with no captured paint refuses rather than inventing one",
+          "[browser-capture][native-lowering][svg]") {
+    // A capture taken before the protocol collected `fill` / `stroke` carries
+    // the geometry and no colour for it. SVG's own default fill is black, so
+    // defaulting would paint a black icon on a dark panel — a wrong picture
+    // that reads as a rendering bug rather than as a stale capture. The subtree
+    // stays pooled and the reason says which of the two it is.
+    //
     // nodes: 0 #document, 1 HTML, 2 BODY, 3 svg, 4 path, 5 path
     const auto lowered = lower_snapshot(
         {
@@ -850,6 +918,7 @@ TEST_CASE("an svg subtree pools into one capture-fallback node",
     });
     REQUIRE(svg != nullptr);
     CHECK(attribute(*svg, "capture_fallback_element") == "svg");
+    CHECK(attribute(*svg, "capture_fallback_reason") == "svg-paint-unavailable");
     // Pooling removes the shape children; it must not also strip the ancestry
     // that says WHERE the artwork sits.
     const auto* body = find_named(root, "body");
@@ -926,6 +995,338 @@ TEST_CASE("pooling reaches through a plain element inside the capture",
           }) == 0);
 }
 
+// ── Inline <svg> ────────────────────────────────────────────────────────────
+// An icon is geometry, not a picture: its shapes lower to vector nodes drawn
+// from path data, so the panel scales, recolours, and carries no raster.
+//
+// Every case below reads ONE real Chromium capture
+// (test/fixtures/browser-capture-svg-icons) rather than a hand-built snapshot,
+// because the whole premise is that the browser resolved the paint —
+// `currentColor`, a stylesheet rule, an opacity — and a fixture written by hand
+// would agree with the parser by construction about what it resolved to. The
+// page is deliberately awkward: non-square viewBoxes, a stroke AND a fill on
+// one path, a compound even-odd ring, and two icons that must REFUSE.
+
+namespace {
+
+/// Vector nodes, in composed order, under the whole tree.
+std::vector<const IRNode*> vector_nodes(const IRNode& root) {
+    std::vector<const IRNode*> found;
+    const std::function<void(const IRNode&)> walk = [&](const IRNode& node) {
+        for (const auto& child : node.children) {
+            if (child.type == "path" && child.attributes.count("path_data"))
+                found.push_back(&child);
+            walk(child);
+        }
+    };
+    walk(root);
+    return found;
+}
+
+const IRNode* vector_from(const IRNode& root, std::string_view path_data) {
+    for (const auto* node : vector_nodes(root))
+        if (attribute(*node, "path_data") == path_data) return node;
+    return nullptr;
+}
+
+}  // namespace
+
+TEST_CASE("an svg icon's shapes lower to vector nodes, not to a capture",
+          "[browser-capture][native-lowering][svg]") {
+    const auto lowered = lower_capture("browser-capture-svg-icons");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    // Four of the six icons draw; the last two refuse for reasons the case
+    // below pins by name.
+    CHECK(attribute(root, "native_svg_lowered") == "4");
+    CHECK(attribute(root, "native_svg_refused") == "2");
+
+    // The stroke-only waveform: authored `d` reaches the node verbatim, and
+    // the stroke Chrome resolved on it comes with the width it was authored in
+    // — in the viewBox's user units, which is the space the path data is in.
+    const auto* wave = vector_from(root, "M1 15 L5 3 L9 13 L13 1 L17 11 L23 6");
+    REQUIRE(wave != nullptr);
+    CHECK(attribute(*wave, "svg_stroke") == "rgb(232, 181, 82)");
+    CHECK(attribute(*wave, "svg_stroke_width") == "1.8");
+    // A shape with no fill must SAY so. SVG's own default fill is opaque
+    // black and the renderer's default matches it, so an absent `svg_fill`
+    // here does not mean unfilled — it paints a solid black slab inside the
+    // stroke that is meant to be the whole icon. Measured, not reasoned: the
+    // first render of this fixture did exactly that.
+    CHECK(attribute(*wave, "svg_fill") == "none");
+    // The viewBox is what turns user units into the icon's box, and it is NOT
+    // square — a square one would let a wrong axis pass unnoticed.
+    CHECK(attribute(*wave, "svg_viewbox") == "0 0 24 16");
+
+    // One path carrying BOTH roles at once, which is the case a fill-only or
+    // stroke-only reader gets half right.
+    const auto* filled = vector_from(root, "M2 18 L10 2 L18 18 Z");
+    REQUIRE(filled != nullptr);
+    CHECK(attribute(*filled, "svg_fill") == "rgb(74, 144, 212)");
+    CHECK(attribute(*filled, "svg_stroke") == "rgb(255, 255, 255)");
+    CHECK(attribute(*filled, "svg_stroke_width") == "1.2");
+}
+
+TEST_CASE("the browser's resolved paint is what reaches a vector node",
+          "[browser-capture][native-lowering][svg]") {
+    const auto lowered = lower_capture("browser-capture-svg-icons");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    // `fill="currentColor"` on a `<rect>`: the colour lives on the DIV around
+    // the icon, so nothing in the SVG markup names it. Reading the authored
+    // attribute back would carry the literal string `currentColor` into the
+    // IR, where it parses as no colour at all.
+    const auto* themed = find_node(root, [](const IRNode& node) {
+        return node.type == "path" &&
+               attribute(node, "svg_fill") == "rgb(124, 214, 193)";
+    });
+    INFO("currentColor must arrive as the .cell colour #7cd6c1");
+    REQUIRE(themed != nullptr);
+    CHECK(attribute(*themed, "source_tag") == "rect");
+
+    // A stylesheet rule (`.themed path { fill: … }`) with no presentation
+    // attribute anywhere on the element.
+    const auto* styled = vector_from(root, "M2 13 L10 2 L18 13 Z");
+    REQUIRE(styled != nullptr);
+    CHECK(attribute(*styled, "svg_fill") == "rgb(200, 106, 208)");
+    CHECK(attribute(*styled, "svg_stroke") == "rgb(245, 240, 255)");
+
+    // `fill-opacity` is a separate property from the colour; folded into the
+    // alpha so a consumer that only understands a CSS colour still gets the
+    // right pixel. Its sibling above shares the same rule at full opacity, so
+    // the two differ ONLY in the alpha — a fold that silently dropped would
+    // make them identical.
+    const auto* faded = vector_from(root, "M6 13 L10 7 L14 13 Z");
+    REQUIRE(faded != nullptr);
+    CHECK(attribute(*faded, "svg_fill") == "rgba(200, 106, 208, 0.45)");
+}
+
+TEST_CASE("svg primitives lower through the same path data as a <path>",
+          "[browser-capture][native-lowering][svg]") {
+    const auto lowered = lower_capture("browser-capture-svg-icons");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    const auto by_tag = [&root](std::string_view tag) -> const IRNode* {
+        for (const auto* node : vector_nodes(root))
+            if (attribute(*node, "source_tag") == tag) return node;
+        return nullptr;
+    };
+
+    // `<circle cx="13" cy="1" r="1.6">`. Two half-arcs, because one full-turn
+    // arc is degenerate — its start and end coincide, so no ellipse is
+    // determined and it renders as nothing.
+    const auto* circle = by_tag("circle");
+    REQUIRE(circle != nullptr);
+    CHECK(attribute(*circle, "path_data") ==
+          "M11.4 1 A1.6 1.6 0 0 1 14.6 1 A1.6 1.6 0 0 1 11.4 1 Z");
+    CHECK(attribute(*circle, "svg_fill") == "rgb(212, 84, 74)");
+
+    // `<rect x="21" y="5" width="9" height="10" rx="2">`: a missing `ry` takes
+    // `rx`, and the corners become arcs rather than being dropped square.
+    const auto* rect = by_tag("rect");
+    REQUIRE(rect != nullptr);
+    CHECK(attribute(*rect, "path_data") ==
+          "M23 5 H28 A2 2 0 0 1 30 7 V13 A2 2 0 0 1 28 15 H23 A2 2 0 0 1 21 13"
+          " V7 A2 2 0 0 1 23 5 Z");
+
+    // `<polygon points="3,22 8,14 13,22">` closes; a `<polyline>` would not.
+    const auto* polygon = by_tag("polygon");
+    REQUIRE(polygon != nullptr);
+    CHECK(attribute(*polygon, "path_data") == "M3 22 L8 14 L13 22 Z");
+
+    // The compound ring: outer circle plus an inner contour wound the same
+    // way. Under nonzero winding the hole fills solid and the icon is a disc,
+    // so the rule has to survive the lowering.
+    const auto* ring = find_node(root, [](const IRNode& node) {
+        return attribute(node, "svg_fill_rule") == "evenodd";
+    });
+    REQUIRE(ring != nullptr);
+    CHECK(attribute(*ring, "svg_fill") == "rgb(99, 179, 237)");
+}
+
+TEST_CASE("an svg the vector lowering cannot draw says which construct refused",
+          "[browser-capture][native-lowering][svg]") {
+    const auto lowered = lower_capture("browser-capture-svg-icons");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    // The residual is meant to be a LIST, not a total: a design's remaining
+    // can't-draw work is "one paint server and one group transform", which is
+    // actionable, where "two SVGs failed" is not.
+    std::vector<std::string> reasons;
+    const std::function<void(const IRNode&)> walk = [&](const IRNode& node) {
+        for (const auto& child : node.children) {
+            if (attribute(child, "capture_fallback_element") == "svg")
+                reasons.push_back(attribute(child, "capture_fallback_reason"));
+            walk(child);
+        }
+    };
+    walk(root);
+    std::sort(reasons.begin(), reasons.end());
+    CHECK(reasons ==
+          std::vector<std::string>{"svg-paint-reference", "svg-transform"});
+
+    // A refused subtree must not leak half of itself: the `<rect>` filled from
+    // `<defs>` and the one inside the rotated `<g>` are both still pooled, so
+    // nothing paints on top of the captured element.
+    for (const auto* node : vector_nodes(root)) {
+        INFO("vector node " << attribute(*node, "path_data"));
+        CHECK(attribute(*node, "svg_fill") != "rgb(143, 214, 148)");
+    }
+}
+
+TEST_CASE("each refusal names the construct that caused it",
+          "[browser-capture][native-lowering][svg]") {
+    // A second real capture, one icon per refusal, because the residual is
+    // meant to be a LIST of constructs a reader can act on. Each of these
+    // draws something visibly different from what the vector lowering could
+    // produce, which is why the honest answer is the captured element:
+    //   <text>            — no shape vocabulary for glyphs
+    //   <switch>          — renders ONE child, so a group walk draws too much
+    //   preserveAspectRatio="none" — stretches instead of fitting
+    //   stroke-dasharray  — drawn solid it is a different picture
+    //   <g opacity>       — composited as a unit, not per shape
+    //   width="50%"       — resolves against a viewport the synthesis lacks
+    const auto lowered = lower_capture("browser-capture-svg-refusals");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    CHECK(root.attributes.count("native_svg_lowered") == 0);
+    CHECK(attribute(root, "native_svg_refused") == "6");
+
+    std::map<std::string, std::string> refusals;  // reason → detail
+    const std::function<void(const IRNode&)> walk = [&](const IRNode& node) {
+        for (const auto& child : node.children) {
+            if (attribute(child, "capture_fallback_element") == "svg") {
+                refusals[attribute(child, "capture_fallback_reason")] =
+                    attribute(child, "capture_fallback_detail");
+            }
+            walk(child);
+        }
+    };
+    walk(root);
+
+    CHECK(refusals["svg-dashed-stroke"] == "circle");
+    CHECK(refusals["svg-group-opacity"] == "g");
+    CHECK(refusals["svg-shape-geometry"] == "rect");
+    // Three different constructs share the `element` reason, so the DETAIL is
+    // the only thing that separates them — a reason alone would collapse
+    // "add a shape kind" and "this can never be a shape" into one line.
+    CHECK(refusals.count("svg-element") == 1);
+
+    std::vector<std::string> element_details;
+    const std::function<void(const IRNode&)> details = [&](const IRNode& node) {
+        for (const auto& child : node.children) {
+            if (attribute(child, "capture_fallback_reason") == "svg-element")
+                element_details.push_back(
+                    attribute(child, "capture_fallback_detail"));
+            details(child);
+        }
+    };
+    details(root);
+    std::sort(element_details.begin(), element_details.end());
+    CHECK(element_details == std::vector<std::string>{
+                                 "preserveAspectRatio=none", "switch", "text"});
+
+    // Nothing from a refused subtree may reach the tree as geometry.
+    CHECK(count_nodes(root, [](const IRNode& node) {
+              return node.attributes.count("path_data") != 0;
+          }) == 0);
+}
+
+TEST_CASE("a capture with no SVG paint says so out loud",
+          "[browser-capture][native-lowering][svg]") {
+    // The same six icons, byte-identical, with ONLY the seven SVG paint
+    // columns removed — exactly the shape of a snapshot taken before the
+    // capture collected them. Every icon then refuses, and a reader sees a
+    // panel with no icons and no error: indistinguishable from the defect this
+    // lowering exists to remove. It happened; the whole design lost its icons
+    // silently because the capture, not the code, was old.
+    //
+    // Held against the LIVE fixture in the same case, because the claim is a
+    // difference between two inputs and asserting one of them alone would pass
+    // just as well if the lowering had stopped working entirely.
+    const auto stale = lower_capture("browser-capture-svg-stale-protocol");
+    REQUIRE(stale.design_ir);
+    const auto live = lower_capture("browser-capture-svg-icons");
+    REQUIRE(live.design_ir);
+
+    CHECK(attribute(live.design_ir->root, "native_svg_lowered") == "4");
+    CHECK(live.warnings.empty());
+
+    CHECK(stale.design_ir->root.attributes.count("native_svg_lowered") == 0);
+    CHECK(attribute(stale.design_ir->root, "native_svg_refused") == "6");
+    CHECK(count_nodes(stale.design_ir->root, [](const IRNode& node) {
+              return node.attributes.count("path_data") != 0;
+          }) == 0);
+
+    // The warning has to name the ACTION, not just the symptom: nothing about
+    // the design tells a reader that re-capturing is the fix.
+    // On the IR too, not only in the warning: a harness that lowers in-process
+    // and dumps `native.ir.json` never sees a CLI print, which is exactly how a
+    // whole design's missing icons read as a code failure for a full round of
+    // debugging.
+    CHECK(attribute(stale.design_ir->root, "native_svg_stale_capture") == "6");
+    CHECK(live.design_ir->root.attributes.count("native_svg_stale_capture") == 0);
+
+    REQUIRE(stale.warnings.size() == 1);
+    INFO(stale.warnings.front());
+    CHECK(stale.warnings.front().find("6 of 6") != std::string::npos);
+    CHECK(stale.warnings.front().find("Re-run the browser capture") !=
+          std::string::npos);
+
+    // And the per-node reason separates "your capture is old" from "this
+    // design uses a construct we cannot draw" — the two have different fixes
+    // and only one of them is the caller's.
+    const auto* icon = find_node(stale.design_ir->root, [](const IRNode& node) {
+        return attribute(node, "capture_fallback_element") == "svg";
+    });
+    REQUIRE(icon != nullptr);
+    CHECK(attribute(*icon, "capture_fallback_reason") ==
+          "svg-paint-unavailable");
+}
+
+TEST_CASE("a drawn icon's vector nodes sit under it and share its box",
+          "[browser-capture][native-lowering][svg]") {
+    const auto lowered = lower_capture("browser-capture-svg-icons");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    const auto* wave = vector_from(root, "M1 15 L5 3 L9 13 L13 1 L17 11 L23 6");
+    REQUIRE(wave != nullptr);
+
+    // Containment, so an editor grabbing the icon moves its geometry with it.
+    const auto* icon = find_node(root, [wave](const IRNode& node) {
+        return attribute(node, "source_tag") == "svg" &&
+               std::any_of(node.children.begin(), node.children.end(),
+                           [wave](const IRNode& child) {
+                               return &child == wave;
+                           });
+    });
+    REQUIRE(icon != nullptr);
+    CHECK(attribute(*icon, "svg_shapes") == "2");
+    CHECK(attribute(*icon, "paint_class") == "native");
+
+    // The shapes share ONE user-coordinate space, so they share ONE box: the
+    // `<svg>`'s. Sized to its own bounds instead, each path would rescale by a
+    // different factor and the icon would come apart. Offsets are relative to
+    // that parent, so the vector node sits exactly on it.
+    REQUIRE(wave->style.width);
+    REQUIRE(wave->style.height);
+    CHECK(*wave->style.width == Catch::Approx(54.0));
+    CHECK(*wave->style.height == Catch::Approx(36.0));
+    REQUIRE(wave->style.left);
+    REQUIRE(wave->style.top);
+    CHECK(*wave->style.left == Catch::Approx(0.0));
+    CHECK(*wave->style.top == Catch::Approx(0.0));
+
+    // The geometry is drawn, so it must not ALSO be counted as pooled away.
+    CHECK(attribute(root, "native_svg_shapes") == "8");
+}
+
 TEST_CASE("canvas and image elements classify away from native",
           "[browser-capture][native-lowering]") {
     // nodes: 0 #document, 1 HTML, 2 BODY, 3 CANVAS, 4 IMG, 5 DIV(url bg)
@@ -954,6 +1355,88 @@ TEST_CASE("canvas and image elements classify away from native",
     });
     REQUIRE(image != nullptr);
     CHECK(attribute(*image, "src") == "logo.png");
+}
+
+TEST_CASE("a fallback that carries no raster says it paints nothing",
+          "[browser-capture][native-lowering]") {
+    // The classification is honest and the RENDER is empty: nothing attaches a
+    // raster to a fallback node, so the frame it emits paints only whatever
+    // background the element's own styles carry — for a `<canvas>`, nothing.
+    // Left at that, the node is counted among the lowered and reads downstream
+    // as handled by a capture. It has to say otherwise on its face.
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,6]",
+            .node_types = "[9,1,1,1]",
+            .parents = "[-1,0,1,2]",
+            .attributes = "[[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14]]",
+            .bounds = "[[0,0,200,100],[0,0,200,100],[0,0,200,100],"
+                      "[0,0,40,20]]",
+            .paint_orders = "[0,1,1,2]",
+        },
+        "unpainted-fallback");
+    const auto* canvas = find_node(lowered.root, [](const IRNode& node) {
+        return attribute(node, "capture_fallback_element") == "canvas";
+    });
+    REQUIRE(canvas != nullptr);
+    CHECK(attribute(*canvas, "unpainted") == "true");
+    // 40x20 of it, and nothing else in the document is unpainted.
+    CHECK(lowered.counts.unpainted_fallback_area == 800.0);
+
+    // A node that CAN be drawn from styles must not be tarred with it, or the
+    // number stops meaning anything.
+    const auto* body = find_node(lowered.root, [](const IRNode& node) {
+        return attribute(node, "source_tag") == "body";
+    });
+    REQUIRE(body != nullptr);
+    CHECK(body->attributes.count("unpainted") == 0);
+}
+
+TEST_CASE("unpainted area separates an icon-sized hole from a panel-sized one",
+          "[browser-capture][native-lowering]") {
+    // The count cannot rank these and the area can, which is the whole reason
+    // the area exists. Measured on the real corpus: forge's EIGHTEEN fallback
+    // nodes are inline `<svg>` icons covering 0.4% of the panel, while SPECTR's
+    // TWO are full-window `<canvas>` elements covering it twice over. Read as
+    // counts, the eighteen look nine times worse than the two.
+    const auto icons = lower_snapshot(
+        {
+            .node_names = "[0,1,2,4,4,4]",
+            .node_types = "[9,1,1,1,1,1]",
+            .parents = "[-1,0,1,2,2,2]",
+            .attributes = "[[],[],[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3,4,5]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14],[11,14],[11,14]]",
+            .bounds = "[[0,0,400,200],[0,0,400,200],[0,0,400,200],"
+                      "[0,0,16,16],[20,0,16,16],[40,0,16,16]]",
+            .paint_orders = "[0,1,1,2,3,4]",
+        },
+        "unpainted-icons");
+    const auto panel = lower_snapshot(
+        {
+            .node_names = "[0,1,2,6]",
+            .node_types = "[9,1,1,1]",
+            .parents = "[-1,0,1,2]",
+            .attributes = "[[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14]]",
+            .bounds = "[[0,0,400,200],[0,0,400,200],[0,0,400,200],"
+                      "[0,0,400,200]]",
+            .paint_orders = "[0,1,1,2]",
+        },
+        "unpainted-panel");
+
+    // Three holes against one: the count ranks the icons as the worse design.
+    CHECK(icons.counts.element_capture_fallback == 3);
+    CHECK(panel.counts.element_capture_fallback == 1);
+    // The area ranks them the other way round, which is the true one — 768 px²
+    // of a 80,000 px² document against all 80,000 of it.
+    CHECK(icons.counts.unpainted_fallback_area == 768.0);
+    CHECK(panel.counts.unpainted_fallback_area == 80000.0);
+    CHECK(panel.counts.unpainted_fallback_area >
+          icons.counts.unpainted_fallback_area * 100.0);
 }
 
 TEST_CASE("every element whose pixels are not CSS is captured, not styled",
@@ -1322,6 +1805,11 @@ TEST_CASE("a rotated element is not reported as drawn",
     //
     // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV rotated 45°,
     //        4 SPAN inside it, 5 DIV scaled 2×
+    //
+    // The rotated DIV carries a solid background and a shadow, because that is
+    // the case the classification exists for: an element whose OWN styles would
+    // paint the bounding box. A rotated `<canvas>` proves nothing here — it has
+    // no fill to leak.
     const auto lowered = lower_snapshot(
         {
             .node_names = "[0,1,2,3,49,3]",
@@ -1329,13 +1817,15 @@ TEST_CASE("a rotated element is not reported as drawn",
             .parents = "[-1,0,1,2,3,2]",
             .attributes = "[[],[],[],[],[],[]]",
             .layout_nodes = "[0,1,2,3,4,5]",
-            .styles = "[[14,11],[14,11],[14,11],[14,47],[14,11],[14,48]]",
+            .styles = "[[14,11,11,11],[14,11,11,11],[14,11,11,11],"
+                      "[14,47,31,33],[14,11,11,11],[14,48,11,11]]",
             .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
                       "[157.5625,157.5625,84.875,84.875],"
                       "[163.21875,161.8125,27.84375,27.828125],"
                       "[95,35,100,100]]",
             .paint_orders = "[0,1,1,2,3,4]",
-            .computed_names = R"(["display","transform"])",
+            .computed_names =
+                R"(["display","transform","background-color","box-shadow"])",
         },
         "rotated");
     const auto& root = lowered.root;
@@ -1352,6 +1842,19 @@ TEST_CASE("a rotated element is not reported as drawn",
     REQUIRE(rotated != nullptr);
     CHECK(attribute(*rotated, "capture_fallback_reason") == "transform");
 
+    // `unpainted` is a claim about pixels, so the node has to be stripped of
+    // the paint the claim denies. Carrying the fill and the shadow through
+    // leaves a consumer painting them into the bounding box — the exact
+    // 3.7×-the-ink outline this classification exists to refuse — while the
+    // census reports the area as a hole nothing drew.
+    CHECK(attribute(*rotated, "unpainted") == "true");
+    CHECK_FALSE(rotated->style.background_color.has_value());
+    CHECK(rotated->style.box_shadow.empty());
+    // The hole stays findable: geometry and ordering are what let a consumer
+    // rank it and a human locate it.
+    CHECK(rotated->style.width.has_value());
+    CHECK(rotated->style.height.has_value());
+
     // A 2× scale stays native, because ITS bounding box really is its shape.
     // This is why the assumption reads as true until something rotates, so it
     // is pinned rather than left to be rediscovered.
@@ -1361,6 +1864,76 @@ TEST_CASE("a rotated element is not reported as drawn",
                node.style.width && *node.style.width == 100.0f;
     });
     REQUIRE(scaled != nullptr);
+    // This DIV stays a fallback for TWO independent reasons — 45° is the angle
+    // whose bounding box does not determine its rectangle, and the SPAN inside
+    // it would have to be un-pooled. The case below separates them.
+    CHECK(lowered.counts.rotation_recovered == 0);
+}
+
+TEST_CASE("a pure rotation recovers its own box and angle",
+          "[browser-capture][native-lowering]") {
+    // A rotation is rigid, so the bounding box has not destroyed the shape:
+    // `aabb_w = W·cos + H·sin` and `aabb_h = W·sin + H·cos` solve for the
+    // rectangle, and the rotated rectangle's centroid IS the box's centre
+    // whatever the element pivoted about. Drawing it is strictly better than
+    // refusing it — the alternative is a hole where the design has a line.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY,
+    //        3 DIV 100×20 rotated 30°, childless — recovered
+    //        4 DIV rotated 45°, childless      — refused, ambiguous angle
+    //        5 DIV rotated 30° with a child    — refused, subtree in the way
+    //        6 SPAN inside 5
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,3,3,49]",
+            .node_types = "[9,1,1,1,1,1,1]",
+            .parents = "[-1,0,1,2,2,2,5]",
+            .attributes = "[[],[],[],[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3,4,5,6]",
+            .styles = "[[14,11],[14,11],[14,11],[14,61],[14,47],[14,61],"
+                      "[14,11]]",
+            .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
+                      "[100,50,96.6025,67.32051],"
+                      "[200,200,84.875,84.875],"
+                      "[10,300,96.6025,67.32051],"
+                      "[20,310,30,20]]",
+            .paint_orders = "[0,1,1,2,3,4,5]",
+            .computed_names = R"(["display","transform"])",
+        },
+        "recovered-rotation");
+    const auto& root = lowered.root;
+
+    CHECK(lowered.counts.rotation_recovered == 1);
+    const auto* bar = find_node(root, [](const IRNode& node) {
+        return node.style.transform.has_value();
+    });
+    REQUIRE(bar != nullptr);
+    CHECK(attribute(*bar, "paint_class") == "native");
+    CHECK(bar->attributes.count("unpainted") == 0);
+    // The authored rectangle, back out of an 96.6×67.3 bounding box.
+    REQUIRE(bar->style.width.has_value());
+    REQUIRE(bar->style.height.has_value());
+    CHECK_THAT(*bar->style.width, Catch::Matchers::WithinAbs(100.0, 0.05));
+    CHECK_THAT(*bar->style.height, Catch::Matchers::WithinAbs(20.0, 0.05));
+    REQUIRE(bar->style.transform.has_value());
+    CHECK(bar->style.transform->rfind("rotate(30", 0) == 0);
+    // Centred on the box Chrome reported, which is what makes `transform-origin`
+    // something this recovery never has to know.
+    REQUIRE(bar->style.left.has_value());
+    REQUIRE(bar->style.top.has_value());
+    CHECK_THAT(*bar->style.left + *bar->style.width * 0.5f,
+               Catch::Matchers::WithinAbs(100.0 + 96.6025 / 2.0, 0.05));
+    CHECK_THAT(*bar->style.top + *bar->style.height * 0.5f,
+               Catch::Matchers::WithinAbs(50.0 + 67.32051 / 2.0, 0.05));
+
+    // Both refusals, each for its own reason. At 45° a 100×20 bar and a 20×100
+    // bar have the SAME bounding box, so the width is not recoverable and a
+    // guess would be a fabricated shape rather than a missing one. And a
+    // rotated element with a subtree cannot be un-refused without un-pooling
+    // children whose own boxes are bounding boxes in the rotated frame.
+    CHECK(lowered.counts.element_capture_fallback == 2);
+    CHECK(lowered.counts.pooled_into_fallback == 1);
+    CHECK(lowered.counts.native == 3);   // html, body, and the recovered bar
 }
 
 TEST_CASE("a parentIndex cycle terminates instead of hanging the importer",
@@ -1730,6 +2303,53 @@ TEST_CASE("a shape clip the rectangle cannot carry is counted as lost",
     CHECK(attribute(*inner, "clip_inexpressible") == "clip-path");
 }
 
+TEST_CASE("a rotated node carries no clip rectangle",
+          "[browser-capture][native-lowering][clip-model]") {
+    // The renderer applies a node's clip INSIDE that node's own transform, so a
+    // rectangle written onto a node that rotates gets rotated with it. A clip
+    // meant to trim the bar where it meets the panel edge then cuts across the
+    // bar's length instead, and an envelope's attack ramp stops partway with a
+    // clean diagonal end — a shape defect, not a clipping one, which is why the
+    // rectangle is withheld and the loss is booked by name.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY,
+    //        3 DIV.wrap (overflow: hidden, 100×100 at 10,10)
+    //        4 DIV.leaf, a 100×20 bar rotated 30° whose bounding box runs past
+    //          the wrap's right edge, so CSS really does cut it
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,3]",
+            .node_types = "[9,1,1,1,1]",
+            .parents = "[-1,0,1,2,3]",
+            .attributes = "[[],[],[],[23,24],[23,26]]",
+            .layout_nodes = "[0,1,2,3,4]",
+            .styles = "[[50,52,11,11,55,55,55,55],[50,52,11,11,55,55,55,55],"
+                      "[50,52,11,11,55,55,55,55],[51,52,11,11,55,55,55,55],"
+                      "[50,52,61,11,55,55,55,55]]",
+            .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
+                      "[10,10,100,100],[60,30,96.6025,67.32051]]",
+            .paint_orders = "[0,1,1,2,3]",
+            .computed_names = std::string(kClipProperties),
+        },
+        "clip-rotated");
+
+    CHECK(lowered.counts.rotation_recovered == 1);
+    const auto* bar = find_named(lowered.root, "div.leaf");
+    REQUIRE(bar != nullptr);
+    REQUIRE(bar->style.transform.has_value());
+    CHECK(bar->style.transform->rfind("rotate(30", 0) == 0);
+    CHECK_THAT(*bar->style.width, Catch::Matchers::WithinAbs(100.0, 0.05));
+    CHECK_FALSE(bar->style.clip_rect.has_value());
+
+    // Said out loud rather than left as a silent omission: the node keeps ink
+    // the browser cut, and the reason is the rotation, not a missing rectangle
+    // someone could go add.
+    CHECK(lowered.counts.clip_lost == 1);
+    CHECK(lowered.counts.clip_over_applied == 0);
+    CHECK(attribute(*bar, "clip_lost") == "1");
+    CHECK(attribute(*bar, "clip_inexpressible") == "rotate");
+}
+
 TEST_CASE("the panel frame's crop is not counted as a clip disagreement",
           "[browser-capture][native-lowering][clip-model]") {
     // The root the caller lowers into is a window onto the page, and the crop
@@ -1859,6 +2479,119 @@ TEST_CASE("a real capture where the clip agrees reports no disagreement",
     CHECK(attribute(*bar, "capture_fallback_reason") == "transform");
 }
 
+// ── Generated content, against Chrome's own capture ─────────────────────────
+//
+// `generated-content/g.html` declares `content` on five pseudo-elements: two
+// strings, one empty, one `counter()`, one `attr()`. Every expected string
+// below is the one CHROME put in the snapshot's layout text, never one this
+// file computed — Chrome resolves counters and attribute references before it
+// serializes, so the resolved forms arrive as ordinary text runs.
+
+TEST_CASE("a pseudo-element's generated text is drawn, not dropped",
+          "[browser-capture][native-lowering][generated-content]") {
+    // A pseudo-element emits one layout row for its box and one more per
+    // generated text run, and EVERY one of them maps back to the pseudo's own
+    // element node. A text run identified by its DOM node type is therefore
+    // never found here, and the string is lowered as an empty frame.
+    const auto lowered = lower_capture("browser-capture-generated-content");
+    REQUIRE(lowered.error.empty());
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    const auto* before = find_by_text(root, "BEFORE");
+    REQUIRE(before != nullptr);
+    const auto* after = find_by_text(root, "AFT");
+    REQUIRE(after != nullptr);
+
+    // The text belongs to the pseudo-element, not to the element that carries
+    // the pseudo: the pseudo owns the colour and font the run is drawn with.
+    const auto* label = find_named(root, "div#label");
+    REQUIRE(label != nullptr);
+    CHECK(contains(*label, before));
+    CHECK(before->style.color.value_or("") == "rgb(255, 209, 102)");
+    CHECK(after->style.color.value_or("") == "rgb(6, 214, 160)");
+
+    // Chrome's own box for the run, composed back from the parent-relative
+    // offsets: `[24, 20, 82.25, 23]` in the snapshot.
+    const auto all = composed(root);
+    const auto* placed = placed_for(all, before);
+    REQUIRE(placed != nullptr);
+    CHECK(placed->left == 24.0);
+    CHECK(placed->top == 20.0);
+    CHECK(*before->style.width == 82.25f);
+
+    // A text run does not repaint its element's box — the pseudo's own frame
+    // already drew it, and a second copy is a slab behind every label.
+    CHECK_FALSE(before->style.background_color.has_value());
+}
+
+TEST_CASE("Chrome's resolved counters and attribute text are lowered",
+          "[browser-capture][native-lowering][generated-content]") {
+    // `counter(n) ". "` and `attr(data-tag)` never have to be evaluated here:
+    // Chrome resolved them into text runs before serializing, so lowering the
+    // runs gets both value forms for free. The strings asserted are Chrome's.
+    const auto lowered = lower_capture("browser-capture-generated-content");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    // One counter renders as TWO runs — the number and the ". " suffix — so a
+    // pseudo with several runs must yield several text nodes, not just one.
+    REQUIRE(find_by_text(root, "1") != nullptr);
+    REQUIRE(find_by_text(root, "2") != nullptr);
+    CHECK(count_nodes(root, [](const IRNode& node) {
+              return node.type == "text" && node.text_content == ". ";
+          }) == 2);
+    REQUIRE(find_by_text(root, "ATTR-VALUE") != nullptr);
+
+    // Runs of one pseudo-element are separate nodes with separate anchors —
+    // sharing one would apply a stored edit to whichever the walk reached
+    // first.
+    std::set<std::string> unique;
+    int lowered_nodes = 0;
+    for (const auto& entry : composed(root)) {
+        if (entry.node->attributes.count("paint_class") == 0) continue;
+        ++lowered_nodes;
+        REQUIRE(entry.node->stable_anchor_id);
+        unique.insert(*entry.node->stable_anchor_id);
+    }
+    CHECK(static_cast<int>(unique.size()) == lowered_nodes);
+
+    // The anchor names the run as a child of the pseudo that generated it, so
+    // the tweaks layer can select the whole pseudo by prefix.
+    const auto* one = find_by_text(root, "1");
+    CHECK(one->stable_anchor_id->find("/::before[0]/#text[0]") !=
+          std::string::npos);
+}
+
+TEST_CASE("an empty content string generates a box and no text",
+          "[browser-capture][native-lowering][generated-content]") {
+    // The decorative idiom — `content: ""` plus a background — is what almost
+    // every generated-content declaration in a real panel is. It must stay a
+    // painted frame: a predicate that turned pseudo-elements into text nodes
+    // wholesale would lose the dot this design draws. This is the control that
+    // keeps the two cases above from passing by treating every pseudo as text.
+    const auto lowered = lower_capture("browser-capture-generated-content");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    const auto* dot = find_named(root, "div#dot");
+    REQUIRE(dot != nullptr);
+    REQUIRE(dot->children.size() == 1);
+    const auto& generated = dot->children.front();
+    CHECK(generated.name == "::before");
+    CHECK(generated.type == "frame");
+    CHECK(generated.text_content.empty());
+    CHECK(generated.style.background_color.value_or("") ==
+          "rgb(239, 71, 111)");
+
+    // And an ordinary element that happens to contain text is still a frame
+    // with a `#text` child, not a text node itself.
+    const auto* list_item = find_named(root, "li");
+    REQUIRE(list_item != nullptr);
+    CHECK(list_item->type == "frame");
+    CHECK(find_by_text(*list_item, "alpha") != nullptr);
+}
+
 TEST_CASE("the reorder audit counts a real inversion and only a visible one",
           "[browser-capture][native-lowering]") {
     // The other cases assert this diagnostic is zero, which a counter wired to
@@ -1870,12 +2603,22 @@ TEST_CASE("the reorder audit counts a real inversion and only a visible one",
     //        5 DIV sibling of outer. Chrome paints outer(2), sibling(3),
     //        inner(4); nesting composes outer, inner, sibling — so the
     //        inner/sibling pair is emitted against Chrome's order.
+    // The inner node carries a background COLOUR, because the audit counts an
+    // inversion only where the node that ends up on top actually puts ink on
+    // the canvas. A bare positioning div reordered over a painted sibling is an
+    // empty rectangle in front of a filled one — nothing a painter can show —
+    // so a fixture of style-less divs would drive this to zero and assert
+    // nothing. Index 31 is "rgb(9, 11, 16)".
     const std::string names = "[0,1,2,3,3,3]";
     const std::string types = "[9,1,1,1,1,1]";
     const std::string parents = "[-1,0,1,2,3,2]";
     const std::string attributes = "[[],[],[],[],[],[]]";
     const std::string styles =
-        "[[11,14],[11,14],[11,14],[11,14],[11,14],[11,14]]";
+        "[[11,11,14],[11,11,14],[11,11,14],[11,11,14],[31,11,14],[11,11,14]]";
+    const std::string inkless_styles =
+        "[[11,11,14],[11,11,14],[11,11,14],[11,11,14],[11,11,14],[11,11,14]]";
+    const std::string paint_names =
+        R"(["background-color","background-image","display"])";
     const std::string paint_orders = "[0,1,1,2,4,3]";
 
     const auto overlapping = lower_snapshot(
@@ -1889,11 +2632,37 @@ TEST_CASE("the reorder audit counts a real inversion and only a visible one",
             .bounds = "[[0,0,300,300],[0,0,300,300],[0,0,300,300],"
                       "[20,20,100,100],[40,40,60,60],[60,60,100,100]]",
             .paint_orders = paint_orders,
+            .computed_names = paint_names,
         },
         "reorder-visible");
     CHECK(overlapping.counts.lowered == 5);
     CHECK(overlapping.counts.hoisted_escapes == 0);  // not the same effect
     CHECK(overlapping.counts.overlapping_reorders == 1);
+    // Named, not just counted: a bare total says a panel can paint wrong
+    // without saying where, and finding the pair by eye means diffing two
+    // renders.
+    CHECK(overlapping.counts.overlapping_reorder_pairs.size() == 1);
+
+    // The SAME inversion, over the same overlapping boxes, with the node that
+    // lands on top painting nothing. The painter has no ink to show out of
+    // order, so this must not count — which is what stops the number being a
+    // tally of how hierarchical a document happens to be.
+    const auto inkless = lower_snapshot(
+        {
+            .node_names = names,
+            .node_types = types,
+            .parents = parents,
+            .attributes = attributes,
+            .layout_nodes = "[0,1,2,3,4,5]",
+            .styles = inkless_styles,
+            .bounds = "[[0,0,300,300],[0,0,300,300],[0,0,300,300],"
+                      "[20,20,100,100],[40,40,60,60],[60,60,100,100]]",
+            .paint_orders = paint_orders,
+            .computed_names = paint_names,
+        },
+        "reorder-inkless");
+    CHECK(inkless.counts.lowered == 5);
+    CHECK(inkless.counts.overlapping_reorders == 0);
 
     // The identical inversion with the two boxes moved apart. A painter cannot
     // show a reorder of disjoint boxes, so the audit must NOT count it — which

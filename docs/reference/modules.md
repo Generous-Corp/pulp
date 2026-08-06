@@ -183,7 +183,7 @@ eval.evaluate("x * 100 + 10");  // 60.0
 | Primes | `primes.hpp` | `is_prime(97)`, `generate_prime(32)`, `sieve_primes(1000)` |
 | Range | `range.hpp` | `Range<float>(0, 1).contains(0.5)`, intersection, union |
 | Scope Guard | `scope_guard.hpp` | `PULP_ON_SCOPE_EXIT(file.close())` |
-| Sockets | `socket.hpp` | TCP/UDP client and server for networked audio |
+| Sockets | `socket.hpp` | TCP/UDP plus credential-bearing OS-local streams; local endpoints require an owner-private parent and expose kernel peer credentials |
 | System Info | `system.hpp` | CPU model, core count, RAM, OS, SIMD features (runtime detected) |
 | Temp File | `temporary_file.hpp` | Auto-deleting temp file — `TemporaryFile tmp(".wav")` |
 | Text Diff | `text_diff.hpp` | Line-by-line diff with formatted +/- output |
@@ -200,7 +200,14 @@ Event loop, timers, IPC, and process management.
 
 ### IPC — Inter-process communication
 
-Length-prefixed messages over named pipes or TCP sockets. Use for crash-isolated plugin scanning, multi-process architectures, standalone↔plugin communication.
+Length-prefixed messages over named pipes, TCP sockets, or OS-local sockets. Use
+named pipes for existing worker protocols, TCP only where a network carrier is
+actually intended, and `LocalSocket` when a local security boundary needs
+kernel-observed peer credentials. Local endpoints require an absolute path in
+an owner-owned `0700` directory with no extended ACL, refuse to replace an
+existing filesystem object, are created `0600`, and are removed with the owning
+listener. macOS additionally exposes a peer audit-token process generation;
+unsupported identity-verification platforms fail closed.
 
 ```cpp
 #include <pulp/events/interprocess_connection.hpp>
@@ -215,6 +222,17 @@ InterprocessConnection client;
 client.connect("my_pipe", IpcTransport::NamedPipe);
 client.send_message("scan_plugin:/path/to/plugin.vst3");
 ```
+
+`LocalSocket` does not make a peer authorized. It supplies carrier evidence
+only. The capability-control verifier combines accepted-socket UID, GID, PID,
+and macOS audit-token PID generation with the live process's validated code
+signature, identifier, Team ID or per-artifact ad-hoc CDHash. The broker must
+still exact-match that observation against launcher- or policy-owned expected
+identity before minting a verified peer. Named-pipe and TCP peers cannot be
+passed to that verifier. The installed `pulp::inspect-control` component owns
+the resulting identity, registration, and grant state in a dormant
+`ControlBroker`; constructing it never opens an endpoint or activates a runtime
+bridge.
 
 ### Child Process Pool — Crash-isolated workers
 
@@ -1446,6 +1464,32 @@ and velocity edits carry both snapshots with the same note identity.
 have no transaction lowerer yet: granular
 note commands own that later boundary, so this editor API does not disguise an
 O(clip) `ReplaceNoteContent` rewrite as an interactive note edit.
+
+`undo_gesture_budget` answers how long a gesture can stream before the document
+refuses it, which an editor needs *before* it opens one. A gesture coalesces
+every `Update` into a single undo group, that group stays open until its `End`,
+and only closed groups are evictable — so the charge accumulates with nothing
+able to reclaim it, and past `UndoLimits::max_retained_bytes` the next step comes
+back `ConflictCode::UndoFull`: a drag that stops responding rather than one that
+degrades. The answer is `max_retained_bytes / step_bytes` and does not depend on
+what the undo stack already holds, because a session has one open gesture at a
+time, so every group present when one opens is closed and evictable.
+
+```cpp
+#include <pulp/timeline_editor/gesture_budget.hpp>
+
+// Priced before the gesture opens, from the step the drag is about to repeat.
+const auto budget = undo_gesture_budget(limits.undo, forward, inverse);
+if (budget.steps < expected_frames)
+    hold_the_edit_locally_and_commit_one_single_on_release();
+else
+    stream_updates_into_one_open_group();
+```
+
+A `GesturePhase::Single` edit is closed on admission and therefore immediately
+evictable, so the fallback branch has no step ceiling at all — only undo depth.
+This is the undo ceiling alone: `JournalLimits` bounds the same gesture
+independently, has no automatic eviction, and can bind first.
 
 `ScriptedUiHost<Intent>` is a host whose playhead is written by the caller and
 which keeps what a view emitted, so an editor is testable with no audio and no

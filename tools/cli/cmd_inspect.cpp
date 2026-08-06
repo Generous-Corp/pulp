@@ -1,5 +1,8 @@
 // cmd_inspect.cpp — authenticated client for explicitly enabled inspector sessions
 
+#include "cmd_inspect_screenshot.hpp"
+#include "inspector_shipping_report.hpp"
+
 #include <pulp/inspect/client.hpp>
 #include <pulp/inspect/discovery.hpp>
 
@@ -10,6 +13,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -160,10 +164,18 @@ std::string risk_id(InspectorCapabilityRisk risk) {
     switch (risk) {
     case InspectorCapabilityRisk::Observe:
         return "observe";
+    case InspectorCapabilityRisk::Sensitive:
+        return "sensitive";
+    case InspectorCapabilityRisk::StreamingSensitive:
+        return "streaming-sensitive";
+    case InspectorCapabilityRisk::ResourceConsuming:
+        return "resource-consuming";
     case InspectorCapabilityRisk::Control:
         return "control";
     case InspectorCapabilityRisk::HighRisk:
         return "high-risk";
+    case InspectorCapabilityRisk::Critical:
+        return "critical";
     case InspectorCapabilityRisk::Unavailable:
         return "unavailable";
     }
@@ -242,6 +254,7 @@ int cmd_inspect(const std::vector<std::string>& args) {
     std::string command;
     std::string params = "{}";
     std::string output_file;
+    std::string screenshot_output;
     std::string parameter_id_text;
     std::string parameter_value_text;
     std::string midi_kind;
@@ -262,10 +275,45 @@ int cmd_inspect(const std::vector<std::string>& args) {
         verb = args.front();
         first_option = 1;
         if (verb != "profiles" && verb != "list" && verb != "capabilities" && verb != "doctor" &&
+            verb != "audit" &&
+            verb != "screenshot" &&
             verb != "set-parameter" && verb != "inject-midi" && verb != "set-transport") {
             std::cerr << "Error: unknown inspect command: " << verb << "\n";
             return 2;
         }
+    }
+
+    if (verb == "audit") {
+        std::filesystem::path artifact;
+        for (std::size_t index = first_option; index < args.size(); ++index) {
+            if (args[index] == "--json") {
+                json_output = true;
+            } else if (args[index] == "--help" || args[index] == "-h") {
+                std::cout << "Usage: pulp inspect audit ARTIFACT [--json]\n"
+                             "Verify the manifest, profile, digest, and linked "
+                             "control surfaces without activating the artifact.\n";
+                return 0;
+            } else if (args[index].starts_with("-")) {
+                std::cerr << "Error: unknown inspect audit argument: "
+                          << args[index] << "\n";
+                return 2;
+            } else if (!artifact.empty()) {
+                std::cerr << "Error: inspect audit accepts exactly one artifact\n";
+                return 2;
+            } else {
+                artifact = args[index];
+            }
+        }
+        if (artifact.empty()) {
+            std::cerr << "Error: inspect audit requires ARTIFACT\n";
+            return 2;
+        }
+        const auto report =
+            pulp::cli::inspector_shipping::audit_artifact(artifact);
+        std::cout << (json_output
+            ? pulp::cli::inspector_shipping::audit_json(report) + "\n"
+            : pulp::cli::inspector_shipping::audit_human(report));
+        return report.complete ? 0 : 1;
     }
 
     for (std::size_t index = first_option; index < args.size(); ++index) {
@@ -274,6 +322,8 @@ int cmd_inspect(const std::vector<std::string>& args) {
             std::cout
                 << "pulp inspect — authenticated client for explicitly enabled sessions\n\n"
                 << "Usage: pulp inspect <profiles|list|capabilities|doctor> [options]\n"
+                << "       pulp inspect audit ARTIFACT [--json]\n"
+                << "       pulp inspect screenshot --out FILE [session options] [--json]\n"
                 << "       pulp inspect set-parameter --id ID --value VALUE --session ID "
                    "--instance ID --publication ID\n"
                 << "       pulp inspect inject-midi --kind note_on|note_off --channel 1..16 --note "
@@ -301,7 +351,8 @@ int cmd_inspect(const std::vector<std::string>& args) {
                 << "  --tempo-bpm N     Set standalone tempo from 20 to 400 BPM\n"
                 << "  --command METHOD  Send one command and print its result\n"
                 << "  --params JSON     JSON params for --command (default: {})\n"
-                << "  --output FILE     Write the one-shot result to FILE\n"
+                << "  --output FILE     Write a legacy one-shot result to FILE\n"
+                << "  --out FILE        Write screenshot PNG bytes to FILE\n"
                 << "  --json            Stable JSON output for named commands\n\n"
                 << "Normal launches do not start an inspector endpoint. A standalone\n"
                 << "must be explicitly launched with an inspector profile. Discovery is\n"
@@ -372,6 +423,13 @@ int cmd_inspect(const std::vector<std::string>& args) {
         } else if (arg == "--output") {
             if (!require_arg_value(args, index, "--output", output_file))
                 return 2;
+        } else if (arg == "--out") {
+            if (verb != "screenshot") {
+                std::cerr << "Error: --out requires screenshot\n";
+                return 2;
+            }
+            if (!require_arg_value(args, index, "--out", screenshot_output))
+                return 2;
         } else if (arg == "--json") {
             json_output = true;
         } else {
@@ -403,6 +461,10 @@ int cmd_inspect(const std::vector<std::string>& args) {
     if (!verb.empty() && (!command.empty() || params_provided || !output_file.empty())) {
         std::cerr << "Error: named inspect commands do not accept legacy "
                      "--command/--params/--output options\n";
+        return 2;
+    }
+    if (verb == "screenshot" && screenshot_output.empty()) {
+        std::cerr << "Error: screenshot requires --out FILE\n";
         return 2;
     }
 
@@ -707,6 +769,8 @@ int cmd_inspect(const std::vector<std::string>& args) {
     const auto selected = select_inspector_session(records, session_id, instance_id, publication_id,
                                                    &selection_error);
     if (!selected) {
+        if (verb == "screenshot")
+            return report_inspect_screenshot_selection_failure(selection_error, json_output);
         std::cerr << "Error: " << selection_error;
         if (!host.empty() || port != 0 || !session_id.empty() || !instance_id.empty() ||
             !publication_id.empty()) {
@@ -789,6 +853,10 @@ int cmd_inspect(const std::vector<std::string>& args) {
             std::cout << "Updated standalone transport\n";
         }
         return 0;
+    }
+
+    if (verb == "screenshot") {
+        return run_inspect_screenshot(*selected, discovery, screenshot_output, json_output);
     }
 
     auto& status = command.empty() ? std::cout : std::cerr;

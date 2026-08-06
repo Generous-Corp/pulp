@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="styles.css">
+</head><body style="margin:0">
+  <div class="pulp-root" data-theme="dark" style="
+    padding:32px;width:760px;height:500px;
+    --surface-app:#090824;
+    --surface-panel:#11113a;
+    --surface-raised:#1b1b52;
+    --surface-sunken:#06061b;
+    --text-strong:#f7f3ff;
+    --text:#d9d4f2;
+    --text-muted:#9ea1d2;
+    --text-faint:#676b9d;
+    --accent:#58f0ff;
+    --accent-soft:#b897ff;
+    --accent-line:#79fbff;
+    --accent-ring:#d6b8ff;
+    --line:#34366e;
+    --line-soft:#242654;
+    --line-strong:#6064a8;
+    --control-line:#7e83c8;
+    --signal-low:#7a70ff;
+    --signal-high:#65fff1;
+    --data-1:#ffcf6e;
+    --ok:#66ffd1;
+    --warn:#ffd36a;
+    --err:#ff6c9f">
+    <div class="pulp-panel" style="
+      position:relative;overflow:hidden;height:100%;box-sizing:border-box;
+      padding:30px;border-radius:var(--radius-lg);
+      background:
+        radial-gradient(circle at 18% 18%,color-mix(in oklab,var(--accent) 22%,transparent),transparent 38%),
+        radial-gradient(circle at 82% 78%,color-mix(in oklab,var(--accent-soft) 20%,transparent),transparent 42%),
+        linear-gradient(145deg,var(--surface-raised),var(--surface-panel) 48%,var(--surface-sunken));
+      box-shadow:
+        inset 0 1px 0 color-mix(in oklab,var(--text-strong) 18%,transparent),
+        inset 0 -18px 50px color-mix(in oklab,var(--surface-sunken) 62%,transparent),
+        0 22px 60px color-mix(in oklab,var(--surface-sunken) 82%,transparent);
+      border:1px solid var(--line)">
+      <div style="
+        position:absolute;left:-70px;top:-90px;width:340px;height:300px;border-radius:50%;
+        filter:blur(70px);mix-blend-mode:screen;
+        background:radial-gradient(circle,color-mix(in oklab,var(--accent) 48%,transparent),transparent 70%)"></div>
+      <div style="
+        position:absolute;right:-80px;bottom:-70px;width:380px;height:280px;border-radius:50%;
+        filter:blur(82px);mix-blend-mode:plus-lighter;
+        background:radial-gradient(circle,color-mix(in oklab,var(--accent-soft) 42%,transparent),transparent 72%)"></div>
+
+      <div style="position:relative;z-index:1;display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <div class="pulp-eyebrow">noise burst resonator mallets</div>
+          <div class="pulp-heading" style="font-size:52px;line-height:.9;letter-spacing:0">POLYSTRIKE</div>
+        </div>
+        <div style="display:flex;gap:var(--space-2);align-items:center">
+          <div class="pulp-badge">TUNED</div>
+          <div class="pulp-badge">7 MACRO</div>
+        </div>
+      </div>
+
+      <div style="
+        position:relative;z-index:1;display:grid;grid-template-columns:1.05fr .95fr;
+        gap:26px;margin-top:24px;align-items:stretch">
+        <div style="
+          position:relative;overflow:hidden;border-radius:var(--radius-lg);
+          padding:24px 22px 20px;
+          background:
+            radial-gradient(circle at 50% 36%,color-mix(in oklab,var(--accent) 24%,transparent),transparent 44%),
+            linear-gradient(160deg,color-mix(in oklab,var(--surface-raised) 94%,var(--accent) 6%),var(--surface-panel));
+          border:1px solid var(--line-strong);
+          box-shadow:
+            inset 0 1px 0 color-mix(in oklab,var(--text-strong) 15%,transparent),
+            0 18px 42px color-mix(in oklab,var(--surface-sunken) 58%,transparent)">
+          <div style="
+            position:absolute;inset:18px;border-radius:28px;
+            background:
+              conic-gradient(from 45deg,color-mix(in oklab,var(--accent) 0%,transparent),color-mix(in oklab,var(--accent) 30%,transparent),color-mix(in oklab,var(--accent-soft) 28%,transparent),color-mix(in oklab,var(--accent) 0%,transparent));
+            filter:blur(24px);opacity:.75;mix-blend-mode:screen"></div>
+          <div style="position:relative;display:flex;justify-content:center">
+            <div class="pulp-knob" data-pulp-param="param_1" data-pulp-value="0.72">
+              <div class="dial" data-pulp-paint style="
+                width:126px;height:126px;
+                background:
+                  radial-gradient(circle at 34% 28%,color-mix(in oklab,var(--text-strong) 22%,transparent),transparent 26%),
+                  linear-gradient(145deg,color-mix(in oklab,var(--accent) 42%,var(--surface-raised)),color-mix(in oklab,var(--accent-soft) 34%,var(--surface-panel)));
+                border-color:var(--accent-line);
+                box-shadow:
+                  inset 0 1px 0 color-mix(in oklab,var(--text-strong) 26%,transparent),
+                  inset 0 -10px 24px color-mix(in oklab,var(--surface-sunken) 46%,transparent),
+                  0 0 42px color-mix(in oklab,var(--accent) 24%,transparent)"></div>
+              <div class="knob-label" style="font-size:var(--text-xs);color:var(--text-strong)">HARDNESS</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="
+          position:relative;overflow:hidden;border-radius:var(--radius-lg);
+          padding:18px;background:color-mix(in oklab,var(--surface-sunken) 62%,var(--surface-panel));
+          border:1px solid var(--line-soft);
+          box-shadow:inset 0 0 34px color-mix(in oklab,var(--surface-sunken) 80%,transparent)">
+          <div class="pulp-spectrum" style="height:154px;border-color:var(--line);background:
+            linear-gradient(180deg,color-mix(in oklab,var(--surface-panel) 86%,transparent),color-mix(in oklab,var(--surface-sunken) 90%,transparent))">
+            <div class="grid-x"></div><div class="grid-y"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-top:var(--space-3);gap:var(--space-3)">
+            <div class="pulp-knob" data-pulp-param="param_5" data-pulp-value="0.58">
+              <div class="dial" data-pulp-paint style="width:66px;height:66px;background:var(--surface-raised);border-color:var(--control-line)"></div>
+              <div class="knob-label">STRIKE</div>
+            </div>
+            <div class="pulp-knob" data-pulp-param="param_7" data-pulp-value="0.46">
+              <div class="dial" data-pulp-paint style="width:66px;height:66px;background:var(--surface-raised);border-color:var(--control-line)"></div>
+              <div class="knob-label">BITE</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="
+        position:relative;z-index:1;display:grid;grid-template-columns:repeat(4,1fr);
+        gap:18px;margin-top:22px">
+        <div style="
+          border-radius:var(--radius-md);padding:16px 12px;
+          background:color-mix(in oklab,var(--surface-raised) 78%,var(--surface-panel));
+          border:1px solid var(--line);box-shadow:0 10px 28px color-mix(in oklab,var(--surface-sunken) 42%,transparent)">
+          <div class="pulp-knob" data-pulp-param="param_2" data-pulp-value="0.64">
+            <div class="dial" data-pulp-paint style="width:70px;height:70px;background:var(--surface-panel);border-color:var(--control-line)"></div>
+            <div class="knob-label">RING</div>
+          </div>
+        </div>
+        <div style="
+          border-radius:var(--radius-md);padding:16px 12px;
+          background:color-mix(in oklab,var(--surface-raised) 78%,var(--surface-panel));
+          border:1px solid var(--line);box-shadow:0 10px 28px color-mix(in oklab,var(--surface-sunken) 42%,transparent)">
+          <div class="pulp-knob" data-pulp-param="param_3" data-pulp-value="0.52">
+            <div class="dial" data-pulp-paint style="width:70px;height:70px;background:var(--surface-panel);border-color:var(--control-line)"></div>
+            <div class="knob-label">DECAY</div>
+          </div>
+        </div>
+        <div style="
+          border-radius:var(--radius-md);padding:16px 12px;
+          background:color-mix(in oklab,var(--surface-raised) 78%,var(--surface-panel));
+          border:1px solid var(--line);box-shadow:0 10px 28px color-mix(in oklab,var(--surface-sunken) 42%,transparent)">
+          <div class="pulp-knob" data-pulp-param="param_4" data-pulp-value="0.38">
+            <div class="dial" data-pulp-paint style="width:70px;height:70px;background:var(--surface-panel);border-color:var(--control-line)"></div>
+            <div class="knob-label">RELEASE</div>
+          </div>
+        </div>
+        <div style="
+          border-radius:var(--radius-md);padding:16px 12px;
+          background:color-mix(in oklab,var(--surface-raised) 78%,var(--surface-panel));
+          border:1px solid var(--line);box-shadow:0 10px 28px color-mix(in oklab,var(--surface-sunken) 42%,transparent)">
+          <div class="pulp-knob" data-pulp-param="param_6" data-pulp-value="0.70">
+            <div class="dial" data-pulp-paint style="width:70px;height:70px;background:var(--surface-panel);border-color:var(--control-line)"></div>
+            <div class="knob-label">KEYTRACK</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body></html>

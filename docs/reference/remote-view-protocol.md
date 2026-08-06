@@ -6,10 +6,16 @@ A remote view is registered through
 connected `pulp::runtime::MessageChannel`, usually a `WebSocketChannel`
 connected to another process or machine.
 
-**Status:** **MVP** — parameter sync + input events + basic metadata are
-live. Paint-op streaming (canvas-command mirroring) is staged for a
+**Status:** **MVP** — read-only parameter observation + basic metadata are
+live. Input notifications are transport-visible but are not dispatched into
+the host's primary view. Paint-op streaming (canvas-command mirroring) is staged for a
 follow-up; clients render their own view tree today and the protocol
-is the coherent parameter-and-input bus that wires into it.
+is the observation bus that wires into it.
+
+The protocol grants no remote mutation authority. In particular,
+`view.param_set` is intentionally unsupported. A future writable remote surface
+must enter through Pulp's capability/grant controller; it must not add a direct
+StateStore write handler here.
 
 ## Transport
 
@@ -46,9 +52,8 @@ is the coherent parameter-and-input bus that wires into it.
 
 | Method | Payload | Response | Notes |
 |---|---|---|---|
-| `view.param_set` | `{id, normalized}` | `null` | Drive parameter automation from the remote UI; resolved into the shared `StateStore`. |
 | `view.param_get` | `{id}` | `{normalized}` | Cheap resync. |
-| `view.input` | `{kind, ...}` | `null` | Forwarded input event. `kind` is `"click" \| "key" \| "wheel" \| "text"`; the per-kind payload mirrors `pulp::view::input_events.hpp`. |
+| `view.input` | `{kind, ...}` | `null` | Reserved notification. The host currently logs and ignores it; it does not dispatch into the primary view. |
 
 ## Lifecycle
 
@@ -64,10 +69,8 @@ attach_remote_channel(WebSocketChannel::connect(...))
   │  ◄─────────────────────────────────
   │  view.metadata ────────────────────►
   │
-  ... per-frame param sync + input ...
-  │  ◄─── view.param_set ──────────────
+  ... parameter observation ...
   │   param_changed ──────────────────►
-  │  ◄─── view.input ──────────────────
   │
   (bridge is closed)
   │  view.close ───────────────────────►
@@ -106,14 +109,16 @@ attach_remote_channel(WebSocketChannel::connect(...))
 
 `tools/mcp/pulp_mcp.cpp` is the repo-level MCP server today. It does not yet
 expose per-plugin remote-view tools, but a host-side MCP wrapper can use this
-protocol to attach to a running plugin and inspect / drive its editor:
+protocol to attach to a running plugin for read-only inspection:
 
 - `view_attach` — connects a `WebSocketChannel` and calls `attach_remote_channel`
-- `view_param_set` / `view_param_get` — drives `RemoteViewSession::set_parameter`
-  / `get_parameter`
+- `view_param_get` — reads through `RemoteViewSession::get_parameter`
 - `view_list` — enumerates attached secondary views
-- `view_input` — calls `RemoteViewSession::send_input`
 - `view_close` — detaches
+
+Do not expose parameter writes or synthetic input by wrapping
+`RemoteViewSession`; future mutation belongs behind the capability controller's
+explicit grant and audit path.
 
 See `.agents/skills/view-bridge/SKILL.md` for the full MCP command
 recipe.

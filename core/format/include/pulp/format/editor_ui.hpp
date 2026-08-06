@@ -1,6 +1,8 @@
 #pragma once
 
 #include <pulp/format/processor.hpp>
+#include <pulp/runtime/alive_token.hpp>
+#include <pulp/runtime/exceptions.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/auto_ui.hpp>
@@ -14,6 +16,25 @@
 #include <vector>
 
 namespace pulp::format {
+
+/// Build the UI-thread accessor used by scripted editors. The liveness handle
+/// deliberately does not own the Processor; once its owner retires, every
+/// future visit fails closed without dereferencing the captured pointer.
+/// Visits and owner retirement/destruction must remain serialized on the host
+/// UI thread. AliveToken prevents deferred post-destruction calls; it is not a
+/// cross-thread reclamation or hazard-pointer mechanism.
+inline view::ValueChannelAccess processor_value_channel_access(
+    Processor& processor, runtime::AliveToken::Handle owner_alive) {
+    return [processor = &processor, owner = std::move(owner_alive)](
+               const view::ValueChannelVisitor& visitor) {
+        if (!runtime::AliveToken::is_alive(owner)) {
+            visitor(nullptr);
+            return;
+        }
+        PULP_TRY { processor->visit_value_channels(visitor); }
+        PULP_CATCH_ALL { visitor(nullptr); }
+    };
+}
 
 struct EditorUiInstance {
     std::unique_ptr<view::View> root;
@@ -52,15 +73,11 @@ inline std::vector<std::filesystem::path> configured_ui_asset_roots() {
     return roots;
 }
 
-/// `value_channels` are the hosting processor's named value channels
-/// (Processor::value_channels()), forwarded so a scripted UI can bind
-/// `value:<name>` sources. Non-owning and defaulted to null, so a caller
-/// with no processor in hand — the CLI validator, a headless test — is
-/// unaffected.
-inline EditorUiInstance build_editor_ui(state::StateStore& store,
-                                        bool enable_hot_reload,
-                                        std::string* error = nullptr,
-                                        view::ValueChannelSet* value_channels = nullptr) {
+/// `value_channel_access` leases the hosting processor's current named value
+/// channels while scripted UI code resolves and snapshots them.
+inline EditorUiInstance build_editor_ui_with_value_channel_access(
+    state::StateStore& store, bool enable_hot_reload, std::string* error,
+    view::ValueChannelAccess value_channel_access) {
     if (auto script_path = configured_ui_script_path()) {
         auto root = std::make_unique<view::View>();
         root->set_theme(view::Theme::dark());
@@ -80,7 +97,7 @@ inline EditorUiInstance build_editor_ui(state::StateStore& store,
         options.asset_roots = configured_ui_asset_roots();
         options.enable_hot_reload = enable_hot_reload;
         options.enable_theme_reload = enable_hot_reload || has_configured_theme;
-        options.value_channels = value_channels;
+        options.value_channel_access = std::move(value_channel_access);
         auto scripted_ui = std::make_unique<view::ScriptedUiSession>(*root, store, std::move(options));
 
         std::string load_error;
@@ -100,6 +117,22 @@ inline EditorUiInstance build_editor_ui(state::StateStore& store,
         *error = "AutoUi::build() returned nullptr";
     }
     return {std::move(root), nullptr, false};
+}
+
+/// Compatibility entry point for stable processors and callers without a
+/// processor. Reloadable processors use build_editor_ui_with_value_channel_access().
+inline EditorUiInstance build_editor_ui(state::StateStore& store,
+                                        bool enable_hot_reload,
+                                        std::string* error = nullptr,
+                                        view::ValueChannelSet* value_channels = nullptr) {
+    view::ValueChannelAccess access;
+    if (value_channels != nullptr) {
+        access = [value_channels](const view::ValueChannelVisitor& visitor) {
+            visitor(value_channels);
+        };
+    }
+    return build_editor_ui_with_value_channel_access(
+        store, enable_hot_reload, error, std::move(access));
 }
 
 } // namespace pulp::format

@@ -16,12 +16,11 @@
 #include <pulp/render/render_pass.hpp>
 #include <pulp/render/dirty_tracker.hpp>
 #include <pulp/view/inspector.hpp>
-#include <pulp/view/script_engine.hpp>
-#include <pulp/view/script_inspector_bridge.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/live_constant_editor.hpp>
 #include <pulp/state/store.hpp>
 #include <choc/containers/choc_Value.h>
+#include <choc/text/choc_JSON.h>
 
 #include <algorithm>
 #include <cctype>
@@ -29,9 +28,12 @@
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
+#include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 using namespace pulp::view;
@@ -426,10 +428,13 @@ TEST_CASE("DomainHandler: dispatches inspector domain edge paths", "[inspect][do
     auto bad_node_params = handler.handle(make_request(7, methods::kDOMGetNodeById, "not json"));
     REQUIRE(bad_node_params.is_error);
 
-    auto highlight = handler.handle(make_request(8, methods::kDOMHighlightNode));
+    auto highlight = handler.handle(make_request(
+        8, methods::kDOMHighlightNode, R"({"id":"child"})"));
     REQUIRE_FALSE(highlight.is_error);
+    REQUIRE(overlay.selected_view() == root.child_at(0));
     auto clear = handler.handle(make_request(9, methods::kDOMClearHighlight));
     REQUIRE_FALSE(clear.is_error);
+    REQUIRE(overlay.selected_view() == nullptr);
 
     auto search = handler.handle(make_request(10, methods::kDOMSearch, R"({"query":"child"})"));
     REQUIRE_FALSE(search.is_error);
@@ -730,157 +735,6 @@ TEST_CASE("LiveConstant.reset rolls a value back to its default",
                  Catch::Matchers::WithinAbs(2.0, 0.001));
 }
 
-// ── Runtime domain: scripted-UI inspector / debug console ────────────────────
-// These wire a real ScriptEngine through the ScriptInspectorBridge. The test
-// thread is the engine thread, so Runtime.evaluate runs inline (no pump loop).
-
-TEST_CASE("DomainHandler: Runtime.getCapabilities reports QuickJS honestly",
-          "[inspect][domain][runtime]") {
-    ScriptEngine engine;
-    ScriptInspectorBridge bridge;
-    bridge.attach(&engine);
-    DomainHandler handler;
-    handler.set_script_inspector(&bridge);
-    handler.set_runtime_eval_enabled(true);  // opt in so canEvaluate is true
-
-    auto resp = handler.handle(make_request(1, methods::kRuntimeGetCapabilities));
-    REQUIRE_FALSE(resp.is_error);
-    auto caps = choc::json::parse(resp.params_json);
-    REQUIRE(caps["engine"].toString() == "QuickJS");
-    REQUIRE(caps["attached"].getWithDefault(false));
-    REQUIRE(caps["canEvaluate"].getWithDefault(false));
-    REQUIRE(caps["canInterrupt"].getWithDefault(false));
-    // Mainline QuickJS has no source-line debug protocol — must report false.
-    REQUIRE_FALSE(caps["canBreak"].getWithDefault(true));
-    REQUIRE_FALSE(caps["canStep"].getWithDefault(true));
-    REQUIRE_FALSE(caps["canInspectLocals"].getWithDefault(true));
-}
-
-TEST_CASE("DomainHandler: Runtime.getCapabilities without an engine",
-          "[inspect][domain][runtime]") {
-    DomainHandler handler;  // no script inspector attached
-    auto resp = handler.handle(make_request(1, methods::kRuntimeGetCapabilities));
-    REQUIRE_FALSE(resp.is_error);
-    auto caps = choc::json::parse(resp.params_json);
-    REQUIRE(caps["engine"].toString().empty());
-    REQUIRE_FALSE(caps["attached"].getWithDefault(true));
-    REQUIRE_FALSE(caps["canEvaluate"].getWithDefault(true));
-}
-
-TEST_CASE("DomainHandler: Runtime.evaluate returns a typed result",
-          "[inspect][domain][runtime]") {
-    ScriptEngine engine;
-    ScriptInspectorBridge bridge;
-    bridge.attach(&engine);
-    DomainHandler handler;
-    handler.set_script_inspector(&bridge);
-    handler.set_runtime_eval_enabled(true);
-
-    auto resp = handler.handle(make_request(1, methods::kRuntimeEvaluate,
-                                            R"({"code":"40 + 2"})"));
-    REQUIRE_FALSE(resp.is_error);
-    auto result = choc::json::parse(resp.params_json);
-    REQUIRE(result["result"].getWithDefault(0) == 42);
-
-    // CDP-compatible alias 'expression'.
-    auto aliased = handler.handle(make_request(2, methods::kRuntimeEvaluate,
-                                               R"({"expression":"'ab' + 'cd'"})"));
-    REQUIRE_FALSE(aliased.is_error);
-    auto astr = choc::json::parse(aliased.params_json);
-    REQUIRE(astr["result"].toString() == "abcd");
-}
-
-TEST_CASE("DomainHandler: Runtime.evaluate surfaces JS errors and bad params",
-          "[inspect][domain][runtime]") {
-    ScriptEngine engine;
-    ScriptInspectorBridge bridge;
-    bridge.attach(&engine);
-    DomainHandler handler;
-    handler.set_script_inspector(&bridge);
-    handler.set_runtime_eval_enabled(true);
-
-    auto thrown = handler.handle(make_request(1, methods::kRuntimeEvaluate,
-                                              R"json({"code":"throw new Error('boom')"})json"));
-    REQUIRE(thrown.is_error);
-    REQUIRE(thrown.params_json.find("boom") != std::string::npos);
-
-    auto empty = handler.handle(make_request(2, methods::kRuntimeEvaluate, R"({"code":""})"));
-    REQUIRE(empty.is_error);
-
-    auto bad = handler.handle(make_request(3, methods::kRuntimeEvaluate, "{"));
-    REQUIRE(bad.is_error);
-}
-
-TEST_CASE("DomainHandler: Runtime.evaluate is disabled by default (security)",
-          "[inspect][domain][runtime]") {
-    // Even with an engine wired, evaluate must not run until the host opts in —
-    // the inspector transport is unauthenticated, and evaluate is RCE.
-    ScriptEngine engine;
-    ScriptInspectorBridge bridge;
-    bridge.attach(&engine);
-    DomainHandler handler;
-    handler.set_script_inspector(&bridge);  // wired but NOT enabled
-
-    auto disabled = handler.handle(make_request(1, methods::kRuntimeEvaluate,
-                                                R"({"code":"1+1"})"));
-    REQUIRE(disabled.is_error);
-    REQUIRE(disabled.params_json.find("disabled") != std::string::npos);
-
-    // getCapabilities reports the honest false so a client never tries.
-    auto caps = choc::json::parse(
-        handler.handle(make_request(2, methods::kRuntimeGetCapabilities)).params_json);
-    REQUIRE(caps["attached"].getWithDefault(false));
-    REQUIRE_FALSE(caps["canEvaluate"].getWithDefault(true));
-
-    // Enabled but no engine → unavailable (distinct from disabled).
-    DomainHandler enabled_no_engine;
-    enabled_no_engine.set_runtime_eval_enabled(true);
-    auto no_engine = enabled_no_engine.handle(make_request(3, methods::kRuntimeEvaluate,
-                                                           R"({"code":"1+1"})"));
-    REQUIRE(no_engine.is_error);
-    REQUIRE(no_engine.params_json.find("no scripted-UI engine") != std::string::npos);
-}
-
-TEST_CASE("DomainHandler: Runtime.evaluate never breaks response framing (NaN/Infinity)",
-          "[inspect][domain][runtime]") {
-    ScriptEngine engine;
-    ScriptInspectorBridge bridge;
-    bridge.attach(&engine);
-    DomainHandler handler;
-    handler.set_script_inspector(&bridge);
-    handler.set_runtime_eval_enabled(true);
-
-    // 1/0 → Infinity; ({x:0/0}) → nested NaN. Whichever the engine yields, the
-    // response must remain parseable JSON (no bare NaN/Infinity token).
-    for (const char* expr : {R"json({"code":"1/0"})json", R"json({"code":"({x: 0/0})"})json"}) {
-        auto resp = handler.handle(make_request(1, methods::kRuntimeEvaluate, expr));
-        if (!resp.is_error) {
-            // params_json must parse; the runtime inspector guarantees valid JSON.
-            REQUIRE_NOTHROW(choc::json::parse(resp.params_json));
-        }
-    }
-}
-
-TEST_CASE("DomainHandler: Runtime.interrupt reports whether it armed",
-          "[inspect][domain][runtime]") {
-    // No engine → cannot interrupt.
-    DomainHandler bare;
-    auto none = bare.handle(make_request(1, methods::kRuntimeInterrupt));
-    REQUIRE_FALSE(none.is_error);
-    REQUIRE_FALSE(choc::json::parse(none.params_json)["interrupted"].getWithDefault(true));
-
-    // Engine attached but nothing in flight → interrupt is a no-op (false),
-    // which prevents spuriously aborting the next evaluation.
-    ScriptEngine engine;
-    ScriptInspectorBridge bridge;
-    bridge.attach(&engine);
-    DomainHandler handler;
-    handler.set_script_inspector(&bridge);
-    handler.set_runtime_eval_enabled(true);  // reach the idle-guard, not the gate
-    auto idle = handler.handle(make_request(2, methods::kRuntimeInterrupt));
-    REQUIRE_FALSE(idle.is_error);
-    REQUIRE_FALSE(choc::json::parse(idle.params_json)["interrupted"].getWithDefault(true));
-}
 
 // ── Console domain: device-log cursor poll ───────────────────────────────────
 
@@ -978,6 +832,27 @@ TEST_CASE("DomainHandler: State.getValueChannels is [] when none are declared",
     auto resp = handler.handle(make_request(1, "State.getValueChannels"));
     REQUIRE_FALSE(resp.is_error);
     CHECK(resp.params_json == "[]");
+}
+
+TEST_CASE("StateInspector owns value-channel metadata across source destruction",
+          "[inspect][domain][value-channel][lifecycle]") {
+    StateStore store;
+    StateInspector state_inspector(store);
+    {
+        pulp::view::ValueChannelSet channels;
+        channels.declare_scalar("retired_envelope", "dB", -90.0f);
+        state_inspector.set_value_channels(&channels);
+    }
+
+    DomainHandler handler;
+    handler.set_state_inspector(&state_inspector);
+    const auto response = handler.handle(make_request(1, "State.getValueChannels"));
+    REQUIRE_FALSE(response.is_error);
+    const auto parsed = choc::json::parse(response.params_json);
+    REQUIRE(parsed.isArray());
+    REQUIRE(parsed.size() == 1);
+    CHECK(parsed[0]["name"].getString() == "retired_envelope");
+    CHECK(parsed[0]["neutral"].getWithDefault<double>(0.0) == -90.0);
 }
 
 TEST_CASE("the inspector and the scripted-UI bridge describe channels identically",

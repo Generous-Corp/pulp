@@ -14,8 +14,26 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/text_editor.hpp>
 
+#include "../core/view/platform/mac/accessibility_mac_host_lifetime.hpp"
+
 using pulp::view::View;
 using pulp::view::ns_role_for_access_role;
+
+TEST_CASE("accessibility host lifetime expires with its NSView",
+          "[a11y][macos][lifetime]") {
+    std::weak_ptr<const std::uint8_t> lifetime;
+    @autoreleasepool {
+        NSView* host = [[NSView alloc] initWithFrame:NSZeroRect];
+        lifetime = pulp::view::capture_accessibility_host_lifetime(host);
+        REQUIRE_FALSE(lifetime.expired());
+#if __has_feature(objc_arc)
+        host = nil;
+#else
+        [host release];
+#endif
+    }
+    CHECK(lifetime.expired());
+}
 
 TEST_CASE("expanded roles map to real NSAccessibility roles", "[a11y][macos]") {
     REQUIRE(ns_role_for_access_role(View::AccessRole::button)

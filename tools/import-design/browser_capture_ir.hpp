@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace pulp::import_design {
 
@@ -17,6 +18,15 @@ struct BrowserCaptureIrResult {
     std::filesystem::path semantic_report;
     std::optional<std::filesystem::path> interaction_report;
     std::string error;
+    /// Lowering succeeded, but something about the INPUT means part of the
+    /// design could not be drawn and re-running the capture would fix it.
+    ///
+    /// Distinct from `error` (nothing was produced) and from a per-node
+    /// `capture_fallback_reason` (a property of the design, which no amount of
+    /// re-capturing changes). A caller is expected to print these: the whole
+    /// point is that a design silently losing a class of content should not be
+    /// something a reader has to go looking for in node attributes.
+    std::vector<std::string> warnings;
 
     explicit operator bool() const noexcept { return design_ir.has_value(); }
 };

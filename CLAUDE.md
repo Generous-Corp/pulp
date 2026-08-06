@@ -822,8 +822,14 @@ Reach for the tool whose *use when* matches your need; open its `skill`
 for the real guidance. If nothing here fits, say so — then hand-roll.
 
 **visual-compare** — compare a render against its source / a baseline
-- Get the expected numbers for a CSS gradient geometry test from Chromium rather than from your own formula. → `tools/import-validation/chrome_gradient_oracle.py`
-  - ⚠ **Cannot see:** Exists because a fixture derived from the same formula as the implementation agrees with it BY CONSTRUCTION, including when both are wrong. Chromium is an independent implementation of the same spec, so it can disagree, which is the only reason those tests can fail for a real cause. Cases use hard-edged stops so a scanline reads the boundary exactly, and a 160x100 box on purpose: a square box makes an ellipse a circle and a 45-degree angle its own reflection, hiding every defect worth testing.
+- Regression-guard the native design path — run it after touching capture, lowering or paint. → `tools/import-validation/check_agent_panel_invariants.py`
+  - ⚠ **Cannot see:** Skips rather than fails without the importer or a design pack, so a green run is only meaningful if it printed PASS lines. A skip is not a pass.
+- Assert named elements are present in a rendered panel rather than eyeballing a screenshot. → `tools/import-validation/check_panel_presence.py`
+  - ⚠ **Cannot see:** Presence is not correctness — an element can be present, misplaced and unreadable.
+- Prove each hop of the agent-HTML -> Chromium -> DesignIR pipeline actually ran, before trusting any fidelity number from the same panel. → `tools/import-validation/check_pipeline_stages.py`
+  - ⚠ **Cannot see:** Asserts MECHANISM, not quality. A panel can pass every stage and still render badly — that is score-native-panel's job. Conversely a high similarity score says nothing about whether Chromium ran at all, which is exactly the confusion this exists to end.
+- Get Chrome's own answer for a CSS gradient when the native paint disagrees. → `tools/import-validation/chrome_gradient_oracle.py`
+  - ⚠ **Cannot see:** Needs a local Chrome, like the rest of the browser-capture lane. The oracle is Chrome's interpretation, which is the target here but is not the CSS spec.
 - Get one similarity score + verdict BEFORE showing the user any native screenshot. → `tools/import-validation/diff_against_reference.py`
   - ⚠ **Cannot see:** POSITION-BLIND. The score is histogram cosine similarity (gross colour distribution), so a design with every element in the wrong place scores identically to a correct one — same pixels, different arrangement. It catches obviously-broken only. Never read a high score as 'laid out right'; that is layout-parity's job.
 - A whole-image score is hiding a broken sub-region (empty canvas, broken chrome). → `tools/import-validation/diff_against_reference_regions.py`
@@ -844,8 +850,10 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Nothing — it renders no verdict at all. Building a montage is not verifying one; a montage nobody looked at is decoration. It is the instrument of last resort precisely because a human is the only thing that reads it.
 - Render an import at the design's OWN canvas size (a mismatched size voids every score). → `tools/scripts/render-figma-import.sh`
   - ⚠ **Cannot see:** It renders; it judges nothing. Producing a render is not evidence about it — the render is the INPUT every checker above reads, and each of those has its own blind spot. Its one real guarantee is size fidelity; render at any other size and every score downstream is measuring a reshaped design.
-- Measure how much of a natively-rendered panel disagrees with Chrome, attributed per node and per drawing feature. → `tools/import-validation/score_native_panel.py`
-  - ⚠ **Cannot see:** Two traps live in the METRIC, not the code. (1) A blank render scores WELL against a dark design: an empty SPECTR render scored 12.45% failing while the correct one scored 10.99%, because black matches black and the denominator comes from the capture side, so it never notices the render contributed no ink. ALWAYS read coverage beside the failing fraction. (2) It is AREA-weighted while perception is salience-weighted: a gradient fix moved one design 46% with no visible change, while a missing icon or a lost accent fill costs a fraction of a percent. Per-node scores are not usable yet (worst-node 1.0000, ~0% of ink nodes passing everywhere). Never inherit tau from the identity-blit calibration control, which contains no native rasterisation.
+- Iterate on the RENDERER against real generated markup without paying for a model call each round. → `tools/import-validation/replay-agent-panel.sh`
+  - ⚠ **Cannot see:** Needs a design pack for the fixture's stylesheet and fonts; without one the page imports unstyled and every number is meaningless. Says so rather than scoring.
+- Attribute a natively rendered panel's failing pixels to the nodes that own them, against the Chromium capture that is its oracle. → `tools/import-validation/score_native_panel.py`
+  - ⚠ **Cannot see:** A blank render scores WELL against a dark design, so the area-weighted number is not a fidelity measure without a companion coverage statistic; per-node scores are not yet usable as a gate.
 - Triage an import's GROSS colour against Figma's own raster, offline, with no API call. Advisory only — never a gate. → `tools/import-design/thumb_parity.py`
   - ⚠ **Cannot see:** MATERIAL-BLIND by construction. It compares block MEANS, so it cannot see any error that preserves a region's mean — a flattened gradient matches its own mean exactly, 20%-vs-100% white thin strokes average out, a soft shadow on a dark panel vanishes. At ~0.4x it also cannot resolve features under ~3 design px. For geometry use layout-parity; for material survival use the material audit.
 - Prove the emitted ui.js artifact renders like the importer output it claims to ship. → `tools/import-validation/verify_rendered_panel.py`
@@ -854,6 +862,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 **design-import** — get a design into Pulp
 - Check agent-authored panel HTML before importing it — the one entry point that runs all three contract gates. → `tools/import-design/check_contracts.py`
   - ⚠ **Cannot see:** Static text analysis, so it proves the markup keeps its side of the contract — never that the panel renders well. It is deliberately the check a pixel diff CANNOT make: a meter authored with invented children draws the same empty box in the browser and in Skia, so an A/B comparison scores it 100% identical and PASS while the control is dead. Without --macros the macro contract is SKIPPED (and says so) — a green run that checked two gates of three.
+- A render matches its reference pixel for pixel and still reads wrong — a screaming accent, a label you cannot read. Pixel comparison scores agreement with the source, so a palette defect the source already had survives every visual gate. → `tools/import-validation/check_palette_health.py (--tokens`
+  - ⚠ **Cannot see:** Judges declared token values, which are an upper bound — anything composited under the type (shadow, accent bloom) only lowers real contrast. parse_color has no color-mix()/relative-color support, so a token defined that way is skipped rather than judged; ink-signal's light --accent is one, and the emitted note names --accent-text as the unresolvable token rather than the --accent it failed on.
 - Catch a panel that invents component classes or child parts the design system never defined. → `tools/import-design/component_contract.py`
   - ⚠ **Cannot see:** Derives the contract from CSS rules, so a component nothing styles is a component it cannot police. Commented-out rules deliberately do not license a class.
 - Decode a local .fig file offline — no Figma desktop, no REST quota. → `tools/import-design/fig_decode.mjs emit`
@@ -1393,7 +1403,8 @@ tools/scripts/clean_build_cov.sh          # dry-run: list + total reclaimable
 tools/scripts/clean_build_cov.sh --yes    # delete (idle-gated; skips an in-flight build)
 ```
 
-It only ever removes dirs literally named `build-cov` / `build-coverage` (never
+It only ever removes dirs named `build-cov` / `build-coverage` or their
+hyphen-suffixed variants such as `build-cov-phase6-gpu` (never
 a source tree or the primary `build/`), scans sibling worktrees by default
 (override with `PULP_WORKTREES_ROOT`), and skips any coverage dir a live build
 process is using. Tested by `tools/scripts/test_clean_build_cov.py`.

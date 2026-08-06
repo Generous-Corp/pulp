@@ -761,10 +761,15 @@ loopback) as a `ViewRole::Remote` secondary. The session speaks the
 protocol in `docs/reference/remote-view-protocol.md`:
 
 - `view.hello` + `view.metadata` handshake
-- `view.param_set` / `view.param_changed` wire through `StateStore`
+- `view.param_changed` publishes trusted host-side `StateStore` updates
 - `view.param_get` request/response
-- `view.input` (notification)
+- `view.input` (reserved notification; logged and ignored by the host)
 - `view.close` (either side)
+
+Remote View is observation-only. It deliberately has no inbound
+`view.param_set` handler, and `view.input` is not dispatched into the primary
+view. Do not restore either as an authority shortcut: future parameter or input
+mutation must pass through Pulp's capability/grant controller and audit path.
 
 Tests: `test/test_remote_view.cpp` covers handshake, metadata escaping,
 parameter sync, input forwarding, close handling, null-channel rejection, and
@@ -773,16 +778,18 @@ stale-session detach behavior via MemoryMessageChannel loopback.
 ### Attaching from an MCP server
 
 An MCP server that runs alongside a Pulp plugin host can open a
-`RemoteViewSession` to drive the plugin's view from Claude Code:
+`RemoteViewSession` to inspect the plugin's view from Claude Code:
 
-1. MCP server can declare a tool (e.g. `view_attach`, `view_param_set`,
+1. MCP server can declare read-only tools (for example `view_attach` and
    `view_param_get`) backed by `pulp::runtime::WebSocketChannel::connect(...)`.
 2. Tool handler calls `bridge->attach_remote_channel(std::move(ws), "mcp")`
    where `bridge` is the host's ViewBridge (same process) — or opens
    the socket *to* a separate Pulp host process that listens via
    `WebSocketChannel::accept`.
-3. Subsequent MCP tool calls drive `RemoteViewSession::set_parameter`
-   / `get_parameter` / `send_input`.
+3. Subsequent MCP tool calls may read through
+   `RemoteViewSession::get_parameter` and detach the session. Do not expose
+   `set_parameter` or `send_input` as remote mutation tools; the former is a
+   trusted host-side publish helper, and the latter has no host dispatch path.
 
 This is the pattern. A concrete MCP-tool wrapper bundled with Pulp is
 a small follow-up on top of `tools/mcp/pulp_mcp.cpp`.
@@ -1022,6 +1029,38 @@ editor view, CLAP hides `CLAP_EXT_GUI`, AU v2 returns no Cocoa view, and
 AUv3 avoids constructing `PluginViewHost`. Do not replace this with
 post-hoc window cleanup; the contract is that no native editor host is
 created in the first place.
+
+## Several editors in one process — scope every routing read to the event's root
+
+A DAW puts many Audio Units in ONE `AUHostingServiceXPC` process, so a product
+family (MIDI FX + instrument + audio FX) is several editors of the SAME binary
+sharing an address space — and, because they are the same binary, sharing
+IDENTICAL editor geometry. That last part is what turns a process-global slot
+into a routing bug rather than a theoretical one: a pointer at (x, y) in editor
+B lands at the same (x, y) in editor A's tree, so any rect test against a
+globally-named widget passes for the wrong editor.
+
+`View::focused_input_`, `View::active_overlay_`, and `ComboBox::active_popup_`
+are process-global SHIM MIRRORS naming the most-recently-acted slot
+process-wide. The per-root source of truth is `View::interaction()`. When you
+add or edit a host/routing path:
+
+- Read focus through `focused_input_under_root(root)` — never the raw mirror.
+- Read the open dropdown through `ComboBox::active_popup_in(scope)` and close it
+  through `close_active_popup(scope)` — never `active_popup_` /
+  `close_active_popup()`, which act on whichever editor moved last. Reading the
+  mirror sent editor B's wheel, click, and hover into editor A's open menu, and
+  made the mac plugin host capture a drag target owned by a tree it does not own
+  (`plugin_view_host_mac.mm` re-validates with `view_is_in_tree` on the next
+  event, so the release is safe — but the event was already delivered wrong).
+- The three-editor proof is `test/test_multi_plugin_coexistence.cpp`; the
+  two-tree state proof is `test/test_interaction_multiinstance.cpp`.
+
+Still process-wide and unscoped, so do not reach for them from a plugin host:
+`WidgetBridge::dispatch_global_key` / `dispatch_document_event` fan out to EVERY
+registered bridge in the process. Only the STANDALONE window host calls them
+today; wiring either into the plugin host would fire one keystroke into every
+open editor's JS runtime.
 
 ## Keyboard-focus host etiquette — never hold the host's first responder when idle
 
@@ -1698,6 +1737,18 @@ The mechanism is format-agnostic and driven by the shared idle pump:
   logic whose `create_view()` returns a custom `View` **subclass** with root-level
   paint gets children+bg refreshed but not the subclass identity (fine for the
   common container-root editor).
+- **Processor-owned scripted sessions reload themselves.** When `create_view()`
+  returns a custom root while `active_scripted_ui()` also exposes the processor's
+  live `ScriptedUiSession`, it may explicitly opt in with
+  `supports_in_place_scripted_ui_reload()`. `ViewBridge` caches that mode at
+  `open()` and calls `reload_active_scripted_ui_in_place()` on a generation
+  change. The opt-in is separate from `active_scripted_ui()` so existing custom
+  scripted processors keep their ordinary `create_view()` rebuild behavior. In
+  the opted-in mode, do not call `create_view()` again: it would replace the
+  session and strand the root's raw host subscriptions on the destroyed
+  instance. The override owns its locking protocol and must retain both the
+  original session and root; returning false leaves the generation pending so
+  the next UI tick retries the same in-place path.
 - **Repaint after rebuild.** The CPU (CoreGraphics) mac host only repaints on
   `setNeedsDisplay`, so `make_editor_idle_pump` calls `View::request_repaint()`
   after a rebuild. Mutating the tree alone does NOT repaint on CPU.
@@ -1708,8 +1759,10 @@ The mechanism is format-agnostic and driven by the shared idle pump:
   tick on CPU editors.
 
 Test: `test_view_bridge.cpp` `[reload]` cases — a reloadable stub rebuilds into
-the same root object with new content/bg, is idempotent, and is inert for a normal
-processor. `examples/hot-reload-morph` exercises it end-to-end.
+the same root object with new content/bg, a processor-owned scripted session
+keeps both its root and session identity across a failed retry and successful
+reload, and a normal processor remains inert. `examples/hot-reload-morph`
+exercises the ordinary transplant path end-to-end.
 
 ## Standalone is a transport — it must derive the same playhead change flags
 

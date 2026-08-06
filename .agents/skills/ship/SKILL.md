@@ -248,6 +248,74 @@ component-selectable `.pkg` — it collects every built bundle (Standalone →
 produces disk images instead. The routing lives in the `pulp ship package`
 branch of `tools/cli/cmd_ship.cpp`.
 
+### Multi-product installers: group by product, ship the uninstaller
+
+`build_combined_installer.sh` gained four things a multi-product installer
+needs. Both Forge installers use them.
+
+**Group by product, not by build target.** Without `--product-title`, an
+installer carrying three products lists each one TWICE under two naming
+schemes: an expandable format group named from the bundle (`PulpDesignSynth`)
+and, separately at top level, its standalone app named from the title passed in
+(`Kelvin (instrument)`). Six rows for three products, with nothing on screen
+saying they are the same thing.
+
+```bash
+--product-title PulpDesignSynth "Kelvin — instrument" \
+--app-for       PulpDesignSynth "Standalone app" "$B/…/PulpDesignSynth.app"
+```
+
+`--app-for BUNDLE TITLE PATH` nests the app inside that product's group instead
+of at top level, and marks the choice `enabled="false" selected="true"`. Forced
+on deliberately: the standalone carries the uninstaller, so a user who
+deselects it installs plugins they cannot later remove. The row stays visible
+rather than hidden, which is honest about what is being installed.
+
+**The uninstaller is manifest-driven.** `--uninstaller-in BUNDLE` ships
+`pulp_uninstall.sh` inside that app next to a manifest generated for the
+release. Two rules it exists to enforce:
+
+- It removes what the MANIFEST says, never a glob. Globbing for likely-looking
+  names under `/Library/Audio/Plug-Ins` deletes another vendor's plugin the day
+  two products share a word.
+- It ALSO removes the same bundle NAMES from the other standard plugin folder.
+  The installer writes to `/Library`; a development build writes to
+  `~/Library`; every host scans both. Removing only the manifest's exact paths
+  leaves a plugin the host keeps loading, so "uninstalled" would not mean gone.
+  Names, never wildcards: `Forge FX.component` matches itself and not
+  `Forge FX Pro.component`.
+
+The manifest is computed BEFORE anything is signed, because a bundle modified
+after signing has a broken signature. Its receipt ids are derived independently
+of the loops that build the components and are then VERIFIED against `REFS` —
+the build fails if an id rule drifts, rather than leaving the uninstaller
+quietly unable to forget a receipt.
+
+**Panes.** `--welcome` / `--license` / `--readme` / `--conclusion`. productbuild
+resolves these by BASENAME inside `--resources`, so each file is staged there
+under its own name. Passing a path in the XML shows a blank pane with no error.
+
+Covered by `test_build_combined_installer.py` and `test_pulp_uninstall.py`
+(the `pulp-uninstaller-contract` ctest), which tests both failure directions:
+removing too little and removing too much.
+
+### VST3 bundles: moduleinfo.json must be in Contents/Resources/
+
+A loose non-code file directly under `Contents/` makes codesign treat it as an
+unsigned nested code object and refuse the whole bundle:
+
+```
+code object is not signed at all
+In subcomponent: …/Contents/moduleinfo.json
+```
+
+An unsignable bundle cannot be notarized, so it cannot ship. Nothing before
+packaging notices, because the plugin builds, loads and validates happily
+unsigned — and `core/host/src/scanner.cpp` reads the file from
+`Contents/Resources/`, so a misplaced one is invisible to Pulp's own FUID
+lookup too. Guarded by the `vst3-bundle-layout` ctest
+(`tools/cmake/scripts/check_vst3_bundle_layout.py`).
+
 ### macOS one-command pipeline: `pulp ship release`
 
 ```bash

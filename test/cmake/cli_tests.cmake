@@ -1,6 +1,18 @@
 # CLI unit and shellout test target registrations.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+add_executable(pulp-test-inspector-shipping-report
+    test_inspector_shipping_report.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/inspector_shipping_report.cpp)
+target_include_directories(pulp-test-inspector-shipping-report PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/inspect/include
+    ${choc_SOURCE_DIR})
+target_link_libraries(pulp-test-inspector-shipping-report PRIVATE
+    pulp::inspect-protocol Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-inspector-shipping-report
+    PROPERTIES LABELS "inspect;ship;cli")
+
 # CLI design binding tests
 add_executable(pulp-test-cli-design-binding test_cli_design_binding.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/design_binding.cpp
@@ -263,6 +275,28 @@ target_link_libraries(pulp-test-cli-shell-quote PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-shell-quote)
 
+add_executable(pulp-test-cli-checkout-dependencies
+    test_cli_checkout_dependencies.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/tartci_lease.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_doctor_helpers.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/projects_registry.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/update_check.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/version_diag.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp)
+target_include_directories(pulp-test-cli-checkout-dependencies PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/cli
+    ${CMAKE_BINARY_DIR}/tools/cli)
+target_link_libraries(pulp-test-cli-checkout-dependencies PRIVATE
+    pulp::runtime
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-checkout-dependencies)
+
 add_executable(pulp-test-cli-tartci-lease
     test_cli_tartci_lease.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/tartci_lease.cpp
@@ -437,6 +471,7 @@ catch_discover_tests(pulp-test-cli-validator-discovery)
 add_executable(pulp-test-cli-mac-runtime-validators
     test_cli_mac_runtime_validators.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/mac_runtime_validators.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
 )
 target_include_directories(pulp-test-cli-mac-runtime-validators PRIVATE
     ${CMAKE_SOURCE_DIR}

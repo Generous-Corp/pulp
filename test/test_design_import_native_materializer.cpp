@@ -3,6 +3,7 @@
 #include <pulp/runtime/base64.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/buttons.hpp>
+#include <pulp/view/control_painters.hpp>
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_sources.hpp>
@@ -22,6 +23,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -1981,9 +1983,12 @@ TEST_CASE("standard meter snaps fill edge and suppresses duplicate peak line",
 
     const auto* fill = first_meter_fill_rect(same_edge_canvas);
     REQUIRE(fill != nullptr);
-    REQUIRE(fill->f[0] == 1.0f);
+    // The level snaps to whole pixels along the growth axis (y/height) and
+    // spans the track's full cross axis (x/width) — track and fill cover the
+    // same box, so a cross-axis inset would leave a rail of track colour.
+    REQUIRE(fill->f[0] == 0.0f);
     REQUIRE(fill->f[1] == 16.0f);
-    REQUIRE(fill->f[2] == 6.0f);
+    REQUIRE(fill->f[2] == 8.0f);
     REQUIRE(fill->f[3] == 40.0f);
     REQUIRE(same_edge_canvas.count(pulp::canvas::DrawCommand::Type::stroke_line) == 0);
 
@@ -2005,9 +2010,10 @@ TEST_CASE("standard meter snaps fill edge and suppresses duplicate peak line",
         }
     }
     REQUIRE(peak_line != nullptr);
-    REQUIRE(peak_line->f[0] == 1.0f);
+    // Same box edge as the fill.
+    REQUIRE(peak_line->f[0] == 0.0f);
     REQUIRE(peak_line->f[1] == 14.0f);
-    REQUIRE(peak_line->f[2] == 7.0f);
+    REQUIRE(peak_line->f[2] == 8.0f);
     REQUIRE(peak_line->f[3] == 14.0f);
 }
 
@@ -3108,4 +3114,431 @@ TEST_CASE("a promoted TextButton still reaches an interactive descendant",
     REQUIRE(root->hit_test({30.0f, 10.0f}) == nested_view);
     // ...and the outer button still owns its own body.
     REQUIRE(root->hit_test({70.0f, 60.0f}) == outer);
+}
+
+namespace {
+
+/// Counts the delegate hooks the widgets actually reach, so a test can tell
+/// "the skin was installed" apart from "the skin was installed AND consulted".
+class HookCountingPainter final : public WidgetPainter {
+public:
+    bool paint_rotary(pulp::canvas::Canvas&, const RotaryPaintState&, View&) override {
+        ++rotary;
+        return true;
+    }
+    bool paint_linear(pulp::canvas::Canvas&, const LinearPaintState& state, View&) override {
+        ++linear;
+        last_horizontal = state.horizontal;
+        last_thumb_pos = state.thumb_pos;
+        return true;
+    }
+    int rotary = 0;
+    int linear = 0;
+    bool last_horizontal = false;
+    float last_thumb_pos = -1.0f;
+};
+
+}  // namespace
+
+TEST_CASE("a designed fader gets the value-only skin, like a designed knob",
+          "[view][import][native-materializer][designed-control]") {
+    // The design already painted the track, so the widget must contribute only
+    // the value layer. apply_designed_body_skin installs that contract, and it
+    // was wired into the knob case only — a designed fader kept its full stock
+    // body and drew a track, a fill and an oversized thumb over the design's own.
+    //
+    // The knob leg is the CONTROL. It passes before this change, which is what
+    // proves the fixture can report success rather than being a probe that never
+    // fires on either leg.
+    DesignIR ir;
+    ir.root = frame("designed-root", 320.0f, 200.0f, LayoutDirection::row);
+
+    auto knob_node = frame("cutoff", 160.0f, 160.0f, LayoutDirection::column);
+    knob_node.audio_widget = AudioWidgetType::knob;
+    knob_node.attributes["designed_body"] = "underlay";
+    knob_node.attributes["design_accent"] = "#C4622A";
+    knob_node.attributes["design_track"] = "rgba(60,50,30,0.18)";
+    knob_node.attributes["design_indicator"] = "#2A2418";
+
+    auto fader_node = frame("drive", 10.0f, 96.0f, LayoutDirection::column);
+    fader_node.audio_widget = AudioWidgetType::fader;
+    fader_node.attributes["designed_body"] = "underlay";
+    fader_node.attributes["design_accent"] = "#C4622A";
+    fader_node.attributes["design_track"] = "rgba(60,50,30,0.18)";
+    fader_node.attributes["design_indicator"] = "#2A2418";
+
+    ir.root.children.push_back(std::move(knob_node));
+    ir.root.children.push_back(std::move(fader_node));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 2);
+
+    // painter(), not effective_painter(): the latter walks up to an ancestor, so
+    // it would pass on a widget that was never skinned itself.
+    auto* knob = dynamic_cast<Knob*>(root->child_at(0));
+    REQUIRE(knob != nullptr);
+    REQUIRE(knob->painter() != nullptr);
+
+    auto* fader = dynamic_cast<Fader*>(root->child_at(1));
+    REQUIRE(fader != nullptr);
+    REQUIRE(fader->painter() != nullptr);
+}
+
+TEST_CASE("Fader::paint consults its paint delegate, as Knob::paint does",
+          "[view][import][native-materializer][designed-control]") {
+    // Installing the delegate is not enough. WidgetPainter::paint_linear had no
+    // caller anywhere, so a skinned fader painted its stock body regardless and
+    // the install moved zero pixels. Assert the hook is reached, and assert the
+    // knob's alongside it so a silent regression in either is visible.
+    pulp::canvas::RecordingCanvas canvas;
+    auto painter = std::make_shared<HookCountingPainter>();
+
+    Knob knob;
+    knob.set_bounds({0, 0, 64.0f, 64.0f});
+    knob.set_painter(painter);
+    knob.paint(canvas);
+    REQUIRE(painter->rotary == 1);
+
+    Fader fader;
+    fader.set_bounds({0, 0, 10.0f, 96.0f});
+    fader.set_orientation(Fader::Orientation::vertical);
+    fader.set_value(0.25f);
+    fader.set_painter(painter);
+    fader.paint(canvas);
+    REQUIRE(painter->linear == 1);
+    REQUIRE(painter->last_horizontal == false);
+    REQUIRE(painter->last_thumb_pos == Catch::Approx(0.25f));
+}
+
+TEST_CASE("a lowered control does not repaint the box-shadow its underlay drew",
+          "[view][import][native-materializer][shadow]") {
+    // A bound dial is lowered into a CONTROL node placed over the native node
+    // it came from, and Chrome's computed appearance is recorded on that
+    // control so its geometry survives a round-trip. `designed_body` states
+    // that the BODY is the layer beneath — but the materializer installed the
+    // recorded shadow stack on the control as well, so every layer composited
+    // twice. Two composites of one translucent layer are not one composite: a
+    // 0.5-alpha offset layer reaches 0.75 and its tail stretches, which on a
+    // real panel reads as a dark crescent under the dial where the browser
+    // leaves a clean gap.
+    DesignIR ir;
+    ir.root = frame("root", 200.0f, 200.0f, LayoutDirection::column);
+
+    const auto stack = parse_css_box_shadow(
+        "rgba(0, 0, 0, 0.5) 0px 18px 36px 0px, "
+        "rgba(0, 0, 0, 0.34) 0px 4px 9px 0px");
+    REQUIRE(stack.size() == 2);
+
+    // The lowered native node the dial was hoisted out of. It draws the body.
+    auto underlay = frame("dial", 160.0f, 160.0f, LayoutDirection::column);
+    underlay.style.background_color = "rgb(247, 240, 224)";
+    underlay.style.box_shadow = stack;
+    ir.root.children.push_back(std::move(underlay));
+
+    // The control hoisted over it, carrying the same recorded appearance.
+    auto control = frame("CUTOFF", 160.0f, 160.0f, LayoutDirection::column);
+    control.audio_widget = AudioWidgetType::knob;
+    control.attributes["binding"] = "cutoff";
+    control.attributes["designed_body"] = "underlay";
+    control.style.background_color = "rgb(247, 240, 224)";
+    control.style.box_shadow = stack;
+    ir.root.children.push_back(std::move(control));
+
+    auto root = build_native_view_tree(ir, {}, {.preview_mode = true});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 2);
+
+    // The underlay still paints the design's shadow: the control must lose its
+    // duplicate, not the design its depth.
+    CHECK(root->child_at(0)->box_shadows().size() == 2);
+    CHECK(root->child_at(1)->box_shadows().empty());
+}
+
+TEST_CASE("a designed knob's value ring rides outside the body, not across it",
+          "[view][import][native-materializer][designed-control]") {
+    // The control box is the design's body box, so the old fixed 0.46 put the
+    // ring at 92% of the body radius — over the brushed cap the design drew.
+    // Measured on kelvin: an authored dial of radius 80 with our arc at 73.6.
+    //
+    // Assert the PAINTED radius, not the skin field: the field is private to
+    // the painter, and the radius is the thing a reviewer sees.
+    DesignIR ir;
+    ir.root = frame("designed-root", 320.0f, 320.0f, LayoutDirection::row);
+
+    auto knob_node = frame("cutoff", 160.0f, 160.0f, LayoutDirection::column);
+    knob_node.audio_widget = AudioWidgetType::knob;
+    knob_node.attributes["designed_body"] = "underlay";
+    knob_node.attributes["design_accent"] = "#C4622A";
+    ir.root.children.push_back(std::move(knob_node));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    auto* knob = dynamic_cast<Knob*>(root->child_at(0));
+    REQUIRE(knob != nullptr);
+    knob->set_bounds({0, 0, 160.0f, 160.0f});
+
+    pulp::canvas::RecordingCanvas canvas;
+    knob->paint(canvas);
+
+    const pulp::canvas::DrawCommand* arc = nullptr;
+    for (const auto& cmd : canvas.commands())
+        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_arc) { arc = &cmd; break; }
+    REQUIRE(arc != nullptr);
+
+    // Centre stays the box centre; only the radius moves.
+    REQUIRE(arc->f[0] == Catch::Approx(80.0f));
+    REQUIRE(arc->f[1] == Catch::Approx(80.0f));
+    // Half the box (80) + half the 4px ring (2) + a hairline (1) = 83.
+    REQUIRE(arc->f[2] == Catch::Approx(83.0f));
+    // The property that matters, stated independently of the arithmetic: the
+    // ring clears the body instead of crossing it.
+    REQUIRE(arc->f[2] > 80.0f);
+}
+
+TEST_CASE("a design can declare where its value ring belongs",
+          "[view][import][native-materializer][designed-control]") {
+    // design_ring_radius is the refinement, not the mechanism: a design that
+    // drew its own decorative ring can put the value exactly on it. Absent, the
+    // derivation above runs, which is why the common case needs no new data.
+    DesignIR ir;
+    ir.root = frame("designed-root", 320.0f, 320.0f, LayoutDirection::row);
+
+    auto knob_node = frame("cutoff", 160.0f, 160.0f, LayoutDirection::column);
+    knob_node.audio_widget = AudioWidgetType::knob;
+    knob_node.attributes["designed_body"] = "underlay";
+    knob_node.attributes["design_accent"] = "#C4622A";
+    // kelvin's authored tick ring: radius 98 on a 160 box.
+    knob_node.attributes["design_ring_radius"] = "0.6125";
+    ir.root.children.push_back(std::move(knob_node));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    auto* knob = dynamic_cast<Knob*>(root->child_at(0));
+    REQUIRE(knob != nullptr);
+    knob->set_bounds({0, 0, 160.0f, 160.0f});
+
+    pulp::canvas::RecordingCanvas canvas;
+    knob->paint(canvas);
+
+    const pulp::canvas::DrawCommand* arc = nullptr;
+    for (const auto& cmd : canvas.commands())
+        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_arc) { arc = &cmd; break; }
+    REQUIRE(arc != nullptr);
+    REQUIRE(arc->f[2] == Catch::Approx(98.0f));
+}
+
+TEST_CASE("a designed knob's pointer starts at the body edge, not the centre",
+          "[view][import][native-materializer][designed-control]") {
+    // The other half of the same contract. Giving the RING a design-derived
+    // radius stopped the arc crossing the cap and left the pointer running from
+    // the box centre — so the spoke that used to end on the cap now crosses the
+    // cap AND the gap. Whatever a reviewer calls it, a black line across a
+    // brushed dial is the design's body being painted over by the widget.
+    //
+    // Asserted on the PAINTED endpoints, because the endpoints are what a
+    // reviewer sees and the skin fields are private to the painter.
+    DesignIR ir;
+    ir.root = frame("designed-root", 320.0f, 320.0f, LayoutDirection::row);
+
+    auto knob_node = frame("cutoff", 160.0f, 160.0f, LayoutDirection::column);
+    knob_node.audio_widget = AudioWidgetType::knob;
+    knob_node.attributes["designed_body"] = "underlay";
+    knob_node.attributes["design_accent"] = "#C4622A";
+    ir.root.children.push_back(std::move(knob_node));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    auto* knob = dynamic_cast<Knob*>(root->child_at(0));
+    REQUIRE(knob != nullptr);
+    knob->set_bounds({0, 0, 160.0f, 160.0f});
+
+    pulp::canvas::RecordingCanvas canvas;
+    knob->paint(canvas);
+
+    const pulp::canvas::DrawCommand* line = nullptr;
+    for (const auto& cmd : canvas.commands())
+        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_line) line = &cmd;
+    REQUIRE(line != nullptr);
+
+    // kelvin's dial: a 160px box, so the body edge is at radius 80.
+    const float cx = 80.0f, cy = 80.0f;
+    const auto radius_of = [&](float x, float y) {
+        return std::sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+    };
+    const float r_in = radius_of(line->f[0], line->f[1]);
+    const float r_out = radius_of(line->f[2], line->f[3]);
+    INFO("pointer runs from r=" << r_in << " to r=" << r_out);
+    // The whole point: it does not start at the centre, and it starts OUTSIDE
+    // the body rather than on it.
+    CHECK(r_in > 80.0f);
+    // And it still points outward, ending on the ring's outer edge.
+    CHECK(r_out > r_in);
+    CHECK(r_out == Catch::Approx(85.0f).margin(0.5f));
+}
+
+TEST_CASE("a stock knob's pointer still starts at the centre",
+          "[view][control-painters]") {
+    // The control this change could break. `paint_mod_ring_knob` is shared with
+    // every un-designed knob in Pulp, whose box IS its own body and whose
+    // pointer is meant to be a spoke. The new scales default to zero precisely
+    // so those callers are untouched, and that default is worth pinning: a
+    // regression here is invisible in the design fixtures and visible in every
+    // stock UI.
+    pulp::canvas::RecordingCanvas canvas;
+    painters::paint_mod_ring_knob(canvas, Rect{0.0f, 0.0f, 100.0f, 100.0f}, 0.5f);
+
+    const pulp::canvas::DrawCommand* line = nullptr;
+    for (const auto& cmd : canvas.commands())
+        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_line) line = &cmd;
+    REQUIRE(line != nullptr);
+    CHECK(line->f[0] == Catch::Approx(50.0f));
+    CHECK(line->f[1] == Catch::Approx(50.0f));
+}
+
+TEST_CASE("a design's declared pointer overrides the derived tick",
+          "[view][import][native-materializer][designed-control]") {
+    // The captured-indicator path, reached from the browser-capture lane.
+    //
+    // The consumer half already existed for the Figma lane
+    // (hoist_captured_art_knobs -> knob_ind_*), but it hung off an ASSET-backed
+    // disc, so a CSS-designed knob could never reach it: apply_captured_art_
+    // knob_skin returns immediately without an asset_path. The browser-capture
+    // lane's knobs are pure CSS, so a design that drew its own pointer had it
+    // ignored and got our derived tick instead.
+    //
+    // knob_ind_* are fractions of the disc HALF-extent. On a 160px box the
+    // half-extent is 80, so r_out 1.15 is radius 92 and r_in 0.80 is radius 64.
+    DesignIR ir;
+    ir.root = frame("designed-root", 320.0f, 320.0f, LayoutDirection::row);
+
+    auto knob_node = frame("cutoff", 160.0f, 160.0f, LayoutDirection::column);
+    knob_node.audio_widget = AudioWidgetType::knob;
+    knob_node.attributes["designed_body"] = "underlay";
+    knob_node.attributes["design_accent"] = "#C4622A";
+    knob_node.attributes["knob_ind_r_in"] = "0.80";
+    knob_node.attributes["knob_ind_r_out"] = "1.15";
+    knob_node.attributes["knob_ind_w"] = "0.05";
+    ir.root.children.push_back(std::move(knob_node));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    auto* knob = dynamic_cast<Knob*>(root->child_at(0));
+    REQUIRE(knob != nullptr);
+    knob->set_bounds({0, 0, 160.0f, 160.0f});
+
+    pulp::canvas::RecordingCanvas canvas;
+    knob->paint(canvas);
+
+    const pulp::canvas::DrawCommand* line = nullptr;
+    for (const auto& cmd : canvas.commands())
+        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_line) line = &cmd;
+    REQUIRE(line != nullptr);
+
+    const float cx = 80.0f, cy = 80.0f;
+    const auto radius_of = [&](float x, float y) {
+        return std::sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+    };
+    INFO("pointer runs from r=" << radius_of(line->f[0], line->f[1])
+                                << " to r=" << radius_of(line->f[2], line->f[3]));
+    // The declared geometry, not the derived 81..85. A units slip here (using
+    // the fraction as-is instead of halving it) doubles both radii, so the
+    // margins are tight enough to catch it.
+    CHECK(radius_of(line->f[0], line->f[1]) == Catch::Approx(64.0f).margin(0.5f));
+    CHECK(radius_of(line->f[2], line->f[3]) == Catch::Approx(92.0f).margin(0.5f));
+}
+
+TEST_CASE("a lowered control sits above the decoration it was drawn over",
+          "[view][import][native-materializer][stacking]") {
+    // The other half of the same failure, and the half that reached real
+    // panels: a design need not say anything at all for its controls to become
+    // unusable.
+    //
+    // Lowering assigns every composed node a z-index from Chrome's paint order.
+    // The synthesized controls were appended AFTERWARDS with no z-index, so
+    // they defaulted to `auto` and sat beneath the decoration. Appending them
+    // last does not help — z-index beats document order — so the topmost
+    // decorative band answered every press meant for a control.
+    //
+    // This asserts the ORDERING, not a magic number: the control must outrank
+    // the decoration, whatever the decoration happens to be numbered.
+    DesignIR ir;
+    ir.root = frame("panel", 200.0f, 200.0f, LayoutDirection::column);
+
+    auto decoration = frame("html", 200.0f, 200.0f, LayoutDirection::column);
+    decoration.style.z_index = 0;
+    ir.root.children.push_back(std::move(decoration));
+
+    auto knob_node = frame("cutoff", 100.0f, 100.0f, LayoutDirection::column);
+    knob_node.audio_widget = AudioWidgetType::knob;
+    knob_node.style.position = "absolute";
+    knob_node.style.left = 50.0f;
+    knob_node.style.top = 50.0f;
+    knob_node.style.z_index = 1;   // what the importer now assigns
+    ir.root.children.push_back(std::move(knob_node));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    root->set_bounds({0, 0, 200.0f, 200.0f});
+    root->layout_children();
+
+    // Press the knob's centre — the point the operability gate drags.
+    View* hit = root->hit_test({100.0f, 100.0f});
+    REQUIRE(hit != nullptr);
+    INFO("press at the knob centre landed on "
+         << (dynamic_cast<Knob*>(hit) != nullptr ? "the knob" : "the decoration"));
+    CHECK(dynamic_cast<Knob*>(hit) != nullptr);
+}
+
+TEST_CASE("a decorative layer that opts out of hit-testing stops eating presses",
+          "[view][import][native-materializer][pointer-events]") {
+    // The shape of a real failure: a generated panel rendered correctly and
+    // responded to nothing, because the design stacks full-width decorative
+    // bands (glows, gradient washes, vignettes) over its controls.
+    //
+    // `pointer-events` was in the capture's property list and reached no IR
+    // field, so it was dropped at the parse boundary. The design's only way to
+    // say "this band is decoration" did nothing, and hit-testing follows paint
+    // order — so the band above the knob won every press meant for it.
+    //
+    // The band is deliberately declared AFTER the knob and given a positive
+    // z-index, which is what the failing panel did: a positioned element with a
+    // positive z-index paints above z-auto content regardless of document
+    // order, so appending controls last does not save them.
+    DesignIR ir;
+    ir.root = frame("panel", 200.0f, 200.0f, LayoutDirection::column);
+
+    auto knob_node = frame("cutoff", 200.0f, 200.0f, LayoutDirection::column);
+    knob_node.audio_widget = AudioWidgetType::knob;
+    ir.root.children.push_back(std::move(knob_node));
+
+    auto glow = frame("glow", 200.0f, 200.0f, LayoutDirection::column);
+    glow.style.position = "absolute";
+    glow.style.top = 0.0f;
+    glow.style.left = 0.0f;
+    glow.style.z_index = 5;
+    glow.style.pointer_events = "none";
+    ir.root.children.push_back(std::move(glow));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    root->set_bounds({0, 0, 200.0f, 200.0f});
+    root->layout_children();
+
+    auto* band = root->child_at(1);
+    REQUIRE(band != nullptr);
+    // The property has to survive capture -> IR -> View. Asserting the View
+    // state rather than the IR field is deliberate: the IR carrying it while
+    // the materializer ignores it is exactly the failure mode this covers, and
+    // an IR-only assertion passes against it.
+    CHECK(band->pointer_events() == View::PointerEvents::none);
+
+    // The discriminating check. Press the knob's centre — the exact point the
+    // operability gate drags — and require the knob to receive it. Without the
+    // opt-out the band is hit-testable, sits above, and answers instead.
+    View* hit = root->hit_test({100.0f, 100.0f});
+    REQUIRE(hit != nullptr);
+    INFO("press at the knob centre landed on a view that is "
+         << (dynamic_cast<Knob*>(hit) != nullptr ? "the knob" : "NOT the knob"));
+    CHECK(dynamic_cast<Knob*>(hit) != nullptr);
 }

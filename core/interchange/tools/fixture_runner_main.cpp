@@ -16,8 +16,17 @@
 //
 // A corpus entry is a document plus a sibling `.expect` manifest stating what
 // the document is: its schema envelope version, identity, structural counts,
-// and the interchange concepts it uses. Without the manifest a fixture's
-// meaning lives only in whichever test happens to load it.
+// the interchange concepts it uses, and the ordered identities of every
+// collection in its arrangement. Without the manifest a fixture's meaning lives
+// only in whichever test happens to load it.
+//
+// Counts alone cannot state meaning. A count says three tracks survived; it
+// cannot say which three, nor in what order — so a decoder that drops an
+// authored ordering, remaps identities, or permutes a collection still reports
+// the same count, and idempotence holds because both directions of the round
+// trip agree on the same wrong answer. Recording the ordered identities is what
+// closes that gap: they are the part of a document a count is structurally
+// unable to see.
 //
 // The corpus is enumerated by an index file rather than by walking directories,
 // because directory iteration is unreliable in the WASM and emulator lanes this
@@ -26,6 +35,7 @@
 
 #include <pulp/interchange/census.hpp>
 #include <pulp/interchange/concept.hpp>
+#include <pulp/timeline/model.hpp>
 #include <pulp/timeline/schema_registry.hpp>
 #include <pulp/timeline/serialize.hpp>
 
@@ -142,6 +152,12 @@ void collect_summary(std::vector<std::pair<std::string, std::string>>& out,
     out.emplace_back("counts.clips", to_text(counts.clips));
     out.emplace_back("counts.notes", to_text(counts.notes));
     out.emplace_back("counts.device_placements", to_text(counts.device_placements));
+    // Scenes and slots are counted during decode like every other entity here.
+    // Their authored orders are already recorded below; without these two the
+    // census could see a launcher shrink only if the surviving scenes also
+    // reordered, since an order key drops out entirely when its list is empty.
+    out.emplace_back("counts.scenes", to_text(counts.scenes));
+    out.emplace_back("counts.slots", to_text(counts.slots));
     out.emplace_back("counts.automation_lanes", to_text(counts.automation_lanes));
     out.emplace_back("counts.automation_points", to_text(counts.automation_points));
     out.emplace_back("counts.take_lanes", to_text(counts.take_lanes));
@@ -158,6 +174,143 @@ void collect_census(std::vector<std::pair<std::string, std::string>>& out,
     for (const auto concept_value : census.present()) {
         out.emplace_back("concept." + std::string(pulp::interchange::concept_id(concept_value)),
                          to_text(census.count(concept_value)));
+    }
+}
+
+/// Accumulates one ordered identity list as a single manifest value.
+///
+/// Comma-separated because a manifest value may not contain whitespace, and
+/// identities are decimal integers, so no separator escaping is possible or
+/// needed.
+class IdentityOrder {
+  public:
+    void add(pulp::timeline::ItemId id) {
+        if (!text_.empty())
+            text_ += ',';
+        text_ += to_text(id.value);
+    }
+    bool empty() const noexcept { return text_.empty(); }
+    const std::string& text() const noexcept { return text_; }
+
+  private:
+    std::string text_;
+};
+
+/// Records `order` under `key`, omitting empty collections.
+///
+/// An empty collection has no writable value — the manifest format cannot
+/// express one — so the key is left out, matching how `concept.` keys appear
+/// only for concepts the document actually uses. Omission is not a blind spot
+/// in either direction: a collection that empties out drops a key the manifest
+/// still declares, and one that fills up adds a key the manifest never
+/// declared. The runner already fails on both.
+void record_order(std::vector<std::pair<std::string, std::string>>& out, std::string key,
+                  const IdentityOrder& order) {
+    if (order.empty())
+        return;
+    out.emplace_back(std::move(key), order.text());
+}
+
+/// Records the ordered identities of every collection in the arrangement.
+///
+/// The boundary is the arrangement spine — Project, Sequence, Scene, Track —
+/// and stops there. Everything below is leaf content (notes, automation points,
+/// MIDI lane points, takes, comp segments) whose size the counts already state
+/// and whose identities would bloat a manifest without stating anything the
+/// spine does not already pin. Two distinct classes of order live here and both
+/// matter:
+///
+///   Authored orders — `track_order`, `scenes`, `device_chain` — exist only in
+///   the document. Nothing else reconstructs them, and `track_order` in
+///   particular degrades silently: an empty authored order is legal and makes
+///   the sequence adopt the identity order of `tracks()`, so a decoder that
+///   drops it produces a plausible arrangement rather than an error.
+///
+///   That fallback bounds what this can prove. `track_order()` presents the
+///   identity order for a sequence that never recorded one, so the manifest
+///   cannot tell "no authored order" apart from "authored order equals identity
+///   order" — a document in either state is unchanged by the drop and stays
+///   green. A fixture whose authored order is deliberately NOT the identity
+///   order is what makes the check able to fail at all, which is why the corpus
+///   carries one and a CLI case asserts the two orders still differ.
+///
+///   Value-derived orders — `markers`, `regions`, `clips` — are sorted by
+///   position, so their identity order is a cheap proxy for the positions
+///   themselves: a lost or collapsed position reorders the list.
+///
+/// Canonical identity orders (`tracks`, `automation_lanes`, `take_lanes`) carry
+/// no ordering information beyond the id set, but the id set is itself
+/// unstated by a count: three tracks with remapped identities still count three.
+void collect_identity_orders(std::vector<std::pair<std::string, std::string>>& out,
+                             const pulp::timeline::Project& project) {
+    IdentityOrder assets;
+    for (const auto& asset : project.assets())
+        assets.add(asset.id);
+    record_order(out, "order.assets", assets);
+
+    IdentityOrder sequences;
+    for (const auto& sequence : project.sequences())
+        sequences.add(sequence.id());
+    record_order(out, "order.sequences", sequences);
+
+    for (const auto& sequence : project.sequences()) {
+        const std::string prefix = "order.sequence." + to_text(sequence.id().value) + ".";
+
+        IdentityOrder tracks;
+        for (const auto& track : sequence.tracks())
+            tracks.add(track.id());
+        record_order(out, prefix + "tracks", tracks);
+
+        IdentityOrder authored_tracks;
+        for (const auto track_id : sequence.track_order())
+            authored_tracks.add(track_id);
+        record_order(out, prefix + "track_order", authored_tracks);
+
+        IdentityOrder markers;
+        for (const auto& marker : sequence.markers())
+            markers.add(marker.id);
+        record_order(out, prefix + "markers", markers);
+
+        IdentityOrder regions;
+        for (const auto& region : sequence.regions())
+            regions.add(region.id);
+        record_order(out, prefix + "regions", regions);
+
+        IdentityOrder scenes;
+        for (const auto& scene : sequence.scenes())
+            scenes.add(scene.id);
+        record_order(out, prefix + "scenes", scenes);
+
+        for (const auto& scene : sequence.scenes()) {
+            IdentityOrder slots;
+            for (const auto& slot : scene.slots)
+                slots.add(slot.id);
+            record_order(out, "order.scene." + to_text(scene.id.value) + ".slots", slots);
+        }
+
+        for (const auto& track : sequence.tracks()) {
+            const std::string track_prefix = "order.track." + to_text(track.id().value) + ".";
+
+            IdentityOrder clips;
+            for (const auto& clip : track.clips())
+                clips.add(clip.id());
+            record_order(out, track_prefix + "clips", clips);
+
+            IdentityOrder devices;
+            for (const auto& placement : track.device_chain())
+                devices.add(placement.id);
+            record_order(out, track_prefix + "device_chain", devices);
+
+            IdentityOrder automation_lanes;
+            for (const auto& lane : track.automation_lanes())
+                automation_lanes.add(lane.id());
+            record_order(out, track_prefix + "automation_lanes", automation_lanes);
+
+            IdentityOrder take_lanes;
+            for (const auto& lane : track.take_lanes())
+                take_lanes.add(lane.id());
+            record_order(out, track_prefix + "take_lanes", take_lanes);
+        }
     }
 }
 
@@ -195,6 +348,7 @@ FixtureOutcome check_fixture(const std::string& corpus_root, const std::string& 
         return outcome;
     }
     collect_census(outcome.observed, pulp::interchange::census(project.value()));
+    collect_identity_orders(outcome.observed, project.value());
 
     // Round-trip identity is asserted as serialize idempotence rather than as a
     // byte-compare against the fixture on disk: a fixture pinned at an older
