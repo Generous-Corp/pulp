@@ -289,6 +289,47 @@ lpf.process(buffer, num_samples);  // in-place
 
 ---
 
+### Six-band parametric EQ
+
+`SixBandEq` promotes the EQ Curve demo's fixed console layout into a reusable
+process primitive: low shelf, four peaking bands, and high shelf. `SixBandEq64`
+provides the same contract for double samples. Both aliases have two independent
+channels; use `SixBandEqT<SampleType, Channels>` for a different compile-time
+channel count.
+
+```cpp
+#include <pulp/signal/six_band_eq.hpp>
+
+signal::SixBandEq eq;
+eq.prepare(sample_rate);
+eq.set_band(2, {.frequency_hz = 900.0f, .gain_db = -4.0f, .q = 2.0f});
+
+// Planar stereo callback:
+eq.process_block(left, frames, 0);
+eq.process_block(right, frames, 1);
+
+// The plot evaluates the exact coefficients currently processing audio.
+std::array<float, 256> curve_db;
+eq.response_curve_db(20.0, 20000.0, curve_db);
+```
+
+The plain control domains are frequency
+`[20, min(20000, 0.49 * sample_rate)]` Hz, gain `[-18, 18]` dB, and Q
+`[0.1, 12]`. Finite values clamp to those bounds. Non-finite values select the
+band's default. An invalid or too-low sample rate selects 48 kHz. The established
+defaults are 80, 250, 700, 2000, 5000, and 12000 Hz; all gains are 0 dB; Q is
+0.707, 1.0, 1.2, 1.2, 1.0, and 0.707.
+
+`set_band()` is allocation-free and is safe to call between blocks for host
+automation. It swaps coefficients immediately, preserves recursive history,
+and does not smooth. `reset()` clears history without changing controls.
+`magnitude()`, `magnitude_db()`, and `response_curve_db()` inspect the live
+coefficient cascade, so they remain truthful after clamping or automation.
+The class owns no parameters and registers no host or runtime controls; the
+processor remains the single authority for mapping its state into the EQ.
+
+---
+
 ### Svf
 
 State Variable Filter using Topology Preserving Transform (TPT). Numerically stable at all frequencies with no Nyquist cramping. Provides simultaneous lowpass, highpass, bandpass, and notch outputs (one selected via mode).
