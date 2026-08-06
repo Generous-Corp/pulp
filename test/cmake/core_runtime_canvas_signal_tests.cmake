@@ -222,11 +222,13 @@ pulp_add_test_suite(pulp-test-osc-blep LIBRARIES pulp::signal pulp::audio-analys
 pulp_add_test_suite(pulp-test-osc-minblep
     SOURCES test_osc_minblep.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal pulp::audio-analysis)
-add_test(NAME minblep-table-reproducible
-    COMMAND ${Python3_EXECUTABLE}
-        ${CMAKE_SOURCE_DIR}/tools/scripts/generate_minblep_table.py
-        --check
-        --output ${CMAKE_SOURCE_DIR}/core/signal/include/pulp/signal/osc/detail/minblep_table.hpp)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME minblep-table-reproducible
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/generate_minblep_table.py
+            --check
+            --output ${CMAKE_SOURCE_DIR}/core/signal/include/pulp/signal/osc/detail/minblep_table.hpp)
+endif()
 # The VA shapes are gated on measured alias rejection, hence the analysis lib.
 pulp_add_test_suite(pulp-test-osc-va LIBRARIES pulp::signal pulp::audio-analysis)
 # Sync and through-zero FM are gated on measured alias rejection too.

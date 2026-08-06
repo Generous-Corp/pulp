@@ -14,8 +14,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <complex>
 #include <cstddef>
 #include <limits>
+#include <numbers>
 #include <span>
 #include <utility>
 #include <vector>
@@ -70,6 +72,29 @@ AliasReport analyze(const std::vector<double>& signal, double f0) {
 void require_trustworthy(const AliasReport& report) {
     REQUIRE_FALSE(report.has_unresolved_in_band_alias);
     REQUIRE(report.worst_alias_db > report.detection_floor_db);
+}
+
+double upper_quarter_energy_of_difference(const std::vector<double>& signal) {
+    std::vector<double> difference(signal.size(), 0.0);
+    double previous = 0.0;
+    for (std::size_t index = 0; index < signal.size(); ++index) {
+        difference[index] = signal[index] - previous;
+        previous = signal[index];
+    }
+
+    double energy = 0.0;
+    const std::size_t first_bin = signal.size() / 4;
+    const std::size_t nyquist_bin = signal.size() / 2;
+    for (std::size_t bin = first_bin; bin <= nyquist_bin; ++bin) {
+        std::complex<double> projection{};
+        for (std::size_t index = 0; index < difference.size(); ++index) {
+            const double angle = -2.0 * std::numbers::pi * static_cast<double>(bin * index) /
+                                 static_cast<double>(difference.size());
+            projection += difference[index] * std::polar(1.0, angle);
+        }
+        energy += std::norm(projection);
+    }
+    return energy;
 }
 
 std::vector<double> render_saw(double f0, CorrectionKind kind) {
@@ -209,6 +234,33 @@ TEST_CASE("minBLEP response is finite linear and converges to exact zero",
     REQUIRE(scaled.active_events() == 0);
     REQUIRE(unit.next() == 0.0);
     REQUIRE(scaled.next() == 0.0);
+}
+
+TEST_CASE("minBLEP bandlimits an arbitrary isolated discontinuity",
+          "[signal][osc][minblep][impulse]") {
+    constexpr std::size_t sample_count = 256;
+    constexpr std::size_t event_sample = 63;
+    constexpr double position = 0.371;
+    constexpr double height = 0.37;
+    MinBlepAccumulator<> accumulator;
+    std::vector<double> trivial(sample_count, 0.0);
+    std::vector<double> corrected(sample_count, 0.0);
+
+    for (std::size_t index = 0; index < sample_count; ++index) {
+        const double stepped = index > event_sample ? height : 0.0;
+        trivial[index] = stepped;
+        corrected[index] = stepped + accumulator.next();
+        if (index == event_sample)
+            REQUIRE(accumulator.insert(position, height) == MinBlepInsertResult::inserted);
+    }
+
+    const double trivial_high_band = upper_quarter_energy_of_difference(trivial);
+    const double corrected_high_band = upper_quarter_energy_of_difference(corrected);
+    INFO("arbitrary step high-band energy trivial=" << trivial_high_band
+                                                     << " corrected=" << corrected_high_band);
+    REQUIRE(corrected_high_band < trivial_high_band * 0.65);
+    REQUIRE(corrected.back() == height);
+    REQUIRE(accumulator.active_events() == 0);
 }
 
 TEST_CASE("minBLEP collision overflow drops only the new event deterministically",
