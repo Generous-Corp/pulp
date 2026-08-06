@@ -3,6 +3,7 @@
 #include <pulp/inspect/control_grants.hpp>
 
 #include <chrono>
+#include <algorithm>
 #include <memory>
 #include <string>
 
@@ -98,6 +99,47 @@ struct GrantFixture {
             true, authority, std::move(decision_id)};
     }
 };
+
+class AdvancingNthClock {
+public:
+    std::chrono::steady_clock::time_point operator()() {
+        if (remaining_ > 0 && --remaining_ == 0)
+            now_ += advance_;
+        return now_;
+    }
+
+    void advance_on_call(std::size_t call, std::chrono::seconds advance) {
+        remaining_ = call;
+        advance_ = advance;
+    }
+
+private:
+    std::chrono::steady_clock::time_point now_{};
+    std::size_t remaining_ = 0;
+    std::chrono::seconds advance_{};
+};
+
+ControlRegistrationRequest timed_registration_request(std::string suffix) {
+    ControlManifest manifest;
+    manifest.profile = ControlBuildProfile::DeveloperLocal;
+    manifest.target = "TimedFixture";
+    manifest.product_name = "Timed Fixture";
+    manifest.bundle_id = "dev.pulp.timed-fixture";
+    manifest.build_id = "build:0123456789abcdef0123456789abcdef";
+    manifest.endpoint_included = true;
+    manifest.capabilities = {
+        InspectorCapability::SessionDescribe,
+        InspectorCapability::StateRead,
+    };
+    return {
+        ControlHostTier::Standalone,
+        "session-" + suffix,
+        "instance-" + suffix,
+        "publication-" + suffix,
+        std::move(manifest),
+        std::string(64, 'c'),
+    };
+}
 
 } // namespace
 
@@ -408,5 +450,187 @@ TEST_CASE("grant store is bounded and audit contains no consent payload",
     for (const auto& event : events) {
         CHECK(event.reason.find("sensitive-user-text") == std::string::npos);
         CHECK(event.reason.find("manifest-a") == std::string::npos);
+    }
+}
+
+TEST_CASE("direct revoke frees active capacity and retains bounded idempotence",
+          "[inspect][control][grants][capacity]") {
+    GrantFixture fixture;
+    ControlGrantStore bounded(
+        fixture.identities, fixture.audit,
+        ControlGrantStoreConfig{1, 4, 1h, 2},
+        [&] { return fixture.now; });
+    auto first = bounded.issue(
+        fixture.request(),
+        GrantFixture::consent(ControlConsentAuthority::TrustedPulpCli,
+                              "capacity-first"));
+    REQUIRE(first.grant.has_value());
+    CHECK(bounded.revoke(first.grant->grant_id, "capacity-revoke") ==
+          ControlGrantStatus::Revoked);
+    CHECK(bounded.revoke(first.grant->grant_id, "capacity-revoke-again") ==
+          ControlGrantStatus::Revoked);
+
+    auto replacement = bounded.issue(
+        fixture.request(),
+        GrantFixture::consent(ControlConsentAuthority::TrustedPulpCli,
+                              "capacity-second"));
+    CHECK(replacement.status == ControlGrantStatus::Granted);
+    CHECK(replacement.grant.has_value());
+}
+
+TEST_CASE("zero retired grant capacity disables revoke tombstones exactly",
+          "[inspect][control][grants][capacity]") {
+    GrantFixture fixture;
+    ControlGrantStore bounded(
+        fixture.identities, fixture.audit,
+        ControlGrantStoreConfig{1, 4, 1h, 0},
+        [&] { return fixture.now; });
+    auto first = bounded.issue(
+        fixture.request(),
+        GrantFixture::consent(ControlConsentAuthority::TrustedPulpCli,
+                              "zero-retired-first"));
+    REQUIRE(first.grant.has_value());
+    CHECK(bounded.revoke(first.grant->grant_id, "zero-retired-revoke") ==
+          ControlGrantStatus::Revoked);
+    CHECK(bounded.revoke(first.grant->grant_id,
+                         "zero-retired-revoke-again") ==
+          ControlGrantStatus::NotFound);
+
+    auto replacement = bounded.issue(
+        fixture.request(),
+        GrantFixture::consent(ControlConsentAuthority::TrustedPulpCli,
+                              "zero-retired-second"));
+    CHECK(replacement.status == ControlGrantStatus::Granted);
+    CHECK(replacement.grant.has_value());
+}
+
+TEST_CASE("grant insertion time rejects identities that expired after lookup",
+          "[inspect][control][grants][lifecycle][time]") {
+    SECTION("client expiry does not consume consent or active capacity") {
+        AdvancingNthClock clock;
+        auto audit = std::make_shared<ControlSecurityAuditLog>();
+        ControlIdentityRegistryConfig identity_config;
+        identity_config.client_ttl = 1s;
+        identity_config.registration_ttl = 10s;
+        ControlIdentityRegistry identities{
+            identity_config, audit, [&] { return clock(); }};
+        ControlGrantStore grants{
+            identities, audit, ControlGrantStoreConfig{1, 4, 1h, 4},
+            [&] { return clock(); }};
+        auto client_peer = verified_peer(
+            ControlPeerRole::Client, 501, "timed-client");
+        auto host_peer = verified_peer(
+            ControlPeerRole::StandaloneHost, 502, "timed-host");
+
+        auto ticket = identities.issue_bootstrap(client_peer);
+        REQUIRE(ticket.ticket.has_value());
+        auto connected = identities.redeem_bootstrap(
+            ticket.ticket->ticket_id, ticket.ticket->secret.bytes(),
+            client_peer);
+        REQUIRE(connected.client.has_value());
+        auto registered = identities.register_instance(
+            host_peer, timed_registration_request("client-expiry"));
+        REQUIRE(registered.registration.has_value());
+
+        ControlGrantRequest request{
+            connected.client->client_id,
+            registered.registration->registration_id,
+            {InspectorCapability::StateRead},
+            5min,
+        };
+        const ControlConsentDecision consent{
+            true, ControlConsentAuthority::TrustedPulpCli,
+            "timed-consent-client"};
+        clock.advance_on_call(3, 2s);
+        auto rejected = grants.issue(request, consent);
+        CHECK(rejected.status == ControlGrantStatus::ClientUnavailable);
+        CHECK_FALSE(rejected.grant.has_value());
+
+        const auto rejected_events = audit->snapshot();
+        CHECK(std::ranges::any_of(rejected_events, [](const auto& event) {
+            return event.action == "grant.issue" &&
+                   event.outcome == ControlSecurityOutcome::Denied &&
+                   event.reason == "client-unavailable" &&
+                   event.grant_id.empty();
+        }));
+        CHECK_FALSE(std::ranges::any_of(
+            rejected_events, [](const auto& event) {
+                return event.action == "grant.issue" &&
+                       event.outcome == ControlSecurityOutcome::Accepted;
+            }));
+
+        ticket = identities.issue_bootstrap(client_peer);
+        REQUIRE(ticket.ticket.has_value());
+        connected = identities.redeem_bootstrap(
+            ticket.ticket->ticket_id, ticket.ticket->secret.bytes(),
+            client_peer);
+        REQUIRE(connected.client.has_value());
+        request.client_id = connected.client->client_id;
+        auto replacement = grants.issue(request, consent);
+        CHECK(replacement.status == ControlGrantStatus::Granted);
+        CHECK(replacement.grant.has_value());
+    }
+
+    SECTION("registration expiry does not consume consent or active capacity") {
+        AdvancingNthClock clock;
+        auto audit = std::make_shared<ControlSecurityAuditLog>();
+        ControlIdentityRegistryConfig identity_config;
+        identity_config.client_ttl = 10s;
+        identity_config.registration_ttl = 1s;
+        ControlIdentityRegistry identities{
+            identity_config, audit, [&] { return clock(); }};
+        ControlGrantStore grants{
+            identities, audit, ControlGrantStoreConfig{1, 4, 1h, 4},
+            [&] { return clock(); }};
+        auto client_peer = verified_peer(
+            ControlPeerRole::Client, 511, "timed-client-registration");
+        auto host_peer = verified_peer(
+            ControlPeerRole::StandaloneHost, 512,
+            "timed-host-registration");
+
+        auto ticket = identities.issue_bootstrap(client_peer);
+        REQUIRE(ticket.ticket.has_value());
+        auto connected = identities.redeem_bootstrap(
+            ticket.ticket->ticket_id, ticket.ticket->secret.bytes(),
+            client_peer);
+        REQUIRE(connected.client.has_value());
+        auto registered = identities.register_instance(
+            host_peer, timed_registration_request("registration-expiry"));
+        REQUIRE(registered.registration.has_value());
+
+        ControlGrantRequest request{
+            connected.client->client_id,
+            registered.registration->registration_id,
+            {InspectorCapability::StateRead},
+            5min,
+        };
+        const ControlConsentDecision consent{
+            true, ControlConsentAuthority::TrustedPulpCli,
+            "timed-consent-registration"};
+        clock.advance_on_call(3, 2s);
+        auto rejected = grants.issue(request, consent);
+        CHECK(rejected.status == ControlGrantStatus::RegistrationUnavailable);
+        CHECK_FALSE(rejected.grant.has_value());
+
+        const auto rejected_events = audit->snapshot();
+        CHECK(std::ranges::any_of(rejected_events, [](const auto& event) {
+            return event.action == "grant.issue" &&
+                   event.outcome == ControlSecurityOutcome::Denied &&
+                   event.reason == "registration-unavailable" &&
+                   event.grant_id.empty();
+        }));
+        CHECK_FALSE(std::ranges::any_of(
+            rejected_events, [](const auto& event) {
+                return event.action == "grant.issue" &&
+                       event.outcome == ControlSecurityOutcome::Accepted;
+            }));
+
+        registered = identities.register_instance(
+            host_peer, timed_registration_request("registration-replacement"));
+        REQUIRE(registered.registration.has_value());
+        request.registration_id = registered.registration->registration_id;
+        auto replacement = grants.issue(request, consent);
+        CHECK(replacement.status == ControlGrantStatus::Granted);
+        CHECK(replacement.grant.has_value());
     }
 }
