@@ -649,6 +649,37 @@ git worktree remove "$PULP_WORKTREES_ROOT/pulp-phase-audio"
 
 Multiple explorations can run simultaneously. Multiple phases can be implemented in parallel if they don't share subsystems. The worktree-manager plugin handles this.
 
+Every long-lived worktree must also record its continuity state in the shared
+Git config. Do this immediately after creation, update it whenever work moves to
+another branch/worktree/session, and set the final disposition before removal:
+
+```bash
+tools/scripts/worktree_lineage.sh mark --status active --owner "<agent/session>" --note "<goal>"
+tools/scripts/worktree_lineage.sh mark --status superseded --successor "<branch, path, or handoff>"
+tools/scripts/worktree_lineage.sh mark --status merged --pr "https://github.com/.../pull/123"
+tools/scripts/worktree_lineage.sh mark --status archived --archive "/durable/path/topic.bundle"
+tools/scripts/worktree_lineage.sh list
+```
+
+The record is branch-local but stored in the repository's common Git config,
+so sibling worktrees can discover it and it survives worktree removal as long
+as the local branch is retained. `superseded` requires a successor; `merged`
+requires a PR unless exact-head ancestry into `origin/main` is provable; and
+`archived` records the archive SHA-256. Never remove a dirty or active worktree.
+For old clean unmerged work, retain the local branch and either prove an exact
+remote ref or create and verify a complete `git bundle` before removal.
+Lineage metadata is a discovery aid, not deletion authorization: always recheck
+live cleanliness/activity and the exact merge, remote-ref, or bundle proof.
+
+Fresh worktrees must use the shared dependency path delivered by the normal
+Pulp workflow. Prefer `pulp build`, `pulp dev`, or `pulp loop`: a cold or
+pin-stale source checkout bootstraps immutable dependency sources into the
+machine-wide FetchContent cache and links the checkout to them. Before a raw
+CMake configure in a source worktree, run `./setup.sh`; do not copy another
+worktree's `external/`, `_deps`, or build directory. Compiled objects and
+generated files remain per-worktree and must be removed with the worktree when
+its lineage is complete.
+
 When creating a fresh worktree for a task that references `planning/`, initialize the planning submodule before reading specs or handoffs:
 
 ```bash
