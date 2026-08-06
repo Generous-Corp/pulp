@@ -174,15 +174,22 @@ class ChordFormula {
         const int replacement = index == 0 ? 2 : 5;
         for (std::size_t note = 1; note < count_; ++note) {
             const int interval_value = intervals_[note];
-            if (interval_value <= 12 && (wrap_pitch_class(interval_value) == PitchClass::d_sharp ||
-                                         wrap_pitch_class(interval_value) == PitchClass::e))
-                return with_replacement(interval_value, replacement);
+            const auto pitch_class = wrap_pitch_class(interval_value);
+            if (pitch_class == PitchClass::d_sharp || pitch_class == PitchClass::e) {
+                const int replacement_interval =
+                    interval_value - static_cast<int>(pitch_class) + replacement;
+                return with_replacement(interval_value, replacement_interval);
+            }
         }
         for (std::size_t note = 1; note < count_; ++note) {
             const int interval_value = intervals_[note];
-            if (interval_value <= 12 && (interval_value == 2 || interval_value == 5) &&
-                interval_value != replacement)
-                return with_replacement(interval_value, replacement);
+            const auto pitch_class = wrap_pitch_class(interval_value);
+            if ((pitch_class == PitchClass::d || pitch_class == PitchClass::f) &&
+                static_cast<int>(pitch_class) != replacement) {
+                const int replacement_interval =
+                    interval_value - static_cast<int>(pitch_class) + replacement;
+                return with_replacement(interval_value, replacement_interval);
+            }
         }
         for (std::size_t note = 1; note < count_; ++note)
             if (intervals_[note] == replacement)

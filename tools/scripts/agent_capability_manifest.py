@@ -30,7 +30,7 @@ from agent_capability_evolution import (
 SCHEMA = "pulp.agent-capabilities.v1"
 SCHEMA_MINOR = 1
 MANIFEST_REVISION = 5
-SURFACE_INVENTORY_VERSION = 7
+SURFACE_INVENTORY_VERSION = 8
 HISTORY_SCHEMA = "pulp.agent-capability-history.v1"
 HISTORY_FILE = pathlib.Path("tools/agent-capabilities/contract-history.json")
 SNAPSHOT = pathlib.Path("docs/status/agent-capabilities.json")
@@ -1341,7 +1341,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/music/chord.hpp",
-        "fingerprint": "sha256:24dd445d17537d186ecdfd4181102b4cb0d3409363d7ab62c5f700736969a222",
+        "fingerprint": "sha256:2715a6ef063ec9815edd4955a23906bc38182b7c5e99db0a75073f14f9ce8323",
         "disposition": "capability_support",
         "capability_keys": [
             "music.chord-recognition",
