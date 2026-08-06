@@ -1283,11 +1283,27 @@ def render_inventory(inv: dict, prefer: str | None = None) -> str:
             if m.get("tags"):
                 line += f"  [{', '.join(m['tags'])}]"
             out.append(line)
+            # SAY when the jacks are unknown, rather than printing nothing.
+            #
+            # This emitted `in:`/`out:` only for a module that had inputs, so a
+            # module nobody has cartographed rendered exactly like a module
+            # with no ports at all. Three quarters of the installed library is
+            # in that state, and the model cannot prefer a module it can
+            # actually wire if the two are indistinguishable on the page.
+            #
+            # The two sides are also independent now: a module with outputs and
+            # no recorded inputs used to lose its outputs too.
             if m.get("inputs"):
-                ins = ", ".join(f"{i}={n}" for i, n in enumerate(m["inputs"]))
-                outs = ", ".join(f"{i}={n}" for i, n in enumerate(m.get("outputs", [])))
-                out.append(f"    in: {ins}")
-                out.append(f"    out: {outs}")
+                out.append("    in: " + ", ".join(
+                    f"{i}={n}" for i, n in enumerate(m["inputs"])))
+            if m.get("outputs"):
+                out.append("    out: " + ", ".join(
+                    f"{i}={n}" for i, n in enumerate(m["outputs"])))
+            if not m.get("inputs") and not m.get("outputs"):
+                out.append("    ports: UNKNOWN (nobody has recorded this "
+                           "module's jacks; prefer a module whose jacks are "
+                           "listed when a cable has to land somewhere "
+                           "specific)")
             # With their defaults, which are the values a person gets when
             # they place the module. A param left out of a patch keeps its
             # default; a param written blindly does not, and the difference
@@ -2101,21 +2117,48 @@ def default_output_device() -> str | None:
     return default
 
 
-def keep_attempt(patch: dict, report: str, n: int, why: str) -> None:
-    """Keep a failed attempt where a person can read it.
+def attempts_dir() -> str:
+    """Where this process writes the attempts it rejected.
+
+    FORGE_ATTEMPT_DIR when a caller names one; otherwise a directory of this
+    run's own beside the patches, which is the only place a person already
+    knows to look.
+
+    It is NOT optional. It used to be, and the whole mechanism was then dead
+    for the one caller that matters: nothing in the app or the examples set
+    the variable, only `prove_idioms.sh` did -- so a real build kept nothing
+    while the transcript said "keeping the patch anyway". A run that generated
+    five patches it had itself judged structurally sound ended with none of
+    them on disk and one line of explanation.
+
+    Stamped and per-pid so two runs cannot write over each other's evidence,
+    which is the fault the run log itself had to fix for the same reason.
+    """
+    named = os.environ.get("FORGE_ATTEMPT_DIR")
+    if named:
+        return named
+    global _ATTEMPTS_DIR
+    if _ATTEMPTS_DIR is None:
+        import time
+        _ATTEMPTS_DIR = os.path.join(
+            os.path.dirname(user_patches_dir()), "attempts",
+            time.strftime("%Y%m%d-%H%M%S") + f"-{os.getpid()}")
+    return _ATTEMPTS_DIR
+
+
+_ATTEMPTS_DIR = None
+
+
+def keep_attempt(patch: dict, report: str, n: int, why: str) -> str:
+    """Keep a failed attempt where a person can read it. -> its path, or "".
 
     The per-module activity is the whole diagnosis -- the FIRST module reading
     0.000 is where the signal stops -- and it went to the model and nowhere
     else. The run log kept the verdict ("makes no sound") and not one number
     behind it, so answering "why was it silent" meant spending another dozen
     model calls to reproduce a failure that had already happened.
-
-    Off unless FORGE_ATTEMPT_DIR names somewhere, so an ordinary build from
-    the app does not litter a person's patch folder. prove_idioms.sh sets it.
     """
-    dest = os.environ.get("FORGE_ATTEMPT_DIR")
-    if not dest:
-        return
+    dest = attempts_dir()
     try:
         os.makedirs(dest, exist_ok=True)
         stem = os.path.join(dest, f"attempt{n:02d}-{why}")
@@ -2123,9 +2166,10 @@ def keep_attempt(patch: dict, report: str, n: int, why: str) -> None:
             json.dump(patch, f, indent=2)
         with open(stem + ".txt", "w") as f:
             f.write(report)
+        return stem + ".vcv"
     except OSError:
         # Evidence is worth having and never worth failing a build over.
-        pass
+        return ""
 
 
 def configure_audio(patch: dict) -> str | None:
@@ -3212,8 +3256,270 @@ def claim_idiom(prompt: str, idioms: dict, say=None):
     return intent
 
 
+def _jacks_for_side(inv: dict, roles: dict, role: str, kind: str,
+                    side: str, limit: int = 3, prefer=()) -> tuple[list, list]:
+    """Installed jacks matching one end of a requirement. -> (can, cannot).
+
+    `can` names a real module and a real jack index and label. `cannot` names
+    modules that play the part but publish nothing of that kind, WITH the jacks
+    they do publish -- a sequencer with no gate output is the reason a
+    requirement is unsatisfiable, and saying which one it is turns a dead end
+    into a choice.
+
+    `prefer` names the plugins the patch is ALREADY built from, and they sort
+    first. Alphabetical order alone offered three strangers ahead of the
+    maker's own module that answers the requirement exactly, which is both a
+    worse suggestion and a bigger change than the patch needs -- the same
+    reason a retry is told not to drop the makers the prompt named.
+
+    A module nobody has cartographed appears in neither: it may well have the
+    jack, and asserting it does not would be inventing a fact.
+    """
+    import idiom_check
+    can, cannot = [], []
+    prefer = set(prefer)
+    field = "outputs" if side == "out" else "inputs"
+    rfield = "roles_out" if side == "out" else "roles_in"
+    for pslug in sorted(inv, key=lambda s: (s not in prefer, s)):
+        for mslug, m in sorted(inv[pslug].get("modules", {}).items()):
+            try:
+                if not idiom_check._module_matches(role, m, roles):
+                    continue
+            except KeyError:
+                return [], []                 # unknown role: say nothing
+            names = m.get(field) or []
+            if not names:
+                continue                      # uncartographed; unknown, not absent
+            prole = m.get(rfield) or []
+            hit = None
+            for i, name in enumerate(names):
+                try:
+                    ok = idiom_check._port_matches(
+                        kind, prole[i] if i < len(prole) else None, name, roles)
+                except KeyError:
+                    return [], []             # unknown port kind: say nothing
+                if ok:
+                    hit = (i, name)
+                    break
+            if hit:
+                can.append(f"{pslug}/{mslug} {side}{hit[0]} '{hit[1]}'")
+            else:
+                # A jack the scan reached but could not name is a real jack
+                # with an unknown label, not an absent one. Shown by index so
+                # the count is still honest.
+                shown = ", ".join(n if n else f"({side}{i}, unnamed)"
+                                  for i, n in enumerate(names))
+                cannot.append(f"{pslug}/{mslug} (its {side}puts are {shown})")
+    return can[:limit], cannot[:limit]
+
+
+def _patch_cannot(patch: dict, inv: dict, roles: dict, role: str, kind: str,
+                  side: str, limit: int = 2) -> list:
+    """Modules THIS patch already uses for the part, that cannot do the job.
+
+    The most actionable thing there is. A run failed five times because it kept
+    reaching for a sequencer with no gate output; every retry was told the
+    concept it had failed and none of them was told that the module in front of
+    it could not satisfy the concept however it was wired.
+    """
+    import idiom_check
+    field = "outputs" if side == "out" else "inputs"
+    rfield = "roles_out" if side == "out" else "roles_in"
+    seen, out = set(), []
+    for m in patch.get("modules", []):
+        key = (m.get("plugin"), m.get("model"))
+        if key in seen or None in key:
+            continue
+        seen.add(key)
+        entry = inv.get(key[0], {}).get("modules", {}).get(key[1])
+        if not entry:
+            continue
+        try:
+            if not idiom_check._module_matches(role, entry, roles):
+                continue
+        except KeyError:
+            return []
+        names = entry.get(field) or []
+        if not names:
+            continue                          # uncartographed; unknown, not absent
+        prole = entry.get(rfield) or []
+        try:
+            if any(idiom_check._port_matches(
+                    kind, prole[i] if i < len(prole) else None, n, roles)
+                   for i, n in enumerate(names)):
+                continue                      # it can; nothing to report
+        except KeyError:
+            return []
+        shown = ", ".join(n if n else f"({side}{i}, unnamed)"
+                          for i, n in enumerate(names))
+        out.append(f"{key[0]}/{key[1]} (its {side}puts are {shown})")
+    return out[:limit]
+
+
+def name_the_jacks(missing: list, idiom: dict, inv: dict,
+                   patch: dict | None = None) -> list:
+    """Each failed requirement, followed by the jacks that would answer it.
+
+    A RESTATED CONCEPT IS NOT ACTIONABLE. The loop named what failed the way a
+    person would say it -- "the sequencer's gate has to fire an envelope" --
+    and then handed that same sentence back to the model as the correction. It
+    says nothing the model did not already believe when it wrote the patch, so
+    five attempts came back near-identical and nothing escalated.
+
+    Naming the JACK does escalate, in both directions. Where an installed
+    module can satisfy the requirement, the retry can wire it. Where none can
+    -- PentaSequencer publishes A, B, C, D and E and no gate at all -- the only
+    useful move is to pick a different module, and that is now visible instead
+    of being rediscovered by attempt five.
+    """
+    import idiom_check
+    try:
+        roles = idiom_check.load_roles()
+    except Exception:                                        # noqa: BLE001
+        return list(missing)
+    by_describe = {}
+    for req in idiom.get("topology", []):
+        key = req.get("describe")
+        if key:
+            by_describe[key] = req
+    # The makers this patch is already built from. A module by one of them is
+    # both the smaller change and the one that keeps whatever the prompt asked
+    # for by name.
+    here = {m.get("plugin") for m in (patch or {}).get("modules", [])
+            if m.get("plugin")}
+    out = []
+    for m in missing:
+        out.append(m)
+        req = by_describe.get(m)
+        if req is None:
+            continue
+        for role_key, port_key, side, verb in (
+                ("from_module", "from_port", "out", "send it"),
+                ("to_module", "to_port", "in", "receive it")):
+            kind = req.get(port_key, "any_out" if side == "out" else "any_in")
+            if kind in ("any_out", "any_in"):
+                continue                      # unconstrained: nothing to name
+            role = req.get(role_key, "any")
+            if patch is not None:
+                for line in _patch_cannot(patch, inv, roles, role, kind, side):
+                    out.append(f"    this patch's {role} CANNOT {verb}, "
+                               f"however it is wired: {line}")
+            can, cannot = _jacks_for_side(inv, roles, role, kind, side,
+                                          prefer=here)
+            if can:
+                out.append(f"    installed jacks that can {verb}: "
+                           f"{'; '.join(can)}")
+            elif cannot:
+                out.append(f"    NO installed {role} can {verb}: "
+                           f"{'; '.join(cannot)}")
+    return out
+
+
+class Shortfall:
+    """A patch that was built, judged, and found not to meet the request.
+
+    Carried rather than discarded. A run that ends without a pass has usually
+    built several of these, and the transcript already says of each one that it
+    is structurally sound -- so throwing them away and printing "gave up after
+    5 attempts" spends five model calls to produce one sentence. The patch is
+    ten seconds of listening away from a verdict WE cannot make and the person
+    who asked for it can.
+
+    `severity` orders the kinds of shortfall against each other: 0 is a patch
+    that plays and is not quite the idiom asked for, 1 is one measured silent.
+    A patch that failed the LINT never becomes a Shortfall -- it names modules
+    Rack cannot create, so handing it over would offer a file that does not
+    open.
+    """
+
+    def __init__(self, patch, why, attempt, kept, headline, detail, severity,
+                 misses=None):
+        self.patch = patch
+        self.why = why
+        self.attempt = attempt
+        self.kept = kept                  # where the attempt was written, or ""
+        self.headline = headline          # one line: what it did not meet
+        self.detail = list(detail)        # what to show a person, jacks and all
+        self.severity = severity
+        # How many attempts the run spent in total, filled in by generate()
+        # when it gives up. `attempt` is which one THIS patch was.
+        self.tried = attempt
+        # How many REQUIREMENTS it missed, which is not how many lines it takes
+        # to say so. Ranking on the line count would rate a patch worse for
+        # each installed jack we managed to name, which is backwards.
+        self.misses = len(detail) if misses is None else misses
+
+    @property
+    def rank(self) -> tuple:
+        """Lower is better. Fewest requirements missed wins; ties go to the
+        LATER attempt, which has had the most correction applied to it."""
+        return (self.severity, self.misses, -self.attempt)
+
+
+def better(a, b):
+    """The better of two shortfalls, either of which may be None."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return a if a.rank <= b.rank else b
+
+
+#: The one phrase every reader agrees means "this run ended without meeting the
+#: request". BuildMonitor classifies it as an ending, `test_generator_endings.py`
+#: keeps the two in step, and a person searching a log finds it. Spelled once so
+#: the generator and the app cannot drift over the wording.
+GAVE_UP = "gave up after"
+
+
+def handover_report(prompt: str, s, out: str, tried: int) -> str:
+    """What a failed run hands the person who asked for it.
+
+    ONE BLOCK, self-contained, and safe to copy whole: the request, what the
+    patch did not meet, where the patch is, and where every attempt behind it
+    went. The previous ending was `raise SystemExit("gave up after 5
+    attempts")` -- a sentence that names a count and nothing else, with the
+    five patches it counted already deleted.
+
+    It says the patch is UNFINISHED in the same breath as offering it. An
+    honest partial result is worth handing over; one presented as a pass is
+    not.
+    """
+    lines = [
+        "",
+        f"  {GAVE_UP} {tried} attempt(s). Handing over the best one anyway.",
+        "",
+        f"  you asked for: {prompt}",
+        f"  this patch does not meet that: {s.headline}.",
+    ]
+    for d in s.detail:
+        lines.append(f"    - {d}" if not d.startswith("  ") else f"  {d}")
+    lines += [
+        "",
+        "  OPEN IT AND LISTEN. It lints clean and every module in it is one",
+        "  this machine can create, so it will load. Whether it is what you",
+        "  meant is the one judgement this tool cannot make and you can make",
+        "  in ten seconds.",
+        "",
+        f"    the patch, attempt {s.attempt}: {out}",
+    ]
+    if s.kept:
+        lines.append(f"    every attempt behind it: {os.path.dirname(s.kept)}")
+    lines += [
+        "",
+        "  Copy this whole block if you are reporting it.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
-    """Prompt -> a patch that lints clean and makes a sound."""
+    """Prompt -> a patch that lints clean and makes a sound.
+
+    Returns `(patch, why, shortfall)`. `shortfall` is None when the patch met
+    everything that was checked, and a `Shortfall` when the run ran out of
+    attempts and is handing over the best thing it built anyway.
+    """
     import re
     import subprocess
     claude = find_claude()
@@ -3244,6 +3550,13 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
     # them -- otherwise adding a gate makes the product worse.
     if claimed.gating:
         retries += 2
+
+    # THE BEST THING THIS RUN BUILT, so a run that ends without a pass still
+    # has something to hand over. Every attempt that lints clean is a patch a
+    # person can open and listen to in ten seconds; we cannot judge whether it
+    # is what they meant, and they can. Five of them were generated, explicitly
+    # kept by the transcript, and then discarded by `raise SystemExit`.
+    best = None
 
     for attempt in range(retries + 1):
         parts = [contract, library_brief(prompt, inv),
@@ -3394,22 +3707,31 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                     print(f"  built as {built}, which answers this request "
                           f"as well as {claimed.slug} would have")
                 if missing:
-                    # Named, so the retry can fix the connection rather than
-                    # guessing what "rejected" meant.
+                    # Named down to the JACK, so the retry can wire a cable
+                    # rather than re-read the sentence it already satisfied to
+                    # its own satisfaction. See name_the_jacks().
+                    told = name_the_jacks(missing, idioms[claimed.slug], inv,
+                                          patch)
                     print(f"  not a {claimed.slug} patch yet:")
-                    for m in missing:
-                        print(f"    - {m}")
+                    for m in told:
+                        print(f"    - {m}" if not m.startswith("  ")
+                              else f"  {m}")
                     ctx = (f"This has to be a {claimed.slug} patch. "
                            f"{idioms[claimed.slug].get('is', '')}\n\n"
                            "It is missing:\n" +
-                           "\n".join(f"  - {m}" for m in missing))
+                           "\n".join(f"  - {m}" if not m.startswith("  ")
+                                     else f"  {m}" for m in told))
                     # Kept for the same reason a silent one is: "wrong idiom"
                     # names the requirement and not the wiring that missed it,
                     # and without the patch the only way to see what was
                     # actually built is to build it again.
-                    keep_attempt(patch, "not the claimed idiom:\n" +
-                                 "\n".join(f"  - {m}" for m in missing),
-                                 attempt + 1, "wrong-idiom")
+                    kept = keep_attempt(patch, "not the claimed idiom:\n" +
+                                        "\n".join(f"  - {m}" for m in told),
+                                        attempt + 1, "wrong-idiom")
+                    best = better(best, Shortfall(
+                        patch, why, attempt + 1, kept,
+                        f"it is not a {claimed.slug} patch", told, 0,
+                        misses=len(missing)))
                     continue
                 # Topology can hold while the music does not exist: the
                 # sequencer can be clocked, reach the oscillator and fire the
@@ -3433,14 +3755,23 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                     ctx = (f"The wiring is right for a {claimed.slug} patch, but "
                            "the values that make it MUSIC are missing:\n" +
                            "\n".join(f"  - {m}" for m in unwritten))
-                    keep_attempt(patch, "music not written:\n" +
-                                 "\n".join(f"  - {m}" for m in unwritten),
-                                 attempt + 1, "music-not-written")
+                    kept = keep_attempt(patch, "music not written:\n" +
+                                        "\n".join(f"  - {m}" for m in unwritten),
+                                        attempt + 1, "music-not-written")
+                    best = better(best, Shortfall(
+                        patch, why, attempt + 1, kept,
+                        f"it is wired as a {claimed.slug}, but the values that "
+                        f"make it music are missing", unwritten, 0))
                     continue
                 print(f"  idiom holds: {claimed.slug}")
-            return patch, why
+            return patch, why, None
         # Silence, measured. A crash never reaches here.
-        keep_attempt(patch, report, attempt + 1, "silent")
+        kept = keep_attempt(patch, report, attempt + 1, "silent")
+        best = better(best, Shortfall(
+            patch, why, attempt + 1, kept,
+            "it was measured, and nothing reached the audio interface",
+            [line.strip() for line in report.splitlines()
+             if "FAIL" in line or "silent" in line], 1))
         print(f"  builds, but makes no sound (attempt {attempt + 1}):",
               flush=True)
         for line in report.splitlines():
@@ -3467,7 +3798,22 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                "was never gated, a sequencer stuck on one value is never "
                "clocked. Then give that module the thing that starts it, "
                "rather than adding more modules after it.")
-    raise SystemExit(f"gave up after {retries + 1} attempts")
+    # OUT OF ATTEMPTS IS NOT THE SAME AS NOTHING TO SHOW.
+    #
+    # This used to raise here, and the run ended with five generated patches on
+    # the floor -- each one already judged structurally sound by the transcript
+    # two lines above. An advisory verdict ("not a sequenced-voice patch YET")
+    # was being treated as fatal at the end of the loop, and the person who
+    # asked got no patch, no reason they could copy, and no way to listen to
+    # what had actually been built.
+    #
+    # It still FAILED, and the caller says so in the words BuildMonitor already
+    # classifies as an ending. What changes is that the failure arrives holding
+    # something.
+    if best is None:
+        raise SystemExit(f"{GAVE_UP} {retries + 1} attempts")
+    best.tried = retries + 1
+    return best.patch, best.why, best
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
@@ -3787,11 +4133,16 @@ def main(argv):
         out = None
         if "--out" in argv:
             out = argv[argv.index("--out") + 1]
-        patch, why = generate(argv[2], inv, prefer)
+        patch, why, shortfall = generate(argv[2], inv, prefer)
         if out is None:
             slug = re.sub(r"[^a-z0-9]+", "-", argv[2].lower()).strip("-")[:40]
             if not slug:
                 slug = "patch"
+            # NAMED for what it is. A patch that did not meet the request must
+            # not sit in the patches folder under the request's own name, where
+            # a week later it is indistinguishable from one that did.
+            if shortfall:
+                slug += "-unfinished"
             pdir = user_patches_dir()
             os.makedirs(pdir, exist_ok=True)
             out = os.path.join(pdir, slug + ".vcv")
@@ -3840,6 +4191,10 @@ def main(argv):
                       f"{o['plugin']}/{o['module']}")
             print()
         print(explain(patch, inv, why))
+        if shortfall:
+            print(handover_report(argv[2], shortfall, out, shortfall.tried),
+                  flush=True)
+            return 1
         return 0
 
     if cmd == "verify" and len(argv) > 2:
