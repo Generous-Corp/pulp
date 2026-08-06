@@ -45,6 +45,10 @@ template <typename SampleType = float, std::size_t MaxChannels = 2> class TruePe
     static constexpr int detector_latency_samples() noexcept {
         return static_cast<int>((interpolation_taps() - 1) / 2);
     }
+    /// Fixed future-peak horizon required by the output gain scheduler.
+    static constexpr int internal_gain_lookahead_samples() noexcept {
+        return detector_latency_samples();
+    }
     static constexpr double detector_guard_db() noexcept {
         return 0.50;
     }
@@ -74,12 +78,13 @@ template <typename SampleType = float, std::size_t MaxChannels = 2> class TruePe
         params_ = sanitized(params);
         lookahead_samples_ =
             static_cast<int>(std::ceil(params_.lookahead_ms * 0.001 * sample_rate_));
-        latency_samples_ = detector_latency_samples() + lookahead_samples_;
+        gain_lookahead_samples_ = internal_gain_lookahead_samples_ + lookahead_samples_;
+        latency_samples_ = detector_latency_samples() + gain_lookahead_samples_;
         delay_.assign((static_cast<std::size_t>(latency_samples_) + 1) * channels_, SampleType{0});
         for (std::size_t channel = 0; channel < channels_; ++channel) {
-            peak_values_[channel].assign(static_cast<std::size_t>(lookahead_samples_) + 2,
+            peak_values_[channel].assign(static_cast<std::size_t>(gain_lookahead_samples_) + 2,
                                          ScaledPeak{});
-            peak_indices_[channel].assign(static_cast<std::size_t>(lookahead_samples_) + 2, 0);
+            peak_indices_[channel].assign(static_cast<std::size_t>(gain_lookahead_samples_) + 2, 0);
         }
         design_interpolator();
         update_control_coefficients();
@@ -178,7 +183,7 @@ template <typename SampleType = float, std::size_t MaxChannels = 2> class TruePe
         return gain > 0.0 ? -20.0 * std::log10(gain) : std::numeric_limits<double>::infinity();
     }
 
-    /// Reconstruct the four detector phases for one channel without changing
+    /// Reconstruct the eight detector phases for one channel without changing
     /// limiter state. This exposes the detector stage to tests and visualizers.
     std::array<double, interpolation_factor()>
     detector_phases(std::span<const double, interpolation_taps()> newest_to_oldest) const noexcept {
@@ -253,6 +258,10 @@ template <typename SampleType = float, std::size_t MaxChannels = 2> class TruePe
     }
 
   private:
+#if defined(PULP_TRUE_PEAK_LIMITER_TEST_SEAMS)
+    friend struct TruePeakLimiterTestAccess;
+#endif
+
     static constexpr double pi() noexcept {
         return 3.141592653589793238462643383279502884;
     }
@@ -381,8 +390,8 @@ template <typename SampleType = float, std::size_t MaxChannels = 2> class TruePe
         indices[write] = frame_index_;
         ++queue_size_[lane];
         const std::uint64_t oldest =
-            frame_index_ > static_cast<std::uint64_t>(lookahead_samples_)
-                ? frame_index_ - static_cast<std::uint64_t>(lookahead_samples_)
+            frame_index_ > static_cast<std::uint64_t>(gain_lookahead_samples_)
+                ? frame_index_ - static_cast<std::uint64_t>(gain_lookahead_samples_)
                 : 0;
         while (queue_size_[lane] > 0 && indices[queue_head_[lane]] < oldest) {
             queue_head_[lane] = (queue_head_[lane] + 1) % capacity;
@@ -417,6 +426,8 @@ template <typename SampleType = float, std::size_t MaxChannels = 2> class TruePe
     double release_retain_ = 0.0;
     std::size_t channels_ = 0;
     int lookahead_samples_ = 0;
+    int internal_gain_lookahead_samples_ = internal_gain_lookahead_samples();
+    int gain_lookahead_samples_ = 0;
     int latency_samples_ = 0;
     bool prepared_ = false;
     std::uint64_t frame_index_ = 0;

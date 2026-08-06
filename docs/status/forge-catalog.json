@@ -860,7 +860,7 @@
       "label": "True-Peak Limiter",
       "description": "Look-ahead stereo limiter with oversampled intersample-peak detection.",
       "realization_axes": [
-        {"key": "lookahead_ms", "label": "Lookahead", "description": "Fixed lookahead and matching host latency.", "values": [{"token": "zero", "label": "0 ms", "value": 0}, {"token": "five", "label": "5 ms", "value": 5}, {"token": "ten", "label": "10 ms", "value": 10}]},
+        {"key": "lookahead_ms", "label": "Lookahead", "description": "Optional user lookahead added to the fixed internal detector horizon and reported host latency.", "values": [{"token": "zero", "label": "0 ms", "value": 0}, {"token": "five", "label": "5 ms", "value": 5}, {"token": "ten", "label": "10 ms", "value": 10}]},
         {"key": "channel_link", "label": "Channel link", "description": "Linked preserves the stereo image; independent limits each channel separately.", "values": [{"token": "linked", "label": "Linked", "value": 1}, {"token": "independent", "label": "Independent", "value": 0}]}
       ],
       "realizations": [{"mode": "linked_0ms", "type_id": "dynamics.true_peak_limiter.la_0000000000000000.linked", "settings": {"lookahead_ms": "zero", "channel_link": "linked"}}, {"mode": "linked_5ms", "type_id": "dynamics.true_peak_limiter.la_4014000000000000.linked", "settings": {"lookahead_ms": "five", "channel_link": "linked"}}, {"mode": "linked_10ms", "type_id": "dynamics.true_peak_limiter.la_4024000000000000.linked", "settings": {"lookahead_ms": "ten", "channel_link": "linked"}}, {"mode": "independent_5ms", "type_id": "dynamics.true_peak_limiter.la_4014000000000000.independent", "settings": {"lookahead_ms": "five", "channel_link": "independent"}}],

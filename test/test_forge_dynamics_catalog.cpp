@@ -93,25 +93,31 @@ TEST_CASE("Forge dynamics: true-peak limiting is a registered stereo realization
 
     for (const double rate : rates) {
         for (const float lookahead : lookaheads) {
-            const auto linked = dyn::true_peak::make_node(lookahead, true);
-            REQUIRE(linked.type_id.starts_with("dynamics.true_peak_limiter.la_"));
-            REQUIRE(linked.type_id.ends_with(".linked"));
-            REQUIRE(linked.num_input_ports == 2);
-            REQUIRE(linked.num_output_ports == 2);
-            REQUIRE(linked.latency_samples(rate) ==
-                    64 + static_cast<int>(std::ceil(lookahead * 0.001 * rate)));
+            for (const bool linked_policy : {true, false}) {
+                // The catalog intentionally exposes independent limiting only
+                // at its 5 ms realization; exercise every registered product.
+                if (!linked_policy && lookahead != 5.0f)
+                    continue;
+                const auto node = dyn::true_peak::make_node(lookahead, linked_policy);
+                REQUIRE(node.type_id.starts_with("dynamics.true_peak_limiter.la_"));
+                REQUIRE(node.type_id.ends_with(linked_policy ? ".linked" : ".independent"));
+                REQUIRE(node.num_input_ports == 2);
+                REQUIRE(node.num_output_ports == 2);
+                REQUIRE(node.latency_samples(rate) ==
+                        128 + static_cast<int>(std::ceil(lookahead * 0.001 * rate)));
 
-            Fixture fx(linked, rate, kFrames);
-            ParamInjector injector = fx.claim_injector();
-            REQUIRE(injector.inject(immediate(dyn::true_peak::kCeilingDbtp, -6.0f)) ==
-                    InjectStatus::Ok);
-            REQUIRE(injector.inject(immediate(dyn::true_peak::kReleaseMs, 50.0f)) ==
-                    InjectStatus::Ok);
-            const auto output = fx.settle({loud, loud}, 40);
-            const double ceiling = std::pow(10.0, -6.0 / 20.0);
-            REQUIRE(peak(output[0]) > 0.0f);
-            REQUIRE(sine_amplitude(output[0], 0.4) <= ceiling);
-            REQUIRE(output[0] == output[1]);
+                Fixture fx(node, rate, kFrames);
+                ParamInjector injector = fx.claim_injector();
+                REQUIRE(injector.inject(immediate(dyn::true_peak::kCeilingDbtp, -6.0f)) ==
+                        InjectStatus::Ok);
+                REQUIRE(injector.inject(immediate(dyn::true_peak::kReleaseMs, 50.0f)) ==
+                        InjectStatus::Ok);
+                const auto output = fx.settle({loud, loud}, 40);
+                const double ceiling = std::pow(10.0, -6.0 / 20.0);
+                REQUIRE(peak(output[0]) > 0.0f);
+                REQUIRE(sine_amplitude(output[0], 0.4) <= ceiling);
+                REQUIRE(output[0] == output[1]);
+            }
         }
     }
 

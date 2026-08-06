@@ -347,7 +347,7 @@ inline CustomNodeType make_node(float lookahead_ms = 5.0f, bool linked = true) {
     type.default_name = "True-Peak Limiter";
     type.lowerable = true;
     type.latency_samples = [fixed_lookahead](double sample_rate) {
-        return Limiter::detector_latency_samples() +
+        return Limiter::detector_latency_samples() + Limiter::internal_gain_lookahead_samples() +
                static_cast<int>(std::ceil(fixed_lookahead * 0.001 * sample_rate));
     };
     type.create = []() -> void* { return new Instance{}; };
@@ -392,7 +392,8 @@ inline ForgeNodeDescriptor descriptor() {
     descriptor.axes = {
         {"lookahead_ms",
          "Lookahead",
-         "Fixed lookahead and matching host latency.",
+         "Optional user lookahead added to the fixed internal detector horizon "
+         "and reported host latency.",
          {{"zero", "0 ms", 0.0f}, {"five", "5 ms", 5.0f}, {"ten", "10 ms", 10.0f}}},
         {"channel_link",
          "Channel link",
