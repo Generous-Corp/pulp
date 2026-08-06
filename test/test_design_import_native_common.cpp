@@ -14,10 +14,13 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <utility>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -1053,6 +1056,63 @@ TEST_CASE("build_native_view_tree opts the imported root into sub-pixel layout",
     auto root = build_native_view_tree(ir, {}, {});
     REQUIRE(root != nullptr);
     REQUIRE(root->subpixel_layout());
+}
+
+TEST_CASE("sub-pixel layout keeps concentric siblings on one centre",
+          "[view][import][native][subpixel]") {
+    // The property the flag exists to protect, asserted on solved geometry
+    // rather than on the flag: two siblings that share a centre at
+    // fractional coordinates must still share it after layout. Yoga's
+    // whole-pixel grid rounding moves each box independently, which
+    // de-centres a knob's value ring from its body.
+    auto make_pair = [](bool subpixel) {
+        auto root = std::make_unique<View>();
+        root->set_subpixel_layout(subpixel);
+        root->set_bounds({0, 0, 200, 200});
+
+        // Outer 81x81 at (10.25, 20.25); inner 40x40 sharing its centre. All
+        // four edge coordinates are off the pixel grid, and none of them is a
+        // rounding tie, so snapping moves the two boxes by different amounts.
+        struct Box { float x, y, size; };
+        const Box outer{10.25f, 20.25f, 81.0f};
+        const Box inner{outer.x + (outer.size - 40.0f) * 0.5f,
+                        outer.y + (outer.size - 40.0f) * 0.5f,
+                        40.0f};
+        for (const auto& box : {outer, inner}) {
+            auto child = std::make_unique<View>();
+            child->set_position(View::Position::absolute);
+            child->set_left(box.x);
+            child->set_top(box.y);
+            child->flex().preferred_width = box.size;
+            child->flex().preferred_height = box.size;
+            child->flex().dim_width = {box.size, DimensionUnit::px};
+            child->flex().dim_height = {box.size, DimensionUnit::px};
+            root->add_child(std::move(child));
+        }
+        root->layout_children();
+        return root;
+    };
+
+    auto centre = [](const View& v) {
+        const auto b = v.bounds();
+        return std::pair<float, float>{b.x + b.width * 0.5f, b.y + b.height * 0.5f};
+    };
+
+    auto subpixel = make_pair(true);
+    const auto outer_c = centre(*subpixel->child_at(0));
+    const auto inner_c = centre(*subpixel->child_at(1));
+    CHECK(std::abs(outer_c.first - inner_c.first) < 0.001f);
+    CHECK(std::abs(outer_c.second - inner_c.second) < 0.001f);
+    // The fractional geometry itself survived — nothing snapped it.
+    CHECK(std::abs(subpixel->child_at(0)->bounds().y - 20.25f) < 0.001f);
+
+    // Negative control: with the pixel grid on, the same tree drifts, so the
+    // check above is measuring the flag and not an invariant of the layout.
+    auto snapped = make_pair(false);
+    const auto snapped_outer = centre(*snapped->child_at(0));
+    const auto snapped_inner = centre(*snapped->child_at(1));
+    CHECK((std::abs(snapped_outer.first - snapped_inner.first) > 0.001f ||
+           std::abs(snapped_outer.second - snapped_inner.second) > 0.001f));
 }
 
 TEST_CASE("an imported design names the widget colours it did not state",

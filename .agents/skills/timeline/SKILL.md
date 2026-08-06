@@ -411,7 +411,8 @@ artifact is needed. Never modify canonical project JSON text directly.
   a new fixture must be listed there with its kind.
 - `pulp-fixture-runner` validates every `document` entry against a sibling
   `<path>.expect` manifest: schema envelope version, identity, structural counts
-  from `peek_project_summary()`, and the interchange concept census. Regenerate
+  from `peek_project_summary()`, the interchange concept census, and the ordered
+  identities of every collection in the arrangement spine. Regenerate
   manifests with `pulp-fixture-runner --corpus test/fixtures/timeline --update`;
   generation is deterministic, so a regeneration that dirties the tree means a
   document actually changed. The manifest is checked in **both** directions — an
@@ -442,11 +443,30 @@ artifact is needed. Never modify canonical project JSON text directly.
   `source ~/emsdk/emsdk_env.sh && tools/ci/wasm-fixture-lane.sh <build-dir> 6`.
 - A new `ProjectSnapshotCounts` field is asserted by the corpus only if it is
   also emitted by `collect_summary()` in
-  `core/interchange/tools/fixture_runner_main.cpp`, which
-  lists the counts one by one and is not generated. Add the count and skip that
-  list and every manifest regenerates clean while the new entity goes uncounted
-  in every fixture — the corpus reports green on a document whose new structure
-  it never looked at.
+  `core/interchange/tools/fixture_runner_main.cpp`, which lists the counts one by
+  one and is not generated. Add the count and skip that list and every manifest
+  regenerates clean while the new entity goes uncounted in every fixture — the
+  corpus reports green on a document whose new structure it never looked at.
+- **A count cannot see an ordering, so a new ordered collection needs a line in
+  `collect_identity_orders()` too** — same file, same hazard as the counts list
+  above. The `order.*` manifest keys exist because counts plus idempotence are
+  jointly blind to a lost order: dropping a sequence's authored `track_order`
+  leaves `counts.tracks` intact, and an empty order re-serializes consistently,
+  so a round trip agrees with itself on the wrong answer. Two classes are worth
+  recording — **authored** orders (`track_order`, `scenes`, `device_chain`),
+  which exist only in the document, and **value-derived** orders (`markers`,
+  `regions`, `clips`), whose sort makes identity order a proxy for the positions
+  behind it. Leaf content below a track stays on counts by design.
+- **An order assertion only bites while the fixture's order is not the identity
+  order.** `Sequence::track_order()` presents the identity order of `tracks()`
+  for a sequence that never recorded one, so a manifest cannot distinguish "no
+  authored order" from "authored order equals identity order" — a fixture in
+  either state stays green when the order is dropped.
+  `v6/sequence-track-order.json` is deliberately built with a non-identity order
+  so the check can fail at all, and a case in `test/test_fixture_runner_cli.cpp`
+  asserts its two orders still differ. Do not "fix" a red order assertion by
+  rerunning `--update`; that regenerates from observed output without comparing
+  and bakes the regression in as the new baseline.
 - The census the runner records is `pulp::interchange::census()`, which lives in
   `core/interchange`, **not** `core/timeline`. Anything reaching for it takes an
   interchange dependency; that is on the portable floor, but it is a dependency

@@ -2325,6 +2325,54 @@ TEST_CASE("WidgetBridge::clear drops widgets - subsequent lookups return nullptr
     REQUIRE(bridge.widget("bypass") == nullptr);
 }
 
+TEST_CASE("WidgetBridge::clear leaves another editor's open dropdown alone",
+          "[view][bridge][lifetime][clear][multiinstance]") {
+    // A DAW hosts several plugin editors in one process, each with its own
+    // bridge. clear() is the hot-reload entry point, so one editor rebuilding
+    // its script must not reach across and dismiss a dropdown the user has open
+    // in a DIFFERENT editor — which is what closing the process-global popup
+    // slot did.
+    ScriptEngine engine_a, engine_b;
+    View root_a, root_b;
+    root_a.set_bounds({0, 0, 400, 300});
+    root_b.set_bounds({0, 0, 400, 300});
+    StateStore store_a, store_b;
+    WidgetBridge bridge_a(engine_a, root_a, store_a);
+    WidgetBridge bridge_b(engine_b, root_b, store_b);
+
+    auto open_combo = [](View& root) {
+        auto owned = std::make_unique<ComboBox>();
+        ComboBox* combo = owned.get();
+        combo->set_bounds({0, 0, 160, 28});
+        combo->set_items({"one", "two", "three"});
+        root.add_child(std::move(owned));
+        MouseEvent e;
+        e.position = {10, 14};
+        e.window_position = {10, 14};
+        e.button = MouseButton::left;
+        e.is_down = true;
+        e.phase = MousePhase::press;
+        combo->on_mouse_event(e);
+        return combo;
+    };
+
+    // Open B's FIRST so A's is the most-recently-opened popup and therefore the
+    // one the process-global mirror names. Without that ordering the mirror
+    // happens to name B's popup and clear() closes the right one by accident —
+    // the assertions below would pass against the bug.
+    ComboBox* combo_b = open_combo(root_b);
+    ComboBox* combo_a = open_combo(root_a);
+    REQUIRE(combo_a->is_open());
+    REQUIRE(combo_b->is_open());
+    REQUIRE(ComboBox::active_popup_ == combo_a);  // the mirror names the OTHER editor
+
+    bridge_b.clear();
+    CHECK_FALSE(combo_b->is_open());  // its own popup is dismissed
+    CHECK(combo_a->is_open());        // the other editor's is untouched
+
+    combo_a->close_active_popup();  // leave the process-global mirror clean
+}
+
 TEST_CASE("WidgetBridge nested roots invalidate cached descendants on removal",
           "[view][bridge][lifetime][nested-root]") {
     ScriptEngine engine;

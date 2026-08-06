@@ -307,7 +307,9 @@ int cmd_loop(const std::vector<std::string>& args) {
 
     // Ensure configured. Reuse cmd_build's bootstrap path and the current
     // project's normal build configuration.
-    if (!fs::exists(build_dir / "CMakeCache.txt")) {
+    if (!fs::exists(build_dir / "CMakeCache.txt")
+        || (!standalone_mode
+            && !source_checkout_dependencies_enabled(project_root, build_dir / "CMakeCache.txt"))) {
         std::cout << "Project not configured. Configuring + building first...\n";
         std::vector<std::string> bootstrap_args;
         if (allow_unsupported_sdk) bootstrap_args.push_back("--allow-unsupported-sdk");

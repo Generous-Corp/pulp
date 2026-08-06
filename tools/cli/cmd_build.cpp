@@ -57,6 +57,16 @@ int cmd_build(const std::vector<std::string>& args) {
 
     auto build_dir = project_root / "build";
     bool needs_configure = !fs::exists(build_dir / "CMakeCache.txt");
+    bool needs_dependency_bootstrap = !standalone_mode && needs_configure;
+
+    // Heal source trees configured before dependency provisioning was
+    // completed. Those caches are syntactically valid but silently omit whole
+    // plug-in formats and their tests.
+    if (!standalone_mode && !needs_configure
+        && !source_checkout_dependencies_enabled(project_root, build_dir / "CMakeCache.txt")) {
+        needs_configure = true;
+        needs_dependency_bootstrap = true;
+    }
 
     // Check if CMakeLists.txt is newer than CMakeCache
     if (!needs_configure && fs::exists(build_dir / "CMakeCache.txt")) {
@@ -168,6 +178,14 @@ int cmd_build(const std::vector<std::string>& args) {
     }
 
     if (needs_configure) {
+        // A source checkout detects VST3/AU from external/ symlinks during
+        // configure. Provision them first: doing this after CMake succeeds
+        // silently removes those formats (and their tests) until a second
+        // configure. Standalone projects resolve an installed SDK below.
+        if (needs_dependency_bootstrap && ensure_checkout_dependencies(project_root) != 0) {
+            return 1;
+        }
+
         std::string configure_cmd = "cmake -B " + build_dir.string() + " -S " + project_root.string();
         append_windows_visual_studio_generator_args(configure_cmd);
 
@@ -185,6 +203,8 @@ int cmd_build(const std::vector<std::string>& args) {
             }
             configure_cmd += " -DCMAKE_PREFIX_PATH=" + shell_quote(sdk.resolved_sdk_dir);
             pulp_debug("cmd_build: SDK resolved");
+        } else {
+            configure_cmd += " -DPULP_REQUIRE_CHECKOUT_DEPENDENCIES=ON";
         }
 
         // JS engine selection

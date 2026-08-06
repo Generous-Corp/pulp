@@ -77,22 +77,11 @@ function(pulp_register_fetchcontent_source name)
     string(TOUPPER "${name}" upper_name)
     string(TOLOWER "${name}" lower_name)
     set(fetchcontent_var "FETCHCONTENT_SOURCE_DIR_${upper_name}")
+    set(shared_marker "PULP_FETCHCONTENT_SOURCE_IS_SHARED_${upper_name}")
+    set(shared_path_marker "PULP_FETCHCONTENT_SHARED_SELECTED_PATH_${upper_name}")
 
-    if(DEFINED ${fetchcontent_var} AND NOT "${${fetchcontent_var}}" STREQUAL "")
-        if(EXISTS "${${fetchcontent_var}}")
-            message(STATUS "Pulp: using explicit source override for ${name}: ${${fetchcontent_var}}")
-        else()
-            message(WARNING "Pulp: explicit source override for ${name} does not exist: ${${fetchcontent_var}}")
-        endif()
-        return()
-    endif()
-
-    set(explicit_env "PULP_FETCHCONTENT_SOURCE_DIR_${upper_name}")
-    set(candidate "")
-    if(DEFINED ENV{${explicit_env}} AND NOT "$ENV{${explicit_env}}" STREQUAL "")
-        set(candidate "$ENV{${explicit_env}}")
-        set(source_label "env:${explicit_env}")
-    elseif(PULP_USE_SHARED_FETCHCONTENT_SOURCES)
+    set(expected_shared_candidate "")
+    if(PULP_USE_SHARED_FETCHCONTENT_SOURCES)
         pulp_default_fetchcontent_cache_root(cache_root)
         if(NOT "${cache_root}" STREQUAL "")
             if(PFC_REF)
@@ -106,8 +95,78 @@ function(pulp_register_fetchcontent_source name)
             if(DEFINED cache_suffix AND NOT "${cache_suffix}" STREQUAL "")
                 set(cache_dir "${cache_dir}-${cache_suffix}")
             endif()
-            set(candidate "${cache_root}/${cache_dir}")
+            set(expected_shared_candidate "${cache_root}/${cache_dir}")
+        endif()
+    endif()
+
+    if(DEFINED ${fetchcontent_var} AND NOT "${${fetchcontent_var}}" STREQUAL "")
+        if(DEFINED ${shared_marker})
+            set(source_is_shared "${${shared_marker}}")
+            if(source_is_shared
+               AND DEFINED ${shared_path_marker}
+               AND NOT "${${shared_path_marker}}" STREQUAL "${${fetchcontent_var}}")
+                # The cached automatic path was explicitly replaced by the
+                # developer on this configure.
+                set(source_is_shared FALSE)
+            elseif(source_is_shared
+                   AND NOT "${expected_shared_candidate}" STREQUAL ""
+                   AND EXISTS "${expected_shared_candidate}"
+                   AND NOT "${${fetchcontent_var}}" STREQUAL "${expected_shared_candidate}")
+                # A pin or cache-root change moves automatic selections to the
+                # new immutable cache without ever exposing the old cache to
+                # Pulp's patch steps.
+                set(${fetchcontent_var} "${expected_shared_candidate}" CACHE PATH
+                    "Local source override for ${name}" FORCE)
+            endif()
+        else()
+            # Migration from a build configured before the origin marker
+            # existed. The prior implementation used this exact cache help
+            # string for automatic selections; command-line and project-owned
+            # overrides have different provenance even when they happen to
+            # live beneath the cache root.
+            get_property(existing_source_help CACHE ${fetchcontent_var} PROPERTY HELPSTRING)
+            pulp_default_fetchcontent_cache_root(existing_cache_root)
+            set(source_is_shared FALSE)
+            if(existing_source_help STREQUAL "Local source override for ${name}"
+               AND NOT "${existing_cache_root}" STREQUAL ""
+               AND EXISTS "${existing_cache_root}")
+                file(REAL_PATH "${existing_cache_root}" existing_cache_root_real)
+                file(REAL_PATH "${${fetchcontent_var}}" existing_source_real)
+                cmake_path(IS_PREFIX existing_cache_root_real "${existing_source_real}"
+                    NORMALIZE source_is_shared)
+            endif()
+        endif()
+        set(${shared_marker} ${source_is_shared} CACHE INTERNAL
+            "Whether ${name} source was selected from Pulp's shared cache" FORCE)
+        if(source_is_shared)
+            set(${shared_path_marker} "${${fetchcontent_var}}" CACHE INTERNAL
+                "Last automatic shared-cache path selected for ${name}" FORCE)
+        else()
+            unset(${shared_path_marker} CACHE)
+        endif()
+        if(EXISTS "${${fetchcontent_var}}")
+            if(source_is_shared)
+                message(STATUS "Pulp: using shared cache for ${name}: ${${fetchcontent_var}}")
+            else()
+                message(STATUS "Pulp: using explicit source override for ${name}: ${${fetchcontent_var}}")
+            endif()
+        else()
+            message(WARNING "Pulp: explicit source override for ${name} does not exist: ${${fetchcontent_var}}")
+        endif()
+        return()
+    endif()
+
+    set(explicit_env "PULP_FETCHCONTENT_SOURCE_DIR_${upper_name}")
+    set(candidate "")
+    if(DEFINED ENV{${explicit_env}} AND NOT "$ENV{${explicit_env}}" STREQUAL "")
+        set(candidate "$ENV{${explicit_env}}")
+        set(source_label "env:${explicit_env}")
+        set(source_is_shared FALSE)
+    elseif(PULP_USE_SHARED_FETCHCONTENT_SOURCES)
+        if(NOT "${expected_shared_candidate}" STREQUAL "")
+            set(candidate "${expected_shared_candidate}")
             set(source_label "shared cache")
+            set(source_is_shared TRUE)
         endif()
     endif()
 
@@ -117,10 +176,71 @@ function(pulp_register_fetchcontent_source name)
 
     if(EXISTS "${candidate}")
         set(${fetchcontent_var} "${candidate}" CACHE PATH "Local source override for ${name}" FORCE)
+        set(${shared_marker} ${source_is_shared} CACHE INTERNAL
+            "Whether ${name} source was selected from Pulp's shared cache" FORCE)
+        if(source_is_shared)
+            set(${shared_path_marker} "${candidate}" CACHE INTERNAL
+                "Last automatic shared-cache path selected for ${name}" FORCE)
+        else()
+            unset(${shared_path_marker} CACHE)
+        endif()
         message(STATUS "Pulp: using ${source_label} for ${name}: ${candidate}")
     elseif(DEFINED source_label AND source_label MATCHES "^env:")
         message(WARNING "Pulp: source override path for ${name} does not exist: ${candidate}")
     endif()
+endfunction()
+
+# Shared source caches are safe only while consumers treat them as immutable.
+# Dependencies that Pulp patches during configure get a small build-local copy;
+# explicit developer overrides remain untouched so dependency work can point at
+# a writable checkout deliberately.
+function(pulp_materialize_mutable_fetchcontent_source name)
+    set(options)
+    set(one_value_args PATCH_KEY)
+    cmake_parse_arguments(PMFS "${options}" "${one_value_args}" "" ${ARGN})
+
+    string(TOUPPER "${name}" upper_name)
+    string(TOLOWER "${name}" lower_name)
+    set(source_var "FETCHCONTENT_SOURCE_DIR_${upper_name}")
+    set(shared_marker "PULP_FETCHCONTENT_SOURCE_IS_SHARED_${upper_name}")
+    if(NOT DEFINED ${source_var} OR "${${source_var}}" STREQUAL "")
+        return()
+    endif()
+
+    # Explicit developer overrides are writable inputs, even when their path
+    # happens to sit below the configured cache root. Only sources selected by
+    # pulp_register_fetchcontent_source are immutable shared-cache entries.
+    if(NOT DEFINED ${shared_marker} OR NOT ${${shared_marker}})
+        return()
+    endif()
+
+    pulp_default_fetchcontent_cache_root(cache_root)
+    if("${cache_root}" STREQUAL "" OR NOT EXISTS "${cache_root}")
+        return()
+    endif()
+    file(REAL_PATH "${cache_root}" cache_root_real)
+    file(REAL_PATH "${${source_var}}" source_real)
+    cmake_path(IS_PREFIX cache_root_real "${source_real}" NORMALIZE source_is_shared)
+    if(NOT source_is_shared)
+        return()
+    endif()
+
+    set(local_source "${CMAKE_BINARY_DIR}/_deps/pulp-mutable-${lower_name}-src")
+    set(stamp "${local_source}/.pulp-source-key")
+    set(expected_stamp "${source_real}\n${PMFS_PATCH_KEY}\n")
+    set(current_stamp "")
+    if(EXISTS "${stamp}")
+        file(READ "${stamp}" current_stamp)
+    endif()
+    if(NOT current_stamp STREQUAL expected_stamp)
+        file(REMOVE_RECURSE "${local_source}")
+        file(MAKE_DIRECTORY "${local_source}")
+        file(COPY "${source_real}/" DESTINATION "${local_source}" PATTERN ".git" EXCLUDE)
+        file(WRITE "${stamp}" "${expected_stamp}")
+    endif()
+
+    set(${source_var} "${local_source}" PARENT_SCOPE)
+    message(STATUS "Pulp: using build-local mutable copy for ${name}: ${local_source}")
 endfunction()
 
 function(pulp_register_wgpu_native_precompiled_source version)

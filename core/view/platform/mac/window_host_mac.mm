@@ -321,7 +321,10 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 - (BOOL)routeToOpenComboPopup:(pulp::view::Point)pt
                                      configure:(void (^)(pulp::view::MouseEvent&))configure
                                         capture:(pulp::view::ViewCapture*)capture {
-    auto* combo = pulp::view::ComboBox::active_popup_;
+    // THIS window's root, never the process-wide `active_popup_` mirror, which
+    // can name another window's (or a hosted plugin editor's) open menu.
+    if (!self.rootView) return NO;
+    auto* combo = pulp::view::ComboBox::active_popup_in(*self.rootView);
     if (!combo) return NO;
     float ddx = 0, ddy = 0, ddw = 0, ddh = 0;
     if (!combo->dropdown_window_rect(ddx, ddy, ddw, ddh)) return NO;
@@ -935,8 +938,9 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
             // so a stolen-focus case wedges the dropdown open with no
             // keyboard escape route. Close at host level the same way
             // active_overlay_ does below.
-            if (pulp::view::ComboBox::active_popup_) {
-                pulp::view::ComboBox::close_active_popup();
+            if (self.rootView &&
+                pulp::view::ComboBox::active_popup_in(*self.rootView)) {
+                pulp::view::ComboBox::close_active_popup(*self.rootView);
                 [self startAnimationTimerIfNeeded];
                 [self setNeedsDisplay:YES];
                 return;
@@ -1027,8 +1031,9 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
                 // Don't consume — let normal hover handling continue for cursor changes
             }
 
-            if (pulp::view::ComboBox::active_popup_) {
-                auto* combo = pulp::view::ComboBox::active_popup_;
+            if (auto* combo = self.rootView
+                    ? pulp::view::ComboBox::active_popup_in(*self.rootView)
+                    : nullptr) {
                 float cx = 0, cy = 0;
                 auto* v = static_cast<pulp::view::View*>(combo);
                 while (v) { cx += v->bounds().x; cy += v->bounds().y; v = v->parent(); }
