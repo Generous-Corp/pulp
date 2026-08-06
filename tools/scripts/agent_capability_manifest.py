@@ -30,7 +30,7 @@ from agent_capability_evolution import (
 SCHEMA = "pulp.agent-capabilities.v1"
 SCHEMA_MINOR = 1
 MANIFEST_REVISION = 2
-SURFACE_INVENTORY_VERSION = 1
+SURFACE_INVENTORY_VERSION = 2
 HISTORY_SCHEMA = "pulp.agent-capability-history.v1"
 HISTORY_FILE = pathlib.Path("tools/agent-capabilities/contract-history.json")
 SNAPSHOT = pathlib.Path("docs/status/agent-capabilities.json")
@@ -493,7 +493,19 @@ EXPORTS = [
 
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
-REVIEWED_HEADERS: list[dict[str, Any]] = []
+REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {
+        "include": "pulp/signal/harmony_engine.hpp",
+        "fingerprint": "sha256:edf2c597ddeb7b31f07c7cf094e4cfb2b833b4f4fb6b00376b36635d11734f79",
+        "disposition": "unsupported_capability",
+        "capability_keys": [],
+        "rationale": (
+            "The harmonizer is a public DSP API, but it does not yet have the "
+            "typed bindings, lifecycle contract, parameter semantics, and link "
+            "probe required for a generator-facing capability claim."
+        ),
+    },
+]
 SURFACE_TOMBSTONES: list[dict[str, Any]] = []
 CAPABILITY_TOMBSTONES: list[dict[str, Any]] = []
 

@@ -16,9 +16,14 @@ Maintain three related artifacts:
   append-only evolution history checked against the protected Git tip. Shallow
   GitHub Actions checkouts fetch the immutable event base SHA when necessary.
 
-Only the consumer manifest and its schema install into the SDK. The surface
-ledger, surface schema, legacy baseline, and contract history are maintenance
-artifacts and must not be installed.
+The consumer manifest, its schema, and the handoff schema install into the SDK.
+Official release packaging stamps `agent-capability-handoff.json` only after
+installation; it binds the exact SDK source SHA and platform to the installed
+importer's SHA-256 plus the installed manifest's exact content and byte hash.
+The release archive verifier must require and revalidate that identity at the
+configured capability-handoff floor. The surface ledger, surface schema, legacy
+baseline, and contract history are maintenance artifacts and must not be
+installed.
 
 Keep both separate from the unified runtime control platform. This contract may
 describe what an SDK can design or generate; it must never contain runtime
@@ -112,6 +117,8 @@ artifacts are absent, read the installed schema and manifest, and independently
 compile/link/run every capability and every typed binding against only its
 declared minimal target. It must reject wrong-target declarations and checkout-
 path leakage, and use configuration-aware build/install and executable paths.
+The official-SDK handoff self-test separately covers exact identity plus wrong
+source SHA, importer hash, capability hash, and schema-invalid documents.
 
 The surface fingerprint is intentionally conservative SHA-256 over full header
 bytes. Do not weaken it with regex symbol extraction. A future pinned-Clang AST

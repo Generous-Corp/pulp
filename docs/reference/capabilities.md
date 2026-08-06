@@ -553,6 +553,15 @@ latency/tail/scheduling categories. Signal rows may reference a semantic node
 key in `forge-catalog.json`; they never copy that catalog's numeric ranges,
 defaults, choices, or product policy.
 
+Official release SDKs additionally include
+`share/pulp/agent-capability-handoff.json`. This schema-validated marker binds
+the release's exact source commit and platform to the SHA-256 of the installed
+`bin/pulp-import-design` executable and to both the exact installed capability
+manifest content and its byte hash. Release packaging and archive inspection
+fail closed if the handoff, importer, manifest, or either installed schema is
+missing or disagrees. Consumers should verify this marker from their selected
+SDK rather than combining a manifest or importer from another checkout.
+
 Schema minor 1 adds the required feature `determinism-contract-v1`. Its
 per-row `determinism` object is deliberately separate from `seed_model` and
 answers four different questions:

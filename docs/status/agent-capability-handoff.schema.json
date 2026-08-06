@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/schemas/agent-capability-handoff.schema.json",
+  "title": "Pulp official SDK agent capability handoff",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema",
+    "sdk_source_sha",
+    "platform",
+    "importer",
+    "agent_capabilities"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "agent-capability-handoff.schema.json"
+    },
+    "schema": {
+      "const": "pulp.agent-capability-handoff.v1"
+    },
+    "sdk_source_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "platform": {
+      "type": "string",
+      "pattern": "^(darwin|linux|windows)-(arm64|x64)$"
+    },
+    "importer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^bin/pulp-import-design(?:\\.exe)?$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "agent_capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "content"],
+      "properties": {
+        "path": {
+          "const": "share/pulp/agent-capabilities.json"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "content": {
+          "type": "object"
+        }
+      }
+    }
+  }
+}
