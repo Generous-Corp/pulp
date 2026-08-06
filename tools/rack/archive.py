@@ -102,19 +102,34 @@ def read_member(archive: str, basename: str) -> bytes | None:
 def extract_all(archive: str, dest_dir: str) -> bool:
     """Unpack the whole archive into an existing directory."""
     zstd = _zstd()
+    producer = None
     try:
         if zstd:
-            stream = subprocess.Popen([zstd, "-dc", archive],
-                                      stdout=subprocess.PIPE)
-            r = subprocess.run([_tar(), "xf", "-"], stdin=stream.stdout,
-                               cwd=dest_dir, timeout=120)
-            stream.wait()
-            return r.returncode == 0
+            producer = subprocess.Popen([zstd, "-dc", archive],
+                                        stdout=subprocess.PIPE)
+            consumer = subprocess.run(
+                [_tar(), "xf", "-"], stdin=producer.stdout,
+                cwd=dest_dir, timeout=120)
+            if producer.stdout:
+                producer.stdout.close()
+            producer_status = producer.wait(timeout=10)
+            return producer_status == 0 and consumer.returncode == 0
         r = subprocess.run([_tar(), "--zstd", "-xf", archive, "-C", dest_dir],
                            timeout=120)
         return r.returncode == 0
     except Exception:                                           # noqa: BLE001
         return False
+    finally:
+        if producer is not None:
+            if producer.stdout:
+                producer.stdout.close()
+            if producer.poll() is None:
+                producer.terminate()
+                try:
+                    producer.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    producer.kill()
+                    producer.wait()
 
 
 def create(archive: str, root_dir: str, member: str) -> None:

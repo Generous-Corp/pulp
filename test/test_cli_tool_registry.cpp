@@ -813,7 +813,7 @@ TEST_CASE("tool install helpers have deterministic local exits",
     auto stale_py = install_python_tool(py, with_uv, fs::path{}, /*force=*/false);
     REQUIRE_FALSE(stale_py.ok);  // attempted reinstall; never reported stale venv as 1.0.1
     REQUIRE(stale_py.installed_version.empty());
-    REQUIRE_FALSE(fs::exists(stale_package_bytes));
+    REQUIRE(fs::exists(stale_package_bytes));  // failed replacement rolls back
 
     ToolRegistry uv_unavailable;
     ToolDescriptor uv_without_source;

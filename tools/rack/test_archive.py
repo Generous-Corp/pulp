@@ -77,6 +77,26 @@ class ArchiveCreationTests(unittest.TestCase):
 
             self.assertFalse(os.path.exists(output))
 
+    def test_extract_checks_decompressor_failure(self) -> None:
+        producer = _Producer(returncode=7)
+        with mock.patch.object(archive, "_zstd", return_value="zstd"), \
+             mock.patch.object(archive, "_tar", return_value="tar"), \
+             mock.patch.object(archive.subprocess, "Popen",
+                               return_value=producer), \
+             mock.patch.object(archive.subprocess, "run",
+                               return_value=SimpleNamespace(returncode=0)):
+            self.assertFalse(archive.extract_all("bad.vcvplugin", "."))
+
+    def test_extract_checks_tar_consumer_failure(self) -> None:
+        producer = _Producer(returncode=0)
+        with mock.patch.object(archive, "_zstd", return_value="zstd"), \
+             mock.patch.object(archive, "_tar", return_value="tar"), \
+             mock.patch.object(archive.subprocess, "Popen",
+                               return_value=producer), \
+             mock.patch.object(archive.subprocess, "run",
+                               return_value=SimpleNamespace(returncode=9)):
+            self.assertFalse(archive.extract_all("bad.vcvplugin", "."))
+
 
 if __name__ == "__main__":
     unittest.main()
