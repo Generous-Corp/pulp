@@ -432,6 +432,11 @@ docs:
     kind: reference
     summary: Fixed-capacity chroma and onset-novelty front ends with offline compatibility adapters
 
+  - slug: analysis-frontends
+    path: reference/analysis-frontends.md
+    kind: reference
+    summary: Reusable spectrum conditioning and triggered scope-capture front ends
+
   - slug: cli
     path: reference/cli.md
     kind: reference
