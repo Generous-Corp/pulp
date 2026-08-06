@@ -1,6 +1,6 @@
 #pragma once
 
-#include <pulp/timebase/tick.hpp>
+#include <pulp/timebase/coordinate_random.hpp>
 
 #include <array>
 #include <compare>
@@ -63,26 +63,6 @@ struct TriggerProjectionResult {
         return error == TriggerGridError::None;
     }
 };
-
-namespace detail {
-
-// Portable high half of a 64 x 64-bit product. Keeping the probability test in
-// integer space makes authored ratios deterministic across toolchains.
-constexpr std::uint64_t trigger_grid_multiply_high(std::uint64_t lhs, std::uint64_t rhs) noexcept {
-    const auto lhs_low = static_cast<std::uint64_t>(static_cast<std::uint32_t>(lhs));
-    const auto lhs_high = lhs >> 32U;
-    const auto rhs_low = static_cast<std::uint64_t>(static_cast<std::uint32_t>(rhs));
-    const auto rhs_high = rhs >> 32U;
-    const auto low_low = lhs_low * rhs_low;
-    const auto low_high = lhs_low * rhs_high;
-    const auto high_low = lhs_high * rhs_low;
-    const auto high_high = lhs_high * rhs_high;
-    const auto middle = (low_low >> 32U) + static_cast<std::uint32_t>(low_high) +
-                        static_cast<std::uint32_t>(high_low);
-    return high_high + (low_high >> 32U) + (high_low >> 32U) + (middle >> 32U);
-}
-
-} // namespace detail
 
 /// Fixed-capacity authored trigger data with allocation-free tick projection.
 ///
@@ -228,8 +208,7 @@ template <std::size_t MaxTracks = 16, std::size_t MaxSteps = 64> class TriggerGr
             return false;
         if (probability.numerator == probability.denominator)
             return true;
-        return detail::trigger_grid_multiply_high(draw, probability.denominator) <
-               probability.numerator;
+        return detail::multiply_high(draw, probability.denominator) < probability.numerator;
     }
 
     constexpr std::size_t index_of(std::size_t track, std::size_t step) const noexcept {

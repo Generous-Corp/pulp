@@ -120,7 +120,7 @@ TEST_CASE("trigger probability range reduction agrees with a wide integer oracle
         const auto rhs = value ^ (value >> 29U);
         const auto expected = static_cast<std::uint64_t>(
             (static_cast<unsigned __int128>(value) * static_cast<unsigned __int128>(rhs)) >> 64U);
-        REQUIRE(detail::trigger_grid_multiply_high(value, rhs) == expected);
+        REQUIRE(detail::multiply_high(value, rhs) == expected);
     }
 }
 #endif
