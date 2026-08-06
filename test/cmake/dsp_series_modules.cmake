@@ -45,6 +45,7 @@ endfunction()
 add_library(pulp-dsp-series-header-self-containment OBJECT
     header_compile/additive_spectral_envelope.cpp
     header_compile/cartesian_walk.cpp
+    header_compile/dynamics_contract.cpp
     header_compile/gate_logic.cpp
     header_compile/leslie_rotary.cpp
     header_compile/probability_gate.cpp
