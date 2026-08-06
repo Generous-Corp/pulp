@@ -269,8 +269,13 @@ pulp::platform::ProcessResult run_cli(const std::vector<std::string>& args,
     pulp::platform::ProcessOptions opts;
     opts.timeout_ms = 60000;
     // Deterministic + offline.
+#if defined(_WIN32)
+    _putenv_s("PULP_UPDATE_CHECK_DISABLED", "1");
+    _putenv_s("PULP_KNOWN_FRAMEWORKS", known_frameworks.c_str());
+#else
     ::setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
     ::setenv("PULP_KNOWN_FRAMEWORKS", known_frameworks.c_str(), 1);
+#endif
     return pulp::platform::ChildProcess::run(cli_binary().string(), args, opts);
 }
 }  // namespace
