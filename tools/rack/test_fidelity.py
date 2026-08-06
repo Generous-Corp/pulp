@@ -207,7 +207,41 @@ def test_a_value_outside_a_knobs_range_is_named_before_launching() -> int:
                  "a value past a knob's ceiling is named", str(out))
     bad += check(F.will_be_clamped(over, {}) == [],
                  "a knob with no mapped range is not guessed at")
+    inverted_patch = {"modules": [{"id": 7, "plugin": "Fixture",
+                                    "model": "Inverted", "params": [
+                                        {"id": 0, "value": 0.25}]}]}
+    inverted = {("Fixture", "Inverted", 0): (0.5, 0.0, "Depth")}
+    bad += check(F.will_be_clamped(inverted_patch, inverted) == [],
+                 "a value inside an inverted range predicts no clamp")
+    inverted_patch["modules"][0]["params"][0]["value"] = 0.75
+    bad += check(len(F.will_be_clamped(inverted_patch, inverted)) == 1,
+                 "a value outside an inverted range is still named")
     return bad
+
+
+def test_probe_architecture_comes_from_rack_not_user_plugins() -> int:
+    """An empty or stale user library cannot choose the probe architecture."""
+    real_run = F.subprocess.run
+    real_machine = F.platform.machine
+
+    class Result:
+        returncode = 0
+        stdout = "arm64 x86_64\n"
+
+    try:
+        F.subprocess.run = lambda *a, **k: Result()
+        F.platform.machine = lambda: "arm64"
+        bad = check(F.rack_plugin_dir_name("/fake/Rack") ==
+                    "plugins-mac-arm64",
+                    "a universal Rack uses the running machine architecture")
+        Result.stdout = "x86_64\n"
+        bad += check(F.rack_plugin_dir_name("/fake/Rack") ==
+                     "plugins-mac-x64",
+                     "an x64-only Rack uses its binary architecture")
+        return bad
+    finally:
+        F.subprocess.run = real_run
+        F.platform.machine = real_machine
 
 
 # ── Hearing ──────────────────────────────────────────────────────────────────
@@ -549,6 +583,7 @@ def main(argv: list[str]) -> int:
                test_unmapped_modules_say_so_rather_than_report_no_steps,
                test_written_steps_are_read_off_the_patch,
                test_a_value_outside_a_knobs_range_is_named_before_launching,
+               test_probe_architecture_comes_from_rack_not_user_plugins,
                test_a_known_tone_reads_as_its_own_pitch,
                test_the_reader_is_accurate_across_the_range_it_claims,
                test_nothing_periodic_is_not_a_pitch,

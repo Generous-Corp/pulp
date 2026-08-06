@@ -2076,7 +2076,11 @@ TEST_CASE("a newer release outranks an older installed toolchain",
     CHECK(forge_modular::compare_stamps("", "0.0.1") < 0);
     CHECK(forge_modular::compare_stamps("", "") == 0);
     // A release candidate must not sort above the release it precedes.
-    CHECK(forge_modular::compare_stamps("0.13.0-rc1", "0.13.0") == 0);
+    CHECK(forge_modular::compare_stamps("0.13.0-rc1", "0.13.0") < 0);
+    CHECK(forge_modular::compare_stamps("0.13.0-alpha.1", "0.13.0") < 0);
+    CHECK(forge_modular::choose_toolchain(
+              none, {"/installed", true, "0.13.0-rc1"},
+              {"/bundle", true, "0.13.0"}, checkout).path == "/bundle");
 
     // The stamp file itself: a version, and when it was packaged.
     const auto parsed = forge_modular::parse_stamp("0.12.8\n2026-08-04T10:00:00Z\n");

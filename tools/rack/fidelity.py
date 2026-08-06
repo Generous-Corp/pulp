@@ -52,6 +52,7 @@ import hashlib
 import json
 import math
 import os
+import platform
 import shutil
 import struct
 import subprocess
@@ -120,7 +121,26 @@ def build_probe(dest: str, sdk: str | None = None) -> str:
 
 # ── A Rack that has never seen this machine's user directory ─────────────────
 
-def make_scratch(probe_dir: str) -> str:
+def rack_plugin_dir_name(rack: str) -> str:
+    """The plugin directory the selected Rack executable will actually read."""
+    override = os.environ.get("FORGE_RACK_PLATFORM")
+    if override in ("mac-arm64", "mac-x64"):
+        return "plugins-" + override
+    result = subprocess.run(["/usr/bin/lipo", "-archs", rack],
+                            capture_output=True, text=True)
+    archs = set(result.stdout.split()) if result.returncode == 0 else set()
+    current = platform.machine().lower()
+    preferred = "arm64" if current in ("arm64", "aarch64") else "x86_64"
+    if preferred in archs:
+        return "plugins-mac-arm64" if preferred == "arm64" else "plugins-mac-x64"
+    if archs == {"arm64"}:
+        return "plugins-mac-arm64"
+    if archs == {"x86_64"}:
+        return "plugins-mac-x64"
+    raise SystemExit(f"could not determine the Rack architecture from {rack}")
+
+
+def make_scratch(probe_dir: str, rack: str) -> str:
     """A throwaway Rack user directory with the probe added to the library.
 
     The plugins are symlinked ONE BY ONE rather than as a whole directory, so
@@ -140,8 +160,7 @@ def make_scratch(probe_dir: str) -> str:
             if os.path.isdir(src):
                 os.symlink(src, os.path.join(mirror, name))
     # The probe goes into whichever arch directory this Rack will read.
-    arch = ("plugins-mac-arm64" if os.path.isdir(
-        os.path.join(scratch, "plugins-mac-arm64")) else "plugins-mac-x64")
+    arch = rack_plugin_dir_name(rack)
     os.makedirs(os.path.join(scratch, arch), exist_ok=True)
     os.symlink(probe_dir, os.path.join(scratch, arch, PROBE_PLUGIN))
     # Settings carry the Pro token and the licences save a round trip, so a
@@ -339,12 +358,14 @@ def will_be_clamped(patch: dict, ranges: dict) -> list[str]:
             key = (m.get("plugin"), m.get("model"), prm.get("id"))
             if key not in ranges:
                 continue
-            lo, hi, name = ranges[key]
+            declared_lo, declared_hi, name = ranges[key]
+            lo, hi = sorted((declared_lo, declared_hi))
             v = float(prm.get("value", 0.0))
             if v < lo or v > hi:
                 out.append(f"module {m.get('id')} ({m.get('model')}) "
                            f"param {prm.get('id')} {name!r}: the patch writes "
-                           f"{v:g}, which the knob's range [{lo:g}, {hi:g}] "
+                           f"{v:g}, which the knob's range "
+                           f"[{declared_lo:g}, {declared_hi:g}] "
                            f"will clamp on load")
     return out
 
@@ -439,7 +460,7 @@ def launch_once(rack: str, patch_path: str, probe_dir: str,
     the module destructor -- only runs on a clean shutdown. Holding stdin open
     is what keeps Rack alive at all; it exits as soon as a line arrives.
     """
-    scratch = make_scratch(probe_dir)
+    scratch = make_scratch(probe_dir, rack)
     env = dict(os.environ, FORGE_PROBE_OUT=scratch,
                FORGE_PROBE_SECONDS=str(seconds))
     proc = subprocess.Popen(

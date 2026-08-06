@@ -29,12 +29,23 @@ through the VCV Library.
 """
 from __future__ import annotations
 
+import hashlib
+import io
 import os
 import platform
+import shutil
+import stat
 import sys
+import tempfile
 
 SDK_VERSION = "2.6.6"
 BASE = "https://vcvrack.com/downloads"
+SDK_SHA256 = {
+    "mac-arm64": "29414e52417992cbafa47e30f947c3c0c7a34e5c424bb83c5a0af8c24840481f",
+    "mac-x64": "9b8b0d7582ca25fac879f8f64de40f2481df2fd903b65f3abb5d6801689060ec",
+    "lin-x64": "420da2452def7b195f98e3a0650c35f1e0f058a98a71840b4347d3d203618532",
+    "win-x64": "12f2043311db98592bdf73a7797e8a957c47950c3c8c17c7ff6421eb0015a05c",
+}
 
 # Where it lands. Deliberately outside any checkout: the SDK is GPLv3 and the
 # build refuses to configure if it is found inside the source tree.
@@ -142,9 +153,7 @@ def ensure(may_fetch: bool = True, announce=None) -> str:
 
 def fetch(quiet: bool = True) -> str:
     """Download and unpack. Returns the directory, or raises with a reason."""
-    import io
     import urllib.request
-    import zipfile
 
     have = installed_at()
     if have:
@@ -164,20 +173,64 @@ def fetch(quiet: bool = True) -> str:
     except Exception as e:
         raise SystemExit(f"could not download the Rack SDK: {e}")
 
-    os.makedirs(os.path.dirname(DEST), exist_ok=True)
+    key = platform_key()
+    expected = SDK_SHA256.get(key or "")
+    if not expected:
+        raise SystemExit(f"no pinned Rack SDK digest exists for {key}")
+    return _install_archive(blob, DEST, expected)
+
+
+def _install_archive(blob: bytes, dest: str, expected_digest: str) -> str:
+    """Validate one SDK ZIP and replace only ``dest`` from isolated staging."""
+    import zipfile
+
+    digest = hashlib.sha256(blob).hexdigest()
+    if digest != expected_digest:
+        raise SystemExit(
+            "the Rack SDK download did not match the digest pinned for this "
+            f"release (got {digest}, expected {expected_digest})")
+
+    parent = os.path.dirname(dest)
+    os.makedirs(parent, exist_ok=True)
     try:
-        with zipfile.ZipFile(io.BytesIO(blob)) as z:
-            # The archive holds a single Rack-SDK/ directory; unpack its
-            # contents into DEST so the path does not gain a level.
-            z.extractall(os.path.dirname(DEST))
+        with tempfile.TemporaryDirectory(prefix=".rack-sdk-stage-",
+                                         dir=parent) as stage:
+            with zipfile.ZipFile(io.BytesIO(blob)) as z:
+                for member in z.infolist():
+                    name = member.filename
+                    parts = name.split("/")
+                    mode = member.external_attr >> 16
+                    file_type = stat.S_IFMT(mode)
+                    unsafe_type = file_type and not (stat.S_ISREG(mode) or
+                                                     stat.S_ISDIR(mode))
+                    if ("\\" in name or name.startswith("/") or
+                            not parts or parts[0] != "Rack-SDK" or
+                            any(p in ("", ".", "..") for p in parts[:-1]) or
+                            unsafe_type):
+                        raise ValueError(f"unsafe archive member: {name!r}")
+                z.extractall(stage)
+
+            staged_sdk = os.path.join(stage, "Rack-SDK")
+            if not os.path.isfile(os.path.join(staged_sdk, "include", "rack.hpp")):
+                raise ValueError("Rack-SDK/include/rack.hpp is missing")
+
+            backup_root = None
+            try:
+                if os.path.lexists(dest):
+                    backup_root = tempfile.mkdtemp(prefix=".rack-sdk-old-",
+                                                   dir=parent)
+                    os.replace(dest, os.path.join(backup_root, "Rack-SDK"))
+                os.replace(staged_sdk, dest)
+            except Exception:
+                if backup_root and not os.path.lexists(dest):
+                    os.replace(os.path.join(backup_root, "Rack-SDK"), dest)
+                raise
+            finally:
+                if backup_root:
+                    shutil.rmtree(backup_root, ignore_errors=True)
     except Exception as e:
         raise SystemExit(f"the Rack SDK archive could not be unpacked: {e}")
-
-    if not os.path.exists(os.path.join(DEST, "include", "rack.hpp")):
-        raise SystemExit(
-            f"the SDK unpacked to {DEST} but has no include/rack.hpp — the "
-            f"archive layout may have changed")
-    return DEST
+    return dest
 
 
 def main(argv):

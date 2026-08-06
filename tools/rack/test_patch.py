@@ -2175,7 +2175,80 @@ def check_sdk_resolution() -> tuple:
             print("  WRONG  package.sh still stages the deleted fetcher")
         else:
             print("  ok     one fetcher: the shell duplicate stays deleted")
-    return bad, 9
+
+    # 7. The downloaded ZIP may replace only Rack-SDK. A normal member outside
+    #    that subtree is as dangerous as ../ because the old extractor wrote
+    #    into the shared product support directory containing the generator.
+    import hashlib
+    import io
+    import stat
+    import zipfile
+
+    def sdk_zip(extra=None):
+        out = io.BytesIO()
+        with zipfile.ZipFile(out, "w") as z:
+            z.writestr("Rack-SDK/include/rack.hpp", "// fixture\n")
+            if extra:
+                name, value = extra
+                if isinstance(name, zipfile.ZipInfo):
+                    z.writestr(name, value)
+                else:
+                    z.writestr(name, value)
+        return out.getvalue()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = os.path.join(tmp, "Rack-SDK")
+        adjacent = os.path.join(tmp, "tools", "rack", "patch.py")
+        os.makedirs(os.path.dirname(adjacent))
+        with open(adjacent, "w") as f:
+            f.write("keep me\n")
+
+        valid = sdk_zip()
+        try:
+            fetch_sdk._install_archive(valid, dest, "0" * 64)
+            bad += 1
+            print("  WRONG  an SDK archive with the wrong digest was accepted")
+        except SystemExit as e:
+            if "did not match" not in str(e):
+                bad += 1
+                print(f"  WRONG  digest rejection was not named: {e}")
+            else:
+                print("  ok     SDK download identity is pinned by digest")
+
+        hostile = sdk_zip(("tools/rack/patch.py", "overwritten\n"))
+        try:
+            fetch_sdk._install_archive(
+                hostile, dest, hashlib.sha256(hostile).hexdigest())
+            bad += 1
+            print("  WRONG  an SDK archive wrote outside Rack-SDK")
+        except SystemExit:
+            if open(adjacent).read() != "keep me\n":
+                bad += 1
+                print("  WRONG  rejecting the archive still changed patch.py")
+            else:
+                print("  ok     SDK extraction cannot write beside Rack-SDK")
+
+        link = zipfile.ZipInfo("Rack-SDK/include/escape")
+        link.create_system = 3
+        link.external_attr = (stat.S_IFLNK | 0o777) << 16
+        linked = sdk_zip((link, "../../tools/rack/patch.py"))
+        try:
+            fetch_sdk._install_archive(
+                linked, dest, hashlib.sha256(linked).hexdigest())
+            bad += 1
+            print("  WRONG  an SDK archive symlink was accepted")
+        except SystemExit:
+            print("  ok     SDK extraction rejects links")
+
+        installed = fetch_sdk._install_archive(
+            valid, dest, hashlib.sha256(valid).hexdigest())
+        if installed != dest or not os.path.isfile(
+                os.path.join(dest, "include", "rack.hpp")):
+            bad += 1
+            print("  WRONG  a valid isolated SDK archive did not install")
+        else:
+            print("  ok     a valid SDK atomically replaces only Rack-SDK")
+    return bad, 13
 
 
 def check_setting_writer() -> tuple:

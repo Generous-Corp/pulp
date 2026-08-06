@@ -21,10 +21,12 @@ std::string trimmed(const std::string& s) {
 /// and a release candidate does not sort above the release.
 std::vector<long> fields(const std::string& stamp) {
     std::vector<long> out;
+    const auto suffix = stamp.find_first_of("-+");
+    const auto core = stamp.substr(0, suffix);
     std::size_t at = 0;
-    while (at <= stamp.size()) {
-        const auto dot = stamp.find('.', at);
-        const auto part = stamp.substr(at, dot == std::string::npos
+    while (at <= core.size()) {
+        const auto dot = core.find('.', at);
+        const auto part = core.substr(at, dot == std::string::npos
                                                ? std::string::npos : dot - at);
         char* end = nullptr;
         const long v = std::strtol(part.c_str(), &end, 10);
@@ -34,6 +36,14 @@ std::vector<long> fields(const std::string& stamp) {
         at = dot + 1;
     }
     return out;
+}
+
+std::string prerelease(const std::string& stamp) {
+    const auto dash = stamp.find('-');
+    if (dash == std::string::npos) return {};
+    const auto plus = stamp.find('+', dash + 1);
+    return stamp.substr(dash + 1, plus == std::string::npos
+                                      ? std::string::npos : plus - dash - 1);
 }
 
 }  // namespace
@@ -51,7 +61,13 @@ int compare_stamps(const std::string& a, const std::string& b) {
         const long y = i < fb.size() ? fb[i] : 0;
         if (x != y) return x < y ? -1 : 1;
     }
-    return 0;
+    const auto pa = prerelease(trimmed(a));
+    const auto pb = prerelease(trimmed(b));
+    if (pa.empty() && pb.empty()) return 0;
+    if (pa.empty()) return 1;
+    if (pb.empty()) return -1;
+    if (pa == pb) return 0;
+    return pa < pb ? -1 : 1;
 }
 
 std::string stamp_file_name() { return "VERSION"; }
