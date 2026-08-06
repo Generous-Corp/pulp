@@ -14,6 +14,7 @@
 #include <forge/process_engine.hpp>
 
 #include <pulp/runtime/log.hpp>
+#include <pulp/events/main_thread_dispatcher.hpp>
 
 #include <cctype>
 #include <chrono>
@@ -453,6 +454,10 @@ ForgeModularShell::ForgeModularShell()
     // adding a fourth value would mean editing all 13 remaining switch sites for
     // no gain, and putting a Rack-shaped name in Forge's core enum. The badge
     // does not come from the kind any more, so nothing reads "FORGE FX".
+}
+
+ForgeModularShell::~ForgeModularShell() {
+    alive_->store(false, std::memory_order_release);
 }
 
 pulp::format::PluginDescriptor ForgeModularShell::descriptor() const {
@@ -1669,7 +1674,11 @@ RackPresence look_for_rack() {
     for (const char* app : {"/Applications/VCV Rack 2 Free.app",
                             "/Applications/VCV Rack 2 Pro.app",
                             "/Applications/VCV Rack 2.app"}) {
-        if (std::filesystem::exists(app, ec)) { r.standalone_installed = true; break; }
+        if (std::filesystem::exists(app, ec)) {
+            r.standalone_installed = true;
+            r.standalone_app = app;
+            break;
+        }
     }
     std::string out;
     // -x so "Rack" does not match "Rack SDK" or a path that merely mentions it.
@@ -1684,6 +1693,11 @@ RackPresence look_for_rack() {
         if (std::filesystem::exists(p, ec)) { r.plugin_installed = true; break; }
     }
     return r;
+}
+
+std::string rack_app_to_launch(const RackPresence& presence) {
+    return presence.standalone_app.empty() ? std::string("VCV Rack 2")
+                                            : presence.standalone_app;
 }
 
 namespace {
@@ -1713,6 +1727,10 @@ std::string rack_open_command(const std::string& app, const std::string& patch,
     // autosave, and the patch just built arrives -- if at all -- behind
     // whatever was open last time.
     return "open -a " + quoted(app) + " --args " + quoted(patch);
+}
+
+std::string finder_reveal_command(const std::string& patch) {
+    return "open -R " + quoted(patch);
 }
 
 void ForgeModularShell::run_detached(const std::string& command) {
@@ -1773,8 +1791,8 @@ std::string ForgeModularShell::open_in_rack() {
     const auto rack = look_for_rack();
 
     auto launch = [this, path, &rack] {
-        run_detached(rack_open_command("/Applications/VCV Rack 2 Free.app",
-                                       path, rack.standalone_running));
+        run_detached(rack_open_command(rack_app_to_launch(rack), path,
+                                       rack.standalone_running));
     };
 
     // Already open: hand it the patch, wherever we are running. `open` on a
@@ -1807,7 +1825,7 @@ std::string ForgeModularShell::open_in_rack() {
     }
 
     // No Rack at all. Show the file rather than describing it.
-    run_detached("open -R '" + path + "'");
+    run_detached(finder_reveal_command(path));
     return "VCV Rack is not installed \u2014 showing the file in Finder instead";
 }
 
@@ -1848,12 +1866,22 @@ std::string ForgeModularShell::ask() {
     // not contain -- a confident answer about a connection that does not exist
     // would be worse than no answer.
     if (engine_ && !open_patch_.empty()) {
-        auto answer = engine_->explain(open_patch_);
-        if (!answer.empty()) {
-            for (const auto& line : PatchExplanation::wrap(answer, 118))
-                c->narrate(line);
-            return {};
-        }
+        const auto alive = alive_;
+        const auto caller = std::this_thread::get_id();
+        engine_->explain_async(open_patch_, [this, alive, caller](std::string answer) {
+            auto deliver = [this, alive, answer = std::move(answer)]() mutable {
+                if (!alive->load(std::memory_order_acquire) || answer.empty()) return;
+                auto* current = chrome();
+                if (!current) return;
+                for (const auto& line : PatchExplanation::wrap(answer, 118))
+                    current->narrate(line);
+            };
+            if (std::this_thread::get_id() == caller)
+                deliver();
+            else
+                pulp::events::MainThreadDispatcher::call_async(std::move(deliver));
+        });
+        return {};
     }
     if (open_patch_.empty())
         c->narrate("Build or open a patch first and I can explain it.");

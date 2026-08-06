@@ -48,7 +48,7 @@ public:
     /// synchronous form loads the whole module inventory and takes seconds --
     /// long enough to read as a hang.
     void explain_async(const std::string& patch_path,
-                       std::function<void(std::string)> done) const;
+                       std::function<void(std::string)> done) const override;
 
     /// Where the most recent run put its artifact, or empty.
     std::string last_artifact() const { return artifact_; }

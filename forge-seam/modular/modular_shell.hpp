@@ -25,6 +25,8 @@
 #include <pulp/view/widgets.hpp>
 
 #include <chrono>
+#include <atomic>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -88,6 +90,10 @@ public:
         (void)patch_path;
         return {};
     }
+    virtual void explain_async(const std::string& patch_path,
+                               std::function<void(std::string)> done) const {
+        if (done) done(explain(patch_path));
+    }
 
     /// The log the run just submitted is writing, or empty when this engine
     /// does not keep one per run. Every run sharing a single log let two
@@ -119,6 +125,7 @@ struct RackPresence {
     bool standalone_installed = false;
     bool standalone_running = false;
     bool plugin_installed = false;     ///< Rack Pro as AU/VST3/CLAP
+    std::string standalone_app;        ///< Exact detected .app, if installed
 
     /// The one phrase that names this state, for the pill beside the button.
     std::string phrase() const;
@@ -126,6 +133,10 @@ struct RackPresence {
 
 /// What this machine has, probed now.
 RackPresence look_for_rack();
+
+/// Exact detected Rack app, or an application name that can address a running
+/// copy when the installation lives outside the standard Applications folder.
+std::string rack_app_to_launch(const RackPresence& presence);
 
 /// The shell command that opens `patch` in Rack.
 ///
@@ -140,9 +151,13 @@ RackPresence look_for_rack();
 std::string rack_open_command(const std::string& app, const std::string& patch,
                               bool already_running);
 
+/// Reveal a patch in Finder without allowing its filename to become shell.
+std::string finder_reveal_command(const std::string& patch);
+
 class ForgeModularShell final : public forge::ForgeShell {
 public:
     ForgeModularShell();
+    ~ForgeModularShell() override;
 
     void set_engine(EngineClient* engine) { engine_ = engine; }
 
@@ -551,6 +566,8 @@ private:
     pulp::view::TextButton* tab_module_ = nullptr;
     pulp::view::TextButton* tab_patch_ = nullptr;
     EngineClient* engine_ = nullptr;
+    std::shared_ptr<std::atomic<bool>> alive_ =
+        std::make_shared<std::atomic<bool>>(true);
     Artifact artifact_ = Artifact::module;
     bool has_build_ = false;
     double sample_rate_ = 48000.0;

@@ -4277,6 +4277,19 @@ TEST_CASE("Rack is handed the patch, not left to restore its autosave",
         app, "/tmp/some patch.vcv", true));
     REQUIRE(plain.size() == 3);
     CHECK(plain[2] == "/tmp/some patch.vcv");
+
+    const auto reveal = args_of(
+        forge_modular::finder_reveal_command("/tmp/it's a drone.vcv"));
+    REQUIRE(reveal.size() == 2);
+    CHECK(reveal[0] == "-R");
+    CHECK(reveal[1] == "/tmp/it's a drone.vcv");
+
+    forge_modular::RackPresence pro;
+    pro.standalone_installed = true;
+    pro.standalone_app = "/Applications/VCV Rack 2 Pro.app";
+    CHECK(forge_modular::rack_app_to_launch(pro) == pro.standalone_app);
+    pro.standalone_app.clear();
+    CHECK(forge_modular::rack_app_to_launch(pro) == "VCV Rack 2");
 }
 
 TEST_CASE("whether Rack is there is shown, not left to be discovered",
@@ -5494,6 +5507,42 @@ TEST_CASE("every composer control changes something observable",
         CHECK(engine.submissions.empty());      // a suggestion, not a commitment
         CHECK(chrome->mode() == forge::ForgeChrome::Mode::Home);
     }
+}
+
+TEST_CASE("Ask uses the non-blocking explanation seam", "[phase6][ask][async]") {
+    struct DeferredEngine final : forge_modular::EngineClient {
+        mutable int synchronous_calls = 0;
+        mutable std::function<void(std::string)> completion;
+        bool available() const override { return true; }
+        bool ensure_running() override { return true; }
+        void submit(const std::string&, bool) override {}
+        std::string explain(const std::string&) const override {
+            ++synchronous_calls;
+            return "synchronous answer";
+        }
+        void explain_async(const std::string&,
+                           std::function<void(std::string)> done) const override {
+            completion = std::move(done);
+        }
+    } engine;
+
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    shell.set_engine(&engine);
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    shell.set_open_patch("/tmp/ask-async.vcv");
+    auto* chrome = shell.chrome();
+    chrome->prompt_input()->set_text("what is connected?");
+    CHECK(shell.ask().empty());
+    CHECK(engine.synchronous_calls == 0);
+    REQUIRE(engine.completion);
+    const auto before_answer = chrome->chat_line_count();
+    engine.completion("AUDIO: VCO OUT -> Audio IN");
+    CHECK(chrome->chat_line_count() > before_answer);
 }
 
 TEST_CASE("the shelf, the library link and settings all go somewhere",
