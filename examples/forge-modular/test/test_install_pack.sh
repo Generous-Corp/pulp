@@ -49,6 +49,19 @@ else
 fi
 rm -rf "$W"
 
+ran=$((ran + 1))
+new_world 2.0.0 mac-arm64
+DEST="$W/home/Library/Application Support/Rack2/plugins-mac-arm64"
+mkdir -p "$DEST"
+printf 'stale stock pack\n' > "$DEST/ForgeModular-2.0.0-mac-arm64.vcvplugin"
+"$PLACER" --source "$W/Forge Modular.app" --home "$W/home" >/dev/null 2>&1
+if grep -q 'stub pack' "$DEST/ForgeModular-2.0.0-mac-arm64.vcvplugin"; then
+    ok "an unmarked same-version stock archive is refreshed"
+else
+    fail "a stale unmarked same-version archive was mistaken for user work"
+fi
+rm -rf "$W"
+
 # ── same-version generated content is user work, not stock ──────────────────
 ran=$((ran + 1))
 new_world 2.0.0 mac-arm64

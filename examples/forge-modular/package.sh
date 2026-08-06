@@ -246,11 +246,17 @@ echo "[installer] all four bundles report $VERSION"
 # than one that fails here.
 RACK_PLUGIN="${RACK_PLUGIN_OVERRIDE:-}"
 if [[ -z "$RACK_PLUGIN" ]]; then
+    newest_mtime=-1
     for dir in "$BUILD_DIR/rack" "$REPO/build/rack" "$REPO/build-rack/rack"; do
         [[ -d "$dir" ]] || continue
-        found=$(find "$dir" -maxdepth 1 -name 'ForgeModular-*.vcvplugin' 2>/dev/null \
-                | sort | tail -1)
-        if [[ -n "$found" ]]; then RACK_PLUGIN="$found"; break; fi
+        while IFS= read -r candidate; do
+            [[ -n "$candidate" ]] || continue
+            candidate_mtime=$(stat -f %m "$candidate" 2>/dev/null || echo 0)
+            if [[ "$candidate_mtime" -gt "$newest_mtime" ]]; then
+                newest_mtime="$candidate_mtime"
+                RACK_PLUGIN="$candidate"
+            fi
+        done < <(find "$dir" -maxdepth 1 -name 'ForgeModular-*.vcvplugin' 2>/dev/null)
     done
 fi
 
@@ -443,7 +449,7 @@ codesign --force --options runtime --timestamp \
 ARGS=(--name "Forge Modular" --version "$VERSION" --out "$OUT_DIR"
       --sign-identity "$PULP_SIGN_IDENTITY_HASH"
       --installer-identity "$PULP_SIGN_INSTALLER_HASH"
-      --app "Forge Modular" "$APP"
+      --app-for "Forge Modular" "Forge Modular" "$APP"
       # Rack loads plug-ins from the user's Application Support. A package
       # writes absolute paths as root, so the .vcvplugin cannot be addressed to
       # its real home by the payload -- it rides inside the app bundle and this

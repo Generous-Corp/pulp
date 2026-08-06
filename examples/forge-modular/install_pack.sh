@@ -119,11 +119,6 @@ if [ -n "$HAVE" ] && [ "$HAVE" = "$VERSION" ]; then
         echo "install_pack: keeping user-generated $SLUG $HAVE"
         exit 0
     fi
-    installed_archive="$DEST_DIR/$BASE"
-    if [ -f "$installed_archive" ] && ! cmp -s "$installed_archive" "$PACK"; then
-        echo "install_pack: keeping distinct same-version $SLUG $HAVE pack"
-        exit 0
-    fi
 fi
 if [ -n "$HAVE" ] && [ "$HAVE" != "$VERSION" ]; then
     # sort -V puts the lower version first, so "the newest is the one already
