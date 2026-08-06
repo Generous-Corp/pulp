@@ -270,11 +270,12 @@ fi
 # Packaging is architecture-coherent: artifact selection and Installer's host
 # declaration are derived from the same target architecture.
 ran=$((ran + 1))
-if grep -q 'ForgeModular-\*-\$RACK_PLATFORM.vcvplugin' "$FM/package.sh" && \
+if grep -q -- '--rack-plugin is required' "$FM/package.sh" && \
+   grep -q '\-\$RACK_PLATFORM.vcvplugin' "$FM/package.sh" && \
    grep -q -- '--architectures "\$INSTALLER_ARCH"' "$FM/package.sh"; then
-    ok "package selection and installer host use one target architecture"
+    ok "package requires a named current pack and one target architecture"
 else
-    fail "package architecture does not constrain both Rack pack and Installer"
+    fail "package can discover stale packs or mix target architectures"
 fi
 
 echo

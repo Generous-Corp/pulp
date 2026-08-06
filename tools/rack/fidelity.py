@@ -157,7 +157,8 @@ def make_scratch(probe_dir: str, rack: str) -> str:
         os.makedirs(mirror)
         for name in os.listdir(real):
             src = os.path.join(real, name)
-            if os.path.isdir(src):
+            if os.path.isdir(src) or (os.path.isfile(src) and
+                                      name.endswith(".vcvplugin")):
                 os.symlink(src, os.path.join(mirror, name))
     # The probe goes into whichever arch directory this Rack will read.
     arch = rack_plugin_dir_name(rack)

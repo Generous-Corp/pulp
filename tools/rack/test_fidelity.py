@@ -244,6 +244,42 @@ def test_probe_architecture_comes_from_rack_not_user_plugins() -> int:
         F.platform.machine = real_machine
 
 
+def test_scratch_mirrors_archive_only_plugins() -> int:
+    """A freshly installed .vcvplugin is available before normal Rack opens."""
+    real_user = F.mr.RACK_USER_DIR
+    real_platform = os.environ.get("FORGE_RACK_PLATFORM")
+    with tempfile.TemporaryDirectory() as root:
+        user = os.path.join(root, "Rack2")
+        plugins = os.path.join(user, "plugins-mac-arm64")
+        probe = os.path.join(root, "ForgeProbe")
+        os.makedirs(plugins)
+        os.makedirs(probe)
+        archive = os.path.join(plugins, "Fresh-1.0.0-mac-arm64.vcvplugin")
+        with open(archive, "w") as f:
+            f.write("fixture\n")
+        unpacked = os.path.join(plugins, "AlreadyOpen")
+        os.makedirs(unpacked)
+        try:
+            F.mr.RACK_USER_DIR = user
+            os.environ["FORGE_RACK_PLATFORM"] = "mac-arm64"
+            scratch = F.make_scratch(probe, "/fake/Rack")
+            try:
+                mirrored = os.path.join(scratch, "plugins-mac-arm64")
+                return check(os.path.islink(os.path.join(
+                                 mirrored, os.path.basename(archive))) and
+                             os.path.islink(os.path.join(mirrored,
+                                                        "AlreadyOpen")),
+                             "scratch Rack mirrors archives and unpacked plugins")
+            finally:
+                F.drop_scratch(scratch)
+        finally:
+            F.mr.RACK_USER_DIR = real_user
+            if real_platform is None:
+                os.environ.pop("FORGE_RACK_PLATFORM", None)
+            else:
+                os.environ["FORGE_RACK_PLATFORM"] = real_platform
+
+
 # ── Hearing ──────────────────────────────────────────────────────────────────
 
 def _tone(hz: float, seconds: float, rate: float) -> list[float]:
@@ -584,6 +620,7 @@ def main(argv: list[str]) -> int:
                test_written_steps_are_read_off_the_patch,
                test_a_value_outside_a_knobs_range_is_named_before_launching,
                test_probe_architecture_comes_from_rack_not_user_plugins,
+               test_scratch_mirrors_archive_only_plugins,
                test_a_known_tone_reads_as_its_own_pitch,
                test_the_reader_is_accurate_across_the_range_it_claims,
                test_nothing_periodic_is_not_a_pitch,

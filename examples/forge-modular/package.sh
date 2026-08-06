@@ -12,7 +12,7 @@
 # compiler. Two payloads in one installer preserves that distinction, where one
 # merged bundle would blur it.
 #
-#   package.sh --build-dir DIR --out DIR [--sign] [--notarize]
+#   package.sh --build-dir DIR --out DIR --rack-plugin FILE [--sign] [--notarize]
 #
 # Unsigned by default. Signing and notarization reach Apple's servers, so they
 # are explicit rather than implied -- an unsigned .pkg is exactly what you want
@@ -29,6 +29,7 @@ VERSION="0.1.0"
 DO_SIGN=0
 DO_NOTARIZE=0
 TARGET_ARCH="${TARGET_ARCH_OVERRIDE:-$(uname -m)}"
+RACK_PLUGIN="${RACK_PLUGIN_OVERRIDE:-}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -36,6 +37,7 @@ while [[ $# -gt 0 ]]; do
         --out) OUT_DIR="$2"; shift 2 ;;
         --version) VERSION="$2"; shift 2 ;;
         --architecture) TARGET_ARCH="$2"; shift 2 ;;
+        --rack-plugin) RACK_PLUGIN="$2"; shift 2 ;;
         --sign) DO_SIGN=1; shift ;;
         --notarize) DO_SIGN=1; DO_NOTARIZE=1; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -248,26 +250,15 @@ echo "[installer] all four bundles report $VERSION"
 # interactive step nothing records, and the next clean build would have shipped
 # an installer with no modules and said so only in a line nobody reads.
 #
-# So: look where the modules are actually built, take the newest, SAY WHICH,
-# and refuse to package without one. The app's own installer pane promises
-# "Includes the Rack plug-in" -- an installer that quietly does not is worse
-# than one that fails here.
-RACK_PLUGIN="${RACK_PLUGIN_OVERRIDE:-}"
-if [[ -z "$RACK_PLUGIN" ]]; then
-    newest_mtime=-1
-    for dir in "$BUILD_DIR/rack" "$REPO/build/rack" "$REPO/build-rack/rack"; do
-        [[ -d "$dir" ]] || continue
-        while IFS= read -r candidate; do
-            [[ -n "$candidate" ]] || continue
-            candidate_mtime=$(stat -f %m "$candidate" 2>/dev/null || echo 0)
-            if [[ "$candidate_mtime" -gt "$newest_mtime" ]]; then
-                newest_mtime="$candidate_mtime"
-                RACK_PLUGIN="$candidate"
-            fi
-        done < <(find "$dir" -maxdepth 1 \
-                      -name "ForgeModular-*-$RACK_PLATFORM.vcvplugin" 2>/dev/null)
-    done
-fi
+# So the caller must name the artifact made by the current Rack build. Choosing
+# "newest" from several persistent build directories is not provenance: a
+# stale pack can be newest, or the only one left after its sources changed.
+# The app's own installer pane promises "Includes the Rack plug-in" -- an
+# installer that quietly carries an old or absent one is worse than a failure.
+[[ -n "$RACK_PLUGIN" ]] || {
+    echo "--rack-plugin is required; pass the artifact produced by the current Rack build" >&2
+    exit 2
+}
 if [[ -n "$RACK_PLUGIN" && "$(basename "$RACK_PLUGIN")" != *"-$RACK_PLATFORM.vcvplugin" ]]; then
     echo "wrong Rack pack for $TARGET_ARCH: $RACK_PLUGIN" >&2
     exit 1
@@ -354,15 +345,6 @@ for artifact in "$APP" "$AU" "$VST3" "$CLAP"; do
         missing=1
     fi
 done
-if [[ -z "$RACK_PLUGIN" ]]; then
-    echo "no ForgeModular-*.vcvplugin found. The installer's own pane promises" >&2
-    echo "the Rack plug-in, so packaging without it ships a broken promise." >&2
-    echo "Build the module pack in the pulp tree (it needs the Rack SDK):" >&2
-    echo "  cmake -S . -B build -DPULP_ENABLE_RACK=ON && \\" >&2
-    echo "  cmake --build build --target forge-modular -j8" >&2
-    echo "Or pass one explicitly: RACK_PLUGIN_OVERRIDE=/path/to/x.vcvplugin" >&2
-    exit 1
-fi
 echo "[installer] rack pack: $RACK_PLUGIN"
 # IDENTITY, not size. A .vcvplugin is a zstd tar; a truncated download or a
 # half-written copy is still a file of plausible length. Reading the manifest

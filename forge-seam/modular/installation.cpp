@@ -1,6 +1,7 @@
 #include "forge/installation.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <sstream>
@@ -46,6 +47,43 @@ std::string prerelease(const std::string& stamp) {
                                       ? std::string::npos : plus - dash - 1);
 }
 
+std::vector<std::string> prerelease_identifiers(const std::string& stamp) {
+    std::vector<std::string> out;
+    const auto pre = prerelease(stamp);
+    std::string part;
+    for (char c : pre) {
+        if (c == '.') {
+            if (!part.empty()) out.push_back(std::move(part));
+            part.clear();
+            continue;
+        }
+        if (!part.empty() && std::isdigit(static_cast<unsigned char>(c)) !=
+                                 std::isdigit(static_cast<unsigned char>(part.back()))) {
+            out.push_back(std::move(part));
+            part.clear();
+        }
+        part += c;
+    }
+    if (!part.empty()) out.push_back(std::move(part));
+    return out;
+}
+
+bool numeric_identifier(const std::string& s) {
+    return !s.empty() && std::all_of(s.begin(), s.end(), [](unsigned char c) {
+        return std::isdigit(c);
+    });
+}
+
+int compare_numeric_identifier(std::string a, std::string b) {
+    const auto first_a = a.find_first_not_of('0');
+    const auto first_b = b.find_first_not_of('0');
+    a = first_a == std::string::npos ? "0" : a.substr(first_a);
+    b = first_b == std::string::npos ? "0" : b.substr(first_b);
+    if (a.size() != b.size()) return a.size() < b.size() ? -1 : 1;
+    if (a == b) return 0;
+    return a < b ? -1 : 1;
+}
+
 }  // namespace
 
 int compare_stamps(const std::string& a, const std::string& b) {
@@ -66,8 +104,18 @@ int compare_stamps(const std::string& a, const std::string& b) {
     if (pa.empty() && pb.empty()) return 0;
     if (pa.empty()) return 1;
     if (pb.empty()) return -1;
-    if (pa == pb) return 0;
-    return pa < pb ? -1 : 1;
+    const auto ia = prerelease_identifiers(trimmed(a));
+    const auto ib = prerelease_identifiers(trimmed(b));
+    for (std::size_t i = 0; i < std::min(ia.size(), ib.size()); ++i) {
+        if (ia[i] == ib[i]) continue;
+        const bool na = numeric_identifier(ia[i]);
+        const bool nb = numeric_identifier(ib[i]);
+        if (na && nb) return compare_numeric_identifier(ia[i], ib[i]);
+        if (na != nb) return na ? -1 : 1;
+        return ia[i] < ib[i] ? -1 : 1;
+    }
+    if (ia.size() == ib.size()) return 0;
+    return ia.size() < ib.size() ? -1 : 1;
 }
 
 std::string stamp_file_name() { return "VERSION"; }

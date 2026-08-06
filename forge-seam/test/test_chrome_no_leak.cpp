@@ -2078,6 +2078,9 @@ TEST_CASE("a newer release outranks an older installed toolchain",
     // A release candidate must not sort above the release it precedes.
     CHECK(forge_modular::compare_stamps("0.13.0-rc1", "0.13.0") < 0);
     CHECK(forge_modular::compare_stamps("0.13.0-alpha.1", "0.13.0") < 0);
+    CHECK(forge_modular::compare_stamps("0.13.0-rc10", "0.13.0-rc2") > 0);
+    CHECK(forge_modular::compare_stamps("0.13.0-alpha.10",
+                                        "0.13.0-alpha.2") > 0);
     CHECK(forge_modular::choose_toolchain(
               none, {"/installed", true, "0.13.0-rc1"},
               {"/bundle", true, "0.13.0"}, checkout).path == "/bundle");
