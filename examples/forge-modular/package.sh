@@ -129,7 +129,8 @@ print(manifest["slug"], manifest["version"], len(manifest["modules"]))
     consumed_status="$(git -C "$REPO" status --porcelain --untracked-files=all --ignored=matching -- \
         forge-seam examples/forge-modular/modules examples/forge-modular/res \
         examples/forge-modular/design examples/forge-modular/src tools/rack \
-        tools/dsp_vocabulary.py external/fonts/Inter-Regular.ttf \
+        tools/dsp_vocabulary.py docs/status/agent-capabilities.json \
+        external/fonts/Inter-Regular.ttf \
         core/signal/include core/format/include core/audio/include \
         core/state/include core/platform/include core/runtime/include | \
         grep -Ev '^(!!|\?\?) .*/(\.corpus|\.sweeps|__pycache__|\.pytest_cache)(/|$)' || true)"
@@ -451,6 +452,9 @@ done
 # Everything here is read-only input. What a generation WRITES goes to
 # Application Support -- see ensure_writable_toolchain() in generate.py.
 ditto "$REPO/tools/dsp_vocabulary.py" "$APP/Contents/Resources/tools/dsp_vocabulary.py"
+mkdir -p "$APP/Contents/Resources/docs/status"
+ditto "$REPO/docs/status/agent-capabilities.json" \
+      "$APP/Contents/Resources/docs/status/agent-capabilities.json"
 mkdir -p "$APP/Contents/Resources/external/fonts"
 ditto "$REPO/external/fonts/Inter-Regular.ttf" \
       "$APP/Contents/Resources/external/fonts/Inter-Regular.ttf"

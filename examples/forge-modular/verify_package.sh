@@ -323,6 +323,7 @@ fi
 # FileNotFoundError. Existence is checked for the cheap ones and BEHAVIOUR for
 # the two that can be present and useless.
 need_file "Contents/Resources/tools/dsp_vocabulary.py"        "the DSP vocabulary extractor ships"
+need_file "Contents/Resources/docs/status/agent-capabilities.json" "the DSP capability manifest ships"
 need_file "Contents/Resources/external/fonts/Inter-Regular.ttf" "the panel font ships"
 need_file "Contents/Resources/build/shape_text"               "the panel shaper ships"
 need_file "Contents/Resources/examples/forge-modular/plugin.json" "the module pack manifest ships"
@@ -530,6 +531,7 @@ for kind in au vst3 clap; do
         Contents/Resources/tools/rack/patch.py \
         Contents/Resources/tools/rack/generate.py \
         Contents/Resources/tools/dsp_vocabulary.py \
+        Contents/Resources/docs/status/agent-capabilities.json \
         Contents/Resources/external/fonts/Inter-Regular.ttf \
         Contents/Resources/build/shape_text \
         Contents/Resources/examples/forge-modular/plugin.json; do

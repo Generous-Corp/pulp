@@ -3292,7 +3292,8 @@ def check_shipped_generator() -> tuple:
             capture_output=True, text=True, timeout=180,
             env={**os.environ, "HOME": home})
         said = r.stdout + r.stderr
-        wanted = ["dsp_vocabulary.py", "shape_text", "Inter-Regular.ttf",
+        wanted = ["dsp_vocabulary.py", "agent-capabilities.json",
+                  "shape_text", "Inter-Regular.ttf",
                   "forge-modular/src", "forge-modular/modules",
                   "core/signal/include"]
         missing = [w for w in wanted if w not in said]

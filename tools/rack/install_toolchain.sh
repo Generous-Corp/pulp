@@ -46,6 +46,7 @@ PY
 PARTS=(
   "tools/rack"                 # the generator itself
   "tools/dsp_vocabulary.py"    # the list of DSP the model is allowed to use
+  "docs/status/agent-capabilities.json" # its checked capability source
   "external/fonts"             # shape_text loads Inter from here
   "examples/forge-modular"     # the module pack it edits and rebuilds
   # The pack compiles against Pulp headers. Without these the generator gets

@@ -412,6 +412,19 @@ else
     fail "package can accept an unpinned SDK, unverified content, or stale shape_text helper"
 fi
 
+# The vocabulary extractor reads the checked capability manifest at runtime.
+# Both the signed seed and the writable first-run toolchain must carry it, and
+# finished-package verification must reject every payload that omits it.
+ran=$((ran + 1))
+if grep -q 'docs/status/agent-capabilities.json' "$FM/package.sh" && \
+   grep -q 'docs/status/agent-capabilities.json' "$REPO/tools/rack/install_toolchain.sh" && \
+   [ "$(grep -c 'Contents/Resources/docs/status/agent-capabilities.json' \
+        "$FM/verify_package.sh")" -eq 2 ]; then
+    ok "package carries the capability manifest through seed and writable toolchains"
+else
+    fail "package can strand dsp_vocabulary.py without its capability manifest"
+fi
+
 ran=$((ran + 1))
 if [ "$(grep -c '^trap ' "$FM/package.sh")" -eq 1 ] && \
    grep -q 'STAGED_ROOT.*STAGE.*CHECK' "$FM/package.sh"; then
