@@ -97,6 +97,7 @@ target_include_directories(pulp-fixture-runner PRIVATE
     ${PULP_ROOT}/core/platform/include
     ${PULP_ROOT}/core/runtime/include
     ${PULP_ROOT}/core/timebase/include
+    ${PULP_ROOT}/core/music/include
     ${PULP_ROOT}/core/timeline/include
     ${PULP_ROOT}/core/interchange/include
 )

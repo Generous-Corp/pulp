@@ -476,6 +476,16 @@ per-ABI entry point for it.** Go through the plugin's own state:
   no-exceptions proof together. Hand-editing any of the four consumer lists for a
   timeline unit is not just unnecessary, it is wrong.
 
+- The shared source manifest does **not** propagate target usage requirements.
+  If an existing timeline source starts including a header from another module,
+  every raw-source consumer must receive that module's include surface too. For
+  the header-only `pulp::music` module, add `core/music/include` to both
+  `_PULP_WAM_INCLUDES` and `_PULP_WCLAP_INCLUDES`, add it to the standalone
+  fixture-runner WASM root, and link `pulp::music` into the no-exceptions OBJECT
+  target. Linking it only to native `pulp::timeline` leaves native builds green
+  while WAM, WebCLAP, the WASM fixture corpus, and the no-exceptions proof fail
+  on `<pulp/music/...>` includes.
+
 - **This skill owns the engines' web-ABI source closure, not the engines.**
   `skill_path_map.json` maps `web-plugins` to
   `core/timeline/PulpTimelineSources.cmake`,
