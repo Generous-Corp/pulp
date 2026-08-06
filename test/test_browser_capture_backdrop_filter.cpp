@@ -66,6 +66,15 @@ bool any_capture_node(const pulp::view::IRNode& node) {
 /// device scale — the same materialize-then-raster path `pulp import-design`
 /// uses, so what is measured is what ships.
 std::vector<uint8_t> render_panel() {
+    // This render asks for the Skia backend by name, so a build without Skia
+    // returns nothing and every comparison below fails for a reason that has
+    // no bearing on backdrop-filter. Keyed on the build, never on an empty
+    // render: a build that CAN rasterize and returned nothing is a real defect
+    // and has to keep failing here.
+    if (!pulp::view::raw_rgba_render_available()) {
+        SKIP("no Skia backend compiled in — this panel render cannot run in "
+             "this build");
+    }
     BrowserCaptureIrOptions options;
     options.native_panel_lowering = true;
     const auto lowered =

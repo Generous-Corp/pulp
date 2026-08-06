@@ -161,6 +161,18 @@ tools:
     skill: import-design
     docs: guides/importing-designs.md
 
+  - name: check-palette-health
+    path: tools/import-validation/check_palette_health.py
+    category: design-import
+    use_when: A render matches its reference pixel for pixel and still reads wrong — a screaming accent, a label you cannot read. Pixel comparison scores agreement with the source, so a palette defect the source already had survives every visual gate.
+    invocation: python3 tools/import-validation/check_palette_health.py (--tokens <doc> | --artifact <ui.js> | --pack <dir> [--theme dark|light])
+    inputs: A DesignIR/browser-token document, an emitted UI script (its setColorToken calls), or a design-pack directory whose stylesheets are resolved.
+    outputs: Accent-ramp structure, named-hue survival, and per-tier text contrast against the quietest surface, as problems plus notes; exit 1 on any problem. --json emits the findings.
+    caveat: Judges declared token values, which are an upper bound — anything composited under the type (shadow, accent bloom) only lowers real contrast. parse_color has no color-mix()/relative-color support, so a token defined that way is skipped rather than judged; ink-signal's light --accent is one, and the emitted note names --accent-text as the unresolvable token rather than the --accent it failed on.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
   - name: diff-against-reference-regions
     path: tools/import-validation/diff_against_reference_regions.py
     category: visual-compare

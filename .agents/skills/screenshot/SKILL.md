@@ -280,6 +280,28 @@ session only).
 
 ## Gotchas
 
+- **`render_to_rgba` is Skia-only, and without Skia it returns an EMPTY buffer
+  rather than failing loudly.** The CoreGraphics path on macOS is PNG-only, so a
+  build configured without Skia has no raw-pixel producer at all — every pixel
+  probe reads back nothing no matter what the code under test does. This reads
+  as a pile of unrelated feature failures: a UBSan lane once reported nine reds
+  across box-shadow, inset shadow, mix-blend-mode, oklab and backdrop-filter,
+  all from this one cause. The tell is that the suite's own control ("a plain
+  fill actually reaches the buffer") is among the failures — when the control
+  fails, the environment is the suspect, not the features.
+
+  Ask `pulp::view::raw_rgba_render_available()` (in `screenshot.hpp`) and `SKIP`
+  when it is false. It answers for the BUILD, mirroring the `#ifdef
+  PULP_HAS_SKIA` that selects the backend. **Never skip on an empty result** —
+  a build that CAN rasterize and produced nothing is a real defect, and keying
+  the skip on the result would convert exactly that regression into a green run.
+  Note the same trap applies to `render_to_png(..., ScreenshotBackend::skia)`,
+  which is a named-backend request and likewise yields nothing without Skia.
+
+  A skip has its own failure mode: a guard that wrongly reports "unavailable"
+  greens a whole file without running any of it. Keep one case that never skips
+  and asserts the guard matches reality in both directions.
+
 - **Absolute-positioned leaf views need `preferred_width`/`preferred_height`,
   not just `dim_width`.** `yoga_layout.cpp` applies an explicit px size from
   `FlexStyle::preferred_width/height`; `dim_width = {w, px}` only reaches Yoga

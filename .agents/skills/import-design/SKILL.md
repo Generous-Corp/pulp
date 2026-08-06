@@ -23,6 +23,7 @@ exists:
 | Per-widget fidelity audit + JSON report | `python3 tools/import-design/fidelity_diff.py --render r.png --scene scene.pulp.json --assets-dir DIR --frame-reference src.png` |
 | Side-by-side + heatmap + top offending regions | `python3 tools/scripts/figma_import_diff.py` — use after EVERY codegen change |
 | Render an import at the design's own canvas size | `tools/scripts/render-figma-import.sh` |
+| **"It matches the reference and still looks wrong" → is the PALETTE itself bad?** | `python3 tools/import-validation/check_palette_health.py --pack DIR --theme dark\|light` (also `--tokens`/`--artifact`) |
 | Masked per-region diff vs a reference | `python3 tools/import-validation/diff_against_reference_regions.py` |
 | Re-import regression vs a golden | `python3 tools/import-validation/golden_regression.py` |
 | Measure native HTML importer convergence against Chromium | `python3 tools/import-validation/importer_differential_lab.py` |
@@ -34,6 +35,16 @@ so it is always in context. The table above is the fast path for this skill's
 own work; the registry is the source of truth, and a coverage sweep in
 `tools/scripts/tools_registry_check.py` fails CI if a tool lands here without
 an entry — so nothing can go quiet the way `fidelity_diff.py` did.
+
+**Pixel comparison cannot see a bad palette.** Every visual gate above scores
+agreement with the source, so a colour defect the source ALREADY had — an accent
+that swallows its own ramp, a caption tier under its contrast bar — reproduces
+faithfully and passes. `check_palette_health.py` judges the token values
+themselves instead: accent-ramp structure, named-hue survival, and each text
+tier against the QUIETEST surface it can land on, not just the app background.
+Reach for it on any "looks off / illegible / wrong colour" report that a
+pixel diff calls clean. Its bars are declared-value upper bounds — anything
+composited under the type only takes real contrast lower.
 
 **Check geometry BEFORE you look at pixels.** A `.fig` carries Figma's
 already-SOLVED rect for every node — auto-layout children included — so where
@@ -271,6 +282,15 @@ Facts worth knowing before touching any of it:
 - **Do not carry `transform` onto a control node.** It is placed by its
   `paint_bounds`, which is already the transformed rectangle; re-applying the
   matrix transforms it twice, off its own artwork.
+- **A declared knob pointer has two geometry contracts.** `indicator_bounds`
+  remains its page-space painted footprint for sprite crop/erasure, while its
+  nested `intrinsic` box plus six-number `transform` preserve the pointer's own
+  width and orientation for lowering. Never derive rotated pointer thickness
+  from the axis-aligned footprint: a 4x38 needle at 38 degrees sweeps roughly
+  26.5x32.4 and becomes a slab. Keep unrotated, scaled-viewBox, fractional HTML,
+  CSS zoom, and `non-scaling-stroke` cases when changing this capture contract;
+  unsupported projective or motion-path transforms must decline oriented
+  geometry rather than publish a partial matrix.
 - **Do not carry a border colour without a border width.** Computed style
   reports `border-*-color` on every element whether or not one is drawn, so an
   ungated mapping paints borders the design never had.
@@ -3075,6 +3095,99 @@ in `design_import.cpp` beside the sibling importer passes `enrich_*` /
   color from `border_color` → else `background_color` (demoted) → else `color`,
   and the erase predicate removes `__knob_pointer` nodes too. Test:
   `[knob][sprite]` "recognizes a stroke-demoted pointer frame".
+
+### Browser capture: the author DECLARES the indicator (`data-pulp-indicator`)
+
+The renderer half above is source-agnostic — any knob carrying `knob_ind_*` gets
+the design's own pointer swept by value — but the Figma producer cannot be
+reused for a browser capture, and for a structural reason:
+
+- A capture is **one flat picture of the whole panel**. A lowered knob has no
+  `asset_path` at all, and `apply_captured_art_knob_skin` returns immediately on
+  an empty one. So the knob paints no disc, and the design's indicator — which
+  is in the backdrop bitmap — never moves.
+- The indicator is **CSS, not a layer**: a conic-gradient arc, a positioned dot.
+  There is no thinnest-child hairline to find, so the Figma scan finds nothing.
+
+So the browser lane declares it, exactly as it already declares the paint box:
+
+```html
+<div class="pulp-knob" data-pulp-param="cutoff" data-pulp-value="0.55">
+  <div class="dial" data-pulp-paint>
+    <div class="dot" data-pulp-indicator></div>
+  </div>
+</div>
+```
+
+- `semantics.mjs` reports the marked element's **page rectangle** (same frame as
+  `bounds` / `paint_bounds`) plus its browser-resolved colour: `background-color`
+  → inside SVG, `stroke` then `fill` → border → text. A pointer no single
+  computed colour describes states its own: `data-pulp-indicator="#b8f8c0"`. An
+  unpainted pointer reports `""`, which the consumer reads as "no attribute" and
+  draws its derived tick instead. **The SVG step is not appendable to the end of
+  that list** — see "A marked indicator's colour comes from PAINT" below.
+- `lower_semantic_controls` converts that rectangle to the SAME `knob_ind_*`
+  fractions the Figma hoist stamps, by projecting the box's half-extents onto
+  the **radial axis** and its perpendicular. A plain width/height read is wrong
+  for a dot at 7 o'clock, whose diagonal — not its width — spans the radius.
+- `apply_browser_capture_control_sprites` (`browser_knob_sprites.cpp`, run from
+  `import_browser_html` right after lowering) crops the control out of the panel
+  capture. A knob gets a per-knob PNG stamped through `asset_path` /
+  `png_natural_*` / `sprite_strip_frame_count=1`. A fader gets a cleaned body
+  crop plus the declared indicator as its own sprite; `Fader::paint` moves that
+  authored sprite with the value instead of drawing the stock white slab, while
+  retaining the live native track and fill. Undeclared faders are unchanged.
+  The cleaned crop is byte-identical to the capture everywhere except the
+  declared indicator.
+- The baked pointer is **erased by rotational median**: a dial face is
+  rotationally symmetric about its centre except for the pointer, so each erased
+  pixel takes the median of the same radius under 8 rotations (samples landing
+  back inside the pointer are dropped). This is the browser-lane counterpart of
+  `clean_baked_knob_indicator`; without it the live pointer draws beside a stuck
+  one.
+
+Gotchas:
+- **An undeclared control gets nothing.** No sprite, no indicator, no attribute
+  churn. Inferring one would put a live pointer on a design that has none, and
+  nothing in a flat picture says which pixels move.
+- **A declared indicator that cannot be honoured fails the import** (exit 3).
+  A dropped pointer still renders a perfect static panel and passes every pixel
+  gate — that is exactly the failure that must not be silent.
+- **DPR 2 is load-bearing.** `validate_reference_geometry` requires it, and
+  `Knob::paint`'s no-core sprite branch divides the PNG's natural size by a
+  hardcoded `kExportScale = 2.0f`. The crop is `paint_box × dpr`, so the two
+  agree only at 2. Changing either without the other silently resizes the disc.
+- **A/B similarity can move.** The live pointer is drawn on the
+  `[-135°,+135°]` arc at the control's `data-pulp-value`; a design that sweeps
+  differently lands its dot elsewhere, so the score shifts by roughly two dots'
+  worth of pixels. That is the honest cost of a live indicator, not a
+  regression.
+- **A rotated hairline is not covered.** A bounding rectangle describes a dot or
+  an axis-aligned bar exactly; a CSS-rotated hairline's box is much wider than
+  the hairline, so its declared width comes out too large. Declare a dot, or the
+  pointer's own un-rotated box.
+- Tests: `[browser-capture][knob][indicator]` and
+  `[browser-capture][fader][indicator][movement]` in
+  `test_browser_knob_sprites.cpp`
+  — the load-bearing one is `[movement]`, which renders the pointer at five
+  values and asserts the drawn geometry MOVED. A one-frame similarity score
+  cannot tell a live indicator from a frozen one.
+
+**Both consumers now receive the pointer.** `knob_ind_*` used to reach only the
+native materializer, so the same import rendered the design's pointer when
+materialized (`build_native_view_tree`, `--emit cpp`, embedders) and the generic
+white notch when scripted (`--emit js`, the CLI default). `design_codegen` now
+emits `setKnobCapturedIndicator(id, rIn, rOut, width, color)` beside
+`setKnobSpriteCore`, and the bridge registers it in the `widget_assets` group
+(so `reload_autocaps` gates it as Filesystem, like its siblings). Two traps:
+- **The bridge parses `#rrggbb` only** and silently substitutes near-white for
+  anything else, while the materializer parses any CSS colour. The browser lane
+  normalizes computed `rgb()` to hex at production for this reason. A Figma-lane
+  pointer whose colour came off a demoted stroke as `rgba(...)` still loses its
+  colour on the scripted path.
+- **Emit nothing when there is no recovered pointer.** The call installs a
+  captured indicator unconditionally, and a zero-length one suppresses the
+  synthetic notch — leaving an imported knob with no visible indicator at all.
 - **Import-time disc clean** (`clean_baked_knob_indicator` →
   `clear_baked_knob_antenna`, `design_import_png.cpp`), NOT a render-time cover. Many
   captured discs (ELYSIUM's included) BAKE an indicator into the disc PNG — here
@@ -5933,6 +6046,106 @@ miter limit. `SvgPathWidget` has no setter for them, so a round-capped thick
 stroke renders with butt caps. Measured on a 1.8-unit stroke this moved ink
 coverage by <1%, which is why it is accepted rather than sent to the fallback —
 refusing on it would capture most real icons. Revisit if a design shows it.
+
+## A marked indicator's colour comes from PAINT, and `fill` is a trap
+
+`indicatorColor()` (`browser_capture/semantics.mjs`) reads the colour of the
+child the author marked `data-pulp-indicator`. The order is `background-color`
+→ **inside the SVG namespace** `stroke`, then `fill` but only on the shapes a
+fill actually paints → `border-top-color` → `color`.
+
+That order is not stylistic. Each step exists because the step beside it returns
+a *plausible* colour for the wrong kind of pointer, and a plausible colour is one
+nothing downstream can flag.
+
+Measured in headless Chrome, `getComputedStyle` on a `<div>`, on an unstyled
+`<line>` and on an `<svg>` root — all three reported identically:
+
+| property | computes to |
+|---|---|
+| `fill` | `rgb(0, 0, 0)`, opaque black, on **every** element |
+| `stroke` | `none` |
+| `border-top-color` | the inherited `color`, its initial value being `currentColor` |
+
+Three consequences, in the order they bite:
+
+- **The SVG step must sit BEFORE `border-top-color`.** An SVG element's
+  border-colour initial value is `currentColor`, so a branch appended after it
+  never runs at all: `border-top-color` answers first, with the inherited text
+  colour. On the fixture every SVG pointer came back `rgb(232, 232, 238)` — an
+  authored `#101014` needle reported as near-white, on a knob that still
+  rendered and still passed every pixel gate.
+- **The SVG step must answer even when it finds nothing.** The `color` fallback
+  behind it is that same defect wearing a different name.
+- **`fill` is read only inside SVG, and only on `path`, `polygon`, `circle`,
+  `ellipse`, `rect`.** It computes to opaque black everywhere else, so reading it
+  unguarded hands every borderless `<div>` pointer a black it never had, and
+  reading it on an `<svg>` root or a stroke-only `<line>` reports a black that
+  element paints nowhere. A namespace guard alone is NOT enough for this reason.
+
+`url(#…)` paint is a gradient or a pattern rather than a colour, and is reported
+as absent — the same call the vector lowering makes when it refuses
+`paint_reference`. An unpainted pointer reports `""`, and
+`browser_capture_ir.cpp` stamps `knob_ind_color` only `if (!color.empty())`, so
+the widget falls back to its derived tick. That is the honest answer; a confident
+wrong colour is not.
+
+**Testing this function means EXECUTING it.** It lives inside the template
+literal `semanticExpression()` returns and is evaluated in the page, so a regex
+over that string cannot tell a working precedence from a broken one — every
+ordering above yields a string containing the word `stroke`.
+`semantics.test.mjs` runs the real expression against a DOM stub whose
+`getComputedStyle` reproduces the table above, with two positive controls (a
+background-painted pointer, a border-painted one) pinning the paths that already
+worked.
+
+Two ways such a stub is silently useless:
+
+- **It must expose computed style as camelCase PROPERTIES**, not only
+  `getPropertyValue()`. The page reads `style.backgroundColor` and
+  `style.stroke`, so a stub implementing only `getPropertyValue` passes while
+  exercising nothing.
+- **It must default `fill` to black and `border-top-color` to the inherited
+  `color`.** Default `fill` to `""` and the namespace-guard case passes with the
+  guard deleted; default `border-top-color` to a constant and the ordering case
+  passes with the branch moved to the end.
+
+Prove the stub by mutating: deleting the SVG branch must turn the suite RED
+*reporting the inherited text colour*, not merely red.
+
+## Driving a real Chrome to check a capture change, without touching an SDK
+
+`PULP_BROWSER_CAPTURE_SCRIPT` overrides which **`capture.mjs`** runs, and nothing
+else. `capture.mjs` reaches its siblings by relative ES import
+(`from "./semantics.mjs"`), so the semantics module always comes from whatever
+directory that `capture.mjs` lives in: point the variable at an SDK's
+`capture.mjs` and you get the SDK's `semantics.mjs` however carefully you patched
+your own, and point it at a patched `semantics.mjs` and it is loaded as the wrong
+module entirely. Swapping capture behaviour through that variable means swapping
+the whole runtime DIRECTORY, never one file.
+
+For a change confined to the injected expression there is a shorter route with no
+SDK in it at all, which also leaves the shared SDK other lanes measure against
+untouched. Import `semanticExpression` straight from the worktree and run it in a
+browser you launched yourself:
+
+```js
+import { createEmptyProfile, launchBrowser, pageTarget, terminateBrowser }
+  from "./browser_capture/browser_process.mjs";
+import { semanticExpression } from "./browser_capture/semantics.mjs";
+// launch -> Page.navigate to a fixture -> Runtime.evaluate(semanticExpression([]))
+```
+
+Node 22 ships a built-in `WebSocket`, so the CDP client is a few dozen lines and
+needs no dependency. Importing the merged copy alongside the patched one and
+evaluating BOTH against the same loaded page yields a before/after table that
+re-running one build can never fake — and it is what tells you the two
+already-working controls did not move.
+
+Reuse `browser_process.mjs` rather than spawning Chrome directly: it already
+spawns detached with an owned profile directory, and `terminateBrowser` signals
+the process GROUP. Chrome forks renderer and GPU helpers, so killing the parent
+alone orphans them.
 
 ## Scoring a native panel — the instrument lies in two specific ways
 

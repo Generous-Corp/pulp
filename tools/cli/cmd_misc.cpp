@@ -190,9 +190,11 @@ int cmd_test(const std::vector<std::string>& args) {
     }
 
     auto build_dir = project_root / "build";
-    if (!fs::exists(build_dir / "CMakeCache.txt")) {
+    if (!fs::exists(build_dir / "CMakeCache.txt")
+        || (!standalone_mode
+            && !source_checkout_dependencies_enabled(project_root, build_dir / "CMakeCache.txt"))) {
         // FetchContent cache preflight — same gate cmd_build
-        // applies. Catching it here too means `pulp test` cold-starts
+        // applies. Catching it here too means cold or pin-stale `pulp test`
         // produce the same fail-fast remediation message instead of
         // tunneling through cmd_build's stdout. cmd_build runs its own
         // preflight on the configure path, so a healthy cache makes the

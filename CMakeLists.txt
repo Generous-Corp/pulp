@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.785.0
+    VERSION 0.790.1
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -103,6 +103,16 @@ option(PULP_REQUIRE_GPU_FOR_SDK
        "Fail configure if PULP_ENABLE_GPU=ON but Skia was not found. \
         Set ON in .github/workflows/release-cli.yml to prevent silently \
         shipping CG-only SDKs."
+       OFF)
+# Source-checkout safety net. `pulp build` enables this after provisioning the
+# checkout's pinned shared dependencies. It prevents a cold first configure
+# from silently disabling plug-in formats when the shared-cache symlinks have
+# not been created yet. Direct CMake consumers remain opt-in; as with any CMake
+# option, direct CMake consumers can explicitly select a reduced checkout with
+# `-DPULP_REQUIRE_CHECKOUT_DEPENDENCIES=OFF`; `pulp build` always enables the
+# safety gate for source checkouts.
+option(PULP_REQUIRE_CHECKOUT_DEPENDENCIES
+       "Fail configure when source-checkout VST3 or platform AudioUnit SDK dependencies are missing."
        OFF)
 # Tier-0 Intel canary. When ON, a sub-second static lint runs at configure
 # time and FAILS the configure on any of five cross-arch (x86_64) portability
@@ -326,6 +336,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpTracing.cmake)
 # Order matters: dependencies first
 add_subdirectory(core/platform)
 add_subdirectory(core/runtime)
+add_subdirectory(core/music)
 add_subdirectory(core/timebase)
 add_subdirectory(core/timeline)
 if(PULP_ENABLE_PROJECT_PACKAGE)

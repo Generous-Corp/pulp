@@ -86,6 +86,18 @@ catch_discover_tests(pulp-test-control-identity
 add_executable(pulp-test-control-peer test_control_peer.cpp)
 target_link_libraries(pulp-test-control-peer PRIVATE
     pulp::inspect-control Catch2::Catch2WithMain)
+if(APPLE)
+    find_program(_pulp_test_codesign codesign REQUIRED)
+    # Apple Silicon's linker emits an ad-hoc signature for native executables,
+    # but a cross-built x86_64 test binary may be unsigned. This security test
+    # intentionally rejects unsigned peers, so sign the fixture explicitly on
+    # every macOS architecture instead of weakening the production verifier.
+    add_custom_command(TARGET pulp-test-control-peer POST_BUILD
+        COMMAND "${_pulp_test_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-test-control-peer>"
+        COMMENT "Ad-hoc signing control peer test fixture"
+        VERBATIM)
+endif()
 catch_discover_tests(pulp-test-control-peer
     PROPERTIES LABELS "inspect;control;identity;peer")
 
@@ -94,6 +106,12 @@ target_link_libraries(pulp-test-control-grants PRIVATE
     pulp::inspect-control Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-control-grants
     PROPERTIES LABELS "inspect;control;grants")
+
+add_executable(pulp-test-control-broker test_control_broker.cpp)
+target_link_libraries(pulp-test-control-broker PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-broker
+    PROPERTIES LABELS "inspect;control;broker")
 
 add_executable(pulp-test-inspector-audit
     test_inspector_audit.cpp

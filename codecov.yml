@@ -237,6 +237,10 @@ flags:
     paths:
       - core/midi/
     carryforward: true
+  music:
+    paths:
+      - core/music/
+    carryforward: true
   native-components:
     paths:
       - core/native-components/
@@ -466,6 +470,9 @@ component_management:
       paths:
         - "core/midi/**"
         - "!core/midi/platform/**"
+    - component_id: music
+      name: music
+      paths: ["core/music/**"]
     - component_id: native-components
       name: native-components
       paths: ["core/native-components/**"]

@@ -54,11 +54,13 @@ runtime::Result<T, PersistenceError> model_fail(ModelError error, std::string pa
         PersistenceError{PersistenceErrorCode::ModelRejected, 0, 0, 0, std::move(path), error});
 }
 
+} // namespace
+
 // Each alternative owes its own envelope, dispatched on the declared type name.
 // An unrecognised name is refused rather than coerced to a device parameter,
 // because a target silently read as the wrong kind drives the wrong control.
-runtime::Result<AutomationTarget, PersistenceError>
-decode_automation_target(const JsonValue& value, const std::string& path) {
+runtime::Result<ParameterTarget, PersistenceError>
+decode_parameter_target(const JsonValue& value, const std::string& path) {
     const auto* type_name = member(value, "type_name");
     if (!type_name || type_name->kind != JsonValue::Kind::String)
         return fail<AutomationTarget>(PersistenceErrorCode::MissingField, path + "/type_name",
@@ -97,8 +99,6 @@ decode_automation_target(const JsonValue& value, const std::string& path) {
         AutomationTarget(DeviceParameterTarget{{placement_id.value()}, parameter_id.value()}));
 }
 
-} // namespace
-
 runtime::Result<std::vector<AutomationLane>, PersistenceError>
 decode_automation_lanes(const JsonValue& value, const DecodeLimits& limits, std::size_t& lane_count,
                         std::size_t& point_count, std::string path) {
@@ -134,7 +134,7 @@ decode_automation_lanes(const JsonValue& value, const DecodeLimits& limits, std:
         auto decoded_id = parse_canonical_u64_string(*id.value(), lane_path + "/data/id");
         if (!decoded_id)
             return runtime::Err(decoded_id.error());
-        auto decoded_target = decode_automation_target(*target.value(), lane_path + "/data/target");
+        auto decoded_target = decode_parameter_target(*target.value(), lane_path + "/data/target");
         if (!decoded_target)
             return runtime::Err(decoded_target.error());
 

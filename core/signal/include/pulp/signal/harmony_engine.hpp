@@ -1,5 +1,7 @@
 #pragma once
 
+#include <pulp/music/pitch.hpp>
+
 /// @file harmony_engine.hpp
 /// The intelligent harmonizer — track a monophonic line, snap it to a key and
 /// scale, and add one or two harmony voices that stay IN KEY.
@@ -138,51 +140,33 @@ namespace pulp::signal {
 /// MIDI-side "C Dorian" agree. Public music theory, not a fitted table.
 enum class ScaleType : std::uint8_t {
     major = 0,         ///< Ionian    {0,2,4,5,7,9,11}
-    natural_minor,     ///< Aeolian   {0,2,3,5,7,8,10}
-    dorian,            ///<           {0,2,3,5,7,9,10}
-    phrygian,          ///<           {0,1,3,5,7,8,10}
-    lydian,            ///<           {0,2,4,6,7,9,11}
-    mixolydian,        ///<           {0,2,4,5,7,9,10}
-    harmonic_minor,    ///<           {0,2,3,5,7,8,11}
-    melodic_minor,     ///< ascending {0,2,3,5,7,9,11}
-    major_pentatonic,  ///<           {0,2,4,7,9}
-    minor_pentatonic,  ///<           {0,3,5,7,10}
+    natural_minor = 1, ///< Aeolian   {0,2,3,5,7,8,10}
+    dorian = 2,        ///<           {0,2,3,5,7,9,10}
+    phrygian = 3,      ///<           {0,1,3,5,7,8,10}
+    lydian = 4,        ///<           {0,2,4,6,7,9,11}
+    mixolydian = 5,    ///<           {0,2,4,5,7,9,10}
+    harmonic_minor = 6, ///<         {0,2,3,5,7,8,11}
+    melodic_minor = 7,  ///< ascending {0,2,3,5,7,9,11}
+    major_pentatonic = 8, ///<        {0,2,4,7,9}
+    minor_pentatonic = 9, ///<        {0,3,5,7,10}
 };
 
 /// Number of entries in the shipped scale table.
 inline constexpr int kScaleCount = 10;
 
-namespace detail {
-
-/// Builds a pitch-class mask from a scale's semitone list at compile time.
-///
-/// The scales below are written as their SEMITONE STRUCTURE and the bit masks
-/// are computed from it, rather than the masks being typed out as hex. That is
-/// not a style preference: a hand-typed mask is a magic number nobody can check
-/// by eye, and this file's whole claim is that the diatonic behaviour falls out
-/// of public music theory rather than out of a table.
-constexpr std::uint16_t scale_mask(std::initializer_list<int> semitones) {
-    std::uint16_t mask = 0;
-    for (int s : semitones)
-        if (s >= 0 && s < 12) mask = static_cast<std::uint16_t>(mask | (1u << s));
-    return mask;
-}
-
-}  // namespace detail
-
 /// Pitch-class masks, bit k set ⇒ semitone k above the root is in the scale.
 /// Order-locked: index 0 is Major, index 9 is Minor pentatonic.
 inline constexpr std::uint16_t kScaleTable[kScaleCount] = {
-    detail::scale_mask({0, 2, 4, 5, 7, 9, 11}),  // major (Ionian)
-    detail::scale_mask({0, 2, 3, 5, 7, 8, 10}),  // natural minor (Aeolian)
-    detail::scale_mask({0, 2, 3, 5, 7, 9, 10}),  // dorian
-    detail::scale_mask({0, 1, 3, 5, 7, 8, 10}),  // phrygian
-    detail::scale_mask({0, 2, 4, 6, 7, 9, 11}),  // lydian
-    detail::scale_mask({0, 2, 4, 5, 7, 9, 10}),  // mixolydian
-    detail::scale_mask({0, 2, 3, 5, 7, 8, 11}),  // harmonic minor
-    detail::scale_mask({0, 2, 3, 5, 7, 9, 11}),  // melodic minor (ascending)
-    detail::scale_mask({0, 2, 4, 7, 9}),         // major pentatonic
-    detail::scale_mask({0, 3, 5, 7, 10}),        // minor pentatonic
+    music::scale_intervals(music::kPulpSignalScales[0].scale)->mask(),
+    music::scale_intervals(music::kPulpSignalScales[1].scale)->mask(),
+    music::scale_intervals(music::kPulpSignalScales[2].scale)->mask(),
+    music::scale_intervals(music::kPulpSignalScales[3].scale)->mask(),
+    music::scale_intervals(music::kPulpSignalScales[4].scale)->mask(),
+    music::scale_intervals(music::kPulpSignalScales[5].scale)->mask(),
+    music::scale_intervals(music::kPulpSignalScales[6].scale)->mask(),
+    music::scale_intervals(music::kPulpSignalScales[7].scale)->mask(),
+    music::scale_intervals(music::kPulpSignalScales[8].scale)->mask(),
+    music::scale_intervals(music::kPulpSignalScales[9].scale)->mask(),
 };
 
 /// How a pitch class that is not in the active scale is resolved.

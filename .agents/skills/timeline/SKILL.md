@@ -443,11 +443,10 @@ artifact is needed. Never modify canonical project JSON text directly.
   `source ~/emsdk/emsdk_env.sh && tools/ci/wasm-fixture-lane.sh <build-dir> 6`.
 - A new `ProjectSnapshotCounts` field is asserted by the corpus only if it is
   also emitted by `collect_summary()` in
-  `core/interchange/tools/fixture_runner_main.cpp`, which
-  lists the counts one by one and is not generated. Add the count and skip that
-  list and every manifest regenerates clean while the new entity goes uncounted
-  in every fixture — the corpus reports green on a document whose new structure
-  it never looked at.
+  `core/interchange/tools/fixture_runner_main.cpp`, which lists the counts one by
+  one and is not generated. Add the count and skip that list and every manifest
+  regenerates clean while the new entity goes uncounted in every fixture — the
+  corpus reports green on a document whose new structure it never looked at.
 - **A count cannot see an ordering, so a new ordered collection needs a line in
   `collect_identity_orders()` too** — same file, same hazard as the counts list
   above. The `order.*` manifest keys exist because counts plus idempotence are
@@ -1246,6 +1245,23 @@ plugin that wants only commands should not carry that distinction.
 
 Both directions are pinned by `--selftest`, so neither can be relaxed silently.
 
+### Editor snapping stays in integer ticks and restarts at authored bars
+
+`timebase::next_grid_boundary(double, double)` is a convenience for finite beat-domain
+calculations, not an authoritative editor snapper. It has no meter input, and near the signed
+tick endpoints one double ULP spans more than a thousand ticks. Converting a pointer's target
+tick through it can therefore make two exact document positions collapse onto the same grid
+answer.
+
+Keep sequencer snapping in integer ticks. Use `CompiledMeterMap::tick_to_bar()` to obtain the
+bar-local phase, generate the neighboring straight-grid candidates exactly, and only then pass
+those candidates through `swing_position()`. Restarting at each bar prevents a time-signature
+change from inheriting the previous signature's grid phase. Treat the authored bar end as a
+candidate even when a custom interval leaves a partial final cell, and pin the nearest-tie
+policy explicitly (the editor kernel chooses the later tick). Tests need both a meter change
+whose new bar starts off the tick-zero grid and the signed endpoints; an all-4/4 fixture near
+zero proves neither property.
+
 Consequences worth knowing before you touch this:
 
 - `pulp-timeline-editor` is **not header-only**. It carries `src/edit_intent.cpp`
@@ -1398,6 +1414,32 @@ name. The arrays are kept alphabetical, so a new field inserted in sorted order
 renumbers every index after it — and the result still compiles, still runs, and
 quietly shape-checks the wrong member. Renumber the whole block by hand whenever
 a field lands anywhere but the end.
+
+A **new Track-owned collection** has a fourth hand-written table on top of those
+two: `valid_track_data_shape` in `core/timeline/src/track_schema_migrations.cpp`.
+Every track migration calls it, and it rejects any member it does not know, so a
+field added to the registry and the encoder but not here makes the *migration*
+fail rather than the encode — a different symptom from the same omission. The
+order the four bite in is worth knowing, because only the first one you hit
+tells you anything: `structural_registry_validation.cpp` fails the ENCODER at
+path `/` with `InvalidSchema` on a document just built in memory, which reads
+like an encoder bug and gives no hint that two more tables exist behind it.
+
+An optional collection is far cheaper to add than a required one, and the
+`mixer` v6→v7 pair is the pattern: write absence for the empty value, make the
+upgrade a version stamp and nothing else, and make the downgrade **refuse** when
+the member is present rather than dropping it. Nothing else in the migration
+needs to move bytes.
+
+### `Track::create` moves its input partway through, so late validation reads an empty collection
+
+`Track::create` hands `input.device_chain` to a `shared_ptr` about two thirds of
+the way down, and `input.automation_lanes` right after it. Validation added
+below that point must read `*device_chain`, not `input.device_chain` — the
+moved-from vector is empty, every reference check against it fails, and the
+result is a model that rejects every document that uses the feature while the
+unit tests for the collection itself still pass. The compiler says nothing: a
+moved-from `std::vector` is a valid object.
 
 Version-gating a field in the preflight also **changes the error a caller sees**.
 The preflight runs before the decoder, so an omitted version-gated field is
@@ -2126,6 +2168,37 @@ Do not simplify that to a plain source list. Dropping the trap source while
 keeping the define fails at link on `RtNoAllocScope`'s out-of-line constructor,
 which is the intended behavior — the `playback` skill explains why that guard
 exists and what still needs a hand-run control.
+
+### A quota axis is added in five places, and the fuzz oracle is the one that makes it real
+
+A new bounded collection needs a `DecodeLimits` field, a tightened value in
+`DecodeLimits::web_defaults()`, a counter on `ProjectSnapshotCounts`, a
+`governed_array` call in the preflight walker, and a `bounded_increment` in the
+decoder. Stop after the decoder and the quota exists but is never differentially
+checked. `test/fuzz/timeline_document_oracle.*` closes it in two rows: the
+`StructureCensus` field plus one `quota_axes()` entry binding the measured count
+to its declared ceiling. That pairing is what makes the tightening sweep able to
+fail — the census is walked off the decoded model while the counts come from an
+independent scan of the source bytes, so an axis present in one and absent from
+the other is a quota nothing enforces.
+
+### A mutation control on a fast target silently scores the previous mutation
+
+Proving a test fails without its implementation means editing production code,
+rebuilding, and re-running. On a small target the whole cycle finishes inside
+one filesystem timestamp tick, so `cp` + `touch` of the restored source leaves
+make believing the object is current — and the next control runs against the
+*previous* mutation's binary. The failure mode is not "no result": it is a
+confident wrong verdict, in both directions, and it is indistinguishable from a
+real one. Two independent fixes are needed together:
+
+- Delete the object (`find build -name '<file>.o' -delete`) rather than relying
+  on timestamps, so the rebuild is unconditional.
+- Assert `Building CXX object.*<file>` actually appears in the build log, and
+  report a harness error rather than a verdict when it does not.
+
+Add a no-op mutation that must read GREEN. A control set where every entry reads
+RED has not shown that the instrument can report anything else.
 
 ### Fuzzing the untrusted-document surface
 

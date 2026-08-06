@@ -261,6 +261,16 @@ std::vector<uint8_t> render_to_rgba(View& root, uint32_t width, uint32_t height,
 #endif
 }
 
+bool raw_rgba_render_available() {
+    // Skia is the only backend here that yields raw pixels; the CoreGraphics
+    // path is PNG-only, so a build without Skia has no producer at all.
+#ifdef PULP_HAS_SKIA
+    return true;
+#else
+    return false;
+#endif
+}
+
 } // namespace pulp::view
 
 #else
@@ -271,6 +281,7 @@ bool render_to_file(View&, uint32_t, uint32_t, const std::string&, float, Screen
 std::vector<uint8_t> render_to_rgba(View&, uint32_t, uint32_t, float, uint32_t* ow, uint32_t* oh) {
     if (ow) *ow = 0; if (oh) *oh = 0; return {};
 }
+bool raw_rgba_render_available() { return false; }
 }
 
 #endif

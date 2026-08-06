@@ -6,6 +6,7 @@
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/view/canvas_widget.hpp>
+#include <pulp/view/css_gradient.hpp>
 #include <pulp/view/drag_drop.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/gap_widgets.hpp>
@@ -343,6 +344,67 @@ TEST_CASE("WidgetBridge setFaderSkin applies derived colors to the fader",
     REQUIRE_THAT(f->skin_thumb_color().r, Catch::Matchers::WithinAbs(0xea / 255.0, 0.01));
     // setFaderSkin forces a rectangle thumb so the captured slab look applies.
     REQUIRE(f->thumb_shape() == Fader::ThumbShape::rectangle);
+}
+
+TEST_CASE("a scripted skin colour resolves every form the shared CSS parser does",
+          "[view][bridge][color]") {
+    // The scripted bridge and the native materializer read the same colour
+    // value with different parsers. While the bridge was hex-only, a design
+    // whose colour arrived in any other syntax resolved natively and fell back
+    // to the caller's default when scripted — the same control, right on one
+    // path and wrong on the other. `parse_css_color` is the shared tolerance,
+    // so the assertion is that the scripted result EQUALS it, not merely that
+    // the scripted result is "some colour".
+    //
+    // This matters in practice rather than in theory: Chromium serializes every
+    // modern colour syntax into Oklab, so a browser-captured design reaches this
+    // parser as `oklab()` / `oklch()` whatever the author typed.
+    const auto agrees = [](const char* token, auto&& read) {
+        ScriptEngine engine;
+        View root;
+        root.set_bounds({0, 0, 400, 300});
+        StateStore store;
+        WidgetBridge bridge(engine, root, store);
+        bridge.load_script(std::string("createFader('vol', 'vertical', '');") +
+                           "setFaderSkin('vol', '" + token + "');");
+        auto* f = dynamic_cast<Fader*>(bridge.widget("vol"));
+        REQUIRE(f != nullptr);
+        return read(f);
+    };
+    const auto track = [](Fader* f) {
+        return std::pair<bool, pulp::canvas::Color>{f->has_skin_track_color(),
+                                                    f->skin_track_color()};
+    };
+
+    SECTION("the forms the shared parser understands all arrive, and match it") {
+        for (const char* token : {"#3677cf", "#3677cfaa", "rgb(54, 119, 207)",
+                                  "rgba(54, 119, 207, 0.5)", "hsl(214, 59%, 51%)",
+                                  "oklch(0.62 0.14 254)", "transparent"}) {
+            CAPTURE(token);
+            const auto [applied, color] = agrees(token, track);
+            REQUIRE(applied);
+            const auto expected = parse_css_color(token);
+            CHECK_THAT(color.r, Catch::Matchers::WithinAbs(expected.r, 0.001));
+            CHECK_THAT(color.g, Catch::Matchers::WithinAbs(expected.g, 0.001));
+            CHECK_THAT(color.b, Catch::Matchers::WithinAbs(expected.b, 0.001));
+            CHECK_THAT(color.a, Catch::Matchers::WithinAbs(expected.a, 0.001));
+        }
+    }
+
+    SECTION("a token the parser cannot read is still refused, not painted white") {
+        // The control that makes the section above mean something. If the
+        // recognition check were dropped and everything reported success, these
+        // would silently repaint the widget `parse_css_color`'s opaque-white
+        // default — which is exactly the failure the bool exists to prevent, and
+        // is indistinguishable downstream from a deliberate white.
+        for (const char* token : {"", "rebeccapurple", "var(--accent)",
+                                  "linear-gradient(red, blue)", "#ab12"}) {
+            CAPTURE(token);
+            const auto [applied, color] = agrees(token, track);
+            (void)color;
+            CHECK_FALSE(applied);
+        }
+    }
 }
 
 TEST_CASE("WidgetBridge setFaderTrackWidth sets the derived thin track width",
@@ -2323,6 +2385,54 @@ TEST_CASE("WidgetBridge::clear drops widgets - subsequent lookups return nullptr
     REQUIRE(bridge.widget("gain") == nullptr);
     REQUIRE(bridge.widget("volume") == nullptr);
     REQUIRE(bridge.widget("bypass") == nullptr);
+}
+
+TEST_CASE("WidgetBridge::clear leaves another editor's open dropdown alone",
+          "[view][bridge][lifetime][clear][multiinstance]") {
+    // A DAW hosts several plugin editors in one process, each with its own
+    // bridge. clear() is the hot-reload entry point, so one editor rebuilding
+    // its script must not reach across and dismiss a dropdown the user has open
+    // in a DIFFERENT editor — which is what closing the process-global popup
+    // slot did.
+    ScriptEngine engine_a, engine_b;
+    View root_a, root_b;
+    root_a.set_bounds({0, 0, 400, 300});
+    root_b.set_bounds({0, 0, 400, 300});
+    StateStore store_a, store_b;
+    WidgetBridge bridge_a(engine_a, root_a, store_a);
+    WidgetBridge bridge_b(engine_b, root_b, store_b);
+
+    auto open_combo = [](View& root) {
+        auto owned = std::make_unique<ComboBox>();
+        ComboBox* combo = owned.get();
+        combo->set_bounds({0, 0, 160, 28});
+        combo->set_items({"one", "two", "three"});
+        root.add_child(std::move(owned));
+        MouseEvent e;
+        e.position = {10, 14};
+        e.window_position = {10, 14};
+        e.button = MouseButton::left;
+        e.is_down = true;
+        e.phase = MousePhase::press;
+        combo->on_mouse_event(e);
+        return combo;
+    };
+
+    // Open B's FIRST so A's is the most-recently-opened popup and therefore the
+    // one the process-global mirror names. Without that ordering the mirror
+    // happens to name B's popup and clear() closes the right one by accident —
+    // the assertions below would pass against the bug.
+    ComboBox* combo_b = open_combo(root_b);
+    ComboBox* combo_a = open_combo(root_a);
+    REQUIRE(combo_a->is_open());
+    REQUIRE(combo_b->is_open());
+    REQUIRE(ComboBox::active_popup_ == combo_a);  // the mirror names the OTHER editor
+
+    bridge_b.clear();
+    CHECK_FALSE(combo_b->is_open());  // its own popup is dismissed
+    CHECK(combo_a->is_open());        // the other editor's is untouched
+
+    combo_a->close_active_popup();  // leave the process-global mirror clean
 }
 
 TEST_CASE("WidgetBridge nested roots invalidate cached descendants on removal",

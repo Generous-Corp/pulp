@@ -25,11 +25,20 @@
   --line:        rgba(220,232,250,0.12);
   --line-strong: rgba(220,232,250,0.22);
 
-  /* Text */
+  /* Text — every tier is scored against the QUIETEST surface below, not just
+     the app background. A caption on a raised card or a hovered control has
+     less to work with than the same caption on the deck, and that is where the
+     tier used to run out: muted sat at 4.09:1 on --control-hover, under AA
+     before anything was drawn beneath it. Declared contrast is an upper bound —
+     a drop shadow or an accent bloom composited under the type only takes it
+     lower — so muted carries headroom above AA rather than sitting on it.
+     Faint stays deliberately quiet at the large-text/non-text bar: pushing it
+     to AA too would erase the difference between a caption and a label, which
+     is the hierarchy the tiers exist for. */
   --text-strong: #F3F6F9;
   --text:        #D6DCE4;
-  --text-muted:  #939CA9;
-  --text-faint:  #646D7A;
+  --text-muted:  #B6BCC5;
+  --text-faint:  #838A95;
   --text-inverse:#161A21;
 
   /* Accent (primary = signal teal) */
@@ -89,8 +98,8 @@
 
   --text-strong: #14171C;
   --text:        #2C313A;
-  --text-muted:  #5A636F;
-  --text-faint:  #939BA8;
+  --text-muted:  #4D555F;
+  --text-faint:  #767C86;
   --text-inverse:#FAFBFC;
 
   --accent:        var(--ink-signal-deep);

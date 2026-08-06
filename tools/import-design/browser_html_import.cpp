@@ -3,10 +3,12 @@
 #include "browser_capture_backend.hpp"
 #include "browser_capture_ir.hpp"
 #include "browser_capture_workspace.hpp"
+#include "browser_knob_sprites.hpp"
 #include "claude_html_dependencies.hpp"
 #include "html_intake.hpp"
 #include "html_project_stager.hpp"
 
+#include <string>
 #include <system_error>
 
 namespace pulp::import_design {
@@ -163,6 +165,24 @@ BrowserHtmlImportResult import_browser_html(
             "could not lower browser capture to DesignIR: " + lowered.error,
             shape,
             std::move(workspaces)};
+    }
+    // Give each knob/fader whose author declared an indicator the capture
+    // slices needed to clean the frozen instance and move the authored art with
+    // the parameter. Fails the
+    // import rather than dropping the pointer silently: a declared indicator
+    // that produced nothing is exactly the failure that reads as "it works" in
+    // every pixel gate.
+    //
+    // Keyed on the error string, not on the count: zero knobs skinned is the
+    // ordinary result for a panel that declared no indicators, so a caller that
+    // reads the count as the verdict swallows every failure as "nothing to do".
+    std::string sprite_error;
+    apply_browser_capture_control_sprites(
+        *lowered.design_ir, lowered.reference_png, capture_directory,
+        &sprite_error);
+    if (!sprite_error.empty()) {
+        return BrowserHtmlFailure{
+            3, std::move(sprite_error), shape, std::move(workspaces)};
     }
     return BrowserHtmlCaptured{
         shape,

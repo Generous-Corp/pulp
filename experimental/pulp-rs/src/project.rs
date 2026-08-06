@@ -71,6 +71,33 @@ impl ActiveProject {
             .map(|text| cache_has_tracing_on(&text))
             .unwrap_or(false)
     }
+
+    /// True when a source checkout's configured feature matrix includes the
+    /// pinned plug-in SDKs expected on this platform. A false result forces
+    /// dependency provisioning and reconfiguration instead of preserving an
+    /// older false-green cache.
+    #[must_use]
+    pub fn checkout_dependencies_enabled(&self) -> bool {
+        let Ok(cache) = std::fs::read_to_string(self.build_dir.join("CMakeCache.txt")) else {
+            return false;
+        };
+        let Ok(contract) =
+            std::fs::read_to_string(self.root.join("tools/deps/shared-source-contract.txt"))
+        else {
+            return false;
+        };
+        if !cache_has_checkout_dependencies(&cache, contract.trim()) {
+            return false;
+        }
+        if !self.root.join("external/vst3sdk/pluginterfaces").exists() {
+            return false;
+        }
+        !cache_target_requires_ausdk(&cache)
+            || self
+                .root
+                .join("external/AudioUnitSDK/include/AudioUnitSDK/AUBase.h")
+                .exists()
+    }
 }
 
 /// Scan CMakeCache text for an active `PULP_TRACING:BOOL=ON` entry.
@@ -85,6 +112,58 @@ pub fn cache_has_tracing_on(cache_text: &str) -> bool {
             line.trim().split_once('='),
             Some((key, value))
                 if key.trim() == "PULP_TRACING:BOOL" && value.trim().eq_ignore_ascii_case("on")
+        )
+    })
+}
+
+#[must_use]
+fn cache_has_checkout_dependencies(cache_text: &str, expected_contract: &str) -> bool {
+    let enabled = |value: &str| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "on" | "true" | "1" | "yes"
+        )
+    };
+    let has = |key: &str| {
+        cache_text.lines().any(|line| {
+            matches!(
+                line.trim().split_once('='),
+                Some((found, value))
+                    if found.trim() == key && enabled(value)
+            )
+        })
+    };
+    let target_requires_ausdk = cache_text.lines().find_map(|line| {
+        let (found, value) = line.trim().split_once('=')?;
+        (found.trim() == "PULP_CHECKOUT_REQUIRES_AUSDK:INTERNAL").then(|| enabled(value))
+    });
+    let contract_matches = cache_text.lines().any(|line| {
+        matches!(
+            line.trim().split_once('='),
+            Some((found, value))
+                if found.trim() == "PULP_CHECKOUT_DEPENDENCY_CONTRACT:INTERNAL"
+                    && value.trim() == expected_contract
+        )
+    });
+    let base_dependencies =
+        has("PULP_REQUIRE_CHECKOUT_DEPENDENCIES:BOOL") && has("PULP_HAS_VST3:INTERNAL");
+    !expected_contract.is_empty()
+        && contract_matches
+        && base_dependencies
+        && match target_requires_ausdk {
+            Some(false) => true,
+            Some(true) => has("PULP_HAS_AUSDK:INTERNAL"),
+            None => false,
+        }
+}
+
+fn cache_target_requires_ausdk(cache_text: &str) -> bool {
+    cache_text.lines().any(|line| {
+        matches!(
+            line.trim().split_once('='),
+            Some((found, value))
+                if found.trim() == "PULP_CHECKOUT_REQUIRES_AUSDK:INTERNAL"
+                    && matches!(value.trim().to_ascii_lowercase().as_str(), "on" | "true" | "1" | "yes")
         )
     })
 }
@@ -107,6 +186,47 @@ mod tests {
     fn write_file(path: &Path, body: &str) {
         let mut f = std::fs::File::create(path).expect("create");
         f.write_all(body.as_bytes()).expect("write");
+    }
+
+    #[test]
+    fn checkout_dependency_cache_requires_platform_formats() {
+        let contract = "fixture-contract-v1";
+        let contract_line = "PULP_CHECKOUT_DEPENDENCY_CONTRACT:INTERNAL=fixture-contract-v1\n";
+        let required = "PULP_REQUIRE_CHECKOUT_DEPENDENCIES:BOOL=ON\n";
+        let non_macos = format!("{contract_line}PULP_REQUIRE_CHECKOUT_DEPENDENCIES:BOOL=ON\nPULP_HAS_VST3:INTERNAL=TRUE\nPULP_CHECKOUT_REQUIRES_AUSDK:INTERNAL=FALSE\n");
+        assert!(cache_has_checkout_dependencies(&non_macos, contract));
+        assert!(cache_has_checkout_dependencies(
+            &format!("{contract_line} PULP_REQUIRE_CHECKOUT_DEPENDENCIES:BOOL = TRUE \nPULP_HAS_VST3:INTERNAL=1\nPULP_CHECKOUT_REQUIRES_AUSDK:INTERNAL=no\n"),
+            contract
+        ));
+        assert!(cache_has_checkout_dependencies(
+            &format!("{contract_line}PULP_REQUIRE_CHECKOUT_DEPENDENCIES:BOOL=ON\nPULP_HAS_VST3:INTERNAL=TRUE\nPULP_CHECKOUT_REQUIRES_AUSDK:INTERNAL=TRUE\nPULP_HAS_AUSDK:INTERNAL=TRUE\n"),
+            contract
+        ));
+        assert!(!cache_has_checkout_dependencies(
+            &format!("{contract_line}PULP_REQUIRE_CHECKOUT_DEPENDENCIES:BOOL=ON\nPULP_HAS_VST3:INTERNAL=FALSE\nPULP_CHECKOUT_REQUIRES_AUSDK:INTERNAL=TRUE\nPULP_HAS_AUSDK:INTERNAL=TRUE\n"),
+            contract
+        ));
+        assert!(!cache_has_checkout_dependencies(
+            &format!("{contract_line}{required}PULP_HAS_VST3:INTERNAL=FALSE\n"),
+            contract
+        ));
+        assert!(!cache_has_checkout_dependencies(
+            &format!("{contract_line}PULP_HAS_VST3:INTERNAL=TRUE\nPULP_CHECKOUT_REQUIRES_AUSDK:INTERNAL=TRUE\nPULP_HAS_AUSDK:INTERNAL=TRUE\n"),
+            contract
+        ));
+        assert!(!cache_has_checkout_dependencies(
+            &format!("{contract_line}PULP_REQUIRE_CHECKOUT_DEPENDENCIES:BOOL=ON\nPULP_HAS_VST3:INTERNAL=TRUE\nPULP_HAS_AUSDK:INTERNAL=TRUE\n"),
+            contract
+        ));
+        assert!(!cache_has_checkout_dependencies(
+            &format!("{contract_line}PULP_REQUIRE_CHECKOUT_DEPENDENCIES:BOOL=ON\nPULP_HAS_VST3:INTERNAL=TRUE\nPULP_CHECKOUT_REQUIRES_AUSDK:INTERNAL=TRUE\nPULP_HAS_AUSDK:INTERNAL=FALSE\n"),
+            contract
+        ));
+        assert!(!cache_has_checkout_dependencies(
+            &non_macos,
+            "fixture-contract-v2"
+        ));
     }
 
     #[test]

@@ -1,3 +1,4 @@
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
@@ -771,6 +772,766 @@ TEST_CASE("a lowered control carries what the binding-helper gate requires",
     // Both controls name the SAME macro, so a macro-keyed anchor would collide
     // here and bind neither.
     REQUIRE(anchors.size() == 2);
+}
+
+TEST_CASE("a zero-width pointer box is placed, not dropped",
+          "[import-design][browser-capture][ir][knob][indicator]") {
+    // The stroke could not be recovered, so the capture forwards the client
+    // rect as it stands: zero across the pointer's own axis. The projection
+    // must still place it.
+    //
+    // Refusing here is not a smaller failure than a wrong width, it is a much
+    // larger one: with no knob_ind_* the sprite pass never stamps asset_path,
+    // so the knob keeps its captured body, apply_designed_body_skin reinstalls
+    // DesignedControlPainter, and it returns wearing the value arc and the
+    // track ring over a face whose baked pointer was never erased. That is the
+    // composited chrome this lane exists to remove.
+    //
+    // The consumer refuses a zero knob_ind_w and keeps its skin default
+    // thickness (design_import_native_common.cpp), so the result is a thin
+    // pointer in the RIGHT PLACE at the right angle -- radial extent, colour
+    // and sweep all still come from the design.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"knob","binding_status":"bound","name":"bare",
+         "bounds":{"left":8,"top":20,"width":96,"height":96},
+         "paint_bounds":{"left":8,"top":20,"width":96,"height":96},
+         "indicator_bounds":{"left":56,"top":30,"width":0,"height":38},
+         "indicator_color":"rgb(255, 255, 255)",
+         "data_pulp":{"param":"bare"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    INFO("lowering error: " << result.error);
+    REQUIRE(result);
+
+    const pulp::view::IRNode* found = nullptr;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            const auto binding = node.attributes.find("binding");
+            if (binding != node.attributes.end() && binding->second == "bare")
+                found = &node;
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+    REQUIRE(found != nullptr);
+
+    const auto& bare = found->attributes;
+    // Placed: the radial extent survives even though the width did not.
+    REQUIRE(bare.count("knob_ind_r_out") == 1);
+    CHECK(std::stof(bare.at("knob_ind_r_in")) ==
+          Catch::Approx(0.0f).margin(0.001f));
+    CHECK(std::stof(bare.at("knob_ind_r_out")) ==
+          Catch::Approx(0.79167f).margin(0.001f));
+    CHECK(std::stof(bare.at("knob_ind_w")) ==
+          Catch::Approx(0.0f).margin(0.001f));
+    // And it stays on the sprite lane, which is the part that keeps the value
+    // arc and the track ring off the design's own face.
+    CHECK(bare.count("browser_sprite_crop_px") == 1);
+    CHECK(bare.count("browser_sprite_indicator_px") == 1);
+}
+
+TEST_CASE("a pointer box with no extent at all is still refused",
+          "[import-design][browser-capture][ir][knob][indicator]") {
+    // The other side of the same guard. A 0x0 box genuinely carries no
+    // direction, so there is nothing to place and refusing is right -- this
+    // pins that relaxing the zero-AXIS case did not relax the empty-box case
+    // with it.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"knob","binding_status":"bound","name":"empty",
+         "bounds":{"left":8,"top":20,"width":96,"height":96},
+         "paint_bounds":{"left":8,"top":20,"width":96,"height":96},
+         "indicator_bounds":{"left":56,"top":30,"width":0,"height":0},
+         "data_pulp":{"param":"empty"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    INFO("lowering error: " << result.error);
+    REQUIRE(result);
+
+    const pulp::view::IRNode* found = nullptr;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            const auto binding = node.attributes.find("binding");
+            if (binding != node.attributes.end() && binding->second == "empty")
+                found = &node;
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+    REQUIRE(found != nullptr);
+    CHECK(found->attributes.count("knob_ind_r_out") == 0);
+    CHECK(found->attributes.count("knob_ind_w") == 0);
+}
+
+TEST_CASE("a pointer aimed straight up projects to a hairline, not a slab",
+          "[import-design][browser-capture][ir][knob][indicator]") {
+    // Twelve o'clock, which is where every centred bipolar parameter rests.
+    //
+    // An SVG <line> drawn straight up has ZERO width in its client rect --
+    // getBoundingClientRect() does not include stroke -- so the capture recovers
+    // the painted extent from the computed stroke and hands this pass a box that
+    // is 4px wide and 38px long. This pins what the projection must then make of
+    // it, because both plausible failures render as a believable knob: dropping
+    // the box entirely falls back to the derived tick, and mistaking the length
+    // for the width paints a slab across a third of the dial.
+    //
+    // Dial (8,20,96,96) so centre (56,68) and half-extent 48. Pointer box
+    // (54,30,4,38), centre (56,49): 19px straight up from the dial centre,
+    // reaching 19px along the radius either side of that. So the radial reach is
+    // its own length and the width is its own width -- r_out = 38/48, and
+    // knob_ind_w = 4/48, NOT 38/48.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    // The summary mirrors the shared envelope() helper's declared counts, which
+    // the lowering cross-checks against; only the one candidate below matters.
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"knob","binding_status":"bound","name":"up",
+         "bounds":{"left":8,"top":20,"width":96,"height":96},
+         "paint_bounds":{"left":8,"top":20,"width":96,"height":96},
+         "indicator_bounds":{"left":54,"top":30,"width":4,"height":38},
+         "indicator_color":"rgb(255, 255, 255)",
+         "data_pulp":{"param":"up"}}
+      ]
+    })JSON");
+    // Counts here also have to match the envelope helper: 1 colour, 1
+    // dimension, 2 strings. None of them bear on the geometry under test.
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    INFO("lowering error: " << result.error);
+    REQUIRE(result);
+
+    const pulp::view::IRNode* found = nullptr;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            const auto binding = node.attributes.find("binding");
+            if (binding != node.attributes.end() && binding->second == "up")
+                found = &node;
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+    REQUIRE(found != nullptr);
+
+    const auto& up = found->attributes;
+    REQUIRE(up.count("knob_ind_r_out") == 1);
+    CHECK(std::stof(up.at("knob_ind_r_in")) ==
+          Catch::Approx(0.0f).margin(0.001f));
+    CHECK(std::stof(up.at("knob_ind_r_out")) ==
+          Catch::Approx(0.79167f).margin(0.001f));
+    // The whole point of the case. Knob::paint multiplies this by the dial's
+    // half-extent, so 0.0833 draws the author's 4px stroke and 0.79 would draw a
+    // 38px slab.
+    CHECK(std::stof(up.at("knob_ind_w")) ==
+          Catch::Approx(0.08333f).margin(0.001f));
+}
+
+TEST_CASE("a rotated pointer is measured in its own space, not its footprint",
+          "[import-design][browser-capture][ir][knob][indicator]") {
+    // The SAME 4x38 needle as the case above, turned 38 degrees and swung round
+    // the dial to match, so every number it produces must come out unchanged: a
+    // rotation moves a pointer, it does not widen one.
+    //
+    // getBoundingClientRect() reports the box the shape SWEEPS, not the shape,
+    // so this needle arrives 26.5x32.4. Projecting that footprint is a correct
+    // support function of the wrong box -- it yields 0.851, ten times the truth,
+    // and paints a white slab over a third of the face. The fix is not a better
+    // projection but a better box: the capture also records the needle in its
+    // own coordinate space (4x38) with the matrix that places it, and the same
+    // projection applied to the element's own axes gives its own width back.
+    //
+    // Dial (8,20,96,96) so centre (56,68) and half-extent 48. The needle's
+    // centre is 19px out along the 38-degree radius, and its long axis lies
+    // along that radius, so r_in = 0, r_out = 38/48 and knob_ind_w = 4/48 --
+    // digit for digit what the unrotated needle above produces.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"knob","binding_status":"bound","name":"turned",
+         "bounds":{"left":8,"top":20,"width":96,"height":96},
+         "paint_bounds":{"left":8,"top":20,"width":96,"height":96},
+         "indicator_bounds":{
+           "left":54.423978,"top":36.824268,
+           "width":26.547179,"height":32.407055,
+           "intrinsic":{"width":4,"height":38},
+           "transform":[0.788010754,0.615661475,
+                        -0.615661475,0.788010754,77.819613,36.824268]},
+         "indicator_color":"rgb(255, 255, 255)",
+         "data_pulp":{"param":"turned"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    INFO("lowering error: " << result.error);
+    REQUIRE(result);
+
+    const pulp::view::IRNode* found = nullptr;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            const auto binding = node.attributes.find("binding");
+            if (binding != node.attributes.end() && binding->second == "turned")
+                found = &node;
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+    REQUIRE(found != nullptr);
+
+    const auto& turned = found->attributes;
+    REQUIRE(turned.count("knob_ind_r_out") == 1);
+    CHECK(std::stof(turned.at("knob_ind_r_in")) ==
+          Catch::Approx(0.0f).margin(0.001f));
+    CHECK(std::stof(turned.at("knob_ind_r_out")) ==
+          Catch::Approx(0.79167f).margin(0.001f));
+    // The whole case. 0.0833 is the author's 4px needle; 0.8515 is the footprint
+    // its diagonal sweeps, and is what this produced before the element's own
+    // box was recorded.
+    CHECK(std::stof(turned.at("knob_ind_w")) ==
+          Catch::Approx(0.08333f).margin(0.001f));
+
+    // The sprite hand-off keeps the FOOTPRINT, which is the opposite choice and
+    // the right one: that pass crops the control out of the flat capture and
+    // erases the pointer baked into the crop, so it needs every pixel the
+    // rotated needle covers, not the 4px the geometry describes. DPR 2.
+    CHECK(turned.at("browser_sprite_indicator_px") == "109,74,53,64");
+}
+
+TEST_CASE("an asymmetric pointer uses its transformed intrinsic centre",
+          "[import-design][browser-capture][ir][knob][indicator]") {
+    // A rotated triangle need not paint symmetrically inside the transformed
+    // rectangle returned by getBBox(). Its client-rect centre is therefore an
+    // erasure hint, not its geometry centre. The intrinsic box plus full matrix
+    // places the pointer at (50,25); the painted footprint is deliberately
+    // centred at (55,25). Reading the latter would tilt and widen the result.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"knob","binding_status":"bound","name":"asymmetric",
+         "bounds":{"left":0,"top":0,"width":100,"height":100},
+         "paint_bounds":{"left":0,"top":0,"width":100,"height":100},
+         "indicator_bounds":{
+           "left":50,"top":10,"width":10,"height":30,
+           "intrinsic":{"x":0,"y":0,"width":10,"height":30},
+           "transform":[1,0,0,1,45,10]},
+         "indicator_color":"rgb(255, 255, 255)",
+         "data_pulp":{"param":"asymmetric"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    INFO("lowering error: " << result.error);
+    REQUIRE(result);
+
+    const pulp::view::IRNode* found = nullptr;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            const auto binding = node.attributes.find("binding");
+            if (binding != node.attributes.end() &&
+                binding->second == "asymmetric")
+                found = &node;
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+    REQUIRE(found != nullptr);
+
+    const auto& pointer = found->attributes;
+    CHECK(std::stof(pointer.at("knob_ind_r_in")) ==
+          Catch::Approx(0.2f).margin(0.001f));
+    CHECK(std::stof(pointer.at("knob_ind_r_out")) ==
+          Catch::Approx(0.8f).margin(0.001f));
+    CHECK(std::stof(pointer.at("knob_ind_w")) ==
+          Catch::Approx(0.2f).margin(0.001f));
+    // Erasure still consumes the painted footprint, not the intrinsic box.
+    CHECK(pointer.at("browser_sprite_indicator_px") == "100,20,20,60");
+}
+
+TEST_CASE("a rotated pointer in a scaled viewBox keeps its user units straight",
+          "[import-design][browser-capture][ir][knob][indicator]") {
+    // The same needle again, this time authored in a 24-unit viewBox painted at
+    // 96px: 1 user unit wide and 9.5 long, with a matrix carrying the viewBox's
+    // 4x scale as well as the rotation.
+    //
+    // Element space is NOT CSS px, and nothing in the numbers says so -- 1x9.5
+    // reads as a plausible hairline and 4x38 reads as a plausible needle. Only
+    // the matrix distinguishes them, which is why the capture records the size
+    // unscaled and the matrix beside it rather than pre-multiplying: a consumer
+    // that reads the size alone is off by the viewBox scale, silently, and a
+    // producer that bakes the scale in double-counts it for the next consumer
+    // that reads the matrix.
+    //
+    // Same dial and same placement as the case above, so the answer must be the
+    // same too: 4/48 wide, reaching 38/48.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"knob","binding_status":"bound","name":"scaled",
+         "bounds":{"left":8,"top":20,"width":96,"height":96},
+         "paint_bounds":{"left":8,"top":20,"width":96,"height":96},
+         "indicator_bounds":{
+           "left":54.423978,"top":36.824268,
+           "width":26.547179,"height":32.407055,
+           "intrinsic":{"width":1,"height":9.5},
+           "transform":[3.152043014,2.462645901,
+                        -2.462645901,3.152043014,77.819613,36.824268]},
+         "indicator_color":"rgb(255, 255, 255)",
+         "data_pulp":{"param":"scaled"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    INFO("lowering error: " << result.error);
+    REQUIRE(result);
+
+    const pulp::view::IRNode* found = nullptr;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            const auto binding = node.attributes.find("binding");
+            if (binding != node.attributes.end() && binding->second == "scaled")
+                found = &node;
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+    REQUIRE(found != nullptr);
+
+    const auto& scaled = found->attributes;
+    REQUIRE(scaled.count("knob_ind_r_out") == 1);
+    CHECK(std::stof(scaled.at("knob_ind_r_out")) ==
+          Catch::Approx(0.79167f).margin(0.001f));
+    // Reading the 1-unit width as 1 CSS px would give 0.0208 -- a quarter of the
+    // truth, which renders as a thin pointer rather than as a miss.
+    CHECK(std::stof(scaled.at("knob_ind_w")) ==
+          Catch::Approx(0.08333f).margin(0.001f));
+}
+
+TEST_CASE("an unrotated pointer answers the same with or without its own box",
+          "[import-design][browser-capture][ir][knob][indicator]") {
+    // The positive control for the two cases above, and the reason they are
+    // trustworthy.
+    //
+    // An axis-aligned pointer's footprint IS its own box, so recording the
+    // element space must change nothing at all. Without this, a projection that
+    // quietly became "narrow axis is the width, long axis is the radial reach"
+    // would satisfy every rotated case here and still be wrong, because that
+    // rule discards the corner reach: an 8x8 dot at 7 o'clock spans the radius
+    // along its DIAGONAL, and its 0.1682 is not 8/50.
+    //
+    // Same dial and same dot as "a declared knob indicator lowers to movable
+    // pointer geometry", which asserts these three numbers with no element space
+    // recorded. Identical values from both paths is the claim.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"knob","binding_status":"bound","name":"dot",
+         "bounds":{"left":10,"top":10,"width":100,"height":100},
+         "paint_bounds":{"left":10,"top":10,"width":100,"height":100},
+         "indicator_bounds":{
+           "left":54,"top":18,"width":8,"height":8,
+           "intrinsic":{"width":8,"height":8},
+           "transform":[1,0,0,1,54,18]},
+         "indicator_color":"rgb(184, 248, 192)",
+         "data_pulp":{"param":"dot"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    INFO("lowering error: " << result.error);
+    REQUIRE(result);
+
+    const pulp::view::IRNode* found = nullptr;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            const auto binding = node.attributes.find("binding");
+            if (binding != node.attributes.end() && binding->second == "dot")
+                found = &node;
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+    REQUIRE(found != nullptr);
+
+    const auto& dot = found->attributes;
+    REQUIRE(dot.count("knob_ind_r_out") == 1);
+    CHECK(std::stof(dot.at("knob_ind_r_in")) ==
+          Catch::Approx(0.6770f).margin(0.001f));
+    CHECK(std::stof(dot.at("knob_ind_r_out")) ==
+          Catch::Approx(0.8452f).margin(0.001f));
+    CHECK(std::stof(dot.at("knob_ind_w")) ==
+          Catch::Approx(0.1682f).margin(0.001f));
+}
+
+TEST_CASE("a rotated line keeps the guard that its footprint would defeat",
+          "[import-design][browser-capture][ir][knob][indicator]") {
+    // A marked shape with no extent on either axis carries no direction to sweep
+    // along and is refused. The guard has to be read off the box the projection
+    // uses, because the two boxes disagree in both directions once a rotation is
+    // involved.
+    //
+    // Here the element space is 0x0 -- an empty <g>, a <path> with no data --
+    // while the footprint the browser reports is a plausible 12x9. A guard left
+    // behind on the footprint passes this, and the projection then divides a
+    // pointer out of nothing. The reverse trap is the one already covered
+    // upstream: a rotated <line> is zero-width in its own space and fat in its
+    // footprint, so a guard that demands extent on both axes drops it.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"knob","binding_status":"bound","name":"empty",
+         "bounds":{"left":8,"top":20,"width":96,"height":96},
+         "paint_bounds":{"left":8,"top":20,"width":96,"height":96},
+         "indicator_bounds":{
+           "left":54,"top":30,"width":12,"height":9,
+           "intrinsic":{"width":0,"height":0},
+           "transform":[0.788010754,0.615661475,
+                        -0.615661475,0.788010754,0,0]},
+         "indicator_color":"rgb(255, 255, 255)",
+         "data_pulp":{"param":"empty"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    INFO("lowering error: " << result.error);
+    REQUIRE(result);
+
+    const pulp::view::IRNode* found = nullptr;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            const auto binding = node.attributes.find("binding");
+            if (binding != node.attributes.end() && binding->second == "empty")
+                found = &node;
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+    REQUIRE(found != nullptr);
+
+    const auto& empty = found->attributes;
+    CHECK(empty.count("knob_ind_r_out") == 0);
+    CHECK(empty.count("knob_ind_r_in") == 0);
+    CHECK(empty.count("knob_ind_w") == 0);
+    CHECK(empty.count("browser_sprite_indicator_px") == 0);
+}
+
+TEST_CASE("a declared knob indicator lowers to movable pointer geometry",
+          "[import-design][browser-capture][ir][knob][indicator]") {
+    // A capture is one flat picture, so a knob lowered from it owns no art and
+    // the design's pointer is frozen at whatever value the screenshot caught.
+    // The Figma lane already solved the RENDERING half of this: a knob carrying
+    // knob_ind_* gets the design's own pointer swept along the value arc. What
+    // the browser lane never produced is the geometry, because a CSS dot is not
+    // a child layer to be found -- so the author declares it, exactly as they
+    // declare the paint box.
+    //
+    // The values below are the ones a renderer can move something with:
+    // fractions of the dial's half-extent, which is the unit Knob::paint scales
+    // by. Recording pixels instead would break the moment the control is
+    // resized, and nothing downstream would notice.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"knob","binding_status":"bound","name":"declared",
+         "bounds":{"left":10,"top":10,"width":100,"height":124},
+         "paint_bounds":{"left":10,"top":10,"width":100,"height":100},
+         "indicator_bounds":{"left":54,"top":18,"width":8,"height":8},
+         "indicator_color":"rgb(184, 248, 192)",
+         "data_pulp":{"param":"declared"}},
+        {"kind":"knob","binding_status":"bound","name":"silent",
+         "bounds":{"left":200,"top":10,"width":100,"height":124},
+         "paint_bounds":{"left":200,"top":10,"width":100,"height":100},
+         "data_pulp":{"param":"silent"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    REQUIRE(result);
+
+    std::map<std::string, const pulp::view::IRNode*> by_binding;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            const auto binding = node.attributes.find("binding");
+            if (binding != node.attributes.end())
+                by_binding[binding->second] = &node;
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+    REQUIRE(by_binding.size() == 2);
+
+    const auto& declared = by_binding.at("declared")->attributes;
+    // Dial centre (60,60), a 8x8 dot centred at (58,22): 38.05px from centre,
+    // reaching 4px along the radius either side of that, over a 50px half
+    // extent. The dot is nearly straight up, so the radial reach is essentially
+    // its own height and the width essentially its own width.
+    REQUIRE(declared.count("knob_ind_r_out") == 1);
+    CHECK(std::stof(declared.at("knob_ind_r_in")) ==
+          Catch::Approx(0.6770f).margin(0.001f));
+    CHECK(std::stof(declared.at("knob_ind_r_out")) ==
+          Catch::Approx(0.8452f).margin(0.001f));
+    CHECK(std::stof(declared.at("knob_ind_w")) ==
+          Catch::Approx(0.1682f).margin(0.001f));
+    // The pointer's colour is the design's, resolved by the browser -- not the
+    // pack's text token, which is what design_indicator carries. Normalized to
+    // hex because the two consumers disagree about what they can parse: the
+    // materializer reads any CSS colour, the scripted bridge reads hex only and
+    // silently substitutes near-white for anything else.
+    CHECK(declared.at("knob_ind_color") == "#b8f8c0");
+    // Hand-off to the sprite pass: the control's own pixels and the pointer's,
+    // in the capture PNG's frame at its device scale (DPR 2 here).
+    CHECK(declared.at("browser_sprite_crop_px") == "20,20,200,200");
+    CHECK(declared.at("browser_sprite_indicator_px") == "108,36,16,16");
+
+    // An undeclared knob is untouched. Pulp adds no pointer of its own: with no
+    // declaration there is nothing in a flat picture that says which pixels
+    // move, and inventing one puts a live indicator on a design that has none.
+    const auto& silent = by_binding.at("silent")->attributes;
+    CHECK(silent.count("knob_ind_r_out") == 0);
+    CHECK(silent.count("knob_ind_r_in") == 0);
+    CHECK(silent.count("knob_ind_w") == 0);
+    CHECK(silent.count("knob_ind_color") == 0);
+    CHECK(silent.count("browser_sprite_crop_px") == 0);
+    CHECK(silent.count("browser_sprite_indicator_px") == 0);
+}
+
+TEST_CASE("a knob indicator with no radius to sweep is refused",
+          "[import-design][browser-capture][ir][knob][indicator]") {
+    // A pointer centred on the dial has no radial direction, so there is no arc
+    // to reproduce. Stamping one anyway yields a zero-length stroke that pivots
+    // on itself: it renders, it moves nothing, and every geometric assertion
+    // about it is trivially satisfied.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"knob","binding_status":"bound","name":"centred",
+         "bounds":{"left":0,"top":0,"width":100,"height":100},
+         "paint_bounds":{"left":0,"top":0,"width":100,"height":100},
+         "indicator_bounds":{"left":45,"top":45,"width":10,"height":10},
+         "indicator_color":"#fff",
+         "data_pulp":{"param":"centred"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    REQUIRE(result);
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            CHECK(node.attributes.count("knob_ind_r_out") == 0);
+            CHECK(node.attributes.count("browser_sprite_crop_px") == 0);
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+}
+
+TEST_CASE("a fader indicator is handed to the control sprite pass",
+          "[import-design][browser-capture][ir][fader][indicator]") {
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"fader","binding_status":"bound","name":"drive",
+         "bounds":{"left":40,"top":10,"width":40,"height":220},
+         "paint_bounds":{"left":50,"top":20,"width":20,"height":200},
+         "indicator_bounds":{"left":52,"top":108,"width":16,"height":12},
+         "indicator_color":"rgb(244, 231, 180)",
+         "data_pulp":{"param":"drive","value":"0.5"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    INFO("lowering error: " << result.error);
+    REQUIRE(result);
+
+    const pulp::view::IRNode* found = nullptr;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            const auto binding = node.attributes.find("binding");
+            if (binding != node.attributes.end() && binding->second == "drive")
+                found = &node;
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+    REQUIRE(found != nullptr);
+    CHECK(found->audio_widget == pulp::view::AudioWidgetType::fader);
+    CHECK(found->attributes.at("browser_sprite_crop_px") == "100,40,40,400");
+    CHECK(found->attributes.at("browser_sprite_indicator_px") ==
+          "104,216,32,24");
+    // Rotary geometry belongs only to knobs; stamping it on a linear control
+    // would make an unrelated consumer appear wired while doing nothing.
+    CHECK(found->attributes.count("knob_ind_r_in") == 0);
+    CHECK(found->attributes.count("knob_ind_r_out") == 0);
+    CHECK(found->attributes.count("knob_ind_w") == 0);
 }
 
 #ifdef PULP_BROWSER_CAPTURE_STYLE_FIXTURE_DIR
