@@ -15,6 +15,15 @@
 
 namespace pulp::signal {
 
+namespace detail {
+
+template <std::size_t Inputs, std::size_t Outputs>
+inline constexpr bool
+    valid_audio_matrix_capacity = Inputs > 0 && Outputs > 0 &&
+                                  Inputs <= std::numeric_limits<std::size_t>::max() / Outputs;
+
+} // namespace detail
+
 /// Raw applies the signed matrix exactly. NormalizePeak scales each output row
 /// by max(1, sum(abs(gain))) so full-scale, arbitrarily correlated inputs cannot
 /// exceed full scale. Neither policy clips the output.
@@ -31,9 +40,9 @@ enum class MatrixHeadroomPolicy { Raw, NormalizePeak };
 /// Output buffers themselves must not overlap each other.
 template <typename SampleType = float, std::size_t MaxInputs = 16, std::size_t MaxOutputs = 16,
           typename Allocator = std::allocator<SampleType>>
+    requires detail::valid_audio_matrix_capacity<MaxInputs, MaxOutputs>
 class AudioMatrixMixerT {
   public:
-    static_assert(MaxInputs > 0 && MaxOutputs > 0);
     static_assert(std::is_floating_point_v<SampleType>);
     static constexpr std::size_t max_inputs = MaxInputs;
     static constexpr std::size_t max_outputs = MaxOutputs;
