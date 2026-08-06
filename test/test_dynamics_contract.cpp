@@ -70,6 +70,113 @@ void require_magnitude_legacy_meter(const GainReduction& meter, double legacy_db
     REQUIRE_THAT(meter.linear_gain(), WithinAbs(std::pow(10.0, -legacy_db / 20.0), 1e-14));
 }
 
+template <typename SampleType>
+void require_compressor_nonfinite_recovery() {
+    using CompressorType = CompressorT<SampleType>;
+    using Limits = std::numeric_limits<SampleType>;
+
+    typename CompressorType::Params params;
+    params.threshold_db = SampleType{-30};
+    params.ratio = SampleType{10};
+    params.attack_ms = SampleType{0.25};
+    params.release_ms = SampleType{80};
+    params.knee_db = SampleType{3};
+    params.makeup_db = SampleType{2};
+
+    for (const int configuration : {0, 1, 2, 3}) {
+        for (const SampleType bad : {Limits::quiet_NaN(), Limits::infinity(),
+                                     -Limits::infinity()}) {
+            for (const bool fault_is_sidechain : {false, true}) {
+                CompressorType subject;
+                CompressorType reset_equivalent;
+                for (auto* compressor : {&subject, &reset_equivalent}) {
+                    compressor->set_params(params);
+                    compressor->set_sample_rate(SampleType{48000});
+                    if ((configuration & 1) != 0)
+                        compressor->set_sidechain_hpf_hz(SampleType{120});
+                    if ((configuration & 2) != 0)
+                        compressor->set_lookahead_ms(SampleType{1});
+                }
+
+                for (int i = 0; i < 512; ++i)
+                    (void)subject.process_with_sidechain(SampleType{0.75}, SampleType{1});
+                REQUIRE(subject.gain_reduction().db() > 0.0);
+
+                const SampleType output = fault_is_sidechain
+                    ? subject.process_with_sidechain(SampleType{0.5}, bad)
+                    : subject.process_with_sidechain(bad, SampleType{0.5});
+                REQUIRE(output == SampleType{0});
+                REQUIRE(std::isfinite(output));
+                require_unity_meter(subject.gain_reduction());
+                REQUIRE(subject.gain_reduction_db() == SampleType{0});
+
+                // A rejected sample has exactly reset semantics for all owned
+                // signal history, including the detector HPF and lookahead.
+                for (int i = 0; i < 128; ++i) {
+                    const SampleType program = static_cast<SampleType>((i % 11) - 5) /
+                                               SampleType{8};
+                    const SampleType detector = static_cast<SampleType>((i % 7) - 3) /
+                                                SampleType{4};
+                    REQUIRE(subject.process_with_sidechain(program, detector) ==
+                            reset_equivalent.process_with_sidechain(program, detector));
+                    REQUIRE(subject.gain_reduction_db() ==
+                            reset_equivalent.gain_reduction_db());
+                }
+            }
+        }
+    }
+}
+
+template <typename SampleType>
+void require_limiter_nonfinite_recovery() {
+    using LimiterType = LimiterT<SampleType>;
+    using Limits = std::numeric_limits<SampleType>;
+
+    for (const SampleType bad : {Limits::quiet_NaN(), Limits::infinity(),
+                                 -Limits::infinity()}) {
+        LimiterType subject;
+        LimiterType reset_equivalent;
+        for (auto* limiter : {&subject, &reset_equivalent}) {
+            limiter->set_threshold_db(SampleType{-12});
+            limiter->set_release_ms(SampleType{137});
+            limiter->set_sample_rate(SampleType{96000});
+        }
+        for (int i = 0; i < 512; ++i)
+            (void)subject.process(SampleType{1});
+        REQUIRE(subject.gain_reduction().db() > 0.0);
+
+        const SampleType output = subject.process(bad);
+        REQUIRE(output == SampleType{0});
+        REQUIRE(std::isfinite(output));
+        require_unity_meter(subject.gain_reduction());
+
+        for (int i = 0; i < 128; ++i) {
+            const SampleType input = static_cast<SampleType>((i % 13) - 6) /
+                                     SampleType{4};
+            REQUIRE(subject.process(input) == reset_equivalent.process(input));
+            REQUIRE(subject.gain_reduction().db() == reset_equivalent.gain_reduction().db());
+        }
+    }
+
+    LimiterType mute;
+    mute.set_threshold_db(-Limits::infinity());
+    REQUIRE(mute.process(SampleType{0.5}) == SampleType{0});
+    REQUIRE(mute.gain_reduction().db() == std::numeric_limits<double>::infinity());
+    REQUIRE(mute.process(Limits::infinity()) == SampleType{0});
+    REQUIRE(mute.gain_reduction().db() == std::numeric_limits<double>::infinity());
+    REQUIRE(mute.process(SampleType{0.25}) == SampleType{0});
+
+    // Preserve the legacy finite-control edge case: an extremely negative but
+    // finite dB value may underflow to a zero linear threshold, but it is not
+    // the explicit -infinity-dB mute until signal establishes attenuation.
+    LimiterType finite_underflow;
+    finite_underflow.set_threshold_db(Limits::lowest());
+    require_unity_meter(finite_underflow.gain_reduction());
+    REQUIRE(finite_underflow.process(SampleType{0.5}) == SampleType{0});
+    REQUIRE(finite_underflow.gain_reduction().db() ==
+            std::numeric_limits<double>::infinity());
+}
+
 } // namespace
 
 TEST_CASE("Envelope follower publishes its 10-to-90-percent coefficient", "[signal][dynamics]") {
@@ -539,6 +646,56 @@ TEST_CASE("External sidechain remains detector-domain input", "[signal][dynamics
     REQUIRE(external.gain_reduction().db() > internal.gain_reduction().db() + 10.0);
 }
 
+TEST_CASE("Legacy compressor rejects non-finite program and sidechain samples before state",
+          "[signal][dynamics][nonfinite]") {
+    require_compressor_nonfinite_recovery<float>();
+    require_compressor_nonfinite_recovery<double>();
+}
+
+TEST_CASE("Limiter rejects non-finite audio and recovers without changing controls",
+          "[signal][dynamics][nonfinite]") {
+    require_limiter_nonfinite_recovery<float>();
+    require_limiter_nonfinite_recovery<double>();
+}
+
+TEST_CASE("Compressor and limiter block paths recover at non-finite samples",
+          "[signal][dynamics][nonfinite]") {
+    Compressor64 compressor;
+    Compressor64::Params params;
+    params.threshold_db = -24.0;
+    params.ratio = 8.0;
+    params.attack_ms = 0.0;
+    params.release_ms = 50.0;
+    compressor.set_params(params);
+    std::array<double, 5> program{1.0, 1.0, std::numeric_limits<double>::quiet_NaN(),
+                                  1.0, 1.0};
+    std::array<double, 5> sidechain{1.0, 1.0, 1.0, 1.0, 1.0};
+    compressor.process_with_sidechain(program.data(), sidechain.data(),
+                                      static_cast<int>(program.size()));
+    for (const double output : program)
+        REQUIRE(std::isfinite(output));
+    REQUIRE(program[2] == 0.0);
+
+    compressor.reset();
+    std::array<double, 5> external_program{1.0, 1.0, 1.0, 1.0, 1.0};
+    std::array<double, 5> external_sidechain{
+        1.0, 1.0, std::numeric_limits<double>::infinity(), 1.0, 1.0};
+    compressor.process_with_sidechain(external_program.data(), external_sidechain.data(),
+                                      static_cast<int>(external_program.size()));
+    for (const double output : external_program)
+        REQUIRE(std::isfinite(output));
+    REQUIRE(external_program[2] == 0.0);
+
+    Limiter64 limiter;
+    limiter.set_threshold_db(-6.0);
+    std::array<double, 5> limited{1.0, 1.0, -std::numeric_limits<double>::infinity(),
+                                  1.0, 1.0};
+    limiter.process(limited.data(), static_cast<int>(limited.size()));
+    for (const double output : limited)
+        REQUIRE(std::isfinite(output));
+    REQUIRE(limited[2] == 0.0);
+}
+
 TEST_CASE("Dynamics contract inspection is allocation-free", "[signal][dynamics][rt-safety]") {
     EnvelopeFollower follower;
     StereoEnvelopeFollower stereo;
@@ -551,6 +708,23 @@ TEST_CASE("Dynamics contract inspection is allocation-free", "[signal][dynamics]
             (void)follower.current_db();
             (void)stereo.process(0.25f, -0.5f);
             (void)GainReduction::from_signed_db(-3.0).linear_gain();
+        }
+    });
+
+    Compressor compressor;
+    compressor.set_sample_rate(48000.0f);
+    compressor.set_sidechain_hpf_hz(120.0f);
+    compressor.set_lookahead_ms(1.0f);
+    Limiter limiter;
+    require_no_allocation([&] {
+        for (int i = 0; i < 4096; ++i) {
+            const float bad = (i & 1) != 0
+                ? std::numeric_limits<float>::quiet_NaN()
+                : std::numeric_limits<float>::infinity();
+            (void)compressor.process_with_sidechain(0.25f, bad);
+            (void)compressor.gain_reduction();
+            (void)limiter.process(bad);
+            (void)limiter.gain_reduction();
         }
     });
 }

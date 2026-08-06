@@ -88,6 +88,16 @@ public:
     /// `sidechain` is the signal that drives the envelope follower;
     /// `input` is the signal that gets the gain applied.
     SampleType process_with_sidechain(SampleType input, SampleType sidechain) {
+        // A non-finite program or detector sample is not meaningful audio. It
+        // must not enter the HPF, delay line, or recursive envelope because one
+        // poisoned state sample would otherwise make later finite audio and
+        // telemetry non-finite. Recover owned signal history, retain all user
+        // configuration, and emit finite silence for the rejected sample.
+        if (!std::isfinite(input) || !std::isfinite(sidechain)) {
+            reset();
+            return SampleType{0};
+        }
+
         // Apply sidechain HPF if configured.
         const SampleType detector = sidechain_hpf_active_
             ? sidechain_hpf_.process(sidechain)
@@ -233,11 +243,20 @@ class LimiterT {
 public:
     void set_threshold_db(SampleType db) {
         threshold_ = std::pow(SampleType{10.0f}, db / SampleType{20.0f});
+        threshold_mute_ = std::isinf(db) && db < SampleType{0};
     }
     void set_release_ms(SampleType ms) { release_ms_ = ms; }
     void set_sample_rate(SampleType sr) { sample_rate_ = sr; }
 
     SampleType process(SampleType input) {
+        // Reject before touching the recursive peak envelope. reset() clears
+        // only signal history; threshold, release, and sample rate remain as
+        // configured. The rejected sample is represented by finite silence.
+        if (!std::isfinite(input)) {
+            reset();
+            return SampleType{0};
+        }
+
         SampleType abs_input = std::abs(input);
 
         // Envelope follower
@@ -265,6 +284,12 @@ public:
     }
 
     GainReduction gain_reduction() const noexcept {
+        // A zero threshold is the documented -infinity-dB mute setting. Its
+        // telemetry remains a mute even while the recovered envelope is zero;
+        // reporting unity here would falsely describe the configured result.
+        if (threshold_mute_)
+            return GainReduction::from_magnitude_db(
+                std::numeric_limits<double>::infinity());
         const SampleType gain =
             (envelope_ > threshold_) ? threshold_ / envelope_ : SampleType{1};
         if (!(gain > SampleType{0}))
@@ -281,6 +306,7 @@ private:
     SampleType release_ms_ = SampleType{50.0f};
     SampleType sample_rate_ = SampleType{44100.0f};
     SampleType envelope_ = SampleType{0.0f};
+    bool threshold_mute_ = false;
 };
 
 using Limiter = LimiterT<float>;
