@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -191,7 +192,7 @@ std::vector<GridProjectionPoint> run_host_transport(const CompiledTempoMap& temp
                                                     const CompiledMeterMap& meter,
                                                     std::span<const std::uint32_t> blocks) {
     GridTempoSyncSource source;
-    source.next_beat = 0.93748125;
+    source.next_beat = 4.93748125;
     source.tempo = 180.0;
     pulp::playback::MasterTransportConfig config;
     config.max_buffer_size = 4'800;
@@ -201,9 +202,7 @@ std::vector<GridProjectionPoint> run_host_transport(const CompiledTempoMap& temp
     pulp::playback::MasterTransport transport;
     REQUIRE(transport.prepare(tempo, config) == pulp::playback::TransportError::None);
 
-    const HostGridAnchor anchor{source.next_beat * static_cast<double>(kTicksPerQuarter), 0,
-                                source.tempo * static_cast<double>(kTicksPerQuarter) /
-                                    (60.0 * 48'000.0)};
+    std::optional<HostGridAnchor> anchor;
     std::vector<GridProjectionPoint> result;
     std::uint32_t rendered = 0;
     std::size_t block_index = 0;
@@ -212,7 +211,13 @@ std::vector<GridProjectionPoint> run_host_transport(const CompiledTempoMap& temp
         pulp::playback::TransportSnapshot snapshot;
         REQUIRE(transport.begin_block(frames, source.time(rendered), snapshot) ==
                 pulp::playback::TransportError::None);
-        const HostProjectionContext context{anchor, rendered,
+        REQUIRE(snapshot.range_count > 0);
+        if (!anchor) {
+            anchor = HostGridAnchor{
+                snapshot.ranges[0].host_tick_start, rendered + snapshot.ranges[0].sample_offset,
+                source.tempo * static_cast<double>(kTicksPerQuarter) / (60.0 * 48'000.0)};
+        }
+        const HostProjectionContext context{*anchor, rendered,
                                             static_cast<double>(kTicksPerQuarter)};
         auto points = project_snapshot(tempo, meter, snapshot, BeatDivision::SixtyFourthTriplet,
                                        GridAnchor::Timeline, &context);
@@ -574,9 +579,8 @@ TEST_CASE("grid projection matches tempo-synced host mapping across a precise lo
             if (!pulp::playback::host_mapped_output_offset_for_tick(range, point.timeline_tick,
                                                                     local))
                 continue;
-            const auto source_tick =
-                static_cast<long double>(point.timeline_tick.value) +
-                static_cast<long double>(range.loop_pass_index) * kTicksPerQuarter;
+            const auto source_tick = static_cast<double>(point.timeline_tick.value) +
+                                     static_cast<double>(range.loop_pass_index) * kTicksPerQuarter;
             const auto stable_frame = static_cast<std::int64_t>(
                 std::floor((source_tick - host.anchor.source_tick) / host.anchor.ticks_per_frame));
             REQUIRE(point.frame_offset == static_cast<std::uint32_t>(std::clamp<std::int64_t>(
@@ -650,6 +654,57 @@ TEST_CASE("host grid projection rejects the exclusive signed frame bound", "[tim
     REQUIRE(exclusive_upper.count == 0);
     REQUIRE(exclusive_upper.required == 0);
     REQUIRE(output[0].frame_offset == 77);
+}
+
+TEST_CASE("host grid projection is binary64-stable at a frame boundary", "[timebase][grid]") {
+    const std::array tempo_points{TempoPoint{{0}, 60.0}};
+    const auto tempo = require_compiled_tempo_map(tempo_points, {48'000, 1});
+    const std::array meter_points{MeterPoint{{0}, {4, 4}}};
+    const auto meter = meter_map(meter_points);
+    constexpr std::int64_t document_tick = -1'656'925'200;
+    GridProjectionRange range{
+        0, 1'000, {0}, {-1'656'965'198}, {-1'656'869'050}, {{-1'656'965'198}}, {{-1'656'869'050}},
+        0};
+    range.host_beat_mapping = true;
+    range.host_tick_start = -1'656'965'197.5003655;
+    range.host_tick_end = -1'656'869'049.6629484;
+    range.has_precise_host_ticks = true;
+    range.host_anchor = {-2'554'068'054.6532755, 0, 96.1478374170194};
+    range.absolute_frame_start = 565'000;
+    range.document_to_source_tick_offset = -842'779'329.012294;
+    range.has_host_anchor = true;
+    std::array<GridProjectionPoint, 2> output{};
+
+    const auto result =
+        project_grid(tempo, meter, {BeatDivision::SixtyFourth, GridAnchor::Timeline, true},
+                     std::span<const GridProjectionRange>(&range, 1), output);
+
+    REQUIRE(result);
+    REQUIRE(result.count == 2);
+    REQUIRE(output[0].timeline_tick == TickPosition{document_tick});
+    REQUIRE(output[0].frame_offset == 416);
+}
+
+TEST_CASE("host grid projection preserves cancellable signed frame deltas", "[timebase][grid]") {
+    std::uint32_t offset = 77;
+    GridProjectionRange range{};
+    range.frame_count = 20;
+    range.host_beat_mapping = true;
+    range.host_tick_start = 0.0;
+    range.host_tick_end = 2.0;
+    range.has_precise_host_ticks = true;
+    range.absolute_frame_start = -10;
+    range.has_host_anchor = true;
+
+    range.host_anchor = {0.0, std::numeric_limits<std::int64_t>::min(), 1.0};
+    range.document_to_source_tick_offset = std::ldexp(1.0, 63);
+    REQUIRE(pulp::timebase::detail::host_mapped_grid_output_offset(range, {0}, offset));
+    REQUIRE(offset == 10);
+
+    range.host_anchor = {0.0, std::numeric_limits<std::int64_t>::max(), 1.0};
+    range.document_to_source_tick_offset = -std::ldexp(1.0, 63);
+    REQUIRE(pulp::timebase::detail::host_mapped_grid_output_offset(range, {0}, offset));
+    REQUIRE(offset == 9);
 }
 
 TEST_CASE("grid candidate preflight bounds incoherent remote-sample ranges", "[timebase][grid]") {

@@ -1092,11 +1092,14 @@ to 65,536 candidate and projected points, with an overflow-safe preflight before
 enumeration. Host-beat-mapped ranges retain their precise fractional tick
 endpoints and project ticks proportionally into output frames, so session tempo
 may differ from the document tempo without silently falling back to the document
-sample map. Their `HostGridAnchor` names one continuous source tick at one
+sample map. Their `HostGridAnchor` names one normalized source tick at one
 absolute output frame plus the source-ticks-per-frame slope; loop ranges add
-their document-to-source pass offset. Reusing that anchor across callbacks keeps
-a rounded loop split from moving a grid tick by one frame when callback
-partitioning changes. For document-clock ranges the rounded tick end is
+their document-to-source pass offset. Callers initialize that coordinate from
+the first resolved range in a normalization epoch, not from an absolute host
+beat that the transport has already wrapped, and reset it when the epoch or
+slope changes. Reusing that anchor across callbacks keeps a rounded loop split
+from moving a grid tick by one frame when callback partitioning changes. For
+document-clock ranges the rounded tick end is
 inclusive only as a candidate search bound; the half-open document sample
 interval is authoritative. This preserves a grid point in a one-frame range
 even when a sparse tick map rounds both range endpoints to the same tick,
