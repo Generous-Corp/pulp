@@ -77,6 +77,52 @@ Rules it follows, each of which was a wrong answer first:
 - **An unconstrained port kind (`any_out`/`any_in`) names nothing**, because
   every jack matches and the list would be noise.
 
+## A table is not a fact, and a retry cannot see the run
+
+Two lessons from the run kept in `tools/rack/test_fixtures/silent-oscillator/`.
+A correctly-wired patch was silent because one oscillator produced 0.000 V, and
+the model kept that oscillator for **four consecutive attempts**, adjusting its
+knobs. Its params were all in range and none at a silencing zero, so retuning
+was never going to work.
+
+**The information was already there and was not usable.** The retry context
+carried the entire per-module table and told the model to "find the FIRST
+module in the chain whose output is 0.000". It did not. Handing over data plus
+an instruction to infer the conclusion is not the same as handing over the
+conclusion. `dead_module()` names it: `CVfunkSands/Zephyr PRODUCED NOTHING:
+out0=0.000, out1=0.000`.
+
+Rules that finder follows, each of which was a wrong answer available:
+
+- **Dead means EVERY output reads zero.** A module with one quiet jack among
+  live ones is working, and accusing it sends the model to rebuild correct
+  wiring.
+- **Blame the cause, not the consequence.** In that report `PressedDuck` also
+  reads 0.000 and is what the `FAIL` line points at — it is silent *because*
+  Zephyr is. The cause is a dead module with no dead module feeding it, decided
+  from the patch's own cables, never from the order the gate printed.
+- **Match rows to modules by POSITION, then verify the model name.** The gate
+  prints one row per module in the patch's order, which survives two modules of
+  the same model where a name lookup cannot tell them apart. Verified, because
+  a silently wrong pairing names an innocent module. Where verification fails
+  it falls back to unambiguous names; where that fails it names nothing.
+- **`(not instantiated)` reported nothing, which is not zero.** Core's audio
+  interface is in that state in every patch, and calling it dead would name the
+  one module that cannot be the cause.
+
+**The more valuable half is escalation.** Each attempt arrives knowing only its
+own rejection, so *repetition is a fact only the loop can see* — and it was
+telling nobody. The fourth prompt read exactly like the first. `generate()`
+keeps `silent_runs` and `missed_runs`; from the second consecutive attempt with
+the same dead module (`silence_advice`) or the same unmet requirement
+(`stuck_note`) it says to **replace the module**, not retune or rewire it, and
+names installed candidates. On the real evidence this fires on attempt 2, three
+attempts before the model found its own way out.
+
+A **different** dead module, or a different requirement, is progress and must
+never be called a repeat: escalating on a run that is improving tells the model
+to throw away a fix that worked.
+
 `render_inventory` has the same honesty rule: a module with no recorded jacks
 prints `ports: UNKNOWN`, and inputs and outputs are independent. It used to
 emit both only `if m.get("inputs")`, so an uncartographed module and one with
