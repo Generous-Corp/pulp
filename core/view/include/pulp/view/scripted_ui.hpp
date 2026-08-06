@@ -53,6 +53,17 @@ public:
     ScriptedUiSession& operator=(const ScriptedUiSession&) = delete;
 
     bool load(std::string* error = nullptr);
+    /// Advance one frame: discharge the realm reset a completed
+    /// `Runtime.evaluate` owes, retire and destroy realms replaced since the
+    /// last frame, pump the bridge and one queued inspector request, then poll
+    /// the script and theme files. Returns whether anything changed; returns
+    /// false with `error` set when the owed realm reset (or the accessibility
+    /// retirement it defers) could not complete.
+    ///
+    /// A host MUST call this from its frame loop even when it drives the UI
+    /// itself: it is where an evaluated realm is discarded, so skipping it
+    /// leaves evaluated timers and callbacks live in the realm they were
+    /// created in.
     bool poll(std::string* error = nullptr);
 
     // Explicitly reload the current script in place: rebuilds the widget bridge

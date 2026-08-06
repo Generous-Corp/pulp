@@ -62,12 +62,23 @@ void ScriptInspectorBridge::detach() {
             reset_in_progress_ && std::this_thread::get_id() == reset_thread_;
         engine_ = nullptr;
         caps_ = Capabilities{};
-        stranded = std::move(pending_);
-        if (stranded) {
-            EvalResult result;
-            result.detached = true;
-            result.error = "engine detached before evaluation ran";
-            finish_locked(stranded, std::move(result));
+        // The detach/attach pair inside a realm reset is an engine SWAP, not a
+        // teardown, so it must not fail a request that is merely queued: with
+        // the reset deferred to the frame boundary, the whole gap between one
+        // evaluation's response and the next frame is time in which a client
+        // can queue, and stranding there would fail back-to-back evaluations
+        // for no reason. The request has not run yet and the replacement engine
+        // serves it in this same frame's pump. A reset that cannot produce a
+        // replacement strands it explicitly instead — see
+        // run_pending_post_evaluation_reset().
+        if (!reset_reentry) {
+            stranded = std::move(pending_);
+            if (stranded) {
+                EvalResult result;
+                result.detached = true;
+                result.error = "engine detached before evaluation ran";
+                finish_locked(stranded, std::move(result));
+            }
         }
         if (running_ && !reset_reentry) {
             running_->detach_requested = true;
@@ -76,8 +87,11 @@ void ScriptInspectorBridge::detach() {
         if (running)
             interrupt_if_active_locked(running);
 
+        // A deferred reset runs outside any request, so quiescence means both
+        // "no evaluation running" and "no realm reconstruction in flight" — a
+        // detacher must not return while the reset is still touching the engine.
         if (!reset_reentry)
-            state_cv_.wait(lock, [&] { return !running_; });
+            state_cv_.wait(lock, [&] { return !running_ && !reset_in_progress_; });
     }
 }
 
@@ -85,6 +99,48 @@ void ScriptInspectorBridge::set_post_evaluation_reset(
     std::function<std::string(EvaluationDeadline)> reset) {
     std::lock_guard<std::mutex> lock(mutex_);
     post_evaluation_reset_ = std::move(reset);
+}
+
+bool ScriptInspectorBridge::post_evaluation_reset_pending() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return reset_pending_;
+}
+
+std::string ScriptInspectorBridge::run_pending_post_evaluation_reset() {
+    std::function<std::string(EvaluationDeadline)> reset;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!reset_pending_)
+            return {};
+        reset_pending_ = false;
+        reset = post_evaluation_reset_;
+        reset_in_progress_ = true;
+        reset_thread_ = std::this_thread::get_id();
+    }
+    // Realm reconstruction stays mandatory after every evaluation and keeps its
+    // own small, fixed grace window. Deferral moved the work off the request, so
+    // the window runs from this call rather than from the request deadline that
+    // has already expired by the time the host reaches its frame boundary.
+    const auto reset_error = invoke_realm_reset(
+        reset, std::chrono::steady_clock::now() + kPostEvaluationResetGrace);
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        reset_in_progress_ = false;
+        reset_thread_ = {};
+        // A reset the host held its queued slot through, but which produced no
+        // replacement engine, has nothing left to serve that request with. Fail
+        // it now rather than let it wait out its own deadline holding the
+        // single-flight slot.
+        if (!engine_ && pending_) {
+            auto stranded = std::move(pending_);
+            EvalResult result;
+            result.detached = true;
+            result.error = "engine detached before evaluation ran";
+            finish_locked(stranded, std::move(result));
+        }
+        state_cv_.notify_all();
+    }
+    return reset_error;
 }
 
 ScriptInspectorBridge::EvalResult
@@ -269,28 +325,25 @@ ScriptInspectorBridge::EvalResult ScriptInspectorBridge::run_claimed_request(
     if (interrupt_was_issued && engine)
         interrupt_was_late = engine->clear_pending_interrupt();
 
-    std::function<std::string(EvaluationDeadline)> reset;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         req->interrupt_consumed =
             req->interrupt_requested && !interrupt_was_late;
         req->evaluation_finished = true;
-        reset_in_progress_ = true;
-        reset_thread_ = std::this_thread::get_id();
-        reset = post_evaluation_reset_;
+        // Evaluated code may have planted timers, animation frames, Promise
+        // jobs, or patched callbacks, so the realm that ran it must be rebuilt
+        // before anything can execute them. Rebuilding HERE would replace the
+        // view tree underneath a caller that is still holding widget pointers
+        // from before the request. Record the debt instead and let the host
+        // discharge it at its frame boundary: nothing evaluated gets a frame
+        // either way, which is the containment the reset exists to provide.
+        if (post_evaluation_reset_)
+            reset_pending_ = true;
         req->cv.notify_all();
     }
     watchdog.join();
-    // Evaluation owns the advertised request deadline. Realm reconstruction is
-    // mandatory even when that deadline fired, so give only that cleanup step
-    // a small, fixed grace window. The standalone RPC fence is deliberately
-    // longer and still bounds the complete evaluate-plus-reset operation.
-    const auto reset_error = invoke_realm_reset(
-        reset, req->deadline + kPostEvaluationResetGrace);
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        reset_in_progress_ = false;
-        reset_thread_ = {};
         if (req->detach_requested) {
             engine_ = nullptr;
             caps_ = Capabilities{};
@@ -301,9 +354,6 @@ ScriptInspectorBridge::EvalResult ScriptInspectorBridge::run_claimed_request(
             result = EvalResult{};
             result.timed_out = true;
             result.error = "evaluation timed out";
-        } else if (!reset_error.empty()) {
-            result = EvalResult{};
-            result.error = "evaluated realm reset failed: " + reset_error;
         } else if (req->interrupt_consumed) {
             result = EvalResult{};
             result.error = "evaluation interrupted";
