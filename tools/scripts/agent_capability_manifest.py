@@ -174,6 +174,7 @@ EXPORTS = [
         ],
         forge_descriptor={"catalog": "forge-catalog.json", "node_key": "saturator"},
         _link_probes=[{
+            "role": "entrypoint",
             "binding": "pulp::signal::SaturatorT<float>",
             "operation": "member_call",
             "member": "prepare",
@@ -219,6 +220,7 @@ EXPORTS = [
             )
         ],
         _link_probes=[{
+            "role": "entrypoint",
             "binding": "pulp::audio::InstrumentVoiceAllocator",
             "operation": "member_call",
             "member": "prepare",
@@ -264,6 +266,7 @@ EXPORTS = [
             )
         ],
         _link_probes=[{
+            "role": "entrypoint",
             "binding": "pulp::midi::MpeVoiceTracker",
             "operation": "member_call",
             "member": "reset",
@@ -306,6 +309,7 @@ EXPORTS = [
             )
         ],
         _link_probes=[{
+            "role": "entrypoint",
             "binding": "pulp::timebase::TickPosition",
             "operation": "construct",
             "arguments": "1",
@@ -371,11 +375,13 @@ EXPORTS = [
         ],
         _link_probes=[
             {
+                "role": "configuration",
                 "binding": "pulp::timebase::SwingRatio",
                 "operation": "construct",
                 "arguments": "1, 2",
             },
             {
+                "role": "forward-operation",
                 "binding": "pulp::timebase::swing_position",
                 "operation": "function_call",
                 "arguments": (
@@ -384,6 +390,7 @@ EXPORTS = [
                 ),
             },
             {
+                "role": "inverse-operation",
                 "binding": "pulp::timebase::unswing_position",
                 "operation": "function_call",
                 "arguments": (
@@ -432,6 +439,7 @@ EXPORTS = [
             )
         ],
         _link_probes=[{
+            "role": "entrypoint",
             "binding": "pulp::sequence::HostTransportProjector",
             "operation": "member_call",
             "member": "reset",
@@ -629,27 +637,31 @@ def _link_probe_problems(row: dict[str, Any]) -> list[str]:
     probes = row.get("_link_probes")
     if not isinstance(probes, list) or not probes:
         return [f"{key} requires operational installed-consumer probes"]
-    bindings = {
-        item["qualified_name"]: item["kind"]
+    binding_entries = [
+        ((item["role"], item["qualified_name"]), item["kind"])
         for item in row.get("bindings", [])
         if isinstance(item, dict)
+        and isinstance(item.get("role"), str)
         and isinstance(item.get("qualified_name"), str)
-    }
+    ]
+    bindings = dict(binding_entries)
     problems: list[str] = []
-    probed_bindings: list[str] = []
+    if len(binding_entries) != len(bindings):
+        problems.append(f"{key} advertised bindings repeat a role/name probe identity")
+    probed_bindings: list[tuple[str, str]] = []
     for index, probe in enumerate(probes):
         where = f"{key} link probe[{index}]"
         if not isinstance(probe, dict):
             problems.append(f"{where} must be an object")
             continue
         operation = probe.get("operation")
-        required = {"binding", "operation", "arguments"}
+        required = {"role", "binding", "operation", "arguments"}
         if operation == "member_call":
             required.add("member")
         if set(probe) != required:
             problems.append(f"{where} fields are not exact for {operation!r}")
             continue
-        binding = probe.get("binding")
+        binding = (probe.get("role"), probe.get("binding"))
         if binding not in bindings:
             problems.append(f"{where} must name an advertised binding")
             continue
@@ -675,12 +687,14 @@ def _link_probe_problems(row: dict[str, Any]) -> list[str]:
     missing = sorted(set(bindings) - set(probed_bindings))
     if missing:
         problems.append(
-            f"{key} advertised bindings lack operational probes: {', '.join(missing)}"
+            f"{key} advertised bindings lack operational probes: "
+            + ", ".join(f"{role}:{name}" for role, name in missing)
         )
     extra = sorted(set(probed_bindings) - set(bindings))
     if extra:
         problems.append(
-            f"{key} operational probes name unknown bindings: {', '.join(extra)}"
+            f"{key} operational probes name unknown bindings: "
+            + ", ".join(f"{role}:{name}" for role, name in extra)
         )
     try:
         render_link_probes(row)
