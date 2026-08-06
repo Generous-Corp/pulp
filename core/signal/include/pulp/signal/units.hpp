@@ -42,6 +42,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <pulp/timebase/beat_division.hpp>
 
 namespace pulp::signal::units {
 
@@ -283,43 +284,47 @@ inline T seconds_to_beats(T seconds, T bpm) {
 /// Shared serialized musical-division vocabulary. Order is ABI/preset state:
 /// append before `count`; never reorder existing entries.
 enum class Division : std::uint8_t {
-    whole,
-    whole_dotted,
-    whole_triplet,
-    half,
-    half_dotted,
-    half_triplet,
-    quarter,
-    quarter_dotted,
-    quarter_triplet,
-    eighth,
-    eighth_dotted,
-    eighth_triplet,
-    sixteenth,
-    sixteenth_dotted,
-    sixteenth_triplet,
-    thirty_second,
-    thirty_second_dotted,
-    thirty_second_triplet,
-    sixty_fourth,
-    sixty_fourth_dotted,
-    sixty_fourth_triplet,
-    count,
+    whole = 0,
+    whole_dotted = 1,
+    whole_triplet = 2,
+    half = 3,
+    half_dotted = 4,
+    half_triplet = 5,
+    quarter = 6,
+    quarter_dotted = 7,
+    quarter_triplet = 8,
+    eighth = 9,
+    eighth_dotted = 10,
+    eighth_triplet = 11,
+    sixteenth = 12,
+    sixteenth_dotted = 13,
+    sixteenth_triplet = 14,
+    thirty_second = 15,
+    thirty_second_dotted = 16,
+    thirty_second_triplet = 17,
+    sixty_fourth = 18,
+    sixty_fourth_dotted = 19,
+    sixty_fourth_triplet = 20,
+    count = 21,
 };
 
 inline constexpr int kDivisionCount = static_cast<int>(Division::count);
 
+/// Converts the legacy signal spelling to the canonical timebase vocabulary.
+/// Both enums are persisted, append-only ordinal contracts.
+constexpr timebase::BeatDivision to_beat_division(Division division) noexcept {
+    return static_cast<timebase::BeatDivision>(static_cast<std::uint8_t>(division));
+}
+
+static_assert(static_cast<std::uint8_t>(Division::count) ==
+              static_cast<std::uint8_t>(timebase::BeatDivision::Count));
+
 constexpr float division_to_beats(Division division) {
     const int index = static_cast<int>(division);
     if (index < 0 || index >= kDivisionCount) return 1.0f;
-    const int family = index / 3;
-    float beats = 4.0f;
-    for (int i = 0; i < family; ++i) beats *= 0.5f;
-    switch (index % 3) {
-        case 1: return beats * 1.5f;
-        case 2: return beats * (2.0f / 3.0f);
-        default: return beats;
-    }
+    const auto fraction = timebase::beat_fraction_or(to_beat_division(division), {1, 1});
+    return static_cast<float>(fraction.numerator) /
+           static_cast<float>(fraction.denominator);
 }
 
 constexpr float division_to_beats(int index) {

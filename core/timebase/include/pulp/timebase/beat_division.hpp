@@ -49,19 +49,36 @@ enum class BeatDivisionError {
     RangeExceeded,
 };
 
+namespace detail {
+
+inline constexpr BeatFraction kBeatDivisionFractions[] = {
+    {4, 1}, {6, 1}, {8, 3}, {2, 1}, {3, 1}, {4, 3},  {1, 1},  {3, 2},  {2, 3},  {1, 2},  {3, 4},
+    {1, 3}, {1, 4}, {3, 8}, {1, 6}, {1, 8}, {3, 16}, {1, 12}, {1, 16}, {3, 32}, {1, 24},
+};
+
+static_assert(sizeof(kBeatDivisionFractions) / sizeof(kBeatDivisionFractions[0]) ==
+              static_cast<std::size_t>(BeatDivision::Count));
+
+} // namespace detail
+
+/// Returns the exact fraction for `division`, or `fallback` for an invalid
+/// ordinal. This total constexpr form lets compatibility vocabularies derive
+/// their values from the canonical table without duplicating its arithmetic.
+constexpr BeatFraction beat_fraction_or(BeatDivision division,
+                                        BeatFraction fallback) noexcept {
+    const auto index = static_cast<std::uint8_t>(division);
+    if (index >= static_cast<std::uint8_t>(BeatDivision::Count))
+        return fallback;
+    return detail::kBeatDivisionFractions[index];
+}
+
 // Exact quarter-note beat value. Fractions are reduced and positive.
 inline runtime::Result<BeatFraction, BeatDivisionError>
 beat_fraction(BeatDivision division) noexcept {
-    constexpr BeatFraction values[] = {
-        {4, 1}, {6, 1}, {8, 3}, {2, 1}, {3, 1}, {4, 3},  {1, 1},  {3, 2},  {2, 3},  {1, 2},  {3, 4},
-        {1, 3}, {1, 4}, {3, 8}, {1, 6}, {1, 8}, {3, 16}, {1, 12}, {1, 16}, {3, 32}, {1, 24},
-    };
-    static_assert(sizeof(values) / sizeof(values[0]) ==
-                  static_cast<std::size_t>(BeatDivision::Count));
     const auto index = static_cast<std::uint8_t>(division);
     if (index >= static_cast<std::uint8_t>(BeatDivision::Count))
         return runtime::Err(BeatDivisionError::InvalidDivision);
-    return runtime::Ok(values[index]);
+    return runtime::Ok(beat_fraction_or(division, {}));
 }
 
 // Converts the vocabulary to the repository's exact document tick lattice.

@@ -853,7 +853,7 @@ worked patches: the [modulation toolkit](modulation-toolkit.md).
 | VCA | `vca.hpp` | Control-driven gain with linear or ~40 dB exponential response and a built-in de-clicking control lag; exactly unity at full |
 | Low-pass gate | `lpg.hpp` | Vactrol-modelled Buchla gate — loudness and brightness move together, and a re-strike mid-decay accumulates the way a real roll does |
 | Mod matrix | `mod_matrix.hpp` | Fixed-capacity source-to-destination routing with depth and a `via` slot; trivially copyable, so it hot-swaps through a `TripleBuffer` |
-| Unit conversions | `units.hpp` | dB, MIDI pitch, cents, one-pole and T60 coefficients, tapers, and the one shared musical-division table (straight, dotted, triplet) |
+| Unit conversions | `units.hpp` | dB, MIDI pitch, cents, one-pole and T60 coefficients, tapers, and compatibility spellings for the canonical timebase musical divisions (straight, dotted, triplet) |
 | Chaos | `chaos.hpp` | `LogisticMapT` — one control-rate source that runs from periodic to chaotic on a single knob |
 
 `ModalBank::prepare()` allocates its fixed-capacity storage and therefore runs
@@ -1075,7 +1075,11 @@ wrap. `CompiledMeterMap` provides the corresponding validated meter lookup.
 triplet values from whole notes through sixty-fourth notes. `beat_fraction()`
 returns the reduced rational quarter-note value and `division_ticks()` converts
 it to the exact document lattice, failing explicitly if a future division is
-invalid, out of range, or not exactly representable.
+invalid, out of range, or not exactly representable. The older
+`signal::units::Division` spellings retain their public names and persisted
+ordinals, but convert to `BeatDivision` and derive beat values from this table;
+new divisions must be appended to both vocabularies with exhaustive parity
+coverage.
 
 `project_grid()` projects those divisions through explicit
 `GridProjectionRange` values. Each range carries its document sample/tick
