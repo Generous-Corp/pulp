@@ -19,9 +19,11 @@ offline thread. Analysis calls allocate nothing, retain none of their borrowed
 spans, and must not run concurrently on the same analyzer. Caller-provided
 input and output spans must not overlap unless an API explicitly permits it.
 When C++ exceptions are enabled, both typed preparation APIs translate
-`std::bad_alloc` and `std::length_error` to `AllocationFailure`; invalid geometry or allocation
-failure leaves any previously prepared analyzer and published LPC result
-unchanged.
+`std::bad_alloc` and `std::length_error` to `AllocationFailure`; invalid
+geometry or allocation failure leaves any previously prepared analyzer and
+published LPC result unchanged. The cepstral analyzer also verifies
+`FftT::ready()` so a null Apple vDSP setup is reported as `AllocationFailure`
+instead of publishing an unusable prepared analyzer.
 
 The cepstral analyzer retains one FFT, `fft_size` complex cepstrum values, and
 one `fft_size / 2 + 1` scalar work array. The LPC analyzer retains
@@ -64,6 +66,10 @@ its established group-RMS conversion: power is floored at the larger of
 `frame_peak_power * 1e-4` and `1e-24`, then converted with `0.5 * log(power)`.
 Its extracted analyzer uses zero convergence tolerance, preserving the fixed
 legacy iteration path.
+
+`SpectralEnvelopeShifterT::prepare()` requires a finite, nonnegative gain
+limit. Its runtime warp is finite and strictly positive; zero, negative, NaN,
+and infinite warps leave the caller's spectral frame unchanged.
 
 ## Linear prediction
 

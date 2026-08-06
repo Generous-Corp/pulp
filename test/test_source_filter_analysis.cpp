@@ -366,6 +366,43 @@ TEST_CASE("Envelope shifter reports invalid configuration without losing prepare
     config.fft_size = 255;
     REQUIRE(shifter.prepare(config) == SourceFilterAnalysisStatus::InvalidFftSize);
     REQUIRE(shifter.num_bins() == 129);
+
+    config.fft_size = 256;
+    for (const auto invalid_gain :
+         {-1.0f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()}) {
+        config.max_gain_db = invalid_gain;
+        REQUIRE(shifter.prepare(config) == SourceFilterAnalysisStatus::InvalidGain);
+        REQUIRE(shifter.num_bins() == 129);
+    }
+}
+
+TEST_CASE("Envelope shifter rejects nonpositive and nonfinite warp without mutation",
+          "[signal][source-filter][fault]") {
+    SpectralEnvelopeShifter shifter;
+    SpectralEnvelopeShifterConfig config;
+    config.fft_size = 256;
+    REQUIRE(shifter.prepare(config) == SourceFilterAnalysisStatus::Ok);
+
+    std::array<std::complex<float>, 129> frame{};
+    for (std::size_t bin = 0; bin < frame.size(); ++bin)
+        frame[bin] = {0.1f + static_cast<float>(bin) * 0.001f, -0.2f};
+    const auto original = frame;
+    std::complex<float>* frames[] = {frame.data()};
+    for (const auto invalid_warp : {-1.0f, 0.0f, std::numeric_limits<float>::infinity(),
+                                    std::numeric_limits<float>::quiet_NaN()}) {
+        shifter.process_group(frames, 1, 129, invalid_warp);
+        REQUIRE(frame == original);
+    }
+}
+
+TEST_CASE("FFT exposes backend readiness", "[signal][source-filter][fault]") {
+    Fft empty;
+    REQUIRE_FALSE(empty.ready());
+    Fft prepared(256);
+    REQUIRE(prepared.ready());
+    Fft moved(std::move(prepared));
+    REQUIRE(moved.ready());
+    REQUIRE_FALSE(prepared.ready());
 }
 
 TEST_CASE("Autocorrelation and Levinson-Durbin recover known stable models",

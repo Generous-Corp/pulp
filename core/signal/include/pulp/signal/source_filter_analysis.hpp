@@ -114,6 +114,8 @@ template <typename SampleType = float> class CepstralEnvelopeAnalyzerT {
         try {
 #endif
             FftT<SampleType> next_fft(config.fft_size);
+            if (!next_fft.ready())
+                return SourceFilterAnalysisStatus::AllocationFailure;
             std::vector<SampleType> next_smooth(static_cast<std::size_t>(config.fft_size / 2 + 1),
                                                 SampleType{0});
             std::vector<std::complex<SampleType>> next_cepstrum(

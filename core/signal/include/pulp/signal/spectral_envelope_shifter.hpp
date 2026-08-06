@@ -22,7 +22,9 @@
 /// RMS magnitude and the same gain is applied to every channel, so
 /// inter-channel relationships (and identical channels) are preserved.
 ///
-/// `warp == 1` is an exact bypass. No allocation after `prepare()`.
+/// `warp` must be finite and positive; invalid values fail closed without
+/// changing the frame. `warp == 1` is an exact bypass. No allocation after
+/// `prepare()`.
 
 #include <algorithm>
 #include <cassert>
@@ -41,8 +43,8 @@ struct SpectralEnvelopeShifterConfig {
     /// True-envelope refinement passes (0 = plain liftering). Each pass
     /// costs two FFTs per frame.
     int true_envelope_iterations = 3;
-    /// Gain clamp for the applied correction, in dB (safety bound for
-    /// degenerate envelopes on sparse spectra).
+    /// Finite, nonnegative gain clamp for the applied correction, in dB
+    /// (safety bound for degenerate envelopes on sparse spectra).
     float max_gain_db = 60.0f;
 };
 
@@ -73,6 +75,8 @@ template <typename SampleType = float> class SpectralEnvelopeShifterT {
     /// pointers must reference exactly num_bins() bins.
     [[nodiscard]] SourceFilterAnalysisStatus prepare(const SpectralEnvelopeShifterConfig& config) {
         auto effective_config = config;
+        if (!std::isfinite(effective_config.max_gain_db) || effective_config.max_gain_db < 0.0f)
+            return SourceFilterAnalysisStatus::InvalidGain;
         if (effective_config.order <= 0)
             effective_config.order = effective_config.fft_size / 16;
         CepstralEnvelopeConfigT<SampleType> analysis_config;
@@ -125,6 +129,8 @@ template <typename SampleType = float> class SpectralEnvelopeShifterT {
                        SampleType warp) {
         assert(num_bins == num_bins_);
         assert(channels >= 1);
+        if (!std::isfinite(warp) || warp <= SampleType{0})
+            return;
         if (warp == SampleType{1})
             return; // exact bypass — neutral by construction
 
