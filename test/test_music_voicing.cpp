@@ -451,6 +451,24 @@ TEST_CASE("recognition exposes ambiguity and keeps ranked ties stable", "[music]
     CHECK(ranked->candidate(0)->score.extra == 1);
     CHECK_FALSE(ranked->candidate(0)->score.exact());
 
+    // C, E, and B-flat are independently known to be C7 with its fifth omitted.
+    // Keep this fixture literal so it does not derive the expected missing tone
+    // from ChordFormula or from the recognition implementation under test.
+    constexpr std::array<PitchClass, 3> omitted_fifth{PitchClass::c, PitchClass::e,
+                                                      PitchClass::a_sharp};
+    const auto observed = PitchClassSet::from_pitch_classes(omitted_fifth);
+    REQUIRE(observed);
+    const auto incomplete = recognize_chord(*observed);
+    REQUIRE(incomplete);
+    REQUIRE(incomplete->candidate(0));
+    CHECK(incomplete->candidate(0)->root == PitchClass::c);
+    CHECK(incomplete->candidate(0)->quality == ChordQuality::dominant7);
+    CHECK(incomplete->candidate(0)->score.matched == 3);
+    CHECK(incomplete->candidate(0)->score.missing == 1);
+    CHECK(incomplete->candidate(0)->score.extra == 0);
+    CHECK(incomplete->candidate(0)->score.root_present);
+    CHECK_FALSE(incomplete->candidate(0)->score.exact());
+
     const auto octave = ChordFormula::for_quality(ChordQuality::octave);
     REQUIRE(octave);
     const auto octave_chord = Chord::construct(60, *octave);
