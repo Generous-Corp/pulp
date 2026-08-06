@@ -373,6 +373,74 @@ fails loudly with the reason instead of reporting a total, and its verdict is
 which models still lack ranges rather than whether a number went up. Modules
 with no params at all (CV funk's blanks, our MULT) are not a shortfall.
 
+## A headless Rack RUNS THE ENGINE, so a patch can be listened to
+
+A patch had only ever been checked as a file. It can be heard, and the way in
+is not obvious: `Rack -h <patch>` closes stdin and exits at once, which is why
+`measure_ranges.py` gets a scan and no audio. Hold stdin OPEN as a pipe and
+Rack blocks on its "Press enter to exit." — and while it blocks, the engine
+runs in real time on its fallback thread. Four seconds of stdin held is four
+seconds of DSP, measured: 176,401 frames at 44.1 kHz, every time.
+
+`tools/rack/fidelity.py` is the harness built on that, and
+`tools/rack/fidelity_probe.cpp` the module it drives. Three things about the
+shape are worth keeping:
+
+**The probe is a SEPARATE plugin, compiled into a scratch directory.** Not a
+module added to Forge Modular: a diagnostic in the shipped set would show up in
+the user's browser and outlive the question. `make_scratch` symlinks the user's
+plugins one directory at a time rather than linking the arch directory whole,
+which is what leaves room to add a plugin they do not have. Nothing is
+installed and the user's Rack is never written to.
+
+**Every audio interface is DELETED before the run, and the probe takes its
+place.** The probe is patched with exactly what the interface was being fed, so
+what gets recorded is what a listener would have heard — and nothing in the
+patch can reach an output device. That is what makes the harness safe to run
+unattended on somebody's desk.
+
+**Ask Rack to leave; never kill it.** The probe flushes its capture from the
+audio callback when the window fills, and from its destructor otherwise. The
+destructor only runs on a clean shutdown, so the harness writes a newline to
+stdin and waits.
+
+## A value outside a knob's range is silently clamped on load
+
+`Module::paramsFromJson` puts a written value through the parameter's own
+bounds, so a patch that writes `0.0` into a knob whose minimum is `0.001`
+loads holding `0.001`. Nothing reports it: the file keeps the number it was
+written with, the module holds a different one, and the only symptom is the
+patch not doing what it says. Found on a real generated patch —
+`bouncing-ball-never-bounces.vcv` writes ENV Attack `0.0` — and reproduced from
+both ends, by reading the engine back and by predicting it from the port map's
+declared range. `fidelity.will_be_clamped()` names it before Rack is launched
+at all, which costs nothing; the port map has to have ranges for that plugin
+first (`measure_ranges.py`).
+
+## A pitch reader will invent notes unless it is made to answer for itself
+
+Four readings out of the first analyser were the instrument rather than the
+patch, and each one read as a finding:
+
+* **A confident 8.9 kHz on two unrelated patches, identical to four decimals.**
+  Autocorrelation is near one at no lag and falls away, so the largest value in
+  the curve is the SHORTEST lag the search can see, not the period. Start the
+  search after the correlation first turns negative.
+* **A sawtooth an octave low above a kilohertz.** Taking every fifth sample
+  folds everything above the new Nyquist back into the search. Average down,
+  do not stride down.
+* **Zero tracking error on a drone.** One held note tracks any tuning
+  perfectly, because there is no interval to get wrong — so a CV that never
+  moves has to report that nothing was tested, not that everything passed.
+* **An envelope-gated patch reading as no notes at all.** Requiring every note
+  to hold two windows throws away plucks. Silence AROUND a reading is what
+  tells a short note from the boundary between two long ones.
+
+Two numbers that look identical are the tell for a reading that came from the
+instrument. And "silent" and "unreadable" are different findings: report the
+recording's level, or a patch that plainly sounds reads as one that makes
+nothing.
+
 ## Count the readers before you trust a format
 
 Every shared format here had more parsers than anybody was checking, and the

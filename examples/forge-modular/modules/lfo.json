@@ -51,7 +51,12 @@
           "ident": "SQR_OUTPUT",
           "name": "Square",
           "label": "SQR",
-          "role": "Cv",
+          "role": [
+            "Cv",
+            "Clock",
+            "Gate",
+            "Trigger"
+          ],
           "x_mm": 21.336,
           "y_mm": 95
         },

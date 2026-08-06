@@ -99,7 +99,17 @@
       "is": "broadband noise, the raw material for random and for texture"
     },
     "clock": {
-      "$comment": "Clock is here because it is the tag 11 of the 78 clock-looking modules installed actually publish -- AS/BPMClock, Bidoo/tOCAnTe, JW-Modules/SimpleClock, NYSTHI/TIMEX, mscHack/MasterClockx4 among them -- and the list held only the two-word spellings. A model asked for a melody reached for BPMClock in 3 of 5 attempts and every one was rejected as unclocked while a clock sat in the patch.",
+      "$comment": [
+        "`Clock` on its own is not one of Rack's canonical tags, and 15 of",
+        "the 76 clock-ish modules installed here use it anyway -- AS/BPMClock,",
+        "JW-Modules/SimpleClock, NYSTHI/TIMEX, StellareModular-Link/Link and",
+        "others -- while the list held only the two-word spellings. So the",
+        "most obvious clock on the machine matched no role at all, and `the",
+        "sequencer has to be clocked` rejected patches that were plainly",
+        "clocked: a model asked for a melody reached for BPMClock in 3 of 5",
+        "attempts and every one was refused with a clock sitting in the patch.",
+        "A tag is whatever the plugin's author typed."
+      ],
       "tags": [
         "Clock",
         "Clock generator",
@@ -335,7 +345,16 @@
       ]
     },
     "cv_out": {
-      "$comment": "Pitch is a control voltage. Leaving it out meant the best-named pitch output on the machine -- ForgeModular/SEQ's \"Pitch CV (1V/oct)\", which infers as Pitch -- failed the requirement that a sequencer's pitch reach an oscillator. The label fallback could not rescue it either, because labels are compared whole and \"PITCH CV (1V/OCT)\" is not \"CV\". A sequencer whose jack happened to be called \"Step CV\" passed; the one that says what it carries did not.",
+      "$comment": [
+        "`Pitch` is here because a pitch CV IS a CV -- the most specific kind",
+        "of one. Without it a sequencer whose output is honestly named",
+        "'Pitch CV (1V/oct)' classified as Pitch, failed a requirement asking",
+        "for cv_out, and the best-named jack on the machine could not feed an",
+        "oscillator. A sibling whose jack read 'Step CV' passed, so the",
+        "better-labelled module was the one that failed. The label fallback",
+        "could not rescue it either: labels are compared whole, and",
+        "'PITCH CV (1V/OCT)' is not 'CV'."
+      ],
       "ports": [
         "Cv",
         "Pitch"
