@@ -1,0 +1,71 @@
+{
+  "$comment": [
+    "A small, experiment-first screening tranche from the 100-patch image",
+    "book. Duplicate examples strengthen an existing semantic identity; they",
+    "do not become extra idioms. No source text or images are stored here.",
+    "Every page is patch number plus seven. Semantic hashes cover the same",
+    "topology/minimum/forbidden structure used to detect catalogue duplicates."
+  ],
+  "source": "Arp 2600 to Behringer 2600.epub",
+  "source_sha256": "45fe6f6d77f431fd342b2394fde31e2b4e1ae9e5b55a2b166d4e6e8ce129a176",
+  "source_total": 100,
+  "page_offset": 7,
+  "accepted": [
+    {
+      "patch": 1,
+      "page": 8,
+      "page_sha256": "ab0bbb301793dc3d97d639f1c2dc155ffebb1eedfecd95fda3d075b82ee37536",
+      "canonical_slug": "marimba-roll",
+      "semantic_identity": "c489b9899451cfbea31ed36c976c4c8e8dcec8a9ffdf79a755b6577c6d215d28"
+    },
+    {
+      "patch": 13,
+      "page": 20,
+      "page_sha256": "76055f3dbc8c3475495573ec1e2e26c6434b2be90b536740000cdbf1b77cc398",
+      "canonical_slug": "ensemble-vibrato",
+      "semantic_identity": "533053f7389b4cca95cb89c92f82fdbe79b22b6a947192cbeca9c8ad3a0c35e5"
+    },
+    {
+      "patch": 68,
+      "page": 75,
+      "page_sha256": "58dd2ec67f4887b064283ff266ed0343c65677195fd640e4cf407ab46a834856",
+      "canonical_slug": "gliding-intervals",
+      "semantic_identity": "52b0da80ef2797eebb7134621fde969d53cc159296850cc8b46c058506594e48"
+    }
+  ],
+  "duplicates": [
+    {
+      "patch": 2,
+      "page": 9,
+      "page_sha256": "4d888b2f5c1f4a810ce39a2ae7f81839a3748d0d0960a944f65c437b5e7f3c8d",
+      "canonical_slug": "subtractive-voice",
+      "semantic_identity": "0e0151f12dc382f08e877490c8bb677a72987b07e29223eac9251661d3e518c0",
+      "reason": "The source example is the existing oscillator-to-filter voice with an envelope controlling brightness; its named instrument setting does not create a new cable identity."
+    },
+    {
+      "patch": 6,
+      "page": 13,
+      "page_sha256": "39e2d464fe0e49e1a25fedab133d75cf0c539d3c0dd5ad251a141af7ee05fb6d",
+      "canonical_slug": "ensemble-vibrato",
+      "semantic_identity": "533053f7389b4cca95cb89c92f82fdbe79b22b6a947192cbeca9c8ad3a0c35e5",
+      "reason": "Multiple close oscillators share slow pitch movement, which is already the canonical ensemble-vibrato fragment; the source adds a setting example, not another topology."
+    },
+    {
+      "patch": 7,
+      "page": 14,
+      "page_sha256": "29158f6a63ffb14eed8e33b778e7233a05a2093628cd8084697f06de2c853241",
+      "canonical_slug": "bell-tone",
+      "semantic_identity": "4a59a9ab661e4b23e8cc744ca9a7aa36b1fcd02006ab000dc8b868aad33874f1",
+      "reason": "The multiplied oscillator pair and struck resonant body are already represented by bell-tone; a tubular-chime setting is corroboration, not a distinct checked structure."
+    },
+    {
+      "patch": 8,
+      "page": 15,
+      "page_sha256": "a01bea304096960bcea42ad9dbb3d2d467ba50247968de7b14839c3133998c72",
+      "canonical_slug": "vibrato",
+      "semantic_identity": "55d37372774091848e2ff4cea9ac3526fb961338ad4de4ab5fa3753b0251a54f",
+      "reason": "A slow source moving oscillator pitch is the canonical vibrato identity; the instrument label and knob positions do not add a checkable connection."
+    }
+  ],
+  "remaining": 93
+}

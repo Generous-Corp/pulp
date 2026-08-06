@@ -124,7 +124,137 @@
           "message": "the multiplied signal never reaches the filter"
         }
       ],
-      "provenance": "canon"
+      "provenance": "canon",
+      "realises": [
+        "pitch-analysis-eligibility"
+      ]
+    },
+    {
+      "slug": "marimba-roll",
+      "family": "rhythm",
+      "names": [
+        "marimba roll",
+        "rolled marimba"
+      ],
+      "implies": [
+        "rapid wooden roll",
+        "repeating marimba strike"
+      ],
+      "is": "One oscillator supplies both a direct wooden tone and one side of a multiplied tone, while a second oscillator modulates its pitch and the multiplier; changing that second oscillator's frequency turns the beating into a controllable roll.",
+      "sounds_right_when": "a pitched wooden strike repeats rapidly enough to read as a roll, and the rate follows the modulating oscillator without losing the central note.",
+      "source": "Derived from patch 1 of an ARP 2600-to-Behringer 2600 patch book",
+      "at_least": {
+        "audio_oscillator": 2,
+        "amplifier": 1,
+        "mixer": 1,
+        "filter": 1
+      },
+      "topology": [
+        {
+          "id": "direct-tone",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "the rolled oscillator has to reach the body mix directly, preserving the central wooden pitch"
+        },
+        {
+          "id": "multiplier-carrier",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "amplifier",
+          "to_port": "audio_in",
+          "describe": "the same pitched source has to reach the multiplier's signal input"
+        },
+        {
+          "id": "roll-modulator",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "amplifier",
+          "to_port": "cv_in",
+          "different_module": true,
+          "describe": "a second oscillator has to multiply the pitched source; its frequency sets the audible roll rate"
+        },
+        {
+          "id": "pitch-motion",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "audio_oscillator",
+          "to_port": "cv_in",
+          "different_module": true,
+          "describe": "the roll oscillator also has to move the pitched oscillator, coupling repetition and pitch motion as the worked topology does"
+        },
+        {
+          "id": "multiplied-tone",
+          "from_module": "amplifier",
+          "from_port": "audio_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "the multiplied component has to join the direct tone in the body mix"
+        },
+        {
+          "id": "filtered-body",
+          "from_module": "mixer",
+          "from_port": "audio_out",
+          "to_module": "filter",
+          "to_port": "audio_in",
+          "describe": "the direct and multiplied components have to reach the filter as one mixture"
+        },
+        {
+          "id": "heard",
+          "from_module": "filter",
+          "from_port": "audio_out",
+          "to_module": "any",
+          "to_port": "audio_in",
+          "describe": "the filtered mixture has to reach the audio path"
+        }
+      ],
+      "behaviour": {
+        "rhythmic": true
+      },
+      "listen_for": {
+        "sounds_like": "a tuned, hollow wooden tone with a regular roll whose speed changes when the modulating oscillator changes",
+        "confusable_with": "plain tremolo, which changes only level, or a bell tone, whose inharmonic ring is struck once rather than rolled"
+      },
+      "common_mistakes": [
+        {
+          "id": "no-direct-body",
+          "do": "cut",
+          "requirement": "direct-tone",
+          "message": "the direct pitched component is missing, so the roll loses its wooden centre"
+        },
+        {
+          "id": "no-roll-modulator",
+          "do": "cut",
+          "requirement": "roll-modulator",
+          "message": "nothing multiplies the pitched source, so there is no oscillator-controlled roll"
+        },
+        {
+          "id": "no-pitch-motion",
+          "do": "cut",
+          "requirement": "pitch-motion",
+          "message": "the roll oscillator does not reach the pitched oscillator, reducing the worked topology to ordinary amplitude modulation"
+        },
+        {
+          "id": "no-multiplied-body",
+          "do": "cut",
+          "requirement": "multiplied-tone",
+          "message": "the multiplied component never joins the body mix"
+        },
+        {
+          "id": "unfiltered-body",
+          "do": "cut",
+          "requirement": "filtered-body",
+          "message": "the direct and multiplied components never reach the filter together"
+        }
+      ],
+      "provenance": "read",
+      "anchor": {
+        "doc": "arp2600-patchbook-behringer",
+        "page": 8,
+        "sha256": "ab0bbb301793dc3d97d639f1c2dc155ffebb1eedfecd95fda3d075b82ee37536",
+        "shows": "patch 1: one oscillator is mixed directly into the filter and also through the ring modulator, while a second oscillator feeds the first oscillator's frequency control; the second oscillator's frequency is identified as the roll-speed control"
+      }
     },
     {
       "slug": "external-audio-processing",

@@ -17,6 +17,7 @@ as an unsubstituted comment marker, and nothing noticed for three runs.
 
 from __future__ import annotations
 
+import os
 import sys
 
 from idiom_check import fragments_for, load_idioms, resolve_intent
@@ -27,6 +28,28 @@ MARKER = "<!--PATCH_VOCABULARY-->"
 # a family file failed to parse, or the directory did not ship. Checked at the
 # point the model would be handed it, not at the point it was written.
 MIN_IDIOMS = 50
+
+# A MATCHED CONTROL FOR THE BOOK LAYER. Generation still receives the same
+# requested idiom, module minimums, topology and mistakes; only the optional
+# catalogue/technique material is removed. That makes
+#
+#   FORGE_BOOK_GUIDANCE=off ...
+#   FORGE_BOOK_GUIDANCE=on  ...
+#
+# a deterministic A/B pair without editing a checkout between runs. Keep the
+# switch here, at the single seam where book knowledge enters the contract,
+# rather than teaching each source or caller its own idea of "off".
+BOOK_GUIDANCE_ENV = "FORGE_BOOK_GUIDANCE"
+
+
+def book_guidance_enabled(environ: dict | None = None) -> bool:
+    """Whether optional catalogue/technique guidance enters the contract."""
+    env = os.environ if environ is None else environ
+    value = str(env.get(BOOK_GUIDANCE_ENV, "on")).strip().lower()
+    if value not in ("on", "off"):
+        raise ValueError(f"{BOOK_GUIDANCE_ENV} must be 'on' or 'off', got "
+                         f"{value!r}")
+    return value == "on"
 
 
 def needed_modules(idiom: dict) -> dict:
@@ -150,11 +173,15 @@ def render(idioms: dict | None = None, prompt: str | None = None) -> str:
     # description here would put all seventy in front of every unresolved
     # request, which is how a patch gets steered toward a sound nobody asked
     # for.
-    try:
-        import knowledge                                 # noqa: PLC0415
-        sounds = [e for e in knowledge.load().values()
-                  if e.get("kind") == "settings" and e.get("numbers")]
-    except Exception:                                    # noqa: BLE001
+    guidance = book_guidance_enabled()
+    if guidance:
+        try:
+            import knowledge                             # noqa: PLC0415
+            sounds = [e for e in knowledge.load().values()
+                      if e.get("kind") == "settings" and e.get("numbers")]
+        except Exception:                                # noqa: BLE001
+            sounds = []
+    else:
         sounds = []
     # THE SOUND THAT WAS ACTUALLY ASKED FOR, LIFTED OUT AND PUT FIRST. The
     # matcher below already finds it correctly -- whole-word, family fallback,
@@ -162,7 +189,7 @@ def render(idioms: dict | None = None, prompt: str | None = None) -> str:
     # sounds nobody requested. An instruction and a glossary entry are not the
     # same thing to a reader with 88,000 characters in front of it.
     matched = []
-    if prompt:
+    if prompt and guidance:
         try:
             import knowledge                             # noqa: PLC0415
             matched = knowledge.for_prompt(prompt)
@@ -213,18 +240,20 @@ def for_prompt(prompt: str, idioms: dict | None = None) -> str:
     # an empty string and the catalogue of named sounds — 74 recipes, every
     # number verified — reached nothing. A request can name a sound, a
     # structure, or both, and each is looked up its own way.
+    guidance = book_guidance_enabled()
     named_sounds = ""
-    try:
-        import knowledge                                 # noqa: PLC0415
-        heard = knowledge.for_prompt(prompt)
-        if heard:
-            named_sounds = (
-                "## the sound this request names\n"
-                "Measured settings for exactly what was asked for. Start from "
-                "these values, then use your ears.\n\n" +
-                "\n\n".join(knowledge.render(e) for e in heard))
-    except Exception:                                    # noqa: BLE001
-        named_sounds = ""
+    if guidance:
+        try:
+            import knowledge                             # noqa: PLC0415
+            heard = knowledge.for_prompt(prompt)
+            if heard:
+                named_sounds = (
+                    "## the sound this request names\n"
+                    "Measured settings for exactly what was asked for. Start from "
+                    "these values, then use your ears.\n\n" +
+                    "\n\n".join(knowledge.render(e) for e in heard))
+        except Exception:                                # noqa: BLE001
+            named_sounds = ""
 
     if not slug:
         # No structure named, but a sound was. Better than nothing, which is
@@ -331,10 +360,13 @@ def for_prompt(prompt: str, idioms: dict | None = None) -> str:
     # WHAT IS KNOWN ABOUT THE TECHNIQUE, as opposed to about the wiring. Read
     # lazily and skipped silently when absent: the generator worked before this
     # existed and has to keep working when it does not.
-    try:
-        import knowledge                                 # noqa: PLC0415
-        known = knowledge.render_for(slug, None, idioms)
-    except Exception:                                    # noqa: BLE001
+    if guidance:
+        try:
+            import knowledge                             # noqa: PLC0415
+            known = knowledge.render_for(slug, None, idioms)
+        except Exception:                                # noqa: BLE001
+            known = ""
+    else:
         known = ""
     if known:
         lines += ["", known.rstrip()]

@@ -40,6 +40,7 @@ RESOLUTIONS = [
     ("make it stay in key", "quantized-voice"),
     ("a wind and rain atmosphere", "noise-texture"),
     ("delay repeats that build on themselves", "feedback-delay-texture"),
+    ("a tuned marimba roll whose speed I can change", "marimba-roll"),
     # Nothing claimed: a request with no idiom must resolve to nothing rather
     # than to whatever matched loosest. A checker that always finds an idiom
     # would gate every patch against something arbitrary.
@@ -1265,6 +1266,83 @@ def check_knowledge() -> int:
     return bad
 
 
+def check_book_guidance_tranche() -> int:
+    """The small Roads/ARP tranche is reachable, switchable and quarantined."""
+    import copy                                          # noqa: PLC0415
+    import source_quarantine                             # noqa: PLC0415
+
+    idioms = idiom_check.load_idioms()
+    bad = 0
+
+    # SCREENED DUPLICATES ARE DATA, NOT A NOTE. Each disposition is bound to
+    # the canonical structure it corroborates. If that structure changes, the
+    # source has to be screened again rather than silently remaining a
+    # "duplicate" forever.
+    doc = source_quarantine.load()
+    got = source_quarantine.problems(doc, idioms)
+    if got:
+        print(f"  WRONG  the ARP source quarantine is stale: {got[:2]}")
+        bad += 1
+    else:
+        print(f"  ok     {len(doc['duplicates'])} ARP examples are quarantined "
+              f"against canonical semantic identities")
+    changed = copy.deepcopy(idioms)
+    changed["subtractive-voice"]["topology"].pop()
+    got = source_quarantine.problems(doc, changed)
+    if not any("semantic identity no longer matches subtractive-voice" in p
+               for p in got):
+        print("  WRONG  changing a canonical topology did not stale its "
+              "quarantined duplicate")
+        bad += 1
+    else:
+        print("  ok     a changed canonical topology fails the quarantine")
+
+    # THE ROADS RECORD REACHES THE GENERATOR. Its numeric lower edge also has
+    # a real false side: nineteen events must fail and twenty must pass. This
+    # pins the boundary the catalogue A/B evaluator consumes without inventing
+    # a second tolerance in test code.
+    text = patch_vocabulary.for_prompt("a granular cloud", idioms)
+    if "event-fusion-density" not in text or "20 events per second" not in text:
+        print("  WRONG  Roads' event-fusion guidance never reaches the model")
+        bad += 1
+    else:
+        print("  ok     Roads' event-fusion record and number reach the model")
+    expect = idioms["granular-cloud"]["listen_for"]["expect"][0]
+    passes = lambda actual: actual >= expect["value"]  # its declared >= op
+    if (expect["field"] != "onsets.per_second" or expect["op"] != ">=" or
+            passes(19) or not passes(20)):
+        print("  WRONG  the event-fusion expectation has no working failure edge")
+        bad += 1
+    else:
+        print("  ok     19 events/s fails and 20 events/s passes the listen gate")
+
+    # MATCHED OFF/ON, WITHOUT CHECKOUT TRICKS. OFF must remove only optional
+    # catalogue/technique prose. The idiom and its topology remain byte-for-
+    # byte sourced from the same library, so the control still builds the same
+    # requested kind of patch.
+    old = os.environ.get(patch_vocabulary.BOOK_GUIDANCE_ENV)
+    try:
+        os.environ[patch_vocabulary.BOOK_GUIDANCE_ENV] = "off"
+        off = patch_vocabulary.for_prompt("a granular cloud", idioms)
+        os.environ[patch_vocabulary.BOOK_GUIDANCE_ENV] = "on"
+        on = patch_vocabulary.for_prompt("a granular cloud", idioms)
+    finally:
+        if old is None:
+            os.environ.pop(patch_vocabulary.BOOK_GUIDANCE_ENV, None)
+        else:
+            os.environ[patch_vocabulary.BOOK_GUIDANCE_ENV] = old
+    topology = "a fast envelope has to window the source into grains"
+    if topology not in off or topology not in on:
+        print("  WRONG  the book-guidance switch changed the idiom topology")
+        bad += 1
+    elif "event-fusion-density" in off or "event-fusion-density" not in on:
+        print("  WRONG  FORGE_BOOK_GUIDANCE does not isolate the book layer")
+        bad += 1
+    else:
+        print("  ok     FORGE_BOOK_GUIDANCE=off/on isolates optional guidance")
+    return bad
+
+
 def check_named_sounds() -> int:
     """A request that names a sound gets that sound's settings. By measurement.
 
@@ -1524,6 +1602,9 @@ def main() -> int:
 
     print("\nthe knowledge base is portable and optional:")
     bad += check_knowledge()
+
+    print("\nthe Roads/ARP experiment tranche is bounded and switchable:")
+    bad += check_book_guidance_tranche()
 
     print("\na request that names a sound gets its settings:")
     bad += check_named_sounds()

@@ -7,7 +7,7 @@ not anybody's property, and the descriptions here are our own words --
 nothing is transcribed from any of the works below. This page records
 what informed the work, and is honest about how much.
 
-Of **96** idioms: **13** were written from, or checked against, a text we hold and quote; **83** were written from general knowledge of the practice; **0** were reasoned out from adjacent technique. That first number is the only one under which a work can honestly be listed as a source, and it is the smaller number on purpose.
+Of **97** idioms: **14** were written from, or checked against, a text we hold and quote; **83** were written from general knowledge of the practice; **0** were reasoned out from adjacent technique. That first number is the only one under which a work can honestly be listed as a source, and it is the smaller number on purpose.
 
 ## Derived from
 
@@ -16,7 +16,7 @@ quotes text that is really there. A citation that stops verifying is
 moved out of this section automatically.
 
 - ARP 2600 — the instrument, and the practice that grew around it
-  — `ensemble-vibrato`, `gliding-intervals`
+  — `ensemble-vibrato`, `gliding-intervals`, `marimba-roll`
 - Fred Welsh, *Welsh's Synthesizer Cookbook*
   — `portamento`
 - Gordon Reid, *Synth Secrets* (Sound On Sound, 1999–2004)
