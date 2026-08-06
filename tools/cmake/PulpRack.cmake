@@ -187,10 +187,13 @@ function(pulp_add_rack_plugin target)
     # A .vcvplugin is a zstd-compressed tar of the plugin directory.
     find_program(PULP_ZSTD_EXE zstd)
     if(PULP_ZSTD_EXE)
+        set(_tar "${_pkg}.tar")
         add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E rm -f "${_pkg}"
-            COMMAND tar --no-xattrs -cf - -C "${CMAKE_BINARY_DIR}/rack" "${RACK_SLUG}"
-                    | ${PULP_ZSTD_EXE} -q -19 -o "${_pkg}"
+            COMMAND ${CMAKE_COMMAND} -E rm -f "${_pkg}" "${_tar}"
+            COMMAND tar --no-xattrs -cf "${_tar}"
+                    -C "${CMAKE_BINARY_DIR}/rack" "${RACK_SLUG}"
+            COMMAND ${PULP_ZSTD_EXE} -q -19 -f "${_tar}" -o "${_pkg}"
+            COMMAND ${CMAKE_COMMAND} -E rm -f "${_tar}"
             VERBATIM
             COMMENT "Packaging ${RACK_SLUG}-${RACK_VERSION}-${_rack_os}-${_rack_cpu}.vcvplugin")
     elseif(APPLE AND EXISTS "/usr/bin/tar")

@@ -592,8 +592,18 @@ def check_buildable_from_parts() -> tuple:
                             "patch.py")).read()
     body = src[src.index("def generate("):]
     body = body[:body.index("\ndef ")] if "\ndef " in body[10:] else body
-    first_reflow = body.find("reflow(patch")
-    first_lint = body.find("lint(patch")
+    # generate() may spell the sequence directly or call the shared
+    # physical-target/layout/lint helper. Inspect the helper when present so a
+    # safe refactor does not look like the ordering contract disappeared.
+    helper_call = body.find("prepare_and_lint(patch")
+    if helper_call != -1:
+        helper = src[src.index("def prepare_and_lint("):]
+        helper = helper[:helper.index("\ndef ", 1)]
+        first_reflow = helper.find("reflow(patch")
+        first_lint = helper.find("+ lint(patch")
+    else:
+        first_reflow = body.find("reflow(patch")
+        first_lint = body.find("lint(patch")
     if first_reflow == -1 or first_lint == -1:
         print("  WRONG  generate() no longer both reflows and lints")
         bad += 1
@@ -771,8 +781,8 @@ def check_acquisition() -> tuple:
     else:
         print("  ok     owning it is not buying it")
 
-    # 117 of 547 published plugins are Rack v1 survivors with no mac-arm64
-    # build: listed, described and tagged exactly like live ones.
+    # Rack v1 survivors can lack the running machine's build while still being
+    # listed, described and tagged exactly like live ones.
     cases = [({"arches": ["mac-arm64", "win-x64"]}, True),
              ({"arches": ["win-x64"]}, False),
              ({"arches": None}, False),
@@ -783,7 +793,28 @@ def check_acquisition() -> tuple:
             print(f"  WRONG  installable_here({entry}) != {want}")
     if not bad:
         print("  ok     a plugin with no arm64 build is never offered")
-    return bad, 4
+
+    original_machine = P.platform.machine
+    try:
+        for machine, arch in (("arm64", "mac-arm64"), ("x86_64", "mac-x64")):
+            P.platform.machine = lambda machine=machine: machine
+            if P.rack_arch() != arch:
+                bad += 1
+                print(f"  WRONG  {machine} selected {P.rack_arch()}, not {arch}")
+            if not P.rack_plugin_dir().endswith("plugins-" + arch):
+                bad += 1
+                print(f"  WRONG  {machine} selected {P.rack_plugin_dir()}")
+            if not P.installable_here({"arches": [arch]}):
+                bad += 1
+                print(f"  WRONG  {machine} rejected its own {arch} build")
+            if P.installable_here({"arches": ["mac-x64" if arch == "mac-arm64" else "mac-arm64"]}):
+                bad += 1
+                print(f"  WRONG  {machine} accepted the other Mac architecture")
+    finally:
+        P.platform.machine = original_machine
+    if not bad:
+        print("  ok     Rack downloads and inventory follow the running Mac architecture")
+    return bad, 12
 
 
 

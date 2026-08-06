@@ -721,7 +721,7 @@ def run_editor_build_mode(reaper: Path, args: argparse.Namespace) -> int:
             "killed and no verdict is being invented — INCONCLUSIVE")
         return EXIT_INCONCLUSIVE
     finally:
-        session.terminate()
+        session.cleanup()
 
 
 def run_editor_open_mode(reaper: Path, args: argparse.Namespace) -> int:
@@ -775,7 +775,7 @@ def run_editor_open_mode(reaper: Path, args: argparse.Namespace) -> int:
         log("editor opened and stayed up — PASS.")
         return EXIT_PASS
     finally:
-        session.terminate()
+        session.cleanup()
 
 
 def run_live_plugin_swap_mode(reaper: Path, args: argparse.Namespace) -> int:

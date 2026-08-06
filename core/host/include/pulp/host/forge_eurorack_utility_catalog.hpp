@@ -108,8 +108,8 @@ inline CustomNodeType make_slew_node() {
             if (t_s <= 0.0f) {
                 s.y = x;
             } else {
-                // Volts-per-second slope over the full +/-10 V CV span.
-                const float slope = (2.0f * kCvUnipolarMax) / t_s;
+                // Both published CV ranges span 10 V (0..10 or -5..+5).
+                const float slope = kCvUnipolarMax / t_s;
                 const float step = slope * dt;
                 s.y += std::clamp(x - s.y, -step, step);
             }
@@ -172,10 +172,7 @@ inline CustomNodeType make_clock_divider_node() {
 }
 
 // ── Sample and hold ──────────────────────────────────────────────────────────
-// Single input carrying the signal; samples on its own rising edge is not
-// meaningful, so this node samples on the Schmitt edge of the SAME input, which
-// makes it a track-and-hold usable as a one-port bake node. A two-input variant
-// (signal + trigger) belongs on the graph, not inside one node.
+// Input 0 is the signal to capture; input 1 is an independent Schmitt trigger.
 
 struct SampleHoldInstance {
     bool high = false;
@@ -186,7 +183,8 @@ inline CustomNodeType make_sample_hold_node() {
     CustomNodeType t;
     t.type_id = "eurorack.sample_hold";
     t.version = 1;
-    t.num_input_ports = t.num_output_ports = 1;
+    t.num_input_ports = 2;
+    t.num_output_ports = 1;
     t.default_name = "Sample & Hold";
     t.lowerable = true;
     t.create = []() -> void* { return new SampleHoldInstance{}; };
@@ -196,17 +194,19 @@ inline CustomNodeType make_sample_hold_node() {
     t.process_instance = [](void* p, audio::BufferView<float>& out,
                             const audio::BufferView<const float>& in, int n) {
         auto& s = *static_cast<SampleHoldInstance*>(p);
-        const float* input = in.channel_ptr(0);
+        const float* signal = in.channel_ptr(0);
+        const float* trigger = in.channel_ptr(1);
         float* output = out.channel_ptr(0);
         for (int i = 0; i < n; ++i) {
-            const float v = input[static_cast<std::size_t>(i)];
+            const auto index = static_cast<std::size_t>(i);
+            const float v = trigger[index];
             if (!s.high && v >= kSchmittHigh) {
                 s.high = true;
-                s.held = v;
+                s.held = signal[index];
             } else if (s.high && v <= kSchmittLow) {
                 s.high = false;
             }
-            output[static_cast<std::size_t>(i)] = s.held;
+            output[index] = s.held;
         }
     };
     return t;

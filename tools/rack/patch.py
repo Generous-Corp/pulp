@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import shutil
 import re
 import time
@@ -1697,8 +1698,14 @@ SETTINGS_DEFAULTS = {
 }
 
 
-RACK_PLUGIN_DIR = os.path.expanduser(
-    "~/Library/Application Support/Rack2/plugins-mac-arm64")
+def rack_arch() -> str:
+    """Rack's architecture slug for the machine running the installer."""
+    return "mac-arm64" if platform.machine().lower() in ("arm64", "aarch64") else "mac-x64"
+
+
+def rack_plugin_dir() -> str:
+    return os.path.expanduser(
+        f"~/Library/Application Support/Rack2/plugins-{rack_arch()}")
 
 
 def install_module(plugin: str, version: str, premium: bool,
@@ -1729,10 +1736,12 @@ def install_module(plugin: str, version: str, premium: bool,
                        "be fetched for you after that.")
     import urllib.parse
     import urllib.request
+    arch = rack_arch()
+    plugin_dir = rack_plugin_dir()
     query = urllib.parse.urlencode({"slug": plugin, "version": version,
-                                    "arch": "mac-arm64"})
-    dest = os.path.join(RACK_PLUGIN_DIR,
-                        f"{plugin}-{version}-mac-arm64.vcvplugin")
+                                    "arch": arch})
+    dest = os.path.join(plugin_dir,
+                        f"{plugin}-{version}-{arch}.vcvplugin")
     # The token goes in a COOKIE, which is how Rack itself sends it. Passing it
     # as a query parameter returns 403 for every plugin, free or owned, so the
     # download path could never once have succeeded in that form.
@@ -1740,7 +1749,7 @@ def install_module(plugin: str, version: str, premium: bool,
         "https://api.vcvrack.com/download?" + query,
         headers={"Cookie": "token=" + token, "User-Agent": "Rack/2.6.6"})
     try:
-        os.makedirs(RACK_PLUGIN_DIR, exist_ok=True)
+        os.makedirs(plugin_dir, exist_ok=True)
         with urllib.request.urlopen(req, timeout=180) as r:
             if r.status != 200:
                 return False, f"the library returned HTTP {r.status}"
@@ -1850,13 +1859,13 @@ def entitlements_cached(refresh: bool = False) -> set:
 def installable_here(entry: dict) -> bool:
     """Whether a catalog entry has a build this machine can actually load.
 
-    117 of the 547 published plugins have no mac-arm64 build -- Rack v1
+    Some published plugins have no build for the running architecture -- Rack v1
     survivors that are listed, described and tagged exactly like live ones.
     Naming one in a patch produces a module that can never be installed, so
     the catalog is filtered before the model ever sees it rather than failing
     at download time with a plugin the user was told to expect.
     """
-    return "mac-arm64" in (entry.get("arches") or [])
+    return rack_arch() in (entry.get("arches") or [])
 
 
 RACK_APPS = ("VCV Rack 2 Pro", "VCV Rack 2 Free", "VCV Rack 2")

@@ -285,6 +285,16 @@ class EditorOpenMode(unittest.TestCase):
         rc = rs.run_editor_open_mode(pathlib.Path("/nonexistent/REAPER"), args)
         self.assertNotEqual(rc, rs.EXIT_PASS)
 
+    def test_every_exit_runs_full_cleanup(self):
+        args = argparse.Namespace(plugin_path=__file__, plugin_name="X",
+                                  format="clap", timeout=1)
+        session = mock.MagicMock()
+        session.place_plugin.return_value = rs.EXIT_FAIL
+        with mock.patch.object(rs, "ReaperSession", return_value=session):
+            self.assertEqual(rs.run_editor_open_mode(pathlib.Path("/reaper"), args),
+                             rs.EXIT_FAIL)
+        session.cleanup.assert_called_once_with()
+
 
 class AuAlreadyInstalled(unittest.TestCase):
     """An AU that is already installed is the case worth proving, not a clash.
@@ -363,6 +373,16 @@ class EditorBuildMode(unittest.TestCase):
                               "--plugin-path", __file__])
         self.assertEqual(args.mode, "editor-build")
         rs.validate_mode_args(ap, args)   # must not raise or exit
+
+    def test_every_exit_runs_full_cleanup(self):
+        args = argparse.Namespace(plugin_path=__file__, plugin_name="X",
+                                  format="clap", timeout=1)
+        session = mock.MagicMock()
+        session.place_plugin.return_value = rs.EXIT_FAIL
+        with mock.patch.object(rs, "ReaperSession", return_value=session):
+            self.assertEqual(rs.run_editor_build_mode(pathlib.Path("/reaper"), args),
+                             rs.EXIT_FAIL)
+        session.cleanup.assert_called_once_with()
 
     def test_it_does_not_drive_the_screen_at_all(self):
         """No clicks, no keystrokes, no screen coordinates.
