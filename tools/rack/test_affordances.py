@@ -264,7 +264,9 @@ def check_affordances_are_classified() -> tuple:
     # `portmap_merge.hpp` takes a re-measured module's whole block from the
     # fresh scan, so a classification stored there would be erased by the
     # next scan — silently, and only for the modules being actively used.
-    if A.CACHE_PATH.startswith(P.RACK_USER) or A.CACHE_PATH == P.PORTMAP:
+    import portmap_seed
+    if (A.CACHE_PATH.startswith(P.RACK_USER)
+            or A.CACHE_PATH == portmap_seed.LOCAL_PATH):
         bad += 1
         print("  WRONG  the classification cache lives in the scanner's "
               "directory, where a rescan replaces a module's whole record")

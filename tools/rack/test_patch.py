@@ -2753,12 +2753,19 @@ def check_vendor_params_reach_model() -> tuple:
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
         json.dump(pm, f)
         path = f.name
-    saved = P.PORTMAP
-    P.PORTMAP = path
+    # The map this machine scanned is now read through portmap_seed, which
+    # folds the shipped measurements under it. Point the LOCAL half at the
+    # fixture and blank the shipped half, so this tests what a scan
+    # contributes rather than what a release happened to carry.
+    import portmap_seed
+    saved_local, saved_seed = portmap_seed.LOCAL_PATH, portmap_seed.SEED_PATH
+    portmap_seed.LOCAL_PATH = path
+    portmap_seed.SEED_PATH = path + ".absent"
     try:
         P._add_portmap(inv)
     finally:
-        P.PORTMAP = saved
+        portmap_seed.LOCAL_PATH = saved_local
+        portmap_seed.SEED_PATH = saved_seed
         os.unlink(path)
 
     got = inv["CVfunk"]["modules"]["StepWave"].get("params") or []
