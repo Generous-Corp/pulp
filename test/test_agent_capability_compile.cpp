@@ -6,6 +6,7 @@
 #include <pulp/sequence/host_transport_projector.hpp>
 #include <pulp/signal/osc/minblep.hpp>
 #include <pulp/signal/saturator.hpp>
+#include <pulp/signal/sos_cascade.hpp>
 #include <pulp/timebase/quantize.hpp>
 #include <pulp/timebase/tick.hpp>
 
@@ -34,6 +35,11 @@ int main() {
         // signal.saturator
         static_assert(sizeof(pulp::signal::SaturatorT<float>) > 0);
         pulp::signal::SaturatorT<float> probe_value_0{}; (void)probe_value_0.prepare(48000.0);
+    }
+    {
+        // signal.sos-cascade
+        static_assert(sizeof(pulp::signal::SosCascadeT<float>) > 0);
+        pulp::signal::SosCascadeT<float> probe_value_0{}; (void)probe_value_0.prepare(4);
     }
     {
         // timebase.swing

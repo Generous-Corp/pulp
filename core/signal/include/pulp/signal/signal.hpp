@@ -5,6 +5,7 @@
 #include <pulp/signal/adsr.hpp>
 #include <pulp/signal/bias.hpp>
 #include <pulp/signal/biquad.hpp>
+#include <pulp/signal/sos_cascade.hpp>
 #include <pulp/signal/oscillator.hpp>
 #include <pulp/signal/delay_line.hpp>
 #include <pulp/signal/dry_wet_mixer.hpp>

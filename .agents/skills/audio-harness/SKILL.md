@@ -1092,3 +1092,14 @@ disagreement is still reported as *that*.
 against `SpectralFrameEngine` (true latency `fft_size + analysis_hop` = 2560),
 not just against a delay line, and a companion case deliberately misreports by
 one analysis hop to confirm the catch. Copy that shape when covering real DSP.
+
+## Proving an SOS cascade executor
+
+For a runtime cascade, do not use its own DF2T recurrence as the oracle. Compare
+impulses against an independently written high-precision direct-form-I reference,
+and compare steady-state sine gain against direct complex evaluation of the SOS
+polynomials. Cover every supported design family, float and double execution,
+caller ordering/internal headroom, coefficient replacement and reset tails,
+non-finite/unstable/over-capacity transaction failures, denormal decay, and an
+allocation probe around the prepared runtime surface. Build and time the largest
+supported product in Release; Debug timing is not performance evidence.

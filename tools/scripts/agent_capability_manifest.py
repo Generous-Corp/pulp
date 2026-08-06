@@ -29,8 +29,8 @@ from agent_capability_evolution import (
 
 SCHEMA = "pulp.agent-capabilities.v1"
 SCHEMA_MINOR = 1
-MANIFEST_REVISION = 4
-SURFACE_INVENTORY_VERSION = 4
+MANIFEST_REVISION = 5
+SURFACE_INVENTORY_VERSION = 5
 HISTORY_SCHEMA = "pulp.agent-capability-history.v1"
 HISTORY_FILE = pathlib.Path("tools/agent-capabilities/contract-history.json")
 SNAPSHOT = pathlib.Path("docs/status/agent-capabilities.json")
@@ -90,6 +90,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/midi/mpe_voice_tracker.hpp": "Pulp::midi",
     "pulp/sequence/host_transport_projector.hpp": "Pulp::sequence",
     "pulp/signal/saturator.hpp": "Pulp::signal",
+    "pulp/signal/sos_cascade.hpp": "Pulp::signal",
     "pulp/signal/fft_backend.hpp": "Pulp::signal-fft-backend",
     "pulp/signal/modal_spec.hpp": "Pulp::signal-modal-spec",
     "pulp/signal/osc/minblep.hpp": "Pulp::signal",
@@ -242,6 +243,59 @@ EXPORTS = [
             "operation": "member_call",
             "member": "prepare",
             "arguments": "48000.0",
+        }],
+    ),
+    capability(
+        key="signal.sos-cascade",
+        domain="signal",
+        summary=(
+            "Fixed-capacity transactional execution of stable normalized "
+            "second-order-section cascades."
+        ),
+        rt_class="audio",
+        lifecycle={
+            "construction": "control",
+            "prepare": "control",
+            "process": "audio",
+            "reset": "audio",
+            "release": "none",
+        },
+        state_model=(
+            "A prepared fixed-capacity section array owns recursive DF2T state; "
+            "coefficient installation is whole-cascade transactional and occurs "
+            "at a block boundary."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "same_build",
+            "transport_history": "irrelevant",
+        },
+        input_domain="audio samples and normalized SOS coefficients",
+        output_domain="audio samples",
+        units=["samples", "normalized coefficients", "section count"],
+        latency="zero",
+        tail="recursive IIR decay until reset or denormal snap",
+        scheduling="sample-synchronous; coefficient changes at block boundaries",
+        bindings=[
+            binding(
+                role="entrypoint",
+                kind="cpp_type",
+                include="pulp/signal/sos_cascade.hpp",
+                qualified_name="pulp::signal::SosCascadeT<float>",
+                target="Pulp::signal",
+                header_fingerprint=(
+                    "sha256:8e6d177601b3167a8033a7e51c33174169b05a8719930964562fd22d5a4b5c3a"
+                ),
+            )
+        ],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::signal::SosCascadeT<float>",
+            "operation": "member_call",
+            "member": "prepare",
+            "arguments": "4",
         }],
     ),
     capability(
@@ -569,6 +623,36 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         "rationale": (
             "Generated residual coefficients are an installed implementation "
             "dependency of signal.minblep, not an independent authoring surface."
+        ),
+    },
+    {
+        "include": "pulp/signal/biquad.hpp",
+        "fingerprint": "sha256:938e359bcd792fb4b8d4205d94ec5ab2db6684ec99ea1f927a417539cb09c55b",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.sos-cascade"],
+        "rationale": (
+            "The bounded SOS executor consumes the normalized biquad coefficient "
+            "type and uses its shared stability predicate and runtime section."
+        ),
+    },
+    {
+        "include": "pulp/signal/iir_design.hpp",
+        "fingerprint": "sha256:d45c17451d8410069e3cffd4f911f2a532d525383ff033775d0c38b7c7decb10",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.sos-cascade"],
+        "rationale": (
+            "The public high-order IIR design helpers produce normalized SOS "
+            "coefficient vectors accepted by the bounded cascade executor."
+        ),
+    },
+    {
+        "include": "pulp/signal/signal.hpp",
+        "fingerprint": "sha256:457eacf11d8d8c8fdc47012ddc0255a233f249d9ce07dc86f2c701fc5d93892d",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "This is the signal module umbrella include; it exposes no distinct "
+            "consumer capability beyond the headers it aggregates."
         ),
     },
     {
