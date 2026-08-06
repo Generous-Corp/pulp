@@ -543,26 +543,64 @@ The `pulp` CLI wraps common development workflows.
 
 SDK installs include `share/pulp/agent-capabilities.json`, a versioned,
 multi-domain inventory of public APIs intended for generators and agents. Each
-curated row provides a stable key, public include and symbol, RT class,
-lifecycle, state and seed model, data domains, units, and latency/tail/scheduling
-categories. Signal rows may reference a semantic node key in
-`forge-catalog.json`; they never copy that catalog's numeric ranges, defaults,
-choices, or product policy.
+curated row provides a stable key, per-capability contract version and digest,
+support status, evolution state, typed C++ bindings and exported targets, RT
+class, lifecycle, state and seed model, data domains, units, and
+latency/tail/scheduling categories. Signal rows may reference a semantic node
+key in `forge-catalog.json`; they never copy that catalog's numeric ranges,
+defaults, choices, or product policy.
 
 The first inventory covers representative public signal processing, instrument
 voice allocation, MPE note ownership, exact tick/swing timebase types, and host
 transport projection. Swing projection uses an exact rational ratio; inverse
 recovery is bounded by integer-tick rounding rather than exact. A checked C++
-fixture includes and instantiates every advertised symbol. A separate acceptance
-test installs the SDK, configures an outside consumer, reads the installed
-manifest, and compiles/links against the exported targets. Maintainers validate
-or regenerate both artifacts with:
+fixture mechanically references every advertised type or function. A separate
+acceptance test installs the SDK, configures an outside consumer, reads the
+installed manifest and schemas, and compiles/links against every advertised
+exported target.
+
+Coverage is explicitly `partial`. An absent key means **unknown**, not
+unsupported. A live row's `status` is the positive support claim; an
+`unsupported_capability` surface disposition is an explicit negative claim;
+`legacy_unreviewed` means only that the public header has not yet received a
+machine-readable capability review.
+
+`docs/status/agent-capability-surface.json` is the maintenance ledger for all
+public headers in the covered audio, MIDI, signal, timebase, and sequence roots.
+It records SHA-256 file fingerprints and reviewed dispositions. The original
+unreviewed surface is frozen in
+`tools/agent-capabilities/legacy-unreviewed-baseline.json`: that set may shrink
+as headers are reviewed but may never grow. Consequently, CI fails closed when
+a public header is added, removed, or changed—including a new symbol inside an
+existing header—until the owner explicitly registers a capability, classifies
+the header as support/infrastructure/unsupported, or records a removal
+tombstone.
+
+For a new generator-facing algorithm, add a curated row and typed binding; the
+tool deliberately does not guess from a header or class name. Start a new key at
+contract version `1.0`. Increase the minor version for compatible additions and
+the major version for removed/renamed bindings or incompatible semantic changes.
+Any installed-manifest change also increases `manifest_revision`; any ledger
+change increases its `inventory_version`. Removed keys and headers leave
+permanent tombstones, so consumers can distinguish removal from an incomplete
+inventory and stable keys cannot be silently reused.
+
+This is a design-time discovery contract. Runtime operations, grants, policy,
+risk decisions, instances, activation, sessions, revocation, and receipts remain
+owned by the unified control platform and are rejected if added here.
+
+Maintainers validate or regenerate the checked artifacts with:
 
 ```bash
 python3 tools/scripts/agent_capability_manifest.py --check
 python3 tools/scripts/agent_capability_manifest.py --json
 python3 tools/scripts/agent_capability_manifest.py --write
 ```
+
+Use the `agent-capabilities` skill for the add/change/remove workflow. The
+surface ledger currently uses a conservative full-header byte fingerprint. A
+future pinned-Clang AST inventory may reduce non-semantic churn, but it must
+retain the same fail-closed mutation coverage.
 
 `tools/dsp_vocabulary.py` remains available with its exact signal-only JSON and
 Markdown output while consumers migrate. That renderer reads the complete

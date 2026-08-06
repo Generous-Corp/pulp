@@ -1,0 +1,1363 @@
+{
+  "schema": "pulp.agent-capability-legacy-baseline.v1",
+  "frozen_count": 339,
+  "entries_digest": "sha256:880d2694d8dab7fdb041297ea4d7fe2c70c7b8bd53ca6bf7b47cd9954bbdd8c7",
+  "entries": [
+    {
+      "include": "pulp/audio/analyzer_provider.hpp",
+      "fingerprint": "sha256:61a125489eff54a9ab4433207b62c68af5df896e064d4cebacef86cdd1e207ed"
+    },
+    {
+      "include": "pulp/audio/audio.hpp",
+      "fingerprint": "sha256:016864f99eabfce2757bf7105c2c1323f7b737c09f32e7468a9b4183a3ff2e00"
+    },
+    {
+      "include": "pulp/audio/audio_boundary_report.hpp",
+      "fingerprint": "sha256:45c6b48d154b28a714f220c5f27e5b7f201ea8b3540b6f1fdf2eca44de99307e"
+    },
+    {
+      "include": "pulp/audio/audio_device_manager.hpp",
+      "fingerprint": "sha256:9d1b63aef909a1cfe643e3d67e295dae20f2c8d788952ae7b7bfbb0f174547c3"
+    },
+    {
+      "include": "pulp/audio/audio_file.hpp",
+      "fingerprint": "sha256:421cd28fdbc1bd053d8cae09c8b6771031c410e1521f17fd6d2a030ef911d3d6"
+    },
+    {
+      "include": "pulp/audio/audio_focus.hpp",
+      "fingerprint": "sha256:50180461d91f1e615d6a3390ddb865a5858a658b1e5022dee7ebe042406b0874"
+    },
+    {
+      "include": "pulp/audio/audio_io_timing.hpp",
+      "fingerprint": "sha256:a1f193729a091848a61dfc912c128d080395469acdd2988cb43bea5e0e980d86"
+    },
+    {
+      "include": "pulp/audio/audio_probe.hpp",
+      "fingerprint": "sha256:6451a59ef45103ad6816f6278e9a987c3fcc9b1e0d4530ef55975eed530240ad"
+    },
+    {
+      "include": "pulp/audio/audio_probe_json.hpp",
+      "fingerprint": "sha256:015ae178bdae314d16320ee5439761df7aa2fd5d678078a0e70db2de277b5698"
+    },
+    {
+      "include": "pulp/audio/audio_probe_snapshot.hpp",
+      "fingerprint": "sha256:dd6124fdf8daf2f6da1a6f3aa608bbc5b0aba997af71c455910814407386d472"
+    },
+    {
+      "include": "pulp/audio/audio_scope.hpp",
+      "fingerprint": "sha256:7683a86f295a26b4c195b5511eb814e28e0290b8d81789f622e97d27f843db88"
+    },
+    {
+      "include": "pulp/audio/audio_scope_json.hpp",
+      "fingerprint": "sha256:eb9ed360156e9a44a8b2e4065f901232b7004c4591353aa6dffc9b9b16b0c535"
+    },
+    {
+      "include": "pulp/audio/audio_stats.hpp",
+      "fingerprint": "sha256:e43a38f2e590ed7e1796a3f8a0590bbe63c22146995e0f575bdb4a2ec938c84e"
+    },
+    {
+      "include": "pulp/audio/audio_stream_handoff.hpp",
+      "fingerprint": "sha256:b28868d228bd317cf55dc711b50cbe4658b0b35666bdfb1b29bad7a8b67084c5"
+    },
+    {
+      "include": "pulp/audio/audio_tap.hpp",
+      "fingerprint": "sha256:4a10602cf02b7d2ea6ee1b48c2da8da7da23b1b0a242119cd6ecac7a38f2b384"
+    },
+    {
+      "include": "pulp/audio/buffer.hpp",
+      "fingerprint": "sha256:658bed3ec575d41c492d6123903ebeac6d2bfa6ebacac42ab9a165b1d1e6c51c"
+    },
+    {
+      "include": "pulp/audio/buffer_ops.hpp",
+      "fingerprint": "sha256:9f7a193dd29ab2ef40a3c6d92ded708777885e4099532403ed6b397613666df2"
+    },
+    {
+      "include": "pulp/audio/buffering_reader.hpp",
+      "fingerprint": "sha256:89d37d1bae31a3851126afadf408056980fb1fd09d2e66987a359f762f78945a"
+    },
+    {
+      "include": "pulp/audio/built_in_key_tempo_analyzer.hpp",
+      "fingerprint": "sha256:24cf2445dd67098080321b282140547da7c93aff494321a1d520aab29dd16562"
+    },
+    {
+      "include": "pulp/audio/built_in_transient_classifier.hpp",
+      "fingerprint": "sha256:3da5ae7fc962b1808da88083dc90f3b0b5a3a5d46b78b66b96e66966a62c612c"
+    },
+    {
+      "include": "pulp/audio/channel_set.hpp",
+      "fingerprint": "sha256:2e369d3c828b0f5006ee24e7479826904521916eadbe1ad937c77df673c35c49"
+    },
+    {
+      "include": "pulp/audio/device.hpp",
+      "fingerprint": "sha256:fdba25f4a39f78b8099203b79bd7bf1cde913e35d075d10ec71ff5611a72e6d3"
+    },
+    {
+      "include": "pulp/audio/excerpt_types.hpp",
+      "fingerprint": "sha256:a135ce1555622831cc5b218f375a7f71b5712f224553df523209e1ee68b4a24d"
+    },
+    {
+      "include": "pulp/audio/finite_time_stretch.hpp",
+      "fingerprint": "sha256:2edcfa0f14d8adc1c8a7252aaf73ebeb5f571dce83549ed9fba400c5f468bd33"
+    },
+    {
+      "include": "pulp/audio/format_reader_source.hpp",
+      "fingerprint": "sha256:69094144023267290c028a341b1dacd9466ad8802d907623d464623f65af1940"
+    },
+    {
+      "include": "pulp/audio/format_registry.hpp",
+      "fingerprint": "sha256:7241d82c4bdf004085cb68ce3293e8948dce6ea08758d29e9df06778e57705d1"
+    },
+    {
+      "include": "pulp/audio/frame_fill.hpp",
+      "fingerprint": "sha256:cc3acd673981d415a5063bdd0e70dcef7b981bf8694d0de253a905d6fbc48ed9"
+    },
+    {
+      "include": "pulp/audio/impulse_response.hpp",
+      "fingerprint": "sha256:6decae41f09fa9859a8973196e8ccba6b729e81d39b46eb2f5510479c4e86b0d"
+    },
+    {
+      "include": "pulp/audio/instrument_envelope.hpp",
+      "fingerprint": "sha256:9cd3fa5e2de18281ed642545100d2a31da6e72d9f2e8912e847916e62d5f2fd5"
+    },
+    {
+      "include": "pulp/audio/instrument_runtime.hpp",
+      "fingerprint": "sha256:807335629a0ea6cdaf524221df9f5e87bbd9f39c9de3a7eb4fa96f50ba0d9632"
+    },
+    {
+      "include": "pulp/audio/live_dsp_telemetry.hpp",
+      "fingerprint": "sha256:73e0a0b8800f9f9ef25fdbb08c5a13c9f79ece5f025ddae834b72866bad45103"
+    },
+    {
+      "include": "pulp/audio/live_dsp_telemetry_json.hpp",
+      "fingerprint": "sha256:b8f0e6568ec315cc489f3253aea85c7984f779d8c3f5082a4b6aa693412f6c44"
+    },
+    {
+      "include": "pulp/audio/load_measurer.hpp",
+      "fingerprint": "sha256:75f64718a84bbf884e6818eb3bfcff157da9d566231f79966656ab470f8a6aa3"
+    },
+    {
+      "include": "pulp/audio/loop_playback_cursor.hpp",
+      "fingerprint": "sha256:88d4fe18587bc8103d04740ba5f0410f966adc3b80633e87523e0f4ab1df4b16"
+    },
+    {
+      "include": "pulp/audio/loop_point_analyzer.hpp",
+      "fingerprint": "sha256:54cc729b3681c1600a74f911c5857ab6a847f0083ad96aff356deb50d5a41d94"
+    },
+    {
+      "include": "pulp/audio/loop_reader.hpp",
+      "fingerprint": "sha256:3a2a18ad10df18195aeee96e210da9fd0799df9e73313f4289277fd9c0ab9119"
+    },
+    {
+      "include": "pulp/audio/loop_renderer.hpp",
+      "fingerprint": "sha256:686a890b3972cdd26ad714868116e2efdf24400f62adb2f83463ada24389311c"
+    },
+    {
+      "include": "pulp/audio/loop_types.hpp",
+      "fingerprint": "sha256:850a3e22817fb2a5bf8a80c4e217b0c95575fb575e5a8f927a5cbd310dfc2d53"
+    },
+    {
+      "include": "pulp/audio/mmap_reader.hpp",
+      "fingerprint": "sha256:483e1c322fc564087a3594548ae7b57d53fc76b1823253a92b6e07c459d91650"
+    },
+    {
+      "include": "pulp/audio/offline_processor.hpp",
+      "fingerprint": "sha256:2fbdb09b45a7b397c3b151ea6c63d7edf6553fb54abccf602997a5c539f4da7f"
+    },
+    {
+      "include": "pulp/audio/onset_detector.hpp",
+      "fingerprint": "sha256:ac3f1d1f1a455ffdcf4f6fd855ee3ad111fa0c4a2796139260e576340168727f"
+    },
+    {
+      "include": "pulp/audio/planar_audio_ring_buffer.hpp",
+      "fingerprint": "sha256:b556854669dae5a5b2c14f133d8920d46d20908c28b394c6ef4417ec19eb8d7d"
+    },
+    {
+      "include": "pulp/audio/published_sample_store.hpp",
+      "fingerprint": "sha256:19bf5531ac90bf4fd88c3b6a1afac7de5796a7110c36e898ebcd3bf54a1a5c2e"
+    },
+    {
+      "include": "pulp/audio/realtime_sample_recorder.hpp",
+      "fingerprint": "sha256:35ce46a609c2c11f73fbd1b0089be96210fb6579fdca179bfaf827b59f1e9451"
+    },
+    {
+      "include": "pulp/audio/realtime_time_stretch.hpp",
+      "fingerprint": "sha256:76ce262e36d2fc89320cc1d5871a9f5175653e15ec71d11047655ab09dfb85ad"
+    },
+    {
+      "include": "pulp/audio/rolling_audio_capture_buffer.hpp",
+      "fingerprint": "sha256:09b23362101d10ef49e6a5cb27db60dd8e4dae4283972eb2680bd0154718f5b2"
+    },
+    {
+      "include": "pulp/audio/rt_safety_contract.hpp",
+      "fingerprint": "sha256:7c6420b43b8a6cfeb7e9cf6940a3fd38406d81c3f36b0e244f7b1e9694301c99"
+    },
+    {
+      "include": "pulp/audio/sample_asset.hpp",
+      "fingerprint": "sha256:d013c5e47e6fee6b04b5e3a58f5e92cc9eef67459a3a00b0408fbef08ce041a4"
+    },
+    {
+      "include": "pulp/audio/sample_asset_io.hpp",
+      "fingerprint": "sha256:8c13d7d1971353f6a0bbe14fe3ab85bcce14c01562334d3e79f37cf5cc2906e7"
+    },
+    {
+      "include": "pulp/audio/sample_bank.hpp",
+      "fingerprint": "sha256:4bc8b8d64ad56992a9c8120295a6985a2d18b428e7ad7372e753dbdb64e8eca6"
+    },
+    {
+      "include": "pulp/audio/sample_converter.hpp",
+      "fingerprint": "sha256:5e5eeb941a02adca3b81437bdb759c4d92811b4dea3cd3c980220b034bbcac57"
+    },
+    {
+      "include": "pulp/audio/sample_edit_document.hpp",
+      "fingerprint": "sha256:389fa57929db53159a01e55e987102d0e4d84f66b0d97981794ce033c410b5fc"
+    },
+    {
+      "include": "pulp/audio/sample_heritage.hpp",
+      "fingerprint": "sha256:af08dfe1c371079549453f2a262b88a50421705e6113aaea3a5a21978b24ed23"
+    },
+    {
+      "include": "pulp/audio/sample_heritage_bus_dsp.hpp",
+      "fingerprint": "sha256:86c1ee48941055e66e202900e0a4a881fc2beed714f529a2bbe4e8100e65345e"
+    },
+    {
+      "include": "pulp/audio/sample_heritage_engine.hpp",
+      "fingerprint": "sha256:a91726423011e52c45798dfa31e7cc9719e487009a59e4c8e66c852e9448b5db"
+    },
+    {
+      "include": "pulp/audio/sample_heritage_json.hpp",
+      "fingerprint": "sha256:777f833a6175ab1ca905c973653f6dc9f10bd2486183e39ebc9c53ae02ba6f46"
+    },
+    {
+      "include": "pulp/audio/sample_heritage_live_cyclic.hpp",
+      "fingerprint": "sha256:2875957f00decc9d63191beee105dd799408003d6a1006430b26ea651f3edd40"
+    },
+    {
+      "include": "pulp/audio/sample_heritage_pitch.hpp",
+      "fingerprint": "sha256:d3697c1338b5719019b0c87376c50770f91ca91483bca8b5004edd6e1663ee1e"
+    },
+    {
+      "include": "pulp/audio/sample_heritage_record_commit.hpp",
+      "fingerprint": "sha256:f19d0bf30bf22509fa6a8d54f913350ab5a43d5b9ecdbeb673b33e16b93763e1"
+    },
+    {
+      "include": "pulp/audio/sample_heritage_runtime_state.hpp",
+      "fingerprint": "sha256:bd4c618a3641b4bbd2844d9ae4da5817b3ac66d4f5ccbededfa5afece5005f1a"
+    },
+    {
+      "include": "pulp/audio/sample_heritage_schema.hpp",
+      "fingerprint": "sha256:6a7f040c44e0984e5a5bae5ca250df13e63d43784a3695eacbaaef994be31e13"
+    },
+    {
+      "include": "pulp/audio/sample_heritage_src.hpp",
+      "fingerprint": "sha256:8b0cf838b112990887c68dae018275bbea0cd02c3d5f59eee15729a4878e90e6"
+    },
+    {
+      "include": "pulp/audio/sample_heritage_voice_dsp.hpp",
+      "fingerprint": "sha256:2ca48616c271f21676d214054dfe5c3b7258b53859c9fb057b1c0dfdd5e71906"
+    },
+    {
+      "include": "pulp/audio/sample_identity.hpp",
+      "fingerprint": "sha256:ad2e3857d7b85e0564c5ca264d5d6dc12393c6066fa713a3ce744f95b5d4b7c1"
+    },
+    {
+      "include": "pulp/audio/sample_interpolation.hpp",
+      "fingerprint": "sha256:e37bf8115fb37b1a5f17fbc3eeeefb2f3d9f216f7cf14a6db218cead4c17c224"
+    },
+    {
+      "include": "pulp/audio/sample_key_map.hpp",
+      "fingerprint": "sha256:4bc949a32e96a8a7896a1a6420c02d70ca0ff5d3bdc670463c6d8cad270dcc52"
+    },
+    {
+      "include": "pulp/audio/sample_memory_governor.hpp",
+      "fingerprint": "sha256:f4dc0bd180a59d54107b20dcb5465b4525dc643b6f33548c3567ed9d08e21124"
+    },
+    {
+      "include": "pulp/audio/sample_mip_builder.hpp",
+      "fingerprint": "sha256:c880ecb06e13d30986f1a22e0c9dbc1bc880818c60a61971711a1becede1b82a"
+    },
+    {
+      "include": "pulp/audio/sample_mip_sidecar.hpp",
+      "fingerprint": "sha256:06b3ea7ec7b79c6090a81aeec970a5985cc5d50c79f98fa8edf3b7c265dc4583"
+    },
+    {
+      "include": "pulp/audio/sample_pool.hpp",
+      "fingerprint": "sha256:d2f83c66496948f17ab0591f016b6b094abb400d3e83c8a4fe169e445ffcacd2"
+    },
+    {
+      "include": "pulp/audio/sample_preload_contract.hpp",
+      "fingerprint": "sha256:d314fe8249453d94a1059b278bc7b32cb42d1d12174af739eb43ca681bd9805f"
+    },
+    {
+      "include": "pulp/audio/sample_rate_conversion.hpp",
+      "fingerprint": "sha256:cac76520230b993f90a6ea1666b3c7849d1c948dd10b4cdb9f78fcb755dd362b"
+    },
+    {
+      "include": "pulp/audio/sample_resource.hpp",
+      "fingerprint": "sha256:663954f691b0957447899d2b86ea92a9bad7edba92f736eb6806955df7b362ea"
+    },
+    {
+      "include": "pulp/audio/sample_sinc_kernel.hpp",
+      "fingerprint": "sha256:e3d4eab28df941ad3049a3f2ee56900b6023c52b629d3f318929f2e16f5f602f"
+    },
+    {
+      "include": "pulp/audio/sample_slot_bank.hpp",
+      "fingerprint": "sha256:5e8b4fdffd80b81f90d27e0d42348bb26a725cbd1a619aa7e476aedd580657ae"
+    },
+    {
+      "include": "pulp/audio/sample_slot_materializer.hpp",
+      "fingerprint": "sha256:ed04de4807576ba9436a5b3a7d9545766af4edbc2bdc105fd1248f0c059a2366"
+    },
+    {
+      "include": "pulp/audio/sample_starvation_envelope.hpp",
+      "fingerprint": "sha256:18409577e896742b093e477d37c7fd850a548f904c879ea872205334f56b5d3b"
+    },
+    {
+      "include": "pulp/audio/sample_stream_async_service.hpp",
+      "fingerprint": "sha256:d150bcdead72864721ff8f164a21f1d666d2737b6cba759e5d660cd39a99e1e3"
+    },
+    {
+      "include": "pulp/audio/sample_stream_consumption.hpp",
+      "fingerprint": "sha256:bcdeff549207087974b39e22af7322ee5e2325bbf07645ed19289d8c79d34148"
+    },
+    {
+      "include": "pulp/audio/sample_stream_decode_pool.hpp",
+      "fingerprint": "sha256:85222e3080dfa5d8acfd9bf9cc66017c004bacdc442e3d5d68d5ddd2bdb0d818"
+    },
+    {
+      "include": "pulp/audio/sample_stream_loop_voice_reader.hpp",
+      "fingerprint": "sha256:8302f9b45ec6d4cacf65e1f1b5cebcc74cb0472cac80eb85cc9e60224487a134"
+    },
+    {
+      "include": "pulp/audio/sample_stream_scheduler.hpp",
+      "fingerprint": "sha256:848760dba08f2c2ccfd6739d05ed785cde0b029b42dd6c4e1a6f989578fd7bd4"
+    },
+    {
+      "include": "pulp/audio/sample_stream_service.hpp",
+      "fingerprint": "sha256:b0c457d29c366a46d29a5401810daee2eed444755cf7088161997a4fb75c5715"
+    },
+    {
+      "include": "pulp/audio/sample_stream_voice_reader.hpp",
+      "fingerprint": "sha256:1846e2982d4bda7a3a88236fd2cf679add47495354277b24a12382037b9dc07e"
+    },
+    {
+      "include": "pulp/audio/sample_stream_window.hpp",
+      "fingerprint": "sha256:44a90c09dd4d281462b792d7af2620e91e961c4d142acff7c1e0f9b42af8936e"
+    },
+    {
+      "include": "pulp/audio/sample_voice_renderer.hpp",
+      "fingerprint": "sha256:1b7240423af839abed8e4752bb7f7b5a34d98329c51ed475828a5e99e8c9d597"
+    },
+    {
+      "include": "pulp/audio/sample_zone_map.hpp",
+      "fingerprint": "sha256:1da1aee15d53f0a8b862d6879eed971babcbedaad24bb4a35dbb04d68e365a83"
+    },
+    {
+      "include": "pulp/audio/sampler_looper_metrics.hpp",
+      "fingerprint": "sha256:21d51d06e9493712ec9c1ae15cc7ddc259a98c59ad293656a9dbfae7d4e5ad37"
+    },
+    {
+      "include": "pulp/audio/signalsmith_time_pitch_processor.hpp",
+      "fingerprint": "sha256:7f690f3e7a61e70061636cc3b7ded24a89b1e41ac4ec1786173c4856fcc26224"
+    },
+    {
+      "include": "pulp/audio/slice_map.hpp",
+      "fingerprint": "sha256:2de21378192c525720412d7f6a1c218e1c7dae79895d43deb0a3d408b58b3631"
+    },
+    {
+      "include": "pulp/audio/slice_point_analyzer.hpp",
+      "fingerprint": "sha256:03fd4177e69bc444770b683dc880ab523dd6ad437ec68705c1f58deee672db5e"
+    },
+    {
+      "include": "pulp/audio/source.hpp",
+      "fingerprint": "sha256:c79c698a5dc76bab62d08456539f9df42e324d07f6f6f0eff6ae592f2ee14f87"
+    },
+    {
+      "include": "pulp/audio/source_player.hpp",
+      "fingerprint": "sha256:edbe609fabe6e068a7e256cdc4df21aa10b613cdbe93986b5d9210407dfcb4c8"
+    },
+    {
+      "include": "pulp/audio/streaming_sample_source.hpp",
+      "fingerprint": "sha256:3daf96212583d625d2372780b22f8a7e211104290511e776ca6ff149b2a61e64"
+    },
+    {
+      "include": "pulp/audio/streaming_sample_source_file.hpp",
+      "fingerprint": "sha256:578ae30905a7c954ca6eeb78d6d9545d316b291660034c5a39e931c4b6f6391e"
+    },
+    {
+      "include": "pulp/audio/streaming_writer.hpp",
+      "fingerprint": "sha256:f722e34094bde9bd502352608ea95e024d7133f78d8031772c079361bb6767e0"
+    },
+    {
+      "include": "pulp/audio/subsection_reader.hpp",
+      "fingerprint": "sha256:47864850acb9aea78d161b3e5fe7fb0e2a86b4f0deda22f5d6d50780cb2fbcac"
+    },
+    {
+      "include": "pulp/audio/system_volume.hpp",
+      "fingerprint": "sha256:aae9b56b7d4e49c4fab3a6bc134291f67011957566d5f4b2f95936409ccc2ec2"
+    },
+    {
+      "include": "pulp/audio/transport_source.hpp",
+      "fingerprint": "sha256:874ced28e7539821d20cf858172c6cdc90edb7b0b118e293f629b6100c74be70"
+    },
+    {
+      "include": "pulp/audio/voice_modulation_buffer.hpp",
+      "fingerprint": "sha256:291ed39f552efec999bb542f86500560e82a220c57305e98fccc5c7ad69cbd77"
+    },
+    {
+      "include": "pulp/audio/voice_sum_mixer.hpp",
+      "fingerprint": "sha256:8104a916cf3b10c08e16975386527b3b71012838c36642da3eb17e8ed16d1826"
+    },
+    {
+      "include": "pulp/audio/wav_decoder.hpp",
+      "fingerprint": "sha256:f6da1ca1a82383df7793d0ec17a4bafebe351eb4bd987791fff4eea0b6fd6671"
+    },
+    {
+      "include": "pulp/audio/wav_metadata.hpp",
+      "fingerprint": "sha256:5b1b984502026fdd82de3e317bcaab9a2885b16c55757427224ff90313722969"
+    },
+    {
+      "include": "pulp/audio/waveform_overview.hpp",
+      "fingerprint": "sha256:0cf992095a45b0909fc81bb46bc05ae31b2139b77799b8ede2057527749d5463"
+    },
+    {
+      "include": "pulp/audio/window_enumerator.hpp",
+      "fingerprint": "sha256:129267603d956724b04c8ed2b8a9e0904ebd01a201a7adb13c570c4b29bdcc15"
+    },
+    {
+      "include": "pulp/audio/workgroup.hpp",
+      "fingerprint": "sha256:225bd04e5a5925d031f1f0222824b116ab8ed413c6b127b98b1b687522d091ee"
+    },
+    {
+      "include": "pulp/audio/zone_layer_select.hpp",
+      "fingerprint": "sha256:af743f6923ffc81dc6991edb462a186e7e92d6a6d11114fd15966c65bcdb8fda"
+    },
+    {
+      "include": "pulp/midi/android_midi_fifo.hpp",
+      "fingerprint": "sha256:6f28940461c02bc3f631a756e270c2eeaea532c4d415ccd78fecf614b2668f6c"
+    },
+    {
+      "include": "pulp/midi/ble_midi.hpp",
+      "fingerprint": "sha256:926bf54d18762c875c7a26591b191e1532e20c228d9ab18c160e6cc76a5c89b9"
+    },
+    {
+      "include": "pulp/midi/ble_midi_registry.hpp",
+      "fingerprint": "sha256:c3766d3752a8c17e58b5fa067a2e920dd7e32914e25dadca8306510264b87734"
+    },
+    {
+      "include": "pulp/midi/block_ops.hpp",
+      "fingerprint": "sha256:d0ab39f9d6b333f754a1e658607bfa64ad098c80f9d62be3da60c3839fdeea29"
+    },
+    {
+      "include": "pulp/midi/buffer.hpp",
+      "fingerprint": "sha256:fc89c0c56e027b62538257f2eea76ea52bc85df42c65a5ed4394451565aa4d1f"
+    },
+    {
+      "include": "pulp/midi/device.hpp",
+      "fingerprint": "sha256:e09c197d2137be61c745d5f2db9c6266bbac7e8f9b757fcf386daae5881be45d"
+    },
+    {
+      "include": "pulp/midi/keyboard_state.hpp",
+      "fingerprint": "sha256:bec4e61084cecc823ee01cd0abb9b1a679d483d68bee499f319f142c07c6b76b"
+    },
+    {
+      "include": "pulp/midi/mcoded7.hpp",
+      "fingerprint": "sha256:8f643636797c932f05b161bba67022d908a32e70aa31fd13a19c4c317c34d3c4"
+    },
+    {
+      "include": "pulp/midi/message.hpp",
+      "fingerprint": "sha256:ebc97204af0cf9bedd352776d8f22dfc958b4df193ebe20377013b91b4c5590d"
+    },
+    {
+      "include": "pulp/midi/message_collector.hpp",
+      "fingerprint": "sha256:f7c985ccf4ae0ac09ba6f68c9f9a9bce13345c1b429683eb4a9e6daa7735a3e6"
+    },
+    {
+      "include": "pulp/midi/midi.hpp",
+      "fingerprint": "sha256:e28f7965cbf55cb0fc0fd1bcda671a15a87de7bd7960c60a812dab797211d082"
+    },
+    {
+      "include": "pulp/midi/midi_ci.hpp",
+      "fingerprint": "sha256:d6f5ca27a55dc7f195929ec691fbfe3940b423b36ae2c0e67bb6bac4d75f9b3f"
+    },
+    {
+      "include": "pulp/midi/midi_ci_pe.hpp",
+      "fingerprint": "sha256:9779afd4941edeb719be0690bb6191b67017ba14a6c455080a1b42bfa3f72b7f"
+    },
+    {
+      "include": "pulp/midi/midi_control_bus.hpp",
+      "fingerprint": "sha256:a22c252c7d026ee8a845b8d0653d297d8af1d6c6be6e78a1d811d4eb6a823c50"
+    },
+    {
+      "include": "pulp/midi/midi_file.hpp",
+      "fingerprint": "sha256:c2fc4fb8395c2549cfc56f71502c373425de55bc95ef918cbb1227ff274c3a8b"
+    },
+    {
+      "include": "pulp/midi/midi_message_sequence.hpp",
+      "fingerprint": "sha256:27afa05df603d54ce47a409e9aacccbb7291a69232acb833128ac9f6cd74d5df"
+    },
+    {
+      "include": "pulp/midi/monotonic_timestamp.hpp",
+      "fingerprint": "sha256:1008341155436ccd7b672cde9b1d7f2c0f948a95e05a81e5c055f37f7d86faa1"
+    },
+    {
+      "include": "pulp/midi/mpe_buffer.hpp",
+      "fingerprint": "sha256:55d1ce24a0ddd8c7f914cc12dcc608224a3be1b436323c82b39de575e6ac07d8"
+    },
+    {
+      "include": "pulp/midi/mpe_synth_voice.hpp",
+      "fingerprint": "sha256:56cd71c417411386ef5baab86915094bd39d95b6299344908a75d7444d385d57"
+    },
+    {
+      "include": "pulp/midi/mts_esp_tuning.hpp",
+      "fingerprint": "sha256:360dc9fa8ccbdfea24210bdeb0b6edb2d3f4731378cffbf707bc3ae8375cd156"
+    },
+    {
+      "include": "pulp/midi/raw_midi_parser.hpp",
+      "fingerprint": "sha256:48adcd006d27381b0d80fc5d1f40b70c5ff007afe0c20bdec3642cc3cfe1e48b"
+    },
+    {
+      "include": "pulp/midi/rpn_parser.hpp",
+      "fingerprint": "sha256:60f5770bd9ca92bffe45753b864c30388e23072192b7478791248ef7484efd8c"
+    },
+    {
+      "include": "pulp/midi/running_status.hpp",
+      "fingerprint": "sha256:6f0686885d408c5a47b89ed0564f19b5b71691fcfa0b9b4429628d0de5568a9c"
+    },
+    {
+      "include": "pulp/midi/scala_tuning.hpp",
+      "fingerprint": "sha256:2c3f39709076bfd6930a78826fc02e58602575066dfbc1f75bde9bec642e31af"
+    },
+    {
+      "include": "pulp/midi/synthesiser.hpp",
+      "fingerprint": "sha256:831ae4496996596eea75fb8e6ec7ae6fa7ee3aca61976a633727ac96174eb1a0"
+    },
+    {
+      "include": "pulp/midi/sysex_accumulator.hpp",
+      "fingerprint": "sha256:d4820481a0bf30553f2990f096cb1684ab4f1762d85df08b38c21d0d63823623"
+    },
+    {
+      "include": "pulp/midi/tuning.hpp",
+      "fingerprint": "sha256:84f372a58c3a1955de081c6f76fc96fc6f67a65b3f07801833996dab90c8a025"
+    },
+    {
+      "include": "pulp/midi/ump.hpp",
+      "fingerprint": "sha256:2ae339435f5a384442b347f3e329713ed38cb64ca0238d727462003b833846fd"
+    },
+    {
+      "include": "pulp/midi/ump_buffer.hpp",
+      "fingerprint": "sha256:5837b645aee78cb09cd5031d779930b5da49ab04cd343e0c0f86655ce7343406"
+    },
+    {
+      "include": "pulp/midi/ump_conversion.hpp",
+      "fingerprint": "sha256:43f1ec9ddadc0ce7921d04348a74b4c58b65d04cf7566145dea199988e10b179"
+    },
+    {
+      "include": "pulp/midi/ump_endpoint.hpp",
+      "fingerprint": "sha256:2d6cbc8335139a867ba9042b4652b6f9303ccd55d087ed93e58a3f62ae8d311a"
+    },
+    {
+      "include": "pulp/midi/ump_session.hpp",
+      "fingerprint": "sha256:76ca1ce5ec3a7e82074df1005c3c90829f1d28585d5b5f34f71eb8cbe84cf213"
+    },
+    {
+      "include": "pulp/midi/ump_sysex7_reassembler.hpp",
+      "fingerprint": "sha256:f881ddce6a156c2f5916c986c0ac9411890f2cc529987f26e17f93a7139b0dc1"
+    },
+    {
+      "include": "pulp/midi/ump_virtual_endpoint.hpp",
+      "fingerprint": "sha256:f6945562e87c7a56d143808ec0c8fbba787afd08a3bd707b46c3d97128cab646"
+    },
+    {
+      "include": "pulp/sequence/sequence_processor.hpp",
+      "fingerprint": "sha256:e3b4f26370fed406bbb195b5f8a5234c1cbb492e20d9b90c6e41ba6948a69e4c"
+    },
+    {
+      "include": "pulp/signal/additive_bank.hpp",
+      "fingerprint": "sha256:f0035051d020bb09b8d721ec04aa2b314caccfc1ec6a3571d57b6266016aedeb"
+    },
+    {
+      "include": "pulp/signal/additive_spectral_envelope.hpp",
+      "fingerprint": "sha256:4e1bd0d14ccfdb4c88c004bf72cf84afcbd782ee89119f4ac0b41a6b573e15e3"
+    },
+    {
+      "include": "pulp/signal/adsr.hpp",
+      "fingerprint": "sha256:4daa4704d4f686d319cc02512db610cefe5db900eb4d73e47440b355ee2cffa9"
+    },
+    {
+      "include": "pulp/signal/analog_vcf.hpp",
+      "fingerprint": "sha256:8d4fc8071426df0f61027d1324e3253363edd4903a43443b709d3b7b686a6725"
+    },
+    {
+      "include": "pulp/signal/ballistics_filter.hpp",
+      "fingerprint": "sha256:38b75ea9928b3e2fa233713822b433e37e354970091d25aa677e978c2cd3dc03"
+    },
+    {
+      "include": "pulp/signal/bias.hpp",
+      "fingerprint": "sha256:e1b90f23d44c752132d0feb9e5873a03069a32cf40f9631098d2019231f696d8"
+    },
+    {
+      "include": "pulp/signal/biquad.hpp",
+      "fingerprint": "sha256:4ad68251b7c150875a9a816f77c342631dd4bc886ca5f199fc01b28b97964757"
+    },
+    {
+      "include": "pulp/signal/bridged_t_resonator.hpp",
+      "fingerprint": "sha256:3f756cda95749f4ac85181a5f24791013441738bf952be6970fec3347c127a85"
+    },
+    {
+      "include": "pulp/signal/cartesian_walk.hpp",
+      "fingerprint": "sha256:0dd49e8351e1fdb7c0144f0038272c99b0709cfde6e1d4dac2cd5a086f63446f"
+    },
+    {
+      "include": "pulp/signal/chaos.hpp",
+      "fingerprint": "sha256:35668d317c30a5d7d6ea7a333a7f4c4c7705b77d4c7a58965d0e03a51a0f78ff"
+    },
+    {
+      "include": "pulp/signal/character_delay.hpp",
+      "fingerprint": "sha256:29f335794f366ad74721c563f866cba8f088dccf5c824e4f1c1b8b5f91dd217f"
+    },
+    {
+      "include": "pulp/signal/character_delay/bbd.hpp",
+      "fingerprint": "sha256:d857643819c46373021adcf19ecdcd28c2de21c64b0cace70bd12a409835b244"
+    },
+    {
+      "include": "pulp/signal/character_delay/diffusion.hpp",
+      "fingerprint": "sha256:a74d3dc77bf8be1d4df4eb350804f23c3cd13283d18060f390bdb8b54525a233"
+    },
+    {
+      "include": "pulp/signal/character_delay/hysteresis.hpp",
+      "fingerprint": "sha256:343ce3a241ccfe57ea1949961de81251618954dbcadd2a05cbb032884c6d73d1"
+    },
+    {
+      "include": "pulp/signal/character_delay/primitives.hpp",
+      "fingerprint": "sha256:3c90c636f429e11f2912e015919302fcf473067fe3f2a329e70ef7ddd086a65e"
+    },
+    {
+      "include": "pulp/signal/character_delay/reverse.hpp",
+      "fingerprint": "sha256:c1c53d21dcb25833f48f3901e6770318a01d84399045014d3cc0d96a0d68aa48"
+    },
+    {
+      "include": "pulp/signal/character_delay/tables.hpp",
+      "fingerprint": "sha256:8f211dda83d5f7073dd30813ce582e82910af50384180eb1433b7c439a4e34e3"
+    },
+    {
+      "include": "pulp/signal/character_delay/tape.hpp",
+      "fingerprint": "sha256:7a7ecf6f7493f8acccc4da38e725233b4b9044d207b3cecbfdca8077fea88d4a"
+    },
+    {
+      "include": "pulp/signal/character_delay/tape_loss.hpp",
+      "fingerprint": "sha256:dea3d566fd6282d322433ea249a8fe2ed0657c9f0c464acb45a95a11856cf341"
+    },
+    {
+      "include": "pulp/signal/character_delay/tape_physical.hpp",
+      "fingerprint": "sha256:29fc77affb854823d15b2ae2cb6bfda3e06ce9df89c6ffe111d424245c4b8a55"
+    },
+    {
+      "include": "pulp/signal/character_delay/vintage.hpp",
+      "fingerprint": "sha256:14800ba2cf8a3727ec2982ba0ba8f9aa1b9d325bea8a29b8119d18a3d982632e"
+    },
+    {
+      "include": "pulp/signal/checked_allocation.hpp",
+      "fingerprint": "sha256:c76d64d6fd358fe243c7c374ed4b3611dfdd07bd2370be1eae6feeaf0f195d08"
+    },
+    {
+      "include": "pulp/signal/chorus.hpp",
+      "fingerprint": "sha256:eab232dd7dc5bedfef38b0fe68d2c382e2e6984f76c64f28b2b919c09d2bf97a"
+    },
+    {
+      "include": "pulp/signal/chorus_family.hpp",
+      "fingerprint": "sha256:0976c7ced05cdbf451bfb9b9e814cd881d14e03b526579f324fd086135262cf8"
+    },
+    {
+      "include": "pulp/signal/compressor.hpp",
+      "fingerprint": "sha256:a33363f8c737fe94231f427d1bb1bf4ec8ba41d369d284e49a1efd7b90fd9201"
+    },
+    {
+      "include": "pulp/signal/convolver.hpp",
+      "fingerprint": "sha256:7426a15cbae4c4ef930bc290d94b60378af9a95786b5be52b030288567bb0aed"
+    },
+    {
+      "include": "pulp/signal/convolver_messages.hpp",
+      "fingerprint": "sha256:273c4296f0311011f7ea920d1ceac2b11d4e9964bdfaa8699bd8f8f9a761d91b"
+    },
+    {
+      "include": "pulp/signal/convolver_non_uniform.hpp",
+      "fingerprint": "sha256:29591426ae6ab0fe96c9d9eaa57a2dacc0bb1ffde3465f08d13aa42b493b620d"
+    },
+    {
+      "include": "pulp/signal/crossfade.hpp",
+      "fingerprint": "sha256:f342c0c90361767a4572ca8cf8575160574121575e059a89694f546ed4160d71"
+    },
+    {
+      "include": "pulp/signal/cyclic_stretch.hpp",
+      "fingerprint": "sha256:b7e959409956e526204cc16112d467d650709a6c3f5f1f759b3f94f5ce73f990"
+    },
+    {
+      "include": "pulp/signal/dc_blocker.hpp",
+      "fingerprint": "sha256:ac4362c67c262ca48625cb2eb3e07cbd3fd5a40579f18a97845b9787d1449b89"
+    },
+    {
+      "include": "pulp/signal/decay_envelope.hpp",
+      "fingerprint": "sha256:0ccde45dd7243ce074abc7e1897c2e6ed3ddd1ef32c456de1058cf686a413cc3"
+    },
+    {
+      "include": "pulp/signal/delay_line.hpp",
+      "fingerprint": "sha256:ee6ef4ef39a57ea7485b6ddc391bf1962ce7badd8ef6765cb6f47734c329cf66"
+    },
+    {
+      "include": "pulp/signal/denormal.hpp",
+      "fingerprint": "sha256:e9b473e4eebb1c10a1fc3d0e2610d8082a6cdd8a7e0c939c077b152addf74c91"
+    },
+    {
+      "include": "pulp/signal/detail/fractional_synthesis_hop_accumulator.hpp",
+      "fingerprint": "sha256:75b761a7b99590f6ddc3edae4abafaef951c45cbb36fde84969edb599bef8fe7"
+    },
+    {
+      "include": "pulp/signal/detail/leslie_common.hpp",
+      "fingerprint": "sha256:7aa012d8416d5a904122d533d4cb1b8fcbaab62de6fbbb1441b2beb43ff87743"
+    },
+    {
+      "include": "pulp/signal/detail/modular_sequencing_common.hpp",
+      "fingerprint": "sha256:035d6f351a02060b781ff442d1b548a15a1f7637a2a1d116efd4ddc0259565d5"
+    },
+    {
+      "include": "pulp/signal/diode_bridge_compressor.hpp",
+      "fingerprint": "sha256:031664e86d4ad3e46ce1a97c584845d782da6845bbe3d7663f45fa3fe75f318a"
+    },
+    {
+      "include": "pulp/signal/distortion.hpp",
+      "fingerprint": "sha256:fd4edeb6e3888abe527fb949a09d323ba7ec5208b6ca237f60059aedd93befed"
+    },
+    {
+      "include": "pulp/signal/drum/clap.hpp",
+      "fingerprint": "sha256:143ccede8b7ec3770b0fbf51b584b1024310bdf62a3822a9d6f88f4fc6680ea0"
+    },
+    {
+      "include": "pulp/signal/drum/cymbal.hpp",
+      "fingerprint": "sha256:99a8c81b3359f87fa8e65201576d62fb78e652090d08e08b085fb0efefba0c30"
+    },
+    {
+      "include": "pulp/signal/drum/engine_registry.hpp",
+      "fingerprint": "sha256:bd6c72fcf4722570d8ff1bf13917d8103387686e649d3b55e8b4a5601c76a543"
+    },
+    {
+      "include": "pulp/signal/drum/fm.hpp",
+      "fingerprint": "sha256:6f2b53a4baa98a7af6615f01a7b593efe64fa6c9bb5aa5ff4278e19d9da9befe"
+    },
+    {
+      "include": "pulp/signal/drum/fm6.hpp",
+      "fingerprint": "sha256:f5f2ef3b0b075c72c5158f2a4b486c29a9c7521b742f4abeaaba6a134b233be1"
+    },
+    {
+      "include": "pulp/signal/drum/fm_tables.hpp",
+      "fingerprint": "sha256:374f888d2228dca073721a81583caa52336c6d292b7ab51c668bdc4dd2d0c03c"
+    },
+    {
+      "include": "pulp/signal/drum/hat.hpp",
+      "fingerprint": "sha256:8f7292d614e352dcdcd06d4fb39bae1d00bd2fb20704c0cbe3e615abcae7199b"
+    },
+    {
+      "include": "pulp/signal/drum/hit_life.hpp",
+      "fingerprint": "sha256:213f8be04b4efc0dd7a1567c4a316ffd7a159e54dc4adbec39b8e1e6c83c84a7"
+    },
+    {
+      "include": "pulp/signal/drum/kick.hpp",
+      "fingerprint": "sha256:006b062a40cc5a0299bef09acafcb141912347a0cd7c8e12952fb97ccb054df3"
+    },
+    {
+      "include": "pulp/signal/drum/kit.hpp",
+      "fingerprint": "sha256:7f371878773a177e36dc260f36ed769c811fe7b8bb1585166b9e11963ee70d4f"
+    },
+    {
+      "include": "pulp/signal/drum/layers.hpp",
+      "fingerprint": "sha256:7e44d3477e0e2c9af535bf31b370cd7057427cbc2929458a7d6d1d71ea960282"
+    },
+    {
+      "include": "pulp/signal/drum/membrane.hpp",
+      "fingerprint": "sha256:abbf09290ccde64d15a35e27bb540b32812c59bafb87de23541bf83620eae562"
+    },
+    {
+      "include": "pulp/signal/drum/output_stage.hpp",
+      "fingerprint": "sha256:27b7488804f557b4bfdd756c4c5747d37f036a2d1d823398b7e8f8c243a8aad9"
+    },
+    {
+      "include": "pulp/signal/drum/snare.hpp",
+      "fingerprint": "sha256:d2d65499d7f607bb891fbbee478207b288a92ab3afc5c4e23fc86d6af40810e6"
+    },
+    {
+      "include": "pulp/signal/drum/string.hpp",
+      "fingerprint": "sha256:8b68970084dbddbcb493c14dc949f6da30fb61cb76380fb45f22bdf5cc236a04"
+    },
+    {
+      "include": "pulp/signal/drum/tom.hpp",
+      "fingerprint": "sha256:2062cc8f015ed0352d5d14ad0d21537b2dc0a4cc2f226e59c3f16fe6768d4ffb"
+    },
+    {
+      "include": "pulp/signal/drum/velocity.hpp",
+      "fingerprint": "sha256:ee794effe04dfe24da8bc939066068c2c3455ce109196e865e3b6ff71d40a427"
+    },
+    {
+      "include": "pulp/signal/drum/voice.hpp",
+      "fingerprint": "sha256:b19c5c5c4d2c5aed42461f9e7bb1a70771d3582684b177ef16da2ad8063594a8"
+    },
+    {
+      "include": "pulp/signal/drum/zap.hpp",
+      "fingerprint": "sha256:1bfabc16a0000e093e25c5d5122aa94a5a43f4098844c38a05870962a44513d7"
+    },
+    {
+      "include": "pulp/signal/dry_wet_mixer.hpp",
+      "fingerprint": "sha256:f4d0619a6a2896582cbb3823cbcf33d08f83312e029ad209e25c3ca842ab6a5d"
+    },
+    {
+      "include": "pulp/signal/dynamics_core.hpp",
+      "fingerprint": "sha256:e1e83d01a6ae7cdc363a8e9f5f02a21374ce91aed731b90eef74d4f0508c8036"
+    },
+    {
+      "include": "pulp/signal/envelope.hpp",
+      "fingerprint": "sha256:dc624d9acca91f044c5eac8ed3ad6d3e35ef86b8cdb4a34b2424679550169eaf"
+    },
+    {
+      "include": "pulp/signal/fast_math.hpp",
+      "fingerprint": "sha256:462131dc5a1801300da5e636c759f42a888036c6595a9b528de687a63367d35d"
+    },
+    {
+      "include": "pulp/signal/fdn/config.hpp",
+      "fingerprint": "sha256:dcb742b910fff18d48565ff191d9447f00144b4fd7629e0e17106781aba6bd7a"
+    },
+    {
+      "include": "pulp/signal/fdn/diffusion.hpp",
+      "fingerprint": "sha256:25d95b590e6b7942e8c3fc5c50ce1b6f98408256516fd81c88378cd5f314d47e"
+    },
+    {
+      "include": "pulp/signal/fdn/filter_state.hpp",
+      "fingerprint": "sha256:1c9b3f599e1a150cb91cb47e4e6443accc0f5f4e5971c22f1d68dba37de8428b"
+    },
+    {
+      "include": "pulp/signal/fdn/frac_delay.hpp",
+      "fingerprint": "sha256:366074ccef78b5a51305c52c5b362304148650123af8d208533ce5df1861aee7"
+    },
+    {
+      "include": "pulp/signal/fdn/interp.hpp",
+      "fingerprint": "sha256:b19071caf4663f1ccfde2663bff4d7504543eab1143810cca1a4748b2eeb7960"
+    },
+    {
+      "include": "pulp/signal/fdn/loop_eq.hpp",
+      "fingerprint": "sha256:06132e980081bca3042d589b2504502735697677aa15eeec33f0f6b030c83cb9"
+    },
+    {
+      "include": "pulp/signal/fdn/modulation.hpp",
+      "fingerprint": "sha256:95d0b6ecf64fbdd7a7ec2e0d4bcf6b6a22a662a44a595fd7e494fb1f7be99abd"
+    },
+    {
+      "include": "pulp/signal/fdn/multirate.hpp",
+      "fingerprint": "sha256:0004f34796384c5e261de5f96915d076a086a91451ba54ef57a3ceb56c00b85b"
+    },
+    {
+      "include": "pulp/signal/fdn/sanitize.hpp",
+      "fingerprint": "sha256:6fd73a8696cc1632279ca06d5702a1b2193d0e1fee21e6a9eade3623742ad184"
+    },
+    {
+      "include": "pulp/signal/fdn/shimmer.hpp",
+      "fingerprint": "sha256:bd8f3cd8a59dc48c98068e23ebb1694913a836df77944ca1e0fd640ef99faff4"
+    },
+    {
+      "include": "pulp/signal/fdn/stages.hpp",
+      "fingerprint": "sha256:5f65f0ca32f5d52c40582eb9f2621bd941cef8d9be2458ec4c0cbbabce34f9e3"
+    },
+    {
+      "include": "pulp/signal/fdn/tank.hpp",
+      "fingerprint": "sha256:3232020917fc2d77ab8fcd6d7716833cd1c106491d6dec1505b9fd4ba825b2c7"
+    },
+    {
+      "include": "pulp/signal/fdn_reverb.hpp",
+      "fingerprint": "sha256:1cf5183054034ec774acadd7ed8429333fbc89ec3f8baf2545e944d4c379d7c2"
+    },
+    {
+      "include": "pulp/signal/feedforward_compressor.hpp",
+      "fingerprint": "sha256:df1462e7ee9a77d171f3b890da4f5b3c3c5ac1c4f797209941dd0725faff33b7"
+    },
+    {
+      "include": "pulp/signal/fet_compressor.hpp",
+      "fingerprint": "sha256:d82e7903e48701c5afdc35128d45666ad4749fda73c3143d5760178e9a695cca"
+    },
+    {
+      "include": "pulp/signal/fft.hpp",
+      "fingerprint": "sha256:3fc300d8283a795ca2bb1ab16f054995d66bb90fe3cb351ec8ae8e061e7c14b3"
+    },
+    {
+      "include": "pulp/signal/fft_backend.hpp",
+      "fingerprint": "sha256:ce81fc902e0aa8fa25c0d414a943a0189fd85f7755aba433052600e3167c5cc1"
+    },
+    {
+      "include": "pulp/signal/filter_design.hpp",
+      "fingerprint": "sha256:3b8c0e3e4b7d7907162dfeb24b989a1634992f6dcdc30bb00535722f8febc0e9"
+    },
+    {
+      "include": "pulp/signal/finite_stretch_builder.hpp",
+      "fingerprint": "sha256:9c78fb3f1c47b76dce491e9aeffb197b3fdc808a3976ccca39fee1039cbfcfa3"
+    },
+    {
+      "include": "pulp/signal/fir_filter.hpp",
+      "fingerprint": "sha256:0b5b3413b8a1e91a3b0adc26f1bc1fb153e24416b622e9e5e003ef8cc9989188"
+    },
+    {
+      "include": "pulp/signal/flanger.hpp",
+      "fingerprint": "sha256:69d78cebfeb3186f3dffe3f4d600d18e1fc461e10725a3d20909497ac186a218"
+    },
+    {
+      "include": "pulp/signal/freeze_hold.hpp",
+      "fingerprint": "sha256:6df0729c6ab67878ef59c06d980e3113366f93a50f1f01a24486e0b884c039c2"
+    },
+    {
+      "include": "pulp/signal/freeze_loop_sampler.hpp",
+      "fingerprint": "sha256:e1f095e06e0edf5600fdcf321f368f952eb17f2b9b09e334d351a2ab0eb05cbd"
+    },
+    {
+      "include": "pulp/signal/frequency_response.hpp",
+      "fingerprint": "sha256:605f532380faf983b8f35306540bd5a1cef6f870ab67058e65e69ffb505bd982"
+    },
+    {
+      "include": "pulp/signal/frequency_shifter.hpp",
+      "fingerprint": "sha256:7093f90eabdf3bacf9621dd62ae1fcc1dfdccb9850fe2467a48d1d1a12a6e5c1"
+    },
+    {
+      "include": "pulp/signal/frequency_shifter_ssb.hpp",
+      "fingerprint": "sha256:f4c3316c9c4e8ea4325b798d154799dfef4b0eb7f7105c97930bb220b0b22f58"
+    },
+    {
+      "include": "pulp/signal/fuzz_pair.hpp",
+      "fingerprint": "sha256:7a8baf5f8ee75ae6116a5dd8a26ed2d19c5b51538919f5c07a6cb2d4165f0b2e"
+    },
+    {
+      "include": "pulp/signal/gain.hpp",
+      "fingerprint": "sha256:8cf5c1c81f789ad47b98f7e05c3859969f7938a0fe63b93da2297d74dc390469"
+    },
+    {
+      "include": "pulp/signal/gate_logic.hpp",
+      "fingerprint": "sha256:1354a44fcc7efba7a59b173f85aa1183699ade63b5471e03c5f4b1f018decaf4"
+    },
+    {
+      "include": "pulp/signal/granular.hpp",
+      "fingerprint": "sha256:c79ebfe97d8823c68d9f38a295f0aed066db9243033b8fd22be7e0fb234cbf48"
+    },
+    {
+      "include": "pulp/signal/halfband_iir.hpp",
+      "fingerprint": "sha256:2c82382d9cdd84e5b349e3929f9b29f33d4c9c5976f842c009ab2f6f7004b143"
+    },
+    {
+      "include": "pulp/signal/harmony_engine.hpp",
+      "fingerprint": "sha256:e701093ba3ff00d76e19b404027746b5f45e7d83c39f878ce4ed53682ea069ab"
+    },
+    {
+      "include": "pulp/signal/iir_design.hpp",
+      "fingerprint": "sha256:640f0243cb1469f0e64d44a5bfcffd53227759b31797063ef3ab1ccd8617729a"
+    },
+    {
+      "include": "pulp/signal/interpolator.hpp",
+      "fingerprint": "sha256:60024e7a07267bfd759963a94f0e7744c9d687707aab1b93f414763bd4e7371f"
+    },
+    {
+      "include": "pulp/signal/junction.hpp",
+      "fingerprint": "sha256:fe1f4c67f07ef6565fa3efb4a4414debd8fb903f62f804d2052ccadbc6ade1d1"
+    },
+    {
+      "include": "pulp/signal/karplus_strong.hpp",
+      "fingerprint": "sha256:081a56e41a69cb9a8d7b32b8cee1833b1a985731c74ca0cca3a85fe6e0e16218"
+    },
+    {
+      "include": "pulp/signal/ladder_filter.hpp",
+      "fingerprint": "sha256:cedce46a708a23a603c81d8e5b6497f623a93e25a68e58b6d58c67169bb761d1"
+    },
+    {
+      "include": "pulp/signal/latency_aware_control_smoother.hpp",
+      "fingerprint": "sha256:b3b99fa8275403a047516a06d2d6a268b45c64dc94f90548ed5e7b994e922291"
+    },
+    {
+      "include": "pulp/signal/leslie.hpp",
+      "fingerprint": "sha256:62e8d032868f938776b071e78a66bea28397477eb36d956e3a0c4da9f9044da1"
+    },
+    {
+      "include": "pulp/signal/leslie_rotary.hpp",
+      "fingerprint": "sha256:2fa7a1449291fd9237a695e399f2c8c212c6cdb7d548fd5198b95d1cd8410e6f"
+    },
+    {
+      "include": "pulp/signal/lfo.hpp",
+      "fingerprint": "sha256:f24356e804172862d6bf497975993f9521d3da8092a36ed7eaf0b460600e270a"
+    },
+    {
+      "include": "pulp/signal/linkwitz_riley.hpp",
+      "fingerprint": "sha256:f272ce58a7112a6d85d043f12223606035509476ffc3d0b53fc6bc6dd269df3a"
+    },
+    {
+      "include": "pulp/signal/lofi_chain.hpp",
+      "fingerprint": "sha256:6679adfd8937683a7fe12c9517626de825cf72ce0080c0454b35f7ec6525f391"
+    },
+    {
+      "include": "pulp/signal/log_ramped_value.hpp",
+      "fingerprint": "sha256:eb488df3faa601ed2a3cae8d01d881e8df33c81c4cb84bb43dc2261f12e40d96"
+    },
+    {
+      "include": "pulp/signal/lookup_table.hpp",
+      "fingerprint": "sha256:d7d07aacf201046947b4d9f1cfb27df2dad558cf17d90d66afacb07cbcb5a4ba"
+    },
+    {
+      "include": "pulp/signal/lowpass_gate.hpp",
+      "fingerprint": "sha256:c04fd24cabddb1deef4336f06daf639091226cb6e20271bd7ec01f079c356f0a"
+    },
+    {
+      "include": "pulp/signal/lpg.hpp",
+      "fingerprint": "sha256:ab452f860d7e5fdd7407d9af9fecdbfe3b75112e0df617444a5c06a44a109b75"
+    },
+    {
+      "include": "pulp/signal/matrix.hpp",
+      "fingerprint": "sha256:e6375066ff9843d16e70affed5dc880879d197b1bf132202610b3fcc0a04f224"
+    },
+    {
+      "include": "pulp/signal/mod_matrix.hpp",
+      "fingerprint": "sha256:ff8e50d0c9b6a94543073019e1367da206aed7899b2947506cbc9e18d910d186"
+    },
+    {
+      "include": "pulp/signal/mod_tools.hpp",
+      "fingerprint": "sha256:bc4860fe82ce29c7e5066e1dc70d7042487e9bbe4252f2c1c8821163cf701f90"
+    },
+    {
+      "include": "pulp/signal/modal_bank.hpp",
+      "fingerprint": "sha256:9950194ad59c13028feb8ce1246fe20405688c453908dbea8a532d091f72d65a"
+    },
+    {
+      "include": "pulp/signal/modal_spec.hpp",
+      "fingerprint": "sha256:f1424fd92fe2e49d70738beb7c7d3a9c862965e36ef7ad89fc6fd1fc9e0d8f64"
+    },
+    {
+      "include": "pulp/signal/modular_sequencing.hpp",
+      "fingerprint": "sha256:89f5a67271054c239f008f3fb89ffa6535ec75b29c1d18f532e395e531f8cc76"
+    },
+    {
+      "include": "pulp/signal/multi_channel_meter.hpp",
+      "fingerprint": "sha256:e3b23b5fbeda54d6074934994cf58a4d54b461a8ff9ab97d1f8d91cb8f909505"
+    },
+    {
+      "include": "pulp/signal/multichannel_phase_coordinator.hpp",
+      "fingerprint": "sha256:e6ee02f7a7b55e37d58a37aef83f778d6e1bfe8b7337c4f20eb98dcb29d9f84b"
+    },
+    {
+      "include": "pulp/signal/noise_gate.hpp",
+      "fingerprint": "sha256:e23710aac665491fdac9fa5a2830c2e107215ab0e82ef85427580dbfe3e5dfc3"
+    },
+    {
+      "include": "pulp/signal/noise_morpher.hpp",
+      "fingerprint": "sha256:5a57d65be64030dc08ed092f642062ae205fedb3f5802d718c9b8926971dd24c"
+    },
+    {
+      "include": "pulp/signal/noise_source.hpp",
+      "fingerprint": "sha256:b7063bb65d854600d97f95c3957406fe8d625cc4e99e3c6677aeaa9a3329ae8c"
+    },
+    {
+      "include": "pulp/signal/nonlin_ambience.hpp",
+      "fingerprint": "sha256:6564b9e03b1ca746c0b24865fdc1448d17a9c21fb8b2700727f6ac300a214288"
+    },
+    {
+      "include": "pulp/signal/nonlin_ambience_design.hpp",
+      "fingerprint": "sha256:d99dcc9b99d22c4a89a8e7968b52a848eed3380e1f0f98e1be07fe3e115327a0"
+    },
+    {
+      "include": "pulp/signal/offline_stretch.hpp",
+      "fingerprint": "sha256:aa39df9f1d1828fba6cc54997e54aa334efadd2dc4818021ba3515912dc482b8"
+    },
+    {
+      "include": "pulp/signal/osc/blep.hpp",
+      "fingerprint": "sha256:056bf1ae0e7c9ebd6739d8bee2d45fd499dba0471643742de4b1b760dceda4f9"
+    },
+    {
+      "include": "pulp/signal/osc/dco.hpp",
+      "fingerprint": "sha256:b68f6d0563c04e0cc22e8fefc8c53166c7d9fd1c19a020c3055e2d0b8a5495cf"
+    },
+    {
+      "include": "pulp/signal/osc/phase.hpp",
+      "fingerprint": "sha256:038ed76c73f627b3513ed78bda8027a1b94fa50aac33ffbbc64404f1fde47687"
+    },
+    {
+      "include": "pulp/signal/osc/va.hpp",
+      "fingerprint": "sha256:60abb49620684a3516e8c1a56ec34402205b7ef1180a768c00375ade9f1f6f35"
+    },
+    {
+      "include": "pulp/signal/osc/vco.hpp",
+      "fingerprint": "sha256:57c07ecce8ab4c0506540870497dede593d1050ac126bfcfc0730ee5e4551279"
+    },
+    {
+      "include": "pulp/signal/osc/wt.hpp",
+      "fingerprint": "sha256:e7f1808f8b51cd6194302f5341a5fb0f516d85f8f12a63d5d32093d40eb1aa43"
+    },
+    {
+      "include": "pulp/signal/osc/wt_lofi.hpp",
+      "fingerprint": "sha256:b9cf6a0f9a3938f2131b0df3a59aa0e45ef9d8e302ef9c47ba201f11afdc9668"
+    },
+    {
+      "include": "pulp/signal/oscillator.hpp",
+      "fingerprint": "sha256:83f8be4c5ed70776dc18e28579a42aa3cc02ac000a152d4f596516d4d2f9d23d"
+    },
+    {
+      "include": "pulp/signal/ota_cascade_filter.hpp",
+      "fingerprint": "sha256:cd159bfc52680259c16f215a80e65c09f271115d733ef90be8ac279467382236"
+    },
+    {
+      "include": "pulp/signal/oversampling.hpp",
+      "fingerprint": "sha256:3d5227ff3c98232170387e48a1ed3f08f1e5e2a6bf3e073f306eb12b2e2bc9fd"
+    },
+    {
+      "include": "pulp/signal/oversampling_fir.hpp",
+      "fingerprint": "sha256:fb645178bec9b3c7a66101d289471d3b723f073e9bbf1adb05035d00e65c1af8"
+    },
+    {
+      "include": "pulp/signal/panner.hpp",
+      "fingerprint": "sha256:2642e7237385c323d7d89e434132285f5c917449d7db51c3d8535d754b4fcce6"
+    },
+    {
+      "include": "pulp/signal/phase_distortion.hpp",
+      "fingerprint": "sha256:9fc1e8fa751942f5c17af2e6834097ef390427b10415f2d3fdbdadd6ae376c73"
+    },
+    {
+      "include": "pulp/signal/phase_vocoder.hpp",
+      "fingerprint": "sha256:3d2c5d6a9835c5428dcfe92f9f16fbdd0ad814fcff6b968e0098e2c90d3c2dd9"
+    },
+    {
+      "include": "pulp/signal/phaser.hpp",
+      "fingerprint": "sha256:cab5cca6029f3067c28a9ed7af027ac7564caab09636bf291e25494118e7e281"
+    },
+    {
+      "include": "pulp/signal/phaser_stages.hpp",
+      "fingerprint": "sha256:dfd0da542fcd8a1a019d3a65f8720c326dbed04a5b761e544cd9c5fb5eabdceb"
+    },
+    {
+      "include": "pulp/signal/pitch_shifter.hpp",
+      "fingerprint": "sha256:305f94b441ef957477432f8d5f8febec02deacd1bd76adfeade72ad33a992e10"
+    },
+    {
+      "include": "pulp/signal/pitched_feedback_delay.hpp",
+      "fingerprint": "sha256:a30024dd3bec0bc3808994ccda9a836949da40c43a33cf2cc314b0193c3489ea"
+    },
+    {
+      "include": "pulp/signal/poly_math.hpp",
+      "fingerprint": "sha256:77419df140347c77029681f3f02a62231ca822a7d878d3b55b74fd56b803d394"
+    },
+    {
+      "include": "pulp/signal/probability_gate.hpp",
+      "fingerprint": "sha256:5194b58f07ffce22cd6a5041ce8221ca743d9e8a343527ada867e264f9960441"
+    },
+    {
+      "include": "pulp/signal/processor_chain.hpp",
+      "fingerprint": "sha256:a3b3fb80e8b5eea64ecb1fca94ff8972a2f1da7c364de16d214f2e73914b2b4f"
+    },
+    {
+      "include": "pulp/signal/processor_duplicator.hpp",
+      "fingerprint": "sha256:053dfa828a26904b3fc1403c956f24e1fc0b0a9dc582fd5eb3b7f6c8ccabc0e9"
+    },
+    {
+      "include": "pulp/signal/realtime_pitch_time_geometry.hpp",
+      "fingerprint": "sha256:223e7ba078434feaec55040093bbca020d4d4879deda414d6200a1c4fd6d6a93"
+    },
+    {
+      "include": "pulp/signal/realtime_pitch_time_processor.hpp",
+      "fingerprint": "sha256:0eb29002be4e3af46d2212d4bcb0dbe11a39b3989c226e60d6edafae89d5a2fa"
+    },
+    {
+      "include": "pulp/signal/resampler.hpp",
+      "fingerprint": "sha256:cba4f92de1d465864c26345d11278160690db60af94618454382f35e82d71689"
+    },
+    {
+      "include": "pulp/signal/reverb.hpp",
+      "fingerprint": "sha256:381ccdac9cc7ec2297dc1597a20f77a5827101ae948946e2bae86ef6643e4f29"
+    },
+    {
+      "include": "pulp/signal/rng.hpp",
+      "fingerprint": "sha256:eada9a6663082e3844a1b0f7bd7a39524519bc8c60ed3e387901b6d151a68203"
+    },
+    {
+      "include": "pulp/signal/rungler.hpp",
+      "fingerprint": "sha256:7a1ed7467f98faa570b9f3efe852406cf03af4011e1c91cc94c7b6d360395a40"
+    },
+    {
+      "include": "pulp/signal/scale_quantizer.hpp",
+      "fingerprint": "sha256:55edf27ef1d76118d4751fa193ef917f897129eb5f54cfe680e72a2ba6a79629"
+    },
+    {
+      "include": "pulp/signal/scanner_vibrato.hpp",
+      "fingerprint": "sha256:68756657c39c6d95b8669991138e45068a49d1ac6c4892c9e66217771cda053f"
+    },
+    {
+      "include": "pulp/signal/scoped_flush_denormals.hpp",
+      "fingerprint": "sha256:989e43be3e1f6f2f806f3896116b98f21e6959fda976530659ccf4f7d99c6e16"
+    },
+    {
+      "include": "pulp/signal/signal.hpp",
+      "fingerprint": "sha256:3b9f10b9aafb43c93d0f0fb538fa2dd1a0abff859a0989c558a2dd1997a5901b"
+    },
+    {
+      "include": "pulp/signal/simd_buffer.hpp",
+      "fingerprint": "sha256:4c1f992ac9257c507f7247c1ecc2b601153dca7e24d93d7def19c0344da4c2d2"
+    },
+    {
+      "include": "pulp/signal/sinc_resampler.hpp",
+      "fingerprint": "sha256:681a0d7fb7feb2457a8136779766172efcc7ef5030f0304b675f544341062215"
+    },
+    {
+      "include": "pulp/signal/slew_limiter.hpp",
+      "fingerprint": "sha256:df25dd785055fa158bff4189eef1cae94911d15219ef7d6c06e8c92a0739aeb4"
+    },
+    {
+      "include": "pulp/signal/smoothed_value.hpp",
+      "fingerprint": "sha256:bd2d00db0d73183efc1b19ebb0a01ac1f4795525662669e30f8d4fc539406ce3"
+    },
+    {
+      "include": "pulp/signal/soft_bypass.hpp",
+      "fingerprint": "sha256:5e10b762067b45b67c883e4121e520c088f6adc372a52174ae28a4ff0aa9dcfc"
+    },
+    {
+      "include": "pulp/signal/speaker_cabinet.hpp",
+      "fingerprint": "sha256:458bfadc6e965b3317e69d1d07969ceed4857679d0c4f0a99e449d6f3392e40d"
+    },
+    {
+      "include": "pulp/signal/special_functions.hpp",
+      "fingerprint": "sha256:6895432b826f6a4dc47ec20891191fe62f6e534826fa8a49f5533199f4acf713"
+    },
+    {
+      "include": "pulp/signal/spectral_envelope_shifter.hpp",
+      "fingerprint": "sha256:66173ce70b65e07bf40269f08658f8401c905bcc77b07c2e42b0711eaba222ae"
+    },
+    {
+      "include": "pulp/signal/spectral_frame_engine.hpp",
+      "fingerprint": "sha256:96ccee16ef6cf63730e4dbaf0c386a1210e9e37ee038b416c39ddd14eb649a68"
+    },
+    {
+      "include": "pulp/signal/spectrogram.hpp",
+      "fingerprint": "sha256:592fcb82978e0186489600456ab44b71be9a416715b88ea3921265de739a538b"
+    },
+    {
+      "include": "pulp/signal/square_osc_bank.hpp",
+      "fingerprint": "sha256:ad27c86ce305091aa25bbc9b5a2d229e230b3ca39268f25216fbed3788939179"
+    },
+    {
+      "include": "pulp/signal/stage_sequencer.hpp",
+      "fingerprint": "sha256:8d46ce25ebfced8a91ddad3581c9767556ed0832eec42202f2cd51f945ce0064"
+    },
+    {
+      "include": "pulp/signal/stft.hpp",
+      "fingerprint": "sha256:a21f2852fe6ee9293876298c04a31349a213225e9cf7e86cba6c8fcd5264bead"
+    },
+    {
+      "include": "pulp/signal/stn_decomposer.hpp",
+      "fingerprint": "sha256:18114da3d1be93c7f77d04797c99c1b10b0942c0ec3ad09b004f1995d23b2c9b"
+    },
+    {
+      "include": "pulp/signal/stretch_preset.hpp",
+      "fingerprint": "sha256:4c9ce2c0bf5fea160ec00d50c97669c9ea182cf78df9c4ae1c0db7653bf9bdd5"
+    },
+    {
+      "include": "pulp/signal/svf.hpp",
+      "fingerprint": "sha256:5de2664969eb9eebd63e1af7791a5f9738cc857686102d8cde57fe7174e896f4"
+    },
+    {
+      "include": "pulp/signal/tape_machine.hpp",
+      "fingerprint": "sha256:22b96ff46858d85c65b7a1d2ee5c50406759f06d4b944075212243f21536cd00"
+    },
+    {
+      "include": "pulp/signal/tape_machine_components.hpp",
+      "fingerprint": "sha256:f3f68cd5c426ca5752265ab3d64abbb7fa580003ceec7377be6efbdafc38fd89"
+    },
+    {
+      "include": "pulp/signal/tpt_filter.hpp",
+      "fingerprint": "sha256:280fe931e00700159f4fb526b5f35e08228c4091c09068b111a89d21fc46a974"
+    },
+    {
+      "include": "pulp/signal/transient_phase_policy.hpp",
+      "fingerprint": "sha256:4d6ace3ed3644f3d765a78e7beea5f833e661b65e7e6fb2071af52fd47cc6934"
+    },
+    {
+      "include": "pulp/signal/transition_mixer.hpp",
+      "fingerprint": "sha256:f505434e7e7f9b6d32a9f67e74dc33495728fe07ca87533cabef32b7f3ff4470"
+    },
+    {
+      "include": "pulp/signal/transport_edge.hpp",
+      "fingerprint": "sha256:a469dd58ae5392702f42340e0024308d626facb0d6584090b166d0167d13c66d"
+    },
+    {
+      "include": "pulp/signal/trigger.hpp",
+      "fingerprint": "sha256:4d2cd9cc3247c34ad7047705f7a084f6f58f9b55a3b52606e9b9bca9ce5e7e82"
+    },
+    {
+      "include": "pulp/signal/trigger_kit.hpp",
+      "fingerprint": "sha256:39e6800b2bceaa27c01910cfdbeaa76b0541f53d21e56d521c7acb11f2206532"
+    },
+    {
+      "include": "pulp/signal/two_pole_resonator.hpp",
+      "fingerprint": "sha256:090ff7de0a8d1eb6d9abc4260f09eb40062b83a8018f5728edd9da111f3cf202"
+    },
+    {
+      "include": "pulp/signal/units.hpp",
+      "fingerprint": "sha256:a2bb6df8fa1cc1e8381758577cbbdb0cf5b3299c12f64ca68d656c7bb6c1645d"
+    },
+    {
+      "include": "pulp/signal/vactrol.hpp",
+      "fingerprint": "sha256:2c9bbf225eb35d8d17c15b9fda8f5db8c92af2b78bf553b3ae118aef516a4653"
+    },
+    {
+      "include": "pulp/signal/vca.hpp",
+      "fingerprint": "sha256:b9e1b3392d025b0024ca504e7cffefbd382d9eacae448994d38d45225991a481"
+    },
+    {
+      "include": "pulp/signal/vca_compressor.hpp",
+      "fingerprint": "sha256:00468bcca3606cb167b0b32a12fe551d327085388789a20bdb4e8ddef6ead150"
+    },
+    {
+      "include": "pulp/signal/vibrato.hpp",
+      "fingerprint": "sha256:5a42b43aa94d173bee0bbae7c91b142e5394f449064d3c48e5c480bac372465e"
+    },
+    {
+      "include": "pulp/signal/vocoder.hpp",
+      "fingerprint": "sha256:800e0249e437493b89d89765ae124f9981418a3319af6c647ef92210684aafad"
+    },
+    {
+      "include": "pulp/signal/waveshaper.hpp",
+      "fingerprint": "sha256:4673695872790612c9282cf395c6b197af14f500acc0cf86d18366b0ccb48a47"
+    },
+    {
+      "include": "pulp/signal/wavetable.hpp",
+      "fingerprint": "sha256:4d6724df9ccba9137090b0c911169b624d7dec481e9aa56eb5c6dc5c1503bab0"
+    },
+    {
+      "include": "pulp/signal/windowed_sinc_design.hpp",
+      "fingerprint": "sha256:e546ef4f5996229a119abcb77a037ff53f5d9ba4ed4d1679f7fb437bcc2b666d"
+    },
+    {
+      "include": "pulp/signal/windowing.hpp",
+      "fingerprint": "sha256:7196cac25d5310d34a1fe2c55d8a0555a6391096fd12247f6699495048f9237d"
+    },
+    {
+      "include": "pulp/signal/yin_tracker.hpp",
+      "fingerprint": "sha256:a2667df45dc5c6a29a920a3381a808958ebcca3c7ae7c15feaa9e9de4fffd171"
+    },
+    {
+      "include": "pulp/signal/zero_latency_convolver.hpp",
+      "fingerprint": "sha256:4dae2e21eeac15b2ebfa53d2d8395c1644bb42e007105a40c2408af09bdddeb9"
+    },
+    {
+      "include": "pulp/signal/zero_latency_convolver_support.hpp",
+      "fingerprint": "sha256:e8185c57af35bcdb34ea1d5a7fc2d51336f8ccc69c46a753c2ae342dd7c4ee6e"
+    },
+    {
+      "include": "pulp/timebase/compiled_meter_map.hpp",
+      "fingerprint": "sha256:9e06ac7c08f950aa5cb392d27439a6db85eca47cc3e1746a6c3e7f1272bde6fb"
+    },
+    {
+      "include": "pulp/timebase/compiled_tempo_map.hpp",
+      "fingerprint": "sha256:806efe0ef4a166e80b8b584813a6d61f8fb497a0327162716679906acf7485de"
+    },
+    {
+      "include": "pulp/timebase/loop_region.hpp",
+      "fingerprint": "sha256:836588746669ec85e7e7fdda636b0a21e70435a17fc1af12d0626721115de59c"
+    },
+    {
+      "include": "pulp/timebase/rational_time.hpp",
+      "fingerprint": "sha256:333417397f3df67fef0d84bb91a0910d519ab58ef9a2ce7590f7e31a5b643c3f"
+    }
+  ]
+}

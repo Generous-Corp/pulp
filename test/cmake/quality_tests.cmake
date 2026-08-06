@@ -9,7 +9,12 @@ add_test(NAME build-check COMMAND pulp-test-build-check)
 # Installed agent capability manifest: curated snapshot, negative validation,
 # and compile proof for every advertised include/symbol pair.
 add_executable(pulp-test-agent-capability-compile test_agent_capability_compile.cpp)
-target_link_libraries(pulp-test-agent-capability-compile PRIVATE pulp::sequence)
+target_link_libraries(pulp-test-agent-capability-compile PRIVATE
+    pulp::audio
+    pulp::midi
+    pulp::sequence
+    pulp::signal
+    pulp::timebase)
 add_test(NAME agent-capability-symbols-compile COMMAND pulp-test-agent-capability-compile)
 
 if(Python3_Interpreter_FOUND)
