@@ -392,6 +392,50 @@ TEST_CASE("Forge lo-fi: injecting bitcrush rate reduction decimates a baked tone
     CHECK(decimated > 0);                   // but still latches periodically
 }
 
+TEST_CASE("Forge lo-fi: bitcrush exposes fixed output-correctness realizations",
+          "[host][baked][forge][forge-lofi][dither]") {
+    const auto legacy_type = lofi::make_bitcrush_node();
+    const auto tpdf_type =
+        lofi::make_bitcrush_node(pulp::signal::DitherMode::tpdf);
+    const auto first_type = lofi::make_bitcrush_node(
+        pulp::signal::DitherMode::tpdf,
+        pulp::signal::NoiseShapingOrder::first);
+    const auto second_type = lofi::make_bitcrush_node(
+        pulp::signal::DitherMode::tpdf,
+        pulp::signal::NoiseShapingOrder::second);
+
+    CHECK(legacy_type.type_id == lofi::kBitcrushTypeId);
+    CHECK(tpdf_type.type_id == lofi::kBitcrushTpdfTypeId);
+    CHECK(first_type.type_id == lofi::kBitcrushTpdfFirstTypeId);
+    CHECK(second_type.type_id == lofi::kBitcrushTpdfSecondTypeId);
+
+    auto render = [](const CustomNodeType& type) {
+        BakedFixture fx(type);
+        ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+        REQUIRE(inj.valid());
+        pulp::state::ParameterEventQueue q;
+        REQUIRE(q.push(immediate(lofi::kBitcrushBitDepth, 6.0f)));
+        REQUIRE(q.push(immediate(lofi::kBitcrushRateDiv, 1.0f)));
+        REQUIRE(inj.inject(q) == InjectStatus::Ok);
+        return run_block(*fx.result.processor,
+                         std::vector<float>(kFrames, 0.017f));
+    };
+
+    const auto legacy = render(legacy_type);
+    const auto tpdf = render(tpdf_type);
+    const auto first = render(first_type);
+    const auto second = render(second_type);
+    CHECK(tpdf != legacy);
+    CHECK(first != tpdf);
+    CHECK(second != first);
+
+    const auto descriptor = lofi::bitcrush_descriptor();
+    REQUIRE(descriptor.axes.size() == 1);
+    CHECK(descriptor.axes.front().values.size() == 4);
+    CHECK(descriptor.realizations.size() == 4);
+    CHECK(descriptor.params.size() == 2);
+}
+
 // ── Delay: time + feedback are live on the baked feedback echo ───────────
 TEST_CASE("Forge lo-fi: injecting delay feedback changes a baked echo's tail",
           "[host][baked][param-injection][forge][forge-lofi]") {

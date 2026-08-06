@@ -4,6 +4,7 @@
 /// Runtime nonlinear ambience processor. Program constants and documented
 /// topology live in nonlin_ambience_design.hpp.
 
+#include <pulp/signal/dither.hpp>
 #include <pulp/signal/nonlin_ambience_design.hpp>
 
 namespace pulp::signal {
@@ -505,8 +506,8 @@ private:
         const auto step = static_cast<SampleType>(
             1.0 / static_cast<double>(1 << (std::max(2, bits) - 1)));
         // TPDF dither, 1 LSB peak: the difference of two independent uniforms.
-        const SampleType d =
-            (dither_.next_unit<SampleType>() - dither_.next_unit<SampleType>()) * step;
+        const SampleType d = tpdf_difference(dither_.next_unit<SampleType>(),
+                                             dither_.next_unit<SampleType>()) * step;
         y = std::round((y + d) / step) * step;
 
         return conv_dc_[channel].process(y);
@@ -557,8 +558,6 @@ private:
 
         const double gate_hold = gate_hold_pct_ / 100.0;
         const double attack = attack_pct_ / 100.0;
-        const bool reverse_segments = program_ == NonlinProgram::reverse;
-
         for (int ch = 0; ch < 2; ++ch) {
             const std::uint32_t seed = ch == 0 ? seed_ : (seed_ ^ na::kSeedRodd);
             Tap* out = taps_[bank][ch].data();
@@ -572,40 +571,23 @@ private:
                 const double nd = na::pulse_density(u, density_pct_, density_growth_);
                 const double grid = sample_rate_ / nd;  // Td, in samples
 
-                // mix64 is keyed on the tap index, so a tap's jitter and sign do
-                // not depend on how many taps were generated before it — which
-                // is what makes the layout independent of block size and of the
-                // order the generator happens to walk the grid.
-                const double jitter =
-                    unit_from<double>(mix64(seed, static_cast<std::uint64_t>(index), 0u));
-                const int sign =
-                    (mix64(seed, static_cast<std::uint64_t>(index), 1u) & 1ull) ? 1 : -1;
-
-                const int delay = std::clamp(
-                    static_cast<int>(std::lround(t + jitter * std::max(0.0, grid - 1.0))),
-                    0, window_samples - 1);
-
-                const double tau = static_cast<double>(delay) /
-                                   static_cast<double>(window_samples);
-                const double env =
-                    na::program_envelope(program_, tau, gate_hold, attack);
+                const auto design = na::design_velvet_tap(
+                    program_, t, grid, window_samples, predelay_samples,
+                    gate_hold, attack,
+                    velvet_noise_draw<double>(seed, static_cast<std::uint64_t>(index)));
 
                 // A tap whose envelope is exactly zero is past a hard gate. It
                 // is dropped rather than stored, which is what makes the "IR is
                 // zero after the last tap" property meaningful: the last stored
                 // tap is the last audible one.
-                if (env > 0.0) {
+                if (design.audible) {
                     // sqrt(Td) density weighting — see the file note. It makes
                     // the short-time RMS envelope equal E(τ) regardless of how
                     // the density law varies underneath it.
-                    const double weight = std::sqrt(grid);
-                    const double magnitude = env * weight;
-                    out[count].delay = predelay_samples + delay;
-                    out[count].gain = static_cast<float>(sign * magnitude);
-                    int segment = static_cast<int>(tau * na::kSegments);
-                    segment = std::clamp(segment, 0, na::kSegments - 1);
-                    out[count].segment =
-                        reverse_segments ? na::kSegments - 1 - segment : segment;
+                    const double magnitude = design.magnitude;
+                    out[count].delay = design.delay;
+                    out[count].gain = static_cast<float>(design.gain);
+                    out[count].segment = design.segment;
                     l1 += magnitude;
                     ++count;
                 }
@@ -711,24 +693,15 @@ private:
         const double grid = sample_rate_ / nd;
         const std::uint32_t channel_seed =
             b.channel == 0 ? seed_ : (seed_ ^ na::kSeedRodd);
-        const double jitter = unit_from<double>(
-            mix64(channel_seed, static_cast<std::uint64_t>(b.index), 0u));
-        const int sign =
-            (mix64(channel_seed, static_cast<std::uint64_t>(b.index), 1u) & 1ull) ? 1 : -1;
-        const int delay = std::clamp(
-            static_cast<int>(std::lround(b.t + jitter * std::max(0.0, grid - 1.0))),
-            0, b.window_samples - 1);
-        const double tau = static_cast<double>(delay) / static_cast<double>(b.window_samples);
-        const double env = na::program_envelope(b.program, tau, b.gate_hold, b.attack);
-        if (env > 0.0) {
-            const double magnitude = env * std::sqrt(grid);
-            out[b.count].delay = b.predelay_samples + delay;
-            out[b.count].gain = static_cast<float>(sign * magnitude);
-            int segment = std::clamp(static_cast<int>(tau * na::kSegments), 0,
-                                     na::kSegments - 1);
-            out[b.count].segment = b.program == NonlinProgram::reverse
-                                       ? na::kSegments - 1 - segment
-                                       : segment;
+        const auto design = na::design_velvet_tap(
+            b.program, b.t, grid, b.window_samples, b.predelay_samples,
+            b.gate_hold, b.attack,
+            velvet_noise_draw<double>(channel_seed, static_cast<std::uint64_t>(b.index)));
+        if (design.audible) {
+            const double magnitude = design.magnitude;
+            out[b.count].delay = design.delay;
+            out[b.count].gain = static_cast<float>(design.gain);
+            out[b.count].segment = design.segment;
             b.l1 += magnitude;
             ++b.count;
         }

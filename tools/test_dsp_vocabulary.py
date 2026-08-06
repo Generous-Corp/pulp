@@ -38,6 +38,8 @@ MUST_HAVE = [
     ("stage_sequencer.hpp", None, None),
     ("chaos.hpp", None, None),
     ("rng.hpp", None, None),
+    ("dither.hpp", "DitherQuantizerT", "set_dither_mode"),
+    ("velvet_noise.hpp", "VelvetNoiseGridT", "next"),
     ("trigger.hpp", None, None),
     ("dc_blocker.hpp", None, None),
     ("smoothed_value.hpp", None, None),

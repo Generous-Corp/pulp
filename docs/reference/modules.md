@@ -612,6 +612,8 @@ a working convolution and would hide the bug. Assert
 | Chorus | `chorus.hpp` | Modulated delay for stereo widening and detuning effects |
 | Convolver | `convolver.hpp` | Partitioned frequency-domain convolution for reverb impulse responses |
 | Delay Line | `delay_line.hpp` | Sample-accurate delay with linear, cubic, or sinc interpolation |
+| Dither Quantizer | `dither.hpp` | Deterministic TPDF dither with opt-in bounded first- or second-order error-feedback noise shaping; zero latency and allocation-free |
+| Lo-Fi Chain | `lofi_chain.hpp` | Bit-depth reduction, sample-and-hold rate reduction, and dead-zone saturation; dither/noise shaping are opt-in so the legacy default remains exact |
 | Oversampling | `oversampling.hpp` | 2x/4x/8x/16x realtime up/downsampling; minimum-phase IIR and 96/140 dB-prototype linear-phase FIR tiers with exact latency reporting |
 | Phaser | `phaser.hpp` | All-pass filter chain with LFO modulation for sweeping comb effects |
 | FDN Reverb | [`fdn_reverb.hpp`](../guides/fdn-reverb.md) | 16-line feedback delay network with a selectable internal tank sample rate (16-96 kHz), Jot decay law, granular shimmer, and a provably bounded loop gain; wet-only |
@@ -637,6 +639,7 @@ a working convolution and would hide the bug. Assert
 | Multi-Channel Meter | `multi_channel_meter.hpp` | Peak and RMS level measurement across multiple channels |
 | Oscillator | `oscillator.hpp` | Legacy polyBLEP oscillator with sine, saw, square, triangle waveforms (float phase, integrated triangle) |
 | Oscillator suite (`osc/`) | `osc/va.hpp`, `osc/vco.hpp`, `osc/dco.hpp`, `osc/wt.hpp`, `osc/wt_lofi.hpp` | Newer VA/VCO/DCO/wavetable family sharing a phase accumulator and BLEP/BLAMP kernels — see the [oscillators guide](../guides/oscillators.md) |
+| Velvet Noise Grid | `velvet_noise.hpp` | Coordinate-keyed jitter/sign draws for sparse velvet-noise tap grids; full and incremental builders produce identical draws |
 | Spectrogram | `spectrogram.hpp` | Rolling time-frequency analysis for visual display of spectral content |
 | STFT | `stft.hpp` | Short-time Fourier Transform for visualization (analysis-only; for processing use `spectral_frame_engine.hpp`) |
 
