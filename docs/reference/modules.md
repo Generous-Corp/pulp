@@ -493,6 +493,15 @@ deliberately the 12 stable named qualities. Extended or altered input is ranked
 against that catalog by its missing and extra tones; recognition does not invent
 an extension identity.
 
+The music APIs are pure and deterministic and own no mutable processing state,
+so they have no `prepare()` or `reset()` lifecycle. Pitch-class and scale
+operations, formula transforms, chord construction and spelling, and diatonic
+construction are fixed-capacity, allocation-free, bounded value operations that
+may be used on a real-time path. `voice_chord()`,
+`minimum_motion_voice_leading()`, and `recognize_chord()` are control/offline
+algorithms, not audio-callback operations: they perform bounded searches or
+candidate ranking and use comparatively large temporary result/work tables.
+
 ```cpp
 #include <pulp/music/music.hpp>
 
