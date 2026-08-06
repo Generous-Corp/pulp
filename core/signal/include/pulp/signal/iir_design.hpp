@@ -595,10 +595,7 @@ private:
 /// unit circle (i.e. the filter is BIBO stable).
 inline bool cascade_is_stable(std::span<const FilterDesign::Coefficients> sos) {
     for (const auto& c : sos) {
-        // Poles are roots of z^2 + a1 z + a2 = 0. With real coefficients:
-        //   |a2| < 1 AND |a1| < 1 + a2.
-        double a1 = c.a1, a2 = c.a2;
-        if (!(std::abs(a2) < 1.0 && std::abs(a1) < 1.0 + a2)) return false;
+        if (!biquad_is_stable(c)) return false;
     }
     return true;
 }
