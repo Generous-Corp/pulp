@@ -78,6 +78,10 @@ TEST_CASE("Voice modulation adapter reset and hot swap clear voice ownership",
     SECTION("release identity prevents stale note generations from clearing a voice") {
         REQUIRE(adapter.note_event(0, pulp::midi::MidiEvent::note_on(2, 70, 100), 100));
         REQUIRE(adapter.note_event(0, pulp::midi::MidiEvent::note_on(2, 70, 110), 101));
+        CHECK_FALSE(adapter.note_event(0, pulp::midi::MidiEvent::note_on(2, 69, 120), 100));
+        CHECK_FALSE(adapter.note_event(0, pulp::midi::MidiEvent::note_on(2, 69, 120), 101));
+        REQUIRE(adapter.state(0)->note == 70);
+        REQUIRE(adapter.state(0)->note_id == 101);
         CHECK_FALSE(adapter.note_event(0, pulp::midi::MidiEvent::note_off(2, 70), 99));
         REQUIRE(adapter.state(0)->active);
         CHECK_FALSE(adapter.note_event(0, pulp::midi::MidiEvent::note_off(2, 70), 100));
