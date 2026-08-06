@@ -3,10 +3,23 @@
 
 #include <pulp/audio/instrument_voice_allocator.hpp>
 #include <pulp/midi/mpe_voice_tracker.hpp>
+#include <pulp/music/harmony.hpp>
+#include <pulp/music/spelling.hpp>
+#include <pulp/music/voicing.hpp>
 #include <pulp/sequence/host_transport_projector.hpp>
+#include <pulp/signal/mirrored_history_buffer.hpp>
+#include <pulp/signal/osc/minblep.hpp>
 #include <pulp/signal/saturator.hpp>
+#include <pulp/signal/sos_cascade.hpp>
+#include <pulp/signal/windowing.hpp>
+#include <pulp/timebase/beat_division.hpp>
+#include <pulp/timebase/coordinate_random.hpp>
+#include <pulp/timebase/grid_projection.hpp>
+#include <pulp/timebase/groove_kernel.hpp>
 #include <pulp/timebase/quantize.hpp>
+#include <pulp/timebase/ratchet.hpp>
 #include <pulp/timebase/tick.hpp>
+#include <pulp/timebase/trigger_grid.hpp>
 
 int main() {
     {
@@ -20,9 +33,52 @@ int main() {
         pulp::midi::MpeVoiceTracker probe_value_0{}; (void)probe_value_0.reset();
     }
     {
+        // music.chord-recognition
+        auto *volatile binding_2 = static_cast<std::optional<pulp::music::ChordRecognitionList> (*)(pulp::music::PitchClassSet, std::optional<pulp::music::PitchClass>) noexcept>(&pulp::music::recognize_chord);
+        (void)binding_2;
+        auto *volatile binding_3 = static_cast<std::optional<pulp::music::ChordRecognitionList> (*)(std::span<const int>) noexcept>(&pulp::music::recognize_chord);
+        (void)binding_3;
+        (void)pulp::music::recognize_chord(*pulp::music::PitchClassSet::from_mask(0x091u), pulp::music::PitchClass::c);
+        (void)pulp::music::recognize_chord([]() { static constexpr int pitches[]{60, 64, 67}; return std::span<const int>{pitches}; }());
+    }
+    {
+        // music.chord-spelling
+        auto *volatile binding_4 = &pulp::music::spell_pitch_class;
+        (void)binding_4;
+        auto *volatile binding_5 = &pulp::music::spelling_name;
+        (void)binding_5;
+        auto *volatile binding_6 = static_cast<std::optional<pulp::music::SpelledChord> (*)(pulp::music::PitchClass, const pulp::music::ChordFormula&, pulp::music::AccidentalPolicy) noexcept>(&pulp::music::spell_chord);
+        (void)binding_6;
+        auto *volatile binding_7 = static_cast<std::optional<pulp::music::SpelledChord> (*)(const pulp::music::Chord&, pulp::music::AccidentalPolicy) noexcept>(&pulp::music::spell_chord);
+        (void)binding_7;
+        (void)pulp::music::spell_pitch_class(pulp::music::PitchClass::c_sharp, pulp::music::AccidentalPolicy::prefer_flats);
+        (void)pulp::music::spelling_name(pulp::music::SpelledPitchClass{});
+        (void)pulp::music::spell_chord(pulp::music::PitchClass::c, *pulp::music::ChordFormula::for_quality(pulp::music::ChordQuality::major), pulp::music::AccidentalPolicy::prefer_sharps);
+        (void)pulp::music::spell_chord(*pulp::music::Chord::construct(60, *pulp::music::ChordFormula::for_quality(pulp::music::ChordQuality::major)), pulp::music::AccidentalPolicy::prefer_sharps);
+    }
+    {
+        // music.chord-voicing
+        auto *volatile binding_8 = &pulp::music::voice_chord;
+        (void)binding_8;
+        auto *volatile binding_9 = &pulp::music::minimum_motion_voice_leading;
+        (void)binding_9;
+        (void)pulp::music::voice_chord(60, *pulp::music::ChordFormula::for_quality(pulp::music::ChordQuality::major), pulp::music::VoicingConstraints{});
+        (void)pulp::music::minimum_motion_voice_leading([]() { static constexpr int pitches[]{60, 64, 67}; return std::span<const int>{pitches}; }(), pulp::music::PitchClass::f, *pulp::music::ChordFormula::for_quality(pulp::music::ChordQuality::major), pulp::music::MidiRange{});
+    }
+    {
         // sequence.host-transport-projector
         static_assert(sizeof(pulp::sequence::HostTransportProjector) > 0);
         pulp::sequence::HostTransportProjector probe_value_0{}; (void)probe_value_0.reset();
+    }
+    {
+        // signal.bounded-sample-history
+        static_assert(sizeof(pulp::signal::MirroredHistoryBuffer<float>) > 0);
+        pulp::signal::MirroredHistoryBuffer<float> probe_value_0{}; (void)probe_value_0.prepare(8);
+    }
+    {
+        // signal.minblep
+        static_assert(sizeof(pulp::signal::osc::MinBlepAccumulator<>) > 0);
+        pulp::signal::osc::MinBlepAccumulator<> probe_value_0{}; (void)probe_value_0.insert(0.5, 1.0);
     }
     {
         // signal.saturator
@@ -30,12 +86,56 @@ int main() {
         pulp::signal::SaturatorT<float> probe_value_0{}; (void)probe_value_0.prepare(48000.0);
     }
     {
+        // signal.sos-cascade
+        static_assert(sizeof(pulp::signal::SosCascadeT<float>) > 0);
+        pulp::signal::SosCascadeT<float> probe_value_0{}; (void)probe_value_0.prepare(4);
+    }
+    {
+        // signal.window-functions
+        static_assert(sizeof(pulp::signal::WindowFunction) > 0);
+        pulp::signal::WindowFunction probe_value_0{}; (void)probe_value_0.generate(8, pulp::signal::WindowFunction::Type::hann);
+    }
+    {
+        // timebase.beat-division
+        static_assert(sizeof(pulp::timebase::BeatDivision) > 0);
+        auto *volatile binding_17 = &pulp::timebase::division_ticks;
+        (void)binding_17;
+        pulp::timebase::BeatDivision probe_value_0{pulp::timebase::BeatDivision::Quarter}; (void)probe_value_0;
+        (void)pulp::timebase::division_ticks(pulp::timebase::BeatDivision::Quarter);
+    }
+    {
+        // timebase.coordinate-random
+        static_assert(sizeof(pulp::timebase::RandomCoordinate) > 0);
+        auto *volatile binding_19 = &pulp::timebase::coordinate_chance;
+        (void)binding_19;
+        pulp::timebase::RandomCoordinate probe_value_0{pulp::timebase::TickPosition{0}, 0, 0, 0}; (void)probe_value_0;
+        (void)pulp::timebase::coordinate_chance(0, pulp::timebase::RandomCoordinate{}, 1, 2);
+    }
+    {
+        // timebase.grid-projection
+        auto *volatile binding_20 = &pulp::timebase::project_grid;
+        (void)binding_20;
+        (void)pulp::timebase::project_grid(pulp::timebase::CompiledTempoMap::compile(pulp::timebase::TempoMap{}, pulp::timebase::RationalRate{48000, 1}).value(), pulp::timebase::CompiledMeterMap::compile(pulp::timebase::MeterMap{}).value(), pulp::timebase::GridProjectionRequest{}, std::span<const pulp::timebase::GridProjectionRange>{}, std::span<pulp::timebase::GridProjectionPoint>{});
+    }
+    {
+        // timebase.groove-kernel
+        auto *volatile binding_21 = &pulp::timebase::OrderPreservingGrooveKernel::create;
+        (void)binding_21;
+        (void)pulp::timebase::OrderPreservingGrooveKernel::create(pulp::timebase::GrooveKernelInput{});
+    }
+    {
+        // timebase.ratchet
+        auto *volatile binding_22 = &pulp::timebase::project_ratchet_interval<>;
+        (void)binding_22;
+        (void)pulp::timebase::project_ratchet_interval<>(pulp::timebase::TickPosition{0}, pulp::timebase::TickPosition{4}, 2, pulp::timebase::TickPosition{0}, pulp::timebase::TickPosition{4}, std::span<pulp::timebase::TickPosition>{});
+    }
+    {
         // timebase.swing
         static_assert(sizeof(pulp::timebase::SwingRatio) > 0);
-        auto *volatile binding_5 = &pulp::timebase::swing_position;
-        (void)binding_5;
-        auto *volatile binding_6 = &pulp::timebase::unswing_position;
-        (void)binding_6;
+        auto *volatile binding_24 = &pulp::timebase::swing_position;
+        (void)binding_24;
+        auto *volatile binding_25 = &pulp::timebase::unswing_position;
+        (void)binding_25;
         pulp::timebase::SwingRatio probe_value_0{1, 2}; (void)probe_value_0;
         (void)pulp::timebase::swing_position(pulp::timebase::TickPosition{1}, pulp::timebase::TickDuration{2}, pulp::timebase::kStraightSwing);
         (void)pulp::timebase::unswing_position(pulp::timebase::TickPosition{1}, pulp::timebase::TickDuration{2}, pulp::timebase::kStraightSwing);
@@ -44,6 +144,11 @@ int main() {
         // timebase.tick
         static_assert(sizeof(pulp::timebase::TickPosition) > 0);
         pulp::timebase::TickPosition probe_value_0{1}; (void)probe_value_0;
+    }
+    {
+        // timebase.trigger-grid
+        static_assert(sizeof(pulp::timebase::TriggerGrid<>) > 0);
+        pulp::timebase::TriggerGrid<> probe_value_0{}; (void)probe_value_0.configure(1, 1, pulp::timebase::TickDuration{1});
     }
     return 0;
 }

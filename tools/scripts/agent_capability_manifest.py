@@ -29,8 +29,8 @@ from agent_capability_evolution import (
 
 SCHEMA = "pulp.agent-capabilities.v1"
 SCHEMA_MINOR = 1
-MANIFEST_REVISION = 2
-SURFACE_INVENTORY_VERSION = 2
+MANIFEST_REVISION = 5
+SURFACE_INVENTORY_VERSION = 5
 HISTORY_SCHEMA = "pulp.agent-capability-history.v1"
 HISTORY_FILE = pathlib.Path("tools/agent-capabilities/contract-history.json")
 SNAPSHOT = pathlib.Path("docs/status/agent-capabilities.json")
@@ -88,12 +88,28 @@ FORBIDDEN_RUNTIME_CONTROL_FIELDS = {
 REVIEWED_MINIMAL_TARGETS = {
     "pulp/audio/instrument_voice_allocator.hpp": "Pulp::audio",
     "pulp/midi/mpe_voice_tracker.hpp": "Pulp::midi",
+    "pulp/music/chord.hpp": "Pulp::music",
+    "pulp/music/harmony.hpp": "Pulp::music",
+    "pulp/music/music.hpp": "Pulp::music",
+    "pulp/music/pitch.hpp": "Pulp::music",
+    "pulp/music/spelling.hpp": "Pulp::music",
+    "pulp/music/voicing.hpp": "Pulp::music",
     "pulp/sequence/host_transport_projector.hpp": "Pulp::sequence",
     "pulp/signal/saturator.hpp": "Pulp::signal",
+    "pulp/signal/sos_cascade.hpp": "Pulp::signal",
     "pulp/signal/fft_backend.hpp": "Pulp::signal-fft-backend",
     "pulp/signal/modal_spec.hpp": "Pulp::signal-modal-spec",
+    "pulp/signal/mirrored_history_buffer.hpp": "Pulp::signal",
+    "pulp/signal/osc/minblep.hpp": "Pulp::signal",
+    "pulp/signal/windowing.hpp": "Pulp::signal",
     "pulp/timebase/quantize.hpp": "Pulp::timebase",
     "pulp/timebase/tick.hpp": "Pulp::timebase",
+    "pulp/timebase/beat_division.hpp": "Pulp::timebase",
+    "pulp/timebase/coordinate_random.hpp": "Pulp::timebase",
+    "pulp/timebase/grid_projection.hpp": "Pulp::timebase",
+    "pulp/timebase/groove_kernel.hpp": "Pulp::timebase",
+    "pulp/timebase/ratchet.hpp": "Pulp::timebase",
+    "pulp/timebase/trigger_grid.hpp": "Pulp::timebase",
 }
 
 
@@ -113,8 +129,9 @@ def binding(
     qualified_name: str,
     target: str,
     header_fingerprint: str,
+    address_expression: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    result = {
         "role": role,
         "kind": kind,
         "include": include,
@@ -123,6 +140,9 @@ def binding(
         "availability": availability(),
         "_header_fingerprint": header_fingerprint,
     }
+    if address_expression is not None:
+        result["_address_expression"] = address_expression
+    return result
 
 
 def capability(**row: Any) -> dict[str, Any]:
@@ -138,6 +158,165 @@ def capability(**row: Any) -> dict[str, Any]:
 # ships. Header fingerprints are maintenance data and are stripped from the
 # installed manifest.
 EXPORTS = [
+    capability(
+        key="signal.minblep",
+        domain="signal",
+        summary=(
+            "Fixed-capacity minimum-phase bandlimited-step correction for "
+            "oscillator discontinuities."
+        ),
+        rt_class="audio",
+        lifecycle={
+            "construction": "control",
+            "prepare": "none",
+            "process": "audio",
+            "reset": "audio",
+            "release": "none",
+        },
+        state_model=(
+            "A compile-time-bounded slot array accumulates causal corrections; "
+            "insertion reports invalid inputs and capacity exhaustion explicitly."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "same_build",
+            "transport_history": "irrelevant",
+        },
+        input_domain="fractional oscillator discontinuity positions and step heights",
+        output_domain="causal bandlimited-step correction samples",
+        units=["normalized sample position", "sample amplitude", "samples"],
+        latency="zero",
+        tail="32 samples per inserted discontinuity",
+        scheduling="sample-synchronous",
+        bindings=[
+            binding(
+                role="entrypoint",
+                kind="cpp_type",
+                include="pulp/signal/osc/minblep.hpp",
+                qualified_name="pulp::signal::osc::MinBlepAccumulator<>",
+                target="Pulp::signal",
+                header_fingerprint=(
+                    "sha256:f310b561f6e616926b2079050c1b49cc762e8ab8ad8d1b518677d77a98cd2631"
+                ),
+            ),
+        ],
+        _link_probes=[
+            {
+                "role": "entrypoint",
+                "binding": "pulp::signal::osc::MinBlepAccumulator<>",
+                "operation": "member_call",
+                "member": "insert",
+                "arguments": "0.5, 1.0",
+            },
+        ],
+    ),
+    capability(
+        key="signal.bounded-sample-history",
+        domain="signal",
+        summary=(
+            "Prepared fixed-capacity sample history with a contiguous "
+            "oldest-to-newest view."
+        ),
+        rt_class="mixed",
+        lifecycle={
+            "construction": "control",
+            "prepare": "control",
+            "process": "audio",
+            "reset": "audio",
+            "release": "destruction-off-audio",
+        },
+        state_model=(
+            "prepare allocates two mirrored copies of a fixed capacity; push, "
+            "window, reset, and accessors allocate no memory afterward. The "
+            "state is single-thread DSP history, not a synchronization primitive."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "same_build",
+            "transport_history": "irrelevant",
+        },
+        input_domain="sample values and prepared sample capacity",
+        output_domain="contiguous oldest-to-newest sample history",
+        units=["samples", "sample count"],
+        latency="zero",
+        tail="capacity-sample-history-until-overwritten-or-reset",
+        scheduling="sample-synchronous single-thread use",
+        bindings=[
+            binding(
+                role="entrypoint",
+                kind="cpp_type",
+                include="pulp/signal/mirrored_history_buffer.hpp",
+                qualified_name="pulp::signal::MirroredHistoryBuffer<float>",
+                target="Pulp::signal",
+                header_fingerprint=(
+                    "sha256:a008193b186b53f91576d23e8bd82209599f39c159587e8bae28f106e5374802"
+                ),
+            )
+        ],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::signal::MirroredHistoryBuffer<float>",
+            "operation": "member_call",
+            "member": "prepare",
+            "arguments": "8",
+        }],
+    ),
+    capability(
+        key="signal.window-functions",
+        domain="signal",
+        summary=(
+            "Reusable analysis-window generation and allocation-free in-place "
+            "application."
+        ),
+        rt_class="mixed",
+        lifecycle={
+            "construction": "none",
+            "prepare": "control",
+            "process": "audio-with-precomputed-window",
+            "reset": "none",
+            "release": "generated-vector-destruction-off-audio",
+        },
+        state_model=(
+            "Stateless static utility; generate returns caller-owned allocated "
+            "coefficients and apply mutates caller-owned samples without allocation."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "not_applicable",
+            "platform_scope": "same_build",
+            "transport_history": "irrelevant",
+        },
+        input_domain="window size, window family, optional Kaiser parameter, and samples",
+        output_domain="window coefficients or in-place windowed samples",
+        units=["samples", "sample count", "normalized ratio"],
+        latency="zero",
+        tail="none",
+        scheduling="control-generated and sample-array-applied",
+        bindings=[
+            binding(
+                role="entrypoint",
+                kind="cpp_type",
+                include="pulp/signal/windowing.hpp",
+                qualified_name="pulp::signal::WindowFunction",
+                target="Pulp::signal",
+                header_fingerprint=(
+                    "sha256:672043aa1a9a0d0a0cd28a82cd7b7d81e57de035b963e0226c23b85b42ce1f7f"
+                ),
+            )
+        ],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::signal::WindowFunction",
+            "operation": "member_call",
+            "member": "generate",
+            "arguments": "8, pulp::signal::WindowFunction::Type::hann",
+        }],
+    ),
     capability(
         key="signal.saturator",
         contract_version={"major": 1, "minor": 1},
@@ -187,6 +366,59 @@ EXPORTS = [
             "operation": "member_call",
             "member": "prepare",
             "arguments": "48000.0",
+        }],
+    ),
+    capability(
+        key="signal.sos-cascade",
+        domain="signal",
+        summary=(
+            "Fixed-capacity transactional execution of stable normalized "
+            "second-order-section cascades."
+        ),
+        rt_class="audio",
+        lifecycle={
+            "construction": "control",
+            "prepare": "control",
+            "process": "audio",
+            "reset": "audio",
+            "release": "none",
+        },
+        state_model=(
+            "A prepared fixed-capacity section array owns recursive DF2T state; "
+            "coefficient installation is whole-cascade transactional and occurs "
+            "at a block boundary."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "same_build",
+            "transport_history": "irrelevant",
+        },
+        input_domain="audio samples and normalized SOS coefficients",
+        output_domain="audio samples",
+        units=["samples", "normalized coefficients", "section count"],
+        latency="zero",
+        tail="recursive IIR decay until reset or denormal snap",
+        scheduling="sample-synchronous; coefficient changes at block boundaries",
+        bindings=[
+            binding(
+                role="entrypoint",
+                kind="cpp_type",
+                include="pulp/signal/sos_cascade.hpp",
+                qualified_name="pulp::signal::SosCascadeT<float>",
+                target="Pulp::signal",
+                header_fingerprint=(
+                    "sha256:8e6d177601b3167a8033a7e51c33174169b05a8719930964562fd22d5a4b5c3a"
+                ),
+            )
+        ],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::signal::SosCascadeT<float>",
+            "operation": "member_call",
+            "member": "prepare",
+            "arguments": "4",
         }],
     ),
     capability(
@@ -294,6 +526,287 @@ EXPORTS = [
             "member": "reset",
             "arguments": "",
         }],
+    ),
+    capability(
+        key="music.chord-spelling",
+        domain="music",
+        summary=(
+            "Fixed-capacity pitch-class and chord spelling under an explicit "
+            "accidental policy."
+        ),
+        rt_class="any",
+        lifecycle={
+            "construction": "any",
+            "prepare": "none",
+            "process": "any",
+            "reset": "none",
+            "release": "none",
+        },
+        state_model="Pure fixed-capacity value transforms with no retained state.",
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "not_applicable",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
+        input_domain="12-TET pitch classes, chord formulas, and accidental policy",
+        output_domain="spelled pitch classes, chord tones, and names",
+        units=["pitch class", "semitones", "note letter"],
+        latency="zero",
+        tail="none",
+        scheduling="pure",
+        status="experimental",
+        bindings=[
+            binding(
+                role="pitch-class-operation",
+                kind="cpp_function",
+                include="pulp/music/spelling.hpp",
+                qualified_name="pulp::music::spell_pitch_class",
+                target="Pulp::music",
+                header_fingerprint=(
+                    "sha256:2a0f8acc58dd5525631d694ae6b989ec7d50a2bf305d176414ee51a542673c13"
+                ),
+            ),
+            binding(
+                role="name-operation",
+                kind="cpp_function",
+                include="pulp/music/spelling.hpp",
+                qualified_name="pulp::music::spelling_name",
+                target="Pulp::music",
+                header_fingerprint=(
+                    "sha256:2a0f8acc58dd5525631d694ae6b989ec7d50a2bf305d176414ee51a542673c13"
+                ),
+            ),
+            binding(
+                role="formula-operation",
+                kind="cpp_function",
+                include="pulp/music/spelling.hpp",
+                qualified_name="pulp::music::spell_chord",
+                target="Pulp::music",
+                header_fingerprint=(
+                    "sha256:2a0f8acc58dd5525631d694ae6b989ec7d50a2bf305d176414ee51a542673c13"
+                ),
+                address_expression=(
+                    "static_cast<std::optional<pulp::music::SpelledChord> (*)("
+                    "pulp::music::PitchClass, const pulp::music::ChordFormula&, "
+                    "pulp::music::AccidentalPolicy) noexcept>("
+                    "&pulp::music::spell_chord)"
+                ),
+            ),
+            binding(
+                role="chord-operation",
+                kind="cpp_function",
+                include="pulp/music/spelling.hpp",
+                qualified_name="pulp::music::spell_chord",
+                target="Pulp::music",
+                header_fingerprint=(
+                    "sha256:2a0f8acc58dd5525631d694ae6b989ec7d50a2bf305d176414ee51a542673c13"
+                ),
+                address_expression=(
+                    "static_cast<std::optional<pulp::music::SpelledChord> (*)("
+                    "const pulp::music::Chord&, pulp::music::AccidentalPolicy) noexcept>("
+                    "&pulp::music::spell_chord)"
+                ),
+            ),
+        ],
+        _link_probes=[
+            {
+                "role": "pitch-class-operation",
+                "binding": "pulp::music::spell_pitch_class",
+                "operation": "function_call",
+                "arguments": (
+                    "pulp::music::PitchClass::c_sharp, "
+                    "pulp::music::AccidentalPolicy::prefer_flats"
+                ),
+            },
+            {
+                "role": "name-operation",
+                "binding": "pulp::music::spelling_name",
+                "operation": "function_call",
+                "arguments": "pulp::music::SpelledPitchClass{}",
+            },
+            {
+                "role": "formula-operation",
+                "binding": "pulp::music::spell_chord",
+                "operation": "function_call",
+                "arguments": (
+                    "pulp::music::PitchClass::c, "
+                    "*pulp::music::ChordFormula::for_quality("
+                    "pulp::music::ChordQuality::major), "
+                    "pulp::music::AccidentalPolicy::prefer_sharps"
+                ),
+            },
+            {
+                "role": "chord-operation",
+                "binding": "pulp::music::spell_chord",
+                "operation": "function_call",
+                "arguments": (
+                    "*pulp::music::Chord::construct(60, "
+                    "*pulp::music::ChordFormula::for_quality("
+                    "pulp::music::ChordQuality::major)), "
+                    "pulp::music::AccidentalPolicy::prefer_sharps"
+                ),
+            },
+        ],
+    ),
+    capability(
+        key="music.chord-recognition",
+        domain="music",
+        summary=(
+            "Ranked recognition over Pulp's stable 12-quality chord catalog with "
+            "explicit ambiguity and inversion evidence."
+        ),
+        rt_class="control",
+        lifecycle={
+            "construction": "control-or-offline",
+            "prepare": "none",
+            "process": "control-or-offline",
+            "reset": "none",
+            "release": "none",
+        },
+        state_model="Pure bounded candidate ranking with no retained state.",
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "not_applicable",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
+        input_domain="12-TET pitch-class sets or bounded MIDI-note collections",
+        output_domain="ranked named-chord candidates and inversion evidence",
+        units=["pitch class", "MIDI note", "candidate count"],
+        latency="request-bound",
+        tail="none",
+        scheduling="request-synchronous",
+        status="partial",
+        bindings=[
+            binding(
+                role="pitch-class-operation",
+                kind="cpp_function",
+                include="pulp/music/harmony.hpp",
+                qualified_name="pulp::music::recognize_chord",
+                target="Pulp::music",
+                header_fingerprint=(
+                    "sha256:78526fc61168d1b9d50f184fa9a9c3cc58986030afdfa919a2db087332c2e7a9"
+                ),
+                address_expression=(
+                    "static_cast<std::optional<pulp::music::ChordRecognitionList> (*)("
+                    "pulp::music::PitchClassSet, std::optional<pulp::music::PitchClass>) "
+                    "noexcept>(&pulp::music::recognize_chord)"
+                ),
+            ),
+            binding(
+                role="midi-operation",
+                kind="cpp_function",
+                include="pulp/music/harmony.hpp",
+                qualified_name="pulp::music::recognize_chord",
+                target="Pulp::music",
+                header_fingerprint=(
+                    "sha256:78526fc61168d1b9d50f184fa9a9c3cc58986030afdfa919a2db087332c2e7a9"
+                ),
+                address_expression=(
+                    "static_cast<std::optional<pulp::music::ChordRecognitionList> (*)("
+                    "std::span<const int>) noexcept>(&pulp::music::recognize_chord)"
+                ),
+            ),
+        ],
+        _link_probes=[
+            {
+                "role": "pitch-class-operation",
+                "binding": "pulp::music::recognize_chord",
+                "operation": "function_call",
+                "arguments": (
+                    "*pulp::music::PitchClassSet::from_mask(0x091u), "
+                    "pulp::music::PitchClass::c"
+                ),
+            },
+            {
+                "role": "midi-operation",
+                "binding": "pulp::music::recognize_chord",
+                "operation": "function_call",
+                "arguments": (
+                    "[]() { static constexpr int pitches[]{60, 64, 67}; "
+                    "return std::span<const int>{pitches}; }()"
+                ),
+            },
+        ],
+    ),
+    capability(
+        key="music.chord-voicing",
+        domain="music",
+        summary=(
+            "Constrained chord voicing and deterministic minimum-motion voice "
+            "leading over the bounded MIDI domain."
+        ),
+        rt_class="control",
+        lifecycle={
+            "construction": "control-or-offline",
+            "prepare": "none",
+            "process": "control-or-offline",
+            "reset": "none",
+            "release": "none",
+        },
+        state_model="Pure bounded search with fixed local work tables and no retained state.",
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "not_applicable",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
+        input_domain="chord formulas, prior voices, MIDI range, and voicing constraints",
+        output_domain="ordered MIDI-note voicings and summed semitone motion",
+        units=["MIDI note", "semitones", "voice count"],
+        latency="request-bound",
+        tail="none",
+        scheduling="request-synchronous",
+        status="experimental",
+        bindings=[
+            binding(
+                role="voicing-operation",
+                kind="cpp_function",
+                include="pulp/music/voicing.hpp",
+                qualified_name="pulp::music::voice_chord",
+                target="Pulp::music",
+                header_fingerprint=(
+                    "sha256:2e9c5c02b29c3cba699b5f4c6cf89207626aa3fd19cbe4b46bfaf2642925d95d"
+                ),
+            ),
+            binding(
+                role="voice-leading-operation",
+                kind="cpp_function",
+                include="pulp/music/voicing.hpp",
+                qualified_name="pulp::music::minimum_motion_voice_leading",
+                target="Pulp::music",
+                header_fingerprint=(
+                    "sha256:2e9c5c02b29c3cba699b5f4c6cf89207626aa3fd19cbe4b46bfaf2642925d95d"
+                ),
+            ),
+        ],
+        _link_probes=[
+            {
+                "role": "voicing-operation",
+                "binding": "pulp::music::voice_chord",
+                "operation": "function_call",
+                "arguments": (
+                    "60, *pulp::music::ChordFormula::for_quality("
+                    "pulp::music::ChordQuality::major), pulp::music::VoicingConstraints{}"
+                ),
+            },
+            {
+                "role": "voice-leading-operation",
+                "binding": "pulp::music::minimum_motion_voice_leading",
+                "operation": "function_call",
+                "arguments": (
+                    "[]() { static constexpr int pitches[]{60, 64, 67}; "
+                    "return std::span<const int>{pitches}; }(), "
+                    "pulp::music::PitchClass::f, "
+                    "*pulp::music::ChordFormula::for_quality("
+                    "pulp::music::ChordQuality::major), pulp::music::MidiRange{}"
+                ),
+            },
+        ],
     ),
     capability(
         key="timebase.tick",
@@ -437,6 +950,327 @@ EXPORTS = [
         ],
     ),
     capability(
+        key="timebase.beat-division",
+        domain="timebase",
+        summary="Canonical persisted beat-division vocabulary with exact tick conversion.",
+        rt_class="any",
+        lifecycle={
+            "construction": "any",
+            "prepare": "none",
+            "process": "any",
+            "reset": "value-initialization",
+            "release": "none",
+        },
+        state_model="Pure enum, fraction, and tick-duration value conversion.",
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "not_applicable",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
+        input_domain="persisted beat-division ordinal",
+        output_domain="exact quarter-note fraction and document tick duration",
+        units=["quarter-note fraction", "ticks"],
+        latency="zero",
+        tail="none",
+        scheduling="pure",
+        bindings=[
+            binding(
+                role="vocabulary",
+                kind="cpp_type",
+                include="pulp/timebase/beat_division.hpp",
+                qualified_name="pulp::timebase::BeatDivision",
+                target="Pulp::timebase",
+                header_fingerprint=(
+                    "sha256:a6f8a5abd5184d33e08c38ed24565b8ed18df756ce63688594a7a3b4ca6ed570"
+                ),
+            ),
+            binding(
+                role="tick-conversion",
+                kind="cpp_function",
+                include="pulp/timebase/beat_division.hpp",
+                qualified_name="pulp::timebase::division_ticks",
+                target="Pulp::timebase",
+                header_fingerprint=(
+                    "sha256:a6f8a5abd5184d33e08c38ed24565b8ed18df756ce63688594a7a3b4ca6ed570"
+                ),
+            ),
+        ],
+        _link_probes=[
+            {
+                "role": "vocabulary",
+                "binding": "pulp::timebase::BeatDivision",
+                "operation": "construct",
+                "arguments": "pulp::timebase::BeatDivision::Quarter",
+            },
+            {
+                "role": "tick-conversion",
+                "binding": "pulp::timebase::division_ticks",
+                "operation": "function_call",
+                "arguments": "pulp::timebase::BeatDivision::Quarter",
+            },
+        ],
+    ),
+    capability(
+        key="timebase.coordinate-random",
+        domain="timebase",
+        summary="Stateless seeded probability keyed by stable musical coordinates.",
+        rt_class="any",
+        lifecycle={
+            "construction": "any",
+            "prepare": "none",
+            "process": "any",
+            "reset": "none",
+            "release": "none",
+        },
+        state_model="Pure coordinate hash and exact integer-ratio predicate with no mutable RNG.",
+        seed_model="caller-supplied 64-bit seed plus tick, lane, cycle, and stream coordinates",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
+        input_domain="seed, musical coordinate, and exact probability ratio",
+        output_domain="deterministic probability selection",
+        units=["ticks", "unsigned integer ratio"],
+        latency="zero",
+        tail="none",
+        scheduling="event-synchronous",
+        bindings=[
+            binding(
+                role="coordinate",
+                kind="cpp_type",
+                include="pulp/timebase/coordinate_random.hpp",
+                qualified_name="pulp::timebase::RandomCoordinate",
+                target="Pulp::timebase",
+                header_fingerprint=(
+                    "sha256:327487f1a49eb2f8729a6db7ba493ad220f634fec2cb4c7295a300f0a68ddae5"
+                ),
+            ),
+            binding(
+                role="probability-operation",
+                kind="cpp_function",
+                include="pulp/timebase/coordinate_random.hpp",
+                qualified_name="pulp::timebase::coordinate_chance",
+                target="Pulp::timebase",
+                header_fingerprint=(
+                    "sha256:327487f1a49eb2f8729a6db7ba493ad220f634fec2cb4c7295a300f0a68ddae5"
+                ),
+            ),
+        ],
+        _link_probes=[
+            {
+                "role": "coordinate",
+                "binding": "pulp::timebase::RandomCoordinate",
+                "operation": "construct",
+                "arguments": "pulp::timebase::TickPosition{0}, 0, 0, 0",
+            },
+            {
+                "role": "probability-operation",
+                "binding": "pulp::timebase::coordinate_chance",
+                "operation": "function_call",
+                "arguments": "0, pulp::timebase::RandomCoordinate{}, 1, 2",
+            },
+        ],
+    ),
+    capability(
+        key="timebase.grid-projection",
+        domain="timebase",
+        summary="Bounded projection of musical grid points through resolved transport ranges.",
+        rt_class="audio",
+        lifecycle={
+            "construction": "control",
+            "prepare": "control",
+            "process": "audio",
+            "reset": "caller-replaces-resolved-ranges",
+            "release": "none",
+        },
+        state_model=(
+            "Pure projection over caller-owned immutable compiled tempo and meter maps, "
+            "resolved ranges, and fixed output storage."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "same_build",
+            "transport_history": "input",
+        },
+        input_domain="resolved half-open transport ranges and beat division",
+        output_domain="bounded frame-offset grid events with timeline and monotonic coordinates",
+        units=["frames", "samples", "ticks", "bars"],
+        latency="zero",
+        tail="none",
+        scheduling="block-synchronous event projection",
+        bindings=[
+            binding(
+                role="projection-operation",
+                kind="cpp_function",
+                include="pulp/timebase/grid_projection.hpp",
+                qualified_name="pulp::timebase::project_grid",
+                target="Pulp::timebase",
+                header_fingerprint=(
+                    "sha256:b2f226eac6ab4171874c462a69dceca9fad0468e749c0d3195b1a7daf6a032b5"
+                ),
+            )
+        ],
+        _link_probes=[{
+            "role": "projection-operation",
+            "binding": "pulp::timebase::project_grid",
+            "operation": "function_call",
+            "arguments": (
+                "pulp::timebase::CompiledTempoMap::compile("
+                "pulp::timebase::TempoMap{}, pulp::timebase::RationalRate{48000, 1}).value(), "
+                "pulp::timebase::CompiledMeterMap::compile(pulp::timebase::MeterMap{}).value(), "
+                "pulp::timebase::GridProjectionRequest{}, "
+                "std::span<const pulp::timebase::GridProjectionRange>{}, "
+                "std::span<pulp::timebase::GridProjectionPoint>{}"
+            ),
+        }],
+    ),
+    capability(
+        key="timebase.groove-kernel",
+        domain="timebase",
+        summary="Fixed-capacity swing and groove projection that rejects event reordering.",
+        rt_class="mixed",
+        lifecycle={
+            "construction": "control",
+            "prepare": "factory-validation-on-control",
+            "process": "audio",
+            "reset": "replace-immutable-value",
+            "release": "none",
+        },
+        state_model="Immutable copied groove table with bounded validation and allocation-free lookup.",
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
+        input_domain="authored event ticks, rational swing, and fixed-capacity groove steps",
+        output_domain="order-preserving event ticks and velocity scale",
+        units=["ticks", "rational ratio", "per-thousand scale"],
+        latency="zero",
+        tail="none",
+        scheduling="event-synchronous",
+        bindings=[
+            binding(
+                role="validated-factory",
+                kind="cpp_function",
+                include="pulp/timebase/groove_kernel.hpp",
+                qualified_name="pulp::timebase::OrderPreservingGrooveKernel::create",
+                target="Pulp::timebase",
+                header_fingerprint=(
+                    "sha256:169e0104d2ea6164d6924de224ac636eaf11d617f5b844b4a2facaf0cbaa0286"
+                ),
+            )
+        ],
+        _link_probes=[{
+            "role": "validated-factory",
+            "binding": "pulp::timebase::OrderPreservingGrooveKernel::create",
+            "operation": "function_call",
+            "arguments": "pulp::timebase::GrooveKernelInput{}",
+        }],
+    ),
+    capability(
+        key="timebase.trigger-grid",
+        domain="timebase",
+        summary="Fixed-capacity authored trigger grid with block-invariant window projection.",
+        rt_class="mixed",
+        lifecycle={
+            "construction": "control",
+            "prepare": "configure-and-author-on-control",
+            "process": "audio",
+            "reset": "control-or-audio-when-quiescent",
+            "release": "none",
+        },
+        state_model="Inline fixed-capacity track-step cells; projection does not mutate the grid.",
+        seed_model="caller supplies one stable 64-bit probability word per configured coordinate",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
+        input_domain="authored trigger cells, cycle origin, half-open tick window, and probability words",
+        output_domain="bounded step-major trigger events",
+        units=["ticks", "MIDI velocity", "unsigned integer ratio"],
+        latency="zero",
+        tail="none",
+        scheduling="event-synchronous",
+        bindings=[
+            binding(
+                role="entrypoint",
+                kind="cpp_type",
+                include="pulp/timebase/trigger_grid.hpp",
+                qualified_name="pulp::timebase::TriggerGrid<>",
+                target="Pulp::timebase",
+                header_fingerprint=(
+                    "sha256:6a5b7dd7f2b1185ed3a3f5c8ae1ffcf506415fe6083ec772f984010476b337ca"
+                ),
+            )
+        ],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::timebase::TriggerGrid<>",
+            "operation": "member_call",
+            "member": "configure",
+            "arguments": "1, 1, pulp::timebase::TickDuration{1}",
+        }],
+    ),
+    capability(
+        key="timebase.ratchet",
+        domain="timebase",
+        summary="Clock-locked bounded ratchet subdivision over half-open tick intervals.",
+        rt_class="any",
+        lifecycle={
+            "construction": "any",
+            "prepare": "none",
+            "process": "any",
+            "reset": "none",
+            "release": "none",
+        },
+        state_model="Pure fixed-capacity integer subdivision with caller-owned output storage.",
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
+        input_domain="clock interval, hit count, and half-open projection window",
+        output_domain="bounded tick-position ratchet onsets",
+        units=["ticks", "event count"],
+        latency="zero",
+        tail="none",
+        scheduling="event-synchronous",
+        bindings=[
+            binding(
+                role="projection-operation",
+                kind="cpp_function",
+                include="pulp/timebase/ratchet.hpp",
+                qualified_name="pulp::timebase::project_ratchet_interval<>",
+                target="Pulp::timebase",
+                header_fingerprint=(
+                    "sha256:93f1ae1c80b5c5ad255180067adabcc331577e63a6f77b57b06255891926718d"
+                ),
+            )
+        ],
+        _link_probes=[{
+            "role": "projection-operation",
+            "binding": "pulp::timebase::project_ratchet_interval<>",
+            "operation": "function_call",
+            "arguments": (
+                "pulp::timebase::TickPosition{0}, pulp::timebase::TickPosition{4}, 2, "
+                "pulp::timebase::TickPosition{0}, pulp::timebase::TickPosition{4}, "
+                "std::span<pulp::timebase::TickPosition>{}"
+            ),
+        }],
+    ),
+    capability(
         key="sequence.host-transport-projector",
         contract_version={"major": 1, "minor": 1},
         domain="sequence",
@@ -494,6 +1328,152 @@ EXPORTS = [
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {
+        "include": "pulp/signal/units.hpp",
+        "fingerprint": "sha256:2f0af86ba3fccbb3017339235c05b7d43b492939c111fc67e93ee2046ee6e264",
+        "disposition": "capability_support",
+        "capability_keys": ["timebase.beat-division"],
+        "rationale": (
+            "The signal Division compatibility vocabulary now derives from the "
+            "canonical timebase BeatDivision table. The broad signal unit-conversion "
+            "header remains outside this slice's generator-facing claims."
+        ),
+    },
+    {
+        "include": "pulp/music/chord.hpp",
+        "fingerprint": "sha256:24dd445d17537d186ecdfd4181102b4cb0d3409363d7ab62c5f700736969a222",
+        "disposition": "capability_support",
+        "capability_keys": [
+            "music.chord-recognition",
+            "music.chord-spelling",
+            "music.chord-voicing",
+        ],
+        "rationale": (
+            "Shared fixed-capacity chord values and named-quality formulas support "
+            "the curated spelling, recognition, and voicing operations."
+        ),
+    },
+    {
+        "include": "pulp/music/music.hpp",
+        "fingerprint": "sha256:7afe6a1c5c2bcbc5de65eac6290a8e0e4c92215bcb940558f18caec3177c227d",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Convenience umbrella include only; consumers use the operation-owning "
+            "headers named by each typed capability binding."
+        ),
+    },
+    {
+        "include": "pulp/music/pitch.hpp",
+        "fingerprint": "sha256:2b26eed1a1e6ecfe6357ebbcf95c7ac0d94cd73d6416723144015125cda3e660",
+        "disposition": "capability_support",
+        "capability_keys": [
+            "music.chord-recognition",
+            "music.chord-spelling",
+            "music.chord-voicing",
+        ],
+        "rationale": (
+            "Checked 12-TET pitch-class values and sets are shared inputs to the "
+            "curated spelling, recognition, and voicing operations."
+        ),
+    },
+    {
+        "include": "pulp/signal/interpolator.hpp",
+        "fingerprint": "sha256:87600671e64ed34870e2302ca2765b3539d3ec23116db02b85ef813a43916952",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.window-functions"],
+        "rationale": (
+            "The interpolator reuses the window implementation internally but "
+            "does not add a distinct generator-facing window contract."
+        ),
+    },
+    {
+        "include": "pulp/signal/resampler.hpp",
+        "fingerprint": "sha256:1bd78bf7111b9bfe5b1fd923ba0304390956ddf92337ed788b06a0b865a196e8",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.bounded-sample-history"],
+        "rationale": (
+            "The resampler adopts the bounded history primitive for its delay "
+            "storage; this slice does not introduce a new resampler contract."
+        ),
+    },
+    {
+        "include": "pulp/signal/stft.hpp",
+        "fingerprint": "sha256:a326b986439d9382932a05682db29f862c0fb371a27acf701eea41d3ec873a32",
+        "disposition": "capability_support",
+        "capability_keys": [
+            "signal.bounded-sample-history",
+            "signal.window-functions",
+        ],
+        "rationale": (
+            "STFT consumes both reusable primitives while retaining its existing "
+            "analysis API; it is not a newly claimed capability in this slice."
+        ),
+    },
+    {
+        "include": "pulp/signal/fast_math.hpp",
+        "fingerprint": "sha256:040569eb66723784d089120ecb679b78df4f206678a77a2f2881e0a874456de4",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "FastMath is a shared scalar implementation utility rather than a "
+            "standalone semantic DSP unit. The corrected exp2 operation has no "
+            "product consumer outside its own documentation and tests, so exposing "
+            "it as a generator capability would overstate demonstrated adoption."
+        ),
+    },
+    {
+        "include": "pulp/signal/osc/detail/minblep_table.hpp",
+        "fingerprint": "sha256:9354ed2187ec030386544ccffe90b85f1ed35f539a861983ee994c04dde05b31",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.minblep"],
+        "rationale": (
+            "Generated residual coefficients are an installed implementation "
+            "dependency of signal.minblep, not an independent authoring surface."
+        ),
+    },
+    {
+        "include": "pulp/signal/biquad.hpp",
+        "fingerprint": "sha256:938e359bcd792fb4b8d4205d94ec5ab2db6684ec99ea1f927a417539cb09c55b",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.sos-cascade"],
+        "rationale": (
+            "The bounded SOS executor consumes the normalized biquad coefficient "
+            "type and uses its shared stability predicate and runtime section."
+        ),
+    },
+    {
+        "include": "pulp/signal/iir_design.hpp",
+        "fingerprint": "sha256:d45c17451d8410069e3cffd4f911f2a532d525383ff033775d0c38b7c7decb10",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.sos-cascade"],
+        "rationale": (
+            "The public high-order IIR design helpers produce normalized SOS "
+            "coefficient vectors accepted by the bounded cascade executor."
+        ),
+    },
+    {
+        "include": "pulp/signal/signal.hpp",
+        "fingerprint": "sha256:957d2e652931e29de41e360044c05ede7f21511097e3dbf6272908c4d7d8ee08",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "This is the signal module umbrella include; it exposes no distinct "
+            "consumer capability beyond the headers it aggregates."
+        ),
+    },
+    {
+        "include": "pulp/signal/multi_channel_meter.hpp",
+        "fingerprint": "sha256:3ccb8f63241c150c00a4ce323f9de0501d2d54c0ef4ec3f0f307ac72111c329d",
+        "disposition": "unsupported_capability",
+        "capability_keys": [],
+        "rationale": (
+            "The multi-channel meter is a public DSP and presentation helper, "
+            "but it does not yet have the typed bindings, lifecycle contract, "
+            "parameter semantics, and link probe required for a generator-facing "
+            "capability claim."
+        ),
+    },
     {
         "include": "pulp/signal/harmony_engine.hpp",
         "fingerprint": "sha256:edf2c597ddeb7b31f07c7cf094e4cfb2b833b4f4fb6b00376b36635d11734f79",
@@ -644,8 +1624,15 @@ def compile_fixture() -> str:
             if item["kind"] == "cpp_type":
                 lines.append(f"        static_assert(sizeof({name}) > 0);")
             else:
+                source_binding = next(
+                    candidate
+                    for candidate in source_by_key[row["key"]]["bindings"]
+                    if candidate["role"] == item["role"]
+                    and candidate["qualified_name"] == name
+                )
+                address = source_binding.get("_address_expression", f"&{name}")
                 lines.append(
-                    f"        auto *volatile binding_{binding_index} = &{name};"
+                    f"        auto *volatile binding_{binding_index} = {address};"
                 )
                 lines.append(f"        (void)binding_{binding_index};")
             binding_index += 1
@@ -764,9 +1751,16 @@ def history_entry(
     material = {
         "manifest": {
             "schema": manifest_document["schema"],
+            "schema_minor": manifest_document["schema_minor"],
             "manifest_revision": manifest_document["manifest_revision"],
+            "required_features": copy.deepcopy(
+                manifest_document["required_features"]
+            ),
+            "coverage": copy.deepcopy(manifest_document["coverage"]),
             "capabilities": copy.deepcopy(manifest_document["capabilities"]),
             "tombstones": copy.deepcopy(manifest_document["tombstones"]),
+            "counts": copy.deepcopy(manifest_document["counts"]),
+            "compatibility": copy.deepcopy(manifest_document["compatibility"]),
         },
         "surface": {
             "schema": surface_document["schema"],
