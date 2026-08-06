@@ -56,8 +56,21 @@ def needed_modules(idiom: dict) -> dict:
     return need
 
 
-def render(idioms: dict | None = None) -> str:
-    """The library as the model sees it, grouped by family."""
+def render(idioms: dict | None = None, prompt: str | None = None) -> str:
+    """The library as the model sees it, grouped by family.
+
+    `prompt` is optional and is what makes a named sound reach the model as an
+    ANSWER rather than as a row in a table. Without it this path emits the
+    catalogue as a compact alphabetical list -- 75 sounds inside an 88,000
+    character contract -- and a request for a cello receives Welsh's
+    "7.5 Hz, applied to amplitude" as line 12 of a glossary. Measured: the
+    model wrote 5 Hz on pitch instead. The numbers were present, correct, and
+    indistinguishable from the 74 sounds nobody asked for.
+
+    The compact list stays, because it is how "a brass stab" lands somewhere
+    sensible when it names no recipe outright. It is the matched entry that has
+    to be lifted out of it.
+    """
     idioms = idioms if idioms is not None else load_idioms()
     families: dict[str, list] = {}
     for slug, idiom in sorted(idioms.items()):
@@ -142,12 +155,37 @@ def render(idioms: dict | None = None) -> str:
                   if e.get("kind") == "settings" and e.get("numbers")]
     except Exception:                                    # noqa: BLE001
         sounds = []
+    # THE SOUND THAT WAS ACTUALLY ASKED FOR, LIFTED OUT AND PUT FIRST. The
+    # matcher below already finds it correctly -- whole-word, family fallback,
+    # capped -- and its answer was then buried in the list it shares with 74
+    # sounds nobody requested. An instruction and a glossary entry are not the
+    # same thing to a reader with 88,000 characters in front of it.
+    matched = []
+    if prompt:
+        try:
+            import knowledge                             # noqa: PLC0415
+            matched = knowledge.for_prompt(prompt)
+        except Exception:                                # noqa: BLE001
+            matched = []
+    if matched:
+        head = ["## the sound this request names",
+                "Measured settings for exactly what was asked for. Start from "
+                "these values, then use your ears.", ""]
+        for e in matched:
+            head.append(knowledge.render(e))
+            head.append("")
+        # Prepended, not appended: it answers the request, so it belongs where
+        # the request is being read rather than after the reference material.
+        out = head + out
+
     if sounds:
-        out += ["## named sounds",
-                "Settings measured from a synthesis catalogue. If the request "
-                "names one of these, start from its values and then use your "
-                "ears.", ""]
+        out += ["## other named sounds",
+                "The rest of the catalogue, for when a request names no sound "
+                "outright. Do NOT reach for one of these unless the request "
+                "actually asks for it.", ""]
         for e in sorted(sounds, key=lambda x: x["names"][0]):
+            if e in matched:
+                continue        # already given above, in full
             vals = "; ".join(f"{n['quantity']} {n['value']}"
                              for n in e["numbers"])
             out.append(f"- {e['names'][0]}: {vals}")

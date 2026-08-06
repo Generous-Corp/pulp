@@ -3900,7 +3900,7 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
     contract = contract.replace(
         patch_vocabulary.MARKER,
         patch_vocabulary.for_prompt(prompt, idioms) if claimed.slug
-        else patch_vocabulary.render(idioms))
+        else patch_vocabulary.render(idioms, prompt))
 
     # Checked where the model receives it, not where it was rendered: the DSP
     # side once shipped a vocabulary that rendered perfectly and arrived as a
