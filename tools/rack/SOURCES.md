@@ -56,4 +56,3 @@ It is generated from the records, by `tools/rack/notice.py`. The tier
 of each record is data; the anchor that justifies a *derived from*
 entry is data; the counts are counted. Editing this file by hand would
 let it drift from the library, so a test fails when it is stale.
-

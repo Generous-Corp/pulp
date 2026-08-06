@@ -101,4 +101,3 @@ LICENSE. Names use the demo project (Lo‑Fi Multi‑FX). Notes:
   ever needs licensing, it's out. Keep the tree/codegen C++ + Cmajor only.
 - Open: real syntax highlighting, editing/saving, search behavior, and how the
   web demo's tree maps to the desktop repo on export.
-

@@ -303,5 +303,3 @@ def spread(notes: list[float], volts: list[float]) -> float:
         by_level.setdefault(round(volt, 3), []).append(note)
     widths = [max(v) - min(v) for v in by_level.values() if len(v) > 1]
     return max(widths) if widths else 0.0
-
-

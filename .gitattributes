@@ -4,3 +4,4 @@ external/skia-build/build/win-gpu/lib/Release/*.lib filter=lfs diff=lfs merge=lf
 external/skia-build/build/linux-gpu/lib/Release/*.a filter=lfs diff=lfs merge=lfs -text
 external/skia-build/build/ios-gpu/lib/Release/*.a filter=lfs diff=lfs merge=lfs -text
 external/skia-build/build/wasm-gpu/lib/Release/*.a filter=lfs diff=lfs merge=lfs -text
+*.patch whitespace=-blank-at-eol
