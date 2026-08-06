@@ -8,6 +8,7 @@ pulp_add_test_suite(pulp-test-timebase-groove-kernels
     SOURCES test_timebase_groove_kernels.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::timebase pulp::playback pulp::timeline
     TIMEOUT 60)
+pulp_add_test_suite(pulp-test-timebase-ratchet LIBRARIES pulp::timebase TIMEOUT 60)
 
 # Sample asset drop target adapter over cheap extension classification.
 pulp_add_test_suite(pulp-test-sample-asset-drop-target LIBRARIES pulp::view)

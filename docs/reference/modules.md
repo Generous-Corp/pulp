@@ -1050,6 +1050,14 @@ sample domain. When a requested sample lies outside the image of the tick
 domain, `resolve_sample()` reports `exact == false`, a nearest canonical edge
 representation, and the actual sample error.
 
+`project_ratchet_interval()` subdivides two adjacent clock boundaries into a
+bounded number of exact integer-tick hits. Its hit count includes the onset and
+the later boundary is excluded, so adjacent intervals neither duplicate nor
+orphan a clock-edge event. A count that would collapse multiple hits onto one
+integer tick is rejected. Projection into half-open windows is allocation-free
+and callback-partition invariant, including across non-divisible spans and the
+full signed tick domain.
+
 **Link:** `pulp::timebase` · **Include prefix:** `<pulp/timebase/...>`
 
 ```cpp
