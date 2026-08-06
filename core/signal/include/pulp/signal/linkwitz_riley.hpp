@@ -145,6 +145,8 @@ template <typename SampleType = float, std::size_t MaxBands = 8> class LinkwitzR
         if (!prepared_ || transition_length_ != 0 || cutoffs.size() != cutoff_count_ ||
             !valid_configuration(sample_rate_, cutoffs))
             return false;
+        if (transition_samples == std::numeric_limits<std::size_t>::max())
+            return false;
 
         std::array<double, MaxBands - 1> proposed_cutoffs{};
         std::array<double, MaxBands - 1> proposed_warped_cutoffs{};

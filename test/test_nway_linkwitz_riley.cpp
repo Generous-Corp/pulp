@@ -741,8 +741,14 @@ TEST_CASE("N-way Linkwitz-Riley rejects unrepresentable transitions transactiona
         REQUIRE(rounding_edge.process(input).bands == rounding_control.process(input).bands);
     }
 
-    REQUIRE(rounding_edge.set_cutoffs(low, sentinel));
+    REQUIRE_FALSE(rounding_edge.set_cutoffs(low, sentinel));
     REQUIRE_FALSE(rounding_edge.transitioning());
+    REQUIRE(rounding_edge.set_cutoffs(low, 1024));
+    REQUIRE_FALSE(rounding_edge.transitioning());
+    for (std::size_t sample = 0; sample < 4096; ++sample) {
+        const double input = 0.5 * std::cos(0.09 * static_cast<double>(sample));
+        REQUIRE(rounding_edge.process(input).bands == rounding_control.process(input).bands);
+    }
 
     if constexpr (std::numeric_limits<std::size_t>::digits >= 63) {
         constexpr std::uint64_t extreme_upward_samples = 5'000'000'000'000'000ULL;
