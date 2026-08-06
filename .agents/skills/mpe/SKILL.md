@@ -195,6 +195,19 @@ than growing vectors during `clap_process()`. If you add a new adapter
 or widen the sidecar contract, test the overflow path without copying
 large event vectors inside the processor no-allocation guard.
 
+`bind_tracker_to_buffer()` treats a same-note retrigger as one atomic pair:
+`NoteOff(old generation)` then `NoteOn(new generation)` at the same sample
+offset. One remaining realtime slot is not enough, so neither half is emitted
+and the tracker does not rotate the generation. A physical note-off is
+different because the controller will not replay it: when the buffer is full,
+the tracker moves that release into its fixed FIFO and blocks fresh starts until
+it is drained. `MpeSidecar` drains it automatically at offset zero before the
+next block. A direct tracker/buffer integration must do the same by calling
+`flush_pending_note_offs()` after clearing its output and before ingesting the
+next block. At reset/deactivation, clear both tracker and downstream allocator
+state (`MpeVoiceAllocator::reset_all()`); `MpeVoiceTracker::reset()` deliberately
+does not synthesize callbacks.
+
 ### Scale-aware bend and voice-modulation projection
 
 `pulp::midi::ScaleAwareMpePitch` in `utility_kernels.hpp` maps the tracked

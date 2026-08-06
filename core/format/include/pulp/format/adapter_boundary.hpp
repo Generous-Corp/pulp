@@ -508,6 +508,12 @@ struct MpeSidecar {
     void run(Processor& processor, const MidiRange& midi_in) {
         if (enabled) {
             buffer.clear();
+            // Releases that could not fit at the end of the previous block
+            // must lead this block before any new starts. The tracker blocks
+            // note-ons while this fixed queue is nonempty, so no voice can be
+            // orphaned and the queue remains bounded by tracker polyphony.
+            current_sample_offset = 0;
+            tracker.flush_pending_note_offs();
             for (const auto& ev : midi_in) {
                 current_sample_offset = ev.sample_offset;
                 tracker.process(ev);

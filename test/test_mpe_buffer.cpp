@@ -254,6 +254,7 @@ TEST_CASE("MpeBuffer callback appends are allocation-free after reserve",
         REQUIRE(buffer.add({100, Kind::Pressure, {}}));
     }
     REQUIRE(buffer.dropped_event_count() == 0);
+    const auto held_id = tracker.find(1, 60)->note_id;
 
     {
         pulp::test::RtAllocationProbe probe;
@@ -264,6 +265,127 @@ TEST_CASE("MpeBuffer callback appends are allocation-free after reserve",
 
     REQUIRE(buffer.size() == prepared_capacity);
     REQUIRE(buffer.dropped_event_count() == 1);
+    REQUIRE(tracker.active_count() == 0);
+    REQUIRE(tracker.pending_note_off_count() == 1);
+
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 62, 100)));
+    REQUIRE(tracker.active_count() == 0);
+    buffer.clear();
+    offset = 0;
+    REQUIRE(tracker.flush_pending_note_offs());
+    REQUIRE(buffer.size() == 1);
+    REQUIRE(buffer[0].kind == Kind::NoteOff);
+    REQUIRE(buffer[0].state.note_id == held_id);
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 62, 100)));
+    REQUIRE(tracker.find(1, 62)->note_id == held_id + 1);
+}
+
+TEST_CASE("MpeBuffer emits retrigger retirement and replacement atomically",
+          "[midi][mpe][lifecycle]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    MpeBuffer buffer;
+    int32_t offset = 7;
+    bind_tracker_to_buffer(tracker, buffer, offset);
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 90)));
+    const auto first = tracker.find(1, 60)->note_id;
+    {
+        pulp::test::RtAllocationProbe probe;
+        REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 110)));
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    const auto second = tracker.find(1, 60)->note_id;
+    REQUIRE(buffer.size() == 3);
+    REQUIRE(buffer[1].kind == Kind::NoteOff);
+    REQUIRE(buffer[1].state.note_id == first);
+    REQUIRE(buffer[2].kind == Kind::NoteOn);
+    REQUIRE(buffer[2].state.note_id == second);
+    {
+        pulp::test::RtAllocationProbe probe;
+        buffer.sort();
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    REQUIRE(buffer[1].kind == Kind::NoteOff);
+    REQUIRE(buffer[2].kind == Kind::NoteOn);
+}
+
+TEST_CASE("MpeBuffer retrigger capacity boundary is atomic",
+          "[midi][mpe][lifecycle][overflow]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    MpeBuffer buffer;
+    buffer.set_realtime_capacity_limit(true);
+    int32_t offset = 0;
+    bind_tracker_to_buffer(tracker, buffer, offset);
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 90)));
+    const auto before = *tracker.find(1, 60);
+    while (buffer.size() + 1 < buffer.capacity()) {
+        REQUIRE(buffer.add({0, Kind::Pressure, {}}));
+    }
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 110)));
+    REQUIRE(buffer.capacity() - buffer.size() == 1);
+    REQUIRE(buffer.dropped_event_count() == 2);
+    REQUIRE(tracker.find(1, 60)->note_id == before.note_id);
+    REQUIRE(tracker.find(1, 60)->velocity == before.velocity);
+
+    buffer.clear();
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 111)));
+    REQUIRE(buffer.size() == 2);
+    REQUIRE(buffer[0].kind == Kind::NoteOff);
+    REQUIRE(buffer[1].kind == Kind::NoteOn);
+    REQUIRE(buffer[1].state.note_id == before.note_id + 1);
+}
+
+TEST_CASE("MpeBuffer accepts retrigger at exact realtime capacity",
+          "[midi][mpe][lifecycle][capacity]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    MpeBuffer buffer;
+    buffer.set_realtime_capacity_limit(true);
+    int32_t offset = 0;
+    bind_tracker_to_buffer(tracker, buffer, offset);
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 90)));
+    while (buffer.size() + 2 < buffer.capacity()) {
+        REQUIRE(buffer.add({0, Kind::Pressure, {}}));
+    }
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 110)));
+    REQUIRE(buffer.size() == buffer.capacity());
+    REQUIRE(buffer.dropped_event_count() == 0);
+    REQUIRE(buffer[buffer.size() - 2].kind == Kind::NoteOff);
+    REQUIRE(buffer[buffer.size() - 1].kind == Kind::NoteOn);
+}
+
+TEST_CASE("MpeBuffer rejected fresh note-on does not consume generation",
+          "[midi][mpe][lifecycle][overflow]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    MpeBuffer buffer;
+    buffer.set_realtime_capacity_limit(true);
+    int32_t offset = 0;
+    bind_tracker_to_buffer(tracker, buffer, offset);
+    while (buffer.size() < buffer.capacity()) {
+        REQUIRE(buffer.add({0, Kind::Pressure, {}}));
+    }
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 90)));
+    REQUIRE(tracker.active_count() == 0);
+    buffer.clear();
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 91)));
+    REQUIRE(tracker.find(1, 60)->note_id == 1);
+}
+
+TEST_CASE("MIDI 2 UMP retrigger uses retirement-before-start lifecycle",
+          "[midi][mpe][ump][lifecycle]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    MpeBuffer buffer;
+    int32_t offset = 12;
+    bind_tracker_to_buffer(tracker, buffer, offset);
+    REQUIRE(tracker.process(UmpPacket::note_on_2(0, 2, 67, 0xA000)));
+    const auto first = tracker.find(2, 67)->note_id;
+    REQUIRE(tracker.process(UmpPacket::note_on_2(0, 2, 67, 0xF000)));
+    const auto second = tracker.find(2, 67)->note_id;
+    REQUIRE(buffer[1].kind == Kind::NoteOff);
+    REQUIRE(buffer[1].state.note_id == first);
+    REQUIRE(buffer[2].kind == Kind::NoteOn);
+    REQUIRE(buffer[2].state.note_id == second);
+    REQUIRE(tracker.process(UmpPacket::note_off_2(0, 2, 67, 0)));
+    REQUIRE(buffer[3].kind == Kind::NoteOff);
+    REQUIRE(buffer[3].state.note_id == second);
 }
 
 TEST_CASE("MpeVoiceTracker UMP manager and member events feed callbacks",

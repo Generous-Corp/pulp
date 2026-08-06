@@ -69,6 +69,16 @@ Voice* find_voice_by_note_id(MpeVoiceAllocator<Voice>& alloc, MpeNoteGeneration 
     return nullptr;
 }
 
+template<typename Alloc>
+std::size_t held_count(const Alloc& alloc) {
+    std::size_t count = 0;
+    for (std::size_t i = 0; i < alloc.polyphony(); ++i) {
+        const auto& voice = alloc.voice(i);
+        if (voice.active() && !voice.releasing()) ++count;
+    }
+    return count;
+}
+
 } // namespace
 
 TEST_CASE("MpeSynthVoice smoothing ramps pressure toward target", "[midi][mpe]") {
@@ -167,6 +177,98 @@ TEST_CASE("MpeVoiceAllocator routes events to voices by note_id", "[midi][mpe]")
         if (alloc.voice(i).releasing()) releasing = true;
     }
     REQUIRE(releasing);
+}
+
+TEST_CASE("MPE retrigger pipeline retires every generation without orphaning a voice",
+          "[midi][mpe][lifecycle][integration]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    MpeBuffer buffer;
+    int32_t offset = 0;
+    bind_tracker_to_buffer(tracker, buffer, offset);
+    MpeVoiceAllocator<TestVoice> alloc{2};
+
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 90)));
+    const auto first = tracker.find(1, 60)->note_id;
+    alloc.dispatch_all(buffer);
+    buffer.clear();
+    offset = 16;
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 110)));
+    const auto second = tracker.find(1, 60)->note_id;
+    REQUIRE(buffer.size() == 2);
+    REQUIRE(buffer[0].kind == Kind::NoteOff);
+    REQUIRE(buffer[0].state.note_id == first);
+    REQUIRE(buffer[1].kind == Kind::NoteOn);
+    REQUIRE(buffer[1].state.note_id == second);
+    alloc.dispatch_all(buffer);
+    buffer.clear();
+    REQUIRE(alloc.active_count() == 2);
+    REQUIRE(alloc.releasing_count() == 1);
+    REQUIRE(held_count(alloc) == 1);
+
+    REQUIRE(tracker.process(MidiEvent::note_off(1, 60)));
+    alloc.dispatch_all(buffer);
+    REQUIRE(tracker.active_count() == 0);
+    REQUIRE(alloc.releasing_count() == 2);
+    REQUIRE(held_count(alloc) == 0);
+    REQUIRE(find_voice_by_note_id(alloc, first)->releasing());
+    REQUIRE(find_voice_by_note_id(alloc, second)->releasing());
+}
+
+TEST_CASE("Repeated MPE retriggers preserve one held generation through steals",
+          "[midi][mpe][lifecycle][integration]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    MpeBuffer buffer;
+    int32_t offset = 0;
+    bind_tracker_to_buffer(tracker, buffer, offset);
+    MpeVoiceAllocator<TestVoice> alloc{2};
+    MpeNoteGeneration current = 0;
+    for (int retrigger = 0; retrigger < 8; ++retrigger) {
+        REQUIRE(tracker.process(MidiEvent::note_on(
+            1, 60, static_cast<uint8_t>(90 + retrigger))));
+        current = tracker.find(1, 60)->note_id;
+        alloc.dispatch_all(buffer);
+        buffer.clear();
+        REQUIRE(held_count(alloc) == 1);
+        REQUIRE_FALSE(find_voice_by_note_id(alloc, current)->releasing());
+    }
+    REQUIRE(alloc.steal_count() > 0);
+    REQUIRE(tracker.process(MidiEvent::note_off(1, 60)));
+    alloc.dispatch_all(buffer);
+    REQUIRE(held_count(alloc) == 0);
+    REQUIRE(find_voice_by_note_id(alloc, current)->releasing());
+    tracker.reset();
+    alloc.reset_all();
+    buffer.clear();
+    REQUIRE(alloc.active_count() == 0);
+}
+
+TEST_CASE("Deferred MPE note-off releases allocator on the next buffer",
+          "[midi][mpe][lifecycle][overflow][integration]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    MpeBuffer buffer;
+    buffer.set_realtime_capacity_limit(true);
+    int32_t offset = 0;
+    bind_tracker_to_buffer(tracker, buffer, offset);
+    MpeVoiceAllocator<TestVoice> alloc{1};
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 100)));
+    const auto note_id = tracker.find(1, 60)->note_id;
+    alloc.dispatch_all(buffer);
+    buffer.clear();
+    while (buffer.size() < buffer.capacity()) {
+        REQUIRE(buffer.add(pressure_event(0, 0.0f)));
+    }
+    REQUIRE(tracker.process(MidiEvent::note_off(1, 60)));
+    REQUIRE(tracker.pending_note_off_count() == 1);
+    alloc.dispatch_all(buffer);
+    REQUIRE(held_count(alloc) == 1);
+
+    buffer.clear();
+    REQUIRE(tracker.flush_pending_note_offs());
+    REQUIRE(buffer.size() == 1);
+    REQUIRE(buffer[0].state.note_id == note_id);
+    alloc.dispatch_all(buffer);
+    REQUIRE(held_count(alloc) == 0);
+    REQUIRE(alloc.releasing_count() == 1);
 }
 
 TEST_CASE("MpeVoiceAllocator per-note expression updates only the matching voice",
