@@ -353,6 +353,9 @@ pulp_add_test_suite(pulp-test-instrument-envelope LIBRARIES pulp::audio)
 
 # Prepared voice-slot allocation, stealing, release, and choke-group policy.
 pulp_add_test_suite(pulp-test-instrument-voice-allocator LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-unison-voice-stack
+    SOURCES test_unison_voice_stack.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio)
 
 # Non-owning facade over the existing MIDI and prepared instrument voice owners.
 pulp_add_test_suite(pulp-test-voice-runtime-facade

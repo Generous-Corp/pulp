@@ -393,6 +393,11 @@ AAC/ALAC readers. Permissive (libflac, ALAC) packages install freely; copyleft
 
 Reusable low-level pieces for building samplers, generated-audio freeze/loop workflows, waveform displays, and offline/background sample analysis. These are primitives, not a full sampler UI. Callback-safe operations are documented in `rt_safety_contract.hpp`; import/export, analysis, waveform thumbnail build, publication writes, and materialization stay off the audio callback.
 
+`unison_voice_stack.hpp` adds the logical-note ownership layer above
+`InstrumentVoiceAllocator`. It exclusively owns the allocator, preflights a
+complete child stack, steals only complete oldest stacks, and requires exact
+voice IDs when renderer tails finish recycled slots.
+
 For a runnable integration of the asset, streaming, interpolation, starvation,
 and synthetic-heritage primitives, see the
 [PulpSampler example](../examples/pulp-sampler.md).
