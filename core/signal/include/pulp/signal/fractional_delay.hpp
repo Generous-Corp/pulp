@@ -103,6 +103,45 @@ SampleType lagrange5(double fraction, SampleType ym2, SampleType ym1, SampleType
     return output;
 }
 
+namespace detail {
+
+struct FractionalDelaySplit {
+    std::size_t integer = 0;
+    double fraction = 0.0;
+    double canonical = 0.0;
+    bool valid = false;
+};
+
+[[nodiscard]] inline FractionalDelaySplit split_fractional_delay(double delay_samples) noexcept {
+    if (!std::isfinite(delay_samples) || delay_samples < 0.0)
+        return {};
+    const auto nearest = std::round(delay_samples);
+    const auto tolerance =
+        8.0 * std::numeric_limits<double>::epsilon() * std::max(1.0, std::abs(delay_samples));
+    const auto canonical = std::abs(delay_samples - nearest) <= tolerance ? nearest : delay_samples;
+    if (canonical < 0.0)
+        return {};
+    constexpr auto size_digits = std::numeric_limits<std::size_t>::digits;
+    constexpr auto double_digits = std::numeric_limits<double>::digits;
+    const auto size_limit = static_cast<double>(std::numeric_limits<std::size_t>::max());
+    if constexpr (size_digits <= double_digits) {
+        if (canonical > size_limit)
+            return {};
+    } else {
+        // The cast to double rounds SIZE_MAX up to the next power of two.
+        // Reject that rounded endpoint before converting back to size_t.
+        if (canonical >= size_limit)
+            return {};
+    }
+    const auto integer_value = std::floor(canonical);
+    return {.integer = static_cast<std::size_t>(integer_value),
+            .fraction = canonical - integer_value,
+            .canonical = canonical,
+            .valid = true};
+}
+
+} // namespace detail
+
 template <typename SampleType> struct FractionalDelaySampleResult {
     SampleType sample{};
     FractionalDelayStatus status = FractionalDelayStatus::not_prepared;
@@ -110,6 +149,171 @@ template <typename SampleType> struct FractionalDelaySampleResult {
     [[nodiscard]] explicit operator bool() const noexcept {
         return status == FractionalDelayStatus::ok;
     }
+};
+
+/// Prepared history shared by any number of stateless Lagrange read heads.
+///
+/// Pushing and reading are deliberately separate operations. A caller may read
+/// the current immutable history before pushing a feedback result, or push an
+/// input first and then take any number of simultaneous reads. Delays are
+/// measured behind the next write: delay 1 is the most recently pushed sample.
+/// Failed prepare calls leave the previous history and configuration untouched.
+template <typename SampleType = float> class FractionalDelayHistoryT {
+    static_assert(std::is_floating_point_v<SampleType>);
+
+  public:
+    FractionalDelayHistoryT() = default;
+    FractionalDelayHistoryT(const FractionalDelayHistoryT&) = delete;
+    FractionalDelayHistoryT& operator=(const FractionalDelayHistoryT&) = delete;
+
+    FractionalDelayHistoryT(FractionalDelayHistoryT&& other) noexcept {
+        move_from(std::move(other));
+    }
+
+    FractionalDelayHistoryT& operator=(FractionalDelayHistoryT&& other) noexcept {
+        if (this != &other)
+            move_from(std::move(other));
+        return *this;
+    }
+
+    [[nodiscard]] bool prepare(std::size_t maximum_delay_samples) {
+        constexpr auto additional_history = 3u;
+        if (maximum_delay_samples < minimum_delay_samples(FractionalDelayMethod::lagrange5) ||
+            maximum_delay_samples > std::numeric_limits<std::size_t>::max() - additional_history)
+            return false;
+
+        const auto storage_size = maximum_delay_samples + additional_history;
+        std::vector<SampleType> replacement;
+        if (storage_size > replacement.max_size())
+            return false;
+        try {
+            replacement.assign(storage_size, SampleType{});
+        } catch (const std::bad_alloc&) {
+            return false;
+        } catch (const std::length_error&) {
+            return false;
+        }
+
+        buffer_.swap(replacement);
+        maximum_delay_samples_ = maximum_delay_samples;
+        write_ = 0;
+        valid_ = 0;
+        prepared_ = true;
+        return true;
+    }
+
+    void reset() noexcept {
+        std::fill(buffer_.begin(), buffer_.end(), SampleType{});
+        write_ = 0;
+        valid_ = 0;
+    }
+
+    [[nodiscard]] bool prepared() const noexcept {
+        return prepared_;
+    }
+    [[nodiscard]] std::size_t maximum_delay_samples() const noexcept {
+        return prepared_ ? maximum_delay_samples_ : 0u;
+    }
+    [[nodiscard]] std::size_t retained_samples() const noexcept {
+        return buffer_.size();
+    }
+    [[nodiscard]] std::size_t retained_bytes() const noexcept {
+        return buffer_.size() * sizeof(SampleType);
+    }
+    [[nodiscard]] std::size_t required_older_lookback() const noexcept {
+        return prepared_ ? maximum_delay_samples_ + 3u : 0u;
+    }
+
+    [[nodiscard]] static constexpr std::size_t
+    minimum_delay_samples(FractionalDelayMethod method) noexcept {
+        if (method == FractionalDelayMethod::lagrange3)
+            return 2u;
+        if (method == FractionalDelayMethod::lagrange5)
+            return 3u;
+        return 0u;
+    }
+
+    /// Advances history by one sample. Nonfinite input advances with zero and
+    /// reports the fault so invalid values can never poison later read heads.
+    [[nodiscard]] FractionalDelayStatus push(SampleType sample) noexcept {
+        if (!prepared_)
+            return FractionalDelayStatus::not_prepared;
+        const auto status = std::isfinite(sample) ? FractionalDelayStatus::ok
+                                                  : FractionalDelayStatus::non_finite_input;
+        buffer_[write_] = status == FractionalDelayStatus::ok ? sample : SampleType{};
+        write_ = (write_ + 1u) % buffer_.size();
+        valid_ = std::min(valid_ + 1u, buffer_.size());
+        return status;
+    }
+
+    /// Reads one stateless head from the current history snapshot. Only the two
+    /// Lagrange methods are accepted; reads never advance or alter history.
+    [[nodiscard]] FractionalDelaySampleResult<SampleType>
+    read_at(double delay_samples, FractionalDelayMethod method) const noexcept {
+        if (!prepared_)
+            return {{}, FractionalDelayStatus::not_prepared};
+        const auto minimum = minimum_delay_samples(method);
+        if (minimum == 0u)
+            return {{}, FractionalDelayStatus::invalid_argument};
+
+        const auto split = detail::split_fractional_delay(delay_samples);
+        if (!split.valid || split.canonical < static_cast<double>(minimum) ||
+            split.canonical > static_cast<double>(maximum_delay_samples_))
+            return {{}, FractionalDelayStatus::invalid_delay};
+
+        long double output = 0.0L;
+        if (method == FractionalDelayMethod::lagrange3) {
+            output = static_cast<long double>(Interpolator::lagrange<long double>(
+                static_cast<long double>(split.fraction), tap_delay(split.integer - 1u),
+                tap_delay(split.integer), tap_delay(split.integer + 1u),
+                tap_delay(split.integer + 2u)));
+        } else {
+            output = lagrange5<long double>(
+                split.fraction, tap_delay(split.integer - 2u), tap_delay(split.integer - 1u),
+                tap_delay(split.integer), tap_delay(split.integer + 1u),
+                tap_delay(split.integer + 2u), tap_delay(split.integer + 3u));
+        }
+
+        const auto limit = static_cast<long double>(std::numeric_limits<SampleType>::max());
+        if (!std::isfinite(output) || output > limit || output < -limit)
+            return {{}, FractionalDelayStatus::output_out_of_range};
+        return {static_cast<SampleType>(output), FractionalDelayStatus::ok};
+    }
+
+    [[nodiscard]] FractionalDelaySampleResult<SampleType>
+    read_lagrange3_at(double delay_samples) const noexcept {
+        return read_at(delay_samples, FractionalDelayMethod::lagrange3);
+    }
+
+    [[nodiscard]] FractionalDelaySampleResult<SampleType>
+    read_lagrange5_at(double delay_samples) const noexcept {
+        return read_at(delay_samples, FractionalDelayMethod::lagrange5);
+    }
+
+  private:
+    void move_from(FractionalDelayHistoryT&& other) noexcept {
+        buffer_ = std::move(other.buffer_);
+        write_ = std::exchange(other.write_, 0u);
+        valid_ = std::exchange(other.valid_, 0u);
+        maximum_delay_samples_ = std::exchange(other.maximum_delay_samples_, 0u);
+        prepared_ = std::exchange(other.prepared_, false);
+        // Vector's moved-from size is valid but otherwise unspecified. Clear it
+        // so every moved-from query observes the same unprepared empty state.
+        other.buffer_.clear();
+    }
+
+    [[nodiscard]] long double tap_delay(std::size_t delay) const noexcept {
+        if (delay == 0u || delay > valid_)
+            return 0.0L;
+        const auto index = (write_ + buffer_.size() - delay) % buffer_.size();
+        return static_cast<long double>(buffer_[index]);
+    }
+
+    std::vector<SampleType> buffer_{};
+    std::size_t write_ = 0;
+    std::size_t valid_ = 0;
+    std::size_t maximum_delay_samples_ = 0;
+    bool prepared_ = false;
 };
 
 struct FractionalDelayBlockResult {
@@ -244,7 +448,7 @@ template <typename SampleType = float> class FractionalDelayLineT {
             return {{}, FractionalDelayStatus::non_finite_input};
         }
 
-        const auto split = split_delay(delay_samples);
+        const auto split = detail::split_fractional_delay(delay_samples);
         const auto outside_general_range =
             !split.valid || split.canonical < static_cast<double>(minimum_delay_samples()) ||
             split.canonical > static_cast<double>(maximum_delay_samples_);
@@ -301,42 +505,6 @@ template <typename SampleType = float> class FractionalDelayLineT {
     }
 
   private:
-    struct DelaySplit {
-        std::size_t integer = 0;
-        double fraction = 0.0;
-        double canonical = 0.0;
-        bool valid = false;
-    };
-
-    [[nodiscard]] static DelaySplit split_delay(double delay_samples) noexcept {
-        if (!std::isfinite(delay_samples) || delay_samples < 0.0)
-            return {};
-        const auto nearest = std::round(delay_samples);
-        const auto tolerance =
-            8.0 * std::numeric_limits<double>::epsilon() * std::max(1.0, std::abs(delay_samples));
-        const auto canonical =
-            std::abs(delay_samples - nearest) <= tolerance ? nearest : delay_samples;
-        if (canonical < 0.0)
-            return {};
-        constexpr auto size_digits = std::numeric_limits<std::size_t>::digits;
-        constexpr auto double_digits = std::numeric_limits<double>::digits;
-        const auto size_limit = static_cast<double>(std::numeric_limits<std::size_t>::max());
-        if constexpr (size_digits <= double_digits) {
-            if (canonical > size_limit)
-                return {};
-        } else {
-            // The cast to double rounds SIZE_MAX up to the next power of two.
-            // Reject that rounded endpoint before converting back to size_t.
-            if (canonical >= size_limit)
-                return {};
-        }
-        const auto integer_value = std::floor(canonical);
-        return {.integer = static_cast<std::size_t>(integer_value),
-                .fraction = canonical - integer_value,
-                .canonical = canonical,
-                .valid = true};
-    }
-
     template <typename DelayAt>
     FractionalDelayBlockResult process_block(const SampleType* input, SampleType* output,
                                              std::size_t frames, DelayAt&& delay_at) noexcept {
@@ -423,5 +591,7 @@ template <typename SampleType = float> class FractionalDelayLineT {
 
 using FractionalDelayLine = FractionalDelayLineT<float>;
 using FractionalDelayLine64 = FractionalDelayLineT<double>;
+using FractionalDelayHistory = FractionalDelayHistoryT<float>;
+using FractionalDelayHistory64 = FractionalDelayHistoryT<double>;
 
 } // namespace pulp::signal

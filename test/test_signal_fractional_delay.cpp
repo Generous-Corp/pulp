@@ -12,9 +12,11 @@
 #include <cstddef>
 #include <limits>
 #include <numbers>
+#include <utility>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
+using pulp::signal::FractionalDelayHistoryT;
 using pulp::signal::FractionalDelayLineT;
 using pulp::signal::FractionalDelayMethod;
 using pulp::signal::FractionalDelayStatus;
@@ -47,6 +49,33 @@ double independent_group_delay(double delay, double omega) {
     const auto ratio = independent_thiran_response(delay, omega + step) /
                        independent_thiran_response(delay, omega - step);
     return -std::arg(ratio) / (2.0 * step);
+}
+
+std::complex<long double> independent_lagrange_response(FractionalDelayMethod method, double delay,
+                                                        double omega) {
+    const auto integer = static_cast<long long>(std::floor(delay));
+    const auto fraction = static_cast<long double>(delay - static_cast<double>(integer));
+    constexpr std::array<long long, 4> order3_nodes{-1, 0, 1, 2};
+    constexpr std::array<long long, 6> order5_nodes{-2, -1, 0, 1, 2, 3};
+    std::complex<long double> response{};
+    const auto accumulate = [&](const auto& nodes) {
+        for (std::size_t i = 0; i < nodes.size(); ++i) {
+            long double weight = 1.0L;
+            for (std::size_t j = 0; j < nodes.size(); ++j) {
+                if (i != j)
+                    weight *= (fraction - static_cast<long double>(nodes[j])) /
+                              static_cast<long double>(nodes[i] - nodes[j]);
+            }
+            const auto tap_delay = static_cast<long double>(integer + nodes[i]);
+            response += weight * std::exp(std::complex<long double>{
+                                     0.0L, -static_cast<long double>(omega) * tap_delay});
+        }
+    };
+    if (method == FractionalDelayMethod::lagrange3)
+        accumulate(order3_nodes);
+    else
+        accumulate(order5_nodes);
+    return response;
 }
 
 template <typename SampleType>
@@ -334,5 +363,259 @@ TEST_CASE("prepare is transactional and processing allocates nothing",
         pulp::test::RtAllocationProbe probe;
         REQUIRE(line.process(input.data(), output.data(), input.size(), 3.5));
         CHECK(probe.allocation_count() == 0);
+    }
+}
+
+TEST_CASE("shared history has transactional bounded preparation and typed faults",
+          "[signal][fractional-delay][shared-history]") {
+    FractionalDelayHistoryT<double> history;
+    CHECK_FALSE(history.prepared());
+    CHECK(history.maximum_delay_samples() == 0);
+    CHECK(history.retained_samples() == 0);
+    CHECK(history.retained_bytes() == 0);
+    CHECK(history.required_older_lookback() == 0);
+    CHECK(history.push(1.0) == FractionalDelayStatus::not_prepared);
+    CHECK(history.read_lagrange3_at(2.0).status == FractionalDelayStatus::not_prepared);
+
+    REQUIRE(history.prepare(16));
+    CHECK(history.maximum_delay_samples() == 16);
+    CHECK(history.retained_samples() == 19);
+    CHECK(history.retained_bytes() == 19 * sizeof(double));
+    CHECK(history.required_older_lookback() == 19);
+    CHECK(FractionalDelayHistoryT<double>::minimum_delay_samples(
+              FractionalDelayMethod::lagrange3) == 2);
+    CHECK(FractionalDelayHistoryT<double>::minimum_delay_samples(
+              FractionalDelayMethod::lagrange5) == 3);
+    CHECK(FractionalDelayHistoryT<double>::minimum_delay_samples(FractionalDelayMethod::thiran1) ==
+          0);
+
+    REQUIRE(history.push(0.5) == FractionalDelayStatus::ok);
+    const auto retained = history.retained_samples();
+    CHECK_FALSE(history.prepare(2));
+    CHECK_FALSE(history.prepare(std::numeric_limits<std::size_t>::max()));
+    CHECK(history.prepared());
+    CHECK(history.maximum_delay_samples() == 16);
+    CHECK(history.retained_samples() == retained);
+    CHECK_THAT(history.read_lagrange3_at(2.0).sample, WithinAbs(0.0, 0.0));
+
+    CHECK(history.read_at(4.0, FractionalDelayMethod::thiran1).status ==
+          FractionalDelayStatus::invalid_argument);
+    CHECK(history.read_lagrange3_at(1.999).status == FractionalDelayStatus::invalid_delay);
+    CHECK(history.read_lagrange5_at(2.999).status == FractionalDelayStatus::invalid_delay);
+    CHECK(history.read_lagrange3_at(16.001).status == FractionalDelayStatus::invalid_delay);
+    CHECK(history.read_lagrange5_at(std::numeric_limits<double>::quiet_NaN()).status ==
+          FractionalDelayStatus::invalid_delay);
+    CHECK(history.read_lagrange5_at(std::numeric_limits<double>::infinity()).status ==
+          FractionalDelayStatus::invalid_delay);
+    CHECK(history.read_lagrange5_at(static_cast<double>(std::numeric_limits<std::size_t>::max()))
+              .status == FractionalDelayStatus::invalid_delay);
+
+    CHECK(history.push(std::numeric_limits<double>::quiet_NaN()) ==
+          FractionalDelayStatus::non_finite_input);
+    REQUIRE(history.push(0.25) == FractionalDelayStatus::ok);
+    CHECK(std::isfinite(history.read_lagrange3_at(2.0).sample));
+    history.reset();
+    CHECK(history.read_lagrange3_at(2.0).sample == 0.0);
+
+    std::array<double, 256> input{};
+    for (std::size_t i = 0; i < input.size(); ++i)
+        input[i] = std::sin(0.03 * static_cast<double>(i));
+    {
+        pulp::test::RtAllocationProbe probe;
+        for (const auto sample : input) {
+            REQUIRE(history.push(sample) == FractionalDelayStatus::ok);
+            REQUIRE(history.read_lagrange3_at(4.25));
+            REQUIRE(history.read_lagrange5_at(11.75));
+        }
+        CHECK(probe.allocation_count() == 0);
+    }
+}
+
+TEST_CASE("shared history read heads observe one exact immutable snapshot",
+          "[signal][fractional-delay][shared-history]") {
+    FractionalDelayHistoryT<double> history;
+    REQUIRE(history.prepare(32));
+    for (int sample = 1; sample <= 24; ++sample)
+        REQUIRE(history.push(static_cast<double>(sample)) == FractionalDelayStatus::ok);
+
+    const auto old_l3 = history.read_lagrange3_at(4.25);
+    const auto old_l5 = history.read_lagrange5_at(9.75);
+    const auto integer_head = history.read_lagrange5_at(3.0);
+    REQUIRE(old_l3);
+    REQUIRE(old_l5);
+    REQUIRE(integer_head);
+    CHECK_THAT(old_l3.sample, WithinAbs(20.75, 2.0e-14));
+    CHECK_THAT(old_l5.sample, WithinAbs(15.25, 2.0e-14));
+    CHECK(integer_head.sample == 22.0);
+
+    for (int repeat = 0; repeat < 8; ++repeat) {
+        CHECK(history.read_lagrange3_at(4.25).sample == old_l3.sample);
+        CHECK(history.read_lagrange5_at(9.75).sample == old_l5.sample);
+        CHECK(history.read_lagrange5_at(3.0).sample == integer_head.sample);
+    }
+
+    REQUIRE(history.push(25.0) == FractionalDelayStatus::ok);
+    CHECK_THAT(history.read_lagrange3_at(4.25).sample, WithinAbs(21.75, 2.0e-14));
+    CHECK_THAT(history.read_lagrange5_at(9.75).sample, WithinAbs(16.25, 2.0e-14));
+}
+
+TEST_CASE("shared history supports identical float and double cursor contracts",
+          "[signal][fractional-delay][shared-history]") {
+    const auto exercise = []<typename SampleType>() {
+        FractionalDelayHistoryT<SampleType> history;
+        REQUIRE(history.prepare(12));
+        for (int sample = 1; sample <= 10; ++sample)
+            REQUIRE(history.push(static_cast<SampleType>(sample)) == FractionalDelayStatus::ok);
+        const auto order3 = history.read_lagrange3_at(4.0);
+        const auto order5 = history.read_lagrange5_at(7.0);
+        REQUIRE(order3);
+        REQUIRE(order5);
+        CHECK(order3.sample == static_cast<SampleType>(7));
+        CHECK(order5.sample == static_cast<SampleType>(4));
+        history.reset();
+        CHECK(history.read_lagrange3_at(4.0).sample == SampleType{});
+        CHECK(history.read_lagrange5_at(7.0).sample == SampleType{});
+    };
+    exercise.template operator()<float>();
+    exercise.template operator()<double>();
+}
+
+TEST_CASE("shared history moves preserve destination state and empty the source",
+          "[signal][fractional-delay][shared-history]") {
+    FractionalDelayHistoryT<double> source;
+    REQUIRE(source.prepare(16));
+    for (int sample = 1; sample <= 12; ++sample)
+        REQUIRE(source.push(static_cast<double>(sample)) == FractionalDelayStatus::ok);
+
+    FractionalDelayHistoryT<double> moved{std::move(source)};
+    CHECK_FALSE(source.prepared());
+    CHECK(source.maximum_delay_samples() == 0);
+    CHECK(source.retained_samples() == 0);
+    CHECK(source.retained_bytes() == 0);
+    CHECK(source.required_older_lookback() == 0);
+    CHECK(source.push(1.0) == FractionalDelayStatus::not_prepared);
+    CHECK(source.read_lagrange3_at(4.0).status == FractionalDelayStatus::not_prepared);
+    REQUIRE(moved.prepared());
+    CHECK(moved.read_lagrange3_at(4.0).sample == 9.0);
+
+    FractionalDelayHistoryT<double> assigned;
+    REQUIRE(assigned.prepare(4));
+    REQUIRE(assigned.push(-1.0) == FractionalDelayStatus::ok);
+    assigned = std::move(moved);
+    CHECK_FALSE(moved.prepared());
+    CHECK(moved.retained_samples() == 0);
+    CHECK(moved.push(1.0) == FractionalDelayStatus::not_prepared);
+    REQUIRE(assigned.prepared());
+    CHECK(assigned.maximum_delay_samples() == 16);
+    CHECK(assigned.read_lagrange5_at(7.0).sample == 6.0);
+}
+
+TEST_CASE("shared Lagrange heads are continuous across integer boundaries and partition exact",
+          "[signal][fractional-delay][shared-history]") {
+    constexpr std::size_t count = 513;
+    std::array<double, count> input{};
+    for (std::size_t i = 0; i < input.size(); ++i)
+        input[i] = std::sin(0.071 * static_cast<double>(i)) +
+                   0.25 * std::cos(0.019 * static_cast<double>(i));
+
+    const auto render_shared = [&](const std::array<std::size_t, 3>& partitions) {
+        FractionalDelayHistoryT<double> history;
+        REQUIRE(history.prepare(32));
+        std::array<double, count> output{};
+        std::size_t begin = 0;
+        for (const auto end : partitions) {
+            for (auto i = begin; i < end; ++i) {
+                REQUIRE(history.push(input[i]) == FractionalDelayStatus::ok);
+                const auto result =
+                    history.read_lagrange5_at(8.0 + 0.9 * std::sin(0.017 * static_cast<double>(i)));
+                REQUIRE(result);
+                output[i] = result.sample;
+            }
+            begin = end;
+        }
+        return output;
+    };
+
+    const auto whole = render_shared({count, count, count});
+    const auto partitioned = render_shared({73, 251, count});
+    CHECK(whole == partitioned);
+
+    FractionalDelayHistoryT<double> history;
+    REQUIRE(history.prepare(32));
+    for (const auto sample : input)
+        REQUIRE(history.push(sample) == FractionalDelayStatus::ok);
+    constexpr double epsilon = 1.0e-7;
+    for (const auto method : {FractionalDelayMethod::lagrange3, FractionalDelayMethod::lagrange5}) {
+        const auto below = history.read_at(9.0 - epsilon, method);
+        const auto exact = history.read_at(9.0, method);
+        const auto above = history.read_at(9.0 + epsilon, method);
+        REQUIRE(below);
+        REQUIRE(exact);
+        REQUIRE(above);
+        CHECK(std::abs(below.sample - exact.sample) < 1.0e-7);
+        CHECK(std::abs(above.sample - exact.sample) < 1.0e-7);
+        CHECK(std::abs((below.sample + above.sample) * 0.5 - exact.sample) < 1.0e-12);
+    }
+}
+
+TEST_CASE("read-before-write feedback uses the requested impulse loop delay",
+          "[signal][fractional-delay][shared-history]") {
+    FractionalDelayHistoryT<double> history;
+    REQUIRE(history.prepare(16));
+    constexpr std::size_t loop_delay = 4;
+    constexpr double feedback = 0.5;
+    std::array<double, 21> output{};
+    for (std::size_t n = 0; n < output.size(); ++n) {
+        const auto loop = history.read_lagrange3_at(static_cast<double>(loop_delay));
+        REQUIRE(loop);
+        output[n] = (n == 0 ? 1.0 : 0.0) + feedback * loop.sample;
+        REQUIRE(history.push(output[n]) == FractionalDelayStatus::ok);
+    }
+    for (std::size_t n = 0; n < output.size(); ++n) {
+        const auto expected = n % loop_delay == 0 ? std::pow(feedback, n / loop_delay) : 0.0;
+        CHECK(output[n] == expected);
+    }
+}
+
+TEST_CASE("shared Lagrange magnitude and phase match an independent fractional oracle",
+          "[signal][fractional-delay][shared-history]") {
+    constexpr std::array fractions{0.1, 0.25, 0.5, 0.9};
+    constexpr std::array omegas{0.1 * std::numbers::pi, 0.45 * std::numbers::pi,
+                                0.8 * std::numbers::pi};
+    for (const auto method : {FractionalDelayMethod::lagrange3, FractionalDelayMethod::lagrange5}) {
+        for (const auto fraction : fractions) {
+            const auto physical_delay = 7.0 + fraction;
+            // The shared-history cursor is the next write, so a read performed
+            // after pushing x[n] uses one additional sample of cursor distance.
+            const auto requested_delay = physical_delay + 1.0;
+            for (const auto omega : omegas) {
+                FractionalDelayHistoryT<double> cosine_history;
+                FractionalDelayHistoryT<double> sine_history;
+                REQUIRE(cosine_history.prepare(32));
+                REQUIRE(sine_history.prepare(32));
+                std::complex<long double> measured{};
+                constexpr std::size_t measure_at = 160;
+                for (std::size_t n = 0; n <= measure_at; ++n) {
+                    const auto phase = omega * static_cast<double>(n);
+                    REQUIRE(cosine_history.push(std::cos(phase)) == FractionalDelayStatus::ok);
+                    REQUIRE(sine_history.push(std::sin(phase)) == FractionalDelayStatus::ok);
+                    if (n == measure_at) {
+                        const auto real = cosine_history.read_at(requested_delay, method);
+                        const auto imaginary = sine_history.read_at(requested_delay, method);
+                        REQUIRE(real);
+                        REQUIRE(imaginary);
+                        measured = {real.sample, imaginary.sample};
+                    }
+                }
+                const auto carrier = std::exp(std::complex<long double>{
+                    0.0L, static_cast<long double>(omega * static_cast<double>(measure_at))});
+                const auto measured_response = measured / carrier;
+                const auto oracle = independent_lagrange_response(method, physical_delay, omega);
+                CHECK_THAT(static_cast<double>(std::abs(measured_response)),
+                           WithinAbs(static_cast<double>(std::abs(oracle)), 2.0e-13));
+                CHECK_THAT(static_cast<double>(std::arg(measured_response / oracle)),
+                           WithinAbs(0.0, 2.0e-13));
+            }
+        }
     }
 }

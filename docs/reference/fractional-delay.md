@@ -1,10 +1,11 @@
 # Fractional delay
 
-`<pulp/signal/fractional_delay.hpp>` provides one prepared mono delay-line
-contract with stable first-order Thiran allpass, four-point/order-3 Lagrange,
-and six-point/order-5 Lagrange reconstruction. It is intended as a foundation
-for waveguides, resonators, and physical models that need an explicit
-fractional-delay policy rather than an effect-specific private ring.
+`<pulp/signal/fractional_delay.hpp>` provides a prepared mono delay line with a
+stable first-order Thiran allpass and order-3/order-5 Lagrange reconstruction.
+It also provides a prepared shared-history ring with explicit writes and any
+number of stateless Lagrange read heads. Together they cover ordinary variable
+delay, multitap, ping-pong feedback, and simultaneous old/new transition reads
+without requiring effect-specific private rings.
 
 There was no general Thiran primitive to promote. Existing Pulp code provides a
 linear `DelayLineT`, the shared `Interpolator::lagrange` order-3 kernel, and
@@ -87,3 +88,42 @@ reduces high-frequency approximation error at the cost of two more taps and a
 two-sample causal minimum. `lagrange5_weights()` and `lagrange5()` expose the
 pure six-tap design/value surface; order 3 delegates to the existing
 `Interpolator::lagrange` helper.
+
+## Shared history and stateless read heads
+
+`FractionalDelayHistoryT<SampleType>` separates the timeline write from reads:
+
+```cpp
+pulp::signal::FractionalDelayHistory history;
+history.prepare(maximum_delay_samples);
+
+const auto left_loop = history.read_lagrange5_at(left_delay);
+const auto right_loop = history.read_lagrange5_at(right_delay);
+const auto next = input + feedback * 0.5f * (left_loop.sample + right_loop.sample);
+history.push(next);
+```
+
+The cursor denotes the next write, so delay 1 is the most recently pushed
+sample. A read-before-write request of delay `D` therefore returns the signal
+at `n - D`, which makes feedback loop timing explicit. If a caller pushes first,
+the cursor advances first too. Read heads are `const` and stateless: repeated
+reads see the identical snapshot, and callers may read several taps or both
+sides of a delay transition before committing the next sample.
+
+The shared ring accepts only `lagrange3` and `lagrange5`; recursive Thiran state
+cannot be shared by stateless heads. The causal minimum is 2 samples for order 3
+and 3 samples for order 5 because their centered stencils must not inspect the
+not-yet-written sample. `read_lagrange3_at()` and `read_lagrange5_at()` are the
+convenience forms; `read_at(delay, method)` supports runtime method selection.
+All accept delays through the prepared maximum and may cross integer boundaries
+without changing objects or allocating.
+
+Preparation retains exactly `maximum_delay_samples + 3` samples, enough for the
+oldest order-5 stencil tap. `retained_samples()`, `retained_bytes()`, and
+`required_older_lookback()` make that bound inspectable. Failed preparation is
+transactional. `push()` advances nonfinite input as zero and reports
+`non_finite_input`; invalid reads report a typed status without advancing or
+altering history. `reset()`, `push()`, and every read are allocation-free,
+lock-free, and non-throwing after preparation. The prepared owner is move-only;
+a moved-from object becomes an empty unprepared object and may be prepared
+again.
