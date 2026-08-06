@@ -333,12 +333,7 @@ void BridgeRegistrars::register_widget_factory_composite_api(WidgetBridge& self)
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto seg = std::make_unique<SegmentedControl>(); seg->set_id(id);
         auto* ptr = seg.get(); self.widgets_[id] = ptr;
-        auto alive = self.callback_alive_;
-        auto* engine = &self.engine_;
-        seg->on_change = [alive, engine, id](int index) {
-            dispatch_event(alive, engine, id, "select", std::to_string(index));
-        };
-        self.wire_parameter_gestures(id, ptr);
+        self.wire_callbacks(id, ptr);
         self.resolve_parent(pid)->add_child(std::move(seg));
         return choc::value::createString(id);
     });
@@ -465,12 +460,7 @@ void BridgeRegistrars::register_widget_factory_design_system_api(WidgetBridge& s
         s->set_id(id);
         auto* ptr = s.get();
         self.widgets_[id] = ptr;
-        auto alive = self.callback_alive_;
-        auto* engine = &self.engine_;
-        s->on_change = [alive, engine, id](double v) {
-            BridgeCallbackScope scope(alive);
-            dispatch_event(alive, engine, id, "change", std::to_string(v));
-        };
+        self.wire_callbacks(id, ptr);
         self.resolve_parent(pid)->add_child(std::move(s));
         return choc::value::createString(id);
     });

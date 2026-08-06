@@ -7,6 +7,7 @@
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -30,6 +31,20 @@ std::string string_member(const choc::value::ValueView& object,
         !object[key].isString())
         return {};
     return object[key].toString();
+}
+
+std::optional<float> strict_finite_float(std::string_view text) {
+    if (text.empty()) return std::nullopt;
+    try {
+        std::size_t consumed = 0;
+        const auto owned = std::string(text);
+        const float parsed = std::stof(owned, &consumed);
+        if (consumed != owned.size() || !std::isfinite(parsed))
+            return std::nullopt;
+        return parsed;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
 }
 
 double number_member(const choc::value::ValueView& object,
@@ -554,20 +569,32 @@ int lower_semantic_controls(const fs::path& path,
         // inferred: the value lives in a CSS custom property the stylesheet
         // reads, and which property that is differs per design system.
         const auto declared_value = string_member(data, "value");
-        if (!declared_value.empty()) {
-            try {
-                control.audio_default = std::stof(declared_value);
-            } catch (const std::exception&) {
-                // A malformed value must not take the control down with it;
-                // the default stands and the design still renders.
+        if (widget == pulp::view::AudioWidgetType::toggle) {
+            // Canonicalise one source value into BOTH representations consumed
+            // downstream. Native materialisation reads `checked`, while both
+            // JS emitters read audio_default. Keeping the author's raw spelling
+            // in only one made `true` and `0.75` open in opposite states.
+            float value = 0.0f;
+            if (!declared_value.empty()) {
+                auto lower = declared_value;
+                std::transform(lower.begin(), lower.end(), lower.begin(),
+                               [](unsigned char c) {
+                                   return static_cast<char>(std::tolower(c));
+                               });
+                if (lower == "true" || lower == "yes" || lower == "on") {
+                    value = 1.0f;
+                } else if (lower == "false" || lower == "no" || lower == "off") {
+                    value = 0.0f;
+                } else if (const auto parsed = strict_finite_float(declared_value)) {
+                    value = std::clamp(*parsed, 0.0f, 1.0f);
+                }
             }
-            // A toggle's opening state is read as a BOOLEAN attribute rather
-            // than from the numeric default, because that is where the native
-            // materializer looks for it. Writing only the float left every
-            // imported switch opening OFF, including the ones the design drew
-            // lit -- the panel changed the moment it loaded.
-            if (widget == pulp::view::AudioWidgetType::toggle)
-                control.attributes["checked"] = declared_value;
+            control.audio_default = value;
+            control.attributes["checked"] =
+                pulp::view::toggle_on_from_normalized(value) ? "1" : "0";
+        } else if (!declared_value.empty()) {
+            if (const auto parsed = strict_finite_float(declared_value))
+                control.audio_default = *parsed;
         }
         // The segment labels, declared rather than scraped: only the author
         // knows which children are segments, and scraping the element's text
@@ -579,23 +606,40 @@ int lower_semantic_controls(const fs::path& path,
             if (choices.empty()) continue;
             control.attributes["pulpChoices"] = choices;
         }
-        // A stepper's grid is DECLARED, because nothing about the element's
-        // geometry implies it: a voices control counting 1..8 and an octave
-        // control spanning -2..+2 are the same box. Without a declared range
-        // the widget keeps its own default and shows a number the patch never
-        // had, so an undeclared stepper stays part of the backdrop.
+        // Prefer a fully DECLARED stepper grid: nothing about the element's
+        // geometry distinguishes a voice count (1..8) from an octave offset
+        // (-2..2). With no domain at all, the only honest fallback is the host
+        // parameter's normalized 0..1 domain. A PARTIAL domain is rejected:
+        // merging an authored -2 minimum with an invented +1 maximum would be
+        // a plausible-looking but false product contract.
         if (widget == pulp::view::AudioWidgetType::stepper) {
             const auto min = string_member(data, "min");
             const auto max = string_member(data, "max");
-            if (min.empty() || max.empty()) continue;
-            try {
-                control.audio_min = std::stof(min);
-                control.audio_max = std::stof(max);
-            } catch (const std::exception&) { continue; }
-            if (!(control.audio_max > control.audio_min)) continue;
+            if (min.empty() != max.empty()) continue;
+            const bool has_declared_range = !min.empty();
+            const auto parsed_min = min.empty()
+                ? std::optional<float>{0.0f} : strict_finite_float(min);
+            const auto parsed_max = max.empty()
+                ? std::optional<float>{1.0f} : strict_finite_float(max);
+            if (!parsed_min || !parsed_max) continue;
+            control.audio_min = *parsed_min;
+            control.audio_max = *parsed_max;
+            if (
+                !(control.audio_max > control.audio_min)) continue;
             control.has_audio_range = true;
             const auto step = string_member(data, "step");
-            control.attributes["pulpStep"] = step.empty() ? "1" : step;
+            float parsed_step = has_declared_range ? 1.0f : 0.01f;
+            if (!step.empty()) {
+                const auto value = strict_finite_float(step);
+                if (!value) continue;
+                parsed_step = *value;
+            }
+            if (!std::isfinite(parsed_step) || parsed_step <= 0.0f) continue;
+            // Preserve validated author precision. std::to_string(float) fixes
+            // six decimals, which turns a valid 1e-7 grid into "0.000000" and
+            // makes the next semantic pass reject its own lowered output.
+            control.attributes["pulpStep"] =
+                step.empty() ? std::to_string(parsed_step) : step;
         }
         control.style.position = "absolute";
         control.style.left =

@@ -2748,6 +2748,62 @@ TEST_CASE("generated C++ binding helper emits routed checkbox bindings",
 #endif
 }
 
+TEST_CASE("tiny Stepper grid matches baked widget and binding descriptor and compiles",
+          "[view][import][native-materializer][cpp-codegen][discrete-controls][stepper][compile]") {
+    DesignIR ir;
+    ir.source = DesignSource::html;
+    ir.root.type = "frame";
+    ir.root.name = "Tiny stepper";
+    ir.root.style.width = 160.0f;
+    ir.root.style.height = 80.0f;
+
+    IRNode stepper;
+    stepper.type = "frame";
+    stepper.audio_widget = AudioWidgetType::stepper;
+    stepper.audio_min = 0.0f;
+    stepper.audio_max = 0.000001f;
+    stepper.audio_default = 0.0000005f;
+    stepper.has_audio_range = true;
+    stepper.stable_anchor_id = "capture:tiny-stepper:0";
+    stepper.attributes["pulpRouteId"] = "capture:tiny-stepper:0";
+    stepper.attributes["pulpParamKey"] = "fine";
+    stepper.attributes["pulpBindingModule"] = "OSC";
+    stepper.attributes["pulpBindingParam"] = "fine";
+    stepper.attributes["pulpStep"] = "0.0000001";
+    ir.root.children.push_back(std::move(stepper));
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+
+    REQUIRE(result.source.find("->set_step(1e-07f);") != std::string::npos);
+    const auto descriptor_start = result.source.find(
+        "NativeImportStepperBindingDescriptor{");
+    REQUIRE(descriptor_start != std::string::npos);
+    const auto descriptor_end = result.source.find("});", descriptor_start);
+    REQUIRE(descriptor_end != std::string::npos);
+    const auto descriptor = result.source.substr(
+        descriptor_start, descriptor_end - descriptor_start);
+    REQUIRE(descriptor.find(
+        "\n                0.0f,\n"
+        "                1e-06f,\n"
+        "                1e-07f\n") != std::string::npos);
+
+#if defined(_WIN32)
+    SKIP("freestanding generated-source compile is unsupported on the Windows CI toolchain");
+#else
+    TempDir tmp("pulp-native-materializer-tiny-stepper-codegen");
+    const auto header = tmp.path / "imported_ui.hpp";
+    const auto source = tmp.path / "imported_ui.cpp";
+    const auto object = tmp.path / "imported_ui.o";
+    write_text(header, result.header);
+    write_text(source, result.source);
+
+    std::string diagnostics;
+    const bool compiled = compile_generated_source(source, object, &diagnostics);
+    INFO(diagnostics);
+    REQUIRE(compiled);
+#endif
+}
+
 TEST_CASE("compiled generated C++ binding helper binds and fails closed at runtime",
           "[view][import][native-materializer][binding][cpp-codegen]") {
     auto root = pulp::test::generated_binding_runtime::build_generated_binding_runtime_ui();

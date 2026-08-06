@@ -2189,7 +2189,7 @@ TEST_CASE("a bound selector lowers with the segments its author declared",
     REQUIRE(direction.stable_anchor_id);
 }
 
-TEST_CASE("a bound stepper lowers with the grid its author declared",
+TEST_CASE("a bound stepper lowers with a declared or normalized fallback grid",
           "[import][browser-capture][semantics][stepper]") {
     // A count is the control the original request asked for ("voice number
     // parameter") and the one a knob reads worst. Its range is DECLARED
@@ -2206,9 +2206,33 @@ TEST_CASE("a bound stepper lowers with the grid its author declared",
         {"kind":"stepper","binding_status":"bound","name":"voices",
          "bounds":{"left":24,"top":40,"width":80,"height":28},
          "data_pulp":{"param":"voices","min":"1","max":"8","step":"1"}},
-        {"kind":"stepper","binding_status":"bound","name":"ungridded",
+        {"kind":"stepper","binding_status":"bound","name":"normalized",
          "bounds":{"left":24,"top":90,"width":80,"height":28},
-         "data_pulp":{"param":"nothing"}}
+         "data_pulp":{"param":"normalized"}},
+        {"kind":"stepper","binding_status":"bound","name":"partial",
+         "bounds":{"left":24,"top":140,"width":80,"height":28},
+         "data_pulp":{"param":"partial","min":"-2"}},
+        {"kind":"stepper","binding_status":"bound","name":"bipolar",
+         "bounds":{"left":24,"top":190,"width":80,"height":28},
+         "data_pulp":{"param":"bipolar","min":"-2","max":"2","step":"1"}},
+        {"kind":"stepper","binding_status":"bound","name":"frequency",
+         "bounds":{"left":24,"top":240,"width":80,"height":28},
+         "data_pulp":{"param":"frequency","min":"20","max":"20000","step":"10"}},
+        {"kind":"stepper","binding_status":"bound","name":"precision",
+         "bounds":{"left":24,"top":265,"width":80,"height":28},
+         "data_pulp":{"param":"precision","min":"0","max":"0.000001","step":"0.0000001"}},
+        {"kind":"stepper","binding_status":"bound","name":"junk",
+         "bounds":{"left":24,"top":290,"width":80,"height":28},
+         "data_pulp":{"param":"junk","min":"1junk","max":"8","step":"1"}},
+        {"kind":"stepper","binding_status":"bound","name":"reversed",
+         "bounds":{"left":24,"top":340,"width":80,"height":28},
+         "data_pulp":{"param":"reversed","min":"8","max":"1","step":"1"}},
+        {"kind":"stepper","binding_status":"bound","name":"nonfinite",
+         "bounds":{"left":24,"top":390,"width":80,"height":28},
+         "data_pulp":{"param":"nonfinite","min":"0","max":"nan","step":"1"}},
+        {"kind":"stepper","binding_status":"bound","name":"zero-step",
+         "bounds":{"left":24,"top":440,"width":80,"height":28},
+         "data_pulp":{"param":"zero-step","min":"0","max":"1","step":"0"}}
       ]
     })JSON");
     temp.write("tokens.json", R"JSON({
@@ -2235,12 +2259,44 @@ TEST_CASE("a bound stepper lowers with the grid its author declared",
         };
     walk(result.design_ir->root);
 
-    // The second declared no range, so it would show a number off the widget's
-    // own default grid rather than the patch's; it stays part of the backdrop.
-    REQUIRE(steppers.size() == 1);
-    const auto& voices = *steppers.front();
+    // No domain means a normalized host parameter. A partial domain is not
+    // merged with an invented endpoint and therefore does not lower.
+    REQUIRE(steppers.size() == 5);
+    const auto find_stepper = [&](std::string_view param) -> const pulp::view::IRNode& {
+        const auto it = std::find_if(steppers.begin(), steppers.end(),
+            [&](const auto* node) {
+                const auto found = node->attributes.find("pulpParamKey");
+                return found != node->attributes.end() && found->second == param;
+            });
+        REQUIRE(it != steppers.end());
+        return **it;
+    };
+    const auto& voices = find_stepper("voices");
     REQUIRE(voices.audio_min == 1.0f);
     REQUIRE(voices.audio_max == 8.0f);
-    REQUIRE(voices.attributes.at("pulpStep") == "1");
+    REQUIRE(std::stof(voices.attributes.at("pulpStep")) == 1.0f);
     REQUIRE(voices.attributes.at("pulpParamKey") == "voices");
+
+    const auto& normalized = find_stepper("normalized");
+    REQUIRE(normalized.audio_min == 0.0f);
+    REQUIRE(normalized.audio_max == 1.0f);
+    REQUIRE(std::stof(normalized.attributes.at("pulpStep")) == 0.01f);
+    REQUIRE(normalized.attributes.at("pulpParamKey") == "normalized");
+
+    const auto& bipolar = find_stepper("bipolar");
+    REQUIRE(bipolar.audio_min == -2.0f);
+    REQUIRE(bipolar.audio_max == 2.0f);
+    REQUIRE(std::stof(bipolar.attributes.at("pulpStep")) == 1.0f);
+
+    const auto& frequency = find_stepper("frequency");
+    REQUIRE(frequency.audio_min == 20.0f);
+    REQUIRE(frequency.audio_max == 20000.0f);
+    REQUIRE(std::stof(frequency.attributes.at("pulpStep")) == 10.0f);
+
+    const auto& precision = find_stepper("precision");
+    REQUIRE(precision.audio_min == 0.0f);
+    REQUIRE(precision.audio_max == Catch::Approx(0.000001f));
+    REQUIRE(precision.attributes.at("pulpStep") == "0.0000001");
+    REQUIRE(std::stof(precision.attributes.at("pulpStep")) ==
+            Catch::Approx(0.0000001f));
 }

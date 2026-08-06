@@ -31,11 +31,11 @@ void BridgeRegistrars::register_widget_value_controls_api(WidgetBridge& self) {
         else if (auto* range = dynamic_cast<RangeSlider*>(it->second.view))
             range->set_value(static_cast<float>(value));
         else if (auto* toggle = dynamic_cast<Toggle*>(it->second.view))
-            toggle->set_on(value > 0.5);
+            toggle->set_on(toggle_on_from_normalized(value));
         else if (auto* cb = dynamic_cast<Checkbox*>(it->second.view))
-            cb->set_checked(value > 0.5);
+            cb->set_checked(toggle_on_from_normalized(value));
         else if (auto* tb = dynamic_cast<ToggleButton*>(it->second.view))
-            tb->set_on(value > 0.5);
+            tb->set_on(toggle_on_from_normalized(value));
         else if (auto* stepper = dynamic_cast<Stepper*>(it->second.view))
             stepper->set_value(value);
         else if (auto* pan = dynamic_cast<PanControl*>(it->second.view))
@@ -70,6 +70,8 @@ void BridgeRegistrars::register_widget_value_controls_api(WidgetBridge& self) {
             return choc::value::createFloat64(range->value());
         if (auto* toggle = dynamic_cast<Toggle*>(it->second.view))
             return choc::value::createFloat64(toggle->is_on() ? 1.0 : 0.0);
+        if (auto* stepper = dynamic_cast<Stepper*>(it->second.view))
+            return choc::value::createFloat64(stepper->value());
 
         return choc::value::createFloat64(0);
     });
@@ -107,6 +109,8 @@ void BridgeRegistrars::register_widget_value_controls_api(WidgetBridge& self) {
         auto v = args.get<double>(1, 0);
         if (auto* range = dynamic_cast<RangeSlider*>(self.widget(id)))
             range->set_step(static_cast<float>(v));
+        else if (auto* st = dynamic_cast<Stepper*>(self.widget(id)))
+            st->set_step(v);
         return choc::value::Value();
     });
 

@@ -5311,8 +5311,172 @@ TEST_CASE("WidgetBridge creates Ink & Signal design-system widgets from JS",
     // setValue routes through the shared dynamic_cast chain to the gap widgets.
     bridge.load_script("setValue('voices', 8); setValue('balance', -1); setText('fmt', 'CLAP');");
     REQUIRE(stepper->value() == Catch::Approx(8.0));
+    REQUIRE(engine.evaluate("getValue('voices')").getWithDefault<double>(0.0) ==
+            Catch::Approx(8.0));
     REQUIRE(pan->value() == Catch::Approx(-1.0f));
     REQUIRE(badge->text() == "CLAP");
+}
+
+TEST_CASE("WidgetBridge discrete factories and DOM tags share gesture-safe callbacks",
+          "[view][bridge][design-system][discrete][gesture][lifetime]") {
+    struct Variant { const char* name; const char* create; bool segmented; };
+    for (const auto variant : {
+             Variant{"factory stepper", "createStepper('control', '');", false},
+             Variant{"DOM stepper", "__domAppend('', 'control', 'stepper');", false},
+             Variant{"factory segmented", "createSegmented('control', ''); setSegments('control', ['A','B','C']);", true},
+             Variant{"DOM segmented", "__domAppend('', 'control', 'segmented'); setSegments('control', ['A','B','C']);", true}}) {
+        DYNAMIC_SECTION(variant.name) {
+            ScriptEngine engine;
+            View root;
+            StateStore store;
+            store.add_parameter({
+                .id = 1,
+                .name = "choice",
+                .range = {0.0f, 1.0f, 0.0f, 0.0f},
+            });
+            int begins = 0;
+            int ends = 0;
+            store.set_gesture_callbacks(
+                [&](pulp::state::ParamID) { ++begins; },
+                [&](pulp::state::ParamID) { ++ends; });
+            WidgetBridge bridge(engine, root, store);
+            bridge.load_script(std::string(variant.create) +
+                               "bindWidgetToParam('control', 'choice');");
+
+            if (variant.segmented) {
+                auto* control = dynamic_cast<SegmentedControl*>(bridge.widget("control"));
+                REQUIRE(control != nullptr);
+                REQUIRE(control->on_change);
+                control->on_change(1);
+            } else {
+                auto* control = dynamic_cast<Stepper*>(bridge.widget("control"));
+                REQUIRE(control != nullptr);
+                REQUIRE(control->on_change);
+                control->on_change(0.5);
+            }
+            REQUIRE(begins == 1);
+            REQUIRE(ends == 1);
+            REQUIRE(store.open_gesture_count() == 0);
+        }
+    }
+
+    // A JS handler may tear down the bridge during dispatch. The callback must
+    // not touch its destroyed `this` while closing the instantaneous gesture.
+    for (const auto variant : {
+             Variant{"teardown factory stepper", "createStepper('control', '');", false},
+             Variant{"teardown DOM stepper", "__domAppend('', 'control', 'stepper');", false},
+             Variant{"teardown factory segmented", "createSegmented('control', '');", true},
+             Variant{"teardown DOM segmented", "__domAppend('', 'control', 'segmented');", true}}) {
+        DYNAMIC_SECTION(variant.name) {
+            ScriptEngine engine;
+            View root;
+            StateStore store;
+            std::unique_ptr<WidgetBridge> bridge;
+            engine.register_function("__destroyDiscreteBridge",
+                [&](const choc::value::Value*, size_t) {
+                    bridge.reset();
+                    return choc::value::createInt32(1);
+                });
+            bridge = std::make_unique<WidgetBridge>(engine, root, store);
+            bridge->load_script(std::string(variant.create) +
+                "on('control', '" + (variant.segmented ? "select" : "change") +
+                "', function() { __destroyDiscreteBridge(); });");
+
+            if (variant.segmented) {
+                auto callback = dynamic_cast<SegmentedControl*>(
+                    bridge->widget("control"))->on_change;
+                REQUIRE_NOTHROW(callback(1));
+            } else {
+                auto callback = dynamic_cast<Stepper*>(
+                    bridge->widget("control"))->on_change;
+                REQUIRE_NOTHROW(callback(0.5));
+            }
+            REQUIRE(bridge == nullptr);
+        }
+    }
+
+    // A scheduler or caller may retain a copied widget callback past bridge
+    // teardown. The alive token must be checked before the callback's first
+    // use of its captured raw `this`, not merely after JS dispatch returns.
+    SECTION("retained stepper callback invoked after bridge destruction") {
+        ScriptEngine engine;
+        View root;
+        StateStore store;
+        store.add_parameter({.id = 1, .name = "choice",
+                             .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+        int begins = 0;
+        int ends = 0;
+        store.set_gesture_callbacks([&](auto) { ++begins; },
+                                    [&](auto) { ++ends; });
+        auto bridge = std::make_unique<WidgetBridge>(engine, root, store);
+        bridge->load_script(
+            "globalThis.retainedEvents = 0;"
+            "createStepper('control', '');"
+            "on('control', 'change', function(){ ++globalThis.retainedEvents; });"
+            "bindWidgetToParam('control', 'choice');");
+        auto callback = dynamic_cast<Stepper*>(bridge->widget("control"))->on_change;
+        REQUIRE(callback);
+        bridge.reset();
+        REQUIRE_NOTHROW(callback(0.5));
+        CHECK(begins == 0);
+        CHECK(ends == 0);
+        CHECK(engine.evaluate("globalThis.retainedEvents")
+                  .getWithDefault<int32_t>(-1) == 0);
+    }
+
+    SECTION("retained segmented callback invoked after bridge destruction") {
+        ScriptEngine engine;
+        View root;
+        StateStore store;
+        store.add_parameter({.id = 1, .name = "choice",
+                             .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+        int begins = 0;
+        int ends = 0;
+        store.set_gesture_callbacks([&](auto) { ++begins; },
+                                    [&](auto) { ++ends; });
+        auto bridge = std::make_unique<WidgetBridge>(engine, root, store);
+        bridge->load_script(
+            "globalThis.retainedEvents = 0;"
+            "createSegmented('control', '');"
+            "setSegments('control', ['A', 'B']);"
+            "on('control', 'select', function(){ ++globalThis.retainedEvents; });"
+            "bindWidgetToParam('control', 'choice');");
+        auto callback =
+            dynamic_cast<SegmentedControl*>(bridge->widget("control"))->on_change;
+        REQUIRE(callback);
+        bridge.reset();
+        REQUIRE_NOTHROW(callback(1));
+        CHECK(begins == 0);
+        CHECK(ends == 0);
+        CHECK(engine.evaluate("globalThis.retainedEvents")
+                  .getWithDefault<int32_t>(-1) == 0);
+    }
+
+    SECTION("retained toggle callback invoked after bridge destruction") {
+        ScriptEngine engine;
+        View root;
+        StateStore store;
+        store.add_parameter({.id = 1, .name = "choice",
+                             .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+        int begins = 0;
+        int ends = 0;
+        store.set_gesture_callbacks([&](auto) { ++begins; },
+                                    [&](auto) { ++ends; });
+        auto bridge = std::make_unique<WidgetBridge>(engine, root, store);
+        bridge->load_script(
+            "globalThis.retainedEvents = 0;"
+            "createToggle('control', false);"
+            "on('control', 'toggle', function(){ ++globalThis.retainedEvents; });"
+            "bindWidgetToParam('control', 'choice');");
+        auto callback = dynamic_cast<Toggle*>(bridge->widget("control"))->on_toggle;
+        REQUIRE(callback);
+        bridge.reset();
+        REQUIRE_NOTHROW(callback(true));
+        CHECK(begins == 0);
+        CHECK(ends == 0);
+        CHECK(engine.evaluate("globalThis.retainedEvents")
+                  .getWithDefault<int32_t>(-1) == 0);
+    }
 }
 
 TEST_CASE("WidgetBridge design-system stepper/pan dispatch change events",
@@ -5476,16 +5640,16 @@ TEST_CASE("WidgetBridge snapshot/restore round-trips every scalar value widget",
     REQUIRE(checkbox_ptr->is_checked());
     REQUIRE(toggle_button_ptr->is_on());
 
-    // A restore value at/below the 0.5 threshold turns a boolean widget off —
-    // the set side of the ladder reads > 0.5 as on.
+    // The canonical boolean threshold is inclusive: exactly 0.5 is on in the
+    // importer, bridge APIs, host binding, and reload restore path.
     std::unordered_map<std::string, float> off;
     off["toggle"] = 0.5f;
     off["checkbox"] = 0.0f;
     off["toggle-button"] = 0.5f;
     bridge.restore_values(off);
-    REQUIRE_FALSE(toggle_ptr->is_on());
+    REQUIRE(toggle_ptr->is_on());
     REQUIRE_FALSE(checkbox_ptr->is_checked());
-    REQUIRE_FALSE(toggle_button_ptr->is_on());
+    REQUIRE(toggle_button_ptr->is_on());
 }
 
 // The reload snapshot layers selection controls and XYPad ON TOP of the shared

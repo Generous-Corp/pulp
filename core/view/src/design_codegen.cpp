@@ -444,8 +444,18 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
                    << js_single_quote_escape(node.audio_label) << "');\n";
             ss << ind << "setMin(" << var << "._id, " << node.audio_min << ");\n";
             ss << ind << "setMax(" << var << "._id, " << node.audio_max << ");\n";
-            ss << ind << "setValue(" << var << "._id, " << node.audio_default
-               << ");\n";
+            if (node.audio_widget == AudioWidgetType::stepper) {
+                const auto step = imported_stepper_step(node);
+                ss << ind << "setStep(" << var << "._id, " << step << ");\n";
+                ss << ind << "setValue(" << var << "._id, "
+                   << stepper_plain_value(normalized_audio_default(node),
+                                          node.audio_min,
+                                          node.audio_max, step)
+                   << ");\n";
+            } else {
+                ss << ind << "setValue(" << var << "._id, " << node.audio_default
+                   << ");\n";
+            }
 
             if (node.audio_widget == AudioWidgetType::fader) {
                 if (fader_is_horizontal(node))
@@ -1717,6 +1727,12 @@ static void emit_js_audio_widget(const NativeEmit& e) {
         ss << ind << "setFlex('" << id << "', 'height', " << h << ");\n";
         ss << ind << "setMin('" << id << "', " << node.audio_min << ");\n";
         ss << ind << "setMax('" << id << "', " << node.audio_max << ");\n";
+        const auto step = imported_stepper_step(node);
+        ss << ind << "setStep('" << id << "', " << step << ");\n";
+        ss << ind << "setValue('" << id << "', "
+           << stepper_plain_value(normalized_audio_default(node), node.audio_min,
+                                  node.audio_max, step)
+           << ");\n";
         if (!label_text.empty()) {
             const std::string lbl_id = id + "_lbl";
             ss << ind << "createLabel('" << lbl_id << "', '"
@@ -1764,7 +1780,7 @@ static void emit_js_audio_widget(const NativeEmit& e) {
         ss << ind << "setFlex('" << id << "', 'width', " << w << ");\n";
         ss << ind << "setFlex('" << id << "', 'height', " << h << ");\n";
         ss << ind << "setValue('" << id << "', "
-           << (node.audio_default >= 0.5f ? 1 : 0) << ");\n";
+           << (toggle_on_from_normalized(node.audio_default) ? 1 : 0) << ");\n";
         if (!label_text.empty()) {
             const std::string lbl_id = id + "_lbl";
             ss << ind << "createLabel('" << lbl_id << "', '"

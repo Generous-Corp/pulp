@@ -77,8 +77,8 @@ TEST_CASE("generate_pulp_cpp checkpoint artifact stays byte-exact",
 
     CHECK(result.header.size() == 494);
     CHECK(header_hash == "53c5ce7b1e23e25eb0616b132485ca3ef46df0e85c6d1a56fc06114e512a3ffc");
-    CHECK(result.source.size() == 5611);
-    CHECK(source_hash == "b6f12f893e22fb1c4422e482843b337b0138d69a82e466746e401cb958b25b02");
+    CHECK(result.source.size() == 5687);
+    CHECK(source_hash == "fced15f19f0ddee2247d883246236008df819f1e172f47d7da2658b23eca6b46");
     CHECK(result.binding_manifest.size() == 413);
     CHECK(binding_hash == "1afbdd18d296b7d27a0b72f42c106e485cc7640a02771b51267c5c66e71d95a5");
 }
@@ -187,6 +187,228 @@ TEST_CASE("generate_pulp_cpp emits the public layout and visual-style surface",
           std::string::npos);
     CHECK(result.source.find("set_text_decoration(pulp::view::Label::TextDecoration::underline)") !=
           std::string::npos);
+}
+
+TEST_CASE("baked C++ emits and binds segmented selectors and numeric steppers",
+          "[view][import][cpp-codegen][discrete-controls]") {
+    DesignIR ir;
+    ir.source = DesignSource::html;
+    ir.root.type = "frame";
+    ir.root.name = "Discrete controls";
+    ir.root.style.width = 320.0f;
+    ir.root.style.height = 120.0f;
+
+    IRNode selector;
+    selector.type = "frame";
+    selector.name = "Wave shape";
+    selector.audio_widget = AudioWidgetType::selector;
+    selector.audio_default = 0.5f;
+    selector.stable_anchor_id = "capture:shape:0";
+    selector.attributes["pulpRouteId"] = "capture:shape:0";
+    selector.attributes["pulpParamKey"] = "shape";
+    selector.attributes["pulpBindingModule"] = "OSC";
+    selector.attributes["pulpBindingParam"] = "wave_shape";
+    selector.attributes["pulpChoices"] = "Pulse|Saw|Noise";
+    ir.root.children.push_back(std::move(selector));
+
+    IRNode stepper;
+    stepper.type = "frame";
+    stepper.name = "Octave";
+    stepper.audio_widget = AudioWidgetType::stepper;
+    stepper.audio_min = -2.0f;
+    stepper.audio_max = 2.0f;
+    stepper.audio_default = 0.0f;
+    stepper.has_audio_range = true;
+    stepper.stable_anchor_id = "capture:octave:1";
+    stepper.attributes["pulpRouteId"] = "capture:octave:1";
+    stepper.attributes["pulpParamKey"] = "octave";
+    stepper.attributes["pulpBindingModule"] = "OSC";
+    stepper.attributes["pulpBindingParam"] = "octave";
+    stepper.attributes["pulpStep"] = "1";
+    ir.root.children.push_back(std::move(stepper));
+
+    CppExportOptions opts;
+    opts.header_filename = "discrete_controls.hpp";
+    opts.namespace_name = "pulp::test::discrete";
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, opts);
+
+    CHECK(count_occurrences(result.source,
+                            "std::make_unique<pulp::view::SegmentedControl>()") == 1);
+    CHECK(count_occurrences(result.source,
+                            "std::make_unique<pulp::view::Stepper>()") == 1);
+    CHECK(result.source.find(
+              "->set_segments({\"Pulse\", \"Saw\", \"Noise\"});") !=
+          std::string::npos);
+    CHECK(result.source.find("->set_selected_silent(1);") != std::string::npos);
+    CHECK(result.source.find("->set_range(-2.0f, 2.0f);") != std::string::npos);
+    CHECK(result.source.find("->set_step(1.0f);") != std::string::npos);
+    CHECK(result.source.find("->set_value(0.0f);") != std::string::npos);
+    CHECK(count_occurrences(result.source, "ctx.bind_segmented(") == 1);
+    CHECK(count_occurrences(result.source, "ctx.bind_stepper(") == 1);
+    CHECK(result.source.find("NativeImportSegmentedBindingDescriptor{") !=
+          std::string::npos);
+    CHECK(result.source.find("NativeImportStepperBindingDescriptor{") !=
+          std::string::npos);
+
+    const auto manifest = choc::json::parse(result.binding_manifest);
+    REQUIRE(manifest["entries"].size() == 2);
+    CHECK(manifest["entries"][0]["native_primitive"].getString() == "segmented");
+    CHECK(manifest["entries"][1]["native_primitive"].getString() == "stepper");
+}
+
+TEST_CASE("baked C++ selector fallback matches runtime text and one-segment count",
+          "[view][import][cpp-codegen][discrete-controls]") {
+    DesignIR ir;
+    ir.source = DesignSource::html;
+    ir.root.type = "frame";
+
+    auto add_selector = [&](std::string anchor, std::string text) {
+        IRNode selector;
+        selector.type = "frame";
+        selector.text_content = std::move(text);
+        selector.audio_widget = AudioWidgetType::selector;
+        selector.stable_anchor_id = anchor;
+        selector.attributes["pulpRouteId"] = anchor;
+        selector.attributes["pulpParamKey"] = anchor;
+        selector.attributes["pulpBindingModule"] = "OSC";
+        selector.attributes["pulpBindingParam"] = anchor;
+        ir.root.children.push_back(std::move(selector));
+    };
+    add_selector("capture:text-fallback:0", "Mono");
+    add_selector("capture:numeric-fallback:1", "");
+
+    CppExportOptions opts;
+    opts.header_filename = "selector_fallback.hpp";
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, opts);
+
+    CHECK(result.source.find("->set_segments({\"Mono\"});") != std::string::npos);
+    CHECK(result.source.find("->set_segments({\"1\"});") != std::string::npos);
+    CHECK(count_occurrences(result.source,
+                            "NativeImportSegmentedBindingDescriptor{") == 2);
+    for (const auto route : {"capture:text-fallback:0",
+                             "capture:numeric-fallback:1"}) {
+        std::size_t matching_descriptors = 0;
+        std::size_t search = 0;
+        while ((search = result.source.find(
+                    "NativeImportSegmentedBindingDescriptor{", search)) !=
+               std::string::npos) {
+            const auto end = result.source.find("});", search);
+            REQUIRE(end != std::string::npos);
+            const auto descriptor = result.source.substr(search, end - search);
+            if (descriptor.find(route) != std::string::npos) {
+                ++matching_descriptors;
+                CHECK(descriptor.find("\n                1\n") !=
+                      std::string::npos);
+            }
+            search = end + 3;
+        }
+        CHECK(matching_descriptors == 1);
+    }
+}
+
+TEST_CASE("invalid stepper grids fall back identically in baked descriptors and JS",
+          "[view][import][cpp-codegen][discrete-controls][stepper]") {
+    DesignIR ir;
+    ir.source = DesignSource::html;
+    ir.root.type = "frame";
+
+    int index = 0;
+    for (const auto invalid : {"0", "-1", "nan", "inf"}) {
+        IRNode stepper;
+        stepper.type = "frame";
+        stepper.audio_widget = AudioWidgetType::stepper;
+        stepper.audio_min = 0.0f;
+        stepper.audio_max = 1.0f;
+        stepper.audio_default = 0.5f;
+        stepper.has_audio_range = true;
+        const auto anchor = "capture:invalid-step:" + std::to_string(index++);
+        stepper.stable_anchor_id = anchor;
+        stepper.attributes["pulpRouteId"] = anchor;
+        stepper.attributes["pulpParamKey"] = anchor;
+        stepper.attributes["pulpBindingModule"] = "OSC";
+        stepper.attributes["pulpBindingParam"] = anchor;
+        stepper.attributes["pulpStep"] = invalid;
+        ir.root.children.push_back(std::move(stepper));
+    }
+
+    CppExportOptions opts;
+    opts.header_filename = "invalid_stepper_grids.hpp";
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, opts);
+
+    CHECK(count_occurrences(result.source, "->set_step(1.0f);") == 4);
+    CHECK(count_occurrences(result.source,
+                            "NativeImportStepperBindingDescriptor{") == 4);
+    std::size_t search = 0;
+    std::size_t descriptors = 0;
+    while ((search = result.source.find(
+                "NativeImportStepperBindingDescriptor{", search)) !=
+           std::string::npos) {
+        const auto end = result.source.find("});", search);
+        REQUIRE(end != std::string::npos);
+        const auto descriptor = result.source.substr(search, end - search);
+        CHECK(descriptor.find(
+                  "\n                0.0f,\n"
+                  "                1.0f,\n"
+                  "                1.0f\n") != std::string::npos);
+        ++descriptors;
+        search = end + 3;
+    }
+    CHECK(descriptors == 4);
+
+    const auto js = generate_pulp_js(ir);
+    CHECK(count_occurrences(js, "setStep(") == 4);
+    search = 0;
+    std::size_t js_steps = 0;
+    while ((search = js.find("setStep(", search)) != std::string::npos) {
+        const auto end = js.find('\n', search);
+        REQUIRE(end != std::string::npos);
+        CHECK(js.substr(search, end - search).ends_with(", 1);"));
+        ++js_steps;
+        search = end + 1;
+    }
+    CHECK(js_steps == 4);
+}
+
+TEST_CASE("stepper defaults remain in their declared plain domain in every emitter",
+          "[view][import][cpp-codegen][discrete-controls][stepper]") {
+    DesignIR ir;
+    ir.source = DesignSource::html;
+    ir.root.type = "frame";
+
+    auto add_stepper = [&](std::string anchor, float min, float max,
+                           float plain_default) {
+        IRNode stepper;
+        stepper.type = "frame";
+        stepper.audio_widget = AudioWidgetType::stepper;
+        stepper.audio_min = min;
+        stepper.audio_max = max;
+        stepper.audio_default = plain_default;
+        stepper.has_audio_range = true;
+        stepper.stable_anchor_id = anchor;
+        stepper.attributes["pulpRouteId"] = anchor;
+        stepper.attributes["pulpParamKey"] = anchor;
+        stepper.attributes["pulpBindingModule"] = "OSC";
+        stepper.attributes["pulpBindingParam"] = anchor;
+        stepper.attributes["pulpStep"] = "1";
+        ir.root.children.push_back(std::move(stepper));
+    };
+    add_stepper("capture:voices:0", 1.0f, 8.0f, 5.0f);
+    add_stepper("capture:octave:1", -2.0f, 2.0f, -1.0f);
+
+    CppExportOptions cpp_opts;
+    cpp_opts.header_filename = "plain_stepper_defaults.hpp";
+    const auto cpp = generate_pulp_cpp(ir, ir.asset_manifest, cpp_opts);
+    CHECK(cpp.source.find("->set_value(5.0f);") != std::string::npos);
+    CHECK(cpp.source.find("->set_value(-1.0f);") != std::string::npos);
+
+    for (const auto mode : {CodeGenMode::bridge_native_js,
+                            CodeGenMode::web_compat}) {
+        CodeGenOptions js_opts;
+        js_opts.mode = mode;
+        const auto js = generate_pulp_js(ir, js_opts);
+        CHECK(count_occurrences(js, ", 5);") == 1);
+        CHECK(count_occurrences(js, ", -1);") == 1);
+    }
 }
 
 TEST_CASE("baked C++ codegen emits a resolved clip rectangle",

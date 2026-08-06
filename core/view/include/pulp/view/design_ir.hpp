@@ -308,9 +308,16 @@ inline double stepper_plain_value(float normalized, double min, double max,
 
 inline int selector_segment_index(float value, int count) {
     if (count <= 1) return 0;
+    if (!std::isfinite(value)) return 0;
     const float scaled = value * static_cast<float>(count - 1);
     const int nearest = static_cast<int>(scaled + 0.5f);
     return nearest < 0 ? 0 : (nearest >= count ? count - 1 : nearest);
+}
+
+/// The single threshold used by every toggle import/binding path. Invalid
+/// host values fail closed instead of changing UI state unpredictably.
+inline bool toggle_on_from_normalized(double value) {
+    return std::isfinite(value) && value >= 0.5;
 }
 
 struct IRNode;

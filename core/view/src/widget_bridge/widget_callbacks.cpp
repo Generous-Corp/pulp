@@ -54,9 +54,11 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
         wire_parameter_gestures(id, w);
         t->on_toggle = [this, alive, engine, id](bool v) {
             BridgeCallbackScope scope(alive);
+            if (!alive || !alive->load(std::memory_order_acquire)) return;
             begin_param_gesture(id);
             dispatch_event(alive, engine, id, "toggle", v ? "1" : "0");
-            end_param_gesture(id);
+            if (alive && alive->load(std::memory_order_acquire))
+                end_param_gesture(id);
         };
     } else if (auto* r = dynamic_cast<RangeSlider*>(w)) {
         wire_parameter_gestures(id, w);
@@ -74,9 +76,12 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
         // next frame. The payload is the PLAIN value the widget shows.
         wire_parameter_gestures(id, w);
         st->on_change = [this, alive, engine, id](double v) {
+            BridgeCallbackScope scope(alive);
+            if (!alive || !alive->load(std::memory_order_acquire)) return;
             begin_param_gesture(id);
             dispatch_event(alive, engine, id, "change", std::to_string(v));
-            end_param_gesture(id);
+            if (alive && alive->load(std::memory_order_acquire))
+                end_param_gesture(id);
         };
     } else if (auto* seg = dynamic_cast<SegmentedControl*>(w)) {
         // Mirror createSegmented's inline wiring so a `<segmented>` tag routed
@@ -90,9 +95,12 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
         // re-asserts the store value over the click on the very next frame.
         wire_parameter_gestures(id, w);
         seg->on_change = [this, alive, engine, id](int index) {
+            BridgeCallbackScope scope(alive);
+            if (!alive || !alive->load(std::memory_order_acquire)) return;
             begin_param_gesture(id);
             dispatch_event(alive, engine, id, "select", std::to_string(index));
-            end_param_gesture(id);
+            if (alive && alive->load(std::memory_order_acquire))
+                end_param_gesture(id);
         };
     } else if (auto* c = dynamic_cast<ComboBox*>(w)) {
         // Mirror createCombo's inline wiring so a `<combo>`/`<select>` tag

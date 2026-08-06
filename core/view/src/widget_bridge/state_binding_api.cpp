@@ -345,13 +345,13 @@ bool WidgetBridge::apply_param_binding(ParamBinding& b, View* w,
         const float hi = r->max_value();
         r->set_value(lo + std::clamp(target, 0.0f, 1.0f) * (hi - lo));
     } else if (auto* t = dynamic_cast<Toggle*>(w)) {
-        t->set_on(target > 0.5f);
+        t->set_on(toggle_on_from_normalized(target));
     } else if (auto* seg = dynamic_cast<SegmentedControl*>(w)) {
         seg->set_selected_silent(selector_segment_index(
             target, static_cast<int>(seg->segments().size())));
     } else if (auto* st = dynamic_cast<Stepper*>(w)) {
-        st->set_value(stepper_plain_value(target, st->minimum(), st->maximum(),
-                                          st->step()));
+        st->set_value_silent(stepper_plain_value(
+            target, st->minimum(), st->maximum(), st->step()));
     } else if (auto* p = dynamic_cast<ProgressBar*>(w)) {
         // ProgressBar::set_progress does NOT self-repaint; the caller schedules
         // one when `changed`.

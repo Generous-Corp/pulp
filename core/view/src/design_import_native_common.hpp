@@ -98,6 +98,15 @@ struct ImportedWidgetSemantics {
 ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
                                                   const ResolvedNativeNode& resolved);
 
+// A stepper grid must be finite and positive in every output lane. Invalid or
+// absent author data falls back to the documented count-grid default; capture
+// lowering writes 0.01 explicitly for its normalized no-range contract.
+double imported_stepper_step(const IRNode& node) noexcept;
+
+// Convert an IR control's declared plain default into the normalized parameter
+// domain consumed by native widgets and discrete value mappings.
+float normalized_audio_default(const IRNode& node);
+
 // On-screen box (and optional absolute offset) for an imported image node,
 // derived from the PNG's natural size, its art-core rect, or its bleed aspect.
 // Shared by the runtime materializer and the C++ codegen so both size an

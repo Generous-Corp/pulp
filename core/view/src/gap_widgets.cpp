@@ -160,8 +160,11 @@ void EmptyState::on_mouse_down(Point) { if (!action_.empty() && on_action) on_ac
 
 // ── Stepper ───────────────────────────────────────────────────────────────
 void Stepper::set_value(double v) {
-    value_ = std::clamp(v, min_, max_);
+    set_value_silent(v);
     if (on_change) on_change(value_);
+}
+void Stepper::set_value_silent(double v) {
+    value_ = std::clamp(v, min_, max_);
 }
 void Stepper::paint(canvas::Canvas& canvas) {
     const float w = bounds().width, h = bounds().height, btn = h;

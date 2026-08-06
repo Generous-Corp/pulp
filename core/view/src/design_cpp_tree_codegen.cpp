@@ -30,6 +30,10 @@ std::string widget_make_expr(const IRNode& node,
             return "std::make_unique<pulp::view::Checkbox>()";
         case NativeWidgetKind::toggle_button:
             return "std::make_unique<pulp::view::ToggleButton>()";
+        case NativeWidgetKind::segmented:
+            return "std::make_unique<pulp::view::SegmentedControl>()";
+        case NativeWidgetKind::stepper:
+            return "std::make_unique<pulp::view::Stepper>()";
         case NativeWidgetKind::knob:
             return "std::make_unique<pulp::view::Knob>()";
         case NativeWidgetKind::fader:
@@ -116,6 +120,39 @@ void emit_widget_specific(std::ostringstream& out,
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_corner_radius(" + float_expr(ctx, *semantics.toggle_corner_radius) + ");");
             if (semantics.toggle_font_size)
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_font_size(" + float_expr(ctx, *semantics.toggle_font_size) + ");");
+            break;
+        case NativeWidgetKind::segmented: {
+            std::string labels = "{";
+            for (std::size_t i = 0; i < semantics.segments.size(); ++i) {
+                if (i != 0) labels += ", ";
+                labels += cpp_string_literal(semantics.segments[i]);
+            }
+            labels += "}";
+            emit_line(out, depth, opts.indent_spaces,
+                      std::string(var) + "->set_segments(" + labels + ");");
+            emit_line(out, depth, opts.indent_spaces,
+                      std::string(var) + "->set_selected_silent(" +
+                          std::to_string(selector_segment_index(
+                              semantics.normalized_value,
+                              static_cast<int>(semantics.segments.size()))) +
+                          ");");
+            break;
+        }
+        case NativeWidgetKind::stepper:
+            emit_line(out, depth, opts.indent_spaces,
+                      std::string(var) + "->set_range(" +
+                          float_expr(ctx, node.audio_min) + ", " +
+                          float_expr(ctx, node.audio_max) + ");");
+            emit_line(out, depth, opts.indent_spaces,
+                      std::string(var) + "->set_step(" +
+                          float_expr(ctx, static_cast<float>(semantics.stepper_step)) +
+                          ");");
+            emit_line(out, depth, opts.indent_spaces,
+                      std::string(var) + "->set_value(" +
+                          float_expr(ctx, static_cast<float>(stepper_plain_value(
+                              semantics.normalized_value, node.audio_min,
+                              node.audio_max, semantics.stepper_step))) +
+                          ");");
             break;
         case NativeWidgetKind::knob: {
             if (!text.empty())

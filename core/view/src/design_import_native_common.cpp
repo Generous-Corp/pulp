@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
@@ -898,7 +899,7 @@ LabelAlign parse_label_align(std::string_view value) {
     return LabelAlign::left;
 }
 
-float normalized_audio_default(const IRNode& node) {
+float normalized_audio_default_impl(const IRNode& node) {
     if (node.audio_max > node.audio_min)
         return std::clamp((node.audio_default - node.audio_min) /
                               (node.audio_max - node.audio_min),
@@ -909,7 +910,7 @@ float normalized_audio_default(const IRNode& node) {
 
 float normalized_audio_value(const IRNode& node) {
     if (auto value = attr_float(node, "value")) return std::clamp(*value, 0.0f, 1.0f);
-    return normalized_audio_default(node);
+    return normalized_audio_default_impl(node);
 }
 
 void append_resolved_diagnostics(const ResolvedNativeNode& node,
@@ -2014,7 +2015,6 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             // touch rather than as one choice.
             auto segmented = std::make_unique<SegmentedControl>();
             auto labels = semantics.segments;
-            if (labels.empty()) labels.push_back(text.empty() ? std::string("1") : text);
             const auto count = static_cast<int>(labels.size());
             segmented->set_segments(std::move(labels));
             segmented->set_selected_silent(
@@ -2338,6 +2338,10 @@ std::unique_ptr<View> materialize_error_view(const char* message,
 
 } // namespace
 
+float normalized_audio_default(const IRNode& node) {
+    return normalized_audio_default_impl(node);
+}
+
 // Exported (design_import_native_common.hpp). Defined in the named namespace so
 // both the runtime materializer and the C++ codegen size an imported image and
 // resolve hit ownership from one definition. Call the attr/lower helpers from
@@ -2533,6 +2537,20 @@ const char* native_widget_kind_name(NativeWidgetKind kind) {
     return "view";
 }
 
+double imported_stepper_step(const IRNode& node) noexcept {
+    const auto found = node.attributes.find("pulpStep");
+    if (found == node.attributes.end() || found->second.empty()) return 1.0;
+    try {
+        std::size_t consumed = 0;
+        const double value = std::stod(found->second, &consumed);
+        if (consumed == found->second.size() && std::isfinite(value) &&
+            value > 0.0)
+            return value;
+    } catch (const std::exception&) {
+    }
+    return 1.0;
+}
+
 ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
                                                   const ResolvedNativeNode& resolved) {
     ImportedWidgetSemantics out;
@@ -2579,10 +2597,13 @@ ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
         }
         out.segments.push_back(current);
     }
-    if (const auto step = attr(node, "pulpStep"); step && !step->empty()) {
-        try { out.stepper_step = std::stod(*step); }
-        catch (const std::exception&) { /* the default grid stands */ }
-    }
+    // A selector is still one real segment when capture metadata has no
+    // explicit choice table. Keep this in the shared semantic model so runtime
+    // materialization and baked C++ agree on both the visible label and the
+    // binding descriptor's count.
+    if (resolved.kind == NativeWidgetKind::segmented && out.segments.empty())
+        out.segments.push_back(out.text.empty() ? std::string("1") : out.text);
+    out.stepper_step = imported_stepper_step(node);
     out.checked = attr_bool(node, "checked");
     out.toggle_on = out.checked || attr_bool(node, "value");
     out.toggle_on_background_color = non_empty(md.on_background_color);

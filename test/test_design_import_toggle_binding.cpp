@@ -13,6 +13,7 @@
 
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include <pulp/state/store.hpp>
 #include <pulp/view/design_codegen.hpp>
@@ -27,8 +28,47 @@
 #include <pulp/view/widgets.hpp>
 
 #include <string>
+#include <limits>
 #include <type_traits>
 #include <vector>
+
+TEST_CASE("discrete value mappings are finite and domain independent",
+          "[design-import][binding][discrete][mapping]") {
+    using namespace pulp::view;
+
+    for (int count = 1; count <= 5; ++count) {
+        for (int index = 0; index < count; ++index) {
+            const auto value = selector_segment_value(index, count);
+            CHECK(selector_segment_index(value, count) == index);
+        }
+    }
+    CHECK(selector_segment_index(-1.0f, 4) == 0);
+    CHECK(selector_segment_index(2.0f, 4) == 3);
+    CHECK(selector_segment_index(std::numeric_limits<float>::quiet_NaN(), 4) == 0);
+    CHECK(selector_segment_index(std::numeric_limits<float>::infinity(), 4) == 0);
+
+    struct Domain { double min; double max; double step; double plain; };
+    for (const auto domain : {
+             Domain{1.0, 8.0, 1.0, 5.0},
+             Domain{-2.0, 2.0, 1.0, -1.0},
+             Domain{0.0, 1.0, 0.01, 0.37},
+             Domain{20.0, 20000.0, 10.0, 1040.0}}) {
+        const auto normalized = stepper_normalized_value(
+            domain.plain, domain.min, domain.max);
+        CHECK(stepper_plain_value(normalized, domain.min, domain.max,
+                                  domain.step) == Catch::Approx(domain.plain));
+    }
+
+    CHECK_FALSE(toggle_on_from_normalized(0.0));
+    CHECK_FALSE(toggle_on_from_normalized(0.25));
+    CHECK(toggle_on_from_normalized(0.5));
+    CHECK(toggle_on_from_normalized(0.75));
+    CHECK(toggle_on_from_normalized(1.0));
+    CHECK_FALSE(toggle_on_from_normalized(
+        std::numeric_limits<double>::quiet_NaN()));
+    CHECK_FALSE(toggle_on_from_normalized(
+        std::numeric_limits<double>::infinity()));
+}
 
 using namespace pulp::view;
 
