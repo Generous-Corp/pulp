@@ -97,8 +97,9 @@ using LinkwitzRiley64 = LinkwitzRileyT<double>;
 /// RT contract: prepare/configuration, process, reset, and response inspection
 /// use fixed storage and allocate no memory. Band count is fixed by prepare();
 /// a realtime retune may change only the existing ordered cutoffs. Smoothed
-/// retunes interpolate the cutoff coefficients of one stateful bank, avoiding
-/// the phase cancellation caused by crossfading differently phased banks.
+/// retunes use a topology-preserving-transform bank, avoiding both coefficient-
+/// dependent state reinterpretation and cross-bank phase cancellation. Downward
+/// moves must meet the bound reported by minimum_transition_samples().
 template <typename SampleType = float, std::size_t MaxBands = 8> class LinkwitzRileyCrossoverT {
     static_assert(std::is_floating_point_v<SampleType>);
     static_assert(MaxBands >= 2);
@@ -125,7 +126,6 @@ template <typename SampleType = float, std::size_t MaxBands = 8> class LinkwitzR
                            current_warped_cutoffs_);
         Bank::design_coefficients(current_warped_cutoffs_, cutoff_count_, current_coefficients_);
         target_warped_cutoffs_ = current_warped_cutoffs_;
-        bank_.set_coefficients(current_coefficients_, cutoff_count_);
         bank_.reset();
         transition_position_ = 0;
         transition_length_ = 0;
@@ -152,9 +152,12 @@ template <typename SampleType = float, std::size_t MaxBands = 8> class LinkwitzR
             current_warped_cutoffs_ = target_warped_cutoffs_;
             Bank::design_coefficients(current_warped_cutoffs_, cutoff_count_,
                                       current_coefficients_);
-            bank_.set_coefficients(current_coefficients_, cutoff_count_);
+            bank_.reset();
             return true;
         }
+
+        if (transition_samples < minimum_transition_samples_from_warped(target_warped_cutoffs_))
+            return false;
 
         for (std::size_t split = 0; split < cutoff_count_; ++split) {
             warped_cutoff_multipliers_[split] =
@@ -173,7 +176,8 @@ template <typename SampleType = float, std::size_t MaxBands = 8> class LinkwitzR
             return recover(result);
 
         advance_transition();
-        const auto rendered = bank_.process(static_cast<double>(input), cutoff_count_);
+        const auto rendered =
+            bank_.process(static_cast<double>(input), cutoff_count_, current_coefficients_);
         for (std::size_t band = 0; band < result.count; ++band)
             result.bands[band] = static_cast<SampleType>(rendered[band]);
 
@@ -214,6 +218,20 @@ template <typename SampleType = float, std::size_t MaxBands = 8> class LinkwitzR
     }
     std::uint64_t fault_count() const noexcept {
         return fault_count_;
+    }
+
+    /// Minimum safe nonzero transition for the requested cutoff set. Returning
+    /// max() means the configuration is invalid for this prepared topology.
+    std::size_t minimum_transition_samples(std::span<const SampleType> cutoffs) const noexcept {
+        if (!prepared_ || cutoffs.size() != cutoff_count_ ||
+            !valid_configuration(sample_rate_, cutoffs))
+            return std::numeric_limits<std::size_t>::max();
+        std::array<double, MaxBands - 1> warped{};
+        std::array<double, MaxBands - 1> copied{};
+        copy_cutoffs(cutoffs, copied);
+        Bank::warp_cutoffs(std::span<const double>(copied.data(), cutoff_count_), sample_rate_,
+                           warped);
+        return minimum_transition_samples_from_warped(warped);
     }
     static constexpr int latency_samples() noexcept {
         return 0;
@@ -263,9 +281,60 @@ template <typename SampleType = float, std::size_t MaxBands = 8> class LinkwitzR
   private:
     using SectionCoefficients = LinkwitzRileyT<double>::SectionCoefficients;
 
+    struct TptCoefficients {
+        double a1 = 1.0;
+        double a2 = 0.0;
+        double a3 = 0.0;
+    };
+
+    struct TptSection {
+        struct Outputs {
+            double low = 0.0;
+            double high = 0.0;
+        };
+
+        Outputs process(double input, const TptCoefficients& coefficients) noexcept {
+            constexpr double inverse_q = 1.0 / LinkwitzRileyT<double>::exact_butterworth_q;
+            const double v3 = input - state2;
+            const double v1 = coefficients.a1 * state1 + coefficients.a2 * v3;
+            const double v2 = state2 + coefficients.a2 * state1 + coefficients.a3 * v3;
+            state1 = snap_to_zero(2.0 * v1 - state1);
+            state2 = snap_to_zero(2.0 * v2 - state2);
+            return {v2, input - inverse_q * v1 - v2};
+        }
+
+        void reset() noexcept {
+            state1 = 0.0;
+            state2 = 0.0;
+        }
+
+        double state1 = 0.0;
+        double state2 = 0.0;
+    };
+
+    struct ModulatedLinkwitzRiley {
+        LinkwitzRileyT<double>::BandSplit process(double input,
+                                                  const TptCoefficients& coefficients) noexcept {
+            const double low =
+                low2.process(low1.process(input, coefficients).low, coefficients).low;
+            const double high =
+                high2.process(high1.process(input, coefficients).high, coefficients).high;
+            return {low, high};
+        }
+
+        void reset() noexcept {
+            low1.reset();
+            low2.reset();
+            high1.reset();
+            high2.reset();
+        }
+
+        TptSection low1, low2, high1, high2;
+    };
+
     struct Bank {
-        std::array<LinkwitzRileyT<double>, MaxBands - 1> splitters{};
-        std::array<std::array<LinkwitzRileyT<double>, MaxBands - 1>, MaxBands - 1>
+        std::array<ModulatedLinkwitzRiley, MaxBands - 1> splitters{};
+        std::array<std::array<ModulatedLinkwitzRiley, MaxBands - 1>, MaxBands - 1>
             phase_compensators{};
 
         static void warp_cutoffs(std::span<const double> cutoffs, double sample_rate,
@@ -290,18 +359,12 @@ template <typename SampleType = float, std::size_t MaxBands = 8> class LinkwitzR
         static void
         design_coefficients(const std::array<double, MaxBands - 1>& warped_cutoffs,
                             std::size_t cutoff_count,
-                            std::array<SectionCoefficients, MaxBands - 1>& destination) noexcept {
+                            std::array<TptCoefficients, MaxBands - 1>& destination) noexcept {
             for (std::size_t split = 0; split < cutoff_count; ++split) {
-                destination[split] = coefficients_from_warped_cutoff(warped_cutoffs[split]);
-            }
-        }
-
-        void set_coefficients(const std::array<SectionCoefficients, MaxBands - 1>& coefficients,
-                              std::size_t cutoff_count) noexcept {
-            for (std::size_t split = 0; split < cutoff_count; ++split) {
-                splitters[split].set_section_coefficients(coefficients[split]);
-                for (std::size_t band = 0; band < split; ++band)
-                    phase_compensators[band][split].set_section_coefficients(coefficients[split]);
+                constexpr double inverse_q = 1.0 / LinkwitzRileyT<double>::exact_butterworth_q;
+                const double warped = warped_cutoffs[split];
+                const double a1 = 1.0 / (1.0 + warped * (warped + inverse_q));
+                destination[split] = {a1, warped * a1, warped * warped * a1};
             }
         }
 
@@ -313,11 +376,13 @@ template <typename SampleType = float, std::size_t MaxBands = 8> class LinkwitzR
                     compensator.reset();
         }
 
-        std::array<double, MaxBands> process(double input, std::size_t cutoff_count) noexcept {
+        std::array<double, MaxBands>
+        process(double input, std::size_t cutoff_count,
+                const std::array<TptCoefficients, MaxBands - 1>& coefficients) noexcept {
             std::array<double, MaxBands> bands{};
             double remainder = input;
             for (std::size_t split = 0; split < cutoff_count; ++split) {
-                const auto divided = splitters[split].process(remainder);
+                const auto divided = splitters[split].process(remainder, coefficients[split]);
                 bands[split] = divided.low;
                 remainder = divided.high;
             }
@@ -325,7 +390,8 @@ template <typename SampleType = float, std::size_t MaxBands = 8> class LinkwitzR
 
             for (std::size_t band = 0; band < cutoff_count; ++band) {
                 for (std::size_t split = band + 1; split < cutoff_count; ++split) {
-                    const auto aligned = phase_compensators[band][split].process(bands[band]);
+                    const auto aligned =
+                        phase_compensators[band][split].process(bands[band], coefficients[split]);
                     bands[band] = aligned.low + aligned.high;
                 }
             }
@@ -388,10 +454,34 @@ template <typename SampleType = float, std::size_t MaxBands = 8> class LinkwitzR
         return std::isfinite(radius) && radius < 1.0 - pole_margin;
     }
 
-    void copy_cutoffs(std::span<const SampleType> cutoffs,
-                      std::array<double, MaxBands - 1>& destination) noexcept {
+    static void copy_cutoffs(std::span<const SampleType> cutoffs,
+                             std::array<double, MaxBands - 1>& destination) noexcept {
         for (std::size_t i = 0; i < cutoffs.size(); ++i)
             destination[i] = static_cast<double>(cutoffs[i]);
+    }
+
+    std::size_t minimum_transition_samples_from_warped(
+        const std::array<double, MaxBands - 1>& target) const noexcept {
+        // TPT state is invariant under coefficient changes, but a rapid downward
+        // move can still release stored integrator energy into a much slower
+        // pole. Limit only that direction; upward moves do not expose the stored
+        // state through a narrower bandwidth. Twenty nepers/second keeps a
+        // musically useful sweep while bounding the full supported-domain move.
+        constexpr double maximum_downward_log_slew_per_second = 20.0;
+        double largest_downward_distance = 0.0;
+        for (std::size_t split = 0; split < cutoff_count_; ++split) {
+            if (target[split] < current_warped_cutoffs_[split]) {
+                largest_downward_distance =
+                    std::max(largest_downward_distance,
+                             std::log(current_warped_cutoffs_[split] / target[split]));
+            }
+        }
+        const double required = std::ceil(sample_rate_ * largest_downward_distance /
+                                          maximum_downward_log_slew_per_second);
+        if (!(std::isfinite(required) && required >= 0.0) ||
+            required > static_cast<double>(std::numeric_limits<std::size_t>::max()))
+            return std::numeric_limits<std::size_t>::max();
+        return static_cast<std::size_t>(required);
     }
 
     void advance_transition() noexcept {
@@ -407,7 +497,6 @@ template <typename SampleType = float, std::size_t MaxBands = 8> class LinkwitzR
             transition_length_ = 0;
         }
         Bank::design_coefficients(current_warped_cutoffs_, cutoff_count_, current_coefficients_);
-        bank_.set_coefficients(current_coefficients_, cutoff_count_);
     }
 
     void finish_transition() noexcept {
@@ -416,7 +505,6 @@ template <typename SampleType = float, std::size_t MaxBands = 8> class LinkwitzR
         cutoffs_ = target_cutoffs_;
         current_warped_cutoffs_ = target_warped_cutoffs_;
         Bank::design_coefficients(current_warped_cutoffs_, cutoff_count_, current_coefficients_);
-        bank_.set_coefficients(current_coefficients_, cutoff_count_);
         transition_position_ = 0;
         transition_length_ = 0;
     }
@@ -439,7 +527,7 @@ template <typename SampleType = float, std::size_t MaxBands = 8> class LinkwitzR
     std::array<double, MaxBands - 1> current_warped_cutoffs_{};
     std::array<double, MaxBands - 1> target_warped_cutoffs_{};
     std::array<double, MaxBands - 1> warped_cutoff_multipliers_{};
-    std::array<SectionCoefficients, MaxBands - 1> current_coefficients_{};
+    std::array<TptCoefficients, MaxBands - 1> current_coefficients_{};
     double sample_rate_ = 0.0;
     std::size_t cutoff_count_ = 0;
     std::size_t transition_position_ = 0;

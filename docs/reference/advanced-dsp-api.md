@@ -45,15 +45,19 @@ double-precision recursive realization independently of its floating-point API
 sample type; validation also rejects degenerate coefficients and poles too
 close to the unit circle.
 `set_cutoffs(cutoffs, transition_samples)` preserves topology. A nonzero
-transition moves one stateful bank through logarithmically interpolated,
-bilinear-warped cutoff design values for the exact sample count and rejects an
-overlapping retune. The transcendental endpoint design happens in
+transition moves one topology-preserving-transform bank through logarithmically
+interpolated, bilinear-warped cutoff design values for the exact sample count and
+rejects an overlapping retune. Its integrator state is not reinterpreted when
+coefficients move. Downward moves must also meet the logarithmic slew floor
+reported by `minimum_transition_samples()`; `set_cutoffs()` rejects a shorter
+request without changing the live configuration. Upward moves may use any
+nonzero length. The transcendental endpoint and slew calculations happen in
 `set_cutoffs()`; `process()` uses bounded multiply/add/divide arithmetic. It does
-not crossfade differently phased banks. A one-sample transition is an explicit
-immediate coefficient change. During a transition, `cutoff()` continues to
-report the last stationary cutoff set until the target becomes live. Invalid
-configurations are rejected without changing the live configuration. A
-non-finite sample clears recursive state, returns zero bands, and increments
+not crossfade differently phased banks. A zero-length transition is an explicit
+immediate coefficient change and clears recursive state. During a transition,
+`cutoff()` continues to report the last stationary cutoff set until the target
+becomes live. Invalid configurations are rejected without changing the live
+configuration. A non-finite sample clears recursive state, returns zero bands, and increments
 `fault_count()` so the following finite sample starts recovered.
 
 Earlier bands receive the all-pass response of every later split. Summing every
@@ -68,7 +72,7 @@ coefficient design retains the rounded Q used by existing renders, while
 - Lifecycle: `prepare(sample_rate, cutoffs)`, `reset()`.
 - Controls: `set_cutoffs(cutoffs, transition_samples)`.
 - Processing: `process(input)` returns `Frame{bands, count, healthy}`.
-- Inspection: `supports_configuration()`, `band_count()`, `cutoff_count()`, `cutoff()`, `sample_rate()`, `transitioning()`, `healthy()`, `fault_count()`, `latency_samples()`, `band_response()`, `reconstruction_response()`.
+- Inspection: `supports_configuration()`, `minimum_transition_samples()`, `band_count()`, `cutoff_count()`, `cutoff()`, `sample_rate()`, `transitioning()`, `healthy()`, `fault_count()`, `latency_samples()`, `band_response()`, `reconstruction_response()`.
 
 ## Dynamics
 

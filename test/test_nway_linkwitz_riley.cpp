@@ -218,6 +218,41 @@ struct ReferenceNway {
     }
 };
 
+struct ReferenceTptSection {
+    struct Outputs {
+        long double low = 0.0L;
+        long double high = 0.0L;
+    };
+
+    Outputs process(long double input, long double warped) {
+        constexpr long double inverse_q =
+            1.0L /
+            static_cast<long double>(pulp::signal::LinkwitzRileyT<double>::exact_butterworth_q);
+        const long double a1 = 1.0L / (1.0L + warped * (warped + inverse_q));
+        const long double a2 = warped * a1;
+        const long double a3 = warped * a2;
+        const long double v3 = input - state2;
+        const long double v1 = a1 * state1 + a2 * v3;
+        const long double v2 = state2 + a2 * state1 + a3 * v3;
+        state1 = 2.0L * v1 - state1;
+        state2 = 2.0L * v2 - state2;
+        return {v2, input - inverse_q * v1 - v2};
+    }
+
+    long double state1 = 0.0L;
+    long double state2 = 0.0L;
+};
+
+struct ReferenceTptLinkwitzRiley {
+    std::array<long double, 2> process(long double input, long double warped) {
+        const long double low = low2.process(low1.process(input, warped).low, warped).low;
+        const long double high = high2.process(high1.process(input, warped).high, warped).high;
+        return {low, high};
+    }
+
+    ReferenceTptSection low1, low2, high1, high2;
+};
+
 template <typename Frame> double sum(const Frame& frame) {
     double result = 0.0;
     for (std::size_t band = 0; band < frame.count; ++band)
@@ -439,7 +474,10 @@ TEST_CASE("N-way Linkwitz-Riley retunes with a bounded deterministic transition"
 
     Crossover target_fresh;
     REQUIRE(target_fresh.prepare(48000.0, target));
-    REQUIRE(crossover.set_cutoffs(initial, 128));
+    const auto downward_transition = crossover.minimum_transition_samples(initial);
+    REQUIRE(downward_transition > 128);
+    REQUIRE_FALSE(crossover.set_cutoffs(initial, downward_transition - 1));
+    REQUIRE(crossover.set_cutoffs(initial, downward_transition));
     crossover.reset();
     target_fresh.prepare(48000.0, initial);
     for (int i = 0; i < 256; ++i) {
@@ -536,6 +574,115 @@ TEST_CASE("N-way Linkwitz-Riley coefficient retune avoids adversarial phase canc
     REQUIRE(std::abs(one_sample_measured) > 0.85);
     REQUIRE(std::abs(one_sample_measured) < 1.15);
     REQUIRE(wrapped_phase_error(one_sample_measured, one_sample_expected) < 0.15);
+}
+
+TEST_CASE("N-way Linkwitz-Riley short full-domain retunes preserve bounded TPT state",
+          "[signal][crossover][automation][stability]") {
+    using Runtime = pulp::signal::LinkwitzRileyCrossoverT<float, 2>;
+    constexpr float sample_rate = 48000.0f;
+    constexpr double frequency = 23000.0;
+    const std::array<float, 1> initial{0.01f};
+    const std::array<float, 1> target{23999.0f};
+    constexpr double input_peak = 0.5;
+    constexpr double maximum_peak_gain = 1.2;
+    constexpr std::size_t observation_tail = 20000;
+
+    for (const std::size_t transition_samples :
+         {std::size_t{4}, std::size_t{16}, std::size_t{64}, std::size_t{256}}) {
+        Runtime runtime;
+        REQUIRE(runtime.prepare(sample_rate, initial));
+        REQUIRE(runtime.set_cutoffs(target, transition_samples));
+
+        const long double initial_warped =
+            std::tan(std::numbers::pi_v<long double> * initial[0] / sample_rate);
+        const long double target_warped =
+            std::tan(std::numbers::pi_v<long double> * target[0] / sample_rate);
+        const long double multiplier =
+            std::exp(std::log(target_warped / initial_warped) / transition_samples);
+        long double reference_warped = initial_warped;
+        ReferenceTptLinkwitzRiley reference;
+        double peak = 0.0;
+        double worst_reference_error = 0.0;
+        for (std::size_t sample = 0; sample < transition_samples + observation_tail; ++sample) {
+            if (sample < transition_samples)
+                reference_warped *= multiplier;
+            if (sample + 1 == transition_samples)
+                reference_warped = target_warped;
+            const float input = static_cast<float>(
+                input_peak * std::sin(2.0 * std::numbers::pi * frequency *
+                                      static_cast<double>(sample) / sample_rate));
+            const auto actual = runtime.process(input);
+            const auto expected = reference.process(input, reference_warped);
+            REQUIRE(actual.healthy);
+            peak = std::max(peak, std::abs(sum(actual)));
+            worst_reference_error =
+                std::max(worst_reference_error,
+                         std::abs(sum(actual) - static_cast<double>(expected[0] + expected[1])));
+        }
+        INFO("transition_samples=" << transition_samples << " peak=" << peak);
+        REQUIRE(peak < input_peak * maximum_peak_gain);
+        REQUIRE(worst_reference_error < 2.0e-6);
+        REQUIRE(runtime.fault_count() == 0);
+    }
+
+    using ThreeSplit = pulp::signal::LinkwitzRileyCrossover;
+    const std::array<float, 3> low{0.01f, 1.0f, 100.0f};
+    const std::array<float, 3> high{1000.0f, 10000.0f, 23999.0f};
+    for (const std::size_t transition_samples :
+         {std::size_t{4}, std::size_t{16}, std::size_t{64}, std::size_t{256}}) {
+        ThreeSplit runtime;
+        REQUIRE(runtime.prepare(sample_rate, low));
+        REQUIRE(runtime.set_cutoffs(high, transition_samples));
+        double peak = 0.0;
+        for (std::size_t sample = 0; sample < transition_samples + observation_tail; ++sample) {
+            const float input = static_cast<float>(
+                input_peak * std::sin(2.0 * std::numbers::pi * frequency *
+                                      static_cast<double>(sample) / sample_rate));
+            const auto frame = runtime.process(input);
+            REQUIRE(frame.healthy);
+            peak = std::max(peak, std::abs(sum(frame)));
+        }
+        INFO("three-split transition_samples=" << transition_samples << " peak=" << peak);
+        REQUIRE(peak < input_peak * maximum_peak_gain);
+    }
+}
+
+TEST_CASE("N-way Linkwitz-Riley adversarial downward sweeps enforce the disclosed slew floor",
+          "[signal][crossover][automation][stability]") {
+    using Runtime = pulp::signal::LinkwitzRileyCrossover;
+    constexpr double input_peak = 0.5;
+    constexpr double maximum_peak_gain = 1.5;
+    constexpr std::size_t observation_tail = 50000;
+
+    for (const float sample_rate : {44100.0f, 48000.0f, 96000.0f}) {
+        const std::array<float, 3> low{0.01f, 1.0f, 100.0f};
+        const std::array<float, 3> high{sample_rate * 0.1f, sample_rate * 0.3f,
+                                        std::nextafter(sample_rate * 0.5f, 0.0f)};
+        for (const double frequency : {0.5, 20.0, 1000.0, static_cast<double>(sample_rate) * 0.1,
+                                       static_cast<double>(sample_rate) * 0.47}) {
+            Runtime runtime;
+            REQUIRE(runtime.prepare(sample_rate, high));
+            const std::size_t required = runtime.minimum_transition_samples(low);
+            REQUIRE(required > 0);
+            REQUIRE(required != std::numeric_limits<std::size_t>::max());
+            REQUIRE_FALSE(runtime.set_cutoffs(low, required - 1));
+            REQUIRE(runtime.set_cutoffs(low, required));
+
+            double peak = 0.0;
+            for (std::size_t sample = 0; sample < required + observation_tail; ++sample) {
+                const float input = static_cast<float>(
+                    input_peak * std::sin(2.0 * std::numbers::pi * frequency *
+                                          static_cast<double>(sample) / sample_rate));
+                const auto frame = runtime.process(input);
+                REQUIRE(frame.healthy);
+                const double output = sum(frame);
+                peak = std::max(peak, std::abs(output));
+            }
+            INFO("sample_rate=" << sample_rate << " frequency=" << frequency
+                                << " required=" << required << " peak=" << peak);
+            REQUIRE(peak < input_peak * maximum_peak_gain);
+        }
+    }
 }
 
 TEST_CASE("N-way Linkwitz-Riley validates its numerical support domain and maximum topology",
