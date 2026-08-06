@@ -597,7 +597,7 @@ a working convolution and would hide the bug. Assert
 | Processor | Header | Description |
 |-----------|--------|-------------|
 | Biquad | `biquad.hpp` | Second-order IIR filter — low/high/band-pass, notch, shelf, peaking EQ |
-| Six-band EQ | `six_band_eq.hpp` | Allocation-free low-shelf/four-peak/high-shelf cascade with exact live-response inspection |
+| Six-band EQ | `six_band_eq.hpp` | Allocation-free low-shelf/four-peak/high-shelf cascade with optional stable cascade crossfades and endpoint response inspection |
 | Filter Design | `filter_design.hpp` | Generate Butterworth and Chebyshev coefficient sets for arbitrary order |
 | FIR | `fir_filter.hpp` | Finite impulse response filter with arbitrary tap count for linear-phase EQ |
 | [Analog VCF](../guides/analog-vcf.md) | `analog_vcf.hpp` / `ota_cascade_filter.hpp` | Four measured Juno, Jupiter-8, Prophet-5, and Minimoog panel voicings over a shared zero-delay nonlinear four-pole cascade |

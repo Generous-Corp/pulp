@@ -143,6 +143,90 @@ TEST_CASE("SixBandEq automation preserves history and reset clears only history"
     REQUIRE(dirty.band(2).q == effective.q);
 }
 
+TEST_CASE("SixBandEq transition crossfades stable cascades and reaches the exact endpoint",
+          "[signal][eq][automation]") {
+    pulp::signal::SixBandEqT<double, 1> warmed;
+    warmed.prepare(48000.0);
+    REQUIRE(warmed.set_band(2, {900.0, 12.0, 5.0}));
+    static_cast<void>(warmed.process(1.0));
+    for (int i = 0; i < 24; ++i) static_cast<void>(warmed.process(0.0));
+
+    auto old_continuation = warmed;
+    auto immediate = warmed;
+    auto transitioned = warmed;
+    immediate.set_band(2, {900.0, -18.0, 5.0});
+    transitioned.set_transition_samples(64);
+    transitioned.set_band(2, {900.0, -18.0, 5.0});
+
+    constexpr double automation_sample = 0.25;
+    const double old_first = old_continuation.process(automation_sample);
+    const double immediate_first = immediate.process(automation_sample);
+    const double transitioned_first = transitioned.process(automation_sample);
+    REQUIRE(std::abs(transitioned_first - old_first) <
+            std::abs(immediate_first - old_first));
+    for (int i = 1; i < 64; ++i) {
+        static_cast<void>(immediate.process(0.0));
+        static_cast<void>(transitioned.process(0.0));
+    }
+    REQUIRE_FALSE(transitioned.transition_active());
+    REQUIRE(transitioned.process(0.0) == immediate.process(0.0));
+}
+
+TEST_CASE("SixBandEq transition queues block changes without interpolating coefficients",
+          "[signal][eq][automation]") {
+    pulp::signal::SixBandEqT<float, 2> eq;
+    eq.prepare(48000.0f);
+    eq.set_transition_samples(4);
+    REQUIRE(eq.set_band(0, {100.0f, 6.0f, 0.7f}));
+    REQUIRE(eq.set_band(5, {10000.0f, -6.0f, 0.7f}));
+    REQUIRE(eq.transition_active(0));
+    REQUIRE(eq.transition_active(1));
+    REQUIRE_FALSE(eq.transition_active(2));
+    REQUIRE_FALSE(eq.set_band(6, {1000.0f, 3.0f, 1.0f}));
+
+    auto rejected_process_reference = eq;
+    REQUIRE_FALSE(eq.process_block(nullptr, 1, 0));
+    REQUIRE(eq.process(0.25f, 0) == rejected_process_reference.process(0.25f, 0));
+
+    static_cast<void>(eq.process(0.0f, 0));
+    REQUIRE(eq.set_band(2, {800.0f, 12.0f, 3.0f}));
+    for (int i = 0; i < 6; ++i) static_cast<void>(eq.process(0.0f, 0));
+    REQUIRE_FALSE(eq.transition_active(0));
+    REQUIRE(eq.transition_active(1));
+    REQUIRE(eq.band(2).gain_db == 12.0f);
+    for (int i = 0; i < 4; ++i) static_cast<void>(eq.process(0.0f, 1));
+    REQUIRE_FALSE(eq.transition_active());
+
+    REQUIRE(eq.set_band(3, {1800.0f, -12.0f, 2.0f}));
+    REQUIRE(eq.transition_active());
+    eq.set_transition_samples(0);
+    REQUIRE(eq.transition_samples() == 0);
+    REQUIRE_FALSE(eq.transition_active());
+}
+
+TEST_CASE("SixBandEq set_bands transition is deterministic across reset and extremes",
+          "[signal][eq][automation]") {
+    using Eq = pulp::signal::SixBandEqT<double, 1>;
+    Eq a;
+    a.prepare(41.0);
+    a.set_transition_samples(17);
+    std::array<Eq::Parameters, Eq::band_count> controls{};
+    for (std::size_t band = 0; band < controls.size(); ++band)
+        controls[band] = {band & 1 ? 1e12 : -1e12, band & 1 ? 1e12 : -1e12,
+                          band & 1 ? 1e12 : -1e12};
+    a.set_bands(controls);
+    auto b = a;
+    for (int i = 0; i < 8; ++i) {
+        REQUIRE(std::isfinite(a.process(i == 0 ? 1.0 : 0.0)));
+        REQUIRE(std::isfinite(b.process(i == 0 ? 1.0 : 0.0)));
+    }
+    a.reset();
+    b.reset();
+    for (int i = 0; i < 32; ++i)
+        REQUIRE(a.process(i == 0 ? 1.0 : 0.0) == b.process(i == 0 ? 1.0 : 0.0));
+    REQUIRE_FALSE(a.transition_active());
+}
+
 TEST_CASE("SixBandEq response reports the active cascade measured by an impulse DFT",
           "[signal][eq][response]") {
     pulp::signal::SixBandEqT<double, 1> response_eq;
@@ -180,6 +264,7 @@ TEST_CASE("SixBandEq control process response and reset paths allocate nothing",
     std::size_t allocations = 0;
     {
         pulp::test::RtAllocationProbe probe;
+        eq.set_transition_samples(32);
         REQUIRE(eq.set_band(3, {1800.0f, 6.0f, 2.0f}));
         REQUIRE(eq.process_block(block.data(), block.size(), 0));
         eq.response_curve_db(20.0, 20000.0, curve);

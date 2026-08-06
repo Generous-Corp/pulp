@@ -302,13 +302,14 @@ channel count.
 
 signal::SixBandEq eq;
 eq.prepare(sample_rate);
+eq.set_transition_samples(64); // Optional; zero keeps immediate legacy updates.
 eq.set_band(2, {.frequency_hz = 900.0f, .gain_db = -4.0f, .q = 2.0f});
 
 // Planar stereo callback:
 eq.process_block(left, frames, 0);
 eq.process_block(right, frames, 1);
 
-// The plot evaluates the exact coefficients currently processing audio.
+// During a transition, the plot describes the requested destination.
 std::array<float, 256> curve_db;
 eq.response_curve_db(20.0, 20000.0, curve_db);
 ```
@@ -321,12 +322,22 @@ defaults are 80, 250, 700, 2000, 5000, and 12000 Hz; all gains are 0 dB; Q is
 0.707, 1.0, 1.2, 1.2, 1.0, and 0.707.
 
 `set_band()` is allocation-free and is safe to call between blocks for host
-automation. It swaps coefficients immediately, preserves recursive history,
-and does not smooth. `reset()` clears history without changing controls.
-`magnitude()`, `magnitude_db()`, and `response_curve_db()` inspect the live
-coefficient cascade, so they remain truthful after clamping or automation.
-The class owns no parameters and registers no host or runtime controls; the
-processor remains the single authority for mapping its state into the EQ.
+automation. By default, `transition_samples()` is zero: changes swap
+coefficients immediately and preserve the legacy demo output. Set a non-zero
+length to crossfade two complete, stable cascades without interpolating
+recursive coefficients. That temporarily doubles the EQ processing work only
+while a fade is active. Use `set_bands()` to apply several changed controls as
+one atomic destination at a block boundary.
+
+Several changes made before a fade processes its first sample update that same
+destination. Changes arriving after it starts are coalesced into the latest
+destination for one subsequent fade. Each channel advances independently as it
+is processed. `reset()` clears both cascades' history without changing controls
+or transition progress. During a fade, `coefficients()`, `magnitude()`,
+`magnitude_db()`, and `response_curve_db()` describe the requested destination,
+not the instantaneous crossfade. The class owns no parameters and registers no
+host or runtime controls; the processor remains the single authority for
+mapping its state into the EQ.
 
 ---
 

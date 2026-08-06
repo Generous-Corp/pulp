@@ -19,10 +19,10 @@ namespace pulp::signal {
 ///
 /// The template's channel count is fixed so prepare, control changes, process,
 /// reset, and response inspection never allocate. Controls are plain-domain
-/// values intended to be changed between blocks. A control change takes effect
-/// immediately, preserves the recursive filter history, and performs no
-/// smoothing; callers that need sample-accurate ramps must supply them as a
-/// sequence of bounded control changes.
+/// values intended to be changed between blocks. The default zero-sample
+/// transition preserves the legacy demo's immediate coefficient replacement.
+/// An opt-in transition crossfades two complete stable cascades; recursive
+/// coefficients are never interpolated. Both paths preserve filter history.
 template <typename SampleType = float, std::size_t Channels = 2>
 class SixBandEqT {
     static_assert(std::is_floating_point_v<SampleType>,
@@ -50,15 +50,32 @@ public:
         SampleType q = SampleType{1};
     };
 
-    SixBandEqT() { apply_all_parameters(); }
+    SixBandEqT() { apply_all_parameters_immediate(); }
 
     /// Set the processing rate, re-clamp controls, derive coefficients, and
     /// clear all recursive history. Rates too low to represent the public
     /// 20 Hz floor, or non-finite rates, select the 48 kHz safe default.
     void prepare(SampleType sample_rate) {
         sample_rate_ = valid_sample_rate(sample_rate) ? sample_rate : default_sample_rate;
-        apply_all_parameters();
+        apply_all_parameters_immediate();
         reset();
+    }
+
+    /// Set the length of future coefficient transitions. Zero is the legacy
+    /// immediate mode. Changing the length while a transition is active safely
+    /// commits the latest requested controls immediately and cancels the fade.
+    void set_transition_samples(std::size_t samples) {
+        if (transition_active()) apply_all_parameters_immediate();
+        transition_samples_ = samples;
+    }
+
+    std::size_t transition_samples() const { return transition_samples_; }
+    bool transition_active(std::size_t channel) const {
+        return channel < Channels && transition_remaining_[channel] != 0;
+    }
+    bool transition_active() const {
+        return std::any_of(transition_remaining_.begin(), transition_remaining_.end(),
+                           [](std::size_t remaining) { return remaining != 0; });
     }
 
     /// Change one band's plain-domain controls without clearing filter state.
@@ -66,8 +83,20 @@ public:
     bool set_band(std::size_t band, Parameters parameters) {
         if (band >= band_count) return false;
         parameters_[band] = sanitize(band, parameters);
-        apply_parameters(band);
+        design_parameters(band);
+        schedule_band(band);
         return true;
+    }
+
+    /// Atomically request all six bands. This is the preferred host-automation
+    /// path when several controls change at one block boundary: every band
+    /// shares one transition rather than serializing six fades.
+    void set_bands(const std::array<Parameters, band_count>& parameters) {
+        for (std::size_t band = 0; band < band_count; ++band) {
+            parameters_[band] = sanitize(band, parameters[band]);
+            design_parameters(band);
+        }
+        schedule_all_bands();
     }
 
     /// Effective controls. Invalid indices return neutral generic parameters;
@@ -85,16 +114,36 @@ public:
         return index < band_count ? defaults_[index] : Parameters{};
     }
 
-    /// Exact normalized coefficients currently used by every channel.
+    /// Exact normalized coefficients at the latest requested transition
+    /// endpoint. During a fade both stable cascades are active; response
+    /// inspection intentionally describes the destination.
     Coefficients coefficients(std::size_t band) const {
-        return band < band_count ? filters_[0][band].coefficients() : Coefficients{};
+        return band < band_count ? requested_coefficients_[band] : Coefficients{};
     }
 
     /// Process one sample. An invalid channel fails transparent.
     SampleType process(SampleType input, std::size_t channel = 0) {
         if (channel >= Channels) return input;
-        for (auto& section : filters_[channel]) input = section.process(input);
-        return input;
+        if (!transition_active(channel)) {
+            for (auto& section : filters_[channel]) input = section.process(input);
+            return input;
+        }
+        SampleType from = input;
+        SampleType to = input;
+        for (auto& section : filters_[channel]) from = section.process(from);
+        for (auto& section : transition_filters_[channel]) to = section.process(to);
+        const std::size_t completed = transition_total_[channel] - transition_remaining_[channel] + 1;
+        const SampleType mix = static_cast<SampleType>(completed) /
+                               static_cast<SampleType>(transition_total_[channel]);
+        const SampleType output = from + (to - from) * mix;
+        if (--transition_remaining_[channel] == 0) {
+            filters_[channel] = transition_filters_[channel];
+            if (queued_transition_[channel]) {
+                queued_transition_[channel] = false;
+                begin_transition(channel);
+            }
+        }
+        return output;
     }
 
     /// Process one caller-owned channel in place. A null buffer with a non-zero
@@ -110,9 +159,11 @@ public:
     void reset() {
         for (auto& channel : filters_)
             for (auto& section : channel) section.reset();
+        for (auto& channel : transition_filters_)
+            for (auto& section : channel) section.reset();
     }
 
-    /// Linear magnitude of the exact active coefficient cascade. Query
+    /// Linear magnitude of the requested endpoint coefficient cascade. Query
     /// frequencies are saturated to [0, Nyquist]; non-finite queries use DC.
     double magnitude(double frequency_hz) const {
         const double omega = query_omega(frequency_hz);
@@ -132,7 +183,7 @@ public:
         return result;
     }
 
-    /// Decibel magnitude of the exact active cascade, floored at -200 dB.
+    /// Decibel magnitude of the requested endpoint cascade, floored at -200 dB.
     double magnitude_db(double frequency_hz) const {
         const double linear = magnitude(frequency_hz);
         if (!(linear > 0.0)) return -200.0;
@@ -191,17 +242,66 @@ private:
         return parameters;
     }
 
-    void apply_parameters(std::size_t band) {
+    void design_parameters(std::size_t band) {
+        Filter designer;
         const auto& parameters = parameters_[band];
-        for (auto& channel : filters_)
-            channel[band].set_coefficients(types_[band], parameters.frequency_hz, parameters.q,
-                                           sample_rate_, parameters.gain_db);
+        designer.set_coefficients(types_[band], parameters.frequency_hz, parameters.q,
+                                  sample_rate_, parameters.gain_db);
+        requested_coefficients_[band] = designer.coefficients();
     }
 
-    void apply_all_parameters() {
+    void apply_all_parameters_immediate() {
         for (std::size_t band = 0; band < band_count; ++band) {
             parameters_[band] = sanitize(band, parameters_[band]);
-            apply_parameters(band);
+            design_parameters(band);
+        }
+        for (std::size_t channel = 0; channel < Channels; ++channel) {
+            for (std::size_t band = 0; band < band_count; ++band)
+                filters_[channel][band].set_coefficients(requested_coefficients_[band]);
+            transition_remaining_[channel] = 0;
+            transition_total_[channel] = 0;
+            queued_transition_[channel] = false;
+        }
+    }
+
+    void load_requested(std::array<Filter, band_count>& cascade) {
+        for (std::size_t band = 0; band < band_count; ++band)
+            cascade[band].set_coefficients(requested_coefficients_[band]);
+    }
+
+    void begin_transition(std::size_t channel) {
+        transition_filters_[channel] = filters_[channel];
+        load_requested(transition_filters_[channel]);
+        transition_total_[channel] = transition_samples_;
+        transition_remaining_[channel] = transition_samples_;
+    }
+
+    void schedule_band(std::size_t band) {
+        if (transition_samples_ == 0) {
+            for (auto& channel : filters_)
+                channel[band].set_coefficients(requested_coefficients_[band]);
+            return;
+        }
+        for (std::size_t channel = 0; channel < Channels; ++channel) {
+            if (!transition_active(channel)) begin_transition(channel);
+            else if (transition_remaining_[channel] == transition_total_[channel])
+                transition_filters_[channel][band].set_coefficients(requested_coefficients_[band]);
+            else
+                queued_transition_[channel] = true;
+        }
+    }
+
+    void schedule_all_bands() {
+        if (transition_samples_ == 0) {
+            for (auto& channel : filters_) load_requested(channel);
+            return;
+        }
+        for (std::size_t channel = 0; channel < Channels; ++channel) {
+            if (!transition_active(channel)) begin_transition(channel);
+            else if (transition_remaining_[channel] == transition_total_[channel])
+                load_requested(transition_filters_[channel]);
+            else
+                queued_transition_[channel] = true;
         }
     }
 
@@ -218,7 +318,13 @@ private:
 
     SampleType sample_rate_ = default_sample_rate;
     std::array<Parameters, band_count> parameters_ = defaults_;
+    std::array<Coefficients, band_count> requested_coefficients_{};
     std::array<std::array<Filter, band_count>, Channels> filters_{};
+    std::array<std::array<Filter, band_count>, Channels> transition_filters_{};
+    std::array<std::size_t, Channels> transition_total_{};
+    std::array<std::size_t, Channels> transition_remaining_{};
+    std::array<bool, Channels> queued_transition_{};
+    std::size_t transition_samples_ = 0;
 };
 
 using SixBandEq = SixBandEqT<float>;
