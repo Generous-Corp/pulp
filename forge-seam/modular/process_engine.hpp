@@ -74,6 +74,8 @@ public:
     /// after a restart the shell believes nothing is happening while a
     /// generator is still writing.
     bool generator_running() const override;
+    bool try_claim_generation() override;
+    void release_generation_claim() override;
 
     /// Run a tool and collect its output. Public so a test can drive the same
     /// path the app does rather than a private shortcut.
@@ -112,6 +114,7 @@ private:
     // probe runs once and the answer is remembered.
     mutable std::atomic<int> available_{-1};   // -1 unknown, 0 no, 1 yes
     std::atomic<int> python_ok_{-1};
+    std::atomic<bool> claimed_by_this_{false};
 };
 
 }  // namespace forge_modular

@@ -28,6 +28,7 @@ class CombinedInstallerTest(unittest.TestCase):
         grouped_apps: list[tuple[str, str, str]] | None = None,
         product_titles: list[tuple[str, str]] | None = None,
         scripted_apps: set[str] | None = None,
+        architectures: str | None = None,
     ) -> tuple[str, str]:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
@@ -110,6 +111,8 @@ class CombinedInstallerTest(unittest.TestCase):
                 str(output),
                 "--no-notarize",
             ]
+            if architectures:
+                args.extend(("--architectures", architectures))
             for plugin_name, kind in plugins:
                 suffix = {"au": "component", "vst3": "vst3", "clap": "clap"}[kind]
                 bundle = tmp / f"{plugin_name}.{suffix}"
@@ -265,6 +268,12 @@ class CombinedInstallerTest(unittest.TestCase):
 
         self.assertNotIn("--scripts", self._last_pkgbuild_argv.splitlines())
         self.assertIn('require-scripts="false"', xml)
+
+    def test_intel_installer_declares_x86_64_host_support(self) -> None:
+        xml, _ = self._run_installer([], [("Fixture", "Fixture")],
+                                     architectures="x86_64")
+
+        self.assertIn('hostArchitectures="x86_64"', xml)
 
 
 if __name__ == "__main__":

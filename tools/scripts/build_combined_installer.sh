@@ -19,6 +19,7 @@
 #     --sign-identity <Developer ID Application hash> \
 #     --installer-identity <Developer ID Installer hash> \
 #     --out DIR \
+#     [--architectures arm64|x86_64|arm64,x86_64]
 #     [--plugin au|vst3|clap PATH]...     (repeatable)
 #     [--product-title BUNDLE "Display Title"]...  (repeatable; renames the
 #                                                   expandable group for that
@@ -47,6 +48,7 @@ VALIDATOR="$ROOT/tools/cmake/scripts/check_bundle_relocatable.py"
 CLI="${PULP_CPP:-$ROOT/build/tools/cli/pulp-cpp}"
 
 NAME=""; VERSION=""; APP_ID=""; INST_ID=""; OUT=""; NOTARIZE=1
+HOST_ARCHITECTURES=""
 # Parallel arrays of components.
 declare -a P_KIND P_PATH      # plugins: kind + bundle path
 declare -a A_TITLE A_PATH A_ENT  # apps: choice title + bundle path + entitlements (or "")
@@ -62,6 +64,7 @@ while [[ $# -gt 0 ]]; do
     --sign-identity) APP_ID="$2"; shift 2;;
     --installer-identity) INST_ID="$2"; shift 2;;
     --out) OUT="$2"; shift 2;;
+    --architectures) HOST_ARCHITECTURES="$2"; shift 2;;
     --no-notarize) NOTARIZE=0; shift;;
     --plugin) P_KIND+=("$2"); P_PATH+=("$3"); shift 3;;
     --product-title) PT_NAME+=("$2"); PT_TITLE+=("$3"); shift 3;;
@@ -83,6 +86,15 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$NAME" && -n "$VERSION" && -n "$APP_ID" && -n "$INST_ID" && -n "$OUT" ]] || {
   echo "missing required args (--name --version --sign-identity --installer-identity --out)" >&2; exit 2; }
+if [[ -z "$HOST_ARCHITECTURES" ]]; then
+  case "$(uname -m)" in
+    arm64|aarch64) HOST_ARCHITECTURES="arm64" ;;
+    x86_64|amd64) HOST_ARCHITECTURES="x86_64" ;;
+    *) echo "unsupported installer host architecture: $(uname -m)" >&2; exit 2 ;;
+  esac
+fi
+[[ "$HOST_ARCHITECTURES" =~ ^(arm64|x86_64)(,(arm64|x86_64))*$ ]] || {
+  echo "invalid --architectures: $HOST_ARCHITECTURES" >&2; exit 2; }
 
 UNINSTALL_IN="${UNINSTALL_IN:-}"
 WELCOME_FILE="${WELCOME_FILE:-}"; LICENSE_FILE="${LICENSE_FILE:-}"
@@ -460,7 +472,7 @@ cat > "$STAGE/distribution.xml" <<XML
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
   <title>$NAME $VERSION</title><organization>com.pulp</organization>
-  <options customize="always" require-scripts="$REQUIRE_SCRIPTS" hostArchitectures="arm64"/>
+  <options customize="always" require-scripts="$REQUIRE_SCRIPTS" hostArchitectures="$HOST_ARCHITECTURES"/>
   $PANES
   <choices-outline>$CHOICES</choices-outline>
   $DEFS

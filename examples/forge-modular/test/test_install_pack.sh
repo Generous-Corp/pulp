@@ -248,6 +248,35 @@ else
     fail "uninstall.sh does not mirror the released system plug-in payloads"
 fi
 
+# A failed deletion is not a successful uninstall. Use a scratch HOME and a
+# failing rm so no real installation can be touched.
+ran=$((ran + 1))
+W="$(mktemp -d)"
+mkdir -p "$W/bin" \
+    "$W/home/Library/Audio/Plug-Ins/Components/Forge Modular.component"
+printf '#!/bin/bash\nexit 1\n' > "$W/bin/rm"
+chmod +x "$W/bin/rm"
+out="$(PATH="$W/bin:/usr/bin:/bin" HOME="$W/home" \
+    /bin/bash "$FM/uninstall.sh" 2>&1)"; rc=$?
+if [ "$rc" -ne 0 ] && echo "$out" | grep -q 'could not be removed' && \
+   ! echo "$out" | grep -q 'Nothing to remove' && \
+   [ -d "$W/home/Library/Audio/Plug-Ins/Components/Forge Modular.component" ]; then
+    ok "uninstall failure is reported and returns non-zero"
+else
+    fail "uninstall failure was reported as success: rc=$rc; $out"
+fi
+/bin/rm -rf "$W"
+
+# Packaging is architecture-coherent: artifact selection and Installer's host
+# declaration are derived from the same target architecture.
+ran=$((ran + 1))
+if grep -q 'ForgeModular-\*-\$RACK_PLATFORM.vcvplugin' "$FM/package.sh" && \
+   grep -q -- '--architectures "\$INSTALLER_ARCH"' "$FM/package.sh"; then
+    ok "package selection and installer host use one target architecture"
+else
+    fail "package architecture does not constrain both Rack pack and Installer"
+fi
+
 echo
 echo "$((ran - bad))/$ran correct"
 [ "$bad" -eq 0 ] || exit 1

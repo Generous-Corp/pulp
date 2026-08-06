@@ -75,20 +75,28 @@ WORK=(
 
 gone=0
 kept=0
+failed=0
 
 remove() {
     local path="$1"
     if [ ! -e "$path" ] && [ ! -L "$path" ]; then return; fi
     if [ "$DRY" -eq 1 ]; then
         echo "  would remove  $path"
+        gone=$((gone + 1))
     elif [[ "$path" = /Applications/* || "$path" = /Library/* ]] && \
          [ "$(id -u)" -ne 0 ]; then
-        /usr/bin/sudo /bin/rm -rf "$path" && echo "  removed  $path" || \
-            echo "  FAILED   $path" >&2
+        if /usr/bin/sudo /bin/rm -rf "$path"; then
+            echo "  removed  $path"; gone=$((gone + 1))
+        else
+            echo "  FAILED   $path" >&2; failed=$((failed + 1))
+        fi
     else
-        rm -rf "$path" && echo "  removed  $path" || echo "  FAILED   $path" >&2
+        if rm -rf "$path"; then
+            echo "  removed  $path"; gone=$((gone + 1))
+        else
+            echo "  FAILED   $path" >&2; failed=$((failed + 1))
+        fi
     fi
-    gone=$((gone + 1))
 }
 
 echo "Forge Modular uninstaller"
@@ -121,12 +129,18 @@ else
 fi
 
 echo
-if [ "$gone" -eq 0 ]; then
-    echo "Nothing to remove. Forge Modular is not installed."
-elif [ "$DRY" -eq 1 ]; then
+if [ "$DRY" -eq 1 ]; then
     echo "$gone item(s) would be removed."
-else
+elif [ "$gone" -eq 0 ] && [ "$failed" -eq 0 ]; then
+    echo "Nothing to remove. Forge Modular is not installed."
+elif [ "$gone" -gt 0 ]; then
     echo "Removed $gone item(s)."
+else
+    echo "No requested item was removed."
 fi
 [ "$kept" -gt 0 ] && echo "Kept your patches and projects. Use --all to remove those too."
+if [ "$failed" -gt 0 ]; then
+    echo "$failed item(s) could not be removed." >&2
+    exit 1
+fi
 exit 0

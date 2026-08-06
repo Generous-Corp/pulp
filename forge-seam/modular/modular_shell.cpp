@@ -1489,15 +1489,15 @@ std::string ForgeModularShell::start_build_with(const std::string& prompt) {
     // The engine knows about a generator process whoever started it, including
     // one left over from a previous launch of the app — a generation survives
     // the window closing by design. But there is a moment after submit before
-    // the process exists, so a fast second press would slip through.
-    //
-    // `in_flight_` covers that moment: a build this shell started, on a log it
-    // is watching, that has not reported an end. All three parts matter —
+    // the process exists. The engine's atomic claim covers that launch window
+    // across every editor; `in_flight_` covers the longer run for this shell:
+    // a build it started, on a log it is watching, that has not reported an
+    // end. All three parts matter —
     // `busy()` alone reads `running` for a shell that is merely watching a log
     // nothing has written, which refused the FIRST build of every session.
     const bool ours = in_flight_ && watching_ &&
                       monitor_.outcome() == BuildOutcome::running;
-    if (ours || engine_->generator_running())
+    if (ours || !engine_->try_claim_generation())
         return "a patch is already building — let it finish first";
 
     // A prompt typed on Home starts a NEW project. Continuing the last one

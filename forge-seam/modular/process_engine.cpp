@@ -18,6 +18,8 @@ namespace forge_modular {
 
 namespace {
 
+std::atomic<bool> g_generation_launch_claim{false};
+
 /// Quote one argument for /bin/sh. Single quotes with the close-escape-reopen
 /// dance, so a prompt containing a quote, a semicolon or a backtick is text
 /// rather than shell.
@@ -125,6 +127,24 @@ bool ProcessEngine::generator_running() const {
     return false;
 }
 
+bool ProcessEngine::try_claim_generation() {
+    bool expected = false;
+    if (!g_generation_launch_claim.compare_exchange_strong(
+            expected, true, std::memory_order_acq_rel))
+        return false;
+    if (generator_running()) {
+        g_generation_launch_claim.store(false, std::memory_order_release);
+        return false;
+    }
+    claimed_by_this_.store(true, std::memory_order_release);
+    return true;
+}
+
+void ProcessEngine::release_generation_claim() {
+    if (claimed_by_this_.exchange(false, std::memory_order_acq_rel))
+        g_generation_launch_claim.store(false, std::memory_order_release);
+}
+
 void ProcessEngine::submit(const std::string& prompt, bool patch_mode) {
     error_.clear();
     artifact_.clear();
@@ -200,9 +220,13 @@ void ProcessEngine::submit(const std::string& prompt, bool patch_mode) {
     // TCC-gated volume, where either can block for seconds. That is what made
     // the app appear to freeze on Build, which is precisely when a user is
     // least willing to believe it is still alive.
-    std::thread([command = cmd.str()]() {
+    const bool releases_claim =
+        claimed_by_this_.exchange(false, std::memory_order_acq_rel);
+    std::thread([command = cmd.str(), releases_claim]() {
         std::string out;
         run(command, out);
+        if (releases_claim)
+            g_generation_launch_claim.store(false, std::memory_order_release);
     }).detach();
 }
 

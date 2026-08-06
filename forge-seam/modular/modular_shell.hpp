@@ -106,6 +106,13 @@ public:
     /// survives by design (nohup + setsid) and which the shell's own `busy()`
     /// therefore cannot see.
     virtual bool generator_running() const { return false; }
+
+    /// Atomically reserve the process-wide generation launch slot.
+    /// The concrete process engine holds it until the detached launcher has
+    /// created the generator process; generator_running() covers the run after
+    /// that. This closes the small window where neither editor could see it.
+    virtual bool try_claim_generation() { return !generator_running(); }
+    virtual void release_generation_claim() {}
 };
 
 /// Build a Forge Modular processor with its generator already connected.

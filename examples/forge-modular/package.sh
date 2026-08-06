@@ -28,17 +28,25 @@ OUT_DIR=""
 VERSION="0.1.0"
 DO_SIGN=0
 DO_NOTARIZE=0
+TARGET_ARCH="${TARGET_ARCH_OVERRIDE:-$(uname -m)}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --build-dir) BUILD_DIR="$2"; shift 2 ;;
         --out) OUT_DIR="$2"; shift 2 ;;
         --version) VERSION="$2"; shift 2 ;;
+        --architecture) TARGET_ARCH="$2"; shift 2 ;;
         --sign) DO_SIGN=1; shift ;;
         --notarize) DO_SIGN=1; DO_NOTARIZE=1; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
+
+case "$TARGET_ARCH" in
+    arm64|aarch64) RACK_PLATFORM="mac-arm64"; INSTALLER_ARCH="arm64" ;;
+    x86_64|amd64) RACK_PLATFORM="mac-x64"; INSTALLER_ARCH="x86_64" ;;
+    *) echo "unsupported package architecture: $TARGET_ARCH" >&2; exit 2 ;;
+esac
 
 [[ -n "$BUILD_DIR" ]] || { echo "--build-dir is required" >&2; exit 2; }
 [[ -n "$OUT_DIR" ]] || { echo "--out is required" >&2; exit 2; }
@@ -256,8 +264,13 @@ if [[ -z "$RACK_PLUGIN" ]]; then
                 newest_mtime="$candidate_mtime"
                 RACK_PLUGIN="$candidate"
             fi
-        done < <(find "$dir" -maxdepth 1 -name 'ForgeModular-*.vcvplugin' 2>/dev/null)
+        done < <(find "$dir" -maxdepth 1 \
+                      -name "ForgeModular-*-$RACK_PLATFORM.vcvplugin" 2>/dev/null)
     done
+fi
+if [[ -n "$RACK_PLUGIN" && "$(basename "$RACK_PLUGIN")" != *"-$RACK_PLATFORM.vcvplugin" ]]; then
+    echo "wrong Rack pack for $TARGET_ARCH: $RACK_PLUGIN" >&2
+    exit 1
 fi
 
 # A bundle EXISTING is not a bundle with anything in it.
@@ -447,6 +460,7 @@ codesign --force --options runtime --timestamp \
          -s "$PULP_SIGN_IDENTITY_HASH" "$APP/Contents/Resources/build/shape_text"
 
 ARGS=(--name "Forge Modular" --version "$VERSION" --out "$OUT_DIR"
+      --architectures "$INSTALLER_ARCH"
       --sign-identity "$PULP_SIGN_IDENTITY_HASH"
       --installer-identity "$PULP_SIGN_INSTALLER_HASH"
       --app-for "Forge Modular" "Forge Modular" "$APP"

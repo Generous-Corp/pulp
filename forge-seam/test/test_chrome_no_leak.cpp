@@ -9161,6 +9161,52 @@ TEST_CASE("a second build is refused while one is still running",
     std::filesystem::remove_all(dir, ec);
 }
 
+TEST_CASE("two editor shells share one atomic generation launch claim",
+          "[build][lock]") {
+    struct SharedClaimEngine final : forge_modular::EngineClient {
+        bool claimed = false;
+        int submissions = 0;
+        bool available() const override { return true; }
+        bool ensure_running() override { return true; }
+        bool try_claim_generation() override {
+            if (claimed) return false;
+            claimed = true;
+            return true;
+        }
+        void release_generation_claim() override { claimed = false; }
+        void submit(const std::string&, bool) override { ++submissions; }
+    } engine;
+
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell first;
+    forge_modular::ForgeModularShell second;
+    first.set_engine(&engine);
+    second.set_engine(&engine);
+    pulp::state::StateStore first_store;
+    pulp::state::StateStore second_store;
+    first.set_state_store(&first_store);
+    second.set_state_store(&second_store);
+    first.define_parameters(first_store);
+    second.define_parameters(second_store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    first.prepare(pc);
+    second.prepare(pc);
+    auto first_view = first.create_view();
+    auto second_view = second.create_view();
+    REQUIRE(first_view != nullptr);
+    REQUIRE(second_view != nullptr);
+
+    CHECK(first.start_build_with("one patch").empty());
+    CHECK(engine.submissions == 1);
+    const auto why = second.start_build_with("a different patch");
+    CHECK(why.find("already building") != std::string::npos);
+    CHECK(engine.submissions == 1);
+
+    engine.release_generation_claim();
+}
+
 TEST_CASE("every run writes its own log", "[build][lock]") {
     // The lock stops a second build from THIS shell. It cannot stop a run left
     // over from a previous launch of the app, which survives by design — a
@@ -9202,6 +9248,28 @@ TEST_CASE("every run writes its own log", "[build][lock]") {
     // generation costs minutes and its transcript is the only record of what
     // the model was asked and answered.
     CHECK(std::filesystem::path(a).parent_path() == dir / "runs");
+
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST_CASE("process engines atomically share the launch window",
+          "[build][lock]") {
+    std::error_code ec;
+    const auto dir = std::filesystem::temp_directory_path() / "fm-engine-claim";
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    for (const char* t : {"generate.py", "patch.py"}) {
+        std::ofstream f(dir / t);
+        f << "import sys; sys.exit(0)\n";
+    }
+
+    forge_modular::ProcessEngine first(dir.string(), {});
+    forge_modular::ProcessEngine second(dir.string(), {});
+    REQUIRE(first.try_claim_generation());
+    CHECK_FALSE(second.try_claim_generation());
+    first.release_generation_claim();
+    CHECK(second.try_claim_generation());
+    second.release_generation_claim();
 
     std::filesystem::remove_all(dir, ec);
 }
