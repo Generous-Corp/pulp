@@ -622,7 +622,7 @@ a working convolution and would hide the bug. Assert
 
 | Processor | Header | Description |
 |-----------|--------|-------------|
-| Ballistics Filter | `ballistics_filter.hpp` | Envelope follower with configurable attack/release for meter and dynamics |
+| Envelope Follower | `dynamics_contract.hpp` | Peak/RMS envelope following, stereo detector linking, and canonical gain-reduction telemetry; `BallisticsFilter` remains the compatibility name |
 | Compressor | `compressor.hpp` | Soft-knee downward compressor with threshold, ratio, attack, release |
 | DryWetMixer | `dry_wet_mixer.hpp` | Parallel mix with latency compensation — equal-power or linear crossfade |
 | Gain | `gain.hpp` | Scalar gain stage; pair with `smoothed_value.hpp`, `log_ramped_value.hpp`, or audio `apply_gain_ramp()` when transitions need de-clicking |

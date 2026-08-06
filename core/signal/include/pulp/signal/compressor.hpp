@@ -3,6 +3,7 @@
 #include <pulp/signal/biquad.hpp>
 #include <pulp/signal/delay_line.hpp>
 #include <pulp/signal/denormal.hpp>
+#include <pulp/signal/dynamics_contract.hpp>
 
 #include <cmath>
 #include <algorithm>
@@ -135,6 +136,11 @@ public:
 
     SampleType gain_reduction_db() const { return envelope_db_; }
 
+    /// Canonical non-negative gain-reduction magnitude for shared meters.
+    GainReduction gain_reduction() const noexcept {
+        return GainReduction::from_signed_db(static_cast<double>(envelope_db_));
+    }
+
     void reset() {
         envelope_db_ = SampleType{0.0f};
         sidechain_hpf_.reset();
@@ -255,6 +261,13 @@ public:
     void process(SampleType* buffer, int num_samples) {
         for (int i = 0; i < num_samples; ++i)
             buffer[i] = process(buffer[i]);
+    }
+
+    GainReduction gain_reduction() const noexcept {
+        const SampleType gain =
+            (envelope_ > threshold_) ? threshold_ / envelope_ : SampleType{1};
+        return GainReduction::from_signed_db(
+            SampleType{20} * std::log10(std::max(gain, SampleType{1e-30f})));
     }
 
     void reset() { envelope_ = SampleType{0.0f}; }

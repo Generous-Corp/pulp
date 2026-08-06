@@ -103,6 +103,7 @@
 
 #include <pulp/signal/denormal.hpp>
 #include <pulp/signal/dynamics_core.hpp>
+#include <pulp/signal/dynamics_contract.hpp>
 #include <pulp/signal/units.hpp>
 
 #include <algorithm>
@@ -290,6 +291,11 @@ public:
     /// detector rather than inferring it from the audio.
     double gain_reduction_db(int channel = 0) const {
         return channels_[static_cast<std::size_t>(channel & 1)].smoothed_reduction;
+    }
+
+    /// Canonical non-negative gain-reduction magnitude for shared meters.
+    GainReduction gain_reduction(int channel = 0) const noexcept {
+        return GainReduction::from_magnitude_db(gain_reduction_db(channel));
     }
 
     // ── Processing ────────────────────────────────────────────────────────

@@ -5,6 +5,21 @@ Pulp provides four complementary compressor designs. They share an explicit
 editors, and report latency without requiring an audio probe. Use the float
 aliases shown below; every class also has a `64` double-precision alias.
 
+`<pulp/signal/dynamics_contract.hpp>` supplies the common vocabulary around
+those intentionally different processors:
+
+- `EnvelopeFollower` is the discoverable spelling of the established
+  `BallisticsFilter`. It accepts raw linear-amplitude samples, supports peak and
+  RMS modes, and reports linear or dBFS envelopes. Attack and release are
+  10-to-90-percent times in the smoothed-state domain: amplitude for peak mode
+  and mean-square power for RMS mode.
+- `StereoEnvelopeFollower` composes two followers and links them in the
+  detector-magnitude domain. Link zero is dual mono; link one follows the louder
+  channel on both sides without opposite-polarity cancellation.
+- `GainReduction` is the shared meter contract. Its `db()` value is always a
+  non-negative attenuation magnitude; `signed_db()` and `linear_gain()` expose
+  the equivalent gain-domain values.
+
 | Processor | Header | Choose it for |
 |---|---|---|
 | `FeedforwardCompressor` | `<pulp/signal/feedforward_compressor.hpp>` | Transparent peak/RMS compression, stereo linking, lookahead, and auto makeup |
@@ -53,10 +68,11 @@ history.
   quantities; expose the nominal ratio to users and the measured accessors to
   analysis or visualization code.
 
-All gain-reduction meters are valid after processing a sample. Sign conventions
-differ where the circuit convention differs: consult the
-[complete advanced DSP API](../reference/advanced-dsp-api.md#dynamics) before
-combining meter values across processor types.
+All gain-reduction meters are valid after processing a sample. Use
+`gain_reduction()` when combining processor types: it returns the canonical
+non-negative `GainReduction` value. The older `gain_reduction_db()` accessors
+retain each circuit lineage's established sign and remain available for
+compatibility and lineage-specific analysis.
 
 ## Verification
 

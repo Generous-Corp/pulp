@@ -40,11 +40,13 @@ public:
     }
 
     void set_attack_ms(SampleType ms) {
+        if (!std::isfinite(static_cast<double>(ms))) return;
         attack_ms_ = std::max(SampleType{0.01f}, ms);
         update_coefficients();
     }
 
     void set_release_ms(SampleType ms) {
+        if (!std::isfinite(static_cast<double>(ms))) return;
         release_ms_ = std::max(SampleType{0.01f}, ms);
         update_coefficients();
     }
@@ -52,6 +54,10 @@ public:
     void set_mode(Mode m) { mode_ = m; }
 
     SampleType process(SampleType input) {
+        if (!std::isfinite(static_cast<double>(input))) {
+            reset();
+            return SampleType{0};
+        }
         SampleType value = (mode_ == Mode::rms) ? input * input : std::abs(input);
         SampleType coeff = (value > state_) ? attack_coeff_ : release_coeff_;
         // Snap the envelope state so a long release into silence flushes to
@@ -68,6 +74,31 @@ public:
 
     SampleType current() const {
         return (mode_ == Mode::rms) ? std::sqrt(state_) : state_;
+    }
+
+    /// Current envelope in dBFS, floored at @p floor_db.
+    SampleType current_db(SampleType floor_db = SampleType{-160}) const {
+        const SampleType value = current();
+        if (!(value > SampleType{0})) return floor_db;
+        return std::max(floor_db, SampleType{20} * std::log10(value));
+    }
+
+    SampleType attack_ms() const noexcept { return attack_ms_; }
+    SampleType release_ms() const noexcept { return release_ms_; }
+    SampleType attack_coefficient() const noexcept { return attack_coeff_; }
+    SampleType release_coefficient() const noexcept { return release_coeff_; }
+
+    /// Pure coefficient for the follower's 10-to-90-percent time convention.
+    static SampleType coefficient_for_time_ms(SampleType ms, SampleType sample_rate) {
+        if (!(ms > SampleType{0.01f}) || !(sample_rate > SampleType{0}) ||
+            !std::isfinite(static_cast<double>(ms)) ||
+            !std::isfinite(static_cast<double>(sample_rate)))
+            return ms <= SampleType{0.01f} && sample_rate > SampleType{0}
+                ? SampleType{1}
+                : SampleType{0};
+        return SampleType{1} -
+               std::exp(SampleType{-2.2f} /
+                        (ms * SampleType{0.001f} * sample_rate));
     }
 
     void reset() { state_ = SampleType{0.0f}; }
@@ -88,9 +119,7 @@ private:
     }
 
     SampleType time_constant(SampleType ms) const {
-        if (ms <= SampleType{0.01f}) return SampleType{1.0f};
-        return SampleType{1.0f} -
-               std::exp(SampleType{-2.2f} / (ms * SampleType{0.001f} * sample_rate_));
+        return coefficient_for_time_ms(ms, sample_rate_);
     }
 };
 
