@@ -74,6 +74,64 @@ pulp_add_rack_plugin(forge-modular
 
 add_dependencies(forge-modular forge-modular-codegen)
 
+# The eight-step sequencer lives in voice.cpp's private implementation
+# namespace. Compile that production translation unit into the test so the
+# cursor/reset contract is exercised without exporting a test-only API.
+if(PULP_BUILD_TESTS)
+    add_executable(forge-modular-test-voice-sequence
+        "${_fm_dir}/test/voice_sequence.cpp")
+    add_dependencies(forge-modular-test-voice-sequence forge-modular-codegen)
+    target_include_directories(forge-modular-test-voice-sequence PRIVATE
+        "${PULP_RACK_SDK_DIR_REAL}/include"
+        "${PULP_RACK_SDK_DIR_REAL}/dep/include"
+        "${_fm_dir}/src"
+        "${CMAKE_SOURCE_DIR}/core/signal/include"
+        "${CMAKE_SOURCE_DIR}/core/format/include"
+        "${CMAKE_SOURCE_DIR}/core/audio/include"
+        "${CMAKE_SOURCE_DIR}/core/state/include"
+        "${CMAKE_SOURCE_DIR}/core/platform/include"
+        "${CMAKE_SOURCE_DIR}/core/runtime/include")
+
+    if(APPLE)
+        target_compile_definitions(forge-modular-test-voice-sequence PRIVATE
+            ARCH_MAC)
+        target_link_libraries(forge-modular-test-voice-sequence PRIVATE
+            "${PULP_RACK_SDK_DIR_REAL}/libRack.dylib")
+        set_target_properties(forge-modular-test-voice-sequence PROPERTIES
+            BUILD_RPATH "${PULP_RACK_SDK_DIR_REAL}")
+        # Rack's dylib has the bare install name `libRack.dylib`; a bare name
+        # does not consult LC_RPATH. Rewrite this test executable's load command
+        # so it runs directly as well as under ctest.
+        add_custom_command(TARGET forge-modular-test-voice-sequence POST_BUILD
+            COMMAND "${CMAKE_INSTALL_NAME_TOOL}" -change libRack.dylib
+                    @rpath/libRack.dylib
+                    "$<TARGET_FILE:forge-modular-test-voice-sequence>")
+    elseif(UNIX)
+        target_compile_definitions(forge-modular-test-voice-sequence PRIVATE
+            ARCH_LIN)
+        target_link_directories(forge-modular-test-voice-sequence PRIVATE
+            "${PULP_RACK_SDK_DIR_REAL}")
+        target_link_libraries(forge-modular-test-voice-sequence PRIVATE Rack)
+        set_target_properties(forge-modular-test-voice-sequence PROPERTIES
+            BUILD_RPATH "${PULP_RACK_SDK_DIR_REAL}")
+    elseif(WIN32)
+        target_compile_definitions(forge-modular-test-voice-sequence PRIVATE
+            ARCH_WIN _USE_MATH_DEFINES)
+        target_link_directories(forge-modular-test-voice-sequence PRIVATE
+            "${PULP_RACK_SDK_DIR_REAL}")
+        target_link_libraries(forge-modular-test-voice-sequence PRIVATE Rack)
+        add_custom_command(TARGET forge-modular-test-voice-sequence POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                    "${PULP_RACK_SDK_DIR_REAL}/Rack.dll"
+                    "$<TARGET_FILE_DIR:forge-modular-test-voice-sequence>")
+    endif()
+
+    add_test(NAME forge-modular-voice-sequence
+        COMMAND forge-modular-test-voice-sequence)
+    set_tests_properties(forge-modular-voice-sequence PROPERTIES
+        LABELS "forge-modular;rack;sequence")
+endif()
+
 # Pulp's DSP arrives as headers only — the modules use the per-sample
 # generators (OscillatorT::next(), AdsrT::next()) directly, so nothing links.
 target_include_directories(forge-modular PRIVATE
