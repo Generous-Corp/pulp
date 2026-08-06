@@ -264,6 +264,31 @@ def check_a_specific_word_beats_a_generic_one() -> tuple:
         print("  ok     names a person could read but the rule cannot are "
               "left alone, and the limit is pinned")
 
+    # A WORD CAN NAME AN ACTION ARRIVING AND A VALUE LEAVING.
+    #
+    # "Step CV" as an INPUT advances a sequential switch, which is a trigger.
+    # As an OUTPUT it is the step's voltage -- the melody. Promoting the output
+    # is wrong twice: it loses cv_out, so a sequenced-voice patch built on that
+    # module can no longer satisfy the pitch requirement, and it gains
+    # gate_out, so wiring that pitch into an envelope's gate starts passing.
+    # One word, a false reject and a false accept.
+    #
+    # No installed module is affected today: ours carries a cartographed role,
+    # which inference never overwrites, and the only inferred "Step CV" jacks
+    # are inputs. This is the next vendor to ship one as an output.
+    before = bad
+    if P.infer_port_role("Step CV", ["Sequencer"], "out") != "Cv":
+        bad += 1
+        print("  WRONG  a 'Step CV' OUTPUT is promoted; that is a sequencer's "
+              "pitch losing cv_out and gaining gate_out at once")
+    if P.infer_port_role("Step CV", ["Sequencer"], "in") != "Trigger":
+        bad += 1
+        print("  WRONG  a 'Step CV' INPUT stopped resolving; that one really "
+              "does advance a switch")
+    if bad == before:
+        print("  ok     a step INPUT advances and a step OUTPUT is a value, "
+              "and only the input promotes")
+
     # And nothing that was ALREADY specific is touched. Every change this rule
     # makes must be from Cv; a rule that rewrites a cartographed role would be
     # overruling a measurement with a guess.
@@ -275,7 +300,7 @@ def check_a_specific_word_beats_a_generic_one() -> tuple:
         print("  WRONG  a bare 'Gate' stopped resolving")
     else:
         print("  ok     names that were already unambiguous are unchanged")
-    return bad, 4
+    return bad, 5
 
 
 def check_a_widened_role_accuses_nobody() -> tuple:

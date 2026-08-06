@@ -341,6 +341,22 @@ WEAK_PORT_WORDS = frozenset({
 #: measurement, not by oversight: see the comment in `infer_port_role`.
 PROMOTABLE_ROLES = frozenset({"Pitch", "Clock", "Gate", "Trigger"})
 
+#: Markers that name an ACTION arriving and a VALUE leaving, so they may
+#: promote an input and never an output.
+#:
+#: "Step CV" as an INPUT advances a sequential switch, which is a trigger.
+#: As an OUTPUT it is the step's voltage -- the melody itself. Promoting the
+#: output is wrong twice over: it loses `cv_out`, so a sequenced-voice patch
+#: built on that module can no longer satisfy the pitch requirement, and it
+#: gains `gate_out`, so wiring that pitch into an envelope's gate starts
+#: passing. A false reject and a false accept from one word.
+#:
+#: No module in the installed library is affected today -- ours carries a
+#: cartographed role, which inference never overwrites, and the only inferred
+#: "Step CV" jacks are inputs. This is here for the next vendor to ship one as
+#: an output, which is a matter of time and would be silent.
+INPUT_ONLY_MARKERS = frozenset({"STEP"})
+
 _ROLE_WORDS: list[tuple[str, tuple[str, ...]]] = [
     ("Cv", ("CV", "MODULATION", "FM", "PROBABILITY", "SPREAD", "RATE",
             "AMOUNT", "AMT", "DEPTH", "LEVEL", "LVL", "EXPONENTIAL", "LINEAR",
@@ -489,6 +505,9 @@ def infer_port_role(name: str | None, tags: list | None,
     # there does not merely mislabel a jack, it stops a working clock or gate
     # from satisfying any requirement at all.
     core = {w for w in words if w not in WEAK_PORT_WORDS and not w.isdigit()}
+    # A word that names an action arriving and a value leaving cannot carry a
+    # promotion on the way out. See INPUT_ONLY_MARKERS.
+    mute = INPUT_ONLY_MARKERS if kind == "out" else frozenset()
     first = strong = None
     for role, markers in _ROLE_WORDS:
         hit = words & set(markers)
@@ -497,7 +516,8 @@ def infer_port_role(name: str | None, tags: list | None,
         if first is None:
             first = role
         if (strong is None and role in PROMOTABLE_ROLES
-                and (hit - WEAK_PORT_WORDS) and not (core - set(markers))):
+                and (hit - WEAK_PORT_WORDS - mute)
+                and not (core - set(markers))):
             strong = role
     if strong is not None:
         return strong
