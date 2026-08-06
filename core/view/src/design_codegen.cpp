@@ -92,6 +92,28 @@ static std::string format_px(float v) {
     return ss.str();
 }
 
+// IR attributes are strings and may originate in a hand-authored .pulp.json.
+// Numeric bridge arguments must be parsed before emission; copying raw text
+// here would turn an attribute into executable JavaScript.
+static double finite_numeric_attribute(const IRNode& node,
+                                       const char* key,
+                                       double fallback) {
+    const auto it = node.attributes.find(key);
+    if (it == node.attributes.end()) return fallback;
+    try {
+        std::size_t consumed = 0;
+        const double value = std::stod(it->second, &consumed);
+        if (consumed == it->second.size() && std::isfinite(value)) return value;
+    } catch (const std::exception&) {
+    }
+    return fallback;
+}
+
+static bool fader_is_horizontal(const IRNode& node) {
+    return node.style.width.value_or(0.0f) >=
+           node.style.height.value_or(0.0f);
+}
+
 // The lowercase tag `__widgetTagFactory__` (core/view/js/web-compat-element.js)
 // understands. Creating an audio widget through `document.createElement(<tag>)`
 // is what routes it to the native `createX(id, parent)` bridge call, so the
@@ -314,6 +336,49 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "setMax(" << var << "._id, " << node.audio_max << ");\n";
             ss << ind << "setValue(" << var << "._id, " << node.audio_default
                << ");\n";
+
+            if (node.audio_widget == AudioWidgetType::fader) {
+                if (fader_is_horizontal(node))
+                    ss << ind << "setOrientation(" << var
+                       << "._id, 'horizontal');\n";
+                const auto body = node.attributes.find("fader_body_asset_path");
+                const auto indicator =
+                    node.attributes.find("fader_indicator_asset_path");
+                if (body != node.attributes.end() &&
+                    indicator != node.attributes.end()) {
+                    ss << ind << "setFaderCapturedArt(" << var << "._id, '"
+                       << js_single_quote_escape(body->second) << "', "
+                       << finite_numeric_attribute(node, "fader_body_natural_w", 0.0)
+                       << ", "
+                       << finite_numeric_attribute(node, "fader_body_natural_h", 0.0)
+                       << ", '"
+                       << js_single_quote_escape(indicator->second) << "', "
+                       << finite_numeric_attribute(node, "fader_indicator_natural_w", 0.0)
+                       << ", "
+                       << finite_numeric_attribute(node, "fader_indicator_natural_h", 0.0)
+                       << ", "
+                       << std::clamp(finite_numeric_attribute(
+                              node, "fader_indicator_cross", 0.5), 0.0, 1.0)
+                       << ", "
+                       << finite_numeric_attribute(node, "fader_body_origin_x", 0.0)
+                       << ", "
+                       << finite_numeric_attribute(node, "fader_body_origin_y", 0.0)
+                       << ", "
+                       << finite_numeric_attribute(node, "fader_control_natural_w", 0.0)
+                       << ", "
+                       << finite_numeric_attribute(node, "fader_control_natural_h", 0.0)
+                       << ");\n";
+                    const auto color = [&](const char* key) {
+                        const auto it = node.attributes.find(key);
+                        return it != node.attributes.end()
+                            ? js_single_quote_escape(it->second) : std::string();
+                    };
+                    ss << ind << "setFaderSkin(" << var << "._id, '"
+                       << color("design_track") << "', '"
+                       << color("design_accent") << "', '"
+                       << color("design_indicator") << "', '');\n";
+                }
+            }
 
             // A declared parameter binding is the reason an audio widget
             // exists. `bindWidgetToParam` is deliberately host-to-widget only:
@@ -1359,7 +1424,9 @@ static void emit_js_audio_widget(const NativeEmit& e) {
         ss << ind << "setFlex('" << col_id << "', 'height', " << col_h << ");\n";
         ss << ind << "setFlex('" << col_id << "', 'min_width', " << frame_w << ");\n";
         fid_w = widget_w; fid_h = shape_h;  // emitted widget dims (fidelity)
-        ss << ind << "createFader('" << id << "', 'vertical', '" << col_id << "');\n";
+        const char* orientation = shape_w >= shape_h ? "horizontal" : "vertical";
+        ss << ind << "createFader('" << id << "', '" << orientation
+           << "', '" << col_id << "');\n";
         ss << ind << "setFlex('" << id << "', 'width', " << widget_w << ");\n";
         ss << ind << "setFlex('" << id << "', 'height', " << shape_h << ");\n";
         // Fader label overlaps track when rendered inside bounds — use separate label
@@ -1381,6 +1448,43 @@ static void emit_js_audio_widget(const NativeEmit& e) {
             pit != node.attributes.end() && !pit->second.empty())
             fader_norm = std::clamp(std::stof(pit->second), 0.0f, 1.0f);
         ss << ind << "setValue('" << id << "', " << fader_norm << ");\n";
+        if (const auto body = node.attributes.find("fader_body_asset_path");
+            body != node.attributes.end()) {
+            const auto indicator = node.attributes.find("fader_indicator_asset_path");
+            if (indicator != node.attributes.end()) {
+                ss << ind << "setFaderCapturedArt('" << id << "', '"
+                   << js_single_quote_escape(body->second) << "', "
+                   << finite_numeric_attribute(node, "fader_body_natural_w", 0.0)
+                   << ", "
+                   << finite_numeric_attribute(node, "fader_body_natural_h", 0.0)
+                   << ", '"
+                   << js_single_quote_escape(indicator->second) << "', "
+                   << finite_numeric_attribute(node, "fader_indicator_natural_w", 0.0)
+                   << ", "
+                   << finite_numeric_attribute(node, "fader_indicator_natural_h", 0.0)
+                   << ", "
+                   << std::clamp(finite_numeric_attribute(
+                          node, "fader_indicator_cross", 0.5), 0.0, 1.0)
+                   << ", "
+                   << finite_numeric_attribute(node, "fader_body_origin_x", 0.0)
+                   << ", "
+                   << finite_numeric_attribute(node, "fader_body_origin_y", 0.0)
+                   << ", "
+                   << finite_numeric_attribute(node, "fader_control_natural_w", 0.0)
+                   << ", "
+                   << finite_numeric_attribute(node, "fader_control_natural_h", 0.0)
+                   << ");\n";
+                const auto color = [&](const char* key) {
+                    const auto it = node.attributes.find(key);
+                    return it != node.attributes.end()
+                        ? js_single_quote_escape(it->second) : std::string();
+                };
+                ss << ind << "setFaderSkin('" << id << "', '"
+                   << color("design_track") << "', '"
+                   << color("design_accent") << "', '"
+                   << color("design_indicator") << "', '');\n";
+            }
+        }
         // Value-driven skin derived from the captured asset. The importer
         // sampled the PNG's track/fill/thumb colors; emit setFaderSkin so
         // the native fader renders the captured look while the thumb still

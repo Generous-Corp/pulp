@@ -1846,6 +1846,39 @@ void apply_captured_art_knob_skin(Knob& knob, const IRNode& node) {
     }
 }
 
+void apply_captured_art_fader_skin(Fader& fader, const IRNode& node) {
+    const auto body_path = attr(node, "fader_body_asset_path");
+    const auto indicator_path = attr(node, "fader_indicator_asset_path");
+    if (!body_path || !indicator_path) return;
+
+    const float body_w = attr_float(node, "fader_body_natural_w").value_or(0.0f);
+    const float body_h = attr_float(node, "fader_body_natural_h").value_or(0.0f);
+    const float indicator_w =
+        attr_float(node, "fader_indicator_natural_w").value_or(0.0f);
+    const float indicator_h =
+        attr_float(node, "fader_indicator_natural_h").value_or(0.0f);
+    if (body_w <= 0.0f || body_h <= 0.0f ||
+        indicator_w <= 0.0f || indicator_h <= 0.0f)
+        return;
+
+    auto body = std::make_shared<SpriteStrip>();
+    body->load_from_file(*body_path, static_cast<int>(body_w),
+                         static_cast<int>(body_h), 1,
+                         SpriteStrip::Orientation::vertical);
+    auto indicator = std::make_shared<SpriteStrip>();
+    indicator->load_from_file(*indicator_path, static_cast<int>(indicator_w),
+                              static_cast<int>(indicator_h), 1,
+                              SpriteStrip::Orientation::vertical);
+    if (!body->loaded() || !indicator->loaded()) return;
+    fader.set_captured_art(
+        std::move(body), std::move(indicator),
+        attr_float(node, "fader_indicator_cross").value_or(0.5f),
+        attr_float(node, "fader_body_origin_x").value_or(0.0f),
+        attr_float(node, "fader_body_origin_y").value_or(0.0f),
+        attr_float(node, "fader_control_natural_w").value_or(body_w),
+        attr_float(node, "fader_control_natural_h").value_or(body_h));
+}
+
 std::unique_ptr<View> make_widget(const IRNode& node,
                                   const ResolvedNativeNode& resolved,
                                   const IRAssetManifest& manifest,
@@ -1998,11 +2031,28 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             if (semantics.fader_thumb_corner_radius)
                 fader->set_thumb_corner_radius(*semantics.fader_thumb_corner_radius);
             if (options.preview_mode) fader->set_render_style(WidgetRenderStyle::minimal);
+            apply_captured_art_fader_skin(*fader, node);
             // Same contract the knob case takes above: a design that painted its
             // own track owns the body, and the widget contributes only the value
             // layer. Without it a designed fader drew a stock track, fill and
             // thumb over the authored track the box pipeline had already painted.
-            apply_designed_body_skin(*fader, node);
+            if (fader->has_captured_indicator_art()) {
+                // The designed painter owns track+fill+thumb as one indivisible
+                // operation. Captured art replaces only the thumb, so carry the
+                // same design-token colors into the separable stock track/fill
+                // renderer instead of dropping the design palette.
+                if (const auto hex = attr(node, "design_track"))
+                    if (const auto color = parse_any_css_color(*hex))
+                        fader->set_skin_track_color(*color);
+                if (const auto hex = attr(node, "design_accent"))
+                    if (const auto color = parse_any_css_color(*hex))
+                        fader->set_skin_fill_color(*color);
+                if (const auto hex = attr(node, "design_indicator"))
+                    if (const auto color = parse_any_css_color(*hex))
+                        fader->set_skin_thumb_color(*color);
+            } else {
+                apply_designed_body_skin(*fader, node);
+            }
             return fader;
         }
         case NativeWidgetKind::meter: {

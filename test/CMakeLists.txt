@@ -1,5 +1,4 @@
-# Pulp test suite -- Catch2
-# Shared setup plus ordered owner includes; add registrations to test/cmake/*_tests.cmake.
+# Pulp Catch2 setup plus ordered owner includes; register suites in test/cmake/*_tests.cmake.
 
 include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpTestSuite.cmake)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/dsp_rt_contract_tests.cmake")
@@ -22,6 +21,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/canvas_text_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/image_codec_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/core_runtime_canvas_signal_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/six_band_eq_tests.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/music_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/timeline_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/interchange_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/sampler_runtime_tests.cmake")

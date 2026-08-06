@@ -1167,6 +1167,29 @@ TEST_CASE("asset localization stamps a portable path from asset_ref",
         output.parent_path() / ir.root.attributes.at("asset_path")));
 }
 
+TEST_CASE("asset localization preserves split captured fader art",
+          "[import-design][browser-capture][assets][fader]") {
+    TempTree tree;
+    const auto body = tree.root / "capture/fader-body.png";
+    const auto indicator = tree.root / "capture/fader-indicator.png";
+    const auto output = tree.root / "published/ui.js";
+    tree.write(body, "clean-body-pixels");
+    tree.write(indicator, "moving-indicator-pixels");
+
+    pulp::view::DesignIR ir;
+    ir.root.attributes["fader_body_asset_path"] = body.string();
+    ir.root.attributes["fader_indicator_asset_path"] = indicator.string();
+
+    std::string error;
+    REQUIRE(id::localize_ir_assets(ir, output.string(), &error));
+    for (const char* key : {"fader_body_asset_path",
+                            "fader_indicator_asset_path"}) {
+        const auto& localized = ir.root.attributes.at(key);
+        CHECK(fs::path(localized).is_relative());
+        CHECK(fs::is_regular_file(output.parent_path() / localized));
+    }
+}
+
 TEST_CASE("browser CLI detection and direct inference preserve CLI disposition",
           "[import-design][browser-capture][cli-adapter][detect]") {
     TempTree tree;

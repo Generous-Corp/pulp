@@ -109,11 +109,32 @@ DesignIR dot_with_shadow(const std::string& blend, bool inset = false) {
     return ir;
 }
 
+/// Only the raw-RGBA helpers below need this. `render_bytes` and the text
+/// cases go through `render_to_file`, which falls back to CoreGraphics and
+/// still paints, so skipping those would hide regressions they can catch.
+///
+/// Keyed on the build, never on an empty render. The Skia path here is
+/// `SkSurfaces::Raster` — CPU, no device to be missing — so once Skia is
+/// compiled in an empty buffer has no benign cause left and has to keep
+/// failing. Deciding from the result instead would swallow exactly that.
+///
+/// Call a guarded helper on its own line, never inside `CHECK(...)`/
+/// `REQUIRE(...)`: SKIP unwinds by exception, and CATCH_CONFIG_FAST_COMPILE
+/// disables the translation that would turn it back into a skip, so a guarded
+/// call nested in an assertion reports a hard failure instead.
+void skip_without_raw_rgba() {
+    if (!raw_rgba_render_available()) {
+        SKIP("no raw-RGBA backend compiled in (needs Skia) — pixel probes "
+             "cannot run in this build");
+    }
+}
+
 /// How many pixels OUTSIDE the dot's own 24x24 box carry ink the flat ground
 /// does not. Counted rather than compared: the point is whether the halo
 /// exists at all, and a count says that without depending on what a blend mode
 /// does to the halo's colour.
 int halo_pixels(const DesignIR& ir) {
+    skip_without_raw_rgba();
     auto root = build_native_view_tree(ir, ir.asset_manifest);
     REQUIRE(root != nullptr);
     uint32_t w = 0, h = 0;
@@ -143,6 +164,7 @@ struct Rgb {
 /// buffer. No PNG encode/decode round-trip, so the value read is the value
 /// composited.
 Rgb render_centre(const DesignIR& ir) {
+    skip_without_raw_rgba();
     auto root = build_native_view_tree(ir, ir.asset_manifest);
     REQUIRE(root != nullptr);
     uint32_t w = 0, h = 0;
@@ -277,8 +299,11 @@ TEST_CASE("an inset shadow does not grow a blend node's layer",
     // node that has one and admit ink that does not exist.
     //
     // Asserted where it is observable: no ink outside the box, blend or not.
-    CHECK(halo_pixels(dot_with_shadow("", /*inset=*/true)) == 0);
-    CHECK(halo_pixels(dot_with_shadow("plus-lighter", /*inset=*/true)) == 0);
+    // Rendered before the assertion, not inside it — see `skip_without_raw_rgba`.
+    const int plain = halo_pixels(dot_with_shadow("", /*inset=*/true));
+    const int blended = halo_pixels(dot_with_shadow("plus-lighter", /*inset=*/true));
+    CHECK(plain == 0);
+    CHECK(blended == 0);
 }
 
 TEST_CASE("a filter list without blur leaves the node unfiltered",

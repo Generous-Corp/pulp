@@ -434,6 +434,54 @@ same `audio_sha256` and a zero residual while still carrying different
 
 ---
 
+## music
+
+Dependency-light 12-tone equal-temperament theory values for sharing musical
+intent across audio, MIDI, timeline, and product code. The module does not own a
+clock, sequencer, transform chain, event ledger, or tuning system.
+
+**Link:** `pulp::music` · **Include prefix:** `<pulp/music/...>`
+
+`PitchClassSet` is an arbitrary checked 12-bit set. `Scale` adds a root and
+supports degree lookup, signed octave-spanning degrees, transposition, and mode
+rotation. `NamedScale` retains the existing ten Pulp signal selector values and
+appends the scale set currently needed by Forge. The explicit
+`kPulpSignalScales`, `kForgeRuntimeScales`, and `kForgePrimitiveScales` tables
+carry each existing stored index and spelling; consumers should map through the
+matching table rather than cast between product enums.
+
+Pulp's existing signal harmonizer scale table and Timeline chord/scale wire
+codec delegate through these compatibility maps. Their public enum ordinals and
+stored names remain unchanged while the interval and identity data has one
+owner.
+
+`ChordFormula` accepts fixed-capacity ascending semitone formulas, including
+extensions and alterations. `kPulpTimelineChordQualities` and
+`kForgeChordQualities` map the two existing stored identities onto the shared
+named qualities. `Chord::construct()` builds bounded MIDI pitches and
+deterministic inversions, failing when a root, inversion, formula, or resulting
+pitch is outside its legal domain.
+
+```cpp
+#include <pulp/music/music.hpp>
+
+using namespace pulp::music;
+const auto scale = Scale::named(PitchClass::d, NamedScale::dorian);
+const auto formula = ChordFormula::for_quality(ChordQuality::minor7);
+const auto first_inversion = Chord::construct(62, *formula, 1);
+```
+
+The named collection is a 12-TET compatibility vocabulary, not a claim of
+microtonal support. More tuning systems belong in the provider-neutral MIDI
+tuning APIs rather than in this representation.
+
+This module is the shared-theory foundation sub-slice. It does not yet provide
+pitch spelling, chord recognition, voicing constraints, or minimum-motion
+voice leading; those remain separate later additions rather than implied
+capabilities of `ChordFormula`.
+
+---
+
 ## midi
 
 MIDI I/O, file handling, MIDI 2.0 support, and provider-neutral note tuning.
@@ -980,6 +1028,28 @@ placement/parameter targets, and registers lane and point identities in the
 Project. Lanes persist in snapshots and are reachable through typed commands
 and `DocumentSession`. `pulp::playback` compiles attached lanes into immutable
 cursor programs, while host-graph parameter delivery remains outside Timeline.
+
+`parameter_target.hpp` holds the format-neutral vocabulary for naming a
+document parameter — a placed device parameter, or one of the owning track's own
+mixer controls. One vocabulary serves every consumer that addresses a parameter,
+because "which parameter" is addressing rather than a property of what writes
+there. `AutomationTarget` and `ModulationTarget` are both names for it.
+
+`modulation.hpp` provides modulators, macro controls, and modulation routes as
+Track-owned document entities distinct from automation. The difference is what
+they write: an automation lane authors a parameter's *base* value over time,
+while a modulation route contributes a depth-scaled *relative offset* on top of
+whatever base is in force, which is CLAP's `param_value`/`param_mod` separation.
+Two consequences the document preserves: several routes may reach one parameter
+and their offsets sum, where two automation lanes on one parameter is a
+contradiction the model rejects; and depth belongs to the connection rather than
+to the source, so one macro reaches many parameters with a different amount for
+each. A route names its source by identity *and* kind, so a macro can never
+stand in for a modulator that shared its ID. Track attachment proves the source
+is a modulator or macro of the matching kind on the same track and that any
+referenced placement exists in that track's chain. No modulator runtime ships
+yet; the schema exists so routing authored now survives to the phase that adds
+one.
 
 `device_placement.hpp` defines the durable identity of one logical placement in
 a Track-owned device chain. The chain preserves authored processing order

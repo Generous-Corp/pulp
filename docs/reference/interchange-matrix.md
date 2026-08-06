@@ -76,6 +76,10 @@ is not a reason to add a model feature.
 | `context.chord-voicing` | yes | A chord statement carrying a hint for how a generator should spread its tones. |
 | `tuning.project` | yes | A document-wide statement of the tuning every instrument plays in. |
 | `tuning.instrument` | yes | One instrument overriding the document-wide tuning with its own. |
+| `modulation.modulator` | yes | A track-owned generator of modulation signal, by identity and declared kind. |
+| `modulation.macro` | yes | A track-owned named performer control that drives parameters through modulation routes. |
+| `modulation.route-device-param` | yes | A modulation route contributing a depth-scaled offset to a device parameter, on top of whatever base value is in force. |
+| `modulation.route-track-mixer` | yes | A modulation route contributing a depth-scaled offset to a track's own gain or pan. |
 
 ## DAWproject
 
@@ -142,6 +146,10 @@ Format id `dawproject`. Writer registered: yes.
 | `context.chord-voicing` | none | not declared |
 | `tuning.project` | none | not declared |
 | `tuning.instrument` | none | not declared |
+| `modulation.modulator` | none | not declared |
+| `modulation.macro` | none | not declared |
+| `modulation.route-device-param` | none | not declared |
+| `modulation.route-track-mixer` | none | not declared |
 
 ### Export
 
@@ -204,6 +212,10 @@ Format id `dawproject`. Writer registered: yes.
 | `context.chord-voicing` | drop |  | dropped | the DAWproject chord representation carries no voicing hint |
 | `tuning.project` | drop |  | dropped | DAWproject has no document-wide tuning statement |
 | `tuning.instrument` | drop |  | dropped | DAWproject has no per-instrument tuning statement |
+| `modulation.modulator` | drop | | dropped | not declared |
+| `modulation.macro` | drop | | dropped | not declared |
+| `modulation.route-device-param` | drop | | dropped | not declared |
+| `modulation.route-track-mixer` | drop | | dropped | not declared |
 
 ## Standard MIDI File
 
@@ -270,6 +282,10 @@ Format id `smf`. Writer registered: yes.
 | `context.chord-voicing` | none | not declared |
 | `tuning.project` | none | not declared |
 | `tuning.instrument` | none | not declared |
+| `modulation.modulator` | none | not declared |
+| `modulation.macro` | none | not declared |
+| `modulation.route-device-param` | none | not declared |
+| `modulation.route-track-mixer` | none | not declared |
 
 ### Export
 
@@ -332,6 +348,10 @@ Format id `smf`. Writer registered: yes.
 | `context.chord-voicing` | drop |  | dropped | the bounded writer does not emit chord or scale context |
 | `tuning.project` | drop |  | dropped | Standard MIDI Files have no document-wide tuning statement |
 | `tuning.instrument` | drop |  | dropped | Standard MIDI Files have no per-instrument tuning statement |
+| `modulation.modulator` | drop | | dropped | not declared |
+| `modulation.macro` | drop | | dropped | not declared |
+| `modulation.route-device-param` | drop | | dropped | not declared |
+| `modulation.route-track-mixer` | drop | | dropped | not declared |
 
 ## Adding a format
 

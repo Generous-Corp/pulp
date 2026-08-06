@@ -18,6 +18,7 @@ function(pulp_resolve_timeline_sources root output)
         json_span_reader.cpp
         media_reference_validation.cpp
         model.cpp
+        modulation_document_internal.cpp
         sequence.cpp
         sequence_context.cpp
         sequence_scene_internal.cpp
@@ -49,6 +50,7 @@ function(pulp_resolve_timeline_sources root output)
         serialize_asset_loop_decode.cpp
         serialize_automation_decode.cpp
         serialize_decode_support.cpp
+        serialize_modulation_decode.cpp
         serialize_decode.cpp
         serialize_project_decode.cpp
         serialize_command_decode.cpp

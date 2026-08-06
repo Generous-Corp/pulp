@@ -142,6 +142,33 @@ bool validate_publication_destinations(
     return true;
 }
 
+std::vector<fs::path> localized_asset_paths(
+    const pulp::view::DesignIR& ir,
+    const fs::path& output_dir) {
+    std::vector<fs::path> paths;
+    const auto append = [&](std::string_view value) {
+        if (value.empty()) return;
+        fs::path path(value);
+        if (path.is_relative()) path = output_dir / path;
+        paths.push_back(std::move(path));
+    };
+    for (const auto& asset : ir.asset_manifest.assets)
+        if (asset.local_path) append(*asset.local_path);
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            for (const char* key : {"fader_body_asset_path",
+                                    "fader_indicator_asset_path"}) {
+                if (const auto it = node.attributes.find(key);
+                    it != node.attributes.end())
+                    append(it->second);
+            }
+            for (const auto& alternate : node.alternate_frames) walk(alternate);
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(ir.root);
+    return paths;
+}
+
 bool validate_localized_asset_destinations(
     const BrowserImportCliRequest& request,
     const pulp::view::DesignIR& ir,
@@ -159,10 +186,7 @@ bool validate_localized_asset_destinations(
         protected_paths.push_back(*request.browser_interactions);
     if (!request.reference_image.empty())
         protected_paths.emplace_back(request.reference_image);
-    for (const auto& asset : ir.asset_manifest.assets) {
-        if (!asset.local_path || asset.local_path->empty()) continue;
-        auto asset_path = fs::path(*asset.local_path);
-        if (asset_path.is_relative()) asset_path = output_dir / asset_path;
+    for (const auto& asset_path : localized_asset_paths(ir, output_dir)) {
         const auto normalized_asset = normalized_destination(asset_path);
         if ((!rendered.empty() &&
              normalized_render == normalized_asset) ||
@@ -793,16 +817,12 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
             std::cerr << "Error: " << localization_error << "\n";
             return BrowserImportFailure{2};
         }
-        for (const auto& asset : design_ir.asset_manifest.assets) {
-            if (!asset.local_path || asset.local_path->empty()) continue;
-            auto asset_path = fs::path(*asset.local_path);
-            if (asset_path.is_relative()) {
-                auto output_dir = request.output_file.parent_path();
-                if (output_dir.empty()) output_dir = fs::current_path();
-                asset_path = output_dir / asset_path;
-            }
-            protected_paths.push_back(std::move(asset_path));
-        }
+        auto output_dir = request.output_file.parent_path();
+        if (output_dir.empty()) output_dir = fs::current_path();
+        auto asset_paths = localized_asset_paths(design_ir, output_dir);
+        protected_paths.insert(protected_paths.end(),
+                               std::make_move_iterator(asset_paths.begin()),
+                               std::make_move_iterator(asset_paths.end()));
     }
 
     const auto retained_proof_root =

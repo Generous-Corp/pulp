@@ -100,6 +100,9 @@ struct StructureCensus {
     std::uint64_t device_placements = 0;  ///< Device placements across all tracks.
     std::uint64_t automation_lanes = 0;   ///< Automation lanes across all tracks.
     std::uint64_t automation_points = 0;  ///< Automation points across all lanes.
+    std::uint64_t modulators = 0;         ///< Modulators across all tracks.
+    std::uint64_t macro_controls = 0;     ///< Macro controls across all tracks.
+    std::uint64_t modulation_routes = 0;  ///< Modulation routes across all tracks.
     std::uint64_t take_lanes = 0;         ///< Take lanes across all tracks.
     std::uint64_t takes = 0;              ///< Takes across all take lanes.
     std::uint64_t take_comp_segments = 0; ///< Selected comp segments across all lanes.

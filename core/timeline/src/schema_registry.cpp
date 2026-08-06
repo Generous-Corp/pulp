@@ -385,7 +385,10 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                           {"device_chain", SchemaValueKind::Array},
                           {"freeze", SchemaValueKind::Object, false},
                           {"id", SchemaValueKind::U64String},
+                          {"macros", SchemaValueKind::Array, false},
                           {"mixer", SchemaValueKind::Object, false},
+                          {"modulation_routes", SchemaValueKind::Array, false},
+                          {"modulators", SchemaValueKind::Array, false},
                           {"name", SchemaValueKind::String},
                           {"record_armed", SchemaValueKind::Boolean},
                           {"take_lanes", SchemaValueKind::Array},
@@ -398,6 +401,8 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
     track.upgrades.push_back({5, 6, {}, detail::migrate_track_v5_to_v6});
     track.upgrades.push_back({6, 7, {}, detail::migrate_track_v6_to_v7});
     track.upgrades.push_back({7, 8, {}, detail::migrate_track_v7_to_v8});
+    track.upgrades.push_back({8, 9, {}, detail::migrate_track_v8_to_v9});
+    track.downgrades.push_back({9, 8, {}, detail::migrate_track_v9_to_v8});
     track.downgrades.push_back({8, 7, {}, detail::migrate_track_v8_to_v7});
     track.downgrades.push_back({7, 6, {}, detail::migrate_track_v7_to_v6});
     track.downgrades.push_back({6, 5, {}, detail::migrate_track_v6_to_v5});
@@ -418,6 +423,21 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                               {{"parameter", SchemaValueKind::String}}));
     schemas.push_back(builtin("pulp.timeline.device_placement", SchemaDomain::Document,
                               {{"id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.macro_control", SchemaDomain::Document,
+                              {{"id", SchemaValueKind::U64String},
+                               {"name", SchemaValueKind::String},
+                               {"value_bits", SchemaValueKind::U32}}));
+    schemas.push_back(builtin("pulp.timeline.modulation_route", SchemaDomain::Document,
+                              {{"depth_bits", SchemaValueKind::U32},
+                               {"enabled", SchemaValueKind::Boolean},
+                               {"id", SchemaValueKind::U64String},
+                               {"source_id", SchemaValueKind::U64String},
+                               {"source_kind", SchemaValueKind::String},
+                               {"target", SchemaValueKind::Object}}));
+    schemas.push_back(builtin("pulp.timeline.modulator", SchemaDomain::Document,
+                              {{"id", SchemaValueKind::U64String},
+                               {"kind", SchemaValueKind::String},
+                               {"name", SchemaValueKind::String}}));
     auto take_lane = builtin("pulp.timeline.take_lane", SchemaDomain::Document,
                              {{"comp_segments", SchemaValueKind::Array},
                               {"id", SchemaValueKind::U64String},
