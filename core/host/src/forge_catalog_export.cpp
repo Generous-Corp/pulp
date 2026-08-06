@@ -120,26 +120,26 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
     add(saturator::saturator_descriptor(),
         {
             realization("tanh_adaa", saturator::make_saturator_node(saturator::Shape::tanh_soft,
-                                                                    saturator::AliasPolicy::adaa)),
+                                                       saturator::AliasPolicy::adaa)),
             realization("tanh_x2",
                         saturator::make_saturator_node(saturator::Shape::tanh_soft,
                                                        saturator::AliasPolicy::oversample_2x)),
             realization("tanh_off", saturator::make_saturator_node(saturator::Shape::tanh_soft,
-                                                                   saturator::AliasPolicy::off)),
+                                                       saturator::AliasPolicy::off)),
             realization("atan_adaa", saturator::make_saturator_node(saturator::Shape::atan_soft,
-                                                                    saturator::AliasPolicy::adaa)),
+                                                       saturator::AliasPolicy::adaa)),
             realization("atan_x2",
                         saturator::make_saturator_node(saturator::Shape::atan_soft,
                                                        saturator::AliasPolicy::oversample_2x)),
             realization("atan_off", saturator::make_saturator_node(saturator::Shape::atan_soft,
-                                                                   saturator::AliasPolicy::off)),
+                                                       saturator::AliasPolicy::off)),
             realization("cubic_adaa", saturator::make_saturator_node(saturator::Shape::cubic_soft,
-                                                                     saturator::AliasPolicy::adaa)),
+                                                       saturator::AliasPolicy::adaa)),
             realization("cubic_x2",
                         saturator::make_saturator_node(saturator::Shape::cubic_soft,
                                                        saturator::AliasPolicy::oversample_2x)),
             realization("cubic_off", saturator::make_saturator_node(saturator::Shape::cubic_soft,
-                                                                    saturator::AliasPolicy::off)),
+                                                       saturator::AliasPolicy::off)),
             realization("sinh_arc_adaa",
                         saturator::make_saturator_node(saturator::Shape::sinh_arc,
                                                        saturator::AliasPolicy::adaa)),
@@ -165,9 +165,9 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
     add(character_delay::character_delay_descriptor(),
         {
             realization("clean", character_delay::make_character_delay_node(
-                                     character_delay::Character::clean)),
+                            character_delay::Character::clean)),
             realization("vintage", character_delay::make_character_delay_node(
-                                       character_delay::Character::vintage_digital)),
+                            character_delay::Character::vintage_digital)),
             realization("tape",
                         character_delay::make_character_delay_node(
                             character_delay::Character::tape, character_delay::TapeTier::standard)),
@@ -177,35 +177,35 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
             realization(
                 "bbd", character_delay::make_character_delay_node(character_delay::Character::bbd)),
             realization("diffusion", character_delay::make_character_delay_node(
-                                         character_delay::Character::diffusion)),
+                            character_delay::Character::diffusion)),
         });
 
     add(distortion::distortion_descriptor(),
         {
             realization("to_ground_x1",
                         distortion::make_distortion_node(distortion::Topology::to_ground,
-                                                         distortion::OversampleTier::x1)),
+                            distortion::OversampleTier::x1)),
             realization("to_ground_x2",
                         distortion::make_distortion_node(distortion::Topology::to_ground,
-                                                         distortion::OversampleTier::x2)),
+                            distortion::OversampleTier::x2)),
             realization("to_ground_x4",
                         distortion::make_distortion_node(distortion::Topology::to_ground,
-                                                         distortion::OversampleTier::x4)),
+                            distortion::OversampleTier::x4)),
             realization("to_ground_x8",
                         distortion::make_distortion_node(distortion::Topology::to_ground,
-                                                         distortion::OversampleTier::x8)),
+                            distortion::OversampleTier::x8)),
             realization("in_loop_x1",
                         distortion::make_distortion_node(distortion::Topology::in_loop,
-                                                         distortion::OversampleTier::x1)),
+                            distortion::OversampleTier::x1)),
             realization("in_loop_x2",
                         distortion::make_distortion_node(distortion::Topology::in_loop,
-                                                         distortion::OversampleTier::x2)),
+                            distortion::OversampleTier::x2)),
             realization("in_loop_x4",
                         distortion::make_distortion_node(distortion::Topology::in_loop,
-                                                         distortion::OversampleTier::x4)),
+                            distortion::OversampleTier::x4)),
             realization("in_loop_x8",
                         distortion::make_distortion_node(distortion::Topology::in_loop,
-                                                         distortion::OversampleTier::x8)),
+                            distortion::OversampleTier::x8)),
         });
 
     const auto add_drum = [&add](forge_drum::EngineId engine) {
@@ -256,42 +256,42 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
     add(modulation::chorus::chorus_descriptor(),
         {
             realization("ce2_clean", modulation::chorus::make_chorus_node(
-                                         modulation::chorus::Voicing::ce2,
-                                         modulation::chorus::JunoMode::mode_I, false)),
+                            modulation::chorus::Voicing::ce2,
+                            modulation::chorus::JunoMode::mode_I, false)),
             realization("ce2_bbd", modulation::chorus::make_chorus_node(
-                                       modulation::chorus::Voicing::ce2,
-                                       modulation::chorus::JunoMode::mode_I, true)),
+                            modulation::chorus::Voicing::ce2,
+                            modulation::chorus::JunoMode::mode_I, true)),
             realization("juno_i_clean", modulation::chorus::make_chorus_node(
-                                            modulation::chorus::Voicing::juno_ensemble,
-                                            modulation::chorus::JunoMode::mode_I, false)),
+                            modulation::chorus::Voicing::juno_ensemble,
+                            modulation::chorus::JunoMode::mode_I, false)),
             realization("juno_i_bbd", modulation::chorus::make_chorus_node(
-                                          modulation::chorus::Voicing::juno_ensemble,
-                                          modulation::chorus::JunoMode::mode_I, true)),
+                            modulation::chorus::Voicing::juno_ensemble,
+                            modulation::chorus::JunoMode::mode_I, true)),
             realization("juno_ii_clean", modulation::chorus::make_chorus_node(
-                                             modulation::chorus::Voicing::juno_ensemble,
-                                             modulation::chorus::JunoMode::mode_II, false)),
+                            modulation::chorus::Voicing::juno_ensemble,
+                            modulation::chorus::JunoMode::mode_II, false)),
             realization("juno_ii_bbd", modulation::chorus::make_chorus_node(
-                                           modulation::chorus::Voicing::juno_ensemble,
-                                           modulation::chorus::JunoMode::mode_II, true)),
+                            modulation::chorus::Voicing::juno_ensemble,
+                            modulation::chorus::JunoMode::mode_II, true)),
             realization("juno_i_ii_clean",
                         modulation::chorus::make_chorus_node(
                             modulation::chorus::Voicing::juno_ensemble,
                             modulation::chorus::JunoMode::mode_I_plus_II, false)),
             realization("juno_i_ii_bbd", modulation::chorus::make_chorus_node(
-                                             modulation::chorus::Voicing::juno_ensemble,
-                                             modulation::chorus::JunoMode::mode_I_plus_II, true)),
+                            modulation::chorus::Voicing::juno_ensemble,
+                            modulation::chorus::JunoMode::mode_I_plus_II, true)),
             realization("dimension_d_clean", modulation::chorus::make_chorus_node(
-                                                 modulation::chorus::Voicing::dimension_d,
-                                                 modulation::chorus::JunoMode::mode_I, false)),
+                            modulation::chorus::Voicing::dimension_d,
+                            modulation::chorus::JunoMode::mode_I, false)),
             realization("dimension_d_bbd", modulation::chorus::make_chorus_node(
-                                               modulation::chorus::Voicing::dimension_d,
-                                               modulation::chorus::JunoMode::mode_I, true)),
+                            modulation::chorus::Voicing::dimension_d,
+                            modulation::chorus::JunoMode::mode_I, true)),
             realization("tri_chorus_clean", modulation::chorus::make_chorus_node(
-                                                modulation::chorus::Voicing::tri_chorus,
-                                                modulation::chorus::JunoMode::mode_I, false)),
+                            modulation::chorus::Voicing::tri_chorus,
+                            modulation::chorus::JunoMode::mode_I, false)),
             realization("tri_chorus_bbd", modulation::chorus::make_chorus_node(
-                                              modulation::chorus::Voicing::tri_chorus,
-                                              modulation::chorus::JunoMode::mode_I, true)),
+                            modulation::chorus::Voicing::tri_chorus,
+                            modulation::chorus::JunoMode::mode_I, true)),
         });
     add(modulation::phaser::phaser_descriptor(),
         {
@@ -318,9 +318,9 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
             realization("classic",
                         modulation::flanger::make_flanger_node(modulation::flanger::Mode::classic)),
             realization("through_zero", modulation::flanger::make_flanger_node(
-                                            modulation::flanger::Mode::through_zero)),
+                            modulation::flanger::Mode::through_zero)),
             realization("barberpole", modulation::flanger::make_flanger_node(
-                                          modulation::flanger::Mode::barberpole)),
+                            modulation::flanger::Mode::barberpole)),
             realization("through_zero_1ms", modulation::flanger::make_flanger_node(
                                                 modulation::flanger::Mode::through_zero, 1.0)),
             realization("through_zero_2ms", modulation::flanger::make_flanger_node(
@@ -396,9 +396,9 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
     add(sequencing::cartesian::descriptor(),
         {
             realization("cartesian", sequencing::cartesian::make_cartesian_walk_node(
-                                         sequencing::cartesian::default_grid(), false)),
+                            sequencing::cartesian::default_grid(), false)),
             realization("row_major", sequencing::cartesian::make_cartesian_walk_node(
-                                         sequencing::cartesian::default_grid(), true)),
+                            sequencing::cartesian::default_grid(), true)),
         });
     add(sequencing::rungler::descriptor(),
         {realization("default", sequencing::rungler::make_rungler_node())});
@@ -424,18 +424,18 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
     add(synthesis::additive::descriptor(),
         {
             realization("organ", synthesis::additive::make_additive_bank_node(
-                                     synthesis::additive::Voice::organ)),
+                            synthesis::additive::Voice::organ)),
             realization("bell", synthesis::additive::make_additive_bank_node(
-                                    synthesis::additive::Voice::bell)),
+                            synthesis::additive::Voice::bell)),
         });
     add(synthesis::vocoder::descriptor(),
         {realization("default", synthesis::vocoder::make_vocoder_node())});
     add(synthesis::cyclic::descriptor(),
         {
             realization("short", synthesis::cyclic::make_cyclic_stretch_node(
-                                     synthesis::cyclic::Regime::short_frame)),
+                            synthesis::cyclic::Regime::short_frame)),
             realization("long", synthesis::cyclic::make_cyclic_stretch_node(
-                                    synthesis::cyclic::Regime::long_frame)),
+                            synthesis::cyclic::Regime::long_frame)),
         });
     add(synthesis::granular::descriptor(),
         {realization("default", synthesis::granular::make_granular_node())});

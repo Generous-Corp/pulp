@@ -19,7 +19,6 @@ bool has_fault(const std::vector<ForgeAuditFinding>& findings, ForgeAuditFault f
     return std::any_of(findings.begin(), findings.end(),
                        [fault](const auto& f) { return f.fault == fault; });
 }
-
 std::string render(const std::vector<ForgeAuditFinding>& findings) {
     std::string out;
     for (const auto& f : findings)
@@ -44,18 +43,19 @@ std::set<std::string> realization_modes(const ForgeCatalogExportNode& node) {
 
 const ForgeCatalogExportRealization& require_realization(const ForgeCatalogExportNode& node,
                                                          std::string_view mode) {
-    const auto found =
-        std::find_if(node.realizations.begin(), node.realizations.end(),
-                     [mode](const auto& realization) { return realization.mode == mode; });
+    const auto found = std::find_if(node.realizations.begin(), node.realizations.end(),
+                                    [mode](const auto& realization) {
+                                        return realization.mode == mode;
+                                    });
     REQUIRE(found != node.realizations.end());
     return *found;
 }
 
-const CustomNodeBakedParam& require_baked_param(const ForgeCatalogExportRealization& realization,
-                                                pulp::state::ParamID id) {
-    const auto found =
-        std::find_if(realization.baked_params.begin(), realization.baked_params.end(),
-                     [id](const auto& param) { return param.id == id; });
+const CustomNodeBakedParam& require_baked_param(
+    const ForgeCatalogExportRealization& realization, pulp::state::ParamID id) {
+    const auto found = std::find_if(realization.baked_params.begin(),
+                                    realization.baked_params.end(),
+                                    [id](const auto& param) { return param.id == id; });
     REQUIRE(found != realization.baked_params.end());
     return *found;
 }
@@ -377,12 +377,12 @@ TEST_CASE("dynamic Forge families export every supported finite realization", "[
     const auto& flanger = require_node(nodes, "flanger");
     const auto* depth = find_param(flanger.descriptor, "depth_ms");
     REQUIRE(depth != nullptr);
-    const auto& one_ms =
-        require_baked_param(require_realization(flanger, "through_zero_1ms"), depth->id);
+    const auto& one_ms = require_baked_param(require_realization(flanger, "through_zero_1ms"),
+                                             depth->id);
     REQUIRE(one_ms.max_value == 1.0f);
     REQUIRE(one_ms.default_value == 1.0f);
-    const auto& two_ms =
-        require_baked_param(require_realization(flanger, "through_zero_2ms"), depth->id);
+    const auto& two_ms = require_baked_param(require_realization(flanger, "through_zero_2ms"),
+                                             depth->id);
     REQUIRE(two_ms.max_value == 2.0f);
     REQUIRE(two_ms.default_value == 1.5f);
 }

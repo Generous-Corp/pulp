@@ -17,7 +17,12 @@
 
 namespace pulp::signal {
 
-template <typename SampleType = float, std::size_t MaxChannels = 8> class TruePeakLimiterT {
+template <typename SampleType = float, std::size_t MaxChannels = 2> class TruePeakLimiterT {
+    struct ScaledPeak {
+        double mantissa = 0.0;
+        int exponent = 0;
+    };
+
   public:
     static_assert(std::is_floating_point_v<SampleType>);
     static_assert(MaxChannels > 0);
@@ -32,7 +37,7 @@ template <typename SampleType = float, std::size_t MaxChannels = 8> class TruePe
     };
 
     static constexpr std::size_t interpolation_factor() noexcept {
-        return 4;
+        return 8;
     }
     static constexpr std::size_t interpolation_taps() noexcept {
         return 129;
@@ -41,13 +46,21 @@ template <typename SampleType = float, std::size_t MaxChannels = 8> class TruePe
         return static_cast<int>((interpolation_taps() - 1) / 2);
     }
     static constexpr double detector_guard_db() noexcept {
-        return 0.20;
+        return 0.50;
     }
     static constexpr double maximum_supported_sample_rate() noexcept {
         return 384000.0;
     }
     static constexpr double maximum_lookahead_ms() noexcept {
         return 20.0;
+    }
+    static constexpr std::size_t maximum_supported_channels() noexcept {
+        return MaxChannels;
+    }
+    static constexpr std::size_t detector_mac_count_per_channel() noexcept {
+        // Phase zero is the exact centre sample. Only the seven fractional
+        // phases require FIR dot products.
+        return 1 + (interpolation_factor() - 1) * interpolation_taps();
     }
 
     bool prepare(double sample_rate, std::size_t channels, Params params = {}) {
@@ -64,7 +77,8 @@ template <typename SampleType = float, std::size_t MaxChannels = 8> class TruePe
         latency_samples_ = detector_latency_samples() + lookahead_samples_;
         delay_.assign((static_cast<std::size_t>(latency_samples_) + 1) * channels_, SampleType{0});
         for (std::size_t channel = 0; channel < channels_; ++channel) {
-            peak_values_[channel].assign(static_cast<std::size_t>(lookahead_samples_) + 2, 0.0);
+            peak_values_[channel].assign(static_cast<std::size_t>(lookahead_samples_) + 2,
+                                         ScaledPeak{});
             peak_indices_[channel].assign(static_cast<std::size_t>(lookahead_samples_) + 2, 0);
         }
         design_interpolator();
@@ -86,7 +100,6 @@ template <typename SampleType = float, std::size_t MaxChannels = 8> class TruePe
             queue_head_[channel] = 0;
             queue_size_[channel] = 0;
             gain_[channel] = 1.0;
-            gain_reduction_db_[channel] = 0.0;
         }
     }
 
@@ -109,6 +122,23 @@ template <typename SampleType = float, std::size_t MaxChannels = 8> class TruePe
             return true;
         params_.release_ms = clamped;
         update_control_coefficients();
+        return true;
+    }
+
+    /// Install already-computed control coefficients without calling libm.
+    /// Intended for sample-accurate automation whose lookup table was built on
+    /// the control thread. The dB/ms values remain the public control state.
+    bool set_realtime_control_coefficients(double ceiling_dbtp, double safe_ceiling_linear,
+                                           double release_ms, double release_retain) noexcept {
+        if (!std::isfinite(ceiling_dbtp) || !std::isfinite(safe_ceiling_linear) ||
+            !std::isfinite(release_ms) || !std::isfinite(release_retain) || ceiling_dbtp < -24.0 ||
+            ceiling_dbtp > 0.0 || safe_ceiling_linear <= 0.0 || safe_ceiling_linear > 1.0 ||
+            release_ms < 5.0 || release_ms > 2000.0 || release_retain < 0.0 || release_retain > 1.0)
+            return false;
+        params_.ceiling_dbtp = ceiling_dbtp;
+        params_.release_ms = release_ms;
+        safe_ceiling_ = safe_ceiling_linear;
+        release_retain_ = release_retain;
         return true;
     }
 
@@ -144,7 +174,8 @@ template <typename SampleType = float, std::size_t MaxChannels = 8> class TruePe
     double gain_reduction_db(std::size_t channel = 0) const noexcept {
         if (!prepared_ || channel >= channels_)
             return 0.0;
-        return gain_reduction_db_[params_.channel_link == ChannelLink::linked ? 0 : channel];
+        const double gain = gain_[params_.channel_link == ChannelLink::linked ? 0 : channel];
+        return gain > 0.0 ? -20.0 * std::log10(gain) : std::numeric_limits<double>::infinity();
     }
 
     /// Reconstruct the four detector phases for one channel without changing
@@ -170,19 +201,22 @@ template <typename SampleType = float, std::size_t MaxChannels = 8> class TruePe
             }
         }
 
-        std::array<double, MaxChannels> detected{};
+        std::array<ScaledPeak, MaxChannels> detected{};
         for (std::size_t channel = 0; channel < channels_; ++channel) {
             histories_[channel][history_write_] = static_cast<double>(input[channel]);
+            histories_[channel][history_write_ + interpolation_taps()] =
+                static_cast<double>(input[channel]);
             detected[channel] = interpolated_peak(channel);
         }
         if (++history_write_ == interpolation_taps())
             history_write_ = 0;
 
         if (params_.channel_link == ChannelLink::linked) {
-            const double peak = *std::max_element(detected.begin(), detected.begin() + channels_);
+            ScaledPeak peak{};
+            for (std::size_t channel = 0; channel < channels_; ++channel)
+                if (peak_less(peak, detected[channel]))
+                    peak = detected[channel];
             update_gain(0, peak);
-            for (std::size_t channel = 1; channel < channels_; ++channel)
-                gain_reduction_db_[channel] = gain_reduction_db_[0];
         } else {
             for (std::size_t channel = 0; channel < channels_; ++channel)
                 update_gain(channel, detected[channel]);
@@ -273,27 +307,72 @@ template <typename SampleType = float, std::size_t MaxChannels = 8> class TruePe
         }
     }
 
-    double interpolated_peak(std::size_t channel) const noexcept {
-        double peak = 0.0;
-        for (std::size_t phase = 0; phase < interpolation_factor(); ++phase) {
-            double value = 0.0;
-            for (std::size_t tap = 0; tap < interpolation_taps(); ++tap) {
-                const std::size_t index =
-                    (history_write_ + interpolation_taps() - tap) % interpolation_taps();
-                value += interpolation_[phase][tap] * histories_[channel][index];
-            }
-            peak = std::max(peak, std::abs(value));
-        }
-        return peak;
+    static bool peak_less(const ScaledPeak& lhs, const ScaledPeak& rhs) noexcept {
+        if (lhs.mantissa == 0.0)
+            return rhs.mantissa != 0.0;
+        if (rhs.mantissa == 0.0)
+            return false;
+        return lhs.exponent != rhs.exponent ? lhs.exponent < rhs.exponent
+                                            : lhs.mantissa < rhs.mantissa;
     }
 
-    void update_gain(std::size_t lane, double peak) noexcept {
+    static ScaledPeak scaled_peak(double mantissa, int exponent) noexcept {
+        if (!(mantissa > 0.0))
+            return {};
+        int adjustment = 0;
+        mantissa = std::frexp(mantissa, &adjustment);
+        return {mantissa, exponent + adjustment};
+    }
+
+    ScaledPeak interpolated_peak(std::size_t channel) const noexcept {
+        const auto* chronological = histories_[channel].data() + history_write_ + 1;
+        double scale = 0.0;
+        for (std::size_t tap = 0; tap < interpolation_taps(); ++tap)
+            scale = std::max(scale, std::abs(chronological[tap]));
+        if (scale == 0.0)
+            return {};
+
+        // Phase zero is the exact centre sample. Fractional-phase coefficient
+        // rows are stored oldest-to-newest so these contiguous loops vectorize.
+        double normalized_peak =
+            std::abs(chronological[static_cast<std::size_t>(detector_latency_samples())]) / scale;
+        const bool reciprocal_is_finite = scale >= std::numeric_limits<double>::min();
+        const double inverse_scale = reciprocal_is_finite ? 1.0 / scale : 0.0;
+        for (std::size_t phase = 1; phase < interpolation_factor(); ++phase) {
+            double value = 0.0;
+            for (std::size_t tap = 0; tap < interpolation_taps(); ++tap) {
+                const double normalized = reciprocal_is_finite ? chronological[tap] * inverse_scale
+                                                               : chronological[tap] / scale;
+                value += interpolation_[phase][interpolation_taps() - 1 - tap] * normalized;
+            }
+            normalized_peak = std::max(normalized_peak, std::abs(value));
+        }
+
+        int scale_exponent = 0;
+        const double scale_mantissa = std::frexp(scale, &scale_exponent);
+        return scaled_peak(scale_mantissa * normalized_peak, scale_exponent);
+    }
+
+    double required_gain(const ScaledPeak& peak) const noexcept {
+        if (peak.mantissa == 0.0)
+            return 1.0;
+        int ceiling_exponent = 0;
+        const double ceiling_mantissa = std::frexp(safe_ceiling_, &ceiling_exponent);
+        const int shift = ceiling_exponent - peak.exponent;
+        if (shift < std::numeric_limits<double>::min_exponent - 2)
+            return 0.0;
+        if (shift > 1)
+            return 1.0;
+        return std::clamp(std::ldexp(ceiling_mantissa / peak.mantissa, shift), 0.0, 1.0);
+    }
+
+    void update_gain(std::size_t lane, ScaledPeak peak) noexcept {
         auto& values = peak_values_[lane];
         auto& indices = peak_indices_[lane];
         const std::size_t capacity = values.size();
         while (queue_size_[lane] > 0) {
             const std::size_t back = (queue_head_[lane] + queue_size_[lane] - 1) % capacity;
-            if (values[back] > peak)
+            if (peak_less(peak, values[back]))
                 break;
             --queue_size_[lane];
         }
@@ -310,15 +389,15 @@ template <typename SampleType = float, std::size_t MaxChannels = 8> class TruePe
             --queue_size_[lane];
         }
 
-        const double future_peak = queue_size_[lane] == 0 ? 0.0 : values[queue_head_[lane]];
-        const double required = future_peak > safe_ceiling_ ? safe_ceiling_ / future_peak : 1.0;
+        const ScaledPeak future_peak =
+            queue_size_[lane] == 0 ? ScaledPeak{} : values[queue_head_[lane]];
+        const double required = required_gain(future_peak);
         if (required < gain_[lane]) {
             gain_[lane] = required;
         } else {
             gain_[lane] = required + release_retain_ * (gain_[lane] - required);
         }
-        gain_[lane] = std::clamp(gain_[lane], std::numeric_limits<double>::min(), 1.0);
-        gain_reduction_db_[lane] = -20.0 * std::log10(gain_[lane]);
+        gain_[lane] = std::clamp(gain_[lane], 0.0, 1.0);
     }
 
     void reset_after_fault() noexcept {
@@ -345,14 +424,13 @@ template <typename SampleType = float, std::size_t MaxChannels = 8> class TruePe
     std::size_t history_write_ = 0;
     std::size_t delay_write_frame_ = 0;
     std::array<std::array<double, interpolation_taps()>, interpolation_factor()> interpolation_{};
-    std::array<std::array<double, interpolation_taps()>, MaxChannels> histories_{};
+    std::array<std::array<double, interpolation_taps() * 2>, MaxChannels> histories_{};
     std::vector<SampleType> delay_{};
-    std::array<std::vector<double>, MaxChannels> peak_values_{};
+    std::array<std::vector<ScaledPeak>, MaxChannels> peak_values_{};
     std::array<std::vector<std::uint64_t>, MaxChannels> peak_indices_{};
     std::array<std::size_t, MaxChannels> queue_head_{};
     std::array<std::size_t, MaxChannels> queue_size_{};
     std::array<double, MaxChannels> gain_{};
-    std::array<double, MaxChannels> gain_reduction_db_{};
 };
 
 using TruePeakLimiter = TruePeakLimiterT<float>;
