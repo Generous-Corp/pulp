@@ -221,16 +221,22 @@ export function semanticExpression(snapshotClickableIndexes = []) {
       let { left, top, width, height } = box;
       if (!(width > 0) && !(height > 0)) return null;
       if (!(width > 0) || !(height > 0)) {
-        const stroke = strokePaintedExtent(marked);
-        // No stroke to recover means there is genuinely nothing painted across
-        // that axis. Refuse rather than invent a width: a pointer stamped at a
-        // guessed thickness is worse than one the design never declared.
-        if (!(stroke > 0)) return null;
         // Grown about the line's own centre, so the box still describes what is
         // painted AND its centroid -- which is what the radial projection
         // downstream actually reads -- is left where it was.
-        if (!(width > 0)) { left -= stroke / 2; width = stroke; }
-        if (!(height > 0)) { top -= stroke / 2; height = stroke; }
+        //
+        // A stroke that cannot be recovered leaves the axis at zero rather than
+        // dropping the box. The consumer places such a pointer correctly from
+        // its radial extent and falls back to a default THICKNESS, which is a
+        // thin pointer in the right place. Dropping it instead costs the whole
+        // sprite lane: with no geometry the knob keeps its captured body, the
+        // designed-body painter is reinstalled, and it comes back wearing the
+        // value arc and track ring over a face whose pointer was never erased.
+        const stroke = strokePaintedExtent(marked);
+        if (stroke > 0) {
+          if (!(width > 0)) { left -= stroke / 2; width = stroke; }
+          if (!(height > 0)) { top -= stroke / 2; height = stroke; }
+        }
       }
       return {
         left: left + window.scrollX,

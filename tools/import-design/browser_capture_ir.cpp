@@ -233,7 +233,20 @@ std::optional<DeclaredPointer> pointer_fractions(double dial_left,
                                                  double ind_width,
                                                  double ind_height) {
     const double half = std::min(dial_width, dial_height) * 0.5;
-    if (!(half > 0.0) || !(ind_width > 0.0) || !(ind_height > 0.0))
+    // Reject a box with NO extent on EITHER axis -- that carries no direction
+    // to sweep along. A box with one zero axis is a different thing and must
+    // survive: an SVG <line> or <path> drawn straight up, down, left or right
+    // reports zero extent across its own axis, because a client rect excludes
+    // stroke. The capture recovers the painted width from the stroke where it
+    // can, but where it cannot -- a shape with no stroke to read -- the right
+    // answer is a correctly PLACED pointer of defaulted thickness, not a
+    // dropped one. `&&` rather than `||` is the whole difference.
+    //
+    // This predicate exists twice, once here and once as the capture's own
+    // guard in browser_capture/semantics.mjs. They are in different languages,
+    // so neither grep finds the other; relaxing one alone leaves the other
+    // refusing the same box, one layer down and just as silently.
+    if (!(half > 0.0) || (!(ind_width > 0.0) && !(ind_height > 0.0)))
         return std::nullopt;
     const double cx = dial_left + dial_width * 0.5;
     const double cy = dial_top + dial_height * 0.5;

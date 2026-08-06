@@ -774,6 +774,132 @@ TEST_CASE("a lowered control carries what the binding-helper gate requires",
     REQUIRE(anchors.size() == 2);
 }
 
+TEST_CASE("a zero-width pointer box is placed, not dropped",
+          "[import-design][browser-capture][ir][knob][indicator]") {
+    // The stroke could not be recovered, so the capture forwards the client
+    // rect as it stands: zero across the pointer's own axis. The projection
+    // must still place it.
+    //
+    // Refusing here is not a smaller failure than a wrong width, it is a much
+    // larger one: with no knob_ind_* the sprite pass never stamps asset_path,
+    // so the knob keeps its captured body, apply_designed_body_skin reinstalls
+    // DesignedControlPainter, and it returns wearing the value arc and the
+    // track ring over a face whose baked pointer was never erased. That is the
+    // composited chrome this lane exists to remove.
+    //
+    // The consumer refuses a zero knob_ind_w and keeps its skin default
+    // thickness (design_import_native_common.cpp), so the result is a thin
+    // pointer in the RIGHT PLACE at the right angle -- radial extent, colour
+    // and sweep all still come from the design.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"knob","binding_status":"bound","name":"bare",
+         "bounds":{"left":8,"top":20,"width":96,"height":96},
+         "paint_bounds":{"left":8,"top":20,"width":96,"height":96},
+         "indicator_bounds":{"left":56,"top":30,"width":0,"height":38},
+         "indicator_color":"rgb(255, 255, 255)",
+         "data_pulp":{"param":"bare"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    INFO("lowering error: " << result.error);
+    REQUIRE(result);
+
+    const pulp::view::IRNode* found = nullptr;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            const auto binding = node.attributes.find("binding");
+            if (binding != node.attributes.end() && binding->second == "bare")
+                found = &node;
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+    REQUIRE(found != nullptr);
+
+    const auto& bare = found->attributes;
+    // Placed: the radial extent survives even though the width did not.
+    REQUIRE(bare.count("knob_ind_r_out") == 1);
+    CHECK(std::stof(bare.at("knob_ind_r_in")) ==
+          Catch::Approx(0.0f).margin(0.001f));
+    CHECK(std::stof(bare.at("knob_ind_r_out")) ==
+          Catch::Approx(0.79167f).margin(0.001f));
+    CHECK(std::stof(bare.at("knob_ind_w")) ==
+          Catch::Approx(0.0f).margin(0.001f));
+    // And it stays on the sprite lane, which is the part that keeps the value
+    // arc and the track ring off the design's own face.
+    CHECK(bare.count("browser_sprite_crop_px") == 1);
+    CHECK(bare.count("browser_sprite_indicator_px") == 1);
+}
+
+TEST_CASE("a pointer box with no extent at all is still refused",
+          "[import-design][browser-capture][ir][knob][indicator]") {
+    // The other side of the same guard. A 0x0 box genuinely carries no
+    // direction, so there is nothing to place and refusing is right -- this
+    // pins that relaxing the zero-AXIS case did not relax the empty-box case
+    // with it.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"knob","binding_status":"bound","name":"empty",
+         "bounds":{"left":8,"top":20,"width":96,"height":96},
+         "paint_bounds":{"left":8,"top":20,"width":96,"height":96},
+         "indicator_bounds":{"left":56,"top":30,"width":0,"height":0},
+         "data_pulp":{"param":"empty"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    INFO("lowering error: " << result.error);
+    REQUIRE(result);
+
+    const pulp::view::IRNode* found = nullptr;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            const auto binding = node.attributes.find("binding");
+            if (binding != node.attributes.end() && binding->second == "empty")
+                found = &node;
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+    REQUIRE(found != nullptr);
+    CHECK(found->attributes.count("knob_ind_r_out") == 0);
+    CHECK(found->attributes.count("knob_ind_w") == 0);
+}
+
 TEST_CASE("a pointer aimed straight up projects to a hairline, not a slab",
           "[import-design][browser-capture][ir][knob][indicator]") {
     // Twelve o'clock, which is where every centred bipolar parameter rests.
