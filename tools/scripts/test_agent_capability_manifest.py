@@ -57,6 +57,18 @@ def expect_problem(problems: list[str], needle: str) -> None:
 def exercise_manifest_mutations(canonical: dict) -> int:
     checks = 0
 
+    for document, hidden_schema in (
+        ({}, {"properties": {"absent": {"unsupportedKeyword": True}}}),
+        ([], {"items": {"unsupportedKeyword": True}}),
+        ({}, {"additionalProperties": {"unsupportedKeyword": True}}),
+    ):
+        try:
+            json_schema_lite.validate(document, hidden_schema)
+        except json_schema_lite.UnsupportedKeyword:
+            checks += 1
+        else:
+            raise AssertionError("unsupported keyword escaped schema preflight")
+
     assert manifest._minimal_target_for_include("pulp/signal/fft_backend.hpp") == (
         "Pulp::signal-fft-backend"
     )
@@ -910,6 +922,9 @@ def exercise_compatibility(canonical: dict) -> int:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     header_projection = module.scan_headers()
+    assert list(header_projection) == sorted(header_projection), (
+        "signal vocabulary projection depends on filesystem traversal order"
+    )
     expected_json = json.dumps(header_projection, indent=2) + "\n"
     legacy = subprocess.run(
         [sys.executable, str(vocabulary_tool), "--json"],

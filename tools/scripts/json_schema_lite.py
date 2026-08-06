@@ -90,30 +90,59 @@ def validate(document: Any, schema: Any, path: str = "$") -> list[str]:
     Raises `UnsupportedKeyword` if the schema uses a keyword outside the
     documented subset — a loud failure, never a silent skip.
     """
-    if schema is True:
-        return []
-    if schema is False:
-        return [f"{path}: schema forbids any value here"]
+    _preflight_schema(schema, path)
+    return _validate(document, schema, path)
+
+
+def _preflight_schema(schema: Any, path: str) -> None:
+    """Reject unsupported schema constructs independent of instance shape."""
+    if isinstance(schema, bool):
+        return
     if not isinstance(schema, dict):
         raise UnsupportedKeyword(f"{path}: schema must be an object or boolean")
 
     for key in schema:
-        if key in _ANNOTATIONS or key in _SUPPORTED:
-            continue
-        raise UnsupportedKeyword(
-            f"{path}: schema keyword {key!r} is not implemented by "
-            "json_schema_lite. Implement it (and test it) or express the "
-            "constraint with a supported keyword — do not leave it "
-            "unchecked."
-        )
+        if key not in _ANNOTATIONS and key not in _SUPPORTED:
+            raise UnsupportedKeyword(
+                f"{path}: schema keyword {key!r} is not implemented by "
+                "json_schema_lite. Implement it (and test it) or express the "
+                "constraint with a supported keyword — do not leave it "
+                "unchecked."
+            )
 
+    if "type" in schema:
+        names = schema["type"]
+        names = [names] if isinstance(names, str) else list(names)
+        for name in names:
+            if name not in _TYPES and name not in {"integer", "number"}:
+                raise UnsupportedKeyword(f"{path}: unknown type name: {name!r}")
+
+    for key, child in schema.get("properties", {}).items():
+        _preflight_schema(child, f"{path}.properties[{key!r}]")
+    if "items" in schema:
+        _preflight_schema(schema["items"], f"{path}.items")
+    if "propertyNames" in schema:
+        _preflight_schema(schema["propertyNames"], f"{path}.propertyNames")
+    if "additionalProperties" in schema:
+        _preflight_schema(
+            schema["additionalProperties"], f"{path}.additionalProperties"
+        )
+    for index, branch in enumerate(schema.get("oneOf", [])):
+        _preflight_schema(branch, f"{path}.oneOf[{index}]")
+
+
+def _validate(document: Any, schema: Any, path: str) -> list[str]:
+    if schema is True:
+        return []
+    if schema is False:
+        return [f"{path}: schema forbids any value here"]
     errors: list[str] = []
 
     if "oneOf" in schema:
         matches = [
             branch
             for branch in schema["oneOf"]
-            if not validate(document, branch, path)
+            if not _validate(document, branch, path)
         ]
         if len(matches) != 1:
             errors.append(
@@ -182,7 +211,7 @@ def _validate_array(document: list, schema: dict, path: str) -> list[str]:
         errors.append(f"{path}: array items are not unique")
     if "items" in schema:
         for i, item in enumerate(document):
-            errors.extend(validate(item, schema["items"], f"{path}[{i}]"))
+            errors.extend(_validate(item, schema["items"], f"{path}[{i}]"))
     return errors
 
 
@@ -220,14 +249,14 @@ def _validate_object(document: dict, schema: dict, path: str) -> list[str]:
     for key, value in document.items():
         child = f"{path}.{key}"
         if "propertyNames" in schema:
-            errors.extend(validate(key, schema["propertyNames"], f"{child} (name)"))
+            errors.extend(_validate(key, schema["propertyNames"], f"{child} (name)"))
         if key in props:
-            errors.extend(validate(value, props[key], child))
+            errors.extend(_validate(value, props[key], child))
             continue
         if "additionalProperties" in schema:
             extra = schema["additionalProperties"]
             if extra is False:
                 errors.append(f"{path}: unexpected property {key!r}")
             else:
-                errors.extend(validate(value, extra, child))
+                errors.extend(_validate(value, extra, child))
     return errors

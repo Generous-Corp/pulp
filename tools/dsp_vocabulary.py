@@ -121,7 +121,11 @@ def scan_headers():
                     classes.append({"class": cls, "methods": meth})
             if classes:
                 found[rel] = classes
-    return found
+    # os.walk() preserves the filesystem's directory enumeration order, which
+    # differs between filesystems (for example APFS and ext4).  This mapping is
+    # serialized into the checked agent-capability manifest, so make its order
+    # source-derived rather than environment-derived.
+    return {relative: found[relative] for relative in sorted(found)}
 
 
 def scan():

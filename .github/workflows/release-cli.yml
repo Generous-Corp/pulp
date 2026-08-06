@@ -957,21 +957,6 @@ jobs:
           # build-sdk on macOS is a symlink to build (CLI was built with
           # WebView=ON there).
           cmake --install build-sdk --prefix sdk-staging --config Release
-          if [ -z "$SOURCE_REF" ]; then
-            # The current positive release marker must ship with the current
-            # fail-closed consumer validator. Historical tag copies recognize
-            # only development markers and reject an official SDK at
-            # find_package(Pulp) time.
-            install -m 0644 "$PULP_SDK_PROVENANCE_CMAKE" \
-              sdk-staging/lib/cmake/Pulp/PulpSdkProvenance.cmake
-            python3 "$PULP_SDK_PROVENANCE_HELPER" stamp \
-              --prefix sdk-staging \
-              --build-dir build-sdk \
-              --source-dir . \
-              --release-tag "$RELEASE_TAG" \
-              --source-sha "$(git rev-parse HEAD)" \
-              --platform "${{ matrix.platform }}"
-          fi
           test -f sdk-staging/lib/libpulp-view.a
           test -f sdk-staging/lib/libpulp-view-core.a
           # CMake rewrites install RPATHs while copying executables into the SDK.
@@ -981,6 +966,20 @@ jobs:
           # only the standalone CLI archive was re-signed after its rewrite.
           if [[ "$MATRIX_PLATFORM" == darwin-* ]]; then
             python3 tools/scripts/resign_macos_release_tree.py sdk-staging
+          fi
+          if [ -z "$SOURCE_REF" ]; then
+            # Stamp only after every installed byte mutation. The capability
+            # handoff hashes the installed importer, and macOS re-signing
+            # changes those Mach-O bytes.
+            install -m 0644 "$PULP_SDK_PROVENANCE_CMAKE" \
+              sdk-staging/lib/cmake/Pulp/PulpSdkProvenance.cmake
+            python3 "$PULP_SDK_PROVENANCE_HELPER" stamp \
+              --prefix sdk-staging \
+              --build-dir build-sdk \
+              --source-dir . \
+              --release-tag "$RELEASE_TAG" \
+              --source-sha "$(git rev-parse HEAD)" \
+              --platform "${{ matrix.platform }}"
           fi
           python3 - <<'PY'
           import os
