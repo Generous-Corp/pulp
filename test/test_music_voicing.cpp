@@ -484,6 +484,11 @@ TEST_CASE("recognition exposes ambiguity and keeps ranked ties stable", "[music]
     CHECK_FALSE(octave_recognition->candidate(0)->inversion);
 
     CHECK_FALSE(recognize_chord(PitchClassSet{}));
+    constexpr std::array<PitchClass, 3> c_major{PitchClass::c, PitchClass::e,
+                                                PitchClass::g};
+    const auto c_major_set = PitchClassSet::from_pitch_classes(c_major);
+    REQUIRE(c_major_set);
+    CHECK_FALSE(recognize_chord(*c_major_set, PitchClass::d));
     const std::array<int, 1> negative{-1};
     const std::array<int, 1> too_high{128};
     const std::array<int, 9> too_many{};
