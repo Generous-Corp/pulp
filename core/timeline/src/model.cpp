@@ -492,6 +492,9 @@ detail::ProjectStateAccess::restore_identities(Project project,
                        entry.item != location.clip_id && entry.item != location.parent_id;
             case ItemKind::DevicePlacement:
             case ItemKind::AutomationLane:
+            case ItemKind::Modulator:
+            case ItemKind::MacroControl:
+            case ItemKind::ModulationRoute:
             case ItemKind::TakeLane:
                 return location.sequence_id.valid() && location.track_id.valid() &&
                        location.sequence_id != location.track_id &&
@@ -548,6 +551,9 @@ detail::ProjectStateAccess::restore_identities(Project project,
             }
             case ItemKind::DevicePlacement:
             case ItemKind::AutomationLane:
+            case ItemKind::Modulator:
+            case ItemKind::MacroControl:
+            case ItemKind::ModulationRoute:
             case ItemKind::TakeLane: {
                 const auto* track = find_entry(location.parent_id);
                 return track && track->location.kind == ItemKind::Track &&

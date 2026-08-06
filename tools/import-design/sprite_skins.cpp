@@ -482,6 +482,15 @@ bool localize_ir_assets(
         asset.local_path = std::move(localized);
     }
     std::function<void(IRNode&)> walk = [&](IRNode& n) {
+        // Browser capture may split a fader into a cleaned body and a moving
+        // indicator. Both are first-class publishable assets even though they
+        // deliberately avoid the generic asset_path (which would make the
+        // whole fader look like one indivisible image widget).
+        for (const char* key : {"fader_body_asset_path",
+                                "fader_indicator_asset_path"}) {
+            if (auto it = n.attributes.find(key); it != n.attributes.end())
+                localize(it->second);
+        }
         if (auto it = n.attributes.find("asset_path"); it != n.attributes.end()) {
             localize(it->second);
         } else if (auto ref = n.attributes.find("asset_ref");

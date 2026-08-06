@@ -120,6 +120,8 @@ std::vector<uint8_t> render_to_rgba(
     return {};
 }
 
+bool raw_rgba_render_available() { return false; }
+
 #endif // (!__APPLE__ && !PULP_HAS_SKIA) || (__APPLE__ && TARGET_OS_IOS)
 
 } // namespace pulp::view

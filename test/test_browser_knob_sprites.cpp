@@ -161,6 +161,92 @@ IRNode declared_knob() {
     return knob;
 }
 
+constexpr int kFaderLeft = 80;
+constexpr int kFaderTop = 20;
+constexpr int kFaderWidth = 40;
+constexpr int kFaderHeight = 200;
+constexpr int kFaderIndicatorLeft = 78;
+constexpr int kFaderIndicatorTop = 110;
+constexpr int kFaderIndicatorWidth = 36;
+constexpr int kFaderIndicatorHeight = 20;
+constexpr int kFaderBodyLeft = kFaderIndicatorLeft;
+constexpr int kFaderBodyWidth =
+    kFaderLeft + kFaderWidth - kFaderBodyLeft;
+
+ImportPngImage synthetic_fader_panel() {
+    ImportPngImage panel;
+    panel.width = kPanelWidth;
+    panel.height = kPanelHeight;
+    panel.rgba.assign(static_cast<std::size_t>(panel.width) * panel.height * 4, 0);
+    for (int y = 0; y < panel.height; ++y) {
+        for (int x = 0; x < panel.width; ++x) {
+            auto* p = pixel_at(panel, x, y);
+            p[0] = 14; p[1] = 18; p[2] = 24; p[3] = 255;
+        }
+    }
+    // Authored track/fill changes continuously along the travel axis, so the
+    // erase test can prove it reconstructed that axis rather than flooding the
+    // thumb hole with one constant.
+    for (int y = kFaderTop; y < kFaderTop + kFaderHeight; ++y) {
+        for (int x = kFaderLeft; x < kFaderLeft + kFaderWidth; ++x) {
+            auto* p = pixel_at(panel, x, y);
+            p[0] = static_cast<std::uint8_t>(30 + (y - kFaderTop) / 2);
+            p[1] = 52; p[2] = 70; p[3] = 255;
+        }
+    }
+    // Value-dependent captured fill. The static-body pass must remove this
+    // whole band, not merely the thumb at its one captured position.
+    for (int y = kFaderIndicatorTop + kFaderIndicatorHeight;
+         y < kFaderTop + kFaderHeight; ++y) {
+        for (int x = kFaderLeft + kFaderWidth / 2 - 2;
+             x < kFaderLeft + kFaderWidth / 2 + 2; ++x) {
+            auto* p = pixel_at(panel, x, y);
+            p[0] = 216; p[1] = 112; p[2] = 48; p[3] = 255;
+        }
+    }
+    for (int y = kFaderIndicatorTop;
+         y < kFaderIndicatorTop + kFaderIndicatorHeight; ++y) {
+        for (int x = kFaderIndicatorLeft;
+             x < kFaderIndicatorLeft + kFaderIndicatorWidth; ++x) {
+            const int ix = x - kFaderIndicatorLeft;
+            const int iy = y - kFaderIndicatorTop;
+            const bool corner =
+                (ix < 3 || ix >= kFaderIndicatorWidth - 3) &&
+                (iy < 3 || iy >= kFaderIndicatorHeight - 3);
+            if (corner) continue;
+            auto* p = pixel_at(panel, x, y);
+            p[0] = 244; p[1] = 231; p[2] = 180; p[3] = 255;
+        }
+    }
+    return panel;
+}
+
+IRNode declared_fader() {
+    IRNode fader;
+    fader.type = "frame";
+    fader.stable_anchor_id = "capture:drive:0";
+    fader.audio_widget = AudioWidgetType::fader;
+    fader.style.position = "absolute";
+    fader.style.left = static_cast<float>(kFaderLeft) * 0.5f;
+    fader.style.top = static_cast<float>(kFaderTop) * 0.5f;
+    fader.style.width = static_cast<float>(kFaderWidth) * 0.5f;
+    fader.style.height = static_cast<float>(kFaderHeight) * 0.5f;
+    fader.attributes["binding"] = "drive";
+    fader.attributes["designed_body"] = "capture";
+    fader.attributes["design_track"] = "#253047";
+    fader.attributes["design_accent"] = "#d4a44d";
+    fader.attributes["design_indicator"] = "#f4e7b4";
+    fader.attributes["browser_sprite_crop_px"] =
+        std::to_string(kFaderLeft) + "," + std::to_string(kFaderTop) + "," +
+        std::to_string(kFaderWidth) + "," + std::to_string(kFaderHeight);
+    fader.attributes["browser_sprite_indicator_px"] =
+        std::to_string(kFaderIndicatorLeft) + "," +
+        std::to_string(kFaderIndicatorTop) + "," +
+        std::to_string(kFaderIndicatorWidth) + "," +
+        std::to_string(kFaderIndicatorHeight);
+    return fader;
+}
+
 /// The bright pointer is the LAST stroke_line the knob emits: the captured
 /// pointer draws a dark backing stroke and then the design's colour over it.
 struct Segment {
@@ -195,7 +281,7 @@ TEST_CASE("a declared knob gets its own crop of the capture with the pointer era
     ir.root.children.push_back(declared_knob());
 
     std::string error;
-    REQUIRE(pulp::import_design::apply_browser_capture_knob_sprites(
+    REQUIRE(pulp::import_design::apply_browser_capture_control_sprites(
                 ir, capture, temp.root / "sprites", &error) == 1);
     CHECK(error.empty());
 
@@ -293,12 +379,180 @@ TEST_CASE("an undeclared control is left exactly as it was",
     ir.root.children.push_back(silent);
 
     std::string error;
-    CHECK(pulp::import_design::apply_browser_capture_knob_sprites(
+    CHECK(pulp::import_design::apply_browser_capture_control_sprites(
               ir, capture, temp.root / "sprites", &error) == 0);
     CHECK(error.empty());
     CHECK(ir.root.children[0].attributes == before);
     // Nor is a sprite directory conjured for a panel that needs none.
     CHECK_FALSE(fs::exists(temp.root / "sprites"));
+}
+
+TEST_CASE("a declared fader hoists its authored thumb and keeps live chrome",
+          "[import-design][browser-capture][fader][indicator][movement]") {
+    TempDirectory temp;
+    const auto panel = synthetic_fader_panel();
+    const auto capture = temp.root / "browser.png";
+    write_png(capture, panel);
+
+    DesignIR ir;
+    ir.source = pulp::view::DesignSource::html;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    ir.root.style.width = static_cast<float>(kPanelWidth) * 0.5f;
+    ir.root.style.height = static_cast<float>(kPanelHeight) * 0.5f;
+    ir.root.children.push_back(declared_fader());
+
+    std::string error;
+    REQUIRE(pulp::import_design::apply_browser_capture_control_sprites(
+                ir, capture, temp.root / "sprites", &error) == 1);
+    CHECK(error.empty());
+
+    const auto& node = ir.root.children.front();
+    REQUIRE(node.attributes.count("fader_body_asset_path") == 1);
+    REQUIRE(node.attributes.count("fader_indicator_asset_path") == 1);
+    CHECK(node.attributes.at("fader_body_natural_w") ==
+          std::to_string(kFaderBodyWidth));
+    CHECK(node.attributes.at("fader_body_natural_h") ==
+          std::to_string(kFaderHeight));
+    CHECK(node.attributes.at("fader_body_origin_x") == "-2");
+    CHECK(node.attributes.at("fader_body_origin_y") == "0");
+    CHECK(node.attributes.at("fader_control_natural_w") ==
+          std::to_string(kFaderWidth));
+    CHECK(node.attributes.at("fader_control_natural_h") ==
+          std::to_string(kFaderHeight));
+    CHECK(node.attributes.at("fader_indicator_natural_w") ==
+          std::to_string(kFaderIndicatorWidth));
+    CHECK(node.attributes.at("fader_indicator_natural_h") ==
+          std::to_string(kFaderIndicatorHeight));
+    CHECK(std::stof(node.attributes.at("fader_indicator_cross")) ==
+          Catch::Approx(0.4f));
+    CHECK(node.attributes.count("browser_sprite_crop_px") == 0);
+    CHECK(node.attributes.count("browser_sprite_indicator_px") == 0);
+
+    const auto body = read_png(node.attributes.at("fader_body_asset_path"));
+    const auto indicator =
+        read_png(node.attributes.at("fader_indicator_asset_path"));
+    REQUIRE(body.valid());
+    REQUIRE(indicator.valid());
+    REQUIRE(indicator.width == kFaderIndicatorWidth);
+    REQUIRE(indicator.height == kFaderIndicatorHeight);
+    // The hoisted asset is the designer's pixels, not a sampled solid-color
+    // substitute.
+    CHECK(pixel_at(indicator, kFaderIndicatorWidth / 2,
+                   kFaderIndicatorHeight / 2)[0] == 244);
+    // The authored rounded corners stay transparent instead of carrying a
+    // rectangular patch of the captured track as the thumb moves.
+    CHECK(pixel_at(indicator, 0, 0)[3] == 0);
+    // The cleaned body no longer carries a frozen copy of the slab.
+    for (int y = kFaderIndicatorTop;
+         y < kFaderIndicatorTop + kFaderIndicatorHeight; ++y)
+        for (int x = kFaderIndicatorLeft;
+             x < kFaderIndicatorLeft + kFaderIndicatorWidth; ++x)
+            CHECK(pixel_at(body, x - kFaderBodyLeft, y - kFaderTop)[0] < 180);
+    CHECK(pixel_at(body, kFaderLeft + kFaderWidth / 2 - kFaderBodyLeft,
+                   kFaderHeight - 10)[0] < 180);
+
+    auto root = pulp::view::build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    auto* fader = dynamic_cast<pulp::view::Fader*>(root->child_at(0));
+    REQUIRE(fader != nullptr);
+    REQUIRE(fader->has_captured_indicator_art());
+    CHECK(fader->has_skin_track_color());
+    CHECK(fader->has_skin_fill_color());
+    fader->set_bounds({0.0f, 0.0f,
+                       static_cast<float>(kFaderWidth) * 0.5f,
+                       static_cast<float>(kFaderHeight) * 0.5f});
+
+    auto indicator_y = [&](float value) {
+        fader->set_value(value);
+        pulp::canvas::RecordingCanvas canvas;
+        fader->paint(canvas);
+        std::vector<pulp::canvas::DrawCommand> images;
+        for (const auto& command : canvas.commands())
+            if (command.type == pulp::canvas::DrawCommand::Type::draw_image)
+                images.push_back(command);
+        // Cleaned designer body + moving designer indicator.
+        REQUIRE(images.size() == 2);
+        CHECK(images.front().text == node.attributes.at("fader_body_asset_path"));
+        CHECK(images.back().text ==
+              node.attributes.at("fader_indicator_asset_path"));
+        CHECK(images.back().f[2] ==
+              Catch::Approx(kFaderIndicatorWidth * 0.5f));
+        CHECK(images.back().f[3] ==
+              Catch::Approx(kFaderIndicatorHeight * 0.5f));
+        // Functional native track and fill stay present, while the stock white
+        // slab is absent (it would be a third rounded rect).
+        REQUIRE(canvas.count(
+                    pulp::canvas::DrawCommand::Type::fill_rounded_rect) == 2);
+        return images.back().f[1];
+    };
+    const float low = indicator_y(0.0f);
+    const float mid = indicator_y(0.5f);
+    const float high = indicator_y(1.0f);
+    CHECK(low > mid);
+    CHECK(mid > high);
+
+    // Preview selects the minimal body renderer, but the authored indicator is
+    // a final overlay and must not disappear with the stock thumb branch.
+    fader->set_render_style(pulp::view::WidgetRenderStyle::minimal);
+    pulp::canvas::RecordingCanvas minimal_canvas;
+    fader->paint(minimal_canvas);
+    CHECK(minimal_canvas.count(
+              pulp::canvas::DrawCommand::Type::draw_image) == 2);
+    CHECK(minimal_canvas.count(
+              pulp::canvas::DrawCommand::Type::fill_rounded_rect) == 1);
+    fader->set_render_style(pulp::view::WidgetRenderStyle::standard);
+
+    // The renderer's other travel axis uses the same hoisted art contract.
+    // This catches accidentally hard-coding the vertical Y calculation while
+    // the capture pass itself accepts both fader orientations.
+    fader->set_orientation(pulp::view::Fader::Orientation::horizontal);
+    fader->set_bounds({0.0f, 0.0f, 100.0f, 20.0f});
+    auto indicator_x = [&](float value) {
+        fader->set_value(value);
+        pulp::canvas::RecordingCanvas canvas;
+        fader->paint(canvas);
+        std::vector<pulp::canvas::DrawCommand> images;
+        for (const auto& command : canvas.commands())
+            if (command.type == pulp::canvas::DrawCommand::Type::draw_image)
+                images.push_back(command);
+        REQUIRE(images.size() == 2);
+        CHECK(images.front().text == node.attributes.at("fader_body_asset_path"));
+        CHECK(images.back().text ==
+              node.attributes.at("fader_indicator_asset_path"));
+        CHECK(images.back().f[2] == Catch::Approx(90.0f));
+        CHECK(images.back().f[3] == Catch::Approx(2.0f));
+        REQUIRE(canvas.count(
+                    pulp::canvas::DrawCommand::Type::fill_rounded_rect) == 2);
+        return images.back().f[0];
+    };
+    const float left = indicator_x(0.0f);
+    const float centre = indicator_x(0.5f);
+    const float right = indicator_x(1.0f);
+    CHECK(left < centre);
+    CHECK(centre < right);
+
+    auto& generated_fader = ir.root.children.front();
+    generated_fader.style.width = 100.0f;
+    generated_fader.style.height = 20.0f;
+    generated_fader.attributes["fader_indicator_cross"] =
+        "0.5); maliciousCall(); //";
+
+    pulp::view::CodeGenOptions options;
+    options.mode = pulp::view::CodeGenMode::bridge_native_js;
+    const auto js = pulp::view::generate_pulp_js(ir, options);
+    CHECK(js.find("setFaderCapturedArt") != std::string::npos);
+    CHECK(js.find("setFaderSkin") != std::string::npos);
+    CHECK(js.find("'horizontal'") != std::string::npos);
+    CHECK(js.find("maliciousCall") == std::string::npos);
+    CHECK(js.find(node.attributes.at("fader_indicator_asset_path")) !=
+          std::string::npos);
+
+    options.mode = pulp::view::CodeGenMode::web_compat;
+    const auto web_js = pulp::view::generate_pulp_js(ir, options);
+    CHECK(web_js.find("setOrientation") != std::string::npos);
+    CHECK(web_js.find("'horizontal'") != std::string::npos);
+    CHECK(web_js.find("maliciousCall") == std::string::npos);
 }
 
 TEST_CASE("a declared indicator that cannot be honoured fails the import",
@@ -314,7 +568,7 @@ TEST_CASE("a declared indicator that cannot be honoured fails the import",
     ir.root.children.push_back(declared_knob());
 
     std::string error;
-    CHECK(pulp::import_design::apply_browser_capture_knob_sprites(
+    CHECK(pulp::import_design::apply_browser_capture_control_sprites(
               ir, missing, temp.root / "sprites", &error) == 0);
     CHECK_FALSE(error.empty());
     CHECK(ir.root.children[0].attributes.count("asset_path") == 0);
@@ -341,7 +595,7 @@ TEST_CASE("the imported knob's indicator moves with its parameter",
     ir.root.children.push_back(declared_knob());
 
     std::string error;
-    REQUIRE(pulp::import_design::apply_browser_capture_knob_sprites(
+    REQUIRE(pulp::import_design::apply_browser_capture_control_sprites(
                 ir, capture, temp.root / "sprites", &error) == 1);
 
     auto root = pulp::view::build_native_view_tree(ir, {}, {});
@@ -420,7 +674,7 @@ TEST_CASE("the producer's pointer reaches the scripted path too",
     ir.root.children.push_back(std::move(knob));
 
     std::string error;
-    REQUIRE(pulp::import_design::apply_browser_capture_knob_sprites(
+    REQUIRE(pulp::import_design::apply_browser_capture_control_sprites(
                 ir, temp.root / "browser.png", temp.root / "sprites",
                 &error) == 1);
 

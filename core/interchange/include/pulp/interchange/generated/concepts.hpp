@@ -68,9 +68,13 @@ enum class Concept : std::uint16_t {
     ContextChordVoicing = 54,
     TuningProject = 55,
     TuningInstrument = 56,
+    ModulationModulator = 57,
+    ModulationMacro = 58,
+    ModulationRouteDeviceParam = 59,
+    ModulationRouteTrackMixer = 60,
 };
 
-inline constexpr std::size_t kConceptCount = 57;
+inline constexpr std::size_t kConceptCount = 61;
 
 namespace detail {
 struct ConceptRecord {
@@ -137,6 +141,10 @@ inline constexpr ConceptRecord kConceptRecords[kConceptCount] = {
     {"context.chord-voicing", "A chord statement carrying a hint for how a generator should spread its tones.", true},
     {"tuning.project", "A document-wide statement of the tuning every instrument plays in.", true},
     {"tuning.instrument", "One instrument overriding the document-wide tuning with its own.", true},
+    {"modulation.modulator", "A track-owned generator of modulation signal, by identity and declared kind.", true},
+    {"modulation.macro", "A track-owned named performer control that drives parameters through modulation routes.", true},
+    {"modulation.route-device-param", "A modulation route contributing a depth-scaled offset to a device parameter, on top of whatever base value is in force.", true},
+    {"modulation.route-track-mixer", "A modulation route contributing a depth-scaled offset to a track's own gain or pan.", true},
 };
 } // namespace detail
 

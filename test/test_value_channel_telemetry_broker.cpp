@@ -43,6 +43,14 @@ choc::value::ValueView channel(const choc::value::ValueView& root, std::string_v
     return {};
 }
 
+/// A ValueView does not own its bytes, so a view taken from a temporary Value
+/// dangles the moment the full expression ends. `json()` returns by value, so
+/// `channel(json(msg), name)` reads freed memory as soon as the result outlives
+/// the statement. Deleting the rvalue overload turns that into a compile error
+/// rather than a heap-use-after-free only a sanitizer lane can see: name the
+/// Value first, then take the view.
+choc::value::ValueView channel(choc::value::Value&&, std::string_view) = delete;
+
 } // namespace
 
 TEST_CASE("telemetry snapshots expose stable schema and UI-consumption staleness",
@@ -453,7 +461,8 @@ TEST_CASE("telemetry subscription starts after the event overflow baseline",
     REQUIRE_FALSE(subscribed.is_error);
     broker.poll();
     REQUIRE(emitted.size() == 1);
-    const auto baseline = channel(json(emitted[0]), "onsets");
+    const auto baseline_message = json(emitted[0]);
+    const auto baseline = channel(baseline_message, "onsets");
     CHECK(baseline["payload"].size() == 0);
     CHECK(baseline["sourceDropped"].getWithDefault<std::int64_t>(-1) == 0);
     CHECK(baseline["coalesced"].getWithDefault<std::int64_t>(-1) == 0);
@@ -462,7 +471,8 @@ TEST_CASE("telemetry subscription starts after the event overflow baseline",
     now += 20ms;
     broker.poll();
     REQUIRE(emitted.size() == 2);
-    CHECK(channel(json(emitted[1]), "onsets")["payload"].size() == 1);
+    const auto followup_message = json(emitted[1]);
+    CHECK(channel(followup_message, "onsets")["payload"].size() == 1);
 }
 
 TEST_CASE("telemetry fans one event drain to isolated client delivery state",
