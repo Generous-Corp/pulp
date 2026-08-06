@@ -4,6 +4,7 @@
 #include <pulp/audio/instrument_voice_allocator.hpp>
 #include <pulp/midi/mpe_voice_tracker.hpp>
 #include <pulp/sequence/host_transport_projector.hpp>
+#include <pulp/signal/osc/minblep.hpp>
 #include <pulp/signal/saturator.hpp>
 #include <pulp/timebase/quantize.hpp>
 #include <pulp/timebase/tick.hpp>
@@ -25,6 +26,11 @@ int main() {
         pulp::sequence::HostTransportProjector probe_value_0{}; (void)probe_value_0.reset();
     }
     {
+        // signal.minblep
+        static_assert(sizeof(pulp::signal::osc::MinBlepAccumulator<>) > 0);
+        pulp::signal::osc::MinBlepAccumulator<> probe_value_0{}; (void)probe_value_0.insert(0.5, 1.0);
+    }
+    {
         // signal.saturator
         static_assert(sizeof(pulp::signal::SaturatorT<float>) > 0);
         pulp::signal::SaturatorT<float> probe_value_0{}; (void)probe_value_0.prepare(48000.0);
@@ -32,10 +38,10 @@ int main() {
     {
         // timebase.swing
         static_assert(sizeof(pulp::timebase::SwingRatio) > 0);
-        auto *volatile binding_5 = &pulp::timebase::swing_position;
-        (void)binding_5;
-        auto *volatile binding_6 = &pulp::timebase::unswing_position;
+        auto *volatile binding_6 = &pulp::timebase::swing_position;
         (void)binding_6;
+        auto *volatile binding_7 = &pulp::timebase::unswing_position;
+        (void)binding_7;
         pulp::timebase::SwingRatio probe_value_0{1, 2}; (void)probe_value_0;
         (void)pulp::timebase::swing_position(pulp::timebase::TickPosition{1}, pulp::timebase::TickDuration{2}, pulp::timebase::kStraightSwing);
         (void)pulp::timebase::unswing_position(pulp::timebase::TickPosition{1}, pulp::timebase::TickDuration{2}, pulp::timebase::kStraightSwing);

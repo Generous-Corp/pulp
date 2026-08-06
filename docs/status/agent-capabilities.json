@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 3,
+  "manifest_revision": 4,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 1
+        "capabilities": 2
       },
       "timebase": {
         "state": "partial",
@@ -226,6 +226,66 @@
         }
       },
       "contract_digest": "sha256:415624b411001a8583ecde5da2c6a695c74e874eb4b36a46536b17d3cddf1004"
+    },
+    {
+      "key": "signal.minblep",
+      "domain": "signal",
+      "summary": "Fixed-capacity minimum-phase bandlimited-step correction for oscillator discontinuities.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "none",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "A compile-time-bounded slot array accumulates causal corrections; insertion reports invalid inputs and capacity exhaustion explicitly.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "fractional oscillator discontinuity positions and step heights",
+      "output_domain": "causal bandlimited-step correction samples",
+      "units": [
+        "normalized sample position",
+        "sample amplitude",
+        "samples"
+      ],
+      "latency": "zero",
+      "tail": "32 samples per inserted discontinuity",
+      "scheduling": "sample-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/osc/minblep.hpp",
+          "qualified_name": "pulp::signal::osc::MinBlepAccumulator<>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:a4b8818f25bc81b9b9e34f3c4dc341dc757a6abfb441254ce1d88d7cecae096b"
     },
     {
       "key": "signal.saturator",
@@ -440,14 +500,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 6,
+    "total": 7,
     "by_domain": {
       "audio": 1,
       "midi": 1,
       "music": 0,
       "offline": 0,
       "sequence": 1,
-      "signal": 1,
+      "signal": 2,
       "timebase": 2
     }
   },
@@ -3248,6 +3308,18 @@
               "effective_note_hz()",
               "detune_cents()",
               "quantization_bound_cents()"
+            ],
+            "enums": []
+          }
+        ],
+        "osc/minblep.hpp": [
+          {
+            "class": "MinBlepAccumulator",
+            "methods": [
+              "static_assert(MaximumEvents > 0, \"minBLEP event capacity must be positive\")",
+              "insert(double position, double height)",
+              "next()",
+              "active_events()"
             ],
             "enums": []
           }

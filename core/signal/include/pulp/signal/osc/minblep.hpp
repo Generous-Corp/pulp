@@ -40,7 +40,8 @@ enum class MinBlepInsertResult {
 /// the new event is dropped with `capacity_exceeded`; existing corrections are
 /// unchanged. Per-sample work is therefore fixed at `MaximumEvents`, with no
 /// allocation, locks, I/O, or table initialization on the audio thread.
-template <std::size_t MaximumEvents = 8> class MinBlepAccumulator {
+template <std::size_t MaximumEvents = 8>
+class MinBlepAccumulator {
   public:
     static_assert(MaximumEvents > 0, "minBLEP event capacity must be positive");
 
