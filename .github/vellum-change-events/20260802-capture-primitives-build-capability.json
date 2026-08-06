@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "event_id": "20260802-capture-primitives-build-capability",
+  "kind": "change",
+  "created_at": "2026-08-02T20:05:00Z",
+  "slices": [
+    "capture-primitives"
+  ],
+  "rationale": "Adds raw_rgba_render_available(), a build-level query answering whether this build has a raw-RGBA producer at all, declared in screenshot.hpp and defined at each of the four sites that already select a backend: the Skia path and the mac path return true where Skia is compiled in, the mac non-Skia path and the stub return false. It is a new query only; render_to_rgba, render_to_file and the registered-provider surface are untouched, so no existing caller changes behaviour and no code path is added or removed from capture itself. It exists because a pixel test cannot otherwise separate two situations that look identical from outside — a build with no raster backend, where every probe returns an empty buffer regardless of the code under test, from a build that can rasterize and produced nothing, which is a real defect. Deciding from an empty result would turn a genuine rasterizer regression into a silently green run, so the question is asked of the build and a test may skip only when the answer is false. Pulp-only: this originates here alongside Pulp's backdrop-filter and generated-content pixel probes, which are the callers, and it is a test-observability affordance over the existing backend selection rather than a capture behaviour change, so there is no counterpart framework change to backport.",
+  "tests": [
+    "pulp-test-browser-capture-import",
+    "pulp-test-web-compat-reftest"
+  ],
+  "disposition": "pulp-only"
+}
