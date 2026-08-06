@@ -3186,9 +3186,18 @@ def main():
     # First, and outside the skip below: these need no installed Rack, and the
     # skip returns 0 — so a check placed after it does not run on a machine
     # without Fundamental and reports success anyway.
+    #
     # What a FAILED run hands over, and whether the retry says anything the
     # previous attempt did not already know. Its own file for the same reason
     # test_affordances has one, and called here for the same reason too.
+    #
+    # AT THE VERY TOP, and that position is load-bearing. Nothing between here
+    # and the skip is in a try/except, so a check that RAISES takes the whole
+    # run down and silently drops every check below it — which is not a
+    # hypothetical: a stale constant reference did exactly that, and 143 of
+    # these were reported by nothing at all until it was fixed. Cheap checks
+    # that need no Rack, no SDK and no network belong where the most code can
+    # fail without hiding them.
     import test_handover
     hand_bad = hand_ran = 0
     for _check in (test_handover.check_retry_names_a_real_jack,
