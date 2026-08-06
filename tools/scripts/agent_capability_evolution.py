@@ -78,11 +78,22 @@ def manifest_evolution_problems(
             problems.append(f"{key} tombstone has the wrong last_contract_version")
         if tombstone.get("last_contract_digest") != old.get("contract_digest"):
             problems.append(f"{key} tombstone has the wrong last_contract_digest")
+        old_evolution = old.get("evolution", {})
+        if tombstone.get("introduced_in") != old_evolution.get("introduced_in"):
+            problems.append(f"{key} tombstone has the wrong introduced_in version")
+        if tombstone.get("deprecated_in") != old_evolution.get("deprecated_in"):
+            problems.append(f"{key} tombstone has the wrong deprecated_in version")
         if tombstone.get("removed_in_manifest_revision") != current.get(
             "manifest_revision"
         ):
             problems.append(
                 f"{key} tombstone must name the current manifest revision"
+            )
+        if old.get("status") != "deprecated" or old.get("evolution", {}).get(
+            "state"
+        ) != "deprecated":
+            problems.append(
+                f"{key} may be removed only after a published deprecated revision"
             )
 
     removed_keys = set(old_by_key) - set(new_by_key)

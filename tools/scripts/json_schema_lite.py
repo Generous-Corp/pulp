@@ -15,7 +15,8 @@ checked — the schema either validates for real or the run errors out.
 Supported keywords:
     type, const, enum, required, properties, additionalProperties,
     propertyNames, minProperties, maxProperties, items, minItems,
-    maxItems, uniqueItems, minLength, maxLength, pattern
+    maxItems, uniqueItems, minLength, maxLength, pattern, minimum, maximum,
+    oneOf
 
 Ignored (annotation-only) keywords:
     $schema, $id, title, description, $comment, examples, default
@@ -51,6 +52,9 @@ _SUPPORTED = frozenset(
         "minLength",
         "maxLength",
         "pattern",
+        "minimum",
+        "maximum",
+        "oneOf",
     }
 )
 
@@ -105,6 +109,17 @@ def validate(document: Any, schema: Any, path: str = "$") -> list[str]:
 
     errors: list[str] = []
 
+    if "oneOf" in schema:
+        matches = [
+            branch
+            for branch in schema["oneOf"]
+            if not validate(document, branch, path)
+        ]
+        if len(matches) != 1:
+            errors.append(
+                f"{path}: expected exactly one oneOf branch to match, got {len(matches)}"
+            )
+
     if "type" in schema:
         names = schema["type"]
         names = [names] if isinstance(names, str) else list(names)
@@ -121,6 +136,12 @@ def validate(document: Any, schema: Any, path: str = "$") -> list[str]:
 
     if "enum" in schema and document not in schema["enum"]:
         errors.append(f"{path}: {document!r} is not one of {schema['enum']!r}")
+
+    if isinstance(document, (int, float)) and not isinstance(document, bool):
+        if "minimum" in schema and document < schema["minimum"]:
+            errors.append(f"{path}: {document!r} is less than minimum {schema['minimum']!r}")
+        if "maximum" in schema and document > schema["maximum"]:
+            errors.append(f"{path}: {document!r} is greater than maximum {schema['maximum']!r}")
 
     if isinstance(document, str):
         errors.extend(_validate_string(document, schema, path))

@@ -204,9 +204,9 @@ def build_surface_document(
     ) or inventory_version < 1:
         problems.append("surface inventory_version must be a positive integer")
     for include, tombstone in removed.items():
-        if tombstone["removed_in_inventory_version"] != inventory_version:
+        if tombstone["removed_in_inventory_version"] > inventory_version:
             problems.append(
-                f"surface tombstone must name the current inventory version: {include}"
+                f"surface tombstone names a future inventory version: {include}"
             )
 
     overlap = sorted(set(claims) & set(reviewed))

@@ -24,10 +24,43 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME agent-capability-manifest-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_manifest.py")
+    set(_pulp_agent_capability_installed_args
+        --build-dir "${CMAKE_BINARY_DIR}"
+        --cmake "${CMAKE_COMMAND}"
+        --generator "${CMAKE_GENERATOR}"
+        "--config=$<CONFIG>")
+    if(CMAKE_GENERATOR_PLATFORM)
+        list(APPEND _pulp_agent_capability_installed_args
+            --generator-platform "${CMAKE_GENERATOR_PLATFORM}")
+    endif()
+    if(CMAKE_GENERATOR_TOOLSET)
+        list(APPEND _pulp_agent_capability_installed_args
+            --generator-toolset "${CMAKE_GENERATOR_TOOLSET}")
+    endif()
+    if(CMAKE_TOOLCHAIN_FILE)
+        list(APPEND _pulp_agent_capability_installed_args
+            --toolchain-file "${CMAKE_TOOLCHAIN_FILE}")
+    endif()
+    if(CMAKE_OSX_ARCHITECTURES)
+        string(REPLACE ";" "\\;" _pulp_agent_capability_architectures
+            "${CMAKE_OSX_ARCHITECTURES}")
+        list(APPEND _pulp_agent_capability_installed_args
+            --osx-architectures "${_pulp_agent_capability_architectures}")
+        unset(_pulp_agent_capability_architectures)
+    endif()
+    if(CMAKE_OSX_SYSROOT)
+        list(APPEND _pulp_agent_capability_installed_args
+            --osx-sysroot "${CMAKE_OSX_SYSROOT}")
+    endif()
+    if(CMAKE_OSX_DEPLOYMENT_TARGET)
+        list(APPEND _pulp_agent_capability_installed_args
+            --osx-deployment-target "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    endif()
     add_test(NAME agent-capability-installed-sdk
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_installed_sdk.py"
-            --build-dir "${CMAKE_BINARY_DIR}" --cmake "${CMAKE_COMMAND}")
+            ${_pulp_agent_capability_installed_args})
+    unset(_pulp_agent_capability_installed_args)
     set_tests_properties(agent-capability-installed-sdk PROPERTIES TIMEOUT 180)
 
     add_test(NAME ci-python-selector-selftest COMMAND ${Python3_EXECUTABLE}

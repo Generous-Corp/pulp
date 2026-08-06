@@ -13,67 +13,33 @@
   "coverage": {
     "state": "partial",
     "absence_semantics": "unknown",
-    "surface_schema": "pulp.agent-capability-surface.v1",
-    "surface_inventory_version": 1,
-    "public_headers": 345,
-    "reviewed_headers": 6,
-    "legacy_unreviewed_headers": 339,
-    "unsupported_headers": 0,
     "domains": {
       "audio": {
         "state": "partial",
-        "public_headers": 108,
-        "reviewed_headers": 1,
-        "legacy_unreviewed_headers": 107,
-        "unsupported_headers": 0,
         "capabilities": 1
       },
       "midi": {
         "state": "partial",
-        "public_headers": 35,
-        "reviewed_headers": 1,
-        "legacy_unreviewed_headers": 34,
-        "unsupported_headers": 0,
         "capabilities": 1
       },
       "music": {
         "state": "not_inventoried",
-        "public_headers": 0,
-        "reviewed_headers": 0,
-        "legacy_unreviewed_headers": 0,
-        "unsupported_headers": 0,
         "capabilities": 0
       },
       "offline": {
         "state": "not_inventoried",
-        "public_headers": 0,
-        "reviewed_headers": 0,
-        "legacy_unreviewed_headers": 0,
-        "unsupported_headers": 0,
         "capabilities": 0
       },
       "sequence": {
         "state": "partial",
-        "public_headers": 2,
-        "reviewed_headers": 1,
-        "legacy_unreviewed_headers": 1,
-        "unsupported_headers": 0,
         "capabilities": 1
       },
       "signal": {
         "state": "partial",
-        "public_headers": 194,
-        "reviewed_headers": 1,
-        "legacy_unreviewed_headers": 193,
-        "unsupported_headers": 0,
         "capabilities": 1
       },
       "timebase": {
         "state": "partial",
-        "public_headers": 6,
-        "reviewed_headers": 2,
-        "legacy_unreviewed_headers": 4,
-        "unsupported_headers": 0,
         "capabilities": 2
       }
     }
@@ -125,9 +91,13 @@
       },
       "status": "usable",
       "evolution": {
-        "state": "active"
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
       },
-      "contract_digest": "sha256:d8e70f462e0d7d7641361ef2a5e9a93b36705e0e3fe29c610e2a958ade4a9e4e"
+      "contract_digest": "sha256:28cc54d7dd468a8c5877c004d6555715687dfc318e008fa06932f6ac28b62d4b"
     },
     {
       "key": "midi.mpe-voice-tracker",
@@ -176,9 +146,13 @@
       },
       "status": "usable",
       "evolution": {
-        "state": "active"
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
       },
-      "contract_digest": "sha256:116ddcf2ccb311a7b2654af2e8b616bc3fe17e5aa4d54ee5aa97f0c272b696ed"
+      "contract_digest": "sha256:10a8d7d1219d9d715e96238c0211d2a06f94a65b64d607c9b4c027660b3d8709"
     },
     {
       "key": "sequence.host-transport-projector",
@@ -226,9 +200,13 @@
       },
       "status": "usable",
       "evolution": {
-        "state": "active"
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
       },
-      "contract_digest": "sha256:a67a401dbd16b3ae8d15c353a120cb9371503164862374c920cd63e35aceac9f"
+      "contract_digest": "sha256:7a0929eb32c53fcf553f62fef47cf6e3b9b139447a270e24b7472c251e0f57d8"
     },
     {
       "key": "signal.saturator",
@@ -281,9 +259,13 @@
       },
       "status": "usable",
       "evolution": {
-        "state": "active"
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
       },
-      "contract_digest": "sha256:0c3cc263d773ca755535262cddd9c569add6f4a94197a0a09be2ddaa6181bb3d"
+      "contract_digest": "sha256:1cb30f14586a8359f4cdd0c96fbab66873ccb71e726e77ab25cde21fd402d59f"
     },
     {
       "key": "timebase.swing",
@@ -358,9 +340,13 @@
       },
       "status": "usable",
       "evolution": {
-        "state": "active"
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
       },
-      "contract_digest": "sha256:1c81bd3ab29331b68e17d4ce1f2719f5d37438460ab4e6b65e801bfc20119d75"
+      "contract_digest": "sha256:fa7edaa67f6987b95f387885145207a66efe00d689f49aa0cf9d5c9f289c9442"
     },
     {
       "key": "timebase.tick",
@@ -406,9 +392,13 @@
       },
       "status": "usable",
       "evolution": {
-        "state": "active"
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
       },
-      "contract_digest": "sha256:5506be4d757af4af7425f06d482a6a4dc341c42efdd3e39f73d74f13e24bfc75"
+      "contract_digest": "sha256:4f13ad37315f1b650d2741fa0548d1a55da1523248278401fbbacef055ee6ac2"
     }
   ],
   "tombstones": [],

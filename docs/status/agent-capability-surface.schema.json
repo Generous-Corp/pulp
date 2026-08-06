@@ -18,7 +18,7 @@
   "properties": {
     "$schema": { "type": "string", "const": "agent-capability-surface.schema.json" },
     "schema": { "type": "string", "const": "pulp.agent-capability-surface.v1" },
-    "inventory_version": { "type": "integer" },
+    "inventory_version": { "type": "integer", "minimum": 1 },
     "fingerprint_algorithm": { "type": "string", "const": "sha256-file-bytes" },
     "coverage_state": { "type": "string", "enum": ["partial", "complete"] },
     "roots": {
@@ -130,7 +130,7 @@
         "properties": {
           "include": { "type": "string", "pattern": "^pulp/" },
           "last_fingerprint": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
-          "removed_in_inventory_version": { "type": "integer" },
+          "removed_in_inventory_version": { "type": "integer", "minimum": 1 },
           "reason": { "type": "string", "minLength": 20 }
         }
       }
