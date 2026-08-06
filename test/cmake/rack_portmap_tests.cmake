@@ -16,4 +16,17 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(rack-measure-ranges PROPERTIES
         LABELS "rack;portmap"
         TIMEOUT 60)
+
+    # Physical-value conversion for a vendor's controls. The coefficients it
+    # asserts against were measured off real modules rather than invented, so
+    # this catches a conversion that is present and wrong -- which is what a
+    # book's "40 Hz" meets when it reaches a knob calibrated in volts. Its
+    # live section round-trips whatever this machine has measured and skips
+    # cleanly where there is no port map.
+    add_test(NAME rack-param-units
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tools/rack/test_param_units.py)
+    set_tests_properties(rack-param-units PROPERTIES
+        LABELS "rack;portmap"
+        TIMEOUT 60)
 endif()

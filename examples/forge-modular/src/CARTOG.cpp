@@ -267,6 +267,46 @@ struct CARTOGWidget : rack::app::ModuleWidget {
 
     void clear_pending() const { std::remove(pending_path().c_str()); }
 
+    /// What a knob position MEANS, so a number from a book can be placed.
+    ///
+    /// A range alone says a control runs 0..1 or 20..12000; it does not say
+    /// which of those is 40 Hz. The same idea carries four unit systems across
+    /// an installed library -- Hz, volts, normalised, and a bare -1..0 -- so
+    /// "low-pass cutoff 40 Hz" is past one module's maximum, near another's
+    /// floor, and meaningless on a third. Rack answers this next to the bounds
+    /// we were already reading, and we were dropping it.
+    ///
+    ///     displayValue = f(value) * displayMultiplier + displayOffset
+    ///        f(value) = value                     for displayBase == 0
+    ///        f(value) = log_{-displayBase}(value) for displayBase < 0
+    ///        f(value) = displayBase^value         for displayBase > 0
+    ///
+    /// Written only where it is not the identity, and the unit only where
+    /// there is one. Absence is unambiguous BECAUSE the scan version says
+    /// this scanner looked: at scan 5 a missing `displayBase` means linear,
+    /// and a missing `unit` means the control is dimensionless. Below 5 it
+    /// means nobody asked -- the same rule `kind` already lives by. Emitting
+    /// the identity for every linear knob would add most of a megabyte of
+    /// `0.000000` across a library this size and say nothing.
+    static std::string display_of(rack::engine::ParamQuantity* q) {
+        std::string out;
+        if (!q->unit.empty()) out += ", \"unit\": \"" + esc(q->unit) + "\"";
+        const bool identity = q->displayBase == 0.f &&
+                              q->displayMultiplier == 1.f &&
+                              q->displayOffset == 0.f;
+        if (identity) return out;
+        // A non-finite factor would break the same JSON parse an infinite
+        // bound once broke, and a conversion through it is meaningless
+        // anyway, so it is dropped rather than written.
+        if (!finite(q->displayBase) || !finite(q->displayMultiplier) ||
+            !finite(q->displayOffset))
+            return out;
+        out += ", \"displayBase\": " + num(q->displayBase) +
+               ", \"displayMultiplier\": " + num(q->displayMultiplier) +
+               ", \"displayOffset\": " + num(q->displayOffset);
+        return out;
+    }
+
     /// One module's entry, written from a widget that has been laid out.
     ///
     /// Split out from the rack walk so one measurement serves both a
@@ -283,7 +323,7 @@ struct CARTOGWidget : rack::app::ModuleWidget {
         // made them: without this, a module measured before controls were
         // recorded at all reports a matching plugin version and reads as
         // faithful. Keep in step with PortMap::kScanVersion.
-        out += "      \"scan\": 4,\n";
+        out += "      \"scan\": 5,\n";
         // Panel size lets a preview lay modules out at true width without
         // parsing anyone's artwork.
         out += "      \"size\": [" +
@@ -325,6 +365,7 @@ struct CARTOGWidget : rack::app::ModuleWidget {
                         if (finite(q->defaultValue))
                             range += ", \"defaultValue\": " +
                                      num(q->defaultValue);
+                        range += display_of(q);
                     }
                 }
                 // WHICH control, not just where. A fader, a switch and a

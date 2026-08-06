@@ -9,6 +9,19 @@ endif()
 
 set(_fm_dir "${CMAKE_CURRENT_SOURCE_DIR}")
 
+# The codegen below runs a Python script, so this scope has to have found a
+# Python. The only top-level find_package(Python3) sits behind
+# PULP_INTEL_CANARY, which is off by default, so `${Python3_EXECUTABLE}` was
+# empty here and the custom command degraded to executing the script by path.
+# That fails with "Permission denied" -- the script is mode 644, correctly --
+# and it hides everywhere the generated header, plugin.json, plugin.hpp and
+# plugin.cpp are already checked in and newer than the manifests: codegen is
+# skipped, the build is green, and only a fresh worktree or an edit to a
+# manifest ever runs it. REQUIRED because there is no fallback worth having;
+# a missing interpreter should stop configure, not surface later as a
+# permission error nobody reads as a missing dependency.
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
 # The layout manifests are the single source of truth: the panel SVGs, the
 # plugin.json and the C++ widget placement are all generated from them, so a
 # control and its label cannot drift apart.

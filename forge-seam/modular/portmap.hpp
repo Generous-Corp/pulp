@@ -99,7 +99,12 @@ public:
     ///   2  controls, with their kind, size and label
     ///   3  lights and displays
     ///   4  parameter ranges: minValue, maxValue, defaultValue
-    static constexpr int kScanVersion = 4;
+    ///   5  what a knob position MEANS: unit, and the displayBase /
+    ///      displayMultiplier / displayOffset that convert between a knob
+    ///      position and a physical value. Written only where they are not
+    ///      the identity, so at this version an absent displayBase is linear
+    ///      and an absent unit is dimensionless -- below it, unknown.
+    static constexpr int kScanVersion = 5;
 
     /// The first scanner that recorded controls at all.
     ///

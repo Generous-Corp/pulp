@@ -474,6 +474,37 @@ what Rack loads. Same version in both places is not the documented refusal
 live. **Verify by hash, not by exit code**, and if the directory is stale move
 it aside and unpack the archive over it.
 
+**A range without a unit cannot place a number from a book.** The same idea
+carries four unit systems across an installed library — measured on its
+filters: `ALM018` runs −1..0, `XFMN01` 20..12000 Hz, `Rain` 0..1 normalised,
+`BattalionTone` −5..5 volts. Against bounds alone, "cutoff 40 Hz" is past one
+module's maximum, near another's floor, and meaningless on a third.
+
+Scan 5 records what Rack keeps beside the bounds: `unit`, and the
+`displayBase` / `displayMultiplier` / `displayOffset` that convert both ways.
+
+    displayValue = f(value) * displayMultiplier + displayOffset
+        f(value) = value                      base == 0   linear
+        f(value) = log_{-displayBase}(value)  base < 0    logarithmic
+        f(value) = displayBase ** value       base > 0    exponential
+
+`tools/rack/param_units.py` is the conversion; **use `place()` and pass the
+unit the number came with.** Converting without checking the unit is the
+failure this exists to stop: 40 on a dimensionless 0..1 knob is out of range,
+clamps to 1.0, and yields a filter wide open in a patch claiming to follow the
+book. So a unit the control cannot read is a **refusal**, while a value it
+understands but cannot reach is a **clamp with a reason** — different
+situations, reported differently.
+
+Written only where it is not the identity, so at scan 5 an absent
+`displayBase` means linear and an absent `unit` means dimensionless; below 5
+it means nobody looked. Same rule `kind` lives by. Emitting the identity for
+every linear knob would add most of a megabyte of `0.000000` and say nothing.
+
+**Bump `kScanVersion` and CARTOG's emitted `"scan"` together** — they live in
+different products and `forge-seam/test_seam_patch.sh` greps both because
+nothing else links them.
+
 **A measured range can be inverted, and a default can sit outside it.** Rack's
 `configParam` does not require `min < max` — a reversed knob is a legal
 configuration — and a vendor may declare a default outside its own bounds (0
