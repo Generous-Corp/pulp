@@ -59,6 +59,11 @@ docs:
     kind: guide
     summary: State and parameter system — ParamValue, StateStore, Binding, serialization
 
+  - slug: voice-runtime-facade
+    path: guides/voice-runtime-facade.md
+    kind: guide
+    summary: One non-owning facade over Pulp's existing MIDI and allocated voice runtimes
+
   - slug: partial-repaint
     path: guides/partial-repaint.md
     kind: guide
