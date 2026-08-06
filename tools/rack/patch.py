@@ -2596,6 +2596,7 @@ def ask_model(claude: str, prompt: str, seconds: float, tick: float = 8.0):
     """
     import json as _json
     import os as _os
+    import re as _re
     import subprocess
     import tempfile
     import threading
@@ -2617,14 +2618,30 @@ def ask_model(claude: str, prompt: str, seconds: float, tick: float = 8.0):
                    "--output-format=stream-json",
                    "--include-partial-messages"]
     else:
+        codex_model = _os.environ.get("FORGE_CODEX_MODEL")
+        if codex_model is not None:
+            codex_model = codex_model.strip()
+            if not codex_model:
+                raise SystemExit(
+                    "FORGE_CODEX_MODEL is set but empty; name an exact Codex "
+                    "model or unset it to use the CLI default")
+            if not _re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]*",
+                                 codex_model):
+                raise SystemExit(
+                    "FORGE_CODEX_MODEL is malformed; use a model identifier "
+                    "containing only letters, digits, dot, underscore, "
+                    "colon, slash, or hyphen")
         answer_file = tempfile.NamedTemporaryFile(
             prefix="forge-model-answer-", suffix=".txt", delete=False)
         answer_path = answer_file.name
         answer_file.close()
-        command = [claude, "exec", "--ephemeral", "--sandbox", "read-only",
+        command = [claude, "exec"]
+        if codex_model is not None:
+            command.extend(["--model", codex_model])
+        command.extend(["--ephemeral", "--sandbox", "read-only",
                    "--ignore-user-config", "--ignore-rules", "--color",
                    "never", "--skip-git-repo-check", "--json",
-                   "--output-last-message", answer_path, "-"]
+                   "--output-last-message", answer_path, "-"])
 
     try:
         proc = subprocess.Popen(

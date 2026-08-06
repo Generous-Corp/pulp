@@ -2458,7 +2458,10 @@ import os
 import sys
 
 args = sys.argv[1:]
-fixed = ["exec", "--ephemeral", "--sandbox", "read-only",
+fixed = ["exec"]
+if "FORGE_CODEX_MODEL" in os.environ:
+    fixed += ["--model", os.environ["FORGE_CODEX_MODEL"]]
+fixed += ["--ephemeral", "--sandbox", "read-only",
          "--ignore-user-config", "--ignore-rules", "--color", "never",
          "--skip-git-repo-check", "--json"]
 if args[:len(fixed)] != fixed or args[-1] != "-" or \
@@ -2559,7 +2562,60 @@ else:
               f"{code} {text!r} {why!r}")
     else:
         print("  ok     FORGE_CODEX_BIN identifies an arbitrarily named wrapper")
-    ran += 5
+
+    old_codex_model = os.environ.get("FORGE_CODEX_MODEL")
+    os.environ["FORGE_CODEX_MODEL"] = "gpt-5.6-sol"
+    try:
+        code, text, why = P.ask_model(
+            codex, "hello codex", 30.0, tick=0.0)
+    finally:
+        if old_codex_model is None:
+            os.environ.pop("FORGE_CODEX_MODEL", None)
+        else:
+            os.environ["FORGE_CODEX_MODEL"] = old_codex_model
+    if code != 0 or text != "exact final response\n" or why:
+        bad += 1
+        print(f"  WRONG  an exact Codex model was not passed through: "
+              f"{code} {text!r} {why!r}")
+    else:
+        print("  ok     FORGE_CODEX_MODEL selects the exact Codex model")
+
+    os.environ["FORGE_CODEX_MODEL"] = "   "
+    try:
+        P.ask_model(codex, "hello codex", 30.0)
+    except SystemExit as e:
+        refused = "set but empty" in str(e)
+    else:
+        refused = False
+    finally:
+        if old_codex_model is None:
+            os.environ.pop("FORGE_CODEX_MODEL", None)
+        else:
+            os.environ["FORGE_CODEX_MODEL"] = old_codex_model
+    if not refused:
+        bad += 1
+        print("  WRONG  an empty FORGE_CODEX_MODEL was silently accepted")
+    else:
+        print("  ok     an empty FORGE_CODEX_MODEL fails closed")
+
+    os.environ["FORGE_CODEX_MODEL"] = "--profile unexpected"
+    try:
+        P.ask_model(codex, "hello codex", 30.0)
+    except SystemExit as e:
+        refused = "is malformed" in str(e)
+    else:
+        refused = False
+    finally:
+        if old_codex_model is None:
+            os.environ.pop("FORGE_CODEX_MODEL", None)
+        else:
+            os.environ["FORGE_CODEX_MODEL"] = old_codex_model
+    if not refused:
+        bad += 1
+        print("  WRONG  a malformed FORGE_CODEX_MODEL was passed as CLI args")
+    else:
+        print("  ok     a malformed FORGE_CODEX_MODEL fails closed")
+    ran += 8
 
     real = P.SETTINGS_PATH
     try:
