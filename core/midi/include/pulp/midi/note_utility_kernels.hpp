@@ -52,7 +52,10 @@ template <std::size_t MaximumActiveNotes = 128> class NoteLengthShaper {
             const auto absolute =
                 utility_detail::saturating_sample_add(block_start.value, event.sample_offset);
             emit_due(output, report, {absolute});
-            const bool is_note = event.is_note_on() || event.is_note_off();
+            const bool is_attack = event.is_note_on() && event.velocity() != 0;
+            const bool is_release = event.is_note_off() ||
+                                    (event.is_note_on() && event.velocity() == 0);
+            const bool is_note = is_attack || is_release;
             const int event_key =
                 is_note ? utility_detail::key_index(event.channel(), event.note()) : 0;
             if (is_note && quarantined_[event_key]) {
@@ -60,7 +63,7 @@ template <std::size_t MaximumActiveNotes = 128> class NoteLengthShaper {
                 report.complete = false;
                 continue;
             }
-            if (event.is_note_on()) {
+            if (is_attack) {
                 if (!release_matching(event.channel(), event.note(), event.sample_offset, output,
                                       report)) {
                     track_suppressed(event_key);
@@ -94,7 +97,7 @@ template <std::size_t MaximumActiveNotes = 128> class NoteLengthShaper {
                          event.sample_offset,
                          next_serial_++,
                          true};
-            } else if (event.is_note_off()) {
+            } else if (is_release) {
                 const int key = event_key;
                 if (suppressed_depth_[key] != 0) {
                     --suppressed_depth_[key];
@@ -326,14 +329,17 @@ template <std::size_t MaximumActiveNotes = 128> class NoteLengthShaper {
 
     void account_unprocessed_input(const MidiBuffer& input) noexcept {
         for (const auto& event : input) {
-            if (!event.is_note_on() && !event.is_note_off())
+            const bool is_attack = event.is_note_on() && event.velocity() != 0;
+            const bool is_release = event.is_note_off() ||
+                                    (event.is_note_on() && event.velocity() == 0);
+            if (!is_attack && !is_release)
                 continue;
             const int key = utility_detail::key_index(event.channel(), event.note());
             if (quarantined_[key])
                 continue;
-            if (event.is_note_on()) {
+            if (is_attack) {
                 track_suppressed(key);
-            } else if (event.is_note_off()) {
+            } else if (is_release) {
                 if (suppressed_depth_[key] != 0)
                     --suppressed_depth_[key];
                 else if (passthrough_depth_[key] != 0) {
@@ -402,7 +408,10 @@ template <typename Serial = std::uint32_t> class BasicMonophonicNoteSelector {
             return {0, input.size(), 0, false};
         reconcile(0, output, report);
         for (const auto& event : input) {
-            if (event.is_note_on()) {
+            const bool is_attack = event.is_note_on() && event.velocity() != 0;
+            const bool is_release = event.is_note_off() ||
+                                    (event.is_note_on() && event.velocity() == 0);
+            if (is_attack) {
                 const int key = utility_detail::key_index(event.channel(), event.note());
                 if (held_depth_[key] != std::numeric_limits<std::uint32_t>::max())
                     ++held_depth_[key];
@@ -411,7 +420,7 @@ template <typename Serial = std::uint32_t> class BasicMonophonicNoteSelector {
                     rebase_serials();
                 serial_[key] = next_serial_++;
                 reconcile(event.sample_offset, output, report);
-            } else if (event.is_note_off()) {
+            } else if (is_release) {
                 const int key = utility_detail::key_index(event.channel(), event.note());
                 if (held_depth_[key] != 0)
                     --held_depth_[key];

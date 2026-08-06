@@ -457,6 +457,7 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     // transport_changed against the prior session's last block.
     self->playhead_prev = {};
     self->reset_requested = false;
+    self->sidecar_reconcile_requested = false;
     return true;
 }
 
@@ -469,6 +470,7 @@ void clap_deactivate(const clap_plugin_t* plugin) {
     clear_midi_event_buffers(*self);
     self->playhead_prev = {};
     self->reset_requested = false;
+    self->sidecar_reconcile_requested = false;
 }
 
 bool clap_start_processing(const clap_plugin_t*) { return true; }
@@ -483,6 +485,7 @@ void clap_reset(const clap_plugin_t* plugin) {
     clear_midi_event_buffers(*self);
     self->playhead_prev = {};
     self->reset_requested = true;
+    self->sidecar_reconcile_requested = false;
 }
 
 bool clap_param_modulation_lane(const PulpClapPlugin& self,
@@ -1621,11 +1624,25 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     const bool bypassed = self->bypass_param_id != 0 &&
                           self->store.get_value(self->bypass_param_id) >= 0.5f;
     auto render_lock = self->state_restore_gate.lock_for_render();
+    const bool skipped_note_lifecycle = std::any_of(
+        self->midi_in.begin(), self->midi_in.end(), [](const midi::MidiEvent& event) {
+            return event.is_note_on() || event.is_note_off();
+        });
     // Do not advance adapter-owned note identity when the processor will not
     // observe this block. In particular, a reset request retained across
     // bypass must keep tracker and allocator at the same boundary.
     if (render_lock && !bypassed) {
+        if (self->sidecar_reconcile_requested) {
+            self->mpe.reset();
+            self->sidecar_reconcile_requested = false;
+        }
         clap_phase_prepare_sidecars(self, host_delivered_ump);
+    } else if (skipped_note_lifecycle) {
+        // The decoded MIDI block cannot be replayed after bypass/contention.
+        // Reset both ownership domains on the next real render so a dropped
+        // release cannot resurrect a held voice.
+        self->sidecar_reconcile_requested = true;
+        self->reset_requested = true;
     }
 
     // Process! Wrap the plugin call in a ScopedNoAlloc so any debug

@@ -1286,6 +1286,48 @@ TEST_CASE("CLAP resets MPE sidecar ownership across reset and reactivation",
     REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
     REQUIRE_FALSE(g_capturing->captured_context.reset_requested);
 
+    // A release decoded while bypassed cannot be replayed. The first real
+    // render reconciles both the adapter tracker and processor-owned voices.
+    InputEventList held_input;
+    clap_event_note_t held_note = bypassed_note;
+    held_note.key = 73;
+    held_input.push(held_note);
+    REQUIRE(h.run(held_input) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
+    InputEventList skipped_release;
+    held_note.header.type = CLAP_EVENT_NOTE_OFF;
+    held_note.velocity = 0.0;
+    skipped_release.push(held_note);
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 1.0f);
+    REQUIRE(h.run(skipped_release) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
+    REQUIRE(h.plugin.reset_requested);
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 0.0f);
+    REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 0);
+    REQUIRE(g_capturing->captured_context.reset_requested);
+
+    // Empty bypass blocks preserve a legitimately held note because no
+    // unreplayable ownership event crossed the skipped boundary.
+    held_note.header.type = CLAP_EVENT_NOTE_ON;
+    held_note.velocity = 0.8;
+    InputEventList continued_held_input;
+    continued_held_input.push(held_note);
+    REQUIRE(h.run(continued_held_input) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 1.0f);
+    REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+    REQUIRE_FALSE(h.plugin.sidecar_reconcile_requested);
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 0.0f);
+    REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
+    held_note.header.type = CLAP_EVENT_NOTE_OFF;
+    held_note.velocity = 0.0;
+    InputEventList continued_release;
+    continued_release.push(held_note);
+    REQUIRE(h.run(continued_release) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 0);
+
     // Deactivate/re-activate repeatedly. Processor::release() owns downstream
     // DSP state; the adapter resets its tracker immediately afterward.
     for (int cycle = 0; cycle < 3; ++cycle) {

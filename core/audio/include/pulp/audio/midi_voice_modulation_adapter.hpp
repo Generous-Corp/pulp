@@ -40,7 +40,8 @@ template <std::size_t MaximumVoices> class MidiVoiceModulationAdapter {
             (!event.is_note_on() && !event.is_note_off()))
             return false;
         auto& voice = voices_[voice_index];
-        if (event.is_note_on()) {
+        const bool is_attack = event.is_note_on() && event.velocity() != 0;
+        if (is_attack) {
             if (voice.active && note_id <= voice.note_id)
                 return false;
             voice = {true, event.channel(), event.note(), event.velocity(), note_id, 0.0f, 0.0f,

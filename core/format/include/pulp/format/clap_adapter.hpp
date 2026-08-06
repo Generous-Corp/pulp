@@ -247,6 +247,10 @@ struct PulpClapPlugin {
     // exposes reset as a one-block ProcessContext signal rather than a virtual
     // callback, so carry that request to exactly the next process block.
     bool reset_requested = false;
+    // A bypassed or render-contended block may contain an unreplayable note
+    // lifecycle event. Reconcile adapter and processor ownership together on
+    // the next block that actually reaches Processor::process().
+    bool sidecar_reconcile_requested = false;
 
     // Process-wide MainThreadDispatcher backend token. Acquired in clap_init()
     // so adapter callsites (e.g. host-callback dispatches posted via

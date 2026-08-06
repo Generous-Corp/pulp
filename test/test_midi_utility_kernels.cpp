@@ -401,6 +401,40 @@ TEST_CASE("Note length shaping orders retrigger releases before attacks",
     CHECK(output[2].sample_offset == 12);
 }
 
+TEST_CASE("Note length shaping treats velocity-zero note-ons as releases",
+          "[midi][utility][lifecycle]") {
+    auto input = prepared_buffer();
+    auto output = prepared_buffer();
+    midi::NoteLengthShaper<1> shaper({4096});
+    input.add(midi::MidiEvent::note_on(0, 60, 100));
+    REQUIRE(shaper.process(input, output, {0}, 64).complete);
+    REQUIRE(output.size() == 1);
+
+    input.clear();
+    input.add(midi::MidiEvent::note_on(0, 60, 0));
+    REQUIRE(shaper.process(input, output, {64}, 64).complete);
+    CHECK(output.empty());
+    REQUIRE(shaper.flush(output).complete);
+    REQUIRE(output.size() == 1);
+    CHECK(output[0].is_note_off());
+
+    SECTION("an unprocessed velocity-zero release clears suppression debt") {
+        midi::NoteLengthShaper<1> invalid({0});
+        auto zero_capacity = prepared_buffer(0);
+        input.clear();
+        input.add(midi::MidiEvent::note_on(0, 61, 100));
+        REQUIRE_FALSE(invalid.process(input, zero_capacity, {0}, 64).complete);
+        input.clear();
+        input.add(midi::MidiEvent::note_on(0, 61, 0));
+        REQUIRE_FALSE(invalid.process(input, zero_capacity, {64}, 64).complete);
+        REQUIRE(invalid.replace_spec({8}, output).complete);
+        input.clear();
+        input.add(midi::MidiEvent::note_on(0, 61, 100));
+        REQUIRE(invalid.process(input, output, {128}, 64).complete);
+        REQUIRE(output.size() == 2);
+    }
+}
+
 TEST_CASE("Note length saturation never schedules a release before its attack",
           "[midi][utility][ordering][boundary]") {
     auto input = prepared_buffer();
@@ -571,6 +605,23 @@ TEST_CASE("Monophonic priorities maintain balanced release-before-attack transit
         balance.feed(output);
         CHECK(balance.balanced());
     }
+}
+
+TEST_CASE("Monophonic selection treats velocity-zero note-ons as releases",
+          "[midi][utility][mono][lifecycle]") {
+    auto input = prepared_buffer();
+    auto output = prepared_buffer();
+    midi::MonophonicNoteSelector selector;
+    input.add(midi::MidiEvent::note_on(0, 60, 100));
+    REQUIRE(selector.process(input, output).complete);
+    REQUIRE(selector.pitch_state().active);
+
+    input.clear();
+    input.add(midi::MidiEvent::note_on(0, 60, 0));
+    REQUIRE(selector.process(input, output).complete);
+    REQUIRE(output.size() == 1);
+    CHECK(output[0].is_note_off());
+    CHECK_FALSE(selector.pitch_state().active);
 }
 
 TEST_CASE("Last-note priority rebases deterministically across serial rollover",
