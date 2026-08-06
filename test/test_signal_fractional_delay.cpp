@@ -577,6 +577,95 @@ TEST_CASE("read-before-write feedback uses the requested impulse loop delay",
     }
 }
 
+TEST_CASE("stereo ping-pong reads both opposite histories before either push",
+          "[signal][fractional-delay][shared-history]") {
+    constexpr std::size_t count = 21;
+    constexpr double delay = 4.0;
+    constexpr double feedback = 0.5;
+    const auto render = [](const std::array<std::size_t, 3>& partitions) {
+        FractionalDelayHistoryT<double> left_history;
+        FractionalDelayHistoryT<double> right_history;
+        REQUIRE(left_history.prepare(16));
+        REQUIRE(right_history.prepare(16));
+        std::array<std::array<double, count>, 2> output{};
+        std::size_t begin = 0;
+        for (const auto end : partitions) {
+            for (auto n = begin; n < end; ++n) {
+                const auto into_left = right_history.read_lagrange5_at(delay);
+                const auto into_right = left_history.read_lagrange5_at(delay);
+                REQUIRE(into_left);
+                REQUIRE(into_right);
+                output[0][n] = (n == 0 ? 1.0 : 0.0) + feedback * into_left.sample;
+                output[1][n] = feedback * into_right.sample;
+                REQUIRE(left_history.push(output[0][n]) == FractionalDelayStatus::ok);
+                REQUIRE(right_history.push(output[1][n]) == FractionalDelayStatus::ok);
+            }
+            begin = end;
+        }
+        return output;
+    };
+
+    const auto whole = render({count, count, count});
+    const auto partitioned = render({3, 9, count});
+    CHECK(whole == partitioned);
+    for (std::size_t n = 0; n < count; ++n) {
+        double expected_left = 0.0;
+        double expected_right = 0.0;
+        if (n == 0)
+            expected_left = 1.0;
+        else if (n == 8)
+            expected_left = 0.25;
+        else if (n == 16)
+            expected_left = 0.0625;
+        if (n == 4)
+            expected_right = 0.5;
+        else if (n == 12)
+            expected_right = 0.125;
+        else if (n == 20)
+            expected_right = 0.03125;
+        CHECK(whole[0][n] == expected_left);
+        CHECK(whole[1][n] == expected_right);
+    }
+}
+
+TEST_CASE("old and new Lagrange-5 heads share one pre-push transition snapshot",
+          "[signal][fractional-delay][shared-history]") {
+    constexpr std::size_t count = 12;
+    const auto render = [](const std::array<std::size_t, 3>& partitions) {
+        FractionalDelayHistoryT<double> history;
+        REQUIRE(history.prepare(16));
+        std::array<std::array<double, count>, 3> output{};
+        std::size_t begin = 0;
+        for (const auto end : partitions) {
+            for (auto n = begin; n < end; ++n) {
+                const auto old_head = history.read_lagrange5_at(4.0);
+                const auto new_head = history.read_lagrange5_at(7.0);
+                REQUIRE(old_head);
+                REQUIRE(new_head);
+                output[0][n] = old_head.sample;
+                output[1][n] = new_head.sample;
+                output[2][n] = 0.25 * old_head.sample + 0.75 * new_head.sample;
+                const auto input = n == 0 ? 1.0 : (n == 3 ? 2.0 : 0.0);
+                REQUIRE(history.push(input) == FractionalDelayStatus::ok);
+            }
+            begin = end;
+        }
+        return output;
+    };
+
+    const auto whole = render({count, count, count});
+    const auto partitioned = render({4, 8, count});
+    CHECK(whole == partitioned);
+    for (std::size_t n = 0; n < count; ++n) {
+        const auto expected_old = n == 4 ? 1.0 : (n == 7 ? 2.0 : 0.0);
+        const auto expected_new = n == 7 ? 1.0 : (n == 10 ? 2.0 : 0.0);
+        const auto expected_mixed = n == 4 ? 0.25 : (n == 7 ? 1.25 : (n == 10 ? 1.5 : 0.0));
+        CHECK(whole[0][n] == expected_old);
+        CHECK(whole[1][n] == expected_new);
+        CHECK(whole[2][n] == expected_mixed);
+    }
+}
+
 TEST_CASE("shared Lagrange magnitude and phase match an independent fractional oracle",
           "[signal][fractional-delay][shared-history]") {
     constexpr std::array fractions{0.1, 0.25, 0.5, 0.9};
