@@ -5,6 +5,7 @@
 /// Accumulates samples from the audio thread and emits windowed FFT frames.
 
 #include <pulp/signal/fft.hpp>
+#include <pulp/signal/mirrored_history_buffer.hpp>
 #include <pulp/signal/windowing.hpp>
 #include <vector>
 #include <complex>
@@ -69,9 +70,8 @@ public:
             config.fft_size, config.window, static_cast<SampleType>(config.window_param));
         num_bins_ = config.fft_size / 2 + 1;
 
-        // Ring buffer for sample accumulation
-        ring_.resize(config.fft_size, SampleType{0.0f});
-        ring_pos_ = 0;
+        // The complete oldest-to-newest analysis history remains contiguous.
+        history_.prepare(static_cast<std::size_t>(config.fft_size));
         hop_counter_ = 0;
         samples_fed_ = 0;
 
@@ -90,8 +90,7 @@ public:
     bool push_samples(const SampleType* samples, int count) {
         bool computed = false;
         for (int i = 0; i < count; ++i) {
-            ring_[ring_pos_] = samples[i];
-            ring_pos_ = (ring_pos_ + 1) % config_.fft_size;
+            history_.push(samples[i]);
             ++samples_fed_;
             ++hop_counter_;
 
@@ -140,8 +139,7 @@ public:
     }
 
     void reset() {
-        std::fill(ring_.begin(), ring_.end(), SampleType{0.0f});
-        ring_pos_ = 0;
+        history_.reset();
         hop_counter_ = 0;
         samples_fed_ = 0;
         frame_ready_ = false;
@@ -151,10 +149,9 @@ public:
 
 private:
     void compute_frame() {
-        // Copy ring buffer contents in order, starting from the oldest sample
-        int start = ring_pos_; // ring_pos_ points to the next write position = oldest
+        const auto history = history_.window();
         for (int i = 0; i < config_.fft_size; ++i) {
-            windowed_[i] = ring_[(start + i) % config_.fft_size];
+            windowed_[i] = history[static_cast<std::size_t>(i)];
         }
 
         // Apply window
@@ -177,9 +174,8 @@ private:
     std::vector<SampleType> window_;
     int num_bins_ = 0;
 
-    // Ring buffer for sample accumulation
-    std::vector<SampleType> ring_;
-    int ring_pos_ = 0;
+    // Single-thread sample history; not a producer/consumer queue.
+    MirroredHistoryBuffer<SampleType> history_;
     int hop_counter_ = 0;
     int samples_fed_ = 0;
 

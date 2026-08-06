@@ -63,4 +63,12 @@ if(PULP_BENCHMARK)
         LIBRARIES pulp::host pulp::signal
         LABELS "bench"
         TIMEOUT 120)
+
+    # Advisory prepare-time window and worst-case history-wrap measurements.
+    # No timing threshold: heterogeneous hosts report evidence without making
+    # scheduler noise a correctness failure.
+    pulp_add_test_suite(pulp-test-analysis-utilities-bench
+        LIBRARIES pulp::signal
+        LABELS "bench"
+        TIMEOUT 120)
 endif()
