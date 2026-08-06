@@ -554,7 +554,12 @@ with the instrument's allocator, preserving the MIDI-to-audio dependency
 direction and avoiding a second voice-allocation policy. Expression and release
 updates must carry a nonzero `note_id`: event releases match channel, note, and
 generation, while index-based releases match the generation explicitly. A stale
-generation therefore cannot mutate or release a reused voice slot. `flush()` and
+generation therefore cannot mutate or release a reused voice slot. The tracker
+uses the 64-bit `MpeNoteGeneration` type, never recycles a generation across
+`reset()`, and fails closed after issuing its final nonzero value: further
+note-ons are consumed but create no voice or callback. Check
+`note_generation_exhausted()` and `refused_note_on_count()` to surface that
+terminal condition. `flush()` and
 `reset()` are the deliberate identity-free lifecycle clears. Destinations are
 preflighted for four lanes and the complete frame capacity before any lane is
 written.

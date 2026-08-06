@@ -54,6 +54,16 @@ flags with the node ABI capability field.
 | `pulp/midi/mpe_synth_voice.hpp` | `MpeVoiceAllocator<Voice>` | Routes `MpeBuffer` events to a voice pool; configurable steal mode |
 | `pulp/midi/mpe_synth_voice.hpp` | `MpeGlideDetector` | Flags legato/glide gestures (overlap on same MPE member channel) |
 
+Each accepted note-on receives a nonzero 64-bit `MpeNoteGeneration` in
+`MpeNoteState::note_id`. Generations are never recycled by `reset()` or a
+configuration change, so a delayed release cannot collide with a later note.
+After the final representable generation, the tracker enters permanent
+exhaustion and consumes subsequent MPE note-ons without creating or retriggering
+a note or invoking `on_note_on`. Applications that need to report this terminal
+condition can query `note_generation_exhausted()` and
+`refused_note_on_count()`; constructing a new tracker requires clearing every
+downstream owner that could still hold a generation from the old instance.
+
 ## Zone configuration
 
 `MpeConfig` (from `pulp/midi/ump.hpp`) describes which channels belong to

@@ -82,7 +82,7 @@ public:
     // Getters for subclasses and the allocator.
     bool active() const { return active_; }
     bool releasing() const { return releasing_; }
-    uint32_t note_id() const { return note_.note_id; }
+    MpeNoteGeneration note_id() const { return note_.note_id; }
     uint8_t channel() const { return note_.channel; }
     uint8_t note_number() const { return note_.note; }
     uint8_t velocity() const { return note_.velocity; }
@@ -357,7 +357,7 @@ private:
         return target;
     }
 
-    Voice* find_voice_by_id(uint32_t id) {
+    Voice* find_voice_by_id(MpeNoteGeneration id) {
         for (auto& v : voices_) {
             if (v.active() && v.note_id() == id) return &v;
         }

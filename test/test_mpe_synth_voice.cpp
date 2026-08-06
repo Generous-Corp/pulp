@@ -31,29 +31,29 @@ struct TestVoice : public MpeSynthVoice {
     }
 };
 
-MpeExpressionEvent note_on_event(uint8_t ch, uint8_t note, uint8_t vel, uint32_t id) {
+MpeExpressionEvent note_on_event(uint8_t ch, uint8_t note, uint8_t vel, MpeNoteGeneration id) {
     MpeNoteState s; s.active = true; s.channel = ch; s.note = note; s.velocity = vel; s.note_id = id;
     return {0, Kind::NoteOn, s};
 }
-MpeExpressionEvent note_off_event(uint32_t id, uint8_t ch = 0) {
+MpeExpressionEvent note_off_event(MpeNoteGeneration id, uint8_t ch = 0) {
     MpeNoteState s; s.active = false; s.channel = ch; s.note_id = id;
     return {0, Kind::NoteOff, s};
 }
-MpeExpressionEvent pitch_bend_event(uint32_t id, float semi) {
+MpeExpressionEvent pitch_bend_event(MpeNoteGeneration id, float semi) {
     MpeNoteState s; s.active = true; s.note_id = id; s.pitch_bend_semitones = semi;
     return {0, Kind::PitchBend, s};
 }
-MpeExpressionEvent pressure_event(uint32_t id, float p) {
+MpeExpressionEvent pressure_event(MpeNoteGeneration id, float p) {
     MpeNoteState s; s.active = true; s.note_id = id; s.pressure = p;
     return {0, Kind::Pressure, s};
 }
-MpeExpressionEvent timbre_event(uint32_t id, float t) {
+MpeExpressionEvent timbre_event(MpeNoteGeneration id, float t) {
     MpeNoteState s; s.active = true; s.note_id = id; s.timbre = t;
     return {0, Kind::Timbre, s};
 }
 
 template<typename Alloc>
-bool has_note_id(const Alloc& alloc, uint32_t note_id) {
+bool has_note_id(const Alloc& alloc, MpeNoteGeneration note_id) {
     for (std::size_t i = 0; i < alloc.polyphony(); ++i) {
         if (alloc.voice(i).active() && alloc.voice(i).note_id() == note_id) return true;
     }
@@ -61,7 +61,7 @@ bool has_note_id(const Alloc& alloc, uint32_t note_id) {
 }
 
 template<typename Voice>
-Voice* find_voice_by_note_id(MpeVoiceAllocator<Voice>& alloc, uint32_t note_id) {
+Voice* find_voice_by_note_id(MpeVoiceAllocator<Voice>& alloc, MpeNoteGeneration note_id) {
     for (std::size_t i = 0; i < alloc.polyphony(); ++i) {
         auto& voice = alloc.voice(i);
         if (voice.active() && voice.note_id() == note_id) return &voice;

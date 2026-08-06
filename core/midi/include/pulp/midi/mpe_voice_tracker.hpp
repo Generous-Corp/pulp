@@ -31,6 +31,10 @@
 
 namespace pulp::midi {
 
+/// Stable identity assigned to one accepted MPE note-on generation.
+/// Zero is permanently reserved as "no generation".
+using MpeNoteGeneration = std::uint64_t;
+
 /// Per-note state maintained by `MpeVoiceTracker`.
 ///
 /// Expression values are normalized:
@@ -45,7 +49,7 @@ struct MpeNoteState {
     float pitch_bend_semitones = 0.0f;  ///< Current per-note pitch bend in semitones
     float pressure = 0.0f;         ///< Channel pressure (0..1)
     float timbre = 0.0f;           ///< CC 74 (0..1); same value as `slide`
-    uint32_t note_id = 0;          ///< Monotonic id assigned on note-on (never 0)
+    MpeNoteGeneration note_id = 0; ///< Monotonic generation assigned on note-on (never 0)
     bool is_upper_zone = false;    ///< true if this note lives in the upper zone
     /// True after a UMP Per-Note Management message with the "detach
     /// controllers" flag landed on this note: subsequent channel-level
@@ -129,6 +133,22 @@ public:
     /// returns the count written.
     std::size_t snapshot(MpeNoteState* out, std::size_t max) const;
 
+    /// True once every representable nonzero note generation has been issued.
+    /// Further note-ons are consumed by process() but refused without changing
+    /// note state or invoking on_note_on. Exhaustion is permanent for this
+    /// tracker instance, including across reset() and set_config().
+    bool note_generation_exhausted() const noexcept { return next_note_generation_ == 0; }
+
+    /// Number of note-ons refused because the generation space was exhausted.
+    /// Saturates at the maximum representable value.
+    std::uint64_t refused_note_on_count() const noexcept { return refused_note_on_count_; }
+
+    /// Advance the next generation without issuing it. This control-thread
+    /// operation succeeds only while no notes are active and only moves the
+    /// cursor forward; zero, rewind, and exhausted-tracker requests fail.
+    /// Primarily useful for deterministic lifecycle tests and state handoff.
+    bool advance_note_generation(MpeNoteGeneration next) noexcept;
+
     /// Direct access to the underlying slots (active flag identifies live
     /// notes). Stable indices across calls.
     const std::array<MpeNoteState, kMaxNotes>& slots() const { return notes_; }
@@ -158,6 +178,8 @@ public:
 private:
     void add_note(uint8_t ch, uint8_t note, uint8_t velocity, bool upper);
     void remove_note(uint8_t ch, uint8_t note);
+    std::optional<MpeNoteGeneration> take_note_generation() noexcept;
+    void record_generation_refusal() noexcept;
 
     void update_channel_pitch_bend(uint8_t ch, float semitones, bool upper);
     void update_channel_pressure(uint8_t ch, float pressure, bool upper);
@@ -187,7 +209,8 @@ private:
     ZoneState upper_zone_state_{};
     float member_bend_semi_ = kDefaultMemberBendSemitones;
     float manager_bend_semi_ = kDefaultManagerBendSemitones;
-    uint32_t next_note_id_ = 1;
+    MpeNoteGeneration next_note_generation_ = 1;
+    std::uint64_t refused_note_on_count_ = 0;
     std::optional<uint8_t> assignable_timbre_index_;
 };
 
