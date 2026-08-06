@@ -18,8 +18,10 @@ enum class GridAnchor {
 };
 
 // Stable affine session-clock anchor shared by every host-mapped range in a
-// continuous interval. `source_tick` occurs at absolute output `frame`; the
-// positive slope is expressed in source ticks per output frame.
+// continuous interval. `source_tick` is the normalized source coordinate at
+// absolute output `frame`; the positive slope is expressed in source ticks per
+// output frame. Establish a new anchor when that normalization epoch or slope
+// changes.
 struct HostGridAnchor {
     double source_tick = 0.0;
     std::int64_t frame = 0;
@@ -109,6 +111,65 @@ constexpr bool checked_grid_subtract(std::int64_t lhs, std::int64_t rhs,
     return true;
 }
 
+// Adds an already-integral binary64 delta without first narrowing it to int64.
+// An opposite-signed anchor can make a delta beyond the signed domain produce
+// a valid signed frame, so retain a uint64 magnitude through the cancellation.
+inline bool checked_grid_add_integral_delta(std::int64_t anchor, double integral_delta,
+                                            std::int64_t& result) noexcept {
+    constexpr auto sign_bit = std::uint64_t{1} << 63U;
+    constexpr auto signed_max =
+        static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+    const auto unsigned_max_exclusive = std::ldexp(1.0, 64);
+    if (!std::isfinite(integral_delta))
+        return false;
+
+    const auto assign_negative = [&](std::uint64_t magnitude) noexcept {
+        if (magnitude > sign_bit)
+            return false;
+        result = magnitude == sign_bit ? std::numeric_limits<std::int64_t>::min()
+                                       : -static_cast<std::int64_t>(magnitude);
+        return true;
+    };
+    const auto anchor_magnitude = [&] {
+        return anchor < 0 ? static_cast<std::uint64_t>(-(anchor + 1)) + 1U
+                          : static_cast<std::uint64_t>(anchor);
+    }();
+
+    if (integral_delta >= 0.0) {
+        if (!(integral_delta < unsigned_max_exclusive))
+            return false;
+        const auto magnitude = static_cast<std::uint64_t>(integral_delta);
+        if (anchor >= 0) {
+            if (magnitude > signed_max - anchor_magnitude)
+                return false;
+            result = anchor + static_cast<std::int64_t>(magnitude);
+            return true;
+        }
+        if (magnitude < anchor_magnitude)
+            return assign_negative(anchor_magnitude - magnitude);
+        const auto positive = magnitude - anchor_magnitude;
+        if (positive > signed_max)
+            return false;
+        result = static_cast<std::int64_t>(positive);
+        return true;
+    }
+
+    const auto magnitude_as_double = -integral_delta;
+    if (!(magnitude_as_double < unsigned_max_exclusive))
+        return false;
+    const auto magnitude = static_cast<std::uint64_t>(magnitude_as_double);
+    if (anchor <= 0) {
+        if (magnitude > sign_bit - anchor_magnitude)
+            return false;
+        return assign_negative(anchor_magnitude + magnitude);
+    }
+    if (magnitude <= anchor_magnitude) {
+        result = static_cast<std::int64_t>(anchor_magnitude - magnitude);
+        return true;
+    }
+    return assign_negative(magnitude - anchor_magnitude);
+}
+
 // Exact ceiling to a positive quantum. Avoid forming floor(value / quantum) *
 // quantum: for INT64_MIN that intermediate can lie below the signed domain even
 // when the requested ceiling is representable.
@@ -147,11 +208,11 @@ inline GridProjectionError validate_range(const GridProjectionRange& range) noex
         return GridProjectionError::InvalidRange;
     if (range.host_beat_mapping) {
         const auto tick_start = range.has_precise_host_ticks
-                                    ? static_cast<long double>(range.host_tick_start)
-                                    : static_cast<long double>(range.timeline_tick_start.value);
+                                    ? range.host_tick_start
+                                    : static_cast<double>(range.timeline_tick_start.value);
         const auto tick_end = range.has_precise_host_ticks
-                                  ? static_cast<long double>(range.host_tick_end)
-                                  : static_cast<long double>(range.timeline_tick_end.value);
+                                  ? range.host_tick_end
+                                  : static_cast<double>(range.timeline_tick_end.value);
         if (!std::isfinite(tick_start) || !std::isfinite(tick_end) ||
             (range.frame_count != 0 && !(tick_start < tick_end)))
             return GridProjectionError::InvalidRange;
@@ -170,28 +231,26 @@ inline bool host_mapped_grid_output_offset(const GridProjectionRange& range,
                                            TickPosition document_tick,
                                            std::uint32_t& output_offset) noexcept {
     const auto tick_start = range.has_precise_host_ticks
-                                ? static_cast<long double>(range.host_tick_start)
-                                : static_cast<long double>(range.timeline_tick_start.value);
+                                ? range.host_tick_start
+                                : static_cast<double>(range.timeline_tick_start.value);
     const auto tick_end = range.has_precise_host_ticks
-                              ? static_cast<long double>(range.host_tick_end)
-                              : static_cast<long double>(range.timeline_tick_end.value);
+                              ? range.host_tick_end
+                              : static_cast<double>(range.timeline_tick_end.value);
     if (!range.host_beat_mapping || range.frame_count == 0 || !(tick_start < tick_end))
         return false;
-    const auto document = static_cast<long double>(document_tick.value);
+    // The host clock contract is binary64. Keep every intermediate binary64 as
+    // well: `long double` is binary64 on Apple ARM but extended precision on
+    // x86_64, which can move a grid event by one frame at a floor boundary.
+    const auto document = static_cast<double>(document_tick.value);
     if (document < tick_start || !(document < tick_end))
         return false;
     const auto source_tick = document + range.document_to_source_tick_offset;
-    const auto projected =
-        static_cast<long double>(range.host_anchor.frame) +
+    const auto frame_delta =
         (source_tick - range.host_anchor.source_tick) / range.host_anchor.ticks_per_frame;
-    const auto minimum = static_cast<long double>(std::numeric_limits<std::int64_t>::min());
-    // Use an exclusive, exactly representable 2^63 upper bound. On platforms
-    // where long double aliases double, converting INT64_MAX to long double can
-    // itself round to 2^63 and make an inclusive comparison unsafe.
-    const auto maximum_exclusive = -minimum;
-    if (projected < minimum || !(projected < maximum_exclusive))
+    const auto integral_delta = std::floor(frame_delta);
+    std::int64_t absolute_frame = 0;
+    if (!checked_grid_add_integral_delta(range.host_anchor.frame, integral_delta, absolute_frame))
         return false;
-    auto absolute_frame = static_cast<std::int64_t>(std::floor(projected));
     std::int64_t absolute_frame_end = 0;
     if (!checked_grid_add(range.absolute_frame_start, range.frame_count, absolute_frame_end))
         return false;
