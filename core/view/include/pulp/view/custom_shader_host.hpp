@@ -13,9 +13,10 @@ namespace pulp::view {
 /// `dynamic_cast<CustomShaderHost*>` rather than a hardcoded chain of concrete
 /// widget types.
 ///
-/// The render loop discovers this mixin too. Core widgets use an allocation-free
-/// type tag on their hot path; an untagged future widget falls back to this mixin,
-/// so a shader declaring a `time` uniform still keeps its view tree live.
+/// The render loop discovers this mixin too. Core shader widgets use an
+/// allocation-free type tag on their hot path; any other future widget falls
+/// back to this mixin, including a subclass that inherits a non-shader tag, so
+/// a shader declaring a `time` uniform still keeps its view tree live.
 class CustomShaderHost {
 public:
     virtual ~CustomShaderHost() = default;

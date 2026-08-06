@@ -10,6 +10,7 @@
 // unipolar CV 0..10 V, bipolar CV +/-5 V, gates and triggers 10 V, and Schmitt
 // detection with a 0.1 V low / 1.0 V high hysteresis band.
 
+#include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 
 #include <algorithm>
@@ -210,6 +211,50 @@ inline CustomNodeType make_sample_hold_node() {
         }
     };
     return t;
+}
+
+// ── Forge semantic descriptors ──────────────────────────────────────────────
+// The factories above remain the numeric authority. These descriptors add the
+// vocabulary needed to discover and author the nodes through the installed
+// Forge catalog without duplicating ranges or defaults.
+
+inline ForgeNodeDescriptor attenuverter_descriptor() {
+    return {"eurorack_attenuverter", "Attenuverter",
+            "Scales, inverts, and offsets a Eurorack control-voltage signal.",
+            {}, {{"default", "eurorack.attenuverter"}},
+            {{"amount", kAmount, "Amount", "",
+              "Scales the input from full inversion through zero to unity.",
+              ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"offset_v", kOffset, "Offset", "V",
+              "Adds a bipolar voltage offset after scaling.",
+              ForgeParamKind::continuous, ForgeParamCurve::linear}}};
+}
+
+inline ForgeNodeDescriptor slew_descriptor() {
+    return {"eurorack_slew", "Slew Limiter",
+            "Limits independent rising and falling CV slopes for glide and lag processing.",
+            {}, {{"default", "eurorack.slew"}},
+            {{"rise_s", kSlewRise, "Rise", "s",
+              "Sets the time for a ten-volt upward transition.",
+              ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"fall_s", kSlewFall, "Fall", "s",
+              "Sets the time for a ten-volt downward transition.",
+              ForgeParamKind::continuous, ForgeParamCurve::linear}}};
+}
+
+inline ForgeNodeDescriptor clock_divider_descriptor() {
+    return {"eurorack_clock_divider", "Clock Divider",
+            "Emits a ten-volt gate on every Nth Schmitt-detected input clock edge.",
+            {}, {{"default", "eurorack.clock_divider"}},
+            {{"division", kDivision, "Division", "",
+              "Sets the integer input-clock division from one through sixty-four.",
+              ForgeParamKind::continuous, ForgeParamCurve::linear}}};
+}
+
+inline ForgeNodeDescriptor sample_hold_descriptor() {
+    return {"eurorack_sample_hold", "Sample & Hold",
+            "Captures the signal input on each Schmitt-detected trigger edge and holds it.",
+            {}, {{"default", "eurorack.sample_hold"}}, {}};
 }
 
 }  // namespace pulp::host::eurorack

@@ -16,6 +16,10 @@ const std::vector<std::string_view>& expected_node_keys() {
         "analog_vcf",
         "character_delay",
         "distortion",
+        "eurorack_attenuverter",
+        "eurorack_slew",
+        "eurorack_clock_divider",
+        "eurorack_sample_hold",
         "drum_kick_oscillator",
         "drum_kick_resonant",
         "drum_kick_circuit",
@@ -206,6 +210,15 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
                         distortion::make_distortion_node(distortion::Topology::in_loop,
                             distortion::OversampleTier::x8)),
         });
+
+    add(eurorack::attenuverter_descriptor(),
+        {realization("default", eurorack::make_attenuverter_node())});
+    add(eurorack::slew_descriptor(),
+        {realization("default", eurorack::make_slew_node())});
+    add(eurorack::clock_divider_descriptor(),
+        {realization("default", eurorack::make_clock_divider_node())});
+    add(eurorack::sample_hold_descriptor(),
+        {realization("default", eurorack::make_sample_hold_node())});
 
     const auto add_drum = [&add](forge_drum::EngineId engine) {
         add(forge_drum::drum_descriptor(engine),

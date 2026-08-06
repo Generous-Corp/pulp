@@ -250,6 +250,7 @@ constexpr const char* kStaticShader =
     "half4 main(float2 p) { return half4(1); }";
 
 class UntaggedShaderView : public View, public CustomShaderHost {};
+class TaggedShaderScrollView : public ScrollView, public CustomShaderHost {};
 } // namespace
 
 TEST_CASE("a time-driven widget shader keeps the tree live", "[view][continuous-frames]") {
@@ -277,6 +278,14 @@ TEST_CASE("a time-driven widget shader keeps the tree live", "[view][continuous-
     SECTION("future untagged shader host") {
         View root;
         auto future = std::make_unique<UntaggedShaderView>();
+        future->set_custom_shader(kTimeShader);
+        root.add_child(std::move(future));
+        REQUIRE(needs_continuous_frames(&root));
+    }
+    SECTION("future shader host inheriting a non-shader tag") {
+        View root;
+        auto future = std::make_unique<TaggedShaderScrollView>();
+        REQUIRE(future->runtime_view_kind() == RuntimeViewKind::scroll);
         future->set_custom_shader(kTimeShader);
         root.add_child(std::move(future));
         REQUIRE(needs_continuous_frames(&root));
