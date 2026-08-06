@@ -88,6 +88,7 @@ BuildLine::Kind BuildMonitor::classify(const std::string& line) {
         contains(lower, "is missing something") ||
         contains(lower, "model cli is not installed") ||
         contains(lower, "the rack sdk is not installed") ||
+        contains(lower, "rack sdk not found") ||
         contains(lower, "could not download the rack sdk") ||
         contains(lower, "unknown setting") ||
         contains(lower, "two manifests claim")) {

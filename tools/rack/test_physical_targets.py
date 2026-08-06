@@ -80,6 +80,19 @@ def test_refusals_are_atomic() -> int:
     bad += check(patch == before,
                  "one refused target prevents every partial conversion")
 
+    duplicate = {"modules": [{"id": 1, "plugin": "Fundamental",
+                                "model": "VCO", "params": [
+        {"id": 0, "physical": 440.0, "unit": "Hz"},
+        {"id": 0, "value": 9.0},
+    ]}]}
+    before = copy.deepcopy(duplicate)
+    errs = P.place_physical_targets(duplicate, inv)
+    bad += check(any("repeats param 0" in e for e in errs),
+                 "a second row cannot override a placed physical target",
+                 str(errs))
+    bad += check(duplicate == before,
+                 "duplicate control IDs preserve atomic refusal")
+
     unreachable = {"modules": [{"id": 1, "plugin": "Fundamental",
                                  "model": "VCO", "params": [
                                      {"id": 0, "physical": 1e30,

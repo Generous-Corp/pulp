@@ -1817,3 +1817,15 @@ index 8910bc9..8657b97 100644
      require_stable_surface();
  
      shell.on_view_closed(*view);
+diff --git a/test/test_settings_surface.cpp b/test/test_settings_surface.cpp
+--- a/test/test_settings_surface.cpp
++++ b/test/test_settings_surface.cpp
+@@ -77,7 +77,7 @@ TEST_CASE("SettingsSurface owns reversible modal motion and tab routing") {
+     surface.open_providers();
+     CHECK(surface.active_tab() == 1);
+     surface.open_permissions();
+-    CHECK(surface.active_tab() == 2);
++    CHECK(surface.active_tab() == 3);
+     CHECK(focus_releases == 3);
+
+     surface.close();

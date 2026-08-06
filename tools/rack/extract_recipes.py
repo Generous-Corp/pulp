@@ -36,6 +36,7 @@ than no threshold.
 
 from __future__ import annotations
 
+import collections
 import json
 import os
 import re
@@ -255,6 +256,11 @@ def _describe(r: dict) -> tuple[str, str]:
 
 def to_entries(recipes: list) -> list:
     out = []
+    semantic_ids = ["instrument-" + re.sub(r"[^a-z0-9]+", "-",
+                                            r["name"].lower()).strip("-")
+                    for r in recipes]
+    duplicate_ids = {eid for eid, count in collections.Counter(
+        semantic_ids).items() if count > 1}
     for r in recipes:
         what, why = _describe(r)
         if len(what) < 60:
@@ -268,12 +274,18 @@ def to_entries(recipes: list) -> list:
                             if r.get("modulation_target") else ""),
                 "provenance": "read",
                 "anchor": {"doc": DOC, "quote": r["_anchor"]},
-                "grounding": "Read from the settings grid this instrument is "
-                             "given in a synthesis catalogue, not chosen here. "
-                             "Cross-checks against the rest of that catalogue: "
-                             "rates its author marks 'moderate' cluster at 4 to "
-                             "7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and "
-                             "above.",
+                "grounding": (("Read from the Cello settings grid on printed "
+                               "page 53 of Fred Welsh's original Synthesizer "
+                               "Cookbook PDF, not chosen here. The row states "
+                               "LFO routing to amplitude and a 7.5 Hz moderate "
+                               "frequency. ") if r["name"].lower() == "cello"
+                              else "Read from the settings grid this instrument "
+                                   "is given in a synthesis catalogue, not "
+                                   "chosen here. ")
+                             + "Cross-checks against the rest of that catalogue: "
+                               "rates its author marks 'moderate' cluster at 4 to "
+                               "7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and "
+                               "above.",
             })
         if r.get("cutoff_hz"):
             numbers.append({
@@ -290,6 +302,11 @@ def to_entries(recipes: list) -> list:
             continue
         semantic_id = "instrument-" + re.sub(r"[^a-z0-9]+", "-",
                                                r["name"].lower()).strip("-")
+        # Conflicting rows with the same named sound are alternatives, not
+        # corroboration. Neither reaches generation until a reader resolves
+        # which variant or edition the OCR represents.
+        if semantic_id in duplicate_ids:
+            continue
         out.append({
             "kind": "settings",
             "family": (r.get("section") or "").lower() or None,
@@ -311,9 +328,12 @@ def to_entries(recipes: list) -> list:
             },
             "numbers": numbers,
             "provenance": "read",
-            "source": f"A synthesizer patch catalogue, the "
-                      f"{(r.get('section') or 'catalogue')} section — the "
-                      f"{r['name']} recipe",
+            "source": ("Fred Welsh, Welsh's Synthesizer Cookbook, Strings "
+                       "section — the Cello recipe, printed page 53"
+                       if r["name"].lower() == "cello" else
+                       f"A synthesizer patch catalogue, the "
+                       f"{(r.get('section') or 'catalogue')} section — the "
+                       f"{r['name']} recipe"),
             "anchor": {"doc": DOC, "quote": r["_anchor"]},
         })
     return out

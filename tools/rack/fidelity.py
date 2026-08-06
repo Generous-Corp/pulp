@@ -48,6 +48,7 @@ user's own autosave, log, settings and installed plugins are never written to.
 from __future__ import annotations
 
 import array
+import hashlib
 import json
 import math
 import os
@@ -585,10 +586,30 @@ def write_audio_artifact(path: str, frames: list[list[float]],
         out.setsampwidth(2)
         out.setframerate(int(round(sample_rate)))
         out.writeframes(pcm.tobytes())
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    metadata = {
+        "schema": "forge.fidelity_audio_artifact.v1",
+        "wav_sha256": digest.hexdigest(),
+        "source_rms_volts": source_rms,
+        "minimum_source_rms_volts": SILENCE,
+        "source_peak_volts": peak,
+    }
+    metadata_path = path + ".fidelity.json"
+    with open(metadata_path, "w", encoding="utf-8") as sidecar:
+        json.dump(metadata, sidecar, indent=2, sort_keys=True)
+        sidecar.write("\n")
+    metadata_digest = hashlib.sha256()
+    with open(metadata_path, "rb") as source:
+        metadata_digest.update(source.read())
     return {"path": os.path.abspath(path), "channels": len(audio_channels),
             "frames": count, "sample_rate": int(round(sample_rate)),
             "source_peak_volts": peak, "source_rms_volts": source_rms,
-            "normalization_gain": gain}
+            "normalization_gain": gain,
+            "fidelity_metadata": os.path.abspath(metadata_path),
+            "fidelity_metadata_sha256": metadata_digest.hexdigest()}
 
 
 # ── Structural fidelity ──────────────────────────────────────────────────────

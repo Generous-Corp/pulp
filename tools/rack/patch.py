@@ -997,7 +997,13 @@ def place_physical_targets(patch: dict, inv: dict) -> list[str]:
     for mod in (patch.get("modules") or []):
         plugin, model = mod.get("plugin"), mod.get("model")
         entry = inv.get(plugin, {}).get("modules", {}).get(model)
+        seen_param_ids: set[object] = set()
         for target in (mod.get("params") or []):
+            param_id = target.get("id")
+            if param_id in seen_param_ids:
+                errs.append(f"{plugin}/{model} repeats param {param_id}; one "
+                            "Rack control may have exactly one target")
+            seen_param_ids.add(param_id)
             has_physical = "physical" in target
             if not has_physical:
                 if "unit" in target:

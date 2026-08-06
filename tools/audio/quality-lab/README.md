@@ -165,9 +165,14 @@ operator's authoritative local copy and page in machine-local experiment metadat
 
 It also requires a content-bound experiment manifest. Each `working` and
 `holdout` row records a distinct `pair_id`, the prompt, inventory digest, model,
-and `without`/`with` arms containing `guidance: off|on`, attempt number, and the
-exact WAV SHA-256. The command verifies every digest, controlled field, and
-holdout independence before it can emit a causal catalogue verdict.
+one fixed `analysis_channel`, the exact audibility-gate configuration, and
+`without`/`with` arms containing `guidance: off|on`, matched attempt/seed,
+distinct generation identity, exact WAV SHA-256, and the SHA-256 of the
+`fidelity.py --wav` sidecar. That sidecar binds the normalized WAV to its
+original Rack-voltage RMS. The command refuses a catalogue-on source-level drop
+over 3 dB, different channels between arms, low-confidence measurements,
+reused decoded audio, or a non-independent holdout before it can emit a causal
+catalogue verdict.
 
 The other supported keys are `spectral_centroid_hz`, `hf_energy_fraction`,
 `spectral_flux`, and `hnr_db`. These are measurement fields, not universal quality

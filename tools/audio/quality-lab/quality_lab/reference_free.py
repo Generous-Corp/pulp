@@ -25,6 +25,7 @@ EXPERIMENT_SCHEMA = "quality_lab.catalogue_experiment.v1"
 # denormals, or a leaked control/DC value to support a perceptual claim.
 MIN_AUDIBLE_RMS = 1e-4
 HF_MIN_BINS = 8
+MAX_SOURCE_LEVEL_DROP_DB = 3.0
 
 
 def _audible_band_rms(y: np.ndarray, sr: int) -> float:
@@ -106,22 +107,21 @@ def analyze_samples(y: np.ndarray, sr: int) -> dict[str, Any]:
     }
 
 
-def analyze_file(path: str) -> dict[str, Any]:
+def analyze_file(path: str, selected_channel: int = 0) -> dict[str, Any]:
     y, sr, channels = audio_io.load_wav_multichannel(path)
-    selected = 0
+    if (not isinstance(selected_channel, int)
+            or isinstance(selected_channel, bool)
+            or selected_channel < 0 or selected_channel >= channels):
+        raise ValueError(
+            f"analysis channel {selected_channel!r} is invalid for {channels} channels")
     if channels > 1:
-        # Catalogue targets describe timbre, not spatial image. A mean downmix
-        # can erase an anti-phase stereo signal and manufacture silence, so use
-        # the loudest actual listener channel and disclose that bounded choice.
-        levels = [audio_io.rms(y[:, channel]) for channel in range(channels)]
-        selected = int(np.argmax(levels))
-        y = y[:, selected]
+        y = y[:, selected_channel]
     report = analyze_samples(y, sr)
     report["input"] = os.path.abspath(path)
     report["channel_handling"] = {
         "input_channels": channels,
-        "analysis": "mono" if channels == 1 else "loudest-listener-channel",
-        "selected_channel": selected,
+        "analysis": "mono" if channels == 1 else "manifest-selected-channel",
+        "selected_channel": selected_channel,
     }
     return report
 
@@ -191,6 +191,38 @@ def _pcm_sha256(path: str) -> str:
     return digest.hexdigest()
 
 
+def _fidelity_metadata(wav_path: str, arm_doc: dict, label: str) -> dict:
+    """Validate Fidelity's content-bound pre-normalization level record."""
+    metadata_path = wav_path + ".fidelity.json"
+    try:
+        with open(metadata_path) as source:
+            metadata = json.load(source)
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"experiment {label} lacks Fidelity metadata: {exc}")
+    if metadata.get("schema") != "forge.fidelity_audio_artifact.v1":
+        raise ValueError(f"experiment {label} has unknown Fidelity metadata")
+    if metadata.get("wav_sha256") != _sha256(wav_path):
+        raise ValueError(f"experiment {label} Fidelity metadata names another WAV")
+    if arm_doc.get("fidelity_metadata_sha256") != _sha256(metadata_path):
+        raise ValueError(f"experiment {label} Fidelity metadata digest does not match")
+    source_rms = metadata.get("source_rms_volts")
+    floor = metadata.get("minimum_source_rms_volts")
+    if (not isinstance(source_rms, (int, float)) or isinstance(source_rms, bool)
+            or not math.isfinite(float(source_rms))
+            or not isinstance(floor, (int, float)) or isinstance(floor, bool)
+            or not math.isfinite(float(floor)) or float(floor) <= 0
+            or float(source_rms) < float(floor)):
+        raise ValueError(f"experiment {label} source was below Fidelity's floor")
+    declared_rms = arm_doc.get("source_rms_volts")
+    if (not isinstance(declared_rms, (int, float))
+            or isinstance(declared_rms, bool)
+            or not math.isfinite(float(declared_rms))
+            or not math.isclose(float(declared_rms), float(source_rms),
+                                rel_tol=0, abs_tol=1e-12)):
+        raise ValueError(f"experiment {label} source RMS does not match Fidelity")
+    return metadata
+
+
 def _experiment(path: str, wavs: dict[str, str], has_holdout: bool) -> dict:
     """Validate a content-bound record of the controlled generation arms."""
     with open(path) as source:
@@ -200,10 +232,11 @@ def _experiment(path: str, wavs: dict[str, str], has_holdout: bool) -> dict:
     splits = ["working"] + (["holdout"] if has_holdout else [])
     for split in splits:
         row = doc.get(split) or {}
-        missing = [key for key in
-                   ("pair_id", "prompt", "inventory_sha256", "model",
-                    "audibility_gate", "arms")
-                   if not row.get(key)]
+        required = ("pair_id", "prompt", "inventory_sha256", "model",
+                    "analysis_channel", "audibility_gate", "arms")
+        missing = [key for key in required
+                   if key not in row or (key != "analysis_channel"
+                                         and not row.get(key))]
         if missing:
             raise ValueError(f"experiment {split} lacks {', '.join(missing)}")
         for arm, state in (("without", "off"), ("with", "on")):
@@ -223,6 +256,8 @@ def _experiment(path: str, wavs: dict[str, str], has_holdout: bool) -> dict:
             actual = _sha256(wavs[f"{split}.{arm}"])
             if arm_doc.get("wav_sha256") != actual:
                 raise ValueError(f"experiment {split}.{arm} WAV digest does not match")
+            arm_doc["fidelity"] = _fidelity_metadata(
+                wavs[f"{split}.{arm}"], arm_doc, f"{split}.{arm}")
         without = row["arms"]["without"]
         with_guidance = row["arms"]["with"]
         if without["attempt"] != with_guidance["attempt"]:
@@ -236,7 +271,8 @@ def _experiment(path: str, wavs: dict[str, str], has_holdout: bool) -> dict:
                 f"experiment {split} audibility_gate must record the exact "
                 "Quality Lab audible-band RMS configuration")
     if has_holdout:
-        for key in ("prompt", "inventory_sha256", "model", "audibility_gate"):
+        for key in ("prompt", "inventory_sha256", "model", "analysis_channel",
+                    "audibility_gate"):
             if doc["working"][key] != doc["holdout"][key]:
                 raise ValueError(f"working and holdout must use the same {key}")
         if doc["working"]["pair_id"] == doc["holdout"]["pair_id"]:
@@ -285,15 +321,17 @@ def compare_files(without_wav: str, with_wav: str, expectations_path: str,
         wavs.update({"holdout.without": holdout_without,
                      "holdout.with": holdout_with})
     experiment = _experiment(experiment_path, wavs, bool(holdout_without))
-    without = analyze_file(without_wav)
-    with_catalogue = analyze_file(with_wav)
+    working_channel = experiment["working"]["analysis_channel"]
+    without = analyze_file(without_wav, working_channel)
+    with_catalogue = analyze_file(with_wav, working_channel)
     champ = score(without, expectations, "catalogue-off")
     cand = score(with_catalogue, expectations, "catalogue-on")
     holdout = None
     holdout_cand = holdout_champ = None
     if holdout_without and holdout_with:
-        ho_without = analyze_file(holdout_without)
-        ho_with = analyze_file(holdout_with)
+        holdout_channel = experiment["holdout"]["analysis_channel"]
+        ho_without = analyze_file(holdout_without, holdout_channel)
+        ho_with = analyze_file(holdout_with, holdout_channel)
         holdout_champ = score(ho_without, expectations, "catalogue-off-holdout")
         holdout_cand = score(ho_with, expectations, "catalogue-on-holdout")
         holdout = {
@@ -305,6 +343,22 @@ def compare_files(without_wav: str, with_wav: str, expectations_path: str,
     thresholds = {name: 1.0 for name in cand.scores}
     guard = loop.goodhart_guard(cand, champ, holdout_cand, holdout_champ,
                                 thresholds=thresholds)
+    level_pairs = [("working", experiment["working"])]
+    if holdout:
+        level_pairs.append(("holdout", experiment["holdout"]))
+    for split, row in level_pairs:
+        off_level = float(row["arms"]["without"]["source_rms_volts"])
+        on_level = float(row["arms"]["with"]["source_rms_volts"])
+        drop_db = 20.0 * math.log10(off_level / on_level)
+        row["source_level_drop_db"] = drop_db
+        if drop_db > MAX_SOURCE_LEVEL_DROP_DB:
+            guard = {
+                "accepted": False,
+                "needs_ear": False,
+                "reason": (f"{split} catalogue-on source level fell "
+                           f"{drop_db:.2f} dB before normalization"),
+            }
+            break
     return {
         "schema": AB_SCHEMA,
         "experiment": experiment,

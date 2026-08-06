@@ -6820,6 +6820,7 @@ TEST_CASE("a test cannot open an application on somebody's desktop",
     pulp::state::StateStore store;
     shell.set_state_store(&store);
     shell.define_parameters(store);
+    shell.set_standalone(true);
     auto view = shell.create_view();
     REQUIRE(view != nullptr);
     // A finished build, so the shell is willing to open anything at all --
@@ -7026,6 +7027,7 @@ TEST_CASE("Open in Rack refuses a patch this Rack cannot create",
     pulp::state::StateStore store;
     shell.set_state_store(&store);
     shell.define_parameters(store);
+    shell.set_standalone(true);
     auto view = shell.create_view();
     REQUIRE(view != nullptr);
 

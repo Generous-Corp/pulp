@@ -18,18 +18,39 @@ def _digest(path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _fidelity(tmp_path, stem: str, source_rms: float = 1.0) -> tuple[str, float]:
+    wav = tmp_path / f"{stem}.wav"
+    metadata = {
+        "schema": "forge.fidelity_audio_artifact.v1",
+        "wav_sha256": _digest(wav),
+        "source_rms_volts": source_rms,
+        "minimum_source_rms_volts": 5e-4,
+        "source_peak_volts": source_rms * 2.0,
+    }
+    sidecar = tmp_path / f"{stem}.wav.fidelity.json"
+    sidecar.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
+    return _digest(sidecar), source_rms
+
+
 def _manifest(tmp_path, paths, holdout=True):
     def split(name, pair_id, seed):
+        off_digest, off_rms = _fidelity(tmp_path, f"{name}off")
+        on_digest, on_rms = _fidelity(tmp_path, f"{name}on")
         return {"pair_id": pair_id, "prompt": "make me a cello",
                 "inventory_sha256": "a" * 64, "model": "fixture-model",
+                "analysis_channel": 0,
                 "audibility_gate": {"analysis": "audible-band-rms-v1",
                                      "minimum_rms": 1e-4},
                 "arms": {
                     "without": {"guidance": "off", "attempt": 1, "seed": seed,
                                 "generation_id": f"{pair_id}-off",
+                                "source_rms_volts": off_rms,
+                                "fidelity_metadata_sha256": off_digest,
                                 "wav_sha256": _digest(tmp_path / f"{name}off.wav")},
                     "with": {"guidance": "on", "attempt": 1, "seed": seed,
                              "generation_id": f"{pair_id}-on",
+                             "source_rms_volts": on_rms,
+                             "fidelity_metadata_sha256": on_digest,
                              "wav_sha256": _digest(tmp_path / f"{name}on.wav")}}}
     doc = {"schema": "quality_lab.catalogue_experiment.v1",
            "working": split("", "working-1", 101)}
@@ -107,6 +128,32 @@ def test_experiment_requires_matched_arms_and_independent_audio(tmp_path):
             "holdout.with": paths["holdout-on"]}, True)
 
 
+def test_pre_normalization_level_collapse_cannot_promote(tmp_path):
+    paths = {}
+    for name, rate in (("off", 5.0), ("on", 7.5),
+                       ("holdout-off", 5.2), ("holdout-on", 7.45)):
+        path = tmp_path / f"{name}.wav"
+        audio_io.save_wav(str(path), _am_tone(48000, rate), 48000)
+        paths[name] = str(path)
+    manifest_path = _manifest(tmp_path, paths)
+    doc = json.loads((tmp_path / "experiment.json").read_text())
+    for stem, split in (("on", "working"), ("holdout-on", "holdout")):
+        digest, source_rms = _fidelity(tmp_path, stem, source_rms=0.01)
+        doc[split]["arms"]["with"]["fidelity_metadata_sha256"] = digest
+        doc[split]["arms"]["with"]["source_rms_volts"] = source_rms
+    (tmp_path / "experiment.json").write_text(json.dumps(doc))
+    expect = tmp_path / "expect.json"
+    expect.write_text(json.dumps({
+        "source": {"path": "Welsh.pdf", "page": 42},
+        "metrics": {"amplitude_modulation_hz": {
+            "target": 7.5, "tolerance": 0.5}}}))
+    report = reference_free.compare_files(
+        paths["off"], paths["on"], str(expect), manifest_path,
+        paths["holdout-off"], paths["holdout-on"])
+    assert report["verdict"] == "NOT_PROVEN"
+    assert "source level fell" in report["goodhart_guard"]["reason"]
+
+
 def test_catalogue_ab_needs_a_cited_source(tmp_path):
     sr = 48000
     path = tmp_path / "tone.wav"
@@ -173,17 +220,26 @@ def test_dc_and_ultra_quiet_audio_cannot_win():
                 "spectral_flux": {"max": 1.0, "tolerance": 0.1}}}, "inaudible")
 
 
-def test_multichannel_catalogue_input_uses_disclosed_loudest_channel(tmp_path):
+def test_multichannel_catalogue_input_uses_disclosed_manifest_channel(tmp_path):
     path = tmp_path / "stereo.wav"
     tone = _am_tone(48000, 7.5)
     audio_io.save_wav(str(path), np.stack([tone, -tone], axis=1), 48000)
     report = reference_free.analyze_file(str(path))
     assert report["channel_handling"] == {
         "input_channels": 2,
-        "analysis": "loudest-listener-channel",
+        "analysis": "manifest-selected-channel",
         "selected_channel": 0,
     }
     assert report["audibility"]["audible_band_rms"] > 0.1
+
+
+def test_manifest_channel_selection_is_stable_when_loudness_moves(tmp_path):
+    path = tmp_path / "stereo.wav"
+    tone = _am_tone(48000, 7.5)
+    audio_io.save_wav(str(path), np.stack([tone * 0.1, tone], axis=1), 48000)
+    report = reference_free.analyze_file(str(path), selected_channel=0)
+    assert report["channel_handling"]["selected_channel"] == 0
+    assert report["audibility"]["audible_band_rms"] < 0.1
 
 
 def test_hf_metric_is_absent_when_the_band_is_degenerate():

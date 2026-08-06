@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Candidate quarantine and canonical-claim dedupe controls."""
 import copy
+import json
 import os
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -40,6 +42,23 @@ def main() -> int:
         bad += 1
     else:
         print("  ok     semantic duplicates attach evidence to one row despite wording")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        repeated = copy.deepcopy(candidate)
+        repeated["status"] = "admitted"
+        with open(os.path.join(tmp, "a.json"), "w") as out:
+            json.dump({"entries": [repeated, repeated]}, out)
+        try:
+            knowledge.load(tmp)
+        except ValueError as exc:
+            if "duplicate knowledge id" in str(exc):
+                print("  ok     duplicate ids fail before generation can overwrite one")
+            else:
+                print(f"  WRONG  duplicate id failed for the wrong reason: {exc}")
+                bad += 1
+        else:
+            print("  WRONG  duplicate ids collapsed before validation")
+            bad += 1
 
     broken = copy.deepcopy(all_entries)
     broken["post-multiplier-low-pass"]["canonical_claim_fingerprint"] = "0" * 64

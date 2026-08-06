@@ -86,8 +86,13 @@ def load(path: str | None = None, include_candidates: bool = False) -> dict:
             doc = json.load(f)
         for entry in doc.get("entries", []):
             status = entry.get("status", "admitted")
-            if entry.get("id") and (include_candidates or status == "admitted"):
-                out[entry["id"]] = entry
+            eid = entry.get("id")
+            if eid and (include_candidates or status == "admitted"):
+                if eid in out:
+                    raise ValueError(
+                        f"duplicate knowledge id {eid!r}; variants must be "
+                        "quarantined or merged before generation")
+                out[eid] = entry
     return out
 
 
