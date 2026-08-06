@@ -550,7 +550,7 @@ EXPORTS = [
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
         "include": "pulp/signal/biquad.hpp",
-        "fingerprint": "sha256:c9674cc3225cb8b9f3bac303189cd4e0a554a4c4d6ea5b59f7b1aaace29ebf1e",
+        "fingerprint": "sha256:938e359bcd792fb4b8d4205d94ec5ab2db6684ec99ea1f927a417539cb09c55b",
         "disposition": "capability_support",
         "capability_keys": ["signal.sos-cascade"],
         "rationale": (

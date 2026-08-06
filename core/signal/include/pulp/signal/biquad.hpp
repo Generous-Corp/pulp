@@ -28,8 +28,16 @@ using BiquadCoefficients = BiquadCoefficientsT<float>;
 template <typename SampleType>
 inline bool biquad_is_stable(const BiquadCoefficientsT<SampleType>& c) noexcept {
     // Jury criterion for z^2 + a1*z + a2 with real coefficients.
-    return std::abs(c.a2) < SampleType{1}
-        && std::abs(c.a1) < SampleType{1} + c.a2;
+    if (!(std::abs(c.a2) < SampleType{1}))
+        return false;
+
+    // FastTwoSum is exact here because |1| >= |a2|. Keep the residual so a
+    // rounded bound equal to |a1| still observes the strict real inequality.
+    const SampleType rounded_bound = SampleType{1} + c.a2;
+    const SampleType bound_error = c.a2 - (rounded_bound - SampleType{1});
+    const SampleType a1_magnitude = std::abs(c.a1);
+    return a1_magnitude < rounded_bound
+        || (a1_magnitude == rounded_bound && bound_error > SampleType{0});
 }
 
 // Biquad IIR filter — standard second-order section.

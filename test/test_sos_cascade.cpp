@@ -129,6 +129,41 @@ template <typename Sample> void require_design_families() {
                                       frequency_tolerance);
 }
 
+template <typename Sample> void require_strict_stability_boundary() {
+    const BiquadCoefficientsT<Sample> near_boundary{
+        Sample{1}, Sample{0}, Sample{0}, Sample{1.5},
+        std::nextafter(Sample{0.5}, Sample{1})};
+    const BiquadCoefficientsT<Sample> on_boundary{
+        Sample{1}, Sample{0}, Sample{0}, Sample{1.5}, Sample{0.5}};
+    REQUIRE(biquad_is_stable(near_boundary));
+    REQUIRE_FALSE(biquad_is_stable(on_boundary));
+    auto negative_near_boundary = near_boundary;
+    negative_near_boundary.a1 = -negative_near_boundary.a1;
+    auto negative_on_boundary = on_boundary;
+    negative_on_boundary.a1 = -negative_on_boundary.a1;
+    REQUIRE(biquad_is_stable(negative_near_boundary));
+    REQUIRE_FALSE(biquad_is_stable(negative_on_boundary));
+
+    const Sample inside_unit = std::nextafter(Sample{1}, Sample{0});
+    REQUIRE(biquad_is_stable(BiquadCoefficientsT<Sample>{
+        Sample{1}, Sample{0}, Sample{0}, Sample{0}, inside_unit}));
+    REQUIRE_FALSE(biquad_is_stable(BiquadCoefficientsT<Sample>{
+        Sample{1}, Sample{0}, Sample{0}, Sample{0}, Sample{1}}));
+    REQUIRE(biquad_is_stable(BiquadCoefficientsT<Sample>{
+        Sample{1}, Sample{0}, Sample{0}, Sample{0}, -inside_unit}));
+    REQUIRE_FALSE(biquad_is_stable(BiquadCoefficientsT<Sample>{
+        Sample{1}, Sample{0}, Sample{0}, Sample{0}, Sample{-1}}));
+
+    SosCascadeT<Sample, 1> cascade;
+    REQUIRE(cascade.prepare(1));
+    const std::array stable{near_boundary};
+    REQUIRE(cascade.set_coefficients(std::span{stable}) ==
+            SosCascadeInstallStatus::installed);
+    const std::array unstable{on_boundary};
+    REQUIRE(cascade.set_coefficients(std::span{unstable}) ==
+            SosCascadeInstallStatus::unstable);
+}
+
 } // namespace
 
 TEST_CASE("SOS cascade matches independent DF1 and complex-response oracles",
@@ -183,6 +218,16 @@ TEST_CASE("SOS cascade installation is whole-cascade transactional",
 
     for (int i = 0; i < 64; ++i)
         REQUIRE(cascade.process(0.0f) == unchanged.process(0.0f));
+}
+
+TEST_CASE("SOS cascade stability validation preserves strict numeric boundaries",
+          "[signal][sos-cascade][stability]") {
+    SECTION("float") {
+        require_strict_stability_boundary<float>();
+    }
+    SECTION("double") {
+        require_strict_stability_boundary<double>();
+    }
 }
 
 TEST_CASE("SOS cascade installs coefficient precision independently of sample precision",
