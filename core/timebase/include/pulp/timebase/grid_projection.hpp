@@ -70,6 +70,7 @@ inline constexpr std::size_t kMaximumGridProjectionPoints = 65'536;
 enum class GridProjectionError {
     None,
     InvalidDivision,
+    InvalidAnchor,
     InvalidRange,
     SampleRangeExceeded,
     TickRangeExceeded,
@@ -393,6 +394,8 @@ inline GridProjectionResult project_grid(const CompiledTempoMap& tempo,
     const auto grid_result = division_ticks(request.division);
     if (!grid_result)
         return {GridProjectionError::InvalidDivision, 0, 0};
+    if (request.anchor != GridAnchor::Timeline && request.anchor != GridAnchor::Bar)
+        return {GridProjectionError::InvalidAnchor, 0, 0};
     if (!request.playing)
         return {GridProjectionError::None, 0, 0};
 
