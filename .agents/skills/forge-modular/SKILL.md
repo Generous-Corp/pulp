@@ -13,6 +13,76 @@ Read this before trusting any green result in this area. Everything below cost
 a session at least once, and most of it was a test or a tool reporting success
 for work it had not done.
 
+## A run that fails still has to hand something over
+
+`generate()` returns `(patch, why, shortfall)`. `shortfall` is `None` on a pass
+and a `Shortfall` when the loop ran out of attempts and is handing over the
+best thing it built. It only raises `SystemExit` when there is genuinely
+nothing to hand over — no attempt ever got past the lint.
+
+The rule this encodes: **an advisory verdict is not fatal, and out of attempts
+is not the same as nothing to show.** The loop used to `raise SystemExit("gave
+up after 5 attempts")` after generating five patches its own transcript had
+called "structurally sound" and "keeping the patch anyway", and the user got
+nothing — not the patches, not a copyable reason. "Not a sequenced-voice patch
+**yet**" is a wording that means the loop should keep going, not that the patch
+is worthless.
+
+Consequences to keep in step when touching this:
+
+- The build writes the handover as `<slug>-unfinished.vcv`, prints the "built N
+  modules, M cables → path" line the app parses for an artifact, then the
+  `handover_report()` block, and **exits 1**. Dropping either the exit code or
+  the `gave up after` phrase breaks a different reader: the shell decides a run
+  ended by classifying that phrase, so without it the app watches a dead build
+  forever.
+- A patch that failed the **lint** never becomes a `Shortfall`. It names modules
+  Rack cannot create, so handing it over offers a file that will not open.
+- `Shortfall.rank` is `(severity, misses, -attempt)`, lowest wins: a patch that
+  plays beats one measured silent, fewer missed requirements beats more, and
+  only a tie goes to the later attempt. Rank on requirements missed, never on
+  the number of LINES it takes to say so — naming installed jacks adds lines,
+  and ranking on those would rate a patch worse for every jack we managed to
+  name.
+- `keep_attempt` is **not** gated on `FORGE_ATTEMPT_DIR` any more. It was, and
+  nothing but `prove_idioms.sh` ever set it, so every app build kept nothing
+  while the log claimed otherwise. The default is a stamped per-pid directory
+  under `~/Library/Application Support/Forge Modular/attempts/`.
+
+## A retry has to name a jack, not restate the concept
+
+`name_the_jacks()` turns each failed requirement into something the next
+attempt can act on. The requirement itself is a sentence the model already
+believed when it wrote the patch — "the sequencer's gate has to fire an
+envelope, or every step runs together" — so handing it back as the correction
+produced five near-identical attempts and nothing escalated.
+
+It joins the missing describe-strings back to the idiom's `topology` entries
+(the strings ARE `req["describe"]`), then adds up to three lines per side:
+
+- `this patch's sequencer CANNOT send it, however it is wired:
+  CVfunk/PentaSequencer (its outputs are A, B, C, D, E)` — the most actionable
+  line there is, and the one that ends the loop of trying the same module.
+- `installed jacks that can send it: CVfunk/StepWave out1 'Sequencer Gate'`
+
+Rules it follows, each of which was a wrong answer first:
+
+- **A module nobody cartographed appears in neither list.** An unrecorded jack
+  is unknown, not absent, and claiming otherwise invents a fact about three
+  quarters of the library.
+- **Plugins already in the patch sort first.** Alphabetical order offered three
+  strangers ahead of the maker's own module that answered the requirement
+  exactly — a worse suggestion and a bigger change, for the same reason a retry
+  is told not to drop the makers the prompt named.
+- **An unconstrained port kind (`any_out`/`any_in`) names nothing**, because
+  every jack matches and the list would be noise.
+
+`render_inventory` has the same honesty rule: a module with no recorded jacks
+prints `ports: UNKNOWN`, and inputs and outputs are independent. It used to
+emit both only `if m.get("inputs")`, so an uncartographed module and one with
+no ports at all rendered identically, and a module with outputs and no recorded
+inputs lost its outputs.
+
 ## Diagnose from a saved attempt, not from another run
 
 Both gates are standalone binaries that take a patch and a plugin directory, so
@@ -497,6 +567,42 @@ The authoritative check runs `classify()` itself.
 
 `reason.sh` is the shared "why did it stop" shim, for the same reason `cap.sh`
 is shared: this rule already existed twice and both copies were wrong.
+
+### Seeing an ending is not the same as SHOWING it
+
+The monitor learned to classify every ending and the shell still reported one
+line of it: `BuildOutcome::failed` narrated `headline()`, which by construction
+returns the ending line and nothing after it. When the generator gives up it
+says considerably more — what was asked for, what the patch it is handing over
+does not meet, where that patch is, where the attempts behind it went — and all
+of it was discarded a second time, one layer above the bug that discarded the
+patches.
+
+- `BuildMonitor::closing_block()` returns the ending line **and everything
+  after it**. It scans BACKWARDS for the last ending, not forwards for the
+  first: a model call that failed and was retried is an ending-shaped line in
+  the middle of a healthy run, and starting there hands back most of the
+  transcript as though it were the verdict.
+- The `failed` branch also **opens the handed-over patch** (`open_patch_file` +
+  `save_project_for`, as `done` does). Without it the patch is on disk, the
+  skeleton is still animating, and nothing on screen can reach it.
+- **The run log had never been named anywhere.** It has always existed at
+  `~/Library/Application Support/Forge Modular/runs/<stamp>.log`, and the only
+  way to read a failure was to already know that path. The failed branch says
+  it.
+- `format_failure_report()` is a free function taking a `RunFailure`, so a test
+  can build the copyable block with no shell, no chrome and no clipboard. It
+  reads the log **back from disk** rather than rebuilding it from the lines the
+  monitor kept: the monitor drops blank lines and holds only what it polled, and
+  a report that quietly differs from the file it names wastes an hour when
+  somebody compares the two.
+- **A Label cannot be selected with a mouse.** That argument already lives in
+  the comment beside the About report's Copy action, for a report nobody
+  urgently needs; a failed run is the case where it cost somebody their work
+  ("i didn't even get a way to copy the prompt output"). The "Copy report"
+  action appears in the composer row only after a failure, and is cleared when
+  the next build starts — a control offering the PREVIOUS run's failure while a
+  new one is in flight hands over the wrong report at the worst moment.
 
 ## Proving a surface
 
