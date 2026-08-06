@@ -112,10 +112,11 @@ function(pulp_add_rack_plugin target)
     endif()
 
     add_library(${target} MODULE ${RACK_SOURCES})
+    set(_binary_dir "${CMAKE_BINARY_DIR}/rack-bin/${RACK_SLUG}")
     set_target_properties(${target} PROPERTIES
         PREFIX ""
         OUTPUT_NAME "plugin"
-        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/rack/${RACK_SLUG}")
+        LIBRARY_OUTPUT_DIRECTORY "${_binary_dir}")
 
     target_include_directories(${target} PRIVATE
         "${PULP_RACK_SDK_DIR_REAL}/include"
@@ -146,12 +147,13 @@ function(pulp_add_rack_plugin target)
         set(_rack_os "lin")
         set_target_properties(${target} PROPERTIES SUFFIX ".so")
         target_compile_definitions(${target} PRIVATE ARCH_LIN)
+        target_compile_options(${target} PRIVATE -fno-gnu-unique)
         target_link_directories(${target} PRIVATE "${PULP_RACK_SDK_DIR_REAL}")
         target_link_libraries(${target} PRIVATE Rack)
         # -fno-gnu-unique keeps statics from surviving dlclose(); Rack symlinks
         # /tmp/Rack2 at its system dir so a plugin can find libRack.
         target_link_options(${target} PRIVATE
-            -fno-gnu-unique -Wl,-rpath=/tmp/Rack2 -static-libstdc++ -static-libgcc)
+            -Wl,-rpath=/tmp/Rack2 -static-libstdc++ -static-libgcc)
     elseif(WIN32)
         set(_rack_os "win")
         set_target_properties(${target} PROPERTIES SUFFIX ".dll")
@@ -164,46 +166,62 @@ function(pulp_add_rack_plugin target)
     set(_stage "${CMAKE_BINARY_DIR}/rack/${RACK_SLUG}")
     set(_pkg "${CMAKE_BINARY_DIR}/rack/${RACK_SLUG}-${RACK_VERSION}-${_rack_os}-${_rack_cpu}.vcvplugin")
 
-    # plugin.json and res/ ride alongside the binary inside the package.
+    set(_package_inputs ${RACK_SOURCES} ${RACK_LICENSES})
+    set(_stage_commands
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_stage}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_stage}"
+        COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:${target}>"
+                "${_stage}/$<TARGET_FILE_NAME:${target}>")
     if(RACK_MANIFEST)
-        add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${RACK_MANIFEST}" "${_stage}/plugin.json")
+        list(APPEND _package_inputs "${RACK_MANIFEST}")
+        list(APPEND _stage_commands
+            COMMAND ${CMAKE_COMMAND} -E copy "${RACK_MANIFEST}" "${_stage}/plugin.json")
     endif()
     if(RACK_RES_DIR)
-        add_custom_command(TARGET ${target} POST_BUILD
+        file(GLOB_RECURSE _rack_res_inputs CONFIGURE_DEPENDS
+            LIST_DIRECTORIES FALSE "${RACK_RES_DIR}/*")
+        list(APPEND _package_inputs ${_rack_res_inputs})
+        list(APPEND _stage_commands
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${RACK_RES_DIR}" "${_stage}/res")
     endif()
 
-    # Licence and attribution ride inside the package. A Rack plugin links the
-    # GPLv3 SDK under its non-commercial exception, so the terms a user inherits
-    # -- and the fact that SELLING one needs a licence from VCV -- must travel
-    # with the artifact, not live only in a repo.
     foreach(_lic ${RACK_LICENSES})
         get_filename_component(_lic_name "${_lic}" NAME)
-        add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_lic}" "${_stage}/${_lic_name}")
+        list(APPEND _stage_commands
+            COMMAND ${CMAKE_COMMAND} -E copy "${_lic}" "${_stage}/${_lic_name}")
     endforeach()
 
-    # A .vcvplugin is a zstd-compressed tar of the plugin directory.
+    # Resource deletion changes this generated input list, so a removed panel
+    # invalidates the archive even though the removed file is no longer a dep.
+    list(SORT _package_inputs)
+    string(REPLACE ";" "\n" _package_inputs_text "${_package_inputs}")
+    set(_package_inputs_manifest
+        "${CMAKE_CURRENT_BINARY_DIR}/${target}-package-inputs.txt")
+    file(GENERATE OUTPUT "${_package_inputs_manifest}"
+        CONTENT "${_package_inputs_text}\n")
+    list(APPEND _package_inputs "${_package_inputs_manifest}")
     find_program(PULP_ZSTD_EXE zstd)
     if(PULP_ZSTD_EXE)
         set(_tar "${_pkg}.tar")
-        add_custom_command(TARGET ${target} POST_BUILD
+        add_custom_target(${target}-package ALL
+            ${_stage_commands}
             COMMAND ${CMAKE_COMMAND} -E rm -f "${_pkg}" "${_tar}"
             COMMAND tar --no-xattrs -cf "${_tar}"
                     -C "${CMAKE_BINARY_DIR}/rack" "${RACK_SLUG}"
             COMMAND ${PULP_ZSTD_EXE} -q -19 -f "${_tar}" -o "${_pkg}"
             COMMAND ${CMAKE_COMMAND} -E rm -f "${_tar}"
+            BYPRODUCTS "${_pkg}"
+            DEPENDS ${target} ${_package_inputs}
             VERBATIM
             COMMENT "Packaging ${RACK_SLUG}-${RACK_VERSION}-${_rack_os}-${_rack_cpu}.vcvplugin")
     elseif(APPLE AND EXISTS "/usr/bin/tar")
-        # macOS ships bsdtar with native --zstd support even though it does not
-        # ship a standalone `zstd` executable. Rack packaging must not quietly
-        # disappear on a stock developer machine.
-        add_custom_command(TARGET ${target} POST_BUILD
+        add_custom_target(${target}-package ALL
+            ${_stage_commands}
             COMMAND ${CMAKE_COMMAND} -E rm -f "${_pkg}"
             COMMAND /usr/bin/tar --zstd --no-xattrs -cf "${_pkg}"
                     -C "${CMAKE_BINARY_DIR}/rack" "${RACK_SLUG}"
+            BYPRODUCTS "${_pkg}"
+            DEPENDS ${target} ${_package_inputs}
             VERBATIM
             COMMENT "Packaging ${RACK_SLUG}-${RACK_VERSION}-${_rack_os}-${_rack_cpu}.vcvplugin with system tar")
     else()

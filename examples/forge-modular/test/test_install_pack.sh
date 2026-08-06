@@ -388,11 +388,28 @@ fi
 ran=$((ran + 1))
 if grep -q 'byte-identical to the current build' "$FM/verify_package.sh" && \
    grep -q 'PACKS\[@\].*ne 1' "$FM/verify_package.sh" && \
+   grep -q 'byte-identical to the rebuilt Forge target' \
+        "$FM/verify_package.sh" && \
+   grep -q 'ForgeModular_Standalone ForgeModular_AU' "$FM/package.sh" && \
    grep -q 'provenance binds the current source tree, SDK and binary' \
         "$FM/verify_package.sh"; then
     ok "finished-package verification pins one exact current Rack build"
 else
     fail "finished-package verification can accept a substituted Rack pack"
+fi
+
+# The Forge rebuild is only reproducible when its exact released Pulp SDK and
+# locally rebuilt text shaper are bound into the package provenance.
+ran=$((ran + 1))
+if grep -q 'FORGE_PULP_SDK_SOURCE_SHA is required' "$FM/package.sh" && \
+   grep -q 'FORGE_PULP_SDK_CONTENT_SHA256 is required' "$FM/package.sh" && \
+   grep -q -- '--content-sha256 "\$expected_sdk_content"' "$FM/package.sh" && \
+   grep -q 'sdk_identity.py' "$FM/package.sh" && \
+   grep -q 'build_shape_text.sh' "$FM/package.sh" && \
+   grep -q 'shape_text_sha256' "$FM/verify_package.sh"; then
+    ok "package binds the exact Pulp SDK and rebuilt shape_text helper"
+else
+    fail "package can accept an unpinned SDK, unverified content, or stale shape_text helper"
 fi
 
 ran=$((ran + 1))

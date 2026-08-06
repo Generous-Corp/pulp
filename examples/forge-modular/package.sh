@@ -45,13 +45,32 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$TARGET_ARCH" in
-    arm64|aarch64) RACK_PLATFORM="mac-arm64"; INSTALLER_ARCH="arm64" ;;
-    x86_64|amd64) RACK_PLATFORM="mac-x64"; INSTALLER_ARCH="x86_64" ;;
+    arm64|aarch64)
+        RACK_PLATFORM="mac-arm64"
+        PULP_SDK_PLATFORM="darwin-arm64"
+        INSTALLER_ARCH="arm64"
+        ;;
+    x86_64|amd64)
+        RACK_PLATFORM="mac-x64"
+        PULP_SDK_PLATFORM="darwin-x64"
+        INSTALLER_ARCH="x86_64"
+        ;;
     *) echo "unsupported package architecture: $TARGET_ARCH" >&2; exit 2 ;;
 esac
 
 [[ -n "$BUILD_DIR" ]] || { echo "--build-dir is required" >&2; exit 2; }
 [[ -n "$OUT_DIR" ]] || { echo "--out is required" >&2; exit 2; }
+FORGE_REBUILD_ROOT=""
+STAGED_ROOT=""
+STAGE=""
+CHECK=""
+cleanup_package_staging() {
+    local path
+    for path in "$FORGE_REBUILD_ROOT" "$STAGED_ROOT" "$STAGE" "$CHECK"; do
+        [[ -n "$path" && -d "$path" ]] && rm -rf "$path"
+    done
+}
+trap cleanup_package_staging EXIT
 
 verify_current_rack_plugin() {
     local pack="$1" platform="$2"
@@ -106,11 +125,24 @@ print(manifest["slug"], manifest["version"], len(manifest["modules"]))
         echo "Rack pack must come from a Release build" >&2
         return 1
     fi
+    local consumed_status
+    consumed_status="$(git -C "$REPO" status --porcelain --untracked-files=all --ignored=matching -- \
+        forge-seam examples/forge-modular/modules examples/forge-modular/res \
+        examples/forge-modular/design examples/forge-modular/src tools/rack \
+        tools/dsp_vocabulary.py external/fonts/Inter-Regular.ttf \
+        core/signal/include core/format/include core/audio/include \
+        core/state/include core/platform/include core/runtime/include | \
+        grep -Ev '^(!!|\?\?) .*/(\.corpus|\.sweeps|__pycache__|\.pytest_cache)(/|$)' || true)"
+    if [[ -n "$consumed_status" ]]; then
+        echo "package inputs contain tracked changes or untracked/ignored files:" >&2
+        echo "$consumed_status" >&2
+        return 1
+    fi
     if [[ -n "$(git -C "$REPO" status --porcelain --untracked-files=no)" ]]; then
         echo "Rack pack provenance requires a clean tracked source tree" >&2
         return 1
     fi
-    cmake --build "$build_root" --target forge-modular \
+    cmake --build "$build_root" --target forge-modular-package \
           --parallel "${PULP_PACKAGE_JOBS:-8}"
     if [[ -n "$(git -C "$REPO" status --porcelain --untracked-files=no)" ]]; then
         rm -f "$manifest_tmp"
@@ -184,18 +216,93 @@ print(h.hexdigest())
     }
 }
 
+rebuild_forge_products() {
+    local cache="$1/CMakeCache.txt" source_root base actual prefix clean_source clean_build
+    local expected_sdk_source expected_sdk_version expected_sdk_content sdk_json
+    [[ -f "$cache" ]] || { echo "Forge build has no CMakeCache.txt: $1" >&2; return 1; }
+    source_root="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$cache" | tail -1)"
+    source_root="$(cd "$source_root" 2>/dev/null && pwd)" || true
+    [[ -n "$source_root" ]] && \
+        git -C "$source_root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
+        echo "Forge build has no owning source worktree" >&2; return 1; }
+    base="$(tr -d '[:space:]' < "$REPO/forge-seam/patches/BASE")"
+    actual="$(git -C "$source_root" rev-parse HEAD)"
+    [[ "$actual" == "$base" ]] || {
+        echo "Forge build is based on $actual, not pinned source $base" >&2; return 1; }
+    prefix="$(sed -n 's/^CMAKE_PREFIX_PATH:[^=]*=//p' "$cache" | tail -1)"
+    [[ -n "$prefix" ]] || {
+        echo "Forge build has no pinned CMAKE_PREFIX_PATH" >&2; return 1; }
+    [[ "$prefix" != *';'* ]] || {
+        echo "Forge build must resolve exactly one Pulp SDK prefix, not: $prefix" >&2
+        return 1
+    }
+    prefix="$(cd "$prefix" 2>/dev/null && pwd)" || true
+    [[ -n "$prefix" && -d "$prefix" ]] || {
+        echo "Forge Pulp SDK prefix does not exist" >&2; return 1; }
+    expected_sdk_version="${FORGE_PULP_SDK_VERSION:-$(sed -n \
+        's/^project(Pulp VERSION \([0-9][0-9.]*\).*/\1/p' "$REPO/CMakeLists.txt" | head -1)}"
+    expected_sdk_source="${FORGE_PULP_SDK_SOURCE_SHA:-}"
+    expected_sdk_content="${FORGE_PULP_SDK_CONTENT_SHA256:-}"
+    [[ -n "$expected_sdk_content" ]] || {
+        echo "FORGE_PULP_SDK_CONTENT_SHA256 is required; refusing unverified SDK content" >&2
+        return 1
+    }
+    if [[ -z "$expected_sdk_source" ]]; then
+        if [[ "${FORGE_ALLOW_UNPINNED_PULP_SDK:-0}" != 1 ]]; then
+            echo "FORGE_PULP_SDK_SOURCE_SHA is required; refusing an unpinned Pulp SDK" >&2
+            return 1
+        fi
+        echo "WARNING: local-only unpinned Pulp SDK override is active" >&2
+        expected_sdk_source="$(/usr/bin/python3 -c '
+import json,sys
+print(json.load(open(sys.argv[1]))["source_git_sha"])
+' "$prefix/sdk-provenance.json")"
+    fi
+    sdk_json="$(/usr/bin/python3 "$REPO/examples/forge-modular/sdk_identity.py" \
+        --prefix "$prefix" --platform "$PULP_SDK_PLATFORM" \
+        --source-sha "$expected_sdk_source" --version "$expected_sdk_version" \
+        --content-sha256 "$expected_sdk_content")" || return 1
+    read -r FM_PULP_SDK_VERSION FM_PULP_SDK_SOURCE_SHA FM_PULP_SDK_SHA < <(
+        /usr/bin/python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+print(d["version"], d["source_sha"], d["content_sha256"])
+' <<< "$sdk_json")
+    FORGE_REBUILD_ROOT="$(mktemp -d)"
+    clean_source="$FORGE_REBUILD_ROOT/source"
+    clean_build="$FORGE_REBUILD_ROOT/build"
+    mkdir -p "$clean_source"
+    git -C "$source_root" archive "$base" | /usr/bin/tar -xf - -C "$clean_source"
+    git -C "$clean_source" init -q
+    "$REPO/forge-seam/populate.sh" "$clean_source"
+    cmake -S "$clean_source" -B "$clean_build" -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_PREFIX_PATH="$prefix"
+    cmake --build "$clean_build" --target ForgeModular_Standalone ForgeModular_AU \
+          ForgeModular_VST3 ForgeModular_CLAP --parallel "${PULP_PACKAGE_JOBS:-8}"
+    FORGE_SOURCE_BASE="$base"
+    FORGE_SEAM_TREE_SHA="$(git -C "$REPO" rev-parse 'HEAD^{tree}')"
+    BUILD_DIR="$clean_build"
+}
+
 write_rack_provenance() {
     /usr/bin/python3 -c '
 import json, sys
 keys = ("archive_sha256", "binary_sha256", "manifest_sha256", "module_count",
-        "platform", "sdk_sha256", "source_tree_sha")
+        "platform", "sdk_sha256", "source_tree_sha", "forge_source_base",
+        "forge_seam_tree_sha", "app_binary_sha256", "au_binary_sha256",
+        "vst3_binary_sha256", "clap_binary_sha256", "pulp_sdk_version",
+        "pulp_sdk_source_sha", "pulp_sdk_content_sha256", "shape_text_sha256")
 data = dict(zip(keys, sys.argv[2:]))
 data["module_count"] = int(data["module_count"])
 with open(sys.argv[1], "w") as f:
     json.dump(data, f, sort_keys=True, separators=(",", ":"))
     f.write("\n")
 ' "$1" "$FM_RACK_SHA" "$FM_RACK_BINARY_SHA" "$FM_RACK_MANIFEST_SHA" \
-  "$FM_RACK_MODULES" "$RACK_PLATFORM" "$FM_RACK_SDK_SHA" "$FM_SOURCE_TREE_SHA"
+  "$FM_RACK_MODULES" "$RACK_PLATFORM" "$FM_RACK_SDK_SHA" "$FM_SOURCE_TREE_SHA" \
+  "$FORGE_SOURCE_BASE" "$FORGE_SEAM_TREE_SHA" "$FM_APP_BINARY_SHA" \
+  "$FM_AU_BINARY_SHA" "$FM_VST3_BINARY_SHA" "$FM_CLAP_BINARY_SHA" \
+  "$FM_PULP_SDK_VERSION" "$FM_PULP_SDK_SOURCE_SHA" "$FM_PULP_SDK_SHA" \
+  "$FM_SHAPE_TEXT_SHA"
 }
 
 [[ -n "$RACK_PLUGIN" ]] || {
@@ -220,14 +327,38 @@ echo "[installer] build provenance: tree $FM_SOURCE_TREE_SHA, SDK $FM_RACK_SDK_S
 #
 # Prefer the Forge layout, fall back to the pulp one, and SAY WHICH -- a
 # silent choice between two apps of the same name is what caused this.
+rebuild_forge_products "$BUILD_DIR" || exit 1
+"$REPO/tools/rack/build_shape_text.sh"
+FM_SHAPE_TEXT_SHA="$(/usr/bin/python3 \
+    "$REPO/examples/forge-modular/binary_identity.py" "$REPO/build/shape_text")"
+
 if [[ -n "${APP_OVERRIDE:-}" ]]; then
-    APP="$APP_OVERRIDE"
+    echo "APP_OVERRIDE cannot prove current Forge build identity" >&2
+    exit 2
 elif [[ -d "$BUILD_DIR/modular/Forge Modular.app" ]]; then
     APP="$BUILD_DIR/modular/Forge Modular.app"
 else
     APP="$BUILD_DIR/examples/forge-modular/Forge Modular.app"
 fi
 echo "[installer] app: $APP"
+
+AU="$BUILD_DIR/AU/Forge Modular.component"
+VST3="$BUILD_DIR/VST3/Forge Modular.vst3"
+CLAP="$BUILD_DIR/CLAP/Forge Modular.clap"
+
+bundle_binary() {
+    local bundle="$1" want="${1##*/}" binary
+    want="${want%.*}"
+    binary="$bundle/Contents/MacOS/$want"
+    [[ -f "$binary" ]] || binary="$(find "$bundle/Contents/MacOS" -maxdepth 1 \
+        -type f -perm -u+x ! -name '*.dylib' -print -quit 2>/dev/null)"
+    [[ -f "$binary" ]] || return 1
+    echo "$binary"
+}
+FM_APP_BINARY_SHA="$(/usr/bin/python3 "$REPO/examples/forge-modular/binary_identity.py" "$(bundle_binary "$APP")")"
+FM_AU_BINARY_SHA="$(/usr/bin/python3 "$REPO/examples/forge-modular/binary_identity.py" "$(bundle_binary "$AU")")"
+FM_VST3_BINARY_SHA="$(/usr/bin/python3 "$REPO/examples/forge-modular/binary_identity.py" "$(bundle_binary "$VST3")")"
+FM_CLAP_BINARY_SHA="$(/usr/bin/python3 "$REPO/examples/forge-modular/binary_identity.py" "$(bundle_binary "$CLAP")")"
 
 # THE GENERATOR MUST SHIP. The 0.12.1 package carried the app, the plugins and
 # the Rack modules, and ZERO python -- so on a machine that had never seen the
@@ -237,7 +368,6 @@ echo "[installer] app: $APP"
 # Staged into a COPY of the bundle, before signing, so the signature covers
 # them and the source tree is never mutated by packaging.
 STAGED_ROOT="$(mktemp -d)"
-trap 'rm -rf "$STAGED_ROOT" "${STAGE:-}" "${CHECK:-}"' EXIT
 ditto "$APP" "$STAGED_ROOT/$(basename "$APP")"
 APP="$STAGED_ROOT/$(basename "$APP")"
 TOOLS_DEST="$APP/Contents/Resources/tools/rack"
@@ -369,9 +499,6 @@ stage_and_stamp() {   # <bundle> -> echoes the staged path
     echo "$dest"
 }
 
-AU="$BUILD_DIR/AU/Forge Modular.component"
-VST3="$BUILD_DIR/VST3/Forge Modular.vst3"
-CLAP="$BUILD_DIR/CLAP/Forge Modular.clap"
 # Staged and stamped only when they exist; the emptiness checks below still get
 # to say "missing" in their own words rather than dying inside ditto.
 for _fm_fmt in AU VST3 CLAP; do
@@ -560,6 +687,23 @@ if [[ $DO_SIGN -eq 0 ]]; then
         echo "unsigned package Rack provenance differs from current build" >&2
         exit 1
     }
+    _unsigned_bundles=(
+        "$CHECK/payload/Applications/Forge Modular.app"
+        "$CHECK/payload/Library/Audio/Plug-Ins/Components/Forge Modular.component"
+        "$CHECK/payload/Library/Audio/Plug-Ins/VST3/Forge Modular.vst3"
+        "$CHECK/payload/Library/Audio/Plug-Ins/CLAP/Forge Modular.clap")
+    _unsigned_hashes=("$FM_APP_BINARY_SHA" "$FM_AU_BINARY_SHA"
+                      "$FM_VST3_BINARY_SHA" "$FM_CLAP_BINARY_SHA")
+    for _fm_i in 0 1 2 3; do
+        _unsigned_binary="$(bundle_binary "${_unsigned_bundles[$_fm_i]}")" || {
+            echo "unsigned package is missing a Forge binary" >&2; exit 1; }
+        _unsigned_binary_sha="$(/usr/bin/python3 \
+            "$REPO/examples/forge-modular/binary_identity.py" "$_unsigned_binary")"
+        [[ "$_unsigned_binary_sha" == "${_unsigned_hashes[$_fm_i]}" ]] || {
+            echo "unsigned package Forge binary differs from rebuilt target" >&2
+            exit 1
+        }
+    done
     rm -rf "$CHECK"
     echo "$PKG"
     exit 0
@@ -632,4 +776,5 @@ ARGS=(--name "Forge Modular" --version "$VERSION" --out "$OUT_DIR"
 "$REPO/tools/scripts/build_combined_installer.sh" "${ARGS[@]}"
 
 PKG="$OUT_DIR/Forge Modular-$VERSION.pkg"
-"$REPO/examples/forge-modular/verify_package.sh" "$PKG" "$VERSION" "$RACK_PLUGIN"
+"$REPO/examples/forge-modular/verify_package.sh" "$PKG" "$VERSION" \
+    "$RACK_PLUGIN" "$BUILD_DIR"

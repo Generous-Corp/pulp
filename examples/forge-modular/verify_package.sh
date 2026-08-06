@@ -28,7 +28,7 @@ trap 'rm -rf "$WORK"' EXIT
 
 PKG="${1:-}"
 [[ -n "$PKG" ]] || {
-    echo "usage: verify_package.sh <path to .pkg> [version] <current .vcvplugin>" >&2
+    echo "usage: verify_package.sh <pkg> <version> <current .vcvplugin> <Forge build dir>" >&2
     exit 2
 }
 # The version this package claims to be. Taken from the file name when not
@@ -43,6 +43,11 @@ fi
 EXPECTED_PACK="${3:-}"
 [[ -f "$EXPECTED_PACK" ]] || {
     echo "current Rack build is required for exact package verification: $EXPECTED_PACK" >&2
+    exit 2
+}
+EXPECTED_BUILD_DIR="${4:-}"
+[[ -f "$EXPECTED_BUILD_DIR/CMakeCache.txt" ]] || {
+    echo "current Forge build directory is required for exact verification" >&2
     exit 2
 }
 
@@ -130,11 +135,62 @@ if [[ ! -f "$STAGED_BINARY" ]] || ! cmp -s "$STAGED_BINARY" "$EXPECTED_BINARY"; 
     echo "current Rack archive does not match its CMake build-stage binary" >&2
     exit 1
 fi
+find_bundle_binary() {
+    local bundle="$1" want="${1##*/}" binary
+    want="${want%.*}"
+    binary="$bundle/Contents/MacOS/$want"
+    [[ -f "$binary" ]] || binary="$(find "$bundle/Contents/MacOS" -maxdepth 1 \
+        -type f -perm -u+x ! -name '*.dylib' -print -quit 2>/dev/null)"
+    [[ -f "$binary" ]] || return 1
+    echo "$binary"
+}
+EXPECTED_APP_SHA="$(/usr/bin/python3 "$REPO/examples/forge-modular/binary_identity.py" "$(find_bundle_binary "$EXPECTED_BUILD_DIR/modular/Forge Modular.app")")"
+EXPECTED_AU_SHA="$(/usr/bin/python3 "$REPO/examples/forge-modular/binary_identity.py" "$(find_bundle_binary "$EXPECTED_BUILD_DIR/AU/Forge Modular.component")")"
+EXPECTED_VST3_SHA="$(/usr/bin/python3 "$REPO/examples/forge-modular/binary_identity.py" "$(find_bundle_binary "$EXPECTED_BUILD_DIR/VST3/Forge Modular.vst3")")"
+EXPECTED_CLAP_SHA="$(/usr/bin/python3 "$REPO/examples/forge-modular/binary_identity.py" "$(find_bundle_binary "$EXPECTED_BUILD_DIR/CLAP/Forge Modular.clap")")"
+[[ -n "$EXPECTED_APP_SHA" && -n "$EXPECTED_AU_SHA" && -n "$EXPECTED_VST3_SHA" && \
+   -n "$EXPECTED_CLAP_SHA" ]] || {
+    echo "current Forge build is missing one or more exact binaries" >&2
+    exit 1
+}
+EXPECTED_FORGE_BASE="$(tr -d '[:space:]' < "$REPO/forge-seam/patches/BASE")"
+EXPECTED_FORGE_SEAM_TREE="$EXPECTED_SOURCE_TREE_SHA"
+EXPECTED_PULP_SDK_PREFIX="$(sed -n 's/^CMAKE_PREFIX_PATH:[^=]*=//p' \
+    "$EXPECTED_BUILD_DIR/CMakeCache.txt" | tail -1)"
+[[ -n "$EXPECTED_PULP_SDK_PREFIX" && "$EXPECTED_PULP_SDK_PREFIX" != *';'* ]] || {
+    echo "rebuilt Forge tree did not resolve one exact Pulp SDK" >&2; exit 1; }
+EXPECTED_PULP_SDK_SOURCE="${FORGE_PULP_SDK_SOURCE_SHA:-}"
+[[ -n "$EXPECTED_PULP_SDK_SOURCE" ]] || {
+    echo "FORGE_PULP_SDK_SOURCE_SHA is required for exact verification" >&2; exit 1; }
+EXPECTED_PULP_SDK_CONTENT="${FORGE_PULP_SDK_CONTENT_SHA256:-}"
+[[ -n "$EXPECTED_PULP_SDK_CONTENT" ]] || {
+    echo "FORGE_PULP_SDK_CONTENT_SHA256 is required for exact verification" >&2; exit 1; }
+EXPECTED_PULP_SDK_VERSION="${FORGE_PULP_SDK_VERSION:-$(sed -n \
+    's/^project(Pulp VERSION \([0-9][0-9.]*\).*/\1/p' "$REPO/CMakeLists.txt" | head -1)}"
+case "$EXPECTED_PLATFORM" in
+    mac-arm64) EXPECTED_PULP_SDK_PLATFORM="darwin-arm64" ;;
+    mac-x64) EXPECTED_PULP_SDK_PLATFORM="darwin-x64" ;;
+    *) echo "unsupported Rack platform in package: $EXPECTED_PLATFORM" >&2; exit 1 ;;
+esac
+EXPECTED_PULP_SDK_JSON="$(/usr/bin/python3 \
+    "$REPO/examples/forge-modular/sdk_identity.py" \
+    --prefix "$EXPECTED_PULP_SDK_PREFIX" --platform "$EXPECTED_PULP_SDK_PLATFORM" \
+    --source-sha "$EXPECTED_PULP_SDK_SOURCE" --version "$EXPECTED_PULP_SDK_VERSION" \
+    --content-sha256 "$EXPECTED_PULP_SDK_CONTENT")" \
+    || exit 1
+EXPECTED_PULP_SDK_SHA="$(/usr/bin/python3 -c \
+    'import json,sys; print(json.load(sys.stdin)["content_sha256"])' \
+    <<< "$EXPECTED_PULP_SDK_JSON")"
+EXPECTED_SHAPE_TEXT_SHA="$(/usr/bin/python3 \
+    "$REPO/examples/forge-modular/binary_identity.py" "$REPO/build/shape_text")"
 EXPECTED_PROVENANCE="$WORK/expected-provenance.json"
 /usr/bin/python3 -c '
 import json, sys
 keys = ("archive_sha256", "binary_sha256", "manifest_sha256", "module_count",
-        "platform", "sdk_sha256", "source_tree_sha")
+        "platform", "sdk_sha256", "source_tree_sha", "forge_source_base",
+        "forge_seam_tree_sha", "app_binary_sha256", "au_binary_sha256",
+        "vst3_binary_sha256", "clap_binary_sha256", "pulp_sdk_version",
+        "pulp_sdk_source_sha", "pulp_sdk_content_sha256", "shape_text_sha256")
 data = dict(zip(keys, sys.argv[2:]))
 data["module_count"] = int(data["module_count"])
 with open(sys.argv[1], "w") as f:
@@ -142,7 +198,10 @@ with open(sys.argv[1], "w") as f:
     f.write("\n")
 ' "$EXPECTED_PROVENANCE" "$EXPECTED_PACK_SHA" "$EXPECTED_BINARY_SHA" \
   "$EXPECTED_MANIFEST_SHA" "$EXPECTED_MODULES" "$EXPECTED_PLATFORM" \
-  "$EXPECTED_SDK_SHA" "$EXPECTED_SOURCE_TREE_SHA"
+  "$EXPECTED_SDK_SHA" "$EXPECTED_SOURCE_TREE_SHA" "$EXPECTED_FORGE_BASE" \
+  "$EXPECTED_FORGE_SEAM_TREE" "$EXPECTED_APP_SHA" "$EXPECTED_AU_SHA" \
+  "$EXPECTED_VST3_SHA" "$EXPECTED_CLAP_SHA" "$EXPECTED_PULP_SDK_VERSION" \
+  "$EXPECTED_PULP_SDK_SOURCE" "$EXPECTED_PULP_SDK_SHA" "$EXPECTED_SHAPE_TEXT_SHA"
 
 # The one string that exists in the current shell and cannot exist in the older
 # examples/ one. Keep in step with package.sh's SHELL_MARKER.
@@ -288,6 +347,14 @@ case "$shaped" in
     M*) say_ok "the shipped panel shaper actually shapes text" ;;
     *)  say_bad "the shipped panel shaper produced no path for 'Hg'" ;;
 esac
+shipped_shape_sha="$(/usr/bin/python3 \
+    "$REPO/examples/forge-modular/binary_identity.py" \
+    "$ROOT/Contents/Resources/build/shape_text" 2>/dev/null || echo "")"
+if [[ "$shipped_shape_sha" == "$EXPECTED_SHAPE_TEXT_SHA" ]]; then
+    say_ok "the panel shaper is content-identical to the rebuilt Pulp helper"
+else
+    say_bad "the panel shaper identity is $shipped_shape_sha, not rebuilt helper $EXPECTED_SHAPE_TEXT_SHA"
+fi
 
 # An empty vocabulary hands the model a contract with no DSP in it, and the run
 # dies at the compiler three model calls later.
@@ -402,14 +469,20 @@ else
     else
         say_ok "the app binary is the current shell ($((size / 1048576)) MB)"
     fi
+    app_sha="$(/usr/bin/python3 "$REPO/examples/forge-modular/binary_identity.py" "$BIN")"
+    if [[ "$app_sha" == "$EXPECTED_APP_SHA" ]]; then
+        say_ok "the app binary is byte-identical to the rebuilt Forge target"
+    else
+        say_bad "the app binary hash is $app_sha, not rebuilt target $EXPECTED_APP_SHA"
+    fi
 fi
 
 # ── the three plug-in payloads hold code ─────────────────────────────────────
 for kind in au vst3 clap; do
     case "$kind" in
-        au)   sub="Forge Modular.component" ;;
-        vst3) sub="Forge Modular.vst3" ;;
-        clap) sub="Forge Modular.clap" ;;
+        au)   sub="Forge Modular.component"; expected_binary_sha="$EXPECTED_AU_SHA" ;;
+        vst3) sub="Forge Modular.vst3"; expected_binary_sha="$EXPECTED_VST3_SHA" ;;
+        clap) sub="Forge Modular.clap"; expected_binary_sha="$EXPECTED_CLAP_SHA" ;;
     esac
     comp="$WORK/exp/Forge Modular.$kind.pkg"
     if [[ ! -f "$comp/Payload" ]]; then
@@ -430,6 +503,13 @@ for kind in au vst3 clap; do
             say_bad "$kind: binary is $psize bytes — an empty husk"
         else
             say_ok "$kind carries a real binary ($((psize / 1048576)) MB)"
+        fi
+        actual_binary_sha="$(/usr/bin/python3 \
+            "$REPO/examples/forge-modular/binary_identity.py" "$pbin")"
+        if [[ "$actual_binary_sha" == "$expected_binary_sha" ]]; then
+            say_ok "$kind binary is byte-identical to the rebuilt Forge target"
+        else
+            say_bad "$kind binary hash is $actual_binary_sha, not rebuilt target $expected_binary_sha"
         fi
     fi
     # A DAW showing 0.11.0 beside an app showing 0.12.8 is the same

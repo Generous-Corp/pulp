@@ -1100,6 +1100,72 @@ def prepare_and_lint(patch: dict, inv: dict) -> tuple[dict, list[str]]:
     return patch, physical_errs + lint(patch, inv)
 
 
+def _numbered_step(name: str) -> bool:
+    """Whether a parameter is one numbered step value, not a gate or count."""
+    words = set(_normalise_port(name or ""))
+    if words & {"TRIGGER", "TRIG", "GATE"}:
+        return False
+    return "STEP" in words and any(word.isdigit() for word in words)
+
+
+def pitch_step_domain_errors(patch: dict, inv: dict) -> list[str]:
+    """Pitch sequences whose raw steps lack a ParamQuantity volts candidate.
+
+    The patch values are exact and remain usable as raw knob positions. What
+    can be absent is the semantic conversion Rack's ParamQuantity publishes;
+    without that conversion only a runtime transfer probe can say which volts
+    the module emits.
+    """
+    import param_units
+
+    by_id = {m.get("id"): m for m in (patch.get("modules") or [])}
+    errors = []
+    checked = set()
+    for cable in patch.get("cables") or []:
+        source = by_id.get(cable.get("outputModuleId"))
+        target = by_id.get(cable.get("inputModuleId"))
+        if not source or not target:
+            continue
+        target_roles = roles_at(inv, target.get("plugin"), target.get("model"),
+                                "in", cable.get("inputId", 0))
+        if target_roles != "Pitch" and not (
+                isinstance(target_roles, list) and "Pitch" in target_roles):
+            continue
+        source_key = (source.get("plugin"), source.get("model"), source.get("id"))
+        if source_key in checked:
+            continue
+        checked.add(source_key)
+        module = (inv.get(source.get("plugin"), {}).get("modules", {})
+                  .get(source.get("model"), {}))
+        specs = {q.get("id"): q for q in (module.get("params") or [])
+                 if isinstance(q, dict)}
+        written_steps = []
+        for value in source.get("params") or []:
+            spec = specs.get(value.get("id"))
+            if spec and _numbered_step(spec.get("name", "")):
+                written_steps.append((value, spec))
+        if not written_steps:
+            continue
+        unknown = []
+        for value, spec in written_steps:
+            raw = value.get("value")
+            mapped = (param_units.to_display(float(raw), spec)
+                      if isinstance(raw, (int, float)) else None)
+            if param_units.unit_of(spec) != "v" or mapped is None:
+                unknown.append(spec.get("name") or f"param {spec.get('id')}")
+        if unknown:
+            errors.append(
+                f"{source.get('plugin')}/{source.get('model')} feeds a pitch "
+                "input from numbered step controls whose raw knob values have "
+                "no declared physical-V candidate mapping ("
+                + ", ".join(unknown[:4])
+                + (", …" if len(unknown) > 4 else "")
+                + "). Choose a sequencer whose steps declare a physical V "
+                "display range; this only makes the intended values placeable. "
+                "The runtime pitch probe must still prove what its output emits")
+    return errors
+
+
 def lint(patch: dict, inv: dict) -> list[str]:
     """Reasons Rack would not load this patch as intended.
 
@@ -1166,6 +1232,8 @@ def lint(patch: dict, inv: dict) -> list[str]:
             if c.get(end) not in known:
                 errs.append(f"cable {c.get('id')} references module "
                             f"{c.get(end)}, which is not in the patch")
+
+    errs.extend(pitch_step_domain_errors(patch, inv))
 
     # A patch that reaches no audio interface makes no sound, which is a far
     # more common generated failure than a malformed file.
@@ -1584,12 +1652,19 @@ def render_inventory(inv: dict, prefer: str | None = None) -> str:
                     return f"{q['id']}={q['name']}"
                 ps = ", ".join(_one(q) for q in m["params"])
                 out.append(f"    params: {ps}")
+                import param_units                         # noqa: PLC0415
+                if any(_numbered_step(q.get("name", ""))
+                       and param_units.unit_of(q) != "v"
+                       for q in m["params"]):
+                    out.append(
+                        "    pitch-step candidate: UNKNOWN (serialized raw "
+                        "values exist, but ParamQuantity declares no intended "
+                        "voltage; only a runtime probe can prove the output)")
                 if any(not isinstance(q.get("min"), (int, float))
                        for q in m["params"]):
                     out.append("    (params shown without a range are in that "
-                               "knob's native units; pitch and step values are "
-                               "volts on a 1V/oct scale unless the panel says "
-                               "otherwise)")
+                               "knob's native units; never assume a raw pitch "
+                               "or step value equals emitted volts)")
                 try:
                     import affordances                      # noqa: PLC0415
                     out.extend(affordances.render_lines(m))
@@ -2283,7 +2358,8 @@ def _plugin_dir() -> str | None:
             if os.path.isdir(os.path.join(d, slug)):
                 continue
             import archive
-            archive.extract_all(os.path.join(d, entry), d)
+            if not archive.extract_all(os.path.join(d, entry), d):
+                return None
         return d
     return None
 
@@ -2580,6 +2656,51 @@ def audibility(patch: dict) -> tuple[str, str]:
 INVENTORY_BEGIN = "<<<FORGE-INVENTORY-BEGIN>>>"
 INVENTORY_END = "<<<FORGE-INVENTORY-END>>>"
 CODEX_INLINE_INVENTORY_CHAR_LIMIT = 128 * 1024
+MODEL_PROMPT_RECORD_ENV = "FORGE_MODEL_PROMPT_RECORD"
+
+
+def _record_model_prompt(prompt: str) -> str | None:
+    """Persist the exact pre-adapter prompt when an explicit path is requested."""
+    requested = os.environ.get(MODEL_PROMPT_RECORD_ENV)
+    if requested is None:
+        return None
+    requested = requested.strip()
+    if not requested:
+        raise SystemExit(f"{MODEL_PROMPT_RECORD_ENV} is set but empty")
+    path = os.path.abspath(os.path.expanduser(requested))
+    encoded = prompt.encode("utf-8")
+    if "{call}" in path:
+        fd = None
+        for call in range(1, 10000):
+            candidate = path.replace("{call}", f"{call:04d}")
+            try:
+                fd = os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                             0o600)
+                path = candidate
+                break
+            except FileExistsError:
+                continue
+        if fd is None:
+            raise SystemExit(
+                "model prompt record exhausted its {call} sequence")
+    else:
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            raise SystemExit(
+                f"refusing to overwrite model prompt record: {path}") from None
+    try:
+        with os.fdopen(fd, "wb") as output:
+            output.write(encoded)
+            output.flush()
+            os.fsync(output.fileno())
+    except Exception:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+        raise
+    return path
 
 
 def _remove_private_inventory(path: str) -> None:
@@ -2662,6 +2783,7 @@ def ask_model(claude: str, prompt: str, seconds: float, tick: float = 8.0):
     import toolpaths
 
     protocol = toolpaths.model_cli_kind(claude)
+    _record_model_prompt(prompt)
     inventory_path = None
     if protocol == "codex":
         prompt, inventory_path = _externalize_codex_inventory(prompt)

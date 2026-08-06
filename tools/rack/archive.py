@@ -27,7 +27,10 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
+import stat
 import subprocess
+import tempfile
 
 # /usr/bin/tar is BSD tar (libarchive) on macOS and is always present. Named
 # absolutely rather than looked up, because the whole point is to work in a
@@ -99,9 +102,34 @@ def read_member(archive: str, basename: str) -> bytes | None:
     return None
 
 
-def extract_all(archive: str, dest_dir: str) -> bool:
-    """Unpack the whole archive into an existing directory."""
+def _extract_all_into(archive: str, dest_dir: str) -> bool:
+    """Unpack directly into a private staging directory."""
     zstd = _zstd()
+    try:
+        if zstd:
+            decoded = subprocess.run([zstd, "-dc", archive],
+                                     capture_output=True, timeout=60)
+            if decoded.returncode != 0:
+                return False
+            listing = subprocess.run([_tar(), "-tf", "-"],
+                                     input=decoded.stdout, capture_output=True,
+                                     timeout=60, text=False)
+            listing_text = listing.stdout.decode("utf-8", errors="strict")
+        else:
+            listing = subprocess.run([_tar(), "--zstd", "-tf", archive],
+                                     capture_output=True, timeout=60, text=True)
+            listing_text = listing.stdout
+    except Exception:                                           # noqa: BLE001
+        return False
+    if listing.returncode != 0:
+        return False
+    for name in listing_text.splitlines():
+        normalized = name.rstrip("/")
+        parts = normalized.split("/")
+        if (not normalized or os.path.isabs(normalized) or
+                any(part in ("", "..") for part in parts)):
+            return False
+
     producer = None
     try:
         if zstd:
@@ -113,7 +141,12 @@ def extract_all(archive: str, dest_dir: str) -> bool:
             if producer.stdout:
                 producer.stdout.close()
             producer_status = producer.wait(timeout=10)
-            return producer_status == 0 and consumer.returncode == 0
+            # bsdtar stops at the tar end marker and may close its input before
+            # zstd has written frame padding/checksum bytes. That normal close
+            # appears to zstd as SIGPIPE even though tar validated and unpacked
+            # the complete archive.
+            producer_ok = producer_status in (0, -signal.SIGPIPE)
+            return producer_ok and consumer.returncode == 0
         r = subprocess.run([_tar(), "--zstd", "-xf", archive, "-C", dest_dir],
                            timeout=120)
         return r.returncode == 0
@@ -130,6 +163,48 @@ def extract_all(archive: str, dest_dir: str) -> bool:
                 except subprocess.TimeoutExpired:
                     producer.kill()
                     producer.wait()
+
+
+def extract_all(archive: str, dest_dir: str) -> bool:
+    """Atomically publish the single plug-in directory from an archive."""
+    if not os.path.isdir(dest_dir):
+        return False
+    stage = tempfile.mkdtemp(prefix=".forge-extract-", dir=dest_dir)
+    try:
+        if not _extract_all_into(archive, stage):
+            return False
+        entries = os.listdir(stage)
+        if len(entries) != 1:
+            return False
+        staged_plugin = os.path.join(stage, entries[0])
+        try:
+            top_mode = os.lstat(staged_plugin).st_mode
+        except OSError:
+            return False
+        if not stat.S_ISDIR(top_mode):
+            return False
+        # A plug-in archive is data plus regular directories. Publishing a
+        # symlink would let an archive redirect later reads outside the
+        # private extraction root, including after this function returns.
+        for root, dirs, files in os.walk(staged_plugin, followlinks=False):
+            for name in dirs + files:
+                try:
+                    mode = os.lstat(os.path.join(root, name)).st_mode
+                except OSError:
+                    return False
+                if not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
+                    return False
+        published_plugin = os.path.join(dest_dir, entries[0])
+        # lexists() also sees dangling links. os.path.exists() does not, and
+        # os.rename() would replace that directory entry.
+        if os.path.lexists(published_plugin):
+            return False
+        os.rename(staged_plugin, published_plugin)
+        return True
+    except OSError:
+        return False
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
 
 
 def create(archive: str, root_dir: str, member: str) -> None:

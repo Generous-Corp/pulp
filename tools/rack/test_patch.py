@@ -1074,7 +1074,7 @@ def check_unjudged_patch_is_kept() -> tuple:
     stub = os.path.join(home, "claude")
     reply = json.dumps(voice())
     with open(stub, "w") as f:
-        f.write("#!/bin/sh\ncat <<'EOF'\n```json patch\n" + reply +
+        f.write("#!/bin/sh\ncat >/dev/null\ncat <<'EOF'\n```json patch\n" + reply +
                 "\n```\nEOF\n")
     os.chmod(stub, os.stat(stub).st_mode | stat.S_IEXEC)
     saved = (P.find_claude, P.audibility, P.lint, P.reflow, P.configure_audio)
@@ -2635,6 +2635,78 @@ else:
               f"{len(full_inventory_prompt):,} to {len(shortened):,} chars, "
               "is exact and read-only, and is cleaned up")
 
+    full_prompt_record = os.path.join(home, "full-model-prompt.txt")
+    old_prompt_record = os.environ.get(P.MODEL_PROMPT_RECORD_ENV)
+    os.environ[P.MODEL_PROMPT_RECORD_ENV] = full_prompt_record
+    os.environ.update(external_env)
+    try:
+        code, text, why = P.ask_model(
+            codex, full_inventory_prompt, 30.0, tick=0.0)
+    finally:
+        for key, old in old_external_env.items():
+            if old is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old
+        if old_prompt_record is None:
+            os.environ.pop(P.MODEL_PROMPT_RECORD_ENV, None)
+        else:
+            os.environ[P.MODEL_PROMPT_RECORD_ENV] = old_prompt_record
+    with open(full_prompt_record, "rb") as source:
+        recorded_prompt = source.read()
+    prompt_mode = stat.S_IMODE(os.stat(full_prompt_record).st_mode)
+    if (code != 0 or text != "exact final response\n" or why or
+            recorded_prompt != full_inventory_prompt.encode("utf-8") or
+            prompt_mode != 0o600):
+        bad += 1
+        print(f"  WRONG  the opt-in full prompt record is not exact/private: "
+              f"{code} mode={prompt_mode:o} bytes={len(recorded_prompt)} "
+              f"{why!r}")
+    else:
+        print("  ok     opt-in prompt retention records the exact full "
+              "pre-adapter prompt with owner-only permissions")
+
+    old_prompt_record = os.environ.get(P.MODEL_PROMPT_RECORD_ENV)
+    os.environ[P.MODEL_PROMPT_RECORD_ENV] = full_prompt_record
+    try:
+        try:
+            P.ask_model(codex, full_inventory_prompt, 30.0, tick=0.0)
+        except SystemExit as exc:
+            overwrite_refused = "refusing to overwrite" in str(exc)
+        else:
+            overwrite_refused = False
+    finally:
+        if old_prompt_record is None:
+            os.environ.pop(P.MODEL_PROMPT_RECORD_ENV, None)
+        else:
+            os.environ[P.MODEL_PROMPT_RECORD_ENV] = old_prompt_record
+    if not overwrite_refused:
+        bad += 1
+        print("  WRONG  prompt retention overwrote an existing arm record")
+    else:
+        print("  ok     prompt retention refuses to overwrite an existing "
+              "arm record")
+
+    prompt_series = os.path.join(home, "retry-prompt-{call}.txt")
+    old_prompt_record = os.environ.get(P.MODEL_PROMPT_RECORD_ENV)
+    os.environ[P.MODEL_PROMPT_RECORD_ENV] = prompt_series
+    try:
+        first_record = P._record_model_prompt("attempt one Ω")
+        second_record = P._record_model_prompt("attempt two café")
+    finally:
+        if old_prompt_record is None:
+            os.environ.pop(P.MODEL_PROMPT_RECORD_ENV, None)
+        else:
+            os.environ[P.MODEL_PROMPT_RECORD_ENV] = old_prompt_record
+    if (not first_record.endswith("retry-prompt-0001.txt") or
+            not second_record.endswith("retry-prompt-0002.txt") or
+            open(first_record).read() != "attempt one Ω" or
+            open(second_record).read() != "attempt two café"):
+        bad += 1
+        print("  WRONG  retry prompt records did not retain each exact call")
+    else:
+        print("  ok     a {call} prompt path retains every retry separately")
+
     timeout_env = dict(external_env)
     timeout_env["FAKE_CODEX_MODE"] = "external-timeout"
     old_timeout_env = {key: os.environ.get(key) for key in timeout_env}
@@ -3533,6 +3605,74 @@ def check_melody_is_written() -> tuple:
     return bad, 11
 
 
+def check_pitch_step_domains() -> tuple:
+    """A pitch sequence needs a measured map from raw step values to volts."""
+    import copy
+
+    inv = {
+        "Fixture": {"name": "Fixture", "modules": {
+            "RawSeq": {
+                "name": "RawSeq", "tags": ["Sequencer"],
+                "outputs": ["CV"], "roles_out": ["Cv"],
+                "params": [
+                    {"id": 0, "name": "Step 1", "min": 0.0, "max": 1.0},
+                    {"id": 1, "name": "Step 2", "min": 0.0, "max": 1.0},
+                ]},
+            "Voice": {
+                "name": "Voice", "tags": ["Oscillator"],
+                "inputs": ["1V/oct", "FM"],
+                "roles_in": ["Pitch", "Cv"], "outputs": ["Out"]},
+        }}}
+    patch = {
+        "modules": [
+            {"id": 1, "plugin": "Fixture", "model": "RawSeq", "pos": [0, 0],
+             "params": [{"id": 0, "value": 0.1667},
+                        {"id": 1, "value": 0.25}]},
+            {"id": 2, "plugin": "Fixture", "model": "Voice", "pos": [8, 0]},
+        ],
+        "cables": [{"id": 1, "outputModuleId": 1, "outputId": 0,
+                    "inputModuleId": 2, "inputId": 0}],
+    }
+    errors = P.pitch_step_domain_errors(patch, inv)
+    bad = 0
+    if (len(errors) != 1 or "no declared physical-V candidate" not in errors[0]
+            or "Choose a sequencer" not in errors[0]):
+        bad += 1
+        print(f"  WRONG  a raw-only sequencer feeding pitch is not rejected "
+              f"with an actionable replacement: {errors}")
+    else:
+        print("  ok     raw-only step controls feeding pitch fail closed with "
+              "an actionable retry")
+    rendered = P.render_inventory(inv)
+    if "pitch-step candidate: UNKNOWN" not in rendered:
+        bad += 1
+        print("  WRONG  the model inventory hides the unknown output domain")
+    else:
+        print("  ok     the model inventory names the unknown runtime transfer")
+
+    mapped = copy.deepcopy(inv)
+    for spec in mapped["Fixture"]["modules"]["RawSeq"]["params"]:
+        spec.update({"unit": " V", "displayBase": 0.0,
+                     "displayMultiplier": 10.0, "displayOffset": 0.0})
+    errors = P.pitch_step_domain_errors(patch, mapped)
+    if errors:
+        bad += 1
+        print(f"  WRONG  a declared physical-V candidate was rejected: {errors}")
+    else:
+        print("  ok     a declared scaling remains a runtime-testable candidate")
+
+    modulation = copy.deepcopy(patch)
+    modulation["cables"][0]["inputId"] = 1
+    errors = P.pitch_step_domain_errors(modulation, inv)
+    if errors:
+        bad += 1
+        print(f"  WRONG  raw step CV used as generic modulation was rejected: "
+              f"{errors}")
+    else:
+        print("  ok     the same raw step controls remain valid for non-pitch CV")
+    return bad, 4
+
+
 def _behaviour_report(cable: dict) -> str:
     """A gate report carrying one measured cable, without running a gate.
 
@@ -3823,6 +3963,7 @@ def main():
     ver_bad, ver_ran = check_version_stamping()
     vp_bad, vp_ran = check_vendor_params_reach_model()
     mel_bad, mel_ran = check_melody_is_written()
+    domain_bad, domain_ran = check_pitch_step_domains()
     beh_bad, beh_ran = check_behaviour_is_measured()
     # Lives in its own file (test_patch.py is far over the size ceiling), and
     # is called HERE as well as from its own main() -- before the skip below,
@@ -3838,9 +3979,9 @@ def main():
     acq_ran += nf_ran + gs_ran + uk_ran + stream_ran + panel_ran
     # UNION of every lane's counters. Taking one side drops
     # another lane's checks while the total still reads healthy.
-    acq_bad += (vp_bad + mel_bad + beh_bad + aff_bad +
+    acq_bad += (vp_bad + mel_bad + domain_bad + beh_bad + aff_bad +
                 ln_bad + rl_bad + ip_bad + rp_bad + sf_bad + hand_bad)
-    acq_ran += (vp_ran + mel_ran + beh_ran + aff_ran +
+    acq_ran += (vp_ran + mel_ran + domain_ran + beh_ran + aff_ran +
                 ln_ran + rl_ran + ip_ran + rp_ran + sf_ran + hand_ran)
     layout_bad += parts_bad + acq_bad; layout_ran += parts_ran + acq_ran
 

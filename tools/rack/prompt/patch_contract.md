@@ -102,11 +102,17 @@ rejection will name the connection you left out.
    asks for a melody or a sequenced line, the sequencer's step values ARE the
    melody: set them in `params`, and give the steps DIFFERENT values. A
    perfectly wired sequencer whose steps are all left at their default plays
-   one held note. Pitch and step values are volts on a 1V/oct scale unless
-   the listed range says otherwise (0.583 V above a root is a fifth; small
-   simple fractions of a volt are notes). A param listed without a range is
-   in that knob's native units; stay conservative and prefer values near the
-   scale its name suggests.
+   one held note. For a pitch sequence, use step controls whose inventory entry
+   declares a physical display range in V; those are the only controls whose
+   intended voltage values can be placed before launch. This is a candidate
+   mapping, not proof of what the output emits: the runtime pitch probe must
+   still verify the intervals. Prefer such a sequencer over one whose step
+   controls show only a raw range or no range.
+   `0.583 V` above a root is a fifth, but write it as a `physical` target when
+   the request or guidance names that interval. A param listed without a
+   physical range still has an exact serialized raw value, but no known
+   ParamQuantity conversion; do not assume that raw value is the voltage the
+   module's DSP emits at the output.
 
 9. **Some modules say what their knobs can EXPRESS.** Where a module lists
    `affords:`, those params have been read against the maker's own

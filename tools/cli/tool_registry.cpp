@@ -716,6 +716,13 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
     auto venv_path = venv_dir / ".venv";
     const auto rollback_path = venv_dir / ".venv.rollback";
     const auto install_complete_path = venv_path / ".pulp-install-complete";
+#ifdef _WIN32
+    const auto wrapper_path = venv_dir / "run.bat";
+    const auto wrapper_rollback_path = venv_dir / "run.bat.rollback";
+#else
+    const auto wrapper_path = venv_dir / "run.sh";
+    const auto wrapper_rollback_path = venv_dir / "run.sh.rollback";
+#endif
 
     // Recover conservatively if a previous replacement was interrupted. A
     // completed replacement carries its marker; otherwise the saved
@@ -724,10 +731,18 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
         std::error_code recovery_error;
         if (fs::exists(install_complete_path)) {
             fs::remove_all(rollback_path, recovery_error);
+            if (!recovery_error)
+                fs::remove(wrapper_rollback_path, recovery_error);
         } else {
             fs::remove_all(venv_path, recovery_error);
             if (!recovery_error)
                 fs::rename(rollback_path, venv_path, recovery_error);
+            if (!recovery_error && fs::exists(wrapper_rollback_path)) {
+                fs::remove(wrapper_path, recovery_error);
+                if (!recovery_error)
+                    fs::rename(wrapper_rollback_path, wrapper_path,
+                               recovery_error);
+            }
         }
         if (recovery_error) {
             result.error = "Failed to recover interrupted Python environment at "
@@ -735,13 +750,20 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
             return result;
         }
     }
+    if (!fs::exists(rollback_path) &&
+        fs::exists(install_complete_path) &&
+        fs::exists(wrapper_rollback_path)) {
+        std::error_code cleanup_error;
+        fs::remove(wrapper_rollback_path, cleanup_error);
+        if (cleanup_error) {
+            result.error = "Failed to finish Python wrapper recovery at "
+                + wrapper_path.string() + ": " + cleanup_error.message();
+            return result;
+        }
+    }
 
     if (!force && fs::exists(venv_path)) {
-#ifdef _WIN32
-        result.binary_path = venv_dir / "run.bat";
-#else
-        result.binary_path = venv_dir / "run.sh";
-#endif
+        result.binary_path = wrapper_path;
         const auto manifest_path = venv_dir / "manifest.json";
         const std::string version_field =
             "\"version\": \"" + tool.pinned_version + "\"";
@@ -780,6 +802,20 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
         }
         has_rollback = true;
     }
+    bool has_wrapper_rollback = false;
+    if (fs::exists(wrapper_path)) {
+        std::error_code save_error;
+        fs::rename(wrapper_path, wrapper_rollback_path, save_error);
+        if (save_error) {
+            std::error_code restore_error;
+            if (has_rollback)
+                fs::rename(rollback_path, venv_path, restore_error);
+            result.error = "Failed to preserve Python wrapper before replacement at "
+                + wrapper_path.string() + ": " + save_error.message();
+            return result;
+        }
+        has_wrapper_rollback = true;
+    }
 
     const auto restore_previous_environment = [&]() -> std::string {
         std::error_code restore_error;
@@ -788,6 +824,14 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
             return restore_error.message();
         if (has_rollback) {
             fs::rename(rollback_path, venv_path, restore_error);
+            if (restore_error)
+                return restore_error.message();
+        }
+        fs::remove(wrapper_path, restore_error);
+        if (restore_error)
+            return restore_error.message();
+        if (has_wrapper_rollback) {
+            fs::rename(wrapper_rollback_path, wrapper_path, restore_error);
             if (restore_error)
                 return restore_error.message();
         }
@@ -833,11 +877,9 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
 
     // Create wrapper script
 #ifdef _WIN32
-    auto wrapper_path = venv_dir / "run.bat";
     std::string wrapper = "@echo off\n\"" + python_path + "\" -m "
                         + run_module + " %*\n";
 #else
-    auto wrapper_path = venv_dir / "run.sh";
     std::string wrapper = "#!/bin/sh\nexec '" + python_path + "' -m "
                         + run_module + " \"$@\"\n";
 #endif
@@ -871,6 +913,15 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
         if (remove_error) {
             result.error = "Installed new Python environment but could not remove rollback at "
                 + rollback_path.string() + ": " + remove_error.message();
+            return result;
+        }
+    }
+    if (has_wrapper_rollback) {
+        std::error_code remove_error;
+        fs::remove(wrapper_rollback_path, remove_error);
+        if (remove_error) {
+            result.error = "Installed new Python wrapper but could not remove rollback at "
+                + wrapper_rollback_path.string() + ": " + remove_error.message();
             return result;
         }
     }

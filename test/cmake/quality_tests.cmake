@@ -113,6 +113,14 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_combined_installer.py")
     endif()
 
+    add_test(NAME rack-package-contract COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/cmake/test_pulp_rack_contract.py")
+    set_tests_properties(rack-package-contract PROPERTIES TIMEOUT 120)
+    add_test(NAME forge-modular-binary-identity COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/examples/forge-modular/test/test_binary_identity.py")
+    add_test(NAME forge-modular-sdk-identity COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/examples/forge-modular/test/test_sdk_identity.py")
+
     # An Info.plist template reachable by a format helper but absent from the
     # SDK install list does not error — PulpPluginFormats selects with
     # `elseif(EXISTS ...)`, so the helper falls through and consumer builds get

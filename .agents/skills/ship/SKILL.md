@@ -1471,3 +1471,20 @@ staging directory assembled with symlinks instead of real copies produces a
 containing nothing. `pkgutil --payload-files` does NOT enumerate nested
 component payloads either — `pkgutil --expand` and check each component's size.
 Use `ditto` for staging copies.
+
+**Bind product-specific installers to rebuilt inputs, not recognizable ones.**
+Size thresholds, stable strings, and matching manifests still accept an older
+binary built from the same metadata. Rebuild every named target from its pinned
+source in Release before staging; refuse tracked changes plus untracked or
+ignored files reachable by source/resource globs and copied roots; record
+SHA-256 identities for the source tree, external SDK, manifests, archives, and
+every payload binary. Verification expands the finished installer and compares
+those exact identities. An SDK content digest computed during packaging is only
+an observation, not trust: require an expected digest from the release manifest
+(or an explicitly computed local-development pin) and reject any mismatch.
+Mach-O payload identities may exclude the replaceable code signature only when
+they also canonicalize the signature-dependent `__LINKEDIT` sizes; prove this
+against a real `codesign --force -s -` replacement. Archive-producing CMake
+helpers must clear their stage
+on every package invocation: persistent `POST_BUILD` copy directories retain
+resources that were removed from source.

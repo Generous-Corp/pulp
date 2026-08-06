@@ -184,9 +184,36 @@ def test_written_steps_are_read_off_the_patch() -> int:
     names = {("Fundamental", "SEQ3", i): f"CV 1 step {i - 3}"
              for i in range(4, 12)}
     names[("Fundamental", "SEQ3", 3)] = "Steps"
-    vals, why = F.step_values(fixture(), SEQ, names)
+    specs = {("Fundamental", "SEQ3", i): {
+        "index": i, "unit": " V", "displayBase": 0.0,
+        "displayMultiplier": 1.0, "displayOffset": 0.0}
+        for i in range(4, 12)}
+    vals, why = F.step_values(fixture(), SEQ, names, specs)
     return check(sorted(vals) == FIXTURE_STEPS and not why,
                  "the four written step pitches are found", f"{vals} {why}")
+
+
+def test_step_values_use_the_measured_physical_domain() -> int:
+    patch = {"modules": [{"id": 7, "plugin": "Fixture", "model": "Scaled",
+                          "params": [{"id": 0, "value": 0.25},
+                                     {"id": 1, "value": 0.5}]}]}
+    names = {("Fixture", "Scaled", 0): "Step 1",
+             ("Fixture", "Scaled", 1): "Step 2"}
+    scaled = {key: {"unit": " V", "displayBase": 0.0,
+                    "displayMultiplier": 10.0, "displayOffset": 0.0}
+              for key in names}
+    values, why = F.step_values(patch, 7, names, scaled)
+    bad = check(values == [2.5, 5.0] and not why,
+                "declared raw-to-volts candidate is applied before runtime comparison",
+                f"{values} {why}")
+    bad += check([p["value"] for p in patch["modules"][0]["params"]]
+                 == [0.25, 0.5],
+                 "semantic conversion preserves the exact serialized raw values")
+    values, why = F.step_values(patch, 7, names, {})
+    bad += check(values == [] and "no declared physical-V candidate" in why,
+                 "an absent step-voltage mapping is unprovable, not raw volts",
+                 why)
+    return bad
 
 
 def test_a_value_outside_a_knobs_range_is_named_before_launching() -> int:
@@ -507,7 +534,9 @@ def _run_patch(patch: dict, label: str, probe: str, seconds: float = 4.0):
         if got.why:
             print(f"    {label}: the launch did not measure — {got.why}")
             return None
-        return F.judge(given, got, taps, F.param_names(mr.read_portmap()))
+        portmap = mr.read_portmap()
+        return F.judge(given, got, taps, F.param_names(portmap),
+                       F.param_specs(portmap))
     finally:
         shutil.rmtree(stage, ignore_errors=True)
 
@@ -635,6 +664,7 @@ def main(argv: list[str]) -> int:
                test_pitch_inputs_are_recognised_by_name,
                test_unmapped_modules_say_so_rather_than_report_no_steps,
                test_written_steps_are_read_off_the_patch,
+               test_step_values_use_the_measured_physical_domain,
                test_a_value_outside_a_knobs_range_is_named_before_launching,
                test_probe_architecture_comes_from_rack_not_user_plugins,
                test_scratch_mirrors_archive_only_plugins,

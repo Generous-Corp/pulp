@@ -54,35 +54,48 @@ class GeneratedSlugSafety(unittest.TestCase):
         with self.assertRaisesRegex(generate.ExistingModuleSlug,
                                     "already declared"):
             generate._write_generated_module(
-                {"slug": "existingvoice"}, "replacement")
+                {"slug": "EXISTINGVOICE"}, "replacement")
 
         self.assertEqual(path.read_bytes(), before)
         self.assertEqual(list((self.pack / "src").iterdir()), [])
 
     def test_existing_source_or_symlink_is_never_followed(self) -> None:
-        source = self.pack / "src" / "Orphan.cpp"
+        source = self.pack / "src" / "ORPHAN.cpp"
         source.write_text("keep me")
         with self.assertRaisesRegex(generate.ExistingModuleSlug,
                                     "source file already exists"):
-            generate._write_generated_module({"slug": "Orphan"}, "replace")
+            generate._write_generated_module({"slug": "ORPHAN"}, "replace")
         self.assertEqual(source.read_text(), "keep me")
 
         dangling = self.pack / "modules" / "linked.json"
         os.symlink(self.pack / "missing-target", dangling)
         with self.assertRaisesRegex(generate.ExistingModuleSlug,
                                     "manifest already exists"):
-            generate._write_generated_module({"slug": "Linked"}, "body")
+            generate._write_generated_module({"slug": "LINKED"}, "body")
 
     def test_unique_slug_writes_both_new_files(self) -> None:
         generate._write_generated_module(
-            {"slug": "FreshVoice", "name": "Fresh Voice"}, "// dsp\n")
+            {"slug": "FRESHVOICE", "name": "Fresh Voice"}, "// dsp\n")
 
         manifest = json.loads(
             (self.pack / "modules" / "freshvoice.json").read_text())
         self.assertTrue(manifest["forge_generated"])
-        self.assertEqual(manifest["modules"][0]["slug"], "FreshVoice")
-        self.assertEqual((self.pack / "src" / "FreshVoice.cpp").read_text(),
+        self.assertEqual(manifest["modules"][0]["slug"], "FRESHVOICE")
+        self.assertEqual((self.pack / "src" / "FRESHVOICE.cpp").read_text(),
                          "// dsp\n")
+
+    def test_invalid_slug_never_constructs_or_escapes_output_paths(self) -> None:
+        outside = self.pack.parent / "escaped.cpp"
+        for slug in ("../escaped", "/tmp/escaped", "A/B", "A\\B", ".",
+                     "MixedCase", "WITH SPACE", ""):
+            with self.subTest(slug=slug):
+                with self.assertRaisesRegex(generate.InvalidModuleSlug,
+                                            "A-Z0-9 only"):
+                    generate._write_generated_module(
+                        {"slug": slug, "name": "Bad"}, "escape")
+                self.assertEqual(list((self.pack / "modules").iterdir()), [])
+                self.assertEqual(list((self.pack / "src").iterdir()), [])
+                self.assertFalse(outside.exists())
 
 
 class PromptBudgetSafety(unittest.TestCase):

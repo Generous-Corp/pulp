@@ -665,6 +665,10 @@ class ExistingModuleSlug(ValueError):
     """A generated slug would replace something already in the module pack."""
 
 
+class InvalidModuleSlug(ValueError):
+    """A generated slug violates the permanent Rack identity contract."""
+
+
 def _write_generated_module(mod: dict, dsp: str) -> None:
     """Write a new module only when its slug owns no existing pack identity.
 
@@ -674,7 +678,11 @@ def _write_generated_module(mod: dict, dsp: str) -> None:
     the built-in manifest before the later duplicate scan has anything left to
     compare.
     """
-    slug = mod["slug"]
+    slug = mod.get("slug")
+    if not isinstance(slug, str) or not re.fullmatch(r"[A-Z0-9]+", slug):
+        raise InvalidModuleSlug(
+            f"model slug {slug!r} must contain A-Z0-9 only; refusing to "
+            "construct output paths from an invalid permanent identity")
     folded = slug.casefold()
     manifest_path = os.path.join(PACK, "modules", f"{slug.lower()}.json")
     source_path = os.path.join(PACK, "src", f"{slug}.cpp")

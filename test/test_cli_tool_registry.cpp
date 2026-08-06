@@ -816,6 +816,7 @@ TEST_CASE("tool install helpers have deterministic local exits",
     REQUIRE_FALSE(stale_py.ok);  // attempted reinstall; never reported stale venv as 1.0.1
     REQUIRE(stale_py.installed_version.empty());
     REQUIRE(fs::exists(stale_package_bytes));  // failed replacement rolls back
+    REQUIRE(read_file(wrapper) == "fixture\n");
 
     const auto rollback_dir = venv_dir / ".venv.rollback";
     fs::rename(venv_dir / ".venv", rollback_dir);

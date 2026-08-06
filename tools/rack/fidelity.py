@@ -297,9 +297,25 @@ def param_names(portmap: dict) -> dict:
     return out
 
 
-def step_values(patch: dict, source_id: int, names: dict
+def param_specs(portmap: dict) -> dict:
+    """(plugin, model, index) -> the measured raw/display parameter record."""
+    out = {}
+    for entry in (portmap.get("modules") or []):
+        for param in (entry.get("params") or []):
+            out[(entry.get("plugin"), entry.get("model"),
+                 param.get("index"))] = param
+    return out
+
+
+def step_values(patch: dict, source_id: int, names: dict, specs: dict | None = None
                 ) -> tuple[list[float], str]:
-    """(the pitches the patch wrote into `source_id`'s steps, why it could not).
+    """(candidate pitch volts declared for the steps, why unavailable).
+
+    Patch JSON always supplies the exact raw knob values. `specs` supplies the
+    independent ParamQuantity raw-to-display conversion, and the caller then
+    compares those semantic volts with the runtime DSP capture. Keeping the
+    three layers separate is what catches a module whose DSP transfer differs
+    from its serialized or displayed domain.
 
     Only parameters the patch WROTE are counted. A step the file left alone is
     a step the generator did not choose, and holding the module's defaults
@@ -320,10 +336,27 @@ def step_values(patch: dict, source_id: int, names: dict
         return [], (f"{key[0]}/{key[1]} has no mapped parameter names, so "
                     f"which knobs hold the steps is not known here — run "
                     f"measure_ranges.py for that plugin")
+    import param_units
+
     out = []
     for p in (mod.get("params") or []):
-        if is_step_param(names.get((key[0], key[1], p.get("id")), "")):
-            out.append(float(p.get("value", 0.0)))
+        param_key = (key[0], key[1], p.get("id"))
+        if not is_step_param(names.get(param_key, "")):
+            continue
+        spec = (specs or {}).get(param_key)
+        if not spec or param_units.unit_of(spec) != "v":
+            return [], (f"{key[0]}/{key[1]} has numbered step controls but "
+                        "no declared physical-V candidate mapping, so raw knob "
+                        "values are preserved but cannot be compared with "
+                        "emitted pitch volts")
+        raw = p.get("value")
+        physical = (param_units.to_display(float(raw), spec)
+                    if isinstance(raw, (int, float)) else None)
+        if physical is None:
+            return [], (f"{key[0]}/{key[1]} step param {p.get('id')} has a "
+                        "physical-V candidate mapping that cannot express its "
+                        "written raw value")
+        out.append(physical)
     if not out:
         return [], (f"the patch wrote no step values on {key[0]}/{key[1]}, so "
                     f"there is no written sequence to hold the run against")
@@ -738,7 +771,7 @@ TRACKING_TOLERANCE = 0.25
 
 
 def judge(given: dict, got: Run, taps: list[tuple],
-          names: dict | None = None) -> Verdict:
+          names: dict | None = None, specs: dict | None = None) -> Verdict:
     """Turn one run into the claims it supports, with the evidence for each.
 
     Three links, kept apart because they fail in different places and a reader
@@ -795,7 +828,7 @@ def judge(given: dict, got: Run, taps: list[tuple],
             if not pitch_selected:
                 v.volts = volts
                 v.written, v.played_why = step_values(given, src_mod,
-                                                      names or {})
+                                                      names or {}, specs)
                 pitch_selected = True
 
     heard = distinct(v.volts, STEP_TOLERANCE)
@@ -887,7 +920,7 @@ def check(patch_path: str, seconds: float = 4.0,
         got = run(rack, run_patch, probe, seconds)
         if got.why:
             return 2, [f"the run did not measure anything: {got.why}"]
-        v = judge(given, got, used, param_names(portmap))
+        v = judge(given, got, used, param_names(portmap), param_specs(portmap))
         if wav_out:
             try:
                 artifact = write_audio_artifact(
