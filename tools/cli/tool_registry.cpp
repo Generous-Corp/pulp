@@ -740,6 +740,20 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
         // of reporting the registry pin as if it described the installed code.
     }
 
+    // `uv venv` may reuse an existing environment, and a normal `uv pip
+    // install` is allowed to leave already-installed package bytes in place.
+    // Remove the managed environment before a forced or stale reinstall so
+    // the manifest we write below can only describe freshly installed bytes.
+    if (fs::exists(venv_path)) {
+        std::error_code remove_error;
+        fs::remove_all(venv_path, remove_error);
+        if (remove_error) {
+            result.error = "Failed to replace stale Python environment at "
+                + venv_path.string() + ": " + remove_error.message();
+            return result;
+        }
+    }
+
     // Create venv
     fs::create_directories(venv_dir);
     std::cout << "  Creating Python environment for " << tool.display_name << "...\n";

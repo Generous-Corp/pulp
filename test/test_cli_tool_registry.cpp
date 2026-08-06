@@ -807,10 +807,13 @@ TEST_CASE("tool install helpers have deterministic local exits",
     REQUIRE(existing_py.binary_path == wrapper);
     REQUIRE(existing_py.installed_version == py.pinned_version);
 
+    const auto stale_package_bytes = venv_dir / ".venv" / "stale-package-bytes";
+    touch_file(stale_package_bytes);
     py.pinned_version = "1.0.1";
     auto stale_py = install_python_tool(py, with_uv, fs::path{}, /*force=*/false);
     REQUIRE_FALSE(stale_py.ok);  // attempted reinstall; never reported stale venv as 1.0.1
     REQUIRE(stale_py.installed_version.empty());
+    REQUIRE_FALSE(fs::exists(stale_package_bytes));
 
     ToolRegistry uv_unavailable;
     ToolDescriptor uv_without_source;
@@ -829,6 +832,7 @@ TEST_CASE("tool install helpers have deterministic local exits",
                 0);
     }
 
+    fs::create_directories(venv_dir / ".venv");
     fs::remove(wrapper);
     auto missing_wrapper = install_python_tool(py, with_uv, fs::path{}, /*force=*/false);
     REQUIRE_FALSE(missing_wrapper.ok);
