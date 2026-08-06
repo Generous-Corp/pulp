@@ -261,6 +261,39 @@ TEST_CASE("routing spec replacement cannot strand held notes",
         REQUIRE(router.replace_spec(replacement));
     }
 
+    SECTION("releases for suppressed attacks cannot retire newer routed notes") {
+        midi::ChannelRouteSpec initial;
+        initial.accepted_channels = std::uint16_t{1} << 3;
+        initial.output_channel[3] = 15;
+        midi::ChannelRouter router(initial);
+        auto constrained = prepared_buffer(1);
+        auto replacement = initial;
+        replacement.output_channel[3] = 4;
+
+        input.add(midi::MidiEvent::cc(3, 7, 100));
+        input.add(midi::MidiEvent::note_on(3, 64, 100));
+        CHECK_FALSE(router.process(input, constrained).complete);
+        CHECK_FALSE(router.replace_spec(replacement));
+
+        input.clear();
+        input.add(midi::MidiEvent::note_on(3, 64, 100));
+        REQUIRE(router.process(input, constrained).complete);
+        REQUIRE(constrained.size() == 1);
+        CHECK(constrained[0].is_note_on());
+
+        input.clear();
+        input.add(midi::MidiEvent::note_off(3, 64));
+        REQUIRE(router.process(input, constrained).complete);
+        CHECK(constrained.empty());
+        CHECK_FALSE(router.replace_spec(replacement));
+
+        REQUIRE(router.process(input, constrained).complete);
+        REQUIRE(constrained.size() == 1);
+        CHECK(constrained[0].is_note_off());
+        CHECK(constrained[0].channel() == 15);
+        REQUIRE(router.replace_spec(replacement));
+    }
+
     SECTION("range and split kernels retain failed releases") {
         {
             midi::NoteRangeFilter range({60, 72});
@@ -357,6 +390,42 @@ TEST_CASE("routing spec replacement cannot strand held notes",
         CHECK(output_ump[0].packet.group() == 6);
         CHECK(output_ump[0].packet.channel() == 15);
         CHECK((output_ump[0].packet.status() & 0xf0) == 0x80);
+    }
+
+    SECTION("UMP releases for suppressed attacks cannot retire newer notes") {
+        midi::ChannelRouteSpec initial;
+        initial.accepted_channels = std::uint16_t{1} << 3;
+        initial.output_channel[3] = 15;
+        midi::ChannelRouter router(initial);
+        midi::UmpBuffer input_ump;
+        midi::UmpBuffer output_ump;
+        output_ump.set_realtime_capacity_limit(true);
+        input_ump.reserve(output_ump.capacity() + 1);
+        input.attach_ump(&input_ump);
+        output.attach_ump(&output_ump);
+
+        for (std::size_t i = 0; i < output_ump.capacity(); ++i)
+            REQUIRE(input_ump.add(midi::UmpPacket::cc_2(
+                5, 3, 7, static_cast<std::uint32_t>(i)), 0));
+        REQUIRE(input_ump.add(midi::UmpPacket::note_on_2(5, 3, 64, 0x8000), 1));
+        CHECK_FALSE(router.process(input, output).complete);
+
+        input_ump.clear();
+        REQUIRE(input_ump.add(midi::UmpPacket::note_on_2(5, 3, 64, 0x8000), 0));
+        REQUIRE(router.process(input, output).complete);
+        REQUIRE(output_ump.size() == 1);
+        CHECK((output_ump[0].packet.status() & 0xf0) == 0x90);
+
+        input_ump.clear();
+        REQUIRE(input_ump.add(midi::UmpPacket::note_off_2(5, 3, 64), 0));
+        REQUIRE(router.process(input, output).complete);
+        CHECK(output_ump.empty());
+
+        REQUIRE(router.process(input, output).complete);
+        REQUIRE(output_ump.size() == 1);
+        CHECK((output_ump[0].packet.status() & 0xf0) == 0x80);
+        CHECK(output_ump[0].packet.group() == 5);
+        CHECK(output_ump[0].packet.channel() == 15);
     }
 }
 

@@ -1338,6 +1338,26 @@ TEST_CASE("CLAP resets MPE sidecar ownership across reset and reactivation",
     REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
     REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
 
+    // Unrelated channel controls do not mutate MPE ownership or expression
+    // state. Skipping one must not clear a legitimately held voice or request
+    // a processor reset on the next rendered block.
+    clap_event_midi_t skipped_volume{};
+    skipped_volume.header = make_header(sizeof(skipped_volume), CLAP_EVENT_MIDI, 0);
+    skipped_volume.data[0] = 0xB0 | static_cast<uint8_t>(held_note.channel);
+    skipped_volume.data[1] = 7;
+    skipped_volume.data[2] = 100;
+    InputEventList skipped_unrelated_control;
+    skipped_unrelated_control.push(skipped_volume);
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 1.0f);
+    REQUIRE(h.run(skipped_unrelated_control) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
+    REQUIRE_FALSE(h.plugin.sidecar_reconcile_requested);
+    REQUIRE_FALSE(h.plugin.reset_requested);
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 0.0f);
+    REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
+    REQUIRE_FALSE(g_capturing->captured_context.reset_requested);
+
     // Expression/configuration events mutate the tracker too. If one crosses a
     // bypassed block, it cannot be replayed, so the next real render must reset
     // both the sidecar and processor-owned voice state rather than retain
@@ -1400,6 +1420,34 @@ TEST_CASE("CLAP resets MPE sidecar ownership across reset and reactivation",
         REQUIRE(h.plugin.mpe.tracker.pending_note_off_count() == 0);
     }
     REQUIRE(g_capturing->release_count == 3);
+}
+
+TEST_CASE("CLAP bypass does not reconcile non-MPE channel controls",
+          "[clap][midi][bypass][lifecycle]") {
+    g_pending_opts_mpe = false;
+    g_pending_capturing_bypass = true;
+    Harness h(make_capturing);
+    REQUIRE_FALSE(h.plugin.mpe.enabled);
+
+    InputEventList controls;
+    for (const std::array<uint8_t, 3> bytes : {
+             std::array<uint8_t, 3>{0xB1, 7, 100},
+             std::array<uint8_t, 3>{0xC1, 4, 0},
+             std::array<uint8_t, 3>{0xE1, 0x7F, 0x7F}}) {
+        clap_event_midi_t event{};
+        event.header = make_header(sizeof(event), CLAP_EVENT_MIDI, 0);
+        std::copy(bytes.begin(), bytes.end(), event.data);
+        controls.push(event);
+    }
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 1.0f);
+    REQUIRE(h.run(controls) == CLAP_PROCESS_CONTINUE);
+    REQUIRE_FALSE(h.plugin.sidecar_reconcile_requested);
+    REQUIRE_FALSE(h.plugin.reset_requested);
+
+    InputEventList empty;
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 0.0f);
+    REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+    REQUIRE_FALSE(g_capturing->captured_context.reset_requested);
 }
 
 TEST_CASE("CLAP reconciles ownership when realtime MIDI ingress drops a release",

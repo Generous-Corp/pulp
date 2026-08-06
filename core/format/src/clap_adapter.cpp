@@ -646,6 +646,14 @@ static bool is_midi_ownership_event(const midi::MidiEvent& event) {
     return cc == 64 || cc == 66 || cc == 120 || cc == 121 || cc == 123;
 }
 
+static bool is_midi_mpe_state_event(const midi::MidiEvent& event) {
+    if (event.is_pitch_bend())
+        return true;
+    if (event.size() != 0 && (event.data()[0] & 0xF0) == 0xD0)
+        return true;
+    return event.is_cc() && event.cc_number() == 74;
+}
+
 static bool is_ump_ownership_event(const midi::UmpPacket& packet) {
     const auto type = packet.message_type();
     if (type != midi::UmpMessageType::Midi1ChannelVoice &&
@@ -658,6 +666,24 @@ static bool is_ump_ownership_event(const midi::UmpPacket& packet) {
         return false;
     const auto cc = static_cast<uint8_t>((packet.words[0] >> 8) & 0x7F);
     return cc == 64 || cc == 66 || cc == 120 || cc == 121 || cc == 123;
+}
+
+static bool is_ump_expression_state_event(const midi::UmpPacket& packet) {
+    const auto type = packet.message_type();
+    if (type != midi::UmpMessageType::Midi1ChannelVoice &&
+        type != midi::UmpMessageType::Midi2ChannelVoice)
+        return false;
+    const auto status = static_cast<uint8_t>((packet.words[0] >> 16) & 0xF0);
+    if (status == 0xD0 || status == 0xE0)
+        return true;
+    if (status == 0x60 || status == 0x10 || status == 0xF0)
+        return type == midi::UmpMessageType::Midi2ChannelVoice;
+    if (status != 0xB0 && status != 0x00)
+        return false;
+    const auto controller = static_cast<uint8_t>(packet.words[0] & 0x7F);
+    return status == 0xB0
+               ? static_cast<uint8_t>((packet.words[0] >> 8) & 0x7F) == 74
+               : type == midi::UmpMessageType::Midi2ChannelVoice && controller == 74;
 }
 
 static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
@@ -810,7 +836,7 @@ static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
                             break;
                     }
                     if (emitted) {
-                        sidecar_event_seen = true;
+                        sidecar_event_seen |= is_midi_mpe_state_event(me);
                         midi_in.add(me);
                     }
                 }
@@ -824,9 +850,10 @@ static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
                     choc::midi::ShortMessage(ev.data[0], ev.data[1], ev.data[2]),
                     static_cast<int32_t>(hdr->time),
                     0.0};
-                sidecar_event_seen |=
-                    me.size() != 0 && me.data()[0] >= 0x80 && me.data()[0] < 0xf0;
                 const bool ownership_event = is_midi_ownership_event(me);
+                sidecar_event_seen |= ownership_event ||
+                                        (self->mpe.enabled &&
+                                         is_midi_mpe_state_event(me));
                 if (!midi_in.add(me) && ownership_event)
                     ownership_event_dropped = true;
             } else if (hdr->type == CLAP_EVENT_MIDI_SYSEX) {
@@ -858,11 +885,9 @@ static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
                     p.words[2] = ev.data[2];
                     p.words[3] = ev.data[3];
                     p.word_count = midi::UmpPacket::size_for_type(p.message_type());
-                    const auto type = p.message_type();
-                    sidecar_event_seen |=
-                        type == midi::UmpMessageType::Midi1ChannelVoice ||
-                        type == midi::UmpMessageType::Midi2ChannelVoice;
                     const bool ownership_event = is_ump_ownership_event(p);
+                    sidecar_event_seen |= ownership_event ||
+                                            is_ump_expression_state_event(p);
                     if (!self->ump_buffer.add(p, static_cast<int32_t>(hdr->time)) &&
                         ownership_event)
                         ownership_event_dropped = true;

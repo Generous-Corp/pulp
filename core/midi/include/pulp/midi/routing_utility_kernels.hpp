@@ -34,22 +34,42 @@ class HeldNoteLedger {
                    std::numeric_limits<std::uint8_t>::max();
     }
 
+    bool consume_suppressed_release(const MidiEvent& event) noexcept {
+        if (!is_release(event)) return false;
+        return consume_suppressed(
+            midi_suppressed_[utility_detail::key_index(event.channel(), event.note())]);
+    }
+    bool consume_suppressed_release(const UmpPacket& packet) noexcept {
+        if (!is_release(packet)) return false;
+        return consume_suppressed(ump_suppressed_[ump_key(packet)]);
+    }
+
     void record(const MidiEvent& event, bool forwarded) noexcept {
         auto& count = midi_counts_[utility_detail::key_index(event.channel(), event.note())];
+        auto& suppressed = midi_suppressed_[utility_detail::key_index(
+            event.channel(), event.note())];
         auto& debt = midi_release_debt_[utility_detail::key_index(
             event.channel(), event.note())];
-        update(count, debt, midi_debt_total_, is_attack(event), is_release(event), forwarded);
+        update(count, suppressed, debt, midi_debt_total_, is_attack(event),
+               is_release(event), forwarded);
     }
     void record(const UmpPacket& packet, bool forwarded) noexcept {
         auto& count = ump_counts_[ump_key(packet)];
+        auto& suppressed = ump_suppressed_[ump_key(packet)];
         auto& debt = ump_release_debt_[ump_key(packet)];
-        update(count, debt, ump_debt_total_, is_attack(packet), is_release(packet), forwarded);
+        update(count, suppressed, debt, ump_debt_total_, is_attack(packet),
+               is_release(packet), forwarded);
     }
 
-    void retain_unprocessed_releases(const MidiBuffer& input) noexcept {
-        for (const auto& event : input) record(event, false);
+    void retain_unprocessed_ownership(const MidiBuffer& input) noexcept {
+        for (const auto& event : input) {
+            if (!consume_suppressed_release(event)) record(event, false);
+        }
         if (const auto* ump = input.ump())
-            for (const auto& event : *ump) record(event.packet, false);
+            for (const auto& event : *ump) {
+                if (!consume_suppressed_release(event.packet))
+                    record(event.packet, false);
+            }
     }
 
     template <typename Emit>
@@ -136,11 +156,22 @@ class HeldNoteLedger {
                (status == 0x90 && packet.message_type() == UmpMessageType::Midi1ChannelVoice &&
                 (packet.words[0] & 0x7f) == 0);
     }
-    void update(std::uint8_t& count, std::uint8_t& debt,
+    bool consume_suppressed(std::uint8_t& suppressed) noexcept {
+        if (suppressed == 0) return false;
+        --suppressed;
+        --total_;
+        return true;
+    }
+    void update(std::uint8_t& count, std::uint8_t& suppressed,
+                std::uint8_t& debt,
                 std::size_t& debt_total, bool attack, bool release,
                 bool forwarded) noexcept {
         if (attack && forwarded) {
             ++count;
+            ++total_;
+        } else if (attack && !forwarded &&
+                   suppressed != std::numeric_limits<std::uint8_t>::max()) {
+            ++suppressed;
             ++total_;
         } else if (release && forwarded && count != 0) {
             --count;
@@ -152,8 +183,10 @@ class HeldNoteLedger {
     }
 
     mutable std::array<std::uint8_t, 16 * 128> midi_counts_{};
+    mutable std::array<std::uint8_t, 16 * 128> midi_suppressed_{};
     mutable std::array<std::uint8_t, 16 * 128> midi_release_debt_{};
     mutable std::array<std::uint8_t, 2 * 16 * 16 * 128> ump_counts_{};
+    mutable std::array<std::uint8_t, 2 * 16 * 16 * 128> ump_suppressed_{};
     mutable std::array<std::uint8_t, 2 * 16 * 16 * 128> ump_release_debt_{};
     mutable std::size_t midi_drain_cursor_ = 0;
     mutable std::size_t ump_drain_cursor_ = 0;
@@ -229,7 +262,7 @@ class ChannelRouter {
                 return emitted;
             });
         if (!midi_drained || !ump_drained) {
-            held_notes_.retain_unprocessed_releases(input);
+            held_notes_.retain_unprocessed_ownership(input);
             report.dropped += input.size();
             report.complete = false;
             return report;
@@ -242,7 +275,10 @@ class ChannelRouter {
             const auto channel = event.channel();
             if ((spec_.accepted_channels & (std::uint16_t{1} << channel)) == 0)
                 continue;
+            if (held_notes_.consume_suppressed_release(event))
+                continue;
             if (!held_notes_.can_forward(event)) {
+                held_notes_.record(event, false);
                 ++report.dropped;
                 report.complete = false;
                 continue;
@@ -262,10 +298,13 @@ class ChannelRouter {
                 const auto channel = event.packet.channel();
                 if ((spec_.accepted_channels & (std::uint16_t{1} << channel)) == 0)
                     continue;
+                if (held_notes_.consume_suppressed_release(event.packet))
+                    continue;
                 auto routed = event;
                 routed.packet =
                     utility_detail::with_channel(event.packet, spec_.output_channel[channel]);
                 if (!held_notes_.can_forward(event.packet)) {
+                    held_notes_.record(event.packet, false);
                     ++report.dropped;
                     report.complete = false;
                     continue;
@@ -344,7 +383,7 @@ class NoteRangeFilter {
                 return emitted;
             });
         if (!midi_drained || !ump_drained) {
-            held_notes_.retain_unprocessed_releases(input);
+            held_notes_.retain_unprocessed_ownership(input);
             report.dropped += input.size();
             report.complete = false;
             return report;
@@ -353,7 +392,10 @@ class NoteRangeFilter {
             if (utility_detail::is_note_addressed(event) &&
                 (event.note() < spec_.lowest || event.note() > spec_.highest))
                 continue;
+            if (held_notes_.consume_suppressed_release(event))
+                continue;
             if (!held_notes_.can_forward(event)) {
+                held_notes_.record(event, false);
                 ++report.dropped;
                 report.complete = false;
                 continue;
@@ -368,7 +410,10 @@ class NoteRangeFilter {
                     (event.packet.note_number() < spec_.lowest ||
                      event.packet.note_number() > spec_.highest))
                     continue;
+                if (held_notes_.consume_suppressed_release(event.packet))
+                    continue;
                 if (!held_notes_.can_forward(event.packet)) {
+                    held_notes_.record(event.packet, false);
                     ++report.dropped;
                     report.complete = false;
                     continue;
@@ -466,7 +511,7 @@ class KeyboardSplit {
                 return emitted;
             });
         if (!midi_drained || !ump_drained) {
-            held_notes_.retain_unprocessed_releases(input);
+            held_notes_.retain_unprocessed_ownership(input);
             report.dropped += input.size();
             report.complete = false;
             return report;
@@ -483,7 +528,10 @@ class KeyboardSplit {
                     (event.note() == spec_.split_note && spec_.split_note_is_upper);
                 auto routed = utility_detail::with_channel(event, is_upper ? spec_.upper_channel
                                                                            : spec_.lower_channel);
+                if (held_notes_.consume_suppressed_release(event))
+                    continue;
                 if (!held_notes_.can_forward(event)) {
+                    held_notes_.record(event, false);
                     ++report.dropped;
                     report.complete = false;
                     continue;
@@ -516,7 +564,10 @@ class KeyboardSplit {
                     auto routed = event;
                     routed.packet = utility_detail::with_channel(
                         event.packet, is_upper ? spec_.upper_channel : spec_.lower_channel);
+                    if (held_notes_.consume_suppressed_release(event.packet))
+                        continue;
                     if (!held_notes_.can_forward(event.packet)) {
+                        held_notes_.record(event.packet, false);
                         ++report.dropped;
                         report.complete = false;
                         continue;
