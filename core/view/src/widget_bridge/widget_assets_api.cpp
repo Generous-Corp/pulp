@@ -138,6 +138,51 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
             return choc::value::Value();
         });
 
+    // setFaderCapturedArt(id, bodyPath, bodyW, bodyH,
+    //                     indicatorPath, indicatorW, indicatorH, cross,
+    //                     bodyOriginX, bodyOriginY, controlW, controlH)
+    // Hoists the browser-authored thumb into a value-driven overlay while the
+    // cleaned body crop covers the frozen instance in the capture.
+    register_bridge_function(api, "setFaderCapturedArt",
+        [&self](choc::javascript::ArgumentList args) {
+            auto* fader = dynamic_cast<Fader*>(
+                self.widget(args.get<std::string>(0, "")));
+            if (!fader) return choc::value::Value();
+
+            auto body_path = args.get<std::string>(1, "");
+            auto indicator_path = args.get<std::string>(4, "");
+            const int body_w = static_cast<int>(args.get<double>(2, 0));
+            const int body_h = static_cast<int>(args.get<double>(3, 0));
+            const int indicator_w = static_cast<int>(args.get<double>(5, 0));
+            const int indicator_h = static_cast<int>(args.get<double>(6, 0));
+            if (body_path.empty() || indicator_path.empty() ||
+                body_w <= 0 || body_h <= 0 ||
+                indicator_w <= 0 || indicator_h <= 0)
+                return choc::value::Value();
+            if (body_path.rfind("file://", 0) == 0) body_path = body_path.substr(7);
+            if (indicator_path.rfind("file://", 0) == 0)
+                indicator_path = indicator_path.substr(7);
+            body_path = self.resolve_script_relative(body_path);
+            indicator_path = self.resolve_script_relative(indicator_path);
+
+            auto body = std::make_shared<SpriteStrip>();
+            body->load_from_file(body_path, body_w, body_h, 1,
+                                 SpriteStrip::Orientation::vertical);
+            auto indicator = std::make_shared<SpriteStrip>();
+            indicator->load_from_file(indicator_path, indicator_w, indicator_h, 1,
+                                      SpriteStrip::Orientation::vertical);
+            if (!body->loaded() || !indicator->loaded())
+                return choc::value::Value();
+            fader->set_captured_art(
+                std::move(body), std::move(indicator),
+                static_cast<float>(args.get<double>(7, 0.5)),
+                static_cast<float>(args.get<double>(8, 0.0)),
+                static_cast<float>(args.get<double>(9, 0.0)),
+                static_cast<float>(args.get<double>(10, body_w)),
+                static_cast<float>(args.get<double>(11, body_h)));
+            return choc::value::Value();
+        });
+
     // setFaderSkin(id, trackColor, fillColor, thumbColor, thumbBorderColor?,
     //              thumbW?, thumbH?, cornerRadius?)
     register_bridge_function(api, "setFaderSkin",

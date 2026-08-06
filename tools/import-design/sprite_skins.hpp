@@ -30,9 +30,10 @@ void resolve_sprite_skins(pulp::view::DesignIR& ir,
                           bool skin_meters);
 
 /// Make the generated artifact self-contained: copy every filesystem asset
-/// the IR references (manifest `local_path`, image/sprite `asset_path`, and
-/// bundled-font `resolved_path`) into `<output dir>/assets/` and rewrite the
-/// references to output-relative `assets/<file>` paths, in-place on `ir`.
+/// the IR references (manifest `local_path`, image/sprite `asset_path`, split
+/// fader body/indicator paths, and bundled-font `resolved_path`) into
+/// `<output dir>/assets/` and rewrite the references to output-relative
+/// `assets/<file>` paths, in-place on `ir`.
 ///
 /// The absolute paths stamped by resolve_sprite_skins point into the import's
 /// decode scratch directory, which is deleted when the CLI exits — an export
