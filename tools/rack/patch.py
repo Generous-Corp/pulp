@@ -3591,6 +3591,12 @@ def module_activity(report: str, patch: dict) -> list:
     return named
 
 
+def is_audio_interface(module: dict) -> bool:
+    """Whether a Core module is an actual speaker-facing audio interface."""
+    return (module.get("plugin") == "Core" and
+            str(module.get("model", "")).startswith("Audio"))
+
+
 def dead_output(report: str, patch: dict, inv: dict) -> dict | None:
     """The specific silent output upstream of the listener, even on a live module.
 
@@ -3612,8 +3618,7 @@ def dead_output(report: str, patch: dict, inv: dict) -> dict | None:
         incoming.setdefault(c.get("inputModuleId"), []).append(
             (*src, c.get("inputId")))
         dst = modules.get(c.get("inputModuleId")) or {}
-        if (dst.get("plugin") == "Core" or
-                "audiointerface" in str(dst.get("model", "")).lower()):
+        if is_audio_interface(dst):
             listener_sources.append(src)
 
     def value(pair):
@@ -3705,7 +3710,19 @@ def _alternatives_for(inv: dict, dead: dict, limit: int = 4) -> list:
     return out[:limit]
 
 
-def silence_advice(report: str, patch: dict, inv: dict, runs: list) -> list:
+def silence_cause(report: str, patch: dict, inv: dict) -> dict | None:
+    """Choose the one diagnosis both retry copy and retry history must use."""
+    specific = dead_output(report, patch, inv)
+    # The existing whole-module graph walk is intentionally broader and has
+    # years of fixtures behind it. This new path exists for the missing case:
+    # one silent output on an otherwise live module. Do not replace the proven
+    # all-zero diagnosis with a shallower listener-path guess.
+    return (specific if specific and not specific.get("whole_module")
+            else dead_module(report, patch) or specific)
+
+
+def silence_advice(report: str, patch: dict, inv: dict, runs: list,
+                   dead: dict | None = None) -> list:
     """What to tell the model about a silent patch, given what it already tried.
 
     `runs` is every previous attempt's dead-module key, oldest first. It is
@@ -3714,13 +3731,7 @@ def silence_advice(report: str, patch: dict, inv: dict, runs: list) -> list:
     was told the same thing, so nothing about the fourth differed from the
     first. Repetition is a fact about the run, and a fact the model can act on.
     """
-    specific = dead_output(report, patch, inv)
-    # The existing whole-module graph walk is intentionally broader and has
-    # years of fixtures behind it. This new path exists for the missing case:
-    # one silent output on an otherwise live module. Do not replace the proven
-    # all-zero diagnosis with a shallower listener-path guess.
-    dead = (specific if specific and not specific.get("whole_module")
-            else dead_module(report, patch) or specific)
+    dead = dead or silence_cause(report, patch, inv)
     if not dead:
         return []
     if dead.get("whole_module", True):
@@ -4240,7 +4251,7 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
         patch = reflow(patch, inv)
         errs = lint(patch, inv)
         if physical_errs:
-            errs = physical_errs
+            errs = physical_errs + errs
         if errs:
             # The LINT's reasons, not `report` -- that is the gate's, and the
             # gate has not run when a patch is rejected here. Passing it
@@ -4402,8 +4413,8 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
         # has stopped it before. Asking the model to read the table below and
         # infer which module that is did not work: four attempts running kept
         # the same dead oscillator and retuned it. See silence_advice().
-        advice = silence_advice(report, patch, inv, silent_runs)
-        found = dead_module(report, patch)
+        found = silence_cause(report, patch, inv)
+        advice = silence_advice(report, patch, inv, silent_runs, found)
         silent_runs.append(found["key"] if found else None)
         for line in advice:
             print(f"    {line}", flush=True)

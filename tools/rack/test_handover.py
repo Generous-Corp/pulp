@@ -729,6 +729,7 @@ def check_a_dead_gate_on_a_live_sequencer_is_named() -> tuple:
         ENV ch=1 out0=0.000
         VCO ch=1 out0=2.000
         VCA ch=1 out0=0.000
+        UNUSED ch=1 out0=0.000
         AudioInterface2 (not instantiated)
   FAIL listener silent
 """
@@ -737,12 +738,17 @@ def check_a_dead_gate_on_a_live_sequencer_is_named() -> tuple:
         {"id": 2, "plugin": "ForgeModular", "model": "ENV"},
         {"id": 3, "plugin": "ForgeModular", "model": "VCO"},
         {"id": 4, "plugin": "ForgeModular", "model": "VCA"},
-        {"id": 5, "plugin": "Core", "model": "AudioInterface2"},
+        {"id": 5, "plugin": "ForgeModular", "model": "UNUSED"},
+        {"id": 6, "plugin": "Core", "model": "AudioInterface2"},
+        {"id": 7, "plugin": "Core", "model": "CV-MIDI"},
     ], "cables": [
+        # Core has MIDI and utility modules too. This unrelated silent path
+        # must not be mistaken for a speaker-facing listener.
+        {"outputModuleId": 5, "outputId": 0, "inputModuleId": 7, "inputId": 0},
         {"outputModuleId": 1, "outputId": 1, "inputModuleId": 2, "inputId": 0},
         {"outputModuleId": 2, "outputId": 0, "inputModuleId": 4, "inputId": 0},
         {"outputModuleId": 3, "outputId": 0, "inputModuleId": 4, "inputId": 1},
-        {"outputModuleId": 4, "outputId": 0, "inputModuleId": 5, "inputId": 0},
+        {"outputModuleId": 4, "outputId": 0, "inputModuleId": 6, "inputId": 0},
     ]}
     inv = {"ForgeModular": {"modules": {
         "SEQ": {"inputs": ["Clock"], "roles_in": ["Clock"],
@@ -753,6 +759,8 @@ def check_a_dead_gate_on_a_live_sequencer_is_named() -> tuple:
                 "outputs": ["Saw"], "tags": ["Oscillator"]},
         "VCA": {"inputs": ["CV", "Audio"], "roles_in": ["Cv", "Audio"],
                 "outputs": ["Audio"], "tags": ["Amplifier"]},
+        "UNUSED": {"inputs": [], "roles_in": [],
+                   "outputs": ["CV"], "tags": ["Utility"]},
     }}}
     lines = "\n".join(P.silence_advice(report, patch, inv, []))
     bad = 0
@@ -767,6 +775,15 @@ def check_a_dead_gate_on_a_live_sequencer_is_named() -> tuple:
         print(f"  WRONG  a downstream consequence was blamed:\n{lines}")
     else:
         print("  ok     a live sequencer's silent Gate output is named upstream of the VCA")
+
+    cause = P.silence_cause(report, patch, inv)
+    repeated = "\n".join(P.silence_advice(
+        report, patch, inv, [cause["key"]] if cause else []))
+    if not cause or cause.get("key") != "ForgeModular/SEQ out1" or "REPLACE" not in repeated:
+        bad += 1
+        print(f"  WRONG  a repeated partial-output failure does not escalate:\n{repeated}")
+    else:
+        print("  ok     the partial-output diagnosis is reusable as the retry-history key")
 
     # Zero volts on a pitch cable is a valid note, not a silent source. A
     # control-blind graph walk would blame SEQ out0 here instead of the VCO
@@ -788,7 +805,7 @@ def check_a_dead_gate_on_a_live_sequencer_is_named() -> tuple:
         print(f"  WRONG  a valid zero-volt pitch was blamed for silence:\n{lines}")
     else:
         print("  ok     zero-volt pitch stays a valid note and the silent VCO is blamed")
-    return bad, 2
+    return bad, 3
 
 
 def check_a_repeat_escalates_to_replacement() -> tuple:
