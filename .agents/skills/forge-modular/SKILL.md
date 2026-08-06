@@ -637,6 +637,76 @@ The habits that catch these, in order of cost:
   glob matches nothing, so a single stray pattern silently discards the output
   of everything beside it. This happened four times in one session.
 
+## When a check disagrees with your evidence, ask what CHANGED between them
+
+A run log said `EnvelopeArray` could not receive a gate. Ten minutes later the
+live inventory said it could. **The right question was "what landed in
+between"; the question actually asked was "was my evidence stale".** A fix had
+been committed between the two, so a real defect was declared imaginary and
+another agent was told to stop working on it.
+
+`git log --oneline -5` would have settled it in one command, and on a tree
+several agents are committing to it is never a wasted one.
+
+Both readings were true of their moment. **A log records what happened once; a
+query reports what is true now.** Neither is a statement about the other, and
+reconciling them means finding the commit, not picking the more recent
+instrument.
+
+## "Does any kind accept it" cannot detect a defect when one kind is a catch-all
+
+The corpus audit asked, for every jack a real cable lands on, whether **any**
+port kind would accept it — and reported 0 failures in 319 cables, which read
+as "the matcher is healthy".
+
+It is not a health measurement. `cv_in` accepts nearly anything: a jack named
+`Wobble` classifies as `cv_in` quite happily. So the question could barely fail,
+and the zero it produced said almost nothing.
+
+**The defect being hunted was never "no kind accepts this" — it was "the WRONG
+kind accepts this".** `Gate 1 CV` was not unplaceable; it was placed as `Cv`,
+confidently, by a vocabulary that checks `Cv` first. A test that asks whether
+something matched cannot see a thing that matched incorrectly.
+
+When designing a detector, **ask what a defect would look like in its output**
+before running it. If a defect and a clean result produce the same reading, the
+detector measures nothing however impressive the sample size.
+
+## Where the patch corpus lives, and what it was actually worth
+
+```
+~/Library/Application Support/Forge Modular/corpus/patchstorage/
+    index.json     per patch: id, title, author, url, licence, licence slug,
+                   sha256, tags, categories, fetched_at
+    patches/*.vcv  the bodies — Zstandard, `tar --zstd -xf … patch.json`
+```
+
+**Outside the repo entirely, and deliberately so** — `ditto` copies a directory
+rather than git's view of it, which is how 113 MB of reference books once
+reached a signed installer.
+
+Fetched via the public beta API. Patchstorage publishes **no Terms of Service**;
+`robots.txt` carries `Crawl-delay: 10` and no `Disallow`, and **every patch
+carries its own licence in the API response**, which is a stronger permission
+signal than a site-wide document because it comes from the rights holder. The
+crawl delay is honoured and the licence is recorded per patch, so anything
+non-permissive can be excluded from storage later without re-fetching.
+
+**What it was predicted to find:** port-matching defects in bulk, over real
+usage.
+**What it found:** nothing, for the reason in the section above.
+**What it was actually worth:** it exposed a wrong diagnosis. Building the
+audit is what surfaced that a "defect" had been read off a superseded log —
+which stopped a permanent loosening of the gate that would have been made for
+a reason that never existed.
+
+That is worth recording honestly rather than as a success. The corpus is more
+promising as **usage-inference for unmapped modules** — if many patches wire a
+module's `out0` into a `V/Oct` input, that is a pitch output, and that is
+knowledge about the ~40% of the library CARTOG cannot reach because nobody has
+it installed. It is a prior, never a measurement, and must never override a
+real scan.
+
 ## One matching rule produced five defects
 
 `_port_matches` compares a jack's label to a role's label list **whole**:
