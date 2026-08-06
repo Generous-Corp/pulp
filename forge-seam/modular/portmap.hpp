@@ -16,6 +16,7 @@
 // was emitted from, which is always present and never needs a scan.
 
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -36,6 +37,19 @@ struct MappedWidget {
     /// "Audio2Display". Used only to tell a KEY PLATE from a plain screen; a
     /// preview should not try to reproduce a vendor's artwork from a name.
     std::string type;
+    /// The knob's raw Rack range. Absent on jacks and on parameter scans
+    /// older than version 4; zero is a valid bound, so absence cannot be
+    /// represented by a sentinel value.
+    std::optional<float> min_value;
+    std::optional<float> max_value;
+    std::optional<float> default_value;
+    /// How Rack turns a raw knob position into the physical value displayed
+    /// beside it. The identity defaults are intentional: at scan version 5,
+    /// absent coefficients mean the scanner measured an identity mapping.
+    std::string unit;
+    float display_base = 0;
+    float display_multiplier = 1;
+    float display_offset = 0;
 };
 
 /// One module's measured layout.

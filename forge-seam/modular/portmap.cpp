@@ -30,6 +30,22 @@ std::vector<MappedWidget> read_group(const choc::value::ValueView& mod,
         // Empty when the scan predates control classification, which every
         // existing map does. Absent must read as "unknown", not as "knob".
         one.kind = w["kind"].getWithDefault<std::string>("");
+        if (w.hasObjectMember("minValue"))
+            one.min_value = static_cast<float>(
+                w["minValue"].getWithDefault<double>(0.0));
+        if (w.hasObjectMember("maxValue"))
+            one.max_value = static_cast<float>(
+                w["maxValue"].getWithDefault<double>(0.0));
+        if (w.hasObjectMember("defaultValue"))
+            one.default_value = static_cast<float>(
+                w["defaultValue"].getWithDefault<double>(0.0));
+        one.unit = w["unit"].getWithDefault<std::string>("");
+        one.display_base = static_cast<float>(
+            w["displayBase"].getWithDefault<double>(0.0));
+        one.display_multiplier = static_cast<float>(
+            w["displayMultiplier"].getWithDefault<double>(1.0));
+        one.display_offset = static_cast<float>(
+            w["displayOffset"].getWithDefault<double>(0.0));
         out.push_back(one);
     }
     return out;

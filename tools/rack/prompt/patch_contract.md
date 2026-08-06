@@ -85,7 +85,12 @@ rejection will name the connection you left out.
    opens as a partly empty rack with no error.
 6. Set `params` for anything that matters musically — a filter cutoff, an LFO
    rate. Leave the rest out and they take their defaults, which are listed
-   with each module below.
+   with each module below. A plain `{"id": 0, "value": 0.5}` is a value in
+   Rack's raw knob range. When the inventory gives a `physical` range and the
+   request or sound guidance names a physical target, write
+   `{"id": 0, "physical": 40, "unit": "Hz"}` instead. The generator converts
+   it into that module's raw knob position; never perform that conversion or
+   substitute a raw guess yourself.
 7. **A level, gain, volume or amount knob MULTIPLIES its CV — it does not add
    to it.** Setting one to 0 makes that module silent however hard its CV is
    driven, and no amount of re-triggering will recover it. When an envelope

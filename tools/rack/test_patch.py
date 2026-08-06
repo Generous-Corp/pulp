@@ -2730,7 +2730,7 @@ def check_vendor_params_reach_model() -> tuple:
                                                     "default": 0.0}]}}}}
     pm = {"modules": [
         {"plugin": "CVfunk", "model": "StepWave", "pluginVersion": "2.0",
-         "scan": 3, "size": [210.0, 380.0],
+         "scan": 5, "size": [210.0, 380.0],
          # Deliberately out of id order, and with a range on only one param:
          # the fold must sort by index and must not invent bounds nobody
          # measured.
@@ -2739,7 +2739,9 @@ def check_vendor_params_reach_model() -> tuple:
               "w": 20.0, "h": 20.0, "kind": "slider"},
              {"index": 0, "name": "Step 1", "x": 10.0, "y": 100.0,
               "w": 20.0, "h": 20.0, "kind": "slider",
-              "minValue": 0.0, "maxValue": 2.0, "defaultValue": 0.5},
+              "minValue": 0.0, "maxValue": 2.0, "defaultValue": 0.5,
+              "unit": " V", "displayBase": 0.0,
+              "displayMultiplier": 1.0, "displayOffset": 0.0},
          ],
          "inputs": [{"index": 0, "name": "Clock", "x": 5.0, "y": 300.0}],
          "outputs": [{"index": 0, "name": "CV", "x": 40.0, "y": 300.0}]},
@@ -2788,6 +2790,13 @@ def check_vendor_params_reach_model() -> tuple:
         print("  ok     a measured range survives; an unmeasured one is "
               "not invented")
 
+    if not ranged or ranged[0].get("unit") != " V" \
+            or ranged[0].get("displayMultiplier") != 1.0:
+        bad += 1
+        print(f"  WRONG  the measured unit conversion was dropped: {got}")
+    else:
+        print("  ok     a measured unit conversion survives the fold")
+
     ours = inv["ForgeModular"]["modules"]["VCO"].get("params") or []
     if ours != [{"id": 0, "name": "Frequency", "min": -4.0, "max": 4.0,
                  "default": 0.0}]:
@@ -2817,7 +2826,7 @@ def check_vendor_params_reach_model() -> tuple:
               "by name")
     else:
         print("  ok     the patch language addresses scanned params by name")
-    return bad, 6
+    return bad, 7
 
 
 def check_melody_is_written() -> tuple:
@@ -3305,5 +3314,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-
 

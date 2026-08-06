@@ -29,4 +29,15 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(rack-param-units PROPERTIES
         LABELS "rack;portmap"
         TIMEOUT 60)
+
+    # The consumer proof: a model-facing physical target travels through
+    # patch.py and becomes the raw knob value Rack will write. This uses the
+    # measured Fundamental/VCO Hz-to-semitone mapping so copying the physical
+    # number directly cannot pass.
+    add_test(NAME rack-physical-targets
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tools/rack/test_physical_targets.py)
+    set_tests_properties(rack-physical-targets PROPERTIES
+        LABELS "rack;portmap"
+        TIMEOUT 60)
 endif()

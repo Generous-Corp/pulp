@@ -36,12 +36,6 @@ UNREAD_BY_DESIGN = {
     "lights":   "measured for a future light-drawing pass; nothing draws them",
     "displays": "same — a screen's rectangle, with nothing drawing screens yet",
     "type":     "the widget's class name, kept for diagnosing a bad scan",
-    # The app draws geometry and never needs a knob's bounds; the generator's
-    # inventory (patch.py) is the reader, so the model can write a param
-    # value against the knob's real range instead of a guess.
-    "minValue":     "a knob's lower bound, read by patch.py, not drawn",
-    "maxValue":     "a knob's upper bound, read by patch.py, not drawn",
-    "defaultValue": "a knob's default, read by patch.py, not drawn",
 }
 
 
@@ -70,7 +64,9 @@ def main():
     # The other direction is the dangerous one: the reader asking for a field
     # nobody writes gets silence, not an error.
     core = {"modules", "plugin", "model", "pluginVersion", "size",
-            "params", "inputs", "outputs", "index", "name", "x", "y"}
+            "params", "inputs", "outputs", "index", "name", "x", "y",
+            "minValue", "maxValue", "defaultValue", "unit", "displayBase",
+            "displayMultiplier", "displayOffset"}
     missing = sorted(f for f in core if f not in written)
     if missing:
         print(f"  WRONG  the reader depends on fields CARTOG does not write: "
@@ -92,7 +88,9 @@ def main():
         wants = {a or b for a, b in wants}
         missing = sorted(w for w in wants
                          if w in {"modules", "plugin", "model", "inputs",
-                                  "outputs", "index", "name", "x", "y", "size"}
+                                  "outputs", "index", "name", "x", "y", "size",
+                                  "minValue", "maxValue", "defaultValue", "unit",
+                                  "displayBase", "displayMultiplier", "displayOffset"}
                          and w not in written)
         who = os.path.basename(path)
         if missing:

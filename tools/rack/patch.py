@@ -219,6 +219,18 @@ def _add_portmap(inv: dict) -> None:
                                  ("defaultValue", "default")):
                     if isinstance(q.get(src), (int, float)):
                         one[dst] = q[src]
+                        # Keep the scanner's spelling too. `min`/`max` are the
+                        # compact model-facing range; param_units consumes the
+                        # exact Rack fields so physical targets can be turned
+                        # back into raw knob positions without reconstructing
+                        # the measurement later.
+                        one[src] = q[src]
+                if isinstance(q.get("unit"), str):
+                    one["unit"] = q["unit"]
+                for field in ("displayBase", "displayMultiplier",
+                              "displayOffset"):
+                    if isinstance(q.get(field), (int, float)):
+                        one[field] = q[field]
                 folded.append(one)
             if folded:
                 folded.sort(key=lambda q: q["id"])
@@ -296,13 +308,29 @@ def _add_port_names(inv: dict, our_plugin: str = "ForgeModular") -> None:
                 # VCA's level to 0 -- silence, whatever the envelope does --
                 # and no advice afterwards could fix a patch whose first
                 # attempt had already made that choice.
-                mod["params"] = [
-                    {"id": q.get("id", i),
-                     "name": q.get("name") or q.get("label") or f"p{i}",
-                     "min": q.get("min_value", 0.0),
-                     "max": q.get("max_value", 1.0),
-                     "default": q.get("default_value", 0.0)}
-                    for i, q in enumerate(m.get("params", []))]
+                def _manifest_param(q, i):
+                    one = {
+                        "id": q.get("id", i),
+                        "name": q.get("name") or q.get("label") or f"p{i}",
+                        "min": q.get("min_value", 0.0),
+                        "max": q.get("max_value", 1.0),
+                        "default": q.get("default_value", 0.0),
+                        "minValue": q.get("min_value", 0.0),
+                        "maxValue": q.get("max_value", 1.0),
+                        "defaultValue": q.get("default_value", 0.0),
+                    }
+                    if isinstance(q.get("unit"), str):
+                        one["unit"] = q["unit"]
+                    for source, dest in (
+                            ("display_base", "displayBase"),
+                            ("display_multiplier", "displayMultiplier"),
+                            ("display_offset", "displayOffset")):
+                        if isinstance(q.get(source), (int, float)):
+                            one[dest] = q[source]
+                    return one
+
+                mod["params"] = [_manifest_param(q, i)
+                                 for i, q in enumerate(m.get("params", []))]
 
                 # Panel geometry, in the same shape the cartographer records
                 # for third-party modules, so everything downstream reads one
@@ -946,6 +974,79 @@ def lint_why(patch: dict, inv: dict, why: dict | None) -> list[str]:
     return problems
 
 
+def place_physical_targets(patch: dict, inv: dict) -> list[str]:
+    """Replace model-written physical targets with Rack knob positions.
+
+    A physical target is deliberately a transient patch form::
+
+        {"id": 0, "physical": 440.0, "unit": "Hz"}
+
+    Rack only understands ``value``, whose unit is whatever the module chose
+    internally. The port map carries the measured conversion. Refuse the
+    entire conversion if any target is ambiguous, unreachable, or incompatible
+    rather than writing a plausible-looking value that means something else.
+    The patch is mutated only when every physical target can be placed exactly.
+    """
+    import math
+    import param_units
+
+    pending: list[tuple[dict, object, float]] = []
+    errs: list[str] = []
+    for mod in (patch.get("modules") or []):
+        plugin, model = mod.get("plugin"), mod.get("model")
+        entry = inv.get(plugin, {}).get("modules", {}).get(model)
+        for target in (mod.get("params") or []):
+            has_physical = "physical" in target
+            if not has_physical:
+                if "unit" in target:
+                    errs.append(f"{plugin}/{model} param {target.get('id')} has "
+                                "a unit but no physical target")
+                continue
+            if "value" in target:
+                errs.append(f"{plugin}/{model} param {target.get('id')} names "
+                            "both value and physical; choose one")
+                continue
+            physical = target.get("physical")
+            unit = target.get("unit")
+            if isinstance(physical, bool) or not isinstance(physical, (int, float)) \
+                    or not math.isfinite(float(physical)):
+                errs.append(f"{plugin}/{model} param {target.get('id')} has an "
+                            "invalid physical target")
+                continue
+            if not isinstance(unit, str) or not unit.strip():
+                errs.append(f"{plugin}/{model} param {target.get('id')} needs "
+                            "the physical target's unit")
+                continue
+            if entry is None:
+                errs.append(f"{plugin}/{model} has no measured parameter map "
+                            "for physical placement")
+                continue
+            measured = next((q for q in (entry.get("params") or [])
+                             if q.get("id") == target.get("id")), None)
+            if measured is None:
+                errs.append(f"{plugin}/{model} has no measured param "
+                            f"{target.get('id')} for physical placement")
+                continue
+            placed = param_units.place(measured, float(physical), unit=unit)
+            label = measured.get("name") or f"param {target.get('id')}"
+            if placed.value is None:
+                errs.append(f"{plugin}/{model} {label} cannot place "
+                            f"{physical:g} {unit}: {placed.reason}")
+            elif placed.clamped:
+                errs.append(f"{plugin}/{model} {label} cannot reach "
+                            f"{physical:g} {unit}: {placed.reason}")
+            else:
+                pending.append((target, target.get("id"), placed.value))
+    if errs:
+        return errs
+    for target, param_id, value in pending:
+        target.clear()
+        # Preserve the id while removing the transient physical fields.
+        target["id"] = param_id
+        target["value"] = value
+    return []
+
+
 def lint(patch: dict, inv: dict) -> list[str]:
     """Reasons Rack would not load this patch as intended.
 
@@ -1418,7 +1519,11 @@ def render_inventory(inv: dict, prefer: str | None = None) -> str:
                         s = f"{q['id']}={q['name']}[{q['min']:g}..{q['max']:g}"
                         if isinstance(q.get("default"), (int, float)):
                             s += f", default {q['default']:g}"
-                        return s + "]"
+                        s += "]"
+                        if str(q.get("unit", "")).strip():
+                            import param_units                 # noqa: PLC0415
+                            s += f"; physical {param_units.describe(q)}"
+                        return s
                     return f"{q['id']}={q['name']}"
                 ps = ", ".join(_one(q) for q in m["params"])
                 out.append(f"    params: {ps}")
@@ -4007,6 +4112,10 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                 why = json.loads(wj.group(1))
             except json.JSONDecodeError:
                 pass                       # prose is optional; the patch is not
+        # Physical values are instructions to the generator, not fields Rack
+        # understands. Resolve them while the inventory still carries the
+        # scan-5 unit metadata, before linting or writing the patch.
+        physical_errs = place_physical_targets(patch, inv)
         # Lay the panels out BEFORE judging them.
         #
         # Positions are arithmetic, not something the model should be graded
@@ -4017,6 +4126,8 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
         # "LFO overlaps SEQ by 2HP". Fix it, then judge what is left.
         patch = reflow(patch, inv)
         errs = lint(patch, inv)
+        if physical_errs:
+            errs = physical_errs
         if errs:
             # The LINT's reasons, not `report` -- that is the gate's, and the
             # gate has not run when a patch is rejected here. Passing it

@@ -147,6 +147,15 @@ def place(param: dict, physical: float, unit: str | None = None) -> Placement:
     value = from_display(physical, param)
     if value is None:
         return Placement(None, False, "value is not representable on this control")
+    # Prove the inverse produced the target we were asked for before the raw
+    # value is allowed into a patch. This is deliberately checked through the
+    # forward transform rather than trusted from shared arithmetic: the
+    # contract is physical target -> device-domain value -> physical target.
+    shown = to_display(value, param)
+    if shown is None or not math.isclose(shown, physical,
+                                         rel_tol=1e-6, abs_tol=1e-6):
+        return Placement(None, False,
+                         "converted knob value does not round-trip to the target")
     span = bounds(param)
     if span is None:
         return Placement(value, False, "")

@@ -7660,11 +7660,14 @@ TEST_CASE("an entry from an older scanner is not passed off as measured",
       "plugin": "Fundamental",
       "model": "VCO",
       "pluginVersion": "2.6.4",
-      "scan": 3,
+      "scan": 5,
       "size": [135.0, 380.0],
       "params": [
         {"index": 0, "name": "Frequency", "x": 67.0, "y": 100.0,
-         "w": 45.0, "h": 45.0}
+         "w": 45.0, "h": 45.0, "minValue": -54.0,
+         "maxValue": 54.0, "defaultValue": 0.0, "unit": " Hz",
+         "displayBase": 1.059463, "displayMultiplier": 261.62561,
+         "displayOffset": 0.0}
       ],
       "inputs": [
         {"index": 0, "name": "Frequency modulation", "x": 20.0, "y": 286.0}
@@ -7691,6 +7694,13 @@ TEST_CASE("an entry from an older scanner is not passed off as measured",
     CHECK(vco->params.size() == 1);
     CHECK(lfo->scan_version == 1);          // no field: the oldest scanner
     CHECK(vco->scan_version == forge_modular::PortMap::kScanVersion);
+    CHECK(vco->params[0].min_value == -54.0f);
+    CHECK(vco->params[0].max_value == 54.0f);
+    CHECK(vco->params[0].default_value == 0.0f);
+    CHECK(vco->params[0].unit == " Hz");
+    CHECK(vco->params[0].display_base == Catch::Approx(1.059463f));
+    CHECK(vco->params[0].display_multiplier == Catch::Approx(261.62561f));
+    CHECK(vco->params[0].display_offset == 0.0f);
 
     // And the judgement. This is the assertion the missing test would have
     // made: a matching plugin version is not enough to call an entry current.
@@ -8579,27 +8589,30 @@ TEST_CASE("a measured slider is not drawn as a knob", "[portmap][kind]") {
 
 // A map from the CURRENT scanner, which no real file is yet.
 //
-// Pressing SCAN will write a shape nothing has ever read: scan 3, controls
-// carrying `kind`, and lights and displays that no consumer wants. The reader
+// Pressing SCAN writes scan 5: controls carrying ranges and display transforms,
+// plus lights and displays that no consumer wants. The reader
 // must take what it needs and ignore the rest — a parser that trips on an
 // unknown field would turn a scan, which is meant to improve the drawing, into
 // the thing that empties it.
 //
 // Written from CARTOG's own emitted shape: lights and displays are
-// {x, y, w, h}, params carry kind, and the module carries scan 3.
+// {x, y, w, h}, params carry kind and units, and the module carries scan 5.
 TEST_CASE("the reader survives a map from the current scanner",
-          "[portmap][scan3]") {
+          "[portmap][scan5]") {
     const std::string fresh = R"({
   "modules": [
     {
       "plugin": "Fundamental",
       "model": "LFO",
       "pluginVersion": "2.6.4",
-      "scan": 3,
+      "scan": 5,
       "size": [135.0, 380.0],
       "params": [
         {"index": 0, "name": "Frequency", "x": 30.0, "y": 90.0,
-         "w": 20.0, "h": 20.0, "kind": "knob"},
+         "w": 20.0, "h": 20.0, "kind": "knob", "minValue": -8.0,
+         "maxValue": 8.0, "defaultValue": 0.0, "unit": " Hz",
+         "displayBase": 2.0, "displayMultiplier": 2.0,
+         "displayOffset": 0.0},
         {"index": 1, "name": "Level", "x": 90.0, "y": 90.0,
          "w": 8.0, "h": 60.0, "kind": "slider"}
       ],
@@ -8625,7 +8638,7 @@ TEST_CASE("the reader survives a map from the current scanner",
     REQUIRE(lfo != nullptr);
 
     // What it needs survives the fields it does not want.
-    CHECK(lfo->scan_version == 3);
+    CHECK(lfo->scan_version == forge_modular::PortMap::kScanVersion);
     CHECK(lfo->width == 135.0f);
     REQUIRE(lfo->params.size() == 2);
     REQUIRE(lfo->inputs.size() == 1);
