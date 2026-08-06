@@ -72,12 +72,25 @@ public:
     // running work is interrupted and detach waits for engine quiescence.
     void detach();
 
-    // [engine thread] Install the host-owned realm reset run after evaluated
-    // code has stopped but before its result is published. Returning a
-    // non-empty string fails the request closed with that reset error.
+    // [engine thread] Install the host-owned realm reset owed after evaluated
+    // code has stopped. A completed evaluation records the debt; the host
+    // discharges it at its next frame boundary via
+    // run_pending_post_evaluation_reset(). The reset does NOT run inside the
+    // request, so an evaluation leaves the caller's view of the realm intact
+    // until the host returns to its run loop.
     using EvaluationDeadline = std::chrono::steady_clock::time_point;
     void set_post_evaluation_reset(
         std::function<std::string(EvaluationDeadline)> reset);
+
+    // [any thread] Whether a completed evaluation still owes a realm reset.
+    bool post_evaluation_reset_pending() const;
+
+    // [engine thread] Run the realm reset owed by a completed evaluation and
+    // clear the debt, or do nothing when none is owed. Returns the reset's
+    // failure text, empty on success. The host MUST call this before any frame
+    // pump that could execute what evaluated code left behind, and again at
+    // teardown so a caller that never pumps cannot drop a reset failure.
+    std::string run_pending_post_evaluation_reset();
 
     // [any thread] Evaluate `code`, marshaled to the engine thread. Blocks up
     // to `timeout`. On timeout the running evaluation is interrupted (if the
@@ -152,6 +165,11 @@ private:
     std::thread::id engine_thread_{};
     bool have_engine_thread_ = false;
     bool in_flight_ = false;
+    // Set by a completed evaluation, cleared by the host's next reset drain.
+    // Several evaluations between two frames collapse into one debt: they all
+    // ran in the same realm, and one reconstruction from last-good source
+    // discards everything any of them left behind.
+    bool reset_pending_ = false;
     bool reset_in_progress_ = false;
     std::thread::id reset_thread_{};
     std::shared_ptr<Request> pending_;  // single-slot queue, drained by pump()
