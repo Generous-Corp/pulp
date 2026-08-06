@@ -349,6 +349,41 @@ mapping its state into the EQ.
 
 ---
 
+### SOS cascade
+
+`SosCascadeT` executes the coefficient vectors returned by `FilterDesign` and
+`IirDesign` without turning a high-order filter into one numerically fragile
+direct form. Storage and processing are bounded by the template capacity; the
+smaller runtime capacity is selected once during preparation.
+
+```cpp
+auto designed = signal::IirDesign::elliptic_lowpass(
+    8, 2000.0f, 0.5f, 60.0f, sample_rate);
+
+signal::SosCascadeT<float, 8> filter;
+filter.prepare(4); // prepared capacity: four SOS, or eighth order
+if (filter.set_coefficients(std::span{designed}) !=
+    signal::SosCascadeInstallStatus::installed) {
+    // The previous complete cascade and its recursive state remain active.
+}
+filter.process(buffer, num_samples);
+```
+
+Installation rejects the whole candidate if any section is non-finite,
+unstable, or beyond the prepared capacity. No prefix is installed. The default
+transition is an immediate coefficient switch plus recursive-state reset. Pass
+`SosCascadeTransition::preserve_state` explicitly to keep tails for sections
+that remain at the same ordinal; new and removed ordinals are cleared. Neither
+policy crossfades, so install at a block boundary. Section order is preserved
+because it controls internal headroom even though ideal cascade transfer
+functions commute. An empty cascade is a defined identity/bypass.
+
+Design helpers that return `std::vector` still belong on a control or prepare
+thread. Once the vector exists, `prepare`, installation, `process`, and `reset`
+on `SosCascadeT` allocate no memory.
+
+---
+
 ### Svf
 
 State Variable Filter using Topology Preserving Transform (TPT). Numerically stable at all frequencies with no Nyquist cramping. Provides simultaneous lowpass, highpass, bandpass, and notch outputs (one selected via mode).
