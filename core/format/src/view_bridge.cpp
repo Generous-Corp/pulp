@@ -38,8 +38,8 @@ ViewSize safe_view_size(Processor& processor) noexcept {
 std::size_t sync_design_frames(view::View* v) {
     if (!v) return 0;
     std::size_t synced = 0;
-    if (auto* frame = dynamic_cast<view::DesignFrameView*>(v)) {
-        frame->sync_from_host_params();
+    if (v->runtime_view_kind() == view::RuntimeViewKind::design_frame) {
+        static_cast<view::DesignFrameView*>(v)->sync_from_host_params();
         ++synced;
     }
     for (std::size_t i = 0; i < v->child_count(); ++i)

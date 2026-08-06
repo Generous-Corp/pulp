@@ -62,7 +62,7 @@ SOFTWARE=(
 # Silicon plugin folder, and Rack names one directory per platform key.
 while IFS= read -r p; do
     SOFTWARE+=("$p")
-done < <(find "$SUPPORT/Rack2" -mindepth 2 -maxdepth 2 -path '*/plugins-*' \
+done < <(find "$SUPPORT/Rack2" -mindepth 2 -maxdepth 2 -path '*/plugins-*/*' \
               \( -name 'ForgeModular' -o -name 'ForgeModular-*.vcvplugin' \) \
               2>/dev/null)
 

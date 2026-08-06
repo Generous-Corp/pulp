@@ -36,6 +36,16 @@ struct DropData;         // pulp/view/drag_drop.hpp
 class ComboBox;          // pulp/view/ui_components.hpp — held (as View*) in RootInteractionState
 class View;
 
+/// Internal concrete-type hint for the two whole-tree hot paths.
+///
+/// Stored in View's already-indirected style extras, so adding it changes
+/// neither View's object layout nor its vtable. Only the named constructors
+/// set a non-generic value; readers may then use a checked static_cast without
+/// asking RTTI the same question for every node at every vsync.
+enum class RuntimeViewKind : std::uint8_t {
+    generic, knob, fader, toggle, scroll, eq_curve, design_frame
+};
+
 /// Identity-safe reference to a View captured across native event boundaries.
 /// Capturing records the root and current structure generation while the View
 /// is known-live. `live_in()` is therefore O(1) until a detach invalidates that
@@ -1788,6 +1798,12 @@ public:
     void set_continuous_repaint(bool on) { wants_continuous_repaint_ = on; }
     bool wants_continuous_repaint() const { return wants_continuous_repaint_; }
 
+    RuntimeViewKind runtime_view_kind() const noexcept;
+
+protected:
+    void mark_runtime_view_kind(RuntimeViewKind kind);
+
+public:
     /// RN textShadow per-attribute storage. Storage-only; SkPaint shadow
     /// integration is not wired here. Each slot is round-trippable so a
     /// commitUpdate that touches only one of the three preserves the others
@@ -2449,6 +2465,7 @@ private:
     // (SkPath::FromSVGString on Skia, no-op fallback elsewhere); mask_image /
     // mask via mask-capable backends; the rest round-trip through storage.
     struct ViewStyleExtras {
+        RuntimeViewKind runtime_view_kind = RuntimeViewKind::generic;
         StagedAnimation staged_animation{};
         float backdrop_blur = 0.0f;
         /// The whole `backdrop-filter` list when it is more than a blur.

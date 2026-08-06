@@ -34,6 +34,23 @@ TEST_CASE("a static tree needs no continuous frames", "[view][continuous-frames]
     REQUIRE_FALSE(needs_continuous_frames(&root));
 }
 
+TEST_CASE("continuous-frame widget tags match their concrete types",
+          "[view][continuous-frames]") {
+    View generic;
+    Knob knob;
+    Fader fader;
+    Toggle toggle;
+    ScrollView scroll;
+    EqCurveView eq;
+
+    CHECK(generic.runtime_view_kind() == RuntimeViewKind::generic);
+    CHECK(knob.runtime_view_kind() == RuntimeViewKind::knob);
+    CHECK(fader.runtime_view_kind() == RuntimeViewKind::fader);
+    CHECK(toggle.runtime_view_kind() == RuntimeViewKind::toggle);
+    CHECK(scroll.runtime_view_kind() == RuntimeViewKind::scroll);
+    CHECK(eq.runtime_view_kind() == RuntimeViewKind::eq_curve);
+}
+
 TEST_CASE("an opted-in continuous-repaint view is detected", "[view][continuous-frames]") {
     View v;
     REQUIRE_FALSE(needs_continuous_frames(&v));

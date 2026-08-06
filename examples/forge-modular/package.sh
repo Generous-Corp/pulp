@@ -430,6 +430,12 @@ cp "$RACK_PLUGIN" "$APP/Contents/Resources/rack/"
 # The identities live in ~/.config/pulp/secrets/keychain.env as hashes, which
 # is what codesign wants anyway -- a name can match two certificates, a hash
 # cannot. ensure_signing_ready.sh puts them in the environment.
+if [[ -f "$HOME/.config/pulp/secrets/keychain.env" ]]; then
+    source "$HOME/.config/pulp/secrets/keychain.env"
+fi
+if [[ "${PULP_SKIP_SIGNING_PREFLIGHT:-0}" != 1 ]]; then
+    "$REPO/tools/scripts/ensure_signing_ready.sh" >/dev/null
+fi
 : "${PULP_SIGN_IDENTITY_HASH:?set PULP_SIGN_IDENTITY_HASH (see ~/.config/pulp/secrets/keychain.env)}"
 : "${PULP_SIGN_INSTALLER_HASH:?set PULP_SIGN_INSTALLER_HASH (see ~/.config/pulp/secrets/keychain.env)}"
 

@@ -230,6 +230,24 @@ else
     fail "uninstall.sh removes the unpacked directory but not the .vcvplugin"
 fi
 
+# Prove discovery rather than merely checking that a glob is written down. The
+# generated directory and the not-yet-unpacked archive are both real installed
+# shapes, and both live one level below Rack's platform directory.
+ran=$((ran + 1))
+W="$(mktemp -d)"
+RACK_HOME="$W/home/Library/Application Support/Rack2"
+mkdir -p "$RACK_HOME/plugins-mac-arm64/ForgeModular" \
+         "$RACK_HOME/plugins-mac-x64"
+printf 'pack\n' > "$RACK_HOME/plugins-mac-x64/ForgeModular-2.0.0-mac-x64.vcvplugin"
+out="$(HOME="$W/home" /bin/bash "$FM/uninstall.sh" --dry-run 2>&1)"
+if echo "$out" | grep -Fq "$RACK_HOME/plugins-mac-arm64/ForgeModular" && \
+   echo "$out" | grep -Fq "$RACK_HOME/plugins-mac-x64/ForgeModular-2.0.0-mac-x64.vcvplugin"; then
+    ok "uninstall discovers unpacked and archived Rack packs in a scratch home"
+else
+    fail "uninstall did not discover both Rack pack shapes: $out"
+fi
+/bin/rm -rf "$W"
+
 # Released component packages install globally, not under the user's Library.
 # The uninstaller must name all three real payloads and elevate only when it
 # actually removes a system path.
@@ -276,6 +294,24 @@ if grep -q -- '--rack-plugin is required' "$FM/package.sh" && \
     ok "package requires a named current pack and one target architecture"
 else
     fail "package can discover stale packs or mix target architectures"
+fi
+
+# Signing identities may live only in the standard keychain environment file.
+# It has to be sourced (and the preflight run) before strict expansion reads
+# either hash, or a valid signing machine fails before the helper can repair it.
+ran=$((ran + 1))
+source_line=$(grep -nF 'source "$HOME/.config/pulp/secrets/keychain.env"' \
+    "$FM/package.sh" | head -1 | cut -d: -f1)
+preflight_line=$(grep -nF '"$REPO/tools/scripts/ensure_signing_ready.sh"' \
+    "$FM/package.sh" | head -1 | cut -d: -f1)
+identity_line=$(grep -nF ': "${PULP_SIGN_IDENTITY_HASH:?' \
+    "$FM/package.sh" | head -1 | cut -d: -f1)
+if [ -n "$source_line" ] && [ -n "$preflight_line" ] && [ -n "$identity_line" ] && \
+   [ "$source_line" -lt "$identity_line" ] && \
+   [ "$preflight_line" -lt "$identity_line" ]; then
+    ok "package loads and preflights signing identities before requiring them"
+else
+    fail "package requires signing identities before setup can provide them"
 fi
 
 echo

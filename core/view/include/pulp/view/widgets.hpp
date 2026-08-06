@@ -478,6 +478,7 @@ enum class WidgetRenderStyle { standard, minimal, silver };
 class Knob : public View, public CustomShaderHost, public AccessibilityValueInterface {
 public:
     Knob() {
+        mark_runtime_view_kind(RuntimeViewKind::knob);
         set_access_role(AccessRole::slider);
         set_focusable(true);
         // A knob's pointer travel is shorter than a fader's: 150px crosses the
@@ -820,7 +821,11 @@ public:
     enum class Orientation { vertical, horizontal };
     enum class ThumbShape { circle, rectangle };
 
-    Fader() { set_access_role(AccessRole::slider); set_focusable(true); }
+    Fader() {
+        mark_runtime_view_kind(RuntimeViewKind::fader);
+        set_access_role(AccessRole::slider);
+        set_focusable(true);
+    }
 
     // ── AccessibilityValueInterface (normalized 0..1) ────────────────────
     double get_current_value() const override { return value_; }
@@ -1208,6 +1213,7 @@ private:
 class Toggle : public View, public CustomShaderHost {
 public:
     Toggle() : thumb_position_(0.0f), hover_opacity_(0.0f) {
+        mark_runtime_view_kind(RuntimeViewKind::toggle);
         set_access_role(AccessRole::toggle);
         // Seed the ARIA state; Toggle::set_on() keeps it in sync. A `toggle`
         // (ARIA switch) with no state announces nothing about on/off.
