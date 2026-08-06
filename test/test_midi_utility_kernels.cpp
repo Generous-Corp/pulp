@@ -452,6 +452,22 @@ TEST_CASE("Note length lifecycle operations leave no positive note balance",
         balance.feed(output);
         CHECK(balance.balanced());
     }
+
+    SECTION("a valid spec repairs an invalid construction") {
+        auto input = prepared_buffer();
+        auto output = prepared_buffer();
+        midi::NoteLengthShaper<2> shaper({0});
+        REQUIRE_FALSE(shaper.valid());
+        REQUIRE(shaper.replace_spec({8}, output).complete);
+        REQUIRE(shaper.valid());
+
+        input.add(midi::MidiEvent::note_on(0, 60, 100));
+        REQUIRE(shaper.process(input, output, {0}, 64).complete);
+        REQUIRE(output.size() == 2);
+        CHECK(output[0].is_note_on());
+        CHECK(output[1].is_note_off());
+        CHECK(output[1].sample_offset == 8);
+    }
 }
 
 TEST_CASE("Note length overflow remains balanced and processing remains allocation free",

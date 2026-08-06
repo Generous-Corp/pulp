@@ -149,6 +149,7 @@ template <std::size_t MaximumActiveNotes = 128> class NoteLengthShaper {
         quarantined_.fill(false);
         if (empty() && pending_spec_) {
             spec_ = *pending_spec_;
+            valid_ = true;
             pending_spec_.reset();
         }
         report.complete = empty();
@@ -165,10 +166,12 @@ template <std::size_t MaximumActiveNotes = 128> class NoteLengthShaper {
             return {0, 0, 0, false};
         }
         auto report = flush(output);
-        if (report.complete)
+        if (report.complete) {
             spec_ = spec;
-        else
+            valid_ = true;
+        } else {
             pending_spec_ = spec;
+        }
         return report;
     }
 
@@ -287,6 +290,7 @@ template <std::size_t MaximumActiveNotes = 128> class NoteLengthShaper {
         }
         if (empty() && pending_spec_) {
             spec_ = *pending_spec_;
+            valid_ = true;
             pending_spec_.reset();
         }
     }
