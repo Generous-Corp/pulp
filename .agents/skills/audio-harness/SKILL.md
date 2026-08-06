@@ -253,7 +253,9 @@ usually means the processor emitted (almost) nothing, which is the finding.
 - **Do not assume a polynomial is faster than the platform math library.**
   `FastMath::exp2` delegates to the standard float implementation because a
   cubic-plus-`ldexp` path measured slower on supported Apple hardware while
-  losing NaN, infinity, overflow, underflow, and subnormal semantics. A
+  losing NaN, infinity, overflow, underflow, and gradual-underflow semantics. In
+  Pulp callbacks, `ScopedFlushDenormals` still governs the finite subnormal range
+  and may flush it to zero, matching the platform standard in that FP mode. A
   replacement needs a repeatable Release benchmark over pitch and audio-rate FM
   domains as well as dense numerical and product-level error proofs.
 - **Grade discontinuity correctors against the shipped baseline.** A minBLEP
