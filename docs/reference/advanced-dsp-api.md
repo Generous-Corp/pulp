@@ -39,25 +39,36 @@ processing call.
 
 This fixed-capacity LR4 crossover creates between two and `MaxBands` ordered
 bands. `prepare(sample_rate, cutoffs)` fixes the band count; cutoffs are plain Hz,
-finite, strictly increasing, and below Nyquist. `set_cutoffs(cutoffs,
-transition_samples)` preserves that topology. A nonzero transition runs two
-bounded banks in parallel and rejects a second retune until the exact sample
-count completes. Invalid configurations are rejected without changing the live
-configuration. A non-finite sample clears recursive state, returns zero bands,
-and increments `fault_count()` so the following finite sample starts recovered.
+finite, strictly increasing, below Nyquist, and inside the numerically supported
+coefficient domain reported by `supports_configuration()`. The template uses a
+double-precision recursive realization independently of its floating-point API
+sample type; validation also rejects degenerate coefficients and poles too
+close to the unit circle.
+`set_cutoffs(cutoffs, transition_samples)` preserves topology. A nonzero
+transition moves one stateful bank through logarithmically interpolated,
+bilinear-warped cutoff design values for the exact sample count and rejects an
+overlapping retune. The transcendental endpoint design happens in
+`set_cutoffs()`; `process()` uses bounded multiply/add/divide arithmetic. It does
+not crossfade differently phased banks. A one-sample transition is an explicit
+immediate coefficient change. During a transition, `cutoff()` continues to
+report the last stationary cutoff set until the target becomes live. Invalid
+configurations are rejected without changing the live configuration. A
+non-finite sample clears recursive state, returns zero bands, and increments
+`fault_count()` so the following finite sample starts recovered.
 
 Earlier bands receive the all-pass response of every later split. Summing every
 band therefore reconstructs a flat magnitude response with zero host latency.
-`band_response()` and `reconstruction_response()` expose the exact complex
-response for plotting and verification without running audio. The historical
-two-band `LinkwitzRileyT` API remains available; its two-argument coefficient
-design retains the rounded Q used by existing renders, while
+`band_response()` and `reconstruction_response()` expose the exact stationary
+complex response for plotting and verification without running audio; response
+queries outside `[0, Nyquist]` are rejected rather than folded or clamped. The
+historical two-band `LinkwitzRileyT` API remains available; its two-argument
+coefficient design retains the rounded Q used by existing renders, while
 `set_frequency_precise()` selects the exact Butterworth value for new work.
 
 - Lifecycle: `prepare(sample_rate, cutoffs)`, `reset()`.
 - Controls: `set_cutoffs(cutoffs, transition_samples)`.
 - Processing: `process(input)` returns `Frame{bands, count, healthy}`.
-- Inspection: `band_count()`, `cutoff_count()`, `cutoff()`, `sample_rate()`, `transitioning()`, `healthy()`, `fault_count()`, `latency_samples()`, `band_response()`, `reconstruction_response()`.
+- Inspection: `supports_configuration()`, `band_count()`, `cutoff_count()`, `cutoff()`, `sample_rate()`, `transitioning()`, `healthy()`, `fault_count()`, `latency_samples()`, `band_response()`, `reconstruction_response()`.
 
 ## Dynamics
 
