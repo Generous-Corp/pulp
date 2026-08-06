@@ -294,6 +294,31 @@ TEST_CASE("routing spec replacement cannot strand held notes",
         REQUIRE(router.replace_spec(replacement));
     }
 
+    SECTION("a later suppressed attack cannot hide an older routed release") {
+        midi::ChannelRouteSpec initial;
+        initial.accepted_channels = std::uint16_t{1} << 3;
+        initial.output_channel[3] = 15;
+        midi::ChannelRouter router(initial);
+        auto constrained = prepared_buffer(1);
+
+        input.add(midi::MidiEvent::note_on(3, 64, 100));
+        REQUIRE(router.process(input, constrained).complete);
+        input.clear();
+        input.add(midi::MidiEvent::cc(3, 7, 100));
+        input.add(midi::MidiEvent::note_on(3, 64, 110));
+        CHECK_FALSE(router.process(input, constrained).complete);
+
+        input.clear();
+        input.add(midi::MidiEvent::note_off(3, 64));
+        REQUIRE(router.process(input, constrained).complete);
+        REQUIRE(constrained.size() == 1);
+        CHECK(constrained[0].is_note_off());
+        CHECK(constrained[0].channel() == 15);
+
+        REQUIRE(router.process(input, constrained).complete);
+        CHECK(constrained.empty());
+    }
+
     SECTION("range and split kernels retain failed releases") {
         {
             midi::NoteRangeFilter range({60, 72});
@@ -815,6 +840,46 @@ TEST_CASE("Note length overflow remains balanced and processing remains allocati
         REQUIRE(debt_shaper.flush(output).complete);
         debt_balance.feed(output);
         CHECK(debt_balance.balanced());
+    }
+
+    SECTION("fail-open releases retain forwarded and suppressed attack order") {
+        auto one_event_output = prepared_buffer(1);
+        auto events = prepared_buffer();
+
+        {
+            midi::NoteLengthShaper<0> ordered({4096});
+            events.add(midi::MidiEvent::note_on(0, 72, 100));
+            REQUIRE(ordered.process(events, one_event_output, {0}, 64).complete);
+            events.clear();
+            events.add(midi::MidiEvent::cc(0, 7, 100));
+            events.add(midi::MidiEvent::note_on(0, 72, 110));
+            CHECK_FALSE(ordered.process(events, one_event_output, {64}, 64).complete);
+            events.clear();
+            events.add(midi::MidiEvent::note_off(0, 72));
+            REQUIRE(ordered.process(events, one_event_output, {128}, 64).complete);
+            REQUIRE(one_event_output.size() == 1);
+            CHECK(one_event_output[0].is_note_off());
+            REQUIRE(ordered.process(events, one_event_output, {192}, 64).complete);
+            CHECK(one_event_output.empty());
+        }
+
+        {
+            midi::NoteLengthShaper<0> ordered({4096});
+            events.clear();
+            events.add(midi::MidiEvent::cc(0, 7, 100));
+            events.add(midi::MidiEvent::note_on(0, 73, 100));
+            CHECK_FALSE(ordered.process(events, one_event_output, {0}, 64).complete);
+            events.clear();
+            events.add(midi::MidiEvent::note_on(0, 73, 110));
+            REQUIRE(ordered.process(events, one_event_output, {64}, 64).complete);
+            events.clear();
+            events.add(midi::MidiEvent::note_off(0, 73));
+            REQUIRE(ordered.process(events, one_event_output, {128}, 64).complete);
+            CHECK(one_event_output.empty());
+            REQUIRE(ordered.process(events, one_event_output, {192}, 64).complete);
+            REQUIRE(one_event_output.size() == 1);
+            CHECK(one_event_output[0].is_note_off());
+        }
     }
 }
 

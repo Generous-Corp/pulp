@@ -72,12 +72,12 @@ template <std::size_t MaximumActiveNotes = 128> class NoteLengthShaper {
                 Slot* slot = free_slot();
                 if (slot == nullptr) {
                     const int key = utility_detail::key_index(event.channel(), event.note());
-                    if (passthrough_depth_[key] == std::numeric_limits<std::uint32_t>::max()) {
-                        quarantined_[key] = true;
+                    if (!can_track_fail_open(key)) {
+                        track_overflow_suppressed(key);
                         ++report.dropped;
                         report.complete = false;
                     } else if (utility_detail::emit(output, event, report)) {
-                        ++passthrough_depth_[key];
+                        track_passthrough(key);
                     } else {
                         track_suppressed(key);
                     }
@@ -99,13 +99,7 @@ template <std::size_t MaximumActiveNotes = 128> class NoteLengthShaper {
                          true};
             } else if (is_release) {
                 const int key = event_key;
-                if (suppressed_depth_[key] != 0) {
-                    --suppressed_depth_[key];
-                } else if (passthrough_depth_[key] != 0) {
-                    --passthrough_depth_[key];
-                    if (!utility_detail::emit(output, event, report))
-                        track_release_debt(key);
-                }
+                release_fail_open(key, event, output, report);
             } else {
                 utility_detail::emit(output, event, report);
             }
@@ -149,6 +143,8 @@ template <std::size_t MaximumActiveNotes = 128> class NoteLengthShaper {
             }
         }
         suppressed_depth_.fill(0);
+        overflow_suppressed_.fill(0);
+        ownership_run_size_ = 0;
         quarantined_.fill(false);
         if (empty() && pending_spec_) {
             spec_ = *pending_spec_;
@@ -206,6 +202,13 @@ template <std::size_t MaximumActiveNotes = 128> class NoteLengthShaper {
         bool active = false;
     };
 
+    struct FailOpenOwnershipRun {
+        std::uint16_t key = 0;
+        std::uint32_t count = 0;
+        bool forwarded = false;
+    };
+    static constexpr std::size_t kMaxOwnershipRuns = 4096;
+
     template <typename Counter> static bool increment_checked(Counter& value) noexcept {
         if (value != std::numeric_limits<Counter>::max()) {
             ++value;
@@ -215,8 +218,82 @@ template <std::size_t MaximumActiveNotes = 128> class NoteLengthShaper {
     }
 
     void track_suppressed(int key) noexcept {
-        if (!increment_checked(suppressed_depth_[key]))
+        if (overflow_suppressed_[key] != 0 ||
+            ownership_run_size_ == ownership_runs_.size()) {
+            track_overflow_suppressed(key);
+            return;
+        }
+        if (!increment_checked(suppressed_depth_[key]) ||
+            !append_ownership_run(key, false))
             quarantined_[key] = true;
+    }
+
+    void track_passthrough(int key) noexcept {
+        if (!increment_checked(passthrough_depth_[key]) ||
+            !append_ownership_run(key, true))
+            quarantined_[key] = true;
+    }
+
+    bool can_track_fail_open(int key) const noexcept {
+        if (overflow_suppressed_[key] != 0) return false;
+        if (passthrough_depth_[key] == std::numeric_limits<std::uint32_t>::max() ||
+            suppressed_depth_[key] == std::numeric_limits<std::uint32_t>::max())
+            return false;
+        return ownership_run_size_ < ownership_runs_.size();
+    }
+
+    void track_overflow_suppressed(int key) noexcept {
+        if (!increment_checked(overflow_suppressed_[key]))
+            quarantined_[key] = true;
+    }
+
+    bool append_ownership_run(int key, bool forwarded) noexcept {
+        for (std::size_t i = ownership_run_size_; i != 0; --i) {
+            auto& previous = ownership_runs_[i - 1];
+            if (previous.key != key) continue;
+            if (previous.forwarded == forwarded &&
+                previous.count != std::numeric_limits<std::uint32_t>::max()) {
+                ++previous.count;
+                return true;
+            }
+            break;
+        }
+        if (ownership_run_size_ == ownership_runs_.size()) return false;
+        ownership_runs_[ownership_run_size_++] = {
+            static_cast<std::uint16_t>(key), 1, forwarded};
+        return true;
+    }
+
+    void release_fail_open(int key, const MidiEvent& event, MidiBuffer& output,
+                           MidiUtilityProcessReport& report) noexcept {
+        release_fail_open_impl(key, [&](bool forwarded) {
+            if (forwarded && !utility_detail::emit(output, event, report))
+                track_release_debt(key);
+        });
+    }
+
+    template <typename Release>
+    void release_fail_open_impl(int key, Release&& release) noexcept {
+        for (std::size_t i = 0; i < ownership_run_size_; ++i) {
+            auto& run = ownership_runs_[i];
+            if (run.key != key) continue;
+            if (run.forwarded) {
+                --passthrough_depth_[key];
+            } else {
+                --suppressed_depth_[key];
+            }
+            release(run.forwarded);
+            if (--run.count == 0) erase_ownership_run(i);
+            return;
+        }
+        if (overflow_suppressed_[key] != 0)
+            --overflow_suppressed_[key];
+    }
+
+    void erase_ownership_run(std::size_t index) noexcept {
+        for (std::size_t i = index + 1; i < ownership_run_size_; ++i)
+            ownership_runs_[i - 1] = ownership_runs_[i];
+        --ownership_run_size_;
     }
 
     void track_release_debt(int key) noexcept {
@@ -340,12 +417,9 @@ template <std::size_t MaximumActiveNotes = 128> class NoteLengthShaper {
             if (is_attack) {
                 track_suppressed(key);
             } else if (is_release) {
-                if (suppressed_depth_[key] != 0)
-                    --suppressed_depth_[key];
-                else if (passthrough_depth_[key] != 0) {
-                    --passthrough_depth_[key];
-                    track_release_debt(key);
-                }
+                release_fail_open_impl(key, [&](bool forwarded) {
+                    if (forwarded) track_release_debt(key);
+                });
             }
         }
     }
@@ -357,7 +431,10 @@ template <std::size_t MaximumActiveNotes = 128> class NoteLengthShaper {
     std::array<std::uint32_t, 16 * 128> passthrough_depth_{};
     std::array<std::uint32_t, 16 * 128> suppressed_depth_{};
     std::array<std::uint32_t, 16 * 128> release_debt_{};
+    std::array<std::uint32_t, 16 * 128> overflow_suppressed_{};
     std::array<bool, 16 * 128> quarantined_{};
+    std::array<FailOpenOwnershipRun, kMaxOwnershipRuns> ownership_runs_{};
+    std::size_t ownership_run_size_ = 0;
     std::uint32_t next_serial_ = 1;
     std::int64_t current_block_start_ = 0;
 };

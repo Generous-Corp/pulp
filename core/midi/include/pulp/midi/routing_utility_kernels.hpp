@@ -20,45 +20,50 @@ inline UmpPacket note_off_packet(bool midi2, std::uint8_t group,
 
 class HeldNoteLedger {
   public:
+    static constexpr std::size_t kMaxTrackedOwnership = 4096;
+
     constexpr bool empty() const noexcept { return total_ == 0; }
     constexpr void reset() noexcept {}
 
     bool can_forward(const MidiEvent& event) const noexcept {
-        return !is_attack(event) ||
-               midi_counts_[utility_detail::key_index(event.channel(), event.note())] !=
-                   std::numeric_limits<std::uint8_t>::max();
+        if (!is_attack(event)) return true;
+        const auto key = utility_detail::key_index(event.channel(), event.note());
+        return midi_overflow_suppressed_[key] == 0 && midi_size_ < midi_entries_.size();
     }
     bool can_forward(const UmpPacket& packet) const noexcept {
-        return !is_attack(packet) ||
-               ump_counts_[ump_key(packet)] !=
-                   std::numeric_limits<std::uint8_t>::max();
+        if (!is_attack(packet)) return true;
+        const auto key = ump_key(packet);
+        return ump_overflow_suppressed_[key] == 0 && ump_size_ < ump_entries_.size();
     }
 
     bool consume_suppressed_release(const MidiEvent& event) noexcept {
         if (!is_release(event)) return false;
-        return consume_suppressed(
-            midi_suppressed_[utility_detail::key_index(event.channel(), event.note())]);
+        return consume_suppressed(midi_entries_, midi_size_, midi_overflow_suppressed_,
+                                  utility_detail::key_index(event.channel(), event.note()));
     }
     bool consume_suppressed_release(const UmpPacket& packet) noexcept {
         if (!is_release(packet)) return false;
-        return consume_suppressed(ump_suppressed_[ump_key(packet)]);
+        return consume_suppressed(ump_entries_, ump_size_, ump_overflow_suppressed_,
+                                  ump_key(packet));
     }
 
     void record(const MidiEvent& event, bool forwarded) noexcept {
-        auto& count = midi_counts_[utility_detail::key_index(event.channel(), event.note())];
-        auto& suppressed = midi_suppressed_[utility_detail::key_index(
-            event.channel(), event.note())];
-        auto& debt = midi_release_debt_[utility_detail::key_index(
-            event.channel(), event.note())];
-        update(count, suppressed, debt, midi_debt_total_, is_attack(event),
-               is_release(event), forwarded);
+        const auto key = utility_detail::key_index(event.channel(), event.note());
+        if (is_attack(event))
+            record_attack(midi_entries_, midi_size_, midi_overflow_suppressed_, key,
+                          forwarded);
+        else if (is_release(event))
+            record_release(midi_entries_, midi_size_, midi_release_debt_,
+                           midi_debt_total_, key, forwarded);
     }
     void record(const UmpPacket& packet, bool forwarded) noexcept {
-        auto& count = ump_counts_[ump_key(packet)];
-        auto& suppressed = ump_suppressed_[ump_key(packet)];
-        auto& debt = ump_release_debt_[ump_key(packet)];
-        update(count, suppressed, debt, ump_debt_total_, is_attack(packet),
-               is_release(packet), forwarded);
+        const auto key = ump_key(packet);
+        if (is_attack(packet))
+            record_attack(ump_entries_, ump_size_, ump_overflow_suppressed_, key,
+                          forwarded);
+        else if (is_release(packet))
+            record_release(ump_entries_, ump_size_, ump_release_debt_,
+                           ump_debt_total_, key, forwarded);
     }
 
     void retain_unprocessed_ownership(const MidiBuffer& input) noexcept {
@@ -74,60 +79,41 @@ class HeldNoteLedger {
 
     template <typename Emit>
     bool drain_midi_releases(Emit&& emit) const noexcept {
-        if (midi_debt_total_ == 0) return true;
-        constexpr std::size_t kAttemptsPerBlock = 32;
-        std::size_t attempts = 0;
-        std::size_t visited = 0;
-        while (visited < midi_release_debt_.size() && attempts < kAttemptsPerBlock) {
-            const auto key = midi_drain_cursor_;
-            midi_drain_cursor_ = (midi_drain_cursor_ + 1) % midi_release_debt_.size();
-            ++visited;
-            auto& debt = midi_release_debt_[key];
-            if (debt == 0) continue;
-            ++attempts;
-            const auto channel = static_cast<std::uint8_t>(key / 128);
-            const auto note = static_cast<std::uint8_t>(key % 128);
-            if (emit(channel, note)) {
-                --debt;
-                --midi_counts_[key];
-                --midi_debt_total_;
-                --total_;
-            }
-        }
-        return midi_debt_total_ == 0;
+        return drain_pending(midi_release_debt_, midi_debt_total_, midi_drain_cursor_,
+                             [&](std::size_t key) {
+                                 return emit(static_cast<std::uint8_t>(key / 128),
+                                             static_cast<std::uint8_t>(key % 128));
+                             });
     }
 
     template <typename Emit>
     bool drain_ump_releases(Emit&& emit) const noexcept {
-        if (ump_debt_total_ == 0) return true;
-        constexpr std::size_t kAttemptsPerBlock = 32;
-        std::size_t attempts = 0;
-        std::size_t visited = 0;
-        while (visited < ump_release_debt_.size() && attempts < kAttemptsPerBlock) {
-            const auto key = ump_drain_cursor_;
-            ump_drain_cursor_ = (ump_drain_cursor_ + 1) % ump_release_debt_.size();
-            ++visited;
-            auto& debt = ump_release_debt_[key];
-            if (debt == 0) continue;
-            ++attempts;
-            constexpr std::size_t kKeysPerProtocol = 16 * 16 * 128;
-            const bool midi2 = key >= kKeysPerProtocol;
-            const auto protocol_key = key % kKeysPerProtocol;
-            const auto group = static_cast<std::uint8_t>(protocol_key / (16 * 128));
-            const auto remainder = protocol_key % (16 * 128);
-            const auto channel = static_cast<std::uint8_t>(remainder / 128);
-            const auto note = static_cast<std::uint8_t>(remainder % 128);
-            if (emit(midi2, group, channel, note)) {
-                --debt;
-                --ump_counts_[key];
-                --ump_debt_total_;
-                --total_;
-            }
-        }
-        return ump_debt_total_ == 0;
+        return drain_pending(ump_release_debt_, ump_debt_total_, ump_drain_cursor_,
+                             [&](std::size_t key) {
+                                 constexpr std::size_t kKeysPerProtocol = 16 * 16 * 128;
+                                 const bool midi2 = key >= kKeysPerProtocol;
+                                 const auto protocol_key = key % kKeysPerProtocol;
+                                 const auto group = static_cast<std::uint8_t>(
+                                     protocol_key / (16 * 128));
+                                 const auto remainder = protocol_key % (16 * 128);
+                                 return emit(
+                                     midi2, group,
+                                     static_cast<std::uint8_t>(remainder / 128),
+                                     static_cast<std::uint8_t>(remainder % 128));
+                             });
     }
 
   private:
+    enum class OwnershipState : std::uint8_t {
+        Forwarded,
+        Suppressed,
+    };
+    struct OwnershipEntry {
+        std::uint32_t key = 0;
+        std::uint32_t count = 0;
+        OwnershipState state = OwnershipState::Suppressed;
+    };
+
     static std::size_t ump_key(const UmpPacket& packet) noexcept {
         constexpr std::size_t kKeysPerProtocol = 16 * 16 * 128;
         const std::size_t protocol =
@@ -156,38 +142,113 @@ class HeldNoteLedger {
                (status == 0x90 && packet.message_type() == UmpMessageType::Midi1ChannelVoice &&
                 (packet.words[0] & 0x7f) == 0);
     }
-    bool consume_suppressed(std::uint8_t& suppressed) noexcept {
-        if (suppressed == 0) return false;
-        --suppressed;
+    template <std::size_t N, std::size_t KeyCount>
+    bool consume_suppressed(std::array<OwnershipEntry, N>& entries,
+                            std::size_t& size,
+                            std::array<std::uint32_t, KeyCount>& overflow,
+                            std::uint32_t key) noexcept {
+        for (std::size_t i = 0; i < size; ++i) {
+            if (entries[i].key != key) continue;
+            if (entries[i].state == OwnershipState::Forwarded)
+                return false;
+            if (--entries[i].count == 0) erase(entries, size, i);
+            --total_;
+            return true;
+        }
+        if (overflow[key] == 0) return false;
+        --overflow[key];
         --total_;
         return true;
     }
-    void update(std::uint8_t& count, std::uint8_t& suppressed,
-                std::uint8_t& debt,
-                std::size_t& debt_total, bool attack, bool release,
-                bool forwarded) noexcept {
-        if (attack && forwarded) {
-            ++count;
-            ++total_;
-        } else if (attack && !forwarded &&
-                   suppressed != std::numeric_limits<std::uint8_t>::max()) {
-            ++suppressed;
-            ++total_;
-        } else if (release && forwarded && count != 0) {
-            --count;
-            --total_;
-        } else if (release && !forwarded && debt < count) {
-            ++debt;
-            ++debt_total;
+
+    template <std::size_t N, std::size_t KeyCount>
+    void record_attack(std::array<OwnershipEntry, N>& entries, std::size_t& size,
+                       std::array<std::uint32_t, KeyCount>& overflow,
+                       std::uint32_t key, bool forwarded) noexcept {
+        if (overflow[key] != 0 || size == entries.size()) {
+            if (overflow[key] != std::numeric_limits<std::uint32_t>::max()) {
+                ++overflow[key];
+                ++total_;
+            }
+            return;
+        }
+        const auto state = forwarded ? OwnershipState::Forwarded
+                                     : OwnershipState::Suppressed;
+        for (std::size_t i = size; i != 0; --i) {
+            auto& previous = entries[i - 1];
+            if (previous.key != key) continue;
+            if (previous.state == state &&
+                previous.count != std::numeric_limits<std::uint32_t>::max()) {
+                ++previous.count;
+                ++total_;
+                return;
+            }
+            break;
+        }
+        entries[size++] = {key, 1, state};
+        ++total_;
+    }
+
+    template <std::size_t N, std::size_t KeyCount>
+    void record_release(std::array<OwnershipEntry, N>& entries,
+                        std::size_t& size,
+                        std::array<std::uint32_t, KeyCount>& debt,
+                        std::size_t& debt_total, std::uint32_t key,
+                        bool forwarded) noexcept {
+        for (std::size_t i = 0; i < size; ++i) {
+            auto& entry = entries[i];
+            if (entry.key != key || entry.state != OwnershipState::Forwarded)
+                continue;
+            if (--entry.count == 0) erase(entries, size, i);
+            if (forwarded)
+                --total_;
+            else if (debt[key] != std::numeric_limits<std::uint32_t>::max()) {
+                ++debt[key];
+                ++debt_total;
+            }
+            return;
         }
     }
 
-    mutable std::array<std::uint8_t, 16 * 128> midi_counts_{};
-    mutable std::array<std::uint8_t, 16 * 128> midi_suppressed_{};
-    mutable std::array<std::uint8_t, 16 * 128> midi_release_debt_{};
-    mutable std::array<std::uint8_t, 2 * 16 * 16 * 128> ump_counts_{};
-    mutable std::array<std::uint8_t, 2 * 16 * 16 * 128> ump_suppressed_{};
-    mutable std::array<std::uint8_t, 2 * 16 * 16 * 128> ump_release_debt_{};
+    template <std::size_t N, typename Emit>
+    bool drain_pending(std::array<std::uint32_t, N>& debt,
+                       std::size_t& debt_total, std::size_t& cursor,
+                       Emit&& emit) const noexcept {
+        if (debt_total == 0) return true;
+        constexpr std::size_t kAttemptsPerBlock = 32;
+        std::size_t attempts = 0;
+        std::size_t visited = 0;
+        while (visited < debt.size() && attempts < kAttemptsPerBlock) {
+            const auto key = cursor;
+            cursor = (cursor + 1) % debt.size();
+            ++visited;
+            if (debt[key] == 0) continue;
+            ++attempts;
+            if (emit(key)) {
+                --debt[key];
+                --debt_total;
+                --total_;
+            }
+        }
+        return debt_total == 0;
+    }
+
+    template <std::size_t N>
+    static void erase(std::array<OwnershipEntry, N>& entries,
+                      std::size_t& size, std::size_t index) noexcept {
+        for (std::size_t i = index + 1; i < size; ++i)
+            entries[i - 1] = entries[i];
+        --size;
+    }
+
+    mutable std::array<OwnershipEntry, kMaxTrackedOwnership> midi_entries_{};
+    mutable std::array<OwnershipEntry, kMaxTrackedOwnership> ump_entries_{};
+    mutable std::array<std::uint32_t, 16 * 128> midi_overflow_suppressed_{};
+    mutable std::array<std::uint32_t, 2 * 16 * 16 * 128> ump_overflow_suppressed_{};
+    mutable std::array<std::uint32_t, 16 * 128> midi_release_debt_{};
+    mutable std::array<std::uint32_t, 2 * 16 * 16 * 128> ump_release_debt_{};
+    mutable std::size_t midi_size_ = 0;
+    mutable std::size_t ump_size_ = 0;
     mutable std::size_t midi_drain_cursor_ = 0;
     mutable std::size_t ump_drain_cursor_ = 0;
     mutable std::size_t midi_debt_total_ = 0;
@@ -206,7 +267,8 @@ struct ChannelRouteSpec {
 class ChannelRouter {
   public:
     static constexpr MidiUtilityContract contract() noexcept {
-        return {1, 0, MidiUtilityOverflowPolicy::DropUnstarted,
+        return {2, routing_detail::HeldNoteLedger::kMaxTrackedOwnership,
+                MidiUtilityOverflowPolicy::RetainReleaseDebt,
                 MidiUtilitySameSampleOrder::InputStable, MidiUtilityTransportRequirement::None};
     }
 
@@ -335,7 +397,8 @@ struct NoteRangeSpec {
 class NoteRangeFilter {
   public:
     static constexpr MidiUtilityContract contract() noexcept {
-        return {1, 0, MidiUtilityOverflowPolicy::DropUnstarted,
+        return {2, routing_detail::HeldNoteLedger::kMaxTrackedOwnership,
+                MidiUtilityOverflowPolicy::RetainReleaseDebt,
                 MidiUtilitySameSampleOrder::InputStable, MidiUtilityTransportRequirement::None};
     }
 
@@ -446,7 +509,8 @@ struct KeyboardSplitSpec {
 class KeyboardSplit {
   public:
     static constexpr MidiUtilityContract contract() noexcept {
-        return {2, 0, MidiUtilityOverflowPolicy::DropUnstarted,
+        return {3, routing_detail::HeldNoteLedger::kMaxTrackedOwnership,
+                MidiUtilityOverflowPolicy::RetainReleaseDebt,
                 MidiUtilitySameSampleOrder::InputStable, MidiUtilityTransportRequirement::None};
     }
 
