@@ -62,7 +62,10 @@ def manifest_evolution_problems(
         new_nonbinding.pop("bindings", None)
         old_determinism = old_nonbinding.pop("determinism", None)
         new_determinism = new_nonbinding.pop("determinism", None)
+        old_units = set(old_nonbinding.pop("units", []))
+        new_units = set(new_nonbinding.pop("units", []))
         breaking = breaking or old_nonbinding != new_nonbinding
+        breaking = breaking or not old_units.issubset(new_units)
         breaking = breaking or _determinism_weakened(
             old_determinism, new_determinism
         )

@@ -51,6 +51,25 @@ def _capability_handoff_required(prefix: Path) -> bool:
     return _version_tuple(_read_text(prefix / "version.txt")) >= _version_tuple(floor)
 
 
+def _importer_runtime_paths() -> set[str]:
+    try:
+        matrix = json.loads(PRODUCT_MATRIX.read_text(encoding="utf-8"))
+        members = matrix["common_cli_members"]
+    except (KeyError, TypeError, OSError, json.JSONDecodeError) as exc:
+        raise ProvenanceError(
+            f"cannot determine importer runtime contract from {PRODUCT_MATRIX}: {exc}"
+        ) from exc
+    prefix = "browser_capture/"
+    paths = {
+        "bin/browser_capture-v1/" + str(member).removeprefix(prefix)
+        for member in members
+        if isinstance(member, str) and member.startswith(prefix)
+    }
+    if not paths:
+        raise ProvenanceError(f"empty importer runtime contract in {PRODUCT_MATRIX}")
+    return paths
+
+
 def _read_text(path: Path) -> str:
     try:
         return path.read_text(encoding="utf-8").strip()
@@ -246,10 +265,12 @@ def main(argv: list[str] | None = None) -> int:
             )
             handoff = None
             if _capability_handoff_required(args.prefix):
+                runtime_paths = _importer_runtime_paths()
                 handoff = build_handoff(
                     args.prefix,
                     sdk_source_sha=args.source_sha,
                     platform=args.platform,
+                    expected_importer_runtime_paths=runtime_paths,
                 )
             write_atomically(args.prefix / "sdk-provenance.json", marker)
             if handoff is not None:
@@ -264,6 +285,7 @@ def main(argv: list[str] | None = None) -> int:
                     args.prefix,
                     expected_platform=args.platform,
                     expected_sdk_source_sha=args.source_sha,
+                    expected_importer_runtime_paths=runtime_paths,
                 )
             suffix = " and capability handoff" if handoff is not None else ""
             print(f"OK: stamped official SDK provenance{suffix} in {args.prefix}")
@@ -279,6 +301,7 @@ def main(argv: list[str] | None = None) -> int:
                     args.prefix,
                     expected_platform=args.platform,
                     expected_sdk_source_sha=args.source_sha,
+                    expected_importer_runtime_paths=_importer_runtime_paths(),
                 )
             suffix = " and capability handoff" if required else ""
             print(f"OK: verified official SDK provenance{suffix} in {args.prefix}")

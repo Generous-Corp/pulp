@@ -18,6 +18,7 @@ HANDOFF_PATH = Path("share/pulp/agent-capability-handoff.json")
 HANDOFF_SCHEMA_PATH = Path("share/pulp/agent-capability-handoff.schema.json")
 CAPABILITIES_PATH = Path("share/pulp/agent-capabilities.json")
 CAPABILITIES_SCHEMA_PATH = Path("share/pulp/agent-capabilities.schema.json")
+IMPORTER_RUNTIME_ROOT = Path("bin/browser_capture-v1")
 MAX_JSON_BYTES = 16 * 1024 * 1024
 
 
@@ -31,6 +32,26 @@ def importer_path(platform: str) -> Path:
     if platform.startswith(("darwin-", "linux-")):
         return Path("bin/pulp-import-design")
     raise HandoffError(f"unsupported SDK platform: {platform!r}")
+
+
+def _installed_importer_runtime(
+    prefix: Path, expected_paths: set[str]
+) -> dict[str, bytes]:
+    root = prefix / IMPORTER_RUNTIME_ROOT
+    try:
+        children = sorted(root.iterdir())
+    except OSError as exc:
+        raise HandoffError(f"cannot read importer runtime {root}: {exc}") from exc
+    if not children or any(not path.is_file() for path in children):
+        raise HandoffError(f"invalid importer runtime directory: {root}")
+    runtime = {
+        path.relative_to(prefix).as_posix(): _read_bytes(path) for path in children
+    }
+    if set(runtime) != expected_paths:
+        raise HandoffError(
+            f"installed importer runtime does not match the selected contract"
+        )
+    return runtime
 
 
 def _read_bytes(path: Path, *, limit: int = MAX_JSON_BYTES) -> bytes:
@@ -64,7 +85,11 @@ def sha256(data: bytes) -> str:
 
 
 def build_handoff(
-    prefix: Path, *, sdk_source_sha: str, platform: str
+    prefix: Path,
+    *,
+    sdk_source_sha: str,
+    platform: str,
+    expected_importer_runtime_paths: set[str],
 ) -> dict[str, object]:
     capability_bytes = _read_bytes(prefix / CAPABILITIES_PATH)
     capability_document = _json(capability_bytes, str(CAPABILITIES_PATH))
@@ -75,6 +100,13 @@ def build_handoff(
     _validate(capability_document, capability_schema, str(CAPABILITIES_PATH))
     importer = importer_path(platform)
     importer_bytes = _read_bytes(prefix / importer, limit=512 * 1024 * 1024)
+    runtime_bytes = _installed_importer_runtime(
+        prefix, expected_importer_runtime_paths
+    )
+    runtime = [
+        {"path": path, "sha256": sha256(payload)}
+        for path, payload in runtime_bytes.items()
+    ]
     document: dict[str, object] = {
         "$schema": HANDOFF_SCHEMA_PATH.name,
         "schema": SCHEMA,
@@ -83,6 +115,7 @@ def build_handoff(
         "importer": {
             "path": importer.as_posix(),
             "sha256": sha256(importer_bytes),
+            "runtime": runtime,
         },
         "agent_capabilities": {
             "path": CAPABILITIES_PATH.as_posix(),
@@ -120,6 +153,7 @@ def verify_payload(
     handoff_bytes: bytes,
     handoff_schema_bytes: bytes,
     importer_bytes: bytes,
+    importer_runtime_bytes: dict[str, bytes],
     capability_bytes: bytes,
     capability_schema_bytes: bytes,
     expected_sdk_source_sha: str,
@@ -154,6 +188,20 @@ def verify_payload(
         raise HandoffError(
             f"{HANDOFF_PATH}: importer sha256 does not match installed {expected_importer}"
         )
+    expected_runtime = set(importer_runtime_bytes)
+    runtime_items = importer["runtime"]
+    declared_runtime = {item["path"]: item["sha256"] for item in runtime_items}
+    if len(declared_runtime) != len(runtime_items):
+        raise HandoffError(f"{HANDOFF_PATH}: importer runtime paths are duplicated")
+    if set(declared_runtime) != expected_runtime:
+        raise HandoffError(
+            f"{HANDOFF_PATH}: importer runtime paths do not match the selected contract"
+        )
+    for path in sorted(expected_runtime):
+        if declared_runtime[path] != sha256(importer_runtime_bytes[path]):
+            raise HandoffError(
+                f"{HANDOFF_PATH}: importer runtime sha256 does not match installed {path}"
+            )
     actual_capability_hash = sha256(capability_bytes)
     if capabilities["sha256"] != actual_capability_hash:
         raise HandoffError(
@@ -172,13 +220,20 @@ def verify_payload(
 
 
 def verify_handoff(
-    prefix: Path, *, expected_sdk_source_sha: str, expected_platform: str
+    prefix: Path,
+    *,
+    expected_sdk_source_sha: str,
+    expected_platform: str,
+    expected_importer_runtime_paths: set[str],
 ) -> dict[str, object]:
     importer = importer_path(expected_platform)
     return verify_payload(
         handoff_bytes=_read_bytes(prefix / HANDOFF_PATH),
         handoff_schema_bytes=_read_bytes(prefix / HANDOFF_SCHEMA_PATH),
         importer_bytes=_read_bytes(prefix / importer, limit=512 * 1024 * 1024),
+        importer_runtime_bytes=_installed_importer_runtime(
+            prefix, expected_importer_runtime_paths
+        ),
         capability_bytes=_read_bytes(prefix / CAPABILITIES_PATH),
         capability_schema_bytes=_read_bytes(prefix / CAPABILITIES_SCHEMA_PATH),
         expected_sdk_source_sha=expected_sdk_source_sha,

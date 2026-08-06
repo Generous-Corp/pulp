@@ -485,6 +485,33 @@ def exercise_evolution(canonical: dict) -> int:
     )
     checks += 1
 
+    additive_units = copy.deepcopy(canonical)
+    additive_units["manifest_revision"] += 1
+    row = additive_units["capabilities"][0]
+    row["units"].append("normalized")
+    row["contract_version"]["minor"] += 1
+    refresh_digest(row)
+    assert not manifest.evolution_problems(
+        canonical, additive_units, allow_unpublished_migration=False
+    )
+    checks += 1
+
+    removed_units = copy.deepcopy(canonical)
+    removed_units["manifest_revision"] += 1
+    row = next(
+        item for item in removed_units["capabilities"] if len(item["units"]) > 1
+    )
+    row["units"].pop()
+    row["contract_version"]["minor"] += 1
+    refresh_digest(row)
+    expect_problem(
+        manifest.evolution_problems(
+            canonical, removed_units, allow_unpublished_migration=False
+        ),
+        "breaking change without a major increase",
+    )
+    checks += 1
+
     successor = copy.deepcopy(canonical)
     successor["manifest_revision"] += 1
     successor_row = copy.deepcopy(successor["capabilities"][0])

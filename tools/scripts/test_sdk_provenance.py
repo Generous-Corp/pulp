@@ -12,7 +12,6 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-
 SCRIPT = Path(__file__).with_name("sdk_provenance.py")
 spec = importlib.util.spec_from_file_location("sdk_provenance", SCRIPT)
 assert spec and spec.loader
@@ -92,6 +91,10 @@ class SdkProvenanceTests(unittest.TestCase):
         shared.mkdir(parents=True)
         binary.mkdir()
         (binary / "pulp-import-design").write_bytes(b"importer fixture")
+        for value in provenance._importer_runtime_paths():
+            path = Path(value)
+            (self.prefix / path).parent.mkdir(parents=True, exist_ok=True)
+            (self.prefix / path).write_bytes(f"fixture {path.name}".encode())
         capabilities = {"schema": "fixture.capabilities.v1"}
         (shared / "agent-capabilities.json").write_text(
             json.dumps(capabilities) + "\n", encoding="utf-8"
