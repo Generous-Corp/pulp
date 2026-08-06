@@ -115,6 +115,20 @@ TEST_CASE("chord modifiers preserve the fixed-capacity interval contract", "[mus
     CHECK_FALSE(major->with_suspension(static_cast<ChordSuspension>(99)));
     CHECK_FALSE(major->with_alteration(static_cast<ChordAlteration>(99)));
 
+    const std::array<int, 3> compound_major{0, 16, 19};
+    const auto compound_formula = ChordFormula::from_intervals(compound_major);
+    REQUIRE(compound_formula);
+    const auto compound_suspended =
+        compound_formula->with_suspension(ChordSuspension::fourth);
+    REQUIRE(compound_suspended);
+    CHECK(compound_suspended->interval(1) == 17);
+    CHECK(compound_suspended->interval(2) == 19);
+    const auto compound_switched =
+        compound_suspended->with_suspension(ChordSuspension::second);
+    REQUIRE(compound_switched);
+    CHECK(compound_switched->interval(1) == 14);
+    CHECK(compound_switched->interval(2) == 19);
+
     const std::array<int, 8> full{0, 2, 4, 5, 7, 9, 11, 12};
     const auto full_formula = ChordFormula::from_intervals(full);
     REQUIRE(full_formula);
