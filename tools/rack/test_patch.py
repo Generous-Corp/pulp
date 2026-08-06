@@ -2465,6 +2465,9 @@ args = sys.argv[1:]
 fixed = ["exec"]
 if "FORGE_CODEX_MODEL" in os.environ:
     fixed += ["--model", os.environ["FORGE_CODEX_MODEL"]]
+if "FORGE_CODEX_REASONING_EFFORT" in os.environ:
+    fixed += ["-c", 'model_reasoning_effort="' +
+             os.environ["FORGE_CODEX_REASONING_EFFORT"] + '"']
 fixed += ["--ephemeral", "--sandbox", "read-only",
          "--ignore-user-config", "--ignore-rules", "--color", "never",
          "--skip-git-repo-check", "--json"]
@@ -2933,6 +2936,7 @@ print(json.dumps({"type": "result", "subtype": "success",
         print("  ok     a malformed FORGE_CLAUDE_MODEL fails closed")
 
     old_codex_model = os.environ.get("FORGE_CODEX_MODEL")
+    old_codex_effort = os.environ.get("FORGE_CODEX_REASONING_EFFORT")
     old_claude_model = os.environ.get("FORGE_CLAUDE_MODEL")
     saved_provider_bins = {
         name: os.environ.get(name)
@@ -2941,6 +2945,7 @@ print(json.dumps({"type": "result", "subtype": "success",
     os.environ["FORGE_CLAUDE_BIN"] = claude_model_wrapper
     os.environ["FORGE_CODEX_BIN"] = codex
     os.environ["FORGE_CODEX_MODEL"] = "gpt-5.6-sol"
+    os.environ["FORGE_CODEX_REASONING_EFFORT"] = "medium"
     os.environ["FORGE_CLAUDE_MODEL"] = "claude-should-not-reach-codex"
     try:
         code, text, why = P.ask_model(
@@ -2950,6 +2955,10 @@ print(json.dumps({"type": "result", "subtype": "success",
             os.environ.pop("FORGE_CODEX_MODEL", None)
         else:
             os.environ["FORGE_CODEX_MODEL"] = old_codex_model
+        if old_codex_effort is None:
+            os.environ.pop("FORGE_CODEX_REASONING_EFFORT", None)
+        else:
+            os.environ["FORGE_CODEX_REASONING_EFFORT"] = old_codex_effort
         if old_claude_model is None:
             os.environ.pop("FORGE_CLAUDE_MODEL", None)
         else:

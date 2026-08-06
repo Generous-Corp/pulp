@@ -37,6 +37,17 @@ std::string shell_quote(const std::string& s) {
     return out;
 }
 
+// Previously shipped Forge catalogues/settings stored GPT-5.6's friendly
+// family alias as the model slug. Codex does not expose that alias as a
+// runnable model: the CLI needs one of its concrete variants. Resolve legacy
+// persisted selections at the provider boundary, while current concrete and
+// opaque custom slugs continue through unchanged.
+std::string wire_model_for(const forge::ModelSelection& selection) {
+    if (selection.provider_id == "codex" && selection.model == "gpt-5.6")
+        return "gpt-5.6-sol";
+    return selection.model;
+}
+
 }  // namespace
 
 struct ProcessEngine::RunState {
@@ -278,6 +289,9 @@ void ProcessEngine::submit(const std::string& prompt, bool patch_mode,
     run_state_->launch_state.store(0, std::memory_order_release);
     run_state_->terminal_written.store(false, std::memory_order_release);
 
+    const std::string wire_model = wire_model_for(model);
+    const std::string reasoning_effort(
+        forge::to_string(forge::Settings::instance().effort()));
     std::ostringstream cmd;
     // The processor, not the editor view, owns this non-blocking ChildProcess.
     // It therefore remains alive across editor-window closure, while the
@@ -296,10 +310,17 @@ void ProcessEngine::submit(const std::string& prompt, bool patch_mode,
         "import os,sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])";
     cmd << "exec /usr/bin/env "
         << "-u FORGE_CLAUDE_MODEL -u FORGE_CODEX_MODEL "
+        << "-u FORGE_CLAUDE_REASONING_EFFORT "
+        << "-u FORGE_CODEX_REASONING_EFFORT "
         << "FORGE_MODEL_PROVIDER=" << shell_quote(model.provider_id) << " "
         << (model.provider_id == "codex" ? "FORGE_CODEX_MODEL="
                                            : "FORGE_CLAUDE_MODEL=")
-        << shell_quote(model.model) << " "
+        << shell_quote(wire_model) << " "
+        << (model.provider_id == "codex"
+                ? "FORGE_CODEX_REASONING_EFFORT=" +
+                      shell_quote(reasoning_effort) + " "
+                : "FORGE_CLAUDE_REASONING_EFFORT=" +
+                      shell_quote(reasoning_effort) + " ")
         // The bootstrap makes the retained root the leader of a private
         // session/process group before patch.py can spawn the model CLI. Stop
         // can therefore freeze and signal the whole owned group atomically.

@@ -2842,6 +2842,18 @@ def _ask_model(claude: str, prompt: str, seconds: float, tick: float,
                 "slash, or hyphen")
         return model
 
+    def exact_reasoning_effort(env_name: str):
+        raw = _os.environ.get(env_name)
+        if raw is None:
+            return None
+        effort = raw.strip()
+        supported = ("low", "medium", "high", "max")
+        if effort not in supported:
+            raise SystemExit(
+                f"{env_name} must be one of: " +
+                ", ".join(supported))
+        return effort
+
     # THE PROMPT GOES ON STDIN, NOT IN ARGV. It carries the inventory, and the
     # inventory grows with every module anybody cartographs -- so passing it
     # as an argument works until it does not, and then fails for a reason that
@@ -2852,13 +2864,19 @@ def _ask_model(claude: str, prompt: str, seconds: float, tick: float,
     answer_path = None
     if protocol == "claude":
         claude_model = exact_model("FORGE_CLAUDE_MODEL", "Claude")
+        claude_effort = exact_reasoning_effort(
+            "FORGE_CLAUDE_REASONING_EFFORT")
         command = [claude, "-p", "--strict-mcp-config", "--verbose",
                    "--output-format=stream-json",
                    "--include-partial-messages"]
         if claude_model is not None:
             command.extend(["--model", claude_model])
+        if claude_effort is not None:
+            command.extend(["--effort", claude_effort])
     else:
         codex_model = exact_model("FORGE_CODEX_MODEL", "Codex")
+        codex_effort = exact_reasoning_effort(
+            "FORGE_CODEX_REASONING_EFFORT")
         answer_file = tempfile.NamedTemporaryFile(
             prefix="forge-model-answer-", suffix=".txt", delete=False)
         answer_path = answer_file.name
@@ -2866,6 +2884,9 @@ def _ask_model(claude: str, prompt: str, seconds: float, tick: float,
         command = [claude, "exec"]
         if codex_model is not None:
             command.extend(["--model", codex_model])
+        if codex_effort is not None:
+            command.extend(
+                ["-c", f'model_reasoning_effort="{codex_effort}"'])
         command.extend(["--ephemeral", "--sandbox", "read-only",
                    "--ignore-user-config", "--ignore-rules", "--color",
                    "never", "--skip-git-repo-check", "--json",

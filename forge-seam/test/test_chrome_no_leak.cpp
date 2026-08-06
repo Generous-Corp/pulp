@@ -9393,8 +9393,9 @@ TEST_CASE("process engines atomically share the launch window",
     std::filesystem::remove_all(dir, ec);
 }
 
-TEST_CASE("the process engine passes the exact selected provider and model",
+TEST_CASE("the process engine resolves display aliases to provider model ids",
           "[build][provider][process]") {
+    const auto original_effort = forge::Settings::instance().effort();
     std::error_code ec;
     const auto dir = std::filesystem::temp_directory_path() / "fm-provider-route";
     std::filesystem::remove_all(dir, ec);
@@ -9404,45 +9405,57 @@ TEST_CASE("the process engine passes the exact selected provider and model",
            "pathlib.Path(sys.argv[2]).write_text('|'.join([\n"
            " os.environ.get('FORGE_MODEL_PROVIDER', ''),\n"
            " os.environ.get('FORGE_CODEX_MODEL', ''),\n"
-           " os.environ.get('FORGE_CLAUDE_MODEL', '')]))\n"; }
+           " os.environ.get('FORGE_CLAUDE_MODEL', ''),\n"
+           " os.environ.get('FORGE_CODEX_REASONING_EFFORT', ''),\n"
+           " os.environ.get('FORGE_CLAUDE_REASONING_EFFORT', '')]))\n"; }
     { std::ofstream f(dir / "generate.py");
       f << "import os, pathlib, sys\n"
            "pathlib.Path(sys.argv[1]).write_text('|'.join([\n"
            " os.environ.get('FORGE_MODEL_PROVIDER', ''),\n"
            " os.environ.get('FORGE_CODEX_MODEL', ''),\n"
-           " os.environ.get('FORGE_CLAUDE_MODEL', '')]))\n"; }
+           " os.environ.get('FORGE_CLAUDE_MODEL', ''),\n"
+           " os.environ.get('FORGE_CODEX_REASONING_EFFORT', ''),\n"
+           " os.environ.get('FORGE_CLAUDE_REASONING_EFFORT', '')]))\n"; }
 
-    forge_modular::ProcessEngine engine(dir.string(), (dir / "run.log").string());
-    const auto codex_out = dir / "codex.env";
-    engine.submit(codex_out.string(), true,
-                  {.provider_id = "codex", .model = "gpt-5.6"});
-    for (int i = 0; i < 200 && !std::filesystem::exists(codex_out); ++i)
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    REQUIRE(std::filesystem::exists(codex_out));
-    { std::ifstream f(codex_out);
-      std::string value((std::istreambuf_iterator<char>(f)), {});
-      CHECK(value == "codex|gpt-5.6|"); }
+    const auto route = [&](const char* name, bool patch_mode,
+                           forge::ModelSelection selection,
+                           forge::ReasoningEffort effort) {
+        forge::Settings::instance().set_effort(effort);
+        const auto out = dir / (std::string(name) + ".env");
+        forge_modular::ProcessEngine engine(
+            dir.string(), (dir / (std::string(name) + ".log")).string());
+        engine.submit(out.string(), patch_mode, selection);
+        for (int i = 0; i < 200 && !std::filesystem::exists(out); ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        CHECK(std::filesystem::exists(out));
+        if (!std::filesystem::exists(out)) return std::string{};
+        std::ifstream f(out);
+        return std::string((std::istreambuf_iterator<char>(f)), {});
+    };
 
-    const auto claude_out = dir / "claude.env";
-    engine.submit(claude_out.string(), true,
-                  {.provider_id = "claude", .model = "claude-opus-5"});
-    for (int i = 0; i < 200 && !std::filesystem::exists(claude_out); ++i)
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    REQUIRE(std::filesystem::exists(claude_out));
-    { std::ifstream f(claude_out);
-      std::string value((std::istreambuf_iterator<char>(f)), {});
-      CHECK(value == "claude||claude-opus-5"); }
+    // The friendly family selection resolves to Sol, and the UI's effort is
+    // snapshotted into the exact provider environment for both generators.
+    CHECK(route("codex", true, {"codex", "gpt-5.6"},
+                forge::ReasoningEffort::medium) ==
+          "codex|gpt-5.6-sol||medium|");
+    CHECK(route("module", false, {"codex", "gpt-5.6"},
+                forge::ReasoningEffort::max) ==
+          "codex|gpt-5.6-sol||max|");
 
-    const auto module_out = dir / "module.env";
-    engine.submit(module_out.string(), false,
-                  {.provider_id = "codex", .model = "gpt-5.6"});
-    for (int i = 0; i < 200 && !std::filesystem::exists(module_out); ++i)
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    REQUIRE(std::filesystem::exists(module_out));
-    { std::ifstream f(module_out);
-      std::string value((std::istreambuf_iterator<char>(f)), {});
-      CHECK(value == "codex|gpt-5.6|"); }
+    // Concrete variants stay opaque; no display alias can replace them.
+    CHECK(route("sol", true, {"codex", "gpt-5.6-sol"},
+                forge::ReasoningEffort::high) ==
+          "codex|gpt-5.6-sol||high|");
+    CHECK(route("terra", true, {"codex", "gpt-5.6-terra"},
+                forge::ReasoningEffort::low) ==
+          "codex|gpt-5.6-terra||low|");
 
+    // Provider-specific variables cannot bleed across a provider switch.
+    CHECK(route("claude", true, {"claude", "claude-opus-5"},
+                forge::ReasoningEffort::high) ==
+          "claude||claude-opus-5||high");
+
+    forge::Settings::instance().set_effort(original_effort);
     std::filesystem::remove_all(dir, ec);
 }
 
