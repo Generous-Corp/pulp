@@ -542,10 +542,14 @@ def main(argv):
             f"{len(mod.get('params', []))} params, "
             f"{len(mod.get('inputs', []))} in, {len(mod.get('outputs', []))} out)")
 
-        json.dump({"forge_generated": True, "modules": [mod]},
-                  open(os.path.join(PACK, "modules", f"{slug.lower()}.json"), "w"), indent=2)
-        with open(os.path.join(PACK, "src", f"{slug}.cpp"), "w") as f:
-            f.write(dsp)
+        try:
+            _write_generated_module(mod, dsp)
+        except ExistingModuleSlug as e:
+            log(f"refused the generated slug {slug!r}: {e}")
+            ctx = ("The module slug was rejected before any file was written:\n"
+                   f"{e}\nChoose a new slug that does not replace an existing "
+                   "module or source file.")
+            continue
         _wire_entry(slug)
         _assert_no_duplicate_models()
 
@@ -655,6 +659,53 @@ def check_uses_pulp_dsp(slug: str, mod: dict) -> tuple[bool, str]:
     if not used:
         return False, "pulp/signal is mentioned but nothing is included from it"
     return True, f"built from Pulp's DSP: {', '.join(used)}"
+
+
+class ExistingModuleSlug(ValueError):
+    """A generated slug would replace something already in the module pack."""
+
+
+def _write_generated_module(mod: dict, dsp: str) -> None:
+    """Write a new module only when its slug owns no existing pack identity.
+
+    The manifest filename is lower-cased, the C++ filename preserves case, and
+    Rack keys models by slug. Check all three identities before opening either
+    destination: otherwise choosing an ordinary slug such as ``VCO`` truncates
+    the built-in manifest before the later duplicate scan has anything left to
+    compare.
+    """
+    slug = mod["slug"]
+    folded = slug.casefold()
+    manifest_path = os.path.join(PACK, "modules", f"{slug.lower()}.json")
+    source_path = os.path.join(PACK, "src", f"{slug}.cpp")
+
+    for path, kind in ((manifest_path, "manifest"),
+                       (source_path, "source file")):
+        if os.path.lexists(path):
+            raise ExistingModuleSlug(
+                f"{kind} already exists at {path}; replacement is not an "
+                "implicit generation operation")
+
+    modules_dir = os.path.join(PACK, "modules")
+    for name in sorted(os.listdir(modules_dir)):
+        if not name.endswith(".json") or name.startswith("_"):
+            continue
+        try:
+            with open(os.path.join(modules_dir, name)) as f:
+                doc = json.load(f)
+        except (OSError, ValueError):
+            continue
+        for existing in doc.get("modules", []):
+            existing_slug = existing.get("slug")
+            if existing_slug and existing_slug.casefold() == folded:
+                raise ExistingModuleSlug(
+                    f"model slug {existing_slug!r} is already declared by "
+                    f"{name}; Rack model identities must be unique")
+
+    with open(manifest_path, "w") as f:
+        json.dump({"forge_generated": True, "modules": [mod]}, f, indent=2)
+    with open(source_path, "w") as f:
+        f.write(dsp)
 
 
 def _assert_no_duplicate_models() -> None:
