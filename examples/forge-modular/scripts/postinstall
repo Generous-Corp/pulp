@@ -39,9 +39,6 @@ if [ -z "$USER_HOME" ] || [ ! -d "$USER_HOME" ]; then
     exit 0
 fi
 
-USER_GROUP="$(/usr/bin/id -g "$CONSOLE_USER" 2>/dev/null)"
-[ -n "$USER_GROUP" ] || USER_GROUP="staff"
-
 VOLUME="${3:-/}"
 VOLUME="${VOLUME%/}"
 APP="$VOLUME/Applications/Forge Modular.app"
@@ -53,8 +50,12 @@ if [ ! -x "$PLACER" ]; then
 fi
 
 # One rule, shared with the app's own repair path, rather than a second copy
-# that drifts. It is idempotent and refuses to replace a newer pack.
-"$PLACER" --source "$APP" --home "$USER_HOME" --owner "$CONSOLE_USER:$USER_GROUP"
+# that drifts. Run it with the user's credentials, not merely against the
+# user's path while still root: every component below HOME is user-controlled
+# and may be a symlink. Dropping privilege makes following one no more powerful
+# than the app's normal first-run repair path.
+/usr/bin/sudo -H -u "$CONSOLE_USER" -- \
+    "$PLACER" --source "$APP" --home "$USER_HOME"
 
 # NEVER fail. A non-zero postinstall aborts the installation and takes the app
 # with it, so a machine that could not receive the modules would end up with no

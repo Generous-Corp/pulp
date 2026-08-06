@@ -218,6 +218,17 @@ else
     fail "postinstall does not resolve the console user's home directory"
 fi
 
+# HOME is controlled by that user. The package script must drop root before
+# traversing it, otherwise a pre-created Rack2 symlink becomes a privileged
+# write primitive even when the final archive itself is harmless.
+ran=$((ran + 1))
+if grep -q '/usr/bin/sudo -H -u "\$CONSOLE_USER"' "$POSTINSTALL" && \
+   ! grep -q -- '--owner' "$POSTINSTALL"; then
+    ok "postinstall drops to the console user before writing below HOME"
+else
+    fail "postinstall traverses user-controlled HOME paths while privileged"
+fi
+
 # ── uninstall.sh removes what install_pack places ────────────────────────────
 # The two sides have to name the same paths. install_pack drops an ARCHIVE;
 # uninstall.sh used to remove only the unpacked directory, so a user who never

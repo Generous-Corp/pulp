@@ -285,7 +285,14 @@ public:
         const bool changed = visible_ != v;
         visible_ = v;
         invalidate_subtree_caches_up();
-        if (changed) request_repaint();
+        if (changed) {
+            // Parent layout decides whether this child occupies space. Dirty
+            // the whole path so showing a child assigns fresh bounds and
+            // hiding it lets siblings close the gap before the repaint.
+            for (View* node = this; node; node = node->parent_)
+                node->invalidate_layout();
+            request_repaint();
+        }
     }
 
     // ── Layout ───────────────────────────────────────────────────────────

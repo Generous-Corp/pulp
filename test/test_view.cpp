@@ -199,6 +199,25 @@ TEST_CASE("View hit testing", "[view]") {
     REQUIRE(root.hit_test({50, 50}) == &root);
 }
 
+TEST_CASE("visibility changes invalidate the ancestor layout chain", "[view][layout]") {
+    View root;
+    auto parent = std::make_unique<View>();
+    auto* parent_ptr = parent.get();
+    auto child = std::make_unique<View>();
+    auto* child_ptr = child.get();
+    parent->add_child(std::move(child));
+    root.add_child(std::move(parent));
+
+    root.clear_layout_dirty();
+    parent_ptr->clear_layout_dirty();
+    child_ptr->clear_layout_dirty();
+    child_ptr->set_visible(false);
+
+    CHECK(root.layout_dirty());
+    CHECK(parent_ptr->layout_dirty());
+    CHECK(child_ptr->layout_dirty());
+}
+
 TEST_CASE("View hit testing honors disabled hit-testable and overflow states",
           "[view]") {
     View root;

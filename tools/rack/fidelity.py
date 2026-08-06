@@ -773,15 +773,17 @@ def judge(given: dict, got: Run, taps: list[tuple],
     # Every tap is reported; the FIRST of each kind is the one judged. A
     # stereo pair is two taps carrying one melody, and reading the second over
     # the first would make the verdict depend on which channel was listed last.
+    audio_selected = False
+    pitch_selected = False
     for ch, (src_mod, src_out, kind) in enumerate(taps):
         where = f"  tap {ch} ({kind}, module {src_mod} output {src_out}):"
         if kind == "audio":
             notes, dropped = heard_notes(got.frames[ch], rate)
             level = rms(got.frames[ch])
-            if not v.notes:
+            if not audio_selected:
                 v.notes, v.dropped, v.distinct = notes, dropped, distinct(notes)
                 v.level = level
-            v.distinct = v.distinct or distinct(notes)
+                audio_selected = True
             v.lines.append(f"{where} {rms_label(level)}, {len(notes)} notes, "
                            f"{len(distinct(notes))} distinct — "
                            f"{distinct(notes)} semitones from middle C "
@@ -790,10 +792,11 @@ def judge(given: dict, got: Run, taps: list[tuple],
             volts = held_voltages(got.frames[ch], rate)
             v.lines.append(f"{where} {len(volts)} held values — "
                            f"{distinct(volts, STEP_TOLERANCE)} V")
-            if not v.volts:
+            if not pitch_selected:
                 v.volts = volts
                 v.written, v.played_why = step_values(given, src_mod,
                                                       names or {})
+                pitch_selected = True
 
     heard = distinct(v.volts, STEP_TOLERANCE)
     want = distinct(v.written, STEP_TOLERANCE)

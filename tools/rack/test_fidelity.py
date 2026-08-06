@@ -474,6 +474,23 @@ def test_a_capture_is_read_back_channel_by_channel() -> int:
                  "interleaved frames split back into their channels", str(got))
 
 
+def test_a_silent_first_audio_tap_is_not_replaced_by_a_later_channel() -> int:
+    rate = 44100.0
+    given = fixture()
+    samples = int(rate)
+    got = F.Run(_engine_from(given), {"sampleRate": rate, "frames": samples},
+                [[0.0] * samples, _tone(F.C4_HZ, 1.0, rate)], "", "")
+    verdict = F.judge(given, got,
+                      [(VCO, 2, "audio"), (VCO, 3, "audio")])
+    bad = check(verdict.notes == [] and verdict.distinct == [],
+                "a later healthy channel cannot replace the silent first tap",
+                str(verdict.notes))
+    bad += check(verdict.level == 0.0,
+                 "the judged level remains the selected first channel",
+                 str(verdict.level))
+    return bad
+
+
 # ── With Rack ────────────────────────────────────────────────────────────────
 
 def _run_patch(patch: dict, label: str, probe: str, seconds: float = 4.0):
@@ -633,6 +650,7 @@ def main(argv: list[str]) -> int:
                test_tracking_is_blind_to_tuning_but_not_to_intervals,
                test_scatter_is_not_reported_as_mistuning,
                test_a_capture_is_read_back_channel_by_channel,
+               test_a_silent_first_audio_tap_is_not_replaced_by_a_later_channel,
                test_audio_artifact_contains_only_audio_taps):
         print(f"{fn.__name__}:")
         bad += fn()
