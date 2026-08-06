@@ -206,6 +206,36 @@ def test_the_launch_is_a_plain_exec() -> int:
     return bad
 
 
+def test_the_crash_report_outranks_the_scraped_log() -> int:
+    """A macOS crash report decides the verdict where one exists.
+
+    Rack's own log carries the stack only when its signal handler got to run;
+    the crash report is written either way. And an unrecognised crash must
+    stay fatal on the first one -- it might be ours, and retrying something
+    that might be ours is how a real defect gets papered over.
+    """
+    class FakeCrash:
+        def __init__(self, retryable, summary):
+            self.retryable, self.summary = retryable, summary
+
+    bad = 0
+    coremidi = [FakeCrash(True, "aborted in CoreMIDI driver init")]
+    unknown = [FakeCrash(False, "removeModule_NoLock assert")]
+
+    bad += check(mr.exit_verdict("", coremidi) ==
+                 "Rack aborted in CoreMIDI before it reached the patch",
+                 "a retryable crash is reported as the CoreMIDI abort",
+                 f"got {mr.exit_verdict('', coremidi)!r}")
+    bad += check("removeModule_NoLock assert" in mr.exit_verdict("", unknown),
+                 "an unrecognised crash is reported with its own summary",
+                 f"got {mr.exit_verdict('', unknown)!r}")
+    # The log said nothing; the report is what supplied the verdict in both.
+    bad += check(mr.exit_verdict("") == "Rack exited before it scanned",
+                 "and with no report at all, the log is the fallback",
+                 f"got {mr.exit_verdict('')!r}")
+    return bad
+
+
 def test_a_coremidi_abort_is_recognised_by_its_stack() -> int:
     """The abort is claimed on Rack's own frames, not on "the launch failed".
 
@@ -279,6 +309,7 @@ def main() -> int:
                test_a_module_left_by_an_older_scanner_is_named,
                test_scan_is_read_from_racks_own_log,
                test_the_launch_is_a_plain_exec,
+               test_the_crash_report_outranks_the_scraped_log,
                test_a_coremidi_abort_is_recognised_by_its_stack,
                test_launch_closes_stdin):
         print(f"{fn.__name__}:")

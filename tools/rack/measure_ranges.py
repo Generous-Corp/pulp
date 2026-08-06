@@ -42,6 +42,8 @@ import sys
 import tempfile
 import time
 
+import crash_watch
+
 # Pro before Free, because a machine with both is a machine where Pro is the
 # one being used. Overridable, because neither is guaranteed to be the build
 # somebody wants measured.
@@ -308,7 +310,7 @@ def rack_argv(rack: str, user_dir: str, patch: str) -> list[str]:
     return [rack, "-h", "-u", user_dir, patch]
 
 
-def exit_verdict(log: str) -> str:
+def exit_verdict(log: str, crashes: list | None = None) -> str:
     """Why a launch that ended on its own did not measure anything.
 
     Reports what was seen and does not name a cause it cannot check. The
@@ -316,7 +318,17 @@ def exit_verdict(log: str) -> str:
     a missing GUI session, and client exhaustion from relaunching in a loop --
     and neither survived measurement, so this says the observable thing and
     leaves the reader with the skill's account rather than a false lead.
+
+    A macOS crash report is the better witness where one exists: Rack's own
+    log carries the stack only when its signal handler got to run, and the
+    report is written either way. The log stays as the fallback so this keeps
+    working on a machine with reporting turned off.
     """
+    if crashes:
+        if all(c.retryable for c in crashes):
+            return "Rack aborted in CoreMIDI before it reached the patch"
+        worst = next(c for c in crashes if not c.retryable)
+        return f"Rack died before it scanned: {worst.summary}"
     if aborted_in_coremidi(log):
         return "Rack aborted in CoreMIDI before it reached the patch"
     return "Rack exited before it scanned"
@@ -334,8 +346,9 @@ def aborted_in_coremidi(log: str) -> bool:
     return any(mark in log for mark in ABORT_MARKS)
 
 
-def launch_once(rack: str, patch: str, scan_window: float) -> tuple[str, str]:
-    """One headless launch. Returns (log, "" | why it did not measure).
+def launch_once(rack: str, patch: str,
+                scan_window: float) -> tuple[str, str, list]:
+    """One headless launch. Returns (log, "" | why it failed, crash reports).
 
     Waits on the scan rather than on a clock. Rack truncates its log at
     startup and it names the patch it was given, so a log mentioning THIS
@@ -351,6 +364,8 @@ def launch_once(rack: str, patch: str, scan_window: float) -> tuple[str, str]:
     to the library's history and never truncates it.
     """
     scratch = make_scratch()
+    # Marked before the launch so only THIS launch's crash reports are read.
+    mark = crash_watch.now()
     proc = subprocess.Popen(rack_argv(rack, scratch, patch),
                             # stdin from /dev/null, or Rack's "Press enter to
                             # exit." waits on OUR terminal forever and leaves a
@@ -363,6 +378,7 @@ def launch_once(rack: str, patch: str, scan_window: float) -> tuple[str, str]:
                             stderr=subprocess.DEVNULL)
     log = ""
     why = ""
+    crashes: list = []
     try:
         started = time.time()
         loading = False
@@ -381,7 +397,10 @@ def launch_once(rack: str, patch: str, scan_window: float) -> tuple[str, str]:
                 # session was missing when it demonstrably was not would be
                 # the tool inventing a diagnosis -- which is how a reader ends
                 # up debugging the wrong machine.
-                why = exit_verdict(log)
+                # macOS writes the report a moment after the process dies.
+                time.sleep(0.6)
+                crashes = crash_watch.since(mark)
+                why = exit_verdict(log, crashes)
                 break
             waited = time.time() - started
             if not loading and waited > LOAD_WINDOW:
@@ -403,7 +422,7 @@ def launch_once(rack: str, patch: str, scan_window: float) -> tuple[str, str]:
         if not why and os.path.exists(measured_map):
             shutil.copy2(measured_map, PORTMAP)
         drop_scratch(scratch)
-    return log, why
+    return log, why, crashes
 
 
 def run_rack(rack: str, patch: str, scan_window: float,
@@ -429,10 +448,16 @@ def run_rack(rack: str, patch: str, scan_window: float,
     why = "no attempt was made"
     aborts = 0
     for attempt in range(1, attempts + 1):
-        log, why = launch_once(rack, patch, scan_window)
+        log, why, crashes = launch_once(rack, patch, scan_window)
         if not why:
             return log, ""
-        if aborted_in_coremidi(log):
+        # An unrecognised crash is ours until proven otherwise, so it is fatal
+        # on the first one. Only a crash we can PROVE predates patch loading
+        # may be retried, and retrying that cannot hide a defect of ours
+        # because none of our code has run yet.
+        if any(not c.retryable for c in crashes):
+            return log, why
+        if crashes or aborted_in_coremidi(log):
             aborts += 1
             if aborts >= ABORT_ATTEMPTS:
                 return log, (f"{aborts} launches died in CoreMIDI before "

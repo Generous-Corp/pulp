@@ -474,6 +474,17 @@ what Rack loads. Same version in both places is not the documented refusal
 live. **Verify by hash, not by exit code**, and if the directory is stale move
 it aside and unpack the archive over it.
 
+**A measured range can be inverted, and a default can sit outside it.** Rack's
+`configParam` does not require `min < max` — a reversed knob is a legal
+configuration — and a vendor may declare a default outside its own bounds (0
+usually meaning "auto"). On this machine's library: **10 params across 7
+modules are inverted, and 8 across 7 have an out-of-range default**, about
+0.1% each of 9,307 ranged params. They are faithful, not corrupt: re-measuring
+reproduces them exactly. Anything consuming the map must therefore use
+`lo, hi = sorted((minValue, maxValue))` before normalising or sampling —
+`(v - min) / (max - min)` divides by a negative on an inverted range and
+silently mirrors the control.
+
 **A partial sweep is the outcome that looks finished and is not.** An aborted
 launch leaves its subjects exactly as they were, so a batch can end with some
 modules still carrying an entry from an older scanner: present, parsing, and
