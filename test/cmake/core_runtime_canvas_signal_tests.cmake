@@ -217,6 +217,16 @@ pulp_add_test_suite(pulp-test-osc-phase LIBRARIES pulp::signal)
 # The BLEP/BLAMP kernels are gated on measured alias rejection, so this suite
 # links the analysis lib for the shared tone-projection analyzers.
 pulp_add_test_suite(pulp-test-osc-blep LIBRARIES pulp::signal pulp::audio-analysis)
+# The causal minBLEP accumulator is gated on deterministic RT behavior and
+# measured alias residuals against the current polyBLEP path.
+pulp_add_test_suite(pulp-test-osc-minblep
+    SOURCES test_osc_minblep.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal pulp::audio-analysis)
+add_test(NAME minblep-table-reproducible
+    COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_SOURCE_DIR}/tools/scripts/generate_minblep_table.py
+        --check
+        --output ${CMAKE_SOURCE_DIR}/core/signal/include/pulp/signal/osc/detail/minblep_table.hpp)
 # The VA shapes are gated on measured alias rejection, hence the analysis lib.
 pulp_add_test_suite(pulp-test-osc-va LIBRARIES pulp::signal pulp::audio-analysis)
 # Sync and through-zero FM are gated on measured alias rejection too.

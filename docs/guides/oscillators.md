@@ -1,9 +1,10 @@
 # Oscillator suite
 
 `pulp::signal::osc` (`core/signal/include/pulp/signal/osc/`) is a family of
-seven headers that compose into four oscillator "flavors" — VA, VCO, DCO, and
-WT (in two tiers) — over two shared primitives, a phase accumulator and a set
-of BLEP/BLAMP anti-aliasing kernels. This is a **different, newer class
+eight headers that compose into four oscillator "flavors" — VA, VCO, DCO, and
+WT (in two tiers) — over a phase accumulator and two discontinuity-correction
+options: polynomial BLEP/BLAMP kernels and a fixed-capacity minBLEP accumulator.
+This is a **different, newer class
 family** than `signal::Oscillator` (`oscillator.hpp`, documented in
 [Signal Processing §3](signal-processing.md#3-oscillators)) — that one is a
 simpler polyBLEP oscillator with float phase and an integrated triangle;
@@ -265,6 +266,53 @@ one sample to apply the `before` term. This is a two-point polynomial
 approximation of the ideal (infinite-support) BLEP, not a tabulated
 minBLEP: it buys tens of dB over the trivial waveform, not the ~100 dB a
 deep-floor design reaches.
+
+### `minblep.hpp` — bounded causal minBLEP accumulation
+
+`MinBlepAccumulator<MaximumEvents>` is the higher-quality option for a new
+oscillator that can afford a 32-sample correction tail. Call `next()` once per
+output sample and add it to the trivial waveform, then call
+`insert(position, height)` for every discontinuity found while advancing to the
+next sample. `position` is in `[0, 1]`; `height` is always after minus before.
+The default capacity is eight live events, uses at most 256 bytes of per-voice
+state, and always scans exactly eight slots per sample. The shared 32-sample by
+64-phase table is about 8 KiB and is not copied into each voice.
+
+```cpp
+MinBlepAccumulator<> correction;
+
+double output = saw(phase.phase()) + correction.next();
+phase.advance(increment);
+for (const auto& event : phase.events()) {
+    const double height = saw_limit(event.phase_after)
+                        - saw_limit(event.phase_before);
+    if (correction.insert(event.frac, height)
+        == MinBlepInsertResult::capacity_exceeded) {
+        // The new event was dropped; existing correction tails remain intact.
+    }
+}
+```
+
+The kernel is generated reproducibly by
+`tools/scripts/generate_minblep_table.py` from the windowed-sinc, real-cepstrum
+minimum-phase construction described by Eli Brandt in *Hard Sync Without
+Aliasing* (ICMC 2001). The generator and a CTest freshness check are the
+provenance; the checked-in constants are not an opaque hand-tuned table.
+
+The measured product fixtures compose this primitive with `PhaseAccumulator`
+for free-running saw and hard sync. Across 1.1–6.3 kHz, the worst in-band saw
+alias is 38–47 dB below the existing polyBLEP path; the hard-sync fixture is
+35.76 dB lower. The regression floor is 30 dB. Forge's current oscillator
+catalog remains unchanged: this is a public construction primitive for an
+explicit future oscillator realization, not a silent sound change to an
+existing product identity.
+
+Capacity overflow is observable and deterministic. Slots are allocated and
+summed in ascending order; when all are live, `insert` returns
+`capacity_exceeded`, drops only the new event, and leaves existing tails alone.
+At extreme near-Nyquist event rates, callers can count that result, increase the
+compile-time capacity, or accept the documented degradation. `reset()` clears
+all tails immediately, and rendering is invariant to host block partitioning.
 
 ## RT contract
 
