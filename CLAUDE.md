@@ -670,6 +670,11 @@ For old clean unmerged work, retain the local branch and either prove an exact
 remote ref or create and verify a complete `git bundle` before removal.
 Lineage metadata is a discovery aid, not deletion authorization: always recheck
 live cleanliness/activity and the exact merge, remote-ref, or bundle proof.
+The Claude plugin and Codex project hook read this shared metadata at every
+session start. Exact active records are silent; superseded, merged, archived,
+detached, stale-SHA, and unclassified worktrees inject a warning before the
+agent begins. A superseded warning is a stop sign: move to its recorded
+successor rather than continuing in the old checkout.
 
 Fresh worktrees must use the shared dependency path delivered by the normal
 Pulp workflow. Prefer `pulp build`, `pulp dev`, or `pulp loop`: a cold or
