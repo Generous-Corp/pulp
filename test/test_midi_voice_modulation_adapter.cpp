@@ -93,3 +93,27 @@ TEST_CASE("Voice modulation adapter reset and hot swap clear voice ownership",
         CHECK_FALSE(adapter.release_voice(0, 0));
     }
 }
+
+TEST_CASE("Voice modulation adapter preserves wide MPE generations",
+          "[audio][midi][voice-mod][generation]") {
+    pulp::audio::MidiVoiceModulationAdapter<1> adapter;
+    constexpr auto generation = std::numeric_limits<pulp::midi::MpeNoteGeneration>::max();
+    const auto on = pulp::midi::MidiEvent::note_on(3, 67, 101);
+
+    REQUIRE(adapter.note_event(0, on, generation));
+    REQUIRE(adapter.state(0)->note_id == generation);
+
+    pulp::midi::MpeNoteState expression;
+    expression.active = true;
+    expression.channel = 3;
+    expression.note = 67;
+    expression.note_id = generation;
+    expression.pressure = 0.75f;
+    REQUIRE(adapter.mpe_expression(0, expression));
+    REQUIRE(adapter.state(0)->pressure == Catch::Approx(0.75f));
+
+    REQUIRE_FALSE(adapter.release_voice(0, generation - 1));
+    REQUIRE(adapter.state(0)->active);
+    REQUIRE(adapter.release_voice(0, generation));
+    REQUIRE_FALSE(adapter.state(0)->active);
+}

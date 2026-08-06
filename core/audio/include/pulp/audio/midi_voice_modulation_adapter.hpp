@@ -18,7 +18,7 @@ struct MidiVoiceModulationState {
     std::uint8_t channel = 0;
     std::uint8_t note = 0;
     std::uint8_t velocity = 0;
-    std::uint32_t note_id = 0;
+    midi::MpeNoteGeneration note_id = 0;
     float pitch_cents = 0.0f;
     float pressure = 0.0f;
     float timbre = 0.0f;
@@ -35,7 +35,7 @@ template <std::size_t MaximumVoices> class MidiVoiceModulationAdapter {
     }
 
     bool note_event(std::size_t voice_index, const midi::MidiEvent& event,
-                    std::uint32_t note_id) noexcept {
+                    midi::MpeNoteGeneration note_id) noexcept {
         if (voice_index >= MaximumVoices || note_id == 0 ||
             (!event.is_note_on() && !event.is_note_off()))
             return false;
@@ -108,7 +108,7 @@ template <std::size_t MaximumVoices> class MidiVoiceModulationAdapter {
         return voice_index < MaximumVoices ? &voices_[voice_index] : nullptr;
     }
 
-    bool release_voice(std::size_t voice_index, std::uint32_t note_id) noexcept {
+    bool release_voice(std::size_t voice_index, midi::MpeNoteGeneration note_id) noexcept {
         if (voice_index >= MaximumVoices || note_id == 0 || !voices_[voice_index].active ||
             voices_[voice_index].note_id != note_id)
             return false;

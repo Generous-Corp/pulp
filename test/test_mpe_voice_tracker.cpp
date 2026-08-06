@@ -3,6 +3,8 @@
 
 #include <pulp/midi/mpe_voice_tracker.hpp>
 
+#include <limits>
+
 using namespace pulp::midi;
 using Catch::Approx;
 
@@ -81,6 +83,71 @@ TEST_CASE("MpeVoiceTracker retrigger updates velocity and note id in place",
     REQUIRE(retriggered->velocity == 111);
     REQUIRE(retriggered->note_id > first_id);
     REQUIRE(note_on_callbacks == 2);
+}
+
+TEST_CASE("MpeVoiceTracker generation exhaustion refuses note-ons without stale collision",
+          "[midi][mpe][generation]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    constexpr auto maximum = std::numeric_limits<MpeNoteGeneration>::max();
+
+    REQUIRE_FALSE(tracker.advance_note_generation(0));
+    REQUIRE(tracker.advance_note_generation(maximum - 1));
+    REQUIRE_FALSE(tracker.advance_note_generation(1));
+
+    int note_on_callbacks = 0;
+    tracker.on_note_on = [&](const MpeNoteState&) { ++note_on_callbacks; };
+
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 64)));
+    REQUIRE(tracker.find(1, 60)->note_id == maximum - 1);
+    REQUIRE_FALSE(tracker.advance_note_generation(maximum));
+
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 96)));
+    const auto* final_generation = tracker.find(1, 60);
+    REQUIRE(final_generation != nullptr);
+    REQUIRE(final_generation->note_id == maximum);
+    REQUIRE(final_generation->velocity == 96);
+    REQUIRE(note_on_callbacks == 2);
+    REQUIRE(tracker.note_generation_exhausted());
+
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 127)));
+    REQUIRE(tracker.process(MidiEvent::note_on(2, 62, 100)));
+    REQUIRE(tracker.find(1, 60)->note_id == maximum);
+    REQUIRE(tracker.find(1, 60)->velocity == 96);
+    REQUIRE(tracker.find(2, 62) == nullptr);
+    REQUIRE(tracker.active_count() == 1);
+    REQUIRE(note_on_callbacks == 2);
+    REQUIRE(tracker.refused_note_on_count() == 2);
+
+    REQUIRE(tracker.process(MidiEvent::note_off(1, 60)));
+    REQUIRE(tracker.active_count() == 0);
+    tracker.reset();
+    REQUIRE(tracker.note_generation_exhausted());
+    REQUIRE(tracker.refused_note_on_count() == 2);
+    REQUIRE_FALSE(tracker.advance_note_generation(maximum));
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 100)));
+    REQUIRE(tracker.active_count() == 0);
+    REQUIRE(tracker.refused_note_on_count() == 3);
+}
+
+TEST_CASE("MpeVoiceTracker counts exhaustion before the full-table drop policy",
+          "[midi][mpe][generation]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    constexpr auto maximum = std::numeric_limits<MpeNoteGeneration>::max();
+    constexpr auto first = maximum - (MpeVoiceTracker::kMaxNotes - 1);
+    REQUIRE(tracker.advance_note_generation(first));
+
+    for (std::size_t note = 0; note < MpeVoiceTracker::kMaxNotes; ++note) {
+        REQUIRE(tracker.process(MidiEvent::note_on(
+            1, static_cast<std::uint8_t>(note), 100)));
+    }
+    REQUIRE(tracker.active_count() == MpeVoiceTracker::kMaxNotes);
+    REQUIRE(tracker.note_generation_exhausted());
+    REQUIRE(tracker.find(1, 127)->note_id == maximum);
+
+    REQUIRE(tracker.process(MidiEvent::note_on(2, 0, 100)));
+    REQUIRE(tracker.active_count() == MpeVoiceTracker::kMaxNotes);
+    REQUIRE(tracker.find(2, 0) == nullptr);
+    REQUIRE(tracker.refused_note_on_count() == 1);
 }
 
 TEST_CASE("MpeVoiceTracker unmatched note-off is consumed without callback",

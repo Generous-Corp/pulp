@@ -4,6 +4,7 @@
 #include <pulp/midi/ump.hpp>
 
 #include <cstdint>
+#include <limits>
 
 namespace pulp::midi {
 
@@ -184,13 +185,22 @@ std::size_t MpeVoiceTracker::active_count() const {
 
 const MpeNoteState* MpeVoiceTracker::find(uint8_t channel, uint8_t note) const {
     const MpeNoteState* best = nullptr;
-    uint32_t best_id = 0;
+    MpeNoteGeneration best_id = 0;
     for (const auto& s : notes_) {
         if (!s.active) continue;
         if (s.channel != channel || s.note != note) continue;
         if (s.note_id > best_id) { best = &s; best_id = s.note_id; }
     }
     return best;
+}
+
+bool MpeVoiceTracker::advance_note_generation(MpeNoteGeneration next) noexcept {
+    if (next == 0 || note_generation_exhausted() || active_count() != 0
+        || next < next_note_generation_) {
+        return false;
+    }
+    next_note_generation_ = next;
+    return true;
 }
 
 std::size_t MpeVoiceTracker::snapshot(MpeNoteState* out, std::size_t max) const {
@@ -212,18 +222,28 @@ void MpeVoiceTracker::reset() {
     channel_timbre_.fill(0.0f);
     lower_zone_state_ = {};
     upper_zone_state_ = {};
-    next_note_id_ = 1;
 }
 
 // ── Private helpers ────────────────────────────────────────────────────────
 
 void MpeVoiceTracker::add_note(uint8_t ch, uint8_t note, uint8_t velocity, bool upper) {
+    // Exhaustion takes precedence over the ordinary table-full policy so the
+    // terminal refusal counter remains reliable even when every slot is live.
+    if (note_generation_exhausted()) {
+        record_generation_refusal();
+        return;
+    }
     // Reuse existing slot if one matches (retrigger). Re-attach the
     // slot so channel-level controllers resume affecting it.
     for (auto& s : notes_) {
         if (s.active && s.channel == ch && s.note == note) {
+            const auto generation = take_note_generation();
+            if (!generation) {
+                record_generation_refusal();
+                return;
+            }
             s.velocity = velocity;
-            s.note_id = next_note_id_++;
+            s.note_id = *generation;
             s.is_upper_zone = upper;
             s.detached = false;
             // Re-seed expression from the per-channel caches, mirroring the
@@ -240,12 +260,17 @@ void MpeVoiceTracker::add_note(uint8_t ch, uint8_t note, uint8_t velocity, bool 
     }
     for (auto& s : notes_) {
         if (s.active) continue;
+        const auto generation = take_note_generation();
+        if (!generation) {
+            record_generation_refusal();
+            return;
+        }
         s = MpeNoteState{};
         s.active = true;
         s.channel = ch;
         s.note = note;
         s.velocity = velocity;
-        s.note_id = next_note_id_++;
+        s.note_id = *generation;
         s.is_upper_zone = upper;
         // Seed with current per-channel expression so freshly-added
         // notes inherit any running MPE state.
@@ -258,14 +283,29 @@ void MpeVoiceTracker::add_note(uint8_t ch, uint8_t note, uint8_t velocity, bool 
     // Table full — drop silently (audio-thread policy).
 }
 
+std::optional<MpeNoteGeneration> MpeVoiceTracker::take_note_generation() noexcept {
+    if (next_note_generation_ == 0) return std::nullopt;
+    const auto generation = next_note_generation_;
+    next_note_generation_ = generation == std::numeric_limits<MpeNoteGeneration>::max()
+        ? 0
+        : generation + 1;
+    return generation;
+}
+
+void MpeVoiceTracker::record_generation_refusal() noexcept {
+    if (refused_note_on_count_ != std::numeric_limits<std::uint64_t>::max()) {
+        ++refused_note_on_count_;
+    }
+}
+
 void MpeVoiceTracker::remove_note(uint8_t ch, uint8_t note) {
     // Oldest matching note wins (FIFO), matching typical MPE hardware
     // which retriggers with the newest and releases oldest-first.
     MpeNoteState* oldest = nullptr;
-    uint32_t oldest_id = UINT32_MAX;
+    MpeNoteGeneration oldest_id = std::numeric_limits<MpeNoteGeneration>::max();
     for (auto& s : notes_) {
         if (!s.active || s.channel != ch || s.note != note) continue;
-        if (s.note_id < oldest_id) { oldest = &s; oldest_id = s.note_id; }
+        if (!oldest || s.note_id < oldest_id) { oldest = &s; oldest_id = s.note_id; }
     }
     if (!oldest) return;
     MpeNoteState copy = *oldest;

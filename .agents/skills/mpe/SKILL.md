@@ -208,9 +208,12 @@ bridge to `VoiceModulationBuffer`. The instrument's existing allocator supplies
 the voice index; the adapter records note/MPE values for that slot and never
 allocates or steals a voice. Putting this bridge in `core/midi` would reverse
 the established `audio -> midi` dependency and create a cycle. Pass the same
-nonzero `note_id` generation to note-on, expression, and note-off calls; stale
-identity updates are rejected. `release_voice()` also requires the matching
-nonzero generation; use `flush()` or `reset()` only for an intentional
+nonzero 64-bit `MpeNoteGeneration` to note-on, expression, and note-off calls;
+stale identity updates are rejected. The tracker never recycles generations on
+reset and permanently refuses note-ons after generation exhaustion; surface
+that state via `note_generation_exhausted()` / `refused_note_on_count()`.
+`release_voice()` also requires the matching nonzero generation; use `flush()`
+or `reset()` only for an intentional
 identity-free lifecycle clear. Prepare the destination for at least four lanes
 before `write_voice()` so the adapter can publish its block atomically.
 
