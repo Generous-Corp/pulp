@@ -163,6 +163,26 @@ TEST_CASE("Audio matrix applies signed gains, headroom policy, aliasing, and fau
         CHECK(std::isfinite(sample));
         CHECK_THAT(sample, WithinAbs(1.0f, 1.0e-6f));
     }
+
+    SECTION("peak normalization remains a strict full-scale bound") {
+        pulp::signal::AudioMatrixMixerT<float, 16, 1> adversarial;
+        REQUIRE(adversarial.set_dimensions(16, 1));
+        REQUIRE(adversarial.prepare(1));
+        adversarial.set_headroom_policy(MatrixHeadroomPolicy::NormalizePeak);
+        std::array<std::array<float, 1>, 16> full_scale_inputs{};
+        std::array<const float*, 16> full_scale_views{};
+        for (std::size_t input_index = 0; input_index < full_scale_inputs.size(); ++input_index) {
+            const auto gain = input_index % 3 == 0 ? 0.1f : (input_index % 3 == 1 ? -0.3f : 0.7f);
+            REQUIRE(adversarial.set_gain(0, input_index, gain));
+            full_scale_inputs[input_index][0] = std::signbit(gain) ? -1.0f : 1.0f;
+            full_scale_views[input_index] = full_scale_inputs[input_index].data();
+        }
+        std::array<float, 1> strictly_bounded{};
+        float* bounded_view[] = {strictly_bounded.data()};
+        REQUIRE(adversarial.process(full_scale_views.data(), full_scale_views.size(), bounded_view,
+                                    1, 1));
+        CHECK(std::abs(strictly_bounded[0]) <= 1.0f);
+    }
 }
 
 TEST_CASE("Matrix gain automation is sample-continuous and block-split deterministic",
