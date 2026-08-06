@@ -21,8 +21,10 @@ MODULE_FLOORS = {
     # a serializer from reaching for the editor's gesture verbs. A document model
     # that can name Draw/Erase/Move/Resize hands them to every consumer of the
     # model — a headless importer, a .pulpgraph loader, a plugin that wants only
-    # commands — with no gate able to object.
-    "timeline": {"timeline", "timebase", "platform", "runtime"},
+    # commands — with no gate able to object. `music` is a lower, header-only
+    # value vocabulary: admitting it lets the document model share checked
+    # pitch/chord/scale identities without acquiring MIDI, signal, or playback.
+    "timeline": {"timeline", "music", "timebase", "platform", "runtime"},
     # Durable project-package publication sits above the document model. It may
     # validate package-relative Timeline paths and use runtime/platform durability
     # primitives, but ZIP formats, interchange adapters, playback, and UI remain
@@ -32,6 +34,7 @@ MODULE_FLOORS = {
         "project_package",
         "project-package",
         "timeline",
+        "music",
         "timebase",
         "platform",
         "runtime",
@@ -43,6 +46,7 @@ MODULE_FLOORS = {
         "timeline_agent_view",
         "timeline-agent-view",
         "timeline",
+        "music",
         "timebase",
         "platform",
         "runtime",
@@ -50,10 +54,18 @@ MODULE_FLOORS = {
     # Interchange sits above the document model, not inside it: it may read a
     # document and consult what formats declare, but a format adapter, a plugin
     # host, or a view must never become something it can reach for.
-    "interchange": {"interchange", "timeline", "timebase", "platform", "runtime"},
+    "interchange": {
+        "interchange",
+        "timeline",
+        "music",
+        "timebase",
+        "platform",
+        "runtime",
+    },
     "playback": {
         "playback",
         "timeline",
+        "music",
         "timebase",
         "audio",
         "midi",
@@ -80,6 +92,7 @@ MODULE_FLOORS = {
         "timeline_editor",
         "timeline-editor",
         "timeline",
+        "music",
         "timebase",
         "platform",
         "runtime",
@@ -101,6 +114,7 @@ MODULE_FLOORS = {
         "timeline_editor",
         "timeline-editor",
         "timeline",
+        "music",
         "timebase",
         "view",
         "canvas",

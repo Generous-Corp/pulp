@@ -3130,11 +3130,15 @@ So the browser lane declares it, exactly as it already declares the paint box:
   fractions the Figma hoist stamps, by projecting the box's half-extents onto
   the **radial axis** and its perpendicular. A plain width/height read is wrong
   for a dot at 7 o'clock, whose diagonal — not its width — spans the radius.
-- `apply_browser_capture_knob_sprites` (`browser_knob_sprites.cpp`, run from
+- `apply_browser_capture_control_sprites` (`browser_knob_sprites.cpp`, run from
   `import_browser_html` right after lowering) crops the control out of the panel
-  capture into a per-knob PNG and stamps `asset_path` / `png_natural_*` /
-  `sprite_strip_frame_count=1`. The crop is byte-identical to the capture
-  everywhere except the declared pointer.
+  capture. A knob gets a per-knob PNG stamped through `asset_path` /
+  `png_natural_*` / `sprite_strip_frame_count=1`. A fader gets a cleaned body
+  crop plus the declared indicator as its own sprite; `Fader::paint` moves that
+  authored sprite with the value instead of drawing the stock white slab, while
+  retaining the live native track and fill. Undeclared faders are unchanged.
+  The cleaned crop is byte-identical to the capture everywhere except the
+  declared indicator.
 - The baked pointer is **erased by rotational median**: a dial face is
   rotationally symmetric about its centre except for the pointer, so each erased
   pixel takes the median of the same radius under 8 rotations (samples landing
@@ -3162,7 +3166,9 @@ Gotchas:
   an axis-aligned bar exactly; a CSS-rotated hairline's box is much wider than
   the hairline, so its declared width comes out too large. Declare a dot, or the
   pointer's own un-rotated box.
-- Tests: `[browser-capture][knob][indicator]` in `test_browser_knob_sprites.cpp`
+- Tests: `[browser-capture][knob][indicator]` and
+  `[browser-capture][fader][indicator][movement]` in
+  `test_browser_knob_sprites.cpp`
   — the load-bearing one is `[movement]`, which renders the pointer at five
   values and asserts the drawn geometry MOVED. A one-frame similarity score
   cannot tell a live indicator from a frozen one.

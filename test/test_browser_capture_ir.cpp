@@ -1479,6 +1479,61 @@ TEST_CASE("a knob indicator with no radius to sweep is refused",
     walk(result.design_ir->root);
 }
 
+TEST_CASE("a fader indicator is handed to the control sprite pass",
+          "[import-design][browser-capture][ir][fader][indicator]") {
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"fader","binding_status":"bound","name":"drive",
+         "bounds":{"left":40,"top":10,"width":40,"height":220},
+         "paint_bounds":{"left":50,"top":20,"width":20,"height":200},
+         "indicator_bounds":{"left":52,"top":108,"width":16,"height":12},
+         "indicator_color":"rgb(244, 231, 180)",
+         "data_pulp":{"param":"drive","value":"0.5"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    INFO("lowering error: " << result.error);
+    REQUIRE(result);
+
+    const pulp::view::IRNode* found = nullptr;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            const auto binding = node.attributes.find("binding");
+            if (binding != node.attributes.end() && binding->second == "drive")
+                found = &node;
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+    REQUIRE(found != nullptr);
+    CHECK(found->audio_widget == pulp::view::AudioWidgetType::fader);
+    CHECK(found->attributes.at("browser_sprite_crop_px") == "100,40,40,400");
+    CHECK(found->attributes.at("browser_sprite_indicator_px") ==
+          "104,216,32,24");
+    // Rotary geometry belongs only to knobs; stamping it on a linear control
+    // would make an unrelated consumer appear wired while doing nothing.
+    CHECK(found->attributes.count("knob_ind_r_in") == 0);
+    CHECK(found->attributes.count("knob_ind_r_out") == 0);
+    CHECK(found->attributes.count("knob_ind_w") == 0);
+}
+
 #ifdef PULP_BROWSER_CAPTURE_STYLE_FIXTURE_DIR
 // Chrome solves the page; the lowering's job is to carry that solved appearance
 // into the IR rather than leave the native nodes as transparent hit targets over

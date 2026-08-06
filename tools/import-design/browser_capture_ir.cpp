@@ -614,14 +614,16 @@ int lower_semantic_controls(const fs::path& path,
         // is the common case and not a failure.
         //
         // `design_indicator` above is only a COLOUR -- with no geometry the
-        // engine has nothing to move, so an imported knob showed the pointer
-        // frozen wherever the capture happened to catch it.
+        // engine has nothing to move, so an imported control showed the
+        // indicator frozen wherever the capture happened to catch it.
         //
         // The two device-pixel rectangles are hand-off state for the sprite
-        // pass (`apply_browser_capture_knob_sprites`), which crops the control
-        // out of the panel capture and erases the pointer baked into that crop.
-        // It consumes and removes them; they are not a runtime contract. Only a
-        // knob carries them: they exist to feed that pass, which skins dials.
+        // pass (`apply_browser_capture_control_sprites`), which crops the
+        // control out of the panel capture and erases the indicator baked into
+        // that crop. It consumes and removes them; they are not a runtime
+        // contract. Knobs use the cleaned crop as their disc. Faders use it to
+        // cover the frozen thumb while the marked thumb art is hoisted into a
+        // value-driven overlay.
         const auto ind_box = object_member(candidate, "indicator_bounds");
         if (ind_box.isObject() && box.isObject()) {
             const double dial_left = number_member(box, "left", 0.0);
@@ -672,19 +674,19 @@ int lower_semantic_controls(const fs::path& path,
                     ind.center_y = b * local_cx + d * local_cy + f;
                 }
             }
-            if (const auto pointer = pointer_fractions(
-                    dial_left, dial_top, dial_w, dial_h, ind)) {
-                control.attributes["knob_ind_r_in"] =
-                    std::to_string(pointer->r_in);
-                control.attributes["knob_ind_r_out"] =
-                    std::to_string(pointer->r_out);
-                control.attributes["knob_ind_w"] =
-                    std::to_string(pointer->width);
-                if (const auto color =
-                        string_member(candidate, "indicator_color");
-                    !color.empty())
-                    control.attributes["knob_ind_color"] = css_color_to_hex(color);
-                if (widget == pulp::view::AudioWidgetType::knob) {
+            if (widget == pulp::view::AudioWidgetType::knob) {
+                if (const auto pointer = pointer_fractions(
+                        dial_left, dial_top, dial_w, dial_h, ind)) {
+                    control.attributes["knob_ind_r_in"] =
+                        std::to_string(pointer->r_in);
+                    control.attributes["knob_ind_r_out"] =
+                        std::to_string(pointer->r_out);
+                    control.attributes["knob_ind_w"] =
+                        std::to_string(pointer->width);
+                    if (const auto color =
+                            string_member(candidate, "indicator_color");
+                        !color.empty())
+                        control.attributes["knob_ind_color"] = css_color_to_hex(color);
                     control.attributes["browser_sprite_crop_px"] =
                         device_pixel_rect(dial_left, dial_top, dial_w, dial_h, dpr);
                     // The PAINTED footprint, deliberately: this pass crops the
@@ -696,6 +698,17 @@ int lower_semantic_controls(const fs::path& path,
                         device_pixel_rect(ind.left, ind.top, ind.width,
                                           ind.height, dpr);
                 }
+            } else if (widget == pulp::view::AudioWidgetType::fader &&
+                       dial_w > 0.0 && dial_h > 0.0 &&
+                       ind.width > 0.0 && ind.height > 0.0) {
+                // A fader indicator is a translating thumb, not a radial
+                // pointer. Preserve the rectangles directly: the sprite pass
+                // needs the authored pixels and the runtime derives its travel
+                // from the fader orientation/value.
+                control.attributes["browser_sprite_crop_px"] =
+                    device_pixel_rect(dial_left, dial_top, dial_w, dial_h, dpr);
+                control.attributes["browser_sprite_indicator_px"] =
+                    device_pixel_rect(ind.left, ind.top, ind.width, ind.height, dpr);
             }
         }
 
