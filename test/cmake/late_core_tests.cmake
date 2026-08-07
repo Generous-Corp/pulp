@@ -34,6 +34,9 @@ pulp_add_test_suite(pulp-test-mpe-tracker-per-note-management LIBRARIES pulp::mi
 pulp_add_test_suite(pulp-test-midi-utility-kernels
     SOURCES test_midi_utility_kernels.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-midi-arpeggiator
+    SOURCES test_midi_arpeggiator.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::midi)
 pulp_add_test_suite(pulp-test-midi-voice-modulation-adapter
     SOURCES test_midi_voice_modulation_adapter.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio)
