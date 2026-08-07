@@ -12,7 +12,9 @@
 namespace pulp::audio {
 
 struct UnisonVoiceStackTrigger {
+    // Nonzero logical-note identity owned by the caller for this trigger.
     std::uint64_t source_id = 0;
+    // Complete child count requested for the logical note.
     std::size_t voice_count = 1;
     int note = 60;
     std::uint32_t sample_id = kInvalidSampleId;
@@ -51,7 +53,11 @@ template <std::size_t MaximumLogicalNotes = 32, std::size_t MaximumVoicesPerNote
 class UnisonVoiceStackManager {
 public:
     static_assert(MaximumLogicalNotes > 0 && MaximumVoicesPerNote > 0);
+    static_assert(MaximumLogicalNotes <=
+                  std::numeric_limits<std::size_t>::max() / MaximumVoicesPerNote);
 
+    /// Control-side binding to an already prepared, empty allocator. The
+    /// allocator becomes exclusively owned by this manager until `reset()`.
     bool prepare(InstrumentVoiceAllocator& allocator) noexcept {
         if (prepared_ && allocator_ != &allocator && !rebind_allowed_) return false;
         if (prepared_ && (!owned_empty() ||
@@ -69,6 +75,8 @@ public:
 
     bool prepared() const noexcept { return prepared_; }
 
+    /// Audio-thread-safe, bounded complete-stack allocation. Invalid requests
+    /// and insufficient termination storage leave all owned state unchanged.
     UnisonVoiceStackResult trigger(const UnisonVoiceStackTrigger& request,
                                    std::span<UnisonVoiceTermination> terminations,
                                    std::span<VoiceModulationBuffer> modulation = {}) noexcept {
@@ -143,12 +151,14 @@ public:
         return result;
     }
 
+    /// Non-owning child view, invalidated by the next mutating manager call.
     std::span<const UnisonVoiceChild> children(std::uint64_t source_id) const noexcept {
         const auto index = find_source(source_id);
         if (index == npos) return {};
         return {stacks_[index].children.data(), stacks_[index].count};
     }
 
+    /// Audio-thread-safe note-off for every still-active child in a stack.
     bool release(std::uint64_t source_id) noexcept {
         const auto index = find_source(source_id);
         if (index == npos || !consistent()) return false;

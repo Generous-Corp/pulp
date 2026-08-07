@@ -11,6 +11,12 @@ namespace pulp::signal {
 
 enum class UnisonGainLaw : std::uint8_t { PeakSafe, EqualPower };
 
+/// Control-side configuration for a fixed unison layout.
+///
+/// Detune and drift are non-negative cents. Stereo spread and phase
+/// randomization are normalized magnitudes in [0, 1]. A nonzero drift amount
+/// requires a nonzero period in absolute audio frames. `configure()` rejects
+/// invalid or non-finite input without changing the active layout.
 struct UnisonSpec {
     std::size_t voice_count = 1;
     double detune_cents = 0.0;
@@ -36,10 +42,10 @@ public:
     bool configure(const UnisonSpec& spec, std::uint64_t seed = 0,
                    std::uint64_t note_instance_id = 0) noexcept {
         if (spec.voice_count == 0 || spec.voice_count > MaximumVoices ||
-            !finite_nonnegative(spec.detune_cents) ||
-            !unit(spec.stereo_spread) || !unit(spec.phase_randomization) ||
-            !finite_nonnegative(spec.drift_cents) ||
-            (spec.drift_cents > 0.0 && spec.drift_period_frames == 0)) {
+            !finite_nonnegative(spec.detune_cents) || !unit(spec.stereo_spread) ||
+            !unit(spec.phase_randomization) || !finite_nonnegative(spec.drift_cents) ||
+            (spec.drift_cents > 0.0 && spec.drift_period_frames == 0) ||
+            !valid_gain_law(spec.gain_law)) {
             return false;
         }
         std::array<UnisonVoiceParameters, MaximumVoices> next{};
@@ -89,6 +95,9 @@ public:
     }
 
 private:
+    static bool valid_gain_law(UnisonGainLaw law) noexcept {
+        return law == UnisonGainLaw::PeakSafe || law == UnisonGainLaw::EqualPower;
+    }
     static bool finite_nonnegative(double value) noexcept {
         return std::isfinite(value) && value >= 0.0;
     }

@@ -3,6 +3,7 @@
 #include <pulp/audio/unison_voice_stack.hpp>
 #include "harness/rt_allocation_probe.hpp"
 
+#include <algorithm>
 #include <array>
 
 using namespace pulp::audio;
@@ -47,6 +48,43 @@ TEST_CASE("Unison voice stack stealing removes whole oldest stack and never itse
     REQUIRE(allocator.allocated_voice_count() == 4);
 }
 
+TEST_CASE("Unison voice stack stealing selects only the complete oldest stack",
+          "[audio][unison-stack][steal]") {
+    InstrumentVoiceAllocator allocator;
+    REQUIRE(allocator.prepare(6));
+    UnisonVoiceStackManager<> manager;
+    REQUIRE(manager.prepare(allocator));
+    std::array<UnisonVoiceTermination, 6> terms{};
+    for (std::uint64_t source = 1; source <= 3; ++source)
+        REQUIRE(manager
+                    .trigger({.source_id = source,
+                              .voice_count = 2,
+                              .note = static_cast<int>(59 + source),
+                              .sample_id = static_cast<std::uint32_t>(source)},
+                             terms)
+                    .allocated);
+
+    allocator.set_termination_fade_frames(37);
+    const auto oldest_view = manager.children(1);
+    std::array<UnisonVoiceChild, 2> oldest{};
+    std::copy(oldest_view.begin(), oldest_view.end(), oldest.begin());
+    const auto replacement =
+        manager.trigger({.source_id = 4, .voice_count = 2, .note = 64, .sample_id = 4}, terms);
+    REQUIRE(replacement.allocated);
+    REQUIRE(replacement.termination_count == oldest.size());
+    REQUIRE(manager.children(1).empty());
+    REQUIRE(manager.children(2).size() == 2);
+    REQUIRE(manager.children(3).size() == 2);
+    REQUIRE(manager.children(4).size() == 2);
+    for (std::size_t i = 0; i < oldest.size(); ++i) {
+        REQUIRE(terms[i].voice.voice_index == oldest[i].voice_index);
+        REQUIRE(terms[i].voice.voice_id == oldest[i].voice_id);
+        REQUIRE(terms[i].voice.reason == VoiceTerminationReason::Stolen);
+        REQUIRE(terms[i].voice.fade_out_frames == 37);
+        REQUIRE(terms[i].generation == oldest[i].generation);
+    }
+}
+
 TEST_CASE("Unison voice stack trigger preflights termination capacity atomically",
           "[audio][unison-stack]") {
     InstrumentVoiceAllocator allocator;
@@ -61,6 +99,34 @@ TEST_CASE("Unison voice stack trigger preflights termination capacity atomically
                                    .sample_id = 2}, too_small).allocated);
     REQUIRE(manager.children(1).size() == 4);
     REQUIRE(manager.children(2).empty());
+}
+
+TEST_CASE("Unison voice stack rejects invalid triggers without changing ownership",
+          "[audio][unison-stack]") {
+    InstrumentVoiceAllocator allocator;
+    REQUIRE(allocator.prepare(4));
+    UnisonVoiceStackManager<> manager;
+    REQUIRE(manager.prepare(allocator));
+    std::array<UnisonVoiceTermination, 4> terms{};
+    REQUIRE(manager.trigger({.source_id = 1, .voice_count = 2, .note = 60, .sample_id = 1}, terms)
+                .allocated);
+    const auto allocated_before = allocator.allocated_voice_count();
+    REQUIRE_FALSE(
+        manager.trigger({.source_id = 0, .voice_count = 1, .note = 60, .sample_id = 2}, terms)
+            .allocated);
+    REQUIRE_FALSE(
+        manager.trigger({.source_id = 2, .voice_count = 0, .note = 60, .sample_id = 2}, terms)
+            .allocated);
+    REQUIRE_FALSE(
+        manager.trigger({.source_id = 2, .voice_count = 1, .note = 128, .sample_id = 2}, terms)
+            .allocated);
+    REQUIRE_FALSE(
+        manager
+            .trigger({.source_id = 2, .voice_count = 1, .note = 60, .sample_id = kInvalidSampleId},
+                     terms)
+            .allocated);
+    REQUIRE(manager.children(1).size() == 2);
+    REQUIRE(allocator.allocated_voice_count() == allocated_before);
 }
 
 TEST_CASE("Unison voice stacks choke complete matching groups",
@@ -146,10 +212,22 @@ TEST_CASE("Unison voice stack RT operations allocate no memory and reset modulat
     for (auto& buffer : modulation)
         REQUIRE(buffer.prepare({.max_lanes = 2, .max_frames = 16}));
     pulp::test::RtAllocationProbe probe;
-    const auto result = manager.trigger({.source_id = 1, .voice_count = 4,
-                                         .note = 60, .sample_id = 1}, terms, modulation);
+    const auto result = manager.trigger(
+        {.source_id = 1, .voice_count = 2, .note = 60, .sample_id = 1}, terms, modulation);
     REQUIRE(result.allocated);
     REQUIRE(manager.release(1));
+    const auto finishing = manager.children(1)[0];
+    REQUIRE(manager.finish(finishing.voice_index, finishing.voice_id, finishing.generation,
+                           modulation));
+    REQUIRE(manager
+                .trigger({.source_id = 2, .voice_count = 3, .note = 62, .sample_id = 2}, terms,
+                         modulation)
+                .allocated);
+    REQUIRE(manager
+                .trigger({.source_id = 3, .voice_count = 4, .note = 64, .sample_id = 3}, terms,
+                         modulation)
+                .allocated);
+    REQUIRE(manager.terminate_all(terms, modulation).terminated);
     REQUIRE(manager.reset(modulation));
     REQUIRE_FALSE(probe.saw_allocation());
 }

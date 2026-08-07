@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 #include <pulp/signal/oscillator.hpp>
 #include <pulp/signal/unison.hpp>
@@ -18,6 +19,10 @@ template <typename SampleType> struct StereoSampleT {
 template <typename SampleType = float, std::size_t MaximumVoices = 16>
 class SupersawT {
 public:
+    static_assert(std::is_floating_point_v<SampleType>);
+
+    /// Control-side preparation. The sample rate is in hertz; invalid input
+    /// leaves the previous configuration and render state unchanged.
     bool prepare(SampleType sample_rate, const UnisonSpec& spec) noexcept {
         if (!std::isfinite(sample_rate) || sample_rate <= SampleType{0}) return false;
         UnisonLayout<MaximumVoices> check;
@@ -29,6 +34,9 @@ public:
         return true;
     }
 
+    /// Audio-thread-safe note start. Frequency is in hertz and must remain
+    /// below Nyquist after the configured maximum detune and drift. Failure is
+    /// atomic: the currently sounding note is unchanged.
     bool trigger(SampleType frequency, std::uint64_t seed,
                  std::uint64_t note_instance_id) noexcept {
         if (!prepared_ || !std::isfinite(frequency) || frequency <= SampleType{0})
@@ -54,6 +62,9 @@ public:
         return true;
     }
 
+    /// Render one stereo sample for the supplied absolute audio-frame index.
+    /// Calls are allocation-free. Consecutive frame indices produce output
+    /// independent of how a host partitions those calls into callbacks.
     StereoSampleT<SampleType> next(std::uint64_t absolute_frame) noexcept {
         StereoSampleT<SampleType> output{};
         if (!active_) return output;
@@ -71,6 +82,8 @@ public:
         return output;
     }
 
+    /// Audio-thread-safe hard reset. Subsequent samples are silent until the
+    /// next successful trigger.
     void reset() noexcept {
         for (auto& oscillator : oscillators_) oscillator.reset();
         active_ = false;
