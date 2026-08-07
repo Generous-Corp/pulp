@@ -33,6 +33,10 @@ pulp_add_test_suite(pulp-test-signal-rt-safety
     SOURCES test_signal_rt_safety.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal pulp::signal-fft-backend)
 
+pulp_add_test_suite(pulp-test-source-filter-analysis
+    SOURCES test_source_filter_analysis.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
+
 pulp_add_test_suite(pulp-test-realtime-pitch-time-rt-safety
     SOURCES test_realtime_pitch_time_rt_safety.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal pulp::signal-fft-backend)
@@ -43,7 +47,7 @@ pulp_add_test_suite(pulp-test-signal-mod-rt-safety
 
 pulp_add_test_suite(pulp-test-multi-channel-meter
     SOURCES test_multi_channel_meter.cpp harness/rt_allocation_probe.cpp
-    LIBRARIES pulp::signal)
+    LIBRARIES pulp::signal pulp::audio)
 
 pulp_add_test_suite(pulp-test-midi-message-collector
     SOURCES test_midi_message_collector.cpp harness/rt_allocation_probe.cpp

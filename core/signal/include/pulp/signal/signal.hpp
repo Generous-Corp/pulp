@@ -7,6 +7,7 @@
 #include <pulp/signal/biquad.hpp>
 #include <pulp/signal/oscillator.hpp>
 #include <pulp/signal/delay_line.hpp>
+#include <pulp/signal/fractional_delay.hpp>
 #include <pulp/signal/dry_wet_mixer.hpp>
 #include <pulp/signal/gain.hpp>
 #include <pulp/signal/compressor.hpp>
@@ -44,6 +45,7 @@
 #include <pulp/signal/stft.hpp>
 #include <pulp/signal/spectral_frame_engine.hpp>
 #include <pulp/signal/multichannel_phase_coordinator.hpp>
+#include <pulp/signal/source_filter_analysis.hpp>
 #include <pulp/signal/spectral_envelope_shifter.hpp>
 #include <pulp/signal/realtime_pitch_time_processor.hpp>
 #include <pulp/signal/offline_stretch.hpp>
