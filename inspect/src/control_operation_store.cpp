@@ -77,6 +77,7 @@ ControlOperationStore::ControlOperationStore(ControlOperationStoreConfig config,
 ControlOperationStore::~ControlOperationStore() = default;
 
 ControlOperationStoreResult ControlOperationStore::open() {
+    const auto now = detail::unix_milliseconds(impl_->clock());
     std::lock_guard lock(impl_->mutex);
     impl_->opened = false;
     impl_->clear();
@@ -136,7 +137,6 @@ ControlOperationStoreResult ControlOperationStore::open() {
                 "receipt directory could not be enumerated"};
     }
 
-    const auto now = detail::unix_milliseconds(impl_->clock());
     for (auto& [_, receipt] : impl_->by_id) {
         if (control_receipt_state_is_terminal(receipt.state))
             continue;
@@ -186,10 +186,10 @@ bool ControlOperationStore::is_open() const {
 }
 
 ControlOperationStoreResult ControlOperationStore::admit(ControlOperationBinding binding) {
+    const auto now = detail::unix_milliseconds(impl_->clock());
     std::lock_guard lock(impl_->mutex);
     if (!impl_->opened)
         return {ControlOperationStoreStatus::StoreUnavailable, {}, "receipt store is not open"};
-    const auto now = detail::unix_milliseconds(impl_->clock());
     if (!impl_->prune_expired_terminal_receipts(now)) {
         impl_->opened = false;
         impl_->clear();
@@ -289,6 +289,7 @@ ControlOperationStoreResult ControlOperationStore::admit(ControlOperationBinding
 }
 
 ControlOperationStoreResult ControlOperationStore::begin(const ControlReceiptId& receipt_id) {
+    const auto now = detail::unix_milliseconds(impl_->clock());
     std::lock_guard lock(impl_->mutex);
     if (!impl_->opened)
         return {ControlOperationStoreStatus::StoreUnavailable, {}, "receipt store is not open"};
@@ -303,7 +304,6 @@ ControlOperationStoreResult ControlOperationStore::begin(const ControlReceiptId&
     }
 
     auto updated = found->second;
-    const auto now = detail::unix_milliseconds(impl_->clock());
     if (updated.cancellation_requested) {
         updated.state = ControlReceiptState::Cancelled;
         updated.result.result_code = ControlResultCode::Cancelled;
@@ -329,6 +329,7 @@ ControlOperationStoreResult ControlOperationStore::transition(const ControlRecei
                                                               ControlReceiptState expected,
                                                               ControlReceiptState next,
                                                               ControlOperationResult result) {
+    const auto now = detail::unix_milliseconds(impl_->clock());
     std::lock_guard lock(impl_->mutex);
     if (!impl_->opened)
         return {ControlOperationStoreStatus::StoreUnavailable, {}, "receipt store is not open"};
@@ -346,8 +347,7 @@ ControlOperationStoreResult ControlOperationStore::transition(const ControlRecei
     auto updated = found->second;
     updated.state = next;
     updated.result = std::move(result);
-    updated.updated_at_unix_ms =
-        std::max(updated.created_at_unix_ms, detail::unix_milliseconds(impl_->clock()));
+    updated.updated_at_unix_ms = std::max(updated.created_at_unix_ms, now);
     if (!impl_->persist(updated)) {
         return {ControlOperationStoreStatus::PersistenceError, found->second,
                 "receipt transition could not be persisted"};
@@ -359,6 +359,7 @@ ControlOperationStoreResult ControlOperationStore::transition(const ControlRecei
 ControlOperationStoreResult
 ControlOperationStore::request_cancellation(const ControlReceiptId& receipt_id,
                                             std::string reason) {
+    const auto now = detail::unix_milliseconds(impl_->clock());
     std::lock_guard lock(impl_->mutex);
     if (!impl_->opened)
         return {ControlOperationStoreStatus::StoreUnavailable, {}, "receipt store is not open"};
@@ -381,8 +382,7 @@ ControlOperationStore::request_cancellation(const ControlReceiptId& receipt_id,
     auto updated = found->second;
     updated.cancellation_requested = true;
     updated.cancellation_reason = std::move(reason);
-    updated.updated_at_unix_ms =
-        std::max(updated.created_at_unix_ms, detail::unix_milliseconds(impl_->clock()));
+    updated.updated_at_unix_ms = std::max(updated.created_at_unix_ms, now);
     if (!impl_->persist(updated)) {
         return {ControlOperationStoreStatus::PersistenceError, found->second,
                 "cancellation request could not be persisted"};

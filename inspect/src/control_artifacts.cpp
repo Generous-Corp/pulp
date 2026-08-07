@@ -380,7 +380,8 @@ class ControlArtifactStore::Impl {
           artifacts(config.root / "artifacts"), clock(std::move(clock_in)) {
         if (config.root.empty() || config.maximum_blob_bytes == 0 ||
             config.maximum_chunk_bytes == 0 ||
-            config.maximum_chunk_bytes > config.maximum_blob_bytes) {
+            config.maximum_chunk_bytes > config.maximum_blob_bytes ||
+            config.maximum_lifetime.count() <= 0) {
             return;
         }
         std::error_code error;
@@ -435,12 +436,15 @@ bool ControlArtifactStore::is_ready() const {
 ControlArtifactStoreResult ControlArtifactStore::store(std::span<const std::uint8_t> bytes,
                                                        ControlArtifactLineage lineage,
                                                        ControlArtifactProperties properties) {
+    const auto now = impl_->now_unix_ms();
     std::lock_guard lock(impl_->mutex);
     if (!impl_->ready)
         return {.status = ControlArtifactStatus::IoError};
     if (bytes.empty() || bytes.size() > impl_->config.maximum_blob_bytes ||
         !valid_lineage(lineage) || !valid_properties(properties) ||
-        properties.expires_at_unix_ms <= impl_->now_unix_ms()) {
+        properties.expires_at_unix_ms <= now ||
+        properties.expires_at_unix_ms - now >
+            static_cast<std::uint64_t>(impl_->config.maximum_lifetime.count())) {
         return {.status = bytes.size() > impl_->config.maximum_blob_bytes
                               ? ControlArtifactStatus::ResourceExhausted
                               : ControlArtifactStatus::InvalidRequest};
@@ -495,6 +499,7 @@ ControlArtifactStoreResult ControlArtifactStore::store(std::span<const std::uint
 
 std::optional<ControlArtifactMetadata>
 ControlArtifactStore::metadata(std::string_view artifact_id) const {
+    const auto now = impl_->now_unix_ms();
     std::lock_guard lock(impl_->mutex);
     if (!impl_->ready || !valid_artifact_id(artifact_id))
         return std::nullopt;
@@ -508,7 +513,7 @@ ControlArtifactStore::metadata(std::string_view artifact_id) const {
     if (!decoded || decoded->artifact_id != artifact_id ||
         decoded->deletion_state != ControlArtifactDeletionState::Active)
         return std::nullopt;
-    if (decoded->expires_at_unix_ms <= impl_->now_unix_ms()) {
+    if (decoded->expires_at_unix_ms <= now) {
         impl_->expire(path);
         return std::nullopt;
     }
@@ -519,6 +524,7 @@ ControlArtifactReadResult
 ControlArtifactStore::read_authorized(std::string_view artifact_id, std::uint64_t offset,
                                       std::size_t maximum_bytes,
                                       const ControlArtifactMetadata& authorized_metadata) const {
+    const auto now = impl_->now_unix_ms();
     std::lock_guard lock(impl_->mutex);
     if (!impl_->ready)
         return {.status = ControlArtifactStatus::IoError};
@@ -547,7 +553,7 @@ ControlArtifactStore::read_authorized(std::string_view artifact_id, std::uint64_
     }
     if (metadata->deletion_state != ControlArtifactDeletionState::Active)
         return {.status = ControlArtifactStatus::NotFound};
-    if (metadata->expires_at_unix_ms <= impl_->now_unix_ms()) {
+    if (metadata->expires_at_unix_ms <= now) {
         impl_->expire(metadata_path);
         return {.status = ControlArtifactStatus::NotFound};
     }

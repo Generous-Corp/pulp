@@ -172,6 +172,33 @@ bool grant_world_read(const std::filesystem::path& path) {
 
 } // namespace
 
+TEST_CASE("operation store clock callbacks may reenter read-only store state",
+          "[inspect][control][operations][receipt][concurrency]") {
+    TemporaryDirectory temporary;
+    auto now = std::chrono::system_clock::time_point{123456ms};
+    ControlOperationStore* store_address = nullptr;
+    bool observed_closed = false;
+    bool observed_open = false;
+
+    ControlOperationStoreConfig config;
+    config.directory = temporary.path;
+    ControlOperationStore store{std::move(config), [&] {
+                                    if (store_address) {
+                                        if (store_address->is_open())
+                                            observed_open = true;
+                                        else
+                                            observed_closed = true;
+                                    }
+                                    return now;
+                                }};
+    store_address = &store;
+
+    REQUIRE(store.open().status == ControlOperationStoreStatus::Opened);
+    CHECK(observed_closed);
+    REQUIRE(store.admit(binding()).status == ControlOperationStoreStatus::Admitted);
+    CHECK(observed_open);
+}
+
 TEST_CASE("operation receipt transitions preserve admitted running terminal order",
           "[inspect][control][operations][receipt]") {
     TemporaryDirectory temporary;

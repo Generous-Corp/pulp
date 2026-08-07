@@ -112,7 +112,8 @@ to consume its active-operation quota until the deferred completion settles it.
 Progress is monotonically sequenced, bounded, and backpressured. Grant, client,
 and instance teardown request cancellation for affected live receipts.
 
-Phase 3b contains only the minimal broker artifact store needed by later
+Phase 3b caps each artifact's readable lifetime at 24 hours and contains only
+the minimal broker artifact store needed by later
 adapters. It durably publishes each bounded blob before opaque lineage metadata,
 and a terminal receipt may name only an already-published artifact with matching
 producer lineage. Broker-mediated retrieval rechecks the original producer

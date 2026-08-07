@@ -96,6 +96,7 @@ ControlBrokerConfig broker_config(
     };
     config.artifact_store = ControlArtifactStoreConfig{
         .root = store_path.parent_path() / (store_path.filename().string() + "-artifacts"),
+        .maximum_lifetime = std::chrono::hours{24 * 365 * 200},
     };
     config.wall_clock = std::move(wall_clock);
     return config;

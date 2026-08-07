@@ -88,6 +88,7 @@ struct ControlArtifactStoreConfig {
     std::filesystem::path root;
     std::size_t maximum_blob_bytes = 16u * 1024u * 1024u;
     std::size_t maximum_chunk_bytes = 1u * 1024u * 1024u;
+    std::chrono::milliseconds maximum_lifetime = std::chrono::hours{24};
 };
 
 struct ControlArtifactStoreResult {

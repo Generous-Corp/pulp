@@ -180,6 +180,7 @@ struct ServiceFixture {
               };
               config.artifact_store = ControlArtifactStoreConfig{
                   .root = temporary.path / "artifacts",
+                  .maximum_lifetime = std::chrono::hours{24 * 365 * 200},
               };
               config.admission = std::move(admission);
               config.wall_clock = wall_clock;

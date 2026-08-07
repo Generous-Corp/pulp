@@ -163,7 +163,8 @@ Request parameters, result details, and complete wire envelopes have distinct
 bounded budgets (512 KiB, 1,600 KiB, and 2 MiB respectively), including bounded
 JSON node counts. Bulk UI-tree, diagnostics, and log results use artifact
 handles instead of expanding those receipt budgets; artifact reads retain their
-bounded one-mebibyte chunk contract.
+bounded one-mebibyte chunk contract, and publication expiry is capped at 24
+hours by the store rather than trusted to the executor.
 
 The broker checks deadlines and atomically enforces active-operation quotas.
 Trusted in-process executors must return within that bound or promptly return a

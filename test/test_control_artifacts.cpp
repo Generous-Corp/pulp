@@ -60,10 +60,13 @@ ControlArtifactLineage lineage(std::string suffix = "a") {
 }
 
 ControlArtifactProperties properties(std::string content_type = "text/plain") {
+    const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch())
+                            .count();
     return {
         .content_type = std::move(content_type),
         .created_at_unix_ms = 1'000,
-        .expires_at_unix_ms = 4'102'444'800'000,
+        .expires_at_unix_ms = static_cast<std::uint64_t>(now_ms) + 60u * 60u * 1000u,
         .sensitivity = ControlArtifactSensitivity::Sensitive,
         .redaction_state = ControlArtifactRedactionState::Original,
     };
@@ -174,6 +177,25 @@ TEST_CASE("control artifact expiry is enforced inside the store",
     // but without metadata there is no artifact publication or authorization.
     CHECK(fs::exists(blob_path));
     CHECK(store.store(bytes("already expired"), lineage("old"), expiring).status ==
+          ControlArtifactStatus::InvalidRequest);
+}
+
+TEST_CASE("control artifact lifetime is bounded by store policy",
+          "[inspect][control][artifacts][expiry][security]") {
+    TemporaryDirectory temporary;
+    auto now_ms = std::make_shared<std::int64_t>(1'500);
+    ControlArtifactStore store(
+        {.root = temporary.path / "store", .maximum_lifetime = std::chrono::milliseconds{500}},
+        [now_ms] {
+            return std::chrono::system_clock::time_point{std::chrono::milliseconds(*now_ms)};
+        });
+    auto bounded = properties();
+    bounded.created_at_unix_ms = 1'500;
+    bounded.expires_at_unix_ms = 2'000;
+    CHECK(store.store(bytes("bounded"), lineage(), bounded).status ==
+          ControlArtifactStatus::Stored);
+    bounded.expires_at_unix_ms = 2'001;
+    CHECK(store.store(bytes("too long"), lineage("long"), bounded).status ==
           ControlArtifactStatus::InvalidRequest);
 }
 
