@@ -6,7 +6,7 @@
 // This is the showcase for the EqCurveView fix: the curve you drag is the true
 // magnitude response of the exact biquad cascade the audio path runs, because
 // both derive from the same designed coefficients. Grab a point, the curve
-// bends, and the sound follows — a low-shelf that plateaus, two peaks, a
+// bends, and the sound follows — a low-shelf that plateaus, four peaks, a
 // high-shelf, each drawn as its real shape rather than a lookalike bump.
 //
 // Layout follows a classic console EQ: a low-shelf, four sweepable peaks, and a
@@ -14,7 +14,7 @@
 // parameters; the editor writes them back on drag.
 
 #include <pulp/format/processor.hpp>
-#include <pulp/signal/biquad.hpp>
+#include <pulp/signal/six_band_eq.hpp>
 #if !PULP_HEADLESS
 #include <pulp/view/eq_curve_view.hpp>
 #include <pulp/view/view.hpp>
@@ -30,7 +30,7 @@ namespace pulp::examples {
 // Six fixed-role bands — a low shelf, four sweepable peaks, a high shelf. Types
 // are fixed per slot (not a parameter) so the demo reads as a recognizable
 // console EQ and every handle drags in both axes.
-inline constexpr int kEqBandCount = 6;
+inline constexpr int kEqBandCount = static_cast<int>(signal::SixBandEq::band_count);
 
 struct EqBandLayout {
     signal::Biquad::Type type;
@@ -38,14 +38,15 @@ struct EqBandLayout {
     float default_q;
 };
 
-inline constexpr std::array<EqBandLayout, kEqBandCount> kEqBands = {{
-    {signal::Biquad::Type::low_shelf, 80.0f, 0.707f},
-    {signal::Biquad::Type::peaking, 250.0f, 1.0f},
-    {signal::Biquad::Type::peaking, 700.0f, 1.2f},
-    {signal::Biquad::Type::peaking, 2000.0f, 1.2f},
-    {signal::Biquad::Type::peaking, 5000.0f, 1.0f},
-    {signal::Biquad::Type::high_shelf, 12000.0f, 0.707f},
-}};
+inline constexpr auto kEqBands = [] {
+    std::array<EqBandLayout, kEqBandCount> result{};
+    for (int band = 0; band < kEqBandCount; ++band) {
+        const auto defaults = signal::SixBandEq::default_band(static_cast<std::size_t>(band));
+        result[band] = {signal::SixBandEq::band_type(static_cast<std::size_t>(band)),
+                        defaults.frequency_hz, defaults.q};
+    }
+    return result;
+}();
 
 // Parameter IDs are laid out three-per-band: freq, gain, Q. Band b owns
 // [3b+1, 3b+3]. Kept as a helper so the processor and editor agree.
@@ -109,8 +110,7 @@ public:
 
     void prepare(const format::PrepareContext& ctx) override {
         sample_rate_ = static_cast<float>(ctx.sample_rate);
-        for (auto& ch : filters_)
-            for (auto& b : ch) b.reset();
+        eq_.prepare(sample_rate_);
     }
 
     void process(audio::BufferView<float>& output,
@@ -118,14 +118,13 @@ public:
                  midi::MidiBuffer&, midi::MidiBuffer&,
                  const format::ProcessContext& ctx) override {
         const std::size_t channels =
-            std::min({output.num_channels(), input.num_channels(), filters_.size()});
+            std::min({output.num_channels(), input.num_channels(), eq_.channel_count});
         const std::size_t frames = output.num_samples();
 
         if (ctx.should_reset_dsp_state())
-            for (auto& ch : filters_)
-                for (auto& b : ch) b.reset();
+            eq_.reset();
 
-        // Recompute the four sections per block from the current parameters —
+        // Recompute the six sections per block from the current parameters —
         // the SAME design call (FilterDesign via Biquad::set_coefficients) the
         // editor's curve is sampled from. RT-safe: no allocation, and assigning
         // coefficients preserves each filter's running state (no zipper reset).
@@ -134,8 +133,7 @@ public:
             const float freq = std::clamp(state().get_value(eq_freq_param(b)), 20.0f, nyq);
             const float gain = state().get_value(eq_gain_param(b));
             const float q = std::clamp(state().get_value(eq_q_param(b)), 0.1f, 12.0f);
-            for (std::size_t ch = 0; ch < channels; ++ch)
-                filters_[ch][b].set_coefficients(kEqBands[b].type, freq, q, sample_rate_, gain);
+            eq_.set_band(static_cast<std::size_t>(b), {freq, gain, q});
         }
 
         for (std::size_t ch = 0; ch < channels; ++ch) {
@@ -143,8 +141,7 @@ public:
             auto out = output.channel(ch);
             for (std::size_t i = 0; i < frames; ++i) {
                 float s = in[i];
-                for (auto& section : filters_[ch]) s = section.process(s);
-                out[i] = s;
+                out[i] = eq_.process(s, ch);
             }
         }
         for (std::size_t ch = channels; ch < output.num_channels(); ++ch) {
@@ -171,8 +168,7 @@ private:
     }
 
     float sample_rate_ = 48000.0f;
-    // [channel][band] second-order sections; stereo, four bands in series.
-    std::array<std::array<signal::Biquad, kEqBandCount>, 2> filters_{};
+    signal::SixBandEq eq_{};
 };
 
 inline std::unique_ptr<format::Processor> create_eq_curve_demo() {

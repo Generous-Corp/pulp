@@ -1,4 +1,5 @@
 #include <pulp/view/widget_bridge.hpp>
+#include "bridge_dispatch.hpp"
 
 #include <choc/text/choc_JSON.h>
 
@@ -149,6 +150,11 @@ void WidgetBridge::forget_widget_event_state(View& view) {
     view.on_overlay_dismissed = {};
     view.release_overlay();
     view.release_input_focus();
+}
+
+void WidgetBridge::retire_removed_widget(std::unique_ptr<View> widget) {
+    if (callback_alive_)
+        callback_alive_->retire(std::move(widget));
 }
 
 } // namespace pulp::view

@@ -48,6 +48,7 @@ struct PerfCounters;
 namespace pulp::view {
 
 class QueryService;
+struct BridgeCallbackState;
 // Widget value snapshot for hot reload preservation
 struct WidgetReloadSnapshot {
     std::unordered_map<std::string, float> scalar_values;
@@ -495,7 +496,11 @@ private:
         std::string callback_id;
         std::string output;
     };
-    std::shared_ptr<std::atomic<bool>> callback_alive_ = std::make_shared<std::atomic<bool>>(true);
+    // Callback closures retain callback_alive_, so these queues live on the
+    // bridge rather than on BridgeCallbackState to avoid an ownership cycle.
+    std::vector<std::unique_ptr<View>> callback_retired_widgets_;
+    std::vector<std::unique_ptr<View>> callback_collectable_widgets_;
+    std::shared_ptr<BridgeCallbackState> callback_alive_;
     std::shared_ptr<std::mutex> async_exec_mutex_ = std::make_shared<std::mutex>();
     std::shared_ptr<std::vector<AsyncExecResult>> async_exec_results_ =
         std::make_shared<std::vector<AsyncExecResult>>();
@@ -657,6 +662,7 @@ private:
     void forget_widget_subtree(View* node, bool preserve_js_dom_state = false,
                                const DeadlineCheck& deadline_check = {},
                                bool notify_js = true);
+    void retire_removed_widget(std::unique_ptr<View> widget);
     void clear_realm(const DeadlineCheck& deadline_check);
     void retire_realm(const DeadlineCheck& deadline_check);
     void commit_realm_retirement(RetiredRealmState& destination) noexcept;

@@ -127,7 +127,7 @@ public:
 
 // ── Bus layout validation ─────────────────────────────────────────────────
 
-TEST_CASE("Processor::is_bus_layout_supported default policy accepts mono/stereo "
+TEST_CASE("Processor::is_bus_layout_supported default policy accepts empty/mono/stereo "
           "matching the descriptor's bus count",
           "[processor][bus-layout]") {
     StereoEffect p;
@@ -139,6 +139,21 @@ TEST_CASE("Processor::is_bus_layout_supported default policy accepts mono/stereo
     // Mono main is fine.
     Processor::BusesLayout mono{{1}, {1}};
     REQUIRE(p.is_bus_layout_supported(mono));
+
+    // A required stereo main bus cannot be disabled implicitly.
+    Processor::BusesLayout empty_bus{{0}, {2}};
+    REQUIRE_FALSE(p.is_bus_layout_supported(empty_bus));
+
+    class ZeroInputEffect final : public StereoEffect {
+    public:
+        PluginDescriptor descriptor() const override {
+            auto d = StereoEffect::descriptor();
+            d.input_buses[0].default_channels = 0;
+            return d;
+        }
+    };
+    ZeroInputEffect zero_input;
+    REQUIRE(zero_input.is_bus_layout_supported(empty_bus));
 
     // Stereo in, mono out is allowed by the default policy — the
     // adapter is the one that enforces matching counts via the
@@ -159,7 +174,7 @@ TEST_CASE("PluginDescriptor preserves the legacy positional trailing f64 field",
 }
 
 TEST_CASE("Processor::is_bus_layout_supported default policy rejects "
-          "non-mono/stereo channel counts and bus-count mismatches",
+          "channel counts above stereo and bus-count mismatches",
           "[processor][bus-layout]") {
     StereoEffect p;
 
