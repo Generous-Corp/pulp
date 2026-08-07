@@ -74,6 +74,20 @@ TEST_CASE("MultiChannelMeterData preserves legacy positional aggregate initializ
     REQUIRE(std::isinf(legacy.lufs_momentary));
 }
 
+TEST_CASE("MultiChannelMeter default construction remains safe before prepare",
+          "[signal][meter][compatibility]") {
+    MultiChannelMeter meter;
+    std::array<float, 17640> samples{};
+    samples.fill(0.5f);
+    const float* channels[] = {samples.data()};
+
+    meter.process(channels, 1, static_cast<int>(samples.size()));
+
+    REQUIRE(meter.snapshot().num_channels == 1);
+    REQUIRE(std::isfinite(meter.snapshot().channels[0].rms));
+    REQUIRE(std::isinf(meter.snapshot().lufs_integrated));
+}
+
 TEST_CASE("MultiChannelMeter process and ballistics are allocation-free after prepare",
           "[signal][meter][rt-safety]") {
     MultiChannelMeter meter;
