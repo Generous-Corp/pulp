@@ -724,7 +724,7 @@ TEST_CASE("Prepared spectral envelope shifter is allocation-free while processin
     SpectralEnvelopeShifterConfig config;
     config.fft_size = 256;
     config.true_envelope_iterations = 2;
-    shifter.prepare(config);
+    REQUIRE(shifter.prepare(config) == SourceFilterAnalysisStatus::Ok);
 
     std::array<std::complex<float>, 129> left {};
     std::array<std::complex<float>, 129> right {};

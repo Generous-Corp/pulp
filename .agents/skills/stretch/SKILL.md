@@ -71,6 +71,19 @@ with one compensated latency shared by Stretch, parallel non-Stretch audio,
 MIDI 1, and UMP output. Keep both audio implementation translation units in the
 native no-exception mirror and the WAM/WebCLAP portable dependency inventories.
 
+Source/filter analysis is a prepared control-thread facility. Reach it through
+`pulp/signal/source_filter_analysis.hpp` (also exported by `signal.hpp`) for a
+cepstral envelope, LPC coefficients, Schur stability, or an all-pole response;
+formant extraction is deliberately not part of this contract. Preparation is
+transactional and reports typed size, configuration, or allocation failures.
+The analysis calls themselves use only retained scratch after a successful
+prepare. `SpectralEnvelopeShifterT` likewise rejects a non-finite or negative
+`max_gain_db` without changing its prior prepared state. Its runtime `warp`
+must be finite and strictly positive: zero, negative, NaN, or infinity is a
+fail-closed no-op on the frame, never a value to clamp or pass to an index
+calculation. Preserve that guard before any scratch or frame mutation when
+changing the stretch spectral path.
+
 For reproducible offline artifacts, prefer `FiniteStretchBuilder64` from
 `finite_stretch_builder.hpp` over open-coding the stream loop. Keep the render
 double-precision through completion, then seal to float once. This uses the
