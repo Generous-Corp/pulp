@@ -720,3 +720,50 @@ TEST_CASE("a knob with no recovered pointer emits no pointer call",
     REQUIRE(js.find("setKnobSpriteStrip('Plain") != std::string::npos);
     REQUIRE(js.find("setKnobCapturedIndicator") == std::string::npos);
 }
+
+TEST_CASE("browser control overlays do not invent stale companion labels",
+          "[import-design][browser-capture][fader][codegen]") {
+    DesignIR ir;
+    ir.source = pulp::view::DesignSource::html;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+
+    auto fader = declared_fader();
+    fader.name = "01 RATE 0.34";
+    fader.style.width = 240.0f;
+    fader.style.height = 32.0f;
+    fader.audio_label = "VALUE";
+    fader.audio_min = 0.0f;
+    fader.audio_max = 1.0f;
+    fader.audio_default = 0.34f;
+    fader.has_audio_range = true;
+    fader.attributes["pulpRouteId"] = "capture:param_1:0";
+    fader.attributes["binding"] = "param_1";
+    fader.attributes["fader_body_asset_path"] = "assets/body.png";
+    fader.attributes["fader_indicator_asset_path"] = "assets/thumb.png";
+    ir.root.children.push_back(std::move(fader));
+
+    pulp::view::CodeGenOptions options;
+    options.mode = pulp::view::CodeGenMode::bridge_native_js;
+    options.use_silver_knobs = true;
+    const auto js = pulp::view::generate_pulp_js(ir, options);
+
+    REQUIRE(js.find("createFader('_01_RATE_0_34") != std::string::npos);
+    REQUIRE(js.find("'horizontal'") != std::string::npos);
+    REQUIRE(js.find("'vertical'") == std::string::npos);
+    REQUIRE(js.find("setFaderCapturedArt('_01_RATE_0_34") != std::string::npos);
+    REQUIRE(js.find("bindWidgetToParam('_01_RATE_0_340', 'param_1')") !=
+            std::string::npos);
+    REQUIRE(js.find("_01_RATE_0_34_lbl") == std::string::npos);
+    REQUIRE(js.find("_01_RATE_0_34_val") == std::string::npos);
+    REQUIRE(js.find("_01_RATE_0_34_sub") == std::string::npos);
+    REQUIRE(js.find("setFlex('root', 'height', 52") == std::string::npos);
+    REQUIRE(js.find("setFlex('root', 'min_width', 240") == std::string::npos);
+
+    options.mode = pulp::view::CodeGenMode::web_compat;
+    const auto web_js = pulp::view::generate_pulp_js(ir, options);
+    REQUIRE(web_js.find("setLabel(_01_RATE_0_340._id, ' ')") !=
+            std::string::npos);
+    REQUIRE(web_js.find("setLabel(_01_RATE_0_340._id, 'VALUE')") ==
+            std::string::npos);
+}

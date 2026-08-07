@@ -109,12 +109,8 @@ TEST_CASE("point_to_local peels a non-root ScrollView ancestor", "[view][input]"
     CHECK_THAT(local.y, WithinAbs(120.0 - 30.0 - 100.0 + sy, 1e-4)); // py - mid.y - child.y + scroll_y
 }
 
-TEST_CASE("point_to_local divides out a scaled ancestor", "[view][input]") {
-    // When an ancestor has set_scale != 1.0, its descendants are painted magnified.
-    // The forward model is:
-    //   visual = mid.bounds*1 + leaf.bounds*mid.scale + target_local*mid.scale
-    // so the inverse peels mid.bounds at chain=1, leaf.bounds at chain=mid.scale,
-    // then divides the residual by the accumulated chain.
+TEST_CASE("point_to_local honors a scaled ancestor's center origin",
+          "[view][input]") {
     View root;
     root.set_bounds({0, 0, 400, 400});
 
@@ -129,8 +125,74 @@ TEST_CASE("point_to_local divides out a scaled ancestor", "[view][input]") {
     leafp->set_bounds({20, 10, 100, 100});
     midp->add_child(std::move(leaf));
 
-    // visual for target_local (20,20): (50,30) + (20,10)*2 + (20,20)*2 = (130,90).
+    // The default origin is the ancestor's centre. The target-local point
+    // (20,20) paints at root (-20,-60) after the 2x transform around (150,150).
+    const Point local = point_to_local({-20, -60}, leafp, &root);
+    CHECK_THAT(local.x, WithinAbs(20.0, 1e-4));
+    CHECK_THAT(local.y, WithinAbs(20.0, 1e-4));
+}
+
+TEST_CASE("point_to_local honors a scaled ancestor's top-left origin",
+          "[view][input]") {
+    View root;
+    root.set_bounds({0, 0, 400, 400});
+
+    auto mid = std::make_unique<View>();
+    View* midp = mid.get();
+    midp->set_bounds({50, 30, 300, 300});
+    midp->set_transform_origin(0.0f, 0.0f);
+    midp->set_scale(2.0f);
+    root.add_child(std::move(mid));
+
+    auto leaf = std::make_unique<View>();
+    View* leafp = leaf.get();
+    leafp->set_bounds({20, 10, 100, 100});
+    midp->add_child(std::move(leaf));
+
     const Point local = point_to_local({130, 90}, leafp, &root);
-    CHECK_THAT(local.x, WithinAbs(20.0, 1e-4));  // (130 - 50 - 20*2) / 2
-    CHECK_THAT(local.y, WithinAbs(20.0, 1e-4));  // (90  - 30 - 10*2) / 2
+    CHECK_THAT(local.x, WithinAbs(20.0, 1e-4));
+    CHECK_THAT(local.y, WithinAbs(20.0, 1e-4));
+}
+
+TEST_CASE("point_to_local peels root and nested scales exactly once",
+          "[view][input]") {
+    View root;
+    root.set_bounds({0, 0, 240, 160});
+    root.set_transform_origin(0.0f, 0.0f);
+    root.set_scale(0.5f);
+
+    auto container = std::make_unique<View>();
+    auto* container_ptr = container.get();
+    container->set_bounds({40, 20, 120, 100});
+    container->set_transform_origin(0.0f, 0.0f);
+    container->set_scale(0.5f);
+    root.add_child(std::move(container));
+
+    auto control = std::make_unique<View>();
+    auto* control_ptr = control.get();
+    control->set_bounds({40, 20, 20, 20});
+    container_ptr->add_child(std::move(control));
+
+    const Point local = point_to_local({32.5f, 17.5f}, control_ptr, &root);
+    CHECK_THAT(local.x, WithinAbs(10.0, 1e-4));
+    CHECK_THAT(local.y, WithinAbs(10.0, 1e-4));
+}
+
+TEST_CASE("point_to_local peels a scaled ScrollView root before scrolling",
+          "[view][input]") {
+    ScrollView root;
+    root.set_bounds({0, 0, 200, 120});
+    root.set_content_size({300, 240});
+    root.set_transform_origin(0.0f, 0.0f);
+    root.set_scale(0.5f);
+
+    auto control = std::make_unique<View>();
+    auto* control_ptr = control.get();
+    control->set_bounds({100, 120, 40, 20});
+    root.add_child(std::move(control));
+    root.set_scroll(20.0f, 40.0f);
+
+    const Point local = point_to_local({45.0f, 45.0f}, control_ptr, &root);
+    CHECK_THAT(local.x, WithinAbs(10.0, 1e-4));
+    CHECK_THAT(local.y, WithinAbs(10.0, 1e-4));
 }

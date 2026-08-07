@@ -203,6 +203,22 @@ pulp run --audio-probe-json /tmp/probe.json
 cat /tmp/probe.json
 ```
 
+Effects can be given a deterministic input stimulus for this live-device probe
+without opening the Settings UI. These environment variables are intentionally
+development/automation-only and are applied before the audio device starts:
+
+```bash
+PULP_TEST_SIGNAL=sine \
+PULP_TEST_SIGNAL_FREQUENCY_HZ=997 \
+PULP_TEST_SIGNAL_AMPLITUDE=0.25 \
+pulp run <target> --audio-probe-json /tmp/probe.json --frames 90
+```
+
+`PULP_TEST_SIGNAL` accepts only `sine` or `noise`. Frequency is in Hz and is
+valid only for `sine`; amplitude is linear from 0 through 1 (default 0.5).
+Malformed, non-finite, out-of-range, or inapplicable values disable the
+environment-requested signal rather than falling back to unexpected audio.
+
 `--audio-probe-json` implies `--headless` (one-shot dump + exit, like
 `--screenshot`). It is forwarded as `--audio-probe-json <file>` and via
 `PULP_AUDIO_PROBE_JSON=<file>`. The frame delay reuses the same

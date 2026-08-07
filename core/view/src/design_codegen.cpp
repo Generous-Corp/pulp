@@ -439,7 +439,15 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
             // Every user-authored string goes through the same escape as the
             // rest of this file. Interpolating the label raw let a crafted
             // design terminate the literal and inject executable bridge JS.
-            if (!node.audio_label.empty())
+            const auto designed_body = node.attributes.find("designed_body");
+            const bool browser_control_overlay =
+                node.attributes.count("pulpRouteId") != 0 &&
+                designed_body != node.attributes.end() &&
+                (designed_body->second == "underlay" ||
+                 designed_body->second == "capture");
+            if (browser_control_overlay)
+                ss << ind << "setLabel(" << var << "._id, ' ');\n";
+            else if (!node.audio_label.empty())
                 ss << ind << "setLabel(" << var << "._id, '"
                    << js_single_quote_escape(node.audio_label) << "');\n";
             ss << ind << "setMin(" << var << "._id, " << node.audio_min << ");\n";
@@ -1172,6 +1180,19 @@ static void emit_js_audio_widget(const NativeEmit& e) {
     auto wtype = node.audio_widget;
     float fid_w = 0.0f, fid_h = 0.0f;  // emitted widget dims, set per sub-branch (fidelity)
 
+    // Browser whole-tree lowering keeps the authored labels and readouts as
+    // ordinary native text nodes, then hoists a value-driven control over the
+    // painted body. `pulpRouteId` distinguishes that semantic overlay from a
+    // standalone captured-art widget: emitting the generic widget companion
+    // labels here would add VALUE/default/binding text that never existed in
+    // the source and can become stale beside the bound control.
+    const auto designed_body = node.attributes.find("designed_body");
+    const bool browser_control_overlay =
+        node.attributes.count("pulpRouteId") != 0 &&
+        designed_body != node.attributes.end() &&
+        (designed_body->second == "underlay" ||
+         designed_body->second == "capture");
+
     // Extract label text, value text, and stroke color from child nodes
     std::string label_text = node.audio_label;
     std::string value_text;
@@ -1188,6 +1209,10 @@ static void emit_js_audio_widget(const NativeEmit& e) {
             if (child.attributes.count("stroke_color"))
                 stroke_color = child.attributes.at("stroke_color");
         }
+    }
+    if (browser_control_overlay) {
+        label_text.clear();
+        value_text.clear();
     }
 
     // Silver-knob synthesis: in the sprite-strip path the "VALUE" label
@@ -1208,7 +1233,8 @@ static void emit_js_audio_widget(const NativeEmit& e) {
     // check was written when an empty slot really did mean "no label
     // anywhere", which stopped being true.
     const bool design_supplied_art = !node.children.empty();
-    if (opts.use_silver_knobs && label_text.empty() && value_text.empty() &&
+    if (!browser_control_overlay && opts.use_silver_knobs &&
+        label_text.empty() && value_text.empty() &&
         !design_supplied_art) {
         label_text = "VALUE";
     }
@@ -1249,7 +1275,9 @@ static void emit_js_audio_widget(const NativeEmit& e) {
     std::string units_text = (units_attr != node.attributes.end()) ? units_attr->second : std::string();
     auto binding_attr = node.attributes.find("binding");
     std::string binding_text = (binding_attr != node.attributes.end()) ? binding_attr->second : std::string();
-    bool has_value_stack = node.has_audio_range || !units_text.empty() || !binding_text.empty();
+    bool has_value_stack = !browser_control_overlay &&
+                           (node.has_audio_range || !units_text.empty() ||
+                            !binding_text.empty());
     auto emit_value_stack = [&](const std::string& container_id) {
         if (!has_value_stack) return;
         // Primary value (slightly dimmer than the label, larger than the
@@ -1535,8 +1563,10 @@ static void emit_js_audio_widget(const NativeEmit& e) {
         // Use frame width for column, but ensure widget is at least usable
         float widget_w = std::max(shape_w, 6.0f);
         float col_h = shape_h + 20 + value_stack_h;
-        ss << ind << "setFlex('" << col_id << "', 'height', " << col_h << ");\n";
-        ss << ind << "setFlex('" << col_id << "', 'min_width', " << frame_w << ");\n";
+        if (needs_label_wrapper) {
+            ss << ind << "setFlex('" << col_id << "', 'height', " << col_h << ");\n";
+            ss << ind << "setFlex('" << col_id << "', 'min_width', " << frame_w << ");\n";
+        }
         fid_w = widget_w; fid_h = shape_h;  // emitted widget dims (fidelity)
         const char* orientation = shape_w >= shape_h ? "horizontal" : "vertical";
         ss << ind << "createFader('" << id << "', '" << orientation

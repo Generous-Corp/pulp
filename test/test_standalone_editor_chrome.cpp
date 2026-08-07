@@ -1368,6 +1368,73 @@ TEST_CASE("Standalone frame delay env accepts only positive plain integers",
     REQUIRE(frames == 99);
 }
 
+TEST_CASE("Standalone test signal environment parses valid sine and noise",
+          "[standalone][test-signal][environment]") {
+    ScopedEnv signal("PULP_TEST_SIGNAL");
+    ScopedEnv frequency("PULP_TEST_SIGNAL_FREQUENCY_HZ");
+    ScopedEnv amplitude("PULP_TEST_SIGNAL_AMPLITUDE");
+
+    signal.set("sine");
+    frequency.set("997.5");
+    amplitude.set("0.25");
+    auto config = test_signal_config_from_environment(48'000.0);
+    REQUIRE(config);
+    REQUIRE(config->type == TestSignalType::sine);
+    REQUIRE(config->sine_frequency_hz == Catch::Approx(997.5f));
+    REQUIRE(config->sine_amplitude == Catch::Approx(0.25f));
+
+    signal.set("noise");
+    frequency.unset();
+    amplitude.set("1");
+    config = test_signal_config_from_environment(48'000.0);
+    REQUIRE(config);
+    REQUIRE(config->type == TestSignalType::noise);
+    REQUIRE(config->sine_amplitude == Catch::Approx(1.0f));
+}
+
+TEST_CASE("Standalone test signal environment is absent or fails closed",
+          "[standalone][test-signal][environment]") {
+    ScopedEnv signal("PULP_TEST_SIGNAL");
+    ScopedEnv frequency("PULP_TEST_SIGNAL_FREQUENCY_HZ");
+    ScopedEnv amplitude("PULP_TEST_SIGNAL_AMPLITUDE");
+    signal.unset();
+    frequency.set("440");
+    amplitude.set("0.5");
+    REQUIRE_FALSE(test_signal_config_from_environment(48'000.0));
+
+    signal.set("pink");
+    auto config = test_signal_config_from_environment(48'000.0);
+    REQUIRE(config);
+    REQUIRE(config->type == TestSignalType::none);
+
+    signal.set("sine");
+    double parsed = 99.0;
+    REQUIRE_FALSE(parse_test_signal_number("", 0.0, 1.0, parsed));
+    REQUIRE(parsed == 99.0);
+    for (const auto& invalid : {"nan", "inf", "-0.1", "1.01", "0.5x"}) {
+        amplitude.set(invalid);
+        config = test_signal_config_from_environment(48'000.0);
+        CAPTURE(invalid);
+        REQUIRE(config);
+        REQUIRE(config->type == TestSignalType::none);
+    }
+
+    amplitude.set("0.5");
+    for (const auto& invalid : {"0", "24000", "24001", "nan", "440Hz"}) {
+        frequency.set(invalid);
+        config = test_signal_config_from_environment(48'000.0);
+        CAPTURE(invalid);
+        REQUIRE(config);
+        REQUIRE(config->type == TestSignalType::none);
+    }
+
+    signal.set("noise");
+    frequency.set("440");
+    config = test_signal_config_from_environment(48'000.0);
+    REQUIRE(config);
+    REQUIRE(config->type == TestSignalType::none);
+}
+
 TEST_CASE("Standalone delayed action fires exactly once after the configured delay",
           "[standalone][chrome][audio-inspector]") {
     DelayedAction action;

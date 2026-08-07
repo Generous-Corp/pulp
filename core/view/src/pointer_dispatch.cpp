@@ -9,12 +9,9 @@ namespace pulp::view {
 
 Point point_to_local(Point root_pos, View* target, View* root) {
     // Convert root-local `root_pos` into `target`'s local-pre-scale
-    // coordinates, accounting for any ancestor's set_scale transform. The
-    // forward render chain is:
-    //   visual_pos = sum over ancestors A of (A.bounds * scale_chain_above_A)
-    //              + (target_local * scale_chain_above_target)
-    // Inverse: walk root→target, peel off each ancestor's offset (scaled by the
-    // chain above it), then divide the residual by the final scale_chain.
+    // coordinates, accounting for the root and every descendant's set_scale
+    // transform and transform origin. Each step works in its parent's already-
+    // unscaled coordinates, matching the nested canvas transform used for paint.
     if (!target || !root) return root_pos;
 
     std::vector<View*> chain;
@@ -22,7 +19,8 @@ Point point_to_local(Point root_pos, View* target, View* root) {
     std::reverse(chain.begin(), chain.end());  // root_child .. target
 
     auto local = root_pos;
-    float scale_chain = 1.0f;  // accumulated scale from root down to current ancestor
+
+    if (!root->inverse_scale_transform(local)) return {};
 
     // `root_pos` is already root-local, so root's own bounds offset is NOT
     // subtracted — but a root ScrollView still paints its children shifted by
@@ -33,17 +31,13 @@ Point point_to_local(Point root_pos, View* target, View* root) {
         local.y += root_sv->scroll_y();
     }
     for (auto* v : chain) {
-        local.x -= v->bounds().x * scale_chain;
-        local.y -= v->bounds().y * scale_chain;
-        scale_chain *= v->scale();
+        local.x -= v->bounds().x;
+        local.y -= v->bounds().y;
+        if (!v->inverse_scale_transform(local)) return {};
         if (auto* sv = dynamic_cast<ScrollView*>(v)) {
-            local.x += sv->scroll_x() * scale_chain;
-            local.y += sv->scroll_y() * scale_chain;
+            local.x += sv->scroll_x();
+            local.y += sv->scroll_y();
         }
-    }
-    if (scale_chain != 0.0f && scale_chain != 1.0f) {
-        local.x /= scale_chain;
-        local.y /= scale_chain;
     }
     return local;
 }

@@ -933,6 +933,7 @@ std::vector<View*> View::sorted_children_by_z_index() const {
 
 View* View::hit_test(Point local_point) {
     if (!visible_ || !enabled_ || !hit_testable_) return nullptr;
+    if (!parent_ && !inverse_scale_transform(local_point)) return nullptr;
 
     // React Native pointerEvents:
     //   none      — neither this view nor children intercept events.
@@ -955,6 +956,12 @@ View* View::hit_test(Point local_point) {
 
             Point child_point = {local_point.x - child->bounds_.x,
                                 local_point.y - child->bounds_.y};
+
+            // Paint scales a child around its transform origin. Hit testing
+            // must apply the inverse before descending, or a fitted subtree
+            // paints at one location while its descendants remain interactive
+            // at their authored, unscaled coordinates.
+            if (!child->inverse_scale_transform(child_point)) return nullptr;
 
             // For overflow:visible, expand the hit area on all four sides
             // to include content that extends beyond the child's bounds
@@ -1002,6 +1009,17 @@ View* View::hit_test(Point local_point) {
         return this;
 
     return nullptr;
+}
+
+bool View::inverse_scale_transform(Point& point) const noexcept {
+    if (scale_ == 0.0f) return false;
+    if (scale_ == 1.0f) return true;
+
+    const float ox = bounds_.width * origin_x_;
+    const float oy = bounds_.height * origin_y_;
+    point.x = ox + (point.x - ox) / scale_;
+    point.y = oy + (point.y - oy) / scale_;
+    return true;
 }
 
 // ── Overlay paint queue ──────────────────────────────────────────────────────

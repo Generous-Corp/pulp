@@ -1136,6 +1136,13 @@ void ScrollView::paint_all(canvas::Canvas& canvas) {
     auto b = bounds();
     canvas.save();
     canvas.translate(b.x, b.y);
+    if (scale() != 1.0f) {
+        const float ox = b.width * transform_origin_x();
+        const float oy = b.height * transform_origin_y();
+        canvas.translate(ox, oy);
+        canvas.scale(scale(), scale());
+        canvas.translate(-ox, -oy);
+    }
 
     // Clip to viewport
     canvas.clip_rect(0, 0, b.width, b.height);
@@ -1204,6 +1211,7 @@ void ScrollView::paint(canvas::Canvas& canvas) {
 
 View* ScrollView::hit_test(Point local_point) {
     if (!visible() || !enabled() || !hit_testable()) return nullptr;
+    if (!parent() && !inverse_scale_transform(local_point)) return nullptr;
     if (!local_bounds().contains(local_point)) return nullptr;
 
     // React Native pointerEvents parity (pulp #1170):
@@ -1237,6 +1245,8 @@ View* ScrollView::hit_test(Point local_point) {
 
             Point child_point = {local_point.x + sx - child->bounds().x,
                                  local_point.y + sy - child->bounds().y};
+
+            if (!child->inverse_scale_transform(child_point)) continue;
 
             // overflow:visible: expand the hit area to the child's TRUE painted
             // extent — the bounding box of the child plus every descendant
