@@ -109,37 +109,38 @@ std::uint64_t pattern_mask(const BinaryPattern<Capacity>& pattern) {
     return mask;
 }
 
-std::size_t oracle_delayed_step(std::size_t step, std::size_t length,
-                                std::int64_t phase) {
+template <std::size_t Capacity>
+std::vector<bool> oracle_source_projection(const BinaryPattern<Capacity>& source,
+                                           std::size_t target_steps,
+                                           RhythmLengthMapping mapping,
+                                           std::int64_t phase) {
+    std::vector<bool> projection(target_steps, false);
+    if (mapping == RhythmLengthMapping::wrap) {
+        for (std::size_t target = 0; target < target_steps; ++target)
+            projection[target] = *source.at(target % source.size());
+    } else {
+        // Fill each source bucket by its independently derived half-open target
+        // interval [ceil(i*T/S), ceil((i+1)*T/S)). Test dimensions are <= 8,
+        // so these reference products are exactly representable.
+        for (std::size_t source_step = 0; source_step < source.size(); ++source_step) {
+            const auto first = (source_step * target_steps + source.size() - 1)
+                               / source.size();
+            const auto last = ((source_step + 1) * target_steps + source.size() - 1)
+                              / source.size();
+            for (auto target = first; target < last; ++target)
+                projection[target] = *source.at(source_step);
+        }
+    }
+
     while (phase > 0) {
-        step = step == 0 ? length - 1 : step - 1;
+        std::rotate(projection.rbegin(), projection.rbegin() + 1, projection.rend());
         --phase;
     }
     while (phase < 0) {
-        step = (step + 1) % length;
+        std::rotate(projection.begin(), projection.begin() + 1, projection.end());
         ++phase;
     }
-    return step;
-}
-
-template <std::size_t Capacity>
-bool oracle_relationship_candidate(const BinaryPattern<Capacity>& source,
-                                   const RhythmRelationshipConfig& config,
-                                   std::size_t target_step) {
-    const auto shifted = oracle_delayed_step(target_step, config.target_steps,
-                                             config.phase_steps);
-    const auto source_step = config.length_mapping == RhythmLengthMapping::wrap
-                                 ? shifted % source.size()
-                                 : shifted * source.size() / config.target_steps;
-    const bool source_onset = *source.at(source_step);
-    const bool related = config.relationship == RhythmRelationship::coincident
-                             ? source_onset
-                             : config.relationship == RhythmRelationship::complementary
-                                   ? !source_onset
-                                   : true;
-    return related
-           && (config.collision == RhythmCollisionPolicy::allow_source_overlap
-               || !source_onset);
+    return projection;
 }
 
 } // namespace
@@ -251,34 +252,89 @@ TEST_CASE("rhythm relationships match independent phase and length oracles",
                 REQUIRE(source.set(step, ((source_mask >> step) & 1u) != 0));
 
             for (std::size_t target_steps = 1; target_steps <= 8; ++target_steps) {
-                for (const auto relationship : {RhythmRelationship::coincident,
-                                                RhythmRelationship::complementary,
-                                                RhythmRelationship::independent}) {
-                    for (const auto mapping : {RhythmLengthMapping::wrap,
-                                               RhythmLengthMapping::proportional}) {
-                        for (const auto collision : {
-                                 RhythmCollisionPolicy::allow_source_overlap,
-                                 RhythmCollisionPolicy::avoid_source_overlap}) {
-                            for (const auto phase : {-9, -1, 0, 1, 9}) {
-                                RhythmRelationshipConfig config;
-                                config.target_steps = target_steps;
-                                config.relationship = relationship;
-                                config.length_mapping = mapping;
-                                config.phase_steps = phase;
-                                config.collision = collision;
-                                const auto result = derive_rhythm_relationship(source, config);
-                                REQUIRE(result);
-                                for (std::size_t step = 0; step < target_steps; ++step)
-                                    CHECK(*result.pattern.at(step)
-                                          == oracle_relationship_candidate(source, config,
-                                                                           step));
-                            }
-                        }
+                for (const auto mapping : {RhythmLengthMapping::wrap,
+                                           RhythmLengthMapping::proportional}) {
+                    for (const auto phase : {-9, -1, 0, 1, 9}) {
+                        RhythmRelationshipConfig config;
+                        config.target_steps = target_steps;
+                        config.relationship = RhythmRelationship::coincident;
+                        config.length_mapping = mapping;
+                        config.phase_steps = phase;
+                        config.collision = RhythmCollisionPolicy::allow_source_overlap;
+                        const auto expected = oracle_source_projection(
+                            source, target_steps, mapping, phase);
+                        const auto result = derive_rhythm_relationship(source, config);
+                        REQUIRE(result);
+                        for (std::size_t step = 0; step < target_steps; ++step)
+                            CHECK(*result.pattern.at(step) == expected[step]);
                     }
                 }
             }
         }
     }
+}
+
+TEST_CASE("rhythm relationship policies have explicit semantic fixtures",
+          "[music][generative]") {
+    BinaryPattern<8> source;
+    constexpr std::array<std::uint8_t, 3> source_bits{1, 0, 1};
+    REQUIRE(source.assign(source_bits) == PatternError::none);
+
+    struct Fixture {
+        RhythmLengthMapping mapping;
+        std::int64_t phase;
+        RhythmRelationship relationship;
+        RhythmCollisionPolicy collision;
+        std::uint64_t expected;
+    };
+    constexpr std::array fixtures{
+        Fixture{RhythmLengthMapping::wrap, 0, RhythmRelationship::coincident,
+                RhythmCollisionPolicy::allow_source_overlap, 0x6Du},
+        Fixture{RhythmLengthMapping::proportional, 0, RhythmRelationship::coincident,
+                RhythmCollisionPolicy::allow_source_overlap, 0xC7u},
+        Fixture{RhythmLengthMapping::wrap, 1, RhythmRelationship::coincident,
+                RhythmCollisionPolicy::allow_source_overlap, 0xDAu},
+        Fixture{RhythmLengthMapping::wrap, -1, RhythmRelationship::coincident,
+                RhythmCollisionPolicy::allow_source_overlap, 0xB6u},
+        Fixture{RhythmLengthMapping::proportional, 1, RhythmRelationship::coincident,
+                RhythmCollisionPolicy::allow_source_overlap, 0x8Fu},
+        Fixture{RhythmLengthMapping::proportional, -1, RhythmRelationship::coincident,
+                RhythmCollisionPolicy::allow_source_overlap, 0xE3u},
+        Fixture{RhythmLengthMapping::wrap, 0, RhythmRelationship::complementary,
+                RhythmCollisionPolicy::allow_source_overlap, 0x92u},
+        Fixture{RhythmLengthMapping::wrap, 0, RhythmRelationship::independent,
+                RhythmCollisionPolicy::allow_source_overlap, 0xFFu},
+        Fixture{RhythmLengthMapping::wrap, 0, RhythmRelationship::coincident,
+                RhythmCollisionPolicy::avoid_source_overlap, 0x00u},
+        Fixture{RhythmLengthMapping::wrap, 0, RhythmRelationship::complementary,
+                RhythmCollisionPolicy::avoid_source_overlap, 0x92u},
+        Fixture{RhythmLengthMapping::wrap, 0, RhythmRelationship::independent,
+                RhythmCollisionPolicy::avoid_source_overlap, 0x92u},
+    };
+
+    for (const auto& fixture : fixtures) {
+        RhythmRelationshipConfig config;
+        config.target_steps = 8;
+        config.relationship = fixture.relationship;
+        config.length_mapping = fixture.mapping;
+        config.phase_steps = fixture.phase;
+        config.collision = fixture.collision;
+        const auto result = derive_rhythm_relationship(source, config);
+        REQUIRE(result);
+        CHECK(pattern_mask(result.pattern) == fixture.expected);
+    }
+
+    using pulp::music::detail::delayed_step;
+    using pulp::music::detail::multiply_divide_floor;
+    constexpr auto maximum = std::numeric_limits<std::size_t>::max();
+    STATIC_REQUIRE(multiply_divide_floor(maximum - 1, maximum, maximum)
+                   == maximum - 1);
+    STATIC_REQUIRE(multiply_divide_floor(maximum / 2, maximum, maximum)
+                   == maximum / 2);
+    STATIC_REQUIRE(delayed_step(maximum - 2, maximum,
+                                std::numeric_limits<std::int64_t>::min())
+                   == (std::uint64_t{1} << 63u) - 2);
+    STATIC_REQUIRE(delayed_step(0, maximum, 1) == maximum - 1);
 }
 
 TEST_CASE("rhythm density is exact and coordinate deterministic",
@@ -302,9 +358,11 @@ TEST_CASE("rhythm density is exact and coordinate deterministic",
     REQUIRE(repeated);
     CHECK(first.pattern == repeated.pattern);
     CHECK(first.pattern.onset_count() == config.target_onsets);
+    const auto projected_source = oracle_source_projection(
+        source, config.target_steps, config.length_mapping, config.phase_steps);
     for (std::size_t step = 0; step < config.target_steps; ++step) {
         if (*first.pattern.at(step))
-            CHECK(oracle_relationship_candidate(source, config, step));
+            CHECK_FALSE(projected_source[step]);
     }
 
     config.draw.seed += 1;

@@ -5,6 +5,7 @@
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 
 namespace pulp::music {
 
@@ -108,11 +109,42 @@ constexpr bool valid_density_policy(RhythmDensityPolicy value) noexcept {
 
 constexpr std::size_t delayed_step(std::size_t step, std::size_t length,
                                    std::int64_t phase_steps) noexcept {
-    const auto signed_length = static_cast<std::int64_t>(length);
-    auto phase = phase_steps % signed_length;
-    if (phase < 0)
-        phase += signed_length;
-    return (step + length - static_cast<std::size_t>(phase)) % length;
+    const auto magnitude = phase_steps >= 0
+                               ? static_cast<std::uint64_t>(phase_steps)
+                               : static_cast<std::uint64_t>(-(phase_steps + 1)) + 1u;
+    const auto phase = static_cast<std::size_t>(magnitude % length);
+    if (phase_steps >= 0)
+        return step >= phase ? step - phase : length - (phase - step);
+    return step < length - phase ? step + phase : step - (length - phase);
+}
+
+// Computes floor(multiplicand * multiplier / divisor) without forming the
+// potentially overflowing product. The mapping caller supplies
+// multiplicand < divisor, so every prefix quotient is representable.
+constexpr std::size_t multiply_divide_floor(std::size_t multiplicand,
+                                            std::size_t multiplier,
+                                            std::size_t divisor) noexcept {
+    std::size_t quotient = 0;
+    std::size_t remainder = 0;
+    auto bit = std::size_t{1} << (std::numeric_limits<std::size_t>::digits - 1);
+    for (; bit != 0; bit >>= 1u) {
+        quotient *= 2;
+        if (remainder >= divisor - remainder) {
+            remainder -= divisor - remainder;
+            ++quotient;
+        } else {
+            remainder += remainder;
+        }
+        if ((multiplier & bit) == 0)
+            continue;
+        if (remainder >= divisor - multiplicand) {
+            remainder -= divisor - multiplicand;
+            ++quotient;
+        } else {
+            remainder += multiplicand;
+        }
+    }
+    return quotient;
 }
 
 template <std::size_t MaxSteps>
@@ -122,7 +154,7 @@ constexpr std::size_t mapped_source_step(const BinaryPattern<MaxSteps>& source,
     const auto shifted = delayed_step(target_step, config.target_steps, config.phase_steps);
     if (config.length_mapping == RhythmLengthMapping::wrap)
         return shifted % source.size();
-    return shifted * source.size() / config.target_steps;
+    return multiply_divide_floor(shifted, source.size(), config.target_steps);
 }
 
 template <std::size_t MaxSteps>
