@@ -72,9 +72,8 @@ artifact state behind one dormant `ControlBroker` owner. Its installed
 `ControlService` and `ControlClient` expose a typed, connection-bound transport
 seam without opening a listener or activating a runtime. The transport owns the
 authenticated peer and client lineage, so artifact reads cannot substitute a
-client identifier. The temporary `InspectorClient` compatibility constructor
-supports envelope dispatch only and fails artifact reads closed; Phase 3c owns
-the canonical carrier rather than extending the legacy Inspector session/server.
+client identifier. Phase 3c owns the canonical carrier; the legacy Inspector
+session/server is not exposed as a second capability-control authority path.
 Verified peer identity binds UID/SID, PID, process generation,
 executable identity, publisher, and role; same-UID membership and payload claims
 are not proof. Launcher bootstrap material is single-use, short-lived,

@@ -108,10 +108,9 @@ not linked into ordinary plugin-format artifacts, and does not replace the
 current explicitly activated standalone inspector transport. The installed
 `ControlClient` accepts a typed `ControlClientTransport` representing one
 authenticated, connection-bound peer and client identity; its artifact-read API
-therefore has no caller-supplied client ID. The transitional `InspectorClient`
-constructor carries envelope dispatch over the existing path but fails artifact
-reads closed. Phase 3c will supply the canonical carrier without adding new
-coupling to the legacy `InspectorSession`/server that it replaces.
+therefore has no caller-supplied client ID. Phase 3c will supply the canonical
+carrier; the legacy `InspectorSession`/server is not a compatibility transport
+or a second capability-control authority path.
 `ControlService` accepts a carrier-verified peer and connection-bound client
 identity, but has no executor unless a later runtime adapter injects one.
 Per-user service activation, consent UI, and live Inspector/Remote View

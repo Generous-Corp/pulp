@@ -235,9 +235,9 @@ and artifact state in a dormant `ControlBroker`. Installed `ControlService` and
 `ControlClient` types expose a typed transport seam; constructing them never
 opens an endpoint or activates a runtime bridge. A `ControlClientTransport`
 represents one authenticated connection and owns its client lineage, including
-artifact reads. The Phase 3b `InspectorClient` compatibility adapter carries
-envelope dispatch only and fails artifact reads closed. The canonical carrier
-and removal of the legacy Inspector session/server coupling belong to Phase 3c.
+artifact reads. Phase 3c owns the canonical carrier; the legacy Inspector
+session/server is not exposed as a compatibility transport or second authority
+path.
 Each service session must negotiate its own protocol version and mandatory
 receipt support. The broker validates operation input JSON before admission and
 successful output JSON before terminal completion. A started operation that
