@@ -186,6 +186,15 @@ bool ControlOperationStore::is_open() const {
 }
 
 ControlOperationStoreResult ControlOperationStore::admit(ControlOperationBinding binding) {
+    return admit(std::move(binding), true);
+}
+
+ControlOperationStoreResult ControlOperationStore::replay(ControlOperationBinding binding) {
+    return admit(std::move(binding), false);
+}
+
+ControlOperationStoreResult ControlOperationStore::admit(ControlOperationBinding binding,
+                                                          bool allow_new) {
     const auto now = detail::unix_milliseconds(impl_->clock());
     std::lock_guard lock(impl_->mutex);
     if (!impl_->opened)
@@ -231,6 +240,8 @@ ControlOperationStoreResult ControlOperationStore::admit(ControlOperationBinding
         return {ControlOperationStoreStatus::RequestIdConflict, impl_->by_id.at(found->second),
                 "request id was already used by this client"};
     }
+    if (!allow_new)
+        return {ControlOperationStoreStatus::NotFound, {}, "operation replay was not found"};
     if (impl_->by_id.size() >= impl_->config.max_receipts)
         return {
             ControlOperationStoreStatus::ResourceExhausted, {}, "receipt capacity is exhausted"};

@@ -75,6 +75,10 @@ class ControlBroker {
     /// and can never be admitted by minting an ArtifactRead grant.
     ControlAdmissionResult admit_operation(const VerifiedControlPeerIdentity& client_peer,
                                            const ControlRequestEnvelope& request);
+    /// Reauthorizes and resolves an existing idempotent receipt without
+    /// creating a fresh admission.
+    ControlAdmissionResult replay_operation(const VerifiedControlPeerIdentity& client_peer,
+                                            const ControlRequestEnvelope& request);
     bool revalidate_operation(const VerifiedControlPeerIdentity& client_peer,
                               const ControlAdmissionPlan& plan);
     bool operation_store_ready() const;
@@ -125,7 +129,8 @@ class ControlBroker {
                                         const ControlClientId& requesting_client_id,
                                         const ControlArtifactMetadata& metadata);
     ControlAdmissionResult admit_verified_operation(const VerifiedControlPeerIdentity& client_peer,
-                                                    const ControlAdmissionRequest& request);
+                                                    const ControlAdmissionRequest& request,
+                                                    bool allow_new = true);
     bool revalidate_operation_locked(const VerifiedControlPeerIdentity& client_peer,
                                      const ControlAdmissionPlan& plan);
     void audit_denial(std::string_view action, const VerifiedControlPeerIdentity& observed_peer,

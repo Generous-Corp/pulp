@@ -285,8 +285,17 @@ ControlBroker::admit_operation(const VerifiedControlPeerIdentity& client_peer,
 }
 
 ControlAdmissionResult
+ControlBroker::replay_operation(const VerifiedControlPeerIdentity& client_peer,
+                                const ControlRequestEnvelope& envelope) {
+    const auto request = control_admission_request(envelope);
+    if (!request)
+        return {};
+    return admit_verified_operation(client_peer, *request, false);
+}
+
+ControlAdmissionResult
 ControlBroker::admit_verified_operation(const VerifiedControlPeerIdentity& client_peer,
-                                        const ControlAdmissionRequest& request) {
+                                        const ControlAdmissionRequest& request, bool allow_new) {
     std::unique_lock coordination_lock(coordination_mutex_);
     ControlAdmissionResult result;
     if (!request.client_id || !request.registration_id || !request.grant_id ||
@@ -418,7 +427,8 @@ ControlBroker::admit_verified_operation(const VerifiedControlPeerIdentity& clien
     binding.canonical_request_hash = request.canonical_request_hash;
     coordination_lock.unlock();
 
-    const auto stored = operation_store_->admit(std::move(binding));
+    const auto stored = allow_new ? operation_store_->admit(std::move(binding))
+                                  : operation_store_->replay(std::move(binding));
     result.receipt = stored.receipt;
     if (stored.status == ControlOperationStoreStatus::IdempotencyConflict) {
         result.status = ControlAdmissionStatus::IdempotencyConflict;

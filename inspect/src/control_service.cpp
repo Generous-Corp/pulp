@@ -242,13 +242,8 @@ ControlServiceResult ControlService::dispatch_request(Session& session,
             .explanation = "artifacts feature was not negotiated",
         };
     }
-    if (!executor_) {
-        return {
-            .status = ControlServiceStatus::UnsupportedMessage,
-            .explanation = "no control operation executor is installed",
-        };
-    }
-    auto admission = broker_.admit_operation(session.peer_, request);
+    auto admission = executor_ ? broker_.admit_operation(session.peer_, request)
+                               : broker_.replay_operation(session.peer_, request);
     if (admission.receipt && !admission.should_dispatch &&
         (admission.status == ControlAdmissionStatus::Admitted ||
          admission.status == ControlAdmissionStatus::CancelledBeforeDispatch)) {
@@ -256,6 +251,21 @@ ControlServiceResult ControlService::dispatch_request(Session& session,
         // when post-persist revalidation cancelled it before dispatch. A bare
         // denial would discard the receipt ID needed for correlated replay.
         return receipt_response(*admission.receipt, request.request_id);
+    }
+    if (!executor_) {
+        if (admission.status == ControlAdmissionStatus::IdempotencyConflict ||
+            admission.status == ControlAdmissionStatus::RequestIdConflict ||
+            admission.status == ControlAdmissionStatus::ReplayWindowExpired) {
+            return {
+                .status = ControlServiceStatus::AdmissionDenied,
+                .admission_status = admission.status,
+                .explanation = std::string(control_admission_status_id(admission.status)),
+            };
+        }
+        return {
+            .status = ControlServiceStatus::UnsupportedMessage,
+            .explanation = "no control operation executor is installed",
+        };
     }
     if (admission.status != ControlAdmissionStatus::Admitted || !admission.receipt) {
         return {

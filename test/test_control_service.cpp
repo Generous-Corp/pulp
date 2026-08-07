@@ -495,6 +495,14 @@ TEST_CASE("control service executes admitted request once and replays receipt",
     CHECK(receipt(replay).state == ControlReceiptState::Completed);
     CHECK(executions == 1);
 
+    ControlService dormant{fixture.broker};
+    auto dormant_session = negotiate(dormant, fixture);
+    const auto dormant_replay = dormant_session.dispatch(encoded);
+    REQUIRE(dormant_replay.status == ControlServiceStatus::Responded);
+    CHECK(receipt(dormant_replay).receipt_id == receipt(first).receipt_id);
+    CHECK(receipt(dormant_replay).state == ControlReceiptState::Completed);
+    CHECK(executions == 1);
+
     const auto durable =
         fixture.broker.operation_receipt(ControlReceiptId{receipt(first).receipt_id});
     REQUIRE(durable);

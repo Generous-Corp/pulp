@@ -159,6 +159,8 @@ class ControlOperationStore {
     bool is_open() const;
 
     ControlOperationStoreResult admit(ControlOperationBinding binding);
+    /// Resolves an existing idempotent receipt without admitting new work.
+    ControlOperationStoreResult replay(ControlOperationBinding binding);
     /// Atomically claims an admitted receipt for execution. Cancellation and
     /// the receipt's absolute deadline are resolved durably before Running can
     /// become visible.
@@ -173,6 +175,7 @@ class ControlOperationStore {
     std::vector<ControlOperationReceipt> receipts() const;
 
   private:
+    ControlOperationStoreResult admit(ControlOperationBinding binding, bool allow_new);
     class Impl;
     std::unique_ptr<Impl> impl_;
 };
