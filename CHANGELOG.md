@@ -8,6 +8,32 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07902"></a>
+## [0.790.2] - 2026-08-07
+
+- feature/vst3 surround arrangements ([#7223](https://github.com/Generous-Corp/pulp/pull/7223))
+- release/version bump ([#7216](https://github.com/Generous-Corp/pulp/pull/7216))
+- feature/six band eq primitive 20260805 ([#7185](https://github.com/Generous-Corp/pulp/pull/7185))
+- feature/dynamics contract kernels 20260805 ([#7187](https://github.com/Generous-Corp/pulp/pull/7187))
+- fix/widgetbridge dispatch lifetime 20260806 ([#7214](https://github.com/Generous-Corp/pulp/pull/7214))
+- release/post tag sync v0.789.0 21388b41ed15 ([#7207](https://github.com/Generous-Corp/pulp/pull/7207))
+
+<a id="v07901"></a>
+## [0.790.1] - 2026-08-06
+
+- fix/rotated pointer intrinsic geometry ([#7195](https://github.com/Generous-Corp/pulp/pull/7195))
+- release/version bump ([#7210](https://github.com/Generous-Corp/pulp/pull/7210))
+
+<a id="v07900"></a>
+## [0.790.0] - 2026-08-06
+
+- release/version bump ([#7205](https://github.com/Generous-Corp/pulp/pull/7205))
+- fix/knob indicator colour and signature ([#7173](https://github.com/Generous-Corp/pulp/pull/7173))
+- feature/music kernel 20260805 ([#7158](https://github.com/Generous-Corp/pulp/pull/7158))
+- fix/scripted session store lifetime ([#7176](https://github.com/Generous-Corp/pulp/pull/7176))
+- fix/browser fader captured art 20260806 ([#7196](https://github.com/Generous-Corp/pulp/pull/7196))
+- fix/svg indicator stroke paint ([#7191](https://github.com/Generous-Corp/pulp/pull/7191))
+
 <a id="v07890"></a>
 ## [0.789.0] - 2026-08-06
 
@@ -7478,6 +7504,9 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.790.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.790.2
+[0.790.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.790.1
+[0.790.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.790.0
 [0.789.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.789.0
 [0.788.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.788.0
 [0.787.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.787.0
