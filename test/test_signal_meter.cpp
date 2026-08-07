@@ -3,6 +3,7 @@
 #include <pulp/signal/signal.hpp>
 #include <array>
 #include <cmath>
+#include <numbers>
 #include <vector>
 
 using namespace pulp::signal;
@@ -28,7 +29,7 @@ TEST_CASE("MultiChannelMeter emits peak RMS clipping and stereo correlation", "[
     REQUIRE_THAT(snap.channels[1].peak, WithinAbs(0.5f, 0.001f));
     REQUIRE_THAT(snap.channels[1].rms, WithinAbs(0.5f, 0.001f));
     REQUIRE_THAT(snap.correlation, WithinAbs(1.0f, 0.005f));
-    REQUIRE(std::isfinite(snap.channels[0].lufs_momentary));
+    REQUIRE(std::isinf(snap.channels[0].lufs_momentary));
 }
 
 TEST_CASE("MultiChannelMeter64 accepts double input buffers", "[signal][meter][f64]") {
@@ -51,21 +52,24 @@ TEST_CASE("MultiChannelMeter64 accepts double input buffers", "[signal][meter][f
 
 TEST_CASE("MultiChannelMeter tracks negative correlation and integrated loudness", "[signal][meter]") {
     MultiChannelMeter meter;
-    meter.prepare(1000.0f, 2);
+    constexpr int sample_rate = 48000;
+    meter.prepare(sample_rate, 2);
 
-    std::vector<float> left(10, 0.25f);
-    std::vector<float> right(10, -0.25f);
-    const float* channels[] = {left.data(), right.data()};
-
-    for (int i = 0; i < 40; ++i) {
-        meter.process(channels, 2, static_cast<int>(left.size()));
+    std::vector<float> left(sample_rate * 3);
+    std::vector<float> right(sample_rate * 3);
+    for (int i = 0; i < static_cast<int>(left.size()); ++i) {
+        left[static_cast<std::size_t>(i)] = 0.25f * std::sin(
+            2.0f * std::numbers::pi_v<float> * 997.0f * i / sample_rate);
+        right[static_cast<std::size_t>(i)] = -left[static_cast<std::size_t>(i)];
     }
+    const float* channels[] = {left.data(), right.data()};
+    meter.process(channels, 2, static_cast<int>(left.size()));
 
     const auto& snap = meter.snapshot();
     REQUIRE(snap.num_channels == 2);
     REQUIRE_THAT(snap.correlation, WithinAbs(-1.0f, 0.001f));
     REQUIRE(std::isfinite(snap.lufs_integrated));
-    REQUIRE_THAT(snap.lufs_integrated, WithinAbs(-12.73f, 0.1f));
+    REQUIRE_THAT(snap.lufs_integrated, WithinAbs(-12.04f, 0.1f));
 }
 
 TEST_CASE("MultiChannelMeter prepare clears stale clip flags", "[signal][meter]") {

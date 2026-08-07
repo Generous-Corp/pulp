@@ -683,7 +683,7 @@ a working convolution and would hide the bug. Assert
 |-----------|--------|-------------|
 | ADSR | `adsr.hpp` | Attack-decay-sustain-release envelope generator for amplitude or filter modulation |
 | FFT | `fft.hpp` | Fast Fourier Transform — uses vDSP on Apple, fallback on other platforms |
-| Multi-Channel Meter | `multi_channel_meter.hpp` | Peak and RMS level measurement across multiple channels |
+| Multi-Channel Meter | `multi_channel_meter.hpp` | Sample peak, RMS, stereo correlation, and channel-based BS.1770-5 K-weighted momentary plus gated integrated loudness; not true-peak, short-term, LRA, or a complete EBU Mode meter |
 | Oscillator | `oscillator.hpp` | Legacy polyBLEP oscillator with sine, saw, square, triangle waveforms (float phase, integrated triangle) |
 | Oscillator suite (`osc/`) | `osc/va.hpp`, `osc/vco.hpp`, `osc/dco.hpp`, `osc/wt.hpp`, `osc/wt_lofi.hpp` | Newer VA/VCO/DCO/wavetable family sharing a phase accumulator and BLEP/BLAMP kernels — see the [oscillators guide](../guides/oscillators.md) |
 | Spectrogram | `spectrogram.hpp` | Rolling time-frequency analysis for visual display of spectral content |
