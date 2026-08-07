@@ -419,8 +419,9 @@ TEST_CASE("a leave during a captured drag does not clear hover",
 TEST_CASE("utf16_code_point_to_utf8 encodes each range",
           "[win-input-router][wah-6]") {
     REQUIRE(utf16_code_point_to_utf8(u'A', 0) == "A");
-    REQUIRE(utf16_code_point_to_utf8(u'é', 0) == "\xc3\xa9");        // é
-    REQUIRE(utf16_code_point_to_utf8(u'中', 0) == "\xe4\xb8\xad");    // 中
+    // Numeric code points keep this independent of MSVC's source codepage.
+    REQUIRE(utf16_code_point_to_utf8(char16_t{0x00e9}, 0) == "\xc3\xa9");
+    REQUIRE(utf16_code_point_to_utf8(char16_t{0x4e2d}, 0) == "\xe4\xb8\xad");
     // U+1F600 GRINNING FACE — the case that needs both halves.
     REQUIRE(utf16_code_point_to_utf8(0xD83D, 0xDE00) == "\xf0\x9f\x98\x80");
 }
