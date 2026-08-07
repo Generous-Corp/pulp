@@ -1,4 +1,4 @@
-# EqCurveDemo — four-band parametric EQ with the interactive EqCurveView editor.
+# EqCurveDemo — six-band parametric EQ with the interactive EqCurveView editor.
 # Showcases that the drawn response curve and the processed audio share one
 # description of the filter.
 
