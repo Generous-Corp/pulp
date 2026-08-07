@@ -117,6 +117,37 @@ ControlService::~ControlService() {
     completion_owner_->broker = nullptr;
 }
 
+ControlService::Session::~Session() {
+    close();
+}
+
+ControlService::Session::Session(Session&& other) noexcept
+    : service_(std::exchange(other.service_, nullptr)),
+      broker_(std::exchange(other.broker_, nullptr)), peer_(std::move(other.peer_)),
+      client_id_(std::move(other.client_id_)),
+      negotiated_features_(std::move(other.negotiated_features_)) {}
+
+ControlService::Session& ControlService::Session::operator=(Session&& other) noexcept {
+    if (this == &other)
+        return *this;
+    close();
+    service_ = std::exchange(other.service_, nullptr);
+    broker_ = std::exchange(other.broker_, nullptr);
+    peer_ = std::move(other.peer_);
+    client_id_ = std::move(other.client_id_);
+    negotiated_features_ = std::move(other.negotiated_features_);
+    return *this;
+}
+
+void ControlService::Session::close() noexcept {
+    service_ = nullptr;
+    negotiated_features_.reset();
+    if (!broker_)
+        return;
+    auto* broker = std::exchange(broker_, nullptr);
+    (void)broker->disconnect_client(client_id_, peer_, "control-session-disconnect");
+}
+
 ControlServiceResult ControlService::Session::dispatch(std::string_view encoded_envelope) {
     return service_->dispatch(*this, encoded_envelope);
 }

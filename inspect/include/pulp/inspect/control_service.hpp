@@ -56,6 +56,12 @@ class ControlService {
     /// destroying this value.
     class Session {
       public:
+        ~Session();
+        Session(const Session&) = delete;
+        Session& operator=(const Session&) = delete;
+        Session(Session&& other) noexcept;
+        Session& operator=(Session&& other) noexcept;
+
         ControlServiceResult dispatch(std::string_view encoded_envelope);
         /// Reads only artifacts produced by this connection-bound client ID.
         ControlArtifactReadResult read_artifact(std::string_view artifact_id, std::uint64_t offset,
@@ -65,9 +71,13 @@ class ControlService {
         friend class ControlService;
         Session(ControlService& service, VerifiedControlPeerIdentity peer,
                 ControlClientId client_id)
-            : service_(&service), peer_(std::move(peer)), client_id_(std::move(client_id)) {}
+            : service_(&service), broker_(&service.broker_), peer_(std::move(peer)),
+              client_id_(std::move(client_id)) {}
 
-        ControlService* service_;
+        void close() noexcept;
+
+        ControlService* service_ = nullptr;
+        ControlBroker* broker_ = nullptr;
         VerifiedControlPeerIdentity peer_;
         ControlClientId client_id_;
         std::optional<std::vector<std::string>> negotiated_features_;

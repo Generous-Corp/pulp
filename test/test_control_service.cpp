@@ -351,8 +351,11 @@ TEST_CASE("control service is dormant and negotiates without a listener",
     }));
     CHECK(fresh_request.status == ControlServiceStatus::NegotiationRequired);
 
+    std::vector<ControlService::Session> concurrent_sessions;
+    concurrent_sessions.reserve(128);
     for (std::size_t index = 0; index < 128; ++index) {
-        auto ephemeral = service.open_session(fixture.client, fixture.client_identity.client_id);
+        auto& ephemeral = concurrent_sessions.emplace_back(
+            service.open_session(fixture.client, fixture.client_identity.client_id));
         const auto accepted = ephemeral.dispatch(encode_control_envelope(offer));
         INFO(index);
         CHECK(accepted.status == ControlServiceStatus::Responded);
@@ -447,6 +450,61 @@ TEST_CASE("control service gates artifact operations and reads on negotiated sup
     REQUIRE(read.status == ControlArtifactStatus::Read);
     CHECK(read.bytes == std::vector<std::uint8_t>(bytes.begin(), bytes.end()));
     CHECK(read.eof);
+}
+
+TEST_CASE("control service session teardown revokes its client and requests cancellation",
+          "[inspect][control][service][lifecycle][cancellation][security]") {
+    ServiceFixture fixture;
+    ControlDeferredCompletion complete_deferred;
+    ControlExecutionGuard checkpoint;
+    ControlReceiptId receipt_id;
+    ControlService service{
+        fixture.broker,
+        [&](const ControlAdmissionPlan&, const ControlRequestEnvelope&,
+            const ControlExecutionContext& context) {
+            complete_deferred = context.complete_deferred;
+            checkpoint = context.checkpoint;
+            return ControlExecutionOutcome{
+                .terminal_state = ControlReceiptState::UnknownNeedsRefresh,
+                .result =
+                    {
+                        .result_code = ControlResultCode::UnknownNeedsRefresh,
+                        .retry = ControlRetryClassification::AfterRefresh,
+                    },
+                .deferred = true,
+            };
+        },
+    };
+    {
+        auto session = negotiate(service, fixture);
+        const auto pending = session.dispatch(encode_control_envelope({
+            .schema_version = kControlProtocolVersion,
+            .payload = fixture.request(),
+        }));
+        REQUIRE(pending.status == ControlServiceStatus::Responded);
+        receipt_id = ControlReceiptId{receipt(pending).receipt_id};
+        REQUIRE(complete_deferred);
+        REQUIRE(checkpoint);
+        REQUIRE(fixture.broker.client(fixture.client_identity.client_id));
+    }
+
+    CHECK_FALSE(fixture.broker.client(fixture.client_identity.client_id));
+    CHECK_FALSE(fixture.broker.is_granted(fixture.grant.grant_id,
+                                          fixture.client_identity.client_id,
+                                          fixture.registration.registration_id,
+                                          InspectorCapability::StateRead));
+    const auto cancelled = fixture.broker.operation_receipt(receipt_id);
+    REQUIRE(cancelled);
+    CHECK(cancelled->state == ControlReceiptState::Running);
+    CHECK(cancelled->cancellation_requested);
+    CHECK(cancelled->cancellation_reason == "client-disconnected");
+    CHECK(checkpoint() == ControlExecutionCheckpoint::Cancelled);
+
+    complete_deferred(successful_state_read());
+    const auto settled = fixture.broker.operation_receipt(receipt_id);
+    REQUIRE(settled);
+    CHECK(settled->state == ControlReceiptState::CompletedAfterRevocation);
+    CHECK(settled->result.result_code == ControlResultCode::CompletedAfterRevocation);
 }
 
 TEST_CASE("control service executes admitted request once and replays receipt",
