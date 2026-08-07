@@ -1402,21 +1402,6 @@ TEST_CASE("control service binds cancellation and preserves an applied completio
     CHECK(applications == 1);
 }
 
-TEST_CASE("control client extends the existing authenticated client",
-          "[inspect][control][client][security]") {
-    InspectorClient inspector;
-    ControlClient client{inspector};
-    CHECK_FALSE(inspector.is_connected());
-    const auto result = client.negotiate(ControlNegotiationOffer{.versions = {1, 1}});
-    CHECK_FALSE(result.succeeded());
-    CHECK(result.error_code == "not_connected");
-    CHECK_FALSE(inspector.is_connected());
-
-    const auto artifact = client.read_artifact("artifact-unavailable", 0, 1);
-    CHECK(artifact.status == ControlArtifactStatus::IoError);
-    CHECK(artifact.explanation == "artifact reads require the Phase 3c control carrier");
-}
-
 TEST_CASE("control client artifact reads stay bound to the injected transport session",
           "[inspect][control][client][artifact][security]") {
     RecordingControlTransport owner_transport{"client-owner"};

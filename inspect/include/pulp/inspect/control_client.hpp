@@ -6,14 +6,11 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 
 namespace pulp::inspect {
-
-class InspectorClient;
 
 struct ControlTransportDispatchResult {
     std::optional<std::string> encoded_response;
@@ -30,7 +27,9 @@ struct ControlTransportDispatchResult {
 /// The transport owns the peer and client lineage established by its carrier.
 /// Callers cannot supply or override that identity when reading an artifact.
 /// Carrier integrations inject this transport so the installed client remains
-/// independent of any particular listener or connection implementation.
+/// independent of any particular listener or connection implementation. The
+/// Phase 3c carrier supplies the concrete transport; the legacy Inspector
+/// protocol is not a capability-control authority path.
 class ControlClientTransport {
   public:
     virtual ~ControlClientTransport() = default;
@@ -59,14 +58,11 @@ using ControlClientReceiptResult = ControlDispatchResult<ControlReceiptEnvelope>
 ///
 /// This class neither discovers nor opens a connection. The transport binds
 /// negotiation, requests, cancellation, and artifact reads to the same
-/// authenticated session and client identity. The InspectorClient constructor
-/// is a compatibility adapter for envelope dispatch only; artifact reads fail
-/// closed unless the client uses a typed, connection-bound transport.
+/// authenticated session and client identity.
 class ControlClient {
   public:
     /// The connection-bound transport must outlive this client.
     explicit ControlClient(ControlClientTransport& transport);
-    explicit ControlClient(InspectorClient& inspector);
     ~ControlClient();
 
     ControlClient(const ControlClient&) = delete;
@@ -91,7 +87,6 @@ class ControlClient {
     };
 
     DispatchResult dispatch(const ControlEnvelope& envelope, std::chrono::milliseconds timeout);
-    std::unique_ptr<ControlClientTransport> owned_transport_;
     ControlClientTransport* transport_ = nullptr;
 };
 

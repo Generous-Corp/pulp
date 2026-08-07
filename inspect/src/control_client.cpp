@@ -1,46 +1,8 @@
 #include <pulp/inspect/control_client.hpp>
 
-#include <pulp/inspect/client.hpp>
-
 namespace pulp::inspect {
-namespace {
-
-class InspectorControlTransport final : public ControlClientTransport {
-  public:
-    explicit InspectorControlTransport(InspectorClient& inspector) : inspector_(inspector) {}
-
-    ControlTransportDispatchResult dispatch(std::string_view encoded_envelope,
-                                            std::chrono::milliseconds timeout) override {
-        const auto response = inspector_.request(std::string(methods::kControlDispatch),
-                                                 std::string(encoded_envelope), timeout);
-        if (response.is_error) {
-            return {
-                .error_code = response.error_code,
-                .explanation = response.params_json,
-            };
-        }
-        return {.encoded_response = response.params_json};
-    }
-
-    ControlArtifactReadResult read_artifact(std::string_view, std::uint64_t, std::size_t,
-                                            std::chrono::milliseconds) override {
-        return {
-            .status = ControlArtifactStatus::IoError,
-            .explanation = "artifact reads require the Phase 3c control carrier",
-        };
-    }
-
-  private:
-    InspectorClient& inspector_;
-};
-
-} // namespace
 
 ControlClient::ControlClient(ControlClientTransport& transport) : transport_(&transport) {}
-
-ControlClient::ControlClient(InspectorClient& inspector)
-    : owned_transport_(std::make_unique<InspectorControlTransport>(inspector)),
-      transport_(owned_transport_.get()) {}
 
 ControlClient::~ControlClient() = default;
 
