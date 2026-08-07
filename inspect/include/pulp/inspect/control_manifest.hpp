@@ -12,12 +12,10 @@
 namespace pulp::inspect {
 
 inline constexpr std::uint32_t kControlManifestSchemaVersion = 1;
-inline constexpr std::string_view kControlManifestSchemaId =
-    "dev.pulp.control/artifact-manifest@1";
+inline constexpr std::string_view kControlManifestSchemaId = "dev.pulp.control/artifact-manifest@1";
 // Updated deliberately whenever the canonical v1 registry bytes change.
 #include <pulp/inspect/control_registry_digest.inc>
-inline constexpr std::string_view kControlRegistryDigest =
-    PULP_CONTROL_REGISTRY_DIGEST_V1;
+inline constexpr std::string_view kControlRegistryDigest = PULP_CONTROL_REGISTRY_DIGEST_V1;
 #undef PULP_CONTROL_REGISTRY_DIGEST_V1
 
 enum class ControlBuildProfile : std::uint8_t {
@@ -92,14 +90,31 @@ struct ControlManifestValidation {
 
 /// A frozen Product A operation contract. Schema bodies are canonical JSON
 /// Schema, not projections of the legacy Inspector transport.
+struct ControlArtifactResultBinding {
+    bool produced = false;
+    std::string_view artifact_id_field;
+    std::string_view sha256_field;
+    std::string_view byte_count_field;
+    std::string_view media_type_field;
+};
+
+/// Binds a typed success-result field to the broker-minted durable receipt.
+struct ControlReceiptResultBinding {
+    bool bound = false;
+    std::string_view receipt_id_field;
+};
+
 struct ControlOperationDescriptor {
     std::string_view id;
+    std::uint32_t version = 1;
     InspectorCapability capability;
     std::string_view input_schema_id;
     std::string_view input_schema_json;
     std::string_view output_schema_id;
     std::string_view output_schema_json;
     std::string_view result_kind;
+    ControlArtifactResultBinding artifact_binding;
+    ControlReceiptResultBinding receipt_binding;
 };
 
 /// Inputs to the canonical permission equation. Every term defaults false so
@@ -116,8 +131,7 @@ struct ControlPermissionInputs {
 
 struct ControlPermissionDecision {
     bool allowed = false;
-    std::optional<ControlDenialReason> denial =
-        ControlDenialReason::NotImplemented;
+    std::optional<ControlDenialReason> denial = ControlDenialReason::NotImplemented;
 };
 
 std::string_view control_profile_id(ControlBuildProfile profile);
@@ -126,15 +140,12 @@ std::string_view control_manifest_error_id(ControlManifestError error);
 std::string_view control_denial_reason_id(ControlDenialReason reason);
 
 std::span<const std::string_view> control_permission_terms();
-ControlPermissionDecision evaluate_control_permission(
-    const ControlPermissionInputs& inputs);
+ControlPermissionDecision evaluate_control_permission(const ControlPermissionInputs& inputs);
 
-bool validate_control_manifest(const ControlManifest& manifest,
-                               std::string& error);
-ControlManifestValidation validate_control_manifest_detailed(
-    const ControlManifest& manifest);
-std::optional<ControlManifest> parse_control_manifest(
-    std::string_view json, ControlManifestDiagnostics* diagnostics = nullptr);
+bool validate_control_manifest(const ControlManifest& manifest, std::string& error);
+ControlManifestValidation validate_control_manifest_detailed(const ControlManifest& manifest);
+std::optional<ControlManifest>
+parse_control_manifest(std::string_view json, ControlManifestDiagnostics* diagnostics = nullptr);
 
 /// Emits the unique stable byte representation used for artifact digests.
 std::string serialize_control_manifest(const ControlManifest& manifest);
@@ -143,6 +154,8 @@ std::string control_consent_identity(std::string_view manifest_digest,
                                      std::string_view artifact_digest);
 
 std::span<const ControlOperationDescriptor> control_operation_registry();
+const ControlOperationDescriptor* resolve_control_operation(std::string_view id,
+                                                            std::uint32_t version);
 
 /// Canonical projection of capability metadata and adapter operations.
 std::string serialize_control_registry();

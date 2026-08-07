@@ -22,6 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
 COVERAGE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "coverage.yml"
 SANITIZERS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "sanitizers.yml"
+TIMELINE_FUZZ_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "timeline-fuzz.yml"
 
 
 class WorkflowBuildDirTests(unittest.TestCase):
@@ -158,9 +159,57 @@ class WorkflowBuildDirTests(unittest.TestCase):
             line for line in text.splitlines() if "--tests-regex" in line
         )
 
-        for suite in ("Osc", "WebSocket", "Channel"):
+        for suite in (
+            "Osc",
+            "WebSocket",
+            "Channel",
+            "Control",
+            "Broker",
+            "Grant",
+            "Admission",
+            "Receipt",
+            "Artifact",
+            "control protocol",
+            "control artifact",
+            "control service",
+            "control client",
+            "control main-thread",
+            "per-call",
+        ):
             with self.subTest(suite=suite):
                 self.assertIn(suite, regex_line)
+
+        pull_request_paths = text.split("  pull_request:", 1)[1].split(
+            "  schedule:", 1
+        )[0]
+        self.assertIn("- 'inspect/**'", pull_request_paths)
+
+    def test_fuzz_workflow_builds_and_runs_control_protocol_targets(self) -> None:
+        text = TIMELINE_FUZZ_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("pulp-test-control-protocol-fuzz", text)
+        self.assertIn("pulp-fuzz-control-protocol", text)
+        self.assertIn("PULP_CONTROL_PROTOCOL_FUZZ_SEED:", text)
+        self.assertIn("PULP_CONTROL_PROTOCOL_FUZZ_CASES:", text)
+        self.assertIn("pulp-generate-control-protocol-fuzz-corpus", text)
+        self.assertIn(
+            "./build-libfuzzer/test/pulp-generate-control-protocol-fuzz-corpus",
+            text,
+        )
+        self.assertIn("./build-libfuzzer/test/pulp-fuzz-control-protocol", text)
+        self.assertRegex(
+            text,
+            r"pulp-fuzz-control-protocol \\\n\s+fuzz-corpus/control-protocol \\",
+        )
+        self.assertIn("fuzz-corpus/timeline", text)
+        self.assertRegex(
+            text,
+            r"pulp-fuzz-control-protocol[\s\S]*?"
+            r"-max_total_time=\$\{\{ inputs\.libfuzzer_seconds \|\| 900 \}\}",
+        )
+        self.assertIn("- 'inspect/include/pulp/inspect/control_protocol.hpp'", text)
+        self.assertIn("- 'inspect/src/control_protocol*.cpp'", text)
+        self.assertIn("- 'inspect/src/control_json_*.cpp'", text)
 
     def test_macos_build_runs_ios_syntax_gate_after_configure(self) -> None:
         text = BUILD_WORKFLOW.read_text(encoding="utf-8")

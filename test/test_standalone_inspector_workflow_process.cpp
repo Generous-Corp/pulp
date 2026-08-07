@@ -141,15 +141,12 @@ TEST_CASE("Standalone source-build workflow exposes real scripted UI, state, and
     const auto observe_stop_path = observe_path / "stop";
     const auto eval_ready_path = eval_path / "ready.json";
     const auto eval_stop_path = eval_path / "stop";
-    std::mutex startup_log_mutex;
-    std::string startup_log;
     pulp::platform::ProcessOptions options;
     options.timeout_ms = 45'000;
-    options.on_stderr_line = [&](std::string_view line) {
-        std::lock_guard lock(startup_log_mutex);
-        startup_log.append(line);
-        startup_log.push_back('\n');
-    };
+    // These long-lived children are polled before wait(), so captured GPU logs
+    // would not be drained and can fill a pipe before readiness is published.
+    options.capture_stdout = false;
+    options.capture_stderr = false;
     pulp::platform::ChildProcess child;
     REQUIRE(child.start(PULP_STANDALONE_INSPECTOR_WORKFLOW_PROCESS_FIXTURE,
                         {"--ready", ready_path.string(),
@@ -216,10 +213,6 @@ TEST_CASE("Standalone source-build workflow exposes real scripted UI, state, and
     INFO("startup stderr=" << startup_stderr);
     INFO("observe startup stderr=" << observe_startup_stderr);
     INFO("eval startup stderr=" << eval_startup_stderr);
-    {
-        std::lock_guard lock(startup_log_mutex);
-        INFO("streamed startup stderr=" << startup_log);
-    }
     INFO("startup pid=" << startup_process_id);
     INFO("startup process running before cancellation=" << startup_process_running);
     REQUIRE(std::filesystem::exists(ready_path));

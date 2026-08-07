@@ -230,9 +230,28 @@ signature, identifier, Team ID or per-artifact ad-hoc CDHash. The broker must
 still exact-match that observation against launcher- or policy-owned expected
 identity before minting a verified peer. Named-pipe and TCP peers cannot be
 passed to that verifier. The installed `pulp::inspect-control` component owns
-the resulting identity, registration, and grant state in a dormant
-`ControlBroker`; constructing it never opens an endpoint or activates a runtime
-bridge.
+the resulting identity, registration, grant, typed admission, durable receipt,
+and artifact state in a dormant `ControlBroker`. Installed `ControlService` and
+`ControlClient` types expose a typed transport seam; constructing them never
+opens an endpoint or activates a runtime bridge. A `ControlClientTransport`
+represents one authenticated connection and owns its client lineage, including
+artifact reads. Phase 3c owns the canonical carrier; the legacy Inspector
+session/server is not exposed as a compatibility transport or second authority
+path.
+Each service session must negotiate its own protocol version and mandatory
+receipt support. The broker validates operation input JSON before admission and
+successful output JSON before terminal completion. A started operation that
+misses its response deadline remains durably `running` and occupies its active
+quota slot until deferred completion settles it, even though the immediate
+response reports `unknown-needs-refresh`.
+
+The Phase 3b artifact store is a minimal lineage-bound persistence primitive,
+not the Phase 7 artifact lifecycle. Broker reads reauthorize the original grant
+and exact producer/receipt lineage, but only per-blob and per-chunk size limits
+exist; aggregate quota, retention collection, deletion audit, redaction, and
+generalized ACL policy are later work. Owner-private filesystem permissions
+exclude other OS users, not a malicious same-UID process, so they do not claim
+at-rest secrecy from every local process running as that user.
 
 ### Child Process Pool — Crash-isolated workers
 
