@@ -5,14 +5,11 @@
 #include <vector>
 
 #include <pulp/audio/buffer.hpp>
+#include <pulp/signal/analysis_frontends.hpp>
 
 namespace pulp::audio {
 
-enum class OnsetDetectionMethod : std::uint8_t {
-    EnergyFlux,
-    SpectralFlux,
-    HighFrequencyContent,
-};
+using OnsetDetectionMethod = signal::OnsetDetectionMethod;
 
 struct OnsetDetectionConfig {
     OnsetDetectionMethod method = OnsetDetectionMethod::EnergyFlux;
@@ -40,7 +37,7 @@ struct OnsetDetectionResult {
 };
 
 class OnsetDetector {
-public:
+  public:
     // Off-real-time/background analysis. Package-backed analyzers should
     // produce OnsetMarker data for SlicePointAnalyzer rather than entering
     // core/audio as package-specific APIs.
@@ -48,4 +45,4 @@ public:
                                 const OnsetDetectionConfig& config = {}) const;
 };
 
-}  // namespace pulp::audio
+} // namespace pulp::audio

@@ -8,22 +8,21 @@
 #include <cstddef>
 #include <vector>
 
+using pulp::audio::analyzer_descriptor_has_capability;
 using pulp::audio::AnalyzerAvailability;
 using pulp::audio::AnalyzerBackend;
 using pulp::audio::AnalyzerCapability;
 using pulp::audio::AnalyzerExecutionContext;
 using pulp::audio::Buffer;
 using pulp::audio::BufferView;
+using pulp::audio::built_in_analyzer_descriptors;
 using pulp::audio::BuiltInKeyTempoAnalyzer;
 using pulp::audio::KeyTempoAnalysisConfig;
 using pulp::audio::MusicalKeyMode;
-using pulp::audio::analyzer_descriptor_has_capability;
-using pulp::audio::built_in_analyzer_descriptors;
 
 namespace {
 
-BufferView<const float> const_view(const Buffer<float>& buffer,
-                                   std::vector<const float*>& ptrs) {
+BufferView<const float> const_view(const Buffer<float>& buffer, std::vector<const float*>& ptrs) {
     ptrs.resize(buffer.num_channels());
     for (std::size_t ch = 0; ch < buffer.num_channels(); ++ch) {
         ptrs[ch] = buffer.channel(ch).data();
@@ -31,10 +30,7 @@ BufferView<const float> const_view(const Buffer<float>& buffer,
     return {ptrs.data(), buffer.num_channels(), buffer.num_samples()};
 }
 
-void add_sine(Buffer<float>& buffer,
-              double sample_rate,
-              double frequency_hz,
-              double gain) {
+void add_sine(Buffer<float>& buffer, double sample_rate, double frequency_hz, double gain) {
     constexpr double two_pi = 6.28318530717958647692;
     auto channel = buffer.channel(0);
     for (std::size_t i = 0; i < channel.size(); ++i) {
@@ -43,7 +39,7 @@ void add_sine(Buffer<float>& buffer,
     }
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("BuiltInKeyTempoAnalyzer exposes a package-free descriptor",
           "[audio][analysis][key-tempo]") {
@@ -101,9 +97,9 @@ TEST_CASE("BuiltInKeyTempoAnalyzer estimates key from a simple C major chord",
     Buffer<float> source(1, 16384);
     // Use frequencies aligned to the analyzer's 2048-point FFT bins so the
     // fixture tests pitch-class scoring instead of leakage between bins.
-    add_sine(source, sample_rate, sample_rate * 11.0 / 2048.0, 0.3);  // C
-    add_sine(source, sample_rate, sample_rate * 14.0 / 2048.0, 0.3);  // E
-    add_sine(source, sample_rate, sample_rate * 17.0 / 2048.0, 0.3);  // G
+    add_sine(source, sample_rate, sample_rate * 11.0 / 2048.0, 0.3); // C
+    add_sine(source, sample_rate, sample_rate * 14.0 / 2048.0, 0.3); // E
+    add_sine(source, sample_rate, sample_rate * 17.0 / 2048.0, 0.3); // G
     std::vector<const float*> ptrs;
 
     KeyTempoAnalysisConfig config;
@@ -119,6 +115,44 @@ TEST_CASE("BuiltInKeyTempoAnalyzer estimates key from a simple C major chord",
     REQUIRE(result.key_mode == MusicalKeyMode::Major);
     REQUIRE(result.key_confidence > 0.0);
     REQUIRE(result.tempo_bpm == 0.0);
+}
+
+TEST_CASE("BuiltInKeyTempoAnalyzer preserves positive sub-kilohertz sample rates",
+          "[audio][analysis][key-tempo]") {
+    constexpr double sample_rate = 800.0;
+    Buffer<float> source(1, 4096);
+    add_sine(source, sample_rate, 100.0, 0.5);
+    std::vector<const float*> ptrs;
+
+    KeyTempoAnalysisConfig config;
+    config.source_sample_rate = sample_rate;
+    config.channels = 1;
+    config.estimate_key = true;
+    config.estimate_tempo = false;
+
+    const auto result = BuiltInKeyTempoAnalyzer{}.analyze(const_view(source, ptrs), config);
+    REQUIRE(result.ok);
+    REQUIRE(result.key_root == 7);
+    REQUIRE(result.key_mode == MusicalKeyMode::Major);
+}
+
+TEST_CASE("BuiltInKeyTempoAnalyzer preserves high finite sample rates",
+          "[audio][analysis][key-tempo]") {
+    constexpr double sample_rate = 1'000'000.0;
+    Buffer<float> source(1, 4096);
+    add_sine(source, sample_rate, sample_rate / 2048.0, 0.5);
+    std::vector<const float*> ptrs;
+
+    KeyTempoAnalysisConfig config;
+    config.source_sample_rate = sample_rate;
+    config.channels = 1;
+    config.estimate_key = true;
+    config.estimate_tempo = false;
+
+    const auto result = BuiltInKeyTempoAnalyzer{}.analyze(const_view(source, ptrs), config);
+    REQUIRE(result.ok);
+    REQUIRE(result.key_root == 11);
+    REQUIRE(result.key_mode == MusicalKeyMode::Major);
 }
 
 TEST_CASE("BuiltInKeyTempoAnalyzer rejects invalid analysis configs",
