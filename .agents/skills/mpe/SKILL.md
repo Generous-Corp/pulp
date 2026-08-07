@@ -241,6 +241,19 @@ or `reset()` only for an intentional
 identity-free lifecycle clear. Prepare the destination for at least four lanes
 before `write_voice()` so the adapter can publish its block atomically.
 
+### Routing utilities flush through their output buffers
+
+`ChannelRouter`, `NoteRangeFilter`, and `KeyboardSplit` own downstream note
+lifecycle state even though their routing specifications are otherwise static.
+Call their output-bearing `flush()` until its report is complete before a hot
+swap; it emits every downstream release and retains suppression for the old
+input note-offs that can still arrive. Their output-bearing `replace_spec()`
+does this before adopting the new mapping. At a lifecycle boundary that also
+resets the input stream, call output-bearing `reset()` instead; it emits the
+same releases and then discards the old input ownership. A reset with no output
+buffer cannot satisfy the no-orphan-note contract and is intentionally not an
+API.
+
 ## Reference material
 
 - Guide: [docs/guides/mpe.md](../../../docs/guides/mpe.md)

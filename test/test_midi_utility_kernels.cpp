@@ -185,12 +185,9 @@ TEST_CASE("routing spec replacement cannot strand held notes",
         auto replacement = initial;
         replacement.output_channel[3] = 4;
         CHECK_FALSE(router.replace_spec(replacement));
-        router.reset();
-        CHECK_FALSE(router.replace_spec(replacement));
-        input.clear();
-        input.add(midi::MidiEvent::note_off(3, 64));
-        REQUIRE(router.process(input, output).complete);
+        REQUIRE(router.reset(output).complete);
         REQUIRE(output.size() == 1);
+        CHECK(output[0].is_note_off());
         CHECK(output[0].channel() == 15);
         REQUIRE(router.replace_spec(replacement));
         input.clear();
@@ -250,11 +247,10 @@ TEST_CASE("routing spec replacement cannot strand held notes",
         CHECK_FALSE(router.process(input, constrained).complete);
         auto replacement = initial;
         replacement.output_channel[3] = 4;
-        router.reset();
+        auto no_capacity = prepared_buffer(0);
+        CHECK_FALSE(router.reset(no_capacity).complete);
         CHECK_FALSE(router.replace_spec(replacement));
-
-        input.clear();
-        REQUIRE(router.process(input, constrained).complete);
+        REQUIRE(router.reset(constrained).complete);
         REQUIRE(constrained.size() == 1);
         CHECK(constrained[0].is_note_off());
         CHECK(constrained[0].channel() == 15);
@@ -451,6 +447,163 @@ TEST_CASE("routing spec replacement cannot strand held notes",
         CHECK((output_ump[0].packet.status() & 0xf0) == 0x80);
         CHECK(output_ump[0].packet.group() == 5);
         CHECK(output_ump[0].packet.channel() == 15);
+    }
+}
+
+TEST_CASE("routing lifecycle flushes owned notes and suppresses stale releases",
+          "[midi][utility][routing][lifecycle][ownership]") {
+    auto input = prepared_buffer();
+    auto output = prepared_buffer();
+
+    midi::ChannelRouteSpec initial;
+    initial.accepted_channels = std::uint16_t{1} << 3;
+    initial.output_channel[3] = 15;
+    auto replacement = initial;
+    replacement.output_channel[3] = 4;
+    midi::ChannelRouter router(initial);
+
+    input.add(midi::MidiEvent::note_on(3, 64, 100));
+    REQUIRE(router.process(input, output).complete);
+    REQUIRE(router.replace_spec(replacement, output).complete);
+    REQUIRE(output.size() == 1);
+    CHECK(output[0].is_note_off());
+    CHECK(output[0].channel() == 15);
+
+    input.clear();
+    input.add(midi::MidiEvent::note_off(3, 64));
+    REQUIRE(router.process(input, output).complete);
+    CHECK(output.empty());
+
+    input.clear();
+    input.add(midi::MidiEvent::note_on(3, 65, 100));
+    input.add(midi::MidiEvent::note_off(3, 65));
+    REQUIRE(router.process(input, output).complete);
+    REQUIRE(output.size() == 2);
+    CHECK(output[0].channel() == 4);
+    CHECK(output[1].channel() == 4);
+
+    SECTION("range reset emits the owned release") {
+        midi::NoteRangeFilter range({60, 72});
+        input.clear();
+        input.add(midi::MidiEvent::note_on(0, 64, 100));
+        REQUIRE(range.process(input, output).complete);
+        REQUIRE(range.reset(output).complete);
+        REQUIRE(output.size() == 1);
+        CHECK(output[0].is_note_off());
+        CHECK(output[0].note() == 64);
+    }
+
+    SECTION("split reset emits each release through its accepting side") {
+        midi::KeyboardSplit split({60, true, 2, 14});
+        auto lower = prepared_buffer();
+        auto upper = prepared_buffer();
+        input.clear();
+        input.add(midi::MidiEvent::note_on(0, 59, 100));
+        input.add(midi::MidiEvent::note_on(0, 60, 100));
+        REQUIRE(split.process(input, lower, upper).complete);
+        REQUIRE(split.reset(lower, upper).complete);
+        REQUIRE(lower.size() == 1);
+        REQUIRE(upper.size() == 1);
+        CHECK(lower[0].is_note_off());
+        CHECK(lower[0].channel() == 2);
+        CHECK(upper[0].is_note_off());
+        CHECK(upper[0].channel() == 14);
+    }
+
+    SECTION("UMP hot swap keeps protocol, group, route, and stale-release ownership") {
+        midi::ChannelRouter ump_router(initial);
+        midi::UmpBuffer input_ump;
+        midi::UmpBuffer output_ump;
+        prepare_sidecars(input, input_ump);
+        prepare_sidecars(output, output_ump);
+        input.clear();
+        REQUIRE(input_ump.add(midi::UmpPacket::note_on_2(5, 3, 66, 0x8000), 7));
+        REQUIRE(ump_router.process(input, output).complete);
+        REQUIRE(output_ump.size() == 1);
+        REQUIRE(ump_router.replace_spec(replacement, output).complete);
+        REQUIRE(output_ump.size() == 1);
+        CHECK(output_ump[0].packet.group() == 5);
+        CHECK(output_ump[0].packet.channel() == 15);
+        CHECK((output_ump[0].packet.status() & 0xf0) == 0x80);
+
+        input_ump.clear();
+        REQUIRE(input_ump.add(midi::UmpPacket::note_off_2(5, 3, 66), 0));
+        REQUIRE(ump_router.process(input, output).complete);
+        CHECK(output_ump.empty());
+    }
+
+    SECTION("bounded flush retries preserve every release") {
+        constexpr std::size_t note_count = 40;
+        auto attacks = prepared_buffer(note_count);
+        auto routed = prepared_buffer(note_count);
+        midi::ChannelRouter many;
+        for (std::size_t i = 0; i < note_count; ++i)
+            REQUIRE(attacks.add(midi::MidiEvent::note_on(
+                0, static_cast<std::uint8_t>(i), 100)));
+        REQUIRE(many.process(attacks, routed).complete);
+        NoteBalance balance;
+        balance.feed(routed);
+
+        auto bounded = prepared_buffer(16);
+        std::size_t flush_calls = 0;
+        for (;;) {
+            const auto report = many.flush(bounded);
+            ++flush_calls;
+            balance.feed(bounded);
+            if (report.complete)
+                break;
+            REQUIRE(report.deferred > 0);
+            REQUIRE(flush_calls < 8);
+        }
+        CHECK(flush_calls == 3);
+        CHECK(balance.balanced());
+
+        attacks.clear();
+        for (std::size_t i = 0; i < note_count; ++i)
+            REQUIRE(attacks.add(midi::MidiEvent::note_off(
+                0, static_cast<std::uint8_t>(i))));
+        REQUIRE(many.process(attacks, routed).complete);
+        CHECK(routed.empty());
+    }
+}
+
+TEST_CASE("routing kernels retain ownership when output preparation rejects a block",
+          "[midi][utility][routing][overflow][ownership]") {
+    auto input = prepared_buffer();
+    midi::MidiBuffer unprepared;
+    auto output = prepared_buffer();
+
+    SECTION("channel router") {
+        midi::ChannelRouter router;
+        input.add(midi::MidiEvent::note_on(0, 60, 100));
+        CHECK_FALSE(router.process(input, unprepared).complete);
+        input.clear();
+        input.add(midi::MidiEvent::note_off(0, 60));
+        REQUIRE(router.process(input, output).complete);
+        CHECK(output.empty());
+    }
+
+    SECTION("note range") {
+        midi::NoteRangeFilter range;
+        input.add(midi::MidiEvent::note_on(0, 60, 100));
+        CHECK_FALSE(range.process(input, unprepared).complete);
+        input.clear();
+        input.add(midi::MidiEvent::note_off(0, 60));
+        REQUIRE(range.process(input, output).complete);
+        CHECK(output.empty());
+    }
+
+    SECTION("keyboard split") {
+        midi::KeyboardSplit split;
+        auto upper = prepared_buffer();
+        input.add(midi::MidiEvent::note_on(0, 60, 100));
+        CHECK_FALSE(split.process(input, unprepared, upper).complete);
+        auto lower = prepared_buffer();
+        input.clear();
+        input.add(midi::MidiEvent::note_off(0, 60));
+        REQUIRE(split.process(input, lower, upper).complete);
+        CHECK(lower.empty());
+        CHECK(upper.empty());
     }
 }
 

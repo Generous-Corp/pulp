@@ -558,8 +558,12 @@ amplification, fixed state capacity, overflow behavior, same-sample ordering,
 and transport requirements. Stateful note kernels retain release debt when an
 output buffer fills: stop, seek, loop, reset, and spec replacement call
 `flush()`/`reset()` until `complete` is true, so capacity pressure cannot strand
-a downstream note. Scheduling accepts `timebase::SamplePosition`; the kernels
-do not own or advance another clock. Realtime calls require output buffers that
+a downstream note. Routing-kernel `flush()` and output-bearing `replace_spec()`
+close downstream notes while retaining enough input ownership to consume their
+later physical releases; `reset()` closes the notes and then discards that input
+ownership for a lifecycle boundary that also resets the source stream. Scheduling
+accepts `timebase::SamplePosition`; the kernels do not own or advance another
+clock. Realtime calls require output buffers that
 were reserved for the contract's worst case and pinned with
 `set_realtime_capacity_limit(true)`; an unpinned output is rejected instead of
 silently allocating in `add()` or stable `sort()`. Inputs and outputs must be

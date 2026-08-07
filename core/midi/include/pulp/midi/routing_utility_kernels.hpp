@@ -23,7 +23,13 @@ class HeldNoteLedger {
     static constexpr std::size_t kMaxTrackedOwnership = 4096;
 
     constexpr bool empty() const noexcept { return total_ == 0; }
-    constexpr void reset() noexcept {}
+    bool output_ownership_empty() const noexcept {
+        if (midi_debt_total_ != 0 || ump_debt_total_ != 0)
+            return false;
+        return !has_forwarded(midi_entries_, midi_size_) &&
+               !has_forwarded(ump_entries_, ump_size_);
+    }
+    void discard_input_ownership() const noexcept { clear_all(); }
 
     bool can_forward(const MidiEvent& event) const noexcept {
         if (!is_attack(event)) return true;
@@ -38,12 +44,14 @@ class HeldNoteLedger {
 
     bool consume_suppressed_release(const MidiEvent& event) noexcept {
         if (!is_release(event)) return false;
-        return consume_suppressed(midi_entries_, midi_size_, midi_overflow_suppressed_,
+        return consume_suppressed(midi_entries_, midi_size_, midi_flushed_suppressed_,
+                                  midi_overflow_suppressed_,
                                   utility_detail::key_index(event.channel(), event.note()));
     }
     bool consume_suppressed_release(const UmpPacket& packet) noexcept {
         if (!is_release(packet)) return false;
-        return consume_suppressed(ump_entries_, ump_size_, ump_overflow_suppressed_,
+        return consume_suppressed(ump_entries_, ump_size_, ump_flushed_suppressed_,
+                                  ump_overflow_suppressed_,
                                   ump_key(packet));
     }
 
@@ -103,6 +111,31 @@ class HeldNoteLedger {
                              });
     }
 
+    template <typename EmitMidi, typename EmitUmp>
+    bool flush(EmitMidi&& emit_midi, EmitUmp&& emit_ump) const noexcept {
+        if (!drain_midi_releases(emit_midi) || !drain_ump_releases(emit_ump))
+            return false;
+        if (!flush_forwarded(midi_entries_, midi_size_, midi_flushed_suppressed_,
+                             [&](std::uint32_t key) {
+                return emit_midi(static_cast<std::uint8_t>(key / 128),
+                                 static_cast<std::uint8_t>(key % 128));
+            }))
+            return false;
+        if (!flush_forwarded(ump_entries_, ump_size_, ump_flushed_suppressed_,
+                             [&](std::uint32_t key) {
+                constexpr std::size_t kKeysPerProtocol = 16 * 16 * 128;
+                const bool midi2 = key >= kKeysPerProtocol;
+                const auto protocol_key = key % kKeysPerProtocol;
+                const auto group = static_cast<std::uint8_t>(protocol_key / (16 * 128));
+                const auto remainder = protocol_key % (16 * 128);
+                return emit_ump(midi2, group,
+                                static_cast<std::uint8_t>(remainder / 128),
+                                static_cast<std::uint8_t>(remainder % 128));
+            }))
+            return false;
+        return output_ownership_empty();
+    }
+
   private:
     enum class OwnershipState : std::uint8_t {
         Forwarded,
@@ -145,8 +178,14 @@ class HeldNoteLedger {
     template <std::size_t N, std::size_t KeyCount>
     bool consume_suppressed(std::array<OwnershipEntry, N>& entries,
                             std::size_t& size,
+                            std::array<std::uint64_t, KeyCount>& flushed,
                             std::array<std::uint32_t, KeyCount>& overflow,
                             std::uint32_t key) noexcept {
+        if (flushed[key] != 0) {
+            --flushed[key];
+            --total_;
+            return true;
+        }
         for (std::size_t i = 0; i < size; ++i) {
             if (entries[i].key != key) continue;
             if (entries[i].state == OwnershipState::Forwarded)
@@ -233,6 +272,62 @@ class HeldNoteLedger {
         return debt_total == 0;
     }
 
+    template <std::size_t N, std::size_t KeyCount, typename Emit>
+    bool flush_forwarded(std::array<OwnershipEntry, N>& entries,
+                         std::size_t& size,
+                         std::array<std::uint64_t, KeyCount>& flushed,
+                         Emit&& emit) const noexcept {
+        constexpr std::size_t kAttemptsPerCall = 32;
+        std::size_t attempts = 0;
+        for (std::size_t i = 0; i < size;) {
+            auto& entry = entries[i];
+            if (entry.state == OwnershipState::Suppressed) {
+                ++i;
+                continue;
+            }
+            while (entry.count != 0 && attempts < kAttemptsPerCall) {
+                if (flushed[entry.key] == std::numeric_limits<std::uint64_t>::max())
+                    return false;
+                ++attempts;
+                if (!emit(entry.key))
+                    return false;
+                --entry.count;
+                ++flushed[entry.key];
+            }
+            if (entry.count != 0)
+                return false;
+            erase(entries, size, i);
+        }
+        return true;
+    }
+
+    template <std::size_t N>
+    static bool has_forwarded(const std::array<OwnershipEntry, N>& entries,
+                              std::size_t size) noexcept {
+        for (std::size_t i = 0; i < size; ++i)
+            if (entries[i].state == OwnershipState::Forwarded)
+                return true;
+        return false;
+    }
+
+    void clear_all() const noexcept {
+        midi_entries_.fill({});
+        ump_entries_.fill({});
+        midi_overflow_suppressed_.fill(0);
+        ump_overflow_suppressed_.fill(0);
+        midi_flushed_suppressed_.fill(0);
+        ump_flushed_suppressed_.fill(0);
+        midi_release_debt_.fill(0);
+        ump_release_debt_.fill(0);
+        midi_size_ = 0;
+        ump_size_ = 0;
+        midi_drain_cursor_ = 0;
+        ump_drain_cursor_ = 0;
+        midi_debt_total_ = 0;
+        ump_debt_total_ = 0;
+        total_ = 0;
+    }
+
     template <std::size_t N>
     static void erase(std::array<OwnershipEntry, N>& entries,
                       std::size_t& size, std::size_t index) noexcept {
@@ -245,6 +340,8 @@ class HeldNoteLedger {
     mutable std::array<OwnershipEntry, kMaxTrackedOwnership> ump_entries_{};
     mutable std::array<std::uint32_t, 16 * 128> midi_overflow_suppressed_{};
     mutable std::array<std::uint32_t, 2 * 16 * 16 * 128> ump_overflow_suppressed_{};
+    mutable std::array<std::uint64_t, 16 * 128> midi_flushed_suppressed_{};
+    mutable std::array<std::uint64_t, 2 * 16 * 16 * 128> ump_flushed_suppressed_{};
     mutable std::array<std::uint32_t, 16 * 128> midi_release_debt_{};
     mutable std::array<std::uint32_t, 2 * 16 * 16 * 128> ump_release_debt_{};
     mutable std::size_t midi_size_ = 0;
@@ -290,17 +387,73 @@ class ChannelRouter {
         valid_ = true;
         return true;
     }
-    constexpr void reset() noexcept { held_notes_.reset(); }
+
+    MidiUtilityProcessReport flush(MidiBuffer& output) const noexcept {
+        utility_detail::clear_output(output);
+        MidiUtilityProcessReport report;
+        if (held_notes_.output_ownership_empty())
+            return report;
+        if (!utility_detail::ready(output))
+            return {0, 0, 1, false};
+        report.complete = held_notes_.flush(
+            [&](std::uint8_t channel, std::uint8_t note) {
+                return utility_detail::emit(
+                    output,
+                    utility_detail::with_channel(
+                        MidiEvent::note_off(channel, note), spec_.output_channel[channel]),
+                    report);
+            },
+            [&](bool midi2, std::uint8_t group, std::uint8_t channel,
+                std::uint8_t note) {
+                const bool emitted = utility_detail::emit_ump(
+                    output.ump(),
+                    {routing_detail::note_off_packet(
+                         midi2, group, spec_.output_channel[channel], note),
+                     0});
+                if (!emitted) {
+                    ++report.dropped;
+                    report.complete = false;
+                }
+                return emitted;
+            });
+        if (!report.complete)
+            ++report.deferred;
+        return report;
+    }
+
+    MidiUtilityProcessReport reset(MidiBuffer& output) const noexcept {
+        auto report = flush(output);
+        if (report.complete)
+            held_notes_.discard_input_ownership();
+        return report;
+    }
+
+    MidiUtilityProcessReport replace_spec(ChannelRouteSpec spec, MidiBuffer& output) noexcept {
+        if (!valid_spec(spec)) {
+            utility_detail::clear_output(output);
+            return {0, 0, 0, false};
+        }
+        auto report = flush(output);
+        if (report.complete) {
+            spec_ = spec;
+            valid_ = true;
+        }
+        return report;
+    }
 
     MidiUtilityProcessReport process(const MidiBuffer& input, MidiBuffer& output) const {
         if (utility_detail::blocks_alias(input, output))
             return {0, input.size(), 0, false};
         utility_detail::clear_output(output);
         MidiUtilityProcessReport report;
-        if (!utility_detail::ready(output))
+        if (!utility_detail::ready(output)) {
+            held_notes_.retain_unprocessed_ownership(input);
             return {0, input.size(), 0, false};
-        if (!valid_)
+        }
+        if (!valid_) {
+            held_notes_.retain_unprocessed_ownership(input);
             return {0, input.size(), 0, false};
+        }
         const bool midi_drained = held_notes_.drain_midi_releases(
             [&](std::uint8_t channel, std::uint8_t note) {
                 return utility_detail::emit(
@@ -417,17 +570,67 @@ class NoteRangeFilter {
         valid_ = true;
         return true;
     }
-    constexpr void reset() noexcept { held_notes_.reset(); }
+
+    MidiUtilityProcessReport flush(MidiBuffer& output) const noexcept {
+        utility_detail::clear_output(output);
+        MidiUtilityProcessReport report;
+        if (held_notes_.output_ownership_empty())
+            return report;
+        if (!utility_detail::ready(output))
+            return {0, 0, 1, false};
+        report.complete = held_notes_.flush(
+            [&](std::uint8_t channel, std::uint8_t note) {
+                return utility_detail::emit(output, MidiEvent::note_off(channel, note), report);
+            },
+            [&](bool midi2, std::uint8_t group, std::uint8_t channel,
+                std::uint8_t note) {
+                const bool emitted = utility_detail::emit_ump(
+                    output.ump(),
+                    {routing_detail::note_off_packet(midi2, group, channel, note), 0});
+                if (!emitted) {
+                    ++report.dropped;
+                    report.complete = false;
+                }
+                return emitted;
+            });
+        if (!report.complete)
+            ++report.deferred;
+        return report;
+    }
+
+    MidiUtilityProcessReport reset(MidiBuffer& output) const noexcept {
+        auto report = flush(output);
+        if (report.complete)
+            held_notes_.discard_input_ownership();
+        return report;
+    }
+
+    MidiUtilityProcessReport replace_spec(NoteRangeSpec spec, MidiBuffer& output) noexcept {
+        if (!valid_spec(spec)) {
+            utility_detail::clear_output(output);
+            return {0, 0, 0, false};
+        }
+        auto report = flush(output);
+        if (report.complete) {
+            spec_ = spec;
+            valid_ = true;
+        }
+        return report;
+    }
 
     MidiUtilityProcessReport process(const MidiBuffer& input, MidiBuffer& output) const {
         if (utility_detail::blocks_alias(input, output))
             return {0, input.size(), 0, false};
         utility_detail::clear_output(output);
         MidiUtilityProcessReport report;
-        if (!utility_detail::ready(output))
+        if (!utility_detail::ready(output)) {
+            held_notes_.retain_unprocessed_ownership(input);
             return {0, input.size(), 0, false};
-        if (!valid_)
+        }
+        if (!valid_) {
+            held_notes_.retain_unprocessed_ownership(input);
             return {0, input.size(), 0, false};
+        }
         const bool midi_drained = held_notes_.drain_midi_releases(
             [&](std::uint8_t channel, std::uint8_t note) {
                 return utility_detail::emit(
@@ -529,7 +732,69 @@ class KeyboardSplit {
         valid_ = true;
         return true;
     }
-    constexpr void reset() noexcept { held_notes_.reset(); }
+
+    MidiUtilityProcessReport flush(MidiBuffer& lower, MidiBuffer& upper) const noexcept {
+        utility_detail::clear_output(lower);
+        utility_detail::clear_output(upper);
+        MidiUtilityProcessReport report;
+        if (held_notes_.output_ownership_empty())
+            return report;
+        if (!utility_detail::ready(lower) || !utility_detail::ready(upper))
+            return {0, 0, 1, false};
+        report.complete = held_notes_.flush(
+            [&](std::uint8_t, std::uint8_t note) {
+                const bool is_upper =
+                    note > spec_.split_note ||
+                    (note == spec_.split_note && spec_.split_note_is_upper);
+                return utility_detail::emit(
+                    is_upper ? upper : lower,
+                    MidiEvent::note_off(
+                        is_upper ? spec_.upper_channel : spec_.lower_channel, note),
+                    report);
+            },
+            [&](bool midi2, std::uint8_t group, std::uint8_t,
+                std::uint8_t note) {
+                const bool is_upper =
+                    note > spec_.split_note ||
+                    (note == spec_.split_note && spec_.split_note_is_upper);
+                const bool emitted = utility_detail::emit_ump(
+                    is_upper ? upper.ump() : lower.ump(),
+                    {routing_detail::note_off_packet(
+                         midi2, group,
+                         is_upper ? spec_.upper_channel : spec_.lower_channel, note),
+                     0});
+                if (!emitted) {
+                    ++report.dropped;
+                    report.complete = false;
+                }
+                return emitted;
+            });
+        if (!report.complete)
+            ++report.deferred;
+        return report;
+    }
+
+    MidiUtilityProcessReport reset(MidiBuffer& lower, MidiBuffer& upper) const noexcept {
+        auto report = flush(lower, upper);
+        if (report.complete)
+            held_notes_.discard_input_ownership();
+        return report;
+    }
+
+    MidiUtilityProcessReport replace_spec(KeyboardSplitSpec spec, MidiBuffer& lower,
+                                          MidiBuffer& upper) noexcept {
+        if (!valid_spec(spec)) {
+            utility_detail::clear_output(lower);
+            utility_detail::clear_output(upper);
+            return {0, 0, 0, false};
+        }
+        auto report = flush(lower, upper);
+        if (report.complete) {
+            spec_ = spec;
+            valid_ = true;
+        }
+        return report;
+    }
 
     MidiUtilityProcessReport process(const MidiBuffer& input, MidiBuffer& lower,
                                      MidiBuffer& upper) const {
@@ -540,10 +805,14 @@ class KeyboardSplit {
         utility_detail::clear_output(lower);
         utility_detail::clear_output(upper);
         MidiUtilityProcessReport report;
-        if (!utility_detail::ready(lower) || !utility_detail::ready(upper))
+        if (!utility_detail::ready(lower) || !utility_detail::ready(upper)) {
+            held_notes_.retain_unprocessed_ownership(input);
             return {0, input.size(), 0, false};
-        if (!valid_)
+        }
+        if (!valid_) {
+            held_notes_.retain_unprocessed_ownership(input);
             return {0, input.size(), 0, false};
+        }
         const bool midi_drained = held_notes_.drain_midi_releases(
             [&](std::uint8_t channel, std::uint8_t note) {
                 const bool is_upper =
