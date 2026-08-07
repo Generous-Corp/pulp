@@ -663,7 +663,7 @@ TEST_CASE("control service returns deterministic active-operation backpressure",
             std::unique_lock lock(mutex);
             executing = true;
             condition.notify_all();
-            condition.wait(lock, [&] { return release; });
+            condition.wait_for(lock, 10s, [&] { return release; });
             return successful_state_read();
         },
     };
@@ -1319,7 +1319,7 @@ TEST_CASE("control service binds cancellation and preserves an applied completio
             ++applications;
             executing = true;
             condition.notify_all();
-            condition.wait(lock, [&] { return release; });
+            condition.wait_for(lock, 10s, [&] { return release; });
             return successful_state_read();
         },
     };

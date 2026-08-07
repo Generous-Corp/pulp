@@ -207,7 +207,7 @@ TEST_CASE("started main-thread timeout becomes unknown until refresh",
             std::unique_lock lock(mutex);
             started = true;
             condition.notify_all();
-            condition.wait(lock, [&] { return release; });
+            condition.wait_for(lock, 10s, [&] { return release; });
             lock.unlock();
             late_progress_accepted.store(context.report_progress(1, 1, R"({"late":true})"),
                                          std::memory_order_release);
@@ -298,7 +298,7 @@ TEST_CASE("started main-thread throw settles exactly once after the timeout fenc
             std::unique_lock lock(mutex);
             started = true;
             condition.notify_all();
-            condition.wait(lock, [&] { return release; });
+            condition.wait_for(lock, 10s, [&] { return release; });
             throw std::runtime_error("late handler failure");
         },
     };

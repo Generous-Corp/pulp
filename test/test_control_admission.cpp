@@ -115,7 +115,7 @@ class BlockingWallClock {
         if (armed_ && ++calls_ == block_on_call_) {
             blocked_ = true;
             condition_.notify_all();
-            condition_.wait(lock, [&] { return released_; });
+            condition_.wait_for(lock, 10s, [&] { return released_; });
             armed_ = false;
         }
         return std::chrono::system_clock::time_point{std::chrono::milliseconds{1'000}};
@@ -489,8 +489,8 @@ TEST_CASE("Blocked artifact reads do not serialize broker authority changes",
     const bool admission_completed = admission_future.wait_for(5s) == std::future_status::ready;
     if (!admission_completed) {
         clock->release();
-        admission_future.wait();
-        read_future.wait();
+        admission_future.wait_for(10s);
+        read_future.wait_for(10s);
     }
     REQUIRE(admission_completed);
     CHECK(admission_future.get().status == ControlAdmissionStatus::Admitted);
@@ -501,8 +501,8 @@ TEST_CASE("Blocked artifact reads do not serialize broker authority changes",
     const bool revocation_completed = revocation_future.wait_for(5s) == std::future_status::ready;
     if (!revocation_completed) {
         clock->release();
-        revocation_future.wait();
-        read_future.wait();
+        revocation_future.wait_for(10s);
+        read_future.wait_for(10s);
     }
     REQUIRE(revocation_completed);
     CHECK(revocation_future.get() == ControlGrantStatus::Revoked);

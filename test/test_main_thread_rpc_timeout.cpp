@@ -85,7 +85,7 @@ TEST_CASE("per-call started timeout remains fenced until operation completion",
                 std::unique_lock lock(mutex);
                 operation_started = true;
                 cv.notify_all();
-                cv.wait(lock, [&] { return release_operation; });
+                cv.wait_for(lock, 10s, [&] { return release_operation; });
                 return make_response(102, "{}");
             },
             [&] { ++completions; }, 10ms);
@@ -181,7 +181,7 @@ TEST_CASE("direct serialized timeout expires before the operation can apply",
                 std::unique_lock lock(mutex);
                 first_started = true;
                 cv.notify_all();
-                cv.wait(lock, [&] { return release_first; });
+                cv.wait_for(lock, 10s, [&] { return release_first; });
                 return make_response(106, "{}");
             },
             {}, 1s);
