@@ -18,6 +18,7 @@ enum class PatternError : std::uint8_t {
     pulses_exceed_steps,
     invalid_probability,
     invalid_mode,
+    unsupported_recipe_version,
 };
 
 template <std::size_t MaxSteps = 64>
@@ -87,11 +88,14 @@ struct PatternResult {
     }
 };
 
-// Distributes pulses by the accumulator form of Euclid's algorithm. Its stable
-// rotation starts with an onset. Zero pulses produce a silent pattern.
+// Distributes pulses by the accumulator form of Euclid's algorithm. The
+// canonical rotation starts with an onset. Positive rotation delays every onset
+// by that many steps; negative rotation advances it. Zero pulses produce a
+// silent pattern.
 template <std::size_t MaxSteps = 64>
 [[nodiscard]] constexpr PatternResult<MaxSteps>
-euclidean_pattern(std::size_t steps, std::size_t pulses) noexcept {
+euclidean_pattern(std::size_t steps, std::size_t pulses,
+                  std::int64_t rotation = 0) noexcept {
     PatternResult<MaxSteps> result;
     if (steps == 0) {
         result.error = PatternError::empty_pattern;
@@ -117,7 +121,44 @@ euclidean_pattern(std::size_t steps, std::size_t pulses) noexcept {
             (void)result.pattern.set(step, true);
         }
     }
+    const auto signed_steps = static_cast<std::int64_t>(steps);
+    auto normalized_rotation = rotation % signed_steps;
+    if (normalized_rotation < 0)
+        normalized_rotation += signed_steps;
+    if (normalized_rotation != 0) {
+        const auto shift = static_cast<std::size_t>(normalized_rotation);
+        const auto canonical = result.pattern;
+        for (std::size_t destination = 0; destination < steps; ++destination) {
+            const auto source = (destination + steps - shift) % steps;
+            (void)result.pattern.set(destination, *canonical.at(source));
+        }
+    }
     return result;
+}
+
+inline constexpr std::uint16_t euclidean_pattern_recipe_version = 1;
+
+// These named scalar fields form the persistence contract. Object bytes are not
+// a wire format: integrations serialize the fields individually and reject
+// versions they do not understand.
+struct EuclideanPatternRecipe {
+    std::uint16_t version = euclidean_pattern_recipe_version;
+    std::uint16_t steps = 16;
+    std::uint16_t pulses = 4;
+    std::int64_t rotation = 0;
+
+    constexpr auto operator<=>(const EuclideanPatternRecipe&) const = default;
+};
+
+template <std::size_t MaxSteps = 64>
+[[nodiscard]] constexpr PatternResult<MaxSteps>
+materialize_pattern(EuclideanPatternRecipe recipe) noexcept {
+    if (recipe.version != euclidean_pattern_recipe_version) {
+        PatternResult<MaxSteps> result;
+        result.error = PatternError::unsupported_recipe_version;
+        return result;
+    }
+    return euclidean_pattern<MaxSteps>(recipe.steps, recipe.pulses, recipe.rotation);
 }
 
 enum class PatternWalkerMode : std::uint8_t {

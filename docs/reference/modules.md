@@ -505,10 +505,14 @@ tuning APIs rather than in this representation.
 instead of truncating. The following operations are bounded, `constexpr`, and
 allocation-free during evaluation:
 
-- `euclidean_pattern()` returns a deterministic onset-first rotation, accepts a
-  silent zero-pulse pattern, and rejects zero steps, excess pulses, and capacity
-  overflow. This API returns `10010` for `(steps=5, pulses=2)`; conventional
-  E-notation orders arguments `(pulses, steps)`.
+- `euclidean_pattern()` returns a deterministic onset-first canonical rotation,
+  accepts a signed rotation, and rejects zero steps, excess pulses, and capacity
+  overflow. Positive rotation delays onsets and negative rotation advances them;
+  for example, E(3,8) changes from `10010010` to `01001001` at rotation `+1`
+  and `00100101` at rotation `-1`. A silent zero-pulse pattern is valid.
+  `EuclideanPatternRecipe` gives integrations a versioned named-field contract
+  for steps, pulses, and rotation without treating the C++ object bytes as a
+  wire format. Conventional E-notation orders arguments `(pulses, steps)`.
 - `PatternWalker` supports forward, reverse, ping-pong, and random
   traversal. `reset()` restores index zero for forward/ping-pong and the final
   index for reverse. Random traversal consumes a caller-supplied deterministic
@@ -526,15 +530,22 @@ allocation-free during evaluation:
   flips the copied bit using an integer numerator/denominator mutation chance.
   Mutation consumes a caller-supplied random word. Empty input and invalid
   probabilities fail without changing the input.
+- `derive_rhythm_relationship()` creates one lane from another using
+  coincident, complementary, or independent candidates. Wrap and proportional
+  length mapping, signed target-grid phase, source-collision filtering, and
+  exact-onset density are explicit policies. Exact-density selection is a pure
+  coordinate-keyed decision over seed, cycle, lane, and step, so evaluation
+  order cannot change the result.
 
 Random words are mapped to bounded choices with full-domain multiply-high
 reduction rather than remainder reduction.
 
 Construction and transformation results carry explicit errors rather than
 silently truncating or repairing invalid input. None of these APIs owns
-randomness, transport, event ordering, a transform chain, or a callback
-accumulator. Callers obtain coordinate-seeded draws from the canonical timebase
-randomness lane, so callback partition never enters these kernels.
+mutable randomness, transport, event ordering, a transform chain, or a callback
+accumulator. APIs that consume random words take them from the caller;
+relationship density instead names its complete stateless draw coordinate, so
+callback partition never enters these kernels.
 
 The theory surface does not provide pitch spelling, chord recognition, voicing
 constraints, or minimum-motion voice leading; those are not implied

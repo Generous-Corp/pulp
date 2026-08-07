@@ -109,6 +109,39 @@ std::uint64_t pattern_mask(const BinaryPattern<Capacity>& pattern) {
     return mask;
 }
 
+std::size_t oracle_delayed_step(std::size_t step, std::size_t length,
+                                std::int64_t phase) {
+    while (phase > 0) {
+        step = step == 0 ? length - 1 : step - 1;
+        --phase;
+    }
+    while (phase < 0) {
+        step = (step + 1) % length;
+        ++phase;
+    }
+    return step;
+}
+
+template <std::size_t Capacity>
+bool oracle_relationship_candidate(const BinaryPattern<Capacity>& source,
+                                   const RhythmRelationshipConfig& config,
+                                   std::size_t target_step) {
+    const auto shifted = oracle_delayed_step(target_step, config.target_steps,
+                                             config.phase_steps);
+    const auto source_step = config.length_mapping == RhythmLengthMapping::wrap
+                                 ? shifted % source.size()
+                                 : shifted * source.size() / config.target_steps;
+    const bool source_onset = *source.at(source_step);
+    const bool related = config.relationship == RhythmRelationship::coincident
+                             ? source_onset
+                             : config.relationship == RhythmRelationship::complementary
+                                   ? !source_onset
+                                   : true;
+    return related
+           && (config.collision == RhythmCollisionPolicy::allow_source_overlap
+               || !source_onset);
+}
+
 } // namespace
 
 TEST_CASE("random-word range reduction matches independent bucket boundaries",
@@ -165,6 +198,158 @@ TEST_CASE("Euclidean patterns match an independent combinatorial oracle",
     CHECK(euclidean_pattern(0, 0).error == PatternError::empty_pattern);
     CHECK(euclidean_pattern<8>(9, 1).error == PatternError::capacity_exceeded);
     CHECK(euclidean_pattern(8, 9).error == PatternError::pulses_exceed_steps);
+}
+
+TEST_CASE("Euclidean rotation has an explicit signed delay convention",
+          "[music][generative]") {
+    const auto canonical = euclidean_pattern(8, 3);
+    const auto delayed = euclidean_pattern(8, 3, 1);
+    const auto advanced = euclidean_pattern(8, 3, -1);
+    REQUIRE(canonical);
+    REQUIRE(delayed);
+    REQUIRE(advanced);
+    CHECK(pattern_mask(canonical.pattern) == 0x49u); // 10010010
+    CHECK(pattern_mask(delayed.pattern) == 0x92u);   // 01001001
+    CHECK(pattern_mask(advanced.pattern) == 0xA4u);  // 00100101
+
+    CHECK(euclidean_pattern(8, 3, 9).pattern == delayed.pattern);
+    CHECK(euclidean_pattern(8, 3, -9).pattern == advanced.pattern);
+    CHECK(euclidean_pattern(8, 3, std::numeric_limits<std::int64_t>::min()).pattern
+          == canonical.pattern);
+}
+
+TEST_CASE("Euclidean recipes materialize a versioned fixed-capacity contract",
+          "[music][generative]") {
+    constexpr EuclideanPatternRecipe recipe{euclidean_pattern_recipe_version, 8, 3, -1};
+    STATIC_REQUIRE(std::is_trivially_copyable_v<EuclideanPatternRecipe>);
+    STATIC_REQUIRE(recipe.steps == 8);
+    const auto materialized = materialize_pattern<8>(recipe);
+    REQUIRE(materialized);
+    CHECK(pattern_mask(materialized.pattern) == 0xA4u);
+
+    auto unsupported = recipe;
+    unsupported.version = euclidean_pattern_recipe_version + 1;
+    CHECK(materialize_pattern<8>(unsupported).error
+          == PatternError::unsupported_recipe_version);
+    auto oversized = recipe;
+    oversized.steps = 9;
+    CHECK(materialize_pattern<8>(oversized).error == PatternError::capacity_exceeded);
+    auto impossible = recipe;
+    impossible.pulses = 9;
+    CHECK(materialize_pattern<8>(impossible).error
+          == PatternError::pulses_exceed_steps);
+}
+
+TEST_CASE("rhythm relationships match independent phase and length oracles",
+          "[music][generative]") {
+    for (std::size_t source_steps = 1; source_steps <= 7; ++source_steps) {
+        for (std::uint64_t source_mask = 0;
+             source_mask < (std::uint64_t{1} << source_steps); ++source_mask) {
+            BinaryPattern<8> source;
+            REQUIRE(source.resize(source_steps) == PatternError::none);
+            for (std::size_t step = 0; step < source_steps; ++step)
+                REQUIRE(source.set(step, ((source_mask >> step) & 1u) != 0));
+
+            for (std::size_t target_steps = 1; target_steps <= 8; ++target_steps) {
+                for (const auto relationship : {RhythmRelationship::coincident,
+                                                RhythmRelationship::complementary,
+                                                RhythmRelationship::independent}) {
+                    for (const auto mapping : {RhythmLengthMapping::wrap,
+                                               RhythmLengthMapping::proportional}) {
+                        for (const auto collision : {
+                                 RhythmCollisionPolicy::allow_source_overlap,
+                                 RhythmCollisionPolicy::avoid_source_overlap}) {
+                            for (const auto phase : {-9, -1, 0, 1, 9}) {
+                                RhythmRelationshipConfig config;
+                                config.target_steps = target_steps;
+                                config.relationship = relationship;
+                                config.length_mapping = mapping;
+                                config.phase_steps = phase;
+                                config.collision = collision;
+                                const auto result = derive_rhythm_relationship(source, config);
+                                REQUIRE(result);
+                                for (std::size_t step = 0; step < target_steps; ++step)
+                                    CHECK(*result.pattern.at(step)
+                                          == oracle_relationship_candidate(source, config,
+                                                                           step));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("rhythm density is exact and coordinate deterministic",
+          "[music][generative]") {
+    BinaryPattern<16> source;
+    constexpr std::array<std::uint8_t, 8> source_bits{1, 0, 0, 1, 0, 0, 1, 0};
+    REQUIRE(source.assign(source_bits) == PatternError::none);
+
+    RhythmRelationshipConfig config;
+    config.target_steps = 16;
+    config.relationship = RhythmRelationship::independent;
+    config.length_mapping = RhythmLengthMapping::proportional;
+    config.collision = RhythmCollisionPolicy::avoid_source_overlap;
+    config.density = RhythmDensityPolicy::exact_onsets;
+    config.target_onsets = 5;
+    config.draw = {.seed = 0xA11CEu, .cycle = -3, .lane = 4};
+
+    const auto first = derive_rhythm_relationship(source, config);
+    const auto repeated = derive_rhythm_relationship(source, config);
+    REQUIRE(first);
+    REQUIRE(repeated);
+    CHECK(first.pattern == repeated.pattern);
+    CHECK(first.pattern.onset_count() == config.target_onsets);
+    for (std::size_t step = 0; step < config.target_steps; ++step) {
+        if (*first.pattern.at(step))
+            CHECK(oracle_relationship_candidate(source, config, step));
+    }
+
+    config.draw.seed += 1;
+    const auto different_seed = derive_rhythm_relationship(source, config);
+    REQUIRE(different_seed);
+    CHECK(different_seed.pattern.onset_count() == config.target_onsets);
+    CHECK(different_seed.pattern != first.pattern);
+
+    config.target_onsets = 11;
+    CHECK(derive_rhythm_relationship(source, config).error
+          == RhythmRelationshipError::insufficient_candidates);
+}
+
+TEST_CASE("rhythm relationship validation fails closed", "[music][generative]") {
+    BinaryPattern<4> empty;
+    RhythmRelationshipConfig config;
+    CHECK(derive_rhythm_relationship(empty, config).error
+          == RhythmRelationshipError::empty_source);
+
+    BinaryPattern<4> source;
+    REQUIRE(source.resize(4, true) == PatternError::none);
+    STATIC_REQUIRE(std::is_trivially_copyable_v<RhythmRelationshipResult<4>>);
+    STATIC_REQUIRE(noexcept(derive_rhythm_relationship(source, config)));
+    config.target_steps = 0;
+    CHECK(derive_rhythm_relationship(source, config).error
+          == RhythmRelationshipError::empty_target);
+    config.target_steps = 5;
+    CHECK(derive_rhythm_relationship(source, config).error
+          == RhythmRelationshipError::capacity_exceeded);
+    config.target_steps = 4;
+    config.relationship = static_cast<RhythmRelationship>(99);
+    CHECK(derive_rhythm_relationship(source, config).error
+          == RhythmRelationshipError::invalid_relationship);
+    config.relationship = RhythmRelationship::coincident;
+    config.length_mapping = static_cast<RhythmLengthMapping>(99);
+    CHECK(derive_rhythm_relationship(source, config).error
+          == RhythmRelationshipError::invalid_length_mapping);
+    config.length_mapping = RhythmLengthMapping::wrap;
+    config.collision = static_cast<RhythmCollisionPolicy>(99);
+    CHECK(derive_rhythm_relationship(source, config).error
+          == RhythmRelationshipError::invalid_collision_policy);
+    config.collision = RhythmCollisionPolicy::allow_source_overlap;
+    config.density = static_cast<RhythmDensityPolicy>(99);
+    CHECK(derive_rhythm_relationship(source, config).error
+          == RhythmRelationshipError::invalid_density_policy);
 }
 
 TEST_CASE("binary patterns fail closed at their fixed capacity", "[music][generative]") {
