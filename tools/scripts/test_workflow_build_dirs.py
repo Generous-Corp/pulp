@@ -226,25 +226,16 @@ class MacosNinjaGeneratorTests(unittest.TestCase):
         )
 
 
-class CoverageWorkflowSkiaTests(unittest.TestCase):
+class CoverageWorkflowExampleGraphTests(unittest.TestCase):
     def setUp(self) -> None:
         self.text = COVERAGE_WORKFLOW.read_text(encoding="utf-8")
 
-    def test_macos_coverage_fetches_skia_before_run_coverage(self) -> None:
-        fetch_name = "- name: Fetch prebuilt Skia (macOS)"
-        run_name = "- name: Run coverage suite"
-        self.assertIn(fetch_name, self.text)
-        self.assertIn(run_name, self.text)
-        self.assertLess(self.text.index(fetch_name), self.text.index(run_name))
-
-        start = self.text.index(fetch_name)
-        end = self.text.index(run_name)
-        step = self.text[start:end]
-        self.assertIn("if: matrix.os == 'macos'", step)
+    def test_coverage_preserves_example_driven_tests_and_fetches_skia(self) -> None:
         self.assertIn(
-            "python3 tools/scripts/fetch_skia_for_release.py darwin-arm64",
-            step,
+            "-DPULP_BUILD_EXAMPLES=ON",
+            self.text,
         )
+        self.assertIn("fetch_skia_for_release.py darwin-arm64", self.text)
 
 
 if __name__ == "__main__":

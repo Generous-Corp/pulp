@@ -148,11 +148,19 @@ public:
             had_previous_ = true;
             previous_ = prev;
         }
+#if defined(_WIN32)
+        _putenv_s(name, value);
+#else
         ::setenv(name, value, 1);
+#endif
     }
     ~ScopedEnv() {
+#if defined(_WIN32)
+        _putenv_s(name_.c_str(), had_previous_ ? previous_.c_str() : "");
+#else
         if (had_previous_) ::setenv(name_.c_str(), previous_.c_str(), 1);
         else ::unsetenv(name_.c_str());
+#endif
     }
 
 private:
