@@ -1229,6 +1229,17 @@ nothing for processors that don't opt in. (What the hooks *do*, and which format
 actually call them — CLAP does, including native CLAP; VST3/AU/standalone do
 not — is documented in the `clap` skill.)
 
+### Rich f64 fallback scratch follows the active bus layout
+
+Format adapters that negotiate bus widths away from descriptor defaults must
+call `prepare_f64_fallback_scratch(context, active_layout)` with the complete
+accepted `Processor::BusesLayout`. The context carries only main-bus widths;
+using the one-argument descriptor-default overload after widening a sidechain or
+aux bus leaves the default rich-f64 fallback undersized. Its RT capacity guard
+then correctly emits silence instead of allocating, but the accepted layout
+never reaches the processor. Unsupported-layout silence accommodation is the
+exception: pass descriptor-safe widths so surplus host channels remain clamped.
+
 ## Proportional resize with aspect lock — design viewport (2026-05)
 
 `PluginViewHost` now mirrors `WindowHost`'s design-viewport contract

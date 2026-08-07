@@ -8,6 +8,7 @@
 #include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/format/detail/midi_out_offset.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
+#include <pulp/format/detail/vst3_bus_layout.hpp>
 #include <pulp/format/detail/vst3_frame_rate.hpp>
 #include <pulp/format/detail/vst3_midi_mapping.hpp>
 #include <pulp/midi/message.hpp>
@@ -630,20 +631,76 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
             },
             [this](state::ParamID id) { endEdit(static_cast<ParamID>(id)); }});
 
-    // Add audio buses from descriptor (supports multi-bus: main, sidechain, aux)
-    for (const auto& bus : desc.input_buses) {
+    // Add audio buses from descriptor (supports multi-bus: main, sidechain, aux).
+    // PluginDescriptor carries channel counts rather than speaker positions, so
+    // advertise a deterministic conventional VST3 topology for each common
+    // width instead of collapsing every non-mono bus to stereo. An explicit
+    // layout list is the exact contract, so its first entry is the initial
+    // configuration (matching the other configurable format adapters).
+    const auto* initial_layout = desc.supported_bus_layouts.empty()
+        ? nullptr
+        : &desc.supported_bus_layouts.front();
+    if (initial_layout &&
+        (initial_layout->inputs.size() != desc.input_buses.size() ||
+         initial_layout->outputs.size() != desc.output_buses.size())) {
+        runtime::log_info(
+            "VST3: first supported_bus_layouts entry does not match descriptor bus counts");
+        return kResultFalse;
+    }
+    Processor::BusesLayout initial_proposal;
+    if (initial_layout) {
+        initial_proposal.inputs = initial_layout->inputs;
+        initial_proposal.outputs = initial_layout->outputs;
+    } else {
+        initial_proposal.inputs.reserve(desc.input_buses.size());
+        initial_proposal.outputs.reserve(desc.output_buses.size());
+        for (const auto& bus : desc.input_buses)
+            initial_proposal.inputs.push_back(bus.default_channels);
+        for (const auto& bus : desc.output_buses)
+            initial_proposal.outputs.push_back(bus.default_channels);
+    }
+    if (!processor_->is_bus_layout_supported(initial_proposal)) {
+        runtime::log_info(
+            "VST3: initial descriptor bus layout is not supported by the Processor");
+        return kResultFalse;
+    }
+    for (std::size_t i = 0; i < desc.input_buses.size(); ++i) {
+        const auto& bus = desc.input_buses[i];
+        const int channels = initial_layout
+            ? initial_layout->inputs[i]
+            : bus.default_channels;
+        const auto arrangement =
+            detail::vst3_canonical_speaker_arrangement(channels);
+        if (!arrangement) {
+            runtime::log_info(
+                "VST3: cannot advertise input bus '{}' with unsupported {}-channel layout",
+                bus.name, channels);
+            return kResultFalse;
+        }
         Steinberg::Vst::String128 busName;
         Steinberg::UString(busName, 128).fromAscii(bus.name.c_str());
         addAudioInput(busName,
-            bus.default_channels == 1 ? SpeakerArr::kMono : SpeakerArr::kStereo,
+            *arrangement,
             bus.optional ? Steinberg::Vst::BusTypes::kAux : Steinberg::Vst::BusTypes::kMain,
             bus.optional ? 0 : Steinberg::Vst::BusInfo::kDefaultActive);
     }
-    for (const auto& bus : desc.output_buses) {
+    for (std::size_t i = 0; i < desc.output_buses.size(); ++i) {
+        const auto& bus = desc.output_buses[i];
+        const int channels = initial_layout
+            ? initial_layout->outputs[i]
+            : bus.default_channels;
+        const auto arrangement =
+            detail::vst3_canonical_speaker_arrangement(channels);
+        if (!arrangement) {
+            runtime::log_info(
+                "VST3: cannot advertise output bus '{}' with unsupported {}-channel layout",
+                bus.name, channels);
+            return kResultFalse;
+        }
         Steinberg::Vst::String128 busName;
         Steinberg::UString(busName, 128).fromAscii(bus.name.c_str());
         addAudioOutput(busName,
-            bus.default_channels == 1 ? SpeakerArr::kMono : SpeakerArr::kStereo,
+            *arrangement,
             bus.optional ? Steinberg::Vst::BusTypes::kAux : Steinberg::Vst::BusTypes::kMain,
             bus.optional ? 0 : Steinberg::Vst::BusInfo::kDefaultActive);
     }
@@ -840,29 +897,46 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
         return kResultFalse;
     }
 
-    // Only mono + stereo are translatable to a Processor::BusesLayout
-    // proposal today; any other arrangement is unsupported by definition.
-    // The Processor also gets a veto on the proposed mono/stereo layout.
-    auto is_mono_stereo = [](SpeakerArrangement a) {
-        return a == SpeakerArr::kMono || a == SpeakerArr::kStereo;
-    };
-    auto channel_count = [](SpeakerArrangement a) -> int {
-        if (a == SpeakerArr::kMono)   return 1;
-        if (a == SpeakerArr::kStereo) return 2;
-        return 0;
+    // Processor::BusesLayout is count-only. Translate every common VST3
+    // topology to its channel width, then let the Processor's explicit layout
+    // set or override decide whether the complete proposal is supported.
+    auto is_empty_mono_stereo = [](SpeakerArrangement a) {
+        return a == SpeakerArr::kEmpty ||
+               a == SpeakerArr::kMono ||
+               a == SpeakerArr::kStereo;
     };
 
-    bool all_mono_stereo = true;
-    for (int32 i = 0; i < numIns;  ++i) if (!is_mono_stereo(inputs[i]))  all_mono_stereo = false;
-    for (int32 i = 0; i < numOuts; ++i) if (!is_mono_stereo(outputs[i])) all_mono_stereo = false;
+    bool all_empty_mono_stereo = true;
+    for (int32 i = 0; i < numIns; ++i)
+        if (!is_empty_mono_stereo(inputs[i])) all_empty_mono_stereo = false;
+    for (int32 i = 0; i < numOuts; ++i)
+        if (!is_empty_mono_stereo(outputs[i])) all_empty_mono_stereo = false;
+
+    Processor::BusesLayout proposal;
+    proposal.inputs.reserve(static_cast<std::size_t>(numIns));
+    proposal.outputs.reserve(static_cast<std::size_t>(numOuts));
+    bool all_common_layouts = true;
+    for (int32 i = 0; i < numIns; ++i) {
+        const auto channels = detail::vst3_common_channel_count(inputs[i]);
+        if (!channels) {
+            all_common_layouts = false;
+            break;
+        }
+        proposal.inputs.push_back(*channels);
+    }
+    if (all_common_layouts) {
+        for (int32 i = 0; i < numOuts; ++i) {
+            const auto channels = detail::vst3_common_channel_count(outputs[i]);
+            if (!channels) {
+                all_common_layouts = false;
+                break;
+            }
+            proposal.outputs.push_back(*channels);
+        }
+    }
 
     bool natively_supported = false;
-    if (all_mono_stereo) {
-        Processor::BusesLayout proposal;
-        proposal.inputs.reserve(static_cast<std::size_t>(numIns));
-        proposal.outputs.reserve(static_cast<std::size_t>(numOuts));
-        for (int32 i = 0; i < numIns;  ++i) proposal.inputs.push_back(channel_count(inputs[i]));
-        for (int32 i = 0; i < numOuts; ++i) proposal.outputs.push_back(channel_count(outputs[i]));
+    if (all_common_layouts) {
         natively_supported = processor_->is_bus_layout_supported(proposal);
     }
 
@@ -882,9 +956,9 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
         // such as linked main/sidechain channel counts or stereo-only
         // output, and there are no extra channels the silence
         // accommodation could neutralize.
-        if (all_mono_stereo) {
+        if (all_empty_mono_stereo) {
             runtime::log_info(
-                "VST3 setBusArrangements: rejected processor-vetoed mono/stereo "
+                "VST3 setBusArrangements: rejected processor-vetoed empty/mono/stereo "
                 "layout ({} in / {} out buses) — honoring is_bus_layout_supported",
                 numIns, numOuts);
             return kResultFalse;
@@ -940,10 +1014,30 @@ tresult PLUGIN_API PulpVst3Processor::canProcessSampleSize(int32 symbolicSampleS
 tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     if (!processor_) return kInternalError;
 
-    // Query channel counts from the plugin descriptor
+    // Native arrangements prepare the processor at the accepted main-bus
+    // widths. The silence accommodation is deliberately different: it accepts
+    // an unsupported host arrangement only to keep the host alive, so the DSP
+    // must remain prepared at its descriptor-default safe width and process()
+    // clamps/zeros the surplus channels.
     auto desc = processor_->descriptor();
     int in_ch = desc.default_input_channels();
     int out_ch = desc.default_output_channels();
+    if (!silence_unsupported_active_) {
+        if (!desc.input_buses.empty()) {
+            if (auto* bus = Steinberg::FCast<Steinberg::Vst::AudioBus>(
+                    audioInputs.at(0))) {
+                in_ch = static_cast<int>(Steinberg::Vst::SpeakerArr::getChannelCount(
+                    bus->getArrangement()));
+            }
+        }
+        if (!desc.output_buses.empty()) {
+            if (auto* bus = Steinberg::FCast<Steinberg::Vst::AudioBus>(
+                    audioOutputs.at(0))) {
+                out_ch = static_cast<int>(Steinberg::Vst::SpeakerArr::getChannelCount(
+                    bus->getArrangement()));
+            }
+        }
+    }
 
     PrepareContext ctx;
     ctx.sample_rate = setup.sampleRate;
@@ -951,13 +1045,40 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     ctx.input_channels = in_ch;
     ctx.output_channels = out_ch;
 
+    Processor::BusesLayout prepared_layout;
+    prepared_layout.inputs.reserve(desc.input_buses.size());
+    prepared_layout.outputs.reserve(desc.output_buses.size());
+    for (std::size_t i = 0; i < desc.input_buses.size(); ++i) {
+        int channels = desc.input_buses[i].default_channels;
+        if (!silence_unsupported_active_) {
+            if (auto* bus = Steinberg::FCast<Steinberg::Vst::AudioBus>(
+                    audioInputs.at(static_cast<int32>(i)))) {
+                channels = static_cast<int>(Steinberg::Vst::SpeakerArr::getChannelCount(
+                    bus->getArrangement()));
+            }
+        }
+        prepared_layout.inputs.push_back(channels);
+    }
+    for (std::size_t i = 0; i < desc.output_buses.size(); ++i) {
+        int channels = desc.output_buses[i].default_channels;
+        if (!silence_unsupported_active_) {
+            if (auto* bus = Steinberg::FCast<Steinberg::Vst::AudioBus>(
+                    audioOutputs.at(static_cast<int32>(i)))) {
+                channels = static_cast<int>(Steinberg::Vst::SpeakerArr::getChannelCount(
+                    bus->getArrangement()));
+            }
+        }
+        prepared_layout.outputs.push_back(channels);
+    }
+
     processor_->prepare(ctx);
-    processor_->prepare_f64_fallback_scratch(ctx);
+    processor_->prepare_f64_fallback_scratch(ctx, prepared_layout);
     native_f64_enabled_ = desc.effective_capabilities().supports_f64_audio;
     selected_sample_size_ = setup.symbolicSampleSize == kSample64 ? kSample64 : kSample32;
 
     // Cache what the processor's buffers are prepared for; the silence
-    // accommodation clamps process() views to these counts.
+    // accommodation clamps process() views to these counts, while native
+    // negotiated layouts retain the accepted widths above.
     native_in_ = in_ch;
     native_out_ = out_ch;
 
@@ -971,12 +1092,32 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     output_ptrs_.resize(ctx.output_channels);
     input64_ptrs_.resize(ctx.input_channels);
     output64_ptrs_.resize(ctx.output_channels);
-    sidechain64_ptrs_.resize(
-        desc.input_buses.size() > 1 ? desc.input_buses[1].default_channels : 0);
+    // The Processor API exposes only input bus 1 as its sidechain. Size every
+    // pointer/conversion buffer from the accepted arrangement as well as the
+    // declared default: setBusArrangements() may legitimately widen this bus,
+    // and process() must neither allocate nor truncate it on the audio thread.
+    int sidechain_storage = 0;
+    if (desc.input_buses.size() > 1) {
+        const int declared = desc.input_buses[1].default_channels;
+        int accepted = declared;
+        if (!silence_unsupported_active_) {
+            auto* bus = Steinberg::FCast<Steinberg::Vst::AudioBus>(
+                audioInputs.at(1));
+            if (bus) {
+                accepted = static_cast<int>(
+                    Steinberg::Vst::SpeakerArr::getChannelCount(bus->getArrangement()));
+            }
+        }
+        sidechain_storage = (std::max)(declared, accepted);
+    }
+    const std::size_t sidechain_capacity = sidechain_storage > 0
+        ? static_cast<std::size_t>(sidechain_storage)
+        : 0;
+    sidechain_ptrs_.assign(sidechain_capacity, nullptr);
+    sidechain64_ptrs_.assign(sidechain_capacity, nullptr);
     resize_sample_scratch(f64_input_scratch_, ctx.input_channels, ctx.max_buffer_size);
     resize_sample_scratch(f64_output_scratch_, ctx.output_channels, ctx.max_buffer_size);
-    resize_sample_scratch(f64_sidechain_scratch_,
-                          desc.input_buses.size() > 1 ? desc.input_buses[1].default_channels : 0,
+    resize_sample_scratch(f64_sidechain_scratch_, sidechain_storage,
                           ctx.max_buffer_size);
 
     // Pre-size per-bus channel-pointer storage for the secondary (aux) output
@@ -986,8 +1127,9 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     // default — so the routing path in process() reuses this storage, never
     // allocates on the audio thread, and never drops a channel the host
     // negotiated. We size to max(accepted, declared) so a host that presents
-    // the descriptor default after a wider negotiation still fits. The declared
-    // count is recorded separately for the aux view's declared_channels.
+    // the descriptor default after a wider negotiation still fits. Native
+    // layouts report the accepted width as their process-view contract; the
+    // unsupported-layout silence path retains the descriptor-safe width.
     const std::size_t declared_output_buses = desc.output_buses.size();
     const std::size_t aux_bus_count =
         declared_output_buses > 0 ? declared_output_buses - 1 : 0;
@@ -996,13 +1138,15 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     declared_aux_channels_.assign(aux_bus_count, 0);
     for (std::size_t b = 1; b < declared_output_buses; ++b) {
         const int declared = desc.output_buses[b].default_channels;
-        declared_aux_channels_[b - 1] = declared;
         int accepted = declared;
         if (auto* bus = Steinberg::FCast<Steinberg::Vst::AudioBus>(
                 audioOutputs.at(static_cast<int32>(b)))) {
             accepted = static_cast<int>(
                 Steinberg::Vst::SpeakerArr::getChannelCount(bus->getArrangement()));
         }
+        declared_aux_channels_[b - 1] = silence_unsupported_active_
+            ? declared
+            : accepted;
         const int storage = (std::max)(declared, accepted);
         aux_output_ptrs_[b - 1].assign(
             storage > 0 ? static_cast<std::size_t>(storage) : 0, nullptr);
@@ -1422,10 +1566,12 @@ void PulpVst3Processor::process_wire_buffers(
          (!host_f64 && data.inputs[1].channelBuffers32 &&
           data.inputs[1].channelBuffers32[0]))) {
         sc_channels = data.inputs[1].numChannels;
-        if (host_f64) {
-            sc_channels = (std::min)(
-                sc_channels, static_cast<int>(f64_sidechain_scratch_.size()));
-        }
+        // setupProcessing() sizes this storage to the accepted native layout,
+        // or to the descriptor default on the unsupported-layout silence path.
+        // Clamp both sample formats so process() never grows a pointer vector on
+        // the audio thread and accommodated layouts never reach unprepared DSP.
+        sc_channels = (std::min)(
+            sc_channels, static_cast<int>(sidechain_ptrs_.size()));
         sidechain_ptrs_.resize(sc_channels);
         sidechain64_ptrs_.resize(sc_channels);
         for (int ch = 0; ch < sc_channels; ++ch) {
@@ -1976,10 +2122,10 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             }
         }
         if (!active) aux_channels = 0;
-        // declared_channels reports the descriptor's declared layout (captured
-        // in setupProcessing); buffer.num_channels() carries the actual routed
-        // count. Keeping these distinct lets matches_declared_layout() detect a
-        // host-vs-declared channel-count mismatch instead of being tautological.
+        // declared_channels reports the accepted native layout (or the
+        // descriptor-safe width on the silence-accommodation path), captured in
+        // setupProcessing. buffer.num_channels() carries the actual routed count
+        // so matches_declared_layout() can still detect malformed host blocks.
         output_buses[routed_output_buses++] = {
             .info = {"Aux Out", b, BusDirection::Output, BusRole::Aux,
                      declared_aux_channels_[b - 1], true, active},
