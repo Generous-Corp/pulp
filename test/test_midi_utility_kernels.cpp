@@ -565,6 +565,92 @@ TEST_CASE("routing lifecycle flushes owned notes and suppresses stale releases",
         REQUIRE(many.process(attacks, routed).complete);
         CHECK(routed.empty());
     }
+
+    SECTION("a rejecting route still consumes the old release before reuse") {
+        midi::ChannelRouter changing(initial);
+        input.clear();
+        input.add(midi::MidiEvent::note_on(3, 67, 100));
+        REQUIRE(changing.process(input, output).complete);
+
+        auto rejecting = initial;
+        rejecting.accepted_channels &= ~(std::uint16_t{1} << 3);
+        REQUIRE(changing.replace_spec(rejecting, output).complete);
+        REQUIRE(output.size() == 1);
+        CHECK(output[0].is_note_off());
+        CHECK(output[0].channel() == 15);
+
+        input.clear();
+        input.add(midi::MidiEvent::note_off(3, 67));
+        REQUIRE(changing.process(input, output).complete);
+        CHECK(output.empty());
+        REQUIRE(changing.replace_spec(replacement));
+
+        input.clear();
+        input.add(midi::MidiEvent::note_on(3, 67, 100));
+        input.add(midi::MidiEvent::note_off(3, 67));
+        REQUIRE(changing.process(input, output).complete);
+        REQUIRE(output.size() == 2);
+        CHECK(output[0].is_note_on());
+        CHECK(output[1].is_note_off());
+        CHECK(output[0].channel() == 4);
+        CHECK(output[1].channel() == 4);
+    }
+
+    SECTION("a rejecting range still consumes the old release before reuse") {
+        midi::NoteRangeFilter changing({60, 69});
+        input.clear();
+        input.add(midi::MidiEvent::note_on(0, 64, 100));
+        REQUIRE(changing.process(input, output).complete);
+        REQUIRE(changing.replace_spec({70, 80}, output).complete);
+        REQUIRE(output.size() == 1);
+        CHECK(output[0].is_note_off());
+
+        input.clear();
+        input.add(midi::MidiEvent::note_off(0, 64));
+        REQUIRE(changing.process(input, output).complete);
+        CHECK(output.empty());
+        REQUIRE(changing.replace_spec({60, 69}));
+
+        input.clear();
+        input.add(midi::MidiEvent::note_on(0, 64, 100));
+        input.add(midi::MidiEvent::note_off(0, 64));
+        REQUIRE(changing.process(input, output).complete);
+        REQUIRE(output.size() == 2);
+        CHECK(output[0].is_note_on());
+        CHECK(output[1].is_note_off());
+    }
+
+    SECTION("a rejecting UMP route consumes the old release before reuse") {
+        midi::ChannelRouter changing(initial);
+        midi::UmpBuffer input_ump;
+        midi::UmpBuffer output_ump;
+        prepare_sidecars(input, input_ump);
+        prepare_sidecars(output, output_ump);
+        input.clear();
+        REQUIRE(input_ump.add(midi::UmpPacket::note_on_2(5, 3, 68, 0x8000), 4));
+        REQUIRE(changing.process(input, output).complete);
+
+        auto rejecting = initial;
+        rejecting.accepted_channels &= ~(std::uint16_t{1} << 3);
+        REQUIRE(changing.replace_spec(rejecting, output).complete);
+        REQUIRE(output_ump.size() == 1);
+
+        input_ump.clear();
+        REQUIRE(input_ump.add(midi::UmpPacket::note_off_2(5, 3, 68), 5));
+        REQUIRE(changing.process(input, output).complete);
+        CHECK(output_ump.empty());
+        REQUIRE(changing.replace_spec(replacement));
+
+        input_ump.clear();
+        REQUIRE(input_ump.add(midi::UmpPacket::note_on_2(5, 3, 68, 0x8000), 6));
+        REQUIRE(input_ump.add(midi::UmpPacket::note_off_2(5, 3, 68), 7));
+        REQUIRE(changing.process(input, output).complete);
+        REQUIRE(output_ump.size() == 2);
+        CHECK((output_ump[0].packet.status() & 0xf0) == 0x90);
+        CHECK((output_ump[1].packet.status() & 0xf0) == 0x80);
+        CHECK(output_ump[0].packet.channel() == 4);
+        CHECK(output_ump[1].packet.channel() == 4);
+    }
 }
 
 TEST_CASE("routing kernels retain ownership when output preparation rejects a block",

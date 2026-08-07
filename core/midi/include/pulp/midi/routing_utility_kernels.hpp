@@ -487,10 +487,10 @@ class ChannelRouter {
                 utility_detail::emit(output, event, report);
                 continue;
             }
+            if (held_notes_.consume_suppressed_release(event))
+                continue;
             const auto channel = event.channel();
             if ((spec_.accepted_channels & (std::uint16_t{1} << channel)) == 0)
-                continue;
-            if (held_notes_.consume_suppressed_release(event))
                 continue;
             if (!held_notes_.can_forward(event)) {
                 held_notes_.record(event, false);
@@ -510,10 +510,10 @@ class ChannelRouter {
                         utility_detail::emit_ump(output.ump(), event) && copied_sidecars;
                     continue;
                 }
+                if (held_notes_.consume_suppressed_release(event.packet))
+                    continue;
                 const auto channel = event.packet.channel();
                 if ((spec_.accepted_channels & (std::uint16_t{1} << channel)) == 0)
-                    continue;
-                if (held_notes_.consume_suppressed_release(event.packet))
                     continue;
                 auto routed = event;
                 routed.packet =
@@ -655,10 +655,10 @@ class NoteRangeFilter {
             return report;
         }
         for (const auto& event : input) {
+            if (held_notes_.consume_suppressed_release(event))
+                continue;
             if (utility_detail::is_note_addressed(event) &&
                 (event.note() < spec_.lowest || event.note() > spec_.highest))
-                continue;
-            if (held_notes_.consume_suppressed_release(event))
                 continue;
             if (!held_notes_.can_forward(event)) {
                 held_notes_.record(event, false);
@@ -672,11 +672,11 @@ class NoteRangeFilter {
         bool copied_sidecars = utility_detail::copy_sysex_sidecar(input, output);
         if (const auto* source = input.ump()) {
             for (const auto& event : *source) {
+                if (held_notes_.consume_suppressed_release(event.packet))
+                    continue;
                 if (utility_detail::is_note_addressed(event.packet) &&
                     (event.packet.note_number() < spec_.lowest ||
                      event.packet.note_number() > spec_.highest))
-                    continue;
-                if (held_notes_.consume_suppressed_release(event.packet))
                     continue;
                 if (!held_notes_.can_forward(event.packet)) {
                     held_notes_.record(event.packet, false);
