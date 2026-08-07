@@ -100,6 +100,29 @@ void check_owner_private(const fs::path& path, bool directory) {
 
 } // namespace
 
+TEST_CASE("artifact store clock callbacks may reenter read-only store state",
+          "[inspect][control][artifacts][concurrency]") {
+    TemporaryDirectory temporary;
+    ControlArtifactStore* store_address = nullptr;
+    std::size_t ready_observations = 0;
+    ControlArtifactStore store{
+        {.root = temporary.path / "store"},
+        [&] {
+            if (store_address && store_address->is_ready())
+                ++ready_observations;
+            return std::chrono::system_clock::now();
+        },
+    };
+    store_address = &store;
+
+    const auto stored = store.store(bytes("reentrant-clock"), lineage(), properties());
+    REQUIRE(stored.status == ControlArtifactStatus::Stored);
+    REQUIRE(stored.metadata);
+    CHECK(ready_observations == 1);
+    REQUIRE(store.metadata(stored.metadata->artifact_id));
+    CHECK(ready_observations == 2);
+}
+
 TEST_CASE("control artifact store publishes blob before opaque ACL metadata",
           "[inspect][control][artifacts]") {
     TemporaryDirectory temporary;

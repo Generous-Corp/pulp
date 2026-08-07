@@ -16,6 +16,9 @@ struct ControlBrokerConfig {
     ControlAdmissionPolicy admission;
     std::optional<ControlOperationStoreConfig> operation_store;
     std::optional<ControlArtifactStoreConfig> artifact_store;
+    /// Trusted wall-clock source. It may run inside broker authority
+    /// coordination and must be bounded, non-blocking, and non-reentrant: it
+    /// must not call this broker or any store owned by it.
     ControlOperationStore::WallClock wall_clock = [] { return std::chrono::system_clock::now(); };
 };
 
@@ -34,6 +37,9 @@ class ControlBroker {
   public:
     using Clock = ControlIdentityRegistry::Clock;
 
+    /// The steady clock has the same trusted callback contract as
+    /// ControlBrokerConfig::wall_clock. It may run inside broker coordination
+    /// and must not call this broker or any of its owned stores.
     explicit ControlBroker(
         ControlBrokerConfig config = {}, std::shared_ptr<ControlSecurityAuditLog> audit_log = {},
         Clock clock = [] { return std::chrono::steady_clock::now(); });
