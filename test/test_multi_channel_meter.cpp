@@ -490,6 +490,23 @@ TEST_CASE("MultiChannelMeter applies surround weighting and excludes LFE",
     REQUIRE_THAT(rear_meter.snapshot().lufs_momentary, WithinAbs(-3.01f, 0.015f));
 }
 
+TEST_CASE("MultiChannelMeter default quad layout uses left and right surrounds",
+          "[signal][meter][loudness]") {
+    constexpr int sample_rate = 48000;
+    auto tone = pulp::test::audio::make_sine(1, sample_rate * 2, 997.0f, sample_rate);
+    const float* channels[] = {tone.channel(0).data(), tone.channel(0).data(),
+                               tone.channel(0).data(), tone.channel(0).data()};
+
+    MultiChannelMeter meter;
+    meter.prepare(sample_rate, 4);
+    meter.process(channels, 4, static_cast<int>(tone.num_samples()));
+
+    const float expected = -3.01f + 10.0f * std::log10(2.0f + 2.0f * 1.41f);
+    REQUIRE_THAT(meter.snapshot().lufs_momentary, WithinAbs(expected, 0.02f));
+    const float center_lfe_layout = -3.01f + 10.0f * std::log10(3.0f);
+    REQUIRE(std::abs(meter.snapshot().lufs_momentary - center_lfe_layout) > 1.5f);
+}
+
 TEST_CASE("MultiChannelMeter loudness is invariant to process block partitioning",
           "[signal][meter][loudness]") {
     constexpr int sample_rate = 48000;
