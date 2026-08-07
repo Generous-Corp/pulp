@@ -165,8 +165,11 @@ JSON node counts. Bulk UI-tree, diagnostics, and log results use artifact
 handles instead of expanding those receipt budgets; artifact reads retain their
 bounded one-mebibyte chunk contract.
 
-The broker checks deadlines and atomically enforces active-operation quotas. If
-already-started legal-thread work exceeds its response deadline, the response
+The broker checks deadlines and atomically enforces active-operation quotas.
+Trusted in-process executors must return within that bound or promptly return a
+deferred outcome; the service cannot preempt arbitrary C++ in its own process.
+The supplied main-thread adapter enforces the contract with bounded fenced RPC.
+If already-started legal-thread work exceeds its response deadline, the response
 is `unknown-needs-refresh`, while the durable receipt remains `running` and
 retains its quota slot until deferred completion settles it. Cancellation intent
 is durable. Progress events are receipt-bound, monotonic, bounded, and subject

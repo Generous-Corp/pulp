@@ -28,6 +28,11 @@ struct ControlExecutionContext {
     ControlDeferredCompletion complete_deferred;
 };
 
+/// Trusted in-process adapter contract. An executor must never wait past the
+/// plan deadline itself: it either completes within the bound or promptly
+/// returns `deferred = true` and later invokes `complete_deferred`. The service
+/// cannot safely preempt arbitrary C++ running in its process. The supplied
+/// main-thread adapter enforces this contract with a fenced, bounded RPC.
 using ControlOperationExecutor = std::function<ControlExecutionOutcome(
     const ControlAdmissionPlan&, const ControlRequestEnvelope&, const ControlExecutionContext&)>;
 

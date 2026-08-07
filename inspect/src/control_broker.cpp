@@ -596,7 +596,14 @@ ControlBroker::finish_operation(const VerifiedControlPeerIdentity& client_peer,
                                 ? resolve_control_operation(current->binding.operation_id,
                                                             current->binding.operation_version)
                                 : nullptr;
-    if ((operation && operation->artifact_binding.produced) || !result.artifacts.empty()) {
+    if (!result.artifacts.empty() &&
+        (!operation || !operation->artifact_binding.produced)) {
+        return {
+            .status = ControlOperationStoreStatus::InvalidRequest,
+            .error = "only successful artifact-producing operations may retain artifacts",
+        };
+    }
+    if (operation && operation->artifact_binding.produced) {
         if (!artifact_store_) {
             return {
                 .status = ControlOperationStoreStatus::StoreUnavailable,
@@ -807,8 +814,10 @@ bool ControlBroker::authorize_artifact_read_locked(const VerifiedControlPeerIden
         authority.broker_id == identities_.broker_id() &&
         authority.client_id == requesting_client_id &&
         metadata.expires_at_unix_ms > static_cast<std::uint64_t>(wall_clock_unix_ms(wall_clock_)) &&
-        control_receipt_state_is_terminal(receipt->state) && client && registration && grant &&
-        operation && operation->capability == authority.capability &&
+        (receipt->state == ControlReceiptState::Completed ||
+         receipt->state == ControlReceiptState::CompletedAfterRevocation) &&
+        client && registration && grant && operation && operation->artifact_binding.produced &&
+        operation->capability == authority.capability &&
         client->peer_fingerprint == client_peer.fingerprint() &&
         client->peer_fingerprint == authority.client_principal &&
         registration->session_id == authority.session_id &&
@@ -823,10 +832,9 @@ bool ControlBroker::authorize_artifact_read_locked(const VerifiedControlPeerIden
                                 return artifact.artifact_id == metadata.artifact_id &&
                                        artifact.media_type == metadata.content_type &&
                                        artifact.byte_size == metadata.byte_size &&
-                                       (!operation->artifact_binding.produced ||
-                                        (receipt->result.artifacts.size() == 1 &&
-                                         produced_artifact_result_matches(
-                                             *operation, receipt->result, artifact, metadata)));
+                                       receipt->result.artifacts.size() == 1 &&
+                                       produced_artifact_result_matches(
+                                           *operation, receipt->result, artifact, metadata);
                             }) &&
         grants_.is_granted(authority.grant_id, authority.client_id, authority.registration_id,
                            authority.capability);

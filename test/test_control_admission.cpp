@@ -233,23 +233,26 @@ struct AdmissionFixture {
     }
 
     ControlArtifactStoreResult
-    publish_completed_state_artifact(std::span<const std::uint8_t> bytes,
-                                     std::string request_id = "request-artifact-race",
-                                     std::string idempotency_key = "idempotency-artifact-race") {
+    publish_completed_capture_artifact(std::span<const std::uint8_t> bytes,
+                                       std::string request_id = "request-artifact-race",
+                                       std::string idempotency_key = "idempotency-artifact-race") {
         const auto admitted = broker.admit_operation(
-            client, state_read(std::move(request_id), std::move(idempotency_key)));
+            client, capture(std::move(request_id), std::move(idempotency_key)));
         REQUIRE(admitted.plan);
         REQUIRE(broker.begin_operation(client, *admitted.plan).succeeded());
         auto stored =
             broker.store_operation_artifact(client, *admitted.plan, bytes,
                                             ControlArtifactProperties{
-                                                .content_type = "application/octet-stream",
+                                                .content_type = "image/png",
                                                 .created_at_unix_ms = 1,
                                                 .expires_at_unix_ms = 4'102'444'800'000,
                                             });
         REQUIRE(stored.metadata);
         ControlOperationResult completed;
-        completed.detail_json = R"({"generation":1,"parameters":[]})";
+        completed.detail_json =
+            "{\"artifact_id\":\"" + stored.metadata->artifact_id +
+            "\",\"byte_count\":" + std::to_string(stored.metadata->byte_size) +
+            ",\"mime_type\":\"image/png\",\"sha256\":\"" + stored.metadata->sha256 + "\"}";
         completed.artifacts.push_back({stored.metadata->artifact_id, stored.metadata->content_type,
                                        stored.metadata->byte_size});
         REQUIRE(broker
@@ -356,7 +359,7 @@ TEST_CASE("ArtifactRead cannot be admitted through a fresh grant",
 TEST_CASE("Artifact reads reauthorize the original producer lineage",
           "[inspect][control][admission][artifact][security]") {
     AdmissionFixture fixture;
-    const auto admitted = fixture.broker.admit_operation(fixture.client, fixture.state_read());
+    const auto admitted = fixture.broker.admit_operation(fixture.client, fixture.capture());
     REQUIRE(admitted.plan);
     REQUIRE(admitted.receipt);
     REQUIRE(fixture.broker.begin_operation(fixture.client, *admitted.plan).succeeded());
@@ -364,14 +367,17 @@ TEST_CASE("Artifact reads reauthorize the original producer lineage",
     const auto stored =
         fixture.broker.store_operation_artifact(fixture.client, *admitted.plan, bytes,
                                                 ControlArtifactProperties{
-                                                    .content_type = "application/octet-stream",
+                                                    .content_type = "image/png",
                                                     .created_at_unix_ms = 1,
                                                     .expires_at_unix_ms = 4102444800000,
                                                 });
     REQUIRE(stored.status == ControlArtifactStatus::Stored);
     REQUIRE(stored.metadata);
     ControlOperationResult completed;
-    completed.detail_json = R"({"generation":1,"parameters":[]})";
+    completed.detail_json =
+        "{\"artifact_id\":\"" + stored.metadata->artifact_id +
+        "\",\"byte_count\":" + std::to_string(stored.metadata->byte_size) +
+        ",\"mime_type\":\"image/png\",\"sha256\":\"" + stored.metadata->sha256 + "\"}";
     completed.artifacts.push_back(
         {stored.metadata->artifact_id, stored.metadata->content_type, stored.metadata->byte_size});
     REQUIRE(fixture.broker
@@ -466,7 +472,7 @@ TEST_CASE("Blocked artifact reads do not serialize broker authority changes",
     auto clock = std::make_shared<BlockingWallClock>();
     AdmissionFixture fixture{allow_all_policy(), [clock] { return clock->now(); }};
     const std::array<std::uint8_t, 4> bytes{1, 2, 3, 4};
-    const auto stored = fixture.publish_completed_state_artifact(bytes);
+    const auto stored = fixture.publish_completed_capture_artifact(bytes);
     REQUIRE(stored.metadata);
 
     // One artifact metadata clock read and one broker authorization clock read
@@ -519,7 +525,7 @@ TEST_CASE("Artifact blob tampering during a blocked read cannot leak bytes",
     auto clock = std::make_shared<BlockingWallClock>();
     AdmissionFixture fixture{allow_all_policy(), [clock] { return clock->now(); }};
     const std::array<std::uint8_t, 4> bytes{1, 2, 3, 4};
-    const auto stored = fixture.publish_completed_state_artifact(bytes);
+    const auto stored = fixture.publish_completed_capture_artifact(bytes);
     REQUIRE(stored.metadata);
 
     clock->block_on_call(3);
@@ -609,6 +615,13 @@ TEST_CASE("Artifact-producing completion binds typed detail to the authorized ar
     missing_handle.artifacts.clear();
     CHECK(finish(std::move(missing_handle)).status == ControlOperationStoreStatus::InvalidRequest);
 
+    auto failed_with_artifact = result_for(*first.metadata, *first.metadata);
+    failed_with_artifact.result_code = ControlResultCode::InternalError;
+    CHECK(fixture.broker
+              .finish_operation(fixture.client, *admitted.plan, ControlReceiptState::Failed,
+                                std::move(failed_with_artifact))
+              .status == ControlOperationStoreStatus::InvalidRequest);
+
     const auto completed = finish(result_for(*first.metadata, *first.metadata));
     REQUIRE(completed.succeeded());
     REQUIRE(completed.receipt);
@@ -668,6 +681,38 @@ TEST_CASE("Artifact-producing completion binds typed detail to the authorized ar
     CHECK(fixture.broker
               .read_artifact(fixture.client, fixture.client_identity.client_id,
                              first.metadata->artifact_id, 0, first_bytes.size())
+              .status == ControlArtifactStatus::Unauthorized);
+}
+
+TEST_CASE("Non-artifact operations cannot retain published blobs",
+          "[inspect][control][admission][artifact][security]") {
+    AdmissionFixture fixture;
+    const auto admitted = fixture.broker.admit_operation(fixture.client, fixture.state_read());
+    REQUIRE(admitted.plan);
+    REQUIRE(fixture.broker.begin_operation(fixture.client, *admitted.plan).succeeded());
+    const std::array<std::uint8_t, 4> bytes{1, 2, 3, 4};
+    const auto stored = fixture.broker.store_operation_artifact(
+        fixture.client, *admitted.plan, bytes,
+        {.content_type = "application/octet-stream",
+         .created_at_unix_ms = 1,
+         .expires_at_unix_ms = 4102444800000});
+    REQUIRE(stored.metadata);
+
+    auto result = state_read_result();
+    result.artifacts.push_back(
+        {stored.metadata->artifact_id, stored.metadata->content_type, stored.metadata->byte_size});
+    CHECK(fixture.broker
+              .finish_operation(fixture.client, *admitted.plan, ControlReceiptState::Completed,
+                                std::move(result))
+              .status == ControlOperationStoreStatus::InvalidRequest);
+
+    REQUIRE(fixture.broker
+                .finish_operation(fixture.client, *admitted.plan, ControlReceiptState::Failed,
+                                  {.result_code = ControlResultCode::InternalError})
+                .succeeded());
+    CHECK(fixture.broker
+              .read_artifact(fixture.client, fixture.client_identity.client_id,
+                             stored.metadata->artifact_id, 0, bytes.size())
               .status == ControlArtifactStatus::Unauthorized);
 }
 

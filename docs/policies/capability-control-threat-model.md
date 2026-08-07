@@ -99,9 +99,12 @@ schema before the receipt can become `completed` or
 while exact replay returns the existing receipt without executing again.
 
 Per-client and exact registration/instance active-operation quotas are enforced
-atomically. Deadlines are checked before admission and execution; cancellation
-intent is durable, first-wins, and observed at execution boundaries. Once an
-executor reports successful application, a later cancellation request remains
+atomically. Deadlines are checked before admission and execution. Trusted
+in-process executors must complete within the bound or promptly return a deferred
+outcome; arbitrary C++ cannot be safely preempted inside the service process.
+The supplied main-thread adapter enforces this with bounded fenced RPC.
+Cancellation intent is durable, first-wins, and observed at execution
+boundaries. Once an executor reports successful application, a later cancellation request remains
 receipt metadata and cannot rewrite that success as cancellation. If legal-thread
 work has started but misses the response deadline, the caller sees
 `unknown-needs-refresh`, but the durable receipt remains `running` and continues
