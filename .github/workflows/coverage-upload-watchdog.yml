@@ -1,6 +1,7 @@
 name: Coverage upload watchdog
-# Outcome-based invariant: "main should have a SUCCESSFUL Coverage workflow
-# run within the last N hours." Codecov's dashboard silently degrades when
+# Receipt-based invariant: "main should have a completed Coverage workflow
+# with exact current-attempt Linux, macOS, and Python-tools upload receipts
+# within the last N hours." Codecov's dashboard silently degrades when
 # fresh complete uploads stop arriving — and there was no alarm for it (the
 # release pipeline has cadence/stuck/cli watchdogs; coverage had none). This
 # fires on the *symptom* (no recent coverage that actually uploaded), regardless
@@ -12,22 +13,19 @@ name: Coverage upload watchdog
 #     real OS leg, which now drops its report and skips upload NON-FATALLY (so
 #     the run concludes `success` with no C++ upload). A conclusion==success
 #     proxy alone would be blinded by this, so this watchdog requires the
-#     Linux and macOS receipt artifacts emitted only after the shared Codecov
+#     Linux, macOS, and Python-tools receipt artifacts emitted only after the shared Codecov
 #     action completes successfully. The check uses the actions API and needs
 #     no Codecov token.
-#   - codecov.yml component/flag drift (a subsystem matching no component),
-#   - llvm-cov -object-set regressions (a libpulp-*.a dropping out, so whole
-#     subsystems vanish while lines-valid stays > 0 — the recurring class the
-#     verify_cobertura_xml `lines-valid > 0` check cannot catch),
 #   - Codecov `after_n_builds` waiting forever on a missing per-OS leg.
 #
-# Complements: verify_cobertura_xml.py (per-leg, lines-valid>0, pre-upload)
+# This watchdog proves freshness/transport, not report completeness or Codecov
+# dashboard interpretation. It complements verify_cobertura_xml.py (per-leg,
+# lines-valid>0, pre-upload)
 # and test_codecov_components.py / test_codecov_config.py (config mapping,
-# PR-gate). This is the main-branch backstop that catches what slips past
-# both — same triad shape as the release watchdogs
+# PR-gate). Together they form the same layered shape as the release watchdogs
 # (docs/guides/release-watchdog.md).
 #
-# Auto-closes when a fresh successful Coverage run lands on main.
+# Auto-closes when a fresh exact receipt set lands on main.
 
 on:
   schedule:
@@ -35,9 +33,9 @@ on:
   workflow_dispatch:
     inputs:
       max_age_hours:
-        description: 'Hours since the last successful main Coverage run before flagging'
+        description: 'Hours since the last complete exact-attempt Codecov receipt set before flagging'
         required: false
-        default: '4'
+        default: '14'
       dry_run:
         description: 'Log findings but do not touch the tracking issue'
         required: false
@@ -57,11 +55,17 @@ jobs:
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: false
+          lfs: false
       - name: Scan main for a recent successful Coverage run
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          MAX_AGE_HOURS: ${{ github.event.inputs.max_age_hours || '4' }}
+          # Coverage refreshes every 8h and can run for several hours. Keep the
+          # alarm beyond one healthy cadence while still paging within a day.
+          MAX_AGE_HOURS: ${{ github.event.inputs.max_age_hours || '14' }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
           MARKER: '<!-- coverage-upload-watchdog -->'
           TITLE: 'Coverage uploads stalled — main has no recent successful Coverage run'
@@ -70,72 +74,86 @@ jobs:
           # shellcheck disable=SC2016  # printf format strings are intentionally
           # single-quoted; values are passed as positional %s args below.
 
-          # Newest SUCCESSFUL Coverage run on main, and the newest run of any
-          # conclusion (to report what's actually happening — cancelled/failed).
-          runs_json="$(gh api -X GET \
+          # Newest Coverage runs on main. Workflow conclusion is not the
+          # freshness authority: an advisory side job can fail after all
+          # required Codecov uploads completed. Exact receipts are authoritative.
+          now_epoch="$(date -u +%s)"
+          # Include the full freshness horizon plus the maximum self-hosted
+          # queue/runtime cushion, and paginate so main churn cannot displace a
+          # still-fresh scheduled run from an arbitrary first-page limit.
+          scan_cutoff_epoch=$(( now_epoch - (MAX_AGE_HOURS + 30) * 3600 ))
+          scan_cutoff="$(date -u -r "${scan_cutoff_epoch}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@${scan_cutoff_epoch}" +%Y-%m-%dT%H:%M:%SZ)"
+          runs_json="$(gh api -X GET --paginate --slurp \
             "repos/${REPO}/actions/workflows/coverage.yml/runs" \
-            -f branch=main -f per_page=20 \
-            --jq '[.workflow_runs[] | {id, head_sha, status, conclusion, created_at, updated_at, html_url}]')"
+            -f branch=main -f per_page=100 -f created=">=${scan_cutoff}" \
+            | jq -c '[.[].workflow_runs[] | {id, run_attempt, head_sha, status, conclusion, created_at, updated_at, html_url}]')"
 
           # The shared upload action emits a receipt only after the Codecov
           # action completes successfully. Main coverage is complete enough to
           # count as fresh only when both required native dashboard axes,
-          # Linux and macOS, produced receipts. Windows and side-language
-          # uploads remain advisory and may arrive independently.
-          succ_ids="$(printf '%s' "$runs_json" \
-            | jq -r '[.[] | select(.conclusion=="success")] | sort_by(.updated_at) | reverse | .[].id')"
+          # Linux and macOS, plus the independently generated Python-tools
+          # report, produced exact non-expired receipts for this run's SHA.
+          # Windows and other side-language uploads remain advisory.
+          completed_ids="$(printf '%s' "$runs_json" \
+            | jq -r '[.[] | select(.status=="completed")] | sort_by(.updated_at) | reverse | .[].id')"
           last_success_at=""
-          for rid in ${succ_ids}; do
+          scan_incomplete=0
+          for rid in ${completed_ids}; do
             head_sha="$(printf '%s' "$runs_json" \
               | jq -r --arg id "${rid}" '.[] | select((.id|tostring)==$id) | .head_sha')"
-            receipts="$(gh api -X GET "repos/${REPO}/actions/runs/${rid}/artifacts" \
-              -f per_page=100 \
-              --jq '[.artifacts[].name | select(startswith("codecov-upload-"))]' \
-              2>/dev/null || echo '[]')"
-            has_linux="$(printf '%s' "${receipts}" | jq '[.[] | select(startswith("codecov-upload-linux-"))] | length')"
-            has_macos="$(printf '%s' "${receipts}" | jq '[.[] | select(startswith("codecov-upload-macos-"))] | length')"
-            if [ "${has_linux}" -gt 0 ] && [ "${has_macos}" -gt 0 ]; then
-              last_success_at="$(printf '%s' "$runs_json" \
-                | jq -r --arg id "${rid}" '.[] | select((.id|tostring)==$id) | .updated_at')"
-              echo "Newest successful run with Linux + macOS Codecov receipts: ${rid} (${last_success_at})"
-              break
+            if ! jobs="$(gh api -X GET --paginate --slurp \
+                "repos/${REPO}/actions/runs/${rid}/jobs" \
+                -f filter=all -f per_page=100 2>/dev/null \
+                | jq -c '[.[].jobs[] | {name, run_attempt}]')"; then
+              echo "::warning::Could not read jobs for Coverage run ${rid}; freshness is unknown and issue state will not be mutated."
+              scan_incomplete=1
+              continue
             fi
-
-            # Preserve the old watchdog contract during rollout, but only for
-            # a run whose own workflow predates upload receipts. New runs
-            # always contain the receipt-name marker, so their Cobertura
-            # artifact cannot mask a failed Codecov transport.
-            workflow_text=""
-            if workflow_text="$(gh api -X GET \
-                "repos/${REPO}/contents/.github/workflows/coverage.yml" \
-                -f ref="${head_sha}" --jq .content 2>/dev/null \
-                | tr -d '\n' | base64 --decode 2>/dev/null)" \
-                && [ -n "${workflow_text}" ] \
-                && ! grep -q 'receipt-name: codecov-upload-' <<< "${workflow_text}"; then
-              legacy_count="$(gh api -X GET "repos/${REPO}/actions/runs/${rid}/artifacts" \
-                -f per_page=100 \
-                --jq '[.artifacts[].name | select(startswith("coverage-cobertura-"))] | length' \
-                2>/dev/null || echo 0)"
-              if [ "${legacy_count:-0}" -gt 0 ]; then
-                last_success_at="$(printf '%s' "$runs_json" \
-                  | jq -r --arg id "${rid}" '.[] | select((.id|tostring)==$id) | .updated_at')"
-                echo "Newest pre-receipt run with legacy Cobertura proof: ${rid} (${last_success_at})"
-                break
+            linux_attempt="$(printf '%s' "${jobs}" | jq -r '[.[] | select(.name == "Coverage report (Linux, Clang)") | .run_attempt] | max // empty')"
+            macos_attempt="$(printf '%s' "${jobs}" | jq -r '[.[] | select(.name == "Coverage report (macOS, Clang)") | .run_attempt] | max // empty')"
+            if [ -z "${linux_attempt}" ] || [ -z "${macos_attempt}" ]; then
+              echo "Run ${rid} has no complete Linux/macOS job-attempt map; not a full native refresh."
+              continue
+            fi
+            if ! receipts="$(gh api -X GET --paginate --slurp \
+                "repos/${REPO}/actions/runs/${rid}/artifacts" \
+                -f per_page=100 2>/dev/null \
+                | jq -c '{artifacts: [.[].artifacts[]]}')"; then
+              echo "::warning::Could not read artifacts for Coverage run ${rid}; freshness is unknown and issue state will not be mutated."
+              scan_incomplete=1
+              continue
+            fi
+            receipt_counts='{}'
+            if receipt_counts="$(printf '%s' "${receipts}" | python3 tools/scripts/check_codecov_receipts.py \
+                --sha "${head_sha}" --required-axis \
+                "linux=${linux_attempt}" "macos=${macos_attempt}" \
+                "python-tools=${linux_attempt}")"; then
+              # Freshness begins at the oldest required receipt, not workflow
+              # updated_at (which an unrelated long-running job can refresh).
+              candidate_at="$(printf '%s' "${receipt_counts}" | jq -r '.oldest_created_at')"
+              echo "Complete Linux + macOS + Python-tools receipt set: ${rid} (${candidate_at})"
+              if [ -z "${last_success_at}" ] || [[ "${candidate_at}" > "${last_success_at}" ]]; then
+                last_success_at="${candidate_at}"
               fi
+              continue
             fi
-            echo "Run ${rid} lacks complete native Codecov receipts (linux=${has_linux}, macos=${has_macos}) — not counting it as fresh coverage."
+            echo "Run ${rid} lacks exact current Codecov receipts (${receipt_counts}) — not counting it as fresh coverage."
           done
           recent_summary="$(printf '%s' "$runs_json" \
             | jq -r 'sort_by(.created_at) | reverse | .[0:6][] | "  - \(.created_at)  \(.status)/\(.conclusion // "-")  \(.html_url)"')"
 
-          now_epoch="$(date -u +%s)"
+          if [ "${scan_incomplete}" -ne 0 ]; then
+            echo "Coverage receipt scan incomplete; leaving watchdog issue state unchanged."
+            exit 0
+          fi
+
           if [ -n "${last_success_at}" ]; then
             succ_epoch="$(date -u -d "${last_success_at}" +%s 2>/dev/null || date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "${last_success_at}" +%s)"
             age_h=$(( (now_epoch - succ_epoch) / 3600 ))
           else
             age_h=99999  # no success at all in the window
           fi
-          echo "Last successful main Coverage: ${last_success_at:-<none in last 20 runs>} (age ~${age_h}h, threshold ${MAX_AGE_HOURS}h)"
+          echo "Last complete main Codecov receipt set: ${last_success_at:-<none in last 20 runs>} (age ~${age_h}h, threshold ${MAX_AGE_HOURS}h)"
 
           # Find an existing open watchdog issue by marker.
           issue_num="$(gh api -X GET "repos/${REPO}/issues" \
@@ -143,7 +161,7 @@ jobs:
             --jq "[.[] | select(.body != null and (.body | contains(\"${MARKER}\")))] | first | .number // empty" || true)"
 
           if [ "${age_h}" -ge "${MAX_AGE_HOURS}" ]; then
-            body="$(printf '%s\n\n**main has had no Coverage run with successful Linux + macOS Codecov receipts in ~%sh** (threshold %sh). A run may conclude success while a report or transport upload was skipped, so the dashboard can silently degrade.\n\nLast complete native upload: %s\n\nMost recent Coverage runs on main:\n%s\n\nLikely causes (check in order):\n1. A Linux or macOS native build/report verification failed before upload.\n2. The instrumented suite hit its internal time budget and intentionally dropped the report.\n3. Codecov transport failed after local report verification.\n4. CI dispatch throttling cancelled the run before both native uploads.\n5. codecov.yml component/flag drift or an llvm-cov object-set regression removed a subsystem.\n\nAuto-closes when a fresh Coverage run produces both native upload receipts.' \
+            body="$(printf '%s\n\n**main has had no complete exact-attempt Linux + macOS + Python-tools Codecov receipt set in ~%sh** (threshold %sh). A run may conclude success while a report or transport upload was skipped, so the dashboard can silently degrade.\n\nLast complete upload set: %s\n\nMost recent Coverage runs on main:\n%s\n\nLikely causes (check in order):\n1. A Linux or macOS native build/report verification failed before upload.\n2. Python tools coverage failed independently.\n3. The instrumented suite hit its internal time budget and intentionally dropped the report.\n4. Codecov transport failed after local report verification.\n5. CI dispatch throttling cancelled the run before required uploads.\n6. A rerun failed to reproduce receipts from its current attempt.\n\nAuto-closes when a fresh Coverage run produces all required upload receipts.' \
               "${MARKER}" "${age_h}" "${MAX_AGE_HOURS}" "${last_success_at:-<none>}" "${recent_summary}")"
             if [ "${DRY_RUN}" = "true" ]; then
               echo "::warning::[dry-run] would open/update coverage-upload watchdog issue"
@@ -164,7 +182,7 @@ jobs:
             if [ -n "${issue_num}" ] && [ "${DRY_RUN}" != "true" ]; then
               echo "Recovered — closing issue #${issue_num}"
               gh api -X POST "repos/${REPO}/issues/${issue_num}/comments" \
-                -f body="Recovered: a successful Coverage run landed on main (${last_success_at}). Auto-closing." >/dev/null
+                -f body="Recovered: a complete exact-SHA Codecov receipt set landed on main (${last_success_at}). Auto-closing." >/dev/null
               gh api -X PATCH "repos/${REPO}/issues/${issue_num}" -f state=closed >/dev/null
             fi
           fi

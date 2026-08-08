@@ -115,7 +115,6 @@ public:
         if constexpr (std::is_same_v<SampleType, float>) {
             log2n_ = 0;
             for (int n = size; n > 1; n >>= 1) ++log2n_;
-            vdsp_setup_ = vDSP_create_fftsetup(log2n_, kFFTRadix2);
             split_real_.resize(size);
             split_imag_.resize(size);
         }
@@ -126,6 +125,14 @@ public:
             double angle = -2.0 * pi * i / size;
             twiddles_[i] = {std::cos(angle), std::sin(angle)};
         }
+#if PULP_FFT_HAS_VDSP
+        if constexpr (std::is_same_v<SampleType, float>) {
+            // Keep raw setup acquisition last: every vector allocation and
+            // twiddle population that can throw has completed, so constructor
+            // unwinding cannot bypass destruction of an acquired setup.
+            vdsp_setup_ = vDSP_create_fftsetup(log2n_, kFFTRadix2);
+        }
+#endif
     }
 
     ~FftT() {
@@ -135,6 +142,22 @@ public:
     }
 
     int size() const { return size_; }
+
+    /// True when every backend resource required by forward()/inverse() is
+    /// available. Construction can produce a non-ready float FFT if Apple's
+    /// vDSP setup allocation returns null without throwing.
+    [[nodiscard]] bool ready() const noexcept {
+        if (size_ <= 0 || twiddles_.size() != static_cast<std::size_t>(size_ / 2))
+            return false;
+#if PULP_FFT_HAS_VDSP
+        if constexpr (std::is_same_v<SampleType, float>) {
+            return vdsp_setup_ != nullptr
+                && split_real_.size() == static_cast<std::size_t>(size_)
+                && split_imag_.size() == static_cast<std::size_t>(size_);
+        }
+#endif
+        return true;
+    }
 
     // Forward FFT (time → frequency) — complex in-place
     void forward(std::complex<SampleType>* data) const {

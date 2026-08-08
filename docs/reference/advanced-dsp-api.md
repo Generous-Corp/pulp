@@ -33,7 +33,83 @@ their declared enumerators. Unless called out as a topology operation, controls
 may be changed between blocks and are consumed without allocation on the next
 processing call.
 
+## Filters and crossovers
+
+### `LinkwitzRileyCrossoverT<SampleType, MaxBands>`
+
+This fixed-capacity LR4 crossover creates between two and `MaxBands` ordered
+bands. `prepare(sample_rate, cutoffs)` fixes the band count; cutoffs are plain Hz,
+finite, strictly increasing, below Nyquist, and inside the numerically supported
+coefficient domain reported by `supports_configuration()`. The template uses a
+double-precision recursive realization independently of its floating-point API
+sample type; validation also rejects degenerate coefficients and poles too
+close to the unit circle.
+`set_cutoffs(cutoffs, transition_samples)` preserves topology. A nonzero
+transition moves one topology-preserving-transform bank through logarithmically
+interpolated, bilinear-warped cutoff design values for the exact sample count and
+rejects an overlapping retune. Its integrator state is not reinterpreted when
+coefficients move. Downward moves must also meet the logarithmic slew floor
+reported by `minimum_transition_samples()`. The public parameter-rate guarantee
+is at most `maximum_downward_log_slew_nepers_per_second()` in the logarithm of
+the bilinear-warped cutoff; it is not an input-independent signal peak bound,
+because peaks also depend on recursive state established by prior input.
+`set_cutoffs()` rejects shorter or numerically unrepresentable transitions
+without changing the live configuration. `max()` from
+`minimum_transition_samples()` is reserved as the invalid or unrepresentable
+sentinel and is never an accepted transition length. Upward moves may use any
+nonzero length whose entire rounded trajectory is representable. Before a
+transition becomes live, configuration bounds the accumulated multiplication
+roundoff and the endpoint correction implied by the rounded multiplier. The
+endpoint correction may be at most two scheduled logarithmic steps and, for a
+downward move, must also remain inside the public 20-neper/second rate. This
+rejects extremely long transitions even when their multiplier differs from
+unity, because that fact alone does not prove that repeated multiplication will
+arrive near the target.
+The transcendental endpoint and slew calculations happen in `set_cutoffs()`;
+`process()` uses bounded multiply/add/divide arithmetic. It does not crossfade
+differently phased banks. A zero-length transition is an explicit immediate
+coefficient change and clears recursive state. During a transition, `cutoff()`
+continues to report the last stationary cutoff set until the target becomes
+live. Invalid configurations are rejected without changing the live
+configuration. A non-finite sample clears recursive state, returns zero bands,
+and increments `fault_count()` so the following finite sample starts recovered.
+
+Earlier bands receive the all-pass response of every later split. Summing every
+band therefore reconstructs a flat magnitude response with zero host latency.
+`band_response()` and `reconstruction_response()` expose the exact stationary
+complex response for plotting and verification without running audio; response
+queries outside `[0, Nyquist]` are rejected rather than folded or clamped. The
+historical two-band `LinkwitzRileyT` API remains available; its two-argument
+coefficient design retains the rounded Q used by existing renders, while
+`set_frequency_precise()` selects the exact Butterworth value for new work.
+
+- Lifecycle: `prepare(sample_rate, cutoffs)`, `reset()`.
+- Controls: `set_cutoffs(cutoffs, transition_samples)`.
+- Processing: `process(input)` returns `Frame{bands, count, healthy}`.
+- Inspection: `supports_configuration()`, `minimum_transition_samples()`, `maximum_downward_log_slew_nepers_per_second()`, `band_count()`, `cutoff_count()`, `cutoff()`, `sample_rate()`, `transitioning()`, `healthy()`, `fault_count()`, `latency_samples()`, `band_response()`, `reconstruction_response()`.
+
 ## Dynamics
+
+### Shared dynamics contract
+
+`<pulp/signal/dynamics_contract.hpp>` publishes `EnvelopeFollowerT`,
+`StereoEnvelopeFollowerT`, and `GainReduction`. Followers consume raw signed
+samples in the linear amplitude domain. Peak mode rectifies; RMS mode squares,
+smooths, and square-roots. Their attack and release controls are milliseconds
+measured exactly from 10 to 90 percent of the smoothed state: amplitude in peak
+mode and mean-square power in RMS mode. `BallisticsFilterT` retains its legacy
+nominal 2.2 exponent for render compatibility; `EnvelopeFollowerT` selects the
+exact ln(9) convention. `current()` returns linear amplitude,
+`current_db()` returns dBFS with a configurable floor, and the coefficient
+accessors expose the exact pure ballistics intermediate used by processing.
+
+`GainReduction::db()` is always a non-negative attenuation magnitude; positive
+infinity represents a complete mute and has zero linear gain.
+`from_signed_db()` adapts processors whose legacy meter is a negative gain;
+`from_magnitude_db()` adapts positive attenuation meters. Every compressor
+lineage exposes `gain_reduction()` using this convention without changing the
+sign or behavior of its existing `gain_reduction_db()` method. `Compressor`,
+`Limiter`, and `NoiseGate` expose the same telemetry contract.
 
 ### `FeedforwardCompressor`
 
@@ -50,7 +126,7 @@ return output/gain in dB; `gain_reduction_db()` is the current non-negative mete
 - Lifecycle: `prepare(sample_rate, max_lookahead_ms)`, `reset()`.
 - Controls: `set_threshold_db()`, `set_ratio()`, `set_knee_width_db()`, `set_attack_ms()`, `set_release_ms()`, `set_detector()`, `set_rms_window_ms()`, `set_lookahead_ms()`, `set_program_dependent_release()`, `set_makeup_gain_db()`, `set_auto_makeup()`, `set_stereo_link()`.
 - Processing: `process()`, `process_stereo()`, `process_block()`, `process_block_stereo()`.
-- Inspection: `detector()`, `latency_samples()`, `static_curve_db()`, `gain_computer_db()`, `effective_makeup_db()`, `gain_reduction_db()`.
+- Inspection: `detector()`, `latency_samples()`, `static_curve_db()`, `gain_computer_db()`, `effective_makeup_db()`, `gain_reduction_db()`, `gain_reduction()`.
 
 ### `VcaCompressor`
 
@@ -66,7 +142,7 @@ level, coefficient, and gain inspectors are read-only snapshots in their suffix 
 - Lifecycle: `prepare(sample_rate)`, `reset()`.
 - Controls: `set_threshold_db()`, `set_ratio()`, `set_negative_ratio_mode()`, `set_neg_ratio_amount()`, `set_knee_db()`, `set_time_ms()`, `set_attack_release_ratio_k()`, `set_makeup_db()`, `set_lookahead_ms()`, `set_mix()`, `set_ceiling_db()`.
 - Processing: `process()`, `process_block()`.
-- Curve and meter inspection: `latency_samples()`, `static_curve_db()`, `gain_computer_db()`, `gain_computer_unclamped_db()`, `active_ratio()`, `gain_reduction_db()`, `level_db()`, `mean_square()`, `current_gain_linear()`, `attack_coef()`, `release_coef()`.
+- Curve and meter inspection: `latency_samples()`, `static_curve_db()`, `gain_computer_db()`, `gain_computer_unclamped_db()`, `active_ratio()`, `gain_reduction_db()`, `gain_reduction()`, `level_db()`, `mean_square()`, `current_gain_linear()`, `attack_coef()`, `release_coef()`.
 
 ### `DiodeBridgeCompressor`
 
@@ -82,7 +158,7 @@ resistances, or transfer values and never expose owned mutable state.
 - Lifecycle: `prepare(sample_rate)`, `reset()`.
 - Controls: `set_threshold_db()`, `set_ratio()`, `set_knee_db()`, `set_attack_ms()`, `set_release_ms()`, `set_makeup_db()`, `set_character()`, `set_mix_percent()`, `set_sc_hpf_hz()`, `set_auto_release()`, `set_feedback()`, `set_adaa()`.
 - Processing: `process()`, `process_block()`.
-- Inspection: `latency_samples()`, `worst_case_gain()`, `gain_reduction_db()`, `control_drive()`, `static_curve_db()`, `static_curve_feedback_db()`.
+- Inspection: `latency_samples()`, `worst_case_gain()`, `gain_reduction_db()`, `gain_reduction()`, `control_drive()`, `static_curve_db()`, `static_curve_feedback_db()`.
 
 `DiodeBridgeGain` additionally provides `prepare()`, `reset()`, `set_character()`,
 `set_adaa()`, `drive()`, `control_drive_for_current()`, `dynamic_resistance()`,
@@ -106,7 +182,7 @@ inspectors return immutable instantaneous values used for meters and validation.
 - Controls: `set_input_gain_db()`, `set_output_gain_db()`, `set_ratio()`, `set_attack_us()`, `set_release_ms()`, `set_knee_db()`, `set_transformer_amount()`, `set_mix()`.
 - Processing: `process()`, `process_block()`.
 - Configuration and curve inspection: `ratio()`, `latency_samples()`, `sample_rate()`, `oversampled_rate()`, `static_curve_db()`, `gain_computer_db()`, `measured_static_curve_db()`, `measured_gain_reduction_db()`, `loop_slope()`, `measured_ratio()`, `measured_knee_db()`, `nominal_ratio()`, `effective_knee_db()`, `bias_shift_db()`, `coloration_depth()`, `attack_coefficient()`, `release_coefficient()`.
-- Circuit, bound, and meter inspection: `gain_reduction_db()`, `control_voltage()`, `divider_conductance()`, `divider_small_signal_gain()`, `divider_gain()`, `coloration_multiplier()`, `coloration_multiplier_bound()`, `control_for_reduction_db()`, `divider_supremum_is_provable()`, `resampler_peak_gain_bound()`, `worst_case_gain()`.
+- Circuit, bound, and meter inspection: `gain_reduction_db()`, `gain_reduction()`, `control_voltage()`, `divider_conductance()`, `divider_small_signal_gain()`, `divider_gain()`, `coloration_multiplier()`, `coloration_multiplier_bound()`, `control_for_reduction_db()`, `divider_supremum_is_provable()`, `resampler_peak_gain_bound()`, `worst_case_gain()`.
 
 ## Nonlinear and tone
 

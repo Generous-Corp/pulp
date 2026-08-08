@@ -131,9 +131,11 @@ decision to
 `Processor::is_bus_layout_supported(BusesLayout)` — the cross-adapter
 virtual hook that lets a plugin enforce tighter layout contracts
 (linked sidechain, surround, instrument-only output, etc.) without
-overriding `setBusArrangements` directly. The default policy still
-matches the descriptor's per-side bus count and only accepts mono /
-stereo per channel.
+overriding `setBusArrangements` directly. The default policy still matches the
+descriptor's per-side bus count and only accepts empty / mono / stereo per channel. A
+descriptor with an explicit `supported_bus_layouts` list can additionally
+accept common surround widths; the adapter translates VST3 speaker bitsets to
+the Processor's count-only layout model before consulting the hook.
 
 Order matters: **call the hook before mutating `audioInputs` /
 `audioOutputs`**. A rejected proposal returns `kResultFalse` and the
@@ -157,9 +159,11 @@ initialize → setBusArrangements → setupProcessing → setActive(true)
     → process loop → setActive(false) → terminate
 ```
 
-`setupProcessing` calls `processor_->prepare(ctx)` with the host's
-sample rate, max buffer size, and the descriptor's default channel
-counts, then prepares the default f64 fallback scratch. `setActive(false)` calls
+`setupProcessing` calls `processor_->prepare(ctx)` with the host's sample rate,
+max buffer size, and the accepted native main-bus channel counts, then prepares
+the default f64 fallback scratch. The unsupported-layout silence accommodation
+is the exception: it retains descriptor-default counts so surplus host channels
+can be clamped and silenced safely. `setActive(false)` calls
 `processor_->release()` so the
 Processor can free prepare-time resources. Never move `prepare()` out
 of `setupProcessing` — Steinberg guarantees `process()` is only called
@@ -785,12 +789,19 @@ between versions, stored automation data breaks. Do not reorder —
 append only, and never reuse a retired ParamID. This is a VST3-wide
 backward-compat requirement, not a Pulp quirk.
 
-### Only mono + stereo are negotiable today
+### Common surround layouts are count-negotiated
 
-`setBusArrangements` rejects anything other than
-`SpeakerArr::kMono` or `kStereo`. Surround / immersive layouts
-require expanding the `supported` lambda — do not add surround without
-verifying the descriptor, DSP, and `kSpeakerArr` constants align.
+Initialization maps a zero-channel descriptor bus to `kEmpty` and widths 1–8
+to deterministic conventional VST3 arrangements: mono, stereo, 3.0, quad, 5.0,
+5.1, 7.0, and ITU 7.1. When `supported_bus_layouts` is explicit, its first entry
+is advertised as the initial configuration. During
+`setBusArrangements`, the host's speaker bitset is reduced to the count-only
+`Processor::BusesLayout` model, so a matching explicit
+`supported_bus_layouts` entry can accept 5.1/7.1 natively. Do not infer exact
+speaker-position semantics inside the Processor: `BusLayoutConfiguration`
+currently carries widths, not speaker masks. Non-canonical speaker bitsets and
+widths outside 0–8 fail closed
+until the descriptor gains a richer topology contract.
 
 ### VST3 SDK is MIT, fetched via `git clone` in setup.sh
 
@@ -897,9 +908,11 @@ when `PULP_HOST_QUIRKS=off`. See `docs/reference/host-quirks-policy.md`.
   **accepted** (`setArrangement` to the host request, `silence_unsupported_active_=true`);
   with `PULP_HOST_QUIRKS=off` the original `kResultFalse` reject is preserved.
 
-**Key invariant:** `setupProcessing` always `prepare()`s the processor with
-*descriptor-default* channel counts (cached as `native_in_`/`native_out_`),
-NOT the negotiated arrangement. So when `silence_unsupported_active_`,
+**Key invariant:** when `silence_unsupported_active_`, `setupProcessing`
+`prepare()`s the processor with *descriptor-default* channel counts (cached as
+`native_in_`/`native_out_`), NOT the unsupported negotiated arrangement. Native
+accepted layouts prepare at their negotiated main-bus widths. On the silence
+path,
 `process()` hands the processor **clamped** views (`min(host, native)`) and
 **zero-fills all of the host's main-bus output channels first** — the
 processor never reads/writes past what `prepare()` allocated, and the host's

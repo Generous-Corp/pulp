@@ -160,6 +160,7 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
             if (auto* p = w->parent()) {
                 auto removed = p->remove_child(w);
                 self.forget_widget_subtree(removed.get(), preserve_js_dom_state);
+                self.retire_removed_widget(std::move(removed));
             }
         }
         return choc::value::Value();

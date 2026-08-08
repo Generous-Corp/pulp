@@ -167,6 +167,7 @@ All signal processors live in the `signal` module. Each is a standalone, statele
 | Gain | usable | [signal](modules.md#signal) | pulp-gain |
 | ADSR envelope | usable | [signal](modules.md#signal) | PulpSynth |
 | Biquad filter | usable | [signal](modules.md#signal) | pulp-effect |
+| Six-band parametric EQ | usable | [signal](modules.md#signal) | eq-curve-demo |
 | State-variable filter (SVF) | usable | [signal](modules.md#signal) | |
 | Ladder filter | usable | [signal](modules.md#signal) | PulpSynth |
 | Linkwitz-Riley crossover | usable | [signal](modules.md#signal) | |

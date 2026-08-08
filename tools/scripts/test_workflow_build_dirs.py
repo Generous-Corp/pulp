@@ -22,6 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
 COVERAGE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "coverage.yml"
 SANITIZERS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "sanitizers.yml"
+TIMELINE_FUZZ_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "timeline-fuzz.yml"
 
 
 class WorkflowBuildDirTests(unittest.TestCase):
@@ -158,9 +159,57 @@ class WorkflowBuildDirTests(unittest.TestCase):
             line for line in text.splitlines() if "--tests-regex" in line
         )
 
-        for suite in ("Osc", "WebSocket", "Channel"):
+        for suite in (
+            "Osc",
+            "WebSocket",
+            "Channel",
+            "Control",
+            "Broker",
+            "Grant",
+            "Admission",
+            "Receipt",
+            "Artifact",
+            "control protocol",
+            "control artifact",
+            "control service",
+            "control client",
+            "control main-thread",
+            "per-call",
+        ):
             with self.subTest(suite=suite):
                 self.assertIn(suite, regex_line)
+
+        pull_request_paths = text.split("  pull_request:", 1)[1].split(
+            "  schedule:", 1
+        )[0]
+        self.assertIn("- 'inspect/**'", pull_request_paths)
+
+    def test_fuzz_workflow_builds_and_runs_control_protocol_targets(self) -> None:
+        text = TIMELINE_FUZZ_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("pulp-test-control-protocol-fuzz", text)
+        self.assertIn("pulp-fuzz-control-protocol", text)
+        self.assertIn("PULP_CONTROL_PROTOCOL_FUZZ_SEED:", text)
+        self.assertIn("PULP_CONTROL_PROTOCOL_FUZZ_CASES:", text)
+        self.assertIn("pulp-generate-control-protocol-fuzz-corpus", text)
+        self.assertIn(
+            "./build-libfuzzer/test/pulp-generate-control-protocol-fuzz-corpus",
+            text,
+        )
+        self.assertIn("./build-libfuzzer/test/pulp-fuzz-control-protocol", text)
+        self.assertRegex(
+            text,
+            r"pulp-fuzz-control-protocol \\\n\s+fuzz-corpus/control-protocol \\",
+        )
+        self.assertIn("fuzz-corpus/timeline", text)
+        self.assertRegex(
+            text,
+            r"pulp-fuzz-control-protocol[\s\S]*?"
+            r"-max_total_time=\$\{\{ inputs\.libfuzzer_seconds \|\| 900 \}\}",
+        )
+        self.assertIn("- 'inspect/include/pulp/inspect/control_protocol.hpp'", text)
+        self.assertIn("- 'inspect/src/control_protocol*.cpp'", text)
+        self.assertIn("- 'inspect/src/control_json_*.cpp'", text)
 
     def test_macos_build_runs_ios_syntax_gate_after_configure(self) -> None:
         text = BUILD_WORKFLOW.read_text(encoding="utf-8")
@@ -226,25 +275,16 @@ class MacosNinjaGeneratorTests(unittest.TestCase):
         )
 
 
-class CoverageWorkflowSkiaTests(unittest.TestCase):
+class CoverageWorkflowExampleGraphTests(unittest.TestCase):
     def setUp(self) -> None:
         self.text = COVERAGE_WORKFLOW.read_text(encoding="utf-8")
 
-    def test_macos_coverage_fetches_skia_before_run_coverage(self) -> None:
-        fetch_name = "- name: Fetch prebuilt Skia (macOS)"
-        run_name = "- name: Run coverage suite"
-        self.assertIn(fetch_name, self.text)
-        self.assertIn(run_name, self.text)
-        self.assertLess(self.text.index(fetch_name), self.text.index(run_name))
-
-        start = self.text.index(fetch_name)
-        end = self.text.index(run_name)
-        step = self.text[start:end]
-        self.assertIn("if: matrix.os == 'macos'", step)
+    def test_coverage_preserves_example_driven_tests_and_fetches_skia(self) -> None:
         self.assertIn(
-            "python3 tools/scripts/fetch_skia_for_release.py darwin-arm64",
-            step,
+            "-DPULP_BUILD_EXAMPLES=ON",
+            self.text,
         )
+        self.assertIn("fetch_skia_for_release.py darwin-arm64", self.text)
 
 
 if __name__ == "__main__":

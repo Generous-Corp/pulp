@@ -488,10 +488,14 @@ runs `{ubuntu-latest, macos-latest, windows-latest}` so the Codecov
 branch record receives the full cross-OS picture.
 
 Each OS leg produces its own `coverage.cobertura.xml` and uploads to
-Codecov with an OS-tag flag. The Linux leg also uploads the Python
+Codecov with an OS-tag flag. The Linux leg also produces the Python
 tools XML for `tools/scripts/**`, `tools/deps/**`,
 `tools/local-ci/**`, top-level `tools/*.py`, `tools/packages/**`, and
-`core/view/js/embed_js.py`, and the macOS leg also uploads the staged
+`core/view/js/embed_js.py`; that verified XML uploads independently with
+the `python-tools` flag, so a native Linux compiler failure cannot discard it.
+A Python test failure retains the partial report artifact for diagnosis but
+does not upload it as current coverage.
+The macOS leg also uploads the staged
 Apple Swift LCOV from `build-coverage/apple/coverage.apple.lcov`.
 We do NOT merge profdata across
 architectures —
@@ -507,10 +511,32 @@ Codecov action to surface transport errors. Codecov remains a reporting
 sink rather than the merge boundary: transport failure is visible but
 does not override the in-repo `Diff coverage required` gate. A receipt
 artifact is emitted only when the Codecov action completes successfully.
-The main-branch upload watchdog requires both Linux and macOS receipts;
-a successful workflow run with only one native OS upload is not treated
-as a fresh complete snapshot. Windows, Android/Kotlin, and React receipts
-remain advisory.
+Native or Python test failures may retain partial reports for diagnosis, but
+those reports cannot pass semantic verification, upload, or mint a freshness
+receipt. A failure in either verifier does not suppress a valid report from the
+other lane.
+The main-branch upload watchdog requires exact, non-expired Linux, macOS,
+and Python-tools receipt names for the workflow run's own commit and latest
+attempt of each required matrix job. A partial rerun may legitimately combine
+an attempt-1 Linux/Python receipt with an attempt-2 macOS receipt, but it cannot
+reuse a receipt older than the latest attempt that actually ran that axis. A completed
+workflow with a missing, expired, prefix-only, or wrong-SHA receipt is not a
+fresh snapshot. Windows, Android/Kotlin, and React receipts remain advisory.
+The watchdog threshold is 14 hours: longer than the 8-hour refresh cadence plus
+a healthy multi-hour run, but short enough to page within the same day. Workflow
+conclusion is not used as a proxy because advisory side jobs may fail after the
+required uploads have succeeded.
+
+The upload-axis flags (`os-linux`, `os-macos`, `os-windows`, and
+`python-tools`) do not carry forward. A missing current report therefore
+appears missing instead of silently substituting data from an older commit.
+Path-scoped subsystem flags may still carry forward when a change cannot affect
+their source paths.
+Receipt freshness proves that verified files reached the Codecov action. Report
+shape and configuration are separate gates (`verify_cobertura_xml.py`,
+`test_codecov_components.py`, and `test_codecov_config.py`); the watchdog does
+not claim to inspect Codecov's rendered dashboard or detect every possible
+source-inventory omission by itself.
 
 Linux build prerequisites are resolved through
 `tools/ci/linux_build_deps.json` and installed by the shared
@@ -561,6 +587,14 @@ specific change. Merging takes `max(hits)` per `(filename, line)`
 across the inputs, so a line covered on any OS counts as covered
 overall. diff-cover stays a single-XML tool (one PR comment, one
 number) but the silent-skip is closed.
+
+The native coverage build explicitly keeps `PULP_BUILD_EXAMPLES=ON`: although
+example source is excluded from the report, example-owned tests exercise core
+libraries and template/header paths that must remain in the measured inventory.
+On disposable GitHub-hosted macOS only, the workflow removes inactive Xcode
+bundles, requires at least 10 GiB free, and limits the instrumented build to two
+jobs to control linker peak space.
+Self-hosted and Namespace machines are never cleaned by that step.
 
 The Coverage workflow also has a `Coverage queue watchdog` job for PRs
 that need native coverage. It runs on GitHub-hosted Ubuntu and polls the

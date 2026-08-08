@@ -1,7 +1,11 @@
 add_library(pulp-inspect-protocol
     src/authentication.cpp
     src/capabilities.cpp
+    src/control_json_safety.cpp
+    src/control_json_schema.cpp
     src/control_manifest.cpp
+    src/control_protocol.cpp
+    src/control_protocol_codec.cpp
     src/protocol.cpp
     src/session.cpp
     src/test_input.cpp)
@@ -62,10 +66,16 @@ if(WIN32)
 endif()
 
 add_library(pulp-inspect-control
+    src/control_admission.cpp
+    src/control_artifacts.cpp
     src/control_broker.cpp
     src/control_grants.cpp
     src/control_identity.cpp
-    src/control_peer.cpp)
+    src/control_operation_store.cpp
+    src/control_operations.cpp
+    src/control_peer.cpp
+    src/control_private_store.cpp
+    src/control_service.cpp)
 if(APPLE AND NOT IOS AND NOT PULP_IOS)
     target_sources(pulp-inspect-control PRIVATE src/control_peer_mac.cpp)
 else()
@@ -81,9 +91,13 @@ target_link_libraries(pulp-inspect-control
 if(APPLE AND NOT IOS AND NOT PULP_IOS)
     target_link_libraries(pulp-inspect-control PRIVATE
         "-framework Security" "-framework CoreFoundation")
+elseif(WIN32)
+    target_link_libraries(pulp-inspect-control PRIVATE Advapi32)
 endif()
 
-add_library(pulp-inspect-client src/client.cpp)
+add_library(pulp-inspect-client
+    src/client.cpp
+    src/control_client.cpp)
 add_library(pulp::inspect-client ALIAS pulp-inspect-client)
 target_include_directories(pulp-inspect-client
     PUBLIC
@@ -94,6 +108,7 @@ target_link_libraries(pulp-inspect-client
     PRIVATE pulp::events)
 
 add_library(pulp-inspect-runtime
+    src/control_main_thread_executor.cpp
     src/inspector_async_request_executor.cpp
     src/inspector_async_request_executor.hpp
     src/inspector_connected_client.hpp
@@ -108,6 +123,7 @@ target_include_directories(pulp-inspect-runtime
         $<INSTALL_INTERFACE:include>)
 target_link_libraries(pulp-inspect-runtime
     PUBLIC
+        pulp::inspect-control
         pulp::inspect-protocol
         pulp::inspect-publication
         pulp::events)

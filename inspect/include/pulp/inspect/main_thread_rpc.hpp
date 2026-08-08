@@ -15,11 +15,13 @@ namespace pulp::inspect {
 /// execution starts returns a fenced `mayHaveApplied` error at the deadline;
 /// the posted task retains its own state and discards any late response.
 /// Operations must therefore own everything they may access until they return.
-/// Calls already executing inline on the main thread cannot be preempted. A
-/// Post implementation owns every callable copy it accepts until that copy is
-/// destroyed, including cancelled callables that will never execute.
+/// Calls already executing inline on the main thread cannot be preempted and
+/// therefore cannot return at their deadline. If inline work crosses the
+/// deadline, `call()` reports a fenced timeout only after that work returns.
+/// A Post implementation owns every callable copy it accepts until that copy
+/// is destroyed, including cancelled callables that will never execute.
 class InspectorMainThreadRpc {
-public:
+  public:
     using Operation = std::function<InspectorMessage()>;
     using Completion = std::function<void()>;
     using Post = std::function<bool(std::function<void()>)>;
@@ -43,9 +45,18 @@ public:
     /// no longer capable of applying: immediately for work cancelled before it
     /// starts, or after a started operation actually returns. This distinction
     /// lets owners retain mutation leases across a fenced started timeout.
-    InspectorMessage call(std::int64_t request_id,
-                          Operation operation,
-                          Completion completion);
+    InspectorMessage call(std::int64_t request_id, Operation operation, Completion completion);
+    /// As call(), with a deadline chosen for this request. Non-positive values
+    /// clamp to one millisecond, matching Config normalization. The completion
+    /// and fenced-timeout lifetime semantics are otherwise identical.
+    InspectorMessage call(std::int64_t request_id, Operation operation, Completion completion,
+                          std::chrono::milliseconds timeout);
+    /// Strict variant for callers that require an enforceable response
+    /// deadline. It never executes inline: invocation from the registered main
+    /// thread fails before apply and runs completion exactly once. Other
+    /// callers use the normal bounded queued path.
+    InspectorMessage call_queued_only(std::int64_t request_id, Operation operation,
+                                      Completion completion, std::chrono::milliseconds timeout);
 
     /// Stop accepting requests and cancel every queued operation that has not
     /// started. Running operations retain their own state and are not waited
@@ -71,8 +82,14 @@ public:
     /// the caller is not inside an operation owned by this RPC.
     bool after_current_operation(Completion completion);
     bool active() const;
+    /// Normalized per-call ceiling configured for this dispatcher.
+    std::chrono::milliseconds default_timeout() const;
 
-private:
+  private:
+    InspectorMessage call_with_inline_policy(std::int64_t request_id, Operation operation,
+                                             Completion completion,
+                                             std::chrono::milliseconds timeout, bool allow_inline);
+
     class Impl;
     std::shared_ptr<Impl> impl_;
 };

@@ -285,7 +285,8 @@ public:
     /// Validate a proposed bus layout. Default acceptance policy:
     ///
     ///   * Per-side bus count matches the descriptor.
-    ///   * Each proposed channel count is in {1, 2} (mono / stereo).
+    ///   * Each proposed channel count is mono or stereo; empty is accepted
+    ///     only for a descriptor-declared zero-width or optional bus.
     ///
     /// Override for plugins that need a tighter contract (e.g. an
     /// instrument that only renders stereo out, a sidechain compressor
@@ -294,7 +295,7 @@ public:
     /// call this on the host thread — never from process().
     ///
     /// Adapters fall back to the descriptor's declared bus count + the
-    /// mono/stereo policy when a plugin doesn't override this hook,
+    /// empty/mono/stereo policy when a plugin doesn't override this hook,
     /// which preserves the prior default-acceptance behavior exactly.
     virtual bool is_bus_layout_supported(const BusesLayout& layout) const {
         const auto desc = descriptor();
@@ -312,9 +313,21 @@ public:
         if (!layout.outputs.empty() &&
             layout.outputs.size() != desc.output_buses.size())
             return false;
-        auto channels_ok = [](int n) { return n == 1 || n == 2; };
-        for (int n : layout.inputs)  if (!channels_ok(n)) return false;
-        for (int n : layout.outputs) if (!channels_ok(n)) return false;
+        auto side_ok = [](const auto& proposed, const auto& declared) {
+            for (std::size_t i = 0; i < proposed.size(); ++i) {
+                const int channels = proposed[i];
+                if (channels == 1 || channels == 2) continue;
+                if (channels == 0 &&
+                    (declared[i].default_channels == 0 || declared[i].optional))
+                    continue;
+                return false;
+            }
+            return true;
+        };
+        if (!layout.inputs.empty() && !side_ok(layout.inputs, desc.input_buses))
+            return false;
+        if (!layout.outputs.empty() && !side_ok(layout.outputs, desc.output_buses))
+            return false;
         return true;
     }
 
@@ -625,6 +638,8 @@ public:
     /// a plugin that opts into f64 before overriding process_f64() can still run
     /// without allocating on the audio thread.
     void prepare_f64_fallback_scratch(const PrepareContext& context);
+    void prepare_f64_fallback_scratch(const PrepareContext& context,
+                                      const BusesLayout& layout);
 
     /// Native double-precision process entry point.
     ///
@@ -908,10 +923,6 @@ public:
 private:
     std::shared_ptr<const std::vector<uint8_t>> published_plugin_state_;
     static constexpr std::size_t kF64FallbackMaxBuses = 16;
-
-    static std::size_t fallback_bus_channels(const std::vector<BusInfo>& buses,
-                                             std::size_t index,
-                                             std::size_t prepared_main_channels);
 
     static bool requires_rich_f64_fallback(const ProcessBuffers64& audio);
 
