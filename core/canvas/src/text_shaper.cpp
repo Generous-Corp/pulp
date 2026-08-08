@@ -626,7 +626,16 @@ struct TextShaper::Impl {
         }
 
         LineBox box{};
-        box.line_height = font_size * 1.5f;  // fallback if no real metrics
+        // Keep fallback metrics internally coherent.  GPU-off builds do not
+        // have a typeface to query, but attributed layout still needs
+        // per-span ascent/descent/leading components so a 28 px run produces
+        // a taller line than a 10 px run.  A line-height-only fallback makes
+        // every segment carry zero metrics and collapses all automatic
+        // attributed lines onto the paragraph-wide maximum.
+        box.ascent = font_size * 0.8f;
+        box.descent = font_size * 0.2f;
+        box.leading = font_size * 0.5f;
+        box.line_height = box.ascent + box.descent + box.leading;
         box.real = false;
 
 #ifdef PULP_HAS_TEXT_SHAPING

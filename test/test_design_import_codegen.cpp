@@ -2101,6 +2101,8 @@ TEST_CASE("native codegen wraps multi-line text at its design width (issue-3192)
 
 TEST_CASE("native codegen preserves the browser's captured line-breaking decision",
           "[view][import][browser-capture][text]") {
+    if (pulp::canvas::resolved_face_identity("Inter", 400.0f).empty())
+        SKIP("captured line-breaking requires a text-shaping backend");
     DesignIR ir;
     ir.source = DesignSource::html;
     ir.root.type = "frame";

@@ -641,9 +641,22 @@ TEST_CASE("Label decoration follows every captured line without double alignment
     label.set_text_decoration(Label::TextDecoration::underline);
     label.set_multi_line(true);
     label.set_bounds({0, 0, 100, 40});
+    const auto face = resolved_face_identity("Inter", 400.0f);
     label.set_cached_line_boxes(
-        {{5, 0, 30, 16, 0, 5}, {8, 16, 24, 16, 6, 4}}, 100.0f,
-        resolved_face_identity("Inter", 400.0f), true);
+        {{5, 0, 30, 16, 0, 5}, {8, 16, 24, 16, 6, 4}}, 100.0f, face,
+        true);
+
+    // A GPU-off build has no resolvable face and must fail closed into normal
+    // responsive wrapping.  The captured-position assertions below apply only
+    // when the cache basis can actually be verified.
+    if (face.empty()) {
+        CHECK(label.cached_line_boxes().empty());
+        CHECK(label.captured_wrap_fallback());
+        RecordingCanvas fallback;
+        label.paint(fallback);
+        CHECK_FALSE(commands_of(fallback, DrawCommand::Type::fill_text).empty());
+        return;
+    }
 
     RecordingCanvas canvas;
     label.paint(canvas);
@@ -1037,7 +1050,7 @@ TEST_CASE("Label attributed mutation invalidates an older captured line basis",
     label.set_bounds({0, 0, 100, 40});
     label.set_cached_line_boxes(
         {{0, 0, 100, 16, 0, 10}}, 100.0f,
-        resolved_face_identity("Inter", 400.0f), true);
+        "captured-inter-regular", true);
     REQUIRE(label.cached_line_boxes().size() == 1);
 
     AttributedString replacement;
@@ -1192,14 +1205,20 @@ TEST_CASE("Label ellipsis preserves a captured single-line horizontal offset",
     label.set_text_align(LabelAlign::center);
     label.set_text_overflow_ellipsis(true);
     label.set_bounds({0, 0, 100, 24});
+    const auto face = resolved_face_identity("Inter", 400.0f);
     label.set_cached_line_boxes(
         {{30, 0, 40, 18, 0, 5}}, 100.0f,
-        resolved_face_identity("Inter", 400.0f), false);
+        face, false);
 
     RecordingCanvas canvas;
     label.paint(canvas);
     const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
     REQUIRE(fills.size() == 1);
+    if (face.empty()) {
+        CHECK(label.cached_line_boxes().empty());
+        CHECK(fills[0].f[0] == Catch::Approx(50.0f));
+        return;
+    }
     CHECK(fills[0].f[0] == Catch::Approx(30.0f));
 }
 

@@ -70,7 +70,10 @@ std::string widget_make_expr(const IRNode& node,
 }
 
 std::string span_color_expr(const EmitContext& ctx, canvas::Color color) {
-    return "pulp::canvas::Color::rgba(" + float_expr(ctx, color.r) + ", " +
+    // This serializes an authored run color from DesignIR; it is not a Pulp
+    // theme literal.  Generated code must preserve the exact authored RGBA.
+    return "pulp::canvas::Color::rgba(" +  // token-lint:allow
+           float_expr(ctx, color.r) + ", " +
            float_expr(ctx, color.g) + ", " + float_expr(ctx, color.b) + ", " +
            float_expr(ctx, color.a) + ")";
 }
