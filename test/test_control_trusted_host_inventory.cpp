@@ -5,7 +5,6 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -54,8 +53,10 @@ constexpr std::string_view kManifest = R"({
 class Fixture {
   public:
     Fixture() {
+        const auto random = pulp::runtime::secure_random_bytes(8);
+        REQUIRE(random);
         root = fs::canonical(fs::temp_directory_path()) /
-               ("pulp-control-inventory-" + std::to_string(++sequence));
+               ("pulp-control-inventory-" + pulp::runtime::hex_encode(*random));
         fs::create_directories(root / "source");
         fs::create_directories(root / "stage");
 #ifndef _WIN32
@@ -102,7 +103,6 @@ class Fixture {
 
     fs::path root;
     fs::path executable;
-    static inline std::atomic<unsigned> sequence{0};
 };
 
 std::string read_file(const fs::path& path) {
