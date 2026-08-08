@@ -135,6 +135,16 @@ int main() {
   pulp::inspect::ControlOperationStoreConfig operations;
   pulp::inspect::ControlArtifactStoreConfig artifacts;
   const auto artifact = control_client.read_artifact("artifact-installed", 0, 16);
+  const pulp::inspect::ControlLegacyInspectorError legacy_error{
+      .error_code = "installed_error",
+      .error_message = "installed compatibility error",
+      .error_data_json = R"({"installed":true})",
+  };
+  const auto encoded_legacy_error =
+      pulp::inspect::encode_control_legacy_inspector_error(legacy_error);
+  const auto decoded_legacy_error = encoded_legacy_error
+      ? pulp::inspect::decode_control_legacy_inspector_error(*encoded_legacy_error)
+      : std::nullopt;
   (void)main_thread_executor.executor();
 
   request.operation_version = 1;
@@ -143,6 +153,7 @@ int main() {
              && !client.is_connected()
              && !host_connection.is_connected()
              && trace_executor
+             && decoded_legacy_error == legacy_error
              && std::holds_alternative<pulp::inspect::ControlHostConnectionPrincipal>(principal)
              && operations.max_receipts > 0
              && artifacts.maximum_blob_bytes > 0
