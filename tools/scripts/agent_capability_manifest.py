@@ -732,7 +732,9 @@ def main() -> int:
     # coupled generated set. Finish that exact journal before reading any member
     # as the "previous" contract, or history could preserve a hybrid state.
     if args.write:
-        recover_transaction(transaction_path)
+        recover_transaction(
+            transaction_path, (snapshot, surface_snapshot, history_path, fixture)
+        )
 
     if args.bootstrap_surface:
         path = root / surface.LEGACY_BASELINE

@@ -405,9 +405,61 @@ def exercise_evolution(canonical: dict) -> int:
             "new manifest\n",
             "new surface\n",
         }
-        assert transaction.recover_transaction(journal)
+        assert transaction.recover_transaction(journal, outputs)
         assert not journal.exists()
         assert all(path.read_text() == expected for path, expected in outputs.items())
+
+        outside = root / "outside-user-file"
+        outside.write_text("preserve me\n")
+        malicious_staged = root / f".{outside.name}.{'a' * 32}.staged"
+        malicious_staged.write_text("overwrite\n")
+        journal.write_text(
+            json.dumps(
+                {
+                    "schema": transaction.TRANSACTION_SCHEMA,
+                    "entries": [
+                        {
+                            "target": str(outside),
+                            "staged": str(malicious_staged),
+                            "sha256": transaction._digest(
+                                malicious_staged.read_bytes()
+                            ),
+                        }
+                    ],
+                }
+            )
+        )
+        try:
+            transaction.recover_transaction(journal, outputs)
+        except RuntimeError as error:
+            assert "targets do not match generated outputs" in str(error)
+        else:
+            raise AssertionError("malicious transaction target unexpectedly accepted")
+        assert outside.read_text() == "preserve me\n"
+
+        transaction_id = "b" * 32
+        entries = []
+        for index, target in enumerate(outputs):
+            target = target.resolve()
+            staged_path = target.with_name(
+                f".{target.name}.{transaction_id}.staged"
+            )
+            if index == 0:
+                staged_path = root / f".wrong-name.{transaction_id}.staged"
+            entries.append({
+                "target": str(target),
+                "staged": str(staged_path),
+                "sha256": "0" * 64,
+            })
+        journal.write_text(
+            json.dumps({"schema": transaction.TRANSACTION_SCHEMA, "entries": entries})
+        )
+        try:
+            transaction.recover_transaction(journal, outputs)
+        except RuntimeError as error:
+            assert "invalid staged capability output path" in str(error)
+        else:
+            raise AssertionError("malicious staged path unexpectedly accepted")
     checks += 1
 
     for field, weakened in (

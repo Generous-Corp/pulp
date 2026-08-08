@@ -7,7 +7,7 @@ import os
 import pathlib
 import tempfile
 import uuid
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
 
 TRANSACTION_SCHEMA = "pulp.agent-capability-write-transaction.v1"
@@ -87,12 +87,38 @@ def _load_journal(path: pathlib.Path) -> list[dict[str, str]]:
 
 
 def recover_transaction(
-    journal: pathlib.Path, *, interrupt_after: int | None = None
+    journal: pathlib.Path,
+    expected_targets: Iterable[pathlib.Path],
+    *,
+    interrupt_after: int | None = None,
 ) -> bool:
     """Finish a journaled replacement, returning whether recovery was needed."""
     if not journal.exists():
         return False
     entries = _load_journal(journal)
+    expected_target_set = {path.resolve() for path in expected_targets}
+    actual = [pathlib.Path(entry["target"]) for entry in entries]
+    if len(actual) != len(expected_target_set) or set(actual) != expected_target_set:
+        raise RuntimeError(
+            "capability write transaction targets do not match generated outputs"
+        )
+    transaction_ids: set[str] = set()
+    for entry, target in zip(entries, actual, strict=True):
+        staged = pathlib.Path(entry["staged"])
+        prefix = f".{target.name}."
+        suffix = ".staged"
+        if staged.parent != target.parent or not (
+            staged.name.startswith(prefix) and staged.name.endswith(suffix)
+        ):
+            raise RuntimeError(f"invalid staged capability output path: {staged}")
+        transaction_id = staged.name[len(prefix) : -len(suffix)]
+        if len(transaction_id) != 32 or any(
+            character not in "0123456789abcdef" for character in transaction_id
+        ):
+            raise RuntimeError(f"invalid staged capability transaction id: {staged}")
+        transaction_ids.add(transaction_id)
+    if len(transaction_ids) != 1:
+        raise RuntimeError("capability write transaction mixes transaction ids")
     replaced = 0
     for entry in entries:
         target = pathlib.Path(entry["target"])
@@ -124,7 +150,7 @@ def write_transaction(
 ) -> None:
     """Stage every output durably, journal the batch, then commit and recover it."""
     if journal.exists():
-        recover_transaction(journal)
+        recover_transaction(journal, outputs)
     transaction_id = uuid.uuid4().hex
     entries: list[dict[str, str]] = []
     staged_paths: list[pathlib.Path] = []
@@ -139,7 +165,7 @@ def write_transaction(
                 {"target": str(target), "staged": str(staged), "sha256": _digest(payload)}
             )
         _write_journal(journal, {"schema": TRANSACTION_SCHEMA, "entries": entries})
-        recover_transaction(journal, interrupt_after=interrupt_after)
+        recover_transaction(journal, outputs, interrupt_after=interrupt_after)
     except SimulatedInterruption:
         raise
     except BaseException:
