@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Unit tests for pr_check_triage.triage (the pure comparison logic)."""
+"""Unit tests for pr_check_triage comparison and check-run decoding."""
 
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 _spec = importlib.util.spec_from_file_location(
@@ -69,6 +71,46 @@ class TriageTest(unittest.TestCase):
         rows = triage({"ubsan": "FAILURE"}, {"ubsan": "FAILURE"}, set())
         out = mod.format_rows(rows)
         self.assertIn("No required check was regressed", out)
+
+
+class CheckRunDecodeTest(unittest.TestCase):
+    def test_checks_for_sha_slurps_more_than_one_hundred_runs(self):
+        first_page = {
+            "check_runs": [
+                {"name": f"check-{index}", "conclusion": "success"}
+                for index in range(100)
+            ]
+        }
+        second_page = {
+            "check_runs": [
+                {"name": "check-100", "conclusion": "failure"}
+            ]
+        }
+
+        def fake_gh(_gh, *args):
+            if "--paginate" in args:
+                self.assertIn("--slurp", args)
+                self.assertEqual(
+                    args[-1],
+                    "repos/owner/repo/commits/deadbeef/check-runs"
+                    "?filter=latest&per_page=100")
+                return json.dumps([first_page, second_page])
+            return json.dumps({
+                "statuses": [{"context": "legacy", "state": "success"}]
+            })
+
+        with patch.object(mod, "_gh", side_effect=fake_gh):
+            checks = mod._checks_for_sha("ghapp", "owner/repo", "deadbeef")
+
+        self.assertEqual(len(checks), 102)
+        self.assertEqual(checks["check-0"], "success")
+        self.assertEqual(checks["check-100"], "failure")
+        self.assertEqual(checks["legacy"], "success")
+
+    def test_checks_for_sha_rejects_malformed_paginated_output(self):
+        with patch.object(mod, "_gh", return_value='[{"check_runs": []},'):
+            with self.assertRaises(json.JSONDecodeError):
+                mod._checks_for_sha("ghapp", "owner/repo", "deadbeef")
 
 
 if __name__ == "__main__":

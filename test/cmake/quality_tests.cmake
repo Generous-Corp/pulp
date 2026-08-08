@@ -174,9 +174,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gpu-test-resource-locks COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_test_resource_locks.py")
 
-    # PR-check triage: pure comparison logic that labels a red PR check as
+    # PR-check triage: comparison logic that labels a red PR check as
     # pre-existing-on-main vs regressed-by-this-PR (the "also-red-on-main"
-    # diagnostic). The CLI half is a thin gh-api wrapper (not unit-tested).
+    # diagnostic), plus the CLI's paginated check-run decoding.
     add_test(NAME pr-check-triage-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_pr_check_triage.py")
 
