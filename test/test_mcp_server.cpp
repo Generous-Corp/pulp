@@ -6,7 +6,6 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
-#include <mutex>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -28,12 +27,6 @@
 #include <pulp/inspect/agent_request_queue.hpp>
 #include <pulp/inspect/capabilities.hpp>
 #include <pulp/inspect/protocol.hpp>
-#if PULP_TEST_INSPECTOR_RUNTIME
-#include <pulp/inspect/authentication.hpp>
-#include <pulp/inspect/discovery_publisher.hpp>
-#include <pulp/inspect/inspector_server.hpp>
-#endif
-
 #include <choc/text/choc_JSON.h>
 
 namespace {
@@ -97,157 +90,6 @@ class ScopedEnvVar {
     std::string previous_;
     bool had_previous_ = false;
 };
-
-#if PULP_TEST_INSPECTOR_RUNTIME
-class TestPublicationLease final : public pulp::inspect::InspectorPublicationLease {};
-
-class TestPublicationBinding final : public pulp::inspect::InspectorPublicationBinding {
-  public:
-    std::unique_ptr<pulp::inspect::InspectorPublicationLease>
-    bind_publication(const pulp::inspect::InspectorDiscoveryRecord&) override {
-        return std::make_unique<TestPublicationLease>();
-    }
-};
-
-class TestDomainBindings final : public pulp::inspect::InspectorDomainPublicationBindings {
-  public:
-    std::vector<pulp::inspect::InspectorPublicationBindingRegistration>
-    publication_bindings() const override {
-        return {{pulp::inspect::InspectorCapability::TraceSessionControl, binding_}};
-    }
-
-  private:
-    std::shared_ptr<TestPublicationBinding> binding_ = std::make_shared<TestPublicationBinding>();
-};
-
-class InspectorMcpFixture {
-  public:
-    InspectorMcpFixture()
-        : runtime_env_("PULP_INSPECTOR_RUNTIME_DIR", runtime_.path.string()),
-          publisher_(runtime_.path), reader_(runtime_.path), policy_(make_policy()),
-          session_(
-              {"session-a", "instance-b", "com.pulp.mcp-test", "1"}, policy_,
-              [this](const auto& request) {
-                  std::string response_payload;
-                  std::string error_code;
-                  {
-                      std::lock_guard lock(mutex_);
-                      calls_.emplace_back(request.method, request.params_json);
-                      response_payload = response_payload_;
-                      error_code = error_code_;
-                  }
-                  if (!error_code.empty())
-                      return pulp::inspect::make_error(
-                          request.id, "authenticated inspector failure", error_code);
-                  if (!response_payload.empty())
-                      return pulp::inspect::make_response(request.id, std::move(response_payload));
-                  auto payload = choc::value::createObject("");
-                  payload.addMember("method", choc::value::createString(request.method));
-                  try {
-                      payload.addMember("params", choc::json::parse(request.params_json));
-                  } catch (...) {
-                      payload.addMember("params", choc::value::createString(request.params_json));
-                  }
-                  return pulp::inspect::make_response(request.id,
-                                                      choc::json::toString(payload, false));
-              }) {
-#if !defined(_WIN32)
-        std::filesystem::permissions(runtime_.path, std::filesystem::perms::owner_all,
-                                     std::filesystem::perm_options::replace);
-#endif
-        const auto token = pulp::inspect::generate_inspector_secret();
-        REQUIRE(token.has_value());
-        pulp::inspect::InspectorDiscoveryRecord record;
-        record.session_id = session_.info().session_id;
-        record.instance_id = session_.info().instance_id;
-        record.plugin_id = session_.info().plugin_id;
-        auto main_thread_rpc = std::make_shared<pulp::inspect::InspectorMainThreadRpc>(
-            pulp::inspect::InspectorMainThreadRpc::Config{},
-            [](auto task) {
-                task();
-                return true;
-            },
-            [] { return false; });
-        pulp::inspect::InspectorServerConfig config;
-        config.session = &session_;
-        config.discovery = &publisher_;
-        config.record = std::move(record);
-        config.token = *token;
-        config.main_thread_rpc = std::move(main_thread_rpc);
-        config.domain_bindings = &domain_bindings_;
-        config.max_message_bytes = pulp::inspect::kInspectorExtendedMessageBytes;
-        REQUIRE(server_.start_authenticated(std::move(config)));
-        const auto records = reader_.list();
-        REQUIRE(records.size() == 1);
-        publication_ = records.front();
-    }
-
-    ~InspectorMcpFixture() {
-        server_.stop();
-    }
-
-    std::string exact_arguments(std::string fields = {}) const {
-        std::string arguments = "{";
-        if (!fields.empty()) {
-            arguments += std::move(fields);
-            arguments += ',';
-        }
-        arguments += "\"session_id\":" + json_string(publication_.session_id) +
-                     ",\"instance_id\":" + json_string(publication_.instance_id) +
-                     ",\"publication_id\":" + json_string(publication_.publication_id) + "}";
-        return arguments;
-    }
-
-    bool saw(std::string_view method, std::string_view params_fragment = {}) const {
-        std::lock_guard lock(mutex_);
-        return std::any_of(calls_.begin(), calls_.end(), [&](const auto& call) {
-            return call.first == method && (params_fragment.empty() ||
-                                            call.second.find(params_fragment) != std::string::npos);
-        });
-    }
-
-    void respond_with(std::string payload) {
-        std::lock_guard lock(mutex_);
-        response_payload_ = std::move(payload);
-        error_code_.clear();
-    }
-
-    void fail_with(std::string code) {
-        std::lock_guard lock(mutex_);
-        error_code_ = std::move(code);
-        response_payload_.clear();
-    }
-
-    const pulp::inspect::InspectorDiscoveryRecord& publication() const {
-        return publication_;
-    }
-
-  private:
-    static pulp::inspect::InspectorPolicyConfig make_policy() {
-        pulp::inspect::InspectorPolicyConfig policy;
-        policy.profile = pulp::inspect::InspectorProfile::Develop;
-        for (const auto capability :
-             pulp::inspect::profile_capabilities(pulp::inspect::InspectorProfile::Develop)) {
-            policy.available_capabilities.push_back(capability);
-        }
-        return policy;
-    }
-
-    TempDir runtime_;
-    ScopedEnvVar runtime_env_;
-    pulp::inspect::InspectorDiscoveryPublisher publisher_;
-    pulp::inspect::InspectorDiscoveryReader reader_;
-    pulp::inspect::InspectorPolicyConfig policy_;
-    mutable std::mutex mutex_;
-    std::vector<std::pair<std::string, std::string>> calls_;
-    std::string response_payload_;
-    std::string error_code_;
-    TestDomainBindings domain_bindings_;
-    pulp::inspect::InspectorSession session_;
-    pulp::inspect::InspectorServer server_;
-    pulp::inspect::InspectorDiscoveryRecord publication_;
-};
-#endif
 
 // Several tests below shell out to `git -C <tempdir> …` on throwaway repos.
 // If this binary is launched from a git-invoked context — a hook (pre-push),
@@ -375,17 +217,6 @@ std::filesystem::path make_fake_inspector_cli(const std::filesystem::path& root)
                                      std::filesystem::perms::owner_write,
                                  std::filesystem::perm_options::add);
     return cli;
-}
-
-[[maybe_unused]] std::string exact_inspector_arguments(std::string fields = {}) {
-    std::string arguments = "{";
-    if (!fields.empty()) {
-        arguments += std::move(fields);
-        arguments += ",";
-    }
-    arguments +=
-        R"JSON("session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"})JSON";
-    return arguments;
 }
 
 std::filesystem::path make_package_workflow_fake_pulp_cli(const std::filesystem::path& root,
@@ -965,9 +796,6 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_docs_search",
         "pulp_get_view_tree",
         "pulp_inspect_profiles",
-        "pulp_inspect_list",
-        "pulp_inspect_capabilities",
-        "pulp_inspect_doctor",
         "pulp_kit",
         "pulp_kit_apply",
         "pulp_kit_init",
@@ -1058,68 +886,22 @@ TEST_CASE("MCP tools report required argument errors before side effects", "[mcp
     }
 }
 
-#if PULP_TEST_INSPECTOR_RUNTIME
-TEST_CASE("MCP inspector metadata tools discover and authenticate exact publications",
+TEST_CASE("MCP exposes static inspector profiles without legacy discovery tools",
           "[mcp][tools][inspect][metadata]") {
     const auto profiles = handle_request(tool_call("601", "pulp_inspect_profiles"));
     require_contains(profiles, R"JSON("schema_version": 1)JSON");
     require_contains(profiles, R"JSON("id": "observe")JSON");
 
-    InspectorMcpFixture fixture;
-    const auto listed = handle_request(tool_call("602", "pulp_inspect_list"));
-    require_contains(listed, R"JSON("schema_version": 1)JSON");
-    require_contains(listed, fixture.publication().session_id);
-    require_contains(listed, fixture.publication().instance_id);
-    require_contains(listed, fixture.publication().publication_id);
-
-    const auto capabilities =
-        handle_request(tool_call("603", "pulp_inspect_capabilities", fixture.exact_arguments()));
-    require_contains(capabilities, R"JSON("structuredContent":{"ok":true)JSON");
-    require_contains(capabilities, fixture.publication().session_id);
-    require_contains(capabilities, fixture.publication().publication_id);
-    require_contains(capabilities, "session.describe");
-
-    const auto doctor = handle_request(tool_call("604", "pulp_inspect_doctor"));
-    require_contains(doctor, R"JSON("schema_version": 1)JSON");
-    require_contains(doctor, R"JSON("ok": true)JSON");
-    require_contains(doctor, R"JSON("session_count": 1)JSON");
-}
-
-#if !defined(_WIN32)
-TEST_CASE("MCP inspector doctor reports an insecure runtime directory",
-          "[mcp][tools][inspect][metadata][doctor]") {
-    TempDir runtime;
-    ScopedEnvVar runtime_env("PULP_INSPECTOR_RUNTIME_DIR", runtime.path.string());
-    std::filesystem::permissions(
-        runtime.path, std::filesystem::perms::owner_all | std::filesystem::perms::group_read,
-        std::filesystem::perm_options::replace);
-
-    const auto doctor = handle_request(tool_call("605", "pulp_inspect_doctor"));
-    require_contains(doctor, R"JSON("ok":false)JSON");
-    require_contains(doctor, R"JSON("isError":true)JSON");
-    require_contains(doctor, R"JSON("code":"discovery_unavailable")JSON");
-    require_contains(doctor, "runtime directory is not an owner-private directory");
-
-    const auto listed = handle_request(tool_call("606", "pulp_inspect_list"));
-    require_contains(listed, R"JSON("ok":false)JSON");
-    require_contains(listed, R"JSON("isError":true)JSON");
-    require_contains(listed, R"JSON("code":"discovery_unavailable")JSON");
-}
-#endif
-
-#else
-TEST_CASE("MCP inspector tools report the excluded optional component",
-          "[mcp][tools][inspect][component-off]") {
-    const auto profiles = handle_request(tool_call("65", "pulp_inspect_profiles"));
-    require_contains(profiles, R"JSON("schema_version": 1)JSON");
-
-    for (const char* tool : {"pulp_inspect_list", "pulp_inspect_doctor"}) {
-        const auto response = handle_request(tool_call("66", tool, exact_inspector_arguments()));
-        require_contains(response, R"JSON("isError":true)JSON");
-        require_contains(response, R"JSON("code":"component_unavailable")JSON");
+    const auto tools = handle_request(
+        R"JSON({"jsonrpc":"2.0","id":602,"method":"tools/list","params":{}})JSON");
+    for (const char* removed : {"pulp_inspect_list", "pulp_inspect_capabilities",
+                                "pulp_inspect_doctor"}) {
+        REQUIRE(tools.find(std::string(R"JSON("name":")JSON") + removed + '"') ==
+                std::string::npos);
+        const auto response = handle_request(tool_call("603", removed));
+        require_contains(response, "Unknown tool");
     }
 }
-#endif
 
 TEST_CASE("pulp_audio_compare validates its arguments before shelling out", "[mcp][tools][audio]") {
     // Each invocation drives one guard branch in handle_audio_compare so the
