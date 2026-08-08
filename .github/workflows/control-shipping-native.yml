@@ -1,0 +1,271 @@
+name: Control shipping native matrix
+
+# Real installed-SDK consumers, not synthetic format labels. Each leg builds
+# production-stripped plug-in artifacts and preserves the canonical scanner's
+# native nm/readelf/dumpbin/lipo report as CI evidence.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/control-shipping-native.yml'
+      - 'CMakeLists.txt'
+      - 'core/format/**'
+      - 'inspect/**'
+      - 'tools/cmake/**'
+      - 'tools/scripts/verify_control_shipping_native_evidence.py'
+      - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
+      - 'tools/scripts/test_control_shipping_native_workflow.py'
+      - 'tools/validation/sdk-smoke/**'
+  pull_request:
+    paths:
+      - '.github/workflows/control-shipping-native.yml'
+      - 'CMakeLists.txt'
+      - 'core/format/**'
+      - 'inspect/**'
+      - 'tools/cmake/**'
+      - 'tools/scripts/verify_control_shipping_native_evidence.py'
+      - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
+      - 'tools/scripts/test_control_shipping_native_workflow.py'
+      - 'tools/validation/sdk-smoke/**'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: control-shipping-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - leg: macos-universal
+            os: macos-15
+            platform: darwin
+            cmake_architectures: 'arm64;x86_64'
+            sdk_formats: 'Standalone;VST3;CLAP;LV2;AU;AUv3'
+            report_formats: 'Standalone,VST3,CLAP,LV2,AUv2,AUv3Framework,AUv3Extension,AUv3Host'
+            report_architectures: 'arm64,x86_64'
+          - leg: linux-x64
+            os: ubuntu-24.04
+            platform: linux
+            cmake_architectures: ''
+            sdk_formats: 'Standalone;VST3;CLAP;LV2'
+            report_formats: 'Standalone,VST3,CLAP,LV2'
+            report_architectures: 'x86_64'
+          - leg: linux-arm64
+            os: ubuntu-24.04-arm
+            platform: linux
+            cmake_architectures: ''
+            sdk_formats: 'Standalone;VST3;CLAP;LV2'
+            report_formats: 'Standalone,VST3,CLAP,LV2'
+            report_architectures: 'arm64'
+          - leg: windows-x64
+            os: windows-2022
+            platform: windows
+            cmake_architectures: ''
+            sdk_formats: 'Standalone;VST3;CLAP;LV2'
+            report_formats: 'Standalone,VST3,CLAP,LV2'
+            report_architectures: 'x86_64'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    name: ${{ matrix.leg }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: false
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-linux-build-deps
+        with:
+          profile: native
+
+      - name: Bootstrap dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
+
+      - name: Configure installed SDK producer
+        shell: bash
+        run: |
+          set -euo pipefail
+          platform_args=()
+          if [ "${RUNNER_OS}" = "macOS" ]; then
+            platform_args+=("-DCMAKE_OSX_ARCHITECTURES=${{ matrix.cmake_architectures }}")
+          elif [ "${RUNNER_OS}" = "Windows" ]; then
+            platform_args+=(-A x64)
+          fi
+          cmake -S . -B build-sdk \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_BUILD_TESTS=OFF \
+            -DPULP_BUILD_EXAMPLES=OFF \
+            -DPULP_ENABLE_AUDIO_PROBES=OFF \
+            -DPULP_ENABLE_GPU=OFF \
+            -DPULP_ENABLE_INSPECTOR=ON \
+            "${platform_args[@]}"
+
+      - name: Build and install SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools/ci/governed-build.sh \
+            cmake --build build-sdk --config Release
+          prefix="${RUNNER_TEMP}/pulp-control-shipping-sdk"
+          cmake --install build-sdk --prefix "$prefix" --config Release
+          test -f "$prefix/lib/cmake/Pulp/PulpControlShipping.cmake"
+          test -f "$prefix/lib/cmake/Pulp/check_control_shipping_artifact.cmake"
+
+      - name: Materialize optional AAX SDK outside the checkout
+        id: aax
+        # Repository secrets never enter pull-request or manually selected code.
+        # A push to protected main is the trusted boundary for real AAX proof.
+        if: matrix.leg == 'macos-universal' && github.event_name == 'push'
+        shell: bash
+        env:
+          AAX_SDK_ZIP_URL: ${{ secrets.PULP_AAX_SDK_ZIP_URL }}
+          AAX_SDK_ZIP_SHA256: ${{ secrets.PULP_AAX_SDK_ZIP_SHA256 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AAX_SDK_ZIP_URL:-}" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "reason_code=aax-sdk-secret-unavailable" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "${AAX_SDK_ZIP_SHA256:-}" ]; then
+            echo "::error::PULP_AAX_SDK_ZIP_URL exists without PULP_AAX_SDK_ZIP_SHA256"
+            exit 1
+          fi
+          archive="${RUNNER_TEMP}/pulp-aax-sdk.zip"
+          destination="${RUNNER_TEMP}/pulp-aax-sdk"
+          curl --fail --silent --show-error --location \
+            --output "$archive" "$AAX_SDK_ZIP_URL"
+          printf '%s  %s\n' "$AAX_SDK_ZIP_SHA256" "$archive" | shasum -a 256 -c -
+          rm -rf "$destination"
+          mkdir -p "$destination"
+          ditto -x -k "$archive" "$destination"
+          header=$(find "$destination" -type f -path '*/Interfaces/AAX.h' -print -quit)
+          if [ -z "$header" ]; then
+            echo "::error::AAX SDK archive has no Interfaces/AAX.h"
+            exit 1
+          fi
+          sdk_root=${header%/Interfaces/AAX.h}
+          case "$sdk_root" in
+            "${RUNNER_TEMP}"/*) ;;
+            *) echo "::error::resolved AAX SDK escaped RUNNER_TEMP"; exit 1 ;;
+          esac
+          test -f "$sdk_root/Interfaces/AAX_Exports.cpp"
+          test -f "$sdk_root/Libs/AAXLibrary/CMakeLists.txt"
+          echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "sdk_root=$sdk_root" >> "$GITHUB_OUTPUT"
+
+      - name: Configure real installed-SDK plug-in artifacts
+        shell: bash
+        env:
+          AAX_AVAILABLE: ${{ steps.aax.outputs.available }}
+          AAX_SDK_ROOT: ${{ steps.aax.outputs.sdk_root }}
+        run: |
+          set -euo pipefail
+          prefix="${RUNNER_TEMP}/pulp-control-shipping-sdk"
+          platform_args=()
+          aax_args=()
+          required_formats='${{ matrix.sdk_formats }}'
+          if [ "${RUNNER_OS}" = "macOS" ]; then
+            platform_args+=("-DCMAKE_OSX_ARCHITECTURES=${{ matrix.cmake_architectures }}")
+            platform_args+=(-DPULP_SDK_SMOKE_INCLUDE_AUV3=ON)
+            if [ "${AAX_AVAILABLE:-}" = 'true' ]; then
+              aax_args+=(-DPULP_ENABLE_AAX=ON)
+              aax_args+=("-DPULP_AAX_SDK_DIR=${AAX_SDK_ROOT}")
+              required_formats="${required_formats};AAX"
+            fi
+          elif [ "${RUNNER_OS}" = "Windows" ]; then
+            platform_args+=(-A x64)
+          fi
+          cmake -S tools/validation/sdk-smoke -B smoke/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$prefix" \
+            "-DPULP_SDK_SMOKE_REQUIRE_FORMATS=${required_formats}" \
+            "${platform_args[@]}" \
+            "${aax_args[@]}"
+
+      - name: Build and scan real plug-in artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools/ci/governed-build.sh \
+            cmake --build smoke/build --config Release
+
+      - name: Verify native scanner evidence
+        shell: bash
+        env:
+          AAX_AVAILABLE: ${{ steps.aax.outputs.available }}
+        run: |
+          set -euo pipefail
+          required_formats='${{ matrix.report_formats }}'
+          aax_args=(--aax-mode not-assessed)
+          if [ '${{ matrix.leg }}' = 'macos-universal' ]; then
+            if [ "${AAX_AVAILABLE:-}" = 'true' ]; then
+              required_formats="${required_formats},AAX"
+              aax_args=(--aax-mode required)
+            else
+              reason='${{ steps.aax.outputs.reason_code }}'
+              if [ -z "$reason" ]; then
+                reason=aax-sdk-secret-withheld-untrusted-event
+              fi
+              aax_args=(
+                --aax-mode unavailable
+                --aax-unavailable-reason "$reason"
+              )
+            fi
+          fi
+          python3 tools/scripts/verify_control_shipping_native_evidence.py \
+            verify-leg \
+            --report-root smoke/build \
+            --leg '${{ matrix.leg }}' \
+            --platform '${{ matrix.platform }}' \
+            --required-architectures '${{ matrix.report_architectures }}' \
+            --required-formats "$required_formats" \
+            "${aax_args[@]}" \
+            --output '${{ matrix.leg }}.native-shipping-leg.json'
+
+      - name: Upload native scanner reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-shipping-${{ matrix.leg }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            ${{ matrix.leg }}.native-shipping-leg.json
+            smoke/build/**/*.control-shipping-report.json
+
+  evidence:
+    needs: native
+    runs-on: ubuntu-latest
+    name: consolidated evidence
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: false
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: control-shipping-*
+          path: native-evidence
+      - name: Aggregate required native legs
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/verify_control_shipping_native_evidence.py \
+            aggregate \
+            --evidence-root native-evidence \
+            --output control-shipping-native-evidence.json
+        shell: bash
+      - name: Upload consolidated evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-shipping-native-evidence
+          if-no-files-found: error
+          retention-days: 30
+          path: control-shipping-native-evidence.json
