@@ -260,6 +260,34 @@ endif()
 catch_discover_tests(pulp-test-control-host-bootstrap
     PROPERTIES LABELS "inspect;control;host;bootstrap;security")
 
+add_executable(pulp-control-host-preflight-fixture
+    fixtures/control_host_preflight_fixture.cpp)
+target_link_libraries(pulp-control-host-preflight-fixture PRIVATE
+    pulp::inspect-control)
+
+add_executable(pulp-test-control-host-preflight
+    test_control_host_preflight.cpp)
+target_compile_definitions(pulp-test-control-host-preflight PRIVATE
+    PULP_CONTROL_HOST_PREFLIGHT_FIXTURE="$<TARGET_FILE:pulp-control-host-preflight-fixture>")
+target_link_libraries(pulp-test-control-host-preflight PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+add_dependencies(pulp-test-control-host-preflight pulp-control-host-preflight-fixture)
+if(APPLE)
+    find_program(_pulp_preflight_test_codesign codesign REQUIRED)
+    add_custom_command(TARGET pulp-test-control-host-preflight POST_BUILD
+        COMMAND "${_pulp_preflight_test_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-test-control-host-preflight>"
+        COMMENT "Ad-hoc signing control host preflight test fixture"
+        VERBATIM)
+    add_custom_command(TARGET pulp-control-host-preflight-fixture POST_BUILD
+        COMMAND "${_pulp_preflight_test_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-control-host-preflight-fixture>"
+        COMMENT "Ad-hoc signing control host preflight child fixture"
+        VERBATIM)
+endif()
+catch_discover_tests(pulp-test-control-host-preflight
+    PROPERTIES LABELS "inspect;control;host;preflight;security")
+
 add_executable(pulp-test-control-carrier test_control_carrier.cpp)
 target_link_libraries(pulp-test-control-carrier PRIVATE
     pulp::inspect-control Catch2::Catch2WithMain)

@@ -407,6 +407,22 @@ std::string encode_control_envelope(const ControlEnvelope& envelope) {
                 payload.addMember("registration_id",
                                   choc::value::createString(message.registration_id));
                 payload.addMember("request_id", choc::value::createString(message.request_id));
+            } else if constexpr (std::is_same_v<T, ControlHostPreflightChallengeEnvelope>) {
+                valid = valid_hash(message.nonce);
+                kind = "host-preflight-challenge";
+                payload.addMember("nonce", choc::value::createString(message.nonce));
+            } else if constexpr (std::is_same_v<T, ControlHostPreflightResponseEnvelope>) {
+                valid = valid_hash(message.nonce);
+                kind = "host-preflight-response";
+                payload.addMember("nonce", choc::value::createString(message.nonce));
+            } else if constexpr (std::is_same_v<T, ControlHostPreflightBootstrapEnvelope>) {
+                valid = valid_hash(message.nonce) && !message.bootstrap_base64.empty() &&
+                        message.bootstrap_base64.size() <=
+                            kControlHostPreflightMaximumBootstrapBase64Bytes;
+                kind = "host-preflight-bootstrap";
+                payload.addMember("bootstrap_base64",
+                                  choc::value::createString(message.bootstrap_base64));
+                payload.addMember("nonce", choc::value::createString(message.nonce));
             } else if constexpr (std::is_same_v<T, ControlHostExecuteEnvelope>) {
                 valid = valid_host_execute(message);
                 kind = "host-execute";
@@ -840,6 +856,11 @@ std::optional<ControlEnvelope> decode_control_envelope(std::string_view json,
                 return std::nullopt;
             }
             envelope.payload = std::move(result);
+        } else if (is_host_preflight_kind(kind)) {
+            auto preflight = decode_host_preflight_payload(kind, payload, error);
+            if (!preflight)
+                return std::nullopt;
+            envelope.payload = std::move(*preflight);
         } else if (is_host_control_kind(kind)) {
             auto host = decode_host_control_payload(kind, payload, error);
             if (!host)

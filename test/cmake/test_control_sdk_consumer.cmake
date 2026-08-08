@@ -76,6 +76,7 @@ file(WRITE "${_consumer_source}/main.cpp" [=[
 #include <pulp/inspect/control_host_enrollment.hpp>
 #include <pulp/inspect/control_host_connection.hpp>
 #include <pulp/inspect/control_host_bootstrap.hpp>
+#include <pulp/inspect/control_host_preflight.hpp>
 #include <pulp/inspect/control_host_router.hpp>
 #include <pulp/inspect/control_main_thread_executor.hpp>
 #include <pulp/inspect/control_operations.hpp>
@@ -170,8 +171,13 @@ int main() {
     return std::vector<std::uint8_t>{
         static_cast<std::uint8_t>(child_process_id & 0xff)};
   };
+  pulp::platform::StandardInputChannelSession input_session =
+      [](int, pulp::platform::ChildProcessInputChannel) { return false; };
+  pulp::inspect::ControlHostPreflightDiagnostics preflight_diagnostics;
   const auto artifact = control_client.read_artifact("artifact-installed", 0, 16);
   (void)main_thread_executor.executor();
+  (void)input_session;
+  (void)preflight_diagnostics;
 
   request.operation_version = 1;
   admission.operation_version = request.operation_version;

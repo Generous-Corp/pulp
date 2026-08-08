@@ -45,6 +45,30 @@ struct ProcessOptions {
 using StandardInputByteProvider =
     std::function<std::optional<std::vector<std::uint8_t>>(int child_process_id)>;
 
+/// Move-only parent endpoint of the child's inherited standard-input channel.
+/// The native handle remains owned by this object and is closed on destruction.
+class ChildProcessInputChannel {
+public:
+    ~ChildProcessInputChannel();
+    ChildProcessInputChannel(const ChildProcessInputChannel&) = delete;
+    ChildProcessInputChannel& operator=(const ChildProcessInputChannel&) = delete;
+    ChildProcessInputChannel(ChildProcessInputChannel&& other) noexcept;
+    ChildProcessInputChannel& operator=(ChildProcessInputChannel&& other) noexcept;
+
+    std::intptr_t native_handle() const noexcept { return handle_; }
+    explicit operator bool() const noexcept { return handle_ >= 0; }
+
+private:
+    friend class ChildProcess;
+    explicit ChildProcessInputChannel(std::intptr_t handle) noexcept : handle_(handle) {}
+    std::intptr_t handle_ = -1;
+};
+
+/// Owns a post-spawn exchange over the child's private inherited input channel.
+/// The callback runs synchronously outside ChildProcess's internal lock.
+using StandardInputChannelSession =
+    std::function<bool(int child_process_id, ChildProcessInputChannel channel)>;
+
 /// Cross-platform child process with timeout, cancellation, and line-by-line
 /// output callbacks. Uses posix_spawn on POSIX (sandbox-compatible for AU
 /// plugins on macOS) and CreateProcess on Windows.
@@ -82,6 +106,14 @@ public:
                                    const StandardInputByteProvider& provider,
                                    const ProcessOptions& options = {});
 
+    /// Spawn with a private duplex standard-input channel and transfer the
+    /// parent endpoint to a post-spawn session. Unsupported platforms fail
+    /// before spawning. Session failure terminates and joins the child.
+    bool start_with_standard_input_channel(const std::string& command,
+                                           const std::vector<std::string>& args,
+                                           const StandardInputChannelSession& session,
+                                           const ProcessOptions& options = {});
+
     /// Check if the started process is still running.
     bool is_running() const;
 
@@ -104,7 +136,8 @@ private:
     bool start_impl(const std::string& command, const std::vector<std::string>& args,
                     const ProcessOptions& options,
                     const std::span<const std::uint8_t>* standard_input,
-                    const StandardInputByteProvider* standard_input_provider);
+                    const StandardInputByteProvider* standard_input_provider,
+                    const StandardInputChannelSession* standard_input_session);
 
     struct Impl;
     std::unique_ptr<Impl> impl_;

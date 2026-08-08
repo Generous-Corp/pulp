@@ -85,6 +85,39 @@ bool is_host_control_kind(std::string_view kind) {
            kind == "host-progress" || kind == "host-cancel" || kind == "host-complete";
 }
 
+bool is_host_preflight_kind(std::string_view kind) {
+    return kind == "host-preflight-challenge" || kind == "host-preflight-response" ||
+           kind == "host-preflight-bootstrap";
+}
+
+std::optional<ControlEnvelopePayload>
+decode_host_preflight_payload(std::string_view kind, ValueView payload,
+                              ControlProtocolDiagnostics& error) {
+    if (kind == "host-preflight-challenge" || kind == "host-preflight-response") {
+        if (!only_fields(payload, {"nonce"}, error))
+            return std::nullopt;
+        std::string nonce;
+        if (!required_string(payload, "nonce", nonce, 64, error) || !valid_hash(nonce)) {
+            error = {ControlProtocolError::InvalidValue, "host preflight nonce is invalid"};
+            return std::nullopt;
+        }
+        if (kind == "host-preflight-challenge")
+            return ControlHostPreflightChallengeEnvelope{std::move(nonce)};
+        return ControlHostPreflightResponseEnvelope{std::move(nonce)};
+    }
+    if (!only_fields(payload, {"bootstrap_base64", "nonce"}, error))
+        return std::nullopt;
+    ControlHostPreflightBootstrapEnvelope message;
+    if (!required_string(payload, "nonce", message.nonce, 64, error) ||
+        !required_string(payload, "bootstrap_base64", message.bootstrap_base64,
+                         kControlHostPreflightMaximumBootstrapBase64Bytes, error) ||
+        !valid_hash(message.nonce) || message.bootstrap_base64.empty()) {
+        error = {ControlProtocolError::InvalidValue, "host preflight bootstrap fields are invalid"};
+        return std::nullopt;
+    }
+    return message;
+}
+
 std::optional<ControlEnvelopePayload>
 decode_host_control_payload(std::string_view kind, ValueView payload,
                             ControlProtocolDiagnostics& error) {

@@ -876,3 +876,41 @@ TEST_CASE("host open canonically selects exactly one admission mechanism",
     const auto legacy = replace_once(encoded_admission, R"(, "enrollment_id": "")", "");
     CHECK(decode_control_envelope(legacy) == admission);
 }
+
+TEST_CASE("host preflight frames use the canonical codec and strict directions",
+          "[inspect][control-protocol][host][preflight]") {
+    const auto nonce = std::string(64, 'a');
+    const ControlEnvelope challenge{.payload = ControlHostPreflightChallengeEnvelope{nonce}};
+    const ControlEnvelope response{.payload = ControlHostPreflightResponseEnvelope{nonce}};
+    const ControlEnvelope bootstrap{
+        .payload = ControlHostPreflightBootstrapEnvelope{nonce, "Ym9vdHN0cmFw"}};
+
+    CHECK(round_trip(std::get<ControlHostPreflightChallengeEnvelope>(challenge.payload)).nonce ==
+          nonce);
+    CHECK(round_trip(std::get<ControlHostPreflightResponseEnvelope>(response.payload)).nonce ==
+          nonce);
+    CHECK(round_trip(std::get<ControlHostPreflightBootstrapEnvelope>(bootstrap.payload)) ==
+          std::get<ControlHostPreflightBootstrapEnvelope>(bootstrap.payload));
+
+    CHECK(control_envelope_allowed(challenge, ControlEnvelopeDirection::LauncherToHost));
+    CHECK(control_envelope_allowed(bootstrap, ControlEnvelopeDirection::LauncherToHost));
+    CHECK_FALSE(control_envelope_allowed(challenge, ControlEnvelopeDirection::HostToLauncher));
+    CHECK(control_envelope_allowed(response, ControlEnvelopeDirection::HostToLauncher));
+    CHECK_FALSE(control_envelope_allowed(response, ControlEnvelopeDirection::LauncherToHost));
+
+    ControlProtocolDiagnostics diagnostics;
+    auto encoded = encode_control_envelope(bootstrap);
+    auto unknown = replace_once(encoded, R"("nonce":)", R"("extra":1,"nonce":)");
+    CHECK_FALSE(decode_control_envelope(unknown, &diagnostics));
+    CHECK(diagnostics.code == ControlProtocolError::UnknownField);
+
+    auto bad_nonce = std::get<ControlHostPreflightChallengeEnvelope>(challenge.payload);
+    bad_nonce.nonce.pop_back();
+    CHECK(encode_control_envelope(ControlEnvelope{.payload = bad_nonce}).empty());
+    auto empty_bootstrap = std::get<ControlHostPreflightBootstrapEnvelope>(bootstrap.payload);
+    empty_bootstrap.bootstrap_base64.clear();
+    CHECK(encode_control_envelope(ControlEnvelope{.payload = empty_bootstrap}).empty());
+    auto oversized = std::get<ControlHostPreflightBootstrapEnvelope>(bootstrap.payload);
+    oversized.bootstrap_base64.assign(kControlHostPreflightMaximumBootstrapBase64Bytes + 1, 'x');
+    CHECK(encode_control_envelope(ControlEnvelope{.payload = oversized}).empty());
+}
