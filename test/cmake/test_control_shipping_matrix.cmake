@@ -153,6 +153,44 @@ if(NOT _report_after GREATER _report_before)
         "scanner policy change did not invalidate the persisted report")
 endif()
 
+# An unrelated sibling executable is not part of an unbundled artifact's
+# packaged dependency closure.  Use a control-enabled binary named `pulp` to
+# guard against accidentally matching that generic basename in the artifact
+# path/header prose printed by otool/readelf/dumpbin.
+set(_matrix_executable_suffix "")
+if(WIN32)
+    set(_matrix_executable_suffix ".exe")
+endif()
+set(_matrix_runtime_dir "${_matrix_build}")
+if(EXISTS "${_matrix_build}/Release/ProductionStandalone${_matrix_executable_suffix}")
+    set(_matrix_runtime_dir "${_matrix_build}/Release")
+endif()
+file(STRINGS "${_matrix_build}/CMakeCache.txt" _matrix_compiler_entry
+    REGEX "^CMAKE_CXX_COMPILER:FILEPATH=")
+string(REGEX REPLACE "^[^=]+=" "" _matrix_cxx_compiler
+    "${_matrix_compiler_entry}")
+set(_unrelated_sibling
+    "${_matrix_runtime_dir}/pulp${_matrix_executable_suffix}")
+file(COPY_FILE
+    "${_matrix_runtime_dir}/DeveloperStandalone${_matrix_executable_suffix}"
+    "${_unrelated_sibling}" ONLY_IF_DIFFERENT)
+execute_process(COMMAND "${CMAKE_COMMAND}"
+    "-DARTIFACT=${_matrix_runtime_dir}/ProductionStandalone${_matrix_executable_suffix}"
+    "-DMANIFEST=${_matrix_build}/pulp-inspector-manifests/ProductionStandalone.json"
+    "-DSHIPPING_MANIFEST=${_matrix_build}/pulp-control-shipping-manifests/ProductionStandalone.Standalone.control-shipping.json"
+    "-DCXX_COMPILER=${_matrix_cxx_compiler}"
+    "-DREPORT=${_matrix_build}/unrelated-sibling.control-shipping-report.json"
+    -P "${_installed_helper_dir}/check_control_shipping_artifact.cmake"
+    RESULT_VARIABLE _unrelated_sibling_result
+    OUTPUT_VARIABLE _unrelated_sibling_output
+    ERROR_VARIABLE _unrelated_sibling_error)
+if(NOT _unrelated_sibling_result EQUAL 0)
+    message(FATAL_ERROR
+        "unrelated marker-bearing sibling was treated as a packaged dependency: "
+        "${_unrelated_sibling_output}${_unrelated_sibling_error}")
+endif()
+file(REMOVE "${_unrelated_sibling}")
+
 # An intentional declaration without a linked implementation must fail. This
 # prevents the shipping metadata translation unit from becoming self-attested
 # evidence for endpoint or capability linkage.
