@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <limits>
 #include <utility>
+#include <vector>
 
 namespace pulp::timeline_editor {
 
@@ -230,6 +231,72 @@ runtime::Result<Transaction, ModelError> lower_edit_intent(const EditIntent& int
         break;
     }
 
+    return runtime::Ok(std::move(result));
+}
+
+
+namespace {
+
+/// Position of a note identity in a canonical note array, if it is there.
+std::optional<std::size_t> index_of_note(std::span<const NoteEvent> notes, ItemId id) noexcept {
+    for (std::size_t index = 0; index < notes.size(); ++index)
+        if (notes[index].id == id)
+            return index;
+    return std::nullopt;
+}
+
+} // namespace
+
+runtime::Result<Transaction, NoteLoweringError>
+lower_note_edit_intent(const ValidatedNoteEditIntent& validated,
+                       std::span<const NoteEvent> current_notes,
+                       const EditIntentIdentity& identity) {
+    const auto refuse = [](NoteLoweringError error) {
+        return runtime::Result<Transaction, NoteLoweringError>(runtime::Err(error));
+    };
+
+    if (!identity.transaction_id.valid() || !identity.command_id.valid() ||
+        identity.transaction_id.writer != identity.command_id.writer)
+        return refuse(NoteLoweringError::InvalidIdentity);
+
+    const auto& intent = validated.value();
+    // The refusal that names this function's scope. A continuous drag is not a
+    // malformed gesture — it is one this command cannot carry, and emitting a
+    // transaction for it would fail partway through rather than up front.
+    if (intent.phase != GesturePhase::Single)
+        return refuse(NoteLoweringError::ContinuousGestureUnsupported);
+
+    std::vector<NoteEvent> replacement(current_notes.begin(), current_notes.end());
+
+    if (intent.kind == NoteEditIntentKind::Insert) {
+        if (index_of_note(current_notes, intent.replacement->id))
+            return refuse(NoteLoweringError::DuplicateNoteIdentity);
+        replacement.push_back(*intent.replacement);
+    } else {
+        const auto found = index_of_note(current_notes, intent.expected->id);
+        if (!found)
+            return refuse(NoteLoweringError::NoteNotInClip);
+        // The optimistic gate the caller believes it is editing under. Checking
+        // it here turns a stale view into a named refusal instead of an
+        // ExpectedValueMismatch the caller has to decode after the fact.
+        if (!equal_note(current_notes[*found], *intent.expected))
+            return refuse(NoteLoweringError::ExpectedNoteMismatch);
+        if (intent.kind == NoteEditIntentKind::Erase)
+            replacement.erase(replacement.begin() + static_cast<std::ptrdiff_t>(*found));
+        else
+            replacement[*found] = *intent.replacement;
+    }
+
+    Transaction result;
+    result.id = identity.transaction_id;
+    result.expected_revision = identity.expected_revision;
+    result.undo_group = identity.undo_group;
+    result.gesture_phase = GesturePhase::Single;
+    result.commands.push_back(
+        {identity.command_id,
+         ReplaceNoteContent{intent.sequence_id, intent.track_id, intent.clip_id,
+                            std::vector<NoteEvent>(current_notes.begin(), current_notes.end()),
+                            std::move(replacement)}});
     return runtime::Ok(std::move(result));
 }
 
