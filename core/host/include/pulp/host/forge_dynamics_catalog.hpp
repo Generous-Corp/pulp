@@ -292,6 +292,7 @@ inline constexpr state::ParamID kReleaseMs = 2;
 struct Instance {
     static constexpr std::size_t kControlTableSize = 4097;
     signal::TruePeakLimiter limiter;
+    bool prepared = false;
     std::array<double, kControlTableSize> ceiling_table{};
     std::array<double, kControlTableSize> release_table{};
     float last_ceiling_dbtp = -1.0f;
@@ -347,6 +348,9 @@ inline CustomNodeType make_node(float lookahead_ms = 5.0f, bool linked = true) {
     type.default_name = "True-Peak Limiter";
     type.lowerable = true;
     type.latency_samples = [fixed_lookahead](double sample_rate) {
+        if (!std::isfinite(sample_rate) || sample_rate < 8000.0 ||
+            sample_rate > Limiter::maximum_supported_sample_rate())
+            return 0;
         return Limiter::detector_latency_samples() + Limiter::internal_gain_lookahead_samples() +
                static_cast<int>(std::ceil(fixed_lookahead * 0.001 * sample_rate));
     };
@@ -358,8 +362,9 @@ inline CustomNodeType make_node(float lookahead_ms = 5.0f, bool linked = true) {
         params.lookahead_ms = fixed_lookahead;
         params.channel_link =
             linked ? Limiter::ChannelLink::linked : Limiter::ChannelLink::independent;
-        instance.limiter.prepare(sample_rate, 2, params);
-        instance.prepare(sample_rate);
+        instance.prepared = instance.limiter.prepare(sample_rate, 2, params);
+        if (instance.prepared)
+            instance.prepare(sample_rate);
     };
     type.reset = [](void* pointer) { static_cast<Instance*>(pointer)->limiter.reset(); };
     type.baked_params.push_back({kCeilingDbtp, -24.0f, 0.0f, -1.0f});
@@ -369,6 +374,12 @@ inline CustomNodeType make_node(float lookahead_ms = 5.0f, bool linked = true) {
                                            const BakedParamView& params) {
         auto& limiter = static_cast<Instance*>(pointer)->limiter;
         auto& instance = *static_cast<Instance*>(pointer);
+        if (!instance.prepared) {
+            for (int channel = 0; channel < 2; ++channel)
+                std::copy_n(input.channel_ptr(channel), frames,
+                            output.channel_ptr(channel));
+            return;
+        }
         for (int frame = 0; frame < frames; ++frame) {
             const auto offset = static_cast<std::int32_t>(frame);
             instance.set_controls(params.value_at(kCeilingDbtp, offset),
