@@ -314,6 +314,11 @@ bool control_envelope_allowed(const ControlEnvelope& envelope, ControlEnvelopeDi
                                  std::is_same_v<T, ControlHostExecuteEnvelope> ||
                                  std::is_same_v<T, ControlHostCancelEnvelope>) {
                 return direction == ControlEnvelopeDirection::BrokerToHost;
+            } else if constexpr (std::is_same_v<T, ControlHostPreflightResponseEnvelope>) {
+                return direction == ControlEnvelopeDirection::HostToLauncher;
+            } else if constexpr (std::is_same_v<T, ControlHostPreflightChallengeEnvelope> ||
+                                 std::is_same_v<T, ControlHostPreflightBootstrapEnvelope>) {
+                return direction == ControlEnvelopeDirection::LauncherToHost;
             } else if constexpr (std::is_same_v<T, ControlNegotiationOffer> ||
                                  std::is_same_v<T, ControlRequestEnvelope> ||
                                  std::is_same_v<T, ControlCancelEnvelope> ||

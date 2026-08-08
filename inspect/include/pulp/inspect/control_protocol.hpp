@@ -33,6 +33,7 @@ inline constexpr std::size_t kControlMaximumErrorCodeBytes = 128;
 inline constexpr std::size_t kControlMaximumSdkVersionBytes = 128;
 inline constexpr std::size_t kControlMaximumArtifactMetadataFieldBytes = 512;
 inline constexpr std::size_t kControlMaximumArtifactContentTypeBytes = 256;
+inline constexpr std::size_t kControlHostPreflightMaximumBootstrapBase64Bytes = 24u * 1024u;
 static_assert(kControlMaximumRequestPayloadBytes + 256u * 1024u <= kControlMaximumEnvelopeBytes);
 static_assert(kControlMaximumResultDetailBytes + 256u * 1024u <= kControlMaximumEnvelopeBytes);
 static_assert(kControlMaximumArtifactChunkBase64Bytes + 256u * 1024u <=
@@ -142,6 +143,25 @@ struct ControlHostOpenResult {
     std::string error_code;
     std::string explanation;
     friend bool operator==(const ControlHostOpenResult&, const ControlHostOpenResult&) = default;
+};
+
+struct ControlHostPreflightChallengeEnvelope {
+    std::string nonce;
+    friend bool operator==(const ControlHostPreflightChallengeEnvelope&,
+                           const ControlHostPreflightChallengeEnvelope&) = default;
+};
+
+struct ControlHostPreflightResponseEnvelope {
+    std::string nonce;
+    friend bool operator==(const ControlHostPreflightResponseEnvelope&,
+                           const ControlHostPreflightResponseEnvelope&) = default;
+};
+
+struct ControlHostPreflightBootstrapEnvelope {
+    std::string nonce;
+    std::string bootstrap_base64;
+    friend bool operator==(const ControlHostPreflightBootstrapEnvelope&,
+                           const ControlHostPreflightBootstrapEnvelope&) = default;
 };
 
 /// Broker-to-host execution request. Client and grant identities deliberately
@@ -325,7 +345,9 @@ using ControlEnvelopePayload =
                  ControlSessionOpenEnvelope, ControlSessionOpenResult, ControlArtifactReadEnvelope,
                  ControlArtifactReadResponseEnvelope, ControlHealthEnvelope, ControlHealthResult,
                  ControlErrorEnvelope, ControlHostOpenEnvelope, ControlHostOpenResult,
-                 ControlHostExecuteEnvelope, ControlHostProgressEnvelope, ControlHostCancelEnvelope,
+                 ControlHostPreflightChallengeEnvelope, ControlHostPreflightResponseEnvelope,
+                 ControlHostPreflightBootstrapEnvelope, ControlHostExecuteEnvelope,
+                 ControlHostProgressEnvelope, ControlHostCancelEnvelope,
                  ControlHostCompleteEnvelope>;
 
 struct ControlEnvelope {
@@ -359,6 +381,8 @@ enum class ControlEnvelopeDirection : std::uint8_t {
     BrokerToClient,
     HostToBroker,
     BrokerToHost,
+    HostToLauncher,
+    LauncherToHost,
 };
 
 /// Direction is transport state, not payload authority. Carriers call this

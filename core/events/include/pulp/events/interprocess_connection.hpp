@@ -52,6 +52,10 @@ public:
     bool create_server(std::string_view name, IpcTransport transport = IpcTransport::NamedPipe,
                        int timeout_ms = 0);
 
+    /// Attach to a duplicate of an already-connected OS-local socket handle.
+    /// Callbacks must be installed first. Unsupported platforms fail closed.
+    bool attach_inherited_local_socket(std::intptr_t handle);
+
     /// Disconnect and clean up.
     void disconnect();
 

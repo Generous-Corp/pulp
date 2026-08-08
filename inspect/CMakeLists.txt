@@ -76,6 +76,7 @@ add_library(pulp-inspect-control
     src/control_endpoint.cpp
     src/control_grants.cpp
     src/control_host_bootstrap.cpp
+    src/control_host_preflight.cpp
     src/control_host_connection.cpp
     src/control_host_router.cpp
     src/control_identity.cpp
@@ -95,7 +96,7 @@ target_include_directories(pulp-inspect-control
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>)
 target_link_libraries(pulp-inspect-control
-    PUBLIC pulp::inspect-protocol pulp::events)
+    PUBLIC pulp::inspect-protocol pulp::events pulp::platform)
 if(APPLE AND NOT IOS AND NOT PULP_IOS)
     target_link_libraries(pulp-inspect-control PRIVATE
         "-framework Security" "-framework CoreFoundation")

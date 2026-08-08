@@ -318,6 +318,41 @@ bool InterprocessConnection::create_server(std::string_view name, IpcTransport t
     return ok;
 }
 
+bool InterprocessConnection::attach_inherited_local_socket(std::intptr_t handle) {
+    disconnect();
+    Socket socket;
+    if (!socket.duplicate_local_handle(handle)) {
+        state_.store(IpcState::Error);
+        return false;
+    }
+    const auto connection_generation =
+        connection_generation_.fetch_add(1, std::memory_order_acq_rel) + 1;
+    write_poisoned_.store(false, std::memory_order_release);
+    impl_->transport = IpcTransport::LocalSocket;
+    impl_->socket = std::move(socket);
+    impl_->socket.set_write_timeout(
+        std::chrono::milliseconds(write_timeout_ms_.load(std::memory_order_relaxed)));
+    const auto alive = alive_.capture();
+    state_.store(IpcState::Connected);
+    connection_made();
+    if (!runtime::AliveToken::is_alive(alive) ||
+        connection_generation_.load(std::memory_order_acquire) != connection_generation ||
+        state_.load(std::memory_order_acquire) != IpcState::Connected) {
+        return true;
+    }
+    std::function<void()> connected_callback;
+    {
+        std::lock_guard lock(callback_mutex_);
+        connected_callback = on_connected;
+    }
+    if (connected_callback)
+        connected_callback();
+    if (!runtime::AliveToken::is_alive(alive))
+        return true;
+    start_read_thread(false, connection_generation);
+    return true;
+}
+
 void InterprocessConnection::disconnect() {
     disconnect_impl(false);
 }

@@ -55,6 +55,10 @@ bool is_host_control_kind(std::string_view kind);
 std::optional<ControlEnvelopePayload>
 decode_host_control_payload(std::string_view kind, ValueView payload,
                             ControlProtocolDiagnostics& diagnostics);
+bool is_host_preflight_kind(std::string_view kind);
+std::optional<ControlEnvelopePayload>
+decode_host_preflight_payload(std::string_view kind, ValueView payload,
+                              ControlProtocolDiagnostics& diagnostics);
 
 bool only_fields(ValueView value, std::initializer_list<std::string_view> allowed,
                  ControlProtocolDiagnostics& diagnostics);

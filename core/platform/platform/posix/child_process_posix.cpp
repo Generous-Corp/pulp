@@ -13,6 +13,7 @@
 #include <limits>
 #include <mutex>
 #include <thread>
+#include <utility>
 
 #include <fcntl.h>
 #include <poll.h>
@@ -96,6 +97,11 @@ struct InputChannel {
             ::close(child);
             child = -1;
         }
+    }
+    int release_parent() {
+        const auto result = parent;
+        parent = -1;
+        return result;
     }
     void close_all() {
         close_parent();
@@ -198,6 +204,24 @@ struct ChildProcess::Impl {
     ProcessResult result;
 };
 
+ChildProcessInputChannel::~ChildProcessInputChannel() {
+    if (handle_ >= 0)
+        ::close(static_cast<int>(handle_));
+}
+
+ChildProcessInputChannel::ChildProcessInputChannel(ChildProcessInputChannel&& other) noexcept
+    : handle_(std::exchange(other.handle_, -1)) {}
+
+ChildProcessInputChannel&
+ChildProcessInputChannel::operator=(ChildProcessInputChannel&& other) noexcept {
+    if (this != &other) {
+        if (handle_ >= 0)
+            ::close(static_cast<int>(handle_));
+        handle_ = std::exchange(other.handle_, -1);
+    }
+    return *this;
+}
+
 ChildProcess::ChildProcess() : impl_(std::make_unique<Impl>()) {}
 ChildProcess::~ChildProcess() {
     if (impl_ && impl_->started && !impl_->finished) {
@@ -211,29 +235,37 @@ ChildProcess& ChildProcess::operator=(ChildProcess&&) noexcept = default;
 
 bool ChildProcess::start(const std::string& command, const std::vector<std::string>& args,
                          const ProcessOptions& options) {
-    return start_impl(command, args, options, nullptr, nullptr);
+    return start_impl(command, args, options, nullptr, nullptr, nullptr);
 }
 
 bool ChildProcess::start_with_standard_input(const std::string& command,
                                              const std::vector<std::string>& args,
                                              std::span<const std::uint8_t> bytes,
                                              const ProcessOptions& options) {
-    return start_impl(command, args, options, &bytes, nullptr);
+    return start_impl(command, args, options, &bytes, nullptr, nullptr);
 }
 
 bool ChildProcess::start_with_standard_input(const std::string& command,
                                              const std::vector<std::string>& args,
                                              const StandardInputByteProvider& provider,
                                              const ProcessOptions& options) {
-    return start_impl(command, args, options, nullptr, &provider);
+    return start_impl(command, args, options, nullptr, &provider, nullptr);
+}
+
+bool ChildProcess::start_with_standard_input_channel(
+    const std::string& command, const std::vector<std::string>& args,
+    const StandardInputChannelSession& session, const ProcessOptions& options) {
+    return start_impl(command, args, options, nullptr, nullptr, &session);
 }
 
 bool ChildProcess::start_impl(const std::string& command, const std::vector<std::string>& args,
                               const ProcessOptions& options,
                               const std::span<const std::uint8_t>* standard_input,
-                              const StandardInputByteProvider* standard_input_provider) {
+                              const StandardInputByteProvider* standard_input_provider,
+                              const StandardInputChannelSession* standard_input_session) {
     std::unique_lock<std::recursive_mutex> lock(impl_->mutex);
-    const bool has_standard_input = standard_input || standard_input_provider;
+    const bool has_standard_input = standard_input || standard_input_provider ||
+                                    standard_input_session;
     if (impl_->started && !impl_->finished) {
         if (is_running())
             cancel();
@@ -431,7 +463,26 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
                           std::chrono::milliseconds(options.standard_input_timeout_ms);
     SensitiveInputBytes provided_input;
     std::span<const std::uint8_t> input_bytes;
-    if (standard_input_provider) {
+    if (standard_input_session) {
+        auto channel = ChildProcessInputChannel(impl_->standard_input.release_parent());
+        bool completed = false;
+        lock.unlock();
+        try {
+            completed = (*standard_input_session)(static_cast<int>(spawned_pid),
+                                                  std::move(channel));
+        } catch (...) {
+            completed = false;
+        }
+        lock.lock();
+        if (impl_->pid != spawned_pid || !impl_->started || impl_->finished)
+            return false;
+        if (!completed || std::chrono::steady_clock::now() >= deadline) {
+            cancel();
+            (void)wait();
+            return false;
+        }
+        return true;
+    } else if (standard_input_provider) {
         bool provided = false;
         lock.unlock();
         try {

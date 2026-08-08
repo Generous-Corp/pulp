@@ -7,6 +7,7 @@
 #include <future>
 #include <mutex>
 #include <thread>
+#include <utility>
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -168,6 +169,18 @@ struct ChildProcess::Impl {
     ProcessResult result;
 };
 
+ChildProcessInputChannel::~ChildProcessInputChannel() = default;
+
+ChildProcessInputChannel::ChildProcessInputChannel(ChildProcessInputChannel&& other) noexcept
+    : handle_(std::exchange(other.handle_, -1)) {}
+
+ChildProcessInputChannel&
+ChildProcessInputChannel::operator=(ChildProcessInputChannel&& other) noexcept {
+    if (this != &other)
+        handle_ = std::exchange(other.handle_, -1);
+    return *this;
+}
+
 ChildProcess::ChildProcess() : impl_(std::make_unique<Impl>()) {}
 ChildProcess::~ChildProcess() {
     if (impl_ && impl_->started && !impl_->finished) {
@@ -181,27 +194,36 @@ ChildProcess& ChildProcess::operator=(ChildProcess&&) noexcept = default;
 
 bool ChildProcess::start(const std::string& command, const std::vector<std::string>& args,
                          const ProcessOptions& options) {
-    return start_impl(command, args, options, nullptr, nullptr);
+    return start_impl(command, args, options, nullptr, nullptr, nullptr);
 }
 
 bool ChildProcess::start_with_standard_input(const std::string& command,
                                              const std::vector<std::string>& args,
                                              std::span<const std::uint8_t> bytes,
                                              const ProcessOptions& options) {
-    return start_impl(command, args, options, &bytes, nullptr);
+    return start_impl(command, args, options, &bytes, nullptr, nullptr);
 }
 
 bool ChildProcess::start_with_standard_input(const std::string& command,
                                              const std::vector<std::string>& args,
                                              const StandardInputByteProvider& provider,
                                              const ProcessOptions& options) {
-    return start_impl(command, args, options, nullptr, &provider);
+    return start_impl(command, args, options, nullptr, &provider, nullptr);
+}
+
+bool ChildProcess::start_with_standard_input_channel(
+    const std::string&, const std::vector<std::string>&,
+    const StandardInputChannelSession&, const ProcessOptions&) {
+    return false;
 }
 
 bool ChildProcess::start_impl(const std::string& command, const std::vector<std::string>& args,
                               const ProcessOptions& options,
                               const std::span<const std::uint8_t>* standard_input,
-                              const StandardInputByteProvider* standard_input_provider) {
+                              const StandardInputByteProvider* standard_input_provider,
+                              const StandardInputChannelSession* standard_input_session) {
+    if (standard_input_session)
+        return false;
     std::unique_lock<std::recursive_mutex> lock(impl_->mutex);
     const bool has_standard_input = standard_input || standard_input_provider;
     if (impl_->started && !impl_->finished) {

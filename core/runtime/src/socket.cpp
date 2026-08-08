@@ -529,6 +529,39 @@ std::optional<LocalPeerCredentials> Socket::local_peer_credentials() const {
 #endif
 }
 
+bool Socket::duplicate_local_handle(std::intptr_t handle) {
+#ifdef _WIN32
+    (void)handle;
+    return false;
+#else
+    if (handle < 0 || handle > std::numeric_limits<int>::max())
+        return false;
+    const auto source = static_cast<int>(handle);
+    sockaddr_storage local{};
+    sockaddr_storage peer{};
+    socklen_t local_size = sizeof(local);
+    socklen_t peer_size = sizeof(peer);
+    if (::getsockname(source, reinterpret_cast<sockaddr*>(&local), &local_size) != 0 ||
+        ::getpeername(source, reinterpret_cast<sockaddr*>(&peer), &peer_size) != 0 ||
+        local.ss_family != AF_UNIX || peer.ss_family != AF_UNIX) {
+        return false;
+    }
+    const auto duplicate = ::fcntl(source, F_DUPFD_CLOEXEC, 3);
+    if (duplicate < 0)
+        return false;
+    const auto status_flags = ::fcntl(duplicate, F_GETFL);
+    if (status_flags < 0 ||
+        ::fcntl(duplicate, F_SETFL, status_flags & ~O_NONBLOCK) != 0) {
+        ::close(duplicate);
+        return false;
+    }
+    close();
+    fd_ = duplicate;
+    type_ = SocketType::Local;
+    return true;
+#endif
+}
+
 bool Socket::set_write_timeout(std::chrono::milliseconds timeout) {
     if (fd_ == kInvalidSocketHandle) return false;
     const auto bounded = std::max(timeout, std::chrono::milliseconds(0));

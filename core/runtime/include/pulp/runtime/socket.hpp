@@ -61,6 +61,10 @@ public:
     /// transports and platforms return std::nullopt.
     std::optional<LocalPeerCredentials> local_peer_credentials() const;
 
+    /// Duplicate an already-connected OS-local stream handle and own the
+    /// duplicate. The supplied handle remains owned by its caller.
+    bool duplicate_local_handle(std::intptr_t handle);
+
     /// Send data. Returns bytes sent, or -1 on error.
     int send(const uint8_t* data, size_t length);
     int send(std::string_view data);
