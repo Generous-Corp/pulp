@@ -29,7 +29,12 @@
 #include <pulp/signal/ballistics_filter.hpp>
 #include <pulp/signal/log_ramped_value.hpp>
 #include <pulp/signal/matrix.hpp>
+#include <pulp/signal/audio_matrix_mixer.hpp>
+#include <pulp/signal/mid_side.hpp>
 #include <pulp/signal/modal_bank.hpp>
+#include <pulp/signal/nway_crossfade.hpp>
+#include <pulp/signal/path_latency_aligner.hpp>
+#include <pulp/signal/path_switcher.hpp>
 #include <pulp/signal/square_osc_bank.hpp>
 #include <pulp/signal/processor_chain.hpp>
 #include <pulp/signal/processor_duplicator.hpp>

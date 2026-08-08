@@ -26,6 +26,8 @@
 //   * Gate — signal below threshold is attenuated to near-silence, above
 //                threshold passes, and the hold time keeps it open after the
 //                key drops below threshold.
+//   * Width — unequal stereo input proves the L/R ports and live width parameter
+//                produce mono, unity, and doubled-side output as declared.
 //
 // Plus one RT-allocation probe over every node's process path, and a boundedness
 // check proving the dynamics nodes never expand (so the Forge output guard stays
@@ -959,7 +961,38 @@ TEST_CASE("Forge lo-fi: dynamics nodes keep output finite and bounded at extreme
     }
 }
 
-// ── RT safety: every node's inject + process path is allocation-free ─────
+// ── Width: stereo ports and the live amount parameter reach shared M/S math ─
+TEST_CASE("Forge lo-fi: width parameter controls the baked stereo image",
+          "[host][baked][param-injection][forge][forge-lofi][width]") {
+    BakedFixture fx(lofi::make_width_node(), /*input_channels=*/2,
+                    /*out_channels=*/2);
+    ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+    REQUIRE(inj.valid());
+
+    const std::vector<float> left(kFrames, 0.8f);
+    const std::vector<float> right(kFrames, -0.2f);
+    const std::vector<std::vector<float>> stereo{left, right};
+
+    auto render_width = [&](float width) {
+        REQUIRE(inj.inject(immediate(lofi::kWidthAmount, width)) == InjectStatus::Ok);
+        return run_block_multi(*fx.result.processor, stereo, /*out_channels=*/2);
+    };
+
+    const auto mono = render_width(0.0f);
+    const auto unity = render_width(1.0f);
+    const auto wide = render_width(2.0f);
+    for (int frame = 0; frame < kFrames; ++frame) {
+        const auto i = static_cast<std::size_t>(frame);
+        CHECK(mono[0][i] == Catch::Approx(0.3f).margin(2.0e-7f));
+        CHECK(mono[1][i] == Catch::Approx(0.3f).margin(2.0e-7f));
+        CHECK(unity[0][i] == Catch::Approx(0.8f).margin(2.0e-7f));
+        CHECK(unity[1][i] == Catch::Approx(-0.2f).margin(2.0e-7f));
+        CHECK(wide[0][i] == Catch::Approx(1.3f).margin(3.0e-7f));
+        CHECK(wide[1][i] == Catch::Approx(-0.7f).margin(3.0e-7f));
+    }
+}
+
+// ── RT safety: every node's inject + process path is allocation-free ────
 TEST_CASE("Forge lo-fi: inject + process is allocation-free for every catalog node",
           "[host][baked][param-injection][forge][forge-lofi][rt]") {
     struct Case {
