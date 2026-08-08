@@ -525,7 +525,7 @@ The `pulp` CLI wraps common development workflows.
 | `pulp run` (launch standalone binary) | usable | [cli](cli.md) |
 | `pulp upgrade` (self-update) | usable | [cli](cli.md) |
 | `pulp doctor` (check system dependencies) | usable | [cli](cli.md) |
-| `pulp inspect` (low-level client; no normal runtime endpoint yet) | experimental | [cli](cli.md) |
+| `pulp inspect` (static profiles + offline artifact audit) | experimental | [cli](cli.md) |
 | `pulp audit` (dependency license check) | usable | [cli](cli.md) |
 | `pulp add` (add dependency) | usable | [cli](cli.md) |
 | `pulp cache` (build cache management) | usable | [cli](cli.md) |

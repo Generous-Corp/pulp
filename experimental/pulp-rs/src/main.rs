@@ -152,8 +152,10 @@ enum Command {
     /// `run`, `doctor`). Archive installation delegates to `pulp-cpp`.
     Tool(PkgTailArgs),
 
-    /// Canonical trace lifecycle control plus offline Perfetto query, fetch,
-    /// doctor, and open utilities.
+    /// Canonical capability-control start/stop plus offline Perfetto query,
+    /// fetch, doctor, and open. Legacy live query/snapshot/explain and raw
+    /// Inspector discovery are rejected. Pairs with `/trace` and the
+    /// canonical `pulp_trace_start` / `pulp_trace_stop` MCP tools.
     #[command(name = "trace")]
     Trace(PkgTailArgs),
 

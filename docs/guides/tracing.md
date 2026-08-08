@@ -251,6 +251,7 @@ A representative L1 answer:
 
 ```bash
 pulp trace start --categories render,layout,canvas,text,js,gpu
+# Motion correlation currently requires an in-process fixture capture.
 # ... sweep the knob ...
 pulp trace stop
 # Run the trace-sql frame/layout queries against the printed file:

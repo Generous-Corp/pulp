@@ -25,15 +25,11 @@ pulp_add_plugin(MyDeveloperEdition
         dev.pulp.telemetry/subscribe@1)
 ```
 
-This declaration links the inspector-capable standalone component and embeds a
-retained capability marker plus `<target>.inspector-capabilities.json`. It does
-not activate the endpoint: the product still owns runtime profile selection,
-and the default remains off. Once activated, the manifest is the maximum runtime
-grant set. The effective grants are its intersection with the selected runtime
-profile, so neither a broader profile nor a broader manifest widens the other.
-The exported inspector-capable archive is an implementation detail of this
-helper: linking it directly cannot produce a runnable endpoint because the
-generated product declaration supplies a required link symbol.
+This declaration emits a retained capability marker plus
+`<target>.inspector-capabilities.json`. It does not link or activate a live
+standalone endpoint. The legacy server, raw client, discovery publisher, and
+standalone session owner were deleted in Phase 3; the manifest remains an upper
+bound for the canonical replacement, not evidence of current reachability.
 
 Control declarations are re-read as configure-time truth on every CMake run.
 Changing a target from `research-unsafe` to a narrower profile, removing
@@ -45,9 +41,8 @@ cannot preserve a removed capability.
 Available profiles are `production-stripped`, `developer-local`,
 `test-deterministic`, `support-diagnostics`, and `research-unsafe`.
 `support-diagnostics` accepts only instance, state, diagnostics, and log reads.
-Control capabilities require `dev.pulp.session/control@1`. Endpoints are
-currently supported only for `Standalone`; ordinary plugin-format targets stay
-stripped.
+Control capabilities require `dev.pulp.session/control@1`. No product endpoint
+is currently composed; ordinary plugin-format targets stay stripped.
 
 `dev.pulp.runtime/evaluate@1` is arbitrary execution in the product process.
 No profile or acknowledgement implies it. A target that truly needs it must use
@@ -138,8 +133,12 @@ cannot produce identity-bound consent. Every block includes a stable
 `manifest.*` or `audit.*` `errorCode` in JSON.
 The report includes both `artifactDigest` and the derived `consentIdentity`, so
 code changes cannot retain consent merely by reusing a build-tree manifest.
-The command is deliberately included in Inspector-disabled production SDKs;
-only live-session commands depend on the optional Inspector client.
+The command is deliberately included in Inspector-disabled production SDKs.
+
+This intentional temporary capability reduction keeps shipping evidence useful
+while Phases 4–7 finish the canonical trusted launcher and host adapters,
+broker-routed typed execution, client migration, and final release
+negative-controls. None of that work may restore the deleted legacy authority.
 
 The frozen operation schemas are closed and bounded. Required input and output
 resource, receipt, lease, stream, plugin, build, node, and idempotency

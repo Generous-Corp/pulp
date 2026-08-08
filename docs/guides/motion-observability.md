@@ -2,9 +2,8 @@
 
 Pulp Motion is the framework's agent-first motion observability system. It
 turns "this animation feels wrong" into measurable, machine-readable evidence:
-a time-ordered stream of geometry and value samples that an agent can read
-from a fixture or stream over the inspector wire — instead of guessing from
-source.
+a time-ordered stream of geometry and value samples that a test can read from
+an in-process fixture instead of guessing from source.
 
 Trigger phrases an agent should reach for:
 
@@ -15,18 +14,16 @@ Trigger phrases an agent should reach for:
 - "frames look fine but the rendered effect is off"
 
 Mechanics: `Start` / `End` burst framing, monotonic timestamps, deterministic
-capture on a scripted `FrameClock`, runtime-attachable over the inspector
-wire, and a Python visual-analysis pipeline for pixel-truth fallback when no
-scalar is observable.
+capture on a scripted `FrameClock`, and a Python visual-analysis pipeline for
+pixel-truth fallback when no scalar is observable.
 
 The system is off by default — there is zero overhead when tracing is disabled.
 
-> **Current runtime status:** the coordinator, fixtures, protocol domain, CLI,
-> and MCP wrappers exist, but no normal Pulp standalone or preview application
-> constructs the inspector server. `PULP_MOTION_SERVER` is not implemented.
-> Use fixture/test integration today. The live-wire commands below describe the
-> reserved experimental client surface and fail unless a custom host explicitly
-> constructs and wires `InspectorServer` plus `DomainHandler`.
+> **Current runtime status:** the coordinator, fixtures, and protocol-domain
+> components remain, but the shipped Motion CLI/MCP wrappers and legacy remote
+> authority were removed. Use in-process fixture/test integration today. Remote
+> Motion control is intentionally unavailable until a typed canonical
+> capability-control adapter lands.
 
 ## End-to-end flow
 
@@ -59,9 +56,6 @@ from an explicitly owned test host. On macOS and the iOS Simulator,
 Use an explicitly owned fixture host to land your first trace.
 
 ```bash
-# Normal standalone/preview hosts do not start this endpoint.
-# A custom fixture must explicitly construct and wire InspectorServer.
-
 # Record through the in-process motion fixture API and make_fixture_sink().
 ```
 
@@ -279,15 +273,11 @@ Coordinator::instance().add_sink([](const SampleEvent& e) {
 });
 ```
 
-## Runtime attach via the inspector
+## Retained protocol components
 
-The `Motion.*` domain implements the protocol-side operations, but the
-standalone preview app does not construct its server. The following is reserved
-custom-host wiring, not a working preview command:
-
-```bash
-# No PULP_MOTION_SERVER implementation exists in pulp-ui-preview.
-```
+The `Motion.*` domain definitions remain as implementation components, but no
+public client or product host currently routes to them. The table records the
+typed contract for the canonical replacement; it is not a callable wire API.
 
 Protocol requests:
 
@@ -297,7 +287,7 @@ Protocol requests:
 | `Motion.stopTrace` | `{trace_id}` | `{removed}` |
 | `Motion.snapshot` | `{}` | `{tracing_enabled, firehose, active_traces, inspector_traces, emitted_events}` |
 | `Motion.listTraces` | `{}` | `{trace_ids:[…]}` |
-| `Motion.loadFixture` | `{path}` | Unavailable over authenticated inspector sessions because server-side filesystem paths are outside inspector authority |
+| `Motion.loadFixture` | `{path}` | Unavailable remotely; trusted test code loads fixtures in process |
 | `Motion.scrubTo` | `{frame}` | `{playhead_frame, emitted_count}` (broadcasts Motion.start/.sample/.end with `"replay":true`) |
 | `Motion.play` | `{}` | `{playing, emitted_count, playhead_frame}` |
 | `Motion.pause` | `{}` | `{playing:false, playhead_frame}` |
@@ -309,10 +299,9 @@ scroll properties are unique members of the fourteen-property enum. Unknown
 fields, invalid property names, geometry spaces or sources, and malformed
 arrays fail with `invalid_params` without leaving a trace behind.
 
-The server broadcasts `Motion.start`, `Motion.sample`, and `Motion.end` events
-to all connected clients as samples are emitted. Subscribing clients receive a
-clean stream for the trace they registered — concurrent unrelated animations
-do not bleed into the stream unless the firehose is on (see below).
+In-process sinks receive `Motion.start`, `Motion.sample`, and `Motion.end`
+events as samples are emitted. Concurrent unrelated animations do not enter a
+focused sink unless the in-process firehose is enabled.
 
 An explicitly owned test host loads `.motion.jsonl` fixtures in-process before
 the remotely grantable timeline scrubber methods (`Motion.scrubTo` /
@@ -328,7 +317,6 @@ and CI artifact triage (live overlay drawing is a future phase).
 | Variable | Effect |
 |---|---|
 | `PULP_MOTION_LOG=1` | Install the default log sink and enable tracing |
-| `PULP_MOTION_SERVER=1` | Reserved by older documentation; currently does not start a server |
 | `PULP_MOTION_FIREHOSE=1` | Enable the publish firehose so every `publish_value`/`publish_components` call broadcasts to all sinks |
 
 ## The publish channel
@@ -695,13 +683,6 @@ helper. It only starts saving frames once real motion appears, so a short
 pre-roll doesn't pollute the analysis window:
 
 ```bash
-# Running Pulp standalone (works from SSH; no Screen Recording grant)
-python3 tools/motion/visual/capture_sim_frames.py \
-    --source inspector \
-    --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID \
-    --output-dir ./captures/card-open/ \
-    --fps 30 --frame-count 60
-
 # macOS window region (requires --bounds X,Y,W,H)
 python3 tools/motion/visual/capture_sim_frames.py \
     --source macos --bounds 0,0,800,600 \

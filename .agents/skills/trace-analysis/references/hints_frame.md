@@ -85,8 +85,8 @@ When a motion trace is active during capture, `frame` spans carry the motion
 is on the hook for — so a motion `CostSample` ("frame 412 = 9 ms,
 trace_id=knob-sweep") leads straight to that frame's flamegraph. This is the
 unique Pulp correlation: motion says *what moved*, tracing says *where the ms
-went*. Capture both (`pulp trace start ...` + `pulp motion record ...`) when the
-complaint is "it hitches when I do X".
+went*. The shipped Motion recorder is retired; correlate motion only when the
+test host has captured the matching in-process fixture evidence.
 
 ## Startup is a frame-pipeline story too
 

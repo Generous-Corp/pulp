@@ -1,26 +1,25 @@
 ---
 name: inspect
-description: Audit inspector artifacts and read explicitly activated session metadata
+description: Read static inspector profiles and audit inspector artifacts offline
 ---
 
 Use the installed `pulp` command. It delegates to the installed `pulp-cpp`
 sibling; do not rely on a source-tree build path.
 
-Run the read-only evidence loop:
+The Phase 3 surface is intentionally small:
 
 ```bash
-pulp inspect audit PATH --json
-pulp inspect doctor --json
 pulp inspect profiles --json
-pulp inspect list --json
-pulp inspect capabilities --json \
-  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+pulp inspect audit PATH --json
 ```
 
-Keep all three identities from one `list` record together. A changed or missing
-publication requires rediscovery. Report the selected profile and effective
-capabilities without inferring authority from the profile name.
+`profiles` reads the compiled capability registry. `audit` reads an artifact and
+its canonical manifest without loading, executing, connecting to, or activating
+the artifact.
 
-The shipped command deliberately exposes no generic method, mutation,
-screenshot, host, or port route. Use the canonical broker/control platform for
-authorized live operations; do not recreate a raw inspector fallback.
+The shipped command exposes no discovery, live capability query, generic
+method, mutation, screenshot, host, port, or publication-selector route. This
+temporary capability reduction is intentional while Phases 4–7 replace the
+deleted legacy authority with the canonical broker, trusted launcher/host
+adapters, execution routing, and shipping evidence. Do not recreate a raw
+Inspector fallback.
