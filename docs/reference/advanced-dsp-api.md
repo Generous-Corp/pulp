@@ -33,6 +33,34 @@ their declared enumerators. Unless called out as a topology operation, controls
 may be changed between blocks and are consumed without allocation on the next
 processing call.
 
+## Output correctness
+
+### `DitherNoiseShaperT<SampleType>`
+
+`<pulp/signal/dither_noise_shaper.hpp>` provides a reusable signed-normalised
+PCM output quantiser. `set_bit_depth(int)` clamps to `[2,24]`; the code step is
+`2^(1-bits)`, the representable range is `[-1, 1-step]`, and exact halfway
+cases round away from zero before saturation. `DitherMode::tpdf` adds the
+difference of two independent uniform draws at one-LSB scale;
+`DitherMode::none` is the exact undithered path. First- and second-order modes
+use bounded error feedback with `(1-z^-1)` and `(1-z^-1)^2` quantisation-noise
+transfer functions. Clipping and non-finite input clear that history so an
+overload cannot create a persistent shaping transient.
+
+Dither is a pure function of the configured 64-bit seed plus the caller's
+`frame_coordinate` and `lane`. Continuing those coordinates makes output
+bit-identical across block partitions; each sequential channel still needs its
+own shaper instance. `reset()` clears error feedback while preserving controls
+and seed. All controls, reset, scalar processing, and block processing are
+allocation-, lock-, and I/O-free. The block form supports in-place operation.
+This primitive does not change `LofiChainT` or any existing effect unless a
+caller explicitly adopts it.
+
+- Lifecycle: `reset()`.
+- Controls: `set_bit_depth()`, `set_dither_mode()`, `set_noise_shaping_order()`, `set_seed()`.
+- Processing: `process(input, frame_coordinate, lane)`, `process_block(input, output, frames, first_frame_coordinate, lane)`, static `quantize(input, bits)`.
+- Inspection: `bit_depth()`, `step()`, `minimum_code()`, `maximum_code()`, `dither_mode()`, `noise_shaping_order()`, `seed()`, `error_state_1()`, `error_state_2()`, `tpdf_lsb()`.
+
 ## Filters and crossovers
 
 ### `LinkwitzRileyCrossoverT<SampleType, MaxBands>`

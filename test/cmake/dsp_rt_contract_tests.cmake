@@ -121,6 +121,11 @@ pulp_add_test_suite(pulp-test-lofi-chain
     LIBRARIES pulp::signal
     TIMEOUT 300)
 
+pulp_add_test_suite(pulp-test-dither-noise-shaper
+    SOURCES test_dither_noise_shaper.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
 pulp_add_test_suite(pulp-test-lowpass-gate
     SOURCES test_lowpass_gate.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
