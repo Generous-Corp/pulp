@@ -5095,6 +5095,43 @@ TEST_CASE("VST3 noteId-map overflow bumps the drop counter without allocating",
     REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
 }
 
+TEST_CASE("VST3 source MIDI overflow resets MPE and clears noteId routing",
+          "[vst3][midi][noteexpression][mpe][realtime]") {
+    namespace V = Steinberg::Vst;
+    NoteExpressionSetup s;
+
+    constexpr int kMidiCapacity = 2048;
+    Steinberg::Vst::EventList overflowing(kMidiCapacity + 1);
+    for (int i = 0; i < kMidiCapacity; ++i) {
+        auto filler = make_note_on(/*channel=*/0, /*pitch=*/60, 0.7f,
+                                   /*note_id=*/-1, /*offset=*/0);
+        REQUIRE(overflowing.addEvent(filler) == Steinberg::kResultOk);
+    }
+    auto dropped_attack = make_note_on(/*channel=*/1, /*pitch=*/61, 0.8f,
+                                       /*note_id=*/999, /*offset=*/0);
+    REQUIRE(overflowing.addEvent(dropped_attack) == Steinberg::kResultOk);
+
+    s.run(&overflowing);
+    REQUIRE(s.test_processor->last_context.reset_requested);
+    REQUIRE(s.test_processor->last_midi_in_size == 0);
+    REQUIRE(s.test_processor->mpe_input_attached);
+    REQUIRE(s.test_processor->mpe_event_count == 0);
+
+    const auto drops_before_expression =
+        s.processor.note_expression_drop_count();
+    Steinberg::Vst::EventList expression_block(1);
+    auto stale_expression = make_note_expr(
+        V::kTuningTypeID, /*note_id=*/999, 0.7, /*offset=*/0);
+    REQUIRE(expression_block.addEvent(stale_expression) == Steinberg::kResultOk);
+    s.run(&expression_block);
+    REQUIRE(s.processor.note_expression_drop_count() ==
+            drops_before_expression + 1);
+    REQUIRE(find_mpe(s.test_processor->last_mpe_events,
+                     pulp::midi::MpeExpressionEvent::Kind::PitchBend) == nullptr);
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
 TEST_CASE("VST3 expression for an unmapped noteId bumps the drop counter",
           "[vst3][midi][noteexpression][mpe][process]") {
     namespace V = Steinberg::Vst;

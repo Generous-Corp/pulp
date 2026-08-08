@@ -2247,6 +2247,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     if (!mpe_.run(*processor_, midi_in_)) {
         midi_in_.clear();
         midi_in_.clear_sysex();
+        note_id_map_clear();
         ctx.reset_requested = true;
     }
 
