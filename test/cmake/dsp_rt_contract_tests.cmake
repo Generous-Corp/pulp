@@ -239,3 +239,8 @@ pulp_add_test_suite(pulp-test-signal-fuzz-pair
     SOURCES test_signal_fuzz_pair.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
     TIMEOUT 900)
+# NLMS adaptive FIR: convergence, independent reference alignment, and the
+# prepared audio-thread allocation contract live with the RT-owner suites.
+pulp_add_test_suite(pulp-test-nlms-adaptive-filter
+    SOURCES test_nlms_adaptive_filter.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
