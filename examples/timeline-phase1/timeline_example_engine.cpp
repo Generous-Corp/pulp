@@ -197,6 +197,7 @@ struct TimelineExampleEngine::Impl {
         if (!live)
             return false;
         request.tempo_map = live->tempo_map_owner();
+        request.sample_rate = request.tempo_map->sample_rate();
         request.dirty.all = true;
         if (!compiler.submit(std::move(request)) || compiler.status().has_error)
             return false;

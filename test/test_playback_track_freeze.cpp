@@ -90,6 +90,7 @@ TEST_CASE("Frozen track playback selects one rendered artifact and hides authore
     request.project = project;
     request.sequence_id = {2};
     request.tempo_map = tempo;
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty.all = true;
     request.audio_assets = decoded;
@@ -153,6 +154,7 @@ TEST_CASE("Frozen track playback selects one rendered artifact and hides authore
         ProjectInput{{1}, "project", 31, {2}, std::move(thawed_assets), {thawed_sequence}})));
     thaw.sequence_id = {2};
     thaw.tempo_map = tempo;
+    thaw.sample_rate = thaw.tempo_map->sample_rate();
     thaw.document_revision = 2;
     thaw.dirty.tracks = {{10}};
     thaw.audio_assets = decoded;
@@ -191,6 +193,7 @@ TEST_CASE("Frozen track playback rejects an undecoded artifact before publicatio
     request.project = project;
     request.sequence_id = {2};
     request.tempo_map = tempo;
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty.all = true;
     request.audio_assets = decoded;
@@ -231,6 +234,7 @@ TEST_CASE("Frozen track playback accounts for capacity and rejects coordinate ov
     request.project = project;
     request.sequence_id = {2};
     request.tempo_map = tempo;
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty.all = true;
     request.audio_assets = decoded;

@@ -150,6 +150,7 @@ PlaybackTrace play_imported_project(std::shared_ptr<const Project> project,
     request.project = project;
     request.sequence_id = project->root_sequence_id();
     request.tempo_map = tempo_map;
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty.all = true;
     request.audio_assets = std::move(assets);

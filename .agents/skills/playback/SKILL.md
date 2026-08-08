@@ -9,7 +9,12 @@ Playback has two independent public surfaces: `MasterTransport` for the block
 clock, and immutable compiled playback programs. Build a
 `ProgramCompileRequest` from one captured immutable Project snapshot, an
 external monotonically increasing document revision, a shared precompiled tempo
-map, and an explicit `DirtyTrackSet`. Drive it with
+map, an explicit sample rate, and an explicit `DirtyTrackSet`. The request rate
+is invalid by default; set `ProgramCompileRequest::sample_rate` from the engine
+configuration and compile the tempo map at that same exact `RationalRate`.
+Submission normalizes both and fails synchronously if the request rate is
+invalid, above the compiled-rate ceiling, or differs from the map, preventing
+one program from mixing sample domains. Drive it with
 `DeferredCompileExecutor::run_for()` on threadless/UI hosts or use
 `WorkerCompileExecutor` on native threaded hosts. The compiler is the sole
 publisher to its `PlaybackProgramStore`.

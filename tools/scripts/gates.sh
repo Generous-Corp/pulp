@@ -22,6 +22,7 @@
 #     attribution text against the license files actually on disk)
 #   - deps-audit self-tests (tools/deps/test_audit.py — the coverage lane runs
 #     them behind continue-on-error, so nothing enforced them)
+#   - worktree-lineage self-tests (continuity metadata cannot silently rot)
 #   - codecov-config (codecov.yml flags/components mirror the live core/* tree
 #     with no double-counts, and its ignore list mirrors diff_cover_excludes)
 #   - framework-neutrality (Pulp's own source names no other framework, and
@@ -327,6 +328,18 @@ if [ -f "$ROOT/tools/scripts/test_setup_source_cache.sh" ]; then
         fail=1
     else
         echo "  setup.sh source-cache tests: ok" >&2
+    fi
+fi
+
+# ── 7a-ter. worktree-lineage tests ─────────────────────────────────────────
+if [ -f "$ROOT/tools/scripts/test_worktree_lineage.sh" ]; then
+    echo "" >&2
+    echo "▸ worktree-lineage tests" >&2
+    if ! bash "$ROOT/tools/scripts/test_worktree_lineage.sh" >/dev/null 2>&1; then
+        echo "  worktree-lineage tests: failing — run \`bash tools/scripts/test_worktree_lineage.sh\` for details." >&2
+        fail=1
+    else
+        echo "  worktree-lineage tests: ok" >&2
     fi
 fi
 

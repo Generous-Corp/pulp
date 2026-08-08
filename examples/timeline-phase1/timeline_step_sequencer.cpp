@@ -339,6 +339,7 @@ bool TimelineStepSequencerProcessor::compile_pattern(const state::Snapshot& snap
     request.project = std::move(project);
     request.sequence_id = {3};
     request.tempo_map = std::move(map);
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = snapshot.engine_sequence + 1;
     request.audio_assets = std::move(assets).value();
     request.audio_limits.max_channels = 2;
