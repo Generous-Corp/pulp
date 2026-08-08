@@ -236,6 +236,14 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
             'selected["inspector_sdk_floor"] = authoritative["inspector_sdk_floor"]',
             self.text,
         )
+        self.assertIn(
+            'selected["control_broker_floor"] = authoritative["control_broker_floor"]',
+            self.text,
+        )
+        self.assertIn(
+            'PULP_CONTROL_BROKER_FLOOR=$control_broker_floor',
+            self.text,
+        )
         for step_name in (
             "Configure (CLI, no WebView on Linux)",
             "Prepare SDK build dir (Linux)",
@@ -502,6 +510,16 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         self.assertRegex(
             dry_run,
             r"--import-design-runtime-dir\s+build/tools/import-design/browser_capture-v1")
+
+    def test_dry_run_packages_and_verifies_control_broker(self) -> None:
+        dry_run = RELEASE_DRY_RUN.read_text(encoding="utf-8")
+        self.assertRegex(
+            dry_run,
+            r"--control-broker-binary\s+build/inspect/pulp-control-broker",
+        )
+        self.assertIn('test -x "$BROKER"', dry_run)
+        self.assertIn('lipo -archs "$BROKER"', dry_run)
+        self.assertIn('codesign --verify --strict "$BROKER"', dry_run)
 
     def test_unix_preswap_backfills_alias_cpp_cli_to_primary_binary(self) -> None:
         run_block = self._find_step_run("Normalize CLI binary layout (Unix)")
@@ -923,6 +941,11 @@ class SingleOwnerReleasePublication(unittest.TestCase):
         self.assertIn(
             'selected["inspector_sdk_floor"] = '
             'authoritative["inspector_sdk_floor"]',
+            run_block,
+        )
+        self.assertIn(
+            'selected["control_broker_floor"] = '
+            'authoritative["control_broker_floor"]',
             run_block,
         )
         self.assertIn('--matrix "$publication_matrix"', run_block)

@@ -547,8 +547,10 @@ jobs:
           selected = json.loads(selected_path.read_text(encoding="utf-8"))
           authoritative = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
           selected["inspector_sdk_floor"] = authoritative["inspector_sdk_floor"]
+          selected["control_broker_floor"] = authoritative["control_broker_floor"]
           selected_path.write_text(json.dumps(selected, indent=2) + "\n", encoding="utf-8")
           PY
+            release_contract_matrix="$compat_dir/release_product_matrix.json"
             echo "PULP_RELEASE_CONTENT_VERIFIER=$compat_dir/release_artifact_contents.py" \
               >> "$GITHUB_ENV"
             echo "PULP_SDK_PROVENANCE_HELPER=$compat_dir/sdk_provenance.py" \
@@ -558,6 +560,7 @@ jobs:
             echo "PULP_SDK_PROVENANCE_CMAKE=$compat_dir/PulpSdkProvenance.cmake" \
               >> "$GITHUB_ENV"
           else
+            release_contract_matrix="tools/scripts/release_product_matrix.json"
             echo "PULP_RELEASE_CONTENT_VERIFIER=tools/scripts/release_artifact_contents.py" \
               >> "$GITHUB_ENV"
             echo "PULP_SDK_PROVENANCE_HELPER=tools/scripts/sdk_provenance.py" \
@@ -567,6 +570,15 @@ jobs:
             echo "PULP_SDK_PROVENANCE_CMAKE=tools/cmake/PulpSdkProvenance.cmake" \
               >> "$GITHUB_ENV"
           fi
+          control_broker_floor="$(python3 - "$release_contract_matrix" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              print(json.load(handle)["control_broker_floor"])
+          PY
+          )"
+          echo "PULP_CONTROL_BROKER_FLOOR=$control_broker_floor" >> "$GITHUB_ENV"
 
       # The Intel leg cross-compiles on an Apple-Silicon runner, whose
       # bootstrap (setup.sh --ci) prefetched the darwin-ARM64 Skia and flattened
@@ -781,6 +793,8 @@ jobs:
         if: runner.os != 'Windows'
         # Container jobs default to POSIX sh, but this step uses Bash arrays.
         shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
         # Linux: GNU strip works directly. macOS (Apple Silicon): binaries are
         # ad-hoc code-signed at link time, and `strip` invalidates that
         # signature — on the self-hosted Macs that surfaces as a hard `strip`
@@ -791,6 +805,10 @@ jobs:
         # MCP launcher can resolve it on $PATH after install.
         run: |
           release_bins=(build/pulp build/tools/cli/pulp-cpp build/tools/mcp/pulp-mcp)
+          if [ "${RUNNER_OS}" = "macOS" ] \
+              && python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "$PULP_CONTROL_BROKER_FLOOR"; then
+            release_bins+=(build/inspect/pulp-control-broker)
+          fi
           if [ -f build/tools/import-design/pulp-import-design ]; then
             release_bins+=(build/tools/import-design/pulp-import-design)
           fi
@@ -834,8 +852,12 @@ jobs:
       # the plugin itself ships no binaries, it relies on the CLI install.
       - name: Package CLI (Unix)
         if: runner.os != 'Windows'
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+          MATRIX_PLATFORM: ${{ matrix.platform }}
         run: |
           import_design_args=()
+          control_broker_args=()
           if [ -x build/tools/import-design/pulp-import-design ] \
               && [ -d build/tools/import-design/browser_capture-v1 ]; then
             import_design_args=(
@@ -843,10 +865,17 @@ jobs:
               --import-design-runtime-dir build/tools/import-design/browser_capture-v1
             )
           fi
+          if [[ "$MATRIX_PLATFORM" == darwin-* ]] \
+              && python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "$PULP_CONTROL_BROKER_FLOOR"; then
+            control_broker_args=(
+              --control-broker-binary build/inspect/pulp-control-broker
+            )
+          fi
           python3 "$PULP_RELEASE_PACKAGER" \
             --binary build/pulp \
             --cpp-binary build/tools/cli/pulp-cpp \
             --mcp-binary build/tools/mcp/pulp-mcp \
+            "${control_broker_args[@]}" \
             "${import_design_args[@]}" \
             --build-dir build \
             --platform ${{ matrix.platform }} \
@@ -1706,6 +1735,7 @@ jobs:
           )
           selected["sdk_provenance_floor"] = authoritative["sdk_provenance_floor"]
           selected["inspector_sdk_floor"] = authoritative["inspector_sdk_floor"]
+          selected["control_broker_floor"] = authoritative["control_broker_floor"]
           output_path.write_text(
               json.dumps(selected, indent=2) + "\n",
               encoding="utf-8",

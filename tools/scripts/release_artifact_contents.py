@@ -44,6 +44,8 @@ PRE_DECLARATIVE_IMPORT_DESIGN_COMMON_CLI_MEMBERS = frozenset(
         "browser_capture/tokens.mjs",
     }
 )
+CONTROL_BROKER_CLI_MEMBER = "pulp-control-broker"
+CONTROL_BROKER_SDK_MEMBER = "pulp-sdk/libexec/pulp/pulp-control-broker"
 
 
 class ContentError(RuntimeError):
@@ -57,11 +59,22 @@ def version_tuple(value: str) -> tuple[int, int, int]:
     return int(parts[0]), int(parts[1]), int(parts[2])
 
 
+def control_broker_required(
+    platform: str, matrix: ProductMatrix, version: str | None
+) -> bool:
+    if not platform.startswith("darwin-"):
+        return False
+    if version is None:
+        return matrix.control_broker_floor != "999999.0.0"
+    return version_tuple(version) >= version_tuple(matrix.control_broker_floor)
+
+
 @dataclass(frozen=True)
 class ProductMatrix:
     contract_floor: str
     sdk_provenance_floor: str
     inspector_sdk_floor: str
+    control_broker_floor: str
     platforms: tuple[str, ...]
     cli_contract_declared: bool
     cli_binary_stems: frozenset[str]
@@ -94,6 +107,9 @@ class ProductMatrix:
                 inspector_sdk_floor=str(
                     doc.get("inspector_sdk_floor", "999999.0.0")
                 ),
+                control_broker_floor=str(
+                    doc.get("control_broker_floor", "999999.0.0")
+                ),
                 platforms=tuple(doc["platforms"]),
                 cli_contract_declared=cli_contract_declared,
                 # Matrices versioned before the import-design CLI payload did
@@ -122,6 +138,7 @@ class ProductMatrix:
         version_tuple(matrix.contract_floor)
         version_tuple(matrix.sdk_provenance_floor)
         version_tuple(matrix.inspector_sdk_floor)
+        version_tuple(matrix.control_broker_floor)
         return matrix
 
 
@@ -240,7 +257,10 @@ def cli_binary_members(
 ) -> frozenset[str]:
     suffix = ".exe" if platform.startswith("windows-") else ""
     stems, _resources = effective_cli_contract(matrix, version)
-    return frozenset(f"{stem}{suffix}" for stem in stems)
+    members = {f"{stem}{suffix}" for stem in stems}
+    if control_broker_required(platform, matrix, version):
+        members.add(CONTROL_BROKER_CLI_MEMBER)
+    return frozenset(members)
 
 
 def effective_cli_contract(
@@ -291,7 +311,11 @@ def cli_members(
     )
 
 
-def sdk_binary_members(platform: str) -> frozenset[str]:
+def sdk_binary_members(
+    platform: str,
+    matrix: ProductMatrix = DEFAULT_MATRIX,
+    version: str | None = None,
+) -> frozenset[str]:
     suffix = ".exe" if platform.startswith("windows-") else ""
     names = {f"pulp-sdk/bin/{name}{suffix}" for name in ("pulp", "pulp-cpp", "pulp-mcp", "pulp-scan-worker")}
     if platform.startswith("darwin-"):
@@ -301,6 +325,8 @@ def sdk_binary_members(platform: str) -> frozenset[str]:
                 "pulp-sdk/bin/pulp-au-instrument-probe",
             }
         )
+        if control_broker_required(platform, matrix, version):
+            names.add(CONTROL_BROKER_SDK_MEMBER)
     return frozenset(names)
 
 
@@ -326,7 +352,7 @@ def required_sdk_members(
     version: str | None = None,
 ) -> frozenset[str]:
     required = set(matrix.common_sdk_members)
-    required.update(sdk_binary_members(platform))
+    required.update(sdk_binary_members(platform, matrix, version))
     required.update(
         sdk_library_member(stem, platform)
         for stem in expected_pulp_libraries(platform, matrix)
@@ -417,6 +443,14 @@ def verify_sdk_archive(
         missing = sorted(required - names)
         if missing:
             raise ContentError(f"{path.name}: missing SDK product(s): {missing}")
+        if (
+            CONTROL_BROKER_SDK_MEMBER in names
+            and not control_broker_required(platform, matrix, version)
+        ):
+            raise ContentError(
+                f"{path.name}: stale pre-floor SDK product: "
+                f"{CONTROL_BROKER_SDK_MEMBER}"
+            )
 
         actual_libraries = installed_pulp_libraries(names, platform)
         expected_libraries = expected_pulp_libraries(platform, matrix)
@@ -488,7 +522,7 @@ def verify_sdk_archive(
                     f"{path.name}: unsafe SDK provenance contract: {mismatches}"
                 )
         if not platform.startswith("windows-"):
-            require_executable(archive, sdk_binary_members(platform))
+            require_executable(archive, sdk_binary_members(platform, matrix, version))
 
         if not platform.startswith("darwin-"):
             apple_only = sorted(
@@ -516,7 +550,7 @@ def verify_native_macos_signatures(
     targets = {
         cli_asset_name(platform): cli_binary_members(platform, matrix, version)
         | frozenset({cli_runtime_member(platform)}),
-        sdk_asset_name(platform): sdk_binary_members(platform)
+        sdk_asset_name(platform): sdk_binary_members(platform, matrix, version)
         | frozenset({"pulp-sdk/lib/libwgpu_native.dylib"}),
     }
     with tempfile.TemporaryDirectory(prefix="pulp-release-signatures-") as td:

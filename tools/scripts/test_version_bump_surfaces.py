@@ -348,6 +348,15 @@ class VersionBumpSurfacesTests(GateFixtureTestCase):
                         expected,
                     )
 
+    def test_release_product_matrix_is_an_sdk_release_surface(self) -> None:
+        cfg_path = VBC.parents[2] / "tools/scripts/versioning.json"
+        cfg = json.loads(cfg_path.read_text())
+
+        self.assertIn(
+            "tools/scripts/release_product_matrix.json",
+            cfg["surfaces"]["sdk"]["trigger_paths"],
+        )
+
     def test_version_bump_missing_config_returns_usage_error(self) -> None:
         code, out = _run(
             [
