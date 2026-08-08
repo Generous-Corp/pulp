@@ -29,6 +29,18 @@ if(NOT _install_result EQUAL 0)
         "${_install_output}\n${_install_error}")
 endif()
 
+set(_installed_examples "${_prefix}/share/pulp/capability-control")
+foreach(_example IN ITEMS control-examples.json README.md cli-walkthrough.sh mcp-tools.jsonl)
+    if(NOT EXISTS "${_installed_examples}/${_example}")
+        message(FATAL_ERROR "Installed capability-control example is missing: ${_example}")
+    endif()
+endforeach()
+file(READ "${_installed_examples}/cli-walkthrough.sh" _installed_cli_walkthrough)
+if(_installed_cli_walkthrough MATCHES "(\\./build|tools/|planning/|--host|--port)")
+    message(FATAL_ERROR
+        "Installed capability-control walkthrough contains a source-tree/raw-selector command")
+endif()
+
 file(WRITE "${_consumer_source}/CMakeLists.txt" [=[
 cmake_minimum_required(VERSION 3.24)
 project(PulpControlSdkConsumer LANGUAGES CXX)

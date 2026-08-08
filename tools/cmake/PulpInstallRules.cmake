@@ -396,6 +396,18 @@ install(FILES
     DESTINATION "."
 )
 
+# Capability-control walkthroughs are generated from one corpus and use only
+# installed `pulp` / MCP surfaces. Shipping them with the selected SDK makes the
+# clean-machine path independent of a Pulp source checkout.
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/examples/capability-control/control-examples.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/examples/capability-control/README.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/examples/capability-control/generated/mcp-tools.jsonl"
+    DESTINATION "share/pulp/capability-control")
+install(PROGRAMS
+    "${CMAKE_CURRENT_SOURCE_DIR}/examples/capability-control/generated/cli-walkthrough.sh"
+    DESTINATION "share/pulp/capability-control")
+
 # DSP capability registry.
 #
 # Ships the committed snapshot so a downstream consumer can discover the SDK's

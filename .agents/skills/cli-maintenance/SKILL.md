@@ -498,6 +498,26 @@ rebind its client ID and bounded grants across separate CLI processes only after
 every new connection independently passes kernel and static-code authentication;
 never persist a bearer token or accept a client-supplied durable principal.
 
+Phase 11's copyable CLI and MCP recipes have one source:
+`examples/capability-control/control-examples.json`. Regenerate
+`generated/cli-walkthrough.sh` and `generated/mcp-tools.jsonl` with the sibling
+`generate_examples.py`, then run it with `--check`. The generated walkthrough
+must use `pulp` on PATH only—never `./build`, a source-tree script, host/port,
+or a raw Inspector selector—because it is installed under
+`share/pulp/capability-control/` for clean-machine use.
+
+Operation mapping is mechanical: `dev.pulp.state/read@1` becomes
+`pulp_control_state_read`; CLI uses `pulp control call --instance ID
+dev.pulp.state/read@1 --params JSON`. Management pairs are
+`instances`/`pulp_control_instances`, `status`/`pulp_control_status`,
+`grant-request`/`pulp_control_grant_request`, and
+`revoke`/`pulp_control_revoke`. Do not teach a generic MCP call tool. T0 offline
+render examples require an exact job instance, broker-issued render grant, and
+opaque launcher-trusted input artifact ID; no read/develop profile implicitly
+grants render. Critical evaluation likewise requires an explicit broker-issued
+grant backed by single-use broker-owned consent—MCP annotations or UI approval
+are never authority.
+
 After the v0.78.1 cutover, the user-facing CLI is Rust `pulp`. Release
 archives install `pulp` plus sibling `pulp-cpp`, and source builds stage the
 Rust binary at `./build/pulp`. Slash-command examples should prefer `pulp`
