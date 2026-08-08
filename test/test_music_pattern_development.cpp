@@ -334,6 +334,22 @@ TEST_CASE("candidate anchor roles do not become base preservation constraints",
     CHECK(conflict.pattern.empty());
 }
 
+TEST_CASE("regional fills rank unions larger than the output capacity",
+          "[music][pattern-development]") {
+    std::array<PatternEvent, 40> base_events{};
+    std::array<PatternEvent, 30> candidate_events{};
+    for (std::size_t index = 0; index < base_events.size(); ++index)
+        base_events[index] = make_event(index + 1, static_cast<std::int64_t>(index * 2));
+    for (std::size_t index = 0; index < candidate_events.size(); ++index)
+        candidate_events[index] = make_event(index + 101, static_cast<std::int64_t>(index * 2 + 1),
+                                             PatternEventRole::fill);
+    const auto base = pattern_from<64>(base_events);
+    const auto candidates = pattern_from<64>(candidate_events);
+    const auto result = apply_regional_fill(base, candidates, {{0}, {100}, 40, 71, {{0}, 5, 6, 7}});
+    REQUIRE(result);
+    CHECK(result.pattern.size() == 40);
+}
+
 TEST_CASE("integer A B morph preserves IDs and exact endpoints", "[music][pattern-development]") {
     const auto a = pattern_from<8>(std::array{
         make_event(1, -1000, PatternEventRole::anchor, 200),
