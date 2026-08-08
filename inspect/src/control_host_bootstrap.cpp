@@ -104,9 +104,12 @@ std::optional<choc::value::Value> parse_secure_bootstrap_json(std::string_view j
     if (!control_protocol_detail::valid_control_json_bytes(
             json, kControlHostBootstrapMaximumBytes, 64))
         return std::nullopt;
-    std::vector<std::uint8_t> terminated(json.begin(), json.end());
+    // Allocate the terminator up front. Appending it after copying the secret
+    // could reallocate and release the original credential-bearing storage
+    // before ByteStorageWiper gets a chance to clear it.
+    std::vector<std::uint8_t> terminated(json.size() + 1);
     ByteStorageWiper wipe_terminated(terminated);
-    terminated.push_back(0);
+    std::ranges::copy(json, terminated.begin());
     try {
         auto parsed = choc::json::parseValue(std::string_view(
             reinterpret_cast<const char*>(terminated.data()), json.size()));
