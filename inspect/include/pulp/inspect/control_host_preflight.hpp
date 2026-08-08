@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 
@@ -32,6 +33,19 @@ struct ControlHostPreflightDiagnostics {
     ControlHostPreflightStatus status = ControlHostPreflightStatus::InvalidChannel;
     std::string explanation;
 };
+
+/// Mints one bootstrap only after the inherited channel has proven the exact
+/// live child. Returning an empty value rejects the launch without releasing
+/// authority to the host.
+using ControlHostBootstrapProvider =
+    std::function<ControlHostBootstrapBytes(const VerifiedControlPeerIdentity&)>;
+
+std::optional<VerifiedControlPeerIdentity>
+preflight_control_host(platform::ChildProcessInputChannel channel, std::int64_t expected_process_id,
+                       ControlPeerRole role, const ControlPeerVerifier& verifier,
+                       const ControlHostBootstrapProvider& provide_bootstrap,
+                       std::chrono::milliseconds timeout = std::chrono::seconds(3),
+                       ControlHostPreflightDiagnostics* diagnostics = nullptr);
 
 /// Challenge the process on a private inherited channel, verify the kernel-
 /// observed peer after its response, then release an already-minted bootstrap.

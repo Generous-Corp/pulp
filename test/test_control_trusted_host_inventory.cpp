@@ -1,4 +1,5 @@
 #include <pulp/inspect/control_trusted_host_inventory.hpp>
+#include <pulp/inspect/control_trusted_host_launcher.hpp>
 #include <pulp/runtime/crypto.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -19,6 +20,7 @@
 
 #ifndef _WIN32
 #include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 namespace {
@@ -28,7 +30,10 @@ using pulp::inspect::ControlHostTier;
 using pulp::inspect::ControlTrustedHostInventory;
 using pulp::inspect::ControlTrustedHostInventoryConfig;
 using pulp::inspect::ControlTrustedHostInventoryStatus;
+using pulp::inspect::ControlTrustedHostLauncher;
+using pulp::inspect::ControlTrustedHostLauncherConfig;
 using pulp::inspect::ControlTrustedHostLaunchIntent;
+using pulp::inspect::ControlTrustedHostLaunchStatus;
 
 constexpr std::string_view kManifest = R"({
   "schema": "dev.pulp.control/artifact-manifest@1",
@@ -106,6 +111,61 @@ std::string read_file(const fs::path& path) {
 }
 
 } // namespace
+
+TEST_CASE("trusted host launcher releases enrollment only after exact child preflight",
+          "[inspect][control][inventory][launcher][security]") {
+#if defined(__APPLE__) && TARGET_OS_OSX && !TARGET_OS_IPHONE
+    Fixture fixture;
+    fs::copy_file(PULP_CONTROL_HOST_PREFLIGHT_FIXTURE, fixture.executable,
+                  fs::copy_options::overwrite_existing);
+    ::chmod(fixture.executable.c_str(), 0700);
+
+    ControlTrustedHostInventory inventory(fixture.config());
+    auto intent = fixture.intent();
+    intent.arguments = {"--normal"};
+    const auto prepared = inventory.prepare(intent);
+    INFO(pulp::inspect::control_trusted_host_inventory_status_id(prepared.status));
+    REQUIRE(prepared.ticket);
+
+    pulp::inspect::ControlHostEnrollmentStore enrollments;
+    ControlTrustedHostLauncher launcher(
+        inventory, enrollments,
+        ControlTrustedHostLauncherConfig{
+            .endpoint_path = fixture.root / "broker.sock",
+            .expected_broker = {.evidence =
+                                    {
+                                        .role = pulp::inspect::ControlPeerRole::TrustedHostBridge,
+                                        .user_id = "uid:" + std::to_string(::getuid()),
+                                        .process_id = static_cast<std::int64_t>(::getpid()),
+                                        .process_start_id = "pidversion:test",
+                                        .executable_identity = "signed:test-broker",
+                                        .publisher_id = "publisher:test-broker",
+                                    }},
+            .broker_generation = 17,
+            .preflight_timeout = 2s,
+        });
+    pulp::platform::ProcessOptions options;
+    options.timeout_ms = 4'000;
+    auto launched = launcher.launch(prepared.ticket->inventory_id, options);
+    INFO(launched.explanation);
+    REQUIRE(launched.status == ControlTrustedHostLaunchStatus::Launched);
+    REQUIRE(launched.process);
+    CHECK(enrollments.size() == 1);
+    const auto process = launched.process->wait();
+    INFO(process.stderr_output);
+    CHECK(process.exit_code == 0);
+
+    const auto replay = launcher.launch(prepared.ticket->inventory_id, options);
+    CHECK(replay.status == ControlTrustedHostLaunchStatus::InventoryUnavailable);
+
+    intent.arguments = {"--exit"};
+    const auto exited = inventory.prepare(intent);
+    REQUIRE(exited.ticket);
+    auto denied = launcher.launch(exited.ticket->inventory_id, options);
+    CHECK(denied.status == ControlTrustedHostLaunchStatus::PreflightRejected);
+    CHECK(enrollments.size() == 1);
+#endif
+}
 
 TEST_CASE("trusted host inventory fails closed with invalid configuration",
           "[inspect][control][inventory][security]") {
@@ -210,8 +270,7 @@ TEST_CASE("trusted host inventory rejects unsafe and unsupported carriers",
         auto intent = fixture.intent();
         intent.working_directory = real_source;
         ControlTrustedHostInventory inventory(fixture.config());
-        CHECK(inventory.prepare(intent).status ==
-              ControlTrustedHostInventoryStatus::UnsafePath);
+        CHECK(inventory.prepare(intent).status == ControlTrustedHostInventoryStatus::UnsafePath);
     }
     SECTION("manifest symlink") {
         Fixture fixture;

@@ -21,6 +21,14 @@ using namespace std::chrono_literals;
 
 namespace {
 
+const volatile char kStandalone[] = "PULP_STANDALONE_COMPONENT_V1";
+const volatile char kShipping[] = "PULP_INSPECT_SHIPPING_MANIFEST_V1";
+const volatile char kProfile[] = "PULP_CONTROL_PROFILE_DEVELOPER_LOCAL_V1";
+const volatile char kManifest[] =
+    "PULP_CONTROL_MANIFEST_SHA256_b4d89dd1c232f29d16458a992c8c712ba10068db57cdd2b82cf9a81bf5aceaae_"
+    "V1";
+const volatile char kCapability[] = "PULP_INSPECT_CAPABILITY_SESSION_DESCRIBE_V1";
+
 bool contains_authority_material(std::string_view value) {
     return value.find("admission-1") != std::string_view::npos ||
            value.find("registration-1") != std::string_view::npos;
@@ -59,6 +67,9 @@ bool send_malformed(pulp::inspect::ControlHostBootstrapHandle handle) {
 } // namespace
 
 int main(int argc, char** argv) {
+    if (kStandalone[0] != 'P' || kShipping[0] != 'P' || kProfile[0] != 'P' || kManifest[0] != 'P' ||
+        kCapability[0] != 'P')
+        return 73;
     for (int index = 0; index < argc; ++index)
         if (contains_authority_material(argv[index]))
             return 71;

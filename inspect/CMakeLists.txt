@@ -88,7 +88,8 @@ add_library(pulp-inspect-control
     src/control_private_store.cpp
     src/control_service.cpp)
 target_sources(pulp-inspect-control PRIVATE
-    src/control_trusted_host_inventory.cpp)
+    src/control_trusted_host_inventory.cpp
+    src/control_trusted_host_launcher.cpp)
 if(APPLE AND NOT IOS AND NOT PULP_IOS)
     target_sources(pulp-inspect-control PRIVATE
         src/control_peer_mac.cpp

@@ -84,6 +84,7 @@ file(WRITE "${_consumer_source}/main.cpp" [=[
 #include <pulp/inspect/control_protocol.hpp>
 #include <pulp/inspect/control_service.hpp>
 #include <pulp/inspect/control_trusted_host_inventory.hpp>
+#include <pulp/inspect/control_trusted_host_launcher.hpp>
 #include <pulp/platform/child_process.hpp>
 
 #include <chrono>
@@ -172,6 +173,7 @@ int main() {
   pulp::inspect::ControlOperationStoreConfig operations;
   pulp::inspect::ControlArtifactStoreConfig artifacts;
   pulp::inspect::ControlTrustedHostInventoryConfig inventory;
+  auto* launcher_type = static_cast<pulp::inspect::ControlTrustedHostLauncher*>(nullptr);
   pulp::platform::ProcessOptions process_options;
   process_options.max_standard_input_provider_bytes = 4096;
   pulp::platform::StandardInputByteProvider input_provider =
@@ -199,6 +201,7 @@ int main() {
              && operations.max_receipts > 0
              && artifacts.maximum_blob_bytes > 0
              && inventory.maximum_entries > 0
+             && launcher_type == nullptr
              && !bootstrap_bytes.empty()
              && !enrollment_bootstrap_bytes.empty()
              && process_options.max_standard_input_provider_bytes == 4096

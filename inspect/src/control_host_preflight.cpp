@@ -146,9 +146,10 @@ bool attach(events::InterprocessConnection& connection, std::intptr_t handle,
 std::optional<VerifiedControlPeerIdentity>
 preflight_control_host(platform::ChildProcessInputChannel channel, std::int64_t expected_process_id,
                        ControlPeerRole role, const ControlPeerVerifier& verifier,
-                       ControlHostBootstrapBytes bootstrap, std::chrono::milliseconds timeout,
+                       const ControlHostBootstrapProvider& provide_bootstrap,
+                       std::chrono::milliseconds timeout,
                        ControlHostPreflightDiagnostics* diagnostics) {
-    if (!channel || expected_process_id <= 0 || bootstrap.empty() ||
+    if (!channel || expected_process_id <= 0 || !provide_bootstrap ||
         timeout <= std::chrono::milliseconds::zero()) {
         set_diagnostics(diagnostics, ControlHostPreflightStatus::InvalidChannel,
                         "the inherited preflight channel or input is invalid");
@@ -212,6 +213,20 @@ preflight_control_host(platform::ChildProcessInputChannel channel, std::int64_t 
         return std::nullopt;
     }
 
+    ControlHostBootstrapBytes bootstrap;
+    try {
+        bootstrap = provide_bootstrap(*verified);
+    } catch (...) {
+        set_diagnostics(diagnostics, ControlHostPreflightStatus::BootstrapInvalid,
+                        "the verified bootstrap provider failed");
+        return std::nullopt;
+    }
+    if (bootstrap.empty()) {
+        set_diagnostics(diagnostics, ControlHostPreflightStatus::BootstrapInvalid,
+                        "the verified bootstrap provider returned no authority");
+        return std::nullopt;
+    }
+
     auto encoded_bootstrap =
         runtime::base64_encode(bootstrap.bytes().data(), bootstrap.bytes().size());
     const bool delivered = send_sensitive(connection, *nonce, std::move(encoded_bootstrap));
@@ -222,6 +237,17 @@ preflight_control_host(platform::ChildProcessInputChannel channel, std::int64_t 
     }
     set_diagnostics(diagnostics, ControlHostPreflightStatus::Accepted, {});
     return verified;
+}
+
+std::optional<VerifiedControlPeerIdentity>
+preflight_control_host(platform::ChildProcessInputChannel channel, std::int64_t expected_process_id,
+                       ControlPeerRole role, const ControlPeerVerifier& verifier,
+                       ControlHostBootstrapBytes bootstrap, std::chrono::milliseconds timeout,
+                       ControlHostPreflightDiagnostics* diagnostics) {
+    return preflight_control_host(
+        std::move(channel), expected_process_id, role, verifier,
+        [&bootstrap](const VerifiedControlPeerIdentity&) { return std::move(bootstrap); }, timeout,
+        diagnostics);
 }
 
 std::optional<ControlHostBootstrapRecord>
