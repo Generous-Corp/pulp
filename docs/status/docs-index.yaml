@@ -442,6 +442,11 @@ docs:
     kind: reference
     summary: Fixed-capacity chroma and onset-novelty front ends with offline compatibility adapters
 
+  - slug: capability-control
+    path: reference/capability-control.md
+    kind: reference
+    summary: Canonical profiles, exact-instance authority, safe grant and revoke workflow, diagnostics, and installed T0/T1 examples
+
   - slug: cli
     path: reference/cli.md
     kind: reference
