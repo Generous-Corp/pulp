@@ -133,7 +133,6 @@ class InstalledControlSessionOpener final
 int main() {
   pulp::inspect::ControlBroker broker;
   pulp::inspect::ControlHostEnrollmentStore enrollments;
-  pulp::inspect::InspectorClient client;
   InstalledControlTransport transport;
   InstalledControlSessionOpener session_opener;
   pulp::inspect::ControlClient control_client{transport};

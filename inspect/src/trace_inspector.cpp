@@ -63,33 +63,10 @@ private:
     std::shared_ptr<void> owner_token_;
 };
 
-class TraceInspector::PublicationLease final
-    : public InspectorPublicationLease {
-public:
-    explicit PublicationLease(std::unique_ptr<TraceOwnerLease> owner)
-        : owner_(std::move(owner)) {}
-
-private:
-    std::unique_ptr<TraceOwnerLease> owner_;
-};
-
 TraceInspector::~TraceInspector() {
     std::lock_guard lock(mutex_);
     if (ownership_)
         (void)Tracing::stop_owned(*ownership_);
-}
-
-std::unique_ptr<InspectorPublicationLease>
-TraceInspector::bind_publication(
-    const InspectorDiscoveryRecord& record) {
-    if (record.session_id.empty() || record.instance_id.empty() ||
-        record.publication_id.empty()) {
-        return nullptr;
-    }
-    auto owner = bind_owner(OwnerKind::Publication);
-    if (!owner)
-        return nullptr;
-    return std::make_unique<PublicationLease>(std::move(owner));
 }
 
 std::unique_ptr<TraceOwnerLease>
@@ -250,15 +227,14 @@ InspectorMessage TraceInspector::start_session(
     // An authenticated peer can control capture, not host filesystem paths.
     // Empty delegates the destination to host-owned trace configuration.
     std::lock_guard lock(mutex_);
-    const auto authorized = owner_token
-        ? owner_kind_ == OwnerKind::ControlRegistration &&
-              owner_token_ == *owner_token
-        : owner_kind_ == OwnerKind::Publication;
+    const auto authorized = owner_token &&
+        owner_kind_ == OwnerKind::ControlRegistration &&
+        owner_token_ == *owner_token;
     if (!authorized) {
         return make_error(
             req.id,
             "Trace.startSession: trace control is not bound to an active "
-            "inspector publication",
+            "control registration",
             "trace_owner_unbound");
     }
     auto started = Tracing::start_exclusive(categories, {}, ring_kb);
@@ -335,15 +311,14 @@ InspectorMessage TraceInspector::stop_session(
             req.id, "Trace.stopSession: no active tracing session",
             "no_active_trace");
     }
-    const auto authorized = owner_token
-        ? owner_kind_ == OwnerKind::ControlRegistration &&
-              owner_token_ == *owner_token
-        : owner_kind_ == OwnerKind::Publication;
+    const auto authorized = owner_token &&
+        owner_kind_ == OwnerKind::ControlRegistration &&
+        owner_token_ == *owner_token;
     if (!authorized) {
         return make_error(
             req.id,
             "Trace.stopSession: trace control is not bound to an active "
-            "inspector publication",
+            "control registration",
             "trace_owner_unbound");
     }
     if (!Tracing::ownership_status(
@@ -383,7 +358,7 @@ InspectorMessage TraceInspector::snapshot(const InspectorMessage& req) {
     out.addMember(
         "trace_control_available",
         choc::value::createBool(
-            owner_kind_ == OwnerKind::Publication &&
+            owner_kind_ == OwnerKind::ControlRegistration &&
             (!ownership.active || ownership.owned)));
     if (!last_trace_path_.empty())
         out.addMember("last_trace_path", choc::value::createString(last_trace_path_));

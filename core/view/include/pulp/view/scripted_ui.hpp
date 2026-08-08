@@ -94,7 +94,7 @@ public:
     /// Runtime.* methods reach the live UI.
     ///
     /// TEARDOWN CONTRACT: the bridge is owned by (and lives as long as) this
-    /// session, but its off-thread methods are called from an InspectorServer
+    /// session, but its off-thread methods are called from a control router
     /// reader thread. A host that wires it MUST, before destroying this session,
     /// stop that reader thread, clear DomainHandler's evaluator pointer, and
     /// destroy the retained evaluator before this session, so no background

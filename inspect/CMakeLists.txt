@@ -24,49 +24,6 @@ if(NOT PULP_ENABLE_INSPECTOR)
     return()
 endif()
 
-add_library(pulp-inspect-discovery-support
-    src/discovery_common.cpp
-    src/discovery_paths.cpp
-    src/discovery_security.cpp)
-add_library(pulp::inspect-discovery-support
-    ALIAS pulp-inspect-discovery-support)
-target_include_directories(pulp-inspect-discovery-support
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>)
-target_link_libraries(pulp-inspect-discovery-support
-    PRIVATE pulp::runtime)
-if(WIN32)
-    target_link_libraries(
-        pulp-inspect-discovery-support PRIVATE Advapi32)
-endif()
-
-add_library(pulp-inspect-discovery src/discovery_reader.cpp)
-add_library(pulp::inspect-discovery ALIAS pulp-inspect-discovery)
-target_include_directories(pulp-inspect-discovery
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>)
-target_link_libraries(pulp-inspect-discovery
-    PUBLIC
-        pulp::inspect-protocol
-        pulp::inspect-discovery-support)
-add_library(pulp-inspect-publication
-    src/discovery_publisher.cpp
-    src/discovery_security_write.cpp)
-add_library(pulp::inspect-publication ALIAS pulp-inspect-publication)
-target_include_directories(pulp-inspect-publication
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>)
-target_link_libraries(pulp-inspect-publication
-    PUBLIC
-        pulp::inspect-protocol
-        pulp::inspect-discovery-support)
-if(WIN32)
-    target_link_libraries(pulp-inspect-publication PRIVATE Advapi32)
-endif()
-
 add_library(pulp-inspect-control
     src/control_admission.cpp
     src/control_artifacts.cpp
@@ -127,7 +84,6 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS)
 endif()
 
 add_library(pulp-inspect-client
-    src/client.cpp
     src/control_client.cpp
     src/control_client_connection.cpp
     src/control_inspector_client.cpp
@@ -138,17 +94,11 @@ target_include_directories(pulp-inspect-client
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>)
 target_link_libraries(pulp-inspect-client
-    PUBLIC pulp::inspect-discovery
-           pulp::inspect-control)
+    PUBLIC pulp::inspect-control)
 
 add_library(pulp-inspect-runtime
     src/control_main_thread_executor.cpp
     src/control_trace_session_executor.cpp
-    src/inspector_async_request_executor.cpp
-    src/inspector_async_request_executor.hpp
-    src/inspector_connected_client.hpp
-    src/inspector_publication.hpp
-    src/inspector_server.cpp
     src/main_thread_rpc.cpp
     src/trace_inspector.cpp)
 add_library(pulp::inspect-runtime ALIAS pulp-inspect-runtime)
@@ -160,7 +110,6 @@ target_link_libraries(pulp-inspect-runtime
     PUBLIC
         pulp::inspect-control
         pulp::inspect-protocol
-        pulp::inspect-publication
         pulp::events)
 
 add_library(pulp-inspect-telemetry
@@ -238,9 +187,6 @@ endif()
 # without pulling the high-risk evaluator archive into their link closure.
 foreach(_pulp_eval_free_target IN ITEMS
         pulp-inspect-protocol
-        pulp-inspect-discovery-support
-        pulp-inspect-discovery
-        pulp-inspect-publication
         pulp-inspect-control
         pulp-inspect-client
         pulp-inspect-runtime

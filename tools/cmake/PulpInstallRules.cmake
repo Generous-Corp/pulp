@@ -94,15 +94,6 @@ endif()
 if(TARGET pulp-inspect-protocol)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-protocol)
 endif()
-if(TARGET pulp-inspect-discovery-support)
-    list(APPEND PULP_SDK_TARGETS pulp-inspect-discovery-support)
-endif()
-if(TARGET pulp-inspect-discovery)
-    list(APPEND PULP_SDK_TARGETS pulp-inspect-discovery)
-endif()
-if(TARGET pulp-inspect-publication)
-    list(APPEND PULP_SDK_TARGETS pulp-inspect-publication)
-endif()
 if(TARGET pulp-inspect-control)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-control)
 endif()
@@ -120,12 +111,6 @@ if(TARGET pulp-inspect-telemetry)
 endif()
 if(TARGET pulp-inspect-authoring)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-authoring)
-endif()
-if(TARGET pulp-standalone-inspector)
-    list(APPEND PULP_SDK_TARGETS pulp-standalone-inspector)
-endif()
-if(TARGET pulp-standalone-inspector-runtime-eval)
-    list(APPEND PULP_SDK_TARGETS pulp-standalone-inspector-runtime-eval)
 endif()
 
 # pulp-canvas links pulp-bundled-fonts privately when Skia is on.
@@ -326,17 +311,6 @@ elseif(TARGET pulp-inspect-protocol)
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/session.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/test_input.hpp"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
-    if(TARGET pulp-inspect-discovery)
-        install(FILES
-            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/discovery.hpp"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
-    endif()
-    if(TARGET pulp-inspect-publication)
-        install(FILES
-            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/discovery_publisher.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/publication_binding.hpp"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
-    endif()
     if(TARGET pulp-inspect-control)
         install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_admission.hpp"
@@ -373,7 +347,6 @@ elseif(TARGET pulp-inspect-protocol)
         install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_main_thread_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_trace_session_executor.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/inspector_server.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/main_thread_rpc.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/trace_inspector.hpp"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")

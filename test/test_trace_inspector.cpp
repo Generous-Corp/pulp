@@ -7,9 +7,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <pulp/inspect/authentication.hpp>
 #include <pulp/inspect/domain_handler.hpp>
-#include <pulp/inspect/inspector_server.hpp>
 #include <pulp/inspect/protocol.hpp>
 #include <pulp/inspect/trace_inspector.hpp>
 #include <pulp/runtime/trace.hpp>  // kTracingEnabled
@@ -33,20 +31,6 @@ choc::value::Value result_of(const InspectorMessage& resp) {
     return choc::json::parse(resp.params_json);
 }
 
-TracePublicationOwner owner(std::string publication = "publication-a") {
-    return {"session-a", "instance-a", std::move(publication)};
-}
-
-std::unique_ptr<InspectorPublicationLease> bind_trace(
-    TraceInspector& inspector,
-    TracePublicationOwner publication_owner = owner()) {
-    InspectorDiscoveryRecord record;
-    record.session_id = publication_owner.session_id;
-    record.instance_id = publication_owner.instance_id;
-    record.publication_id = publication_owner.publication_id;
-    return inspector.bind_publication(record);
-}
-
 struct ScopedTestDirectory {
     std::filesystem::path path;
     ~ScopedTestDirectory() {
@@ -67,122 +51,28 @@ TEST_CASE("TraceInspector recognizes exactly its Trace.* methods", "[tracing][in
     CHECK_FALSE(TraceInspector::owns_method("Trace.bogus"));
 }
 
-TEST_CASE("DomainHandler wires one TraceInspector into dispatch and publication",
+TEST_CASE("DomainHandler wires one TraceInspector into dispatch",
           "[tracing][inspect][wiring]") {
     DomainHandler handler;
-    InspectorServerConfig server_config;
     auto trace = std::make_shared<TraceInspector>();
 
     handler.set_trace_inspector(trace);
-    server_config.domain_bindings = &handler;
-
-    const auto bindings = handler.publication_bindings();
-    REQUIRE(bindings.size() == 1);
-    CHECK(bindings.front().capability ==
-          InspectorCapability::TraceSessionControl);
-    CHECK(bindings.front().binding.get() == trace.get());
     const auto response =
         handler.handle(request(methods::kTraceSnapshot));
     CHECK(response.is_error ==
           trace->handle(request(methods::kTraceSnapshot)).is_error);
 }
 
-TEST_CASE("trace-capable server validates its domain-owned controller",
-          "[tracing][inspect][wiring][publication]") {
-    const auto token = generate_inspector_secret();
-    REQUIRE(token.has_value());
-    std::string suffix;
-    for (std::size_t index = 0; index < 8; ++index)
-        suffix += "0123456789abcdef"[(*token)[index] & 0xf];
-    ScopedTestDirectory temporary{
-        std::filesystem::temp_directory_path() /
-        ("pulp-trace-wiring-" + suffix)};
-    InspectorDiscoveryPublisher publisher(temporary.path);
-    InspectorPolicyConfig policy;
-    policy.profile = InspectorProfile::Custom;
-    policy.available_capabilities = {
-        InspectorCapability::SessionControl,
-        InspectorCapability::TraceSessionControl,
-    };
-    policy.custom_capabilities = policy.available_capabilities;
-    DomainHandler handler;
-    InspectorSession session(
-        {"session-trace-wiring", "instance", "plugin", "1"},
-        policy,
-        [&handler](const auto& message) {
-            return handler.handle(message);
-        });
-    InspectorDiscoveryRecord record;
-    record.session_id = session.info().session_id;
-    record.instance_id = session.info().instance_id;
-    record.plugin_id = session.info().plugin_id;
-    InspectorServer server;
-
-    TraceInspector dispatch_only;
-    handler.set_trace_inspector(&dispatch_only);
-    InspectorServerConfig missing{
-        &session, &publisher, record, *token};
-    missing.domain_bindings = &handler;
-    CHECK_FALSE(server.start_authenticated(std::move(missing)));
-
-    auto trace = std::make_shared<TraceInspector>();
-    handler.set_trace_inspector(trace);
-
-    InspectorServerConfig valid{
-        &session, &publisher, record, *token};
-    valid.domain_bindings = &handler;
-    REQUIRE(server.start_authenticated(std::move(valid)));
-    CHECK(server.port() != 0);
-    server.stop();
-}
-
-TEST_CASE("ungranted trace availability does not require a publication binding",
-          "[tracing][inspect][wiring][policy]") {
-    const auto token = generate_inspector_secret();
-    REQUIRE(token.has_value());
-    std::string suffix;
-    for (std::size_t index = 0; index < 8; ++index)
-        suffix += "0123456789abcdef"[(*token)[index] & 0xf];
-    ScopedTestDirectory temporary{
-        std::filesystem::temp_directory_path() /
-        ("pulp-trace-observe-" + suffix)};
-    InspectorDiscoveryPublisher publisher(temporary.path);
-    InspectorPolicyConfig policy;
-    policy.profile = InspectorProfile::Observe;
-    policy.available_capabilities = {
-        InspectorCapability::SessionDescribe,
-        InspectorCapability::TraceSessionControl,
-    };
-    DomainHandler handler;
-    TraceInspector dispatch_only;
-    handler.set_trace_inspector(&dispatch_only);
-    InspectorSession session(
-        {"session-trace-observe", "instance", "plugin", "1"},
-        policy,
-        [&handler](const auto& message) {
-            return handler.handle(message);
-        });
-    InspectorDiscoveryRecord record;
-    record.session_id = session.info().session_id;
-    record.instance_id = session.info().instance_id;
-    record.plugin_id = session.info().plugin_id;
-    InspectorServer server;
-    REQUIRE(server.start_authenticated(
-        InspectorServerConfig{
-            &session, &publisher, record, *token}));
-    server.stop();
-}
-
-TEST_CASE("TraceInspector rejects overlapping publication leases",
+TEST_CASE("TraceInspector rejects overlapping control registration leases",
           "[tracing][inspect][security]") {
     TraceInspector inspector;
-    auto first = bind_trace(inspector, owner("publication-first"));
+    auto first = inspector.bind_control_registration("registration-first");
     REQUIRE(first);
-    CHECK_FALSE(bind_trace(inspector, owner("publication-first")));
-    CHECK_FALSE(bind_trace(inspector, owner("publication-second")));
+    CHECK_FALSE(inspector.bind_control_registration("registration-first"));
+    CHECK_FALSE(inspector.bind_control_registration("registration-second"));
 
     first.reset();
-    CHECK(bind_trace(inspector, owner("publication-second")));
+    CHECK(inspector.bind_control_registration("registration-second"));
 }
 
 TEST_CASE("TraceInspector rejects an unknown Trace method", "[tracing][inspect]") {

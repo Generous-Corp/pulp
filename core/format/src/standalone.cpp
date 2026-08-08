@@ -32,19 +32,8 @@
 // The root component gate defines PULP_ENABLE_INSPECTOR for this standalone
 // authoring target and links the visual overlay here, never through
 // pulp-format. PULP_HAS_INSPECT records that the desktop GPU overlay target
-// actually exists. PULP_STANDALONE_INSPECTOR folds those conditions with the
-// platform guard for every inspector block below.
 #if !defined(PULP_ENABLE_INSPECTOR)
 #define PULP_ENABLE_INSPECTOR 1
-#endif
-#if !defined(__ANDROID__) && defined(PULP_HAS_INSPECT) && PULP_ENABLE_INSPECTOR
-#define PULP_STANDALONE_INSPECTOR 1
-#else
-#define PULP_STANDALONE_INSPECTOR 0
-#endif
-
-#if PULP_STANDALONE_INSPECTOR
-#include <pulp/format/detail/standalone_inspector.hpp>
 #endif
 #if PULP_ENABLE_AUDIO_PROBES
 #include <pulp/audio/audio_probe_json.hpp>
@@ -970,31 +959,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         stop();
     };
 
-#if PULP_STANDALONE_INSPECTOR
-    std::unique_ptr<detail::StandaloneInspectorRuntime> inspector_runtime;
-    if (!detail::StandaloneInspectorRuntime::profile_is_off(
-            effective_config.inspector_profile)
-        || effective_config.inspector_runtime_eval) {
-        inspector_runtime = detail::StandaloneInspectorRuntime::create(
-            *this, *processor_, *bridge, window_root, *window,
-            effective_config.inspector_profile,
-            effective_config.inspector_capabilities,
-            effective_config.inspector_runtime_eval);
-        if (!inspector_runtime) {
-            runtime::log_error(
-                "Standalone: requested Development Inspector profile could not start");
-            detail::retire_standalone_editor(*window, *bridge);
-            stop();
-            return false;
-        }
-        window->set_close_callback(
-            inspector_runtime->wrap_close(std::move(close_editor)));
-    } else {
-        window->set_close_callback(std::move(close_editor));
-    }
-#else
     window->set_close_callback(std::move(close_editor));
-#endif
 
 #if PULP_ENABLE_AUDIO_PROBES
     // Audio Inspector tool window. A SEPARATE floating window (sibling of the

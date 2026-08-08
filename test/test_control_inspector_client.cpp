@@ -151,7 +151,6 @@ TEST_CASE("canonical Inspector client translates only trace session methods",
         request_control_inspector(opener, std::string(methods::kTraceStartSession),
                                   R"({"categories":["render","dsp"],"ring_mb":32})");
     REQUIRE(started.succeeded());
-    CHECK_FALSE(started.publication.has_value());
     REQUIRE(started.target.has_value());
     CHECK(*started.target == InspectorClientTarget{"session-1", "instance-1", "publication-1"});
     CHECK(started.response.params_json == R"({"active": true, "compiled_in": true, "ok": true})");
