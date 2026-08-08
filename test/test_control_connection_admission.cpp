@@ -108,7 +108,7 @@ TEST_CASE("connection admission consumption is atomic under contention",
 
     std::atomic<bool> start{false};
     auto consume = [&] {
-        while (!start.load(std::memory_order_acquire))
+        while (!start.load(std::memory_order_acquire)) // unbounded-wait: allow published before get
             std::this_thread::yield();
         return bool(store.consume(issued.ticket->admission_id));
     };

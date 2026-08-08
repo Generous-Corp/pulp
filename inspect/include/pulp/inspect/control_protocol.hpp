@@ -131,6 +131,7 @@ struct ControlSessionOpenResult {
 struct ControlHostOpenEnvelope {
     std::string request_id;
     std::string admission_id;
+    std::string enrollment_id;
     friend bool operator==(const ControlHostOpenEnvelope&,
                            const ControlHostOpenEnvelope&) = default;
 };
