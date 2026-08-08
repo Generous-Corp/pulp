@@ -65,6 +65,83 @@ struct ReceivedEnvelope {
 };
 
 #ifdef __APPLE__
+struct HostOpenBroker {
+    InterprocessConnectionServer server;
+    ReceivedEnvelope received;
+    std::mutex mutex;
+    std::condition_variable ready;
+    std::unique_ptr<InterprocessConnection> peer;
+    std::atomic<unsigned> message_count{0};
+    bool disconnected = false;
+
+    bool start(const std::filesystem::path& endpoint) {
+        server.on_client_connected = [&](std::unique_ptr<InterprocessConnection> connection) {
+            connection->set_on_message([&](const void* data, std::size_t size) {
+                message_count.fetch_add(1, std::memory_order_relaxed);
+                received.receive(data, size);
+            });
+            connection->set_on_disconnected([&] {
+                {
+                    std::lock_guard lock(mutex);
+                    disconnected = true;
+                }
+                ready.notify_all();
+            });
+            {
+                std::lock_guard lock(mutex);
+                peer = std::move(connection);
+            }
+            ready.notify_all();
+        };
+        return server.start(endpoint.string(), IpcTransport::LocalSocket);
+    }
+
+    ControlHostOpenEnvelope wait_for_open() {
+        REQUIRE(received.wait());
+        const auto* open = std::get_if<ControlHostOpenEnvelope>(&received.envelope->payload);
+        REQUIRE(open != nullptr);
+        return *open;
+    }
+
+    bool send(ControlHostOpenResult result) {
+        std::unique_lock lock(mutex);
+        REQUIRE(ready.wait_for(lock, 2s, [&] { return peer != nullptr; }));
+        auto* connected = peer.get();
+        lock.unlock();
+        return connected->send_message(
+            encode_control_envelope(ControlEnvelope{.payload = std::move(result)}));
+    }
+
+    bool send_raw(std::string_view bytes) {
+        std::unique_lock lock(mutex);
+        REQUIRE(ready.wait_for(lock, 2s, [&] { return peer != nullptr; }));
+        auto* connected = peer.get();
+        lock.unlock();
+        return connected->send_message(bytes);
+    }
+
+    void drop() {
+        InterprocessConnection* connected = nullptr;
+        {
+            std::lock_guard lock(mutex);
+            connected = peer.get();
+        }
+        if (connected)
+            connected->disconnect();
+    }
+
+    bool wait_for_disconnect() {
+        std::unique_lock lock(mutex);
+        return ready.wait_for(lock, 2s, [&] { return disconnected; });
+    }
+
+    ~HostOpenBroker() {
+        drop();
+        peer.reset();
+        server.stop();
+    }
+};
+
 ControlPeerEvidence observe_current_process(const std::filesystem::path& endpoint,
                                             ControlPeerRole role = ControlPeerRole::Client) {
     InterprocessConnectionServer observer;
@@ -354,6 +431,111 @@ TEST_CASE("host connection reliably poisons malformed broker input off the reade
     server.stop();
 #else
     SUCCEED("the authenticated control endpoint is currently macOS-only");
+#endif
+}
+
+TEST_CASE("host connection enrollment open validates its exact exchange",
+          "[inspect][control][carrier][host][enrollment][security]") {
+#ifdef __APPLE__
+    EndpointDirectory directory;
+    const auto broker_evidence =
+        observe_current_process(directory.path / "eb.sock", ControlPeerRole::TrustedHostBridge);
+    HostOpenBroker broker;
+    REQUIRE(broker.start(directory.socket));
+    ControlHostConnection host{
+        {.endpoint_path = directory.socket, .expected_broker = {.evidence = broker_evidence}},
+        [](const ControlAdmissionPlan&, const ControlRequestEnvelope&,
+           const ControlExecutionContext&) {
+            return ControlExecutionOutcome{.terminal_state = ControlReceiptState::Completed};
+        }};
+    REQUIRE(host.connect());
+
+    auto result =
+        std::async(std::launch::async, [&] { return host.open_host_enrollment("enrollment-one"); });
+    const auto request = broker.wait_for_open();
+    CHECK(request.admission_id.empty());
+    CHECK(request.enrollment_id == "enrollment-one");
+    REQUIRE(broker.send({.request_id = request.request_id,
+                         .accepted = true,
+                         .registration_id = "broker-minted-registration"}));
+    REQUIRE(result.wait_for(2s) == std::future_status::ready);
+    const auto opened = result.get();
+    CHECK(opened.accepted);
+    CHECK(opened.request_id == request.request_id);
+    CHECK(opened.registration_id == "broker-minted-registration");
+    CHECK(host.is_host_open());
+
+    const auto enrollment_replay = host.open_host_enrollment("enrollment-one");
+    CHECK_FALSE(enrollment_replay.accepted);
+    CHECK(enrollment_replay.error_code == "invalid-host-open");
+    const auto cross_mode_replay = host.open_host("admission-one");
+    CHECK_FALSE(cross_mode_replay.accepted);
+    CHECK(cross_mode_replay.error_code == "invalid-host-open");
+    std::this_thread::sleep_for(20ms);
+    CHECK(broker.message_count.load(std::memory_order_relaxed) == 1);
+    host.disconnect();
+#endif
+}
+
+TEST_CASE("host connection enrollment failures poison or close the carrier",
+          "[inspect][control][carrier][host][enrollment][security]") {
+#ifdef __APPLE__
+    const auto run = [](auto respond, std::chrono::milliseconds timeout = 2s) {
+        EndpointDirectory directory;
+        const auto broker_evidence =
+            observe_current_process(directory.path / "fb.sock", ControlPeerRole::TrustedHostBridge);
+        HostOpenBroker broker;
+        REQUIRE(broker.start(directory.socket));
+        ControlHostConnection host{
+            {.endpoint_path = directory.socket, .expected_broker = {.evidence = broker_evidence}},
+            [](const ControlAdmissionPlan&, const ControlRequestEnvelope&,
+               const ControlExecutionContext&) {
+                return ControlExecutionOutcome{.terminal_state = ControlReceiptState::Completed};
+            }};
+        REQUIRE(host.connect());
+        auto result = std::async(std::launch::async,
+                                 [&] { return host.open_host_enrollment("enrollment", timeout); });
+        const auto request = broker.wait_for_open();
+        respond(broker, request);
+        REQUIRE(result.wait_for(2s) == std::future_status::ready);
+        const auto opened = result.get();
+        CHECK_FALSE(opened.accepted);
+        host.disconnect();
+        return std::pair{opened.error_code, host.last_error_code()};
+    };
+
+    SECTION("mismatched request identity") {
+        const auto [result_error, connection_error] =
+            run([](HostOpenBroker& broker, const ControlHostOpenEnvelope& request) {
+                REQUIRE(broker.send({.request_id = request.request_id + "-wrong",
+                                     .accepted = true,
+                                     .registration_id = "broker-registration"}));
+                REQUIRE(broker.wait_for_disconnect());
+            });
+        CHECK(result_error == "unexpected-host-opened");
+        CHECK(connection_error == "unexpected-host-opened");
+    }
+    SECTION("malformed result") {
+        const auto [result_error, connection_error] =
+            run([](HostOpenBroker& broker, const ControlHostOpenEnvelope&) {
+                REQUIRE(broker.send_raw("not-json"));
+                REQUIRE(broker.wait_for_disconnect());
+            });
+        CHECK(result_error == "malformed-host-frame");
+        CHECK(connection_error == "malformed-host-frame");
+    }
+    SECTION("peer disconnect") {
+        const auto [result_error, connection_error] =
+            run([](HostOpenBroker& broker, const ControlHostOpenEnvelope&) { broker.drop(); });
+        CHECK(result_error == "connection-lost");
+        CHECK(connection_error == "connection-lost");
+    }
+    SECTION("timeout") {
+        const auto [result_error, connection_error] =
+            run([](HostOpenBroker&, const ControlHostOpenEnvelope&) {}, 20ms);
+        CHECK(result_error == "timeout");
+        CHECK(connection_error == "timeout");
+    }
 #endif
 }
 

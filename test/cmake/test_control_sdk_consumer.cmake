@@ -121,6 +121,8 @@ int main() {
   pulp::inspect::ControlHostRouter host_router;
   pulp::inspect::ControlHostConnection host_connection{
       {.endpoint_path = "/tmp/not-connected-control.sock"}, host_router.executor()};
+  const auto enrollment_open =
+      host_connection.open_host_enrollment("installed-enrollment", std::chrono::milliseconds(1));
   pulp::inspect::ControlConnectionPrincipal principal =
       pulp::inspect::ControlHostConnectionPrincipal{
           pulp::inspect::ControlRegistrationId{"installed-registration"}};
@@ -139,6 +141,7 @@ int main() {
   return !broker.is_listening() && !service.is_listening()
              && !client.is_connected()
              && !host_connection.is_connected()
+             && enrollment_open.error_code == "invalid-host-open"
              && std::holds_alternative<pulp::inspect::ControlHostConnectionPrincipal>(principal)
              && operations.max_receipts > 0
              && artifacts.maximum_blob_bytes > 0

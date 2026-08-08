@@ -1,14 +1,12 @@
 #include <pulp/events/interprocess_connection.hpp>
-#include <pulp/inspect/control_protocol.hpp>
+#include <pulp/inspect/control_host_connection.hpp>
 
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <mutex>
-#include <optional>
 #include <string>
 #include <thread>
 
@@ -24,41 +22,6 @@ const volatile char kManifest[] =
     "PULP_CONTROL_MANIFEST_SHA256_b4d89dd1c232f29d16458a992c8c712ba10068db57cdd2b82cf9a81bf5aceaae_"
     "V1";
 const volatile char kCapability[] = "PULP_INSPECT_CAPABILITY_SESSION_DESCRIBE_V1";
-
-std::optional<ControlHostOpenResult> claim(std::string_view endpoint,
-                                           std::string_view enrollment_id,
-                                           InterprocessConnection& connection) {
-    std::mutex mutex;
-    std::condition_variable ready;
-    std::optional<ControlHostOpenResult> result;
-    connection.set_max_message_bytes(kControlMaximumEnvelopeBytes);
-    connection.set_frame_read_timeout(3s);
-    connection.set_write_timeout(3s);
-    connection.set_on_message([&](const void* data, std::size_t size) {
-        const auto envelope =
-            decode_control_envelope(std::string_view(static_cast<const char*>(data), size));
-        if (envelope) {
-            if (const auto* opened = std::get_if<ControlHostOpenResult>(&envelope->payload)) {
-                {
-                    std::lock_guard lock(mutex);
-                    result = *opened;
-                }
-                ready.notify_all();
-            }
-        }
-    });
-    if (!connection.connect(std::string(endpoint), IpcTransport::LocalSocket, 3s))
-        return std::nullopt;
-    const auto encoded = encode_control_envelope(ControlEnvelope{
-        .payload = ControlHostOpenEnvelope{.request_id = "fixture-open",
-                                           .enrollment_id = std::string(enrollment_id)}});
-    if (encoded.empty() || !connection.send_message(encoded))
-        return std::nullopt;
-    std::unique_lock lock(mutex);
-    if (!ready.wait_for(lock, 3s, [&] { return result.has_value(); }))
-        return std::nullopt;
-    return result;
-}
 
 bool send_and_drop(std::string_view endpoint, std::string_view enrollment_id) {
     InterprocessConnection connection;
@@ -86,6 +49,10 @@ int main() {
     InterprocessConnection preflight;
     if (!preflight.connect(preflight_endpoint, IpcTransport::LocalSocket, 3s))
         return 7;
+    const auto broker_evidence =
+        observe_control_peer(preflight, ControlPeerRole::TrustedHostBridge);
+    if (!broker_evidence)
+        return 6;
 
     std::string endpoint;
     std::string enrollment_id;
@@ -102,33 +69,48 @@ int main() {
     std::atomic<unsigned> denied{0};
     std::mutex registration_mutex;
     std::string registration_id;
-    InterprocessConnection first;
-    InterprocessConnection second;
     if (mode == "drop") {
         const bool sent = send_and_drop(endpoint, enrollment_id);
         std::ofstream output(result_path);
         output << "0 0\n";
         return sent ? 0 : 3;
     }
-    auto run = [&](InterprocessConnection& connection) {
-        const auto result = claim(endpoint, enrollment_id, connection);
-        if (!result)
+    const auto make_connection = [&] {
+        return std::make_unique<ControlHostConnection>(
+            ControlHostConnectionConfig{.endpoint_path = endpoint,
+                                        .expected_broker = {.evidence = *broker_evidence}},
+            [](const ControlAdmissionPlan&, const ControlRequestEnvelope&,
+               const ControlExecutionContext&) {
+                return ControlExecutionOutcome{.terminal_state = ControlReceiptState::Completed};
+            });
+    };
+    auto first = make_connection();
+    auto second = make_connection();
+    auto run = [&](ControlHostConnection& connection) {
+        if (!connection.connect())
             return;
-        if (result->accepted) {
+        const auto result = connection.open_host_enrollment(enrollment_id);
+        if (result.accepted) {
             accepted.fetch_add(1, std::memory_order_relaxed);
             std::lock_guard lock(registration_mutex);
-            registration_id = result->registration_id;
+            registration_id = result.registration_id;
         } else {
             denied.fetch_add(1, std::memory_order_relaxed);
         }
     };
     if (mode == "concurrent") {
-        std::thread one([&] { run(first); });
-        std::thread two([&] { run(second); });
+        std::thread one([&] { run(*first); });
+        std::thread two([&] { run(*second); });
         one.join();
         two.join();
     } else {
-        run(first);
+        run(*first);
+        if (mode == "replay" && accepted.load(std::memory_order_relaxed) == 1) {
+            if (!first->open_host_enrollment(enrollment_id).accepted)
+                denied.fetch_add(1, std::memory_order_relaxed);
+            if (!first->open_host("unused-cross-mode-admission").accepted)
+                denied.fetch_add(1, std::memory_order_relaxed);
+        }
     }
     {
         std::ofstream output(result_path);
@@ -139,7 +121,7 @@ int main() {
         for (unsigned attempt = 0; attempt < 5000 && !std::filesystem::exists(stop_path); ++attempt)
             std::this_thread::sleep_for(1ms);
     }
-    first.disconnect();
-    second.disconnect();
+    first->disconnect();
+    second->disconnect();
     return accepted.load(std::memory_order_relaxed) != 0 ? 0 : 2;
 }

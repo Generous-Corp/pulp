@@ -323,6 +323,47 @@ struct ControlHostConnection::Impl : std::enable_shared_from_this<Impl> {
             execute_job(job);
         }
     }
+
+    ControlHostOpenResult open(ControlHostOpenEnvelope request, std::chrono::milliseconds timeout,
+                               std::string_view invalid_explanation) {
+        request.request_id =
+            "host-open-" + std::to_string(next_request.fetch_add(1, std::memory_order_relaxed));
+        const auto request_id = request.request_id;
+        const bool has_single_authority =
+            request.admission_id.empty() != request.enrollment_id.empty();
+        {
+            std::lock_guard lock(mutex);
+            if (!connected || host_open || !expected_open_request.empty() ||
+                !has_single_authority || timeout.count() <= 0)
+                return {.request_id = request_id,
+                        .error_code = "invalid-host-open",
+                        .explanation = std::string(invalid_explanation)};
+            opened.reset();
+            expected_open_request = request_id;
+        }
+        if (!send(ControlEnvelope{.payload = std::move(request)}))
+            fail("send-failed", "the host-open frame could not be sent");
+
+        std::unique_lock lock(mutex);
+        if (!opened_ready.wait_for(lock, timeout, [&] { return opened || !connected; })) {
+            lock.unlock();
+            fail("timeout", "host-open timed out");
+            return {.request_id = request_id,
+                    .error_code = "timeout",
+                    .explanation = "host-open timed out"};
+        }
+        if (!opened)
+            return {.request_id = request_id,
+                    .error_code = last_error,
+                    .explanation = last_explanation};
+        auto result = std::move(*opened);
+        opened.reset();
+        expected_open_request.clear();
+        host_open = result.accepted;
+        if (result.accepted)
+            registration_id = ControlRegistrationId{result.registration_id};
+        return result;
+    }
 };
 
 ControlHostConnection::ControlHostConnection(ControlHostConnectionConfig config,
@@ -363,42 +404,15 @@ bool ControlHostConnection::connect() {
 
 ControlHostOpenResult ControlHostConnection::open_host(std::string_view admission_id,
                                                        std::chrono::milliseconds timeout) {
-    const auto request_id = "host-open-" + std::to_string(impl_->next_request.fetch_add(1));
-    {
-        std::lock_guard lock(impl_->mutex);
-        if (!impl_->connected || impl_->host_open || admission_id.empty() || timeout.count() <= 0)
-            return {.request_id = request_id,
-                    .error_code = "invalid-host-open",
-                    .explanation = "a connected unopened host and valid admission are required"};
-        impl_->opened.reset();
-        impl_->expected_open_request = request_id;
-    }
-    if (!impl_->send(ControlEnvelope{.payload = ControlHostOpenEnvelope{
-                                         .request_id = request_id,
-                                         .admission_id = std::string(admission_id),
-                                     }})) {
-        impl_->fail("send-failed", "the host-open frame could not be sent");
-    }
-    std::unique_lock lock(impl_->mutex);
-    if (!impl_->opened_ready.wait_for(lock, timeout,
-                                      [&] { return impl_->opened || !impl_->connected; })) {
-        lock.unlock();
-        impl_->fail("timeout", "host-open timed out");
-        return {.request_id = request_id,
-                .error_code = "timeout",
-                .explanation = "host-open timed out"};
-    }
-    if (!impl_->opened)
-        return {.request_id = request_id,
-                .error_code = impl_->last_error,
-                .explanation = impl_->last_explanation};
-    auto result = std::move(*impl_->opened);
-    impl_->opened.reset();
-    impl_->expected_open_request.clear();
-    impl_->host_open = result.accepted;
-    if (result.accepted)
-        impl_->registration_id = ControlRegistrationId{result.registration_id};
-    return result;
+    return impl_->open(ControlHostOpenEnvelope{.admission_id = std::string(admission_id)}, timeout,
+                       "a connected unopened host and valid admission are required");
+}
+
+ControlHostOpenResult
+ControlHostConnection::open_host_enrollment(std::string_view enrollment_id,
+                                            std::chrono::milliseconds timeout) {
+    return impl_->open(ControlHostOpenEnvelope{.enrollment_id = std::string(enrollment_id)},
+                       timeout, "a connected unopened host and valid enrollment are required");
 }
 
 void ControlHostConnection::disconnect() noexcept {
@@ -409,6 +423,8 @@ void ControlHostConnection::disconnect() noexcept {
         impl_->stopping = true;
         impl_->connected = false;
         impl_->host_open = false;
+        impl_->opened.reset();
+        impl_->expected_open_request.clear();
         for (auto& [route, job] : impl_->active) {
             (void)route;
             job->cancelled.store(true, std::memory_order_release);

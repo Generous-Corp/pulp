@@ -37,6 +37,9 @@ class ControlHostConnection {
     bool connect();
     ControlHostOpenResult open_host(std::string_view admission_id,
                                     std::chrono::milliseconds timeout = std::chrono::seconds(3));
+    ControlHostOpenResult
+    open_host_enrollment(std::string_view enrollment_id,
+                         std::chrono::milliseconds timeout = std::chrono::seconds(3));
     void disconnect() noexcept;
 
     bool is_connected() const;

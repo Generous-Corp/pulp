@@ -462,6 +462,48 @@ TEST_CASE("endpoint enrollment admits exactly one concurrent claimant",
 #endif
 }
 
+TEST_CASE("host enrollment connection rejects wrong and replayed authorities",
+          "[inspect][control][endpoint][enrollment][security]") {
+#ifdef __APPLE__
+    SECTION("wrong enrollment identity") {
+        EndpointFixture fixture;
+        SpawnedHost host;
+        const auto host_peer = host.observe(fixture.directory);
+        const auto ticket = make_enrollment(fixture.enrollments, fixture.directory, host_peer);
+        REQUIRE(fixture.endpoint.start());
+        const auto result_path = fixture.directory.root / "wrong-enrollment-result";
+        host.start(fixture.directory.root / "broker.sock", ticket.enrollment_id + "-wrong",
+                   result_path);
+        const auto [accepted, denied, registration] = host.wait_result(result_path);
+        CHECK(accepted == 0);
+        CHECK(denied == 1);
+        CHECK(registration.empty());
+        CHECK(host.wait() == 2);
+        CHECK(fixture.enrollments.size() == 1);
+        fixture.endpoint.stop();
+    }
+    SECTION("second open and cross-mode replay") {
+        EndpointFixture fixture;
+        SpawnedHost host;
+        const auto host_peer = host.observe(fixture.directory);
+        const auto ticket = make_enrollment(fixture.enrollments, fixture.directory, host_peer);
+        REQUIRE(fixture.endpoint.start());
+        const auto result_path = fixture.directory.root / "replay-result";
+        const auto stop_path = fixture.directory.root / "replay-stop";
+        host.start(fixture.directory.root / "broker.sock", ticket.enrollment_id, result_path,
+                   stop_path, "replay");
+        const auto [accepted, denied, registration] = host.wait_result(result_path);
+        CHECK(accepted == 1);
+        CHECK(denied == 2);
+        CHECK_FALSE(registration.empty());
+        CHECK(fixture.enrollments.size() == 0);
+        std::ofstream(stop_path) << "stop";
+        CHECK(host.wait() == 0);
+        fixture.endpoint.stop();
+    }
+#endif
+}
+
 TEST_CASE("endpoint rolls registration back when admission or router attach fails",
           "[inspect][control][endpoint][enrollment][rollback]") {
 #ifdef __APPLE__

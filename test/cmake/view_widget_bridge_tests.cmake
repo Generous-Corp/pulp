@@ -184,7 +184,10 @@ add_executable(pulp-test-control-endpoint-enrollment
 add_executable(pulp-control-enrollment-host-fixture
     control_enrollment_host_fixture.cpp)
 target_link_libraries(pulp-control-enrollment-host-fixture PRIVATE
-    pulp::inspect-protocol pulp::events)
+    pulp::inspect-control)
+if(APPLE)
+    target_link_options(pulp-control-enrollment-host-fixture PRIVATE LINKER:-dead_strip)
+endif()
 target_link_libraries(pulp-test-control-endpoint-enrollment PRIVATE
     pulp::inspect-control Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-control-endpoint-enrollment PRIVATE
