@@ -199,8 +199,13 @@ struct MultiChannelBallistics {
 /// Finite inputs beyond +/-kMaxMeterInputMagnitude are treated as deterministic
 /// over-range audio and clipped to that supported-domain boundary.
 ///
-/// The default layout is mono, stereo, L/R/C, quad, 5.0, 5.1, then the common
-/// L/R/C/LFE/Ls/Rs/Lrs/Rrs order. Pass explicit roles for any other order.
+/// The default layouts are mono, stereo, L/R/C, quad, 5.0, 5.1, and 7.1 in
+/// L/R/C/LFE/Ls/Rs/Lrs/Rrs order. There is no implicit seven-channel mapping;
+/// pass unique explicit roles for that case. Layouts above eight channels and
+/// roles outside this enum require a more expressive speaker-position model
+/// and are explicitly unsupported here. `loudness_supported()` reports whether
+/// the prepared sample rate and layout have an honest BS.1770 interpretation;
+/// peak, RMS, correlation, and clip metering remain available when they do not.
 /// This is not a complete EBU Mode meter: it does not expose 3-second
 /// short-term loudness, loudness range, scale/UI behavior, or true peak.
 ///
@@ -218,13 +223,18 @@ public:
     /// only here.
     void prepare(double sample_rate, int num_channels,
                  const LoudnessChannelRole* roles) {
-        sample_rate_ = sample_rate;
+        constexpr double maximum_safe_sample_rate =
+            static_cast<double>(std::numeric_limits<int>::max());
+        const bool sample_rate_supported = std::isfinite(sample_rate)
+                                        && sample_rate > 0.0
+                                        && sample_rate <= maximum_safe_sample_rate;
+        sample_rate_ = sample_rate_supported ? sample_rate : 0.0;
         num_channels_ = std::clamp(num_channels, 0, kMaxMeterChannels);
-        loudness_valid_ = std::isfinite(sample_rate) && sample_rate > 0.0;
+        loudness_valid_ = sample_rate_supported
+                       && configure_channel_roles(roles);
         loudness_hop_samples_ = loudness_valid_
-            ? std::max(1, static_cast<int>(std::llround(sample_rate * 0.1))) : 0;
+            ? std::max(1, static_cast<int>(std::llround(sample_rate_ * 0.1))) : 0;
 
-        configure_channel_roles(roles);
         configure_k_weighting();
         gate_energy_tree_.assign(kGateBinCount + 1, 0.0);
         gate_count_tree_.assign(kGateBinCount + 1, 0);
@@ -238,6 +248,7 @@ public:
     /// Process a block of interleaved or deinterleaved audio.
     /// channels: array of channel pointers. num_samples: samples per channel.
     void process(const SampleType* const* channels, int num_channels, int num_samples) {
+        const int requested_num_channels = num_channels;
         num_channels = std::clamp(num_channels, 0, num_channels_);
         if (channels == nullptr || num_samples <= 0) return;
 
@@ -248,11 +259,16 @@ public:
             }
         }
 
-        // A topology transition starts a new measurement programme. Reset all
-        // windows together so peak/RMS/clip/correlation and loudness never mix
-        // samples from different layouts.
-        if (num_channels != active_num_channels_)
-            reset_measurement_state(num_channels);
+        const bool process_loudness = loudness_valid_
+                                   && requested_num_channels == num_channels_
+                                   && num_channels == num_channels_;
+        // A topology or loudness-eligibility transition starts a new
+        // measurement programme. The raw requested count participates in the
+        // eligibility check before safe level-meter clamping, so an oversized
+        // layout cannot masquerade as the prepared layout.
+        if (num_channels != active_num_channels_
+            || process_loudness != active_loudness_processing_)
+            reset_measurement_state(num_channels, process_loudness);
 
         for (int i = 0; i < num_samples; ++i) {
             for (int ch = 0; ch < num_channels; ++ch) {
@@ -265,7 +281,7 @@ public:
                 if (abs_s >= 1.0) block_clipped_[ch] = true;
 
                 block_sum_sq_[ch] += sd * sd;
-                if (loudness_valid_) {
+                if (process_loudness) {
                     const double weighted = k_filters_[ch].process(sd);
                     loudness_hop_energy_[ch] += weighted * weighted;
                 }
@@ -282,13 +298,13 @@ public:
             }
 
             ++block_samples_;
-            if (loudness_valid_ && ++loudness_hop_position_ == loudness_hop_samples_)
+            if (process_loudness && ++loudness_hop_position_ == loudness_hop_samples_)
                 finish_loudness_hop(num_channels);
         }
 
         // Emit snapshot when we have enough samples for a meaningful measurement
         // Use ~10ms blocks for responsive metering
-        int block_size = static_cast<int>(sample_rate_ * 0.01f);
+        int block_size = static_cast<int>(sample_rate_ * 0.01);
         if (block_size < 1) block_size = 1;
 
         if (block_samples_ >= block_size) {
@@ -299,6 +315,10 @@ public:
     /// Get the latest metering snapshot.
     const MultiChannelMeterData& snapshot() const { return snapshot_; }
 
+    /// Whether the prepared sample rate and speaker layout support BS.1770
+    /// loudness. False does not disable the non-loudness meter fields.
+    bool loudness_supported() const noexcept { return loudness_valid_; }
+
     void reset() {
         reset_measurement_state(0);
     }
@@ -306,7 +326,8 @@ public:
 private:
     friend struct detail::MultiChannelMeterTestAccess;
 
-    void reset_measurement_state(int active_channels) {
+    void reset_measurement_state(int active_channels,
+                                 bool process_loudness = false) {
         for (int ch = 0; ch < kMaxMeterChannels; ++ch) {
             block_peak_[ch] = 0.0f;
             block_sum_sq_[ch] = 0.0f;
@@ -320,6 +341,7 @@ private:
         reset_loudness_state();
         snapshot_ = {};
         active_num_channels_ = active_channels;
+        active_loudness_processing_ = process_loudness;
         snapshot_.num_channels = active_channels;
     }
 
@@ -360,7 +382,7 @@ private:
         }
 
         // Reset correlation accumulators periodically (every ~100ms)
-        int corr_window = static_cast<int>(sample_rate_ * 0.1f);
+        int corr_window = static_cast<int>(sample_rate_ * 0.1);
         if (correlation_samples_ >= corr_window) {
             reset_correlation_accumulators();
         }
@@ -410,30 +432,92 @@ private:
             : -std::numeric_limits<float>::infinity();
     }
 
-    static double role_weight(LoudnessChannelRole role) {
+    static bool role_weight(LoudnessChannelRole role, double& weight) noexcept {
         switch (role) {
-            case LoudnessChannelRole::lfe: return 0.0;
+            case LoudnessChannelRole::lfe:
+                weight = 0.0;
+                return true;
             case LoudnessChannelRole::left_surround:
-            case LoudnessChannelRole::right_surround: return 1.41;
-            default: return 1.0;
+            case LoudnessChannelRole::right_surround:
+                weight = 1.41;
+                return true;
+            case LoudnessChannelRole::left:
+            case LoudnessChannelRole::right:
+            case LoudnessChannelRole::center:
+            case LoudnessChannelRole::left_rear_surround:
+            case LoudnessChannelRole::right_rear_surround:
+                weight = 1.0;
+                return true;
+            case LoudnessChannelRole::unknown:
+                return false;
         }
+        return false;
     }
 
-    void configure_channel_roles(const LoudnessChannelRole* roles) {
-        channel_weights_.fill(1.0);
-        std::array<LoudnessChannelRole, 8> defaults{
+    bool configure_channel_roles(const LoudnessChannelRole* roles) noexcept {
+        channel_weights_.fill(0.0);
+        if (num_channels_ < 1 || num_channels_ > 8) return false;
+
+        constexpr std::array<LoudnessChannelRole, 8> eight_channel_default{
             LoudnessChannelRole::left, LoudnessChannelRole::right,
             LoudnessChannelRole::center, LoudnessChannelRole::lfe,
             LoudnessChannelRole::left_surround, LoudnessChannelRole::right_surround,
             LoudnessChannelRole::left_rear_surround, LoudnessChannelRole::right_rear_surround};
-        for (int ch = 0; ch < num_channels_; ++ch) {
-            auto role = roles ? roles[ch] : defaults[static_cast<std::size_t>(std::min(ch, 7))];
-            if (!roles && num_channels_ == 4)
-                role = ch < 2 ? defaults[ch] : defaults[ch + 2];
-            if (!roles && num_channels_ == 5)
-                role = ch < 3 ? defaults[ch] : defaults[ch + 1];
-            channel_weights_[ch] = role_weight(role);
+        std::array<LoudnessChannelRole, 8> configured{};
+
+        if (roles) {
+            std::array<bool, 8> seen{};
+            for (int ch = 0; ch < num_channels_; ++ch) {
+                const auto role = roles[ch];
+                const auto role_index = static_cast<std::size_t>(role);
+                if (role == LoudnessChannelRole::unknown || role_index >= seen.size()
+                    || seen[role_index])
+                    return false;
+                seen[role_index] = true;
+                configured[static_cast<std::size_t>(ch)] = role;
+            }
+        } else {
+            switch (num_channels_) {
+                case 1:
+                    configured[0] = LoudnessChannelRole::center;
+                    break;
+                case 2:
+                    configured[0] = LoudnessChannelRole::left;
+                    configured[1] = LoudnessChannelRole::right;
+                    break;
+                case 3:
+                    std::copy_n(eight_channel_default.begin(), 3, configured.begin());
+                    break;
+                case 4:
+                    configured = {LoudnessChannelRole::left, LoudnessChannelRole::right,
+                                  LoudnessChannelRole::left_surround,
+                                  LoudnessChannelRole::right_surround};
+                    break;
+                case 5:
+                    configured = {LoudnessChannelRole::left, LoudnessChannelRole::right,
+                                  LoudnessChannelRole::center,
+                                  LoudnessChannelRole::left_surround,
+                                  LoudnessChannelRole::right_surround};
+                    break;
+                case 6:
+                    std::copy_n(eight_channel_default.begin(), 6, configured.begin());
+                    break;
+                case 8:
+                    configured = eight_channel_default;
+                    break;
+                default:
+                    return false;
+            }
         }
+
+        bool has_program_channel = false;
+        for (int ch = 0; ch < num_channels_; ++ch) {
+            double weight = 0.0;
+            if (!role_weight(configured[static_cast<std::size_t>(ch)], weight)) return false;
+            channel_weights_[static_cast<std::size_t>(ch)] = weight;
+            has_program_channel = has_program_channel || weight > 0.0;
+        }
+        return has_program_channel;
     }
 
     void configure_k_weighting() {
@@ -567,12 +651,13 @@ private:
     bool block_clipped_[kMaxMeterChannels] = {};
     int block_samples_ = 0;
 
-    bool loudness_valid_ = true;
+    bool loudness_valid_ = false;
     int loudness_hop_samples_ = 4410;
     int loudness_hop_position_ = 0;
     std::uint64_t loudness_hops_completed_ = 0;
     std::size_t loudness_ring_position_ = 0;
     int active_num_channels_ = 0;
+    bool active_loudness_processing_ = false;
     std::array<KWeighting, kMaxMeterChannels> k_filters_{};
     std::array<double, kMaxMeterChannels> channel_weights_{};
     std::array<double, kMaxMeterChannels> loudness_hop_energy_{};
