@@ -48,6 +48,7 @@ struct InspectorClientTarget {
     std::string session_id;
     std::string instance_id;
     std::string publication_id;
+    friend bool operator==(const InspectorClientTarget&, const InspectorClientTarget&) = default;
 };
 
 /// Typed outcome for a one-shot inspector request. Client-side discovery and
@@ -55,10 +56,14 @@ struct InspectorClientTarget {
 /// protocol failures, so CLI and MCP do not need separate string parsers.
 struct InspectorClientResult {
     std::optional<InspectorDiscoveryRecord> publication;
+    /// Exact authority target used by either the legacy publication client or
+    /// a canonical control session. Canonical callers do not require a legacy
+    /// discovery record in order to identify the affected runtime.
+    std::optional<InspectorClientTarget> target;
     InspectorMessage response;
 
     bool succeeded() const {
-        return publication.has_value() && !response.is_error;
+        return (publication.has_value() || target.has_value()) && !response.is_error;
     }
 };
 

@@ -94,6 +94,9 @@ TEST_CASE("shared one-shot client selects exact publications and owns controller
 
     REQUIRE(result.succeeded());
     REQUIRE(result.publication.has_value());
+    REQUIRE(result.target.has_value());
+    CHECK(*result.target == pulp::inspect::InspectorClientTarget{
+                                record.session_id, record.instance_id, record.publication_id});
     CHECK(result.publication->session_id == record.session_id);
     CHECK(result.publication->instance_id == record.instance_id);
     CHECK(result.publication->publication_id == record.publication_id);
@@ -172,6 +175,7 @@ TEST_CASE("shared one-shot client returns stable structured selection errors",
 
     CHECK_FALSE(result.succeeded());
     CHECK_FALSE(result.publication.has_value());
+    CHECK_FALSE(result.target.has_value());
     CHECK(result.response.is_error);
     CHECK(result.response.error_code == "selection_failed");
     CHECK(result.response.error_data_json.find("missing-session") != std::string::npos);
@@ -193,6 +197,7 @@ TEST_CASE("shared one-shot client preserves discovery security failures",
 
     CHECK_FALSE(result.succeeded());
     CHECK_FALSE(result.publication.has_value());
+    CHECK_FALSE(result.target.has_value());
     CHECK(result.response.is_error);
     CHECK(result.response.error_code == "discovery_unavailable");
     CHECK(result.response.params_json == "runtime directory is not an owner-private directory");

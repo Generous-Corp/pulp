@@ -42,7 +42,18 @@ ControlExecutionOutcome legacy_failure(const InspectorMessage& response) {
         code = ControlResultCode::Inactive;
         retry = ControlRetryClassification::AfterRefresh;
     }
-    return failure(code, retry, response.params_json);
+    const auto detail = encode_control_legacy_inspector_error({
+        .error_code = response.error_code,
+        .error_message = response.params_json,
+        .error_data_json = response.error_data_json,
+    });
+    if (!detail) {
+        return failure(ControlResultCode::InternalError, ControlRetryClassification::Never,
+                       "legacy trace error violated the control compatibility bounds");
+    }
+    auto outcome = failure(code, retry, response.params_json);
+    outcome.result.detail_json = *detail;
+    return outcome;
 }
 
 } // namespace
@@ -96,8 +107,8 @@ struct ControlTraceSessionExecutor::State {
             response = owner->handle(make_request(1, std::string(methods::kTraceStartSession),
                                                   choc::json::toString(legacy, false)));
         } else {
-            response = owner->handle(
-                make_request(1, std::string(methods::kTraceStopSession), "{}"));
+            response =
+                owner->handle(make_request(1, std::string(methods::kTraceStopSession), "{}"));
         }
         if (response.is_error)
             return legacy_failure(response);
