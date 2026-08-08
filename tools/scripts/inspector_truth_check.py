@@ -327,13 +327,25 @@ def public_surface_errors(root: pathlib.Path) -> list[str]:
     trace_dispatch = (root / "experimental/pulp-rs/src/cmd/trace_dispatch.rs").read_text(
         encoding="utf-8"
     )
-    for claim in (
-        "legacy live Trace.query/snapshot/explain authority was removed",
-        "pulp trace start/stop use canonical capability control",
-        "legacy --port/--session/--instance/--publication selectors",
+    if not _contains_in_order(
+        trace_dispatch,
+        (
+            "if let Sub::Query(q)",
+            "run_offline_query",
+            "matches!(sub, Sub::Start(_) | Sub::Stop)",
+            "to_control_call(sub)",
+        ),
     ):
-        if claim not in trace_dispatch:
-            errors.append(f"trace dispatch omits canonical-only contract: {claim}")
+        errors.append(
+            "trace dispatch does not separate offline query from canonical lifecycle control"
+        )
+    for retired in (
+        "resolve_publication_selection",
+        "call_selected",
+        "PULP_INSPECTOR_PORT",
+    ):
+        if retired in trace_dispatch:
+            errors.append(f"trace dispatch restores retired authority path: {retired}")
     return errors
 
 def check_root(

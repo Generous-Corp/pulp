@@ -75,9 +75,10 @@ class ReducedPublicSurfaceTests(unittest.TestCase):
             encoding="utf-8",
         )
         (self.root / "experimental/pulp-rs/src/cmd/trace_dispatch.rs").write_text(
-            "legacy live Trace.query/snapshot/explain authority was removed\n"
-            "pulp trace start/stop use canonical capability control\n"
-            "legacy --port/--session/--instance/--publication selectors\n",
+            "if let Sub::Query(q) { return run_offline_query(q); }\n"
+            "if matches!(sub, Sub::Start(_) | Sub::Stop) {\n"
+            "  let call = to_control_call(sub);\n"
+            "}\n",
             encoding="utf-8",
         )
 
@@ -108,7 +109,7 @@ class ReducedPublicSurfaceTests(unittest.TestCase):
     def test_rejects_missing_canonical_trace_contract(self) -> None:
         (self.root / "experimental/pulp-rs/src/cmd/trace_dispatch.rs").write_text("")
         errors = inspector_truth_check.public_surface_errors(self.root)
-        self.assertTrue(any("canonical-only contract" in error for error in errors))
+        self.assertTrue(any("canonical lifecycle control" in error for error in errors))
 
 
 if __name__ == "__main__":
