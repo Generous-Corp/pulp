@@ -215,7 +215,6 @@ int main() {
   request.operation_version = 1;
   admission.operation_version = request.operation_version;
   return !broker.is_listening() && !service.is_listening()
-             && !client.is_connected()
              && !host_connection.is_connected()
              && enrollment_open.error_code == "invalid-host-open"
              && slot_installed

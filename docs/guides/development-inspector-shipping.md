@@ -31,6 +31,12 @@ standalone endpoint. The legacy server, raw client, discovery publisher, and
 standalone session owner were deleted in Phase 3; the manifest remains an upper
 bound for the canonical replacement, not evidence of current reachability.
 
+The Phase 4 runtime archives now implement exact T0/T1 instance status and
+bounded state/parameter catalog reads. They are reachable only through a
+carrier-authenticated `ControlService` session, an exact registration grant,
+and an injected runtime executor. There is no `pulp inspect` or MCP adapter for
+these operations yet, and ordinary production artifacts remain stripped.
+
 Control declarations are re-read as configure-time truth on every CMake run.
 Changing a target from `research-unsafe` to a narrower profile, removing
 `runtime.eval`, or deleting its acknowledgement force-replaces the cached

@@ -43,6 +43,7 @@ add_library(pulp-inspect-control
     src/control_operations.cpp
     src/control_peer.cpp
     src/control_private_store.cpp
+    src/control_read_operations.cpp
     src/control_service.cpp)
 target_sources(pulp-inspect-control PRIVATE
     src/control_trusted_host_inventory.cpp
@@ -97,6 +98,7 @@ target_link_libraries(pulp-inspect-client
     PUBLIC pulp::inspect-control)
 
 add_library(pulp-inspect-runtime
+    src/control_state_read_executor.cpp
     src/control_main_thread_executor.cpp
     src/control_trace_session_executor.cpp
     src/main_thread_rpc.cpp
@@ -110,7 +112,8 @@ target_link_libraries(pulp-inspect-runtime
     PUBLIC
         pulp::inspect-control
         pulp::inspect-protocol
-        pulp::events)
+        pulp::events
+        pulp::state)
 
 # T0 offline integration is a separate headless adapter archive so the shared
 # control runtime does not acquire format/view dependencies merely by existing.

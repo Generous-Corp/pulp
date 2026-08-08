@@ -12,42 +12,53 @@ namespace {
 
 const char* kind_name(ParamKind kind) {
     switch (kind) {
-        case ParamKind::Continuous: return "continuous";
-        case ParamKind::Integer: return "integer";
-        case ParamKind::Toggle: return "toggle";
-        case ParamKind::Enum: return "enum";
+    case ParamKind::Continuous:
+        return "continuous";
+    case ParamKind::Integer:
+        return "integer";
+    case ParamKind::Toggle:
+        return "toggle";
+    case ParamKind::Enum:
+        return "enum";
     }
     return "continuous";
 }
 
 const char* designation_name(ParamDesignation d) {
     switch (d) {
-        case ParamDesignation::None: return "none";
-        case ParamDesignation::Bypass: return "bypass";
-        case ParamDesignation::Reset: return "reset";
+    case ParamDesignation::None:
+        return "none";
+    case ParamDesignation::Bypass:
+        return "bypass";
+    case ParamDesignation::Reset:
+        return "reset";
     }
     return "none";
 }
 
 /// The label for a discrete value, or empty when there isn't one.
 std::string label_for(const ParamInfo& info, float value) {
-    if (info.value_labels.empty() || !is_discrete_param(info)) return {};
+    if (info.value_labels.empty() || !is_discrete_param(info))
+        return {};
     const auto index = static_cast<long>(value - info.range.min + 0.5f);
-    if (index < 0 || static_cast<std::size_t>(index) >= info.value_labels.size()) return {};
+    if (index < 0 || static_cast<std::size_t>(index) >= info.value_labels.size())
+        return {};
     return info.value_labels[static_cast<std::size_t>(index)];
 }
 
-}  // namespace
+} // namespace
 
 std::string param_display_text(const ParamInfo& info, float value) {
     // The author's formatter wins — it is what the host already shows, so any
     // other answer here would make the UI disagree with the DAW.
-    if (info.to_string) return info.to_string(value);
+    if (info.to_string)
+        return info.to_string(value);
 
     // A discrete parameter with labels reads as its label. Showing "2" for an
     // enum whose author named its values is a worse default than showing the
     // name they chose.
-    if (auto label = label_for(info, value); !label.empty()) return label;
+    if (auto label = label_for(info, value); !label.empty())
+        return label;
 
     // %.3g keeps small integers clean ("440") while trimming float noise. This
     // matches HostParamSurface's long-standing fallback exactly — the two must
@@ -77,7 +88,8 @@ bool param_parse_display_text(const ParamInfo& info, const std::string& text, fl
     const char* begin = text.c_str();
     char* end = nullptr;
     const float parsed = std::strtof(begin, &end);
-    if (end == begin) return false;  // nothing numeric at all — not a zero
+    if (end == begin)
+        return false; // nothing numeric at all — not a zero
 
     // Refuse trailing garbage so "12 bananas" is a parse failure rather than 12.
     std::string rest(end);
@@ -86,7 +98,8 @@ bool param_parse_display_text(const ParamInfo& info, const std::string& text, fl
         rest = rest.substr(first);
         const auto last = rest.find_last_not_of(" \t");
         rest = rest.substr(0, last + 1);
-        if (!rest.empty() && rest != info.unit) return false;
+        if (!rest.empty() && rest != info.unit)
+            return false;
     }
 
     out_value = constrain_param_value(info, parsed);
@@ -95,7 +108,7 @@ bool param_parse_display_text(const ParamInfo& info, const std::string& text, fl
 
 choc::value::Value param_metadata_to_value(const ParamInfo& info) {
     auto obj = choc::value::createObject("");
-    obj.addMember("id", choc::value::createInt32(static_cast<int32_t>(info.id)));
+    obj.addMember("id", choc::value::createInt64(static_cast<int64_t>(info.id)));
     obj.addMember("name", choc::value::createString(info.name));
     obj.addMember("unit", choc::value::createString(info.unit));
     obj.addMember("min", choc::value::createFloat64(info.range.min));
@@ -123,7 +136,7 @@ choc::value::Value param_snapshot_to_value(const StateStore& store, const ParamI
     const float value = store.get_value(info.id);
 
     auto obj = choc::value::createObject("");
-    obj.addMember("id", choc::value::createInt32(static_cast<int32_t>(info.id)));
+    obj.addMember("id", choc::value::createInt64(static_cast<int64_t>(info.id)));
     obj.addMember("name", choc::value::createString(info.name));
     obj.addMember("unit", choc::value::createString(info.unit));
     obj.addMember("value", choc::value::createFloat64(value));
@@ -138,4 +151,15 @@ choc::value::Value param_snapshot_to_value(const StateStore& store, const ParamI
     return obj;
 }
 
-}  // namespace pulp::state
+choc::value::Value param_catalog_snapshot_to_value(const StateStore& store, const ParamInfo& info) {
+    auto value = param_metadata_to_value(info);
+    const auto snapshot = param_snapshot_to_value(store, info);
+    value.addMember("value", snapshot["value"]);
+    value.addMember("normalized", snapshot["normalized"]);
+    value.addMember("modulated", snapshot["modulated"]);
+    if (snapshot.hasObjectMember("display"))
+        value.addMember("display", snapshot["display"]);
+    return value;
+}
+
+} // namespace pulp::state
