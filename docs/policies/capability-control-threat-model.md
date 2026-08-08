@@ -1,9 +1,8 @@
 # Capability control threat model
 
 This document defines the security boundary for Pulp's local capability-control
-platform. It applies to Product A control sessions and the shared primitives a
-future Product B collaboration router may reuse. It does not claim that an
-arbitrary native audio plugin is sandboxed merely because its Pulp control
+platform. It applies only to Product A control sessions. It does not claim that
+an arbitrary native audio plugin is sandboxed merely because its Pulp control
 surface is capability-controlled.
 
 ## Security goals
@@ -21,8 +20,8 @@ surface is capability-controlled.
   nor raw peer addresses, sockets, or generic message escape hatches.
 - Production-stripped artifacts contain no Product A endpoint or legacy Remote
   View parameter authority.
-- Denial is explainable without logging secret values, parameter payloads,
-  captured content, or collaboration message bodies.
+- Denial is explainable without logging secret values, parameter payloads, or
+  captured content.
 
 An operation is allowed only when all seven terms are true:
 
@@ -50,8 +49,7 @@ The broker and its owner-private persistent state are trusted. The CLI and MCP
 adapter are separate clients; neither may self-issue grants. A Pulp-owned host
 bridge is trusted only for the exact host process and slots it attests. Plugin
 code, plugin UI code, imported content, remote renderers, MCP request text,
-project files, presets, collaboration payloads, and third-party host processes
-are untrusted inputs.
+project files, presets, and third-party host processes are untrusted inputs.
 
 The v1 broker is local-only. Loopback is defense in depth, not identity. OS peer
 credentials, owner-private bootstrap material, mutual authentication, exact
@@ -62,7 +60,7 @@ establish what it is and what it may do.
 Shared-process plugins are not meaningfully identified by process signing
 alone. A trusted host bridge must attest the verified artifact publisher and
 exact loaded slot. If a host tier cannot supply that evidence, capability
-control and collaboration are unavailable there.
+control is unavailable there.
 
 ## Implemented foundation and current boundary
 
@@ -171,23 +169,13 @@ environment-delivered bootstrap credentials remain rejected.
 | Artifact changes between discovery and verification | One cached byte snapshot per candidate drives selection, surface detection, marker verification, hashing, and consent identity; sidecar-derived names must remain safe basenames beside the sidecar; artifact and sidecar symlinks are rejected rather than followed |
 | Empty identity, malformed UTF-8/JSON, or oversized typed payload bypasses policy accounting | Required identity and idempotency strings are nonempty; every schema string and collection is bounded; the decoder validates UTF-8 and complete string tokens before the JSON parser; discriminated operations use closed request variants; executor-specific limits are frozen in the registry, including byte-based UTF-8 limits that JSON Schema character counts cannot express |
 | Update installs a second or untrusted broker | One active Pulp-owned per-user service, one signed update/bootstrap path, version negotiation, old service drain and credential invalidation |
-| Cross-vendor route appears from compatibility alone | Compatibility only makes a route offer possible; user/publisher policy and a visible integration action admit it; paired revocable grants are issued only after both exact endpoints are revalidated |
-| A blocked publisher communicates through another allowed route | Publisher deny policy wins before route creation and on restore/reconnect; active routes are inspectable and revoked when policy changes |
 
 ## Consent and policy defaults
 
-Product behavior should be permissive enough for useful integrations without
-making installation consent. Cross-vendor support may be enabled globally, but
-no actual route exists until a visible integration action. Publisher policy has
-three simple states: `use-default`, `always-ask`, and `block-integrations`.
-Blocks always win. A user may allow same-publisher integrations, allow most
-cross-vendor integrations while blocking one publisher, inspect active routes,
-and revoke them at any time.
-
-Routine messages, reconnects, and compatible patch versions do not prompt.
-Publisher changes, service/schema incompatibility, new data fields or direction,
-higher rate/budget, or any other material scope expansion require a new decision.
-Project files store inert route intent, never credentials or durable grants.
+Consent is scoped to one Product A client, target, publication, and live
+session. It never creates a plugin-to-plugin or cross-publisher route: Pulp has
+no such route, policy state, integration action, or paired grant. Project files
+store no broker credential or durable grant.
 
 ## Explicit non-claims
 
@@ -199,8 +187,8 @@ Project files store inert route intent, never credentials or durable grants.
 - Code signing alone does not identify one plugin slot in a shared DAW process.
 - An MCP tool list, a build type, an environment variable, a compatible schema,
   or a discovered peer is not authorization.
-- Product B is not approved merely because the shared identity and policy
-  primitives exist; its design and pilot gates remain separate.
+- Plugin-to-plugin transport is deliberately out of scope. See the accepted
+  [collaboration NO-GO](plugin-collaboration.md) for the only reopen path.
 
 ## Verification gates
 
