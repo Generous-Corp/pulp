@@ -42,7 +42,6 @@ target_sources(pulp-format PRIVATE
     src/ios_audio_session.cpp
     src/descriptor_validation.cpp
     src/view_bridge.cpp
-    src/remote_view_session.cpp
     src/native_core_processor.cpp
     src/transport_quantizer.cpp
 )

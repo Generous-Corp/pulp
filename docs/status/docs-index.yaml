@@ -432,6 +432,11 @@ docs:
     kind: reference
     summary: Exhaustive public-method inventory for the advanced signal-processing families
 
+  - slug: analysis-frontends
+    path: reference/analysis-frontends.md
+    kind: reference
+    summary: Reusable spectrum conditioning and triggered scope-capture front ends
+
   - slug: analysis-chroma-onset-frontends
     path: reference/analysis-chroma-onset-frontends.md
     kind: reference
