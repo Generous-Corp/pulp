@@ -208,6 +208,16 @@ def member_payload(name: str, platform: str = "linux-x64") -> bytes:
             "schema": "pulp.agent-capability-handoff.v1",
             "sdk_source_sha": SOURCE_SHA,
             "platform": platform,
+            "schemas": {
+                "handoff": {
+                    "path": "share/pulp/agent-capability-handoff.schema.json",
+                    "sha256": hashlib.sha256(FIXTURE_HANDOFF_SCHEMA).hexdigest(),
+                },
+                "agent_capabilities": {
+                    "path": "share/pulp/agent-capabilities.schema.json",
+                    "sha256": hashlib.sha256(FIXTURE_CAPABILITIES_SCHEMA).hexdigest(),
+                },
+            },
             "importer": {
                 "path": importer.removeprefix("pulp-sdk/"),
                 "sha256": hashlib.sha256(FIXTURE_IMPORTER).hexdigest(),
@@ -675,6 +685,47 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             ),
             "capability sha256",
         )
+
+    def test_negative_control_substituted_capability_schema_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            make_platform(root, "linux-x64")
+            sdk_path = root / rac.sdk_asset_name("linux-x64")
+            with rac.Archive(sdk_path) as archive:
+                members = set(archive.members)
+            original_payload = member_payload
+            changed_capabilities = b'{"unexpected":true}'
+
+            def substituted_payload(
+                name: str, platform: str = "linux-x64"
+            ) -> bytes:
+                if name == "pulp-sdk/share/pulp/agent-capabilities.json":
+                    return changed_capabilities
+                if name == "pulp-sdk/share/pulp/agent-capabilities.schema.json":
+                    return b'{"type":"object"}'
+                payload = original_payload(name, platform)
+                if name == "pulp-sdk/share/pulp/agent-capability-handoff.json":
+                    document = json.loads(payload)
+                    document["agent_capabilities"]["sha256"] = hashlib.sha256(
+                        changed_capabilities
+                    ).hexdigest()
+                    document["agent_capabilities"]["content"] = json.loads(
+                        changed_capabilities
+                    )
+                    return json.dumps(document).encode()
+                return payload
+
+            with mock.patch(
+                __name__ + ".member_payload", side_effect=substituted_payload
+            ):
+                write_archive(sdk_path, members, as_zip=False)
+            with self.assertRaisesRegex(
+                rac.ContentError, "agent_capabilities schema sha256"
+            ):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA,
+                    native_signatures=False,
+                )
 
     def _assert_mutated_handoff_rejected(self, mutate, message: str) -> None:
         with tempfile.TemporaryDirectory() as td:

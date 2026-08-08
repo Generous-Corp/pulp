@@ -107,6 +107,31 @@ class SdkCapabilityHandoffTests(unittest.TestCase):
         with self.assertRaisesRegex(handoff.HandoffError, "violates its schema"):
             self.verify()
 
+    def test_permissive_capability_schema_cannot_bless_changed_contract(self) -> None:
+        document = self.stamp()
+        changed = json.dumps({"unexpected": True}).encode()
+        (self.prefix / handoff.CAPABILITIES_PATH).write_bytes(changed)
+        (self.prefix / handoff.CAPABILITIES_SCHEMA_PATH).write_text(
+            json.dumps({"type": "object"}), encoding="utf-8"
+        )
+        document["agent_capabilities"]["sha256"] = handoff.sha256(changed)
+        document["agent_capabilities"]["content"] = json.loads(changed)
+        handoff.write_atomically(self.prefix / handoff.HANDOFF_PATH, document)
+        with self.assertRaisesRegex(handoff.HandoffError,
+                                    "agent_capabilities schema sha256"):
+            self.verify()
+
+    def test_permissive_handoff_schema_cannot_bless_unknown_fields(self) -> None:
+        document = self.stamp()
+        document["unexpected"] = True
+        (self.prefix / handoff.HANDOFF_SCHEMA_PATH).write_text(
+            json.dumps({"type": "object"}), encoding="utf-8"
+        )
+        handoff.write_atomically(self.prefix / handoff.HANDOFF_PATH, document)
+        with self.assertRaisesRegex(handoff.HandoffError,
+                                    "handoff schema sha256"):
+            self.verify()
+
 
 if __name__ == "__main__":
     unittest.main()

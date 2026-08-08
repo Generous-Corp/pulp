@@ -68,10 +68,8 @@ def build_handoff(
 ) -> dict[str, object]:
     capability_bytes = _read_bytes(prefix / CAPABILITIES_PATH)
     capability_document = _json(capability_bytes, str(CAPABILITIES_PATH))
-    capability_schema = _json(
-        _read_bytes(prefix / CAPABILITIES_SCHEMA_PATH),
-        str(CAPABILITIES_SCHEMA_PATH),
-    )
+    capability_schema_bytes = _read_bytes(prefix / CAPABILITIES_SCHEMA_PATH)
+    capability_schema = _json(capability_schema_bytes, str(CAPABILITIES_SCHEMA_PATH))
     _validate(capability_document, capability_schema, str(CAPABILITIES_PATH))
     importer = importer_path(platform)
     importer_bytes = _read_bytes(prefix / importer, limit=512 * 1024 * 1024)
@@ -80,6 +78,16 @@ def build_handoff(
         "schema": SCHEMA,
         "sdk_source_sha": sdk_source_sha,
         "platform": platform,
+        "schemas": {
+            "handoff": {
+                "path": HANDOFF_SCHEMA_PATH.as_posix(),
+                "sha256": "",
+            },
+            "agent_capabilities": {
+                "path": CAPABILITIES_SCHEMA_PATH.as_posix(),
+                "sha256": sha256(capability_schema_bytes),
+            },
+        },
         "importer": {
             "path": importer.as_posix(),
             "sha256": sha256(importer_bytes),
@@ -90,9 +98,13 @@ def build_handoff(
             "content": capability_document,
         },
     }
-    handoff_schema = _json(
-        _read_bytes(prefix / HANDOFF_SCHEMA_PATH), str(HANDOFF_SCHEMA_PATH)
-    )
+    handoff_schema_bytes = _read_bytes(prefix / HANDOFF_SCHEMA_PATH)
+    schemas = document["schemas"]
+    assert isinstance(schemas, dict)
+    handoff_descriptor = schemas["handoff"]
+    assert isinstance(handoff_descriptor, dict)
+    handoff_descriptor["sha256"] = sha256(handoff_schema_bytes)
+    handoff_schema = _json(handoff_schema_bytes, str(HANDOFF_SCHEMA_PATH))
     _validate(document, handoff_schema, str(HANDOFF_PATH))
     return document
 
@@ -126,10 +138,38 @@ def verify_payload(
     expected_platform: str,
 ) -> dict[str, object]:
     document = _json(handoff_bytes, str(HANDOFF_PATH))
-    handoff_schema = _json(handoff_schema_bytes, str(HANDOFF_SCHEMA_PATH))
-    _validate(document, handoff_schema, str(HANDOFF_PATH))
     if not isinstance(document, dict):
         raise HandoffError(f"{HANDOFF_PATH} must contain an object")
+    schemas = document.get("schemas")
+    if not isinstance(schemas, dict) or set(schemas) != {
+        "handoff", "agent_capabilities"
+    }:
+        raise HandoffError(f"{HANDOFF_PATH}: schema descriptors are invalid")
+    expected_schemas = {
+        "handoff": (HANDOFF_SCHEMA_PATH, handoff_schema_bytes),
+        "agent_capabilities": (
+            CAPABILITIES_SCHEMA_PATH,
+            capability_schema_bytes,
+        ),
+    }
+    for name, (path, payload) in expected_schemas.items():
+        descriptor = schemas.get(name)
+        if not isinstance(descriptor, dict) or set(descriptor) != {"path", "sha256"}:
+            raise HandoffError(
+                f"{HANDOFF_PATH}: {name} schema descriptor is invalid"
+            )
+        if descriptor["path"] != path.as_posix():
+            raise HandoffError(
+                f"{HANDOFF_PATH}: {name} schema path is {descriptor['path']!r}, "
+                f"expected {path.as_posix()!r}"
+            )
+        if descriptor["sha256"] != sha256(payload):
+            raise HandoffError(
+                f"{HANDOFF_PATH}: {name} schema sha256 does not match installed "
+                f"{path}"
+            )
+    handoff_schema = _json(handoff_schema_bytes, str(HANDOFF_SCHEMA_PATH))
+    _validate(document, handoff_schema, str(HANDOFF_PATH))
     if document.get("sdk_source_sha") != expected_sdk_source_sha:
         raise HandoffError(
             f"{HANDOFF_PATH}: sdk_source_sha is {document.get('sdk_source_sha')!r}, "

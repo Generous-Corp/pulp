@@ -9,6 +9,7 @@
     "schema",
     "sdk_source_sha",
     "platform",
+    "schemas",
     "importer",
     "agent_capabilities"
   ],
@@ -26,6 +27,41 @@
     "platform": {
       "type": "string",
       "pattern": "^(darwin|linux|windows)-(arm64|x64)$"
+    },
+    "schemas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["handoff", "agent_capabilities"],
+      "properties": {
+        "handoff": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256"],
+          "properties": {
+            "path": {
+              "const": "share/pulp/agent-capability-handoff.schema.json"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        "agent_capabilities": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256"],
+          "properties": {
+            "path": {
+              "const": "share/pulp/agent-capabilities.schema.json"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        }
+      }
     },
     "importer": {
       "type": "object",
