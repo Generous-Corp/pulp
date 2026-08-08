@@ -469,6 +469,64 @@ class MainTests(unittest.TestCase):
                 names, ["pulp-mcp.exe", "pulp.exe", "wgpu_native.dll"]
             )
 
+    def test_main_packages_and_rewrites_darwin_control_broker(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            pulp = root / "pulp-built"
+            broker = root / "pulp-control-broker-built"
+            wgpu = root / "libwgpu_native.dylib"
+            for path in (pulp, broker, wgpu):
+                path.write_text(path.name, encoding="utf-8")
+            out = root / "pulp-darwin-arm64.tar.gz"
+
+            with mock.patch.object(pc, "find_wgpu_lib", return_value=wgpu):
+                with mock.patch.object(pc, "fix_rpath_macos") as fix_rpath:
+                    with mock.patch.object(pc, "resign_macos"):
+                        with argv(
+                            [
+                                "package_cli.py",
+                                "--binary", str(pulp),
+                                "--control-broker-binary", str(broker),
+                                "--build-dir", str(root / "build"),
+                                "--platform", "darwin-arm64",
+                                "--out", str(out),
+                            ]
+                        ):
+                            rc = pc.main()
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(fix_rpath.call_count, 2)
+            self.assertEqual(
+                {call.args[0].name for call in fix_rpath.call_args_list},
+                {"pulp", "pulp-control-broker"},
+            )
+            with tarfile.open(out, "r:gz") as tar:
+                self.assertIn("pulp-control-broker", tar.getnames())
+
+    def test_main_rejects_control_broker_on_non_darwin_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            pulp = root / "pulp-built"
+            broker = root / "pulp-control-broker-built"
+            pulp.write_text("pulp", encoding="utf-8")
+            broker.write_text("broker", encoding="utf-8")
+            err = io.StringIO()
+            with argv(
+                [
+                    "package_cli.py",
+                    "--binary", str(pulp),
+                    "--control-broker-binary", str(broker),
+                    "--build-dir", str(root / "build"),
+                    "--platform", "linux-x64",
+                    "--out", str(root / "pulp-linux-x64.tar.gz"),
+                ]
+            ):
+                with contextlib.redirect_stderr(err):
+                    rc = pc.main()
+
+            self.assertEqual(rc, 2)
+            self.assertIn("supported only for Darwin", err.getvalue())
+
     def test_main_returns_missing_mcp_binary_error(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)

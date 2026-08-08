@@ -26,6 +26,10 @@ full executable path without depending on Claude Code's inherited `PATH`, so
 the plugin need not ship the binary itself. Without `--mcp-binary` the script
 omits it, keeping older release lanes byte-identical.
 
+Control-broker support: Darwin archives may include the health-only
+`pulp-control-broker` service binary. Other platforms reject this member so a
+platform matrix mistake cannot silently publish an unusable service.
+
 Usage (called from .github/workflows/release-cli.yml):
     python3 tools/scripts/package_cli.py \\
         --binary build/pulp \\
@@ -39,6 +43,7 @@ Layout produced inside the tarball:
     pulp                        (the binary, rpath rewritten)
     pulp-cpp                    (optional, post-swap; rpath rewritten)
     pulp-mcp                    (optional, plugin-MCP server; rpath rewritten)
+    pulp-control-broker         (optional, Darwin health-only service)
     libwgpu_native.dylib        (or libwgpu_native.so / wgpu_native.dll)
 
 The smoke gate from PR #395 verifies the output runs on a runner
@@ -277,6 +282,8 @@ def main() -> int:
                    help="Optional pulp-cpp delegate binary (dual-binary tarball).")
     p.add_argument("--mcp-binary", required=False, type=Path, default=None,
                    help="Optional pulp-mcp server binary (#2067 — Claude plugin MCP).")
+    p.add_argument("--control-broker-binary", required=False, type=Path, default=None,
+                   help="Optional Darwin pulp-control-broker service binary.")
     p.add_argument("--import-design-binary", required=False, type=Path, default=None,
                    help="Optional pulp-import-design delegate binary.")
     p.add_argument("--import-design-runtime-dir", required=False, type=Path, default=None,
@@ -294,6 +301,10 @@ def main() -> int:
         return 2
     if args.mcp_binary is not None and not args.mcp_binary.exists():
         print(f"FAIL: --mcp-binary not at {args.mcp_binary}", file=sys.stderr)
+        return 2
+    if args.control_broker_binary is not None and not args.control_broker_binary.exists():
+        print(f"FAIL: --control-broker-binary not at {args.control_broker_binary}",
+              file=sys.stderr)
         return 2
     if args.import_design_binary is not None and not args.import_design_binary.exists():
         print(f"FAIL: --import-design-binary not at {args.import_design_binary}",
@@ -313,6 +324,10 @@ def main() -> int:
     is_windows = args.platform.startswith("windows-")
     is_macos = args.platform.startswith("darwin-")
     is_linux = args.platform.startswith("linux-")
+    if args.control_broker_binary is not None and not is_macos:
+        print("FAIL: --control-broker-binary is supported only for Darwin archives",
+              file=sys.stderr)
+        return 2
 
     with tempfile.TemporaryDirectory() as td:
         stage = Path(td)
@@ -346,6 +361,15 @@ def main() -> int:
             files.append(staged_mcp)
             names.append(mcp_name)
             print(f"bundled: {args.mcp_binary} -> {mcp_name}", flush=True)
+
+        staged_broker: Path | None = None
+        if args.control_broker_binary is not None:
+            staged_broker = stage_binary(
+                args.control_broker_binary, stage, "pulp-control-broker", is_windows)
+            files.append(staged_broker)
+            names.append("pulp-control-broker")
+            print("bundled: "
+                  f"{args.control_broker_binary} -> pulp-control-broker", flush=True)
 
         staged_import: Path | None = None
         if args.import_design_binary is not None:
@@ -413,6 +437,9 @@ def main() -> int:
             if staged_mcp is not None:
                 print("rewriting macOS rpath: pulp-mcp", flush=True)
                 fix_rpath_macos(staged_mcp)
+            if staged_broker is not None:
+                print("rewriting macOS rpath: pulp-control-broker", flush=True)
+                fix_rpath_macos(staged_broker)
             if staged_import is not None:
                 print("rewriting macOS rpath: pulp-import-design", flush=True)
                 fix_rpath_macos(staged_import)

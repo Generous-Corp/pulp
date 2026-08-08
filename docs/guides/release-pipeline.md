@@ -267,13 +267,13 @@ including the Intel `darwin-x64` CLI+SDK pair, which is now a REQUIRED leg
 | Asset | Purpose |
 |-------|---------|
 | `appcast.xml` | Sparkle auto-update feed; consumed by `pulp upgrade --check-only` |
-| `pulp-darwin-arm64.tar.gz` | CLI tarball (`pulp`, `pulp-cpp`, `pulp-mcp`, `pulp-import-design`, browser-capture runtime, and GPU runtime library) |
+| `pulp-darwin-arm64.tar.gz` | CLI tarball (`pulp`, `pulp-cpp`, `pulp-mcp`, `pulp-import-design`, the health-only `pulp-control-broker`, browser-capture runtime, and GPU runtime library) |
 | `pulp-darwin-x64.tar.gz` | Intel (x86_64) CLI tarball — cross-compiled on Apple Silicon |
 | `pulp-linux-arm64.tar.gz` | " |
 | `pulp-linux-x64.tar.gz` | " |
 | `pulp-windows-arm64.zip` | " |
 | `pulp-windows-x64.zip` | " |
-| `pulp-sdk-darwin-arm64.tar.gz` | SDK tarball (libpulp-*.a + headers + cmake helpers, for plugin authors) |
+| `pulp-sdk-darwin-arm64.tar.gz` | SDK tarball (libpulp-*.a + headers + cmake helpers, plus the health-only broker under `libexec/pulp`, for plugin authors) |
 | `pulp-sdk-darwin-x64.tar.gz` | Intel (x86_64) SDK tarball |
 | `pulp-sdk-linux-arm64.tar.gz` | " |
 | `pulp-sdk-linux-x64.tar.gz` | " |

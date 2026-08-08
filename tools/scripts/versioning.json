@@ -34,6 +34,7 @@
         "tools/cli/**/*.h",
         "tools/audio/host-probe/**",
         "tools/scripts/build_combined_installer.sh",
+        "tools/scripts/release_product_matrix.json",
         "tools/import-design/CMakeLists.txt",
         "tools/import-design/**/*.cpp",
         "tools/import-design/**/*.hpp",
