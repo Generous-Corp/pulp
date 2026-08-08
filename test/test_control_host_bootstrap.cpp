@@ -177,6 +177,17 @@ TEST_CASE("control host bootstrap codec accepts exactly one credential mode",
     auto decoded_carrier = decode_control_host_bootstrap(*unpacked, now, &diagnostics);
     REQUIRE(decoded_carrier);
     CHECK(decoded_carrier->enrollment_id == enrollment.enrollment_id);
+
+    auto escaped = make_enrollment_record();
+    escaped.enrollment_id = "enrollment-\"quoted\"-\\escaped";
+    const auto encoded_escaped = encode_control_host_bootstrap(escaped);
+    REQUIRE_FALSE(encoded_escaped.empty());
+    CHECK(encoded_text(encoded_escaped).find("enrollment-\\\"quoted\\\"-\\\\escaped") !=
+          std::string::npos);
+    auto decoded_escaped =
+        decode_control_host_bootstrap(encoded_escaped.bytes(), now, &diagnostics);
+    REQUIRE(decoded_escaped);
+    CHECK(decoded_escaped->enrollment_id == escaped.enrollment_id);
 }
 
 TEST_CASE("control host bootstrap codec rejects mixed and malformed credential modes",
@@ -228,9 +239,9 @@ TEST_CASE("control host bootstrap codec rejects mixed and malformed credential m
     CHECK_FALSE(decode_control_host_bootstrap(unknown, now, &diagnostics));
     CHECK(diagnostics.status == ControlHostBootstrapStatus::InvalidRecord);
 
-    const auto oversized_enrollment = replace_once(
-        encoded, R"("enrollment_id": "ZW5yb2xsbWVudC0x+/==")",
-        "\"enrollment_id\": \"" + std::string(129, 'x') + "\"");
+    const auto oversized_enrollment =
+        replace_once(encoded, R"("enrollment_id": "ZW5yb2xsbWVudC0x+/==")",
+                     "\"enrollment_id\": \"" + std::string(129, 'x') + "\"");
     CHECK_FALSE(decode_control_host_bootstrap(oversized_enrollment, now, &diagnostics));
     CHECK(diagnostics.status == ControlHostBootstrapStatus::InvalidRecord);
 
