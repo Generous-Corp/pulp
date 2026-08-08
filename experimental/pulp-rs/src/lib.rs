@@ -80,6 +80,7 @@ pub mod bump;
 pub mod cmd;
 pub mod color;
 pub mod config;
+pub mod control_broker_service;
 pub mod diag;
 pub mod error;
 pub mod fallthrough;

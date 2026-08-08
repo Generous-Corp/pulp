@@ -5,6 +5,7 @@
 #include <choc/text/choc_JSON.h>
 
 #include <cstddef>
+#include <initializer_list>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -44,5 +45,31 @@ bool valid_offer(const ControlNegotiationOffer& offer);
 bool valid_request(const ControlRequestEnvelope& request, bool require_hash);
 bool valid_progress(const ControlProgressEnvelope& progress);
 bool valid_receipt(const ControlReceiptEnvelope& receipt);
+bool valid_host_open(const ControlHostOpenEnvelope& message);
+bool valid_host_open_result(const ControlHostOpenResult& message);
+bool valid_host_execute(const ControlHostExecuteEnvelope& message);
+bool valid_host_progress(const ControlHostProgressEnvelope& message);
+bool valid_host_cancel(const ControlHostCancelEnvelope& message);
+bool valid_host_complete(const ControlHostCompleteEnvelope& message);
+bool is_host_control_kind(std::string_view kind);
+std::optional<ControlEnvelopePayload>
+decode_host_control_payload(std::string_view kind, ValueView payload,
+                            ControlProtocolDiagnostics& diagnostics);
+
+bool only_fields(ValueView value, std::initializer_list<std::string_view> allowed,
+                 ControlProtocolDiagnostics& diagnostics);
+bool required_string(ValueView value, std::string_view name, std::string& out, std::size_t maximum,
+                     ControlProtocolDiagnostics& diagnostics, bool token = true);
+bool required_u32(ValueView value, std::string_view name, std::uint32_t& out,
+                  ControlProtocolDiagnostics& diagnostics, bool nonzero = true);
+bool required_u64(ValueView value, std::string_view name, std::uint64_t& out,
+                  ControlProtocolDiagnostics& diagnostics);
+bool required_i64(ValueView value, std::string_view name, std::int64_t& out,
+                  ControlProtocolDiagnostics& diagnostics);
+bool required_bool(ValueView value, std::string_view name, bool& out,
+                   ControlProtocolDiagnostics& diagnostics);
+bool parse_features(ValueView value, std::string_view name, std::vector<std::string>& out,
+                    ControlProtocolDiagnostics& diagnostics);
+choc::value::Value string_array(const std::vector<std::string>& strings);
 
 } // namespace pulp::inspect::control_protocol_detail
