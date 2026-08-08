@@ -108,6 +108,12 @@ pub fn mcp_basename() -> &'static str {
     }
 }
 
+/// Control-broker service binary basename.
+#[must_use]
+pub const fn control_broker_basename() -> &'static str {
+    "pulp-control-broker"
+}
+
 /// Resolve the running binary's filesystem path (i.e. the file we
 /// will overwrite). Wraps `std::env::current_exe` with a friendlier
 /// error.
@@ -180,6 +186,42 @@ impl InstallPlan {
     }
 }
 
+/// Build the service-manager configuration for this installed CLI layout.
+///
+/// # Errors
+///
+/// Returns an error when `HOME` or the install root cannot be resolved.
+pub fn control_broker_service_config_for_plan(
+    plan: &InstallPlan,
+    accept_custom_root: bool,
+) -> Result<crate::control_broker_service::ControlBrokerServiceConfig> {
+    let home = std::env::var_os("HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .ok_or_else(|| CliError::Other("control broker activation requires HOME".to_owned()))?;
+    let bin = plan.self_path.parent().ok_or_else(|| {
+        CliError::Other(format!(
+            "could not resolve install directory for {}",
+            plan.self_path.display()
+        ))
+    })?;
+    let install_root = bin.parent().ok_or_else(|| {
+        CliError::Other(format!(
+            "could not resolve install root above {}",
+            bin.display()
+        ))
+    })?;
+    let health_working_dir = std::env::current_dir().unwrap_or_else(|_| home.clone());
+    let mut config = crate::control_broker_service::ControlBrokerServiceConfig::canonical(
+        &home,
+        &plan.version,
+        health_working_dir,
+    );
+    config.install_root = install_root.to_owned();
+    config.accept_custom_root = accept_custom_root;
+    Ok(config)
+}
+
 /// What we located inside the extracted archive.
 #[derive(Debug, Clone)]
 pub struct ExtractedArchive {
@@ -191,6 +233,8 @@ pub struct ExtractedArchive {
     /// Present only when the archive ships the MCP server binary.
     /// Older tarballs leave this `None`.
     pub new_mcp: Option<PathBuf>,
+    /// Health-only local broker service shipped by Darwin release archives.
+    pub new_control_broker: Option<PathBuf>,
     /// Browser-solved design import helper and its required JS runtime.
     pub new_import_design: Option<PathBuf>,
     /// Extracted `browser_capture/` runtime directory, when shipped.
@@ -225,12 +269,19 @@ pub fn locate_binaries_in_archive(root: &Path) -> Result<ExtractedArchive> {
     } else {
         None
     };
+    let control_broker_path = root.join(control_broker_basename());
+    let new_control_broker = if control_broker_path.exists() {
+        Some(control_broker_path)
+    } else {
+        None
+    };
     let import_design = install_import_design::locate_payload(root)?;
     Ok(ExtractedArchive {
         root: root.to_owned(),
         new_pulp: pulp_path,
         new_cpp,
         new_mcp,
+        new_control_broker,
         new_import_design: import_design.helper,
         browser_capture_runtime: import_design.runtime,
     })
@@ -413,6 +464,281 @@ pub fn install_extracted(plan: &InstallPlan, archive: &ExtractedArchive) -> Resu
     Ok(report)
 }
 
+/// Result of reconciling the optional Darwin control-broker payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlBrokerInstall {
+    /// The archive or target platform has no broker payload to install.
+    NotPresent,
+    /// A previous broker binary was atomically replaced.
+    Replaced,
+    /// The broker was installed into a previously empty sibling slot.
+    Created,
+}
+
+/// Result of the one-time 0.794-to-broker-capable transition recovery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegacyControlBrokerRecovery {
+    /// This platform, version, layout, or installed payload needs no recovery.
+    NotNeeded,
+    /// The exact installed release/root already made its single bounded attempt.
+    AlreadyAttempted {
+        /// Whether the recorded attempt completed successfully.
+        succeeded: bool,
+    },
+    /// The missing broker was recovered from the exact installed release.
+    Recovered,
+}
+
+/// Recover the first broker-bearing release after an older running upgrader
+/// discarded the then-unknown broker member.
+///
+/// The caller supplies the archive fetch and service reconciliation seams. A
+/// private marker is written before fetching, so a hard network or activation
+/// failure cannot stall every subsequent CLI invocation. Explicit installer or
+/// upgrade actions bypass this lazy transition API and may retry.
+///
+/// # Errors
+///
+/// Returns marker, archive-fetch, broker-install, or reconciliation errors.
+pub fn recover_legacy_control_broker_once_with(
+    plan: &InstallPlan,
+    home: &Path,
+    fetch: impl FnOnce() -> Result<ExtractedArchive>,
+    reconcile: impl FnOnce(&Path, &mut dyn FnMut() -> Result<()>) -> Result<()>,
+) -> Result<LegacyControlBrokerRecovery> {
+    use std::cmp::Ordering;
+
+    if !cfg!(target_os = "macos") {
+        return Ok(LegacyControlBrokerRecovery::NotNeeded);
+    }
+    let installed = crate::parse::SemverCompat::parse(&plan.version);
+    let floor = crate::parse::SemverCompat::parse(crate::build_info::control_broker_floor());
+    if !installed.comparable || !floor.comparable || installed.cmp_triple(&floor) == Ordering::Less
+    {
+        return Ok(LegacyControlBrokerRecovery::NotNeeded);
+    }
+    let canonical_bin = home.join(".pulp").join("bin");
+    if plan.self_path.parent() != Some(canonical_bin.as_path()) {
+        return Ok(LegacyControlBrokerRecovery::NotNeeded);
+    }
+    if canonical_bin.join(control_broker_basename()).is_file() {
+        return Ok(LegacyControlBrokerRecovery::NotNeeded);
+    }
+
+    let state_dir = home.join(".pulp").join("state");
+    let marker = state_dir.join("control-broker-legacy-transition.marker");
+    let marker_key = format!(
+        "schema=1\nrelease_version={}\ninstall_root={}\n",
+        plan.version,
+        home.join(".pulp").display()
+    );
+    if let Ok(contents) = fs::read_to_string(&marker) {
+        if contents.starts_with(&marker_key) {
+            return Ok(LegacyControlBrokerRecovery::AlreadyAttempted {
+                succeeded: contents.contains("outcome=success\n"),
+            });
+        }
+    }
+    fs::create_dir_all(&state_dir).map_err(|e| {
+        CliError::Other(format!(
+            "could not create control broker state directory {}: {e}",
+            state_dir.display()
+        ))
+    })?;
+    write_private_marker(
+        &marker,
+        format!("{marker_key}outcome=failure\nerror_code=transition_interrupted\n").as_bytes(),
+    )?;
+
+    let archive = fetch()?;
+    let installed = install_control_broker_with(plan, &archive, reconcile)?;
+    if installed == ControlBrokerInstall::NotPresent {
+        return Err(CliError::Other(format!(
+            "release {} does not contain the expected Darwin control broker",
+            plan.version
+        )));
+    }
+    write_private_marker(
+        &marker,
+        format!("{marker_key}outcome=success\nerror_code=none\n").as_bytes(),
+    )?;
+    Ok(LegacyControlBrokerRecovery::Recovered)
+}
+
+fn write_private_marker(path: &Path, contents: &[u8]) -> Result<()> {
+    let temporary = path.with_extension("marker.new");
+    fs::write(&temporary, contents).map_err(|e| {
+        CliError::Other(format!(
+            "could not write control broker marker {}: {e}",
+            temporary.display()
+        ))
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600)).map_err(|e| {
+            CliError::Other(format!(
+                "could not secure control broker marker {}: {e}",
+                temporary.display()
+            ))
+        })?;
+    }
+    fs::rename(&temporary, path).map_err(|e| {
+        CliError::Other(format!(
+            "could not publish control broker marker {}: {e}",
+            path.display()
+        ))
+    })
+}
+
+/// Install the optional control broker and commit it only after `reconcile`
+/// proves the per-user health-only service is usable.
+///
+/// The callback owns plist/launchd reconciliation. If it fails, this function
+/// restores the exact previous broker binary (or removes a newly-created one)
+/// before returning the error. Non-macOS targets ignore the Darwin-only
+/// payload defensively.
+///
+/// # Errors
+///
+/// Returns filesystem errors from staging or rollback, or the callback error.
+pub fn install_control_broker_with(
+    plan: &InstallPlan,
+    archive: &ExtractedArchive,
+    reconcile: impl FnOnce(&Path, &mut dyn FnMut() -> Result<()>) -> Result<()>,
+) -> Result<ControlBrokerInstall> {
+    let Some(src) = archive.new_control_broker.as_deref() else {
+        return Ok(ControlBrokerInstall::NotPresent);
+    };
+    install_control_broker_path_with(plan, src, reconcile)
+}
+
+/// Path-based form used by the fresh installer after it stages the broker
+/// separately from the rest of the release archive.
+///
+/// # Errors
+///
+/// Returns filesystem errors from staging or rollback, or the callback error.
+pub fn install_control_broker_path_with(
+    plan: &InstallPlan,
+    src: &Path,
+    reconcile: impl FnOnce(&Path, &mut dyn FnMut() -> Result<()>) -> Result<()>,
+) -> Result<ControlBrokerInstall> {
+    if !cfg!(target_os = "macos") {
+        return Ok(ControlBrokerInstall::NotPresent);
+    }
+    let (dst, existed, backup) = control_broker_install_paths(plan, src)?;
+    if backup.exists() {
+        fs::remove_file(&backup).map_err(|e| {
+            CliError::Other(format!(
+                "could not remove stale broker backup {}: {e}",
+                backup.display()
+            ))
+        })?;
+    }
+    if existed {
+        fs::rename(&dst, &backup).map_err(|e| {
+            CliError::Other(format!(
+                "could not move control broker {} aside: {e}",
+                dst.display()
+            ))
+        })?;
+    }
+    if let Err(error) = copy_with_exec(src, &dst) {
+        if existed {
+            let _ = fs::rename(&backup, &dst);
+        }
+        return Err(error);
+    }
+
+    let rolled_back = std::cell::Cell::new(false);
+    let mut rollback_binary = || {
+        if rolled_back.get() {
+            return Ok(());
+        }
+        if dst.exists() {
+            fs::remove_file(&dst).map_err(|rollback_error| {
+                CliError::Other(format!(
+                    "could not remove replacement control broker {}: {rollback_error}",
+                    dst.display()
+                ))
+            })?;
+        }
+        if existed {
+            fs::rename(&backup, &dst).map_err(|rollback_error| {
+                CliError::Other(format!(
+                    "could not restore retained control broker {}: {rollback_error}",
+                    dst.display()
+                ))
+            })?;
+        }
+        rolled_back.set(true);
+        Ok(())
+    };
+
+    if let Err(error) = reconcile(&dst, &mut rollback_binary) {
+        if let Err(rollback_error) = rollback_binary() {
+            return Err(CliError::Other(format!(
+                "control broker activation failed ({error}); rollback of {} also failed: {rollback_error}",
+                dst.display()
+            )));
+        }
+        return Err(error);
+    }
+    if rolled_back.get() {
+        return Err(CliError::Other(
+            "control broker reconciliation reported success after rolling back the binary"
+                .to_owned(),
+        ));
+    }
+
+    if existed {
+        fs::remove_file(&backup).map_err(|e| {
+            CliError::Other(format!(
+                "control broker activated but backup cleanup failed at {}: {e}",
+                backup.display()
+            ))
+        })?;
+        Ok(ControlBrokerInstall::Replaced)
+    } else {
+        Ok(ControlBrokerInstall::Created)
+    }
+}
+
+fn control_broker_install_paths(
+    plan: &InstallPlan,
+    src: &Path,
+) -> Result<(PathBuf, bool, PathBuf)> {
+    let source_metadata = fs::symlink_metadata(src).map_err(|e| {
+        CliError::Other(format!(
+            "could not inspect staged control broker {}: {e}",
+            src.display()
+        ))
+    })?;
+    if source_metadata.file_type().is_symlink() || !source_metadata.is_file() {
+        return Err(CliError::Other(format!(
+            "staged control broker must be a regular file: {}",
+            src.display()
+        )));
+    }
+    let install_dir = plan.self_path.parent().ok_or_else(|| {
+        CliError::Other(format!(
+            "could not resolve install directory for {}",
+            plan.self_path.display()
+        ))
+    })?;
+    let dst = install_dir.join(control_broker_basename());
+    if fs::symlink_metadata(&dst).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return Err(CliError::Other(format!(
+            "refusing to replace symlinked control broker destination {}",
+            dst.display()
+        )));
+    }
+    let existed = dst.exists();
+    let backup = backup_path(&dst);
+    Ok((dst, existed, backup))
+}
+
 /// Summary of which binaries were touched. Surfaced to the user so
 /// they can see the release-binary install ran cleanly.
 #[derive(Debug, Clone, Copy)]
@@ -504,414 +830,5 @@ fn extract_archive(archive: &Path, dst: &Path, is_zip: bool) -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn upgrade_url_macos_arm64_uses_targz() {
-        let (asset, url) = upgrade_url_for("0.50.0", "darwin", "arm64");
-        assert_eq!(asset, "pulp-darwin-arm64.tar.gz");
-        assert_eq!(
-            url,
-            "https://github.com/Generous-Corp/pulp/releases/download/v0.50.0/pulp-darwin-arm64.tar.gz"
-        );
-    }
-
-    #[test]
-    fn upgrade_url_windows_x64_uses_zip() {
-        let (asset, url) = upgrade_url_for("0.50.0", "windows", "x64");
-        assert_eq!(asset, "pulp-windows-x64.zip");
-        assert!(url.ends_with("/v0.50.0/pulp-windows-x64.zip"));
-    }
-
-    #[test]
-    fn upgrade_url_linux_x64_uses_targz() {
-        let (asset, _url) = upgrade_url_for("1.2.3", "linux", "x64");
-        assert_eq!(asset, "pulp-linux-x64.tar.gz");
-    }
-
-    #[test]
-    fn current_platform_matches_target_os() {
-        let p = current_platform();
-        if cfg!(target_os = "macos") {
-            assert_eq!(p, "darwin");
-        } else if cfg!(target_os = "windows") {
-            assert_eq!(p, "windows");
-        } else {
-            assert_eq!(p, "linux");
-        }
-    }
-
-    #[test]
-    fn current_arch_matches_target_arch() {
-        let a = current_arch();
-        if cfg!(target_arch = "aarch64") {
-            assert_eq!(a, "arm64");
-        } else if cfg!(target_arch = "x86_64") {
-            assert_eq!(a, "x64");
-        } else {
-            assert_eq!(a, "unknown");
-        }
-    }
-
-    #[test]
-    fn pulp_basename_includes_exe_on_windows() {
-        if cfg!(target_os = "windows") {
-            assert_eq!(pulp_basename(), "pulp.exe");
-            assert_eq!(cpp_basename(), "pulp-cpp.exe");
-            assert_eq!(mcp_basename(), "pulp-mcp.exe");
-            assert_eq!(import_design_basename(), "pulp-import-design.exe");
-        } else {
-            assert_eq!(pulp_basename(), "pulp");
-            assert_eq!(cpp_basename(), "pulp-cpp");
-            assert_eq!(mcp_basename(), "pulp-mcp");
-            assert_eq!(import_design_basename(), "pulp-import-design");
-        }
-    }
-
-    #[test]
-    fn sibling_cpp_path_is_under_self_parent() {
-        let me = PathBuf::from("/opt/pulp/bin/pulp");
-        let cpp = sibling_cpp_path(&me).unwrap();
-        assert_eq!(cpp.parent().unwrap(), Path::new("/opt/pulp/bin"));
-        assert_eq!(cpp.file_name().unwrap(), cpp_basename());
-    }
-
-    #[test]
-    fn sibling_mcp_path_is_under_self_parent() {
-        let me = PathBuf::from("/opt/pulp/bin/pulp");
-        let mcp = sibling_mcp_path(&me).unwrap();
-        assert_eq!(mcp.parent().unwrap(), Path::new("/opt/pulp/bin"));
-        assert_eq!(mcp.file_name().unwrap(), mcp_basename());
-    }
-
-    #[test]
-    fn locate_binaries_requires_pulp() {
-        let td = tempfile::tempdir().unwrap();
-        let err = locate_binaries_in_archive(td.path()).unwrap_err();
-        assert!(err.to_string().contains("does not contain"));
-    }
-
-    #[test]
-    fn locate_binaries_finds_pulp_only() {
-        let td = tempfile::tempdir().unwrap();
-        let pulp = td.path().join(pulp_basename());
-        fs::write(&pulp, b"new-pulp").unwrap();
-        let arch = locate_binaries_in_archive(td.path()).unwrap();
-        assert_eq!(arch.new_pulp, pulp);
-        assert!(arch.new_cpp.is_none(), "pre-swap layout: no pulp-cpp");
-        assert!(arch.new_mcp.is_none(), "pre-MCP layout: no pulp-mcp");
-        assert!(arch.new_import_design.is_none());
-        assert!(arch.browser_capture_runtime.is_none());
-    }
-
-    #[test]
-    fn locate_binaries_finds_pulp_cpp_and_mcp() {
-        let td = tempfile::tempdir().unwrap();
-        fs::write(td.path().join(pulp_basename()), b"new-pulp").unwrap();
-        fs::write(td.path().join(cpp_basename()), b"new-cpp").unwrap();
-        fs::write(td.path().join(mcp_basename()), b"new-mcp").unwrap();
-        let arch = locate_binaries_in_archive(td.path()).unwrap();
-        assert!(arch.new_cpp.is_some(), "post-swap layout: pulp-cpp present");
-        assert!(arch.new_mcp.is_some(), "MCP server binary present");
-    }
-
-    #[test]
-    fn replace_binary_atomic_overwrites_and_cleans_backup() {
-        let td = tempfile::tempdir().unwrap();
-        let dst = td.path().join("pulp");
-        let src = td.path().join("new");
-        fs::write(&dst, b"old").unwrap();
-        fs::write(&src, b"new-content").unwrap();
-        replace_binary_atomic(&dst, &src).unwrap();
-        assert_eq!(fs::read(&dst).unwrap(), b"new-content");
-        assert!(!backup_path(&dst).exists(), "backup should be cleaned");
-    }
-
-    #[test]
-    fn replace_binary_atomic_clears_stale_backup_first() {
-        let td = tempfile::tempdir().unwrap();
-        let dst = td.path().join("pulp");
-        let src = td.path().join("new");
-        fs::write(&dst, b"old").unwrap();
-        fs::write(&src, b"new-content").unwrap();
-        // Plant a stale backup from a "previous failed run".
-        fs::write(backup_path(&dst), b"stale").unwrap();
-        replace_binary_atomic(&dst, &src).unwrap();
-        assert_eq!(fs::read(&dst).unwrap(), b"new-content");
-    }
-
-    #[test]
-    fn install_new_binary_creates_new_file_with_exec_perms() {
-        let td = tempfile::tempdir().unwrap();
-        let dst = td.path().join("pulp-cpp");
-        let src = td.path().join("new");
-        fs::write(&src, b"cpp-content").unwrap();
-        assert!(!dst.exists());
-        install_new_binary(&dst, &src).unwrap();
-        assert!(dst.exists());
-        assert_eq!(fs::read(&dst).unwrap(), b"cpp-content");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = fs::metadata(&dst).unwrap().permissions().mode() & 0o777;
-            assert_eq!(mode, 0o755, "exec perms must be set");
-        }
-    }
-
-    #[test]
-    fn install_extracted_replaces_siblings_when_archive_has_them() {
-        let bin_dir = tempfile::tempdir().unwrap();
-        let arch_dir = tempfile::tempdir().unwrap();
-
-        // Existing install: all release binaries present.
-        let pulp_dst = bin_dir.path().join(pulp_basename());
-        let cpp_dst = bin_dir.path().join(cpp_basename());
-        let mcp_dst = bin_dir.path().join(mcp_basename());
-        fs::write(&pulp_dst, b"old-pulp").unwrap();
-        fs::write(&cpp_dst, b"old-cpp").unwrap();
-        fs::write(&mcp_dst, b"old-mcp").unwrap();
-
-        // Archive: current release tarball.
-        fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
-        fs::write(arch_dir.path().join(cpp_basename()), b"new-cpp").unwrap();
-        fs::write(arch_dir.path().join(mcp_basename()), b"new-mcp").unwrap();
-
-        let plan = InstallPlan {
-            version: "0.50.0".into(),
-            url: "ignored".into(),
-            asset: "ignored".into(),
-            self_path: pulp_dst.clone(),
-            cpp_path: Some(cpp_dst.clone()),
-            mcp_path: Some(mcp_dst.clone()),
-            is_zip: false,
-        };
-        let arch = locate_binaries_in_archive(arch_dir.path()).unwrap();
-        let report = install_extracted(&plan, &arch).unwrap();
-
-        assert!(report.pulp_replaced);
-        assert!(report.cpp_replaced);
-        assert!(!report.cpp_created);
-        assert!(report.mcp_replaced);
-        assert!(!report.mcp_created);
-        assert_eq!(fs::read(&pulp_dst).unwrap(), b"new-pulp");
-        assert_eq!(fs::read(&cpp_dst).unwrap(), b"new-cpp");
-        assert_eq!(fs::read(&mcp_dst).unwrap(), b"new-mcp");
-    }
-
-    #[test]
-    fn install_extracted_creates_cpp_when_sibling_slot_empty() {
-        // Pre-swap → post-swap transition: user has only `pulp`, no
-        // `pulp-cpp` yet. Install should drop pulp-cpp into the sibling
-        // slot so the user's next invocation can delegate cleanly.
-        let bin_dir = tempfile::tempdir().unwrap();
-        let arch_dir = tempfile::tempdir().unwrap();
-
-        let pulp_dst = bin_dir.path().join(pulp_basename());
-        let cpp_dst = bin_dir.path().join(cpp_basename());
-        fs::write(&pulp_dst, b"old-pulp").unwrap();
-        // cpp_dst intentionally absent.
-
-        fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
-        fs::write(arch_dir.path().join(cpp_basename()), b"new-cpp").unwrap();
-
-        let plan = InstallPlan {
-            version: "0.50.0".into(),
-            url: "ignored".into(),
-            asset: "ignored".into(),
-            self_path: pulp_dst.clone(),
-            cpp_path: Some(cpp_dst.clone()),
-            mcp_path: None,
-            is_zip: false,
-        };
-        let arch = locate_binaries_in_archive(arch_dir.path()).unwrap();
-        let report = install_extracted(&plan, &arch).unwrap();
-
-        assert!(report.pulp_replaced);
-        assert!(!report.cpp_replaced);
-        assert!(
-            report.cpp_created,
-            "first dual-binary upgrade must create pulp-cpp"
-        );
-        assert!(cpp_dst.exists());
-        assert_eq!(fs::read(&cpp_dst).unwrap(), b"new-cpp");
-    }
-
-    #[test]
-    fn install_extracted_creates_mcp_when_sibling_slot_empty() {
-        // Pre-MCP install: user has `pulp`, but no `pulp-mcp` yet.
-        // Install should drop pulp-mcp into the sibling slot so the
-        // Claude Code plugin's launcher can resolve the server.
-        let bin_dir = tempfile::tempdir().unwrap();
-        let arch_dir = tempfile::tempdir().unwrap();
-
-        let pulp_dst = bin_dir.path().join(pulp_basename());
-        let mcp_dst = bin_dir.path().join(mcp_basename());
-        fs::write(&pulp_dst, b"old-pulp").unwrap();
-        // mcp_dst intentionally absent.
-
-        fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
-        fs::write(arch_dir.path().join(mcp_basename()), b"new-mcp").unwrap();
-
-        let plan = InstallPlan {
-            version: "0.50.0".into(),
-            url: "ignored".into(),
-            asset: "ignored".into(),
-            self_path: pulp_dst.clone(),
-            cpp_path: None,
-            mcp_path: Some(mcp_dst.clone()),
-            is_zip: false,
-        };
-        let arch = locate_binaries_in_archive(arch_dir.path()).unwrap();
-        let report = install_extracted(&plan, &arch).unwrap();
-
-        assert!(report.pulp_replaced);
-        assert!(!report.mcp_replaced);
-        assert!(
-            report.mcp_created,
-            "first MCP-capable upgrade must create pulp-mcp"
-        );
-        assert!(mcp_dst.exists());
-        assert_eq!(fs::read(&mcp_dst).unwrap(), b"new-mcp");
-    }
-
-    #[test]
-    fn install_extracted_skips_cpp_when_archive_lacks_it() {
-        // Pre-swap tarball: only `pulp`. Install replaces pulp; leaves
-        // the (possibly absent) pulp-cpp slot alone. This is the
-        // single-binary-tarball flow that pre-swap users will see when
-        // they upgrade between two pre-swap versions.
-        let bin_dir = tempfile::tempdir().unwrap();
-        let arch_dir = tempfile::tempdir().unwrap();
-
-        let pulp_dst = bin_dir.path().join(pulp_basename());
-        let cpp_dst = bin_dir.path().join(cpp_basename());
-        fs::write(&pulp_dst, b"old-pulp").unwrap();
-
-        fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
-        // No pulp-cpp in archive.
-
-        let plan = InstallPlan {
-            version: "0.46.0".into(),
-            url: "ignored".into(),
-            asset: "ignored".into(),
-            self_path: pulp_dst.clone(),
-            cpp_path: Some(cpp_dst.clone()),
-            mcp_path: None,
-            is_zip: false,
-        };
-        let arch = locate_binaries_in_archive(arch_dir.path()).unwrap();
-        let report = install_extracted(&plan, &arch).unwrap();
-
-        assert!(report.pulp_replaced);
-        assert!(!report.cpp_replaced);
-        assert!(!report.cpp_created);
-        assert!(
-            !cpp_dst.exists(),
-            "single-binary tarball must not invent pulp-cpp"
-        );
-    }
-
-    #[test]
-    fn install_extracted_skips_mcp_when_archive_lacks_it() {
-        // Older tarball: no `pulp-mcp`. Install replaces pulp; leaves the
-        // (possibly absent) pulp-mcp slot alone.
-        let bin_dir = tempfile::tempdir().unwrap();
-        let arch_dir = tempfile::tempdir().unwrap();
-
-        let pulp_dst = bin_dir.path().join(pulp_basename());
-        let mcp_dst = bin_dir.path().join(mcp_basename());
-        fs::write(&pulp_dst, b"old-pulp").unwrap();
-
-        fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
-        // No pulp-mcp in archive.
-
-        let plan = InstallPlan {
-            version: "0.46.0".into(),
-            url: "ignored".into(),
-            asset: "ignored".into(),
-            self_path: pulp_dst.clone(),
-            cpp_path: None,
-            mcp_path: Some(mcp_dst.clone()),
-            is_zip: false,
-        };
-        let arch = locate_binaries_in_archive(arch_dir.path()).unwrap();
-        let report = install_extracted(&plan, &arch).unwrap();
-
-        assert!(report.pulp_replaced);
-        assert!(!report.mcp_replaced);
-        assert!(!report.mcp_created);
-        assert!(!mcp_dst.exists(), "older tarball must not invent pulp-mcp");
-    }
-
-    #[test]
-    fn install_plan_from_version_resolves_self_and_sibling() {
-        let plan = InstallPlan::from_version("0.50.0").unwrap();
-        assert_eq!(plan.version, "0.50.0");
-        assert!(plan.url.contains("/v0.50.0/"));
-        assert_eq!(plan.is_zip, cfg!(target_os = "windows"));
-        // self_path is the test binary; sibling is its parent + cpp_basename().
-        let sib = plan.cpp_path.expect("test binary must have a parent");
-        assert_eq!(sib.parent(), plan.self_path.parent());
-        assert_eq!(sib.file_name().unwrap(), cpp_basename());
-        let mcp = plan.mcp_path.expect("test binary must have a parent");
-        assert_eq!(mcp.parent(), plan.self_path.parent());
-        assert_eq!(mcp.file_name().unwrap(), mcp_basename());
-    }
-
-    #[test]
-    fn looks_like_build_artifact_detects_cargo_target() {
-        assert!(looks_like_build_artifact(Path::new(
-            "/Users/x/proj/target/release/pulp"
-        )));
-        assert!(looks_like_build_artifact(Path::new(
-            "/tmp/pulp-validate/experimental/pulp-rs/target/release/deps/pulp_rs-abcd1234"
-        )));
-        assert!(!looks_like_build_artifact(Path::new("/usr/local/bin/pulp")));
-        assert!(!looks_like_build_artifact(Path::new(
-            "/opt/pulp/bin/pulp-cpp"
-        )));
-        assert!(!looks_like_build_artifact(Path::new(
-            "C:\\Program Files\\Pulp\\bin\\pulp.exe"
-        )));
-    }
-
-    #[test]
-    fn install_extracted_refuses_target_dir_without_live_override() {
-        // Build a plan whose self_path lives under a `target/`
-        // component. Without PULP_UPGRADE_INSTALL_LIVE the swap must
-        // refuse to run.
-        let arch_dir = tempfile::tempdir().unwrap();
-        fs::write(arch_dir.path().join(pulp_basename()), b"new").unwrap();
-        let archive = locate_binaries_in_archive(arch_dir.path()).unwrap();
-
-        let plan = InstallPlan {
-            version: "0.50.0".into(),
-            url: "ignored".into(),
-            asset: "ignored".into(),
-            self_path: PathBuf::from("/some/proj/target/release/pulp"),
-            cpp_path: None,
-            mcp_path: None,
-            is_zip: false,
-        };
-        // Make sure the override env var isn't set from a parallel test.
-        std::env::remove_var("PULP_UPGRADE_INSTALL_LIVE");
-        let err = install_extracted(&plan, &archive).unwrap_err();
-        assert!(
-            err.to_string().contains("cargo build artifact"),
-            "expected build-artifact guard, got: {err}"
-        );
-    }
-
-    #[test]
-    fn backup_path_appends_dot_bak() {
-        assert_eq!(
-            backup_path(Path::new("/x/y/pulp")),
-            PathBuf::from("/x/y/pulp.bak")
-        );
-        assert_eq!(
-            backup_path(Path::new("C:\\bin\\pulp.exe")),
-            PathBuf::from("C:\\bin\\pulp.exe.bak")
-        );
-    }
-}
+#[path = "install/tests.rs"]
+mod tests;

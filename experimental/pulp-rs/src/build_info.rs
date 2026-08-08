@@ -10,6 +10,14 @@ pub fn baked_cli_version() -> &'static str {
     option_env!("PULP_RS_BUILD_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
 }
 
+/// First SDK release whose Darwin CLI archive contains the health-only
+/// control broker. The build script reads this from the authoritative release
+/// product matrix, so transition logic cannot drift from release packaging.
+#[must_use]
+pub const fn control_broker_floor() -> &'static str {
+    env!("PULP_CONTROL_BROKER_FLOOR")
+}
+
 /// CLI version string, honoring the `PULP_RS_CLI_VERSION` override so
 /// tests can pin a version without rebuilding the binary.
 #[must_use]
@@ -52,5 +60,10 @@ mod tests {
         if let Some(v) = prev {
             std::env::set_var("PULP_RS_CLI_VERSION", v);
         }
+    }
+
+    #[test]
+    fn control_broker_floor_is_baked_from_release_matrix() {
+        assert_eq!(control_broker_floor(), "0.795.0");
     }
 }

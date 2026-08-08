@@ -179,6 +179,17 @@ enum Command {
     Identity(PkgTailArgs),
 }
 
+#[derive(Parser, Debug)]
+#[command(name = "__control-broker-reconcile")]
+struct ControlBrokerReconcileArgs {
+    /// Separately staged broker payload from the verified release archive.
+    #[arg(long)]
+    broker: std::path::PathBuf,
+    /// Explicitly accept a persistent service rooted outside `~/.pulp`.
+    #[arg(long)]
+    accept_custom_root: bool,
+}
+
 #[derive(clap::Args, Debug)]
 struct PkgTailArgs {
     /// The full tail, parsed per-command so flag parity with the C++
@@ -339,10 +350,45 @@ fn main() -> ExitCode {
     if std::env::var_os("PULP_USE_CPP").is_some_and(|v| !v.is_empty()) {
         return force_cpp_fallthrough();
     }
+    if let Some(exit) = control_broker_reconcile_entrypoint() {
+        return exit;
+    }
     match real_main() {
         Ok(()) => ExitCode::SUCCESS,
         Err(code) => code,
     }
+}
+
+/// Parse installer-only plumbing outside the public clap command enum. Keeping
+/// this hook out of `Command` prevents it from entering the documented CLI,
+/// slash-command, MCP-parity, and Vellum tooling inventories.
+fn control_broker_reconcile_entrypoint() -> Option<ExitCode> {
+    let mut argv = std::env::args_os();
+    let program = argv.next()?;
+    if argv.next().as_deref() != Some(std::ffi::OsStr::new("__control-broker-reconcile")) {
+        return None;
+    }
+    let args =
+        match ControlBrokerReconcileArgs::try_parse_from(std::iter::once(program).chain(argv)) {
+            Ok(args) => args,
+            Err(error) => {
+                use clap::error::ErrorKind;
+                let code = if matches!(
+                    error.kind(),
+                    ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+                ) {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::from(2)
+                };
+                let _ = error.print();
+                return Some(code);
+            }
+        };
+    Some(match reconcile_installer_control_broker(args) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => map_err(&error),
+    })
 }
 
 /// Honor `$PULP_USE_CPP=1` by exec'ing `pulp-cpp` with the user's
@@ -371,6 +417,122 @@ fn force_cpp_fallthrough() -> ExitCode {
     }
 }
 
+fn reconcile_installer_control_broker(args: ControlBrokerReconcileArgs) -> Result<(), CliError> {
+    let version = pulp_rs::build_info::cli_version_string();
+    let plan = pulp_rs::install::InstallPlan::from_version(&version)?;
+    let config =
+        pulp_rs::install::control_broker_service_config_for_plan(&plan, args.accept_custom_root)?;
+    pulp_rs::control_broker_service::verify_control_broker_payload(
+        &args.broker,
+        config.command_timeout,
+    )
+    .map_err(|error| {
+        CliError::Other(format!(
+            "control broker payload verification failed [{}]: {error}",
+            error.code()
+        ))
+    })?;
+    let result = pulp_rs::install::install_control_broker_path_with(
+        &plan,
+        &args.broker,
+        |_, rollback_binary| {
+            pulp_rs::control_broker_service::reconcile_control_broker_service_transactional(
+                &config,
+                rollback_binary,
+            )
+            .map(|_| ())
+            .map_err(|error| CliError::Other(error.to_string()))
+        },
+    )?;
+    if result != pulp_rs::install::ControlBrokerInstall::NotPresent {
+        println!("Control broker: reachable-unverified");
+    }
+    Ok(())
+}
+
+fn maybe_reconcile_control_broker_on_startup() -> Result<(), CliError> {
+    if !cfg!(target_os = "macos") {
+        return Ok(());
+    }
+    if !command_may_reconcile_control_broker(std::env::args_os().nth(1).as_deref()) {
+        return Ok(());
+    }
+    let version = pulp_rs::build_info::cli_version_string();
+    let plan = pulp_rs::install::InstallPlan::from_version(&version)?;
+    let accept_custom_root = std::env::var("PULP_ACCEPT_CONTROL_BROKER_CUSTOM_INSTALL_ROOT")
+        .ok()
+        .as_deref()
+        == Some("1");
+    let config =
+        pulp_rs::install::control_broker_service_config_for_plan(&plan, accept_custom_root)?;
+    let broker = plan
+        .self_path
+        .parent()
+        .map(|bin| bin.join(pulp_rs::install::control_broker_basename()));
+    if broker.as_deref().is_some_and(std::path::Path::is_file) {
+        let _ = pulp_rs::control_broker_service::bounded_lazy_start_control_broker_service(&config)
+            .map_err(|error| {
+                CliError::Other(format!(
+                    "control broker activation failed [{}]: {error}",
+                    error.code()
+                ))
+            })?;
+        return Ok(());
+    }
+
+    let home = config.home.clone();
+    let temporary = std::env::temp_dir().join(format!(
+        "pulp-control-broker-transition-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&temporary);
+    let recovery = pulp_rs::install::recover_legacy_control_broker_once_with(
+        &plan,
+        &home,
+        || {
+            let archive = pulp_rs::install::fetch_and_extract(&plan, &temporary)?;
+            if let Some(broker) = archive.new_control_broker.as_deref() {
+                pulp_rs::control_broker_service::verify_control_broker_payload(
+                    broker,
+                    config.command_timeout,
+                )
+                .map_err(|error| {
+                    CliError::Other(format!(
+                        "control broker payload verification failed [{}]: {error}",
+                        error.code()
+                    ))
+                })?;
+            }
+            Ok(archive)
+        },
+        |_, rollback_binary| {
+            pulp_rs::control_broker_service::reconcile_control_broker_service_transactional(
+                &config,
+                rollback_binary,
+            )
+            .map(|_| ())
+            .map_err(|error| {
+                CliError::Other(format!(
+                    "control broker activation failed [{}]: {error}",
+                    error.code()
+                ))
+            })
+        },
+    );
+    let _ = std::fs::remove_dir_all(&temporary);
+    recovery.map(|_| ())
+}
+
+/// Keep diagnostic and installer-owned commands observational at process
+/// startup. In particular, `status` and `doctor` may probe an existing carrier,
+/// but must never install or start one as a side effect of observation.
+fn command_may_reconcile_control_broker(command: Option<&std::ffi::OsStr>) -> bool {
+    !matches!(
+        command.and_then(std::ffi::OsStr::to_str),
+        None | Some("__control-broker-reconcile" | "doctor" | "help" | "status" | "upgrade")
+    )
+}
+
 // The subcommand dispatch match is naturally linear — each arm is
 // five to eight lines of clap-to-library shim. Splitting into
 // per-command helpers would double the file with no readability win.
@@ -380,6 +542,13 @@ fn real_main() -> Result<(), ExitCode> {
         Ok(cli) => cli,
         Err(err) => return Err(clap_exit_code(&err)),
     };
+
+    if let Err(error) = maybe_reconcile_control_broker_on_startup() {
+        eprintln!(
+            "pulp: warning: {error}. The optional local broker remains health-only; retry with `pulp upgrade --install --to {}` or run `pulp doctor --only 'Control broker'`.",
+            pulp_rs::build_info::cli_version_string()
+        );
+    }
 
     let stdout = io::stdout();
     let mut out = stdout.lock();
@@ -789,6 +958,57 @@ fn real_main() -> Result<(), ExitCode> {
             let talker = cmd::trace::SystemInspector;
             cmd::trace::dispatch(&sub, &flags, &talker, &mut out).map_err(|e| map_err(&e))
         }
+    }
+}
+
+#[cfg(test)]
+mod control_broker_startup_tests {
+    use std::ffi::OsStr;
+
+    use clap::Parser;
+
+    use super::command_may_reconcile_control_broker;
+
+    #[test]
+    fn observational_and_installer_owned_commands_do_not_reconcile() {
+        for command in [
+            None,
+            Some("__control-broker-reconcile"),
+            Some("doctor"),
+            Some("help"),
+            Some("status"),
+            Some("upgrade"),
+        ] {
+            assert!(!command_may_reconcile_control_broker(
+                command.map(OsStr::new)
+            ));
+        }
+    }
+
+    #[test]
+    fn operational_commands_may_reconcile() {
+        for command in ["build", "run", "test"] {
+            assert!(command_may_reconcile_control_broker(Some(OsStr::new(
+                command
+            ))));
+        }
+    }
+
+    #[test]
+    fn installer_reconcile_arguments_remain_strict_and_private() {
+        let parsed = super::ControlBrokerReconcileArgs::try_parse_from([
+            "__control-broker-reconcile",
+            "--broker",
+            "/tmp/staged-broker",
+            "--accept-custom-root",
+        ])
+        .expect("valid installer arguments");
+        assert_eq!(parsed.broker, std::path::Path::new("/tmp/staged-broker"));
+        assert!(parsed.accept_custom_root);
+        assert!(
+            super::ControlBrokerReconcileArgs::try_parse_from(["__control-broker-reconcile"])
+                .is_err()
+        );
     }
 }
 
