@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include <pulp/inspect/protocol.hpp>
+#include <pulp/inspect/inspector_delivery.hpp>
 #include <pulp/view/motion.hpp>
 
 #include <cstdint>
@@ -32,16 +32,12 @@
 
 namespace pulp::inspect {
 
-class InspectorServer;
-
 class MotionScrubber {
 public:
-    /// Construct with an optional InspectorServer. With a server,
-    /// re-emitted events are broadcast as Motion.start / .sample / .end
-    /// messages on the wire (the same shape MotionInspector uses).
-    /// Without a server, events still flow to any sinks installed via
-    /// `add_sink`.
-    explicit MotionScrubber(InspectorServer* server = nullptr);
+    /// Construct with an optional event delivery callback. When present,
+    /// re-emitted events use the same Motion.start / .sample / .end wire shape
+    /// as MotionInspector. Events always flow to sinks installed via add_sink.
+    explicit MotionScrubber(InspectorEventSink event_sink = {});
     ~MotionScrubber();
 
     MotionScrubber(const MotionScrubber&) = delete;
@@ -92,7 +88,7 @@ public:
     view::motion::FixtureHeader header() const;
 
 private:
-    InspectorServer* server_ = nullptr;
+    InspectorEventSink event_sink_;
 
     mutable std::mutex mtx_;
     std::vector<view::motion::SampleEvent> events_;
@@ -115,13 +111,13 @@ private:
     InspectorMessage handle_play(const InspectorMessage& req);
     InspectorMessage handle_pause(const InspectorMessage& req);
 
-    // Dispatch a snapshot of events to the given sinks + server WITHOUT
+    // Dispatch a snapshot of events to the given sinks + callback WITHOUT
     // holding mtx_. Callers must collect the snapshot under the lock and
     // then call this. Sinks are free to re-enter MotionScrubber methods.
     static void dispatch_snapshot(
         const std::vector<view::motion::SampleEvent>& events,
         const std::vector<SinkSlot>& sinks,
-        InspectorServer* server);
+        const InspectorEventSink& event_sink);
 };
 
 } // namespace pulp::inspect

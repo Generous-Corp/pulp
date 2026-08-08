@@ -109,11 +109,13 @@ macOS, the optional `pulp-control-broker` executable owns the canonical
 per-user `LocalSocket` endpoint. It currently exposes only a bounded health
 probe: it has no signed launcher bootstrap, host registration channel, consent
 surface, or operation executor, so authority-bearing session admission fails
-closed. The installed `ControlClient` accepts a typed
-`ControlClientTransport` representing one authenticated, connection-bound peer
-and client identity; its artifact-read API therefore has no caller-supplied
-client ID. The legacy `InspectorSession`/server is not a compatibility
-transport or a second capability-control authority path.
+closed. Ephemeral socket and liveness files are isolated from owner-private
+durable receipts and artifacts under `~/.pulp/state/control-broker/v1`; service
+stop or removal leaves that durable state intact. The installed `ControlClient`
+accepts a typed `ControlClientTransport` representing one authenticated,
+connection-bound peer and client identity; its artifact-read API therefore has
+no caller-supplied client ID. The legacy `InspectorSession`/server is not a
+compatibility transport or a second capability-control authority path.
 `ControlService` accepts a carrier-verified peer and connection-bound client
 identity, but has no executor unless a later runtime adapter injects one.
 Signed service activation, consent UI, host execution routing, and live

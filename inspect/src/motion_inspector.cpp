@@ -1,6 +1,5 @@
 #include <pulp/inspect/motion_inspector.hpp>
 
-#include <pulp/inspect/inspector_server.hpp>
 #include <pulp/view/inspector.hpp>
 #include <pulp/view/motion.hpp>
 #include <pulp/view/motion_cost.hpp>
@@ -17,6 +16,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace pulp::inspect {
@@ -223,8 +223,9 @@ choc::value::Value components_to_object(
 
 // ── MotionInspector ──────────────────────────────────────────────────
 
-MotionInspector::MotionInspector(pulp::view::View& root, InspectorServer* server)
-    : root_(&root), server_(server) {
+MotionInspector::MotionInspector(pulp::view::View& root,
+                                 InspectorEventSink event_sink)
+    : root_(&root), event_sink_(std::move(event_sink)) {
     sink_id_ = Coordinator::instance().add_sink(
         [this](const SampleEvent& e) { broadcast_event(e); });
     cost_sink_id_ = CostAttributor::instance().add_sink(
@@ -524,7 +525,7 @@ InspectorMessage MotionInspector::list_traces(const InspectorMessage& req) {
 }
 
 void MotionInspector::broadcast_event(const SampleEvent& e) {
-    if (!server_) return;
+    if (!event_sink_) return;
 
     auto params = choc::value::createObject("");
     params.addMember("view_name", choc::value::createString(e.view_name));
@@ -560,11 +561,11 @@ void MotionInspector::broadcast_event(const SampleEvent& e) {
 
     InspectorMessage ev = make_event(event_method_for_kind(e.kind),
                                      choc::json::toString(params, false));
-    server_->broadcast(ev);
+    event_sink_(ev);
 }
 
 void MotionInspector::broadcast_cost(const CostSample& s) {
-    if (!server_) return;
+    if (!event_sink_) return;
     auto params = choc::value::createObject("");
     params.addMember("frame",
                      choc::value::createInt64(static_cast<int64_t>(s.frame)));
@@ -595,7 +596,7 @@ void MotionInspector::broadcast_cost(const CostSample& s) {
 
     InspectorMessage ev = make_event(methods::kMotionCost,
                                      choc::json::toString(params, false));
-    server_->broadcast(ev);
+    event_sink_(ev);
 }
 
 } // namespace pulp::inspect

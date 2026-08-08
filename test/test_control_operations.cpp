@@ -19,6 +19,7 @@
 #include <windows.h>
 #else
 #include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 using namespace pulp::inspect;
@@ -1282,6 +1283,25 @@ TEST_CASE("receipt files and directories are owner-private",
         REQUIRE(grant_world_read(temporary.path));
         auto reopened = store_at(temporary.path);
         CHECK(reopened.open().status == ControlOperationStoreStatus::StoreUnavailable);
+    }
+#endif
+}
+
+TEST_CASE("receipt store creates nested owner-private directories",
+          "[inspect][control][operations][persistence][security]") {
+    TemporaryDirectory temporary;
+    const auto nested = temporary.path / "state" / "operations";
+    auto store = store_at(nested);
+    REQUIRE(store.open().succeeded());
+    REQUIRE(store.admit(binding()).receipt.has_value());
+
+#ifndef _WIN32
+    for (const auto& directory : {temporary.path, temporary.path / "state", nested}) {
+        struct stat status{};
+        REQUIRE(::lstat(directory.c_str(), &status) == 0);
+        CHECK(S_ISDIR(status.st_mode));
+        CHECK(status.st_uid == ::geteuid());
+        CHECK((status.st_mode & 07777) == 0700);
     }
 #endif
 }
