@@ -33,9 +33,9 @@ from agent_capability_history import (
     _resolve_protected_tip,
     append_only_history_problems,
     history_document,
-    history_entry,
     history_problems,
     protected_base_problems,
+    updated_history_entries,
 )
 from agent_capability_registry import (
     CAPABILITY_TOMBSTONES,
@@ -50,7 +50,7 @@ from agent_capability_transaction import recover_transaction, write_transaction
 SCHEMA = "pulp.agent-capabilities.v1"
 SCHEMA_MINOR = 1
 MANIFEST_REVISION = 6
-SURFACE_INVENTORY_VERSION = 10
+SURFACE_INVENTORY_VERSION = 11
 WRITE_TRANSACTION_FILE = pathlib.Path(
     "tools/agent-capabilities/.capability-write-transaction.json"
 )
@@ -807,21 +807,15 @@ def main() -> int:
         if problems:
             return _print_problems(problems)
         history = _load_optional_json(history_path)
-        entries = [] if args.migrate_unpublished_v1 else (
-            copy.deepcopy(history.get("entries", []))
-            if isinstance(history, dict) and history.get("schema") == HISTORY_SCHEMA
-            else []
+        entries = updated_history_entries(
+            history,
+            previous,
+            previous_surface,
+            doc,
+            surface_document,
+            initial_bootstrap=initial_bootstrap,
+            migrate_unpublished=args.migrate_unpublished_v1,
         )
-        if (
-            not args.migrate_unpublished_v1
-            and isinstance(previous, dict)
-            and isinstance(previous_surface, dict)
-        ):
-            previous_entry = history_entry(previous, previous_surface)
-            if not entries or entries[-1] != previous_entry:
-                entries.append(previous_entry)
-        if not entries:
-            entries.append(history_entry(doc, surface_document))
         history = history_document(entries)
         problems = history_problems(history, doc, surface_document)
         problems.extend(

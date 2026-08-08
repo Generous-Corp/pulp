@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 10,
+  "inventory_version": 11,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -1110,7 +1110,7 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/arpeggiator.hpp",
-      "fingerprint": "sha256:7ebb777b9c33fbf66871da573e6a1c4c5bdd7809a03cec01cbc27fcb5a1d7278",
+      "fingerprint": "sha256:96ba2417d37bd1ff46876463d61f53fb7345b5aa88c92c9c05f04339e37d4b25",
       "include": "pulp/midi/arpeggiator.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1178,7 +1178,7 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/detail/arpeggiator_math.hpp",
-      "fingerprint": "sha256:6e7b7fcda5c9691f3eb98d4613b6c35bd2dd5460c29c010fb9828fbda9e033a3",
+      "fingerprint": "sha256:63f62d6a1272a3cfb360f6caf94b4ae4acf73e6c9a1942d7d8ea530eb595e050",
       "include": "pulp/midi/detail/arpeggiator_math.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -1707,7 +1707,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/audio_matrix_mixer.hpp",
-      "fingerprint": "sha256:80ac853fa55eb0bee8730a05dd7cfac32847832eb4f44cb6e0ad5507781db6b1",
+      "fingerprint": "sha256:36ef815dfd9072f7bba8d72aa0e0d53662952e1ee470f1c6b0cd4d64413c55ac",
       "include": "pulp/signal/audio_matrix_mixer.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -2516,7 +2516,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fractional_delay.hpp",
-      "fingerprint": "sha256:df2c07847d8b5f49134a7f274c1114cd475c8ed9ac820044ec8c7da3906a5a17",
+      "fingerprint": "sha256:3689804c0a0eccd03298d9949f883cd99fd0035793fed20f4ada5a2e4c90a125",
       "include": "pulp/signal/fractional_delay.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -3113,7 +3113,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/path_latency_aligner.hpp",
-      "fingerprint": "sha256:1b50ede989667a0a3354900646e3079df8a550474604cf7958c92a7b27f58e8a",
+      "fingerprint": "sha256:a7874bab7001e6c6ad31fd85a7176ec13af44c5047bf38d631e207ce3ae914c6",
       "include": "pulp/signal/path_latency_aligner.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [

@@ -240,7 +240,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/midi/detail/arpeggiator_math.hpp",
-        "fingerprint": "sha256:6e7b7fcda5c9691f3eb98d4613b6c35bd2dd5460c29c010fb9828fbda9e033a3",
+        "fingerprint": "sha256:63f62d6a1272a3cfb360f6caf94b4ae4acf73e6c9a1942d7d8ea530eb595e050",
         "disposition": "capability_support",
         "capability_keys": ["midi.arpeggiator"],
         "rationale": (

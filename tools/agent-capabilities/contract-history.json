@@ -3835,6 +3835,272 @@
                   ]
                 }
               ],
+              "character_delay/bbd.hpp": [
+                {
+                  "class": "BbdChannel",
+                  "methods": [
+                    "set_seed(std::uint32_t seed)",
+                    "set_compander_enabled(bool enabled)",
+                    "update(double character_amount, double delay_seconds)",
+                    "bandwidth_hz()",
+                    "stages()",
+                    "process(double x, double clock_mod = 0.0)"
+                  ]
+                }
+              ],
+              "character_delay/diffusion.hpp": [
+                {
+                  "class": "ModulatedAllpass",
+                  "methods": [
+                    "process(double x, double delay_samples, double gain)",
+                    "max_delay()"
+                  ]
+                },
+                {
+                  "class": "ReverbTank",
+                  "methods": [
+                    "update(double character_amount)",
+                    "active()",
+                    "mix()",
+                    "process(double x, double decorrelation)",
+                    "tick_modulation()"
+                  ]
+                },
+                {
+                  "class": "DiffusionChain",
+                  "methods": [
+                    "update(double character_amount)",
+                    "process_diffuser(double x, double decorrelation)",
+                    "process_cloud(double x, double decorrelation)",
+                    "process(double x, double decorrelation)",
+                    "process_cloud(process_diffuser(x, decorrelation)",
+                    "tick_modulation()"
+                  ]
+                }
+              ],
+              "character_delay/hysteresis.hpp": [
+                {
+                  "class": "Langevin",
+                  "methods": [
+                    "value(double x)",
+                    "coth(x)",
+                    "derivative(double x)",
+                    "second_derivative(double x)",
+                    "coth(double x)"
+                  ]
+                },
+                {
+                  "class": "JilesAthertonHysteresis",
+                  "methods": [
+                    "set_character(double drive, double bias)",
+                    "process(double field)",
+                    "converged_steps()",
+                    "capped_steps()",
+                    "clear_solver_counters()"
+                  ]
+                },
+                {
+                  "class": "HysteresisHalfBandOversampler",
+                  "methods": [
+                    "static_assert(StageCount > 0)",
+                    "oversampling_factor()",
+                    "latency_samples()",
+                    "process(double x, Callback&& callback)"
+                  ]
+                },
+                {
+                  "class": "OversampledHysteresis",
+                  "methods": [
+                    "oversampling_factor()",
+                    "latency_samples()",
+                    "set_character(double drive, double bias)",
+                    "process(double input)"
+                  ]
+                }
+              ],
+              "character_delay/primitives.hpp": [
+                {
+                  "class": "Xorshift32",
+                  "methods": [
+                    "reseed(std::uint32_t seed)",
+                    "next()",
+                    "uniform()",
+                    "bipolar()",
+                    "gaussian()"
+                  ]
+                },
+                {
+                  "class": "Smoother",
+                  "methods": [
+                    "configure(double time_constant_s, double fs)",
+                    "snap(double v)",
+                    "current()",
+                    "process(double target)"
+                  ]
+                },
+                {
+                  "class": "FractionalDelayLine",
+                  "methods": [
+                    "discard_history()",
+                    "capacity()",
+                    "max_delay()",
+                    "push(double x)",
+                    "tap(std::size_t m)",
+                    "read(double delay_samples)"
+                  ]
+                },
+                {
+                  "class": "OnePole",
+                  "methods": [
+                    "set_cutoff(double cutoff_hz, double fs)",
+                    "lowpass(double x)",
+                    "highpass(double x)"
+                  ]
+                },
+                {
+                  "class": "FirstOrderShelf",
+                  "methods": [
+                    "set(double corner_hz, double gain_linear, double fs)",
+                    "set_inverse(double corner_hz, double gain_linear, double fs)",
+                    "process(double x)"
+                  ]
+                },
+                {
+                  "class": "Svf2",
+                  "methods": [
+                    "set_lowpass(double cutoff_hz, double q, double fs)",
+                    "set_highpass(double cutoff_hz, double q, double fs)",
+                    "set_bell(double cutoff_hz, double q, double gain_db, double fs)",
+                    "process(double v0)"
+                  ]
+                },
+                {
+                  "class": "Butterworth6Lowpass",
+                  "methods": [
+                    "set_cutoff(double cutoff_hz, double fs)",
+                    "process(double x)"
+                  ]
+                },
+                {
+                  "class": "FixedFir",
+                  "methods": [
+                    "discard_history()",
+                    "push(double x)",
+                    "convolve(const double* coefficients, std::size_t taps)"
+                  ]
+                },
+                {
+                  "class": "EnvelopeFollower",
+                  "methods": [
+                    "configure(double attack_s, double release_s, double rate_hz)",
+                    "value()",
+                    "process(double magnitude)"
+                  ]
+                }
+              ],
+              "character_delay/reverse.hpp": [
+                {
+                  "class": "ReverseSegmenter",
+                  "methods": [
+                    "process(double x, double segment_samples, double mod_offset_samples)"
+                  ]
+                }
+              ],
+              "character_delay/tape.hpp": [
+                {
+                  "class": "TapeInstability",
+                  "methods": [
+                    "configure(std::uint32_t seed, double flutter_phase_offset)",
+                    "tick()",
+                    "offset_ms(double wow_depth_ms, double flutter_depth_ms)"
+                  ]
+                },
+                {
+                  "class": "TapeStandardChannel",
+                  "methods": [
+                    "update(double character_amount)",
+                    "pre_process(double x)",
+                    "post_process(double x)"
+                  ]
+                }
+              ],
+              "character_delay/tape_loss.hpp": [
+                {
+                  "class": "TapeLossShapes",
+                  "methods": [
+                    "fit()",
+                    "tabulated()",
+                    "parameters_for(const TapeLossGeometry& geometry)"
+                  ]
+                },
+                {
+                  "class": "TapeLossIir",
+                  "methods": [
+                    "set(const TapeLossIirParams& parameters, double fs)",
+                    "process(double x)",
+                    "dc_group_delay_seconds()",
+                    "parameters()"
+                  ]
+                },
+                {
+                  "class": "TapeLossDesign",
+                  "methods": [
+                    "set_speed(double speed_ips)",
+                    "empty()",
+                    "speed_ips()",
+                    "gap_taps()",
+                    "gap_group_delay_samples()",
+                    "shapes()",
+                    "geometry_at(double age)"
+                  ]
+                },
+                {
+                  "class": "TapeLossStage",
+                  "methods": [
+                    "discard_history()",
+                    "reset_recursive()",
+                    "set_parameters(const TapeLossIirParams& parameters, double fs)",
+                    "push(double x)",
+                    "process(const TapeLossDesign& design)",
+                    "copy_history_from(const TapeLossStage& other)",
+                    "dc_group_delay_seconds()"
+                  ]
+                }
+              ],
+              "character_delay/tape_physical.hpp": [
+                {
+                  "class": "TapeChew",
+                  "methods": [
+                    "set_seed(std::uint32_t seed)",
+                    "state_index()",
+                    "process(double x, double depth)"
+                  ]
+                },
+                {
+                  "class": "TapePhysicalChannel",
+                  "methods": [
+                    "recover_audio_fault()",
+                    "set_seeds(std::uint32_t base)",
+                    "set_speed_ips(double ips)",
+                    "speed_ips()",
+                    "gap_coefficients()",
+                    "loss_parameters()",
+                    "update(double age)"
+                  ]
+                }
+              ],
+              "character_delay/vintage.hpp": [
+                {
+                  "class": "VintageChannel",
+                  "methods": [
+                    "set_seed(std::uint32_t seed)",
+                    "update(double character_amount)",
+                    "internal_rate_hz()",
+                    "band_edge_hz()",
+                    "process(double x, double delay_seconds)"
+                  ]
+                }
+              ],
               "checked_allocation.hpp": [
                 {
                   "class": "CheckedRetainedByteCharge",
@@ -3977,6 +4243,16 @@
                   ]
                 }
               ],
+              "detail/fractional_synthesis_hop_accumulator.hpp": [
+                {
+                  "class": "FractionalSynthesisHopAccumulator",
+                  "methods": [
+                    "advance(double exact_hop, int minimum_hop, int maximum_hop)",
+                    "residual()",
+                    "correction_debt()"
+                  ]
+                }
+              ],
               "diode_bridge_compressor.hpp": [
                 {
                   "class": "DiodeBridgeGainT",
@@ -4068,6 +4344,290 @@
                     "sync_configuration_from(const DitherQuantizerT& other)",
                     "process(SampleType input)",
                     "quantize_with_error_feedback(input, quantization_step(bits_)"
+                  ]
+                }
+              ],
+              "drum/clap.hpp": [
+                {
+                  "class": "ClapVoice",
+                  "methods": [
+                    "set_burst_count(int count)",
+                    "set_burst_spacing_ms(double ms)",
+                    "set_burst_decay_ms(double ms)",
+                    "set_burst_falloff(double ratio)",
+                    "set_gap_jitter(double amount)",
+                    "set_alternate_polarity(bool alternate)",
+                    "set_stereo_width(double width)"
+                  ]
+                }
+              ],
+              "drum/cymbal.hpp": [
+                {
+                  "class": "CymbalVoice",
+                  "methods": [
+                    "set_tune_hz(double hz)",
+                    "set_decay_ms(double ms)",
+                    "set_decay_tilt(double tilt)",
+                    "set_high_mode_emphasis_db(double db)",
+                    "set_velocity_feedback(double amount)",
+                    "set_velocity_high_mode_db(double db)",
+                    "set_upper_highpass_hz(double hz)"
+                  ]
+                }
+              ],
+              "drum/fm.hpp": [
+                {
+                  "class": "FmDrumVoice",
+                  "methods": [
+                    "set_tune_hz(double hz)",
+                    "set_ratio(double ratio)",
+                    "set_index(double index)",
+                    "set_index_ms(double ms)",
+                    "set_decay_ms(double ms)",
+                    "set_pitch_sweep_octaves(double octaves)",
+                    "set_pitch_sweep_ms(double ms)"
+                  ]
+                },
+                {
+                  "class": "Fm8DrumVoice",
+                  "methods": [
+                    "set_algorithm(int index)",
+                    "algorithm()",
+                    "set_tune_hz(double hz)",
+                    "set_operator_ratio(int op, double ratio)",
+                    "set_operator_level(int op, double level)",
+                    "set_operator_decay_ms(int op, double ms)",
+                    "set_operator_feedback(int op, double amount)"
+                  ]
+                }
+              ],
+              "drum/fm6.hpp": [
+                {
+                  "class": "Fm6DrumVoice",
+                  "methods": [
+                    "set_algorithm(int index)",
+                    "algorithm()",
+                    "set_tune_hz(double hz)",
+                    "set_operator_ratio(int op, double ratio)",
+                    "set_operator_level(int op, double level)",
+                    "set_operator_decay_ms(int op, double ms)",
+                    "set_feedback(double amount)"
+                  ]
+                }
+              ],
+              "drum/fm_tables.hpp": [
+                {
+                  "class": "FmWaveTable",
+                  "methods": [
+                    "read(int wave, double phase, double phase_increment = 0.0)",
+                    "warp(double phase, double amount)"
+                  ]
+                }
+              ],
+              "drum/hat.hpp": [
+                {
+                  "class": "HatVoice",
+                  "methods": [
+                    "set_tune_hz(double hz)",
+                    "set_decay_ms(double ms)",
+                    "set_spread(double amount)",
+                    "set_metal(double amount)",
+                    "set_grit(double amount)",
+                    "set_grit_ratio(double ratio)",
+                    "set_cutoff_hz(double hz)"
+                  ]
+                }
+              ],
+              "drum/hit_life.hpp": [
+                {
+                  "class": "HitLife",
+                  "methods": [
+                    "set_mode(HitLifeMode mode)",
+                    "mode()",
+                    "trigger(std::uint32_t base_seed)"
+                  ]
+                }
+              ],
+              "drum/kick.hpp": [
+                {
+                  "class": "KickVoice",
+                  "methods": [
+                    "set_body(KickBody body)",
+                    "body()",
+                    "set_tune_hz(double hz)",
+                    "set_body_decay_ms(double ms)",
+                    "set_pitch_sweep_octaves(double octaves)",
+                    "set_pitch_sweep_ms(double ms)",
+                    "set_click_level(double level)"
+                  ]
+                }
+              ],
+              "drum/kit.hpp": [
+                {
+                  "class": "Kit",
+                  "methods": [
+                    "add_voice(Voice* voice, int note, int choke_group = 0)",
+                    "voice_count()",
+                    "latency_samples()",
+                    "output_oversampling()",
+                    "set_output_oversampling(OutputOversampling factor)",
+                    "set_choke_fade_ms(float ms)",
+                    "trigger(int note, float velocity)"
+                  ]
+                }
+              ],
+              "drum/layers.hpp": [
+                {
+                  "class": "ClickLayer",
+                  "methods": [
+                    "set_level(double level)",
+                    "set_cutoff_hz(double hz)",
+                    "set_decay_ms(double ms)",
+                    "level()",
+                    "cutoff_hz()",
+                    "trigger(double brightness = 1.0)",
+                    "is_active()"
+                  ]
+                },
+                {
+                  "class": "NoiseLayer",
+                  "methods": [
+                    "set_level(double level)",
+                    "set_decay_ms(double ms)",
+                    "level()",
+                    "trigger()",
+                    "is_active()",
+                    "process(double coloured)"
+                  ]
+                },
+                {
+                  "class": "ShellLayer",
+                  "methods": [
+                    "set_level(double level)",
+                    "set_frequency_hz(double hz)",
+                    "set_resonance(double q)",
+                    "level()",
+                    "frequency_hz()",
+                    "resonance()",
+                    "is_ringing()"
+                  ]
+                },
+                {
+                  "class": "SubLayer",
+                  "methods": [
+                    "set_level(double level)",
+                    "level()",
+                    "trigger()",
+                    "process(double body_hz, double body_envelope)"
+                  ]
+                }
+              ],
+              "drum/membrane.hpp": [
+                {
+                  "class": "MembraneVoice",
+                  "methods": [
+                    "set_tune_hz(double hz)",
+                    "set_structure(double amount)",
+                    "set_stretch(double amount)",
+                    "set_decay_ms(double ms)",
+                    "set_damping(double amount)",
+                    "set_brightness(double amount)",
+                    "set_position(double position)"
+                  ]
+                }
+              ],
+              "drum/output_stage.hpp": [
+                {
+                  "class": "OutputStageT",
+                  "methods": [
+                    "reset_nonlinear_state()",
+                    "set_oversampling(OutputOversampling factor)",
+                    "oversampling()",
+                    "latency_samples_for(OutputOversampling factor)",
+                    "halfband_latency_samples()",
+                    "latency_samples()",
+                    "latency_samples_for(oversampling_)"
+                  ]
+                }
+              ],
+              "drum/snare.hpp": [
+                {
+                  "class": "SnareVoice",
+                  "methods": [
+                    "set_tune_hz(double hz)",
+                    "set_tone_ratio(double ratio)",
+                    "set_tone_level(double level)",
+                    "set_tone_decay_ms(double ms)",
+                    "set_pitch_sweep_octaves(double octaves)",
+                    "set_pitch_sweep_ms(double ms)",
+                    "set_fm_amount(double amount)"
+                  ]
+                }
+              ],
+              "drum/string.hpp": [
+                {
+                  "class": "StringVoice",
+                  "methods": [
+                    "set_tune_hz(double hz)",
+                    "set_decay_seconds(double seconds)",
+                    "set_damping(double amount)",
+                    "set_stiffness(double amount)",
+                    "set_pluck_position(double position)",
+                    "set_exciter_ms(double ms)",
+                    "set_brightness_hz(double hz)"
+                  ]
+                }
+              ],
+              "drum/tom.hpp": [
+                {
+                  "class": "TomVoice",
+                  "methods": [
+                    "set_tune_hz(double hz)",
+                    "set_bend_octaves(double octaves)",
+                    "set_bend_ms(double ms)",
+                    "set_decay_ms(double ms)",
+                    "set_wave(Wave wave)",
+                    "set_noise_balance(double amount)",
+                    "set_noise_cutoff_hz(double hz)"
+                  ]
+                }
+              ],
+              "drum/velocity.hpp": [
+                {
+                  "class": "VelocityResponse",
+                  "methods": [
+                    "gain(float velocity)",
+                    "bend(float velocity)",
+                    "brightness_scale(float velocity)",
+                    "noise_shift(float velocity)"
+                  ]
+                }
+              ],
+              "drum/voice.hpp": [
+                {
+                  "class": "Voice",
+                  "methods": [
+                    "note_on(float velocity)",
+                    "choke(float fade_ms = 4.0f)",
+                    "is_active()",
+                    "state()",
+                    "velocity()",
+                    "sample_rate()",
+                    "latency_samples()"
+                  ]
+                }
+              ],
+              "drum/zap.hpp": [
+                {
+                  "class": "ZapVoice",
+                  "methods": [
+                    "set_tune_hz(double hz)",
+                    "set_pitch_sweep_octaves(double octaves)",
+                    "set_pitch_sweep_ms(double ms)",
+                    "set_decay_ms(double ms)",
+                    "set_shape(PhaseDistortionShape shape)",
+                    "set_distortion(double amount)",
+                    "set_distortion_ms(double ms)"
                   ]
                 }
               ],
@@ -4218,6 +4778,190 @@
                     "exp2(float x)",
                     "log2(float x)",
                     "pow(float base, float exp)"
+                  ]
+                }
+              ],
+              "fdn/diffusion.hpp": [
+                {
+                  "class": "AllpassStage",
+                  "methods": [
+                    "set_delay(int samples)",
+                    "delay()",
+                    "process(SampleType x, SampleType g)",
+                    "finite_or_zero(static_cast<SampleType>(delayed - g * w)",
+                    "process(SampleType x, SampleType g, double fractional_delay)"
+                  ]
+                },
+                {
+                  "class": "AllpassCascade",
+                  "methods": [
+                    "configure(double base_ms, double sample_rate, int offset_samples)",
+                    "num_stages()",
+                    "total_delay()",
+                    "process(SampleType x, SampleType g)",
+                    "process_fluttered(SampleType x, SampleType g, double lfo, double depth)"
+                  ]
+                }
+              ],
+              "fdn/filter_state.hpp": [
+                {
+                  "class": "SanitizedBiquadState",
+                  "methods": [
+                    "process(const BiquadCoefficientsT<double>& coefficients, double input)"
+                  ]
+                }
+              ],
+              "fdn/frac_delay.hpp": [
+                {
+                  "class": "FracDelayT",
+                  "methods": [
+                    "max_delay()",
+                    "push(SampleType x)",
+                    "read(int delay)",
+                    "read(double delay)"
+                  ]
+                }
+              ],
+              "fdn/interp.hpp": [
+                {
+                  "class": "HermiteHistory",
+                  "methods": [
+                    "push(double sample)",
+                    "read(double t)"
+                  ]
+                }
+              ],
+              "fdn/loop_eq.hpp": [
+                {
+                  "class": "LoopEq",
+                  "methods": [
+                    "set_band(int index, const EqBand& band)",
+                    "band(int index)",
+                    "configure(double tank_rate)",
+                    "worst_case_boost()",
+                    "process(int channel, SampleType x)"
+                  ]
+                },
+                {
+                  "class": "FluxBank",
+                  "methods": [
+                    "configure(double tank_rate, double depth_db)",
+                    "tick_control(int samples_elapsed)",
+                    "worst_case_boost()",
+                    "process(int channel, SampleType x)"
+                  ]
+                }
+              ],
+              "fdn/modulation.hpp": [
+                {
+                  "class": "XorShift32",
+                  "methods": [
+                    "next()",
+                    "next_unit()",
+                    "next_bipolar()"
+                  ]
+                },
+                {
+                  "class": "MeanRevertingWalk",
+                  "methods": [
+                    "step(XorShift32& rng, double reversion, double step_size)",
+                    "value()"
+                  ]
+                },
+                {
+                  "class": "PhaseOsc",
+                  "methods": [
+                    "set_rate(double hz, double sample_rate)",
+                    "tick()",
+                    "phase()"
+                  ]
+                },
+                {
+                  "class": "DelayModulationBank",
+                  "methods": [
+                    "configure(double tank_rate)",
+                    "step_walks()",
+                    "tick(int channel)"
+                  ]
+                }
+              ],
+              "fdn/multirate.hpp": [
+                {
+                  "class": "PositionRing",
+                  "methods": [
+                    "push(SampleType x)",
+                    "written()",
+                    "readable_through()",
+                    "read(double position)",
+                    "hermite4(at(i - 1)"
+                  ]
+                },
+                {
+                  "class": "ButterworthPair",
+                  "methods": [
+                    "design(double cutoff_hz, double sample_rate)",
+                    "sections()"
+                  ]
+                },
+                {
+                  "class": "ButterworthState",
+                  "methods": [
+                    "process(const std::array<BiquadCoefficientsT<double>, 2>& sections, double x)"
+                  ]
+                },
+                {
+                  "class": "MultirateBridge",
+                  "methods": [
+                    "configure(double tank_rate)",
+                    "tank_rate()",
+                    "resampling()",
+                    "interpolation_skew_samples()",
+                    "tank_input(int rail)",
+                    "tank_output(int rail)",
+                    "host_to_tank(const SampleType* left, const SampleType* right, int n)"
+                  ]
+                }
+              ],
+              "fdn/shimmer.hpp": [
+                {
+                  "class": "ShimmerBank",
+                  "methods": [
+                    "configure(double tank_rate)",
+                    "rng(kOffsetSeed + static_cast<std::uint32_t>(i)",
+                    "process(int channel, SampleType x)",
+                    "injection_weight(double shimmer, int active_n)"
+                  ]
+                }
+              ],
+              "fdn/stages.hpp": [
+                {
+                  "class": "TransientDucker",
+                  "methods": [
+                    "configure(double sample_rate)",
+                    "process(double magnitude)",
+                    "fast_envelope()",
+                    "slow_envelope()"
+                  ]
+                },
+                {
+                  "class": "EnsembleChorus",
+                  "methods": [
+                    "configure(double sample_rate)",
+                    "process(SampleType& l, SampleType& r)"
+                  ]
+                }
+              ],
+              "fdn/tank.hpp": [
+                {
+                  "class": "FdnTank",
+                  "methods": [
+                    "configure(double tank_rate)",
+                    "set_active_channels(int n)",
+                    "active_channels()",
+                    "eq()",
+                    "set_flux_depth_db(double db)",
+                    "applied_gain(int channel)",
+                    "loop_drive()"
                   ]
                 }
               ],
@@ -5123,6 +5867,107 @@
                     "fft_size()",
                     "recommend_window(const SampleType* const* in, long frames, int channels, double sample_rate)",
                     "x(static_cast<size_t>(frames)"
+                  ]
+                }
+              ],
+              "osc/dco.hpp": [
+                {
+                  "class": "DcoOscillator",
+                  "methods": [
+                    "set_profile(const DcoProfile& profile)",
+                    "profile()",
+                    "set_note_hz(double note_hz)",
+                    "note_hz()",
+                    "set_shape(VaShape shape)",
+                    "shape()",
+                    "set_pulse_width(double width)"
+                  ]
+                }
+              ],
+              "osc/minblep.hpp": [
+                {
+                  "class": "MinBlepAccumulator",
+                  "methods": [
+                    "static_assert(MaximumEvents > 0, \"minBLEP event capacity must be positive\")",
+                    "insert(double position, double height)",
+                    "next()",
+                    "active_events()"
+                  ]
+                }
+              ],
+              "osc/phase.hpp": [
+                {
+                  "class": "PhaseAccumulator",
+                  "methods": [
+                    "advance(double increment)",
+                    "advance_synced(double increment, double sync_frac, double sync_phase = 0.0)",
+                    "phase()",
+                    "events()",
+                    "truncated()"
+                  ]
+                }
+              ],
+              "osc/va.hpp": [
+                {
+                  "class": "VaOscillator",
+                  "methods": [
+                    "set_shape(VaShape shape)",
+                    "shape()",
+                    "set_pulse_width(double width)",
+                    "pulse_width()",
+                    "phase()",
+                    "next(double increment)",
+                    "next_synced(double increment, double sync_frac, double sync_phase = 0.0)"
+                  ]
+                }
+              ],
+              "osc/vco.hpp": [
+                {
+                  "class": "VcoTuning",
+                  "methods": [
+                    "frequency_hz(double control_volts)",
+                    "phase_increment(double control_volts, double sample_rate)",
+                    "frequency_hz(control_volts)"
+                  ]
+                },
+                {
+                  "class": "VcoOscillator",
+                  "methods": [
+                    "set_shape(VaShape shape)",
+                    "shape()",
+                    "set_pulse_width(double width)",
+                    "pulse_width()",
+                    "set_bow(double curvature)",
+                    "bow()",
+                    "set_waveshaper(VaShape shape, const WaveshaperParams& params)"
+                  ]
+                }
+              ],
+              "osc/wt.hpp": [
+                {
+                  "class": "WtOscillator",
+                  "methods": [
+                    "set_wavetable_set(std::vector<Wavetable64> tables)",
+                    "set_position(double pos)",
+                    "position()",
+                    "set_scan_time_ms(double ms)",
+                    "scan_time_ms()",
+                    "next(double increment)",
+                    "band_count()"
+                  ]
+                }
+              ],
+              "osc/wt_lofi.hpp": [
+                {
+                  "class": "LofiWtOscillator",
+                  "methods": [
+                    "set_tables(std::vector<std::vector<double>> tables, int bit_depth = kDefaultBitDepth)",
+                    "table(table_length_, 0.0)",
+                    "set_scan(double pos)",
+                    "set_reconstruction(bool enabled)",
+                    "set_oversample_factor(int factor)",
+                    "next(double increment)",
+                    "table_length()"
                   ]
                 }
               ],
@@ -6284,851 +7129,6 @@
                     "valid_resample_geometry(int source_length, double source_rate, double destination_rate, int taps_per_phase)"
                   ]
                 }
-              ],
-              "osc/dco.hpp": [
-                {
-                  "class": "DcoOscillator",
-                  "methods": [
-                    "set_profile(const DcoProfile& profile)",
-                    "profile()",
-                    "set_note_hz(double note_hz)",
-                    "note_hz()",
-                    "set_shape(VaShape shape)",
-                    "shape()",
-                    "set_pulse_width(double width)"
-                  ]
-                }
-              ],
-              "osc/minblep.hpp": [
-                {
-                  "class": "MinBlepAccumulator",
-                  "methods": [
-                    "static_assert(MaximumEvents > 0, \"minBLEP event capacity must be positive\")",
-                    "insert(double position, double height)",
-                    "next()",
-                    "active_events()"
-                  ]
-                }
-              ],
-              "osc/phase.hpp": [
-                {
-                  "class": "PhaseAccumulator",
-                  "methods": [
-                    "advance(double increment)",
-                    "advance_synced(double increment, double sync_frac, double sync_phase = 0.0)",
-                    "phase()",
-                    "events()",
-                    "truncated()"
-                  ]
-                }
-              ],
-              "osc/va.hpp": [
-                {
-                  "class": "VaOscillator",
-                  "methods": [
-                    "set_shape(VaShape shape)",
-                    "shape()",
-                    "set_pulse_width(double width)",
-                    "pulse_width()",
-                    "phase()",
-                    "next(double increment)",
-                    "next_synced(double increment, double sync_frac, double sync_phase = 0.0)"
-                  ]
-                }
-              ],
-              "osc/vco.hpp": [
-                {
-                  "class": "VcoTuning",
-                  "methods": [
-                    "frequency_hz(double control_volts)",
-                    "phase_increment(double control_volts, double sample_rate)",
-                    "frequency_hz(control_volts)"
-                  ]
-                },
-                {
-                  "class": "VcoOscillator",
-                  "methods": [
-                    "set_shape(VaShape shape)",
-                    "shape()",
-                    "set_pulse_width(double width)",
-                    "pulse_width()",
-                    "set_bow(double curvature)",
-                    "bow()",
-                    "set_waveshaper(VaShape shape, const WaveshaperParams& params)"
-                  ]
-                }
-              ],
-              "osc/wt.hpp": [
-                {
-                  "class": "WtOscillator",
-                  "methods": [
-                    "set_wavetable_set(std::vector<Wavetable64> tables)",
-                    "set_position(double pos)",
-                    "position()",
-                    "set_scan_time_ms(double ms)",
-                    "scan_time_ms()",
-                    "next(double increment)",
-                    "band_count()"
-                  ]
-                }
-              ],
-              "osc/wt_lofi.hpp": [
-                {
-                  "class": "LofiWtOscillator",
-                  "methods": [
-                    "set_tables(std::vector<std::vector<double>> tables, int bit_depth = kDefaultBitDepth)",
-                    "table(table_length_, 0.0)",
-                    "set_scan(double pos)",
-                    "set_reconstruction(bool enabled)",
-                    "set_oversample_factor(int factor)",
-                    "next(double increment)",
-                    "table_length()"
-                  ]
-                }
-              ],
-              "fdn/diffusion.hpp": [
-                {
-                  "class": "AllpassStage",
-                  "methods": [
-                    "set_delay(int samples)",
-                    "delay()",
-                    "process(SampleType x, SampleType g)",
-                    "finite_or_zero(static_cast<SampleType>(delayed - g * w)",
-                    "process(SampleType x, SampleType g, double fractional_delay)"
-                  ]
-                },
-                {
-                  "class": "AllpassCascade",
-                  "methods": [
-                    "configure(double base_ms, double sample_rate, int offset_samples)",
-                    "num_stages()",
-                    "total_delay()",
-                    "process(SampleType x, SampleType g)",
-                    "process_fluttered(SampleType x, SampleType g, double lfo, double depth)"
-                  ]
-                }
-              ],
-              "fdn/filter_state.hpp": [
-                {
-                  "class": "SanitizedBiquadState",
-                  "methods": [
-                    "process(const BiquadCoefficientsT<double>& coefficients, double input)"
-                  ]
-                }
-              ],
-              "fdn/frac_delay.hpp": [
-                {
-                  "class": "FracDelayT",
-                  "methods": [
-                    "max_delay()",
-                    "push(SampleType x)",
-                    "read(int delay)",
-                    "read(double delay)"
-                  ]
-                }
-              ],
-              "fdn/interp.hpp": [
-                {
-                  "class": "HermiteHistory",
-                  "methods": [
-                    "push(double sample)",
-                    "read(double t)"
-                  ]
-                }
-              ],
-              "fdn/loop_eq.hpp": [
-                {
-                  "class": "LoopEq",
-                  "methods": [
-                    "set_band(int index, const EqBand& band)",
-                    "band(int index)",
-                    "configure(double tank_rate)",
-                    "worst_case_boost()",
-                    "process(int channel, SampleType x)"
-                  ]
-                },
-                {
-                  "class": "FluxBank",
-                  "methods": [
-                    "configure(double tank_rate, double depth_db)",
-                    "tick_control(int samples_elapsed)",
-                    "worst_case_boost()",
-                    "process(int channel, SampleType x)"
-                  ]
-                }
-              ],
-              "fdn/modulation.hpp": [
-                {
-                  "class": "XorShift32",
-                  "methods": [
-                    "next()",
-                    "next_unit()",
-                    "next_bipolar()"
-                  ]
-                },
-                {
-                  "class": "MeanRevertingWalk",
-                  "methods": [
-                    "step(XorShift32& rng, double reversion, double step_size)",
-                    "value()"
-                  ]
-                },
-                {
-                  "class": "PhaseOsc",
-                  "methods": [
-                    "set_rate(double hz, double sample_rate)",
-                    "tick()",
-                    "phase()"
-                  ]
-                },
-                {
-                  "class": "DelayModulationBank",
-                  "methods": [
-                    "configure(double tank_rate)",
-                    "step_walks()",
-                    "tick(int channel)"
-                  ]
-                }
-              ],
-              "fdn/multirate.hpp": [
-                {
-                  "class": "PositionRing",
-                  "methods": [
-                    "push(SampleType x)",
-                    "written()",
-                    "readable_through()",
-                    "read(double position)",
-                    "hermite4(at(i - 1)"
-                  ]
-                },
-                {
-                  "class": "ButterworthPair",
-                  "methods": [
-                    "design(double cutoff_hz, double sample_rate)",
-                    "sections()"
-                  ]
-                },
-                {
-                  "class": "ButterworthState",
-                  "methods": [
-                    "process(const std::array<BiquadCoefficientsT<double>, 2>& sections, double x)"
-                  ]
-                },
-                {
-                  "class": "MultirateBridge",
-                  "methods": [
-                    "configure(double tank_rate)",
-                    "tank_rate()",
-                    "resampling()",
-                    "interpolation_skew_samples()",
-                    "tank_input(int rail)",
-                    "tank_output(int rail)",
-                    "host_to_tank(const SampleType* left, const SampleType* right, int n)"
-                  ]
-                }
-              ],
-              "fdn/shimmer.hpp": [
-                {
-                  "class": "ShimmerBank",
-                  "methods": [
-                    "configure(double tank_rate)",
-                    "rng(kOffsetSeed + static_cast<std::uint32_t>(i)",
-                    "process(int channel, SampleType x)",
-                    "injection_weight(double shimmer, int active_n)"
-                  ]
-                }
-              ],
-              "fdn/stages.hpp": [
-                {
-                  "class": "TransientDucker",
-                  "methods": [
-                    "configure(double sample_rate)",
-                    "process(double magnitude)",
-                    "fast_envelope()",
-                    "slow_envelope()"
-                  ]
-                },
-                {
-                  "class": "EnsembleChorus",
-                  "methods": [
-                    "configure(double sample_rate)",
-                    "process(SampleType& l, SampleType& r)"
-                  ]
-                }
-              ],
-              "fdn/tank.hpp": [
-                {
-                  "class": "FdnTank",
-                  "methods": [
-                    "configure(double tank_rate)",
-                    "set_active_channels(int n)",
-                    "active_channels()",
-                    "eq()",
-                    "set_flux_depth_db(double db)",
-                    "applied_gain(int channel)",
-                    "loop_drive()"
-                  ]
-                }
-              ],
-              "drum/clap.hpp": [
-                {
-                  "class": "ClapVoice",
-                  "methods": [
-                    "set_burst_count(int count)",
-                    "set_burst_spacing_ms(double ms)",
-                    "set_burst_decay_ms(double ms)",
-                    "set_burst_falloff(double ratio)",
-                    "set_gap_jitter(double amount)",
-                    "set_alternate_polarity(bool alternate)",
-                    "set_stereo_width(double width)"
-                  ]
-                }
-              ],
-              "drum/cymbal.hpp": [
-                {
-                  "class": "CymbalVoice",
-                  "methods": [
-                    "set_tune_hz(double hz)",
-                    "set_decay_ms(double ms)",
-                    "set_decay_tilt(double tilt)",
-                    "set_high_mode_emphasis_db(double db)",
-                    "set_velocity_feedback(double amount)",
-                    "set_velocity_high_mode_db(double db)",
-                    "set_upper_highpass_hz(double hz)"
-                  ]
-                }
-              ],
-              "drum/fm.hpp": [
-                {
-                  "class": "FmDrumVoice",
-                  "methods": [
-                    "set_tune_hz(double hz)",
-                    "set_ratio(double ratio)",
-                    "set_index(double index)",
-                    "set_index_ms(double ms)",
-                    "set_decay_ms(double ms)",
-                    "set_pitch_sweep_octaves(double octaves)",
-                    "set_pitch_sweep_ms(double ms)"
-                  ]
-                },
-                {
-                  "class": "Fm8DrumVoice",
-                  "methods": [
-                    "set_algorithm(int index)",
-                    "algorithm()",
-                    "set_tune_hz(double hz)",
-                    "set_operator_ratio(int op, double ratio)",
-                    "set_operator_level(int op, double level)",
-                    "set_operator_decay_ms(int op, double ms)",
-                    "set_operator_feedback(int op, double amount)"
-                  ]
-                }
-              ],
-              "drum/fm6.hpp": [
-                {
-                  "class": "Fm6DrumVoice",
-                  "methods": [
-                    "set_algorithm(int index)",
-                    "algorithm()",
-                    "set_tune_hz(double hz)",
-                    "set_operator_ratio(int op, double ratio)",
-                    "set_operator_level(int op, double level)",
-                    "set_operator_decay_ms(int op, double ms)",
-                    "set_feedback(double amount)"
-                  ]
-                }
-              ],
-              "drum/fm_tables.hpp": [
-                {
-                  "class": "FmWaveTable",
-                  "methods": [
-                    "read(int wave, double phase, double phase_increment = 0.0)",
-                    "warp(double phase, double amount)"
-                  ]
-                }
-              ],
-              "drum/hat.hpp": [
-                {
-                  "class": "HatVoice",
-                  "methods": [
-                    "set_tune_hz(double hz)",
-                    "set_decay_ms(double ms)",
-                    "set_spread(double amount)",
-                    "set_metal(double amount)",
-                    "set_grit(double amount)",
-                    "set_grit_ratio(double ratio)",
-                    "set_cutoff_hz(double hz)"
-                  ]
-                }
-              ],
-              "drum/hit_life.hpp": [
-                {
-                  "class": "HitLife",
-                  "methods": [
-                    "set_mode(HitLifeMode mode)",
-                    "mode()",
-                    "trigger(std::uint32_t base_seed)"
-                  ]
-                }
-              ],
-              "drum/kick.hpp": [
-                {
-                  "class": "KickVoice",
-                  "methods": [
-                    "set_body(KickBody body)",
-                    "body()",
-                    "set_tune_hz(double hz)",
-                    "set_body_decay_ms(double ms)",
-                    "set_pitch_sweep_octaves(double octaves)",
-                    "set_pitch_sweep_ms(double ms)",
-                    "set_click_level(double level)"
-                  ]
-                }
-              ],
-              "drum/kit.hpp": [
-                {
-                  "class": "Kit",
-                  "methods": [
-                    "add_voice(Voice* voice, int note, int choke_group = 0)",
-                    "voice_count()",
-                    "latency_samples()",
-                    "output_oversampling()",
-                    "set_output_oversampling(OutputOversampling factor)",
-                    "set_choke_fade_ms(float ms)",
-                    "trigger(int note, float velocity)"
-                  ]
-                }
-              ],
-              "drum/layers.hpp": [
-                {
-                  "class": "ClickLayer",
-                  "methods": [
-                    "set_level(double level)",
-                    "set_cutoff_hz(double hz)",
-                    "set_decay_ms(double ms)",
-                    "level()",
-                    "cutoff_hz()",
-                    "trigger(double brightness = 1.0)",
-                    "is_active()"
-                  ]
-                },
-                {
-                  "class": "NoiseLayer",
-                  "methods": [
-                    "set_level(double level)",
-                    "set_decay_ms(double ms)",
-                    "level()",
-                    "trigger()",
-                    "is_active()",
-                    "process(double coloured)"
-                  ]
-                },
-                {
-                  "class": "ShellLayer",
-                  "methods": [
-                    "set_level(double level)",
-                    "set_frequency_hz(double hz)",
-                    "set_resonance(double q)",
-                    "level()",
-                    "frequency_hz()",
-                    "resonance()",
-                    "is_ringing()"
-                  ]
-                },
-                {
-                  "class": "SubLayer",
-                  "methods": [
-                    "set_level(double level)",
-                    "level()",
-                    "trigger()",
-                    "process(double body_hz, double body_envelope)"
-                  ]
-                }
-              ],
-              "drum/membrane.hpp": [
-                {
-                  "class": "MembraneVoice",
-                  "methods": [
-                    "set_tune_hz(double hz)",
-                    "set_structure(double amount)",
-                    "set_stretch(double amount)",
-                    "set_decay_ms(double ms)",
-                    "set_damping(double amount)",
-                    "set_brightness(double amount)",
-                    "set_position(double position)"
-                  ]
-                }
-              ],
-              "drum/output_stage.hpp": [
-                {
-                  "class": "OutputStageT",
-                  "methods": [
-                    "reset_nonlinear_state()",
-                    "set_oversampling(OutputOversampling factor)",
-                    "oversampling()",
-                    "latency_samples_for(OutputOversampling factor)",
-                    "halfband_latency_samples()",
-                    "latency_samples()",
-                    "latency_samples_for(oversampling_)"
-                  ]
-                }
-              ],
-              "drum/snare.hpp": [
-                {
-                  "class": "SnareVoice",
-                  "methods": [
-                    "set_tune_hz(double hz)",
-                    "set_tone_ratio(double ratio)",
-                    "set_tone_level(double level)",
-                    "set_tone_decay_ms(double ms)",
-                    "set_pitch_sweep_octaves(double octaves)",
-                    "set_pitch_sweep_ms(double ms)",
-                    "set_fm_amount(double amount)"
-                  ]
-                }
-              ],
-              "drum/string.hpp": [
-                {
-                  "class": "StringVoice",
-                  "methods": [
-                    "set_tune_hz(double hz)",
-                    "set_decay_seconds(double seconds)",
-                    "set_damping(double amount)",
-                    "set_stiffness(double amount)",
-                    "set_pluck_position(double position)",
-                    "set_exciter_ms(double ms)",
-                    "set_brightness_hz(double hz)"
-                  ]
-                }
-              ],
-              "drum/tom.hpp": [
-                {
-                  "class": "TomVoice",
-                  "methods": [
-                    "set_tune_hz(double hz)",
-                    "set_bend_octaves(double octaves)",
-                    "set_bend_ms(double ms)",
-                    "set_decay_ms(double ms)",
-                    "set_wave(Wave wave)",
-                    "set_noise_balance(double amount)",
-                    "set_noise_cutoff_hz(double hz)"
-                  ]
-                }
-              ],
-              "drum/velocity.hpp": [
-                {
-                  "class": "VelocityResponse",
-                  "methods": [
-                    "gain(float velocity)",
-                    "bend(float velocity)",
-                    "brightness_scale(float velocity)",
-                    "noise_shift(float velocity)"
-                  ]
-                }
-              ],
-              "drum/voice.hpp": [
-                {
-                  "class": "Voice",
-                  "methods": [
-                    "note_on(float velocity)",
-                    "choke(float fade_ms = 4.0f)",
-                    "is_active()",
-                    "state()",
-                    "velocity()",
-                    "sample_rate()",
-                    "latency_samples()"
-                  ]
-                }
-              ],
-              "drum/zap.hpp": [
-                {
-                  "class": "ZapVoice",
-                  "methods": [
-                    "set_tune_hz(double hz)",
-                    "set_pitch_sweep_octaves(double octaves)",
-                    "set_pitch_sweep_ms(double ms)",
-                    "set_decay_ms(double ms)",
-                    "set_shape(PhaseDistortionShape shape)",
-                    "set_distortion(double amount)",
-                    "set_distortion_ms(double ms)"
-                  ]
-                }
-              ],
-              "character_delay/bbd.hpp": [
-                {
-                  "class": "BbdChannel",
-                  "methods": [
-                    "set_seed(std::uint32_t seed)",
-                    "set_compander_enabled(bool enabled)",
-                    "update(double character_amount, double delay_seconds)",
-                    "bandwidth_hz()",
-                    "stages()",
-                    "process(double x, double clock_mod = 0.0)"
-                  ]
-                }
-              ],
-              "character_delay/diffusion.hpp": [
-                {
-                  "class": "ModulatedAllpass",
-                  "methods": [
-                    "process(double x, double delay_samples, double gain)",
-                    "max_delay()"
-                  ]
-                },
-                {
-                  "class": "ReverbTank",
-                  "methods": [
-                    "update(double character_amount)",
-                    "active()",
-                    "mix()",
-                    "process(double x, double decorrelation)",
-                    "tick_modulation()"
-                  ]
-                },
-                {
-                  "class": "DiffusionChain",
-                  "methods": [
-                    "update(double character_amount)",
-                    "process_diffuser(double x, double decorrelation)",
-                    "process_cloud(double x, double decorrelation)",
-                    "process(double x, double decorrelation)",
-                    "process_cloud(process_diffuser(x, decorrelation)",
-                    "tick_modulation()"
-                  ]
-                }
-              ],
-              "character_delay/hysteresis.hpp": [
-                {
-                  "class": "Langevin",
-                  "methods": [
-                    "value(double x)",
-                    "coth(x)",
-                    "derivative(double x)",
-                    "second_derivative(double x)",
-                    "coth(double x)"
-                  ]
-                },
-                {
-                  "class": "JilesAthertonHysteresis",
-                  "methods": [
-                    "set_character(double drive, double bias)",
-                    "process(double field)",
-                    "converged_steps()",
-                    "capped_steps()",
-                    "clear_solver_counters()"
-                  ]
-                },
-                {
-                  "class": "HysteresisHalfBandOversampler",
-                  "methods": [
-                    "static_assert(StageCount > 0)",
-                    "oversampling_factor()",
-                    "latency_samples()",
-                    "process(double x, Callback&& callback)"
-                  ]
-                },
-                {
-                  "class": "OversampledHysteresis",
-                  "methods": [
-                    "oversampling_factor()",
-                    "latency_samples()",
-                    "set_character(double drive, double bias)",
-                    "process(double input)"
-                  ]
-                }
-              ],
-              "character_delay/primitives.hpp": [
-                {
-                  "class": "Xorshift32",
-                  "methods": [
-                    "reseed(std::uint32_t seed)",
-                    "next()",
-                    "uniform()",
-                    "bipolar()",
-                    "gaussian()"
-                  ]
-                },
-                {
-                  "class": "Smoother",
-                  "methods": [
-                    "configure(double time_constant_s, double fs)",
-                    "snap(double v)",
-                    "current()",
-                    "process(double target)"
-                  ]
-                },
-                {
-                  "class": "FractionalDelayLine",
-                  "methods": [
-                    "discard_history()",
-                    "capacity()",
-                    "max_delay()",
-                    "push(double x)",
-                    "tap(std::size_t m)",
-                    "read(double delay_samples)"
-                  ]
-                },
-                {
-                  "class": "OnePole",
-                  "methods": [
-                    "set_cutoff(double cutoff_hz, double fs)",
-                    "lowpass(double x)",
-                    "highpass(double x)"
-                  ]
-                },
-                {
-                  "class": "FirstOrderShelf",
-                  "methods": [
-                    "set(double corner_hz, double gain_linear, double fs)",
-                    "set_inverse(double corner_hz, double gain_linear, double fs)",
-                    "process(double x)"
-                  ]
-                },
-                {
-                  "class": "Svf2",
-                  "methods": [
-                    "set_lowpass(double cutoff_hz, double q, double fs)",
-                    "set_highpass(double cutoff_hz, double q, double fs)",
-                    "set_bell(double cutoff_hz, double q, double gain_db, double fs)",
-                    "process(double v0)"
-                  ]
-                },
-                {
-                  "class": "Butterworth6Lowpass",
-                  "methods": [
-                    "set_cutoff(double cutoff_hz, double fs)",
-                    "process(double x)"
-                  ]
-                },
-                {
-                  "class": "FixedFir",
-                  "methods": [
-                    "discard_history()",
-                    "push(double x)",
-                    "convolve(const double* coefficients, std::size_t taps)"
-                  ]
-                },
-                {
-                  "class": "EnvelopeFollower",
-                  "methods": [
-                    "configure(double attack_s, double release_s, double rate_hz)",
-                    "value()",
-                    "process(double magnitude)"
-                  ]
-                }
-              ],
-              "character_delay/reverse.hpp": [
-                {
-                  "class": "ReverseSegmenter",
-                  "methods": [
-                    "process(double x, double segment_samples, double mod_offset_samples)"
-                  ]
-                }
-              ],
-              "character_delay/tape.hpp": [
-                {
-                  "class": "TapeInstability",
-                  "methods": [
-                    "configure(std::uint32_t seed, double flutter_phase_offset)",
-                    "tick()",
-                    "offset_ms(double wow_depth_ms, double flutter_depth_ms)"
-                  ]
-                },
-                {
-                  "class": "TapeStandardChannel",
-                  "methods": [
-                    "update(double character_amount)",
-                    "pre_process(double x)",
-                    "post_process(double x)"
-                  ]
-                }
-              ],
-              "character_delay/tape_loss.hpp": [
-                {
-                  "class": "TapeLossShapes",
-                  "methods": [
-                    "fit()",
-                    "tabulated()",
-                    "parameters_for(const TapeLossGeometry& geometry)"
-                  ]
-                },
-                {
-                  "class": "TapeLossIir",
-                  "methods": [
-                    "set(const TapeLossIirParams& parameters, double fs)",
-                    "process(double x)",
-                    "dc_group_delay_seconds()",
-                    "parameters()"
-                  ]
-                },
-                {
-                  "class": "TapeLossDesign",
-                  "methods": [
-                    "set_speed(double speed_ips)",
-                    "empty()",
-                    "speed_ips()",
-                    "gap_taps()",
-                    "gap_group_delay_samples()",
-                    "shapes()",
-                    "geometry_at(double age)"
-                  ]
-                },
-                {
-                  "class": "TapeLossStage",
-                  "methods": [
-                    "discard_history()",
-                    "reset_recursive()",
-                    "set_parameters(const TapeLossIirParams& parameters, double fs)",
-                    "push(double x)",
-                    "process(const TapeLossDesign& design)",
-                    "copy_history_from(const TapeLossStage& other)",
-                    "dc_group_delay_seconds()"
-                  ]
-                }
-              ],
-              "character_delay/tape_physical.hpp": [
-                {
-                  "class": "TapeChew",
-                  "methods": [
-                    "set_seed(std::uint32_t seed)",
-                    "state_index()",
-                    "process(double x, double depth)"
-                  ]
-                },
-                {
-                  "class": "TapePhysicalChannel",
-                  "methods": [
-                    "recover_audio_fault()",
-                    "set_seeds(std::uint32_t base)",
-                    "set_speed_ips(double ips)",
-                    "speed_ips()",
-                    "gap_coefficients()",
-                    "loss_parameters()",
-                    "update(double age)"
-                  ]
-                }
-              ],
-              "character_delay/vintage.hpp": [
-                {
-                  "class": "VintageChannel",
-                  "methods": [
-                    "set_seed(std::uint32_t seed)",
-                    "update(double character_amount)",
-                    "internal_rate_hz()",
-                    "band_edge_hz()",
-                    "process(double x, double delay_seconds)"
-                  ]
-                }
-              ],
-              "detail/fractional_synthesis_hop_accumulator.hpp": [
-                {
-                  "class": "FractionalSynthesisHopAccumulator",
-                  "methods": [
-                    "advance(double exact_hop, int minimum_hop, int maximum_hop)",
-                    "residual()",
-                    "correction_debt()"
-                  ]
-                }
               ]
             }
           }
@@ -7136,7 +7136,7 @@
       },
       "surface": {
         "schema": "pulp.agent-capability-surface.v1",
-        "inventory_version": 9,
+        "inventory_version": 11,
         "headers": [
           {
             "include": "pulp/audio/analyzer_provider.hpp",
@@ -7700,7 +7700,7 @@
           },
           {
             "include": "pulp/midi/arpeggiator.hpp",
-            "fingerprint": "sha256:5178607c04e0070ad9e22ab028a2c87aa80c925350e0743614c0fb44aa426445",
+            "fingerprint": "sha256:96ba2417d37bd1ff46876463d61f53fb7345b5aa88c92c9c05f04339e37d4b25",
             "disposition": "capability_entrypoint"
           },
           {
@@ -7727,6 +7727,11 @@
             "include": "pulp/midi/controller_utility_kernels.hpp",
             "fingerprint": "sha256:4e28f94ab7787db493e743d3f8cf65d1d6c0015dfd15e9425f6006dfe1d9c711",
             "disposition": "capability_entrypoint"
+          },
+          {
+            "include": "pulp/midi/detail/arpeggiator_math.hpp",
+            "fingerprint": "sha256:63f62d6a1272a3cfb360f6caf94b4ae4acf73e6c9a1942d7d8ea530eb595e050",
+            "disposition": "capability_support"
           },
           {
             "include": "pulp/midi/device.hpp",
@@ -7790,7 +7795,7 @@
           },
           {
             "include": "pulp/midi/mpe_buffer.hpp",
-            "fingerprint": "sha256:024033345347c33b06bc1df4f05240496933797410640ea7eb38bfe810ff8eaa",
+            "fingerprint": "sha256:c6d418b5b04448082aef5da305e1f092aaebef2e826d7bb94eb44a7f968507ac",
             "disposition": "capability_support"
           },
           {
@@ -7985,7 +7990,7 @@
           },
           {
             "include": "pulp/signal/audio_matrix_mixer.hpp",
-            "fingerprint": "sha256:80ac853fa55eb0bee8730a05dd7cfac32847832eb4f44cb6e0ad5507781db6b1",
+            "fingerprint": "sha256:36ef815dfd9072f7bba8d72aa0e0d53662952e1ee470f1c6b0cd4d64413c55ac",
             "disposition": "capability_entrypoint"
           },
           {
@@ -8415,7 +8420,7 @@
           },
           {
             "include": "pulp/signal/fractional_delay.hpp",
-            "fingerprint": "sha256:df2c07847d8b5f49134a7f274c1114cd475c8ed9ac820044ec8c7da3906a5a17",
+            "fingerprint": "sha256:3689804c0a0eccd03298d9949f883cd99fd0035793fed20f4ada5a2e4c90a125",
             "disposition": "capability_entrypoint"
           },
           {
@@ -8725,7 +8730,7 @@
           },
           {
             "include": "pulp/signal/path_latency_aligner.hpp",
-            "fingerprint": "sha256:1b50ede989667a0a3354900646e3079df8a550474604cf7958c92a7b27f58e8a",
+            "fingerprint": "sha256:a7874bab7001e6c6ad31fd85a7176ec13af44c5047bf38d631e207ce3ae914c6",
             "disposition": "capability_entrypoint"
           },
           {
@@ -9141,7 +9146,7 @@
         ],
         "tombstones": []
       },
-      "entry_digest": "sha256:11904b34a95bfee0f3e4b04e1e2851febd7cc0ab05d22617b40077e0d5bf97f8"
+      "entry_digest": "sha256:0928d57fa3ffcde737280ce609757a6af27a0725237e9693c566c5339a0d74e7"
     }
   ]
 }

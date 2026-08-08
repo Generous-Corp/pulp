@@ -12,6 +12,7 @@ import sys
 import tempfile
 
 import agent_capability_manifest as manifest
+import agent_capability_history as capability_history
 import agent_capability_surface as surface
 import agent_capability_transaction as transaction
 import json_schema_lite
@@ -371,6 +372,24 @@ def exercise_evolution(canonical: dict) -> int:
     )
     checks += 1
 
+    bootstrap_history = capability_history.history_document([
+        capability_history.history_entry(canonical, manifest.build_surface(ROOT)[0])
+    ])
+    evolved_surface = copy.deepcopy(manifest.build_surface(ROOT)[0])
+    evolved_surface["inventory_version"] += 1
+    evolved_surface["headers"][0]["fingerprint"] = "sha256:" + "a" * 64
+    entries = capability_history.updated_history_entries(
+        bootstrap_history,
+        canonical,
+        manifest.build_surface(ROOT)[0],
+        canonical,
+        evolved_surface,
+        initial_bootstrap=True,
+        migrate_unpublished=False,
+    )
+    assert entries == [capability_history.history_entry(canonical, evolved_surface)]
+    checks += 1
+
     with tempfile.TemporaryDirectory(prefix="pulp-agent-transaction-") as temp:
         root = pathlib.Path(temp)
         journal = root / "transaction.json"
@@ -707,8 +726,8 @@ def exercise_evolution(canonical: dict) -> int:
     )
     checks += 1
 
-    history = manifest.history_document([
-        manifest.history_entry(
+    history = capability_history.history_document([
+        capability_history.history_entry(
             canonical,
             json.loads((ROOT / surface.SURFACE_SNAPSHOT).read_text()),
         )

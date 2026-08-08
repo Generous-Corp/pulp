@@ -63,6 +63,33 @@ def history_entry(
 def history_document(entries: list[dict[str, Any]]) -> dict[str, Any]:
     return {"schema": HISTORY_SCHEMA, "entries": copy.deepcopy(entries)}
 
+
+def updated_history_entries(
+    history: Any,
+    previous_manifest: Any,
+    previous_surface: Any,
+    current_manifest: dict[str, Any],
+    current_surface: dict[str, Any],
+    *,
+    initial_bootstrap: bool,
+    migrate_unpublished: bool,
+) -> list[dict[str, Any]]:
+    """Return append-only entries, replacing the sole unpublished bootstrap."""
+    if initial_bootstrap or migrate_unpublished:
+        return [history_entry(current_manifest, current_surface)]
+    entries = (
+        copy.deepcopy(history.get("entries", []))
+        if isinstance(history, dict) and history.get("schema") == HISTORY_SCHEMA
+        else []
+    )
+    if isinstance(previous_manifest, dict) and isinstance(previous_surface, dict):
+        previous_entry = history_entry(previous_manifest, previous_surface)
+        if not entries or entries[-1] != previous_entry:
+            entries.append(previous_entry)
+    if not entries:
+        entries.append(history_entry(current_manifest, current_surface))
+    return entries
+
 def history_problems(
     history: Any,
     current_manifest: dict[str, Any],

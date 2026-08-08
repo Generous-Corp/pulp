@@ -59,7 +59,7 @@ EXPORTS = [
         bindings=[
             binding(role="matrix", kind="cpp_type", include="pulp/signal/audio_matrix_mixer.hpp",
                     qualified_name="pulp::signal::AudioMatrixMixerT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:80ac853fa55eb0bee8730a05dd7cfac32847832eb4f44cb6e0ad5507781db6b1"),
+                    header_fingerprint="sha256:36ef815dfd9072f7bba8d72aa0e0d53662952e1ee470f1c6b0cd4d64413c55ac"),
             binding(role="mid_side", kind="cpp_function", include="pulp/signal/mid_side.hpp",
                     qualified_name="pulp::signal::mid_side_encode_block<float>", target="Pulp::signal",
                     header_fingerprint="sha256:709cb80f95a21bd20ec21ac9f055da2d41cf47b86ce91cdd444a408e00ff6443",
@@ -73,7 +73,7 @@ EXPORTS = [
                                         "&pulp::signal::nway_constant_power_gains<float>)")),
             binding(role="aligner", kind="cpp_type", include="pulp/signal/path_latency_aligner.hpp",
                     qualified_name="pulp::signal::PathLatencyAlignerT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:1b50ede989667a0a3354900646e3079df8a550474604cf7958c92a7b27f58e8a"),
+                    header_fingerprint="sha256:a7874bab7001e6c6ad31fd85a7176ec13af44c5047bf38d631e207ce3ae914c6"),
             binding(role="switcher", kind="cpp_type", include="pulp/signal/path_switcher.hpp",
                     qualified_name="pulp::signal::ClickFreePathSwitcherT<float>", target="Pulp::signal",
                     header_fingerprint="sha256:adbf41862725587e477711ac144f5326cdcff3a31560aba47708a42d5cd471f1"),
@@ -220,10 +220,10 @@ EXPORTS = [
         bindings=[
             binding(role="line", kind="cpp_type", include="pulp/signal/fractional_delay.hpp",
                     qualified_name="pulp::signal::FractionalDelayLineT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:df2c07847d8b5f49134a7f274c1114cd475c8ed9ac820044ec8c7da3906a5a17"),
+                    header_fingerprint="sha256:3689804c0a0eccd03298d9949f883cd99fd0035793fed20f4ada5a2e4c90a125"),
             binding(role="history", kind="cpp_type", include="pulp/signal/fractional_delay.hpp",
                     qualified_name="pulp::signal::FractionalDelayHistoryT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:df2c07847d8b5f49134a7f274c1114cd475c8ed9ac820044ec8c7da3906a5a17"),
+                    header_fingerprint="sha256:3689804c0a0eccd03298d9949f883cd99fd0035793fed20f4ada5a2e4c90a125"),
         ],
         _link_probes=[
             {"role": "line", "binding": "pulp::signal::FractionalDelayLineT<float>",
