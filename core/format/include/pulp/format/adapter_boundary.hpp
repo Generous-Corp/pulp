@@ -523,6 +523,17 @@ struct MpeSidecar {
         if (enabled) {
             buffer.clear();
             expression_event_dropped = false;
+            if constexpr (requires { midi_in.dropped_event_count(); }) {
+                if (midi_in.dropped_event_count() != 0) {
+                    // The adapter could not retain the complete source stream.
+                    // Do not advance note identity from a prefix that may have
+                    // lost a release; adapters pair this failure with a
+                    // processor reset and discard the partial MIDI block.
+                    reset();
+                    processor.set_mpe_input(&buffer);
+                    return false;
+                }
+            }
             // Releases that could not fit at the end of the previous block
             // must lead this block before any new starts. The tracker blocks
             // note-ons while this fixed queue is nonempty, so no voice can be
