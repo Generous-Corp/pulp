@@ -238,7 +238,51 @@ bool Socket::listen(int backlog) {
 }
 
 std::optional<Socket> Socket::accept() {
+    return accept(std::chrono::milliseconds(0));
+}
+
+std::optional<Socket> Socket::accept(std::chrono::milliseconds timeout) {
     if (fd_ == kInvalidSocketHandle) return std::nullopt;
+
+    if (timeout > std::chrono::milliseconds(0)) {
+        const auto started = std::chrono::steady_clock::now();
+        for (;;) {
+            const auto elapsed =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - started);
+            if (elapsed >= timeout)
+                return std::nullopt;
+            const int wait_ms = static_cast<int>(
+                std::min<std::int64_t>(
+                    std::max<std::int64_t>((timeout - elapsed).count(), 1),
+                    INT_MAX));
+#ifdef _WIN32
+            WSAPOLLFD descriptor{};
+            descriptor.fd = NATIVE_SOCKET(fd_);
+            descriptor.events = POLLRDNORM;
+            const int ready = ::WSAPoll(&descriptor, 1, wait_ms);
+            if (ready == SOCKET_ERROR && ::WSAGetLastError() == WSAEINTR)
+                continue;
+#else
+            struct pollfd descriptor {
+                NATIVE_SOCKET(fd_), POLLIN, 0
+            };
+            const int ready = ::poll(&descriptor, 1, wait_ms);
+            if (ready < 0 && errno == EINTR)
+                continue;
+#endif
+            if (ready <= 0)
+                return std::nullopt;
+#ifdef _WIN32
+            if ((descriptor.revents & POLLRDNORM) == 0)
+                return std::nullopt;
+#else
+            if ((descriptor.revents & POLLIN) == 0)
+                return std::nullopt;
+#endif
+            break;
+        }
+    }
 
     struct sockaddr_storage client_addr{};
     socklen_t addr_len = sizeof(client_addr);
