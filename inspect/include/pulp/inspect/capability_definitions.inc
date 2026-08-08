@@ -6,7 +6,7 @@
 PULP_INSPECT_CAPABILITY(SessionDescribe, "session.describe", "dev.pulp.instance/read@1", Observe, None, Protocol, Response, 1, 1, 1, 0)
 PULP_INSPECT_CAPABILITY(SessionControl, "session.control", "dev.pulp.session/control@1", Control, Session, Protocol, Receipt, 0, 1, 1, 0)
 PULP_INSPECT_CAPABILITY(StateRead, "state.read", "dev.pulp.state/read@1", Sensitive, None, HostMain, Response, 1, 1, 1, 0)
-PULP_INSPECT_CAPABILITY(RenderOffline, "render.offline", "dev.pulp.render/offline@1", ResourceConsuming, Render, Background, Artifact, 0, 0, 0, 0)
+PULP_INSPECT_CAPABILITY(RenderOffline, "render.offline", "dev.pulp.render/offline@1", ResourceConsuming, Render, OfflineJob, Artifact, 0, 0, 1, 0)
 PULP_INSPECT_CAPABILITY(UiRead, "ui.read", "dev.pulp.ui/observe@1", Sensitive, None, HostMain, Response, 1, 1, 1, 0)
 PULP_INSPECT_CAPABILITY(DiagnosticsRead, "diagnostics.read", "dev.pulp.diagnostics/read@1", Sensitive, None, Protocol, Response, 1, 1, 1, 0)
 PULP_INSPECT_CAPABILITY(LogsRead, "logs.read", "dev.pulp.logs/read@1", Sensitive, None, Protocol, Response, 1, 1, 1, 0)

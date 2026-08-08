@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <limits>
 #include <ranges>
 #include <utility>
 
@@ -765,6 +766,34 @@ ControlArtifactStoreResult ControlBroker::store_operation_artifact(
     }
     return artifact_store_->store(bytes, artifact_lineage_from_receipt(*receipt),
                                   std::move(properties));
+}
+
+ControlArtifactStoreResult ControlBroker::store_operation_artifact(
+    const VerifiedControlPeerIdentity& client_peer, const ControlAdmissionPlan& plan,
+    std::span<const std::uint8_t> bytes, std::string content_type,
+    ControlArtifactSensitivity sensitivity, ControlArtifactRedactionState redaction_state,
+    std::chrono::milliseconds lifetime) {
+    const auto now_count = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               wall_clock_().time_since_epoch())
+                               .count();
+    if (now_count <= 0 || lifetime.count() <= 0 ||
+        static_cast<std::uint64_t>(lifetime.count()) >
+            std::numeric_limits<std::uint64_t>::max() -
+                static_cast<std::uint64_t>(now_count)) {
+        return {.status = ControlArtifactStatus::InvalidRequest};
+    }
+    const auto created_at = static_cast<std::uint64_t>(now_count);
+    return store_operation_artifact(
+        client_peer, plan, bytes,
+        {.content_type = std::move(content_type),
+         .created_at_unix_ms = created_at,
+         .expires_at_unix_ms = created_at + static_cast<std::uint64_t>(lifetime.count()),
+         .sensitivity = sensitivity,
+         .redaction_state = redaction_state});
+}
+
+std::size_t ControlBroker::artifact_maximum_blob_bytes() const noexcept {
+    return artifact_store_ ? artifact_store_->maximum_blob_bytes() : 0;
 }
 
 ControlArtifactReadResult ControlBroker::read_artifact(

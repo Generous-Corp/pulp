@@ -38,7 +38,7 @@ availability.
 | `dev.pulp.instance/read@1` (`session.describe`) | yes | yes | Schema and broker operation exist; no public general-live client route |
 | `dev.pulp.session/control@1` (`session.control`) | no | yes | Broker lease/grant machinery exists; no general product host adapter |
 | `dev.pulp.state/read@1` (`state.read`) | yes | yes | Typed contract exists; not publicly reachable through `pulp inspect` or MCP |
-| `dev.pulp.render/offline@1` (`render.offline`) | no | no | Frozen contract; no current executor or grant path |
+| `dev.pulp.render/offline@1` (`render.offline`) | no | no | T0-only headless executor resolves authority-bound, launcher-trusted in-memory inputs, renders through `OfflineRenderHost`, and publishes broker-owned WAV artifacts; no profile enables it implicitly |
 | `dev.pulp.ui/observe@1` (`ui.read`) | yes | yes | Typed contract/components exist; no general product host adapter |
 | `dev.pulp.diagnostics/read@1` (`diagnostics.read`) | yes | yes | Typed contract/components exist; no general product host adapter |
 | `dev.pulp.logs/read@1` (`logs.read`) | yes | yes | Console component exists; no public live route |

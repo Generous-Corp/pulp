@@ -9,14 +9,17 @@ namespace {
 #define PULP_BUILD_FEATURE_Protocol "inspect-protocol"
 #define PULP_BUILD_FEATURE_HostMain "inspect-host-bridge"
 #define PULP_BUILD_FEATURE_Background "inspect-runtime"
+#define PULP_BUILD_FEATURE_OfflineJob "inspect-offline-runtime"
 #define PULP_BUILD_FEATURE_RuntimeEvaluator "inspect-runtime-eval"
 #define PULP_CONTEXTS_Protocol "standalone,pulp-host,offline"
 #define PULP_CONTEXTS_HostMain "standalone,pulp-host"
 #define PULP_CONTEXTS_Background "standalone,pulp-host,offline"
+#define PULP_CONTEXTS_OfflineJob "offline"
 #define PULP_CONTEXTS_RuntimeEvaluator "standalone-research"
 #define PULP_HOST_TIERS_Protocol "pulp-owned,trusted-bridge"
 #define PULP_HOST_TIERS_HostMain "pulp-owned,trusted-bridge"
 #define PULP_HOST_TIERS_Background "pulp-owned,trusted-bridge"
+#define PULP_HOST_TIERS_OfflineJob "pulp-owned"
 #define PULP_HOST_TIERS_RuntimeEvaluator "pulp-owned"
 #define PULP_GRANT_SCOPE_0 "none"
 #define PULP_GRANT_SCOPE_1 "instance-operation"
@@ -109,14 +112,17 @@ static_assert(capability_registry_is_unique(),
 #undef PULP_GRANT_SCOPE_1
 #undef PULP_GRANT_SCOPE_0
 #undef PULP_HOST_TIERS_RuntimeEvaluator
+#undef PULP_HOST_TIERS_OfflineJob
 #undef PULP_HOST_TIERS_Background
 #undef PULP_HOST_TIERS_HostMain
 #undef PULP_HOST_TIERS_Protocol
 #undef PULP_CONTEXTS_RuntimeEvaluator
+#undef PULP_CONTEXTS_OfflineJob
 #undef PULP_CONTEXTS_Background
 #undef PULP_CONTEXTS_HostMain
 #undef PULP_CONTEXTS_Protocol
 #undef PULP_BUILD_FEATURE_RuntimeEvaluator
+#undef PULP_BUILD_FEATURE_OfflineJob
 #undef PULP_BUILD_FEATURE_Background
 #undef PULP_BUILD_FEATURE_HostMain
 #undef PULP_BUILD_FEATURE_Protocol
@@ -199,6 +205,7 @@ std::string_view executor_id(InspectorExecutor executor) {
         case InspectorExecutor::Protocol: return "protocol";
         case InspectorExecutor::HostMain: return "host-main";
         case InspectorExecutor::Background: return "background";
+        case InspectorExecutor::OfflineJob: return "offline-job";
         case InspectorExecutor::RuntimeEvaluator: return "runtime-evaluator";
     }
     return "protocol";

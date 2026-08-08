@@ -112,6 +112,18 @@ target_link_libraries(pulp-inspect-runtime
         pulp::inspect-protocol
         pulp::events)
 
+# T0 offline integration is a separate headless adapter archive so the shared
+# control runtime does not acquire format/view dependencies merely by existing.
+add_library(pulp-inspect-offline-runtime
+    src/control_offline_render_executor.cpp)
+add_library(pulp::inspect-offline-runtime ALIAS pulp-inspect-offline-runtime)
+target_include_directories(pulp-inspect-offline-runtime
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
+target_link_libraries(pulp-inspect-offline-runtime
+    PUBLIC pulp::inspect-control pulp::format)
+
 add_library(pulp-inspect-telemetry
     src/value_channel_telemetry_broker.cpp)
 add_library(pulp::inspect-telemetry ALIAS pulp-inspect-telemetry)
@@ -190,6 +202,7 @@ foreach(_pulp_eval_free_target IN ITEMS
         pulp-inspect-control
         pulp-inspect-client
         pulp-inspect-runtime
+        pulp-inspect-offline-runtime
         pulp-inspect-telemetry
         pulp-inspect-authoring
         pulp-inspect

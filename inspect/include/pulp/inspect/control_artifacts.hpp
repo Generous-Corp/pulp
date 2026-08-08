@@ -122,6 +122,7 @@ class ControlArtifactStore {
     ControlArtifactStore& operator=(const ControlArtifactStore&) = delete;
 
     bool is_ready() const;
+    std::size_t maximum_blob_bytes() const noexcept;
 
     ControlArtifactStoreResult store(std::span<const std::uint8_t> bytes,
                                      ControlArtifactLineage lineage,

@@ -480,6 +480,19 @@ ControlServiceResult ControlService::dispatch_request(Session& session,
             },
         .complete_deferred =
             [settle](ControlExecutionOutcome outcome) mutable { (void)settle(std::move(outcome)); },
+        .maximum_artifact_bytes = broker_.artifact_maximum_blob_bytes(),
+        .publish_artifact =
+            [completion_owner, peer, plan](std::span<const std::uint8_t> bytes,
+                                           ControlArtifactPublication publication) {
+                std::lock_guard lock(completion_owner->mutex);
+                if (!completion_owner->broker)
+                    return ControlArtifactStoreResult{
+                        .status = ControlArtifactStatus::Unauthorized};
+                return completion_owner->broker->store_operation_artifact(
+                    peer, plan, bytes, std::move(publication.content_type),
+                    publication.sensitivity, publication.redaction_state,
+                    publication.lifetime);
+            },
     };
 
     ControlExecutionOutcome outcome;
