@@ -72,6 +72,7 @@ add_library(pulp-inspect-control
     src/control_artifacts.cpp
     src/control_broker.cpp
     src/control_carrier.cpp
+    src/control_connection_admission.cpp
     src/control_endpoint.cpp
     src/control_grants.cpp
     src/control_host_connection.cpp

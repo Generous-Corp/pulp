@@ -1,6 +1,6 @@
 #pragma once
 
-#include <pulp/inspect/control_peer.hpp>
+#include <pulp/inspect/control_connection_admission.hpp>
 #include <pulp/inspect/control_service.hpp>
 
 #include <chrono>
@@ -12,33 +12,10 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <variant>
 
 namespace pulp::inspect {
 
 class ControlHostRouter;
-
-struct ControlClientConnectionPrincipal {
-    ControlClientId client_id;
-    friend bool operator==(const ControlClientConnectionPrincipal&,
-                           const ControlClientConnectionPrincipal&) = default;
-};
-
-struct ControlHostConnectionPrincipal {
-    ControlRegistrationId registration_id;
-    friend bool operator==(const ControlHostConnectionPrincipal&,
-                           const ControlHostConnectionPrincipal&) = default;
-};
-
-using ControlConnectionPrincipal =
-    std::variant<ControlClientConnectionPrincipal, ControlHostConnectionPrincipal>;
-
-struct ControlConnectionAdmission {
-    std::string admission_id;
-    ControlPeerExpectation expected_peer;
-    ControlConnectionPrincipal principal;
-    std::chrono::steady_clock::time_point expires_at;
-};
 
 using ControlAdmissionConsumer =
     std::function<std::optional<ControlConnectionAdmission>(std::string_view admission_id)>;

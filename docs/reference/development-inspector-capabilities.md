@@ -107,9 +107,12 @@ migration. It is not linked into ordinary plugin-format artifacts and does not
 replace the current explicitly activated standalone inspector transport. On
 macOS, the optional `pulp-control-broker` executable owns the canonical
 per-user `LocalSocket` endpoint. It currently exposes only a bounded health
-probe: it has no signed launcher bootstrap, host registration channel, consent
-surface, or operation executor, so authority-bearing session admission fails
-closed. Darwin CLI installs place the broker beside `pulp` and `pulp-cpp` and
+probe. The control library includes a dormant role-safe host router and a
+bounded broker-owned registry for exact-peer, one-use client or host connection
+admissions. The daemon deliberately supplies neither an admission issuer nor a
+router/executor, and it has no signed launcher bootstrap or consent surface, so
+authority-bearing session admission still fails closed. Darwin CLI installs
+place the broker beside `pulp` and `pulp-cpp` and
 reconcile the owner-only `dev.pulp.control-broker` LaunchAgent. A successful
 reconciliation proves only `reachable-unverified`; strict code-signature
 validation at install time is an integrity check, not a trusted publisher or
