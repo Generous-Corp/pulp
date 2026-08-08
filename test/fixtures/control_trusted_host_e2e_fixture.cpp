@@ -10,6 +10,12 @@
 #include <memory>
 #include <thread>
 
+#include <choc/text/choc_JSON.h>
+
+#ifdef __APPLE__
+#include <unistd.h>
+#endif
+
 using namespace std::chrono_literals;
 using namespace pulp::inspect;
 
@@ -35,7 +41,8 @@ std::shared_ptr<InspectorMainThreadRpc> inline_rpc() {
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 3 || kStandalone[0] != 'P' || kShipping[0] != 'P' || kProfile[0] != 'P' ||
+    if ((argc != 3 && argc != 4) || kStandalone[0] != 'P' || kShipping[0] != 'P' ||
+        kProfile[0] != 'P' ||
         kManifest[0] != 'P' || kSessionControl[0] != 'P' || kTraceControl[0] != 'P')
         return 64;
 
@@ -64,10 +71,40 @@ int main(int argc, char** argv) {
         .trace_inspector = trace,
         .registration_id = ControlRegistrationId{opened.registration_id},
     });
-    if (!executor || !slot.install(executor->executor()))
+    if (!executor)
         return 68;
 
-    std::ofstream(argv[1]) << opened.registration_id << '\n';
+    auto routed_executor = executor->executor();
+    if (argc == 4) {
+        routed_executor = [fallback = std::move(routed_executor), ready_path = argv[3]](
+                              const ControlAdmissionPlan& plan,
+                              const ControlRequestEnvelope& request,
+                              const ControlExecutionContext& context) {
+            if (request.operation_id == "dev.pulp.trace/session-control@1") {
+                try {
+                    const auto params = choc::json::parse(request.params_json);
+                    if (params["action"].getString() == "start" &&
+                        params["ring_mb"].getWithDefault<std::int64_t>(0) == 9) {
+                        std::ofstream(ready_path) << "deferred\n";
+                        return ControlExecutionOutcome{.deferred = true};
+                    }
+                } catch (...) {
+                    // The normal executor owns validation and error projection.
+                }
+            }
+            return fallback(plan, request, context);
+        };
+    }
+    if (!slot.install(std::move(routed_executor)))
+        return 68;
+
+    std::ofstream(argv[1]) << opened.registration_id << '\n'
+#ifdef __APPLE__
+                           << ::getpid() << '\n'
+#else
+                           << 0 << '\n'
+#endif
+        ;
     for (unsigned attempt = 0; attempt < 10'000 && !std::filesystem::exists(argv[2]); ++attempt)
         std::this_thread::sleep_for(1ms);
     const bool stopped = std::filesystem::exists(argv[2]);

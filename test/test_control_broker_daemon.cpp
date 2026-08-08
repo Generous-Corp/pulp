@@ -185,6 +185,27 @@ std::string wait_for_registration(const std::filesystem::path& path) {
     }
     return {};
 }
+
+int wait_for_host_pid(const std::filesystem::path& path) {
+    for (unsigned attempt = 0; attempt < 10'000; ++attempt) {
+        std::ifstream input(path);
+        std::string registration;
+        int process_id = -1;
+        if (input >> registration >> process_id)
+            return process_id;
+        std::this_thread::sleep_for(1ms);
+    }
+    return -1;
+}
+
+bool wait_for_path(const std::filesystem::path& path) {
+    for (unsigned attempt = 0; attempt < 10'000; ++attempt) {
+        if (std::filesystem::exists(path))
+            return true;
+        std::this_thread::sleep_for(1ms);
+    }
+    return false;
+}
 #endif
 
 } // namespace
@@ -573,6 +594,221 @@ TEST_CASE("installed daemon process authenticates host launch and recovers after
     INFO(stopped.stderr_output);
 #else
     SUCCEED("installed daemon process hosting is currently macOS-only");
+#endif
+}
+
+TEST_CASE("broker and host SIGKILL fail closed during a deferred operation",
+          "[inspect][control][daemon][host][process][restart][crash][artifact][security]") {
+#ifdef __APPLE__
+    DaemonRoot root;
+    const auto source = root.path / "crash-source";
+    REQUIRE(std::filesystem::create_directory(source));
+    ::chmod(source.c_str(), 0700);
+    const auto host_executable = source / "trusted-host";
+    std::filesystem::copy_file(PULP_CONTROL_TRUSTED_HOST_E2E_FIXTURE, host_executable);
+    ::chmod(host_executable.c_str(), 0700);
+    {
+        std::ofstream manifest(host_executable.string() + ".inspector-capabilities.json");
+        manifest << kHostManifest;
+    }
+    ::chmod((host_executable.string() + ".inspector-capabilities.json").c_str(), 0600);
+
+    const std::filesystem::path broker_executable{PULP_CONTROL_BROKER_CRASH_FIXTURE};
+    REQUIRE(std::filesystem::exists(broker_executable));
+    const std::vector<std::string> daemon_arguments{
+        "PULP_CONTROL_BROKER_RUNTIME_ROOT=" + root.runtime.string(),
+        "PULP_CONTROL_BROKER_STATE_ROOT=" + root.state.string(),
+        broker_executable.string(),
+    };
+    pulp::platform::ProcessOptions daemon_options;
+    daemon_options.capture_stdout = true;
+    daemon_options.capture_stderr = true;
+    pulp::platform::ChildProcess daemon_process;
+    REQUIRE(daemon_process.start("/usr/bin/env", daemon_arguments, daemon_options));
+
+    const auto endpoint = default_control_endpoint_path(root.runtime);
+    std::unique_ptr<ControlClientConnection> connection;
+    for (unsigned attempt = 0; attempt < 10'000 && !connection; ++attempt) {
+        auto candidate = std::make_unique<ControlClientConnection>(
+            ControlClientConnectionConfig{.endpoint_path = endpoint,
+                                          .expected_broker_executable = broker_executable});
+        if (candidate->connect())
+            connection = std::move(candidate);
+        else
+            std::this_thread::sleep_for(1ms);
+    }
+    REQUIRE(connection);
+    const auto enrolled = connection->manage("enroll");
+    INFO(enrolled.explanation);
+    REQUIRE(enrolled.status_id == "accepted");
+    const auto client_id =
+        std::string(choc::json::parse(enrolled.data_json)["client_id"].getString());
+    REQUIRE_FALSE(client_id.empty());
+
+    const auto registration_path = root.path / "crash-registration";
+    const auto stop_path = root.path / "crash-stop";
+    const auto deferred_path = root.path / "deferred-active";
+    auto prepare_params = choc::value::createObject("");
+    prepare_params.addMember("executable", choc::value::createString(host_executable.string()));
+    auto arguments = choc::value::createEmptyArray();
+    arguments.addArrayElement(choc::value::createString(registration_path.string()));
+    arguments.addArrayElement(choc::value::createString(stop_path.string()));
+    arguments.addArrayElement(choc::value::createString(deferred_path.string()));
+    prepare_params.addMember("arguments", arguments);
+    prepare_params.addMember("working_directory", choc::value::createString(source.string()));
+    prepare_params.addMember("host_tier", choc::value::createString("standalone"));
+    const auto prepared =
+        connection->manage("host-prepare", choc::json::toString(prepare_params, false));
+    INFO(prepared.explanation);
+    REQUIRE(prepared.status_id == "prepared");
+    const auto inventory_id =
+        std::string(choc::json::parse(prepared.data_json)["inventory_id"].getString());
+    auto launch_params = choc::value::createObject("");
+    launch_params.addMember("inventory_id", choc::value::createString(inventory_id));
+    const auto launched =
+        connection->manage("host-launch", choc::json::toString(launch_params, false));
+    INFO(launched.explanation);
+    REQUIRE(launched.status_id == "launched");
+    const ControlRegistrationId registration_id{wait_for_registration(registration_path)};
+    REQUIRE(registration_id);
+    const int host_process_id = wait_for_host_pid(registration_path);
+    REQUIRE(host_process_id > 0);
+
+    const auto inventory = connection->manage("instances");
+    REQUIRE(inventory.status_id == "completed");
+    const auto inventory_data = choc::json::parse(inventory.data_json);
+    const auto instances = inventory_data["instances"];
+    REQUIRE(instances.size() == 1);
+    const auto instance_id = std::string(instances[0]["instance_id"].getString());
+    const auto publication_id = std::string(instances[0]["publication_id"].getString());
+    auto grant_params = choc::value::createObject("");
+    grant_params.addMember("instance_id", choc::value::createString(instance_id));
+    grant_params.addMember("profile", choc::value::createString("develop"));
+    const auto granted =
+        connection->manage("grant-request", choc::json::toString(grant_params, false));
+    INFO(granted.explanation);
+    REQUIRE(granted.status_id == "granted");
+    const auto grant_id =
+        std::string(choc::json::parse(granted.data_json)["grant_id"].getString());
+
+    ControlClient client(*connection);
+    REQUIRE(client.negotiate({.mandatory_features = {"receipts"}}).succeeded());
+    ControlRequestEnvelope request{
+        .request_id = "phase15-deferred-request",
+        .client_id = client_id,
+        .registration_id = registration_id.value,
+        .grant_id = grant_id,
+        .instance_generation = publication_id,
+        .operation_id = "dev.pulp.trace/session-control@1",
+        .operation_version = 1,
+        .idempotency_key = "phase15-deferred-idempotency",
+        .deadline_unix_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                (std::chrono::system_clock::now() + 1s).time_since_epoch())
+                                .count(),
+        .params_json = R"({"action":"start","ring_mb":9})",
+    };
+    request.request_hash = *control_request_hash(request);
+    const auto deferred = client.request(request, 3s);
+    INFO(deferred.error_code);
+    INFO(deferred.explanation);
+    REQUIRE(deferred.succeeded());
+    REQUIRE(deferred.response);
+    CHECK(deferred.response->state == ControlReceiptState::UnknownNeedsRefresh);
+    const auto receipt_id = deferred.response->receipt_id;
+    REQUIRE_FALSE(receipt_id.empty());
+    REQUIRE(wait_for_path(deferred_path));
+
+    const auto pending =
+        connection->manage("host-prepare", choc::json::toString(prepare_params, false));
+    REQUIRE(pending.status_id == "prepared");
+    const auto pending_inventory_id =
+        std::string(choc::json::parse(pending.data_json)["inventory_id"].getString());
+
+    const auto artifact_root = root.state / "artifacts";
+    const auto orphan = artifact_root / "blobs" / (std::string(64, 'c') + ".blob");
+    const auto partial = artifact_root / "artifacts" / ".private-publish-phase15-crash";
+    {
+        std::ofstream(orphan, std::ios::binary) << "orphaned-secret-payload";
+        std::ofstream(partial, std::ios::binary) << "partial-secret-payload";
+    }
+    ::chmod(orphan.c_str(), 0600);
+    ::chmod(partial.c_str(), 0600);
+    REQUIRE(std::filesystem::exists(orphan));
+    REQUIRE(std::filesystem::exists(partial));
+
+    REQUIRE(::kill(daemon_process.process_id(), SIGKILL) == 0);
+    const auto crashed = daemon_process.wait();
+    CHECK(crashed.exit_code != 0);
+    for (unsigned attempt = 0; attempt < 2'000 && connection->is_connected(); ++attempt)
+        std::this_thread::sleep_for(1ms);
+    CHECK_FALSE(connection->is_connected());
+    CHECK_FALSE(connection->is_session_open());
+
+    REQUIRE(::kill(host_process_id, SIGKILL) == 0);
+    for (unsigned attempt = 0; attempt < 2'000 && ::kill(host_process_id, 0) == 0; ++attempt)
+        std::this_thread::sleep_for(1ms);
+    CHECK(::kill(host_process_id, 0) != 0);
+
+    pulp::platform::ChildProcess restarted_process;
+    REQUIRE(restarted_process.start("/usr/bin/env", daemon_arguments, daemon_options));
+    std::unique_ptr<ControlClientConnection> restarted;
+    for (unsigned attempt = 0; attempt < 10'000 && !restarted; ++attempt) {
+        auto candidate = std::make_unique<ControlClientConnection>(
+            ControlClientConnectionConfig{.endpoint_path = endpoint,
+                                          .expected_broker_executable = broker_executable});
+        if (candidate->connect())
+            restarted = std::move(candidate);
+        else
+            std::this_thread::sleep_for(1ms);
+    }
+    REQUIRE(restarted);
+    const auto restarted_enrollment = restarted->manage("enroll");
+    REQUIRE(restarted_enrollment.status_id == "accepted");
+    const auto restarted_client_id = std::string(
+        choc::json::parse(restarted_enrollment.data_json)["client_id"].getString());
+    REQUIRE_FALSE(restarted_client_id.empty());
+    const auto empty_inventory = restarted->manage("instances");
+    REQUIRE(empty_inventory.status_id == "completed");
+    CHECK(choc::json::parse(empty_inventory.data_json)["instances"].size() == 0);
+    auto stale_launch = choc::value::createObject("");
+    stale_launch.addMember("inventory_id", choc::value::createString(pending_inventory_id));
+    CHECK(restarted->manage("host-launch", choc::json::toString(stale_launch, false)).status_id ==
+          "inventory_unavailable");
+
+    ControlClient restarted_client(*restarted);
+    REQUIRE(restarted_client.negotiate({.mandatory_features = {"receipts"}}).succeeded());
+    auto stale_session_request = request;
+    stale_session_request.deadline_unix_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            (std::chrono::system_clock::now() + 5s).time_since_epoch())
+            .count();
+    stale_session_request.request_hash = *control_request_hash(stale_session_request);
+    const auto stale_session = restarted_client.request(stale_session_request, 2s);
+    CHECK_FALSE(stale_session.succeeded());
+    CHECK(stale_session.error_code == "admission-denied");
+
+    auto stale_grant_request = stale_session_request;
+    stale_grant_request.request_id = "phase15-stale-grant-request";
+    stale_grant_request.idempotency_key = "phase15-stale-grant-idempotency";
+    stale_grant_request.client_id = restarted_client_id;
+    stale_grant_request.request_hash = *control_request_hash(stale_grant_request);
+    const auto stale_grant = restarted_client.request(stale_grant_request, 2s);
+    CHECK_FALSE(stale_grant.succeeded());
+    CHECK(stale_grant.error_code == "admission-denied");
+    CHECK_FALSE(std::filesystem::exists(orphan));
+    CHECK_FALSE(std::filesystem::exists(partial));
+    restarted->disconnect();
+
+    restarted_process.cancel();
+    const auto stopped = restarted_process.wait();
+    INFO(stopped.stderr_output);
+    ControlOperationStore store{{.directory = root.state / "operations"}};
+    REQUIRE(store.open().succeeded());
+    const auto recovered = store.receipt(ControlReceiptId{receipt_id});
+    REQUIRE(recovered);
+    CHECK(recovered->state == ControlReceiptState::UnknownNeedsRefresh);
+#else
+    SUCCEED("the authenticated control broker daemon is currently macOS-only");
 #endif
 }
 

@@ -126,6 +126,11 @@ ControlBroker::ControlBroker(ControlBrokerConfig config,
                                             : nullptr) {
     if (operation_store_)
         (void)operation_store_->open();
+    // Opening a broker generation is the recovery boundary for interrupted
+    // artifact publication. Reap crash-left orphan and partial files before
+    // any caller can obtain broker authority.
+    if (artifact_store_ && !artifact_store_->collect().succeeded)
+        artifact_store_.reset();
 }
 
 ControlBroker::~ControlBroker() = default;

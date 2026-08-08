@@ -5,7 +5,10 @@
 #include <pulp/view/value_channel_set.hpp>
 
 #include <array>
+#include <atomic>
 #include <chrono>
+#include <memory>
+#include <thread>
 
 using namespace std::chrono_literals;
 using namespace pulp::inspect;
@@ -152,4 +155,72 @@ TEST_CASE("slow telemetry subscribers retain event batches until their next samp
     REQUIRE(frame->channels.size() == 1);
     REQUIRE(frame->channels.front().values.size() == 1);
     CHECK(frame->channels.front().values.front() == Catch::Approx(3.0f));
+}
+
+TEST_CASE("telemetry producer and slow subscriber sustain bounded high-iteration soak",
+          "[inspect][control][telemetry][soak][watchdog][loss]") {
+    constexpr std::size_t kPolls = 10'000;
+    constexpr std::size_t kPublications = 100'000;
+    constexpr std::size_t kQueueCapacity = 4;
+    auto channels = std::make_shared<pulp::view::ValueChannelSet>();
+    auto* gain = channels->declare_scalar("gain");
+    REQUIRE(gain);
+    auto now = std::chrono::steady_clock::now();
+    ControlTelemetryTap tap({.enabled = true,
+                             .maximum_rate_hz = 60.0,
+                             .maximum_queued_frames = kQueueCapacity},
+                            [&] { return now; });
+    REQUIRE(tap.attach(channels->attach_telemetry(), [](std::string_view) {
+        return ControlTelemetrySensitivity::Observable;
+    }));
+    const auto subscriber = authority();
+    const auto subscription =
+        tap.subscribe(subscriber, {.channels = {"gain"}, .rate_hz = 60.0});
+    REQUIRE(subscription);
+
+    struct ProducerState {
+        std::atomic<bool> finished{false};
+        std::atomic<std::uint64_t> produced{0};
+    };
+    const auto producer_state = std::make_shared<ProducerState>();
+    const auto watchdog_deadline = std::chrono::steady_clock::now() + 5s;
+    std::thread producer([channels, gain, producer_state] {
+        (void)channels; // Own the channel storage until a detached timeout exits.
+        for (std::size_t index = 0; index < kPublications; ++index) {
+            gain->publish(static_cast<float>(index));
+            (void)gain->read();
+            producer_state->produced.fetch_add(1, std::memory_order_relaxed);
+        }
+        producer_state->finished.store(true, std::memory_order_release);
+    });
+
+    for (std::size_t poll = 0; poll < kPolls; ++poll) {
+        tap.poll();
+        now += 17ms;
+    }
+    while (!producer_state->finished.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < watchdog_deadline)
+        std::this_thread::yield();
+    if (!producer_state->finished.load(std::memory_order_acquire)) {
+        producer.detach();
+        FAIL_CHECK("telemetry producer exceeded the five-second render/audio watchdog");
+        return;
+    }
+    producer.join();
+
+    CHECK(producer_state->finished.load(std::memory_order_acquire));
+    CHECK(producer_state->produced.load(std::memory_order_relaxed) == kPublications);
+    CHECK(std::chrono::steady_clock::now() < watchdog_deadline);
+    std::size_t retained_frames = 0;
+    std::size_t retained_values = 0;
+    std::uint64_t reported_loss = 0;
+    while (const auto frame = tap.try_pop(*subscription, subscriber)) {
+        ++retained_frames;
+        reported_loss += frame->dropped_since_previous;
+        for (const auto& channel : frame->channels)
+            retained_values += channel.values.size();
+    }
+    CHECK(retained_frames == kQueueCapacity);
+    CHECK(retained_values <= kQueueCapacity);
+    CHECK(reported_loss == kPolls - kQueueCapacity);
 }
