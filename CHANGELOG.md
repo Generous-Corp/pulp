@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07952"></a>
+## [0.795.2] - 2026-08-08
+
+- release/version bump ([#7261](https://github.com/Generous-Corp/pulp/pull/7261))
+
 <a id="v07951"></a>
 ## [0.795.1] - 2026-08-08
 
@@ -7557,6 +7562,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.795.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.795.2
 [0.795.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.795.1
 [0.795.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.795.0
 [0.794.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.794.0
