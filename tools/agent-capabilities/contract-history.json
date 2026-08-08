@@ -7136,7 +7136,7 @@
       },
       "surface": {
         "schema": "pulp.agent-capability-surface.v1",
-        "inventory_version": 11,
+        "inventory_version": 12,
         "headers": [
           {
             "include": "pulp/audio/analyzer_provider.hpp",
@@ -7795,7 +7795,7 @@
           },
           {
             "include": "pulp/midi/mpe_buffer.hpp",
-            "fingerprint": "sha256:c6d418b5b04448082aef5da305e1f092aaebef2e826d7bb94eb44a7f968507ac",
+            "fingerprint": "sha256:40f4e08a25956811f4466b031734e5fd418e313e4861007304dd33a33ca50e0e",
             "disposition": "capability_support"
           },
           {
@@ -9146,7 +9146,7 @@
         ],
         "tombstones": []
       },
-      "entry_digest": "sha256:0928d57fa3ffcde737280ce609757a6af27a0725237e9693c566c5339a0d74e7"
+      "entry_digest": "sha256:b3f91f8f98c17c8e57e21da30a53479e4d7ddbe81eacb6b6ed43ab624a39a8d3"
     }
   ]
 }
