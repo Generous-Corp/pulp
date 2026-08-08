@@ -67,13 +67,13 @@ class HeaderSelfContainedTests(unittest.TestCase):
                         },
                         {
                             "file": "core/audio/src/a.cpp",
-                            "directory": "/tmp/consumer",
-                            "command": "c++ -Iconsumer -c a.cpp -o core/other/CMakeFiles/consumer.dir/a.o",
+                            "directory": "/home/runner/build/core/sample_bank_manifest",
+                            "command": "c++ -Iconsumer -c a.cpp -oCMakeFiles/pulp-sample-bank-manifest.dir/__/audio/src/a.cpp.o",
                         },
                         {
                             "file": "core/audio/src/a.cpp",
-                            "directory": "/tmp/audio",
-                            "command": "c++ -Iaudio -c a.cpp -o core/audio/CMakeFiles/pulp-audio.dir/src/a.cpp.o",
+                            "directory": "/home/runner/build/core/audio",
+                            "command": "c++ '-I/audio include' -c a.cpp -o 'CMakeFiles/pulp-audio.dir/src/a.cpp.o'",
                         },
                         {"file": "tools/scripts/x.py", "directory": "/tmp/tools", "arguments": ["python"]},
                     ]
@@ -84,7 +84,10 @@ class HeaderSelfContainedTests(unittest.TestCase):
 
         self.assertEqual(sorted(flags), ["core/audio", "core/view"])
         self.assertEqual(flags["core/view"], (["-Iview"], "/tmp/view"))
-        self.assertEqual(flags["core/audio"], (["-Iaudio"], "/tmp/audio"))
+        self.assertEqual(
+            flags["core/audio"],
+            (["-I/audio include"], "/home/runner/build/core/audio"),
+        )
         self.assertNotIn("tools/scripts", flags)
 
     def test_module_target_score_prefers_canonical_owner(self) -> None:
@@ -108,6 +111,82 @@ class HeaderSelfContainedTests(unittest.TestCase):
                 "core/audio",
             ),
             0,
+        )
+
+    def test_module_target_score_handles_ci_output_shapes(self) -> None:
+        ci_directory = "/home/runner/work/pulp/pulp/build/core/audio"
+        self.assertEqual(
+            checker.module_target_score(
+                ["c++", "-o", "CMakeFiles/pulp-audio.dir/src/a.cpp.o"],
+                "core/audio",
+                ci_directory,
+            ),
+            2,
+        )
+        self.assertEqual(
+            checker.module_target_score(
+                [
+                    "c++",
+                    "-I/consumer/CMakeFiles/pulp-audio.dir/fake-include",
+                    "-oCMakeFiles/pulp-sample-bank-manifest.dir/a.cpp.o",
+                ],
+                "core/audio",
+                "/home/runner/work/pulp/pulp/build/core/sample_bank_manifest",
+            ),
+            0,
+        )
+        self.assertEqual(
+            checker.module_target_score(
+                ["c++", "-oCMakeFiles/pulp-audio.dir/src/a.cpp.o"],
+                "core/audio",
+                ci_directory,
+            ),
+            2,
+        )
+        self.assertEqual(
+            checker.module_target_score(
+                ["c++"],
+                "core/audio",
+                f"{ci_directory}/../sample_bank_manifest",
+                "../audio/CMakeFiles/pulp-audio.dir/src/a.cpp.o",
+            ),
+            2,
+        )
+
+    def test_command_split_honors_posix_and_windows_quoting(self) -> None:
+        self.assertEqual(
+            checker.split_compile_command("c++ '-I/audio include' -c a.cpp", windows=False),
+            ["c++", "-I/audio include", "-c", "a.cpp"],
+        )
+        windows_args = checker.split_compile_command(
+                'cl.exe /I"C:\\Program Files\\SDK\\include" /c a.cpp '
+                '/Fo"C:\\build output\\core\\audio\\CMakeFiles\\pulp-audio.dir\\a.cpp.obj"',
+                windows=True,
+            )
+        self.assertEqual(
+            windows_args,
+            [
+                "cl.exe",
+                "/IC:\\Program Files\\SDK\\include",
+                "/c",
+                "a.cpp",
+                "/FoC:\\build output\\core\\audio\\CMakeFiles\\pulp-audio.dir\\a.cpp.obj",
+            ],
+        )
+        self.assertEqual(checker.module_target_score(windows_args, "core/audio"), 2)
+        self.assertEqual(
+            checker.module_target_score(
+                ["cl.exe", "/FO", "C:\\build\\core\\audio\\CMakeFiles\\pulp-audio.dir\\a.obj"],
+                "core/audio",
+            ),
+            2,
+        )
+        self.assertEqual(
+            checker.filter_args(
+                ["cl.exe", "/Iinclude", "/c", "a.cpp", "/FOC:\\build\\A.OBJ"],
+                "core/audio/src/a.cpp",
+            ),
+            ["/Iinclude"],
         )
 
     def test_collect_headers_supports_lists_changed_and_default_scan(self) -> None:
