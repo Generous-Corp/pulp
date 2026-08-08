@@ -9,6 +9,21 @@ if(WIN32)
 else()
     pulp_add_test_suite(pulp-test-child-process LIBRARIES pulp::platform)
 endif()
+add_executable(pulp-child-process-input-fixture
+    fixtures/child_process_input_fixture.cpp)
+if(WIN32)
+    pulp_add_test_suite(pulp-test-child-process-standard-input
+        SOURCES test_child_process_standard_input.cpp
+        LIBRARIES pulp::platform
+        LABELS "windows-pr-quarantine")
+else()
+    pulp_add_test_suite(pulp-test-child-process-standard-input
+        SOURCES test_child_process_standard_input.cpp
+        LIBRARIES pulp::platform)
+endif()
+add_dependencies(pulp-test-child-process-standard-input pulp-child-process-input-fixture)
+target_compile_definitions(pulp-test-child-process-standard-input PRIVATE
+    PULP_CHILD_PROCESS_INPUT_FIXTURE="$<TARGET_FILE:pulp-child-process-input-fixture>")
 
 # Progress parser tests
 pulp_add_test_suite(pulp-test-progress-parser LIBRARIES pulp::platform)

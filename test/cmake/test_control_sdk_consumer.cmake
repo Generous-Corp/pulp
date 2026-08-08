@@ -75,17 +75,22 @@ file(WRITE "${_consumer_source}/main.cpp" [=[
 #include <pulp/inspect/control_executor_slot.hpp>
 #include <pulp/inspect/control_host_enrollment.hpp>
 #include <pulp/inspect/control_host_connection.hpp>
+#include <pulp/inspect/control_host_bootstrap.hpp>
 #include <pulp/inspect/control_host_router.hpp>
 #include <pulp/inspect/control_main_thread_executor.hpp>
 #include <pulp/inspect/control_operations.hpp>
 #include <pulp/inspect/control_protocol.hpp>
 #include <pulp/inspect/control_service.hpp>
 #include <pulp/inspect/control_trusted_host_inventory.hpp>
+#include <pulp/platform/child_process.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 class InstalledControlTransport final
     : public pulp::inspect::ControlClientTransport {
@@ -125,6 +130,28 @@ int main() {
       {.endpoint_path = "/tmp/not-connected-control.sock"}, executor_slot.executor()};
   const auto enrollment_open =
       host_connection.open_host_enrollment("installed-enrollment", std::chrono::milliseconds(1));
+  pulp::inspect::ControlHostBootstrapRecord bootstrap;
+  bootstrap.endpoint_path = "/tmp/not-connected-control.sock";
+  bootstrap.expected_broker.evidence = {
+      .role = pulp::inspect::ControlPeerRole::TrustedHostBridge,
+      .user_id = "installed-user",
+      .process_id = 1,
+      .process_start_id = "installed-start",
+      .executable_identity = "installed-executable",
+      .publisher_id = "installed-publisher"};
+  bootstrap.admission_id = "installed-admission";
+  bootstrap.registration_id = pulp::inspect::ControlRegistrationId{"installed-registration"};
+  bootstrap.expires_at_unix_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          (std::chrono::system_clock::now() + std::chrono::minutes(1)).time_since_epoch()).count();
+  const auto bootstrap_bytes = pulp::inspect::encode_control_host_bootstrap(bootstrap);
+  pulp::inspect::ControlHostBootstrapRecord enrollment_bootstrap;
+  enrollment_bootstrap.endpoint_path = bootstrap.endpoint_path;
+  enrollment_bootstrap.expected_broker = bootstrap.expected_broker;
+  enrollment_bootstrap.enrollment_id = "installed-enrollment";
+  enrollment_bootstrap.expires_at_unix_ms = bootstrap.expires_at_unix_ms;
+  const auto enrollment_bootstrap_bytes =
+      pulp::inspect::encode_control_host_bootstrap(enrollment_bootstrap);
   pulp::inspect::ControlConnectionPrincipal principal =
       pulp::inspect::ControlHostConnectionPrincipal{
           pulp::inspect::ControlRegistrationId{"installed-registration"}};
@@ -136,6 +163,13 @@ int main() {
   pulp::inspect::ControlOperationStoreConfig operations;
   pulp::inspect::ControlArtifactStoreConfig artifacts;
   pulp::inspect::ControlTrustedHostInventoryConfig inventory;
+  pulp::platform::ProcessOptions process_options;
+  process_options.max_standard_input_provider_bytes = 4096;
+  pulp::platform::StandardInputByteProvider input_provider =
+      [](int child_process_id) -> std::optional<std::vector<std::uint8_t>> {
+    return std::vector<std::uint8_t>{
+        static_cast<std::uint8_t>(child_process_id & 0xff)};
+  };
   const auto artifact = control_client.read_artifact("artifact-installed", 0, 16);
   (void)main_thread_executor.executor();
 
@@ -150,6 +184,10 @@ int main() {
              && operations.max_receipts > 0
              && artifacts.maximum_blob_bytes > 0
              && inventory.maximum_entries > 0
+             && !bootstrap_bytes.empty()
+             && !enrollment_bootstrap_bytes.empty()
+             && process_options.max_standard_input_provider_bytes == 4096
+             && input_provider(7).has_value()
              && admission.operation_version == 1
              && artifact.status == pulp::inspect::ControlArtifactStatus::Read
              && artifact.metadata

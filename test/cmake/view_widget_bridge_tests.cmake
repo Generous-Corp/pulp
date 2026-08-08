@@ -232,6 +232,34 @@ target_link_libraries(pulp-test-control-executor-slot PRIVATE
 catch_discover_tests(pulp-test-control-executor-slot
     PROPERTIES LABELS "inspect;control;host;executor;slot")
 
+add_executable(pulp-control-host-bootstrap-fixture
+    fixtures/control_host_bootstrap_fixture.cpp)
+target_link_libraries(pulp-control-host-bootstrap-fixture PRIVATE
+    pulp::inspect-control)
+
+add_executable(pulp-test-control-host-bootstrap
+    test_control_host_bootstrap.cpp)
+target_compile_definitions(pulp-test-control-host-bootstrap PRIVATE
+    PULP_CONTROL_HOST_BOOTSTRAP_FIXTURE="$<TARGET_FILE:pulp-control-host-bootstrap-fixture>")
+target_link_libraries(pulp-test-control-host-bootstrap PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+add_dependencies(pulp-test-control-host-bootstrap pulp-control-host-bootstrap-fixture)
+if(APPLE)
+    find_program(_pulp_bootstrap_test_codesign codesign REQUIRED)
+    add_custom_command(TARGET pulp-test-control-host-bootstrap POST_BUILD
+        COMMAND "${_pulp_bootstrap_test_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-test-control-host-bootstrap>"
+        COMMENT "Ad-hoc signing control host bootstrap test fixture"
+        VERBATIM)
+    add_custom_command(TARGET pulp-control-host-bootstrap-fixture POST_BUILD
+        COMMAND "${_pulp_bootstrap_test_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-control-host-bootstrap-fixture>"
+        COMMENT "Ad-hoc signing control host bootstrap child fixture"
+        VERBATIM)
+endif()
+catch_discover_tests(pulp-test-control-host-bootstrap
+    PROPERTIES LABELS "inspect;control;host;bootstrap;security")
+
 add_executable(pulp-test-control-carrier test_control_carrier.cpp)
 target_link_libraries(pulp-test-control-carrier PRIVATE
     pulp::inspect-control Catch2::Catch2WithMain)

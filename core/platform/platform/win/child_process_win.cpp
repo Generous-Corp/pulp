@@ -4,6 +4,7 @@
 #ifdef _WIN32
 
 #include <chrono>
+#include <future>
 #include <mutex>
 #include <thread>
 
@@ -23,13 +24,39 @@ struct WinPipe {
         SECURITY_ATTRIBUTES sa{};
         sa.nLength = sizeof(sa);
         sa.bInheritHandle = TRUE;
-        if (!CreatePipe(&read_end, &write_end, &sa, 0)) return false;
+        if (!CreatePipe(&read_end, &write_end, &sa, 0))
+            return false;
         SetHandleInformation(read_end, HANDLE_FLAG_INHERIT, 0);
         return true;
     }
-    void close_write() { if (write_end != INVALID_HANDLE_VALUE) { CloseHandle(write_end); write_end = INVALID_HANDLE_VALUE; } }
-    void close_read()  { if (read_end != INVALID_HANDLE_VALUE) { CloseHandle(read_end); read_end = INVALID_HANDLE_VALUE; } }
-    void close_all()   { close_read(); close_write(); }
+    bool create_input() {
+        SECURITY_ATTRIBUTES sa{};
+        sa.nLength = sizeof(sa);
+        sa.bInheritHandle = TRUE;
+        if (!CreatePipe(&read_end, &write_end, &sa, 0))
+            return false;
+        if (!SetHandleInformation(write_end, HANDLE_FLAG_INHERIT, 0)) {
+            close_all();
+            return false;
+        }
+        return true;
+    }
+    void close_write() {
+        if (write_end != INVALID_HANDLE_VALUE) {
+            CloseHandle(write_end);
+            write_end = INVALID_HANDLE_VALUE;
+        }
+    }
+    void close_read() {
+        if (read_end != INVALID_HANDLE_VALUE) {
+            CloseHandle(read_end);
+            read_end = INVALID_HANDLE_VALUE;
+        }
+    }
+    void close_all() {
+        close_read();
+        close_write();
+    }
 };
 
 size_t drain_pipe(HANDLE fd, std::string& full_output, std::string& line_buf,
@@ -112,6 +139,16 @@ HANDLE open_null_device(DWORD access, SECURITY_ATTRIBUTES& sa) {
                        &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 }
 
+void wipe_bytes(std::vector<std::uint8_t>& bytes) noexcept {
+    if (!bytes.empty())
+        SecureZeroMemory(bytes.data(), bytes.size());
+}
+
+struct SensitiveInputBytes {
+    std::vector<std::uint8_t> value;
+    ~SensitiveInputBytes() { wipe_bytes(value); }
+};
+
 }  // namespace
 
 struct ChildProcess::Impl {
@@ -120,6 +157,7 @@ struct ChildProcess::Impl {
     DWORD process_id = 0;
     WinPipe stdout_pipe;
     WinPipe stderr_pipe;
+    WinPipe standard_input;
     ProcessOptions options;
     std::string stdout_full;
     std::string stderr_full;
@@ -141,10 +179,31 @@ ChildProcess::~ChildProcess() {
 ChildProcess::ChildProcess(ChildProcess&&) noexcept = default;
 ChildProcess& ChildProcess::operator=(ChildProcess&&) noexcept = default;
 
-bool ChildProcess::start(const std::string& command,
-                         const std::vector<std::string>& args,
+bool ChildProcess::start(const std::string& command, const std::vector<std::string>& args,
                          const ProcessOptions& options) {
-    std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
+    return start_impl(command, args, options, nullptr, nullptr);
+}
+
+bool ChildProcess::start_with_standard_input(const std::string& command,
+                                             const std::vector<std::string>& args,
+                                             std::span<const std::uint8_t> bytes,
+                                             const ProcessOptions& options) {
+    return start_impl(command, args, options, &bytes, nullptr);
+}
+
+bool ChildProcess::start_with_standard_input(const std::string& command,
+                                             const std::vector<std::string>& args,
+                                             const StandardInputByteProvider& provider,
+                                             const ProcessOptions& options) {
+    return start_impl(command, args, options, nullptr, &provider);
+}
+
+bool ChildProcess::start_impl(const std::string& command, const std::vector<std::string>& args,
+                              const ProcessOptions& options,
+                              const std::span<const std::uint8_t>* standard_input,
+                              const StandardInputByteProvider* standard_input_provider) {
+    std::unique_lock<std::recursive_mutex> lock(impl_->mutex);
+    const bool has_standard_input = standard_input || standard_input_provider;
     if (impl_->started && !impl_->finished) {
         if (is_running())
             cancel();
@@ -163,8 +222,11 @@ bool ChildProcess::start(const std::string& command,
     impl_->finished = false;
     impl_->result = {};
 
-    if ((options.capture_stdout && !impl_->stdout_pipe.create()) ||
+    if ((has_standard_input && (options.standard_input_timeout_ms <= 0 ||
+                                !impl_->standard_input.create_input())) ||
+        (options.capture_stdout && !impl_->stdout_pipe.create()) ||
         (options.capture_stderr && !impl_->stderr_pipe.create())) {
+        impl_->standard_input.close_all();
         impl_->stdout_pipe.close_all();
         impl_->stderr_pipe.close_all();
         return false;
@@ -173,8 +235,8 @@ bool ChildProcess::start(const std::string& command,
     // Build command line with platform-appropriate quoting.
     // Special case: cmd.exe /c passes everything after /c to the shell,
     // so metacharacters and embedded quotes must be preserved.
-    bool is_cmd_c = (command == "cmd" || command == "cmd.exe") &&
-                    !args.empty() && (args[0] == "/c" || args[0] == "/C");
+    bool is_cmd_c = (command == "cmd" || command == "cmd.exe") && !args.empty() &&
+                    (args[0] == "/c" || args[0] == "/C");
 
     std::string cmdline = quote_windows_arg(command);
     for (size_t i = 0; i < args.size(); ++i) {
@@ -187,9 +249,10 @@ bool ChildProcess::start(const std::string& command,
         }
     }
 
-    STARTUPINFOA si{};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
+    STARTUPINFOEXA startup{};
+    startup.StartupInfo.cb = sizeof(STARTUPINFOA);
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    auto& si = startup.StartupInfo;
 
     SECURITY_ATTRIBUTES sa{};
     sa.nLength = sizeof(sa);
@@ -198,7 +261,8 @@ bool ChildProcess::start(const std::string& command,
     HANDLE null_stdout = INVALID_HANDLE_VALUE;
     HANDLE null_stderr = INVALID_HANDLE_VALUE;
 
-    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    si.hStdInput = has_standard_input ? impl_->standard_input.read_end
+                                      : GetStdHandle(STD_INPUT_HANDLE);
     if (!is_valid_handle(si.hStdInput)) {
         null_stdin = open_null_device(GENERIC_READ, sa);
         si.hStdInput = null_stdin;
@@ -217,36 +281,78 @@ bool ChildProcess::start(const std::string& command,
         si.hStdError = null_stderr;
     }
 
-    if (!is_valid_handle(si.hStdInput) ||
-        !is_valid_handle(si.hStdOutput) ||
+    if (!is_valid_handle(si.hStdInput) || !is_valid_handle(si.hStdOutput) ||
         !is_valid_handle(si.hStdError)) {
+        impl_->standard_input.close_all();
         impl_->stdout_pipe.close_all();
         impl_->stderr_pipe.close_all();
-        if (is_valid_handle(null_stdin)) CloseHandle(null_stdin);
-        if (is_valid_handle(null_stdout)) CloseHandle(null_stdout);
-        if (is_valid_handle(null_stderr)) CloseHandle(null_stderr);
+        if (is_valid_handle(null_stdin))
+            CloseHandle(null_stdin);
+        if (is_valid_handle(null_stdout))
+            CloseHandle(null_stdout);
+        if (is_valid_handle(null_stderr))
+            CloseHandle(null_stderr);
         impl_->result.exit_code = -1;
         return false;
     }
 
-    PROCESS_INFORMATION pi{};
-    BOOL ok = CreateProcessA(
-        nullptr,
-        cmdline.data(),
-        nullptr, nullptr,
-        TRUE,  // inherit handles
-        CREATE_NO_WINDOW,
-        nullptr,
-        options.working_directory.empty() ? nullptr : options.working_directory.c_str(),
-        &si, &pi);
+    SIZE_T attributes_size = 0;
+    std::vector<std::byte> attributes;
+    std::vector<HANDLE> inherited;
+    DWORD creation_flags = CREATE_NO_WINDOW;
+    bool attributes_initialized = false;
+    if (has_standard_input) {
+        startup.StartupInfo.cb = sizeof(startup);
+        inherited = {si.hStdInput, si.hStdOutput, si.hStdError};
+        InitializeProcThreadAttributeList(nullptr, 1, 0, &attributes_size);
+        attributes.resize(attributes_size);
+        startup.lpAttributeList = reinterpret_cast<PPROC_THREAD_ATTRIBUTE_LIST>(attributes.data());
+        attributes_initialized = InitializeProcThreadAttributeList(startup.lpAttributeList, 1, 0,
+                                                                   &attributes_size) != FALSE;
+        if (!attributes_initialized ||
+            !UpdateProcThreadAttribute(startup.lpAttributeList, 0,
+                                       PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited.data(),
+                                       inherited.size() * sizeof(HANDLE), nullptr, nullptr)) {
+            if (attributes_initialized)
+                DeleteProcThreadAttributeList(startup.lpAttributeList);
+            impl_->standard_input.close_all();
+            impl_->stdout_pipe.close_all();
+            impl_->stderr_pipe.close_all();
+            if (is_valid_handle(null_stdin))
+                CloseHandle(null_stdin);
+            if (is_valid_handle(null_stdout))
+                CloseHandle(null_stdout);
+            if (is_valid_handle(null_stderr))
+                CloseHandle(null_stderr);
+            impl_->result.exit_code = -1;
+            return false;
+        }
+        creation_flags |= EXTENDED_STARTUPINFO_PRESENT;
+    }
 
+    PROCESS_INFORMATION pi{};
+    BOOL ok = CreateProcessA(nullptr, cmdline.data(), nullptr, nullptr,
+                             TRUE, // inherit handles
+                             creation_flags, nullptr,
+                             options.working_directory.empty() ? nullptr
+                                                               : options.working_directory.c_str(),
+                             &startup.StartupInfo, &pi);
+
+    if (attributes_initialized)
+        DeleteProcThreadAttributeList(startup.lpAttributeList);
+
+    impl_->standard_input.close_read();
     impl_->stdout_pipe.close_write();
     impl_->stderr_pipe.close_write();
-    if (is_valid_handle(null_stdin)) CloseHandle(null_stdin);
-    if (is_valid_handle(null_stdout)) CloseHandle(null_stdout);
-    if (is_valid_handle(null_stderr)) CloseHandle(null_stderr);
+    if (is_valid_handle(null_stdin))
+        CloseHandle(null_stdin);
+    if (is_valid_handle(null_stdout))
+        CloseHandle(null_stdout);
+    if (is_valid_handle(null_stderr))
+        CloseHandle(null_stderr);
 
     if (!ok) {
+        impl_->standard_input.close_all();
         impl_->stdout_pipe.close_all();
         impl_->stderr_pipe.close_all();
         impl_->result.exit_code = -1;
@@ -257,6 +363,79 @@ bool ChildProcess::start(const std::string& command,
     impl_->process_id = pi.dwProcessId;
     CloseHandle(pi.hThread);
     impl_->started = true;
+    const auto spawned_process_id = impl_->process_id;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(options.standard_input_timeout_ms);
+    SensitiveInputBytes provided_input;
+    std::span<const std::uint8_t> input_bytes;
+    if (standard_input_provider) {
+        bool provided = false;
+        lock.unlock();
+        try {
+            auto candidate = (*standard_input_provider)(static_cast<int>(spawned_process_id));
+            if (candidate) {
+                provided_input.value.swap(*candidate);
+                provided = true;
+            }
+        } catch (...) {
+            provided = false;
+        }
+        lock.lock();
+
+        if (impl_->process_id != spawned_process_id || !impl_->started || impl_->finished)
+            return false;
+        if (!provided || provided_input.value.size() > options.max_standard_input_provider_bytes ||
+            std::chrono::steady_clock::now() >= deadline) {
+            cancel();
+            (void)wait();
+            return false;
+        }
+        input_bytes = provided_input.value;
+    } else if (standard_input) {
+        input_bytes = *standard_input;
+    }
+
+    if (has_standard_input) {
+        auto completion = std::make_shared<std::promise<bool>>();
+        auto completed = completion->get_future();
+        const auto input_handle = impl_->standard_input.write_end;
+        std::thread writer([input_handle, input_bytes, completion] {
+            std::size_t written = 0;
+            bool delivered = true;
+            while (written < input_bytes.size()) {
+                DWORD count = 0;
+                const auto remaining = input_bytes.size() - written;
+                const auto chunk = static_cast<DWORD>(std::min<std::size_t>(remaining, MAXDWORD));
+                if (!WriteFile(input_handle, input_bytes.data() + written, chunk,
+                               &count, nullptr) ||
+                    count == 0) {
+                    delivered = false;
+                    break;
+                }
+                written += count;
+            }
+            completion->set_value(delivered);
+        });
+        auto ready = std::future_status::timeout;
+        while ((ready = completed.wait_for(std::chrono::milliseconds(1))) !=
+                   std::future_status::ready &&
+               std::chrono::steady_clock::now() < deadline) {
+            drain_pipe(impl_->stdout_pipe.read_end, impl_->stdout_full, impl_->stdout_lines_buf,
+                       options.max_output_bytes, options.on_stdout_line);
+            drain_pipe(impl_->stderr_pipe.read_end, impl_->stderr_full, impl_->stderr_lines_buf,
+                       options.max_output_bytes, options.on_stderr_line);
+        }
+        if (ready != std::future_status::ready)
+            CancelSynchronousIo(writer.native_handle());
+        writer.join();
+        const bool delivered = ready == std::future_status::ready && completed.get();
+        impl_->standard_input.close_write();
+        if (!delivered) {
+            cancel();
+            (void)wait();
+            return false;
+        }
+    }
     return true;
 }
 
@@ -275,15 +454,18 @@ void ChildProcess::cancel() {
     std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
     if (!impl_->started || impl_->finished) return;
     if (!is_running()) {
+        impl_->standard_input.close_all();
         (void)wait();
         return;
     }
     TerminateProcess(impl_->process, 1);
+    impl_->standard_input.close_all();
     WaitForSingleObject(impl_->process, 1000);
     DWORD code = 1;
     GetExitCodeProcess(impl_->process, &code);
     impl_->stdout_pipe.close_read();
     impl_->stderr_pipe.close_read();
+    impl_->standard_input.close_all();
     CloseHandle(impl_->process);
     impl_->process = INVALID_HANDLE_VALUE;
     impl_->finished = true;
@@ -347,6 +529,7 @@ ProcessResult ChildProcess::wait() {
 
     impl_->stdout_pipe.close_read();
     impl_->stderr_pipe.close_read();
+    impl_->standard_input.close_all();
 
     impl_->result.stdout_output = std::move(impl_->stdout_full);
     impl_->result.stderr_output = std::move(impl_->stderr_full);

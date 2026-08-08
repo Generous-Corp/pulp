@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -31,7 +33,17 @@ struct ProcessOptions {
     std::function<void(std::string_view line)> on_stdout_line;
     /// Called for each complete captured line on stderr while output is drained.
     std::function<void(std::string_view line)> on_stderr_line;
+    int standard_input_timeout_ms = 3000;  ///< Bound inherited-input delivery
+    size_t max_standard_input_provider_bytes = 1 << 20;  ///< Cap provider-returned bytes
 };
+
+/// Produces private standard-input bytes after the child has been spawned.
+/// Returning std::nullopt rejects the launch. The callback runs synchronously
+/// outside ChildProcess's internal lock, may call non-mutating observers, and
+/// must not block indefinitely: it is caller code and cannot be preempted.
+/// Time spent in the callback consumes the standard-input delivery deadline.
+using StandardInputByteProvider =
+    std::function<std::optional<std::vector<std::uint8_t>>(int child_process_id)>;
 
 /// Cross-platform child process with timeout, cancellation, and line-by-line
 /// output callbacks. Uses posix_spawn on POSIX (sandbox-compatible for AU
@@ -56,6 +68,20 @@ public:
                const std::vector<std::string>& args,
                const ProcessOptions& options = {});
 
+    /// Start with bytes delivered through a private inherited standard-input
+    /// pipe. Delivery is bounded and unrelated child handles are closed.
+    bool start_with_standard_input(const std::string& command, const std::vector<std::string>& args,
+                                   std::span<const std::uint8_t> bytes,
+                                   const ProcessOptions& options = {});
+
+    /// Spawn the child blocked on a private inherited standard-input pipe, then
+    /// obtain the bytes from a provider that receives the actual child id.
+    /// Provider rejection, exceptions, oversize output, or delivery failure
+    /// terminate and join the child before this returns false.
+    bool start_with_standard_input(const std::string& command, const std::vector<std::string>& args,
+                                   const StandardInputByteProvider& provider,
+                                   const ProcessOptions& options = {});
+
     /// Check if the started process is still running.
     bool is_running() const;
 
@@ -75,6 +101,11 @@ public:
     std::string read_available_output();
 
 private:
+    bool start_impl(const std::string& command, const std::vector<std::string>& args,
+                    const ProcessOptions& options,
+                    const std::span<const std::uint8_t>* standard_input,
+                    const StandardInputByteProvider* standard_input_provider);
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

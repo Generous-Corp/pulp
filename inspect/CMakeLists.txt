@@ -77,6 +77,7 @@ add_library(pulp-inspect-control
     src/control_executor_slot.cpp
     src/control_grants.cpp
     src/control_host_enrollment.cpp
+    src/control_host_bootstrap.cpp
     src/control_host_connection.cpp
     src/control_host_router.cpp
     src/control_identity.cpp
