@@ -1326,6 +1326,9 @@ function segmentColor(fills: readonly Paint[] | undefined): string | undefined {
 /// offsets (converted from the API's UTF-16 code-unit indices). A homogeneous
 /// node returns no runs — the flat dominant style stays the whole story, which
 /// is the path the consumer prefers for single-style text.
+const semanticFontSlant = (style: string): "normal" | "italic" | "oblique" =>
+  /oblique/i.test(style) ? "oblique" : /italic/i.test(style) ? "italic" : "normal";
+
 function extractTextRuns(
   t: TextNode,
   s: ExtractedStyle,
@@ -1360,7 +1363,7 @@ function extractTextRuns(
   if (s.font_family === undefined && first.fontName &&
       typeof first.fontName.family === "string") {
     s.font_family = first.fontName.family;
-    s.font_style = /italic|oblique/i.test(first.fontName.style) ? "italic" : "normal";
+    s.font_style = semanticFontSlant(first.fontName.style);
   }
   if (s.color === undefined) {
     const c = segmentColor(first.fills);
@@ -1380,14 +1383,8 @@ function extractTextRuns(
   for (const seg of segments) {
     if (seg.fontName && typeof seg.fontName.family === "string" &&
         typeof seg.fontName.style === "string") {
-      if (s.font_family && seg.fontName.family !== s.font_family) {
-        throw new Error(
-          `Mixed font families on "${t.name}" cannot be represented by the ` +
-          "current DesignIR text-run model; export refused.",
-        );
-      }
-      const italic = /italic|oblique/i.test(seg.fontName.style) ? "italic" : "normal";
-      const tuple = `${seg.fontName.family}|${seg.fontWeight ?? ""}|${italic}`;
+      const slant = semanticFontSlant(seg.fontName.style);
+      const tuple = `${seg.fontName.family}|${seg.fontWeight ?? ""}|${slant}`;
       const existingFace = exactFaceByRepresentableTuple.get(tuple);
       if (existingFace && existingFace !== seg.fontName.style) {
         throw new Error(
@@ -1415,9 +1412,13 @@ function extractTextRuns(
     if (typeof seg.fontWeight === "number" && seg.fontWeight !== s.font_weight) {
       run.fontWeight = seg.fontWeight;
     }
+    if (seg.fontName && typeof seg.fontName.family === "string" &&
+        seg.fontName.family !== s.font_family) {
+      run.fontFamily = seg.fontName.family;
+    }
     if (seg.fontName && typeof seg.fontName.style === "string") {
-      const italic = /italic|oblique/i.test(seg.fontName.style) ? "italic" : "normal";
-      if (italic !== (s.font_style ?? "normal")) run.fontStyle = italic;
+      const slant = semanticFontSlant(seg.fontName.style);
+      if (slant !== (s.font_style ?? "normal")) run.fontStyle = slant;
     }
     const color = segmentColor(seg.fills);
     if (color && color !== s.color) run.color = color;
@@ -1444,7 +1445,7 @@ function extractTextStyle(t: TextNode, ex: ExtractedFigmaNode, ctx: WalkCtx): vo
   if (typeof t.fontSize === "number") s.font_size = t.fontSize;
   if (typeof t.fontName === "object" && t.fontName) {
     s.font_family = t.fontName.family;
-    s.font_style = /italic|oblique/i.test(t.fontName.style) ? "italic" : "normal";
+    s.font_style = semanticFontSlant(t.fontName.style);
     fontFaces.push({
       family: t.fontName.family,
       style: t.fontName.style,

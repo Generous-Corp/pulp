@@ -504,6 +504,20 @@ TEST_CASE("generate_pulp_swift lowers mixed-style text_runs to concatenated Text
     REQUIRE(contains(view, "+ Text(\" world\")"));
 }
 
+TEST_CASE("generate_pulp_swift selects a concrete family from CSS stacks",
+          "[view][import][swiftui][text]") {
+    DesignIR ir;
+    ir.root = frame_node("r", "R", 200.0f, 40.0f, LayoutDirection::column);
+    auto label = text_node("label", "Stack", 14.0f, "#111111");
+    label.style.font_family = "\"Open Sans\", Inter, sans-serif";
+    ir.root.children.push_back(std::move(label));
+
+    const auto view = generate_pulp_swift(ir, ir.asset_manifest).view_source;
+    INFO(view);
+    REQUIRE(contains(view, ".custom(\"Open Sans\", size: 14)"));
+    REQUIRE_FALSE(contains(view, "Open Sans\\\", Inter"));
+}
+
 TEST_CASE("generate_pulp_swift flags per-side borders and multi/inset shadows",
           "[view][import][swiftui]") {
     DesignIR ir;
@@ -818,7 +832,8 @@ TEST_CASE("generated SwiftUI with full B2 style + text-runs type-checks",
 
     auto label = text_node("hdr", "Mix and bold tail", 16.0f, "#eeeeee");
     IRTextRun run; run.start = 8; run.end = 12; run.font_weight = 700;
-    run.color = "#ffaa00"; run.font_style = "italic";
+    run.color = "#ffaa00"; run.font_family = "Courier New";
+    run.font_style = "oblique 12deg";
     label.text_runs.push_back(run);
     ir.root.children.push_back(std::move(label));
 
@@ -830,6 +845,10 @@ TEST_CASE("generated SwiftUI with full B2 style + text-runs type-checks",
     abs_box.children.push_back(text_node("n", "9", 10.0f, "#000000"));
     ir.root.children.push_back(std::move(abs_box));
 
+    const auto generated = generate_pulp_swift(ir, {}, {}).view_source;
+    REQUIRE(contains(generated,
+                     ".font(.custom(\"Courier New\", size: 16))"));
+    REQUIRE(contains(generated, ".italic()"));
     require_generated_swift_compiles(ir, "b2-style");
 }
 

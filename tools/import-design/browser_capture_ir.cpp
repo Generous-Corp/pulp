@@ -518,6 +518,13 @@ int lower_semantic_controls(const fs::path& path,
         control.type = "frame";
         control.name = string_member(candidate, "name");
         control.audio_widget = widget;
+        // A single captured frame cannot prove that an apparently uniform
+        // fader track stays uniform at other values. Only the author can make
+        // that promise. The sprite pass still checks the pixels for
+        // contradictory value-dependent chrome before trusting it.
+        if (widget == pulp::view::AudioWidgetType::fader && data.isObject() &&
+            data.hasObjectMember("static-track"))
+            control.attributes["browser_fader_static_track_declared"] = "1";
         // design_codegen keys the host binding off attributes["binding"] —
         // IRNode::param_key does not exist; that field belongs to the
         // geometry-detected element struct, which is a different lane.

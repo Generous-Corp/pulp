@@ -85,16 +85,25 @@ public:
     }
     const std::string& text() const { return text_; }
 
-    // Per-range styled text (design-import mixed text). When set with >=1 span,
-    // a single-line Label paints each span with its own font/color via
-    // paint_attributed_() instead of the single-style path. Empty / multi-line
-    // falls back to the dominant single-style text().
+    // Per-range styled text (design-import mixed text). Every line shape and
+    // paint path retains the spans; captured lines and responsive reflow share
+    // the same attributed renderer.
     void set_attributed_string(canvas::AttributedString a) {
         attributed_runs_ = std::move(a);
         has_attributed_ = !attributed_runs_.spans().empty();
+        // A run mutation changes advances independently of the Label-wide
+        // typography captured in set_cached_line_boxes(). Callers that want to
+        // install both must set the runs first and the captured basis second.
+        cached_line_boxes_.clear();
+        shaped_cache_valid_ = false;
         invalidate_layout();
     }
-    void clear_attributed_string() { has_attributed_ = false; }
+    void clear_attributed_string() {
+        has_attributed_ = false;
+        cached_line_boxes_.clear();
+        shaped_cache_valid_ = false;
+        invalidate_layout();
+    }
     bool has_attributed_string() const { return has_attributed_; }
     std::size_t attributed_span_count() const { return attributed_runs_.spans().size(); }
 
@@ -114,7 +123,7 @@ public:
     int font_weight() const { return font_weight_; }
     bool has_own_font_weight() const { return has_own_font_weight_; }
 
-    void set_font_style(int style) { font_style_ = style; }  // 0=normal, 1=italic
+    void set_font_style(int style) { font_style_ = style; }  // 0=normal, 1=italic, 2=oblique
     int font_style() const { return font_style_; }
 
     void set_letter_spacing(float sp) { letter_spacing_ = sp; has_own_letter_spacing_ = true; }
@@ -241,11 +250,15 @@ public:
     /// `basis_face` is the PostScript name of the face the boxes were laid out
     /// with, not the requested family. Empty means unverifiable, and an
     /// unverifiable cache is never used.
+    /// `wrap_on_cache_miss` keeps a captured one-line attributed run styled
+    /// while valid, but re-enters paragraph wrapping after resize/font drift.
     void set_cached_line_boxes(std::vector<CachedLineBox> boxes,
-                               float basis_width, std::string basis_face);
+                               float basis_width, std::string basis_face,
+                               bool wrap_on_cache_miss = false);
     const std::vector<CachedLineBox>& cached_line_boxes() const {
         return cached_line_boxes_;
     }
+    bool captured_wrap_fallback() const { return captured_wrap_fallback_; }
 
     /// The CSS numeric weight this Label will actually be painted at — its own
     /// when it was given one, otherwise the nearest ancestor's.
@@ -368,13 +381,15 @@ private:
     /// paint() AND text_edit_metrics() both call this so the caret/selection
     /// geometry shapes with the SAME features the painter renders — without it
     /// a tabular-nums / small-caps label's caret x drifts (pulp WYSIWYG sweep).
+    std::vector<canvas::Canvas::FontFeature> resolved_font_features() const;
     void apply_font_features(canvas::Canvas& canvas) const;
+    canvas::AttributedString resolved_attributed_string() const;
 
     std::string text_;
     std::string font_family_;     ///< Empty == widget default ("Inter")
     float font_size_ = 14.0f;
     int font_weight_ = 400;       ///< 400=normal, 700=bold
-    int font_style_ = 0;          ///< 0=normal, 1=italic
+    int font_style_ = 0;          ///< 0=normal, 1=italic, 2=oblique
     float letter_spacing_ = 0;    ///< Extra spacing between characters (px)
     float line_height_ = 0;       ///< 0=auto (font_size * 1.4)
     LabelAlign text_align_ = LabelAlign::left;
@@ -394,7 +409,15 @@ private:
     bool has_own_text_color_ = false;
     canvas::AttributedString attributed_runs_;  ///< per-range styled text (mixed)
     bool has_attributed_ = false;
-    void paint_attributed_(canvas::Canvas& canvas);  ///< single-line span draw
+    void paint_decoration_(canvas::Canvas& canvas, float x, float width,
+                           float baseline, float font_size,
+                           const canvas::Color& color);
+    void paint_attributed_lines_(canvas::Canvas& canvas,
+                                 const canvas::ShapedLayout& layout,
+                                 float baseline_y, float line_height,
+                                 int visible_lines, bool append_ellipsis,
+                                 bool single_line_ellipsis,
+                                 bool captured_positions);
     LabelAlign resolve_effective_align_();            ///< text-align cascade (auto/match-parent resolved)
     bool has_own_font_size_ = false;
     bool has_own_font_weight_ = false;
@@ -410,22 +433,28 @@ private:
     // advances, not a Regular one drawn heavier, so the same string at the same
     // size in the same family breaks at a different word depending on it —
     // which is why a key without it serves a Regular layout to a Bold label.
-    // Letter-spacing is still absent: it is applied after breaking, by the
-    // caller.
     struct ShapedLayoutKey {
         std::string display_text;  // text_ after text-transform
         std::string family;        // resolved family ("Inter" fallback)
+        std::string font_variant;
         float font_size = 0.0f;
         int font_weight = 400;     // CSS numeric weight; selects the face
+        int font_style = 0;
+        float letter_spacing = 0.0f;
         float width = 0.0f;        // bounds().width — changes every resize
         float line_height = 0.0f;
         int break_mode = 0;        // canvas::BreakMode as int
+        int max_lines = 0;         // attributed nowrap uses one; wrap is unlimited
         std::uint64_t font_gen = 0;  // font_registration_generation() snapshot
         bool operator==(const ShapedLayoutKey& o) const {
             return display_text == o.display_text && family == o.family &&
+                   font_variant == o.font_variant &&
                    font_size == o.font_size && font_weight == o.font_weight &&
+                   font_style == o.font_style &&
+                   letter_spacing == o.letter_spacing &&
                    width == o.width && line_height == o.line_height &&
-                   break_mode == o.break_mode && font_gen == o.font_gen;
+                   break_mode == o.break_mode && max_lines == o.max_lines &&
+                   font_gen == o.font_gen;
         }
     };
     /// Whether the captured line boxes still describe this Label.
@@ -434,16 +463,28 @@ private:
     /// must match, and anything unknown counts as a mismatch. Reusing a cache
     /// that no longer applies reintroduces exactly the defect it exists to
     /// prevent; discarding one that still applies costs a reflow.
-    bool cached_line_layout_usable(const std::string& display_text) const;
+    bool cached_line_layout_usable(const std::string& display_text,
+                                   float effective_font_size,
+                                   float effective_letter_spacing,
+                                   float layout_width) const;
 
     /// Build a ShapedLayout from the captured boxes, so the rest of paint —
     /// line-clamp, vertical-align, alignment — is the same code either way.
     canvas::ShapedLayout layout_from_cached_lines(const std::string& text,
                                                   float line_height) const;
+    canvas::ShapedLayout layout_attributed_from_cached_lines(
+        const canvas::AttributedString& text, float line_height) const;
 
     std::vector<CachedLineBox> cached_line_boxes_;
+    bool captured_wrap_fallback_ = false;
     float cached_line_basis_width_ = 0.0f;
     std::string cached_line_basis_face_;
+    std::string cached_line_basis_text_;
+    std::string cached_line_basis_font_variant_;
+    float cached_line_basis_font_size_ = 0.0f;
+    float cached_line_basis_letter_spacing_ = 0.0f;
+    int cached_line_basis_font_weight_ = 400;
+    int cached_line_basis_font_style_ = 0;
 
     ShapedLayoutKey shaped_cache_key_;
     canvas::ShapedLayout shaped_cache_layout_;
@@ -988,7 +1029,8 @@ public:
                           float body_origin_x = 0.0f,
                           float body_origin_y = 0.0f,
                           float control_natural_w = 0.0f,
-                          float control_natural_h = 0.0f) {
+                          float control_natural_h = 0.0f,
+                          bool body_includes_static_track = false) {
         captured_body_ = std::move(body);
         captured_indicator_ = std::move(indicator);
         captured_indicator_cross_ = std::clamp(indicator_cross, 0.0f, 1.0f);
@@ -996,12 +1038,16 @@ public:
         captured_body_origin_y_ = body_origin_y;
         captured_control_natural_w_ = control_natural_w;
         captured_control_natural_h_ = control_natural_h;
+        captured_body_includes_static_track_ = body_includes_static_track;
         request_repaint();
     }
     bool has_captured_indicator_art() const {
         return captured_indicator_ && captured_indicator_->loaded();
     }
     float captured_indicator_cross() const { return captured_indicator_cross_; }
+    bool captured_body_includes_static_track() const {
+        return captured_body_includes_static_track_;
+    }
 
     // ── Skin overrides ────────────────────────────────────────────────────
     // Per-widget appearance, generalising the knob sprite-strip path to the
@@ -1056,6 +1102,7 @@ private:
     float captured_body_origin_y_ = 0.0f;
     float captured_control_natural_w_ = 0.0f;
     float captured_control_natural_h_ = 0.0f;
+    bool captured_body_includes_static_track_ = false;
     canvas::Color track_color_{};
     canvas::Color fill_color_{};
     canvas::Color thumb_color_{};

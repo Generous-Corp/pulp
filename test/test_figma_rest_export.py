@@ -30,6 +30,34 @@ class FontCaptureTest(unittest.TestCase):
         self.assertEqual(inter["style"], "Italic")
         self.assertTrue(inter["italic"])
 
+    def test_record_font_includes_used_run_families(self):
+        frx._record_font({
+            "type": "TEXT",
+            "style": {"fontFamily": "Inter", "fontWeight": 400},
+            "characterStyleOverrides": [0, 1, 1],
+            "styleOverrideTable": {"1": {
+                "fontName": {"family": "Display Face", "style": "Bold Oblique"}
+            }},
+        }, self.ctx)
+        out = list(self.ctx.fonts.values())
+        display = next(f for f in out if f["family"] == "Display Face")
+        self.assertEqual(display["weight"], 700)
+        self.assertTrue(display["italic"])
+
+    def test_record_font_uses_base_family_for_partial_run_face(self):
+        frx._record_font({
+            "type": "TEXT",
+            "style": {"fontFamily": "Inter", "fontWeight": 400},
+            "characterStyleOverrides": [1],
+            "styleOverrideTable": {"1": {"fontWeight": 700,
+                                                   "fontStyle": "Oblique"}},
+        }, self.ctx)
+        out = list(self.ctx.fonts.values())
+        alternate = next(f for f in out
+                         if f["family"] == "Inter" and f["weight"] == 700)
+        self.assertEqual(alternate["style"], "Oblique")
+        self.assertTrue(alternate["italic"])
+
     def test_content_hash_is_sha256_of_bytes(self):
         # The exporter names + content-addresses assets by sha256(bytes); verify
         # the digest helper the export path relies on is the standard one.
@@ -641,6 +669,46 @@ class TextRunsTest(unittest.TestCase):
              "styleOverrideTable": {"1": {"fontSize": 20}, "2": {"fontSize": 30}}}
         runs = frx.extract_text_runs(n)
         self.assertEqual([(r["start"], r["end"]) for r in runs], [(0, 1), (1, 2)])
+
+    def test_run_family_and_slant_delta_support_oblique_and_normal_reset(self):
+        n = {"type": "TEXT", "characters": "abc",
+             "fontName": {"family": "Inter", "style": "Italic"},
+             "characterStyleOverrides": [1, 2, 2],
+             "styleOverrideTable": {
+                 "1": {"fontName": {"family": "Display", "style": "Oblique"}},
+                 "2": {"fontName": {"family": "Inter", "style": "Regular"}}}}
+        runs = frx.extract_text_runs(n)
+        self.assertEqual(runs[0]["fontFamily"], "Display")
+        self.assertEqual(runs[0]["fontStyle"], "oblique")
+        self.assertEqual(runs[1]["fontStyle"], "normal")
+
+    def test_font_style_only_override_becomes_run_slant(self):
+        n = {"type": "TEXT", "characters": "ab",
+             "style": {"fontFamily": "Inter", "fontStyle": "Regular"},
+             "characterStyleOverrides": [0, 1],
+             "styleOverrideTable": {"1": {"fontStyle": "Oblique"}}}
+        runs = frx.extract_text_runs(n)
+        self.assertEqual(runs, [{"start": 1, "end": 2,
+                                 "fontStyle": "oblique"}])
+
+    def test_real_rest_typestyle_shape_preserves_family_tracking_and_decoration_reset(self):
+        n = {"type": "TEXT", "characters": "ab",
+             "style": {"fontFamily": "Inter", "fontPostScriptName": "Inter-Italic",
+                       "textDecoration": "UNDERLINE"},
+             "characterStyleOverrides": [0, 1],
+             "styleOverrideTable": {"1": {
+                 "fontFamily": "Display", "fontPostScriptName": "Display-Oblique",
+                 "italic": True, "letterSpacing": 0,
+                 "textDecoration": "NONE"}}}
+        runs = frx.extract_text_runs(n)
+        self.assertEqual(runs, [{"start": 1, "end": 2,
+                                 "fontFamily": "Display",
+                                 "fontStyle": "oblique",
+                                 "letterSpacing": 0,
+                                 "textDecoration": "none"}])
+        style = {}
+        frx.extract_text_style(n, style)
+        self.assertEqual(style["text_decoration"], "underline")
 
     def test_run_offsets_are_utf8_byte_offsets(self):
         # "café world": é is 2 UTF-8 bytes, so the run over "world" (char index 5)

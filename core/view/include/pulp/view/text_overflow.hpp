@@ -59,7 +59,9 @@ inline std::size_t utf8_codepoint_count(std::string_view text) {
     return n;
 }
 
-/// If `text` already fits within `available_width`, return it as-is.
+/// If `text` already fits within `available_width`, return it as-is unless
+/// `force_ellipsis` is true. The forced form is for a styled fragment that
+/// fits by itself but must still reserve the trailing edge for omitted spans.
 /// Otherwise return the longest UTF-8 prefix of `text` that — appended
 /// with U+2026 — still fits. Falls back to "…" alone if no prefix fits.
 ///
@@ -72,9 +74,11 @@ inline std::size_t utf8_codepoint_count(std::string_view text) {
 /// canvas's font state before invoking; this helper only measures.
 inline std::string truncate_to_width(canvas::Canvas& canvas,
                                      std::string_view text,
-                                     float available_width) {
+                                     float available_width,
+                                     bool force_ellipsis = false) {
     if (available_width <= 0.0f) return std::string(kEllipsis);
-    if (canvas.measure_text(std::string(text)) <= available_width)
+    if (!force_ellipsis &&
+        canvas.measure_text(std::string(text)) <= available_width)
         return std::string(text);
 
     const std::size_t total = utf8_codepoint_count(text);

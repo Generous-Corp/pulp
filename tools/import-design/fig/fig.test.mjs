@@ -2640,7 +2640,7 @@ test('mixed text style runs lower to ordered UTF-8 byte-offset runs', () => {
         styleOverrideTable: [{
           styleID: 5,
           fontSize: 14,
-          fontName: { family: 'Roboto', style: 'Bold' },
+          fontName: { family: 'Display Face', style: 'Bold' },
           textDecoration: 'UNDERLINE',
           fillPaints: [{ type: 'SOLID', color: { r: 0, g: 1, b: 0, a: 1 } }],
         }],
@@ -2652,7 +2652,8 @@ test('mixed text style runs lower to ordered UTF-8 byte-offset runs', () => {
       fillPaints: [{ type: 'SOLID', color: { r: 0, g: 0, b: 0, a: 1 } }] },
   ]});
   const ctx = { ...CTX_MIN, isFontAvailable: () => true };
-  const root = materializeFrame(scene, findFrame(scene, 'Root'), ctx).envelope.root;
+  const materialized = materializeFrame(scene, findFrame(scene, 'Root'), ctx);
+  const root = materialized.envelope.root;
   const [mixed, plain] = root.children;
 
   assert.equal(mixed.content, 'Héllo world');
@@ -2663,6 +2664,7 @@ test('mixed text style runs lower to ordered UTF-8 byte-offset runs', () => {
     end: 12,
     fontSize: 14,
     fontWeight: 700,                // "Bold" style name → CSS weight
+    fontFamily: 'Display Face',
     textDecoration: 'underline',
     color: '#00ff00',
   });
@@ -2672,10 +2674,45 @@ test('mixed text style runs lower to ordered UTF-8 byte-offset runs', () => {
   assert.equal(mixed.style.vertical_align, 'middle');
   assert.equal(mixed.attributes['figma:text_truncation'], 'ending');
   assert.equal(mixed.attributes['figma:max_lines'], '3');
+  const fontRequirement = materialized.diagnostics.find(
+    (d) => d.code === 'fonts-required');
+  assert.ok(fontRequirement.detail.includes('Display Face Bold'),
+    'per-run alternate family must be included in the frame font inventory');
 
   // Homogeneous text keeps the flat single-style path.
   assert.ok(!('runs' in plain), 'no runs array for single-style text');
   assert.ok(!('attributes' in plain), 'no preserved attrs without overrides');
+});
+
+test('mixed text style runs preserve oblique and explicit normal slants', () => {
+  const g = (l) => ({ sessionID: 0, localID: l });
+  const scene = buildScene({ nodeChanges: [
+    { guid: g(1), type: 'CANVAS', name: 'Page 1' },
+    { guid: g(2), type: 'FRAME', name: 'Root',
+      parentIndex: { guid: g(1), position: 'a' }, size: { x: 100, y: 20 } },
+    { guid: g(3), type: 'TEXT', name: 'slants',
+      parentIndex: { guid: g(2), position: 'a' }, size: { x: 100, y: 20 },
+      fontSize: 12, fontName: { family: 'Roboto', style: 'Italic' },
+      letterSpacing: { value: 2, units: 'PIXELS' },
+      fillPaints: [{ type: 'SOLID', color: { r: 0, g: 0, b: 0, a: 1 } }],
+      textData: {
+        characters: 'abc', characterStyleIDs: [0, 5, 6],
+        styleOverrideTable: [
+          { styleID: 5, fontName: { family: 'Roboto', style: 'Oblique' },
+            letterSpacing: { value: 0, units: 'PIXELS' } },
+          { styleID: 6, fontName: { family: 'Roboto', style: 'Regular' } },
+        ],
+      } },
+  ]});
+  const root = materializeFrame(
+    scene, findFrame(scene, 'Root'),
+    { ...CTX_MIN, isFontAvailable: () => true }).envelope.root;
+  const slants = root.children[0];
+  assert.equal(slants.style.font_style, 'italic');
+  assert.equal(slants.style.letter_spacing, 2);
+  assert.equal(slants.runs[0].fontStyle, 'oblique');
+  assert.equal(slants.runs[0].letterSpacing, 0);
+  assert.equal(slants.runs[1].fontStyle, 'normal');
 });
 
 test('per-side stroke weights land as border_*_width; uniform strokes keep the shorthand', () => {

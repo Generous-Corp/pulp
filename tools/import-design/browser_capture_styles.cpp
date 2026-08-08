@@ -2,6 +2,7 @@
 #include "browser_capture_styles.hpp"
 
 #include <choc/text/choc_JSON.h>
+#include <pulp/canvas/text_utf8.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -288,10 +289,13 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load(
     const auto bounds = member(layout, "bounds");
     const auto texts = member(layout, "text");
     const auto paint_orders = member(layout, "paintOrders");
-    if (!node_index.isArray() || !styles.isArray()) return std::nullopt;
+    if (!node_index.isArray() || !styles.isArray() ||
+        node_index.size() != styles.size())
+        return std::nullopt;
 
     index.layout_to_node_.assign(node_index.size(), -1);
     index.layout_text_.assign(node_index.size(), -1);
+    index.layout_normalized_text_.resize(styles.size());
     // Absent rather than zero when the capture did not request paint order:
     // zero is a legitimate order, so defaulting to it would silently reorder
     // the whole panel into document order while looking like real data.
@@ -335,10 +339,12 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load(
         }
     }
 
-    // Per-line text boxes. `includeDOMRects` is what makes Chrome emit these,
-    // and a capture taken without it simply has no `textBoxes` — so their
-    // absence is a capture-age question, not a malformed-snapshot one, and
-    // leaves every node with an empty box list rather than failing the load.
+    // Text fragments. `includeDOMRects` is what makes Chrome emit these, and a
+    // capture taken without it simply has no `textBoxes` — so their absence is
+    // a capture-age question, not a malformed-snapshot one, and leaves every
+    // node with an empty box list rather than failing the load. Chrome can emit
+    // several fragments for one visual line (typically around collapsible
+    // whitespace), so normalize them after reading the parallel arrays.
     index.layout_text_boxes_.resize(index.style_rows_.size());
     const auto text_boxes = member(document, "textBoxes");
     if (text_boxes.isObject()) {
@@ -369,6 +375,20 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load(
                     box.length = json_int(box_length[at], 0);
                 index.layout_text_boxes_[static_cast<size_t>(layout_index)]
                     .push_back(box);
+            }
+            for (size_t layout_index = 0;
+                 layout_index < index.layout_text_boxes_.size(); ++layout_index) {
+                auto text = layout_index < index.layout_text_.size()
+                    ? index.string_at(index.layout_text_[layout_index])
+                    : std::string{};
+                auto& boxes = index.layout_text_boxes_[layout_index];
+                const auto styles = index.styles_for_layout(
+                    static_cast<int>(layout_index));
+                const auto white_space = styles.find("white-space");
+                boxes = coalesce_text_line_fragments(
+                    std::move(boxes), &text,
+                    white_space == styles.end() ? "normal" : white_space->second);
+                index.layout_normalized_text_[layout_index] = std::move(text);
             }
         }
     }
@@ -452,6 +472,92 @@ std::vector<CapturedTextBox> CapturedStyleIndex::text_boxes_for_layout(
         return {};
     }
     return layout_text_boxes_[static_cast<size_t>(layout_index)];
+}
+
+std::vector<CapturedTextBox> coalesce_text_line_fragments(
+    std::vector<CapturedTextBox> boxes, std::string* text,
+    std::string_view white_space) {
+    if (boxes.size() < 2)
+        return boxes;
+
+    struct OmittedRange {
+        int start = 0;
+        int length = 0;
+    };
+    std::vector<OmittedRange> omitted;
+    {
+        const int units = text != nullptr
+            ? static_cast<int>(pulp::canvas::utf16_offset_for_utf8_offset(
+                  *text, text->size()))
+            : 0;
+        for (size_t i = 1; i < boxes.size(); ++i) {
+            const auto& before = boxes[i - 1];
+            const auto& after = boxes[i];
+            if (std::abs(before.bounds.top - after.bounds.top) > 0.5)
+                continue;
+            const int gap_start = before.start + before.length;
+            const int gap_length = after.start - gap_start;
+            if (gap_length <= 0)
+                continue;
+            if (text == nullptr || gap_start < 0 ||
+                gap_start > units - gap_length)
+                return {};
+            const auto byte_start = pulp::canvas::utf8_offset_for_utf16_offset(
+                *text, static_cast<size_t>(gap_start));
+            const auto byte_end = pulp::canvas::utf8_offset_for_utf16_offset(
+                *text, static_cast<size_t>(gap_start + gap_length));
+            const auto gap = std::string_view(*text).substr(
+                byte_start, byte_end - byte_start);
+            if (gap.empty() ||
+                !std::all_of(gap.begin(), gap.end(), [](unsigned char ch) {
+                    return ch == ' ' || ch == '\t' || ch == '\n' ||
+                           ch == '\r' || ch == '\f';
+                }))
+                return {};
+            const bool collapses = white_space != "pre" &&
+                white_space != "pre-wrap" && white_space != "break-spaces";
+            if (collapses) omitted.push_back({gap_start, gap_length});
+        }
+
+        for (auto it = omitted.rbegin(); it != omitted.rend(); ++it) {
+            const auto byte_start = pulp::canvas::utf8_offset_for_utf16_offset(
+                *text, static_cast<size_t>(it->start));
+            const auto byte_end = pulp::canvas::utf8_offset_for_utf16_offset(
+                *text, static_cast<size_t>(it->start + it->length));
+            text->erase(byte_start, byte_end - byte_start);
+        }
+        for (auto& box : boxes) {
+            int removed_before = 0;
+            for (const auto& range : omitted)
+                if (range.start < box.start)
+                    removed_before += range.length;
+            box.start -= removed_before;
+        }
+    }
+
+    std::vector<CapturedTextBox> lines;
+    lines.reserve(boxes.size());
+    for (const auto& fragment : boxes) {
+        if (lines.empty() ||
+            std::abs(lines.back().bounds.top - fragment.bounds.top) > 0.5) {
+            lines.push_back(fragment);
+            continue;
+        }
+
+        auto& line = lines.back();
+        const double left = std::min(line.bounds.left, fragment.bounds.left);
+        const double top = std::min(line.bounds.top, fragment.bounds.top);
+        const double right = std::max(line.bounds.left + line.bounds.width,
+                                      fragment.bounds.left + fragment.bounds.width);
+        const double bottom = std::max(line.bounds.top + line.bounds.height,
+                                       fragment.bounds.top + fragment.bounds.height);
+        const int start = std::min(line.start, fragment.start);
+        const int end = std::max(line.start + line.length, fragment.start + fragment.length);
+        line.bounds = {left, top, right - left, bottom - top};
+        line.start = start;
+        line.length = end - start;
+    }
+    return lines;
 }
 
 std::optional<int> CapturedStyleIndex::layout_for_node(int node_index) const {
@@ -621,8 +727,12 @@ std::vector<CapturedPaintNode> CapturedStyleIndex::painted_nodes() const {
         if (node < static_cast<int>(node_type_.size()))
             entry.node_type = node_type_[static_cast<size_t>(node)];
         entry.tag_name = tag_name(node);
-        if (layout < layout_text_.size())
+        if (layout < layout_normalized_text_.size() &&
+            !layout_normalized_text_[layout].empty()) {
+            entry.text = layout_normalized_text_[layout];
+        } else if (layout < layout_text_.size()) {
             entry.text = string_at(layout_text_[layout]);
+        }
         if (layout < layout_bounds_.size())
             entry.bounds = layout_bounds_[layout];
         entry.backend_node_id =
@@ -752,6 +862,8 @@ void apply_computed_styles(const std::map<std::string, std::string>& computed,
     // the rest. A gate that cannot fire, reported as if it had been evaluated.
     const auto white_space = lookup("white-space");
     if (!white_space.empty()) style.white_space = white_space;
+    const auto text_overflow = lookup("text-overflow");
+    if (!is_absent(text_overflow)) style.text_overflow = text_overflow;
 
     if (scope == ComputedStyleScope::text_only) return;
 

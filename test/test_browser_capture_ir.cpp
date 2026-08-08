@@ -1494,7 +1494,7 @@ TEST_CASE("a fader indicator is handed to the control sprite pass",
          "paint_bounds":{"left":50,"top":20,"width":20,"height":200},
          "indicator_bounds":{"left":52,"top":108,"width":16,"height":12},
          "indicator_color":"rgb(244, 231, 180)",
-         "data_pulp":{"param":"drive","value":"0.5"}}
+         "data_pulp":{"param":"drive","value":"0.5","static-track":""}}
       ]
     })JSON");
     temp.write("tokens.json", R"JSON({
@@ -1527,6 +1527,7 @@ TEST_CASE("a fader indicator is handed to the control sprite pass",
     CHECK(found->attributes.at("browser_sprite_crop_px") == "100,40,40,400");
     CHECK(found->attributes.at("browser_sprite_indicator_px") ==
           "104,216,32,24");
+    CHECK(found->attributes.at("browser_fader_static_track_declared") == "1");
     // Rotary geometry belongs only to knobs; stamping it on a linear control
     // would make an unrelated consumer appear wired while doing nothing.
     CHECK(found->attributes.count("knob_ind_r_in") == 0);

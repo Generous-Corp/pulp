@@ -242,6 +242,20 @@ Facts worth knowing before touching any of it:
   `::before` with generated content is the everyday case. Take the **first**
   entry — the node's own box — so the choice is defined rather than
   last-write-wins.
+- **`textBoxes` are fragments, not guaranteed visual lines.** Chromium can
+  report whitespace-separated inline runs such as `"01 "` and `"RATE"` as
+  separate entries with the same top coordinate. Coalesce same-baseline
+  fragments before deciding whether text wrapped. One coalesced line remains a
+  cache-capable paragraph with one captured box; do not lower it to permanent
+  `white-space: nowrap`, because a stale width/face/text basis must reflow.
+  Two or more distinct line tops use the same cache path with multiple boxes.
+  A same-baseline offset gap may be normalized only when its
+  omitted source range is entirely CSS-collapsible whitespace; otherwise drop
+  the captured-line decision and reflow normally rather than inventing a new
+  line. Validated captured boxes must reach both direct native materialization
+  and generated-JS `setCapturedLineBoxes`; merely enabling multiline lets the
+  two routes choose different breaks. Treating the raw entry count as the line
+  count makes an ordinary single-line label wrap in the Skia result.
 - **Element index N in the page is not element index N in the snapshot.** The
   page walk is `document.querySelectorAll('*')`; the snapshot also emits
   pseudo-element boxes (`::before` / `::after`) and shadow-tree content as
@@ -606,7 +620,7 @@ frame defined by a component property reference), so only their name flows.
 **Mixed text runs are emitted by all three Figma lanes, on ONE offset unit:
 UTF-8 bytes.** A text node with per-range styling (a bold word, a colored
 span) carries an ordered `runs` array of style DELTAS against the dominant
-style — `{start, end, fontSize?, fontWeight?, fontStyle?, color?,
+style — `{start, end, fontSize?, fontWeight?, fontFamily?, fontStyle?, color?,
 letterSpacing?, textDecoration?}` (camelCase; the exact shape
 `design_ir_json.cpp::parse_ir_text_runs` reads). `start`/`end` are `[start,
 end)` **UTF-8 byte offsets into `content`** in every lane — Figma indexes text
@@ -624,8 +638,9 @@ numeric fontWeight, so run weights derive from the override `fontName.style`
 NAME ("Bold" → 700, "SemiBold" → 600, …); `.fig` styleOverrideTable rows are
 NodeChange structs keyed by `styleID`. Codegen coverage (compat
 `text-per-range-styles`): web-compat nested `<span>`s, JS-native
-`setTextRuns` → AttributedString (single-line), SwiftUI concatenated `Text`
-segments; baked C++ and live-native flatten — honest partial.
+`setTextRuns` → AttributedString with captured-line reuse or responsive
+multiline reflow, SwiftUI concatenated `Text` segments, and the direct native
+materializer. Baked C++ alone still flattens — honest partial.
 
 **`textAlignVertical` is design authority; the tall-slot heuristic is only a
 fallback.** All three producers emit `style.vertical_align`
@@ -2727,7 +2742,7 @@ text (a bold word, a colored span, a different size mid-string) lost its
 per-range styling. Now:
 
 - **IR**: `IRNode.text_runs` — an ordered list of `IRTextRun{start,end +
-  optional font_size/font_weight/font_style/color/letter_spacing/
+  optional font_size/font_weight/font_family/font_style/color/letter_spacing/
   text_decoration}`. `[start,end)` are offsets into `text_content`. The dominant
   style stays the node default; runs override.
 - **Parse** (`design_ir_json.cpp`): reads a `runs`/`textRuns` array (start/end +
@@ -2742,14 +2757,16 @@ per-range styling. Now:
   styled `<span style=…>` children and the gaps as plain `createTextNode` (so
   gaps inherit the dominant style). Single-run text keeps the plain
   `.textContent` path (no regression).
-- **Codegen — native**: now wired. The native arm emits `setTextRuns(id,
-  [...])`; the bridge builds a `canvas::AttributedString` from the runs over the
-  Label's dominant style, and `Label::paint_attributed_` draws each span with
-  its own font/color (advancing x by `measure_text`) for a SINGLE-LINE label.
-  Multi-line mixed text still degrades to the dominant single-style path (the
-  span loop is single-line), so `compat.json features.text-per-range-styles`
-  stays **codegen partial**. `Label::set_attributed_string` + the `setTextRuns`
-  bridge fn are the wiring (offsets are UTF-8 byte offsets, same as the web arm).
+- **Codegen — native**: the JS-native arm emits `setTextRuns(id, [...])`; the
+  bridge builds a `canvas::AttributedString` over the Label's dominant style.
+  The direct native materializer constructs the same runs without JS. The
+  common shaped-fragment painter preserves family/size/weight/italic-or-
+  oblique/tracking/color/decoration across captured lines and responsive
+  multiline reflow, including transforms, clamp, and ellipsis. Captured line
+  boxes are reused only when the dominant and every run face can be validated;
+  otherwise the label reflows. `compat.json features.text-per-range-styles`
+  stays **codegen partial** only because baked C++ still flattens. Offsets are
+  UTF-8 byte offsets, the same as the web arm.
 - **Offsets are UTF-8 BYTE offsets** into `text_content`. The Figma exporter
   builds a UTF-16-code-unit → UTF-8-byte map (`characterStyleOverrides` is
   UTF-16-indexed: a BMP char is 1 unit, an astral char / emoji is a surrogate
@@ -3240,10 +3257,24 @@ So the browser lane declares it, exactly as it already declares the paint box:
   capture. A knob gets a per-knob PNG stamped through `asset_path` /
   `png_natural_*` / `sprite_strip_frame_count=1`. A fader gets a cleaned body
   crop plus the declared indicator as its own sprite; `Fader::paint` moves that
-  authored sprite with the value instead of drawing the stock white slab, while
-  retaining the live native track and fill. Undeclared faders are unchanged.
-  The cleaned crop is byte-identical to the capture everywhere except the
-  declared indicator.
+  authored sprite with the value instead of drawing the stock white slab.
+  A fader may retain captured track/ticks/border only when its control element
+  explicitly carries `data-pulp-static-track`; a single default screenshot can
+  never prove that a uniform track will stay uniform at another value, nor can
+  spatial variation distinguish a wide static tick from a value fill. The
+  declaration is therefore the positive semantic evidence: emit it only when
+  the track, ticks and border are invariant at every value AND no tick, marker,
+  label or gradient discontinuity is hidden beneath the thumb at the captured
+  value. `data-pulp-indicator` must bound the entire moving visual footprint,
+  including antialiasing, shadows and transforms. When the visible thumb's DOM
+  box is smaller than that footprint, mark a transparent wrapper around it;
+  pixels outside the declared rectangle remain static by contract. A single
+  capture cannot reconstruct occluded authored pixels. Omit `data-pulp-static-track`
+  for that case and for every low-contrast, alpha-only, edge-origin or bipolar
+  fill; the importer then retains the live native track/fill path. The
+  indicator erasure uses exactly the declared moving footprint. Undeclared
+  faders stay live. Apart from that declared footprint, a declared static
+  body's crop is byte-identical to the capture.
 - The baked pointer is **erased by rotational median**: a dial face is
   rotationally symmetric about its centre except for the pointer, so each erased
   pixel takes the median of the same radius under 8 rotations (samples landing

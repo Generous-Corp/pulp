@@ -79,6 +79,7 @@ export const COMPUTED_STYLES = [
   "text-decoration-thickness",
   "text-underline-offset",
   "white-space",
+  "text-overflow",
   // Generated content. The snapshot reports ::before / ::after as their own
   // nodes with their own layout entries, so the text they inject is only
   // recoverable through this property -- there is no DOM text node to read.

@@ -15,9 +15,12 @@
 #include <pulp/view/design_fidelity.hpp>
 #include <pulp/view/design_tokens.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/canvas/font_resolver.hpp>
+#include <pulp/canvas/text_utf8.hpp>
 
 #include "design_import_internal.hpp"
 #include "design_import_native_common.hpp"
+#include "design_ir_helpers.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -114,6 +117,30 @@ static bool fader_is_horizontal(const IRNode& node) {
            node.style.height.value_or(0.0f);
 }
 
+static bool captured_line_decision_usable(const IRNode& node) {
+    // Validate only source-owned structure here. Generated bundles register
+    // their packaged fonts at runtime before constructing labels, so the
+    // generator's font registry cannot authoritatively compare face identity.
+    // Label::cached_line_layout_usable performs that check at paint time.
+    if (!node.text_layout_basis || node.text_line_boxes.empty() ||
+        !node.style.width || node.text_layout_basis->resolved_face.empty() ||
+        !std::isfinite(node.text_layout_basis->width) ||
+        node.text_layout_basis->width <= 0.0f ||
+        std::abs(*node.style.width - node.text_layout_basis->width) > 0.5f) {
+        return false;
+    }
+
+    int64_t previous_end = 0;
+    for (const auto& box : node.text_line_boxes) {
+        if (!canvas::is_valid_utf16_scalar_range(
+                node.text_content, box.start, box.length, previous_end)) {
+            return false;
+        }
+        previous_end = static_cast<int64_t>(box.start) + box.length;
+    }
+    return true;
+}
+
 // The lowercase tag `__widgetTagFactory__` (core/view/js/web-compat-element.js)
 // understands. Creating an audio widget through `document.createElement(<tag>)`
 // is what routes it to the native `createX(id, parent)` bridge call, so the
@@ -185,13 +212,35 @@ static void emit_web_text_runs(std::ostringstream& ss, const std::string& ind,
         return k;
     };
 
+    int cursor = 0, idx = 0;
+    auto append_base_style = [&](const std::string& child) {
+        const auto& base = node.style;
+        if (base.font_family)
+            ss << ind << child << ".style.fontFamily = '" << js_single_quote_escape(*base.font_family) << "';\n";
+        if (base.font_size)
+            ss << ind << child << ".style.fontSize = '" << *base.font_size << "px';\n";
+        if (base.font_weight)
+            ss << ind << child << ".style.fontWeight = '" << *base.font_weight << "';\n";
+        if (base.font_style)
+            ss << ind << child << ".style.fontStyle = '" << js_single_quote_escape(*base.font_style) << "';\n";
+        if (base.color)
+            ss << ind << child << ".style.color = '" << js_single_quote_escape(*base.color) << "';\n";
+        if (base.letter_spacing)
+            ss << ind << child << ".style.letterSpacing = '" << *base.letter_spacing << "px';\n";
+        if (base.text_decoration)
+            ss << ind << child << ".style.textDecoration = '"
+               << js_single_quote_escape(*base.text_decoration) << "';\n";
+    };
     auto append_plain = [&](int a, int b) {
         if (b <= a) return;
-        ss << ind << var << ".appendChild(document.createTextNode('"
-           << js_single_quote_escape(text.substr(a, b - a)) << "'));\n";
+        const std::string child = var + "_r" + std::to_string(idx++);
+        ss << ind << "const " << child << " = document.createElement('span');\n";
+        append_base_style(child);
+        ss << ind << child << ".textContent = '"
+           << js_single_quote_escape(text.substr(a, b - a)) << "';\n";
+        ss << ind << var << ".appendChild(" << child << ");\n";
     };
 
-    int cursor = 0, idx = 0;
     for (const auto* r : runs) {
         int rs = snap(std::max(0, r->start)), re = snap(std::min(n, r->end));
         if (re <= cursor) continue;          // wholly behind cursor (overlap) — skip
@@ -203,19 +252,11 @@ static void emit_web_text_runs(std::ostringstream& ss, const std::string& ind,
         // web-compat Labels do not inherit from the parent span, so without this
         // a run that overrides only one field would render the rest with Label
         // defaults. The run overrides below win over these base values.
-        const auto& base = node.style;
-        if (base.font_family)
-            ss << ind << child << ".style.fontFamily = '" << js_single_quote_escape(*base.font_family) << "';\n";
-        if (base.font_size)
-            ss << ind << child << ".style.fontSize = '" << *base.font_size << "px';\n";
-        if (base.font_weight)
-            ss << ind << child << ".style.fontWeight = '" << *base.font_weight << "';\n";
-        if (base.color)
-            ss << ind << child << ".style.color = '" << js_single_quote_escape(*base.color) << "';\n";
-        if (base.letter_spacing)
-            ss << ind << child << ".style.letterSpacing = '" << *base.letter_spacing << "px';\n";
+        append_base_style(child);
         if (r->font_weight)
             ss << ind << child << ".style.fontWeight = '" << *r->font_weight << "';\n";
+        if (r->font_family)
+            ss << ind << child << ".style.fontFamily = '" << js_single_quote_escape(*r->font_family) << "';\n";
         if (r->font_size)
             ss << ind << child << ".style.fontSize = '" << *r->font_size << "px';\n";
         if (r->font_style)
@@ -495,6 +536,9 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
                        << finite_numeric_attribute(node, "fader_control_natural_w", 0.0)
                        << ", "
                        << finite_numeric_attribute(node, "fader_control_natural_h", 0.0)
+                       << ", "
+                       << (attr_bool(node, "fader_body_includes_static_track")
+                               ? "true" : "false")
                        << ");\n";
                     const auto color = [&](const char* key) {
                         const auto it = node.attributes.find(key);
@@ -663,6 +707,9 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     emit_px("letterSpacing", s.letter_spacing);
     emit_float("lineHeight", s.line_height);
     emit_str("textTransform", s.text_transform);
+    if (node.text_runs.empty()) emit_str("textDecoration", s.text_decoration);
+    emit_str("textOverflow", s.text_overflow);
+    emit_str("whiteSpace", s.white_space);
     emit_str("overflow", s.overflow);
     emit_str("cursor", s.cursor);
     emit_str("pointerEvents", s.pointer_events);
@@ -1617,6 +1664,9 @@ static void emit_js_audio_widget(const NativeEmit& e) {
                    << finite_numeric_attribute(node, "fader_control_natural_w", 0.0)
                    << ", "
                    << finite_numeric_attribute(node, "fader_control_natural_h", 0.0)
+                   << ", "
+                   << (attr_bool(node, "fader_body_includes_static_track")
+                           ? "true" : "false")
                    << ");\n";
                 const auto color = [&](const char* key) {
                     const auto it = node.attributes.find(key);
@@ -2170,19 +2220,35 @@ static void emit_js_text_node(const NativeEmit& e) {
         ss << ind << "setFontSize('" << id << "', " << *node.style.font_size << ");\n";
     if (node.style.font_weight)
         ss << ind << "setFontWeight('" << id << "', '" << *node.style.font_weight << "');\n";
+    if (node.style.font_style)
+        ss << ind << "setFontStyle('" << id << "', '"
+           << js_single_quote_escape(*node.style.font_style) << "');\n";
     if (node.style.color)
         ss << ind << "setTextColor('" << id << "', '" << *node.style.color << "');\n";
     if (node.style.font_family)
         ss << ind << "setFontFamily('" << id << "', '" << js_single_quote_escape(*node.style.font_family) << "');\n";
     if (node.style.text_transform)
         ss << ind << "setTextTransform('" << id << "', '" << *node.style.text_transform << "');\n";
+    if (node.style.text_decoration)
+        ss << ind << "setTextDecoration('" << id << "', '"
+           << js_single_quote_escape(*node.style.text_decoration) << "');\n";
     if (node.style.text_align)
         ss << ind << "setTextAlign('" << id << "', '" << *node.style.text_align << "');\n";
     if (node.style.letter_spacing)
         ss << ind << "setLetterSpacing('" << id << "', " << *node.style.letter_spacing << ");\n";
-    // Per-range styled text → native styled runs (the bridge builds a
-    // canvas::AttributedString; mirrors the web nested-<span> path). Offsets
-    // are UTF-8 byte offsets, matching emit_web_text_runs.
+    if (node.style.line_height)
+        ss << ind << "setLineHeight('" << id << "', " << *node.style.line_height << ");\n";
+    if (node.style.text_overflow)
+        ss << ind << "setTextOverflow('" << id << "', '"
+           << js_single_quote_escape(*node.style.text_overflow) << "');\n";
+    if (node.style.white_space)
+        ss << ind << "setWhiteSpace('" << id << "', '"
+           << js_single_quote_escape(*node.style.white_space) << "');\n";
+
+    // Install per-range typography BEFORE captured line boxes. A run changes
+    // advances independently of the Label-wide style; setTextRuns therefore
+    // invalidates any older capture, while setCapturedLineBoxes snapshots the
+    // final typography that produced the browser decision.
     if (!node.text_runs.empty()) {
         ss << ind << "setTextRuns('" << id << "', [";
         for (size_t ri = 0; ri < node.text_runs.size(); ++ri) {
@@ -2191,13 +2257,53 @@ static void emit_js_text_node(const NativeEmit& e) {
             ss << "{ start: " << r.start << ", end: " << r.end;
             if (r.font_weight) ss << ", fontWeight: " << *r.font_weight;
             if (r.font_size) ss << ", fontSize: " << *r.font_size;
+            if (r.font_family) ss << ", fontFamily: '" << js_single_quote_escape(*r.font_family) << "'";
             if (r.font_style) ss << ", fontStyle: '" << js_single_quote_escape(*r.font_style) << "'";
             if (r.color) ss << ", color: '" << js_single_quote_escape(*r.color) << "'";
             if (r.letter_spacing) ss << ", letterSpacing: " << *r.letter_spacing;
+            if (r.text_decoration) ss << ", textDecoration: '" << js_single_quote_escape(*r.text_decoration) << "'";
             ss << " }";
         }
         ss << "]);\n";
     }
+
+    // Browser capture is the authority for whether a text run actually fit on
+    // one line. Native font fallback can be a few pixels wider than Chrome's
+    // resolved face; re-measuring a tightly fitted single-line run then wraps
+    // its final word even though the captured browser never did. Preserve the
+    // captured decision in generated JS just as the direct native
+    // materializer does in make_widget().
+    const bool has_browser_line_layout = captured_line_decision_usable(node);
+    const bool browser_single_line =
+        has_browser_line_layout && node.text_line_boxes.size() == 1;
+    const bool browser_wrapped =
+        has_browser_line_layout && node.text_line_boxes.size() > 1;
+    const bool browser_wrap_fallback = browser_single_line &&
+        (!node.style.white_space || *node.style.white_space != "nowrap");
+    if (has_browser_line_layout) {
+        ss << ind << "setCapturedLineBoxes('" << id << "', [";
+        for (size_t i = 0; i < node.text_line_boxes.size(); ++i) {
+            const auto& box = node.text_line_boxes[i];
+            if (i) ss << ", ";
+            ss << "{ left: " << box.left
+               << ", top: " << box.top
+               << ", width: " << box.width
+               << ", height: " << box.height
+               << ", start: " << box.start
+               << ", length: " << box.length << " }";
+        }
+        ss << "], " << node.text_layout_basis->width << ", '"
+           << js_single_quote_escape(node.text_layout_basis->resolved_face)
+           << "', " << (browser_wrap_fallback ? "true" : "false")
+           << ");\n";
+    }
+    // Cache eligibility and stale-cache fallback are separate. Even when a
+    // captured basis cannot be installed, the boxes still prove this was a
+    // paragraph; normal flow must rewrap while explicit nowrap stays one line.
+    if (!node.text_line_boxes.empty() &&
+        (!node.style.white_space || *node.style.white_space != "nowrap") &&
+        !browser_single_line)
+        ss << ind << "setMultiLine('" << id << "', true);\n";
     // Inflate min-width when the label is text-transformed to uppercase.
     // Figma stores the source-text width but renders the transformed
     // glyphs — uppercase Latin is typically ~15-20% wider than the
@@ -2235,10 +2341,21 @@ static void emit_js_text_node(const NativeEmit& e) {
         const float line_h = node.style.line_height.value_or(font_h * 1.2f);
         bool multiline_box =
             node.style.height && *node.style.height > line_h * 1.8f;
-        if (multiline_box) {
+        const bool ellipsis_clip = node.style.text_overflow &&
+            *node.style.text_overflow == "ellipsis";
+        const bool needs_multiline =
+            (multiline_box && !browser_single_line) || browser_wrapped;
+        if (needs_multiline || ellipsis_clip) {
             ss << ind << "setFlex('" << id << "', 'width', " << *node.style.width << ");\n";
-            ss << ind << "setMultiLine('" << id << "', true);\n";
+            if (needs_multiline && !has_browser_line_layout)
+                ss << ind << "setMultiLine('" << id << "', true);\n";
         }
+    } else if (browser_wrapped) {
+        // A browser-wrapped run without an explicit width still needs the
+        // multi-line paint path. Its captured absolute box remains the layout
+        // bound; do not invent a new width here.
+        if (!has_browser_line_layout)
+            ss << ind << "setMultiLine('" << id << "', true);\n";
     }
 
     // Reference-free fidelity self-check for this text (see design_fidelity):

@@ -6,6 +6,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -36,6 +37,21 @@ struct CapturedTextBox {
     int start = 0;
     int length = 0;
 };
+
+/// Coalesces Chrome text fragments that share one visual line.
+///
+/// `DOMSnapshot.textBoxes` is commonly one rectangle per whitespace-separated
+/// fragment, despite the protocol field being documented as line boxes. The
+/// importer needs one rectangle per actual line so fragment count cannot be
+/// mistaken for a wrap decision. When `text` is provided, omitted same-line
+/// CSS-collapsible whitespace is removed and all returned UTF-16 offsets are
+/// remapped to that normalized string. A same-line gap that cannot be proved
+/// to be collapsible whitespace invalidates the captured line decision and
+/// returns an empty vector; representing it as another line would invent a
+/// wrap and make downstream layout stack the fragments vertically.
+std::vector<CapturedTextBox> coalesce_text_line_fragments(
+    std::vector<CapturedTextBox> boxes, std::string* text = nullptr,
+    std::string_view white_space = "normal");
 
 /// One node Chrome actually laid out and painted, in the order it painted it.
 ///
@@ -207,6 +223,9 @@ private:
     std::unordered_map<int, int> node_to_layout_;
     std::vector<int> layout_to_node_;                ///< layout index → node
     std::vector<int> layout_text_;                   ///< layout index → string
+    /// Text with only browser-omitted, same-line collapsible whitespace
+    /// removed, so cached line offsets name the pixels Chrome actually laid out.
+    std::vector<std::string> layout_normalized_text_;
     std::vector<int> layout_paint_order_;            ///< layout index → order
     std::vector<std::vector<int>> style_rows_;       ///< layout index → strings
     std::vector<CapturedBox> layout_bounds_;

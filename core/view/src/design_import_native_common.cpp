@@ -1613,7 +1613,11 @@ void apply_label_style(Label& label, const IRStyle& style) {
     if (style.font_family) label.set_font_family(*style.font_family);
     if (style.font_size) label.set_font_size(*style.font_size);
     if (style.font_weight) label.set_font_weight(*style.font_weight);
-    if (style.font_style && lower_copy(*style.font_style) == "italic") label.set_font_style(1);
+    if (style.font_style) {
+        const auto slant = lower_copy(*style.font_style);
+        if (slant == "italic") label.set_font_style(1);
+        else if (slant.rfind("oblique", 0) == 0) label.set_font_style(2);
+    }
     if (style.letter_spacing) label.set_letter_spacing(*style.letter_spacing);
     if (style.line_height) label.set_line_height(*style.line_height);
     if (style.text_align) label.set_text_align(parse_label_align(*style.text_align));
@@ -1625,6 +1629,20 @@ void apply_label_style(Label& label, const IRStyle& style) {
         if (value == "uppercase") label.set_text_transform(Label::TextTransform::uppercase);
         else if (value == "lowercase") label.set_text_transform(Label::TextTransform::lowercase);
         else if (value == "capitalize") label.set_text_transform(Label::TextTransform::capitalize);
+    }
+    if (style.text_overflow)
+        label.set_text_overflow_ellipsis(lower_copy(*style.text_overflow) == "ellipsis");
+    if (style.white_space) {
+        const auto value = lower_copy(*style.white_space);
+        using Mode = View::WhiteSpaceMode;
+        Mode mode = Mode::normal;
+        if      (value == "nowrap")       mode = Mode::nowrap;
+        else if (value == "pre")          mode = Mode::pre;
+        else if (value == "pre-wrap")     mode = Mode::pre_wrap;
+        else if (value == "pre-line")     mode = Mode::pre_line;
+        else if (value == "break-spaces") mode = Mode::break_spaces;
+        label.set_white_space_mode(mode);
+        label.set_multi_line(mode != Mode::nowrap);
     }
     if (style.text_decoration) {
         const auto value = lower_copy(*style.text_decoration);
@@ -1647,6 +1665,111 @@ void apply_label_style(Label& label, const IRStyle& style) {
     if (style.height && style.font_size &&
         *style.height > *style.font_size * 1.15f)
         label.set_vertical_align(canvas::TextVerticalAlign::center);
+}
+
+void apply_text_runs(Label& label, const IRNode& node) {
+    if (node.text_runs.empty() || node.text_content.empty()) return;
+
+    canvas::TextSpan base;
+    base.inherit_font_family = !node.style.font_family.has_value();
+    base.inherit_font_size = !node.style.font_size.has_value();
+    base.inherit_font_weight = !node.style.font_weight.has_value();
+    base.inherit_font_slant = !node.style.font_style.has_value();
+    base.inherit_letter_spacing = !node.style.letter_spacing.has_value();
+    base.inherit_color = !node.style.color.has_value();
+    if (node.style.font_family) base.font_family = *node.style.font_family;
+    if (node.style.font_size) base.font_size = *node.style.font_size;
+    if (node.style.font_weight) base.font_weight = *node.style.font_weight;
+    if (node.style.font_style) {
+        const auto slant = lower_copy(*node.style.font_style);
+        base.font_slant = slant.rfind("oblique", 0) == 0 ? 2
+                         : slant == "italic" ? 1 : 0;
+        base.italic = base.font_slant != 0;
+    }
+    if (node.style.letter_spacing)
+        base.letter_spacing = *node.style.letter_spacing;
+    if (node.style.color) {
+        if (const auto color = parse_any_css_color(*node.style.color))
+            base.color = *color;
+    }
+
+    std::vector<const IRTextRun*> runs;
+    for (const auto& run : node.text_runs)
+        if (run.start < run.end && run.start <
+            static_cast<int>(node.text_content.size())) runs.push_back(&run);
+    std::sort(runs.begin(), runs.end(), [](const auto* a, const auto* b) {
+        return a->start < b->start;
+    });
+
+    canvas::AttributedString attributed;
+    const int text_size = static_cast<int>(node.text_content.size());
+    const auto snap_utf8 = [&](int offset) {
+        offset = std::clamp(offset, 0, text_size);
+        while (offset > 0 && offset < text_size &&
+               (static_cast<unsigned char>(node.text_content[
+                    static_cast<std::size_t>(offset)]) & 0xC0) == 0x80) {
+            ++offset;
+        }
+        return offset;
+    };
+    auto append = [&](int begin, int end, canvas::TextSpan style) {
+        if (end <= begin) return;
+        style.text = node.text_content.substr(
+            static_cast<std::size_t>(begin),
+            static_cast<std::size_t>(end - begin));
+        attributed.append(std::move(style));
+    };
+    int cursor = 0;
+    for (const auto* run : runs) {
+        int begin = std::max(cursor, snap_utf8(run->start));
+        int end = std::max(begin, snap_utf8(run->end));
+        if (end <= cursor) continue;
+        append(cursor, begin, base);
+        auto style = base;
+        if (run->font_size) {
+            style.font_size = *run->font_size;
+            style.inherit_font_size = false;
+        }
+        if (run->font_weight) {
+            style.font_weight = *run->font_weight;
+            style.inherit_font_weight = false;
+        }
+        if (run->font_family) {
+            style.font_family = *run->font_family;
+            style.inherit_font_family = false;
+        }
+        if (run->font_style) {
+            const auto slant = lower_copy(*run->font_style);
+            style.font_slant = slant.rfind("oblique", 0) == 0 ? 2
+                              : slant == "italic" ? 1 : 0;
+            style.italic = style.font_slant != 0;
+            style.inherit_font_slant = false;
+        }
+        if (run->letter_spacing) {
+            style.letter_spacing = *run->letter_spacing;
+            style.inherit_letter_spacing = false;
+        }
+        if (run->color) {
+            if (const auto color = parse_any_css_color(*run->color)) {
+                style.color = *color;
+                style.inherit_color = false;
+            }
+        }
+        if (run->text_decoration) {
+            style.decoration_override = true;
+            const auto decoration = lower_copy(*run->text_decoration);
+            if (decoration.find("underline") != std::string::npos)
+                style.decoration = canvas::TextDecoration::underline;
+            else if (decoration.find("line-through") != std::string::npos)
+                style.decoration = canvas::TextDecoration::strikethrough;
+            else if (decoration.find("overline") != std::string::npos)
+                style.decoration = canvas::TextDecoration::overline;
+        }
+        append(begin, end, std::move(style));
+        cursor = end;
+    }
+    append(cursor, text_size, base);
+    label.set_attributed_string(std::move(attributed));
 }
 
 void apply_svg_paint(SvgPathWidget& path, const IRNode& node) {
@@ -1909,7 +2032,8 @@ void apply_captured_art_fader_skin(Fader& fader, const IRNode& node) {
         attr_float(node, "fader_body_origin_x").value_or(0.0f),
         attr_float(node, "fader_body_origin_y").value_or(0.0f),
         attr_float(node, "fader_control_natural_w").value_or(body_w),
-        attr_float(node, "fader_control_natural_h").value_or(body_h));
+        attr_float(node, "fader_control_natural_h").value_or(body_h),
+        attr_bool(node, "fader_body_includes_static_track"));
 }
 
 std::unique_ptr<View> make_widget(const IRNode& node,
@@ -1924,6 +2048,7 @@ std::unique_ptr<View> make_widget(const IRNode& node,
         case NativeWidgetKind::label: {
             auto label = std::make_unique<Label>(text);
             apply_label_style(*label, node.style);
+            apply_text_runs(*label, node);
             // Adopt the browser's own line breaking when the capture carried
             // it. Label validates the basis before using it, so a stale cache
             // costs a reflow rather than a wrong layout.
@@ -1934,10 +2059,6 @@ std::unique_ptr<View> make_widget(const IRNode& node,
                     boxes.push_back({b.left, b.top, b.width, b.height,
                                      b.start, b.length});
                 }
-                const bool browser_wrapped = boxes.size() > 1;
-                label->set_cached_line_boxes(
-                    std::move(boxes), node.text_layout_basis->width,
-                    node.text_layout_basis->resolved_face);
                 // THE CAPTURE DECIDES WHETHER THIS RUN WRAPS, not our own
                 // measurement of it. If the browser put the text on one line
                 // then one line is the right answer, and re-deriving that from
@@ -1949,8 +2070,32 @@ std::unique_ptr<View> make_widget(const IRNode& node,
                 // kept whole.
                 //
                 // `white-space` still applies where the capture says nothing.
-                label->set_multi_line(browser_wrapped);
+                const bool explicit_nowrap =
+                    node.style.white_space &&
+                    lower_copy(*node.style.white_space) == "nowrap";
+                const bool wrap_on_cache_miss =
+                    !explicit_nowrap && node.text_line_boxes.size() == 1;
+                label->set_cached_line_boxes(
+                    std::move(boxes), node.text_layout_basis->width,
+                    node.text_layout_basis->resolved_face,
+                    wrap_on_cache_miss);
+                if (!explicit_nowrap && node.text_line_boxes.size() > 1)
+                    label->set_multi_line(true);
             }
+            const bool explicit_nowrap = node.style.white_space &&
+                lower_copy(*node.style.white_space) == "nowrap";
+            const bool captured_single_line =
+                node.text_layout_basis && node.text_line_boxes.size() == 1;
+            const bool captured_wrapped =
+                node.text_layout_basis && node.text_line_boxes.size() > 1;
+            const float font_height = node.style.font_size.value_or(14.0f);
+            const float line_height =
+                node.style.line_height.value_or(font_height * 1.2f);
+            const bool multiline_box = node.style.width && node.style.height &&
+                *node.style.height > line_height * 1.8f;
+            if (!explicit_nowrap &&
+                (captured_wrapped || (multiline_box && !captured_single_line)))
+                label->set_multi_line(true);
             return label;
         }
         case NativeWidgetKind::text_button:

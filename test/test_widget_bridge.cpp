@@ -2135,6 +2135,10 @@ TEST_CASE("WidgetBridge style and layout setters update native view state",
         setTextTransform('title', 'uppercase');
         setTextDecoration('title', 'underline');
         setText('title', 'Updated');
+        setCapturedLineBoxes('title', [
+            { left: 1, top: 2, width: 30, height: 10, start: 0, length: 3 },
+            { left: 1, top: 12, width: 40, height: 10, start: 3, length: 4 }
+        ], 80, 'Inter-Regular');
         setMultiLine('title', 1);
         setText('editor', 'typed');
         setPlaceholder('editor', 'Enter value');
@@ -2260,6 +2264,13 @@ TEST_CASE("WidgetBridge style and layout setters update native view state",
     REQUIRE_THAT(title->font_size(), WithinAbs(18.0f, 0.001f));
     REQUIRE(title->text_transform() == Label::TextTransform::uppercase);
     REQUIRE(title->theme().color("text.primary").has_value());
+    REQUIRE(title->cached_line_boxes().size() == 2);
+    CHECK_THAT(title->cached_line_boxes()[0].left, WithinAbs(1.0f, 0.001f));
+    CHECK(title->cached_line_boxes()[0].start == 0);
+    CHECK(title->cached_line_boxes()[0].length == 3);
+    CHECK_THAT(title->cached_line_boxes()[1].top, WithinAbs(12.0f, 0.001f));
+    CHECK(title->cached_line_boxes()[1].start == 3);
+    CHECK(title->cached_line_boxes()[1].length == 4);
 
     REQUIRE(editor->text() == "typed");
     REQUIRE(editor->placeholder == "Enter value");
@@ -2269,6 +2280,64 @@ TEST_CASE("WidgetBridge style and layout setters update native view state",
     REQUIRE(engine.evaluate("saved_ok").getWithDefault<bool>(false));
     REQUIRE(engine.evaluate("loaded_preset.nested.value").getWithDefault<int>(0) == 3);
     REQUIRE(engine.evaluate("missing_preset_type").toString() == "undefined");
+}
+
+TEST_CASE("WidgetBridge captured line boxes reject partial entries without mutation",
+          "[view][bridge][typography][captured-lines]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createLabel('copy', 'alpha beta', '');
+        setCapturedLineBoxes('copy', [
+            { left: 1, top: 2, width: 30, height: 10, start: 0, length: 5 }
+        ], 80, 'Inter-Regular', true);
+        setCapturedLineBoxes('copy', [
+            { left: 9, top: 9, width: 9, height: 9, start: 0 }
+        ], 80, 'Inter-Regular');
+        setCapturedLineBoxes('copy', [
+            { left: 9, top: 9, width: 9, height: 9,
+              start: 2147483647, length: 1 }
+        ], 80, 'Inter-Regular');
+        setCapturedLineBoxes('copy', [
+            { left: 9, top: 9, width: 9, height: 9, start: 8, length: 5 }
+        ], 80, 'Inter-Regular');
+    )");
+
+    auto* label = dynamic_cast<Label*>(bridge.widget("copy"));
+    REQUIRE(label != nullptr);
+    REQUIRE(label->cached_line_boxes().size() == 1);
+    CHECK(label->captured_wrap_fallback());
+    CHECK_THAT(label->cached_line_boxes()[0].left, WithinAbs(1.0f, 0.001f));
+    CHECK(label->cached_line_boxes()[0].length == 5);
+}
+
+TEST_CASE("WidgetBridge captured line boxes reject reordered and overlapping ranges",
+          "[view][bridge][typography][captured-lines]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createLabel('copy', 'alpha beta', '');
+        setCapturedLineBoxes('copy', [
+            { left: 1, top: 2, width: 30, height: 10, start: 0, length: 5 }
+        ], 80, 'Inter-Regular', true);
+        setCapturedLineBoxes('copy', [
+            { left: 0, top: 0, width: 20, height: 10, start: 6, length: 4 },
+            { left: 0, top: 10, width: 20, height: 10, start: 0, length: 5 }
+        ], 80, 'Inter-Regular');
+        setCapturedLineBoxes('copy', [
+            { left: 0, top: 0, width: 20, height: 10, start: 0, length: 7 },
+            { left: 0, top: 10, width: 20, height: 10, start: 6, length: 4 }
+        ], 80, 'Inter-Regular');
+    )");
+    auto* label = dynamic_cast<Label*>(bridge.widget("copy"));
+    REQUIRE(label != nullptr);
+    REQUIRE(label->cached_line_boxes().size() == 1);
+    CHECK(label->cached_line_boxes()[0].start == 0);
+    CHECK(label->cached_line_boxes()[0].length == 5);
 }
 
 // RN `mixBlendMode` maps W3C blend-mode keywords to the canvas BlendMode enum
@@ -3596,7 +3665,7 @@ TEST_CASE("View::paint_all emits save_backdrop_filter when backdrop_blur is set"
     root.set_bounds({0, 0, 200, 120});
     root.set_backdrop_blur(8.0f);
 
-    RecordingCanvas canvas;
+    pulp::canvas::RecordingCanvas canvas;
     root.paint_all(canvas);
 
     REQUIRE(canvas.count(DrawCommand::Type::save_backdrop_filter) == 1);
@@ -5986,4 +6055,100 @@ TEST_CASE("an explicit label still reaches a bridge-made control",
     REQUIRE(knob != nullptr);
     CHECK(knob->label() == "RATE");
     CHECK(knob->access_label() == "RATE");
+}
+
+TEST_CASE("setFontStyle preserves CSS oblique as a distinct native slant",
+          "[view][widget-bridge][typography][oblique]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(
+        "createLabel('oblique', 'slanted', '');\n"
+        "setFontStyle('oblique', 'oblique 12deg');");
+
+    auto* label = dynamic_cast<Label*>(bridge.widget("oblique"));
+    REQUIRE(label != nullptr);
+    CHECK(label->font_style() == 2);
+}
+
+TEST_CASE("text runs inherit base tracking and normalize slant case",
+          "[view][widget-bridge][typography][text-runs]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createLabel('mixed', 'alpha beta', '');
+        setLetterSpacing('mixed', 3);
+        setFontStyle('mixed', 'Italic');
+        setTextDecoration('mixed', 'underline');
+        setTextRuns('mixed', [
+          { start: 6, end: 10, fontStyle: 'Oblique 12deg', textDecoration: 'none' }
+        ]);
+    )");
+
+    auto* label = dynamic_cast<Label*>(bridge.widget("mixed"));
+    REQUIRE(label != nullptr);
+    CHECK(label->font_style() == 1);
+    label->set_bounds({0, 0, 200, 30});
+    pulp::canvas::RecordingCanvas canvas;
+    label->paint(canvas);
+    bool saw_italic_tracking = false;
+    bool saw_oblique_tracking = false;
+    for (const auto& command : canvas.commands()) {
+        if (command.type != pulp::canvas::DrawCommand::Type::set_font_full)
+            continue;
+        if (command.f[2] == Catch::Approx(1.0f) &&
+            command.f[3] == Catch::Approx(3.0f))
+            saw_italic_tracking = true;
+        if (command.f[2] == Catch::Approx(2.0f) &&
+            command.f[3] == Catch::Approx(3.0f))
+            saw_oblique_tracking = true;
+    }
+    CHECK(saw_italic_tracking);
+    CHECK(saw_oblique_tracking);
+    CHECK(canvas.count(pulp::canvas::DrawCommand::Type::stroke_line) == 2);
+}
+
+TEST_CASE("setTextRuns snaps malformed byte offsets to UTF-8 boundaries",
+          "[view][widget-bridge][typography][text-runs][utf8]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createLabel('mixed', 'A\u00e9B', '');
+        setTextRuns('mixed', [{ start: 1, end: 2, fontWeight: 700 }]);
+    )");
+
+    auto* label = dynamic_cast<Label*>(bridge.widget("mixed"));
+    REQUIRE(label != nullptr);
+    REQUIRE(label->attributed_span_count() == 3);
+    label->set_bounds({0, 0, 100, 24});
+    pulp::canvas::RecordingCanvas canvas;
+    label->paint(canvas);
+    std::string painted;
+    for (const auto& command : canvas.commands())
+        if (command.type == pulp::canvas::DrawCommand::Type::fill_text)
+            painted += command.text;
+    CHECK(painted == std::string("A") + "\xc3\xa9" + "B");
+}
+
+TEST_CASE("setCapturedLineBoxes rejects UTF-16 surrogate-pair splits",
+          "[view][widget-bridge][typography][text-cache][utf16]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createLabel('emoji', 'A\ud83d\ude00B', '');
+        setCapturedLineBoxes('emoji', [
+          { left: 0, top: 0, width: 100, height: 18, start: 1, length: 1 }
+        ], 100, 'Inter');
+    )");
+
+    auto* label = dynamic_cast<Label*>(bridge.widget("emoji"));
+    REQUIRE(label != nullptr);
+    CHECK(label->cached_line_boxes().empty());
 }

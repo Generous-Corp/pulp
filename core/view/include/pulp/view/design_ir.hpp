@@ -432,7 +432,8 @@ struct IRTextRun {
     int end = 0;
     std::optional<float> font_size;
     std::optional<int> font_weight;
-    std::optional<std::string> font_style;       // "italic" / "normal"
+    std::optional<std::string> font_family;
+    std::optional<std::string> font_style;       // "italic" / "oblique ..." / "normal"
     std::optional<std::string> color;
     std::optional<float> letter_spacing;
     std::optional<std::string> text_decoration;  // "underline" / "line-through"

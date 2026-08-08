@@ -18,7 +18,8 @@ export interface ExtractedTextRun {
   end: number;
   fontSize?: number;
   fontWeight?: number;
-  fontStyle?: "italic" | "normal";
+  fontFamily?: string;
+  fontStyle?: "italic" | "oblique" | "normal";
   color?: string;
   letterSpacing?: number;
   textDecoration?: string;
@@ -186,7 +187,7 @@ export interface ExtractedStyle {
   font_family?: string;
   font_size?: number;
   font_weight?: number;
-  font_style?: "normal" | "italic";
+  font_style?: "normal" | "italic" | "oblique";
   text_align?: string;
   /// Figma textAlignVertical normalized to top/middle/bottom. Design
   /// authority: parse_ir_style reads it and codegen honors it over the

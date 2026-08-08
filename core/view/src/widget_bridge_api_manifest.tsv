@@ -143,6 +143,7 @@ setLetterSpacing	typography	function	core/view/src/widget_bridge/typography_api.
 setLineHeight	typography	function	core/view/src/widget_bridge/typography_api.cpp
 setTextAlign	typography	function	core/view/src/widget_bridge/typography_api.cpp
 setMultiLine	typography	function	core/view/src/widget_bridge/typography_api.cpp
+setCapturedLineBoxes	typography	function	core/view/src/widget_bridge/typography_api.cpp
 setFontSize	typography	function	core/view/src/widget_bridge/typography_api.cpp
 setProgress	widget_value	function	core/view/src/widget_bridge/widget_value_content_api.cpp
 setMeterLevel	widget_value	function	core/view/src/widget_bridge/widget_value_content_api.cpp

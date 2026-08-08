@@ -746,11 +746,17 @@ void Knob::paint(canvas::Canvas& canvas) {
 void Fader::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
 
+    const bool captured_body_ready = captured_body_ && captured_body_->loaded();
+    const bool captured_static_body_ready =
+        captured_body_includes_static_track_ && captured_body_ready &&
+        has_captured_indicator_art();
+
     // A browser capture freezes the authored thumb at one value. The importer
     // gives us a cleaned body crop to cover that frozen instance, then the
     // separately captured indicator below is translated with value_. Draw the
     // body before any live chrome so track/fill remain functional and visible.
-    if (captured_body_ && captured_body_->loaded()) {
+    if (captured_body_ready &&
+        (!captured_body_includes_static_track_ || captured_static_body_ready)) {
         const float natural_w = captured_control_natural_w_ > 0.0f
             ? captured_control_natural_w_
             : static_cast<float>(captured_body_->frame_width());
@@ -812,8 +818,14 @@ void Fader::paint(canvas::Canvas& canvas) {
     float track_width = vert ? b.width : b.height;
     const float pos = position_for_value();
 
-    // Sprite strip path
-    if (sprite_strip_ && sprite_strip_->loaded()) {
+    // A static captured travel band already includes the authored track,
+    // ticks, border and other non-value-dependent chrome. Its body plus the
+    // separately moving indicator are the complete live rendering. Missing
+    // body or indicator assets fail back into the ordinary working paths.
+    if (captured_static_body_ready) {
+        // The captured body was painted above; the moving indicator is the
+        // final compositing layer below.
+    } else if (sprite_strip_ && sprite_strip_->loaded()) {
         int frame = sprite_strip_->frame_for_value(value_);
         int fx, fy;
         sprite_strip_->frame_offset(frame, fx, fy);
@@ -998,10 +1010,14 @@ void Fader::paint(canvas::Canvas& canvas) {
         const float hover_scale = hover_thumb_scale_.value();
         const float body_w = captured_control_natural_w_ > 0.0f
             ? captured_control_natural_w_
-            : static_cast<float>(captured_body_->frame_width());
+            : captured_body_ready
+                ? static_cast<float>(captured_body_->frame_width())
+                : b.width;
         const float body_h = captured_control_natural_h_ > 0.0f
             ? captured_control_natural_h_
-            : static_cast<float>(captured_body_->frame_height());
+            : captured_body_ready
+                ? static_cast<float>(captured_body_->frame_height())
+                : b.height;
         const float scale_x = body_w > 0.0f ? b.width / body_w : 0.0f;
         const float scale_y = body_h > 0.0f ? b.height / body_h : 0.0f;
         const float thumb_w = std::max(

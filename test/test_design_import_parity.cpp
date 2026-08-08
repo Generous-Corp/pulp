@@ -133,8 +133,6 @@ const std::map<std::string, AllowlistEntry>& allowlist() {
          {{"cpp", "swift", "native"}, "js-only; setMaskImage bridge consumer, others deferred"}},
         {"mask_size",
          {{"cpp", "swift", "native"}, "js-only; setMaskSize bridge consumer, others deferred"}},
-        {"font_family",
-         {{"swift"}, "js+cpp+native lower it; SwiftUI uses system font stack"}},
         {"text_align",
          {{"swift"}, "js+cpp+native lower it; SwiftUI alignment mapping deferred"}},
         {"vertical_align",
@@ -148,13 +146,11 @@ const std::map<std::string, AllowlistEntry>& allowlist() {
         {"text_transform",
          {{"swift"}, "js+cpp+native lower it; SwiftUI case transform deferred"}},
         {"white_space",
-         {{"js", "swift"},
-          "cpp+native lower it; the JS lane relies on web-compat CSS defaults "
-          "and SwiftUI wrapping is deferred"}},
+         {{"swift"},
+          "js+cpp+native lower it; SwiftUI wrapping is deferred"}},
         {"text_overflow",
-         {{"js", "cpp", "swift", "native"},
-          "parsed into the IR but no codegen lowers it yet (ellipsis clipping "
-          "deferred on every surface)"}},
+         {{"cpp", "swift"},
+          "js+native lower ellipsis clipping; C++ and SwiftUI emission is deferred"}},
         {"overflow",
          {{"swift"}, "js+cpp+native lower it; SwiftUI clipping/scroll deferred"}},
         {"cursor",
@@ -228,9 +224,9 @@ const std::map<std::string, AllowlistEntry>& allowlist() {
 
         // ── IRNode extras (see checked_node_fields) ────────────────────────
         {"text_runs",
-         {{"cpp", "native"},
-          "js+swift lower per-range mixed-text styling; cpp codegen and the "
-          "native materializer emit the plain text only"}},
+         {{"cpp"},
+          "js+swift+native lower per-range mixed-text styling; cpp codegen "
+          "still emits the plain text only"}},
     };
     return a;
 }

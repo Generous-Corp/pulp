@@ -1817,6 +1817,16 @@ export function materializeFrame(scene, frame, ctx) {
     return { style, assetRef, layout };
   }
 
+  function figLetterSpacingPx(value, fontSize) {
+    if (typeof value === 'number') return round2(value);
+    if (!value || typeof value.value !== 'number') return null;
+    if (value.units === 'PERCENT') {
+      return typeof fontSize === 'number'
+        ? round2((value.value / 100) * fontSize) : null;
+    }
+    return round2(value.value);
+  }
+
   function fontToken(node) {
     // Text nodes carry a fontName struct and fontSize. Both matter: dropping the
     // family did not just lose typography, it made a whole class of failure
@@ -1828,11 +1838,13 @@ export function materializeFrame(scene, frame, ctx) {
     const out = {};
     const fs = node.fontSize;
     if (typeof fs === 'number') out.font_size = Math.round(fs);
+    const tracking = figLetterSpacingPx(node.letterSpacing, fs);
+    if (tracking !== null) out.letter_spacing = tracking;
     const family = node.fontName && node.fontName.family;
     if (typeof family === 'string' && family) {
       out.font_family = family;
       const style = node.fontName.style;
-      if (typeof style === 'string' && style && style !== 'Regular') out.font_style = style;
+      if (typeof style === 'string' && style) out.font_style = semanticFontSlant(style);
       fontsSeen.add(style && style !== 'Regular' ? `${family} ${style}` : family);
     }
     return out;
@@ -1851,8 +1863,16 @@ export function materializeFrame(scene, frame, ctx) {
     if (s.includes('extrabold') || s.includes('ultrabold')) return 800;
     if (s.includes('bold')) return 700;
     if (s.includes('black') || s.includes('heavy')) return 900;
-    if (s.includes('regular') || s.includes('normal') || s === 'italic') return 400;
+    if (s.includes('regular') || s.includes('normal') ||
+        s === 'italic' || s === 'oblique') return 400;
     return null;
+  }
+
+  function semanticFontSlant(styleName) {
+    const style = String(styleName || '');
+    if (/oblique/i.test(style)) return 'oblique';
+    if (/italic/i.test(style)) return 'italic';
+    return 'normal';
   }
 
   // Mixed styled ranges. TextData carries `characterStyleIDs` (one override id
@@ -1888,6 +1908,8 @@ export function materializeFrame(scene, frame, ctx) {
     const byteOff = (i) => (i >= 0 && i < u16ToByte.length ? u16ToByte[i] : byte);
 
     const baseWeight = weightFromFontStyleName(node.fontName && node.fontName.style) || 400;
+    const baseFamily = node.fontName && node.fontName.family;
+    const baseSlant = semanticFontSlant(node.fontName && node.fontName.style);
     const runs = [];
     let i = 0;
     const L = Math.min(ids.length, u16ToByte.length - 1);
@@ -1903,24 +1925,34 @@ export function materializeFrame(scene, frame, ctx) {
           run.fontSize = round2(row.fontSize);
         }
         if (row.fontName && typeof row.fontName.style === 'string') {
-          if (/italic/i.test(row.fontName.style)) run.fontStyle = 'italic';
+          const slant = semanticFontSlant(row.fontName.style);
+          if (slant !== baseSlant) run.fontStyle = slant;
           const w = weightFromFontStyleName(row.fontName.style);
           if (w !== null && w !== baseWeight) run.fontWeight = w;
         }
+        if (row.fontName && typeof row.fontName.family === 'string' &&
+            row.fontName.family !== baseFamily) {
+          run.fontFamily = row.fontName.family;
+        }
+        if (row.fontName && typeof row.fontName.family === 'string' &&
+            row.fontName.family) {
+          const runFace = row.fontName.style;
+          fontsSeen.add(runFace && runFace !== 'Regular'
+            ? `${row.fontName.family} ${runFace}` : row.fontName.family);
+        }
         if (row.textDecoration === 'UNDERLINE') run.textDecoration = 'underline';
         else if (row.textDecoration === 'STRIKETHROUGH') run.textDecoration = 'line-through';
+        else if (row.textDecoration === 'NONE') run.textDecoration = 'none';
         const solid = firstSolidFill(row);
         if (solid && solid.color) {
           run.color = colorToHex({ ...solid.color, a: (solid.color.a ?? 1) * (solid.opacity ?? 1) });
         }
         const ls = row.letterSpacing;
-        if (ls && typeof ls.value === 'number' && ls.value !== 0) {
-          const fs = typeof row.fontSize === 'number' ? row.fontSize : node.fontSize;
-          if (ls.units === 'PERCENT') {
-            if (typeof fs === 'number') run.letterSpacing = round2((ls.value / 100) * fs);
-          } else {
-            run.letterSpacing = round2(ls.value);
-          }
+        if (ls && typeof ls.value === 'number') {
+            const fs = typeof row.fontSize === 'number' ? row.fontSize : node.fontSize;
+          const tracking = figLetterSpacingPx(ls, fs);
+          if (tracking !== null && tracking !== figLetterSpacingPx(node.letterSpacing, node.fontSize))
+            run.letterSpacing = tracking;
         }
         if (Object.keys(run).length > 2) runs.push(run);
       }

@@ -34,6 +34,7 @@ test("the capture collects the properties a whole panel needs to be drawn",
       "text-decoration-style",
       "text-decoration-thickness",
       "text-underline-offset",
+      "text-overflow",
       "word-spacing",
       // ::before / ::after inject text that exists in no DOM text node.
       "content",

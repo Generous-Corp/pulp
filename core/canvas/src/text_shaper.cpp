@@ -86,6 +86,23 @@ static size_t utf8_byte_offset_for_codepoints(const std::string& text, int targe
     return text.size();
 }
 
+static void append_fragment(ShapedLayout::Line& line,
+                            const ShapedSegment& segment,
+                            std::string text, float width) {
+    if (text.empty()) return;
+    line.fragments.push_back(
+        {std::move(text), width, segment.style_index});
+}
+
+static void append_segment_range(ShapedLayout::Line& line,
+                                 const std::vector<ShapedSegment>& segments,
+                                 int begin, int end) {
+    for (int i = begin; i < end; ++i) {
+        if (segments[i].is_newline) continue;
+        append_fragment(line, segments[i], segments[i].text, segments[i].width);
+    }
+}
+
 static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segments,
                                           float max_width, float line_height, bool materialize,
                                           int max_lines = 0,
@@ -128,10 +145,16 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
                 // and in width (so ellipsis overflow detection sees the
                 // collapsed advance).
                 w += whitespace_width;
-                if (materialize) line.text += ' ';
+                if (materialize) {
+                    line.text += ' ';
+                    append_fragment(line, seg, " ", whitespace_width);
+                }
             } else {
                 w += seg.width;
-                if (materialize) line.text += seg.text;
+                if (materialize) {
+                    line.text += seg.text;
+                    append_fragment(line, seg, seg.text, seg.width);
+                }
             }
         }
         line.width = w;
@@ -148,6 +171,18 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
     int last_break = -1;
     float width_at_break = 0;
     float max_line_width = 0;
+    std::string carried_text;
+    std::vector<ShapedLayout::Line::Fragment> carried_fragments;
+    const auto append_carried = [&](ShapedLayout::Line& line) {
+        if (!materialize || carried_text.empty()) return;
+        line.text += carried_text;
+        line.fragments.insert(line.fragments.end(), carried_fragments.begin(),
+                              carried_fragments.end());
+    };
+    const auto clear_carried = [&] {
+        carried_text.clear();
+        carried_fragments.clear();
+    };
 
     for (int i = 0; i < static_cast<int>(segments.size()); ++i) {
         auto& seg = segments[i];
@@ -160,10 +195,13 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
             line.first_segment = line_start;
             line.segment_count = i - line_start;
             if (materialize) {
+                append_carried(line);
                 for (int j = line_start; j < i; ++j)
                     line.text += segments[j].text;
+                append_segment_range(line, segments, line_start, i);
             }
             result.lines.push_back(std::move(line));
+            clear_carried();
             max_line_width = std::max(max_line_width, current_width);
 
             y += line_height;
@@ -208,6 +246,14 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
             //     here the two modes coincide because we only enter this
             //     branch on actual overflow.
             const bool has_ws_break = (last_break > line_start);
+            if (break_mode == BreakMode::normal &&
+                seg.joins_previous_word && !has_ws_break) {
+                // A rich-text style boundary inside a word is not a soft-wrap
+                // opportunity. Normal wrapping lets the whole logical word
+                // overflow just as the single-style path does.
+                current_width += seg.width;
+                continue;
+            }
             const bool allow_inside_segment =
                 !has_ws_break && (break_mode == BreakMode::break_word ||
                                   break_mode == BreakMode::anywhere);
@@ -244,11 +290,15 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
                     line.first_segment = line_start;
                     line.segment_count = i - line_start;  // segments BEFORE this one stay grouped
                     if (materialize) {
+                        append_carried(line);
                         for (int j = line_start; j < i; ++j)
                             line.text += segments[j].text;
                         line.text += head;
+                        append_segment_range(line, segments, line_start, i);
+                        append_fragment(line, seg, head, head_w);
                     }
                     result.lines.push_back(std::move(line));
+                    clear_carried();
                     max_line_width = std::max(max_line_width, current_width + head_w);
 
                     y += line_height;
@@ -276,7 +326,10 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
                         chunk_line.y = y;
                         chunk_line.first_segment = i;
                         chunk_line.segment_count = 1;
-                        if (materialize) chunk_line.text = chunk;
+                        if (materialize) {
+                            chunk_line.text = chunk;
+                            append_fragment(chunk_line, seg, chunk, chunk_w);
+                        }
                         result.lines.push_back(std::move(chunk_line));
                         max_line_width = std::max(max_line_width, chunk_w);
                         y += line_height;
@@ -285,36 +338,17 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
                         ++safety;
                     }
 
-                    // Final remnant of this segment must be emitted as
-                    // its own line right now — `current_width` would
-                    // preserve the numeric width into the next iteration
-                    // but the textual content (remaining_text) belongs
-                    // to segment `i`, not to any of segments[i+1..end).
-                    // The materialization loops downstream only walk
-                    // `segments[j].text`, so leaving the remnant in
-                    // current_width would silently drop the characters
-                    // when followed by ANY further segments. The tradeoff:
-                    // the remnant gets its own line instead
-                    // of combining with the following segment on the
-                    // same visual line — minor cosmetic vs. data loss.
-                    //
-                    // Also handles the last-segment case correctly: an
-                    // unconditional emit means we always materialize
-                    // the remnant, regardless of whether more segments
-                    // follow.
-                    {
-                        ShapedLayout::Line tail_line;
-                        tail_line.width = remaining_w;
-                        tail_line.y = y;
-                        tail_line.first_segment = i;
-                        tail_line.segment_count = 1;
-                        if (materialize) tail_line.text = remaining_text;
-                        result.lines.push_back(std::move(tail_line));
-                        max_line_width = std::max(max_line_width, remaining_w);
-                        y += line_height;
-                    }
+                    // Keep the final remnant as the current line prefix so a
+                    // following styled span can use the remaining width. Its
+                    // fragment retains this span's style even though the next
+                    // loop iteration advances beyond segment i.
+                    carried_text = std::move(remaining_text);
+                    carried_fragments.clear();
+                    if (materialize && !carried_text.empty())
+                        carried_fragments.push_back(
+                            {carried_text, remaining_w, seg.style_index});
                     line_start = i + 1;
-                    current_width = 0;
+                    current_width = remaining_w;
                     last_break = -1;
                     continue;
                 }
@@ -332,10 +366,13 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
             line.first_segment = line_start;
             line.segment_count = break_at - line_start;
             if (materialize) {
+                append_carried(line);
                 for (int j = line_start; j < break_at; ++j)
                     line.text += segments[j].text;
+                append_segment_range(line, segments, line_start, break_at);
             }
             result.lines.push_back(std::move(line));
+            clear_carried();
             max_line_width = std::max(max_line_width, break_width);
 
             y += line_height;
@@ -353,15 +390,18 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
     }
 
     // Final line
-    if (line_start < static_cast<int>(segments.size())) {
+    if (line_start < static_cast<int>(segments.size()) || !carried_text.empty()) {
         ShapedLayout::Line line;
         line.width = current_width;
         line.y = y;
         line.first_segment = line_start;
         line.segment_count = static_cast<int>(segments.size()) - line_start;
         if (materialize) {
+            append_carried(line);
             for (int j = line_start; j < static_cast<int>(segments.size()); ++j)
                 line.text += segments[j].text;
+            append_segment_range(line, segments, line_start,
+                                 static_cast<int>(segments.size()));
         }
         result.lines.push_back(std::move(line));
         max_line_width = std::max(max_line_width, current_width);
@@ -399,6 +439,18 @@ struct TextShaper::Impl {
     bool has_real_shaping = false;
 
 #ifdef PULP_HAS_TEXT_SHAPING
+    static FontSlant font_slant_from_int(int slant) {
+        if (slant == 2) return FontSlant::Oblique;
+        if (slant == 1) return FontSlant::Italic;
+        return FontSlant::Normal;
+    }
+
+    static SkFontStyle::Slant skia_slant_from_int(int slant) {
+        if (slant == 2) return SkFontStyle::kOblique_Slant;
+        if (slant == 1) return SkFontStyle::kItalic_Slant;
+        return SkFontStyle::kUpright_Slant;
+    }
+
     sk_sp<SkFontMgr> font_mgr;
     sk_sp<skia::textlayout::FontCollection> font_collection;
 
@@ -436,16 +488,30 @@ struct TextShaper::Impl {
         std::string font_family;
         float font_size;
         int font_weight;
+        int font_slant;
+        float letter_spacing;
+        std::vector<Canvas::FontFeature> font_features;
         bool operator==(const CacheKey& o) const {
             return font_family == o.font_family && font_size == o.font_size &&
-                   font_weight == o.font_weight;
+                   font_weight == o.font_weight && font_slant == o.font_slant &&
+                   letter_spacing == o.letter_spacing &&
+                   font_features == o.font_features;
         }
     };
     struct CacheKeyHash {
         size_t operator()(const CacheKey& k) const {
-            return std::hash<std::string>{}(k.font_family) ^
-                   (std::hash<float>{}(k.font_size) << 16) ^
-                   (std::hash<int>{}(k.font_weight) << 8);
+            size_t hash = std::hash<std::string>{}(k.font_family) ^
+                          (std::hash<float>{}(k.font_size) << 16) ^
+                          (std::hash<int>{}(k.font_weight) << 8) ^
+                          (std::hash<int>{}(k.font_slant) << 4) ^
+                          std::hash<float>{}(k.letter_spacing);
+            for (const auto& feature : k.font_features) {
+                hash ^= std::hash<std::uint32_t>{}(feature.tag) +
+                        0x9e3779b9u + (hash << 6) + (hash >> 2);
+                hash ^= std::hash<std::uint32_t>{}(feature.value) +
+                        0x9e3779b9u + (hash << 6) + (hash >> 2);
+            }
+            return hash;
         }
     };
     std::unordered_map<CacheKey, std::unordered_map<std::string, float>, CacheKeyHash> cache;
@@ -462,13 +528,14 @@ struct TextShaper::Impl {
     // every measure_metrics call after the first is pure cache hit. Same
     // PreText "measure once, reuse forever" model as the segment cache.
     struct LineBox {
-        float ascent;   // positive distance above baseline (Skia stores it negative)
-        float descent;  // positive distance below baseline
-        float leading;  // extra inter-line gap
-        float line_height;  // ascent + descent + leading
-        bool real;      // true if derived from SkFontMetrics, false for the heuristic fallback
+        float ascent = 0;   // positive distance above baseline (Skia stores it negative)
+        float descent = 0;  // positive distance below baseline
+        float leading = 0;  // extra inter-line gap
+        float line_height = 0;  // ascent + descent + leading
+        bool real = false;      // true if derived from SkFontMetrics, false for the heuristic fallback
     };
     std::unordered_map<CacheKey, LineBox, CacheKeyHash> metrics_cache;
+    std::uint64_t metrics_cached_generation = 0;
     std::mutex metrics_mutex;
 
 #ifdef PULP_HAS_TEXT_SHAPING
@@ -478,9 +545,10 @@ struct TextShaper::Impl {
     // no family matched and there's no platform fallback (non-Skia
     // build, RefEmpty mgr, etc.).
     sk_sp<SkTypeface> resolve_typeface(const std::string& font_family,
-                                       int font_weight) {
+                                       int font_weight, int font_slant = 0) {
         FontOptions opts;
         opts.weight = static_cast<float>(font_weight);
+        opts.slant = font_slant_from_int(font_slant);
         // Refuse a platform face whose name does not overlap the requested
         // family, so a miss keeps walking the stack instead of stopping at the
         // host default — which is what `measure_segment`'s own walk did before
@@ -517,10 +585,17 @@ struct TextShaper::Impl {
 #endif
 
     LineBox measure_metrics(const std::string& font_family, float font_size,
-                            int font_weight) {
-        CacheKey key{font_family, font_size, font_weight};
+                            int font_weight, int font_slant = 0) {
+        CacheKey key{font_family, font_size, font_weight, font_slant, 0.0f, {}};
+        std::uint64_t measurement_generation = 0;
         {
             std::lock_guard<std::mutex> lock(metrics_mutex);
+            const auto generation = font_registration_generation();
+            measurement_generation = generation;
+            if (metrics_cached_generation != generation) {
+                metrics_cache.clear();
+                metrics_cached_generation = generation;
+            }
             auto it = metrics_cache.find(key);
             if (it != metrics_cache.end()) return it->second;
         }
@@ -531,7 +606,7 @@ struct TextShaper::Impl {
 
 #ifdef PULP_HAS_TEXT_SHAPING
         SkFont font;
-        sk_sp<SkTypeface> tf = resolve_typeface(font_family, font_weight);
+        sk_sp<SkTypeface> tf = resolve_typeface(font_family, font_weight, font_slant);
         if (tf) font.setTypeface(std::move(tf));
         font.setSize(font_size);
         if (font.getTypeface()) {
@@ -582,18 +657,111 @@ struct TextShaper::Impl {
         }
         {
             std::lock_guard<std::mutex> lock(metrics_mutex);
-            metrics_cache[key] = box;
+            // A face may have been registered while this measurement was in
+            // flight. Never publish a pre-registration fallback under the new
+            // generation; the next caller will measure against the new face.
+            const auto generation = font_registration_generation();
+            if (generation == measurement_generation &&
+                metrics_cached_generation == measurement_generation) {
+                metrics_cache[key] = box;
+            }
         }
         return box;
     }
 
-    float measure_segment(const std::string& text,
-                          const std::string& font_family, float font_size,
-                          int font_weight) {
+    LineBox measure_text_metrics(const std::string& text,
+                                 const std::string& font_family,
+                                 float font_size, int font_weight,
+                                 int font_slant) {
+        LineBox box;
+#ifdef PULP_HAS_TEXT_SHAPING
+        auto ctx = TextFontContext::shared();
+        auto collection = ctx->font_collection();
+        if (!collection || text.empty()) return box;
+        skia::textlayout::ParagraphStyle paragraph_style;
+        skia::textlayout::TextStyle text_style;
+        std::vector<SkString> families;
+        size_t cursor = 0;
+        while (cursor < font_family.size()) {
+            const size_t comma = font_family.find(',', cursor);
+            std::string entry = font_family.substr(
+                cursor, comma == std::string::npos ? std::string::npos
+                                                   : comma - cursor);
+            const size_t first = entry.find_first_not_of(" \t\n\r\f\v\"'");
+            const size_t last = entry.find_last_not_of(" \t\n\r\f\v\"'");
+            if (first != std::string::npos && last != std::string::npos)
+                families.emplace_back(entry.substr(first, last - first + 1).c_str());
+            if (comma == std::string::npos) break;
+            cursor = comma + 1;
+        }
+        const std::string emoji_family = ctx->emoji_family_name();
+        if (!emoji_family.empty()) families.emplace_back(emoji_family.c_str());
+        if (families.empty()) families.emplace_back("");
+        text_style.setFontFamilies(families);
+        text_style.setFontSize(font_size);
+        text_style.setFontStyle(SkFontStyle(
+            font_weight, SkFontStyle::kNormal_Width,
+            skia_slant_from_int(font_slant)));
+        paragraph_style.setTextStyle(text_style);
+        auto builder = skia::textlayout::ParagraphBuilder::make(
+            paragraph_style, collection, shared_sk_unicode());
+        if (!builder) return box;
+        builder->addText(text.c_str(), text.size());
+        auto paragraph = builder->Build();
+        if (!paragraph) return box;
+        paragraph->layout(SK_ScalarInfinity);
+        std::vector<skia::textlayout::LineMetrics> lines;
+        paragraph->getLineMetrics(lines);
+        float previous_cumulative_height = 0.0f;
+        for (const auto& line : lines) {
+            const float ascent = static_cast<float>(line.fAscent);
+            const float descent = static_cast<float>(line.fDescent);
+            // This SkParagraph API reports fHeight cumulatively through the
+            // current line. Convert it to this line's height before deriving
+            // leading, or each hard-newline line would include all preceding
+            // line heights and multiline labels would grow quadratically.
+            const float cumulative_height = static_cast<float>(line.fHeight);
+            const float line_height = cumulative_height - previous_cumulative_height;
+            if (std::isfinite(cumulative_height) &&
+                cumulative_height >= previous_cumulative_height) {
+                previous_cumulative_height = cumulative_height;
+            }
+            const float metric_limit = std::max(1.0f, font_size) * 10.0f;
+            if (!std::isfinite(ascent) || !std::isfinite(descent) ||
+                !std::isfinite(line_height) || ascent < 0.0f ||
+                descent < 0.0f || ascent > metric_limit ||
+                descent > metric_limit || line_height <= 0.0f ||
+                line_height > metric_limit) {
+                continue;
+            }
+            box.ascent = std::max(box.ascent, ascent);
+            box.descent = std::max(box.descent, descent);
+            box.leading = std::max(
+                box.leading,
+                std::max(0.0f, line_height - ascent - descent));
+        }
+        box.line_height = box.ascent + box.descent + box.leading;
+        box.real = box.line_height > 0.0f;
+#else
+        (void)text;
+        (void)font_family;
+        (void)font_size;
+        (void)font_weight;
+        (void)font_slant;
+#endif
+        return box;
+    }
+
+    float measure_segment(
+        const std::string& text, const std::string& font_family,
+        float font_size, int font_weight, int font_slant,
+        float letter_spacing,
+        const std::vector<Canvas::FontFeature>& font_features) {
         std::uint64_t current_gen = font_registration_generation();
 
         // Check cache first
-        CacheKey key{font_family, font_size, font_weight};
+        CacheKey key{font_family, font_size, font_weight, font_slant,
+                     letter_spacing, font_features};
         {
             std::lock_guard<std::mutex> lock(cache_mutex);
             if (current_gen != cached_generation) {
@@ -609,8 +777,78 @@ struct TextShaper::Impl {
         }
 
         float width = 0;
+        bool styled_measurement = false;
 
 #ifdef PULP_HAS_TEXT_SHAPING
+        // Measure through the same fallback-aware SkParagraph path used by
+        // SkiaCanvas paint. Besides honoring slant, tracking, and OpenType
+        // features, this keeps plain and styled CJK/emoji runs on the same
+        // resolved fallback faces; otherwise changing only tracking can also
+        // change the measured typeface and corrupt the apparent advance.
+        {
+            auto ctx = TextFontContext::shared();
+            auto collection = ctx->font_collection();
+            if (collection) {
+                skia::textlayout::ParagraphStyle paragraph_style;
+                skia::textlayout::TextStyle text_style;
+                std::vector<SkString> families;
+                size_t cursor = 0;
+                while (cursor < font_family.size()) {
+                    const size_t comma = font_family.find(',', cursor);
+                    std::string entry = font_family.substr(
+                        cursor, comma == std::string::npos
+                                    ? std::string::npos : comma - cursor);
+                    const size_t first = entry.find_first_not_of(" \t\n\r\f\v");
+                    const size_t last = entry.find_last_not_of(" \t\n\r\f\v");
+                    if (first != std::string::npos && last != std::string::npos) {
+                        entry = entry.substr(first, last - first + 1);
+                        if (entry.size() >= 2 &&
+                            (entry.front() == '\'' || entry.front() == '"') &&
+                            entry.front() == entry.back()) {
+                            entry = entry.substr(1, entry.size() - 2);
+                        }
+                        if (!entry.empty()) families.emplace_back(entry.c_str());
+                    }
+                    if (comma == std::string::npos) break;
+                    cursor = comma + 1;
+                }
+                const std::string emoji_family = ctx->emoji_family_name();
+                if (!emoji_family.empty()) families.emplace_back(emoji_family.c_str());
+                if (families.empty()) families.emplace_back("");
+                text_style.setFontFamilies(families);
+                text_style.setFontSize(font_size);
+                text_style.setFontStyle(SkFontStyle(
+                    font_weight, SkFontStyle::kNormal_Width,
+                    skia_slant_from_int(font_slant)));
+                if (letter_spacing != 0.0f)
+                    text_style.setLetterSpacing(letter_spacing);
+                for (const auto& feature : font_features) {
+                    char tag_chars[4] = {
+                        static_cast<char>((feature.tag >> 24) & 0xFF),
+                        static_cast<char>((feature.tag >> 16) & 0xFF),
+                        static_cast<char>((feature.tag >> 8) & 0xFF),
+                        static_cast<char>(feature.tag & 0xFF),
+                    };
+                    text_style.addFontFeature(
+                        SkString(tag_chars, 4),
+                        static_cast<int>(feature.value));
+                }
+                paragraph_style.setTextStyle(text_style);
+                auto builder = skia::textlayout::ParagraphBuilder::make(
+                    paragraph_style, collection, shared_sk_unicode());
+                if (builder) {
+                    builder->addText(text.c_str(), text.size());
+                    auto paragraph = builder->Build();
+                    if (paragraph) {
+                        paragraph->layout(SK_ScalarInfinity);
+                        width = std::max(paragraph->getLongestLine(),
+                                         paragraph->getMaxIntrinsicWidth());
+                        styled_measurement = width > 0.0f;
+                    }
+                }
+            }
+        }
+
         // Real measurement via SkFont. Use the platform font manager
         // (CoreText/DirectWrite/fontconfig/Android) — RefEmpty() returns
         // no typefaces and silently produces ~0 advance widths, which
@@ -626,7 +864,8 @@ struct TextShaper::Impl {
         // FontResolver and nothing here called it. Segment widths and line
         // metrics could also resolve different faces for one family stack,
         // since only the metrics path went through the resolver.
-        sk_sp<SkTypeface> typeface = resolve_typeface(font_family, font_weight);
+        sk_sp<SkTypeface> typeface =
+            resolve_typeface(font_family, font_weight, font_slant);
 
         // Final fallback — platform default. Used only when every
         // family in the list missed (or no list was provided). Still asked for
@@ -648,7 +887,7 @@ struct TextShaper::Impl {
         font.setSize(font_size);
         font.setEdging(SkFont::Edging::kSubpixelAntiAlias);
 
-        if (font.getTypeface()) {
+        if (width <= 0.0f && font.getTypeface()) {
             // Use the advance width (return value), not bounds.width().
             // Advance includes whitespace and proper glyph spacing;
             // bounds.width() can exclude trailing spaces and differ for
@@ -693,7 +932,7 @@ struct TextShaper::Impl {
                     }
                 }
             }
-        } else {
+        } else if (width <= 0.0f) {
             // No platform font manager (or all matchers failed) — fall
             // back to the same character-width estimator the non-Skia
             // build uses, so callers still get a sane positive width.
@@ -703,6 +942,15 @@ struct TextShaper::Impl {
         // Fallback: character-width estimation
         width = static_cast<float>(text.size()) * font_size * 0.6f;
 #endif
+
+        if (letter_spacing != 0.0f && width > 0.0f &&
+            !styled_measurement) {
+            // The SkParagraph styled path already included tracking. The
+            // plain/non-shaping fallback does not, so add one CSS tracking
+            // step per codepoint to match Label intrinsic sizing and paint.
+            width += static_cast<float>(utf8_codepoint_count(text)) *
+                     letter_spacing;
+        }
 
         // Cache the result
         {
@@ -715,7 +963,8 @@ struct TextShaper::Impl {
                 cache.clear();
                 cached_generation = now_gen;
             }
-            cache[key][text] = width;
+            if (now_gen == current_gen)
+                cache[key][text] = width;
         }
 
         return width;
@@ -727,8 +976,10 @@ struct TextShaper::Impl {
 TextShaper::TextShaper() : impl_(std::make_unique<Impl>()) {}
 TextShaper::~TextShaper() = default;
 
-PreparedText TextShaper::prepare(std::string_view text, std::string_view font_family,
-                                  float font_size, int font_weight) {
+PreparedText TextShaper::prepare(
+    std::string_view text, std::string_view font_family, float font_size,
+    int font_weight, int font_slant, float letter_spacing,
+    const std::vector<Canvas::FontFeature>& font_features) {
     detail_prepare_calls().fetch_add(1, std::memory_order_relaxed);
     PreparedText result;
     result.font_family_ = std::string(font_family);
@@ -740,7 +991,18 @@ PreparedText TextShaper::prepare(std::string_view text, std::string_view font_fa
     // Cached per (family, size) so repeated layout calls hit pure
     // arithmetic — same PreText "measure once" guarantee that already
     // drives the segment width cache.
-    auto box = impl_->measure_metrics(result.font_family_, font_size, font_weight);
+    auto box = impl_->measure_metrics(result.font_family_, font_size, font_weight,
+                                      font_slant);
+    const auto shaped_box = impl_->measure_text_metrics(
+        std::string(text), result.font_family_, font_size, font_weight,
+        font_slant);
+    if (shaped_box.real) {
+        box.ascent = std::max(box.ascent, shaped_box.ascent);
+        box.descent = std::max(box.descent, shaped_box.descent);
+        box.leading = std::max(box.leading, shaped_box.leading);
+        box.line_height = box.ascent + box.descent + box.leading;
+        box.real = true;
+    }
     result.line_height_ = box.line_height;
     result.ascent_       = box.ascent;
     result.descent_      = box.descent;
@@ -756,8 +1018,9 @@ PreparedText TextShaper::prepare(std::string_view text, std::string_view font_fa
             if (!current.empty()) {
                 ShapedSegment seg;
                 seg.text = current;
-                seg.width = impl_->measure_segment(current, result.font_family_, font_size,
-                                       font_weight);
+                seg.width = impl_->measure_segment(
+                    current, result.font_family_, font_size, font_weight,
+                    font_slant, letter_spacing, font_features);
                 result.segments_.push_back(std::move(seg));
                 current.clear();
             }
@@ -769,15 +1032,17 @@ PreparedText TextShaper::prepare(std::string_view text, std::string_view font_fa
             if (!current.empty()) {
                 ShapedSegment seg;
                 seg.text = current;
-                seg.width = impl_->measure_segment(current, result.font_family_, font_size,
-                                       font_weight);
+                seg.width = impl_->measure_segment(
+                    current, result.font_family_, font_size, font_weight,
+                    font_slant, letter_spacing, font_features);
                 result.segments_.push_back(std::move(seg));
                 current.clear();
             }
             ShapedSegment ws;
             ws.text = std::string(1, c);
-            ws.width = impl_->measure_segment(ws.text, result.font_family_, font_size,
-                                      font_weight);
+            ws.width = impl_->measure_segment(
+                ws.text, result.font_family_, font_size, font_weight,
+                font_slant, letter_spacing, font_features);
             ws.is_whitespace = true;
             result.segments_.push_back(std::move(ws));
         } else {
@@ -788,8 +1053,9 @@ PreparedText TextShaper::prepare(std::string_view text, std::string_view font_fa
     if (!current.empty()) {
         ShapedSegment seg;
         seg.text = current;
-        seg.width = impl_->measure_segment(current, result.font_family_, font_size,
-                                       font_weight);
+        seg.width = impl_->measure_segment(
+            current, result.font_family_, font_size, font_weight,
+            font_slant, letter_spacing, font_features);
         result.segments_.push_back(std::move(seg));
     }
 
@@ -806,23 +1072,45 @@ PreparedText TextShaper::prepare(const AttributedString& text) {
     result.font_family_ = first_span.font_family;
     result.font_size_ = first_span.font_size;
     result.font_weight_ = first_span.font_weight;
-    result.line_height_ = first_span.font_size * 1.5f;
+    float fallback_line_height = 0.0f;
 
-    for (auto& span : text.spans()) {
-        // Use the largest font's line height so mixed-size text doesn't overlap
-        float span_lh = span.font_size * 1.5f;
-        if (span_lh > result.line_height_)
-            result.line_height_ = span_lh;
-
+    for (std::size_t span_index = 0; span_index < text.spans().size(); ++span_index) {
+        const auto& span = text.spans()[span_index];
         // The span's own weight, not the run's first: a bold word inside a
         // regular sentence is exactly what an attributed string is for, and
         // measuring it at the paragraph's weight defeats the point.
-        auto span_prepared = prepare(span.text, span.font_family,
-                                     span.font_size, span.font_weight);
+        auto span_prepared = prepare(
+            span.text, span.font_family, span.font_size, span.font_weight,
+            span.font_slant != 0 ? span.font_slant : (span.italic ? 1 : 0),
+            span.letter_spacing);
+        // A mixed-size line needs the largest real metric on each side of the
+        // shared baseline. Taking only the largest aggregate line height can
+        // still clip (for example, a tall ascender in one face plus a deep
+        // descender in another). Preserve the component maxima and derive the
+        // common line box from them.
+        result.ascent_ = std::max(result.ascent_, span_prepared.ascent_);
+        result.descent_ = std::max(result.descent_, span_prepared.descent_);
+        result.leading_ = std::max(result.leading_, span_prepared.leading_);
+        result.metrics_real_ = result.metrics_real_ || span_prepared.metrics_real_;
+        fallback_line_height = std::max(fallback_line_height,
+                                        span_prepared.line_height_);
+        const bool joins_previous_word = !result.segments_.empty() &&
+            !result.segments_.back().is_whitespace &&
+            !result.segments_.back().is_newline &&
+            !span_prepared.segments_.empty() &&
+            !span_prepared.segments_.front().is_whitespace &&
+            !span_prepared.segments_.front().is_newline;
+        for (auto& segment : span_prepared.segments_)
+            segment.style_index = static_cast<int>(span_index);
+        if (joins_previous_word)
+            span_prepared.segments_.front().joins_previous_word = true;
         result.segments_.insert(result.segments_.end(),
                                span_prepared.segments_.begin(),
                                span_prepared.segments_.end());
     }
+    result.line_height_ = result.ascent_ + result.descent_ + result.leading_;
+    if (result.line_height_ <= 0.0f)
+        result.line_height_ = fallback_line_height;
 
     return result;
 }
