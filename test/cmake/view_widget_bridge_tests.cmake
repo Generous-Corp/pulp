@@ -335,7 +335,17 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS)
     target_include_directories(pulp-test-control-broker-daemon PRIVATE
         ${CMAKE_SOURCE_DIR}/inspect/src)
     target_link_libraries(pulp-test-control-broker-daemon PRIVATE
-        pulp::inspect-control Catch2::Catch2WithMain)
+        pulp::inspect-client Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-control-broker-daemon PRIVATE
+        PULP_CONTROL_TRUSTED_HOST_E2E_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-e2e-fixture>")
+    add_dependencies(pulp-test-control-broker-daemon
+        pulp-control-trusted-host-e2e-fixture)
+    find_program(_pulp_daemon_test_codesign codesign REQUIRED)
+    add_custom_command(TARGET pulp-test-control-broker-daemon POST_BUILD
+        COMMAND "${_pulp_daemon_test_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-test-control-broker-daemon>"
+        COMMENT "Ad-hoc signing control broker daemon test"
+        VERBATIM)
     catch_discover_tests(pulp-test-control-broker-daemon
         PROPERTIES LABELS "inspect;control;carrier;daemon")
 endif()
