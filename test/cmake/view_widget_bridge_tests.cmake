@@ -167,6 +167,45 @@ target_compile_definitions(pulp-test-control-trusted-host-inventory PRIVATE
     PULP_CONTROL_TRUSTED_HOST_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-fixture>")
 add_dependencies(pulp-test-control-trusted-host-inventory
     pulp-control-trusted-host-fixture)
+
+add_executable(pulp-test-control-host-enrollment
+    test_control_host_enrollment.cpp)
+target_link_libraries(pulp-test-control-host-enrollment PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-control-host-enrollment PRIVATE
+    PULP_CONTROL_TRUSTED_HOST_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-fixture>")
+add_dependencies(pulp-test-control-host-enrollment
+    pulp-control-trusted-host-fixture)
+catch_discover_tests(pulp-test-control-host-enrollment
+    PROPERTIES LABELS "inspect;control;enrollment;security")
+
+add_executable(pulp-test-control-endpoint-enrollment
+    test_control_endpoint_enrollment.cpp)
+add_executable(pulp-control-enrollment-host-fixture
+    control_enrollment_host_fixture.cpp)
+target_link_libraries(pulp-control-enrollment-host-fixture PRIVATE
+    pulp::inspect-protocol pulp::events)
+target_link_libraries(pulp-test-control-endpoint-enrollment PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-control-endpoint-enrollment PRIVATE
+    PULP_CONTROL_ENROLLMENT_HOST_FIXTURE="$<TARGET_FILE:pulp-control-enrollment-host-fixture>")
+add_dependencies(pulp-test-control-endpoint-enrollment
+    pulp-control-enrollment-host-fixture)
+if(APPLE)
+    find_program(_pulp_endpoint_enrollment_codesign codesign REQUIRED)
+    add_custom_command(TARGET pulp-control-enrollment-host-fixture POST_BUILD
+        COMMAND "${_pulp_endpoint_enrollment_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-control-enrollment-host-fixture>"
+        COMMENT "Ad-hoc signing control enrollment host fixture"
+        VERBATIM)
+    add_custom_command(TARGET pulp-test-control-endpoint-enrollment POST_BUILD
+        COMMAND "${_pulp_endpoint_enrollment_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-test-control-endpoint-enrollment>"
+        COMMENT "Ad-hoc signing control endpoint enrollment test fixture"
+        VERBATIM)
+endif()
+catch_discover_tests(pulp-test-control-endpoint-enrollment
+    PROPERTIES LABELS "inspect;control;carrier;enrollment;security")
 if(APPLE)
     find_program(_pulp_inventory_test_codesign codesign REQUIRED)
     add_custom_command(TARGET pulp-control-trusted-host-fixture POST_BUILD

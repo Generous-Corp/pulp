@@ -18,8 +18,9 @@ std::optional<Enum> enum_from_id(std::string_view id, const std::array<Enum, Siz
 } // namespace
 
 bool valid_host_open(const ControlHostOpenEnvelope& message) {
-    return valid_token(message.request_id, kMaximumIdBytes) &&
-           valid_token(message.admission_id, kMaximumIdBytes);
+    const bool admission = valid_token(message.admission_id, kMaximumIdBytes);
+    const bool enrollment = valid_token(message.enrollment_id, kMaximumIdBytes);
+    return valid_token(message.request_id, kMaximumIdBytes) && admission != enrollment;
 }
 
 bool valid_host_open_result(const ControlHostOpenResult& message) {
@@ -88,12 +89,16 @@ std::optional<ControlEnvelopePayload>
 decode_host_control_payload(std::string_view kind, ValueView payload,
                             ControlProtocolDiagnostics& error) {
     if (kind == "host-open") {
-        if (!only_fields(payload, {"admission_id", "request_id"}, error))
+        if (!only_fields(payload, {"admission_id", "enrollment_id", "request_id"}, error))
             return std::nullopt;
         ControlHostOpenEnvelope message;
         if (!required_string(payload, "request_id", message.request_id, kMaximumIdBytes, error) ||
-            !required_string(payload, "admission_id", message.admission_id, kMaximumIdBytes,
-                             error) ||
+            (payload.hasObjectMember("admission_id") &&
+             !required_string(payload, "admission_id", message.admission_id, kMaximumIdBytes, error,
+                              false)) ||
+            (payload.hasObjectMember("enrollment_id") &&
+             !required_string(payload, "enrollment_id", message.enrollment_id, kMaximumIdBytes,
+                              error, false)) ||
             !valid_host_open(message)) {
             error = {ControlProtocolError::InvalidValue, "host-open fields are invalid"};
             return std::nullopt;

@@ -72,6 +72,7 @@ file(WRITE "${_consumer_source}/main.cpp" [=[
 #include <pulp/inspect/control_broker.hpp>
 #include <pulp/inspect/control_client.hpp>
 #include <pulp/inspect/control_endpoint.hpp>
+#include <pulp/inspect/control_host_enrollment.hpp>
 #include <pulp/inspect/control_host_connection.hpp>
 #include <pulp/inspect/control_host_router.hpp>
 #include <pulp/inspect/control_main_thread_executor.hpp>
@@ -112,6 +113,7 @@ class InstalledControlTransport final
 
 int main() {
   pulp::inspect::ControlBroker broker;
+  pulp::inspect::ControlHostEnrollmentStore enrollments;
   pulp::inspect::InspectorClient client;
   InstalledControlTransport transport;
   pulp::inspect::ControlClient control_client{transport};

@@ -843,3 +843,36 @@ TEST_CASE("host control frames round trip and enforce role direction",
     invalid.result_code = ControlResultCode::InternalError;
     CHECK(encode_control_envelope(ControlEnvelope{.payload = invalid}).empty());
 }
+
+TEST_CASE("host open canonically selects exactly one admission mechanism",
+          "[inspect][control-protocol][host][enrollment]") {
+    const ControlEnvelope admission{.payload =
+                                        ControlHostOpenEnvelope{.request_id = "host-open-admission",
+                                                                .admission_id = "admission-1"}};
+    const auto encoded_admission = encode_control_envelope(admission);
+    REQUIRE_FALSE(encoded_admission.empty());
+    CHECK(encoded_admission.find(R"("enrollment_id": "")") != std::string::npos);
+    CHECK(decode_control_envelope(encoded_admission) == admission);
+
+    const ControlEnvelope enrollment{
+        .payload = ControlHostOpenEnvelope{.request_id = "host-open-enrollment",
+                                           .enrollment_id = "enrollment-1"}};
+    const auto encoded_enrollment = encode_control_envelope(enrollment);
+    CHECK(decode_control_envelope(encoded_enrollment) == enrollment);
+
+    const auto enrollment_without_admission =
+        replace_once(encoded_enrollment, R"("admission_id": "", )", "");
+    CHECK(decode_control_envelope(enrollment_without_admission) == enrollment);
+
+    auto both = std::get<ControlHostOpenEnvelope>(enrollment.payload);
+    both.admission_id = "admission-1";
+    CHECK(encode_control_envelope(ControlEnvelope{.payload = both}).empty());
+    auto neither = both;
+    neither.admission_id.clear();
+    neither.enrollment_id.clear();
+    CHECK(encode_control_envelope(ControlEnvelope{.payload = neither}).empty());
+
+    // Older preissued-admission clients did not emit the new empty field.
+    const auto legacy = replace_once(encoded_admission, R"(, "enrollment_id": "")", "");
+    CHECK(decode_control_envelope(legacy) == admission);
+}
