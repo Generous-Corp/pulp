@@ -43,7 +43,8 @@ GROUPS = [
     ("Clocks, gates & triggers", ["trigger", "gate_logic", "probability_gate"]),
     ("Sequencing", ["modular_sequencing", "stage_sequencer", "cartesian_walk",
                     "rungler"]),
-    ("Noise & chaos", ["noise_source", "chaos", "rng"]),
+    ("Noise & output", ["noise_source", "chaos", "rng", "dither",
+                        "velvet_noise", "lofi_chain"]),
     ("Drums", ["drum/"]),
     ("Physical modeling", ["karplus_strong", "modal_bank", "bridged_t_resonator"]),
     ("Effects", ["delay_line", "character_delay", "chorus", "flanger", "phaser",
@@ -109,7 +110,7 @@ def scan():
             rel = os.path.relpath(path, SIGNAL)
             text = open(path, errors="ignore").read()
             classes = []
-            for m in re.finditer(r"^(?:template[^\n]*\n)?(?:class|struct)\s+(\w+T?)\b(?!\s*;)",
+            for m in re.finditer(r"^(?:template\s*<[^\n]*>\s*)?(?:class|struct)\s+(\w+T?)\b(?!\s*;)",
                                  text, re.M):
                 cls = m.group(1)
                 if cls.endswith("Params") or cls.startswith("_"):
