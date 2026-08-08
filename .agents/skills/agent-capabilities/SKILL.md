@@ -124,6 +124,12 @@ artifacts are absent, read the installed schema and manifest, and independently
 compile/link/run every capability and every typed binding against only its
 declared minimal target. It must reject wrong-target declarations and checkout-
 path leakage, and use configuration-aware build/install and executable paths.
+When checking CMake File API include paths, permit paths outside the install
+prefix only when CMake marks them as system includes; transitive platform and
+third-party headers may be legitimate, but non-system source/build leakage is
+still a failure. When finding build-tree archives for mutation controls, exclude
+the staged install prefix because retrying the test leaves installed archives
+under the build directory.
 The official-SDK handoff self-test separately covers exact identity plus wrong
 source SHA, importer hash, capability hash, and schema-invalid documents.
 

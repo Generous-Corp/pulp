@@ -337,14 +337,15 @@ def inspect_isolation(
     if not isinstance(target_ref, dict) or not isinstance(target_ref.get("jsonFile"), str):
         raise AssertionError("CMake File API codemodel has no consumer target")
     target = json.loads((reply / target_ref["jsonFile"]).read_text())
-    include_dirs = [
-        include["path"]
+    includes = [
+        include
         for group in target.get("compileGroups", [])
         for include in group.get("includes", [])
         if isinstance(include, dict) and isinstance(include.get("path"), str)
     ]
-    if not include_dirs:
+    if not includes:
         raise AssertionError("consumer has no evaluated transitive include directories")
+    include_dirs = [include["path"] for include in includes]
     compile_fragments = [
         fragment["fragment"]
         for group in target.get("compileGroups", [])
@@ -362,10 +363,16 @@ def inspect_isolation(
         if isinstance(artifact, dict) and isinstance(artifact.get("path"), str)
     ]
     prefix_root = prefix.resolve()
-    for entry in include_dirs:
+    forbidden_resolved = [path.resolve() for path in forbidden_roots]
+    for include in includes:
+        entry = include["path"]
         path = pathlib.Path(entry).resolve()
-        if not path.is_relative_to(prefix_root):
-            raise AssertionError(f"exported include directory escapes install prefix: {entry}")
+        if any(path.is_relative_to(forbidden) for forbidden in forbidden_resolved):
+            raise AssertionError(f"consumer include directory leaks checkout path: {entry}")
+        if not path.is_relative_to(prefix_root) and include.get("isSystem") is not True:
+            raise AssertionError(
+                f"non-system exported include directory escapes install prefix: {entry}"
+            )
 
     joined_include_dirs = ";".join(include_dirs)
     export_files = sorted(prefix.rglob("PulpTargets*.cmake"))
@@ -663,8 +670,11 @@ def main() -> int:
         if imported_match is None:
             raise RuntimeError("could not locate installed pulp-audio imported artifact")
         archive_name = pathlib.Path(imported_match.group(1)).name
+        prefix_root = prefix.resolve()
         archive_candidates = [
-            path.resolve() for path in build_dir.rglob(archive_name) if path.is_file()
+            path.resolve()
+            for path in build_dir.rglob(archive_name)
+            if path.is_file() and not path.resolve().is_relative_to(prefix_root)
         ]
         if configuration:
             configured_candidates = [

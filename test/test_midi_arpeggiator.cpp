@@ -602,7 +602,7 @@ TEST_CASE("Arpeggiator saturates extreme host timing without signed overflow",
         .tick_start = {std::numeric_limits<std::int64_t>::min()},
         .sample_count = 1,
         .sample_rate = {kSampleRate, 1},
-        .tempo_bpm = 120.0,
+        .tempo_bpm = 480.0,
         .playing = true,
         .transport_event = midi::ArpeggiatorTransportEvent::Started,
     };
