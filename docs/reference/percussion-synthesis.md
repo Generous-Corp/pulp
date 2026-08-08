@@ -32,7 +32,7 @@ Every voice is assembled from the same components, all in `pulp::signal`:
 | `NoiseSourceT` | Deterministic colourable noise. Reseeded per hit, so a render is reproducible. |
 | `DecayEnvelopeT` | One-shot attack / hold / decay, in either RC or T60 units. |
 | `TwoPoleResonatorT` | A single struck resonance. `ModalBankT` is the many-mode case. |
-| `LofiChainT` | Bit quantisation, sample-and-hold rate reduction, dead-zone saturation. |
+| `LofiChainT` | Bit quantization, sample-and-hold rate reduction, dead-zone saturation, and opt-in deterministic TPDF/error-feedback output policy. |
 | `LowpassGateT` | Vactrol dynamics: fast on, slow off, quiet implies dark. |
 | `BridgedTResonator` | The TR-808 bass-drum network, modelled at component level. |
 | `SquareOscBankT` | An inharmonic oscillator cluster — the metallic source. |
