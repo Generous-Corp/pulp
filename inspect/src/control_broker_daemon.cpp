@@ -318,6 +318,24 @@ struct ControlBrokerDaemon::Impl {
                                          });
                           }}
                         : std::function<bool(const ControlPeerEvidence&)>{},
+                .durable_client_principal =
+                    daemon_identity
+                        ? std::function<std::optional<std::string>(
+                              const ControlPeerEvidence&)>{[](const ControlPeerEvidence& peer) {
+                              std::string canonical;
+                              canonical.reserve(peer.user_id.size() +
+                                                peer.executable_identity.size() +
+                                                peer.publisher_id.size() + 3);
+                              canonical.append(peer.user_id);
+                              canonical.push_back('\0');
+                              canonical.append(peer.executable_identity);
+                              canonical.push_back('\0');
+                              canonical.append(peer.publisher_id);
+                              return std::optional<std::string>{
+                                  "installed-cli-" + runtime::hex_encode(runtime::sha256(canonical))};
+                          }}
+                        : std::function<std::optional<std::string>(
+                              const ControlPeerEvidence&)>{},
             },
             nullptr, nullptr, broker.get());
         if (!carrier->start()) {

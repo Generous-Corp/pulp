@@ -55,7 +55,8 @@ class ControlBroker {
     ControlBootstrapResult issue_bootstrap(const VerifiedControlPeerIdentity& client_peer);
     ControlClientResult redeem_bootstrap(std::string_view ticket_id,
                                          std::span<const std::uint8_t> secret,
-                                         const VerifiedControlPeerIdentity& client_peer);
+                                         const VerifiedControlPeerIdentity& client_peer,
+                                         std::string_view durable_principal = {});
     bool refresh_client(const ControlClientId& client_id,
                         const VerifiedControlPeerIdentity& client_peer);
     ControlBrokerLifecycleResult disconnect_client(const ControlClientId& client_id,

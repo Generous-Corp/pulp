@@ -45,6 +45,10 @@ struct ControlEndpointConfig {
     /// Installed adapters may self-enroll only when this broker-owned policy
     /// accepts kernel-observed, code-signed peer evidence.
     std::function<bool(const ControlPeerEvidence&)> authorize_client;
+    /// Maps an already-authorized, kernel-observed peer to a broker-owned
+    /// reconnectable principal. Absence keeps enrollment connection-scoped.
+    std::function<std::optional<std::string>(const ControlPeerEvidence&)>
+        durable_client_principal;
     /// Optional trusted consent source. Absence means grant requests return
     /// consent-required; request payloads can never claim this authority.
     std::function<ControlConsentDecision(const VerifiedControlPeerIdentity&,

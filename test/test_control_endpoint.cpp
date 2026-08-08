@@ -821,6 +821,100 @@ TEST_CASE("control endpoint enrolls an authenticated local client and returns br
 
     client.disconnect();
     endpoint.stop();
+
+    ControlEndpoint durable_endpoint{
+        service,
+        [](std::string_view) -> std::optional<ControlConnectionAdmission> { return std::nullopt; },
+        {
+            .endpoint_path = directory.socket,
+            .sdk_version = "0.791.0-test",
+            .broker_id = broker.broker_id().value,
+            .process_generation = 43,
+            .authorize_client =
+                [](const ControlPeerEvidence& peer) {
+                    return peer.role == ControlPeerRole::Client;
+                },
+            .durable_client_principal =
+                [](const ControlPeerEvidence&) {
+                    return std::optional<std::string>{"installed-cli-test-principal"};
+                },
+            .decide_consent =
+                [](const VerifiedControlPeerIdentity&, const ControlGrantRequest&) {
+                    return ControlConsentDecision{true, ControlConsentAuthority::TrustedHostUi,
+                                                  "trusted-ui-decision-a"};
+                },
+        },
+        nullptr,
+        nullptr,
+        &broker};
+    REQUIRE(durable_endpoint.start());
+
+    ReceivedEnvelope first_invocation_received;
+    InterprocessConnection first_invocation;
+    first_invocation.set_on_message([&](const void* data, std::size_t size) {
+        first_invocation_received.receive(data, size);
+    });
+    REQUIRE(first_invocation.connect(directory.socket.string(), IpcTransport::LocalSocket, 2s));
+    REQUIRE(first_invocation.send_message(encode_control_envelope(
+        ControlEnvelope{.payload = ControlManagementEnvelope{.request_id = "durable-enroll-a",
+                                                             .command = "enroll"}})));
+    REQUIRE(first_invocation_received.wait());
+    const auto* durable_enrollment_a =
+        std::get_if<ControlManagementResult>(&first_invocation_received.envelope->payload);
+    REQUIRE(durable_enrollment_a != nullptr);
+    REQUIRE(durable_enrollment_a->status_id == "accepted");
+    const auto durable_enrollment_a_data = choc::json::parse(durable_enrollment_a->data_json);
+    const auto durable_client_id =
+        std::string(durable_enrollment_a_data["client_id"].getString());
+
+    first_invocation_received.clear();
+    REQUIRE(first_invocation.send_message(encode_control_envelope(ControlEnvelope{
+        .payload = ControlManagementEnvelope{
+            .request_id = "durable-grant",
+            .command = "grant-request",
+            .params_json = R"({"instance_id":"instance-a","profile":"inspect-readonly"})"}})));
+    REQUIRE(first_invocation_received.wait());
+    const auto* durable_grant =
+        std::get_if<ControlManagementResult>(&first_invocation_received.envelope->payload);
+    REQUIRE(durable_grant != nullptr);
+    REQUIRE(durable_grant->status_id == "granted");
+    const auto durable_grant_data = choc::json::parse(durable_grant->data_json);
+    const auto durable_grant_id = std::string(durable_grant_data["grant_id"].getString());
+    first_invocation.disconnect();
+
+    ReceivedEnvelope second_invocation_received;
+    InterprocessConnection second_invocation;
+    second_invocation.set_on_message([&](const void* data, std::size_t size) {
+        second_invocation_received.receive(data, size);
+    });
+    REQUIRE(second_invocation.connect(directory.socket.string(), IpcTransport::LocalSocket, 2s));
+    REQUIRE(second_invocation.send_message(encode_control_envelope(
+        ControlEnvelope{.payload = ControlManagementEnvelope{.request_id = "durable-enroll-b",
+                                                             .command = "enroll"}})));
+    REQUIRE(second_invocation_received.wait());
+    const auto* durable_enrollment_b =
+        std::get_if<ControlManagementResult>(&second_invocation_received.envelope->payload);
+    REQUIRE(durable_enrollment_b != nullptr);
+    REQUIRE(durable_enrollment_b->status_id == "accepted");
+    const auto durable_enrollment_b_data = choc::json::parse(durable_enrollment_b->data_json);
+    CHECK(durable_enrollment_b_data["client_id"].getString() == durable_client_id);
+
+    second_invocation_received.clear();
+    auto revoke_params = choc::value::createObject("");
+    revoke_params.addMember("grant_id", choc::value::createString(durable_grant_id));
+    REQUIRE(second_invocation.send_message(encode_control_envelope(ControlEnvelope{
+        .payload = ControlManagementEnvelope{
+            .request_id = "durable-revoke",
+            .command = "revoke",
+            .params_json = choc::json::toString(revoke_params, false)}})));
+    REQUIRE(second_invocation_received.wait());
+    const auto* durable_revoke =
+        std::get_if<ControlManagementResult>(&second_invocation_received.envelope->payload);
+    REQUIRE(durable_revoke != nullptr);
+    CHECK(durable_revoke->status_id == "revoked");
+
+    second_invocation.disconnect();
+    durable_endpoint.stop();
 #else
     SUCCEED("the authenticated control endpoint is currently macOS-only");
 #endif

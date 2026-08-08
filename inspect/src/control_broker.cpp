@@ -144,9 +144,10 @@ ControlBroker::issue_bootstrap(const VerifiedControlPeerIdentity& client_peer) {
 
 ControlClientResult
 ControlBroker::redeem_bootstrap(std::string_view ticket_id, std::span<const std::uint8_t> secret,
-                                const VerifiedControlPeerIdentity& client_peer) {
+                                const VerifiedControlPeerIdentity& client_peer,
+                                std::string_view durable_principal) {
     std::lock_guard coordination_lock(coordination_mutex_);
-    auto result = identities_.redeem_bootstrap(ticket_id, secret, client_peer);
+    auto result = identities_.redeem_bootstrap(ticket_id, secret, client_peer, durable_principal);
     grants_.sweep_expired();
     return result;
 }

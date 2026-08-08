@@ -448,6 +448,15 @@ struct ControlEndpoint::Impl {
                             "the local client did not satisfy broker policy");
                 return;
             }
+            const auto durable_principal = config.durable_client_principal
+                                               ? config.durable_client_principal(*evidence)
+                                               : std::optional<std::string>{};
+            if (config.durable_client_principal &&
+                (!durable_principal || durable_principal->empty())) {
+                (void)reply("enrollment-denied", "{}",
+                            "the broker could not derive a durable client principal");
+                return;
+            }
             ControlPeerVerifier verifier([](const ControlPeerEvidence&) { return true; });
             auto peer = verifier.verify(std::move(*evidence));
             auto bootstrap =
@@ -455,7 +464,8 @@ struct ControlEndpoint::Impl {
             auto client =
                 bootstrap.ticket
                     ? management_broker->redeem_bootstrap(bootstrap.ticket->ticket_id,
-                                                          bootstrap.ticket->secret.bytes(), *peer)
+                                                          bootstrap.ticket->secret.bytes(), *peer,
+                                                          durable_principal.value_or(""))
                     : ControlClientResult{};
             if (!client.client) {
                 (void)reply("enrollment-denied", "{}", "the broker rejected client identity");
@@ -471,7 +481,8 @@ struct ControlEndpoint::Impl {
                     const auto encoded =
                         encode_control_envelope(ControlEnvelope{.payload = progress});
                     return !encoded.empty() && locked->connection->send_message(encoded);
-                });
+                },
+                !durable_principal.has_value());
             if (!session.is_open()) {
                 (void)management_broker->disconnect_client(client.client->client_id, *peer,
                                                            "enrollment-rollback");
@@ -490,6 +501,13 @@ struct ControlEndpoint::Impl {
         }
         if (!state.session) {
             (void)reply("session-required", "{}", "management requires an enrolled client");
+            return;
+        }
+        const auto current_client = management_broker->client(state.session->client_id());
+        if (!current_client ||
+            current_client->peer_fingerprint != state.session->peer().fingerprint()) {
+            (void)reply("session-superseded", "{}",
+                        "a newer authenticated process owns this durable client session");
             return;
         }
         if (request.command == "instances") {
