@@ -68,8 +68,9 @@ The plugin extends Claude Code with:
   calls instead of shell-and-parse. Live plugin work uses the generated,
   exact-instance `pulp_control_*` tools over the shared control client; see
   [Capability control over MCP](guides/capability-control-mcp.md).
-  `pulp_inspect_profiles` remains static compatibility metadata. Legacy raw
-  Inspector discovery and RPC are not exposed.
+  `pulp_control_profiles` is the canonical static profile metadata tool.
+  `pulp_inspect_profiles` remains a compatibility alias until Pulp 0.800.0 on
+  2026-10-01. Legacy raw Inspector discovery and RPC are not exposed.
   For project screenshot artifacts, call `pulp_validate` with
   `screenshot=true` or run `pulp run --headless --screenshot <png>`;
   both use the same capture contract documented for the CLI. The

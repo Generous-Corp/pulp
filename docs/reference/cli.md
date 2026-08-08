@@ -1329,13 +1329,13 @@ legacy server, raw client, discovery, and standalone authority were deleted in
 Phase 3. The shipped command has no live session route.
 
 ```bash
-pulp inspect profiles --json
+pulp control profiles --json
 pulp inspect audit path/to/MyProduct --json
 ```
 
 | Command | Result |
 |---|---|
-| `profiles` | Declared `off`, `observe`, and `develop` capability sets. |
+| `profiles` | Deprecated alias for `pulp control profiles`; removed in Pulp 0.800.0 on 2026-10-01. |
 | `audit ARTIFACT` | Read-only artifact check for the canonical manifest, profile/digest markers, declared capabilities, and known external surfaces. The artifact is never loaded. |
 
 The only option is `--json`. There are no `list`, `capabilities`, `doctor`,
@@ -1368,6 +1368,7 @@ host, port, discovery-file, newest-instance, label-selection, or raw protocol
 flags.
 
 ```bash
+pulp control profiles --json
 pulp control instances --json
 pulp control status --instance <id> --explain
 pulp control grant-request --instance <id> --profile inspect-readonly --json
@@ -1376,6 +1377,10 @@ pulp control artifact --id <artifact-id> --out result.wav --json
 pulp control revoke --grant <grant-id>
 pulp control audit path/to/MyProduct --json
 ```
+
+`profiles` reads the shared declared `off`, `observe`, and `develop` registry
+without connecting to the broker. `pulp inspect profiles` is its deprecated
+compatibility alias and will be removed in Pulp 0.800.0 on 2026-10-01.
 
 `grant-request` never mints authority in the CLI. A trusted broker consent
 source must approve it; otherwise the stable result is `consent-required`.

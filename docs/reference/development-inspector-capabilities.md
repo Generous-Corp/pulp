@@ -117,8 +117,8 @@ target.
 
 | Area | Present now | Not yet public |
 |---|---|---|
-| CLI | `pulp inspect profiles`; offline `pulp inspect audit ARTIFACT`; exact-instance `pulp control` management/call/watch/artifact/revoke; canonical trace start/stop; offline trace analysis | Raw Inspector discovery/RPC, host/port selectors, newest-instance selection, and Motion wrappers |
-| MCP | In-process `pulp_inspect_profiles`; generated typed `pulp_control_*` operations and management tools; canonical `pulp_trace_start` and `pulp_trace_stop` | Generic Inspector RPC, raw selectors, and Motion wrappers |
+| CLI | `pulp control profiles`; offline `pulp inspect audit ARTIFACT`; exact-instance `pulp control` management/call/watch/artifact/revoke; canonical trace start/stop; offline trace analysis. `pulp inspect profiles` is a compatibility alias through Pulp 0.800.0 on 2026-10-01. | Raw Inspector discovery/RPC, host/port selectors, newest-instance selection, and Motion wrappers |
+| MCP | In-process `pulp_control_profiles`; generated typed `pulp_control_*` operations and management tools; canonical `pulp_trace_start` and `pulp_trace_stop`. `pulp_inspect_profiles` is a compatibility alias through Pulp 0.800.0 on 2026-10-01. | Generic Inspector RPC, raw selectors, and Motion wrappers |
 | Build/link/install | Separate protocol, control, canonical client, runtime, telemetry, authoring, and high-risk eval components; ordinary targets do not gain authority merely because components are built. A clean-prefix consumer compiles and runs the installed protocol/control/client targets while rejecting direct GPU/render/format/host/CLI/MCP closure | Trusted product host composition, per-target shipped-product declarations, and cross-platform verified-peer parity |
 | Shipping | Canonical manifests, registry digest, artifact audit, stripped ordinary targets, marker checks, and the owner-only macOS health-service LaunchAgent | Final trusted-host composition and complete release negative-control proof |
 

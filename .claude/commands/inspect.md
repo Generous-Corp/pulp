@@ -9,11 +9,12 @@ sibling; do not rely on a source-tree build path.
 The Phase 3 surface is intentionally small:
 
 ```bash
-pulp inspect profiles --json
+pulp control profiles --json
 pulp inspect audit PATH --json
 ```
 
-`profiles` reads the compiled capability registry. `audit` reads an artifact and
+`pulp inspect profiles` remains a deprecated alias through Pulp 0.800.0 on
+2026-10-01. `profiles` reads the compiled capability registry. `audit` reads an artifact and
 its canonical manifest without loading, executing, connecting to, or activating
 the artifact.
 

@@ -1,12 +1,10 @@
 // cmd_inspect.cpp — static metadata, artifact audit, and the private canonical Trace bridge
 
+#include "cli_common.hpp"
 #include "inspector_shipping_report.hpp"
 
-#include <pulp/inspect/capabilities.hpp>
 #include <pulp/inspect/control_inspector_client.hpp>
 #include <pulp/inspect/protocol.hpp>
-
-#include <choc/text/choc_JSON.h>
 
 #include <chrono>
 #include <filesystem>
@@ -41,27 +39,10 @@ void print_error(const InspectorMessage& response) {
         std::cerr << response.error_data_json << "\n";
 }
 
-std::string profiles_json() {
-    auto profiles = choc::value::createEmptyArray();
-    for (const auto profile :
-         {InspectorProfile::Off, InspectorProfile::Observe, InspectorProfile::Develop}) {
-        auto value = choc::value::createObject("");
-        value.addMember("id", choc::value::createString(profile_id(profile)));
-        auto capabilities = choc::value::createEmptyArray();
-        for (const auto capability : profile_capabilities(profile))
-            capabilities.addArrayElement(choc::value::createString(capability_id(capability)));
-        value.addMember("capabilities", capabilities);
-        profiles.addArrayElement(value);
-    }
-    auto root = choc::value::createObject("");
-    root.addMember("schemaVersion", choc::value::createInt32(1));
-    root.addMember("profiles", profiles);
-    return choc::json::toString(root, false);
-}
-
 void print_help() {
-    std::cout << "pulp inspect — static metadata and offline artifact audit\n\n"
-                 "Usage: pulp inspect profiles [--json]\n"
+    std::cout << "pulp inspect — offline artifact audit\n\n"
+                 "Usage: pulp inspect profiles [--json]  (deprecated; use `pulp control profiles`; "
+                 "removed Pulp 0.800.0 on 2026-10-01)\n"
                  "       pulp inspect audit ARTIFACT [--json]\n\n"
                  "Live discovery, raw Inspector calls, and mutations are not exposed.\n";
 }
@@ -69,6 +50,13 @@ void print_help() {
 } // namespace
 
 int cmd_inspect(const std::vector<std::string>& args) {
+    if (!args.empty() && args.front() == "profiles") {
+        std::vector<std::string> canonical_args{"profiles"};
+        canonical_args.insert(canonical_args.end(), args.begin() + 1, args.end());
+        std::cerr << "Warning: `pulp inspect profiles` is deprecated; use `pulp control profiles`. "
+                     "It will be removed in Pulp 0.800.0 on 2026-10-01.\n";
+        return cmd_control(canonical_args);
+    }
     std::string verb;
     std::string command;
     std::string params = "{}";
@@ -84,9 +72,6 @@ int cmd_inspect(const std::vector<std::string>& args) {
             return 2;
         }
     }
-
-    std::cerr << "Warning: `pulp inspect` is a compatibility facade; use `pulp control "
-              << (verb == "audit" ? "audit" : "status") << "` for canonical control.\n";
 
     if (verb == "audit") {
         std::filesystem::path artifact;
@@ -171,15 +156,8 @@ int cmd_inspect(const std::vector<std::string>& args) {
         return 2;
     }
 
-    if (json_output) {
-        std::cout << profiles_json() << "\n";
-    } else {
-        for (const auto profile :
-             {InspectorProfile::Off, InspectorProfile::Observe, InspectorProfile::Develop}) {
-            std::cout << profile_id(profile) << "\n";
-            for (const auto capability : profile_capabilities(profile))
-                std::cout << "  " << capability_id(capability) << "\n";
-        }
-    }
-    return 0;
+    // `profiles` returned above through the canonical control command. All remaining
+    // public inspect verbs are deliberately offline-only.
+    print_help();
+    return 2;
 }

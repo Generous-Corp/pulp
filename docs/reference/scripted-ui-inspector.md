@@ -9,7 +9,9 @@ product surface while the canonical capability-control replacement is built.
 
 ## Current public surface
 
-`pulp inspect profiles [--json]` reads static capability metadata.
+`pulp control profiles [--json]` reads static capability metadata.
+`pulp inspect profiles` remains a deprecated compatibility alias until Pulp
+0.800.0 on 2026-10-01.
 `pulp inspect audit ARTIFACT [--json]` checks an artifact and manifest offline
 without loading or activating it. Neither command reaches a scripted UI.
 
