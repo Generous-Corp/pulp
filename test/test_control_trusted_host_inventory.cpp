@@ -164,6 +164,16 @@ TEST_CASE("trusted host launcher releases enrollment only after exact child pref
     auto denied = launcher.launch(exited.ticket->inventory_id, options);
     CHECK(denied.status == ControlTrustedHostLaunchStatus::PreflightRejected);
     CHECK(enrollments.size() == 1);
+
+    intent.arguments = {"--normal"};
+    intent.host_tier = ControlHostTier::OfflineJob;
+    const auto offline = inventory.prepare(intent);
+    REQUIRE(offline.ticket);
+    auto offline_launched = launcher.launch(offline.ticket->inventory_id, options);
+    INFO(offline_launched.explanation);
+    REQUIRE(offline_launched.launched());
+    CHECK(enrollments.size() == 2);
+    CHECK(offline_launched.process->wait().exit_code == 0);
 #endif
 }
 

@@ -71,10 +71,13 @@ ControlTrustedHostLauncher::launch(std::string_view inventory_id,
         static_cast<int>(std::min<std::int64_t>(config_.preflight_timeout.count() + 1000, 60'000)));
 
     const auto static_expectation = snapshot->static_expectation();
+    const auto child_role = snapshot->registration().host_tier == ControlHostTier::OfflineJob
+                                ? ControlPeerRole::OfflineHost
+                                : ControlPeerRole::StandaloneHost;
     const auto expected_user = config_.expected_broker.evidence.user_id;
     const ControlPeerVerifier verifier(
-        [static_expectation, expected_user](const ControlPeerEvidence& peer) {
-            return peer.role == ControlPeerRole::StandaloneHost && peer.user_id == expected_user &&
+        [static_expectation, expected_user, child_role](const ControlPeerEvidence& peer) {
+            return peer.role == child_role && peer.user_id == expected_user &&
                    peer.process_id > 0 && !peer.process_start_id.empty() &&
                    peer.executable_identity == static_expectation.executable_identity &&
                    peer.publisher_id == static_expectation.publisher_id;
@@ -90,7 +93,7 @@ ControlTrustedHostLauncher::launch(std::string_view inventory_id,
         [&](int child_process_id, platform::ChildProcessInputChannel channel) {
             preflight_attempted = true;
             auto verified = preflight_control_host(
-                std::move(channel), child_process_id, ControlPeerRole::StandaloneHost, verifier,
+                std::move(channel), child_process_id, child_role, verifier,
                 [&](const VerifiedControlPeerIdentity& child) {
                     const auto now = std::chrono::steady_clock::now();
                     const auto expires_at = std::min(snapshot_for_session.expires_at(),
