@@ -231,7 +231,10 @@ private:
     std::vector<std::vector<float>> f64_output_scratch_;
     // Second input bus routed to Processor::set_sidechain(). Only input
     // bus 1 is consumed; additional buses are ignored because the
-    // Processor API exposes a single sidechain slot.
+    // Processor API exposes a single sidechain slot. These arrays are sized in
+    // setupProcessing() to max(declared, natively accepted) channels so native
+    // layout negotiation cannot allocate or truncate on the audio thread. The
+    // unsupported-layout silence path retains the declared safe width.
     std::vector<float*> sidechain_ptrs_;
     std::vector<const double*> sidechain64_ptrs_;
     std::vector<std::vector<float>> f64_sidechain_scratch_;
@@ -246,10 +249,11 @@ private:
     // the host negotiated.
     std::vector<std::vector<float*>> aux_output_ptrs_;
     std::vector<std::vector<double*>> aux_output64_ptrs_;
-    // Descriptor-declared channel count per secondary output bus (index i = host
-    // output bus i+1), captured in setupProcessing(). Reported as the aux
+    // Accepted native channel count per secondary output bus (index i = host
+    // output bus i+1), captured in setupProcessing(). The unsupported-layout
+    // silence path retains the descriptor-safe width. Reported as the aux
     // ProcessBusBufferView's declared_channels so matches_declared_layout()
-    // compares the routed count against the declared layout rather than itself.
+    // compares host buffers against the active processing contract.
     std::vector<int> declared_aux_channels_;
     std::vector<std::vector<std::vector<float>>> f64_aux_output_scratch_;
 

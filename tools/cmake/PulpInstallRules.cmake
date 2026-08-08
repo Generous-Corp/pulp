@@ -309,31 +309,70 @@ if(TARGET pulp-inspect)
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
         FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h" PATTERN "*.inc")
 elseif(TARGET pulp-inspect-protocol)
+    # The protocol archive is available even when PULP_ENABLE_INSPECTOR=OFF.
+    # Install only headers backed by that archive unconditionally; source-bearing
+    # discovery/control/client/runtime headers follow their exported targets.
     install(FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/audit.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/authentication.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/capabilities.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/capability_definitions.inc"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_broker.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_grants.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_identity.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_manifest.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_peer.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_protocol.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_registry_digest.inc"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/client.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/discovery.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/discovery_publisher.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/inspector_server.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/main_thread_rpc.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/protocol.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/protocol_methods.inc"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/publication_binding.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/session.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/test_input.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/trace_inspector.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/tweak_store.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/value_channel_telemetry_broker.hpp"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
+    if(TARGET pulp-inspect-discovery)
+        install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/discovery.hpp"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
+    endif()
+    if(TARGET pulp-inspect-publication)
+        install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/discovery_publisher.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/publication_binding.hpp"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
+    endif()
+    if(TARGET pulp-inspect-control)
+        install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_admission.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_artifacts.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_broker.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_execution.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_grants.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_identity.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_operations.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_peer.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_service.hpp"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
+    endif()
+    if(TARGET pulp-inspect-client)
+        install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/client.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_client.hpp"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
+    endif()
+    if(TARGET pulp-inspect-runtime)
+        install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_main_thread_executor.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/inspector_server.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/main_thread_rpc.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/trace_inspector.hpp"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
+    endif()
+    if(TARGET pulp-inspect-authoring)
+        install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/tweak_store.hpp"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
+    endif()
+    if(TARGET pulp-inspect-telemetry)
+        install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/value_channel_telemetry_broker.hpp"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
+    endif()
 endif()
 
 # SDK license + third-party attribution.

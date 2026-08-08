@@ -149,6 +149,8 @@ struct DecodeLimits {
     static DecodeLimits web_defaults() noexcept;
 };
 
+struct JsonObjectMember;
+
 /// Owning JSON DOM node with source byte bounds.
 ///
 /// Strings and object keys are decoded UTF-8. Number preserves the lexical
@@ -173,7 +175,7 @@ struct JsonValue {
     /// Child values when kind is Array.
     std::vector<JsonValue> array;
     /// Decoded key/value pairs when kind is Object.
-    std::vector<std::pair<std::string, JsonValue>> object;
+    std::vector<JsonObjectMember> object;
     /// Inclusive source byte offset.
     std::size_t begin = 0;
     /// Exclusive source byte offset.
@@ -185,6 +187,18 @@ struct JsonValue {
     /// @return A pointer valid for this DOM's lifetime, or nullptr for a
     ///         non-object or missing key.
     const JsonValue* find(std::string_view key) const noexcept;
+};
+
+/// Pair-like owning member of a JSON object.
+///
+/// This cannot be spelled as `std::pair<std::string, JsonValue>` inside
+/// JsonValue: unlike std::vector, std::pair requires its element types to be
+/// complete when instantiated. Keeping the recursive edge behind vector lets
+/// the member type be completed here while preserving the established
+/// `.first` / `.second` object-member API.
+struct JsonObjectMember {
+    std::string first; ///< Decoded object key.
+    JsonValue second;  ///< Owning object value.
 };
 
 /// Parsed JSON tree that owns the source bytes referenced by node offsets.

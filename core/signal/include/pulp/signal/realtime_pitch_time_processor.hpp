@@ -115,7 +115,8 @@ public:
         SpectralEnvelopeShifterConfig env_config;
         env_config.fft_size = fft_size_;
         env_config.true_envelope_iterations = config.true_envelope_iterations;
-        envelope_.prepare(env_config);
+        if (envelope_.prepare(env_config) != SourceFilterAnalysisStatus::Ok)
+            return PitchTimePrepareStatus::unrepresentable_capacity;
 
         LatencyAwareControlSmoother::Config smoother_config;
         smoother_config.domain = LatencyAwareControlSmoother::Domain::semitone;

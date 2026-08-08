@@ -230,9 +230,28 @@ signature, identifier, Team ID or per-artifact ad-hoc CDHash. The broker must
 still exact-match that observation against launcher- or policy-owned expected
 identity before minting a verified peer. Named-pipe and TCP peers cannot be
 passed to that verifier. The installed `pulp::inspect-control` component owns
-the resulting identity, registration, and grant state in a dormant
-`ControlBroker`; constructing it never opens an endpoint or activates a runtime
-bridge.
+the resulting identity, registration, grant, typed admission, durable receipt,
+and artifact state in a dormant `ControlBroker`. Installed `ControlService` and
+`ControlClient` types expose a typed transport seam; constructing them never
+opens an endpoint or activates a runtime bridge. A `ControlClientTransport`
+represents one authenticated connection and owns its client lineage, including
+artifact reads. Phase 3c owns the canonical carrier; the legacy Inspector
+session/server is not exposed as a compatibility transport or second authority
+path.
+Each service session must negotiate its own protocol version and mandatory
+receipt support. The broker validates operation input JSON before admission and
+successful output JSON before terminal completion. A started operation that
+misses its response deadline remains durably `running` and occupies its active
+quota slot until deferred completion settles it, even though the immediate
+response reports `unknown-needs-refresh`.
+
+The Phase 3b artifact store is a minimal lineage-bound persistence primitive,
+not the Phase 7 artifact lifecycle. Broker reads reauthorize the original grant
+and exact producer/receipt lineage, but only per-blob and per-chunk size limits
+exist; aggregate quota, retention collection, deletion audit, redaction, and
+generalized ACL policy are later work. Owner-private filesystem permissions
+exclude other OS users, not a malicious same-UID process, so they do not claim
+at-rest secrecy from every local process running as that user.
 
 ### Child Process Pool — Crash-isolated workers
 
@@ -645,6 +664,7 @@ a working convolution and would hide the bug. Assert
 | Processor | Header | Description |
 |-----------|--------|-------------|
 | Biquad | `biquad.hpp` | Second-order IIR filter — low/high/band-pass, notch, shelf, peaking EQ |
+| Six-band EQ | `six_band_eq.hpp` | Allocation-free low-shelf/four-peak/high-shelf cascade with optional stable cascade crossfades and endpoint response inspection |
 | Filter Design | `filter_design.hpp` | Generate Butterworth and Chebyshev coefficient sets for arbitrary order |
 | FIR | `fir_filter.hpp` | Finite impulse response filter with arbitrary tap count for linear-phase EQ |
 | [Analog VCF](../guides/analog-vcf.md) | `analog_vcf.hpp` / `ota_cascade_filter.hpp` | Four measured Juno, Jupiter-8, Prophet-5, and Minimoog panel voicings over a shared zero-delay nonlinear four-pole cascade |
@@ -660,6 +680,7 @@ a working convolution and would hide the bug. Assert
 | Chorus | `chorus.hpp` | Modulated delay for stereo widening and detuning effects |
 | Convolver | `convolver.hpp` | Partitioned frequency-domain convolution for reverb impulse responses |
 | Delay Line | `delay_line.hpp` | Sample-accurate delay with linear, cubic, or sinc interpolation |
+| [Fractional Delay](fractional-delay.md) | `fractional_delay.hpp` | Prepared Thiran-1/Lagrange delay lines plus bounded shared history with stateless multitap Lagrange-3/5 heads, explicit causal ranges, and typed fault recovery |
 | Oversampling | `oversampling.hpp` | 2x/4x/8x/16x realtime up/downsampling; minimum-phase IIR and 96/140 dB-prototype linear-phase FIR tiers with exact latency reporting |
 | Phaser | `phaser.hpp` | All-pass filter chain with LFO modulation for sweeping comb effects |
 | FDN Reverb | [`fdn_reverb.hpp`](../guides/fdn-reverb.md) | 16-line feedback delay network with a selectable internal tank sample rate (16-96 kHz), Jot decay law, granular shimmer, and a provably bounded loop gain; wet-only |
@@ -670,7 +691,7 @@ a working convolution and would hide the bug. Assert
 
 | Processor | Header | Description |
 |-----------|--------|-------------|
-| Ballistics Filter | `ballistics_filter.hpp` | Envelope follower with configurable attack/release for meter and dynamics |
+| Envelope Follower | `dynamics_contract.hpp` | Exact peak/RMS envelope timing, stereo detector linking, and canonical gain-reduction telemetry; `BallisticsFilter` retains its legacy nominal timing for render compatibility |
 | Compressor | `compressor.hpp` | Soft-knee downward compressor with threshold, ratio, attack, release |
 | DryWetMixer | `dry_wet_mixer.hpp` | Parallel mix with latency compensation — equal-power or linear crossfade |
 | Gain | `gain.hpp` | Scalar gain stage; pair with `smoothed_value.hpp`, `log_ramped_value.hpp`, or audio `apply_gain_ramp()` when transitions need de-clicking |
@@ -682,7 +703,7 @@ a working convolution and would hide the bug. Assert
 |-----------|--------|-------------|
 | ADSR | `adsr.hpp` | Attack-decay-sustain-release envelope generator for amplitude or filter modulation |
 | FFT | `fft.hpp` | Fast Fourier Transform — uses vDSP on Apple, fallback on other platforms |
-| Multi-Channel Meter | `multi_channel_meter.hpp` | Peak and RMS level measurement across multiple channels |
+| Multi-Channel Meter | `multi_channel_meter.hpp` | Sample peak, RMS, stereo correlation, and channel-based BS.1770-5 K-weighted momentary plus gated integrated loudness; not true-peak, short-term, LRA, or a complete EBU Mode meter |
 | Oscillator | `oscillator.hpp` | Legacy polyBLEP oscillator with sine, saw, square, triangle waveforms (float phase, integrated triangle) |
 | Oscillator suite (`osc/`) | `osc/va.hpp`, `osc/vco.hpp`, `osc/dco.hpp`, `osc/wt.hpp`, `osc/wt_lofi.hpp` | Newer VA/VCO/DCO/wavetable family sharing a phase accumulator and BLEP/BLAMP kernels — see the [oscillators guide](../guides/oscillators.md) |
 | Spectrogram | `spectrogram.hpp` | Rolling time-frequency analysis for visual display of spectral content |
@@ -732,6 +753,7 @@ mode span into a prepared bank. Link `pulp::signal-modal-spec` in addition to
 | Spectral Frame Engine | `spectral_frame_engine.hpp` | Streaming STFT analysis + overlap-add synthesis with coherent multichannel frame groups and variable synthesis hop |
 | Realtime Pitch/Time | `realtime_pitch_time_processor.hpp` | Phase-vocoder pitch shifting (fixed duration, exact reported latency) and independent time stretching, with transient preservation, formant follow/preserve, and freeze |
 | Phase Coordinator | `multichannel_phase_coordinator.hpp` | Laroche-Dolson phase propagation with identity peak locking, applied as one rotation per bin across a channel group — preserves inter-channel phase exactly |
+| Source-filter Analysis | `source_filter_analysis.hpp` | Prepared cepstral and true-envelope analysis plus safely scaled autocorrelation LPC, reflection coefficients, Schur stability, and all-pole response; formant extraction remains explicitly unsupported |
 | Envelope Shifter | `spectral_envelope_shifter.hpp` | Cepstral spectral-envelope estimation (true-envelope refinement) and formant warping with exact unity bypass |
 | Transient Policy | `transient_phase_policy.hpp` | Spectral-flux transient detection (median + energy-relative gates) driving phase reset at onsets |
 | Freeze Hold | `freeze_hold.hpp` | Spectral freeze / infinite hold with de-looped phase evolution, click-free engage/release, and a no-mute latch policy |

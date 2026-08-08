@@ -119,6 +119,7 @@
 #include <pulp/signal/dc_blocker.hpp>
 #include <pulp/signal/denormal.hpp>
 #include <pulp/signal/dynamics_core.hpp>
+#include <pulp/signal/dynamics_contract.hpp>
 #include <pulp/signal/junction.hpp>
 #include <pulp/signal/tpt_filter.hpp>
 #include <pulp/signal/units.hpp>
@@ -791,6 +792,9 @@ public:
 
     /// Smoothed gain reduction in dB (≤ 0) as of the last processed sample.
     double gain_reduction_db() const { return smoothed_reduction_db_; }
+    GainReduction gain_reduction() const noexcept {
+        return GainReduction::from_signed_db(smoothed_reduction_db_);
+    }
 
     /// The control drive `x` currently applied to the bridge.
     double control_drive() const {

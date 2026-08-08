@@ -395,10 +395,10 @@ jobs:
     # GitHub-hosted windows-latest (it is ~1h on Linux/macOS), so the
     # os-windows leg times out. Its C++ coverage adds little unique signal
     # over the Linux/macOS legs (same sources via llvm-cov), and the
-    # coverage-staleness watchdog (#3947) keys off a *successful run*, not
-    # per-OS flags — so letting Windows fail non-fatally lets a healthy
-    # full run conclude success and upload the other OS flags. If Windows
-    # ever fits the cap (faster runner / lighter report) it still uploads.
+    # receipt-aware upload watchdog (#6252) requires exact Linux, macOS, and
+    # Python-tools receipts, but intentionally treats Windows as advisory.
+    # Letting Windows fail non-fatally therefore preserves the required fresh
+    # upload set. If Windows fits the cap, it still uploads its own current flag.
     continue-on-error: ${{ matrix.os == 'windows' }}
     steps:
       - uses: actions/checkout@v5
@@ -508,18 +508,41 @@ jobs:
           python3 -m pip install --user --upgrade numpy || \
             python3 -m pip install --break-system-packages --user --upgrade numpy
 
-      - name: Fetch prebuilt Skia (macOS)
-        # scripts/run_coverage.sh configures with examples enabled. The
-        # design-tool example requires Skia when GPU support is enabled,
-        # and fresh macOS coverage checkouts do not have the LFS-declared
-        # Skia binaries on disk. Reuse the same pinned, sha256-verified
-        # fetch path as build.yml so coverage can configure on the current
-        # self-hosted macOS runners.
-        if: matrix.os == 'macos'
+      - name: Reclaim hosted macOS coverage disk
+        # GitHub's standard arm64 image has a tight root disk and the native
+        # coverage link previously failed at 98% with ENOSPC. On disposable
+        # GitHub-hosted runners only, remove inactive Xcode bundles while
+        # preserving the selected toolchain. Self-hosted/Namespace machines
+        # are never mutated by this step.
+        if: matrix.os == 'macos' && runner.environment == 'github-hosted'
         shell: bash
         run: |
           set -euo pipefail
-          python3 tools/scripts/fetch_skia_for_release.py darwin-arm64
+          active_developer="$(xcode-select -p)"
+          active_xcode="${active_developer%/Contents/Developer}"
+          active_xcode="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${active_xcode}")"
+          echo "Preserving active Xcode: ${active_xcode}"
+          while IFS= read -r -d '' candidate; do
+            candidate_real="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${candidate}")"
+            if [ "${candidate_real}" != "${active_xcode}" ]; then
+              echo "Removing inactive hosted-runner Xcode: ${candidate}"
+              sudo rm -rf -- "${candidate}"
+            fi
+          done < <(find /Applications -maxdepth 1 -type d -name 'Xcode*.app' -print0)
+          brew cleanup --prune=all || true
+          df -h /
+          free_kib="$(df -Pk / | awk 'NR==2 {print $4}')"
+          if [ "${free_kib}" -lt $((10 * 1024 * 1024)) ]; then
+            echo "::error::Hosted macOS coverage has less than 10 GiB free after safe image cleanup. Refusing a predictably truncated coverage build."
+            exit 1
+          fi
+
+      - name: Fetch prebuilt Skia (macOS)
+        # Coverage retains the complete example-driven test surface. The
+        # design-tool example therefore needs the pinned, verified Skia bundle.
+        if: matrix.os == 'macos'
+        shell: bash
+        run: python3 tools/scripts/fetch_skia_for_release.py darwin-arm64
 
       - name: Run coverage suite
         id: coverage-suite
@@ -540,7 +563,12 @@ jobs:
         shell: bash
         env:
           CMAKE_GENERATOR: ${{ matrix.os == 'windows' && 'Ninja' || '' }}
-          PULP_COVERAGE_CMAKE_ARGS: ${{ (matrix.os == 'linux' || matrix.os == 'macos') && '-DPULP_BUILD_PYTHON=ON' || '' }}
+          # Example source is excluded, but example-owned tests exercise core
+          # libraries and template/header paths. Keep that coverage-driving
+          # graph intact; hosted macOS disk is handled by safe image cleanup and
+          # lower linker parallelism instead.
+          PULP_COVERAGE_CMAKE_ARGS: ${{ (matrix.os == 'linux' || matrix.os == 'macos') && '-DPULP_BUILD_PYTHON=ON -DPULP_BUILD_EXAMPLES=ON' || '-DPULP_BUILD_EXAMPLES=ON' }}
+          PULP_COVERAGE_JOBS: ${{ matrix.os == 'macos' && runner.environment == 'github-hosted' && '2' || '' }}
           PULP_COVERAGE_CTEST_ARGS: ${{ matrix.os == 'macos' && '-LE validation' || '' }}
           # Coverage workflow targets C++ source coverage. The Rust CLI
           # gets its own `cli-rust` Codecov tier via a separate
@@ -548,22 +576,66 @@ jobs:
           # binary built. Skipping avoids macOS-runner ring-crate build
           # failure (#785) without losing C++ coverage data.
           PULP_SKIP_RUST_CLI: '1'
-        # Bound the run with an INTERNAL budget below the job's
-        # `timeout-minutes: 150`. The os-windows instrumented build + ~9k tests
+        # Bound the native suite with an INTERNAL budget that reserves a full
+        # hour inside the job's `timeout-minutes: 150` for checkout/setup plus
+        # report verification, Python/Swift coverage, artifacts, and uploads.
+        # The os-windows instrumented build + ~9k tests
         # + llvm-cov over 1000+ objects legitimately can't finish in the cap on
         # windows-latest. A job-level *timeout* CANCELS the whole job, and a
         # cancellation is NOT neutralised by `continue-on-error` (verified by a
         # canary) — so the run would conclude `cancelled` and never clear the
-        # coverage-staleness watchdog. By killing the work ourselves before the
+        # receipt-aware coverage upload watchdog. By killing the work ourselves before the
         # cap, the step exits non-zero (a normal failure), which the job-level
         # `continue-on-error: matrix.os=='windows'` DOES neutralise → the run
         # concludes success and the other OS flags still upload. Linux/macOS
         # finish in ~1h, far under the budget, so they are never affected.
         run: |
-          budget=$(( 135 * 60 ))   # 135 min < 150-min job cap
+          budget=$(( 90 * 60 ))   # leaves 60 min for setup + post-suite work
           budget_hit="${RUNNER_TEMP:-/tmp}/coverage-budget-hit"
           rm -f "${budget_hit}" 2>/dev/null || true
-          scripts/run_coverage.sh & cov=$!
+          coverage_args=()
+          if [ -n "${PULP_COVERAGE_JOBS}" ]; then
+            coverage_args+=(--jobs "${PULP_COVERAGE_JOBS}")
+          fi
+          # A timeout must terminate the whole build/test tree, not only this
+          # wrapper shell. POSIX runners launch the suite as a new process-group
+          # leader; Git Bash on Windows uses taskkill's recursive /T mode.
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            scripts/run_coverage.sh "${coverage_args[@]}" & cov=$!
+            # `$!` is an MSYS PID, but taskkill requires the corresponding
+            # native Windows PID. Resolve it while the wrapper is guaranteed
+            # to be alive; never pass the MSYS number to taskkill.
+            cov_winpid=""
+            for _ in $(seq 1 20); do
+              cov_winpid=$(ps -W | awk -v pid="${cov}" '
+                NR == 1 {
+                  for (i = 1; i <= NF; i++) if ($i == "WINPID") winpid_column = i
+                  next
+                }
+                $1 == pid && winpid_column { print $winpid_column; exit }
+              ')
+              [ -n "${cov_winpid}" ] && break
+              sleep 0.1
+            done
+            if [ -z "${cov_winpid}" ]; then
+              echo "::error::could not resolve native Windows PID for coverage process ${cov}"
+              kill -TERM "${cov}" 2>/dev/null || true
+              wait "${cov}" 2>/dev/null || true
+              exit 1
+            fi
+          else
+            python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
+              bash scripts/run_coverage.sh "${coverage_args[@]}" & cov=$!
+          fi
+          terminate_coverage_tree() {
+            if [ "${RUNNER_OS}" = "Windows" ]; then
+              taskkill.exe //PID "${cov_winpid}" //T //F >/dev/null 2>&1 || true
+            else
+              kill -TERM -- "-${cov}" 2>/dev/null || true
+              sleep 15
+              kill -KILL -- "-${cov}" 2>/dev/null || true
+            fi
+          }
           # Watchdog. Steps are separated by ';' (NOT '&&') so a failed marker
           # write or warning echo can NEVER skip the kill — terminating the suite
           # before the job cap is the entire point. The marker is best-effort; the
@@ -571,9 +643,7 @@ jobs:
           ( sleep "${budget}"
             echo "::warning::coverage suite hit the ${budget}s best-effort budget (expected on os-windows); terminating — leg is non-fatal."
             : > "${budget_hit}" 2>/dev/null || true
-            kill -TERM "${cov}" 2>/dev/null || true
-            sleep 15
-            kill -KILL "${cov}" 2>/dev/null || true ) & watch=$!
+            terminate_coverage_tree ) & watch=$!
           set +e; wait "${cov}"; rc=$?; set -e
           kill -TERM "${watch}" 2>/dev/null || true
           wait "${watch}" 2>/dev/null || true
@@ -593,7 +663,7 @@ jobs:
             # `continue-on-error: matrix.os=='windows'`); the macOS/linux legs
             # reddened main whenever the growing suite crossed the budget. A
             # dropped report is a clean miss on every OS — the
-            # coverage-staleness watchdog is the alarm if coverage genuinely
+            # receipt-aware upload watchdog is the alarm if coverage genuinely
             # stops flowing.
             echo "budget_hit=true" >> "${GITHUB_OUTPUT}"
             { echo "### Coverage suite interrupted (${{ matrix.os }})";
@@ -624,6 +694,7 @@ jobs:
         # Mirror scripts/run_coverage.sh semantics: keep going even if a
         # test fails so we can still emit partial coverage for review.
         if: matrix.os == 'linux'
+        id: python_coverage
         continue-on-error: true
         shell: bash
         run: build-coverage/python-venv/bin/python tools/scripts/run_python_coverage.py
@@ -702,7 +773,9 @@ jobs:
         # purpose, so hard-failing here would redden main on macOS/linux — the
         # exact recurring break this replaces. A real build failure (no budget
         # hit) still produces no XML and fails loudly, as before.
-        if: steps.coverage-suite.outputs.budget_hit != 'true'
+        # `always()` keeps an unrelated Python/Apple diagnostic artifact
+        # failure from suppressing verification of a valid native report.
+        if: always() && steps.coverage-suite.outputs.budget_hit != 'true'
         # Fail loudly if the coverage build didn't produce a cobertura file.
         # Without this check, a silent build failure (e.g. a missing transitive
         # include that breaks under Clang strict mode) produces zero profraw
@@ -715,6 +788,10 @@ jobs:
         # `<` as a reserved redirection operator and errors out).
         shell: bash
         run: |
+          if [ "${{ steps.coverage-suite.outcome }}" != "success" ]; then
+            echo "::error::Native coverage build/tests failed; any partial XML is retained as an artifact but is not eligible for Codecov upload."
+            exit 1
+          fi
           xml=build-coverage/coverage.cobertura.xml
           test -s "$xml" || {
             echo "::error::coverage.cobertura.xml is missing or empty."
@@ -738,6 +815,10 @@ jobs:
         if: always() && matrix.os == 'linux'
         shell: bash
         run: |
+          if [ "${{ steps.python_coverage.outcome }}" != "success" ]; then
+            echo "::error::Python coverage tests failed; the partial XML is retained as an artifact but is not eligible for Codecov upload."
+            exit 1
+          fi
           xml=build-coverage/python/coverage.python.xml
           test -s "$xml" || {
             echo "::error::coverage.python.xml is missing or empty."
@@ -788,8 +869,9 @@ jobs:
         #
         # Skipped on a budget-interrupted leg: the report was intentionally
         # dropped, so `if-no-files-found: error` would otherwise fail the job
-        # (the recurring macOS/linux break). `always()` still covers a normal
-        # ctest-failure run, which emits a partial report worth uploading.
+        # (the recurring macOS/linux break). `always()` still retains a normal
+        # build/ctest-failure report as a diagnostic artifact; the semantic
+        # verifier prevents that partial report from reaching Codecov.
         if: always() && steps.coverage-suite.outputs.budget_hit != 'true'
         uses: actions/upload-artifact@v6
         with:
@@ -821,13 +903,12 @@ jobs:
 
       - name: Compute Codecov upload file list
         id: codecov_files
-        if: steps.native_cobertura.outcome == 'success'
+        # `always()` prevents an independent Python/Apple verifier failure from
+        # suppressing an otherwise valid native upload.
+        if: always() && steps.native_cobertura.outcome == 'success'
         shell: bash
         run: |
           files="build-coverage/coverage.cobertura.xml"
-          if [ "${{ steps.python_cobertura.outcome }}" = "success" ]; then
-            files="${files},build-coverage/python/coverage.python.xml"
-          fi
           if [ "${{ steps.apple_lcov.outcome }}" = "success" ]; then
             files="${files},build-coverage/apple/coverage.apple.lcov"
           fi
@@ -851,13 +932,26 @@ jobs:
         # Local report failures remain hard errors. Transport failures are
         # visible inside the shared action but do not replace the in-repo
         # diff gate with Codecov availability as the merge boundary.
-        if: steps.native_cobertura.outcome == 'success' && github.event.pull_request.head.repo.fork != true
+        if: always() && steps.native_cobertura.outcome == 'success' && github.event.pull_request.head.repo.fork != true
         uses: ./.github/actions/upload-codecov-report
         with:
           files: ${{ steps.codecov_files.outputs.files }}
           flags: ${{ matrix.flag }}
           token: ${{ secrets.CODECOV_TOKEN }}
-          receipt-name: codecov-upload-${{ matrix.os }}-${{ github.sha }}
+          receipt-name: codecov-upload-${{ matrix.os }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
+
+      - name: Upload Python tools coverage to Codecov
+        # Python coverage is an independent report contract. In particular,
+        # upload it even when the Linux native compiler or llvm-cov lane fails;
+        # coupling the two previously discarded a verified Python report and
+        # made the dashboard look less current than the artifacts on disk.
+        if: always() && steps.python_cobertura.outcome == 'success' && github.event.pull_request.head.repo.fork != true
+        uses: ./.github/actions/upload-codecov-report
+        with:
+          files: build-coverage/python/coverage.python.xml
+          flags: python-tools
+          token: ${{ secrets.CODECOV_TOKEN }}
+          receipt-name: codecov-upload-python-tools-${{ github.sha }}-attempt-${{ github.run_attempt }}
 
   # ── Queued-leg watchdog ────────────────────────────────────────────────
   # `timeout-minutes` on the `coverage` matrix job ONLY bounds execution

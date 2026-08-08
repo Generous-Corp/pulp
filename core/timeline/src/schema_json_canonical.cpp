@@ -223,7 +223,7 @@ runtime::Result<std::string, PersistenceError> canonical(const JsonValue& value)
         return runtime::Result<std::string, PersistenceError>(runtime::Ok(std::move(output)));
     }
     case JsonValue::Kind::Object: {
-        std::vector<const std::pair<std::string, JsonValue>*> members;
+        std::vector<const JsonObjectMember*> members;
         members.reserve(value.object.size());
         for (const auto& member : value.object)
             members.push_back(&member);

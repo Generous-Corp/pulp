@@ -167,6 +167,7 @@ void BridgeRegistrars::register_widget_factory_form_api(WidgetBridge& self) {
         auto alive = self.callback_alive_;
         auto* engine = &self.engine_;
         cb->on_change = [alive, engine, id](bool v) {
+            BridgeCallbackScope scope(alive);
             dispatch_event(alive, engine, id, "change", v ? "1" : "0");
         };
         self.resolve_parent(pid)->add_child(std::move(cb));
@@ -182,6 +183,7 @@ void BridgeRegistrars::register_widget_factory_form_api(WidgetBridge& self) {
         auto alive = self.callback_alive_;
         auto* engine = &self.engine_;
         tb->on_toggle = [alive, engine, id](bool v) {
+            BridgeCallbackScope scope(alive);
             dispatch_event(alive, engine, id, "toggle", v ? "1" : "0");
         };
         self.resolve_parent(pid)->add_child(std::move(tb));
@@ -250,6 +252,7 @@ void BridgeRegistrars::register_widget_factory_container_api(WidgetBridge& self)
         auto alive = self.callback_alive_;
         auto* engine = &self.engine_;
         modal->on_dismiss = [alive, engine, modal, id]() {
+            BridgeCallbackScope scope(alive);
             if (modal) {
                 modal->set_visible(false);
             }
@@ -310,6 +313,7 @@ void BridgeRegistrars::register_widget_factory_composite_api(WidgetBridge& self)
         auto alive = self.callback_alive_;
         auto* engine = &self.engine_;
         c->on_change = [alive, engine, id](int idx) {
+            BridgeCallbackScope scope(alive);
             dispatch_event(alive, engine, id, "select", std::to_string(idx));
         };
         self.resolve_parent(pid)->add_child(std::move(c));
@@ -348,9 +352,11 @@ void BridgeRegistrars::register_widget_factory_composite_api(WidgetBridge& self)
         auto alive = self.callback_alive_;
         auto* engine = &self.engine_;
         lb->on_select = [alive, engine, id](int idx) {
+            BridgeCallbackScope scope(alive);
             dispatch_event(alive, engine, id, "select", std::to_string(idx));
         };
         lb->on_activate = [alive, engine, id](int idx) {
+            BridgeCallbackScope scope(alive);
             dispatch_event(alive, engine, id, "activate", std::to_string(idx));
         };
         self.resolve_parent(pid)->add_child(std::move(lb));
@@ -387,13 +393,16 @@ void BridgeRegistrars::register_widget_factory_text_editor_api(WidgetBridge& sel
         auto alive = self.callback_alive_;
         auto* engine = &self.engine_;
         ed->on_escape = [alive, engine, id]() {
+            BridgeCallbackScope scope(alive);
             dispatch_event(alive, engine, id, "escape", "0");
         };
         ed->on_return = [alive, engine, id](const std::string& text) {
+            BridgeCallbackScope scope(alive);
             std::string e; for (char c : text) { if (c=='\'') e+= "\\'"; else if (c=='\n') e+= "\\n"; else e+= c; }
             dispatch_event(alive, engine, id, "return", "'" + e + "'");
         };
         ed->on_change = [alive, engine, id](const std::string& text) {
+            BridgeCallbackScope scope(alive);
             std::string e; for (char c : text) { if (c=='\'') e+= "\\'"; else if (c=='\n') e+= "\\n"; else e+= c; }
             dispatch_event(alive, engine, id, "change", "'" + e + "'");
         };
@@ -436,6 +445,7 @@ void BridgeRegistrars::register_widget_factory_design_system_api(WidgetBridge& s
         auto alive = self.callback_alive_;
         auto* engine = &self.engine_;
         s->on_change = [alive, engine, id](double v) {
+            BridgeCallbackScope scope(alive);
             dispatch_event(alive, engine, id, "change", std::to_string(v));
         };
         self.resolve_parent(pid)->add_child(std::move(s));
@@ -453,6 +463,7 @@ void BridgeRegistrars::register_widget_factory_design_system_api(WidgetBridge& s
         auto alive = self.callback_alive_;
         auto* engine = &self.engine_;
         p->on_change = [alive, engine, id](float v) {
+            BridgeCallbackScope scope(alive);
             dispatch_event(alive, engine, id, "change", std::to_string(v));
         };
         self.resolve_parent(pid)->add_child(std::move(p));

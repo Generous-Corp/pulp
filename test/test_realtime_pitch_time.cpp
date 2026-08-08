@@ -667,11 +667,20 @@ TEST_CASE("RealtimePitchTimeProcessor output is block-size invariant when settle
 
 // ── SpectralEnvelopeShifter ─────────────────────────────────────────────────
 
+TEST_CASE("Realtime pitch-time preflight rejects unsupported envelope iterations",
+          "[signal][envelope][prepare]") {
+    RealtimePitchTimeConfig config;
+    config.true_envelope_iterations = kSourceFilterMaximumEnvelopeIterations + 1;
+    RealtimePitchTimePreparedGeometry<float> geometry;
+    REQUIRE(checked_realtime_pitch_time_prepared_geometry(config, 2.0, 1ULL << 30, geometry) ==
+            PitchTimePrepareStatus::invalid_spectral_geometry);
+}
+
 TEST_CASE("SpectralEnvelopeShifter warp 1 is an exact bypass", "[signal][envelope]") {
     SpectralEnvelopeShifterConfig config;
     config.fft_size = 1024;
     SpectralEnvelopeShifter shifter;
-    shifter.prepare(config);
+    REQUIRE(shifter.prepare(config) == SourceFilterAnalysisStatus::Ok);
 
     std::vector<std::complex<float>> frame(513);
     for (int k = 0; k < 513; ++k)
@@ -688,7 +697,7 @@ TEST_CASE("SpectralEnvelopeShifter64 processes double frames", "[signal][envelop
     SpectralEnvelopeShifterConfig config;
     config.fft_size = 1024;
     SpectralEnvelopeShifter64 shifter;
-    shifter.prepare(config);
+    REQUIRE(shifter.prepare(config) == SourceFilterAnalysisStatus::Ok);
 
     std::vector<std::complex<double>> frame(513);
     for (int k = 0; k < 513; ++k)
@@ -711,7 +720,7 @@ TEST_CASE("SpectralEnvelopeShifter moves envelope features by 1/warp", "[signal]
     config.order = 128;
     config.true_envelope_iterations = 16;
     SpectralEnvelopeShifter shifter;
-    shifter.prepare(config);
+    REQUIRE(shifter.prepare(config) == SourceFilterAnalysisStatus::Ok);
 
     // Harmonic comb shaped by a single bump around bin 100.
     const int bins = 1025;

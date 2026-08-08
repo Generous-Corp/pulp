@@ -4,6 +4,7 @@
 #include <pulp/signal/drum/fm_tables.hpp>
 #include <pulp/signal/drum/layers.hpp>
 #include <pulp/signal/drum/voice.hpp>
+#include <pulp/signal/fm_operator_engine.hpp>
 #include <pulp/signal/noise_source.hpp>
 #include <pulp/signal/svf.hpp>
 
@@ -611,45 +612,43 @@ protected:
         const Algorithm& alg = algorithms[static_cast<std::size_t>(algorithm_)];
 
         for (int i = 0; i < num_samples; ++i) {
-            std::array<double, operator_count> current{};
-
+            std::array<double, operator_count> amplitudes{};
+            std::array<double, operator_count> feedback{};
             for (std::size_t op = 0; op < operator_count; ++op) {
-                // Every modulation input is read from the previous sample, so
-                // this loop has no ordering requirement and the algorithm table
-                // needs no analysis.
-                double modulation = 0.0;
-                const std::uint8_t mask = alg.modulated_by[op];
-                for (std::size_t src = 0; src < operator_count; ++src) {
-                    if (mask & (1u << src)) modulation += previous_[src];
-                }
-                modulation *= applied_depth_;
-                modulation += feedbacks_[op] * kFeedbackDepth * previous_[op];
-
-                const double hz =
-                    std::min(tune_hz_ * ratios_[op], 0.49 * sample_rate());
-                phases_[op] += hz / sample_rate();
-                if (phases_[op] >= 1.0) phases_[op] -= std::floor(phases_[op]);
-
-                current[op] =
-                    FmWaveTable::read(
-                        waves_[op],
-                        phases_[op] +
-                            modulation / (2.0 * 3.14159265358979323846),
-                        hz / sample_rate()) *
-                    envelopes_[op].process() * levels_[op];
+                amplitudes[op] = envelopes_[op].process() * levels_[op];
+                feedback[op] = feedbacks_[op] * kFeedbackDepth;
             }
 
-            double summed = 0.0;
-            int carriers = 0;
-            for (std::size_t op = 0; op < operator_count; ++op) {
-                if (alg.carriers & (1u << op)) {
-                    summed += current[op];
-                    ++carriers;
-                }
-            }
-            if (carriers > 1) summed /= static_cast<double>(carriers);
-
-            previous_ = current;
+            const auto frequency = [&](std::size_t op) {
+                return tune_hz_ * ratios_[op];
+            };
+            const auto phase_route = [&](std::size_t destination,
+                                         std::size_t source) {
+                return (alg.modulated_by[destination] & (1u << source))
+                           ? applied_depth_
+                           : 0.0;
+            };
+            const auto no_frequency_route = [](std::size_t, std::size_t) {
+                return 0.0;
+            };
+            const auto carrier = [&](std::size_t op) {
+                return (alg.carriers & (1u << op)) ? 1.0 : 0.0;
+            };
+            const auto wave = [&](std::size_t op, double phase_cycles,
+                                  double phase_offset_radians,
+                                  double phase_increment) {
+                return FmWaveTable::read(
+                    waves_[op],
+                    phase_cycles +
+                        phase_offset_radians /
+                            (2.0 * 3.14159265358979323846),
+                    phase_increment);
+            };
+            const double summed = detail::render_fm_operator_sample(
+                static_cast<std::size_t>(operator_count), sample_rate(),
+                FmOperatorAliasPolicy::bounded, phases_, previous_, amplitudes,
+                feedback, frequency, phase_route, no_frequency_route, carrier,
+                wave);
 
             const double shaped = formant_.process(static_cast<float>(summed));
             const double noise_envelope =

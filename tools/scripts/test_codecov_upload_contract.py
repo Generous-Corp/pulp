@@ -4,11 +4,15 @@
 from __future__ import annotations
 
 import pathlib
+import sys
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 ACTION = REPO_ROOT / ".github" / "actions" / "upload-codecov-report" / "action.yml"
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
+sys.path.insert(0, str(REPO_ROOT / "tools" / "scripts"))
+
+from check_codecov_receipts import receipt_counts, receipt_summary  # noqa: E402
 
 
 class SharedUploadActionTests(unittest.TestCase):
@@ -43,7 +47,15 @@ class CoverageWorkflowTests(unittest.TestCase):
     def test_native_upload_requires_semantically_verified_report(self) -> None:
         self.assertIn("id: native_cobertura", self.coverage)
         self.assertIn(
-            "if: steps.native_cobertura.outcome == 'success' && "
+            "if: always() && steps.coverage-suite.outputs.budget_hit != 'true'",
+            self.coverage,
+        )
+        self.assertIn(
+            'if [ "${{ steps.coverage-suite.outcome }}" != "success" ]; then',
+            self.coverage,
+        )
+        self.assertIn(
+            "if: always() && steps.native_cobertura.outcome == 'success' && "
             "github.event.pull_request.head.repo.fork != true",
             self.coverage,
         )
@@ -51,29 +63,133 @@ class CoverageWorkflowTests(unittest.TestCase):
             "uses: ./.github/actions/upload-codecov-report", self.coverage
         )
 
+    def test_native_budget_terminates_the_full_process_tree(self) -> None:
+        self.assertIn("os.setsid()", self.coverage)
+        self.assertIn('kill -TERM -- "-${cov}"', self.coverage)
+        self.assertIn('$i == "WINPID"', self.coverage)
+        self.assertIn('taskkill.exe //PID "${cov_winpid}" //T //F', self.coverage)
+
     def test_main_watchdog_requires_both_native_upload_receipts(self) -> None:
-        self.assertIn('startswith("codecov-upload-linux-")', self.watchdog)
-        self.assertIn('startswith("codecov-upload-macos-")', self.watchdog)
-        self.assertIn(
-            '[ "${has_linux}" -gt 0 ] && [ "${has_macos}" -gt 0 ]',
-            self.watchdog,
+        self.assertIn("tools/scripts/check_codecov_receipts.py", self.watchdog)
+        self.assertIn('"linux=${linux_attempt}" "macos=${macos_attempt}"', self.watchdog)
+        self.assertIn('"python-tools=${linux_attempt}"', self.watchdog)
+        self.assertIn('-f filter=all', self.watchdog)
+        self.assertIn('Coverage report (Linux, Clang)', self.watchdog)
+        self.assertIn('Coverage report (macOS, Clang)', self.watchdog)
+        self.assertIn('name: Coverage report (${{ matrix.label }}, Clang)', self.coverage)
+        self.assertIn('label:"Linux"', self.coverage)
+        self.assertIn('label:"macOS"', self.coverage)
+        self.assertIn('select(.status=="completed")', self.watchdog)
+        self.assertNotIn('select(.conclusion=="success")', self.watchdog)
+        self.assertIn("github.event.inputs.max_age_hours || '14'", self.watchdog)
+        self.assertIn("--paginate --slurp", self.watchdog)
+        self.assertNotIn("--slurp \\\n            --jq", self.watchdog)
+        self.assertIn("| jq -c '[.[].workflow_runs[]", self.watchdog)
+        self.assertIn('-f created=">=${scan_cutoff}"', self.watchdog)
+        self.assertIn(".oldest_created_at", self.watchdog)
+        self.assertIn('[[ "${candidate_at}" > "${last_success_at}" ]]', self.watchdog)
+        self.assertIn("scan_incomplete=1", self.watchdog)
+        self.assertIn("leaving watchdog issue state unchanged", self.watchdog)
+
+    def test_receipt_checker_rejects_prefix_wrong_sha_and_expired(self) -> None:
+        sha = "abc123"
+        artifacts = [
+            {"name": f"codecov-upload-linux-{sha}-attempt-2", "expired": False, "created_at": "2026-08-05T10:00:00Z"},
+            {"name": f"codecov-upload-macos-{sha}-attempt-2-extra", "expired": False},
+            {"name": "codecov-upload-macos-oldsha", "expired": False},
+            {"name": f"codecov-upload-python-tools-{sha}-attempt-1", "expired": False},
+            {"name": f"codecov-upload-python-tools-{sha}-attempt-2", "expired": True},
+        ]
+        self.assertEqual(
+            receipt_counts(artifacts, sha, {"linux": 2, "macos": 2, "python-tools": 2}),
+            {"linux": 1, "macos": 0, "python-tools": 0},
         )
 
-    def test_watchdog_legacy_fallback_cannot_mask_new_transport_failure(self) -> None:
-        self.assertIn(
-            "repos/${REPO}/contents/.github/workflows/coverage.yml",
-            self.watchdog,
+    def test_receipt_checker_accepts_one_exact_current_receipt_per_axis(self) -> None:
+        sha = "abc123"
+        artifacts = [
+            {"name": f"codecov-upload-linux-{sha}-attempt-2", "expired": False, "created_at": "2026-08-05T10:02:00Z"},
+            {"name": f"codecov-upload-macos-{sha}-attempt-2", "expired": False, "created_at": "2026-08-05T10:03:00Z"},
+            {"name": f"codecov-upload-python-tools-{sha}-attempt-2", "expired": False, "created_at": "2026-08-05T10:01:00Z"},
+        ]
+        self.assertEqual(
+            receipt_counts(artifacts, sha, {"linux": 2, "macos": 2, "python-tools": 2}),
+            {"linux": 1, "macos": 1, "python-tools": 1},
         )
-        self.assertIn('-f ref="${head_sha}"', self.watchdog)
-        self.assertIn(
-            "&& ! grep -q 'receipt-name: codecov-upload-'",
-            self.watchdog,
+        self.assertEqual(
+            receipt_summary(artifacts, sha, {"linux": 2, "macos": 2, "python-tools": 2})["oldest_created_at"],
+            "2026-08-05T10:01:00Z",
         )
-        self.assertIn('startswith("coverage-cobertura-")', self.watchdog)
+
+    def test_receipt_summary_rejects_missing_creation_time(self) -> None:
+        sha = "abc123"
+        artifacts = [
+            {"name": f"codecov-upload-linux-{sha}-attempt-2", "expired": False},
+            {"name": f"codecov-upload-macos-{sha}-attempt-2", "expired": False, "created_at": "2026-08-05T10:00:00Z"},
+            {"name": f"codecov-upload-python-tools-{sha}-attempt-2", "expired": False, "created_at": "2026-08-05T10:00:00Z"},
+        ]
+        self.assertIsNone(
+            receipt_summary(artifacts, sha, {"linux": 2, "macos": 2, "python-tools": 2})["oldest_created_at"]
+        )
+
+    def test_receipt_summary_accepts_mixed_latest_axis_attempts(self) -> None:
+        sha = "abc123"
+        artifacts = [
+            {"name": f"codecov-upload-linux-{sha}-attempt-1", "expired": False, "created_at": "2026-08-05T10:00:00Z"},
+            {"name": f"codecov-upload-python-tools-{sha}-attempt-1", "expired": False, "created_at": "2026-08-05T10:01:00Z"},
+            {"name": f"codecov-upload-macos-{sha}-attempt-2", "expired": False, "created_at": "2026-08-05T10:05:00Z"},
+        ]
+        summary = receipt_summary(
+            artifacts, sha, {"linux": 1, "macos": 2, "python-tools": 1}
+        )
+        self.assertEqual(summary["counts"], {"linux": 1, "macos": 1, "python-tools": 1})
+
+    def test_native_graph_preserves_example_driven_core_coverage(self) -> None:
+        self.assertIn("-DPULP_BUILD_EXAMPLES=ON", self.coverage)
+        self.assertIn("matrix.os == 'linux' || matrix.os == 'macos'", self.coverage)
+        self.assertIn("-DPULP_BUILD_PYTHON=ON -DPULP_BUILD_EXAMPLES=ON", self.coverage)
+        self.assertIn("budget=$(( 90 * 60 ))", self.coverage)
+        self.assertIn("leaves 60 min for setup + post-suite work", self.coverage)
+        self.assertNotIn(
+            "files=\"${files},build-coverage/python/coverage.python.xml\"",
+            self.coverage,
+        )
+
+    def test_python_upload_is_independent_from_native_report(self) -> None:
+        self.assertIn("id: python_coverage", self.coverage)
+        self.assertIn(
+            'if [ "${{ steps.python_coverage.outcome }}" != "success" ]; then',
+            self.coverage,
+        )
+        self.assertIn("name: Upload Python tools coverage to Codecov", self.coverage)
+        self.assertIn(
+            "if: always() && steps.python_cobertura.outcome == 'success'",
+            self.coverage,
+        )
+        self.assertIn("flags: python-tools", self.coverage)
+        self.assertIn(
+            "receipt-name: codecov-upload-python-tools-${{ github.sha }}-attempt-${{ github.run_attempt }}",
+            self.coverage,
+        )
+        self.assertIn(
+            "if: always() && steps.native_cobertura.outcome == 'success'",
+            self.coverage,
+            "a Python verifier failure must not suppress valid native coverage",
+        )
+
+    def test_watchdog_has_no_legacy_artifact_fallback(self) -> None:
+        self.assertNotIn("legacy_count", self.watchdog)
+        self.assertNotIn('startswith("coverage-cobertura-")', self.watchdog)
+
+    def test_success_only_staleness_watchdog_is_retired(self) -> None:
+        self.assertFalse(
+            (WORKFLOWS / "coverage-staleness-check.yml").exists(),
+            "a success-only watchdog can contradict the receipt authority",
+        )
 
     def test_all_coverage_call_sites_use_shared_action(self) -> None:
         expected = {
-            "coverage.yml": 3,
+            "coverage.yml": 4,
             "pulp-react-build.yml": 1,
         }
         for name, count in expected.items():
