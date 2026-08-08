@@ -914,3 +914,43 @@ TEST_CASE("host preflight frames use the canonical codec and strict directions",
     oversized.bootstrap_base64.assign(kControlHostPreflightMaximumBootstrapBase64Bytes + 1, 'x');
     CHECK(encode_control_envelope(ControlEnvelope{.payload = oversized}).empty());
 }
+
+TEST_CASE("management frames are typed bounded and direction constrained",
+          "[inspect][control-protocol][management]") {
+    const ControlEnvelope request{
+        .payload = ControlManagementEnvelope{
+            .request_id = "management-1",
+            .command = "grant-request",
+            .params_json = R"({"instance_id":"instance-1","profile":"inspect-readonly"})"}};
+    const auto encoded_request = encode_control_envelope(request);
+    REQUIRE_FALSE(encoded_request.empty());
+    const auto decoded_request = decode_control_envelope(encoded_request);
+    REQUIRE(decoded_request.has_value());
+    const auto* management = std::get_if<ControlManagementEnvelope>(&decoded_request->payload);
+    REQUIRE(management != nullptr);
+    CHECK(management->request_id == "management-1");
+    CHECK(management->command == "grant-request");
+    CHECK(canonicalize_control_json(management->params_json) ==
+          canonicalize_control_json(
+              std::get<ControlManagementEnvelope>(request.payload).params_json));
+    CHECK(control_envelope_allowed(request, ControlEnvelopeDirection::ClientToBroker));
+    CHECK_FALSE(control_envelope_allowed(request, ControlEnvelopeDirection::BrokerToClient));
+
+    const ControlEnvelope response{
+        .payload = ControlManagementResult{.request_id = "management-1",
+                                           .status_id = "consent-required",
+                                           .data_json = "{}",
+                                           .explanation = "trusted consent is unavailable"}};
+    const auto decoded_response = decode_control_envelope(encode_control_envelope(response));
+    REQUIRE(decoded_response.has_value());
+    const auto* management_result =
+        std::get_if<ControlManagementResult>(&decoded_response->payload);
+    REQUIRE(management_result != nullptr);
+    CHECK(management_result->status_id == "consent-required");
+    CHECK(control_envelope_allowed(response, ControlEnvelopeDirection::BrokerToClient));
+    CHECK_FALSE(control_envelope_allowed(response, ControlEnvelopeDirection::ClientToBroker));
+
+    auto invalid = std::get<ControlManagementEnvelope>(request.payload);
+    invalid.command = "raw-connect";
+    CHECK(encode_control_envelope(ControlEnvelope{.payload = invalid}).empty());
+}

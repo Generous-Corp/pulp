@@ -733,6 +733,19 @@ std::optional<ControlRegistration> ControlIdentityRegistry::registration(
     return found->second;
 }
 
+std::vector<ControlRegistration> ControlIdentityRegistry::registrations() const {
+    const auto now = impl_->clock();
+    std::lock_guard lock(impl_->mutex);
+    std::vector<ControlRegistration> result;
+    result.reserve(impl_->registrations.size());
+    for (const auto& [_, registration] : impl_->registrations) {
+        if (registration.expires_at > now)
+            result.push_back(registration);
+    }
+    std::ranges::sort(result, {}, [](const auto& value) { return value.registration_id.value; });
+    return result;
+}
+
 void ControlIdentityRegistry::sweep_expired() {
     std::lock_guard lock(impl_->mutex);
     impl_->sweep_locked(impl_->clock());

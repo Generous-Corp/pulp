@@ -42,6 +42,14 @@ struct ControlEndpointConfig {
     std::size_t maximum_queued_bytes_per_connection = 2 * kControlMaximumEnvelopeBytes;
     std::chrono::milliseconds write_timeout = std::chrono::seconds(3);
     std::chrono::milliseconds frame_read_timeout = std::chrono::seconds(3);
+    /// Installed adapters may self-enroll only when this broker-owned policy
+    /// accepts kernel-observed, code-signed peer evidence.
+    std::function<bool(const ControlPeerEvidence&)> authorize_client;
+    /// Optional trusted consent source. Absence means grant requests return
+    /// consent-required; request payloads can never claim this authority.
+    std::function<ControlConsentDecision(const VerifiedControlPeerIdentity&,
+                                         const ControlGrantRequest&)>
+        decide_consent;
 };
 
 /// OS-local carrier for one ControlService composition root.
@@ -53,7 +61,8 @@ class ControlEndpoint {
   public:
     ControlEndpoint(ControlService& service, ControlAdmissionConsumer consume_admission,
                     ControlEndpointConfig config, ControlHostRouter* host_router = nullptr,
-                    ControlEndpointEnrollmentContext* enrollment_context = nullptr);
+                    ControlEndpointEnrollmentContext* enrollment_context = nullptr,
+                    ControlBroker* management_broker = nullptr);
     ~ControlEndpoint();
 
     ControlEndpoint(const ControlEndpoint&) = delete;

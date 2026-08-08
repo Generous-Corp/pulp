@@ -13,6 +13,7 @@ Commands:
   ship           Sign, package, and distribute
   design         Launch the AI design tool
   docs           Browse local documentation
+  forge          Export Forge catalog integration data
   clean          Remove build directory
   fmt            Run clang-format on the source tree
   cache          Manage SDK and asset cache
@@ -22,7 +23,9 @@ Commands:
   version        Show, bump, or check version info
   dev            Unified dev loop: watch, build, test, run
   loop           Leveraged-prototype focus marker + watch loop
-  inspect        Connect to an explicitly hosted inspector fixture
+  inspect        Read static inspector profiles or audit an artifact offline
+  control        Authenticated local capability control
+  trace          Canonical trace lifecycle plus offline Perfetto analysis
   scan           List VST3 / AU / AUv3 / CLAP / LV2 plug-ins
   host           Load a plug-in and run a synthetic audio block through it
   import         Detect a framework project and emit a Pulp migration scaffold
@@ -45,6 +48,13 @@ Commands:
   export-tokens  Export theme as W3C Design Tokens
   audit          License and provenance audit
   add            Add a component to the project
+  remove         Remove a previously added package
+  list           Show installed packages
+  search         Search the package registry
+  update         Check for and apply package updates
+  suggest        Context-aware package recommendations
+  target         Manage project platform targets
+  tool           Manage third-party developer tools
   help           Show this help
 
 Examples:

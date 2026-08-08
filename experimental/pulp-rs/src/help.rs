@@ -140,6 +140,10 @@ pub const COMMANDS: &[Entry] = &[
         summary: "Read static inspector profiles or audit an artifact offline",
     },
     Entry {
+        name: "control",
+        summary: "Authenticated local capability control",
+    },
+    Entry {
         name: "trace",
         summary: "Canonical trace lifecycle plus offline Perfetto analysis",
     },

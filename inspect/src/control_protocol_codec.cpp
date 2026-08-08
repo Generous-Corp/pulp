@@ -94,6 +94,24 @@ bool valid_session_open_result(const ControlSessionOpenResult& message) {
            !message.explanation.empty();
 }
 
+bool valid_management_command(std::string_view command) {
+    return command == "enroll" || command == "instances" || command == "grant-request" ||
+           command == "revoke";
+}
+
+bool valid_management(const ControlManagementEnvelope& message) {
+    return valid_token(message.request_id, kMaximumIdBytes) &&
+           valid_management_command(message.command) &&
+           canonicalize_control_json(message.params_json).has_value();
+}
+
+bool valid_management_result(const ControlManagementResult& message) {
+    return valid_token(message.request_id, kMaximumIdBytes) &&
+           valid_token(message.status_id, kControlMaximumStatusIdBytes) &&
+           valid_text(message.explanation, kMaximumExplanationBytes) &&
+           canonicalize_control_json(message.data_json).has_value();
+}
+
 bool valid_artifact_read(const ControlArtifactReadEnvelope& message) {
     constexpr auto signed_max =
         static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
@@ -391,6 +409,24 @@ std::string encode_control_envelope(const ControlEnvelope& envelope) {
                 payload.addMember("error_code", choc::value::createString(message.error_code));
                 payload.addMember("explanation", choc::value::createString(message.explanation));
                 payload.addMember("request_id", choc::value::createString(message.request_id));
+            } else if constexpr (std::is_same_v<T, ControlManagementEnvelope>) {
+                valid = valid_management(message);
+                kind = "management";
+                if (!valid)
+                    return;
+                payload.addMember("command", choc::value::createString(message.command));
+                payload.addMember("params",
+                                  canonical_value(choc::json::parse(message.params_json)));
+                payload.addMember("request_id", choc::value::createString(message.request_id));
+            } else if constexpr (std::is_same_v<T, ControlManagementResult>) {
+                valid = valid_management_result(message);
+                kind = "management-result";
+                if (!valid)
+                    return;
+                payload.addMember("data", canonical_value(choc::json::parse(message.data_json)));
+                payload.addMember("explanation", choc::value::createString(message.explanation));
+                payload.addMember("request_id", choc::value::createString(message.request_id));
+                payload.addMember("status_id", choc::value::createString(message.status_id));
             } else if constexpr (std::is_same_v<T, ControlHostOpenEnvelope>) {
                 valid = valid_host_open(message);
                 kind = "host-open";
@@ -853,6 +889,41 @@ std::optional<ControlEnvelope> decode_control_envelope(std::string_view json,
             if (!valid_session_open_result(result)) {
                 error = {ControlProtocolError::InvalidValue,
                          "session-open result fields are inconsistent"};
+                return std::nullopt;
+            }
+            envelope.payload = std::move(result);
+        } else if (kind == "management") {
+            if (!only_fields(payload, {"command", "params", "request_id"}, error))
+                return std::nullopt;
+            ControlManagementEnvelope message;
+            if (!required_string(payload, "request_id", message.request_id, kMaximumIdBytes,
+                                 error) ||
+                !required_string(payload, "command", message.command, kControlMaximumStatusIdBytes,
+                                 error) ||
+                !payload.hasObjectMember("params"))
+                return std::nullopt;
+            message.params_json = choc::json::toString(canonical_value(payload["params"]), false);
+            if (!valid_management(message)) {
+                error = {ControlProtocolError::InvalidValue, "management fields are invalid"};
+                return std::nullopt;
+            }
+            envelope.payload = std::move(message);
+        } else if (kind == "management-result") {
+            if (!only_fields(payload, {"data", "explanation", "request_id", "status_id"}, error))
+                return std::nullopt;
+            ControlManagementResult result;
+            if (!required_string(payload, "request_id", result.request_id, kMaximumIdBytes,
+                                 error) ||
+                !required_string(payload, "status_id", result.status_id,
+                                 kControlMaximumStatusIdBytes, error) ||
+                !required_string(payload, "explanation", result.explanation,
+                                 kMaximumExplanationBytes, error, false) ||
+                !payload.hasObjectMember("data"))
+                return std::nullopt;
+            result.data_json = choc::json::toString(canonical_value(payload["data"]), false);
+            if (!valid_management_result(result)) {
+                error = {ControlProtocolError::InvalidValue,
+                         "management-result fields are invalid"};
                 return std::nullopt;
             }
             envelope.payload = std::move(result);

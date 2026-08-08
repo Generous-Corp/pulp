@@ -894,6 +894,11 @@ ControlBroker::registration(const ControlRegistrationId& registration_id) const 
     return identities_.registration(registration_id);
 }
 
+std::vector<ControlRegistration> ControlBroker::registrations() const {
+    std::lock_guard lock(coordination_mutex_);
+    return identities_.registrations();
+}
+
 std::optional<ControlGrant> ControlBroker::grant(const ControlGrantId& grant_id) {
     return grants_.grant(grant_id);
 }

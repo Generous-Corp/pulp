@@ -1355,6 +1355,36 @@ canonical broker/control platform, migrate supported clients, and close the
 shipping/negative-control evidence. No phase may restore a legacy Inspector
 fallback.
 
+### control
+
+**Status**: experimental
+
+`pulp control` is the canonical installed adapter for the owner-local capability
+broker. It authenticates the broker against the installed signed
+`pulp-control-broker`, enrolls the signed CLI as a connection-bound client, and
+selects live targets only by exact broker-issued `instance_id`. There are no
+host, port, discovery-file, newest-instance, label-selection, or raw protocol
+flags.
+
+```bash
+pulp control instances --json
+pulp control status --instance <id> --explain
+pulp control grant-request --instance <id> --profile inspect-readonly --json
+pulp control call --instance <id> dev.pulp.state/read@1 --params '{}'
+pulp control artifact --id <artifact-id> --out result.wav --json
+pulp control revoke --grant <grant-id>
+pulp control audit path/to/MyProduct --json
+```
+
+`grant-request` never mints authority in the CLI. A trusted broker consent
+source must approve it; otherwise the stable result is `consent-required`.
+`call` and `watch` request a connection-bound grant when `--grant` is omitted,
+so consent and invocation share one authenticated process session. They validate
+`--params` against the operation registry before dispatch and print the broker
+receipt. `artifact` reauthorizes every chunk against original
+receipt/grant lineage. Human output and `--json` describe the same result;
+usage errors exit 2 and broker/policy/operation failures exit 1.
+
 ### trace
 
 **Status**: experimental

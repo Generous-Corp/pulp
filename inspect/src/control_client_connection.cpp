@@ -1,5 +1,7 @@
 #include <pulp/inspect/control_client_connection.hpp>
 
+#include "control_static_code_identity.hpp"
+
 #include <pulp/events/interprocess_connection.hpp>
 #include <pulp/runtime/base64.hpp>
 
@@ -108,6 +110,7 @@ struct ControlClientConnection::Impl {
         Negotiation,
         Receipt,
         SessionOpen,
+        Management,
         ArtifactRead,
         Health,
     };
@@ -120,6 +123,7 @@ struct ControlClientConnection::Impl {
 
     std::filesystem::path endpoint_path;
     std::optional<ControlPeerExpectation> expected_broker;
+    std::filesystem::path expected_broker_executable;
     std::chrono::milliseconds connect_timeout;
     InterprocessConnection connection;
     mutable std::mutex state_mutex;
@@ -141,9 +145,10 @@ struct ControlClientConnection::Impl {
     std::atomic<std::uint64_t> next_request{1};
 
     Impl(std::filesystem::path path, std::optional<ControlPeerExpectation> expectation,
-         std::chrono::milliseconds connect_timeout_in, std::chrono::milliseconds write_timeout,
-         std::chrono::milliseconds frame_read_timeout)
+         std::filesystem::path broker_executable, std::chrono::milliseconds connect_timeout_in,
+         std::chrono::milliseconds write_timeout, std::chrono::milliseconds frame_read_timeout)
         : endpoint_path(std::move(path)), expected_broker(std::move(expectation)),
+          expected_broker_executable(std::move(broker_executable)),
           connect_timeout(connect_timeout_in) {
         connection.set_max_message_bytes(kControlMaximumEnvelopeBytes);
         connection.set_write_timeout(write_timeout);
@@ -283,6 +288,11 @@ struct ControlClientConnection::Impl {
                             std::get_if<ControlSessionOpenResult>(&envelope->payload))
                         correlated = opened->request_id == expected_request_id;
                     break;
+                case ResponseKind::Management:
+                    if (const auto* result =
+                            std::get_if<ControlManagementResult>(&envelope->payload))
+                        correlated = result->request_id == expected_request_id;
+                    break;
                 case ResponseKind::ArtifactRead:
                     if (const auto* artifact =
                             std::get_if<ControlArtifactReadResponseEnvelope>(&envelope->payload))
@@ -343,9 +353,17 @@ struct ControlClientConnection::Impl {
             carrier_connected = true;
             reached_during_last_connect = true;
         }
-        if (!expected_broker)
-            return true;
-        if (!verify_control_peer(connection, *expected_broker)) {
+        bool verified = false;
+        if (expected_broker) {
+            verified = verify_control_peer(connection, *expected_broker).has_value();
+        } else if (!expected_broker_executable.empty()) {
+            const auto expected = detail::inspect_static_code_identity(expected_broker_executable);
+            const auto observed = observe_control_peer(connection, ControlPeerRole::Client);
+            verified = expected && observed &&
+                       observed->executable_identity == expected->executable_identity &&
+                       observed->publisher_id == expected->publisher_id;
+        }
+        if (!verified) {
             connection.disconnect();
             set_last_error("broker-verification-failed",
                            "the live local peer did not match the expected broker");
@@ -452,6 +470,10 @@ struct ControlClientConnection::Impl {
         } else if (const auto* open = std::get_if<ControlSessionOpenEnvelope>(&envelope.payload)) {
             response_kind = ResponseKind::SessionOpen;
             request_id = open->request_id;
+        } else if (const auto* management =
+                       std::get_if<ControlManagementEnvelope>(&envelope.payload)) {
+            response_kind = ResponseKind::Management;
+            request_id = management->request_id;
         } else if (const auto* artifact =
                        std::get_if<ControlArtifactReadEnvelope>(&envelope.payload)) {
             response_kind = ResponseKind::ArtifactRead;
@@ -478,13 +500,17 @@ struct ControlClientConnection::Impl {
 
 ControlClientConnection::ControlClientConnection(ControlClientConnectionConfig config)
     : impl_(std::make_unique<Impl>(
-          std::move(config.endpoint_path), std::optional{std::move(config.expected_broker)},
-          config.connect_timeout, config.write_timeout, config.frame_read_timeout)) {}
+          std::move(config.endpoint_path),
+          config.expected_broker.evidence.user_id.empty()
+              ? std::optional<ControlPeerExpectation>{}
+              : std::optional<ControlPeerExpectation>{std::move(config.expected_broker)},
+          std::move(config.expected_broker_executable), config.connect_timeout,
+          config.write_timeout, config.frame_read_timeout)) {}
 
 ControlClientConnection::ControlClientConnection(const ControlHealthProbeConfig& config)
     : impl_(std::make_unique<Impl>(config.endpoint_path, config.expected_broker,
-                                   config.connect_timeout, config.write_timeout,
-                                   config.frame_read_timeout)) {}
+                                   std::filesystem::path{}, config.connect_timeout,
+                                   config.write_timeout, config.frame_read_timeout)) {}
 
 ControlClientConnection::~ControlClientConnection() {
     impl_->shutdown();
@@ -535,6 +561,36 @@ ControlSessionOpenResult ControlClientConnection::open_session(std::string_view 
     if (opened->accepted)
         impl_->mark_session_open();
     return *opened;
+}
+
+ControlManagementResult ControlClientConnection::manage(std::string_view command,
+                                                        std::string_view params_json,
+                                                        std::chrono::milliseconds timeout) {
+    const auto request_id = impl_->request_id("management");
+    auto local_error = [&](std::string code, std::string explanation) {
+        return ControlManagementResult{.request_id = request_id,
+                                       .status_id = std::move(code),
+                                       .explanation = std::move(explanation)};
+    };
+    const bool enrollment = command == "enroll";
+    auto exchanged = impl_->exchange(
+        ControlEnvelope{.payload =
+                            ControlManagementEnvelope{.request_id = request_id,
+                                                      .command = std::string(command),
+                                                      .params_json = std::string(params_json)}},
+        timeout, !enrollment);
+    if (!exchanged.response)
+        return local_error(std::move(exchanged.error_code), std::move(exchanged.explanation));
+    if (const auto* error = std::get_if<ControlErrorEnvelope>(&exchanged.response->payload))
+        return local_error(error->error_code, error->explanation);
+    const auto* result = std::get_if<ControlManagementResult>(&exchanged.response->payload);
+    if (!result || result->request_id != request_id) {
+        disconnect();
+        return local_error("unexpected-response", "management returned an unrelated response");
+    }
+    if (enrollment && result->status_id == "accepted")
+        impl_->mark_session_open();
+    return *result;
 }
 
 void ControlClientConnection::disconnect() noexcept {
