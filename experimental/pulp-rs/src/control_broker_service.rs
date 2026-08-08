@@ -446,12 +446,14 @@ fn reconcile_with_callback<F: FileSystem, R: CommandRunner>(
         Ok(()) => (true, "none"),
         Err(error) => (false, error.code()),
     };
-    let marker_result = write_marker(file_system, &paths.marker, &identity, succeeded, error_code);
-    if let Err(marker_error) = marker_result {
-        if result.is_ok() {
-            return Err(marker_error);
-        }
-    }
+    // The marker only suppresses a repeated lazy attempt. Once launchd has
+    // accepted the service and its health probe succeeds, that activation is
+    // committed: reporting a marker-publication failure as an activation
+    // failure would invite an installer to restore only the old binary while
+    // launchd remains configured for (and may still be running) the new one.
+    // A failed activation remains authoritative too; preserve its original
+    // error even if recording the attempt also fails.
+    let _ = write_marker(file_system, &paths.marker, &identity, succeeded, error_code);
     result.map(|()| ControlBrokerServiceOutcome::Reconciled)
 }
 
