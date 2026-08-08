@@ -49,27 +49,42 @@ double bessel_i0(double x) {
 double oracle_true_peak_config(std::span<const double> signal, std::size_t begin, std::size_t end,
                                int radius, int factor, double beta) {
     const double denominator = bessel_i0(beta);
+    const auto kernel_width = static_cast<std::size_t>(radius) * 2 + 1;
+    // Every frame uses the same phase-relative reconstruction kernel. Cache it
+    // once so the high-density oracle spends its time on convolution rather
+    // than recomputing sinc and Bessel terms billions of times.
+    std::vector<double> phase_coefficients(static_cast<std::size_t>(factor) * kernel_width);
+    for (int phase = 0; phase < factor; ++phase) {
+        const double phase_offset = static_cast<double>(phase) / factor;
+        for (int relative_sample = -radius; relative_sample <= radius; ++relative_sample) {
+            const double distance = phase_offset - relative_sample;
+            const double normalized = distance / radius;
+            const double window =
+                std::abs(normalized) <= 1.0
+                    ? bessel_i0(beta *
+                                std::sqrt(std::max(0.0, 1.0 - normalized * normalized))) /
+                          denominator
+                    : 0.0;
+            phase_coefficients[static_cast<std::size_t>(phase) * kernel_width +
+                               static_cast<std::size_t>(relative_sample + radius)] =
+                sinc(distance) * window;
+        }
+    }
+
     double peak = 0.0;
     end = std::min(end, signal.size() - 1);
     for (std::size_t frame = begin; frame < end; ++frame) {
         for (int phase = 0; phase < factor; ++phase) {
-            const double position =
-                static_cast<double>(frame) + static_cast<double>(phase) / factor;
             double value = 0.0;
             double normalization = 0.0;
             const int first = std::max(0, static_cast<int>(frame) - radius);
             const int last =
                 std::min(static_cast<int>(signal.size()) - 1, static_cast<int>(frame) + radius);
             for (int sample = first; sample <= last; ++sample) {
-                const double distance = position - sample;
-                const double normalized = distance / radius;
-                const double window =
-                    std::abs(normalized) <= 1.0
-                        ? bessel_i0(beta *
-                                    std::sqrt(std::max(0.0, 1.0 - normalized * normalized))) /
-                              denominator
-                        : 0.0;
-                const double coefficient = sinc(distance) * window;
+                const int relative_sample = sample - static_cast<int>(frame);
+                const double coefficient =
+                    phase_coefficients[static_cast<std::size_t>(phase) * kernel_width +
+                                       static_cast<std::size_t>(relative_sample + radius)];
                 value += signal[static_cast<std::size_t>(sample)] * coefficient;
                 normalization += coefficient;
             }
