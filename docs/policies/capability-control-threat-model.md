@@ -111,17 +111,17 @@ to consume its active-operation quota until the deferred completion settles it.
 Progress is monotonically sequenced, bounded, and backpressured. Grant, client,
 and instance teardown request cancellation for affected live receipts.
 
-Phase 3b caps each artifact's readable lifetime at 24 hours and contains only
-the minimal broker artifact store needed by later
-adapters. It durably publishes each bounded blob before opaque lineage metadata,
+The broker artifact system caps each artifact's readable lifetime, total and
+per-client storage/count, and individual blob/chunk size. It durably publishes
+each bounded blob before opaque lineage metadata,
 and a terminal receipt may name only an already-published artifact with matching
 producer lineage. Broker-mediated retrieval rechecks the original producer
 grant, peer, client, registration, session, instance, publication, operation,
 terminal receipt, content metadata, and expiry. A new grant cannot inherit old
-artifact access. This is not the Phase 7 artifact system: there is no aggregate
-artifact quota, retention collector, deletion audit, redaction transform, or
-generalized ACL policy yet. Expiry removes publication metadata lazily; shared
-content-addressed blobs may remain orphaned until the Phase 7 collector exists.
+artifact access. Expiry, crash/orphan recovery, and partial-write cleanup are
+bounded; deletion audit records metadata and reason codes without captured
+content. Redaction state is explicit and broker ACL checks are re-applied on
+every read. Shared content-addressed storage does not weaken producer lineage.
 
 Owner-private directories and files exclude other OS users, but they do not
 provide at-rest secrecy from another malicious process running as the same OS
@@ -160,11 +160,11 @@ environment-delivered bootstrap credentials remain rejected.
 | Confused deputy asks a trusted client to control another instance | Exact session/instance/publication selection; client-scoped grants; capability and operation binding; no newest-instance fallback |
 | PID reuse, restart, stale project intent, or stale grant | Kernel-origin process generation where available, process-start recheck across code-signature inspection, opaque publication IDs, heartbeat/expiry, disconnect revocation; restore creates fresh grants only after revalidation |
 | Malicious plugin claims another publisher, slot, service, or capability | Signed artifact/declaration verification plus trusted host slot attestation; manifest is only an upper bound; broker rejects self-asserted identity |
-| Compromised or over-broad client | Least-privilege client grants, controller leases, expiry, explicit revocation, per-operation input/output schemas, idempotency keys, bounded receipts, and exact original-lineage checks on broker-mediated artifact reads; generalized artifact ACL policy remains Phase 7 |
+| Compromised or over-broad client | Least-privilege client grants, controller leases, expiry, explicit revocation, per-operation input/output schemas, idempotency keys, bounded receipts, and exact original-lineage checks on every broker-mediated artifact read |
 | Plugin or client bypasses policy with raw transport | No generic message or peer socket SDK; one broker transport; generated typed bindings; legacy Remote View mutation removed; raw host/port authority deleted by the broker migration |
-| Artifact or private-data exfiltration | Phase 3b uses opaque handles, exact producer lineage, original-grant reauthorization, per-blob/chunk limits, and metadata-only audit, but makes no same-UID at-rest secrecy claim; aggregate quota, retention collection, redaction, and deletion audit remain Phase 7 |
+| Artifact or private-data exfiltration | Opaque handles, exact producer lineage, original-grant reauthorization, per-blob/chunk and aggregate quotas, bounded retention/collection, explicit redaction state, and content-free deletion audit; no same-UID at-rest secrecy claim |
 | Runtime evaluation becomes a mutation shortcut | Separate high-risk component and capability, `research-unsafe` profile, exact acknowledgement, dedicated evaluator, realm and size/time limits; never an implementation path for typed operations |
-| Denial of service against broker, host, or audio thread | Bounded clients, frames, queues, rates, subscriptions, jobs, receipts, and per-blob/chunk artifact sizes; timeouts, cancellation, and expiry; no JSON/network work on the audio thread; aggregate artifact quota and collection remain Phase 7 |
+| Denial of service against broker, host, or audio thread | Bounded clients, frames, queues, rates, subscriptions, jobs, receipts, per-blob/chunk and aggregate artifact sizes/counts; timeouts, cancellation, expiry, and orphan/partial cleanup; no JSON/network work on the audio thread |
 | Grant revoked while work is queued or executing | Admission and pre-apply revalidation, cancellable staged operations, truthful `mayHaveApplied`/receipt state, no automatic retry of ambiguous mutation |
 | Schema downgrade or scope smuggling | Namespaced versioned IDs, canonical serialization and digest, unknown-field rejection, no permissive downgrade, explicit manifest changes for new fields/directions/rates |
 | Removed build authority survives reconfiguration | Per-target profile, capability, and unsafe-evaluation declarations force-refresh on every configure; a two-configure regression proves critical authority is withdrawn without deleting the build tree |
@@ -209,8 +209,8 @@ permission-term denial, identity forgery and reuse, replay, grant expiry and
 revocation, cancellation races, original-lineage artifact authorization,
 queue/rate limits, broker restart/update, incremental reconfiguration, path
 traversal, immutable artifact snapshot use, schema boundary values, and negative
-binary scans. Phase 7 separately adds aggregate artifact quota, retention,
-redaction, deletion-audit, and generalized ACL tests. The dedicated
+binary scans, aggregate artifact quota/retention/redaction/deletion-audit,
+orphan/partial cleanup, and generalized ACL tests. The dedicated
 platform-sandbox review is accepted with binding T0/T1-only restrictions. It
 rejects direct AUv3 access, self-attested shared-host slots, plugin-rendered
 consent, and environment bootstrap credentials. Any later host tier must close

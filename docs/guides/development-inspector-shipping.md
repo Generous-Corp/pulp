@@ -5,7 +5,9 @@ only makes optional SDK components available; it does not link a listener,
 discovery publisher, server, registration, or runtime evaluator into an
 ordinary `pulp_add_plugin` target.
 
-Every `pulp_add_plugin` target now emits one canonical
+The consolidated authoring and diagnostics reference is
+[Capability control](../reference/capability-control.md). Every
+`pulp_add_plugin` target emits one canonical
 `dev.pulp.control/artifact-manifest@1` sidecar. With no declaration, the target
 uses `production-stripped`: no endpoint and no capabilities. An intentionally
 inspectable developer edition declares one profile and its exact stable
@@ -47,8 +49,10 @@ cannot preserve a removed capability.
 Available profiles are `production-stripped`, `developer-local`,
 `test-deterministic`, `support-diagnostics`, and `research-unsafe`.
 `support-diagnostics` accepts only instance, state, diagnostics, and log reads.
-Control capabilities require `dev.pulp.session/control@1`. No product endpoint
-is currently composed; ordinary plugin-format targets stay stripped.
+Mutation control capabilities require `dev.pulp.session/control@1`. The
+installed per-user broker composes trusted T0/T1 enrollment and routing;
+ordinary plugin-format targets stay stripped and unsupported host tiers remain
+unavailable.
 
 `dev.pulp.runtime/evaluate@1` is arbitrary execution in the product process.
 No profile or acknowledgement implies it. A target that truly needs it must use
@@ -187,10 +191,10 @@ The report includes both `artifactDigest` and the derived `consentIdentity`, so
 code changes cannot retain consent merely by reusing a build-tree manifest.
 The command is deliberately included in Inspector-disabled production SDKs.
 
-This intentional temporary capability reduction keeps shipping evidence useful
-while Phases 4–7 finish the canonical trusted launcher and host adapters,
-broker-routed typed execution, client migration, and final release
-negative-controls. None of that work may restore the deleted legacy authority.
+Shipping evidence and runtime authority remain separate checks. The canonical
+trusted launcher, host router, typed execution, CLI/MCP clients, bounded
+artifact store, and telemetry path do not restore the deleted legacy authority;
+new support must extend the same centralized path.
 
 The frozen operation schemas are closed and bounded. Required input and output
 resource, receipt, lease, stream, plugin, build, node, and idempotency
