@@ -5,6 +5,7 @@
 #include <pulp/events/interprocess_connection.hpp>
 #include <pulp/inspect/control_artifacts.hpp>
 #include <pulp/inspect/control_carrier.hpp>
+#include <pulp/inspect/control_client_connection.hpp>
 #include <pulp/inspect/control_operations.hpp>
 #include <pulp/inspect/control_protocol.hpp>
 #include <pulp/runtime/crypto.hpp>
@@ -12,14 +13,40 @@
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <optional>
+#include <thread>
+#include <vector>
+
+#include <choc/text/choc_JSON.h>
+
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#include <sys/stat.h>
+#endif
 
 using namespace std::chrono_literals;
 using namespace pulp::events;
 using namespace pulp::inspect;
 
 namespace {
+
+constexpr std::string_view kHostManifest = R"({
+  "schema": "dev.pulp.control/artifact-manifest@1",
+  "schema_version": 1,
+  "profile": "developer-local",
+  "target": "pulp-control-trusted-host-e2e-fixture",
+  "product_name": "Pulp Trusted Host E2E Fixture",
+  "bundle_id": "dev.pulp.test.trusted-host-e2e-fixture",
+  "build_id": "build:0123456789abcdef0123456789abcdef",
+  "registry_digest": "8cfed31b632c6f75171d57d8d2d5c1c17bccd765e13095771b8f0e97acc08620",
+  "endpoint_included": true,
+  "unsafe_runtime_eval_acknowledged": false,
+  "permission_terms": ["implemented", "built", "host_available", "activated", "policy_eligible", "client_granted", "session_live"],
+  "capabilities": ["dev.pulp.session/control@1", "dev.pulp.trace/session-control@1"]
+}
+)";
 
 struct DaemonRoot {
     std::filesystem::path path;
@@ -129,6 +156,30 @@ std::optional<ControlEnvelope> request_health(const std::filesystem::path& endpo
     client.disconnect();
     return response;
 }
+
+#ifdef __APPLE__
+std::filesystem::path current_executable() {
+    std::uint32_t size = 0;
+    (void)_NSGetExecutablePath(nullptr, &size);
+    std::vector<char> buffer(size);
+    if (size == 0 || _NSGetExecutablePath(buffer.data(), &size) != 0)
+        return {};
+    std::error_code error;
+    const auto result = std::filesystem::weakly_canonical(buffer.data(), error);
+    return error ? std::filesystem::path{} : result;
+}
+
+std::string wait_for_registration(const std::filesystem::path& path) {
+    for (unsigned attempt = 0; attempt < 10'000; ++attempt) {
+        std::ifstream input(path);
+        std::string registration;
+        if (input >> registration)
+            return registration;
+        std::this_thread::sleep_for(1ms);
+    }
+    return {};
+}
+#endif
 
 } // namespace
 
@@ -247,6 +298,154 @@ TEST_CASE("control broker daemon preserves durable receipts and artifacts across
     CHECK_FALSE(has_credential_named_entry(root.state));
 #else
     SUCCEED("the authenticated control broker daemon is currently macOS-only");
+#endif
+}
+
+TEST_CASE("installed daemon composes host enrollment routing execution and restart teardown",
+          "[inspect][control][daemon][host][e2e][restart]") {
+#ifdef __APPLE__
+    DaemonRoot root;
+    const auto source = root.path / "source";
+    REQUIRE(std::filesystem::create_directory(source));
+    ::chmod(source.c_str(), 0700);
+    const auto host_executable = source / "trusted-host";
+    std::filesystem::copy_file(PULP_CONTROL_TRUSTED_HOST_E2E_FIXTURE, host_executable);
+    ::chmod(host_executable.c_str(), 0700);
+    {
+        std::ofstream manifest(host_executable.string() + ".inspector-capabilities.json");
+        manifest << kHostManifest;
+    }
+    ::chmod((host_executable.string() + ".inspector-capabilities.json").c_str(), 0600);
+
+    const auto broker_executable = current_executable();
+    REQUIRE_FALSE(broker_executable.empty());
+    const auto install = root.path / "install";
+    REQUIRE(std::filesystem::create_directory(install));
+    const auto installed_broker = install / "pulp-control-broker";
+    const auto installed_client = install / "pulp";
+    std::filesystem::copy_file(broker_executable, installed_broker);
+    std::filesystem::copy_file(broker_executable, installed_client);
+    ::chmod(installed_broker.c_str(), 0700);
+    ::chmod(installed_client.c_str(), 0700);
+    ControlBrokerDaemonConfig config{
+        .runtime_root = root.runtime,
+        .state_root = root.state,
+        .sdk_version = "0.795.2-test",
+        .executable_path = installed_broker,
+        .process_generation = 91,
+        .decide_consent =
+            [](const VerifiedControlPeerIdentity&, const ControlGrantRequest&) {
+                return ControlConsentDecision{true, ControlConsentAuthority::TrustedHostUi,
+                                              "daemon-host-e2e-consent"};
+            },
+    };
+    ControlBrokerDaemon daemon{config};
+    REQUIRE(daemon.start());
+
+    const auto registration_path = root.path / "registration";
+    const auto stop_path = root.path / "stop";
+    const auto prepared = daemon.prepare_trusted_host({
+        .executable = host_executable,
+        .arguments = {registration_path.string(), stop_path.string()},
+        .working_directory = source,
+        .host_tier = ControlHostTier::Standalone,
+    });
+    INFO(control_trusted_host_inventory_status_id(prepared.status));
+    REQUIRE(prepared.ticket);
+    pulp::platform::ProcessOptions options;
+    options.timeout_ms = 15'000;
+    auto launched = daemon.launch_trusted_host(prepared.ticket->inventory_id, options);
+    INFO(control_trusted_host_launch_status_id(launched.status));
+    INFO(launched.explanation);
+    REQUIRE(launched.launched());
+    const ControlRegistrationId registration_id{wait_for_registration(registration_path)};
+    REQUIRE(registration_id);
+
+    ControlClientConnection connection({.endpoint_path = daemon.endpoint_path(),
+                                        .expected_broker_executable = broker_executable});
+    REQUIRE(connection.connect());
+    const auto enrolled = connection.manage("enroll");
+    INFO(enrolled.explanation);
+    REQUIRE(enrolled.status_id == "accepted");
+    const auto enrollment_data = choc::json::parse(enrolled.data_json);
+    const auto client_id = std::string(enrollment_data["client_id"].getString());
+    REQUIRE_FALSE(client_id.empty());
+
+    const auto inventory = connection.manage("instances");
+    REQUIRE(inventory.status_id == "completed");
+    const auto inventory_data = choc::json::parse(inventory.data_json);
+    REQUIRE(inventory_data["instances"].size() == 1);
+    const auto instance = inventory_data["instances"][0];
+    CHECK(instance["registration_id"].getString() == registration_id.value);
+    const auto instance_id = std::string(instance["instance_id"].getString());
+    const auto publication_id = std::string(instance["publication_id"].getString());
+
+    auto grant_params = choc::value::createObject("");
+    grant_params.addMember("instance_id", choc::value::createString(instance_id));
+    grant_params.addMember("profile", choc::value::createString("develop"));
+    const auto granted =
+        connection.manage("grant-request", choc::json::toString(grant_params, false));
+    INFO(granted.explanation);
+    REQUIRE(granted.status_id == "granted");
+    const auto grant_data = choc::json::parse(granted.data_json);
+    const auto grant_id = std::string(grant_data["grant_id"].getString());
+    REQUIRE_FALSE(grant_id.empty());
+
+    ControlClient client(connection);
+    REQUIRE(client.negotiate({.mandatory_features = {"receipts"}}).succeeded());
+    ControlRequestEnvelope request{
+        .request_id = "daemon-trace-request",
+        .client_id = client_id,
+        .registration_id = registration_id.value,
+        .grant_id = grant_id,
+        .instance_generation = publication_id,
+        .operation_id = "dev.pulp.trace/session-control@1",
+        .operation_version = 1,
+        .idempotency_key = "daemon-trace-idempotency",
+        .deadline_unix_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                (std::chrono::system_clock::now() + 5s).time_since_epoch())
+                                .count(),
+        .params_json = R"({"action":"start","ring_mb":8})",
+    };
+    request.request_hash = *control_request_hash(request);
+    const auto dispatched = client.request(request, 5s);
+    INFO(dispatched.error_code);
+    INFO(dispatched.explanation);
+    REQUIRE(dispatched.succeeded());
+    CHECK((dispatched.response->state == ControlReceiptState::Completed ||
+           dispatched.response->result_code == ControlResultCode::NotBuilt));
+
+    const auto pending = daemon.prepare_trusted_host({
+        .executable = host_executable,
+        .arguments = {registration_path.string(), stop_path.string()},
+        .working_directory = source,
+        .host_tier = ControlHostTier::Standalone,
+    });
+    REQUIRE(pending.ticket);
+    connection.disconnect();
+    daemon.stop();
+
+    config.process_generation = 92;
+    ControlBrokerDaemon restarted{config};
+    REQUIRE(restarted.start());
+    CHECK(restarted.launch_trusted_host(pending.ticket->inventory_id).status ==
+          ControlTrustedHostLaunchStatus::InventoryUnavailable);
+    ControlClientConnection after_restart({.endpoint_path = restarted.endpoint_path(),
+                                           .expected_broker_executable = broker_executable});
+    REQUIRE(after_restart.connect());
+    REQUIRE(after_restart.manage("enroll").status_id == "accepted");
+    const auto empty_inventory = after_restart.manage("instances");
+    REQUIRE(empty_inventory.status_id == "completed");
+    CHECK(choc::json::parse(empty_inventory.data_json)["instances"].size() == 0);
+    after_restart.disconnect();
+
+    std::ofstream(stop_path) << "stop";
+    const auto process = launched.process->wait();
+    INFO(process.stderr_output);
+    CHECK(process.exit_code == 0);
+    restarted.stop();
+#else
+    SUCCEED("installed daemon host composition is currently macOS-only");
 #endif
 }
 

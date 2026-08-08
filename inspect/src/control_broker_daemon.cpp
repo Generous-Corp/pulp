@@ -7,13 +7,17 @@
 #include <pulp/inspect/control_broker.hpp>
 #include <pulp/inspect/control_carrier.hpp>
 #include <pulp/inspect/control_endpoint.hpp>
+#include <pulp/inspect/control_host_router.hpp>
 #include <pulp/inspect/control_service.hpp>
+#include <pulp/inspect/control_trusted_host_launcher.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/inter_process_lock.hpp>
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
+#include <mutex>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -51,6 +55,41 @@ bool endpoint_accepts_connections(const std::filesystem::path& endpoint) {
         return false;
     probe.disconnect();
     return true;
+}
+
+std::optional<ControlPeerEvidence>
+observe_current_broker(const std::filesystem::path& observer_endpoint) {
+    events::InterprocessConnectionServer observer;
+    std::mutex mutex;
+    std::condition_variable ready;
+    std::unique_ptr<events::InterprocessConnection> accepted;
+    observer.on_client_connected = [&](auto connection) {
+        {
+            std::lock_guard lock(mutex);
+            accepted = std::move(connection);
+        }
+        ready.notify_all();
+    };
+    if (!observer.start(observer_endpoint.string(), events::IpcTransport::LocalSocket))
+        return std::nullopt;
+    events::InterprocessConnection client;
+    if (!client.connect(observer_endpoint.string(), events::IpcTransport::LocalSocket, 2s)) {
+        observer.stop();
+        return std::nullopt;
+    }
+    {
+        std::unique_lock lock(mutex);
+        if (!ready.wait_for(lock, 2s, [&] { return accepted != nullptr; })) {
+            client.disconnect();
+            observer.stop();
+            return std::nullopt;
+        }
+    }
+    auto evidence = observe_control_peer(*accepted, ControlPeerRole::TrustedHostBridge);
+    client.disconnect();
+    accepted.reset();
+    observer.stop();
+    return evidence;
 }
 
 std::filesystem::path current_user_home_directory() {
@@ -192,6 +231,12 @@ struct ControlBrokerDaemon::Impl {
     std::filesystem::path endpoint;
     std::unique_ptr<runtime::InterProcessLock> singleton;
     std::unique_ptr<ControlBroker> broker;
+    std::unique_ptr<ControlHostEnrollmentStore> enrollments;
+    std::unique_ptr<ControlConnectionAdmissionStore> admissions;
+    std::unique_ptr<ControlHostRouter> host_router;
+    std::unique_ptr<ControlEndpointEnrollmentContext> enrollment_context;
+    std::unique_ptr<ControlTrustedHostInventory> trusted_inventory;
+    std::unique_ptr<ControlTrustedHostLauncher> trusted_launcher;
     std::unique_ptr<ControlService> service;
     std::unique_ptr<ControlEndpoint> carrier;
 
@@ -200,6 +245,14 @@ struct ControlBrokerDaemon::Impl {
             carrier->stop();
         carrier.reset();
         service.reset();
+        trusted_launcher.reset();
+        enrollment_context.reset();
+        if (host_router)
+            host_router->stop();
+        host_router.reset();
+        admissions.reset();
+        enrollments.reset();
+        trusted_inventory.reset();
         broker.reset();
         if (singleton)
             singleton->unlock();
@@ -252,7 +305,20 @@ struct ControlBrokerDaemon::Impl {
             }
         }
 
+        host_router = std::make_unique<ControlHostRouter>();
+        auto* router = host_router.get();
         ControlBrokerConfig broker_config;
+        broker_config.admission.host_available =
+            [router](const ControlRegistration& registration, const auto&) {
+                return router->connected(registration.registration_id);
+            };
+        broker_config.admission.activated =
+            [router](const ControlRegistration& registration, const auto&) {
+                return router->connected(registration.registration_id);
+            };
+        broker_config.admission.policy_eligible = [](const auto&, const auto& operation) {
+            return capability_is_grantable(operation.capability);
+        };
         broker_config.operation_store = ControlOperationStoreConfig{
             .directory = state_directory / "operations",
         };
@@ -264,8 +330,6 @@ struct ControlBrokerDaemon::Impl {
             reset();
             return false;
         }
-        service = std::make_unique<ControlService>(*broker);
-
         std::optional<ControlTrustedHostStaticExpectation> daemon_identity;
         if (!config.executable_path.empty())
             daemon_identity = detail::inspect_static_code_identity(config.executable_path);
@@ -293,10 +357,33 @@ struct ControlBrokerDaemon::Impl {
             reset();
             return false;
         }
+        const auto broker_peer = observe_current_broker(runtime_directory / "broker-observer.sock");
+        if (!broker_peer) {
+            reset();
+            return false;
+        }
+
+        enrollments = std::make_unique<ControlHostEnrollmentStore>();
+        admissions = std::make_unique<ControlConnectionAdmissionStore>();
+        enrollment_context = std::make_unique<ControlEndpointEnrollmentContext>(
+            ControlEndpointEnrollmentContext{*enrollments, *broker, *admissions});
+        trusted_inventory = std::make_unique<ControlTrustedHostInventory>(
+            ControlTrustedHostInventoryConfig{
+                .staging_root = runtime_directory / "trusted-hosts",
+                .broker_generation = generation,
+            });
+        trusted_launcher = std::make_unique<ControlTrustedHostLauncher>(
+            *trusted_inventory, *enrollments,
+            ControlTrustedHostLauncherConfig{
+                .endpoint_path = endpoint,
+                .expected_broker = {.evidence = *broker_peer},
+                .broker_generation = generation,
+            });
+        service = std::make_unique<ControlService>(*broker, host_router->executor());
+        auto* admission_store = admissions.get();
         carrier = std::make_unique<ControlEndpoint>(
-            *service,
-            [](std::string_view) -> std::optional<ControlConnectionAdmission> {
-                return std::nullopt;
+            *service, [admission_store](std::string_view id) {
+                return admission_store->consume(id);
             },
             ControlEndpointConfig{
                 .endpoint_path = endpoint,
@@ -336,8 +423,9 @@ struct ControlBrokerDaemon::Impl {
                           }}
                         : std::function<std::optional<std::string>(
                               const ControlPeerEvidence&)>{},
+                .decide_consent = config.decide_consent,
             },
-            nullptr, nullptr, broker.get());
+            host_router.get(), enrollment_context.get(), broker.get());
         if (!carrier->start()) {
             reset();
             return false;
@@ -371,6 +459,21 @@ const std::filesystem::path& ControlBrokerDaemon::endpoint_path() const noexcept
 
 const std::filesystem::path& ControlBrokerDaemon::state_directory() const noexcept {
     return impl_->state_directory;
+}
+
+ControlTrustedHostInventoryPrepareResult
+ControlBrokerDaemon::prepare_trusted_host(const ControlTrustedHostLaunchIntent& intent) {
+    if (!is_running() || !impl_->trusted_inventory)
+        return {};
+    return impl_->trusted_inventory->prepare(intent);
+}
+
+ControlTrustedHostLaunchResult
+ControlBrokerDaemon::launch_trusted_host(std::string_view inventory_id,
+                                         platform::ProcessOptions options) {
+    if (!is_running() || !impl_->trusted_launcher)
+        return {};
+    return impl_->trusted_launcher->launch(inventory_id, std::move(options));
 }
 
 } // namespace pulp::inspect
