@@ -1,7 +1,25 @@
 # Core runtime, canvas, scheduler, and signal-graph test registrations.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
-include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpInspectorShipping.cmake)
+include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpControlShipping.cmake)
+
+if(TARGET pulp::inspect-control)
+    add_executable(pulp-test-control-shipping-real-component
+        control_shipping_real_component_fixture.cpp)
+    target_link_libraries(pulp-test-control-shipping-real-component
+        PRIVATE pulp::inspect-control)
+    _pulp_cache_control_declarations(pulp-test-control-shipping-real-component
+        developer-local "dev.pulp.instance/read@1" FALSE)
+    _pulp_configure_control_shipping(pulp-test-control-shipping-real-component
+        "dev.pulp.test.control-shipping-real-component"
+        "Control Shipping Real Component")
+    _pulp_attach_control_shipping(pulp-test-control-shipping-real-component
+        pulp-test-control-shipping-real-component Standalone)
+    add_test(NAME control-shipping-real-component-runs
+        COMMAND pulp-test-control-shipping-real-component)
+    set_tests_properties(control-shipping-real-component-runs PROPERTIES
+        LABELS "control;ship")
+endif()
 
 # Analytics tests
 pulp_add_test_suite(pulp-test-analytics LIBRARIES pulp::runtime)

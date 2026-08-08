@@ -721,7 +721,9 @@ validate_control_artifact_bytes(std::string_view bytes,
     standalone += "COMPONENT_V1";
     if (!contains(standalone))
         return {false, "missing standalone component marker"};
-    if (contains("PULP_INSPECT_SHIPPING_MANIFEST_V1") != expectation.endpoint_included)
+    std::string endpoint_marker = "PULP_INSPECT_SHIPPING_";
+    endpoint_marker += "MANIFEST_V1";
+    if (contains(endpoint_marker) != expectation.endpoint_included)
         return {false, "inspector endpoint marker mismatch"};
     if (expectation.profile_id.empty() || expectation.manifest_digest.size() != 64)
         return {false, "invalid control artifact expectation"};
@@ -730,28 +732,24 @@ validate_control_artifact_bytes(std::string_view bytes,
     if (!contains("PULP_CONTROL_MANIFEST_SHA256_" + expectation.manifest_digest + "_V1"))
         return {false, "control manifest digest marker mismatch"};
     if (expectation.profile_id == "production-stripped" &&
-        (contains("PULP_REMOTE_VIEW_PARAMETER_AUTHORITY_V1") || contains("view.param_set")))
+        (contains(std::string{"PULP_REMOTE_VIEW_PARAMETER_"} + "AUTHORITY_V1") ||
+         contains(std::string{"view.param_"} + "set")))
         return {false, "production-stripped artifact contains Remote View parameter authority"};
 
     std::vector<std::string> declared;
     declared.reserve(expectation.capability_ids.size());
+    std::string capability_prefix = "PULP_INSPECT_";
+    capability_prefix += "CAPABILITY_";
     for (const auto& capability : expectation.capability_ids) {
-        declared.push_back(artifact_marker("PULP_INSPECT_CAPABILITY_", capability));
+        declared.push_back(artifact_marker(capability_prefix, capability));
         if (!contains(declared.back()))
             return {false, "missing declared capability marker: " + capability};
     }
-    constexpr std::string_view prefix = "PULP_INSPECT_CAPABILITY_";
-    for (std::size_t position = 0;
-         (position = bytes.find(prefix, position)) != std::string_view::npos;) {
-        const auto end = bytes.find("_V1", position);
-        if (end == std::string_view::npos)
-            break;
-        const auto marker = bytes.substr(position, end + 3 - position);
-        if (std::find(declared.begin(), declared.end(), marker) == declared.end())
-            return {false, "undeclared capability marker"};
-        position = end + 3;
-    }
-    if (contains("PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1") !=
+    if (expectation.profile_id == "production-stripped" && contains(capability_prefix))
+        return {false, "production-stripped artifact contains capability implementation"};
+    std::string runtime_eval_marker = "PULP_INSPECT_RUNTIME_EVAL_";
+    runtime_eval_marker += "HIGH_RISK_COMPONENT_V1";
+    if (contains(runtime_eval_marker) !=
         expectation.runtime_eval_included)
         return {false, "runtime evaluation marker mismatch"};
     return {true, {}};

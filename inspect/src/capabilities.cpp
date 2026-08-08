@@ -3,6 +3,21 @@
 
 #include <array>
 
+#if defined(_MSC_VER)
+#define PULP_CONTROL_COMPONENT_MARKER __declspec(dllexport)
+#else
+#define PULP_CONTROL_COMPONENT_MARKER __attribute__((used, visibility("default")))
+#endif
+
+extern "C" PULP_CONTROL_COMPONENT_MARKER const volatile char
+    pulp_control_protocol_capability_markers_v1[] =
+        "PULP_INSPECT_CAPABILITY_SESSION_DESCRIBE_V1\0"
+        "PULP_INSPECT_CAPABILITY_SESSION_CONTROL_V1\0"
+        "PULP_INSPECT_CAPABILITY_DIAGNOSTICS_READ_V1\0"
+        "PULP_INSPECT_CAPABILITY_LOGS_READ_V1";
+
+#undef PULP_CONTROL_COMPONENT_MARKER
+
 namespace pulp::inspect {
 namespace {
 

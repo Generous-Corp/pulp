@@ -24,7 +24,7 @@ _pulp_pick_target(_PULP_VIEW_TARGET Pulp::view pulp::view)
 _pulp_pick_target(_PULP_AUDIO_TARGET Pulp::audio pulp::audio)
 _pulp_pick_target(_PULP_MIDI_TARGET Pulp::midi pulp::midi)
 _pulp_pick_target(_PULP_STANDALONE_TARGET Pulp::standalone pulp::standalone)
-include("${CMAKE_CURRENT_LIST_DIR}/PulpInspectorShipping.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/PulpControlShipping.cmake")
 _pulp_pick_target(_PULP_VST3_SDK_TARGET Pulp::vst3-sdk vst3-sdk)
 _pulp_pick_target(_PULP_CLAP_TARGET Pulp::clap clap)
 _pulp_pick_target(_PULP_LV2_TARGET Pulp::lv2-headers lv2-headers)
@@ -702,7 +702,7 @@ function(pulp_add_plugin target)
         message(FATAL_ERROR
             "pulp_add_plugin(${target}): control endpoints are supported only for Standalone targets")
     endif()
-    _pulp_configure_inspector_shipping(
+    _pulp_configure_control_shipping(
         ${target} "${PLUGIN_BUNDLE_ID}" "${PLUGIN_PLUGIN_NAME}")
 
     if(_PULP_UI_SCRIPT AND NOT EXISTS "${_PULP_UI_SCRIPT}")
@@ -858,25 +858,34 @@ function(pulp_add_plugin target)
 
     # Custom install target: pulp-install-<target>
     set(_install_commands "")
+    set(_install_dependencies "")
     if(TARGET ${target}_VST3 AND DEFINED _vst3_dir)
+        _pulp_control_shipping_scan_dependency(_vst3_scan ${target}_VST3)
+        list(APPEND _install_dependencies ${_vst3_scan})
         list(APPEND _install_commands
             COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${CMAKE_BINARY_DIR}/VST3/${PLUGIN_PLUGIN_NAME}.vst3"
                 "${_vst3_dir}/${PLUGIN_PLUGIN_NAME}.vst3")
     endif()
     if(TARGET ${target}_CLAP AND DEFINED _clap_dir)
+        _pulp_control_shipping_scan_dependency(_clap_scan ${target}_CLAP)
+        list(APPEND _install_dependencies ${_clap_scan})
         list(APPEND _install_commands
             COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${CMAKE_BINARY_DIR}/CLAP/${PLUGIN_PLUGIN_NAME}.clap"
                 "${_clap_dir}/${PLUGIN_PLUGIN_NAME}.clap")
     endif()
     if(TARGET ${target}_AU AND DEFINED _au_dir)
+        _pulp_control_shipping_scan_dependency(_au_scan ${target}_AU)
+        list(APPEND _install_dependencies ${_au_scan})
         list(APPEND _install_commands
             COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${CMAKE_BINARY_DIR}/AU/${PLUGIN_PLUGIN_NAME}.component"
                 "${_au_dir}/${PLUGIN_PLUGIN_NAME}.component")
     endif()
     if(TARGET ${target}_AAX AND DEFINED _aax_dir)
+        _pulp_control_shipping_scan_dependency(_aax_scan ${target}_AAX)
+        list(APPEND _install_dependencies ${_aax_scan})
         list(APPEND _install_commands
             COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${CMAKE_BINARY_DIR}/AAX/${PLUGIN_PLUGIN_NAME}.aaxplugin"
@@ -895,6 +904,15 @@ function(pulp_add_plugin target)
     # next relaunch without a full logout. `pulp doctor --au-cache`
     # documents the same `killall -9 AudioComponentRegistrar` step.
     if(TARGET ${target}_AUv3Host AND APPLE AND NOT PULP_IOS)
+        # The embed target depends on all three binaries and assembles their
+        # final host bundle. Depending on the binaries alone can install an
+        # unassembled app when this specific target is built from clean state.
+        _pulp_control_shipping_scan_dependency(_auv3_framework_scan
+            ${target}_AUv3Framework)
+        _pulp_control_shipping_scan_dependency(_auv3_extension_scan ${target}_AUv3)
+        _pulp_control_shipping_scan_dependency(_auv3_host_scan ${target}_AUv3Host)
+        list(APPEND _install_dependencies ${target}_AUv3Host_Embed
+            ${_auv3_framework_scan} ${_auv3_extension_scan} ${_auv3_host_scan})
         set(_auv3_install_dir "$ENV{HOME}/Applications")
         list(APPEND _install_commands
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_auv3_install_dir}"
@@ -913,6 +931,7 @@ function(pulp_add_plugin target)
     if(_install_commands)
         add_custom_target(pulp-install-${target}
             ${_install_commands}
+            DEPENDS ${_install_dependencies}
             COMMENT "Installing ${PLUGIN_PLUGIN_NAME} to system plugin folders"
         )
     endif()
@@ -981,6 +1000,12 @@ function(pulp_add_plugin_bundle target)
         endif()
     endforeach()
 
+    # Multi-plugin bundles are ordinary production artifacts until a future
+    # bundle-level capability contract exists. They still receive the same
+    # per-format negative scan, so this path cannot bypass strip enforcement.
+    _pulp_cache_control_declarations(${target} production-stripped "" FALSE)
+    _pulp_configure_control_shipping(
+        ${target} "${BUNDLE_BUNDLE_ID}" "${BUNDLE_BUNDLE_NAME}")
     _pulp_configure_plugin_runtime_manifest(${target} "${BUNDLE_BUNDLE_ID}")
 
     # All bundled plugins' code flows into each format binary. With SOURCES, an

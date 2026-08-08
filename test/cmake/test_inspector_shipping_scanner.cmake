@@ -105,6 +105,7 @@ _authoring_case(unknown-control-profile
 set(_installed_helper_dir "${FIXTURE_DIR}/installed/lib/cmake/Pulp")
 file(MAKE_DIRECTORY "${_installed_helper_dir}")
 file(COPY "${PULP_SOURCE_DIR}/tools/cmake/PulpInspectorShipping.cmake"
+    "${PULP_SOURCE_DIR}/tools/cmake/PulpControlShipping.cmake"
     DESTINATION "${_installed_helper_dir}")
 set(_installed_helper_script "${FIXTURE_DIR}/installed-helper.cmake")
 file(WRITE "${_installed_helper_script}"

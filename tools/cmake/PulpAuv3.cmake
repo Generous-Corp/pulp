@@ -146,6 +146,7 @@ function(_pulp_add_auv3_macos_framework target name bundle_id version auv3_entry
     pulp_stage_runtime_dependencies(${fw_target})
     pulp_assert_runtime_dependencies_staged(${fw_target})
     _pulp_attach_plugin_runtime_manifest(${target} ${fw_target})
+    _pulp_attach_control_shipping(${target} ${fw_target} AUv3Framework)
 endfunction()
 
 # ── macOS stub .appex: tiny shell linking the framework ────────────────────
@@ -232,6 +233,7 @@ function(_pulp_add_auv3_macos_appex target name bundle_id version manufacturer m
     target_link_options(${appex_target} PRIVATE
         "-Wl,-force_load,$<TARGET_FILE:${target}_AUv3Framework>")
     _pulp_attach_plugin_runtime_manifest(${target} ${appex_target})
+    _pulp_attach_control_shipping(${target} ${appex_target} AUv3Extension)
 endfunction()
 
 # ── macOS container .app: holds the .appex + framework ────────────────────
@@ -269,6 +271,7 @@ function(_pulp_add_auv3_macos_host target name bundle_id version)
         INSTALL_RPATH "@executable_path/../Frameworks"
     )
     target_link_libraries(${host_target} PRIVATE "-framework Cocoa")
+    _pulp_attach_control_shipping(${target} ${host_target} AUv3Host)
 
     # Make the host depend on both pieces and copy them into the bundle.
     add_dependencies(${host_target} ${target}_AUv3Framework ${target}_AUv3)
@@ -460,6 +463,7 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
     pulp_stage_runtime_dependencies(${target}_AUv3)
     pulp_assert_runtime_dependencies_staged(${target}_AUv3)
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_AUv3)
+    _pulp_attach_control_shipping(${target} ${target}_AUv3 AUv3Extension)
 
     # Embed three.iife.js + web-compat-three-shim.js into the .appex
     # `threejs/` subdirectory so the JSC engine can load Three.js via plain

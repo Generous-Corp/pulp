@@ -2,6 +2,18 @@
 
 #include <pulp/inspect/runtime_eval_component.hpp>
 
+#if defined(_MSC_VER)
+#define PULP_CONTROL_COMPONENT_MARKER __declspec(dllexport)
+#else
+#define PULP_CONTROL_COMPONENT_MARKER __attribute__((used, visibility("default")))
+#endif
+
+extern "C" PULP_CONTROL_COMPONENT_MARKER const volatile char
+    pulp_control_runtime_eval_capability_marker_v1[] =
+        "PULP_INSPECT_CAPABILITY_RUNTIME_EVAL_V1";
+
+#undef PULP_CONTROL_COMPONENT_MARKER
+
 #include <pulp/view/script_inspector_bridge.hpp>
 
 #include <string>

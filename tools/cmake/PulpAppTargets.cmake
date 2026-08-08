@@ -60,7 +60,7 @@ function(_pulp_add_standalone target name bundle_id version)
     include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpPortable.cmake")
     pulp_assert_portable_bundle(${target}_Standalone)
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_Standalone)
-    _pulp_attach_inspector_shipping(${target} ${target}_Standalone)
+    _pulp_attach_control_shipping(${target} ${target}_Standalone Standalone)
     # Linux+GNU-ld link-order fix: libskia.a → fontconfig. Same helper
     # used for pulp-cli (#1986) and pulp-import-design (#2018). Standalone
     # transitively pulls in pulp::view → pulp::canvas → libskia.a, which
