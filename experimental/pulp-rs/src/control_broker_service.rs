@@ -252,7 +252,7 @@ pub fn control_broker_payload_release_version(
         let file_system = SystemFileSystem;
         let runner = SystemCommandRunner;
         verify_payload_with(path, timeout, &file_system, &runner)?;
-        payload_release_version_with(path, timeout, &runner).map(Some)
+        payload_release_version_with(path, timeout, &file_system, &runner).map(Some)
     }
     #[cfg(not(target_os = "macos"))]
     {

@@ -1,5 +1,7 @@
 use super::*;
 
+pub(super) const VERSION_QUERY_MARKER: &[u8] = b"PULP_CONTROL_BROKER_VERSION_QUERY_V1";
+
 pub(super) fn read_identity<R: CommandRunner>(
     runner: &R,
     broker: &Path,
@@ -55,11 +57,22 @@ pub(super) fn restore_marker<F: FileSystem>(
     }
 }
 
-pub(super) fn payload_release_version_with<R: CommandRunner>(
+pub(super) fn payload_release_version_with<F: FileSystem, R: CommandRunner>(
     broker: &Path,
     timeout: Duration,
+    file_system: &F,
     runner: &R,
 ) -> Result<String, ControlBrokerServiceError> {
+    let bytes = read_file(file_system, broker)?;
+    if !bytes
+        .windows(VERSION_QUERY_MARKER.len())
+        .any(|window| window == VERSION_QUERY_MARKER)
+    {
+        return Err(ControlBrokerServiceError::coded(
+            "version-query-unsupported",
+            "control broker does not advertise the side-effect-free version query",
+        ));
+    }
     let output = run_success(
         runner,
         CommandRequest {
@@ -148,7 +161,7 @@ pub(super) fn installed_release_version_with<F: FileSystem, R: CommandRunner>(
             return Ok(version.to_owned());
         }
     }
-    payload_release_version_with(broker, timeout, runner)
+    payload_release_version_with(broker, timeout, file_system, runner)
 }
 
 fn matching_success_marker_version<'a>(

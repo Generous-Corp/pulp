@@ -15,6 +15,9 @@
 #define PULP_CONTROL_SDK_VERSION "unknown"
 #endif
 
+extern "C" __attribute__((used, visibility("default"))) const volatile char
+    pulp_control_broker_version_query_v1[] = "PULP_CONTROL_BROKER_VERSION_QUERY_V1";
+
 namespace {
 
 std::atomic<bool> stopping{false};

@@ -665,11 +665,22 @@ fn legacy_transition_recovers_once_for_exact_canonical_release() {
         mcp_path: None,
         is_zip: false,
     };
-    let recovered = recover_legacy_control_broker_once_with(
+    let recovered = recover_legacy_control_broker_once_with_installer(
         &plan,
         home.path(),
         || locate_binaries_in_archive(archive_dir.path()),
-        |_, _| Ok(()),
+        |plan, archive| {
+            let broker = archive.new_control_broker.as_ref().unwrap();
+            fs::copy(
+                broker,
+                plan.self_path
+                    .parent()
+                    .unwrap()
+                    .join(control_broker_basename()),
+            )
+            .unwrap();
+            Ok(ControlBrokerInstall::Created)
+        },
     )
     .unwrap();
 

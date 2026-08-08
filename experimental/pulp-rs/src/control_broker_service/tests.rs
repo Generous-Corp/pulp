@@ -641,11 +641,17 @@ fn metadata_parser_requires_exact_field_names() {
 
 #[test]
 fn signed_payload_release_version_uses_side_effect_free_process_contract() {
+    let fs = MemoryFileSystem::default();
+    fs.add(
+        "/tmp/pulp-control-broker",
+        lifecycle::VERSION_QUERY_MARKER.to_vec(),
+    );
     let runner = ScriptedRunner::new(vec![output(0, "0.795.0\n", "")]);
     assert_eq!(
         payload_release_version_with(
             Path::new("/tmp/pulp-control-broker"),
             Duration::from_secs(1),
+            &fs,
             &runner,
         )
         .unwrap(),
@@ -656,10 +662,29 @@ fn signed_payload_release_version_uses_side_effect_free_process_contract() {
     let error = payload_release_version_with(
         Path::new("/tmp/pulp-control-broker"),
         Duration::from_secs(1),
+        &fs,
         &ambiguous,
     )
     .unwrap_err();
     assert_eq!(error.code(), "ambiguous-release-version");
+}
+
+#[test]
+fn legacy_payload_without_version_query_marker_is_never_executed() {
+    let fs = MemoryFileSystem::default();
+    fs.add("/tmp/pulp-control-broker", b"legacy broker".to_vec());
+    let runner = ScriptedRunner::new(vec![]);
+
+    let error = payload_release_version_with(
+        Path::new("/tmp/pulp-control-broker"),
+        Duration::from_secs(1),
+        &fs,
+        &runner,
+    )
+    .unwrap_err();
+
+    assert_eq!(error.code(), "version-query-unsupported");
+    assert!(runner.calls.borrow().is_empty());
 }
 
 #[test]
@@ -695,4 +720,58 @@ fn legacy_installed_version_requires_marker_root_and_signed_cdhash_match() {
         runner.calls.borrow()[0].program,
         Path::new("/usr/bin/codesign")
     );
+}
+
+#[test]
+fn mismatched_legacy_marker_does_not_execute_installed_broker() {
+    let config = config();
+    let fs = populated_fs(&config);
+    let paths = paths_for(&config);
+    fs.add(
+        &paths.marker,
+        "schema=1\ninstall_root=/wrong/root\nrelease_version=0.794.0\ncdhash=abc123\noutcome=success\nerror_code=none\n",
+    );
+    let runner = ScriptedRunner::new(vec![identity_output()]);
+
+    let error = lifecycle::installed_release_version_with(
+        &paths.broker,
+        Duration::from_secs(1),
+        &fs,
+        &runner,
+    )
+    .unwrap_err();
+
+    assert_eq!(error.code(), "version-query-unsupported");
+    assert_eq!(runner.calls.borrow().len(), 1);
+    assert_eq!(
+        runner.calls.borrow()[0].program,
+        Path::new("/usr/bin/codesign")
+    );
+}
+
+#[test]
+fn modern_broker_recovers_from_a_stale_service_marker() {
+    let config = config();
+    let fs = populated_fs(&config);
+    let paths = paths_for(&config);
+    fs.add(&paths.broker, lifecycle::VERSION_QUERY_MARKER.to_vec());
+    fs.add(
+        &paths.marker,
+        "schema=1\ninstall_root=/wrong/root\nrelease_version=0.794.0\ncdhash=stale\noutcome=failure\nerror_code=activation-failed\n",
+    );
+    let runner = ScriptedRunner::new(vec![identity_output(), output(0, "0.795.0\n", "")]);
+
+    assert_eq!(
+        lifecycle::installed_release_version_with(
+            &paths.broker,
+            Duration::from_secs(1),
+            &fs,
+            &runner,
+        )
+        .unwrap(),
+        "0.795.0"
+    );
+    assert_eq!(runner.calls.borrow().len(), 2);
+    assert_eq!(runner.calls.borrow()[1].program, paths.broker);
+    assert_eq!(runner.calls.borrow()[1].args, ["--version"]);
 }

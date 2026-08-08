@@ -509,6 +509,17 @@ pub fn recover_legacy_control_broker_once_with(
     fetch: impl FnOnce() -> Result<ExtractedArchive>,
     reconcile: impl FnOnce(&Path, &mut dyn FnMut() -> Result<()>) -> Result<()>,
 ) -> Result<LegacyControlBrokerRecovery> {
+    recover_legacy_control_broker_once_with_installer(plan, home, fetch, |plan, archive| {
+        install_control_broker_with(plan, archive, reconcile)
+    })
+}
+
+fn recover_legacy_control_broker_once_with_installer(
+    plan: &InstallPlan,
+    home: &Path,
+    fetch: impl FnOnce() -> Result<ExtractedArchive>,
+    install: impl FnOnce(&InstallPlan, &ExtractedArchive) -> Result<ControlBrokerInstall>,
+) -> Result<LegacyControlBrokerRecovery> {
     use std::cmp::Ordering;
 
     if !cfg!(target_os = "macos") {
@@ -554,7 +565,7 @@ pub fn recover_legacy_control_broker_once_with(
     )?;
 
     let archive = fetch()?;
-    let installed = install_control_broker_with(plan, &archive, reconcile)?;
+    let installed = install(plan, &archive)?;
     if installed == ControlBrokerInstall::NotPresent {
         return Err(CliError::Other(format!(
             "release {} does not contain the expected Darwin control broker",
