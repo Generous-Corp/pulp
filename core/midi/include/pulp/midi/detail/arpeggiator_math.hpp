@@ -44,6 +44,16 @@ constexpr std::uint64_t mix(std::uint64_t value) noexcept {
     return value ^ (value >> 31);
 }
 
+constexpr long double difference_as_long_double(std::int64_t lhs,
+                                                std::int64_t rhs) noexcept {
+    // Subtract before conversion when both values have the same sign. Their
+    // difference is representable, and this preserves adjacent ticks at the
+    // int64 limits on platforms where long double has only 53 mantissa bits.
+    if ((lhs < 0) == (rhs < 0))
+        return static_cast<long double>(lhs - rhs);
+    return static_cast<long double>(lhs) - static_cast<long double>(rhs);
+}
+
 inline std::int64_t saturating_round(long double value) noexcept {
     constexpr auto minimum =
         static_cast<long double>(std::numeric_limits<std::int64_t>::min());

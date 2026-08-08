@@ -462,8 +462,8 @@ class Arpeggiator {
                 static_cast<long double>(block.tick_start.value));
             delta = event_sample - anchor_sample;
         } else {
-            const auto tick_delta = static_cast<long double>(tick.value) -
-                                    static_cast<long double>(block.tick_start.value);
+            const auto tick_delta = arpeggiator_detail::difference_as_long_double(
+                tick.value, block.tick_start.value);
             delta = tick_delta * block.sample_rate.as_long_double() * 60.0L /
                     (static_cast<long double>(block.tempo_bpm) *
                      static_cast<long double>(timebase::kTicksPerQuarter));

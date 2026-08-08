@@ -564,6 +564,12 @@ TEST_CASE("Arpeggiator saturates extreme host timing without signed overflow",
     STATIC_REQUIRE_FALSE(midi::arpeggiator_detail::distance_exceeds(-1, 1, 2));
     STATIC_REQUIRE(midi::arpeggiator_detail::distance_exceeds(
         std::numeric_limits<std::int64_t>::min(), std::numeric_limits<std::int64_t>::max(), 2));
+    STATIC_REQUIRE(midi::arpeggiator_detail::difference_as_long_double(
+                       std::numeric_limits<std::int64_t>::min() + 1,
+                       std::numeric_limits<std::int64_t>::min()) == 1.0L);
+    STATIC_REQUIRE(midi::arpeggiator_detail::difference_as_long_double(
+                       std::numeric_limits<std::int64_t>::max() - 1,
+                       std::numeric_limits<std::int64_t>::max()) == -1.0L);
 
     midi::Arpeggiator<> discontinuity_arp;
     auto held = prepared_buffer();
@@ -606,9 +612,12 @@ TEST_CASE("Arpeggiator saturates extreme host timing without signed overflow",
         .playing = true,
         .transport_event = midi::ArpeggiatorTransportEvent::Started,
     };
+    output.clear();
     const auto minimum_report = minimum_tick_arp.process(held, output, minimum_tick);
-    CHECK_FALSE(minimum_report.complete);
-    CHECK(minimum_report.dropped > 0);
+    REQUIRE(minimum_report.complete);
+    REQUIRE(minimum_report.dropped == 0);
+    REQUIRE_FALSE(output.empty());
+    CHECK(output[0].is_note_on());
 
     midi::Arpeggiator<> projection_arp;
     auto input = prepared_buffer();
