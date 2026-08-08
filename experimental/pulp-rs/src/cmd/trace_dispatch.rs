@@ -3,7 +3,7 @@
 use std::io::Write;
 
 use crate::cmd::trace::{
-    io_err, print_help, resolve_port, to_inspector_call, GlobalFlags, InspectorTalker, Sub,
+    io_err, print_help, to_inspector_call, GlobalFlags, InspectorTalker, Sub,
 };
 use crate::cmd::trace_doctor::{resolve_trace_processor, run_doctor};
 use crate::cmd::trace_open::run_open;
@@ -39,73 +39,49 @@ pub fn dispatch<T: InspectorTalker>(
             return run_offline_query(q, &resolve_trace_processor(), flags.json, out);
         }
     }
-    let port = resolve_port(flags)?;
-    let explicit_selection = crate::cmd::inspector::explicit_selection(
-        flags.session_id.as_deref(),
-        flags.instance_id.as_deref(),
-        flags.publication_id.as_deref(),
-    );
+    if matches!(sub, Sub::Query(_) | Sub::Snapshot | Sub::Explain { .. }) {
+        return Err(CliError::BadUsage(
+            "legacy live Trace.query/snapshot/explain authority was removed; use `query --trace`, `fetch`, or `open`"
+                .to_owned(),
+        ));
+    }
     if matches!(sub, Sub::Doctor) {
-        return run_doctor(port, explicit_selection.as_ref(), flags.json, talker, out);
+        return run_doctor(0, None, flags.json, &OfflineDoctorTalker, out);
     }
-    let Some((method, params)) = to_inspector_call(sub) else {
-        // The `Help` arm above already returned. This stays here so
-        // adding a new `Sub` variant without a matching
-        // `to_inspector_call` arm fails loudly instead of no-oping.
-        return Err(CliError::Other(format!(
-            "pulp trace: no inspector mapping for {sub:?}"
-        )));
-    };
-    let selection_policy = match sub {
-        Sub::Stop | Sub::Query(_) | Sub::Explain { .. } => {
-            let message = match sub {
-                Sub::Stop => {
-                    concat!(
-                        "pulp trace stop requires --session, --instance, and --publication",
-                        " from the exact command printed by `pulp trace start`"
-                    )
-                }
-                Sub::Query(_) => {
-                    concat!(
-                        "pulp trace query requires --session, --instance, and --publication",
-                        " from the exact command printed by `pulp trace start`"
-                    )
-                }
-                Sub::Explain { .. } => {
-                    concat!(
-                        "pulp trace explain requires --session, --instance, and --publication",
-                        " from the exact command printed by `pulp trace start`"
-                    )
-                }
-                _ => unreachable!(),
-            };
-            crate::cmd::inspector::PublicationSelectionPolicy::RequireExact(message)
+    if matches!(sub, Sub::Start(_) | Sub::Stop) {
+        if flags.port.is_some()
+            || flags.session_id.is_some()
+            || flags.instance_id.is_some()
+            || flags.publication_id.is_some()
+        {
+            return Err(CliError::BadUsage(
+                "pulp trace start/stop use canonical capability control and do not accept \
+                 legacy --port/--session/--instance/--publication selectors"
+                    .to_owned(),
+            ));
         }
-        Sub::Start(_) => crate::cmd::inspector::PublicationSelectionPolicy::DiscoverExact {
-            command_name: "trace",
-        },
-        _ => crate::cmd::inspector::PublicationSelectionPolicy::Preserve,
-    };
-    let selection = crate::cmd::inspector::resolve_publication_selection(
-        talker,
-        port,
-        explicit_selection,
-        selection_policy,
-    )?;
-    let response =
-        crate::cmd::inspector::call_through(talker, port, selection.as_ref(), method, &params)?;
-
-    if flags.json {
-        let rendered = if matches!(sub, Sub::Start(_)) {
-            crate::cmd::inspector::attach_session_selection(&response, selection.as_ref())
-        } else {
-            response.trim_end().to_owned()
+        let Some((method, params)) = to_inspector_call(sub) else {
+            unreachable!("trace lifecycle has a canonical method")
         };
-        writeln!(out, "{rendered}").map_err(io_err)?;
-    } else {
-        write_pretty(out, sub, &response, selection.as_ref()).map_err(io_err)?;
+        let response = talker.call(0, method, &params)?;
+        if flags.json {
+            writeln!(out, "{}", response.trim_end()).map_err(io_err)?;
+        } else {
+            write_pretty(out, sub, &response, None).map_err(io_err)?;
+        }
+        return Ok(());
     }
-    Ok(())
+    unreachable!("all trace subcommands return through canonical or offline paths")
+}
+
+struct OfflineDoctorTalker;
+
+impl InspectorTalker for OfflineDoctorTalker {
+    fn call(&self, _port: u16, _method: &str, _params_json: &str) -> Result<String> {
+        Err(CliError::Other(
+            "live trace diagnostics moved to canonical capability control".to_owned(),
+        ))
+    }
 }
 
 /// Pretty-printer per verb. Falls back to the raw JSON when the

@@ -47,6 +47,15 @@ ControlTransportDispatchResult encoded(ControlEnvelope envelope) {
     return {.encoded_response = encode_control_envelope(envelope)};
 }
 
+TEST_CASE("installed canonical Inspector client is default denied without an opener",
+          "[inspect][control][client]") {
+    const auto result =
+        request_control_inspector(std::string(methods::kTraceStartSession), "{}");
+    CHECK_FALSE(result.succeeded());
+    CHECK(result.response.error_code == "control_session_unavailable");
+    CHECK(result.response.error_data_json == R"({"mayHaveApplied":false})");
+}
+
 ControlTransportDispatchResult accepted_negotiation() {
     return encoded({
         .payload =

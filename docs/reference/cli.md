@@ -1522,48 +1522,38 @@ authority. Load replay fixtures inside an explicitly owned test host instead.
 
 **Status**: experimental
 
-The live-session `Trace.*` wrappers are experimental. Normal Pulp launches do
-not start their endpoint, and `PULP_TRACE_SERVER` is not implemented. They
-require a Pulp source checkout plus an explicitly owned host that constructs
-`InspectorServer`, wires `DomainHandler`, and publishes authenticated
-discovery. Offline
+The live trace lifecycle is experimental. `start` and `stop` use the canonical
+capability-control client: broker authentication, trusted-host enrollment,
+consent, grants, and receipts determine the target and authority. They never
+fall back to legacy Inspector discovery or accept a raw host/port selector.
+Production remains default-denied when no authorized control session can be
+opened. Offline
 `query --trace`, `fetch`, `doctor`, and `open` remain usable without a live
 inspector session.
 
 ```bash
 pulp trace start --categories dsp,render --ring-mb 128
-# copy the exact stop command printed by start:
-pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION  # → prints the .pftrace path
+pulp trace stop                                      # → prints the .pftrace path
 pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20" --trace /tmp/x.pftrace
-pulp trace snapshot
-pulp trace doctor                                 # readiness: inspector + build + trace_processor
+pulp trace doctor                                 # offline trace_processor readiness
 pulp trace fetch                                  # download the pinned trace_processor (zero-install offline query)
 pulp trace open /tmp/x.pftrace                    # serve on loopback + open in the Perfetto UI
 ```
 
 Options:
 
-- `--port PORT` - optional filter for owner-private authenticated discovery;
-  `$PULP_INSPECTOR_PORT` supplies the same explicit filter
-- `--session ID --instance ID --publication ID` - select one exact
-  authenticated publication; all three are required for `stop` and for the
-  reserved live `query` / `explain` methods. An unqualified `start` resolves
-  the selector before mutating and prints the pinned follow-up command.
-  Publication IDs are non-reusable across server restarts.
+- Legacy `--port` and `--session/--instance/--publication` selectors were
+  removed. The broker owns lifecycle target selection.
 - `--json` - emit the raw inspector JSON response instead of the pretty form
 
 Subcommands:
 
 | Subcommand | Inspector method | Description |
 |------------|------------------|-------------|
-| `start [--categories LIST] [--ring-mb 1..512]` | `Trace.startSession` | Begin a session recording the selected span categories into a bounded in-process ring. The host owns the flushed trace destination; remote clients cannot select a filesystem path. |
-| `stop` | `Trace.stopSession` | Flush the session and print the `.pftrace` path. |
-| `query "<sql>" [--format json\|table\|csv]` | `Trace.query` | Reserved live surface; currently fails with `capability_unavailable`. |
+| `start [--categories LIST] [--ring-mb 1..512]` | canonical `dev.pulp.trace/session-control@1` | Begin a broker-authorized session recording selected span categories into a bounded in-process ring. The host owns the flushed trace destination. |
+| `stop` | canonical `dev.pulp.trace/session-control@1` | Flush the broker-authorized session and print the `.pftrace` path. |
 | `query "<sql>" --trace FILE.pftrace` | `trace_processor` (offline) | Run SQL against a flushed `.pftrace` without a live session, via `trace_processor_shell` (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`; see `pulp trace fetch` / `doctor`). Returns trace_processor's native table; `--format`/`--preset` are live-path only. |
-| `query --preset <name>` and named preset verbs | `Trace.query` | Reserved; currently fail with `capability_unavailable`. |
-| `snapshot` | `Trace.snapshot` | Print `compiled_in`, process-global `active`, per-publication `trace_control_available`, and the optional `last_trace_path`. |
-| `explain "<question>"` | `Trace.explain` | Reserved; currently fails with `capability_unavailable`. Use the `trace-analysis` skill with a flushed `.pftrace`. |
-| `doctor` | client-side + `Trace.snapshot` | Readiness check. Uses the authenticated `Trace.snapshot` request as its inspector availability check, then combines it with `trace_processor` availability (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`) and the inspector's `compiled_in` / `active` / `trace_control_available` / `last_trace_path` to report `ready_to_capture` and `ready_to_query`. `--json` emits the flat readiness object. |
+| `doctor` | client-side | Report offline `trace_processor` readiness without contacting a legacy Inspector publication. |
 | `fetch` | client-side | Download + SHA-256-verify the pinned `trace_processor_shell` (Perfetto v57.2) into `$PULP_HOME` so offline `query --trace` works zero-install. Idempotent (no-op when present). `--json` emits `{version, platform, path, already_present}`. |
 | `open <file.pftrace> [--no-browser] [--keep-alive-seconds N]` | client-side | Serve the trace from a loopback-only HTTP server and open it in the Perfetto UI via `?url=` (browsers block `file://`). `--no-browser` prints the URLs to paste; `--keep-alive-seconds` bounds how long the server waits for the UI to fetch. `--json` emits `{trace_path, serve_url, perfetto_url, browser_opened, served}`. |
 

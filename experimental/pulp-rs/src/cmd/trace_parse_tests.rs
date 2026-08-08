@@ -27,9 +27,9 @@ fn parse_global_json_in_any_position() {
 }
 
 #[test]
-fn parse_port_override() {
-    let (_sub, g) = parse(&s(&["--port", "9200", "snapshot"])).unwrap();
-    assert_eq!(g.port, Some(9200));
+fn parse_port_override_is_removed() {
+    let error = parse(&s(&["--port", "9200", "snapshot"])).unwrap_err();
+    assert!(error.to_string().contains("removed"), "{error}");
 }
 
 #[test]
@@ -45,8 +45,8 @@ fn parse_port_rejects_zero() {
 }
 
 #[test]
-fn parse_exact_publication_selection_accepts_all_identifiers() {
-    let (_sub, flags) = parse(&s(&[
+fn parse_exact_publication_selection_is_removed() {
+    let error = parse(&s(&[
         "snapshot",
         "--session",
         "session-a",
@@ -55,10 +55,8 @@ fn parse_exact_publication_selection_accepts_all_identifiers() {
         "--publication",
         "publication-c",
     ]))
-    .unwrap();
-    assert_eq!(flags.session_id.as_deref(), Some("session-a"));
-    assert_eq!(flags.instance_id.as_deref(), Some("instance-b"));
-    assert_eq!(flags.publication_id.as_deref(), Some("publication-c"));
+    .unwrap_err();
+    assert!(error.to_string().contains("removed"), "{error}");
 
     for args in [
         s(&["snapshot", "--session", "session-a"]),
@@ -231,29 +229,18 @@ fn to_inspector_call_methods_match_protocol() {
         to_inspector_call(&Sub::Stop).unwrap().0,
         "Trace.stopSession"
     );
-    assert_eq!(
-        to_inspector_call(&Sub::Query(QueryArgs {
-            sql: Some("SELECT 1".to_owned()),
-            preset: None,
-            format: QueryFormat::Json,
-            ..QueryArgs::default()
-        }))
-        .unwrap()
-        .0,
-        "Trace.query"
-    );
-    assert_eq!(
-        to_inspector_call(&Sub::Snapshot).unwrap().0,
-        "Trace.snapshot"
-    );
-    assert_eq!(
-        to_inspector_call(&Sub::Explain {
-            question: "why?".to_owned()
-        })
-        .unwrap()
-        .0,
-        "Trace.explain"
-    );
+    assert!(to_inspector_call(&Sub::Query(QueryArgs {
+        sql: Some("SELECT 1".to_owned()),
+        preset: None,
+        format: QueryFormat::Json,
+        ..QueryArgs::default()
+    }))
+    .is_none());
+    assert!(to_inspector_call(&Sub::Snapshot).is_none());
+    assert!(to_inspector_call(&Sub::Explain {
+        question: "why?".to_owned()
+    })
+    .is_none());
     assert!(to_inspector_call(&Sub::Help).is_none());
 }
 
@@ -272,38 +259,11 @@ fn build_start_params_includes_only_set_fields() {
 }
 
 #[test]
-fn build_query_params_carries_sql_and_format() {
-    let p = build_query_params(&QueryArgs {
-        sql: Some("SELECT name FROM slice".to_owned()),
-        preset: None,
-        format: QueryFormat::Csv,
-        ..QueryArgs::default()
-    });
-    assert!(p.contains("\"sql\":\"SELECT name FROM slice\""));
-    assert!(p.contains("\"format\":\"csv\""));
-    assert!(!p.contains("preset"));
-}
-
-#[test]
-fn build_query_params_carries_preset() {
-    let p = build_query_params(&QueryArgs {
-        sql: None,
-        preset: Some("slowest-frames".to_owned()),
-        format: QueryFormat::Json,
-        ..QueryArgs::default()
-    });
-    assert!(p.contains("\"preset\":\"slowest-frames\""));
-    assert!(p.contains("\"format\":\"json\""));
-    assert!(!p.contains("\"sql\""));
-}
-
-#[test]
 fn explain_params_escape_the_question() {
-    let (_m, p) = to_inspector_call(&Sub::Explain {
+    assert!(to_inspector_call(&Sub::Explain {
         question: "why is \"x\" slow?".to_owned(),
     })
-    .unwrap();
-    assert!(p.contains("\\\""), "expected escaped quote in {p}");
+    .is_none());
 }
 
 #[test]

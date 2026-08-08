@@ -4,6 +4,7 @@
 #include "inspector_shipping_report.hpp"
 
 #include <pulp/inspect/client.hpp>
+#include <pulp/inspect/control_inspector_client.hpp>
 #include <pulp/inspect/discovery.hpp>
 
 #include <choc/text/choc_JSON.h>
@@ -447,6 +448,21 @@ int cmd_inspect(const std::vector<std::string>& args) {
         std::cerr << "Error: --params requires --command\n";
         return 2;
     }
+    const bool canonical_trace_lifecycle =
+        command == pulp::inspect::methods::kTraceStartSession ||
+        command == pulp::inspect::methods::kTraceStopSession;
+    if (!canonical_trace_lifecycle && command.starts_with("Trace.")) {
+        std::cerr << "Error: legacy Trace.* Inspector authority was removed; use "
+                     "`pulp trace start|stop` through canonical control or offline trace tools\n";
+        return 2;
+    }
+    if (canonical_trace_lifecycle &&
+        (!host.empty() || port != 0 || !session_id.empty() || !instance_id.empty() ||
+         !publication_id.empty())) {
+        std::cerr << "Error: canonical trace lifecycle does not accept legacy "
+                     "--host/--port/--session/--instance/--publication selectors\n";
+        return 2;
+    }
     if (!publication_id.empty() && (session_id.empty() || instance_id.empty())) {
         std::cerr << "Error: --publication requires --session and --instance\n";
         return 2;
@@ -614,6 +630,16 @@ int cmd_inspect(const std::vector<std::string>& args) {
                     std::cout << "  " << capability_id(capability) << "\n";
             }
         }
+        return 0;
+    }
+
+    if (canonical_trace_lifecycle) {
+        const auto result = request_control_inspector(command, params, std::chrono::seconds(3));
+        if (!result.succeeded()) {
+            print_error(result.response);
+            return 1;
+        }
+        std::cout << result.response.params_json << "\n";
         return 0;
     }
 

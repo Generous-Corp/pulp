@@ -41,9 +41,6 @@ constexpr auto kInspectorMcpTools = std::to_array<InspectorMcpToolDescriptor>({
     {"pulp_motion_disable_cost", methods::kMotionDisableCost},
     {"pulp_trace_start", methods::kTraceStartSession},
     {"pulp_trace_stop", methods::kTraceStopSession},
-    {"pulp_trace_snapshot", methods::kTraceSnapshot},
-    {"pulp_trace_query", methods::kTraceQuery},
-    {"pulp_trace_explain", methods::kTraceExplain},
 });
 
 consteval bool inspector_mcp_tool_names_are_unique() {
@@ -98,9 +95,10 @@ bool decorate_inspector_mcp_tool_descriptions(std::string& tools_json) {
         tools_json.insert(insertion, "Inspector method " + std::string(tool.method) +
                                          " (capability " + std::string(capability) + "). ");
 
-        const bool discovers_and_pins_publication =
-            tool.name == "pulp_motion_start_trace" || tool.name == "pulp_trace_start";
-        if (!discovers_and_pins_publication) {
+        const bool discovers_and_pins_publication = tool.name == "pulp_motion_start_trace";
+        const bool uses_canonical_control =
+            tool.name == "pulp_trace_start" || tool.name == "pulp_trace_stop";
+        if (!discovers_and_pins_publication && !uses_canonical_control) {
             constexpr std::string_view input_marker = "\"inputSchema\":{\"type\":\"object\",";
             constexpr std::string_view required_selectors =
                 "\"required\":[\"session_id\",\"instance_id\",\"publication_id\"],";

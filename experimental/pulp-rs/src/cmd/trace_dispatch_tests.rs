@@ -4,11 +4,7 @@ use crate::cmd::trace::*;
 
 #[test]
 fn dispatch_start_passes_method_and_params() {
-    let t = RecordingTalker::new(vec![
-        "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\",\
-         \"publicationId\":\"publication-c\"}",
-        "{\"out_path\":\"/tmp/pulp-9.pftrace\"}",
-    ]);
+    let t = RecordingTalker::new(vec!["{\"out_path\":\"/tmp/pulp-9.pftrace\"}"]);
     let mut buf: Vec<u8> = Vec::new();
     let sub = Sub::Start(StartArgs {
         categories: vec!["dsp".to_owned()],
@@ -16,33 +12,19 @@ fn dispatch_start_passes_method_and_params() {
     });
     dispatch(&sub, &GlobalFlags::default(), &t, &mut buf).unwrap();
     let calls = t.calls.borrow();
-    assert_eq!(calls.len(), 2);
+    assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].0, 0);
-    assert_eq!(calls[0].1, "Session.getCapabilities");
-    assert_eq!(calls[1].1, "Trace.startSession");
-    assert!(calls[1].2.contains("\"categories\":[\"dsp\"]"));
-    assert_eq!(
-        t.selections.borrow()[1],
-        Some(crate::cmd::inspector::SessionSelection {
-            session_id: "session-a".to_owned(),
-            instance_id: "instance-b".to_owned(),
-            publication_id: "publication-c".to_owned(),
-        })
-    );
+    assert_eq!(calls[0].1, "Trace.startSession");
+    assert!(calls[0].2.contains("\"categories\":[\"dsp\"]"));
+    assert_eq!(t.selections.borrow()[0], None);
     let out = String::from_utf8(buf).unwrap();
     assert!(out.contains("/tmp/pulp-9.pftrace"), "{out}");
-    assert!(
-        out.contains(
-            "pulp trace stop --session session-a --instance instance-b \
-         --publication publication-c"
-        ),
-        "{out}"
-    );
+    assert!(out.contains("pulp trace stop"), "{out}");
 }
 
 #[test]
-fn dispatch_start_preserves_exact_selection_in_stop_hint() {
-    let talker = RecordingTalker::new(vec!["{\"compiled_in\":true,\"active\":true,\"ok\":true}"]);
+fn dispatch_start_rejects_legacy_exact_selection() {
+    let talker = RecordingTalker::new(vec![]);
     let flags = GlobalFlags {
         session_id: Some("session-a".to_owned()),
         instance_id: Some("instance-b".to_owned()),
@@ -50,21 +32,18 @@ fn dispatch_start_preserves_exact_selection_in_stop_hint() {
         ..GlobalFlags::default()
     };
     let mut output = Vec::new();
-    dispatch(
+    let error = dispatch(
         &Sub::Start(StartArgs::default()),
         &flags,
         &talker,
         &mut output,
     )
-    .unwrap();
-    let output = String::from_utf8(output).unwrap();
+    .unwrap_err();
     assert!(
-        output.contains(
-            "pulp trace stop --session session-a --instance instance-b \
-         --publication publication-c"
-        ),
-        "{output}"
+        error.to_string().contains("canonical capability control"),
+        "{error}"
     );
+    assert!(talker.calls.borrow().is_empty());
 }
 
 #[test]
@@ -73,12 +52,7 @@ fn dispatch_start_failure_does_not_print_a_stop_command() {
         "{\"compiled_in\":false,\"active\":false,\"ok\":false,\
          \"message\":\"Tracing is not compiled in\"}",
     ]);
-    let flags = GlobalFlags {
-        session_id: Some("session-a".to_owned()),
-        instance_id: Some("instance-b".to_owned()),
-        publication_id: Some("publication-c".to_owned()),
-        ..GlobalFlags::default()
-    };
+    let flags = GlobalFlags::default();
     let mut output = Vec::new();
     dispatch(
         &Sub::Start(StartArgs::default()),
@@ -95,11 +69,7 @@ fn dispatch_start_failure_does_not_print_a_stop_command() {
 
 #[test]
 fn dispatch_start_json_surfaces_resolved_exact_selection() {
-    let talker = RecordingTalker::new(vec![
-        "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\",\
-         \"publicationId\":\"publication-c\"}",
-        "{\"out_path\":\"/tmp/pulp-9.pftrace\"}",
-    ]);
+    let talker = RecordingTalker::new(vec!["{\"out_path\":\"/tmp/pulp-9.pftrace\"}"]);
     let flags = GlobalFlags {
         json: true,
         ..GlobalFlags::default()
@@ -113,44 +83,29 @@ fn dispatch_start_json_surfaces_resolved_exact_selection() {
     )
     .unwrap();
     let value: serde_json::Value = serde_json::from_slice(&output).unwrap();
-    assert_eq!(value["sessionId"], "session-a");
-    assert_eq!(value["instanceId"], "instance-b");
     assert_eq!(value["out_path"], "/tmp/pulp-9.pftrace");
 }
 
 #[test]
-fn dispatch_live_command_uses_exact_session_selection() {
-    let talker = RecordingTalker::new(vec!["{}"]);
-    let mut output = Vec::new();
-    let (sub, flags) = parse(&s(&[
+fn dispatch_live_command_rejects_removed_exact_session_selection() {
+    let talker = RecordingTalker::new(vec![]);
+    let error = parse(&s(&[
         "snapshot",
         "--session",
         "session-a",
         "--instance",
         "instance-b",
     ]))
-    .unwrap();
-    dispatch(&sub, &flags, &talker, &mut output).unwrap();
-    assert_eq!(
-        &*talker.selections.borrow(),
-        &[Some(crate::cmd::inspector::SessionSelection {
-            session_id: "session-a".to_owned(),
-            instance_id: "instance-b".to_owned(),
-            publication_id: String::new(),
-        })]
-    );
+    .unwrap_err();
+    assert!(error.to_string().contains("removed"), "{error}");
+    assert!(talker.calls.borrow().is_empty());
 }
 
 #[test]
 fn dispatch_stop_prints_pftrace_path() {
     let t = RecordingTalker::new(vec!["{\"out_path\":\"/tmp/pulp-42.pftrace\"}"]);
     let mut buf: Vec<u8> = Vec::new();
-    let flags = GlobalFlags {
-        session_id: Some("session-a".to_owned()),
-        instance_id: Some("instance-b".to_owned()),
-        publication_id: Some("publication-c".to_owned()),
-        ..GlobalFlags::default()
-    };
+    let flags = GlobalFlags::default();
     dispatch(&Sub::Stop, &flags, &t, &mut buf).unwrap();
     assert_eq!(t.calls.borrow()[0].1, "Trace.stopSession");
     let out = String::from_utf8(buf).unwrap();
@@ -158,12 +113,12 @@ fn dispatch_stop_prints_pftrace_path() {
 }
 
 #[test]
-fn dispatch_stop_requires_exact_selection_before_calling_inspector() {
-    let talker = RecordingTalker::new(vec![]);
+fn dispatch_stop_uses_canonical_selection_without_legacy_identifiers() {
+    let talker = RecordingTalker::new(vec!["{\"out_path\":\"/tmp/pulp.pftrace\"}"]);
     let mut output = Vec::new();
-    let error = dispatch(&Sub::Stop, &GlobalFlags::default(), &talker, &mut output).unwrap_err();
-    assert!(matches!(error, CliError::BadUsage(_)), "{error}");
-    assert!(talker.calls.borrow().is_empty());
+    dispatch(&Sub::Stop, &GlobalFlags::default(), &talker, &mut output).unwrap();
+    assert_eq!(talker.calls.borrow()[0].1, "Trace.stopSession");
+    assert_eq!(talker.selections.borrow()[0], None);
 }
 
 #[test]
@@ -186,10 +141,9 @@ fn dispatch_live_followups_require_exact_selection() {
 }
 
 #[test]
-fn dispatch_query_preset_verb_routes_to_trace_query() {
-    let t = RecordingTalker::new(vec!["[]"]);
-    let mut buf: Vec<u8> = Vec::new();
-    let (sub, flags) = parse(&s(&[
+fn dispatch_query_preset_verb_has_no_legacy_route() {
+    let t = RecordingTalker::new(vec![]);
+    let error = parse(&s(&[
         "slowest-frames",
         "--session",
         "session-a",
@@ -198,16 +152,14 @@ fn dispatch_query_preset_verb_routes_to_trace_query() {
         "--publication",
         "publication-c",
     ]))
-    .unwrap();
-    dispatch(&sub, &flags, &t, &mut buf).unwrap();
-    let calls = t.calls.borrow();
-    assert_eq!(calls[0].1, "Trace.query");
-    assert!(calls[0].2.contains("\"preset\":\"slowest-frames\""));
+    .unwrap_err();
+    assert!(error.to_string().contains("removed"), "{error}");
+    assert!(t.calls.borrow().is_empty());
 }
 
 #[test]
-fn dispatch_json_flag_prints_raw_response() {
-    let t = RecordingTalker::new(vec!["[{\"name\":\"process\"}]"]);
+fn dispatch_json_flag_does_not_restore_live_query() {
+    let t = RecordingTalker::new(vec![]);
     let mut buf: Vec<u8> = Vec::new();
     let flags = GlobalFlags {
         json: true,
@@ -223,14 +175,13 @@ fn dispatch_json_flag_prints_raw_response() {
         format: QueryFormat::Json,
         ..QueryArgs::default()
     });
-    dispatch(&sub, &flags, &t, &mut buf).unwrap();
-    let out = String::from_utf8(buf).unwrap();
-    assert!(out.contains("[{\"name\":\"process\"}]"), "{out}");
+    assert!(dispatch(&sub, &flags, &t, &mut buf).is_err());
+    assert!(t.calls.borrow().is_empty());
 }
 
 #[test]
-fn dispatch_explain_prints_narrated_prose() {
-    let t = RecordingTalker::new(vec!["{\"explanation\":\"Root cause: font-atlas build.\"}"]);
+fn dispatch_explain_has_no_legacy_route() {
+    let t = RecordingTalker::new(vec![]);
     let mut buf: Vec<u8> = Vec::new();
     let sub = Sub::Explain {
         question: "why slow to open?".to_owned(),
@@ -241,10 +192,8 @@ fn dispatch_explain_prints_narrated_prose() {
         publication_id: Some("publication-c".to_owned()),
         ..GlobalFlags::default()
     };
-    dispatch(&sub, &flags, &t, &mut buf).unwrap();
-    assert_eq!(t.calls.borrow()[0].1, "Trace.explain");
-    let out = String::from_utf8(buf).unwrap();
-    assert_eq!(out.trim(), "Root cause: font-atlas build.");
+    assert!(dispatch(&sub, &flags, &t, &mut buf).is_err());
+    assert!(t.calls.borrow().is_empty());
 }
 
 #[test]

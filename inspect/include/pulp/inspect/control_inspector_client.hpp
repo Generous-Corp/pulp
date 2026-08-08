@@ -45,4 +45,11 @@ request_control_inspector(InspectorControlSessionOpener& opener, std::string met
                           std::string params_json = "{}",
                           std::chrono::milliseconds timeout = std::chrono::seconds(3));
 
+/// Installed-process entry point for trace lifecycle adapters. Production is
+/// default-denied until the broker installs an enrollment/session opener;
+/// callers never fall back to legacy discovery or a raw host/port connection.
+InspectorClientResult
+request_control_inspector(std::string method, std::string params_json = "{}",
+                          std::chrono::milliseconds timeout = std::chrono::seconds(3));
+
 } // namespace pulp::inspect

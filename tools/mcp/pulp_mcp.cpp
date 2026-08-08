@@ -22,6 +22,7 @@
 
 #if PULP_MCP_ENABLE_INSPECTOR_CLIENT
 #include <pulp/inspect/client.hpp>
+#include <pulp/inspect/control_inspector_client.hpp>
 #endif
 #include <pulp/inspect/capabilities.hpp>
 #include <pulp/inspect/protocol.hpp>
@@ -142,6 +143,12 @@ InspectorCommandResult run_inspector_command(const fs::path& root, const std::st
     auto result = pulp::inspect::request_inspector(method, params_json,
                                                    {session_id, instance_id, publication_id});
     return format_inspector_command_result(std::move(result));
+}
+
+InspectorCommandResult run_control_trace_command(const std::string& method,
+                                                 const std::string& params_json = "{}") {
+    return format_inspector_command_result(
+        pulp::inspect::request_control_inspector(method, params_json));
 }
 #else
 std::string inspector_component_unavailable_payload() {
@@ -782,15 +789,9 @@ std::string pulp_mcp::server::tools_list_json() {
     out +=
         R"JSON({"name":"pulp_motion_disable_cost","description":"Experimental source-checkout custom-fixture client for Motion.disableCost on one exact session; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","required":["session_id","instance_id","publication_id"],"properties":{"session_id":{"type":"string","description":"Exact authenticated session id"},"instance_id":{"type":"string","description":"Exact authenticated instance id"},"publication_id":{"type":"string","description":"Exact non-reusable publication id"}}}},)JSON";
     out +=
-        R"JSON({"name":"pulp_trace_start","description":"Experimental source-checkout custom-fixture client for Trace.startSession; normal Pulp launches provide no endpoint. Resolves and pins one authenticated publication, then returns the exact session_id, instance_id, and non-reusable publication_id required to stop it. The fixture must also be built with PULP_TRACING=ON. The host owns the trace destination.","inputSchema":{"type":"object","properties":{"categories":{"type":"array","description":"Span categories to record (e.g. dsp, render, gpu, text, js, layout). Empty lets the inspector pick its default taxonomy.","items":{"type":"string"}},"ring_mb":{"type":"integer","minimum":1,"maximum":512,"description":"In-process ring size in mebibytes (default 80; range 1 through 512)"},"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
+        R"JSON({"name":"pulp_trace_start","description":"Begin trace capture through the canonical capability-control client. The broker owns authenticated target selection, consent, grants, and receipts; legacy Inspector publication and raw host/port selectors are not accepted.","inputSchema":{"type":"object","properties":{"categories":{"type":"array","description":"Span categories to record (e.g. dsp, render, gpu, text, js, layout). Empty lets the host pick its default taxonomy.","items":{"type":"string"}},"ring_mb":{"type":"integer","minimum":1,"maximum":512,"description":"In-process ring size in mebibytes (default 80; range 1 through 512)"}}}},)JSON";
     out +=
-        R"JSON({"name":"pulp_trace_stop","description":"Experimental source-checkout custom-fixture client for Trace.stopSession on the exact publication selected by start; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","required":["session_id","instance_id","publication_id"],"properties":{"session_id":{"type":"string","description":"Exact session_id returned by pulp_trace_start"},"instance_id":{"type":"string","description":"Exact instance_id returned by pulp_trace_start"},"publication_id":{"type":"string","description":"Non-reusable publication_id returned by pulp_trace_start"}}}},)JSON";
-    out +=
-        R"JSON({"name":"pulp_trace_snapshot","description":"Experimental source-checkout custom-fixture client for Trace.snapshot; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
-    out +=
-        R"JSON({"name":"pulp_trace_query","description":"Reserved source-checkout live Trace.query compatibility surface. It currently returns capability_unavailable instead of pretending to run SQL; use the CLI's offline `pulp trace query <sql> --trace <file>` path.","inputSchema":{"type":"object","required":["session_id","instance_id","publication_id"],"properties":{"sql":{"type":"string","description":"SQL query string (omit when using preset)"},"preset":{"type":"string","description":"Reserved named preset"},"format":{"type":"string","enum":["json","table","csv"],"description":"Requested output format"},"session_id":{"type":"string","description":"Exact session_id returned by pulp_trace_start"},"instance_id":{"type":"string","description":"Exact instance_id returned by pulp_trace_start"},"publication_id":{"type":"string","description":"Non-reusable publication_id returned by pulp_trace_start"}}}},)JSON";
-    out +=
-        R"JSON({"name":"pulp_trace_explain","description":"Reserved source-checkout live Trace.explain compatibility surface. It currently returns capability_unavailable; capture a .pftrace and run the trace-analysis workflow over offline queries.","inputSchema":{"type":"object","required":["question","session_id","instance_id","publication_id"],"properties":{"question":{"type":"string","description":"Plain-English investigation question"},"session_id":{"type":"string","description":"Exact session_id returned by pulp_trace_start"},"instance_id":{"type":"string","description":"Exact instance_id returned by pulp_trace_start"},"publication_id":{"type":"string","description":"Non-reusable publication_id returned by pulp_trace_start"}}}},)JSON";
+        R"JSON({"name":"pulp_trace_stop","description":"Stop trace capture through the canonical capability-control client. The broker resolves the authorized target; legacy Inspector publication and raw host/port selectors are not accepted.","inputSchema":{"type":"object","properties":{}}},)JSON";
     out +=
         R"JSON({"name":"pulp_minos","description":"Measure the minimum OS a built binary needs, read straight from the artifact (macOS deployment target / Linux glibc symbol version / Windows PE subsystem). Point it at any Mach-O / ELF / PE / static archive or a plugin bundle's inner binary. The floor of a binary is the MAX minimum among everything linked into it. The multi-repo consumer sweep (rebuild every downstream project and compare floors) is CLI-only: `pulp minos sweep`, because it clones and builds many repositories.","inputSchema":{"type":"object","required":["binary"],"properties":{"binary":{"type":"string","description":"Path to a built binary: a .dylib/.so/.dll, a .a static archive, an executable, or a plugin bundle's inner binary (e.g. Foo.vst3/Contents/MacOS/Foo)"}}}},)JSON";
     out +=
@@ -916,9 +917,11 @@ static std::string handle_request_raw(const std::string& json) {
             }
             if (!inspector_arguments)
                 return json_result(id, inspector_error_payload(parse_error));
-            const bool discovers_and_pins_publication =
-                name == "pulp_motion_start_trace" || name == "pulp_trace_start";
-            if (!discovers_and_pins_publication && !inspector_arguments->selection_fields.all()) {
+            const bool discovers_and_pins_publication = name == "pulp_motion_start_trace";
+            const bool uses_canonical_control =
+                name == "pulp_trace_start" || name == "pulp_trace_stop";
+            if (!discovers_and_pins_publication && !uses_canonical_control &&
+                !inspector_arguments->selection_fields.all()) {
                 if (!installed_inspector_tool && !inspector_capabilities_tool &&
                     find_project_root().empty()) {
                     return json_result(id, "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not "
@@ -1191,12 +1194,8 @@ static std::string handle_request_raw(const std::string& json) {
                 }
             }
         }
-        // Perfetto tracing — inspector Trace.* wrappers (mirror the motion
-        // block). These proxy the LIVE-session RPCs; the client-side CLI verbs
-        // (doctor / open / fetch, and offline `query --trace`) have no
-        // inspector RPC and therefore no MCP tool. query/explain forward their
-        // argument objects; start rebuilds only its protocol fields so MCP-only
-        // exact selectors are not exposed to the inspector domain.
+        // Perfetto lifecycle is control-plane-only. No trace tool may enter
+        // project discovery or the legacy Inspector publication path.
         else if (inspector_tool != nullptr && name.starts_with("pulp_trace_")) {
             std::string inspector_method(inspector_tool->method);
             std::string inspector_params = "{}";
@@ -1212,80 +1211,15 @@ static std::string handle_request_raw(const std::string& json) {
                     inspector_params += "\"ring_mb\":" + ring_mb;
                 }
                 inspector_params += "}";
-            } else if (name == "pulp_trace_query") {
-                const auto sql = inspector_argument_string(*inspector_arguments, "sql");
-                const auto preset = inspector_argument_string(*inspector_arguments, "preset");
-                const auto format = inspector_argument_string(*inspector_arguments, "format");
-                inspector_params = "{";
-                if (!sql.empty())
-                    inspector_params += "\"sql\":" + json_string(sql);
-                if (!preset.empty()) {
-                    if (inspector_params.size() != 1)
-                        inspector_params += ",";
-                    inspector_params += "\"preset\":" + json_string(preset);
-                }
-                if (!format.empty()) {
-                    if (inspector_params.size() != 1)
-                        inspector_params += ",";
-                    inspector_params += "\"format\":" + json_string(format);
-                }
-                inspector_params += "}";
-            } else if (name == "pulp_trace_explain") {
-                inspector_params =
-                    "{\"question\":" +
-                    json_string(inspector_argument_string(*inspector_arguments, "question")) + "}";
             }
 
-            auto root = find_project_root();
-            if (root.empty()) {
-                result =
-                    "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
+            if (inspector_arguments->selection_fields.any()) {
+                result = inspector_error_payload(
+                    "Error: canonical trace lifecycle does not accept legacy "
+                    "session_id, instance_id, or publication_id selectors");
             } else {
-                auto session_id = inspector_arguments->session_id;
-                auto instance_id = inspector_arguments->instance_id;
-                auto publication_id = inspector_arguments->publication_id;
-                const auto selection_fields = inspector_arguments->selection_fields;
-                if (selection_fields.any() &&
-                    (!selection_fields.all() ||
-                     !valid_exact_inspector_selection(session_id, instance_id, publication_id))) {
-                    result = inspector_error_payload(
-                        "Error: session_id, instance_id, and publication_id "
-                        "must be supplied together as exact safe identities");
-                }
-                if (result.empty() && name == "pulp_trace_start") {
-                    auto selection =
-                        resolve_inspector_selection(root, session_id, instance_id, publication_id);
-                    if (!selection) {
-                        result = inspector_error_payload(
-                            "Error: could not resolve a safe exact inspector "
-                            "publication before Trace.startSession");
-                    } else {
-                        session_id = selection->session_id;
-                        instance_id = selection->instance_id;
-                        publication_id = selection->publication_id;
-                    }
-                }
-                const bool requires_selection =
-                    name == "pulp_trace_start" || name == "pulp_trace_stop" ||
-                    name == "pulp_trace_query" || name == "pulp_trace_explain";
-                if (result.empty() && requires_selection &&
-                    !valid_exact_inspector_selection(session_id, instance_id, publication_id)) {
-                    result = inspector_error_payload(
-                        "Error: session_id, instance_id, and publication_id "
-                        "must be the exact safe identities returned by "
-                        "pulp_trace_start");
-                }
-                if (result.empty()) {
-                    auto command = run_inspector_command(root, inspector_method, inspector_params,
-                                                         session_id, instance_id, publication_id);
-                    if (command.succeeded() && name == "pulp_trace_start") {
-                        command.output +=
-                            "\nExact selection: {\"session_id\":" + json_string(session_id) +
-                            ",\"instance_id\":" + json_string(instance_id) +
-                            ",\"publication_id\":" + json_string(publication_id) + "}";
-                    }
-                    result = inspector_tool_payload(std::move(command));
-                }
+                result = inspector_tool_payload(
+                    run_control_trace_command(inspector_method, inspector_params));
             }
         }
         // Pending agent-request queue — an in-process read of the
