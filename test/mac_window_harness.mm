@@ -19,6 +19,7 @@
 #import <AppKit/AppKit.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <Foundation/Foundation.h>
+#import <QuartzCore/CAMetalLayer.h>
 #import <pulp/view/view.hpp>
 #import <pulp/view/window_host.hpp>
 
@@ -273,6 +274,29 @@ std::vector<uint8_t> capture_back_buffer_png(pulp::view::WindowHost& host) {
 
     drain_main_queue_once();
     return host.capture_back_buffer_png();
+}
+
+bool simulate_backing_scale_change(pulp::view::WindowHost& host, float scale) {
+    if (!is_main_thread() || scale <= 0.0f) return false;
+
+    @autoreleasepool {
+        NSView* view = (__bridge NSView*)host.native_content_view_handle();
+        if (!view || ![view.layer isKindOfClass:[CAMetalLayer class]]) return false;
+
+        auto* layer = static_cast<CAMetalLayer*>(view.layer);
+        layer.contentsScale = static_cast<CGFloat>(scale);
+        layer.drawableSize = CGSizeMake(view.bounds.size.width * scale,
+                                        view.bounds.size.height * scale);
+
+        // PulpMetalView is private to the production translation unit. KVC lets
+        // this test-only harness invoke its public Obj-C property without
+        // duplicating the class declaration or exposing a release API.
+        dispatch_block_t callback = [view valueForKey:@"backingChangedBlock"];
+        if (!callback) return false;
+        callback();
+        drain_main_queue_once();
+        return true;
+    }
 }
 
 std::vector<BackBufferFrameCapture>
