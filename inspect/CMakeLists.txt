@@ -4,8 +4,10 @@ add_library(pulp-inspect-protocol
     src/control_json_safety.cpp
     src/control_json_schema.cpp
     src/control_manifest.cpp
+    src/control_host_protocol_codec.cpp
     src/control_protocol.cpp
     src/control_protocol_codec.cpp
+    src/control_protocol_fields.cpp
     src/protocol.cpp
     src/session.cpp
     src/test_input.cpp)
@@ -72,6 +74,8 @@ add_library(pulp-inspect-control
     src/control_carrier.cpp
     src/control_endpoint.cpp
     src/control_grants.cpp
+    src/control_host_connection.cpp
+    src/control_host_router.cpp
     src/control_identity.cpp
     src/control_operation_store.cpp
     src/control_operations.cpp

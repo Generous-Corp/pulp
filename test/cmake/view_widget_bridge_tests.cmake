@@ -150,6 +150,12 @@ endif()
 catch_discover_tests(pulp-test-control-endpoint
     PROPERTIES LABELS "inspect;control;carrier")
 
+add_executable(pulp-test-control-host-router test_control_host_router.cpp)
+target_link_libraries(pulp-test-control-host-router PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-host-router
+    PROPERTIES LABELS "inspect;control;host;router")
+
 add_executable(pulp-test-control-carrier test_control_carrier.cpp)
 target_link_libraries(pulp-test-control-carrier PRIVATE
     pulp::inspect-control Catch2::Catch2WithMain)
