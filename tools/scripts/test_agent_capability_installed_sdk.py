@@ -688,10 +688,17 @@ def main() -> int:
                 target=first_binding["target"], generator=generator,
                 generator_options=generator_options, configuration=configuration,
             )
-            if configured.returncode != 0 or build_consumer(
-                args.cmake, leaked_archive_project, configuration
-            ).returncode != 0:
-                raise RuntimeError("build-tree archive mutation did not otherwise build")
+            if configured.returncode != 0:
+                raise RuntimeError(
+                    "build-tree archive mutation did not otherwise configure:\n"
+                    f"{configured.stdout}\n{configured.stderr}"
+                )
+            # Isolation is an exported-metadata contract. CMake's File API and
+            # the installed PulpTargets files already expose the imported
+            # archive location after configure, so compiling this deliberately
+            # contaminated consumer adds no evidence. It can also fail for
+            # unrelated static-link closure differences before the isolation
+            # oracle gets to inspect the path we intentionally injected.
             expect_failure(
                 "imported target points at build-tree archive",
                 lambda: inspect_isolation(

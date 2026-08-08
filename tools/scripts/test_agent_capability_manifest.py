@@ -642,8 +642,11 @@ def exercise_evolution(canonical: dict) -> int:
     )
     checks += 1
 
+    # GitHub's checkout is intentionally shallow and need not create an
+    # origin/main remote-tracking ref. The event-resolution contract only needs
+    # a known local commit for its positive control, so use HEAD directly.
     protected_sha = subprocess.run(
-        ["git", "rev-parse", "origin/main^{commit}"],
+        ["git", "rev-parse", "HEAD^{commit}"],
         cwd=ROOT,
         text=True,
         capture_output=True,

@@ -4946,6 +4946,12 @@ TEST_CASE("VST3 note-expression decode does not allocate on the audio thread",
     REQUIRE(events.addEvent(brt) == Steinberg::kResultOk);
 
     s.run(&events);  // warm: capacity established
+    // The processor fixture snapshots the MPE sidecar into a std::vector after
+    // each block. Retriggering the same held note can emit more sidecar events
+    // than the warm block, so reserve the adapter's prepared capacity before
+    // arming the allocation probe. The probe must measure the adapter, not the
+    // test observer growing its capture buffer.
+    s.test_processor->last_mpe_events.reserve(s.test_processor->mpe_capacity);
     {
         pulp::test::RtAllocationProbe probe;
         s.run(&events);
@@ -5069,6 +5075,10 @@ TEST_CASE("VST3 noteId-map overflow bumps the drop counter without allocating",
     s.run(&events);
     const auto drops_after_warm = s.processor.note_expression_drop_count();
     REQUIRE(drops_after_warm >= 1);  // overflow already observed on warm run
+    // A second overflowing block can contain retrigger releases as well as the
+    // attacks observed by the warm block. Pre-size the fixture's sidecar copy
+    // so its bookkeeping is outside the real-time allocation measurement.
+    s.test_processor->last_mpe_events.reserve(s.test_processor->mpe_capacity);
 
     {
         pulp::test::RtAllocationProbe probe;
