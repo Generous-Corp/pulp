@@ -130,6 +130,7 @@ target_link_libraries(pulp-inspect-client
 
 add_library(pulp-inspect-runtime
     src/control_main_thread_executor.cpp
+    src/control_trace_session_executor.cpp
     src/inspector_async_request_executor.cpp
     src/inspector_async_request_executor.hpp
     src/inspector_connected_client.hpp

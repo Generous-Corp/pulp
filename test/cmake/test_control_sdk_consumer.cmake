@@ -75,6 +75,7 @@ file(WRITE "${_consumer_source}/main.cpp" [=[
 #include <pulp/inspect/control_host_connection.hpp>
 #include <pulp/inspect/control_host_router.hpp>
 #include <pulp/inspect/control_main_thread_executor.hpp>
+#include <pulp/inspect/control_trace_session_executor.hpp>
 #include <pulp/inspect/control_operations.hpp>
 #include <pulp/inspect/control_protocol.hpp>
 #include <pulp/inspect/control_service.hpp>
@@ -123,11 +124,27 @@ int main() {
           pulp::inspect::ControlRegistrationId{"installed-registration"}};
   auto rpc = std::make_shared<pulp::inspect::InspectorMainThreadRpc>();
   pulp::inspect::ControlMainThreadExecutor main_thread_executor{rpc, {}};
+  auto trace = std::make_shared<pulp::inspect::TraceInspector>();
+  auto trace_executor = pulp::inspect::ControlTraceSessionExecutor::create({
+      .main_thread_rpc = rpc,
+      .trace_inspector = trace,
+      .registration_id = pulp::inspect::ControlRegistrationId{"installed-registration"},
+  });
   pulp::inspect::ControlRequestEnvelope request;
   pulp::inspect::ControlAdmissionRequest admission;
   pulp::inspect::ControlOperationStoreConfig operations;
   pulp::inspect::ControlArtifactStoreConfig artifacts;
   const auto artifact = control_client.read_artifact("artifact-installed", 0, 16);
+  const pulp::inspect::ControlLegacyInspectorError legacy_error{
+      .error_code = "installed_error",
+      .error_message = "installed compatibility error",
+      .error_data_json = R"({"installed":true})",
+  };
+  const auto encoded_legacy_error =
+      pulp::inspect::encode_control_legacy_inspector_error(legacy_error);
+  const auto decoded_legacy_error = encoded_legacy_error
+      ? pulp::inspect::decode_control_legacy_inspector_error(*encoded_legacy_error)
+      : std::nullopt;
   (void)main_thread_executor.executor();
 
   request.operation_version = 1;
@@ -135,6 +152,8 @@ int main() {
   return !broker.is_listening() && !service.is_listening()
              && !client.is_connected()
              && !host_connection.is_connected()
+             && trace_executor
+             && decoded_legacy_error == legacy_error
              && std::holds_alternative<pulp::inspect::ControlHostConnectionPrincipal>(principal)
              && operations.max_receipts > 0
              && artifacts.maximum_blob_bytes > 0
