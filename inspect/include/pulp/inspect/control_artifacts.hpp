@@ -135,6 +135,7 @@ struct ControlArtifactCollectionResult {
     std::size_t deleted_partial_files = 0;
     std::size_t deletion_audit_failures = 0;
     std::uint64_t reclaimed_bytes = 0;
+    bool succeeded = false;
 };
 
 struct ControlArtifactStoreResult {

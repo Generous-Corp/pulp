@@ -305,6 +305,7 @@ TEST_CASE(
 
     *now_ms = 2'000;
     const auto collected = store.collect();
+    REQUIRE(collected.succeeded);
     CHECK(collected.deleted_artifacts == 1);
     CHECK(collected.deleted_orphan_blobs == 2); // expired content + crash orphan
     CHECK(collected.deleted_partial_files == 1);
@@ -319,6 +320,21 @@ TEST_CASE(
                                 std::istreambuf_iterator<char>());
     CHECK(persisted.find("private-secret-marker") == std::string::npos);
     CHECK(persisted.find("partial-secret-marker") == std::string::npos);
+}
+
+TEST_CASE("control artifact recovery reports malformed durable metadata",
+          "[inspect][control][artifacts][retention][crash][security]") {
+    TemporaryDirectory temporary;
+    const auto root = temporary.path / "store";
+    ControlArtifactStore store{{.root = root}};
+    const auto malformed = root / "artifacts" / "artifact-00000000000000000000000000000000.meta";
+    {
+        std::ofstream output(malformed, std::ios::binary);
+        output << "truncated-metadata";
+    }
+    fs::permissions(malformed, fs::perms::owner_read | fs::perms::owner_write,
+                    fs::perm_options::replace);
+    CHECK_FALSE(store.collect().succeeded);
 }
 
 TEST_CASE("orphan control artifact blob from crash is invisible and reusable",

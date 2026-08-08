@@ -329,6 +329,13 @@ catch_discover_tests(pulp-test-control-carrier
     PROPERTIES LABELS "inspect;control;carrier;security")
 
 if(APPLE AND NOT IOS AND NOT PULP_IOS)
+    add_executable(pulp-control-broker-crash-fixture
+        fixtures/control_broker_crash_fixture.cpp
+        ${CMAKE_SOURCE_DIR}/inspect/src/control_broker_daemon.cpp)
+    target_include_directories(pulp-control-broker-crash-fixture PRIVATE
+        ${CMAKE_SOURCE_DIR}/inspect/src)
+    target_link_libraries(pulp-control-broker-crash-fixture PRIVATE
+        pulp::inspect-control)
     add_executable(pulp-test-control-broker-daemon
         test_control_broker_daemon.cpp
         ${CMAKE_SOURCE_DIR}/inspect/src/control_broker_daemon.cpp)
@@ -338,9 +345,11 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS)
         pulp::inspect-client Catch2::Catch2WithMain)
     target_compile_definitions(pulp-test-control-broker-daemon PRIVATE
         PULP_CONTROL_TRUSTED_HOST_E2E_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-e2e-fixture>"
-        PULP_CONTROL_BROKER_DAEMON="$<TARGET_FILE:pulp-control-broker>")
+        PULP_CONTROL_BROKER_DAEMON="$<TARGET_FILE:pulp-control-broker>"
+        PULP_CONTROL_BROKER_CRASH_FIXTURE="$<TARGET_FILE:pulp-control-broker-crash-fixture>")
     add_dependencies(pulp-test-control-broker-daemon
-        pulp-control-trusted-host-e2e-fixture pulp-control-broker)
+        pulp-control-trusted-host-e2e-fixture pulp-control-broker
+        pulp-control-broker-crash-fixture)
     find_program(_pulp_daemon_test_codesign codesign REQUIRED)
     add_custom_command(TARGET pulp-test-control-broker-daemon POST_BUILD
         COMMAND "${_pulp_daemon_test_codesign}" --force --sign -
@@ -352,6 +361,11 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS)
                 "$<TARGET_FILE:pulp-test-control-broker-daemon>"
                 "$<TARGET_FILE_DIR:pulp-control-broker>/pulp"
         COMMENT "Ad-hoc signing control broker daemon test"
+        VERBATIM)
+    add_custom_command(TARGET pulp-control-broker-crash-fixture POST_BUILD
+        COMMAND "${_pulp_daemon_test_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-control-broker-crash-fixture>"
+        COMMENT "Ad-hoc signing control broker crash fixture"
         VERBATIM)
     catch_discover_tests(pulp-test-control-broker-daemon
         PROPERTIES LABELS "inspect;control;carrier;daemon")

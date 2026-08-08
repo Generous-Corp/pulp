@@ -810,6 +810,7 @@ ControlArtifactCollectionResult ControlArtifactStore::collect() {
     const auto active = impl_->active_metadata();
     if (!active)
         return result;
+    bool succeeded = true;
     std::set<std::string, std::less<>> referenced;
     for (const auto& metadata : *active) {
         if (metadata.expires_at_unix_ms <= now) {
@@ -819,6 +820,9 @@ ControlArtifactCollectionResult ControlArtifactStore::collect() {
                 ++result.deleted_artifacts;
             } else if (expired == Impl::ExpireResult::RemovedWithoutAudit) {
                 ++result.deletion_audit_failures;
+                succeeded = false;
+            } else {
+                succeeded = false;
             }
         } else {
             referenced.insert(metadata.sha256);
@@ -831,10 +835,15 @@ ControlArtifactCollectionResult ControlArtifactStore::collect() {
              iterator.increment(error)) {
             const auto name = iterator->path().filename().string();
             if (name.starts_with(".private-publish-") || name.find(".tmp-") != std::string::npos) {
-                if (detail::remove_owner_private_file_durable(iterator->path()))
+                if (detail::remove_owner_private_file_durable(iterator->path())) {
                     ++result.deleted_partial_files;
+                } else {
+                    succeeded = false;
+                }
             }
         }
+        if (error)
+            succeeded = false;
     };
     remove_partial_files(impl_->artifacts);
     remove_partial_files(impl_->blobs);
@@ -854,8 +863,13 @@ ControlArtifactCollectionResult ControlArtifactStore::collect() {
         if (detail::remove_owner_private_file_durable(iterator->path())) {
             ++result.deleted_orphan_blobs;
             result.reclaimed_bytes += size;
+        } else {
+            succeeded = false;
         }
     }
+    if (error)
+        succeeded = false;
+    result.succeeded = succeeded;
     return result;
 }
 
