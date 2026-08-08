@@ -87,6 +87,12 @@ bool simulate_mouse(pulp::view::WindowHost& host, const SimulatedMouse& event);
 /// empty on capture failure — the harness does not raise).
 std::vector<uint8_t> capture_back_buffer_png(pulp::view::WindowHost& host);
 
+/// Simulate AppKit having applied a new backing scale to the host's real
+/// CAMetalLayer, then invoke the production backing-change callback. This is a
+/// test-only seam for same-logical-size Retina transitions, which cannot be
+/// driven deterministically by moving a hidden window between physical screens.
+bool simulate_backing_scale_change(pulp::view::WindowHost& host, float scale);
+
 /// Capture several host-managed frames through the same production
 /// `WindowHost::capture_back_buffer_png` path. Each frame drains the main queue
 /// first and records elapsed milliseconds from the start of the settled capture
