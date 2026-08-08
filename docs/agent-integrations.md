@@ -65,10 +65,11 @@ The plugin extends Claude Code with:
   `/import-design`, `/version`, `/upgrade` — convenience wrappers over
   the CLI.
 - **MCP server**: Claude can call build/test and other installed tools as MCP
-  calls instead of shell-and-parse. `pulp_inspect_profiles` is the only
-  Development Inspector MCP metadata tool; it reads the compiled profile
-  registry in process. Generic live RPC, discovery, evaluation, mutation,
-  capture, and Motion proxies are not exposed.
+  calls instead of shell-and-parse. Live plugin work uses the generated,
+  exact-instance `pulp_control_*` tools over the shared control client; see
+  [Capability control over MCP](guides/capability-control-mcp.md).
+  `pulp_inspect_profiles` remains static compatibility metadata. Legacy raw
+  Inspector discovery and RPC are not exposed.
   For project screenshot artifacts, call `pulp_validate` with
   `screenshot=true` or run `pulp run --headless --screenshot <png>`;
   both use the same capture contract documented for the CLI. The
@@ -94,12 +95,16 @@ If `pulp` is missing when a slash command is invoked, the command
 itself also prints the install command before failing. Pulp CLI is
 always the dependency the plugin sits on top of.
 
-The reduced Inspector surface is an intentional temporary capability reduction
-after deleting the legacy server/client/discovery/standalone authority. Phases
-4–7 retain the canonical replacement work: trusted launcher and host adapters,
-broker-routed typed execution, client migration, and shipping proof. Trace
-start/stop already use that canonical control path and never fall back to the
-legacy transport.
+The period after legacy Inspector authority deletion was an intentional
+temporary capability reduction. Phases 4–7 retain the canonical replacement
+work: trusted launch and host adapters, broker-routed typed execution, client
+migration, and shipping proof. The old Inspector mutation, evaluation, and
+screenshot tool names were removed without a read-only alias. Their canonical
+replacements and the disposition of `pulp_create` and fixture-only Motion tools
+are published in the MCP control guide. Trace start/stop and all generated
+broker-authorizable live operations use canonical control and never fall back
+to the legacy transport; registry entries without a broker authority path are
+omitted.
 
 ## Why the split
 

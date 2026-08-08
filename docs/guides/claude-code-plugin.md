@@ -105,17 +105,18 @@ clients) can drive them in one turn instead of multiple shell calls.
 | Build / test / status | `pulp_build`, `pulp_test`, `pulp_status`, `pulp_validate` (`screenshot=true` for validation editor PNGs), `pulp_create`, `pulp_docs_check`, `pulp_docs_search` |
 | UI rendering + interaction | `pulp_screenshot` (render demo/script UI fixtures to PNG), `pulp_simulate_click`, `pulp_get_view_tree` |
 | Development Inspector | `pulp_inspect_profiles` provides static in-process profile metadata. `pulp_trace_start` and `pulp_trace_stop` use canonical capability control. Legacy discovery/capability/doctor, raw inspect, and Motion wrappers are not exposed. |
+| Capability control | Generated `pulp_control_*` tools provide typed exact-instance operations, broker-owned grants/consent, progress, cancellation, subscriptions, resources, and ACL-checked artifact reads. See [Capability control over MCP](capability-control-mcp.md). |
 | Audio model / WAV-first excerpt-find / live probe/scope JSON / third-party plugin inspection + offline render / advisory before-after compare | `pulp_audio_model_list`, `pulp_audio_model_status`, `pulp_audio_model_activate`, `pulp_audio_excerpt_find`, `pulp_audio_read_bundle`, `pulp_audio_probe_json`, `pulp_audio_scope`, `pulp_audio_plugin_inspect`, `pulp_audio_render`, `pulp_audio_compare` |
 | Timeline project editing, history, rendering + interchange | `pulp_timeline_project_open`, `pulp_timeline_command_apply`, `pulp_timeline_diff`, `pulp_timeline_undo`, `pulp_timeline_redo`, `pulp_timeline_validate`, `pulp_timeline_explain`, `pulp_timeline_render`, `pulp_timeline_export`, `pulp_timeline_import` |
 | Kit manifests | `pulp_kit`, `pulp_kit_search`, `pulp_kit_validate`, `pulp_kit_inspect`, `pulp_kit_plan`, `pulp_kit_verify`, `pulp_kit_apply`, `pulp_kit_remove`, `pulp_kit_pack`, `pulp_kit_publish_check`, `pulp_kit_init` |
 | Content packs | `pulp_content`, `pulp_content_validate`, `pulp_content_preview`, `pulp_content_install`, `pulp_content_update`, `pulp_content_list`, `pulp_content_rescan`, `pulp_content_remove`, `pulp_content_reveal` |
 
-The plugin exposes static inspector profiles as read-only orientation. It does
-not expose discovery, live capability queries, doctor, raw inspector calls, direct
-parameter/test-input mutation, screenshots, evaluation, or Motion RPC wrappers.
-This temporary capability reduction is intentional; authorized live work is
-being consolidated on the canonical broker/control platform, with no legacy
-fallback.
+The plugin exposes static Inspector profiles as compatibility orientation and
+the generated canonical `pulp_control_*` live surface. It does not expose raw
+Inspector discovery or RPC. The removed set-param, evaluation, and screenshot
+names have explicit grant-gated replacements; fixture-only screenshot/Motion
+tools and `pulp_create` stay outside live-instance authority for the reasons in
+the [MCP control guide](capability-control-mcp.md).
 
 Use `pulp_audio_probe_json` as the quick live-health check for a standalone
 target. It runs the existing `pulp run --audio-probe-json` path through

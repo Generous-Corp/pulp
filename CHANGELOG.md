@@ -8,6 +8,21 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+## Capability-control MCP migration (0.796.0)
+
+- Added generated typed `pulp_control_*` tools over the shared authenticated
+  control client, with exact `instance_id`, structured receipts, progress,
+  cancellation, subscriptions/resources, and ACL-checked artifact retrieval.
+- Removed `pulp_inspect_set_param`, `pulp_inspect_evaluate`, and
+  `pulp_inspect_screenshot` without a silently reduced alias. Use
+  `pulp_control_state_parameter_gesture`, `pulp_control_runtime_evaluate`, and
+  `pulp_control_ui_capture`; critical evaluation requires a broker-issued grant
+  backed by single-use broker-owned consent. `pulp_screenshot` remains a
+  fixture renderer, not live capture.
+- `pulp_create` and fixture-only screenshot/Motion tools remain outside the
+  live-instance capability model; their local workspace/fixture side effects
+  are documented in the MCP control guide.
+
 <a id="v07952"></a>
 ## [0.795.2] - 2026-08-08
 

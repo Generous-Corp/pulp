@@ -119,6 +119,11 @@ docs:
     kind: guide
     summary: Install and use the Claude Code plugin for Pulp development workflows
 
+  - slug: capability-control-mcp
+    path: guides/capability-control-mcp.md
+    kind: guide
+    summary: Typed MCP control tools, exact-instance targeting, broker-owned consent, progress, cancellation, subscriptions, and artifact resources
+
   - slug: cmajor-guide
     path: guides/cmajor.md
     kind: guide
