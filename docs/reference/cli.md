@@ -1363,12 +1363,11 @@ safe-identity rules.
 
 The live trace lifecycle is experimental. `start` and `stop` use the canonical
 capability-control client: broker authentication, trusted-host enrollment,
-consent, grants, and receipts determine the target and authority. They never
-fall back to legacy Inspector discovery or accept a raw host/port selector.
+consent, grants, and receipts determine the target and authority. Rust exposes
+no alternate discovery, publication-selection, or raw host/port path.
 Production remains default-denied when no authorized control session can be
 opened. Offline
-`query --trace`, `fetch`, `doctor`, and `open` remain usable without a live
-inspector session.
+`query --trace`, `fetch`, `doctor`, and `open` are wholly offline.
 
 ```bash
 pulp trace start --categories dsp,render --ring-mb 128
@@ -1381,9 +1380,7 @@ pulp trace open /tmp/x.pftrace                    # serve on loopback + open in 
 
 Options:
 
-- Legacy `--port` and `--session/--instance/--publication` selectors were
-  removed. The broker owns lifecycle target selection.
-- `--json` - emit the raw inspector JSON response instead of the pretty form
+- `--json` - emit machine-readable output
 
 Subcommands:
 
@@ -1391,8 +1388,8 @@ Subcommands:
 |------------|------------------|-------------|
 | `start [--categories LIST] [--ring-mb 1..512]` | canonical `dev.pulp.trace/session-control@1` | Begin a broker-authorized session recording selected span categories into a bounded in-process ring. The host owns the flushed trace destination. |
 | `stop` | canonical `dev.pulp.trace/session-control@1` | Flush the broker-authorized session and print the `.pftrace` path. |
-| `query "<sql>" --trace FILE.pftrace` | `trace_processor` (offline) | Run SQL against a flushed `.pftrace` without a live session, via `trace_processor_shell` (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`; see `pulp trace fetch` / `doctor`). Returns trace_processor's native table; `--format`/`--preset` are live-path only. |
-| `doctor` | client-side | Report offline `trace_processor` readiness without contacting a legacy Inspector publication. |
+| `query "<sql>" --trace FILE.pftrace` | `trace_processor` (offline) | Run SQL against a flushed `.pftrace` via `trace_processor_shell` (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`; see `pulp trace fetch` / `doctor`). Returns trace_processor's native table; `--format table` is the only explicit format. |
+| `doctor` | client-side | Report offline `trace_processor` readiness. |
 | `fetch` | client-side | Download + SHA-256-verify the pinned `trace_processor_shell` (Perfetto v57.2) into `$PULP_HOME` so offline `query --trace` works zero-install. Idempotent (no-op when present). `--json` emits `{version, platform, path, already_present}`. |
 | `open <file.pftrace> [--no-browser] [--keep-alive-seconds N]` | client-side | Serve the trace from a loopback-only HTTP server and open it in the Perfetto UI via `?url=` (browsers block `file://`). `--no-browser` prints the URLs to paste; `--keep-alive-seconds` bounds how long the server waits for the UI to fetch. `--json` emits `{trace_path, serve_url, perfetto_url, browser_opened, served}`. |
 

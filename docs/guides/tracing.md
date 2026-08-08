@@ -5,14 +5,6 @@ where CPU/GPU time went** during a run — a Perfetto `.pftrace` you can open in
 [ui.perfetto.dev](https://ui.perfetto.dev) or query with SQL. It answers *"why
 is this slow?"*
 
-> **Motion vs tracing, in one line.** Motion tells you **what changed** on
-> screen (state timeline, JSONL, fixtures — the `motion` skill). Tracing tells
-> you **where the time went** (span timeline, `.pftrace`, SQL). Reach for
-> tracing when the question is "why is this slow"; reach for motion when it is
-> "what moved." The two compose: a motion `trace_id` rides frame spans as an
-> argument, so a slow frame in a motion capture links straight to its
-> flamegraph.
-
 Tracing is a **dev tool, never a shipping feature.** `PULP_TRACING` is OFF by
 default; a default build links zero Perfetto symbols. See the gotchas box
 before you touch it.
@@ -21,10 +13,9 @@ before you touch it.
 
 ## Available analysis surface
 
-Capture and offline SQL are available today. The live `Trace.query` and
-`Trace.explain` protocol names are reserved, but deliberately return
-`capability_unavailable` until an analysis backend exists. Named L0 presets
-therefore remain planned rather than silently returning placeholder data.
+Capture and offline SQL are available today. Rust exposes no live query,
+snapshot, explain, raw-port, or publication-selection path. Named L0 presets
+remain planned rather than silently returning placeholder data.
 
 | Tier | Who | Entry point | What you get |
 |---|---|---|---|
@@ -232,7 +223,7 @@ promise.
 ```bash
 pulp trace start --categories render,gpu,text,js,layout
 # ... open the plugin editor (or launch the standalone app) ...
-pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp trace stop
 # Give the printed .pftrace to an agent using the trace-analysis skill.
 ```
 
@@ -260,18 +251,16 @@ A representative L1 answer:
 
 ```bash
 pulp trace start --categories render,layout,canvas,text,js,gpu
-pulp motion record --view Knob --out knob.jsonl        # motion trace_id joins in
 # ... sweep the knob ...
-pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp trace stop
 # Run the trace-sql frame/layout queries against the printed file:
 pulp trace query "<SQL from trace-sql>" --trace /tmp/pulp-trace.pftrace
 ```
 
 The fat slices are `TextShaper::prepare` firing every frame — the knob's value
 label re-shapes text on each update instead of reusing cached widths
-(`text_shaper.hpp` is built to avoid exactly this). The motion `trace_id` on the
-frame spans ties the hitch to the sweep gesture; `layout-vs-paint` gives the
-one-row-per-stage cost split.
+(`text_shaper.hpp` is built to avoid exactly this). The trace-sql
+`pulp_layout_vs_paint` view gives the one-row-per-stage cost split.
 
 ### Use case 3 — "Why is my plugin using so much CPU?" (run offline for a reproducible answer)
 
@@ -281,7 +270,7 @@ one-row-per-stage cost split.
 # reproduces exactly.
 pulp trace start --categories dsp,dsp.node
 # ... offline-render a fixed MIDI/audio clip through the plugin ...
-pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp trace stop
 # Give the printed .pftrace to an agent using the trace-analysis skill.
 ```
 

@@ -141,7 +141,7 @@ pub const COMMANDS: &[Entry] = &[
     },
     Entry {
         name: "trace",
-        summary: "Agent-facing wrappers around inspector Trace (Perfetto) protocol",
+        summary: "Canonical trace capture + offline Perfetto analysis",
     },
     Entry {
         name: "scan",

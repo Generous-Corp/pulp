@@ -1,15 +1,15 @@
-//! `pulp trace *` — agent-facing wrappers around the inspector
-//! `Trace.*` Perfetto-tracing protocol.
+//! `pulp trace *` — canonical trace lifecycle control plus offline Perfetto
+//! analysis utilities.
 //!
 //! # What this module ports
 //!
 //! Trace lifecycle commands delegate to the C++ canonical capability-control
-//! client. They never select a legacy Inspector publication or raw port. The
+//! client. Rust supplies no independent target-selection authority. The
 //! remaining client-side utilities keep their existing offline behavior.
 //!
 //! Supported paths:
 //!
-//! | `pulp trace <verb>`                    | Inspector method       |
+//! | `pulp trace <verb>`                    | Backend                |
 //! |----------------------------------------|------------------------|
 //! | `start [--categories …] [--ring-mb N]` | `Trace.startSession`   |
 //! | `stop`                                 | `Trace.stopSession`    |
@@ -49,7 +49,7 @@ pub enum QueryFormat {
 }
 
 impl QueryFormat {
-    /// The wire token the inspector `Trace.query` param expects.
+    /// The CLI token for this output format.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -71,7 +71,7 @@ impl QueryFormat {
 }
 
 /// Parsed `pulp trace …` subcommand. One variant per verb; each
-/// carries the already-parsed params so [`to_inspector_call`] is a
+/// carries the already-parsed params so [`to_control_call`] is a
 /// pure translation step (no re-parsing on the hot path).
 #[derive(Debug, Clone)]
 pub enum Sub {
@@ -81,26 +81,12 @@ pub enum Sub {
     Start(StartArgs),
     /// `pulp trace stop` — flush the session and print the `.pftrace`.
     Stop,
-    /// `pulp trace query "<sql>"` / `query --preset <name>` / an L0
-    /// preset verb. Exactly one of `sql` / `preset` is set.
+    /// `pulp trace query "<sql>" --trace <file.pftrace>`.
     Query(QueryArgs),
-    /// `pulp trace snapshot`.
-    Snapshot,
-    /// `pulp trace explain "<question>"` — the plain-English question
-    /// forwarded to `Trace.explain`.
-    Explain {
-        /// The natural-language question the inspector investigates.
-        question: String,
-    },
-    /// `pulp trace doctor` — readiness check. Aggregates client-side
-    /// probes (inspector reachability, `trace_processor` availability)
-    /// with the inspector's own `Trace.snapshot` facts. Not a single
-    /// inspector call, so [`to_inspector_call`] returns `None` for it and
-    /// [`dispatch`] runs it through [`run_doctor`].
+    /// `pulp trace doctor` — offline `trace_processor` readiness check.
     Doctor,
     /// `pulp trace open <file.pftrace>` — serve the trace from a loopback
-    /// HTTP server and open it in the Perfetto UI. Client-side (no inspector
-    /// call), so [`dispatch`] runs it through `trace_open::run_open`.
+    /// HTTP server and open it in the Perfetto UI.
     Open(OpenArgs),
     /// `pulp trace fetch` — download + SHA-verify the pinned
     /// `trace_processor_shell` into the Pulp home so `query --trace` works
@@ -112,47 +98,33 @@ pub enum Sub {
 /// of verb.
 #[derive(Debug, Clone, Default)]
 pub struct GlobalFlags {
-    /// `--json` — emit the raw inspector JSON instead of the
-    /// pretty-printed default.
+    /// `--json` — emit machine-readable output.
     pub json: bool,
-    /// Removed legacy selector fields remain private implementation state only
-    /// so direct callers cannot bypass the parser's fail-closed rejection.
-    pub port: Option<u16>,
-    /// Exact session identity forwarded as `pulp inspect --session`.
-    pub session_id: Option<String>,
-    /// Exact instance identity forwarded as `pulp inspect --instance`.
-    pub instance_id: Option<String>,
-    /// Non-reusable publication generation forwarded as `--publication`.
-    pub publication_id: Option<String>,
 }
 
 /// `pulp trace start` flag set.
 #[derive(Debug, Clone, Default)]
 pub struct StartArgs {
     /// `--categories dsp,render,…` — the span categories to record.
-    /// Empty means "let the inspector pick its default taxonomy".
+    /// Empty means "let the canonical host pick its default taxonomy".
     pub categories: Vec<String>,
     /// `--ring-mb N` — in-process ring size in mebibytes. `None` means
-    /// the inspector's default (80MB); accepted values are 1 through 512.
+    /// the host's default (80MB); accepted values are 1 through 512.
     pub ring_mb: Option<u32>,
 }
 
-/// `pulp trace query` flag set. Exactly one of `sql` / `preset` is
-/// `Some`; the parser enforces that.
+/// `pulp trace query` flag set.
 #[derive(Debug, Clone, Default)]
 pub struct QueryArgs {
     /// Raw SQL passed as the first positional.
     pub sql: Option<String>,
-    /// A named trace-stdlib preset (`--preset` or an L0 verb).
-    pub preset: Option<String>,
     /// Output format; JSON by default.
     pub format: QueryFormat,
     /// True when `--format` was passed explicitly. Lets the offline path
     /// reject `--format json|csv` without misreading the JSON default.
     pub format_set: bool,
     /// `--trace FILE.pftrace` — run the SQL offline against a flushed trace
-    /// via `trace_processor_shell` instead of the live inspector. `None`
-    /// keeps the default live-inspector `Trace.query` path.
+    /// via `trace_processor_shell`. The parser requires this option.
     pub trace: Option<PathBuf>,
 }
 
@@ -165,8 +137,7 @@ pub struct QueryArgs {
 /// - [`CliError::BadUsage`] when required positional / value
 ///   arguments are missing or malformed.
 pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
-    // Sweep the one supported global flag out first. Reject removed authority
-    // selectors on either side of the verb.
+    // Sweep the one supported global flag out first.
     let mut globals = GlobalFlags::default();
     let mut rest: Vec<String> = Vec::with_capacity(args.len());
     let mut i = 0;
@@ -174,13 +145,6 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
         let a = &args[i];
         if a == "--json" {
             globals.json = true;
-        } else if matches!(
-            a.as_str(),
-            "--port" | "--session" | "--instance" | "--publication"
-        ) {
-            return Err(CliError::BadUsage(format!(
-                "{a} was removed from `pulp trace`; canonical control owns target selection"
-            )));
         } else {
             rest.push(a.clone());
         }
@@ -195,15 +159,9 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
         "start" => parse_start(&rest[1..]).map(|s| (s, globals)),
         "stop" => no_args("stop", &rest[1..]).map(|()| (Sub::Stop, globals)),
         "query" => parse_query(&rest[1..]).map(|s| (s, globals)),
-        "snapshot" => no_args("snapshot", &rest[1..]).map(|()| (Sub::Snapshot, globals)),
-        "explain" => parse_explain(&rest[1..]).map(|s| (s, globals)),
         "doctor" => no_args("doctor", &rest[1..]).map(|()| (Sub::Doctor, globals)),
         "fetch" => no_args("fetch", &rest[1..]).map(|()| (Sub::Fetch, globals)),
         "open" => parse_open(&rest[1..]).map(|s| (s, globals)),
-        // L0 preset verbs — sugar for `query --preset <verb>`.
-        "slowest-frames" | "xruns" | "dsp-hotspots" | "layout-vs-paint" => {
-            no_args(verb, &rest[1..]).map(|()| (preset_sub(verb), globals))
-        }
         _ => Err(CliError::UnknownSubcommand),
     }
 }
@@ -215,16 +173,6 @@ fn no_args(verb: &str, args: &[String]) -> Result<()> {
         )));
     }
     Ok(())
-}
-
-/// Build a [`Sub::Query`] for a named preset verb.
-fn preset_sub(name: &str) -> Sub {
-    Sub::Query(QueryArgs {
-        sql: None,
-        preset: Some(name.to_owned()),
-        format: QueryFormat::default(),
-        ..QueryArgs::default()
-    })
 }
 
 fn parse_start(args: &[String]) -> Result<Sub> {
@@ -246,8 +194,8 @@ fn parse_start(args: &[String]) -> Result<Sub> {
             }
             "--out" => {
                 return Err(CliError::BadUsage(
-                    "pulp trace start --out is unavailable: authenticated \
-                     inspector clients cannot choose a host filesystem path"
+                    "pulp trace start --out is unavailable: the controlled host owns \
+                     the trace destination"
                         .to_owned(),
                 ));
             }
@@ -282,13 +230,6 @@ fn parse_query(args: &[String]) -> Result<Sub> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--preset" => {
-                i += 1;
-                let v = args
-                    .get(i)
-                    .ok_or_else(|| CliError::BadUsage("--preset requires a value".to_owned()))?;
-                q.preset = Some(v.clone());
-            }
             "--format" => {
                 i += 1;
                 let v = args
@@ -323,26 +264,18 @@ fn parse_query(args: &[String]) -> Result<Sub> {
         }
         i += 1;
     }
-    if q.sql.is_some() && q.preset.is_some() {
+    if q.sql.is_none() {
         return Err(CliError::BadUsage(
-            "pulp trace query: pass a SQL string OR --preset, not both".to_owned(),
+            "pulp trace query: missing SQL string".to_owned(),
         ));
     }
-    if q.sql.is_none() && q.preset.is_none() {
+    if q.trace.is_none() {
         return Err(CliError::BadUsage(
-            "pulp trace query: missing SQL string (or --preset <name>)".to_owned(),
+            "pulp trace query: --trace <file.pftrace> is required; live query authority was removed"
+                .to_owned(),
         ));
     }
     Ok(Sub::Query(q))
-}
-
-fn parse_explain(args: &[String]) -> Result<Sub> {
-    let question = args.first().ok_or_else(|| {
-        CliError::BadUsage("pulp trace explain: missing \"<question>\"".to_owned())
-    })?;
-    Ok(Sub::Explain {
-        question: question.clone(),
-    })
 }
 
 fn parse_open(args: &[String]) -> Result<Sub> {
@@ -387,19 +320,16 @@ fn parse_open(args: &[String]) -> Result<Sub> {
     }))
 }
 
-/// Translate a [`Sub`] into the inspector call surface —
+/// Translate a [`Sub`] into the canonical control call surface —
 /// `(method, params_json)`. Pure function: easy to unit test without
 /// spawning anything.
 #[must_use]
-pub fn to_inspector_call(sub: &Sub) -> Option<(&'static str, String)> {
+pub fn to_control_call(sub: &Sub) -> Option<(&'static str, String)> {
     match sub {
         Sub::Help => None,
         Sub::Start(s) => Some(("Trace.startSession", build_start_params(s))),
         Sub::Stop => Some(("Trace.stopSession", "{}".to_owned())),
-        Sub::Query(_) | Sub::Snapshot | Sub::Explain { .. } => None,
-        // Doctor and Open are client-side, not a single inspector call —
-        // dispatch() runs them before reaching here.
-        Sub::Doctor | Sub::Open(_) | Sub::Fetch => None,
+        Sub::Query(_) | Sub::Doctor | Sub::Open(_) | Sub::Fetch => None,
     }
 }
 
@@ -436,7 +366,7 @@ fn build_start_params(s: &StartArgs) -> String {
 
 /// Minimal JSON string escaper. We only escape backslashes and
 /// double-quotes — everything else the user types makes it through
-/// verbatim. The inspector's `choc::json::parse` rejects anything that
+/// verbatim. The controlled host rejects anything that
 /// isn't valid JSON afterwards, which gives a clearer error than a
 /// partial escape would.
 pub(crate) fn escape_json(s: &str) -> String {
@@ -452,57 +382,15 @@ pub use crate::cmd::inspector::InspectorTalker;
 pub struct SystemInspector;
 
 impl InspectorTalker for SystemInspector {
-    fn call(&self, port: u16, method: &str, params_json: &str) -> Result<String> {
-        crate::cmd::inspector::call("trace", port, method, params_json)
+    fn call(&self, method: &str, params_json: &str) -> Result<String> {
+        crate::cmd::inspector::call("trace", method, params_json)
     }
-
-    fn call_selected(
-        &self,
-        port: u16,
-        session_id: &str,
-        instance_id: &str,
-        publication_id: &str,
-        method: &str,
-        params_json: &str,
-    ) -> Result<String> {
-        let selection = crate::cmd::inspector::SessionSelection {
-            session_id: session_id.to_owned(),
-            instance_id: instance_id.to_owned(),
-            publication_id: publication_id.to_owned(),
-        };
-        crate::cmd::inspector::call_selected("trace", port, Some(&selection), method, params_json)
-    }
-}
-
-/// The clear "no inspector" hint string surfaced after an authenticated
-/// inspector request fails and in `pulp trace` help text.
-pub(crate) fn no_inspector_hint(port: u16) -> String {
-    let target = if port == 0 {
-        "authenticated discovery".to_owned()
-    } else {
-        format!("port {port}")
-    };
-    format!(
-        "pulp trace: no inspector available through {target}.\n\
-         Live capture requires an explicitly owned source-checkout host that\n\
-         constructs InspectorServer, wires DomainHandler, and publishes\n\
-         authenticated discovery. Normal Pulp hosts do not start this endpoint;\n\
-         PULP_TRACE_SERVER is not implemented.\n\
-         (override the port with --port N or $PULP_INSPECTOR_PORT)."
-    )
-}
-
-/// Resolve the explicit port filter from CLI flags + env. Zero delegates
-/// selection to authenticated discovery. A configured but invalid environment
-/// filter is an error rather than permission to select a different session.
-pub fn resolve_port(flags: &GlobalFlags) -> Result<u16> {
-    crate::cmd::inspector::resolve_port_from_env(flags.port)
 }
 
 pub(crate) fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(
         out,
-        "pulp trace — wrappers around the inspector Trace.* protocol\n"
+        "pulp trace — canonical trace capture and offline Perfetto analysis\n"
     )?;
     writeln!(out, "Usage: pulp trace <verb> [flags]\n")?;
     writeln!(out, "Lifecycle verbs:")?;
@@ -548,7 +436,7 @@ pub(crate) fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(out, "Global flags:")?;
     writeln!(
         out,
-        "  --json                        Print the raw inspector JSON response"
+        "  --json                        Print machine-readable output"
     )?;
     writeln!(
         out,
