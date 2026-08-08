@@ -12,6 +12,7 @@
 #ifndef _WIN32
 #include <fcntl.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
@@ -53,7 +54,8 @@ struct LaunchResult {
 
 LaunchResult launch(std::string mode = "--normal", std::optional<int> expected_pid = std::nullopt,
                     bool reject_authority = false, std::string extra_argument = {},
-                    std::chrono::milliseconds preflight_timeout = 8s) {
+                    std::chrono::milliseconds preflight_timeout = 8s,
+                    std::chrono::milliseconds bootstrap_lifetime = 1min) {
     LaunchResult result;
     pulp::platform::ProcessOptions options;
     options.standard_input_timeout_ms = static_cast<int>(preflight_timeout.count() + 1000);
@@ -73,10 +75,15 @@ LaunchResult launch(std::string mode = "--normal", std::optional<int> expected_p
         PULP_CONTROL_HOST_PREFLIGHT_FIXTURE, arguments,
         [&](int actual_pid, pulp::platform::ChildProcessInputChannel channel) {
             result.actual_pid = actual_pid;
+            auto record = make_record();
+            record.expires_at_unix_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                            (std::chrono::system_clock::now() + bootstrap_lifetime)
+                                                .time_since_epoch())
+                                            .count();
             auto verified =
                 preflight_control_host(std::move(channel), expected_pid.value_or(actual_pid),
                                        ControlPeerRole::StandaloneHost, verifier,
-                                       encode_control_host_bootstrap(make_record()),
+                                       encode_control_host_bootstrap(record),
                                        preflight_timeout, &result.diagnostics);
             if (verified)
                 result.peer = verified->evidence();
@@ -160,6 +167,66 @@ TEST_CASE("private preflight timeout and child exit are bounded and joined",
     CHECK(exited.diagnostics.status == ControlHostPreflightStatus::Timeout);
 #else
     SUCCEED("unsupported child channel platforms fail closed before spawn");
+#endif
+}
+
+TEST_CASE("private preflight drains startup output and validates expiry at receipt",
+          "[inspect][control][host][preflight][lifecycle][security]") {
+#ifdef __APPLE__
+    auto verbose = launch("--verbose");
+    REQUIRE(verbose.started);
+    CHECK(verbose.process.exit_code == 0);
+    CHECK(verbose.process.stdout_output.size() > 256u * 1024u);
+
+    auto expired = launch("--delayed", std::nullopt, false, {}, 2s, 50ms);
+    REQUIRE(expired.started);
+    CHECK(expired.process.exit_code == 70);
+    CHECK(expired.process.stderr_output.find("bootstrap record has expired") != std::string::npos);
+#else
+    SUCCEED("unsupported child channel platforms fail closed before spawn");
+#endif
+}
+
+TEST_CASE("private input channel survives closed inherited standard descriptors",
+          "[inspect][control][host][preflight][handles]") {
+#ifndef _WIN32
+    int report[2] = {-1, -1};
+    REQUIRE(::pipe(report) == 0);
+    REQUIRE(report[0] > STDERR_FILENO);
+    REQUIRE(report[1] > STDERR_FILENO);
+    const auto launcher = ::fork();
+    REQUIRE(launcher >= 0);
+    if (launcher == 0) {
+        ::close(report[0]);
+        ::close(STDIN_FILENO);
+        ::close(STDOUT_FILENO);
+        ::close(STDERR_FILENO);
+        pulp::platform::ChildProcess child;
+        const bool started = child.start_with_standard_input_channel(
+            "/bin/cat", {},
+            [](int, pulp::platform::ChildProcessInputChannel channel) {
+                const char byte = 'x';
+                const bool sent = ::write(static_cast<int>(channel.native_handle()), &byte, 1) == 1;
+                (void)::shutdown(static_cast<int>(channel.native_handle()), SHUT_WR);
+                return sent;
+            });
+        const auto result = child.wait();
+        const char passed = started && result.exit_code == 0 && result.stdout_output == "x" ? '1' : '0';
+        (void)::write(report[1], &passed, 1);
+        ::close(report[1]);
+        _exit(passed == '1' ? 0 : 1);
+    }
+    ::close(report[1]);
+    char passed = '0';
+    REQUIRE(::read(report[0], &passed, 1) == 1);
+    ::close(report[0]);
+    int status = 0;
+    REQUIRE(::waitpid(launcher, &status, 0) == launcher);
+    CHECK(WIFEXITED(status));
+    CHECK(WEXITSTATUS(status) == 0);
+    CHECK(passed == '1');
+#else
+    SUCCEED("Windows channel sessions are rejected before CreateProcess");
 #endif
 }
 

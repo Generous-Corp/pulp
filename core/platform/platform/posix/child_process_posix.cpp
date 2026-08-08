@@ -41,10 +41,26 @@ namespace pulp::platform {
 
 namespace {
 
+bool move_descriptor_out_of_standard_range(int& descriptor) {
+    if (descriptor < 0 || descriptor > STDERR_FILENO)
+        return descriptor >= 0;
+    const auto replacement = ::fcntl(descriptor, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+    if (replacement < 0)
+        return false;
+    ::close(descriptor);
+    descriptor = replacement;
+    return true;
+}
+
 struct Pipe {
     int fd[2] = {-1, -1};
     bool create() {
         if (pipe(fd) != 0) return false;
+        if (!move_descriptor_out_of_standard_range(fd[0]) ||
+            !move_descriptor_out_of_standard_range(fd[1])) {
+            close_all();
+            return false;
+        }
         fcntl(fd[0], F_SETFL, O_NONBLOCK);
         return true;
     }
@@ -78,6 +94,11 @@ struct InputChannel {
 #endif
         parent = pair[0];
         child = pair[1];
+        if (!move_descriptor_out_of_standard_range(parent) ||
+            !move_descriptor_out_of_standard_range(child)) {
+            close_all();
+            return false;
+        }
         const auto status_flags = ::fcntl(parent, F_GETFL);
         if (status_flags < 0 || ::fcntl(parent, F_SETFL, status_flags | O_NONBLOCK) != 0) {
             close_all();
@@ -465,6 +486,23 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     std::span<const std::uint8_t> input_bytes;
     if (standard_input_session) {
         auto channel = ChildProcessInputChannel(impl_->standard_input.release_parent());
+        std::atomic<bool> session_finished{false};
+        std::thread output_drainer([this, spawned_pid, &session_finished] {
+            while (!session_finished.load(std::memory_order_acquire)) {
+                {
+                    std::lock_guard<std::recursive_mutex> drain_lock(impl_->mutex);
+                    if (impl_->pid != spawned_pid || !impl_->started || impl_->finished)
+                        break;
+                    drain_pipe(impl_->stdout_pipe.read_end(), impl_->stdout_full,
+                               impl_->stdout_lines_buf, impl_->options.max_output_bytes,
+                               impl_->options.on_stdout_line);
+                    drain_pipe(impl_->stderr_pipe.read_end(), impl_->stderr_full,
+                               impl_->stderr_lines_buf, impl_->options.max_output_bytes,
+                               impl_->options.on_stderr_line);
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        });
         bool completed = false;
         lock.unlock();
         try {
@@ -473,6 +511,8 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
         } catch (...) {
             completed = false;
         }
+        session_finished.store(true, std::memory_order_release);
+        output_drainer.join();
         lock.lock();
         if (impl_->pid != spawned_pid || !impl_->started || impl_->finished)
             return false;

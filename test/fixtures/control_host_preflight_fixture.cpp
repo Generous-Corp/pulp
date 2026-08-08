@@ -78,6 +78,12 @@ int main(int argc, char** argv) {
         std::this_thread::sleep_for(10s);
         return 0;
     }
+    if (mode == "--verbose") {
+        const std::string output(256u * 1024u, 'v');
+        std::cout << output << std::flush;
+    }
+    if (mode == "--delayed")
+        std::this_thread::sleep_for(200ms);
 
     const auto handle = pulp::inspect::inherited_control_host_bootstrap_handle();
 #ifdef _WIN32
@@ -91,7 +97,8 @@ int main(int argc, char** argv) {
         return send_wrong_nonce(handle) ? 0 : 66;
     if (mode == "--malformed")
         return send_malformed(handle) ? 0 : 67;
-    if (mode != "--normal" && mode != "--unrelated-handle")
+    if (mode != "--normal" && mode != "--unrelated-handle" && mode != "--verbose" &&
+        mode != "--delayed")
         return 64;
 
 #ifndef _WIN32
@@ -105,8 +112,8 @@ int main(int argc, char** argv) {
 #endif
 
     pulp::inspect::ControlHostPreflightDiagnostics diagnostics;
-    auto record = pulp::inspect::receive_control_host_preflight(
-        handle, 2s, std::chrono::system_clock::now(), &diagnostics);
+    auto record = pulp::inspect::receive_control_host_preflight(handle, 2s, std::nullopt,
+                                                                &diagnostics);
     if (!record) {
         std::cerr << "preflight status=" << static_cast<unsigned>(diagnostics.status)
                   << " explanation=" << diagnostics.explanation << '\n';
