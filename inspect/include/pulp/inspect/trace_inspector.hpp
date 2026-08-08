@@ -22,6 +22,12 @@
 
 namespace pulp::inspect {
 
+class TraceOwnerLease {
+public:
+    virtual ~TraceOwnerLease() = default;
+    virtual InspectorMessage handle(const InspectorMessage& request) = 0;
+};
+
 struct TracePublicationOwner {
     std::string session_id;
     std::string instance_id;
@@ -50,6 +56,11 @@ public:
     std::unique_ptr<InspectorPublicationLease> bind_publication(
         const InspectorDiscoveryRecord& record) override;
 
+    /// Bind process-global trace ownership to one authenticated control
+    /// registration. Releasing the lease also stops an abandoned capture.
+    std::unique_ptr<TraceOwnerLease> bind_control_registration(
+        std::string registration_id);
+
     /// Handle a Trace.* request. Returns a response message.
     InspectorMessage handle(const InspectorMessage& req);
 
@@ -58,19 +69,29 @@ public:
     static bool owns_method(const std::string& method);
 
 private:
+    enum class OwnerKind { None, Publication, ControlRegistration };
     class PublicationLease;
-    void release_publication(
-        const TracePublicationOwner& owner) noexcept;
+    class OwnerLease;
+    std::unique_ptr<TraceOwnerLease> bind_owner(OwnerKind kind);
+    void release_owner(const std::shared_ptr<void>& owner_token) noexcept;
+    InspectorMessage handle_with_owner(
+        const InspectorMessage& request,
+        const std::shared_ptr<void>& owner_token);
 
-    TracePublicationOwner owner_;
+    std::shared_ptr<void> owner_token_;
+    OwnerKind owner_kind_ = OwnerKind::None;
     std::optional<pulp::runtime::TraceOwnership> ownership_;
     std::mutex mutex_;
 
     // The last .pftrace flushed by stopSession, so snapshot can report it.
     std::string last_trace_path_;
 
-    InspectorMessage start_session(const InspectorMessage& req);
-    InspectorMessage stop_session(const InspectorMessage& req);
+    InspectorMessage start_session(
+        const InspectorMessage& req,
+        const std::shared_ptr<void>* owner_token);
+    InspectorMessage stop_session(
+        const InspectorMessage& req,
+        const std::shared_ptr<void>* owner_token);
     InspectorMessage snapshot(const InspectorMessage& req);
     InspectorMessage query(const InspectorMessage& req);
     InspectorMessage explain(const InspectorMessage& req);
