@@ -20,7 +20,7 @@ platform              (leaf — no dependencies)
               |
            view                              (depends on: canvas, events, state)
 
- signal                                      (header-only, no link dependencies)
+ signal                                      (header-only; music/runtime/timebase)
 ```
 
 Key rules:
@@ -30,7 +30,8 @@ Key rules:
 - `state` depends on `runtime` only
 - `format` depends on `state`, `audio`, `midi` -- not on `view` or `render`
 - `view` and `render` are optional -- plugins can be built and tested headless
-- `signal` is a header-only leaf -- pure DSP, no framework link dependencies
+- `signal` is header-only and depends on the low-level `music`, `runtime`, and
+  `timebase` value vocabularies; it does not depend on host, UI, or format layers
 - `osc` depends on `runtime` for logging and assertions
 
 ## Public vs Internal Surfaces

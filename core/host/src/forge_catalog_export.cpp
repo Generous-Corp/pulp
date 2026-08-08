@@ -32,6 +32,7 @@ const std::vector<std::string_view>& expected_node_keys() {
         "drum_fm6",
         "drum_fm8",
         "feedforward_compressor",
+        "true_peak_limiter",
         "vca_compressor",
         "fet_compressor",
         "diode_bridge_compressor",
@@ -231,6 +232,11 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
         {realization("zero_lookahead", dynamics::make_feedforward_compressor_node(0.0f)),
          realization("lookahead_3ms", dynamics::make_feedforward_compressor_node(3.0f)),
          realization("lookahead_10ms", dynamics::make_feedforward_compressor_node(10.0f))});
+    add(dynamics::true_peak::descriptor(),
+        {realization("linked_0ms", dynamics::true_peak::make_node(0.0f, true)),
+         realization("linked_5ms", dynamics::true_peak::make_node(5.0f, true)),
+         realization("linked_10ms", dynamics::true_peak::make_node(10.0f, true)),
+         realization("independent_5ms", dynamics::true_peak::make_node(5.0f, false))});
     add(dynamics::vca::vca_compressor_descriptor(),
         {realization("default", dynamics::vca::make_vca_compressor_node(0.0f, 4.0)),
          realization("lookahead_3ms_k4", dynamics::vca::make_vca_compressor_node(3.0f, 4.0)),

@@ -182,6 +182,12 @@ LINK_CLOSURE_DEBT = {
 # verify_engine_consumers() rejects an entry with no reason and an entry that no
 # longer links an engine module, so the list cannot quietly outlive its subject.
 ENGINE_CONSUMERS = {
+    "midi": "MIDI transformation utilities consume timebase for prepared tempo "
+            "maps and sample-domain scheduling. They remain an event-processing "
+            "layer, not a rung in the timeline document/playback ladder.",
+    "signal": "Header-only DSP layer. It consumes timebase only for the canonical "
+              "persisted beat-division vocabulary; this narrow value dependency "
+              "does not make signal part of the timeline engine ladder.",
     "format": "Format adapter layer — VST3/AU/CLAP wrappers are sanctioned "
               "engine consumers, the direction this contract exists to permit.",
     "host": "Plugin-hosting layer, likewise above the engine and sanctioned.",

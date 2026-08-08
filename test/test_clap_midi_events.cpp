@@ -44,6 +44,7 @@
 #if PULP_CLAP_PROCESS_RT_TRAP_TESTS
 #include "native_components/rt_test_scope.hpp"
 #endif
+#include "harness/rt_allocation_probe.hpp"
 
 #include <clap/ext/preset-load.h>
 
@@ -118,6 +119,9 @@ public:
         vtable_.try_push = [](const clap_output_events_t* list,
                               const clap_event_header_t* hdr) -> bool {
             auto* self = static_cast<OutputEventList*>(list->ctx);
+            ++self->attempt_count_;
+            if (self->events_.size() >= self->accept_limit_)
+                return false;
             std::vector<std::uint8_t> buf(hdr->size);
             std::memcpy(buf.data(), hdr, hdr->size);
             if (hdr->type == CLAP_EVENT_MIDI_SYSEX) {
@@ -134,6 +138,9 @@ public:
     }
 
     std::size_t size() const { return events_.size(); }
+    std::size_t attempt_count() const { return attempt_count_; }
+    void accept_at_most(std::size_t count) { accept_limit_ = count; }
+    void accept_all() { accept_limit_ = std::numeric_limits<std::size_t>::max(); }
     const clap_event_header_t* at(std::size_t i) const {
         return reinterpret_cast<const clap_event_header_t*>(events_[i].data());
     }
@@ -159,6 +166,8 @@ private:
     // reallocates on growth, so we reserve() in the ctor.
     std::vector<std::vector<std::uint8_t>> sysex_bodies_;
     clap_output_events_t vtable_{};
+    std::size_t accept_limit_ = std::numeric_limits<std::size_t>::max();
+    std::size_t attempt_count_ = 0;
 
 public:
     OutputEventList() { sysex_bodies_.reserve(16); events_.reserve(64); }
@@ -639,6 +648,7 @@ public:
     std::array<uint8_t, 8> observed_first_sysex_prefix{};
     std::uint32_t observed_event_drops = 0;
     std::uint32_t observed_sysex_drops = 0;
+    bool observed_reset_requested = false;
 
     PluginDescriptor descriptor() const override {
         PluginDescriptor d;
@@ -655,7 +665,7 @@ public:
                  const audio::BufferView<const float>&,
                  midi::MidiBuffer& midi_in,
                  midi::MidiBuffer&,
-                 const ProcessContext&) override {
+                 const ProcessContext& context) override {
         observed_event_count = midi_in.size();
         observed_event_capacity = midi_in.event_capacity();
         observed_sysex_count = midi_in.sysex_size();
@@ -673,6 +683,7 @@ public:
         }
         observed_event_drops = midi_in.dropped_event_count();
         observed_sysex_drops = midi_in.dropped_sysex_count();
+        observed_reset_requested = context.reset_requested;
     }
 };
 
@@ -742,9 +753,11 @@ public:
     std::size_t observed_mpe_count = 0;
     std::size_t observed_mpe_capacity = 0;
     std::uint32_t observed_mpe_drops = 0;
+    bool observed_reset_requested = false;
     std::size_t observed_ump_count = 0;
     std::size_t observed_ump_capacity = 0;
     std::uint32_t observed_ump_drops = 0;
+    std::size_t observed_sysex_count = 0;
 
     PluginDescriptor descriptor() const override {
         PluginDescriptor d;
@@ -761,9 +774,11 @@ public:
     void prepare(const PrepareContext&) override {}
     void process(audio::BufferView<float>&,
                  const audio::BufferView<const float>&,
+                 midi::MidiBuffer& midi_in,
                  midi::MidiBuffer&,
-                 midi::MidiBuffer&,
-                 const ProcessContext&) override {
+                 const ProcessContext& context) override {
+        observed_sysex_count = midi_in.sysex_size();
+        observed_reset_requested = context.reset_requested;
         observed_mpe_attached = mpe_input() != nullptr;
         observed_ump_attached = ump_input() != nullptr;
         if (auto* mpe = mpe_input()) {
@@ -1130,6 +1145,13 @@ struct Harness {
         active = false;
     }
 
+    void reactivate() {
+        REQUIRE_FALSE(active);
+        REQUIRE(clap_adapter::clap_activate(
+            &plugin.plugin, 48000.0, 32, kFrames));
+        active = true;
+    }
+
     clap_process_status run(InputEventList& in_list,
                             OutputEventList* out_list = nullptr) {
         return run_custom(&in_list, out_list,
@@ -1208,6 +1230,266 @@ TEST_CASE("CLAP lifecycle forwards prepare/release and handles no-op callbacks",
     clap_adapter::clap_destroy(&raw->plugin);
     REQUIRE_FALSE(runtime::AliveToken::is_alive(owner_alive));
     g_capturing = nullptr;
+}
+
+TEST_CASE("CLAP resets MPE sidecar ownership across reset and reactivation",
+          "[clap][mpe][lifecycle][reset]") {
+    g_pending_opts_mpe = true;
+    g_pending_opts_ump = false;
+    g_pending_capturing_bypass = true;
+    Harness h(make_capturing);
+    REQUIRE(g_capturing != nullptr);
+    REQUIRE(h.plugin.mpe.enabled);
+
+    // Seed an active identity and force its physical release into the bounded
+    // pending FIFO. clap_reset() must clear every adapter-owned part together.
+    REQUIRE(h.plugin.mpe.tracker.process(midi::MidiEvent::note_on(1, 60, 100)));
+    while (h.plugin.mpe.buffer.size() < h.plugin.mpe.buffer.capacity()) {
+        REQUIRE(h.plugin.mpe.buffer.add(
+            {0, midi::MpeExpressionEvent::Kind::Pressure, {}}));
+    }
+    REQUIRE(h.plugin.mpe.tracker.process(midi::MidiEvent::note_off(1, 60)));
+    REQUIRE(h.plugin.mpe.tracker.pending_note_off_count() == 1);
+
+    clap_adapter::clap_reset(&h.plugin.plugin);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 0);
+    REQUIRE(h.plugin.mpe.tracker.pending_note_off_count() == 0);
+    REQUIRE(h.plugin.mpe.buffer.empty());
+
+    // A state restore holds the render gate, so neither Processor nor the MPE
+    // tracker may observe this block. The reset request remains pending until
+    // the first real render after the restore finishes.
+    InputEventList contended_input;
+    clap_event_note_t contended_note{};
+    contended_note.header = make_header(
+        sizeof(contended_note), CLAP_EVENT_NOTE_ON, 0);
+    contended_note.note_id = -1;
+    contended_note.port_index = 0;
+    contended_note.channel = 1;
+    contended_note.key = 71;
+    contended_note.velocity = 0.8;
+    const int process_count_before_contention = g_capturing->process_count;
+    {
+        auto restore_lock = h.plugin.state_restore_gate.lock_for_restore();
+        contended_input.push(contended_note);
+        REQUIRE(h.run(contended_input) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(g_capturing->process_count == process_count_before_contention);
+        REQUIRE(h.plugin.mpe.tracker.active_count() == 0);
+        REQUIRE(h.plugin.reset_requested);
+    }
+    InputEventList empty;
+    REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_capturing->captured_context.reset_requested);
+    REQUIRE_FALSE(h.plugin.reset_requested);
+    REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+    REQUIRE_FALSE(g_capturing->captured_context.reset_requested);
+
+    // A bypassed block does not call Processor::process(), so it must not
+    // consume the one-shot reset request meant for processor-owned voices.
+    clap_adapter::clap_reset(&h.plugin.plugin);
+    InputEventList bypassed_input;
+    clap_event_note_t bypassed_note{};
+    bypassed_note.header = make_header(
+        sizeof(bypassed_note), CLAP_EVENT_NOTE_ON, 0);
+    bypassed_note.note_id = -1;
+    bypassed_note.port_index = 0;
+    bypassed_note.channel = 1;
+    bypassed_note.key = 72;
+    bypassed_note.velocity = 0.8;
+    bypassed_input.push(bypassed_note);
+    const int process_count_before_bypass = g_capturing->process_count;
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 1.0f);
+    REQUIRE(h.run(bypassed_input) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_capturing->process_count == process_count_before_bypass);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 0);
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 0.0f);
+    REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_capturing->captured_context.reset_requested);
+    REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+    REQUIRE_FALSE(g_capturing->captured_context.reset_requested);
+
+    // A release decoded while bypassed cannot be replayed. The first real
+    // render reconciles both the adapter tracker and processor-owned voices.
+    InputEventList held_input;
+    clap_event_note_t held_note = bypassed_note;
+    held_note.key = 73;
+    held_input.push(held_note);
+    REQUIRE(h.run(held_input) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
+    InputEventList skipped_release;
+    held_note.header.type = CLAP_EVENT_NOTE_OFF;
+    held_note.velocity = 0.0;
+    skipped_release.push(held_note);
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 1.0f);
+    REQUIRE(h.run(skipped_release) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
+    REQUIRE(h.plugin.reset_requested);
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 0.0f);
+    REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 0);
+    REQUIRE(g_capturing->captured_context.reset_requested);
+
+    // Empty bypass blocks preserve a legitimately held note because no
+    // unreplayable ownership event crossed the skipped boundary.
+    held_note.header.type = CLAP_EVENT_NOTE_ON;
+    held_note.velocity = 0.8;
+    InputEventList continued_held_input;
+    continued_held_input.push(held_note);
+    REQUIRE(h.run(continued_held_input) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 1.0f);
+    REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+    REQUIRE_FALSE(h.plugin.sidecar_reconcile_requested);
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 0.0f);
+    REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
+
+    // Unrelated channel controls do not mutate MPE ownership or expression
+    // state. Skipping one must not clear a legitimately held voice or request
+    // a processor reset on the next rendered block.
+    clap_event_midi_t skipped_volume{};
+    skipped_volume.header = make_header(sizeof(skipped_volume), CLAP_EVENT_MIDI, 0);
+    skipped_volume.data[0] = 0xB0 | static_cast<uint8_t>(held_note.channel);
+    skipped_volume.data[1] = 7;
+    skipped_volume.data[2] = 100;
+    InputEventList skipped_unrelated_control;
+    skipped_unrelated_control.push(skipped_volume);
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 1.0f);
+    REQUIRE(h.run(skipped_unrelated_control) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
+    REQUIRE_FALSE(h.plugin.sidecar_reconcile_requested);
+    REQUIRE_FALSE(h.plugin.reset_requested);
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 0.0f);
+    REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
+    REQUIRE_FALSE(g_capturing->captured_context.reset_requested);
+
+    // Expression/configuration events mutate the tracker too. If one crosses a
+    // bypassed block, it cannot be replayed, so the next real render must reset
+    // both the sidecar and processor-owned voice state rather than retain
+    // permanently divergent pitch/pressure/timbre.
+    clap_event_midi_t skipped_bend{};
+    skipped_bend.header = make_header(sizeof(skipped_bend), CLAP_EVENT_MIDI, 0);
+    skipped_bend.data[0] = 0xE0 | static_cast<uint8_t>(held_note.channel);
+    skipped_bend.data[1] = 0x7f;
+    skipped_bend.data[2] = 0x7f;
+    InputEventList skipped_expression;
+    skipped_expression.push(skipped_bend);
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 1.0f);
+    REQUIRE(h.run(skipped_expression) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
+    REQUIRE(h.plugin.sidecar_reconcile_requested);
+    REQUIRE(h.plugin.reset_requested);
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 0.0f);
+    REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 0);
+    REQUIRE(g_capturing->captured_context.reset_requested);
+    REQUIRE(h.run(continued_held_input) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
+
+    for (const uint8_t controller :
+         {uint8_t{64}, uint8_t{66}, uint8_t{69}, uint8_t{123}}) {
+        clap_event_midi_t control{};
+        control.header = make_header(sizeof(control), CLAP_EVENT_MIDI, 0);
+        control.data[0] = 0xB0 | static_cast<uint8_t>(held_note.channel);
+        control.data[1] = controller;
+        control.data[2] = 0;
+        InputEventList skipped_control;
+        skipped_control.push(control);
+        h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 1.0f);
+        REQUIRE(h.run(skipped_control) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
+        REQUIRE(h.plugin.sidecar_reconcile_requested);
+        h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 0.0f);
+        REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(h.plugin.mpe.tracker.active_count() == 0);
+        REQUIRE(g_capturing->captured_context.reset_requested);
+        if (controller != 123) {
+            REQUIRE(h.run(continued_held_input) == CLAP_PROCESS_CONTINUE);
+            REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
+        }
+    }
+
+    // Deactivate/re-activate repeatedly. Processor::release() owns downstream
+    // DSP state; the adapter resets its tracker immediately afterward.
+    for (int cycle = 0; cycle < 3; ++cycle) {
+        REQUIRE(h.plugin.mpe.tracker.process(midi::MidiEvent::note_on(
+            1, static_cast<uint8_t>(61 + cycle), 90)));
+        REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
+        h.deactivate();
+        REQUIRE(h.plugin.mpe.tracker.active_count() == 0);
+        REQUIRE(h.plugin.mpe.tracker.pending_note_off_count() == 0);
+        REQUIRE(h.plugin.mpe.buffer.empty());
+        REQUIRE(clap_adapter::clap_activate(
+            &h.plugin.plugin, 48000.0, 32, Harness::kFrames));
+        h.active = true;
+        REQUIRE(h.plugin.mpe.tracker.active_count() == 0);
+        REQUIRE(h.plugin.mpe.tracker.pending_note_off_count() == 0);
+    }
+    REQUIRE(g_capturing->release_count == 3);
+}
+
+TEST_CASE("CLAP bypass does not reconcile non-MPE channel controls",
+          "[clap][midi][bypass][lifecycle]") {
+    g_pending_opts_mpe = false;
+    g_pending_capturing_bypass = true;
+    Harness h(make_capturing);
+    REQUIRE_FALSE(h.plugin.mpe.enabled);
+
+    InputEventList controls;
+    for (const std::array<uint8_t, 3> bytes : {
+             std::array<uint8_t, 3>{0xB1, 7, 100},
+             std::array<uint8_t, 3>{0xC1, 4, 0},
+             std::array<uint8_t, 3>{0xE1, 0x7F, 0x7F}}) {
+        clap_event_midi_t event{};
+        event.header = make_header(sizeof(event), CLAP_EVENT_MIDI, 0);
+        std::copy(bytes.begin(), bytes.end(), event.data);
+        controls.push(event);
+    }
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 1.0f);
+    REQUIRE(h.run(controls) == CLAP_PROCESS_CONTINUE);
+    REQUIRE_FALSE(h.plugin.sidecar_reconcile_requested);
+    REQUIRE_FALSE(h.plugin.reset_requested);
+
+    InputEventList empty;
+    h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 0.0f);
+    REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+    REQUIRE_FALSE(g_capturing->captured_context.reset_requested);
+}
+
+TEST_CASE("CLAP reconciles ownership when realtime MIDI ingress drops a release",
+          "[clap][midi][mpe][overflow][lifecycle]") {
+    g_pending_opts_mpe = true;
+    g_pending_capturing_bypass = false;
+    Harness h(make_capturing);
+    InputEventList attack;
+    clap_event_note_t note{};
+    note.header = make_header(sizeof(note), CLAP_EVENT_NOTE_ON, 0);
+    note.note_id = -1;
+    note.port_index = 0;
+    note.channel = 1;
+    note.key = 60;
+    note.velocity = 0.8;
+    attack.push(note);
+    REQUIRE(h.run(attack) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
+
+    InputEventList overflow;
+    for (std::size_t i = 0; i < state::ParameterEventQueue::kCapacity; ++i) {
+        clap_event_midi_t control{};
+        control.header = make_header(sizeof(control), CLAP_EVENT_MIDI, 0);
+        control.data[0] = 0xB1;
+        control.data[1] = 7;
+        control.data[2] = static_cast<uint8_t>(i & 0x7F);
+        overflow.push(control);
+    }
+    note.header.type = CLAP_EVENT_NOTE_OFF;
+    note.velocity = 0.0;
+    overflow.push(note);
+    REQUIRE(h.run(overflow) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(h.plugin.mpe.tracker.active_count() == 0);
+    REQUIRE(g_capturing->captured_context.reset_requested);
+    REQUIRE(g_capturing->captured_midi.empty());
 }
 
 TEST_CASE("CLAP latency and tail extensions report processor runtime contract",
@@ -2439,6 +2721,26 @@ TEST_CASE("CLAP store-only param change still emits a single event at time 0",
     REQUIRE(params[0]->value == 0.625);
 }
 
+TEST_CASE("CLAP release backlog does not suppress accepted parameter output",
+          "[clap][params][out-events][midi][ownership][regression]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_output_param);
+    REQUIRE(g_output_param != nullptr);
+    g_output_param->push_events = true;
+    h.plugin.outbound_note_release_debt[3 * 128 + 60] = 2;
+
+    InputEventList events;
+    OutputEventList out;
+    REQUIRE(h.run(events, &out) == CLAP_PROCESS_CONTINUE);
+
+    auto params = out.by_type<clap_event_param_value_t>(CLAP_EVENT_PARAM_VALUE);
+    REQUIRE(params.size() == 2);
+    CHECK(params[0]->header.time == 0);
+    CHECK(params[1]->header.time == 16);
+    CHECK(h.plugin.outbound_note_release_debt[3 * 128 + 60] == 1);
+}
+
 TEST_CASE("CLAP preset-load extension is exposed only for supported ids",
           "[clap][preset]") {
     g_pending_opts_mpe = false;
@@ -3146,6 +3448,80 @@ TEST_CASE("CLAP_EVENT_MIDI_SYSEX with empty payload is dropped",
 // ── Inbound: CLAP_EVENT_MIDI2 ───────────────────────────────────────────
 
 #if defined(CLAP_VERSION_GE) && CLAP_VERSION_GE(1, 1, 0)
+TEST_CASE("CLAP reconciles UMP ownership across skipped and overflowing blocks",
+          "[clap][midi2][ump][overflow][lifecycle]") {
+    auto append_midi2 = [](InputEventList& events, const midi::UmpPacket& packet) {
+        clap_event_midi2_t event{};
+        event.header = make_header(sizeof(event), CLAP_EVENT_MIDI2, 0);
+        event.port_index = 0;
+        event.data[0] = packet.words[0];
+        event.data[1] = packet.words[1];
+        event.data[2] = packet.words[2];
+        event.data[3] = packet.words[3];
+        events.push(event);
+    };
+
+    SECTION("a native note release skipped by bypass arms reconciliation") {
+        g_pending_opts_ump = true;
+        g_pending_capturing_bypass = true;
+        Harness h(make_capturing);
+        InputEventList release;
+        append_midi2(release, midi::UmpPacket::note_off_2(0, 1, 60));
+        h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 1.0f);
+        REQUIRE(h.run(release) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(h.plugin.sidecar_reconcile_requested);
+        REQUIRE(h.plugin.reset_requested);
+        InputEventList empty;
+        h.plugin.store.set_value(CapturingProcessor::kBypassParamId, 0.0f);
+        REQUIRE(h.run(empty) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(g_capturing->captured_context.reset_requested);
+    }
+
+    SECTION("a native ownership event dropped at ingress resets the current render") {
+        g_pending_opts_ump = true;
+        Harness h(make_capturing);
+        InputEventList overflow;
+        for (std::size_t i = 0; i < state::ParameterEventQueue::kCapacity; ++i)
+            append_midi2(overflow, midi::UmpPacket::cc_2(0, 1, 74,
+                                                         static_cast<uint32_t>(i)));
+        append_midi2(overflow, midi::UmpPacket::note_off_2(0, 1, 60));
+        REQUIRE(h.run(overflow) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(g_capturing->captured_context.reset_requested);
+        REQUIRE(g_capturing->captured_ump.empty());
+    }
+
+    SECTION("a dropped native Hold 2 release resets the current render") {
+        g_pending_opts_ump = true;
+        Harness h(make_capturing);
+        InputEventList overflow;
+        for (std::size_t i = 0; i < state::ParameterEventQueue::kCapacity; ++i)
+            append_midi2(overflow, midi::UmpPacket::cc_2(0, 1, 74,
+                                                         static_cast<uint32_t>(i)));
+        append_midi2(overflow, midi::UmpPacket::cc_2(0, 1, 69, 0));
+        REQUIRE(h.run(overflow) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(g_capturing->captured_context.reset_requested);
+        REQUIRE(g_capturing->captured_ump.empty());
+    }
+
+    SECTION("mixed native UMP and synthesized MIDI cannot drop a release") {
+        g_pending_opts_ump = true;
+        Harness h(make_capturing);
+        InputEventList overflow;
+        for (std::size_t i = 0; i < state::ParameterEventQueue::kCapacity; ++i)
+            append_midi2(overflow, midi::UmpPacket::cc_2(0, 1, 74,
+                                                         static_cast<uint32_t>(i)));
+        clap_event_midi_t release{};
+        release.header = make_header(sizeof(release), CLAP_EVENT_MIDI, 0);
+        release.data[0] = 0x81;
+        release.data[1] = 60;
+        release.data[2] = 0;
+        overflow.push(release);
+        REQUIRE(h.run(overflow) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(g_capturing->captured_context.reset_requested);
+        REQUIRE(g_capturing->captured_ump.empty());
+    }
+}
+
 TEST_CASE("CLAP enables sidecars from node capabilities",
           "[clap][midi][node-abi]") {
     g_pending_opts_mpe = false;
@@ -3374,6 +3750,256 @@ TEST_CASE("midi_out CC + pitch-bend surface on CLAP out_events",
     REQUIRE(midis[1]->data[2] == ((12345 >> 7) & 0x7F));
 }
 
+TEST_CASE("CLAP retries rejected outbound ownership releases before new attacks",
+          "[clap][midi][outbound][ownership][rt-safety]") {
+    g_pending_emit.clear();
+    g_pending_sysex.clear();
+    Harness h(make_emitting);
+    InputEventList in;
+
+    SECTION("a rejected release retries once at offset zero") {
+        g_emitting->to_emit = {midi::MidiEvent::note_on(1, 60, 100)};
+        OutputEventList attack_accepted;
+        REQUIRE(h.run(in, &attack_accepted) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(attack_accepted.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI).size() == 1);
+
+        auto release = midi::MidiEvent::note_on(1, 60, 0);
+        release.sample_offset = 12;
+        g_emitting->to_emit = {release};
+        OutputEventList rejecting;
+        rejecting.accept_at_most(0);
+        REQUIRE(h.run(in, &rejecting) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(h.plugin.outbound_note_release_debt[1 * 128 + 60] == 1);
+
+        auto attack = midi::MidiEvent::note_on(1, 62, 100);
+        attack.sample_offset = 8;
+        g_emitting->to_emit = {attack};
+        OutputEventList accepted;
+        REQUIRE(h.run(in, &accepted) == CLAP_PROCESS_CONTINUE);
+        auto events = accepted.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI);
+        REQUIRE(events.size() == 2);
+        CHECK(events[0]->header.time == 0);
+        CHECK((events[0]->data[0] & 0xF0) == 0x80);
+        CHECK(events[0]->data[1] == 60);
+        CHECK(events[1]->header.time == 8);
+        CHECK((events[1]->data[0] & 0xF0) == 0x90);
+        CHECK(h.plugin.outbound_note_release_debt[1 * 128 + 60] == 0);
+
+        g_emitting->to_emit.clear();
+        OutputEventList no_duplicate;
+        REQUIRE(h.run(in, &no_duplicate) == CLAP_PROCESS_CONTINUE);
+        CHECK(no_duplicate.size() == 0);
+    }
+
+    SECTION("a missing host sink retains a release") {
+        g_emitting->to_emit = {midi::MidiEvent::note_off(1, 61)};
+        REQUIRE(h.run(in, nullptr) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(h.plugin.outbound_note_release_debt[1 * 128 + 61] == 1);
+
+        g_emitting->to_emit.clear();
+        OutputEventList accepted;
+        REQUIRE(h.run(in, &accepted) == CLAP_PROCESS_CONTINUE);
+        auto events = accepted.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI);
+        REQUIRE(events.size() == 1);
+        CHECK(events[0]->header.time == 0);
+        CHECK(events[0]->data[0] == 0x81);
+        CHECK(events[0]->data[1] == 61);
+    }
+
+    SECTION("deactivate and reactivate preserve release debt until processing resumes") {
+        g_emitting->to_emit = {midi::MidiEvent::note_on(1, 63, 100)};
+        OutputEventList attack_accepted;
+        REQUIRE(h.run(in, &attack_accepted) == CLAP_PROCESS_CONTINUE);
+
+        g_emitting->to_emit = {midi::MidiEvent::note_off(1, 63)};
+        OutputEventList release_rejected;
+        release_rejected.accept_at_most(0);
+        REQUIRE(h.run(in, &release_rejected) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(h.plugin.outbound_note_release_debt[1 * 128 + 63] == 1);
+
+        h.deactivate();
+        CHECK(h.plugin.outbound_note_release_debt[1 * 128 + 63] == 1);
+        h.reactivate();
+        CHECK(h.plugin.outbound_note_release_debt[1 * 128 + 63] == 1);
+
+        auto resumed_attack = midi::MidiEvent::note_on(1, 65, 100);
+        resumed_attack.sample_offset = 7;
+        g_emitting->to_emit = {resumed_attack};
+        OutputEventList resumed;
+        REQUIRE(h.run(in, &resumed) == CLAP_PROCESS_CONTINUE);
+        auto resumed_events = resumed.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI);
+        REQUIRE(resumed_events.size() == 2);
+        CHECK(resumed_events[0]->header.time == 0);
+        CHECK((resumed_events[0]->data[0] & 0xF0) == 0x80);
+        CHECK(resumed_events[0]->data[1] == 63);
+        CHECK(resumed_events[1]->header.time == 7);
+        CHECK((resumed_events[1]->data[0] & 0xF0) == 0x90);
+        CHECK(resumed_events[1]->data[1] == 65);
+        CHECK(h.plugin.outbound_note_release_debt[1 * 128 + 63] == 0);
+
+        g_emitting->to_emit.clear();
+        OutputEventList no_duplicate;
+        REQUIRE(h.run(in, &no_duplicate) == CLAP_PROCESS_CONTINUE);
+        CHECK(no_duplicate.size() == 0);
+    }
+
+    SECTION("a refusal mid-merge retains every later release") {
+        auto attack = midi::MidiEvent::note_on(2, 60, 100);
+        attack.sample_offset = 1;
+        auto first_release = midi::MidiEvent::note_off(2, 60);
+        first_release.sample_offset = 2;
+        auto second_release = midi::MidiEvent::note_off(2, 61);
+        second_release.sample_offset = 3;
+        g_emitting->to_emit = {attack, first_release, second_release};
+        OutputEventList one_slot;
+        one_slot.accept_at_most(1);
+        REQUIRE(h.run(in, &one_slot) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(one_slot.size() == 1);
+        CHECK(h.plugin.outbound_note_release_debt[2 * 128 + 60] == 1);
+        CHECK(h.plugin.outbound_note_release_debt[2 * 128 + 61] == 1);
+
+        g_emitting->to_emit.clear();
+        OutputEventList accepted;
+        REQUIRE(h.run(in, &accepted) == CLAP_PROCESS_CONTINUE);
+        CHECK(accepted.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI).size() == 2);
+    }
+
+    SECTION("overlapping and channel-separated releases retain multiplicity") {
+        g_emitting->to_emit = {
+            midi::MidiEvent::note_off(2, 64),
+            midi::MidiEvent::note_on(2, 64, 0),
+            midi::MidiEvent::note_off(3, 65),
+        };
+        OutputEventList rejecting;
+        rejecting.accept_at_most(0);
+        REQUIRE(h.run(in, &rejecting) == CLAP_PROCESS_CONTINUE);
+        g_emitting->to_emit.clear();
+        OutputEventList first;
+        REQUIRE(h.run(in, &first) == CLAP_PROCESS_CONTINUE);
+        auto first_events = first.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI);
+        REQUIRE(first_events.size() == 2);
+        CHECK(first_events[0]->data[0] == 0x82);
+        CHECK(first_events[1]->data[0] == 0x83);
+
+        OutputEventList second;
+        REQUIRE(h.run(in, &second) == CLAP_PROCESS_CONTINUE);
+        auto second_events = second.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI);
+        REQUIRE(second_events.size() == 1);
+        CHECK(second_events[0]->data[0] == 0x82);
+    }
+
+    SECTION("pedal and channel reset releases retry canonically") {
+        g_emitting->to_emit = {
+            midi::MidiEvent::cc(4, 64, 0), midi::MidiEvent::cc(4, 66, 0),
+            midi::MidiEvent::cc(4, 69, 0), midi::MidiEvent::cc(4, 120, 0),
+            midi::MidiEvent::cc(4, 121, 0), midi::MidiEvent::cc(4, 123, 0),
+        };
+        OutputEventList rejecting;
+        rejecting.accept_at_most(0);
+        REQUIRE(h.run(in, &rejecting) == CLAP_PROCESS_CONTINUE);
+        g_emitting->to_emit.clear();
+        OutputEventList accepted;
+        REQUIRE(h.run(in, &accepted) == CLAP_PROCESS_CONTINUE);
+        auto events = accepted.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI);
+        REQUIRE(events.size() == 6);
+        for (std::size_t i = 0; i < events.size(); ++i) {
+            CHECK(events[i]->header.time == 0);
+            CHECK(events[i]->data[1] ==
+                  std::array<uint8_t, 6>{64, 66, 69, 120, 121, 123}[i]);
+        }
+    }
+
+    SECTION("Hold 2 engagement creates no release debt") {
+        g_emitting->to_emit = {midi::MidiEvent::cc(6, 69, 64)};
+        OutputEventList rejecting;
+        rejecting.accept_at_most(0);
+        REQUIRE(h.run(in, &rejecting) == CLAP_PROCESS_CONTINUE);
+        CHECK(std::all_of(h.plugin.outbound_control_release_debt.begin(),
+                          h.plugin.outbound_control_release_debt.end(),
+                          [](uint8_t count) { return count == 0; }));
+        CHECK_FALSE(h.plugin.outbound_panic_debt[6]);
+    }
+
+    SECTION("repeated refusal is stable and saturation collapses to panic") {
+        std::vector<midi::MidiEvent> releases(256, midi::MidiEvent::note_off(5, 70));
+        g_emitting->to_emit = releases;
+        OutputEventList rejecting;
+        rejecting.accept_at_most(0);
+        pulp::test::RtAllocationProbe allocations;
+        REQUIRE(h.run(in, &rejecting) == CLAP_PROCESS_CONTINUE);
+        CHECK_FALSE(allocations.saw_allocation());
+        REQUIRE(h.plugin.outbound_panic_debt[5]);
+
+        g_emitting->to_emit.clear();
+        OutputEventList rejecting_again;
+        rejecting_again.accept_at_most(0);
+        REQUIRE(h.run(in, &rejecting_again) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(h.plugin.outbound_panic_debt[5]);
+
+        OutputEventList accepted;
+        REQUIRE(h.run(in, &accepted) == CLAP_PROCESS_CONTINUE);
+        auto events = accepted.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI);
+        REQUIRE(events.size() == 1);
+        CHECK(events[0]->data[0] == 0xB5);
+        CHECK(events[0]->data[1] == 120);
+        CHECK(events[0]->data[2] == 0);
+        CHECK_FALSE(h.plugin.outbound_panic_debt[5]);
+    }
+
+    SECTION("retry work is bounded and later blocks eventually drain") {
+        for (std::size_t note = 0; note < 65; ++note)
+            h.plugin.outbound_note_release_debt[7 * 128 + note] = 1;
+        auto attack = midi::MidiEvent::note_on(7, 72, 100);
+        attack.sample_offset = 8;
+        g_emitting->to_emit = {attack};
+
+        OutputEventList first;
+        REQUIRE(h.run(in, &first) == CLAP_PROCESS_CONTINUE);
+        CHECK(first.attempt_count() == 64);
+        CHECK(first.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI).size() == 64);
+        CHECK(h.plugin.outbound_note_release_debt[7 * 128 + 64] == 1);
+
+        OutputEventList second;
+        REQUIRE(h.run(in, &second) == CLAP_PROCESS_CONTINUE);
+        auto events = second.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI);
+        REQUIRE(events.size() == 2);
+        CHECK(events[0]->header.time == 0);
+        CHECK(events[0]->data[1] == 64);
+        CHECK(events[1]->header.time == 8);
+        CHECK(events[1]->data[1] == 72);
+        CHECK(h.plugin.outbound_note_release_debt[7 * 128 + 64] == 0);
+    }
+
+    SECTION("continuous low-channel debt cannot starve a high-channel release") {
+        h.plugin.outbound_note_release_debt[15 * 128 + 127] = 1;
+        g_emitting->to_emit.clear();
+        bool high_channel_drained = false;
+        for (int block = 0; block < 4; ++block) {
+            for (std::size_t note = 0; note < 128; ++note)
+                h.plugin.outbound_note_release_debt[note] = 1;
+            OutputEventList accepted;
+            REQUIRE(h.run(in, &accepted) == CLAP_PROCESS_CONTINUE);
+            CHECK(accepted.attempt_count() <= 64);
+            if (h.plugin.outbound_note_release_debt[15 * 128 + 127] == 0) {
+                high_channel_drained = true;
+                break;
+            }
+        }
+        CHECK(high_channel_drained);
+    }
+
+    SECTION("a rejected attack creates no ownership debt") {
+        g_emitting->to_emit = {midi::MidiEvent::note_on(6, 72, 100)};
+        OutputEventList rejecting;
+        rejecting.accept_at_most(0);
+        REQUIRE(h.run(in, &rejecting) == CLAP_PROCESS_CONTINUE);
+        CHECK(std::all_of(h.plugin.outbound_note_release_debt.begin(),
+                          h.plugin.outbound_note_release_debt.end(),
+                          [](uint8_t count) { return count == 0; }));
+        CHECK_FALSE(h.plugin.outbound_panic_debt[6]);
+    }
+}
+
 TEST_CASE("midi_out sysex surfaces on CLAP out_events",
           "[clap][midi][issue-pending]") {
     g_pending_emit.clear();
@@ -3510,7 +4136,7 @@ TEST_CASE("midi_out shorts + sysex interleave by sample_offset on out_events",
     REQUIRE(out.at(2)->type == CLAP_EVENT_MIDI);
 }
 
-TEST_CASE("CLAP inbound MIDI drops past realtime event capacity without growing",
+TEST_CASE("CLAP fail-closes incomplete realtime MIDI ingress without growing",
           "[clap][midi][realtime]") {
     Harness h(make_observing_midi_in);
     InputEventList in;
@@ -3529,9 +4155,9 @@ TEST_CASE("CLAP inbound MIDI drops past realtime event capacity without growing"
     REQUIRE(g_observing_midi_in != nullptr);
     REQUIRE(g_observing_midi_in->observed_event_capacity ==
             state::ParameterEventQueue::kCapacity);
-    REQUIRE(g_observing_midi_in->observed_event_count ==
-            state::ParameterEventQueue::kCapacity);
-    REQUIRE(g_observing_midi_in->observed_event_drops == 1);
+    REQUIRE(g_observing_midi_in->observed_event_count == 0);
+    REQUIRE(g_observing_midi_in->observed_event_drops == 0);
+    REQUIRE(g_observing_midi_in->observed_reset_requested);
 }
 
 TEST_CASE("CLAP inbound SysEx drops past realtime sidecar capacity without growing",
@@ -3598,7 +4224,7 @@ TEST_CASE("CLAP outbound MIDI drops past realtime event capacity without growing
     REQUIRE(g_overflowing_midi_out->observed_sysex_drops == 1);
 }
 
-TEST_CASE("CLAP MPE sidecar drops past realtime event capacity without growing",
+TEST_CASE("CLAP MPE sidecar reconciles after realtime expression overflow",
           "[clap][midi][realtime]") {
     g_pending_opts_mpe = true;
     g_pending_opts_ump = false;
@@ -3628,14 +4254,23 @@ TEST_CASE("CLAP MPE sidecar drops past realtime event capacity without growing",
         in.push(ev);
     }
 
+    const std::array<uint8_t, 4> sysex_payload{0xF0, 0x7D, 0x01, 0xF7};
+    clap_event_midi_sysex_t sysex{};
+    sysex.header = make_header(sizeof(sysex), CLAP_EVENT_MIDI_SYSEX, 9);
+    sysex.port_index = 0;
+    sysex.buffer = sysex_payload.data();
+    sysex.size = static_cast<uint32_t>(sysex_payload.size());
+    in.push(sysex);
+
     REQUIRE(h.run(in) == CLAP_PROCESS_CONTINUE);
     REQUIRE(g_observing_sidecar != nullptr);
     REQUIRE(g_observing_sidecar->observed_mpe_attached);
     REQUIRE(g_observing_sidecar->observed_mpe_capacity ==
             state::ParameterEventQueue::kCapacity);
-    REQUIRE(g_observing_sidecar->observed_mpe_count ==
-            state::ParameterEventQueue::kCapacity);
-    REQUIRE(g_observing_sidecar->observed_mpe_drops == 128);
+    REQUIRE(g_observing_sidecar->observed_mpe_count == 0);
+    REQUIRE(g_observing_sidecar->observed_mpe_drops == 0);
+    REQUIRE(g_observing_sidecar->observed_sysex_count == 0);
+    REQUIRE(g_observing_sidecar->observed_reset_requested);
 }
 
 #if defined(CLAP_VERSION_GE) && CLAP_VERSION_GE(1, 1, 0)
@@ -3666,9 +4301,73 @@ TEST_CASE("CLAP UMP sidecar drops past realtime event capacity without growing",
     REQUIRE(g_observing_sidecar->observed_ump_attached);
     REQUIRE(g_observing_sidecar->observed_ump_capacity ==
             state::ParameterEventQueue::kCapacity);
-    REQUIRE(g_observing_sidecar->observed_ump_count ==
-            state::ParameterEventQueue::kCapacity);
-    REQUIRE(g_observing_sidecar->observed_ump_drops == 1);
+    // Ownership overflow fails closed: the partial note stream is discarded
+    // and the processor receives an empty/reset UMP block.
+    REQUIRE(g_observing_sidecar->observed_ump_count == 0);
+    REQUIRE(g_observing_sidecar->observed_ump_drops == 0);
+}
+
+TEST_CASE("CLAP UMP expression overflow fails closed for native and synthesized input",
+          "[clap][midi][ump][realtime]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = true;
+
+    SECTION("native MIDI 2 expression") {
+        Harness h(make_observing_sidecar);
+        InputEventList in;
+        for (std::size_t i = 0; i < state::ParameterEventQueue::kCapacity; ++i) {
+            const auto filler = midi::UmpPacket::cc_2(0, 1, 1, 0);
+            clap_event_midi2_t ev{};
+            ev.header = make_header(sizeof(ev), CLAP_EVENT_MIDI2, 0);
+            ev.port_index = 0;
+            ev.data[0] = filler.words[0];
+            ev.data[1] = filler.words[1];
+            ev.data[2] = filler.words[2];
+            ev.data[3] = filler.words[3];
+            in.push(ev);
+        }
+        const auto expression =
+            midi::UmpPacket::pitch_bend_2(0, 1, 0xFFFFFFFFu);
+        clap_event_midi2_t ev{};
+        ev.header = make_header(sizeof(ev), CLAP_EVENT_MIDI2, 1);
+        ev.port_index = 0;
+        ev.data[0] = expression.words[0];
+        ev.data[1] = expression.words[1];
+        ev.data[2] = expression.words[2];
+        ev.data[3] = expression.words[3];
+        in.push(ev);
+
+        REQUIRE(h.run(in) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(g_observing_sidecar->observed_ump_count == 0);
+        REQUIRE(g_observing_sidecar->observed_reset_requested);
+    }
+
+    SECTION("MIDI 1 expression synthesized after native UMP filler") {
+        Harness h(make_observing_sidecar);
+        InputEventList in;
+        for (std::size_t i = 0; i < state::ParameterEventQueue::kCapacity; ++i) {
+            const auto filler = midi::UmpPacket::cc_2(0, 1, 1, 0);
+            clap_event_midi2_t ev{};
+            ev.header = make_header(sizeof(ev), CLAP_EVENT_MIDI2, 0);
+            ev.port_index = 0;
+            ev.data[0] = filler.words[0];
+            ev.data[1] = filler.words[1];
+            ev.data[2] = filler.words[2];
+            ev.data[3] = filler.words[3];
+            in.push(ev);
+        }
+        clap_event_midi_t bend{};
+        bend.header = make_header(sizeof(bend), CLAP_EVENT_MIDI, 1);
+        bend.port_index = 0;
+        bend.data[0] = 0xE1;
+        bend.data[1] = 0x7F;
+        bend.data[2] = 0x7F;
+        in.push(bend);
+
+        REQUIRE(h.run(in) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(g_observing_sidecar->observed_ump_count == 0);
+        REQUIRE(g_observing_sidecar->observed_reset_requested);
+    }
 }
 #endif
 

@@ -752,6 +752,20 @@ TEST_CASE("RealtimePitchTimeProcessor rejects invalid spectral overrides atomica
         REQUIRE(previously_prepared.output_free_space() == prepared_capacity);
     }
 
+    for (const int invalid_iterations :
+         {-1, kSourceFilterMaximumEnvelopeIterations + 1}) {
+        auto config = stream_config(256);
+        config.true_envelope_iterations = invalid_iterations;
+
+        RealtimePitchTimeProcessor fresh;
+        REQUIRE(fresh.prepare(kSampleRate, config)
+                == PitchTimePrepareStatus::invalid_spectral_geometry);
+        REQUIRE(fresh.output_free_space() == 0);
+        REQUIRE(previously_prepared.prepare(kSampleRate, config)
+                == PitchTimePrepareStatus::invalid_spectral_geometry);
+        REQUIRE(previously_prepared.output_free_space() == prepared_capacity);
+    }
+
     const float sample = 0.25f;
     const float* source[] = {&sample};
     REQUIRE(previously_prepared.feed(source, 1) == PitchTimeStreamFeedStatus::accepted);

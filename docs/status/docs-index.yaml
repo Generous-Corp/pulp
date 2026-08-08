@@ -214,6 +214,11 @@ docs:
     kind: guide
     summary: DSP algorithm reference — 30+ processors with usage examples and parameter docs
 
+  - slug: source-filter-analysis
+    path: guides/source-filter-analysis.md
+    kind: guide
+    summary: Fixed-capacity LPC and cepstral source-filter analysis with explicit preparation and realtime contracts
+
   - slug: analog-vcf
     path: guides/analog-vcf.md
     kind: guide
@@ -436,6 +441,36 @@ docs:
     path: reference/analysis-chroma-onset-frontends.md
     kind: reference
     summary: Fixed-capacity chroma and onset-novelty front ends with offline compatibility adapters
+
+  - slug: analysis-frontends
+    path: reference/analysis-frontends.md
+    kind: reference
+    summary: Reusable spectrum conditioning and triggered scope-capture front ends
+
+  - slug: analysis-chroma-onset-frontends
+    path: reference/analysis-chroma-onset-frontends.md
+    kind: reference
+    summary: Fixed-capacity chroma and onset-novelty front ends with offline compatibility adapters
+
+  - slug: fractional-delay
+    path: reference/fractional-delay.md
+    kind: reference
+    summary: Shared fractional-delay interpolation and history primitives for feedforward and feedback compositions
+
+  - slug: fm-operator-engine
+    path: reference/fm-operator-engine.md
+    kind: reference
+    summary: Fixed-capacity melodic FM and phase-modulation operator graphs with deterministic event and realtime contracts
+
+  - slug: modulation-language
+    path: reference/modulation-language.md
+    kind: reference
+    summary: Shared modulation curves, breakpoint envelopes, and loopable rise/fall generators
+
+  - slug: nonlinear-shaping
+    path: reference/nonlinear-shaping.md
+    kind: reference
+    summary: Oversampled wavefolding, harmonic shaping, and ring-modulation primitives
 
   - slug: cli
     path: reference/cli.md

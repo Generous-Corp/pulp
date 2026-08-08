@@ -24,8 +24,20 @@ public:
     void set_frequency(SampleType hz) { freq_ = hz; }
     void set_waveform(Waveform w) { waveform_ = w; }
 
-    // Reset phase to 0
-    void reset() { phase_ = SampleType{0}; }
+    // Reset phase to 0.
+    void reset() noexcept { phase_ = SampleType{0}; }
+
+    // Set a normalized phase without allowing invalid state into the audio
+    // path. The phase is accepted in [0, 1); failure leaves state unchanged.
+    bool reset_phase(SampleType normalized_phase) noexcept {
+        if (!std::isfinite(normalized_phase) || normalized_phase < SampleType{0} ||
+            normalized_phase >= SampleType{1}) {
+            return false;
+        }
+        phase_ = normalized_phase;
+        tri_state_ = SampleType{0};
+        return true;
+    }
 
     // Generate next sample
     SampleType next() {

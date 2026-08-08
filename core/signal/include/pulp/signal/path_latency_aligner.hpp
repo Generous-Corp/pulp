@@ -49,11 +49,15 @@ class PathLatencyAlignerT {
         if (retained > rings_.max_size())
             return false;
         std::vector<SampleType, Allocator> replacement(rings_.get_allocator());
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
         try {
+#endif
             replacement.assign(retained, SampleType{0});
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
         } catch (const std::bad_alloc&) {
             return false;
         }
+#endif
         rings_.swap(replacement);
         paths_ = paths;
         channels_ = channels;

@@ -1672,6 +1672,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 |-------|---------|
 | `aax` | Optional AAX format: developer-supplied Avid SDK, CMake enablement, DigiShell/AAX Validator workflows |
 | `ableton-link` | Optional desktop Link tempo sync: developer-supplied SDK, licensing boundary, realtime host-time mapping, loud-SKIP validation |
+| `agent-capabilities` | Installed design-time capability contracts: explicit registration, typed bindings, versions/digests, partial coverage, public-header ledger, and removal tombstones |
 | `android` | Android NDK builds, Oboe audio, Dawn/Skia GPU, JNI bridge, emulator smoke, platform gotchas |
 | `ara` | Optional ARA support: developer-supplied SDK, companion APIs, adapter wiring, validation |
 | `audio-harness` | Prove/debug what a Processor emits: signal generators, metrics, assertions, RenderScenario, contracts + offline Audio Doctor (response, THD, group delay) |

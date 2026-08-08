@@ -1,9 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/mpe_expression.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
+#include <pulp/midi/mpe_synth_voice.hpp>
+#include <array>
 #include <vector>
 
 #include "harness/rt_allocation_probe.hpp"
@@ -26,6 +29,37 @@ UmpPacket channel_pressure_ump(uint8_t group, uint8_t channel, uint32_t value) {
         | (static_cast<uint32_t>(0xD0 | (channel & 0x0F)) << 16);
     p.words[1] = value;
     return p;
+}
+
+class SidecarProcessor final : public pulp::format::Processor {
+public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor d;
+        d.name = "MpeSidecarTest";
+        d.supports_mpe = true;
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&,
+                 const pulp::audio::BufferView<const float>&,
+                 MidiBuffer&, MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+};
+
+class SidecarVoice final : public MpeSynthVoice {
+public:
+    void render(float*, int) override {}
+};
+
+template <typename Allocator>
+std::size_t held_voice_count(const Allocator& allocator) {
+    std::size_t count = 0;
+    for (std::size_t i = 0; i < allocator.polyphony(); ++i) {
+        const auto& voice = allocator.voice(i);
+        if (voice.active() && !voice.releasing()) ++count;
+    }
+    return count;
 }
 } // namespace
 
@@ -254,6 +288,7 @@ TEST_CASE("MpeBuffer callback appends are allocation-free after reserve",
         REQUIRE(buffer.add({100, Kind::Pressure, {}}));
     }
     REQUIRE(buffer.dropped_event_count() == 0);
+    const auto held_id = tracker.find(1, 60)->note_id;
 
     {
         pulp::test::RtAllocationProbe probe;
@@ -264,6 +299,328 @@ TEST_CASE("MpeBuffer callback appends are allocation-free after reserve",
 
     REQUIRE(buffer.size() == prepared_capacity);
     REQUIRE(buffer.dropped_event_count() == 1);
+    REQUIRE(tracker.active_count() == 0);
+    REQUIRE(tracker.pending_note_off_count() == 1);
+
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 62, 100)));
+    REQUIRE(tracker.active_count() == 0);
+    buffer.clear();
+    offset = 0;
+    REQUIRE(tracker.flush_pending_note_offs());
+    REQUIRE(buffer.size() == 1);
+    REQUIRE(buffer[0].kind == Kind::NoteOff);
+    REQUIRE(buffer[0].state.note_id == held_id);
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 62, 100)));
+    REQUIRE(tracker.find(1, 62)->note_id == held_id + 1);
+}
+
+TEST_CASE("MpeSidecar drains a deferred release before next-block input",
+          "[midi][mpe][lifecycle][sidecar][rt-safety]") {
+    pulp::format::boundary::MpeSidecar sidecar;
+    SidecarProcessor processor;
+    MpeVoiceAllocator<SidecarVoice> allocator{2};
+    sidecar.configure(true);
+    sidecar.reserve(sidecar.buffer.capacity());
+
+    // Fill block N's production sidecar buffer, then deliver a physical
+    // NoteOff that cannot fit and must be retained for the next run().
+    std::vector<MidiEvent> first_block;
+    first_block.reserve(sidecar.buffer.capacity() + 1);
+    first_block.push_back(MidiEvent::note_on(1, 60, 100));
+    while (first_block.size() < sidecar.buffer.capacity()) {
+        auto bend = MidiEvent::pitch_bend(1, 8192);
+        bend.sample_offset = 7;
+        first_block.push_back(bend);
+    }
+    auto physical_off = MidiEvent::note_off(1, 60);
+    physical_off.sample_offset = 31;
+    first_block.push_back(physical_off);
+    REQUIRE(sidecar.run(processor, first_block));
+
+    REQUIRE(processor.mpe_input() == &sidecar.buffer);
+    REQUIRE(sidecar.buffer.size() == sidecar.buffer.capacity());
+    REQUIRE(sidecar.tracker.pending_note_off_count() == 1);
+    const auto retired_generation = sidecar.buffer[0].state.note_id;
+    allocator.dispatch_all(sidecar.buffer);
+    REQUIRE(held_voice_count(allocator) == 1);
+
+    // Block N+1 starts at the same offset as the deferred release. Production
+    // run() must publish retirement first, then the new generation, without an
+    // allocation on the audio thread.
+    const std::array second_block{MidiEvent::note_on(1, 60, 110)};
+    {
+        pulp::test::RtAllocationProbe probe;
+        REQUIRE(sidecar.run(processor, second_block));
+        allocator.dispatch_all(sidecar.buffer);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+
+    REQUIRE(sidecar.buffer.size() == 2);
+    REQUIRE(sidecar.buffer[0].kind == Kind::NoteOff);
+    REQUIRE(sidecar.buffer[0].sample_offset == 0);
+    REQUIRE(sidecar.buffer[0].state.note_id == retired_generation);
+    REQUIRE(sidecar.buffer[1].kind == Kind::NoteOn);
+    REQUIRE(sidecar.buffer[1].sample_offset == 0);
+    REQUIRE(sidecar.buffer[1].state.note_id == retired_generation + 1);
+    REQUIRE(sidecar.tracker.pending_note_off_count() == 0);
+    REQUIRE(held_voice_count(allocator) == 1);
+    REQUIRE_FALSE(allocator.last_was_glide());
+}
+
+TEST_CASE("MpeSidecar reset clears buffer and deferred releases across reactivation cycles",
+          "[midi][mpe][lifecycle][sidecar][reset]") {
+    pulp::format::boundary::MpeSidecar sidecar;
+    SidecarProcessor processor;
+    sidecar.configure(true);
+    sidecar.reserve(sidecar.buffer.capacity());
+
+    std::vector<MidiEvent> overflowing_block;
+    overflowing_block.reserve(sidecar.buffer.capacity() + 1);
+    overflowing_block.push_back(MidiEvent::note_on(1, 60, 100));
+    while (overflowing_block.size() < sidecar.buffer.capacity()) {
+        auto bend = MidiEvent::pitch_bend(1, 8192);
+        bend.sample_offset = 4;
+        overflowing_block.push_back(bend);
+    }
+    auto physical_off = MidiEvent::note_off(1, 60);
+    physical_off.sample_offset = 15;
+    overflowing_block.push_back(physical_off);
+    REQUIRE(sidecar.run(processor, overflowing_block));
+    REQUIRE(sidecar.tracker.pending_note_off_count() == 1);
+
+    MpeNoteGeneration previous_generation = sidecar.buffer[0].state.note_id;
+    for (int cycle = 0; cycle < 3; ++cycle) {
+        {
+            pulp::test::RtAllocationProbe probe;
+            sidecar.reset();
+            REQUIRE_FALSE(probe.saw_allocation());
+        }
+        REQUIRE(sidecar.buffer.empty());
+        REQUIRE(sidecar.tracker.active_count() == 0);
+        REQUIRE(sidecar.tracker.pending_note_off_count() == 0);
+        REQUIRE(sidecar.current_sample_offset == 0);
+
+        auto note_on = MidiEvent::note_on(
+            1, static_cast<uint8_t>(61 + cycle), 90);
+        note_on.sample_offset = 9;
+        const std::array input{note_on};
+        REQUIRE(sidecar.run(processor, input));
+        REQUIRE(sidecar.buffer.size() == 1);
+        REQUIRE(sidecar.buffer[0].kind == Kind::NoteOn);
+        REQUIRE(sidecar.buffer[0].sample_offset == 9);
+        REQUIRE(sidecar.buffer[0].state.note_id > previous_generation);
+        previous_generation = sidecar.buffer[0].state.note_id;
+    }
+}
+
+TEST_CASE("MpeSidecar reconciles tracker state after an expression append drops",
+          "[midi][mpe][sidecar][overflow][rt-safety]") {
+    pulp::format::boundary::MpeSidecar sidecar;
+    SidecarProcessor processor;
+    sidecar.configure(true);
+    sidecar.reserve(sidecar.buffer.capacity());
+
+    std::vector<MidiEvent> overflowing_block;
+    overflowing_block.reserve(sidecar.buffer.capacity() + 1);
+    overflowing_block.push_back(MidiEvent::note_on(1, 60, 100));
+    while (overflowing_block.size() <= sidecar.buffer.capacity()) {
+        overflowing_block.push_back(MidiEvent::pitch_bend(1, 16383));
+    }
+
+    {
+        pulp::test::RtAllocationProbe probe;
+        REQUIRE_FALSE(sidecar.run(processor, overflowing_block));
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    REQUIRE(processor.mpe_input() == &sidecar.buffer);
+    REQUIRE(sidecar.buffer.empty());
+    REQUIRE(sidecar.tracker.active_count() == 0);
+    REQUIRE(sidecar.tracker.pending_note_off_count() == 0);
+
+    const std::array next_block{MidiEvent::note_on(1, 62, 90)};
+    REQUIRE(sidecar.run(processor, next_block));
+    REQUIRE(sidecar.buffer.size() == 1);
+    REQUIRE(sidecar.buffer[0].kind == Kind::NoteOn);
+    REQUIRE(sidecar.buffer[0].state.note == 62);
+}
+
+TEST_CASE("MpeSidecar rejects a truncated source MIDI lifecycle",
+          "[midi][mpe][sidecar][overflow][rt-safety]") {
+    pulp::format::boundary::MpeSidecar sidecar;
+    SidecarProcessor processor;
+    sidecar.configure(true);
+    sidecar.reserve(sidecar.buffer.capacity());
+
+    MidiBuffer truncated;
+    truncated.reserve(1);
+    truncated.set_realtime_capacity_limit();
+    REQUIRE(truncated.add(MidiEvent::note_on(1, 60, 100)));
+    REQUIRE_FALSE(truncated.add(MidiEvent::note_off(1, 60)));
+    REQUIRE(truncated.dropped_event_count() == 1);
+
+    {
+        pulp::test::RtAllocationProbe probe;
+        REQUIRE_FALSE(sidecar.run(processor, truncated));
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    REQUIRE(processor.mpe_input() == &sidecar.buffer);
+    REQUIRE(sidecar.buffer.empty());
+    REQUIRE(sidecar.tracker.active_count() == 0);
+    REQUIRE(sidecar.tracker.pending_note_off_count() == 0);
+}
+
+TEST_CASE("MpeSidecar rejects truncated source MIDI without MPE enabled",
+          "[midi][sidecar][overflow][rt-safety]") {
+    pulp::format::boundary::MpeSidecar sidecar;
+    SidecarProcessor processor;
+    sidecar.configure(false);
+
+    MidiBuffer truncated;
+    truncated.reserve(1);
+    truncated.set_realtime_capacity_limit();
+    REQUIRE(truncated.add(MidiEvent::note_on(1, 60, 100)));
+    REQUIRE_FALSE(truncated.add(MidiEvent::note_off(1, 60)));
+
+    {
+        pulp::test::RtAllocationProbe probe;
+        REQUIRE_FALSE(sidecar.run(processor, truncated));
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    REQUIRE(processor.mpe_input() == nullptr);
+    REQUIRE(sidecar.tracker.active_count() == 0);
+}
+
+TEST_CASE("MpeSidecar reconciles after an atomic retrigger append drops",
+          "[midi][mpe][sidecar][lifecycle][overflow][rt-safety]") {
+    pulp::format::boundary::MpeSidecar sidecar;
+    SidecarProcessor processor;
+    sidecar.configure(true);
+    sidecar.reserve(sidecar.buffer.capacity());
+
+    std::vector<MidiEvent> overflowing_block;
+    overflowing_block.reserve(sidecar.buffer.capacity());
+    overflowing_block.push_back(MidiEvent::note_on(1, 60, 90));
+    while (overflowing_block.size() + 1 < sidecar.buffer.capacity())
+        overflowing_block.push_back(MidiEvent::pitch_bend(1, 8192));
+    overflowing_block.push_back(MidiEvent::note_on(1, 60, 110));
+
+    {
+        pulp::test::RtAllocationProbe probe;
+        REQUIRE_FALSE(sidecar.run(processor, overflowing_block));
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    REQUIRE(processor.mpe_input() == &sidecar.buffer);
+    REQUIRE(sidecar.buffer.empty());
+    REQUIRE(sidecar.tracker.active_count() == 0);
+    REQUIRE(sidecar.tracker.pending_note_off_count() == 0);
+}
+
+TEST_CASE("MpeBuffer emits retrigger retirement and replacement atomically",
+          "[midi][mpe][lifecycle]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    MpeBuffer buffer;
+    int32_t offset = 7;
+    bind_tracker_to_buffer(tracker, buffer, offset);
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 90)));
+    const auto first = tracker.find(1, 60)->note_id;
+    {
+        pulp::test::RtAllocationProbe probe;
+        REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 110)));
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    const auto second = tracker.find(1, 60)->note_id;
+    REQUIRE(buffer.size() == 3);
+    REQUIRE(buffer[1].kind == Kind::NoteOff);
+    REQUIRE(buffer[1].state.note_id == first);
+    REQUIRE(buffer[2].kind == Kind::NoteOn);
+    REQUIRE(buffer[2].state.note_id == second);
+    {
+        pulp::test::RtAllocationProbe probe;
+        buffer.sort();
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    REQUIRE(buffer[1].kind == Kind::NoteOff);
+    REQUIRE(buffer[2].kind == Kind::NoteOn);
+}
+
+TEST_CASE("MpeBuffer retrigger capacity boundary is atomic",
+          "[midi][mpe][lifecycle][overflow]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    MpeBuffer buffer;
+    buffer.set_realtime_capacity_limit(true);
+    int32_t offset = 0;
+    bind_tracker_to_buffer(tracker, buffer, offset);
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 90)));
+    const auto before = *tracker.find(1, 60);
+    while (buffer.size() + 1 < buffer.capacity()) {
+        REQUIRE(buffer.add({0, Kind::Pressure, {}}));
+    }
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 110)));
+    REQUIRE(buffer.capacity() - buffer.size() == 1);
+    REQUIRE(buffer.dropped_event_count() == 2);
+    REQUIRE(tracker.find(1, 60)->note_id == before.note_id);
+    REQUIRE(tracker.find(1, 60)->velocity == before.velocity);
+
+    buffer.clear();
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 111)));
+    REQUIRE(buffer.size() == 2);
+    REQUIRE(buffer[0].kind == Kind::NoteOff);
+    REQUIRE(buffer[1].kind == Kind::NoteOn);
+    REQUIRE(buffer[1].state.note_id == before.note_id + 1);
+}
+
+TEST_CASE("MpeBuffer accepts retrigger at exact realtime capacity",
+          "[midi][mpe][lifecycle][capacity]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    MpeBuffer buffer;
+    buffer.set_realtime_capacity_limit(true);
+    int32_t offset = 0;
+    bind_tracker_to_buffer(tracker, buffer, offset);
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 90)));
+    while (buffer.size() + 2 < buffer.capacity()) {
+        REQUIRE(buffer.add({0, Kind::Pressure, {}}));
+    }
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 110)));
+    REQUIRE(buffer.size() == buffer.capacity());
+    REQUIRE(buffer.dropped_event_count() == 0);
+    REQUIRE(buffer[buffer.size() - 2].kind == Kind::NoteOff);
+    REQUIRE(buffer[buffer.size() - 1].kind == Kind::NoteOn);
+}
+
+TEST_CASE("MpeBuffer rejected fresh note-on does not consume generation",
+          "[midi][mpe][lifecycle][overflow]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    MpeBuffer buffer;
+    buffer.set_realtime_capacity_limit(true);
+    int32_t offset = 0;
+    bind_tracker_to_buffer(tracker, buffer, offset);
+    while (buffer.size() < buffer.capacity()) {
+        REQUIRE(buffer.add({0, Kind::Pressure, {}}));
+    }
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 90)));
+    REQUIRE(tracker.active_count() == 0);
+    buffer.clear();
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 91)));
+    REQUIRE(tracker.find(1, 60)->note_id == 1);
+}
+
+TEST_CASE("MIDI 2 UMP retrigger uses retirement-before-start lifecycle",
+          "[midi][mpe][ump][lifecycle]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    MpeBuffer buffer;
+    int32_t offset = 12;
+    bind_tracker_to_buffer(tracker, buffer, offset);
+    REQUIRE(tracker.process(UmpPacket::note_on_2(0, 2, 67, 0xA000)));
+    const auto first = tracker.find(2, 67)->note_id;
+    REQUIRE(tracker.process(UmpPacket::note_on_2(0, 2, 67, 0xF000)));
+    const auto second = tracker.find(2, 67)->note_id;
+    REQUIRE(buffer[1].kind == Kind::NoteOff);
+    REQUIRE(buffer[1].state.note_id == first);
+    REQUIRE(buffer[2].kind == Kind::NoteOn);
+    REQUIRE(buffer[2].state.note_id == second);
+    REQUIRE(tracker.process(UmpPacket::note_off_2(0, 2, 67, 0)));
+    REQUIRE(buffer[3].kind == Kind::NoteOff);
+    REQUIRE(buffer[3].state.note_id == second);
 }
 
 TEST_CASE("MpeVoiceTracker UMP manager and member events feed callbacks",

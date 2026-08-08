@@ -69,15 +69,36 @@ responses are each capped at 1 MiB. QuickJS enforces the result byte, depth,
 and cycle limits while walking the value rather than materializing an
 unbounded intermediate object.
 
-After every evaluation, the host rebuilds the scripted-UI realm from its
-source while preserving widget values. The response still describes the live
-realm at the evaluation safe point, but global mutations, timers, animation
-frames, Promise jobs, and event callbacks created by evaluated code are
-discarded before another frame pump can execute them outside the request
-deadline. Realm reconstruction gets a fixed 500 ms cleanup grace after the
-two-second evaluation deadline; the enclosing main-thread RPC still bounds the
-complete operation at three seconds. If that reset fails, the host detaches and
-destroys the scripted engine instead of leaving the evaluated realm active.
+Every evaluation obliges the host to rebuild the scripted-UI realm from its
+source, preserving widget values, **before the next frame** — that is, at the
+top of the host's next `ScriptedUiSession::poll()`, ahead of the frame pump and
+the next request pump. Global mutations, timers, animation frames, Promise jobs,
+and event callbacks created by evaluated code are therefore discarded before any
+frame pump can execute them outside the request deadline. Evaluations that share
+a realm between two frames owe one rebuild between them, not one each.
+
+Sharing a realm is observable, and deliberately so: a global that one evaluation
+plants is visible to another evaluation issued before the next frame. What the
+reset guarantees is that evaluated code never reaches a **frame** — the deferred
+timer, animation frame, Promise job, or patched callback is discarded with its
+realm before any frame pump could run it. It does not, and never did, isolate
+one evaluation from the next within a single frame; an inspector client that
+can evaluate at all could put the same statements in one request.
+
+The rebuild is deliberately **not** run inside `Runtime.evaluate`: replacing the
+view tree there would leave every widget pointer the caller held across the
+request pointing into a detached tree, so a panel would render and stop
+responding. The response describes the live realm at the evaluation safe point,
+and that realm stays the caller's until it returns to its run loop.
+
+Realm reconstruction gets a fixed 500 ms cleanup grace, measured from the frame
+boundary that runs it; the enclosing main-thread RPC still bounds the evaluation
+at three seconds. Because the rebuild is deferred, a reset failure is reported by
+`poll()` — which returns false with `evaluated realm reset failed: …` — rather
+than by the evaluate response. The fail-closed behavior is unchanged: on failure
+the host detaches and destroys the scripted engine instead of leaving the
+evaluated realm active. A session destroyed before it ever polls forces the owed
+reset during teardown so the failure is still logged.
 
 **Opt-in required.** Evaluate is arbitrary code execution in the plugin's JS
 context, so it is **off by default** even when the debug console is wired: a host

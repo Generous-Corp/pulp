@@ -26,7 +26,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import posixpath
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -46,25 +48,112 @@ def module_of(path: str) -> str | None:
     return m.group(2) if m else None
 
 
+def split_compile_command(command: str, *, windows: bool | None = None) -> list[str]:
+    """Split a compile database ``command`` using the producer platform's rules."""
+    if windows is None:
+        windows = os.name == "nt"
+    if not windows:
+        return shlex.split(command)
+
+    # CommandLineToArgvW/MSVCRT quoting: backslashes are special only when
+    # immediately followed by a quote.  Keep this local and dependency-free so
+    # Windows command-form databases do not pass literal quote characters on to
+    # the compiler.
+    args: list[str] = []
+    arg: list[str] = []
+    in_quotes = False
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if char.isspace() and not in_quotes:
+            if arg:
+                args.append("".join(arg))
+                arg = []
+            index += 1
+            continue
+        if char == "\\":
+            run = index
+            while index < len(command) and command[index] == "\\":
+                index += 1
+            count = index - run
+            if index < len(command) and command[index] == '"':
+                arg.extend("\\" * (count // 2))
+                if count % 2:
+                    arg.append('"')
+                else:
+                    in_quotes = not in_quotes
+                index += 1
+            else:
+                arg.extend("\\" * count)
+            continue
+        if char == '"':
+            in_quotes = not in_quotes
+        else:
+            arg.append(char)
+        index += 1
+    if arg:
+        args.append("".join(arg))
+    return args
+
+
 def load_module_flags(cc_path: Path) -> dict[str, tuple[list[str], str]]:
     """module-root -> (filtered compile flags, working directory).
 
-    The first TU seen per module wins; its -I/-D/-std/-isystem flags apply to
-    every header in that module's include tree.
+    Prefer a TU compiled by the module's canonical ``pulp-<module>`` target.
+    A source file can be reused by another target in a different module; taking
+    the first matching path would then test public headers with the consumer's
+    incomplete include closure instead of their owning target's flags.
     """
     entries = json.loads(cc_path.read_text())
     by_module: dict[str, tuple[list[str], str]] = {}
+    scores: dict[str, int] = {}
     for e in entries:
         f = e.get("file", "")
         mod = module_of(f)
-        if not mod or mod in by_module:
+        if not mod:
             continue
         args = e.get("arguments")
         if args is None:
-            # `command` form — split naively (compile_commands rarely quotes).
-            args = e.get("command", "").split()
-        by_module[mod] = (filter_args(args, f), e.get("directory", "."))
+            args = split_compile_command(e.get("command", ""))
+        directory = e.get("directory", ".")
+        score = module_target_score(args, mod, directory, e.get("output", ""))
+        if mod in by_module and score <= scores[mod]:
+            continue
+        by_module[mod] = (filter_args(args, f), directory)
+        scores[mod] = score
     return by_module
+
+
+def module_target_score(
+    args: list[str], module: str, directory: str = ".", explicit_output: str = ""
+) -> int:
+    """Rank a compile entry by how directly its object belongs to ``module``."""
+    output = explicit_output
+    for index, arg in enumerate(args[:-1]):
+        if arg == "-o" or arg.lower() == "/fo":
+            output = args[index + 1]
+            break
+    if not output:
+        for arg in args:
+            if arg.startswith("-o") and len(arg) > 2:
+                output = arg[2:]
+                break
+            if arg.lower().startswith("/fo") and len(arg) > 3:
+                output = arg[3:]
+                break
+    normalized_output = output.replace("\\", "/")
+    normalized_directory = directory.replace("\\", "/").rstrip("/")
+    if normalized_output.startswith("/") or re.match(r"^[A-Za-z]:/", normalized_output):
+        normalized = posixpath.normpath(normalized_output)
+    else:
+        normalized = posixpath.normpath(f"{normalized_directory}/{normalized_output}")
+    module_name = module.rsplit("/", 1)[-1].replace("_", "-")
+    canonical_marker = f"CMakeFiles/pulp-{module_name}.dir/"
+    if canonical_marker in normalized:
+        return 2
+    if f"{module}/CMakeFiles/" in normalized:
+        return 1
+    return 0
 
 
 def filter_args(args: list[str], src_file: str) -> list[str]:
@@ -72,17 +161,22 @@ def filter_args(args: list[str], src_file: str) -> list[str]:
     out: list[str] = []
     skip_next = False
     for i, a in enumerate(args):
+        lower = a.lower()
         if skip_next:
             skip_next = False
             continue
         if i == 0:
             continue  # the compiler executable; we supply our own
-        if a in ("-c",):
+        if a == "-c" or lower == "/c":
             continue
-        if a == "-o":
+        if a == "-o" or a.lower() == "/fo":
             skip_next = True
             continue
-        if a.endswith(".o"):
+        if (
+            (a.startswith("-o") and lower[2:].endswith((".o", ".obj")))
+            or (lower.startswith("/fo") and lower[3:].endswith((".o", ".obj")))
+            or lower.endswith((".o", ".obj"))
+        ):
             continue
         if os.path.basename(a) == os.path.basename(src_file) or a == src_file:
             continue

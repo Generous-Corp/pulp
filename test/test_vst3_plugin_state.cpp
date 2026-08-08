@@ -4946,6 +4946,12 @@ TEST_CASE("VST3 note-expression decode does not allocate on the audio thread",
     REQUIRE(events.addEvent(brt) == Steinberg::kResultOk);
 
     s.run(&events);  // warm: capacity established
+    // The processor fixture snapshots the MPE sidecar into a std::vector after
+    // each block. Retriggering the same held note can emit more sidecar events
+    // than the warm block, so reserve the adapter's prepared capacity before
+    // arming the allocation probe. The probe must measure the adapter, not the
+    // test observer growing its capture buffer.
+    s.test_processor->last_mpe_events.reserve(s.test_processor->mpe_capacity);
     {
         pulp::test::RtAllocationProbe probe;
         s.run(&events);
@@ -5069,6 +5075,10 @@ TEST_CASE("VST3 noteId-map overflow bumps the drop counter without allocating",
     s.run(&events);
     const auto drops_after_warm = s.processor.note_expression_drop_count();
     REQUIRE(drops_after_warm >= 1);  // overflow already observed on warm run
+    // A second overflowing block can contain retrigger releases as well as the
+    // attacks observed by the warm block. Pre-size the fixture's sidecar copy
+    // so its bookkeeping is outside the real-time allocation measurement.
+    s.test_processor->last_mpe_events.reserve(s.test_processor->mpe_capacity);
 
     {
         pulp::test::RtAllocationProbe probe;
@@ -5081,6 +5091,43 @@ TEST_CASE("VST3 noteId-map overflow bumps the drop counter without allocating",
     REQUIRE(s.processor.note_expression_drop_count() >= 2);
     // The processor still ran and saw the MPE sidecar.
     REQUIRE(s.test_processor->mpe_input_attached);
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 source MIDI overflow resets MPE and clears noteId routing",
+          "[vst3][midi][noteexpression][mpe][realtime]") {
+    namespace V = Steinberg::Vst;
+    NoteExpressionSetup s;
+
+    constexpr int kMidiCapacity = 2048;
+    Steinberg::Vst::EventList overflowing(kMidiCapacity + 1);
+    for (int i = 0; i < kMidiCapacity; ++i) {
+        auto filler = make_note_on(/*channel=*/0, /*pitch=*/60, 0.7f,
+                                   /*note_id=*/-1, /*offset=*/0);
+        REQUIRE(overflowing.addEvent(filler) == Steinberg::kResultOk);
+    }
+    auto dropped_attack = make_note_on(/*channel=*/1, /*pitch=*/61, 0.8f,
+                                       /*note_id=*/999, /*offset=*/0);
+    REQUIRE(overflowing.addEvent(dropped_attack) == Steinberg::kResultOk);
+
+    s.run(&overflowing);
+    REQUIRE(s.test_processor->last_context.reset_requested);
+    REQUIRE(s.test_processor->last_midi_in_size == 0);
+    REQUIRE(s.test_processor->mpe_input_attached);
+    REQUIRE(s.test_processor->mpe_event_count == 0);
+
+    const auto drops_before_expression =
+        s.processor.note_expression_drop_count();
+    Steinberg::Vst::EventList expression_block(1);
+    auto stale_expression = make_note_expr(
+        V::kTuningTypeID, /*note_id=*/999, 0.7, /*offset=*/0);
+    REQUIRE(expression_block.addEvent(stale_expression) == Steinberg::kResultOk);
+    s.run(&expression_block);
+    REQUIRE(s.processor.note_expression_drop_count() ==
+            drops_before_expression + 1);
+    REQUIRE(find_mpe(s.test_processor->last_mpe_events,
+                     pulp::midi::MpeExpressionEvent::Kind::PitchBend) == nullptr);
 
     REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
 }

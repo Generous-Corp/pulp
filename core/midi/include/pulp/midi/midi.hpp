@@ -8,3 +8,4 @@
 #include <pulp/midi/tuning.hpp>
 #include <pulp/midi/mts_esp_tuning.hpp>
 #include <pulp/midi/scala_tuning.hpp>
+#include <pulp/midi/utility_kernels.hpp>

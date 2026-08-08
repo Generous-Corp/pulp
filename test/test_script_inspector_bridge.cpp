@@ -72,7 +72,7 @@ TEST_CASE("Same-thread evaluate runs inline without a pump", "[view][script][ins
     REQUIRE(err.error.find("boom") != std::string::npos);
 }
 
-TEST_CASE("Realm reset may reattach before an inline result is published",
+TEST_CASE("A completed evaluation owes its realm reset to the next drain",
           "[view][script][inspector][reset]") {
     ScriptEngine original;
     ScriptEngine replacement;
@@ -90,11 +90,100 @@ TEST_CASE("Realm reset may reattach before an inline result is published",
     const auto result = bridge.evaluate("40 + 2");
     REQUIRE(result.ok);
     REQUIRE(result.json == "42");
+    // Rebuilding inside the request would replace the realm under a caller
+    // still holding widget pointers from before it. The debt is recorded and
+    // the host discharges it at its frame boundary.
+    REQUIRE(resets == 0);
+    REQUIRE(bridge.post_evaluation_reset_pending());
+
+    REQUIRE(bridge.run_pending_post_evaluation_reset().empty());
     REQUIRE(resets == 1);
+    REQUIRE_FALSE(bridge.post_evaluation_reset_pending());
     REQUIRE(bridge.capabilities().engine == "QuickJS");
+
+    // The debt is owed once however many drains follow it.
+    REQUIRE(bridge.run_pending_post_evaluation_reset().empty());
+    REQUIRE(resets == 1);
 }
 
-TEST_CASE("Realm reset failure fails evaluation closed",
+TEST_CASE("Evaluations sharing a realm collapse into one reset",
+          "[view][script][inspector][reset]") {
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&engine);
+
+    int resets = 0;
+    bridge.set_post_evaluation_reset([&](auto) {
+        ++resets;
+        return std::string{};
+    });
+
+    REQUIRE(bridge.evaluate("1").ok);
+    REQUIRE(bridge.evaluate("2").ok);
+    REQUIRE(bridge.evaluate("3").ok);
+    // All three ran in the same realm, so one reconstruction from last-good
+    // source discards everything any of them left behind.
+    REQUIRE(bridge.run_pending_post_evaluation_reset().empty());
+    REQUIRE(resets == 1);
+}
+
+TEST_CASE("A realm reset serves the request queued while it ran",
+          "[view][script][inspector][reset]") {
+    ScriptEngine original;
+    ScriptEngine replacement;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&original);
+
+    // Deferring the reset means the whole gap between one evaluation's response
+    // and the next frame is time in which a client can queue. The engine swap
+    // inside the reset must not fail a request that has not run yet.
+    bridge.set_post_evaluation_reset([&](auto) {
+        bridge.detach();
+        bridge.attach(&replacement);
+        return std::string{};
+    });
+    REQUIRE(bridge.evaluate("1").ok);
+
+    ScriptInspectorBridge::EvalResult queued;
+    std::thread client([&] { queued = bridge.evaluate("40 + 2", 3s); });
+    REQUIRE(ScriptInspectorBridgeTestAccess::wait_until_queued(bridge));
+
+    REQUIRE(bridge.run_pending_post_evaluation_reset().empty());
+    REQUIRE(bridge.pump());
+    client.join();
+
+    REQUIRE(queued.ok);
+    REQUIRE(queued.json == "42");
+    REQUIRE_FALSE(queued.detached);
+}
+
+TEST_CASE("A realm reset that leaves no engine strands the request it held",
+          "[view][script][inspector][reset]") {
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&engine);
+
+    // Fail-closed: the reset detaches without a replacement, so the queued
+    // request must be failed at the drain rather than left to wait out its own
+    // deadline holding the single-flight slot.
+    bridge.set_post_evaluation_reset([&](auto) {
+        bridge.detach();
+        return std::string{"reload failed"};
+    });
+    REQUIRE(bridge.evaluate("1").ok);
+
+    ScriptInspectorBridge::EvalResult queued;
+    std::thread client([&] { queued = bridge.evaluate("40 + 2", 30s); });
+    REQUIRE(ScriptInspectorBridgeTestAccess::wait_until_queued(bridge));
+
+    REQUIRE(bridge.run_pending_post_evaluation_reset() == "reload failed");
+    client.join();
+
+    REQUIRE(queued.detached);
+    REQUIRE_FALSE(bridge.is_busy());
+}
+
+TEST_CASE("Realm reset failure is reported by the drain that ran it",
           "[view][script][inspector][reset]") {
     ScriptEngine engine;
     ScriptInspectorBridge bridge;
@@ -103,9 +192,20 @@ TEST_CASE("Realm reset failure fails evaluation closed",
         [](auto) { return std::string{"reload failed"}; });
 
     const auto result = bridge.evaluate("40 + 2");
-    REQUIRE_FALSE(result.ok);
-    REQUIRE(result.error == "evaluated realm reset failed: reload failed");
+    REQUIRE(result.ok);
     REQUIRE_FALSE(bridge.is_busy());
+    // Deferring the reset moved its failure report off the evaluate response
+    // and onto the drain. The host turns this into poll()'s "evaluated realm
+    // reset failed: …" and runs the same fail-closed quarantine.
+    REQUIRE(bridge.run_pending_post_evaluation_reset() == "reload failed");
+    REQUIRE_FALSE(bridge.post_evaluation_reset_pending());
+
+    bridge.set_post_evaluation_reset([](auto) -> std::string {
+        throw std::runtime_error("reset threw");
+    });
+    REQUIRE(bridge.evaluate("1").ok);
+    REQUIRE(bridge.run_pending_post_evaluation_reset() == "reset threw");
+    REQUIRE_FALSE(bridge.post_evaluation_reset_pending());
 }
 
 TEST_CASE("External detach cannot cross an in-progress realm reset",
@@ -133,9 +233,9 @@ TEST_CASE("External detach cannot cross an in-progress realm reset",
         return std::string{};
     });
 
-    ScriptInspectorBridge::EvalResult result;
-    std::thread client([&] { result = bridge.evaluate("6 * 7", 3s); });
-    REQUIRE(ScriptInspectorBridgeTestAccess::wait_until_queued(bridge));
+    const auto result = bridge.evaluate("6 * 7", 3s);
+    REQUIRE(result.ok);
+    REQUIRE(bridge.post_evaluation_reset_pending());
 
     std::thread detacher([&] {
         {
@@ -153,15 +253,16 @@ TEST_CASE("External detach cannot cross an in-progress realm reset",
         gate_cv.notify_all();
     });
 
-    REQUIRE(bridge.pump());
-    client.join();
+    REQUIRE(bridge.run_pending_post_evaluation_reset().empty());
     detacher.join();
 
+    // A reset now runs outside any request, so engine quiescence has to cover
+    // it too: a detacher must not return while a realm reconstruction is still
+    // touching the engine it is about to let the caller destroy.
     REQUIRE_FALSE(detach_crossed_reset);
     REQUIRE(reset_saw_detacher);
     REQUIRE(detacher_saw_reset);
     REQUIRE(detach_returned);
-    REQUIRE(result.detached);
     REQUIRE_FALSE(bridge.is_busy());
 }
 

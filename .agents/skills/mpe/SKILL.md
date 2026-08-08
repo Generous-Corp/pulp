@@ -27,7 +27,7 @@ If you only need monophonic aftertouch or a global mod wheel, plain
 |--|--|
 | An MPE synth voice | Subclass `midi::MpeSynthVoice`, render your oscillator using `state().pitch_bend_semitones`, `state().pressure`, `state().timbre` |
 | An MPE synth plugin | `MpeVoiceAllocator<YourVoice>` inside the processor, dispatch `MpeBuffer` in `process()`, set `supports_mpe = true` or `node_capabilities.supports_mpe = true` in the descriptor |
-| A host that loads MPE plugins | Build an `MpeBuffer` from inbound MIDI (zone-aware) and hand it to `Processor::mpe_input()` — the CLAP adapter already does this |
+| A host that loads MPE plugins | Build an `MpeBuffer` from inbound MIDI (zone-aware) and hand it to `Processor::mpe_input()` — the CLAP, VST3, and AUv3 adapters already do this |
 | Pure MIDI 2.0 UMP work | Out of scope — direct UMP-native MPE transport is deferred |
 
 ## The three-step pattern for a new MPE synth
@@ -174,11 +174,11 @@ inherit running state via `add_note`.
 
 ### Format adapter coverage
 
-The CLAP adapter populates `MpeBuffer` from inbound MIDI. VST3 and AU
-adapters still forward plain MIDI only. Until those adapters gain direct
-`MpeBuffer` wiring, an MPE synth loaded as VST3/AU sees MIDI events but the
-`MpeBuffer` will be empty; the voice tracker inside the processor still works
-if you extract per-note data from `MidiBuffer` yourself.
+The CLAP, VST3, and AUv3 adapters populate `MpeBuffer` from inbound MIDI and
+reset their tracker state at lifecycle boundaries. AUv2 and other adapters still
+forward plain MIDI only; an MPE synth loaded through one of those formats sees
+MIDI events but the `MpeBuffer` will be empty unless the processor derives
+per-note state from `MidiBuffer` itself.
 
 ### Realtime sidecar buffers are capacity-limited
 
@@ -191,9 +191,70 @@ This matters for CLAP because one short MIDI event can fan out to many
 MPE sidecar callbacks, and native `CLAP_EVENT_MIDI2` packets append
 directly to the UMP sidecar before `Processor::process()`. The CLAP
 adapter reserves both sidecars in `clap_activate()` and drops rather
-than growing vectors during `clap_process()`. If you add a new adapter
-or widen the sidecar contract, test the overflow path without copying
-large event vectors inside the processor no-allocation guard.
+than growing vectors during `clap_process()`. An ownership-event drop or MPE
+expression drop is fail-closed: CLAP, VST3, and AUv3 clear the partial input,
+reset the tracker, and request a processor reset in that render. If you add a
+new adapter or widen the sidecar contract, test the overflow path without
+copying large event vectors inside the processor no-allocation guard.
+
+`bind_tracker_to_buffer()` treats a same-note retrigger as one atomic pair:
+`NoteOff(old generation)` then `NoteOn(new generation)` at the same sample
+offset. One remaining realtime slot is not enough, so neither half is emitted
+and the tracker does not rotate the generation. A physical note-off is
+different because the controller will not replay it: when the buffer is full,
+the tracker moves that release into its fixed FIFO and blocks fresh starts until
+it is drained. `MpeSidecar` drains it automatically at offset zero before the
+next block. A direct tracker/buffer integration must do the same by calling
+`flush_pending_note_offs()` after clearing its output and before ingesting the
+next block. Retrigger is a reattack, not glide: because the old generation's
+NoteOff is dispatched first, `MpeVoiceAllocator::last_was_glide()` remains false.
+Only genuinely overlapping held notes on a member channel count as glide.
+
+The generic sidecar cannot own a processor-specific allocator. At deactivation,
+adapters call `Processor::release()` before resetting the tracker, so an MPE
+processor must call `MpeVoiceAllocator::reset_all()` from `release()`. For an
+in-place host reset, adapters clear the tracker and raise
+`ProcessContext::reset_requested` on the next block; clear the allocator before
+dispatching that block's MPE input. Do not use `should_reset_dsp_state()` for
+voice ownership: it also includes transport jumps, which do not reset the
+adapter tracker. `MpeVoiceTracker::reset()` deliberately does not synthesize
+callbacks, and `MpeSidecar::reset()` also clears its buffer and pending-release
+FIFO.
+
+### Scale-aware bend and voice-modulation projection
+
+`pulp::midi::ScaleAwareMpePitch` in `utility_kernels.hpp` maps the tracked
+member-channel bend onto `pulp::music::Scale` degrees and owns only one pitch
+glide state. Feed it `MpeNoteState`; do not add another MPE tracker or scale
+table. Its bend input is the tracker's semitone value, so configure
+`input_bend_range_semitones` to the same member range used by the tracker.
+
+`pulp::audio::MidiVoiceModulationAdapter<MaximumVoices>` is the dependency-safe
+bridge to `VoiceModulationBuffer`. The instrument's existing allocator supplies
+the voice index; the adapter records note/MPE values for that slot and never
+allocates or steals a voice. Putting this bridge in `core/midi` would reverse
+the established `audio -> midi` dependency and create a cycle. Pass the same
+nonzero 64-bit `MpeNoteGeneration` to note-on, expression, and note-off calls;
+stale identity updates are rejected. The tracker never recycles generations on
+reset and permanently refuses note-ons after generation exhaustion; surface
+that state via `note_generation_exhausted()` / `refused_note_on_count()`.
+`release_voice()` also requires the matching nonzero generation; use `flush()`
+or `reset()` only for an intentional
+identity-free lifecycle clear. Prepare the destination for at least four lanes
+before `write_voice()` so the adapter can publish its block atomically.
+
+### Routing utilities flush through their output buffers
+
+`ChannelRouter`, `NoteRangeFilter`, and `KeyboardSplit` own downstream note
+lifecycle state even though their routing specifications are otherwise static.
+Call their output-bearing `flush()` until its report is complete before a hot
+swap; it emits every downstream release and retains suppression for the old
+input note-offs that can still arrive. Their output-bearing `replace_spec()`
+does this before adopting the new mapping. At a lifecycle boundary that also
+resets the input stream, call output-bearing `reset()` instead; it emits the
+same releases and then discards the old input ownership. A reset with no output
+buffer cannot satisfy the no-orphan-note contract and is intentionally not an
+API.
 
 ## Reference material
 

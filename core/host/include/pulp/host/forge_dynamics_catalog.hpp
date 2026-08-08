@@ -62,6 +62,7 @@
 #include <pulp/signal/diode_bridge_compressor.hpp>
 #include <pulp/signal/feedforward_compressor.hpp>
 #include <pulp/signal/fet_compressor.hpp>
+#include <pulp/signal/true_peak_limiter.hpp>
 #include <pulp/signal/vca_compressor.hpp>
 
 #include <algorithm>
@@ -281,6 +282,159 @@ inline ForgeNodeDescriptor feedforward_compressor_descriptor() {
     };
     return d;
 }
+
+namespace true_peak {
+
+inline constexpr const char* kTypeId = "dynamics.true_peak_limiter";
+inline constexpr state::ParamID kCeilingDbtp = 1;
+inline constexpr state::ParamID kReleaseMs = 2;
+
+struct Instance {
+    static constexpr std::size_t kControlTableSize = 4097;
+    signal::TruePeakLimiter limiter;
+    bool prepared = false;
+    std::array<double, kControlTableSize> ceiling_table{};
+    std::array<double, kControlTableSize> release_table{};
+    float last_ceiling_dbtp = -1.0f;
+    float last_release_ms = 100.0f;
+
+    static double table_value(const std::array<double, kControlTableSize>& table, double value,
+                              double minimum, double maximum) noexcept {
+        const double position = std::clamp((value - minimum) / (maximum - minimum), 0.0, 1.0) *
+                                static_cast<double>(kControlTableSize - 1);
+        const auto lower = static_cast<std::size_t>(position);
+        const auto upper = std::min(lower + 1, kControlTableSize - 1);
+        const double fraction = position - static_cast<double>(lower);
+        return table[lower] + fraction * (table[upper] - table[lower]);
+    }
+
+    void prepare(double sample_rate) {
+        for (std::size_t i = 0; i < kControlTableSize; ++i) {
+            const double unit = static_cast<double>(i) / static_cast<double>(kControlTableSize - 1);
+            const double ceiling = -24.0 + 24.0 * unit;
+            const double release = 5.0 + 1995.0 * unit;
+            ceiling_table[i] = std::pow(
+                10.0, (ceiling - signal::TruePeakLimiter::detector_guard_db()) / 20.0);
+            release_table[i] = signal::dynamics::one_pole_retain(release * 0.001, sample_rate);
+        }
+        last_ceiling_dbtp = -1.0f;
+        last_release_ms = 100.0f;
+    }
+
+    void set_controls(float ceiling_dbtp, float release_ms) noexcept {
+        if (ceiling_dbtp == last_ceiling_dbtp && release_ms == last_release_ms)
+            return;
+        last_ceiling_dbtp = ceiling_dbtp;
+        last_release_ms = release_ms;
+        limiter.set_realtime_control_coefficients(
+            ceiling_dbtp, table_value(ceiling_table, ceiling_dbtp, -24.0, 0.0), release_ms,
+            table_value(release_table, release_ms, 5.0, 2000.0));
+    }
+};
+
+inline CustomNodeType make_node(float lookahead_ms = 5.0f, bool linked = true) {
+    using Limiter = signal::TruePeakLimiter;
+    const double fixed_lookahead = std::clamp(
+        std::isfinite(static_cast<double>(lookahead_ms)) ? static_cast<double>(lookahead_ms) : 5.0,
+        0.0, Limiter::maximum_lookahead_ms());
+
+    CustomNodeType type;
+    type.type_id = kTypeId;
+    type.type_id += ".la_" + detail::realization_real_token(fixed_lookahead);
+    type.type_id += linked ? ".linked" : ".independent";
+    type.version = 1;
+    type.num_input_ports = 2;
+    type.num_output_ports = 2;
+    type.default_name = "True-Peak Limiter";
+    type.lowerable = true;
+    type.latency_samples = [fixed_lookahead](double sample_rate) {
+        if (!std::isfinite(sample_rate) || sample_rate < 8000.0 ||
+            sample_rate > Limiter::maximum_supported_sample_rate())
+            return 0;
+        return Limiter::detector_latency_samples() + Limiter::internal_gain_lookahead_samples() +
+               static_cast<int>(std::ceil(fixed_lookahead * 0.001 * sample_rate));
+    };
+    type.create = []() -> void* { return new Instance{}; };
+    type.destroy = [](void* pointer) { delete static_cast<Instance*>(pointer); };
+    type.prepare = [fixed_lookahead, linked](void* pointer, double sample_rate, int) {
+        auto& instance = *static_cast<Instance*>(pointer);
+        Limiter::Params params;
+        params.lookahead_ms = fixed_lookahead;
+        params.channel_link =
+            linked ? Limiter::ChannelLink::linked : Limiter::ChannelLink::independent;
+        instance.prepared = instance.limiter.prepare(sample_rate, 2, params);
+        if (instance.prepared)
+            instance.prepare(sample_rate);
+    };
+    type.reset = [](void* pointer) { static_cast<Instance*>(pointer)->limiter.reset(); };
+    type.baked_params.push_back({kCeilingDbtp, -24.0f, 0.0f, -1.0f});
+    type.baked_params.push_back({kReleaseMs, 5.0f, 2000.0f, 100.0f});
+    type.process_instance_baked_param = [](void* pointer, audio::BufferView<float>& output,
+                                           const audio::BufferView<const float>& input, int frames,
+                                           const BakedParamView& params) {
+        auto& limiter = static_cast<Instance*>(pointer)->limiter;
+        auto& instance = *static_cast<Instance*>(pointer);
+        if (!instance.prepared) {
+            for (int channel = 0; channel < 2; ++channel)
+                std::copy_n(input.channel_ptr(channel), frames,
+                            output.channel_ptr(channel));
+            return;
+        }
+        for (int frame = 0; frame < frames; ++frame) {
+            const auto offset = static_cast<std::int32_t>(frame);
+            instance.set_controls(params.value_at(kCeilingDbtp, offset),
+                                  params.value_at(kReleaseMs, offset));
+            const std::array<float, 2> in{input.channel_ptr(0)[frame], input.channel_ptr(1)[frame]};
+            std::array<float, 2> out{};
+            limiter.process_frame(in, out);
+            output.channel_ptr(0)[frame] = out[0];
+            output.channel_ptr(1)[frame] = out[1];
+        }
+    };
+    return type;
+}
+
+inline ForgeNodeDescriptor descriptor() {
+    ForgeNodeDescriptor descriptor;
+    descriptor.key = "true_peak_limiter";
+    descriptor.label = "True-Peak Limiter";
+    descriptor.description =
+        "Look-ahead stereo limiter with oversampled intersample-peak detection.";
+    descriptor.axes = {
+        {"lookahead_ms",
+         "Lookahead",
+         "Optional user lookahead added to the fixed internal detector horizon "
+         "and reported host latency.",
+         {{"zero", "0 ms", 0.0f}, {"five", "5 ms", 5.0f}, {"ten", "10 ms", 10.0f}}},
+        {"channel_link",
+         "Channel link",
+         "Linked preserves the stereo image; independent limits each channel separately.",
+         {{"linked", "Linked", 1.0f}, {"independent", "Independent", 0.0f}}},
+    };
+    descriptor.realizations = {
+        {"linked_0ms",
+         make_node(0.0f, true).type_id,
+         {{"lookahead_ms", "zero"}, {"channel_link", "linked"}}},
+        {"linked_5ms",
+         make_node(5.0f, true).type_id,
+         {{"lookahead_ms", "five"}, {"channel_link", "linked"}}},
+        {"linked_10ms",
+         make_node(10.0f, true).type_id,
+         {{"lookahead_ms", "ten"}, {"channel_link", "linked"}}},
+        {"independent_5ms",
+         make_node(5.0f, false).type_id,
+         {{"lookahead_ms", "five"}, {"channel_link", "independent"}}},
+    };
+    descriptor.params = {
+        {"ceiling_dbtp", kCeilingDbtp, "Ceiling", "dBTP", "Maximum reconstructed peak level.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"release_ms", kReleaseMs, "Release", "ms", "Gain-reduction recovery time.",
+         ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+    };
+    return descriptor;
+}
+
+}  // namespace true_peak
 
 // ── The VCA lineage (Blackmer/dbx) ────────────────────────────────────────
 //

@@ -1394,7 +1394,11 @@ struct ScopedAuV3HostWriting {
         // CLAP; the AU render path does not sort midi_in). No-op (detaches the
         // buffer) when the plug-in did not opt into MPE. Allocation-free: the
         // buffer was reserved + capacity-limited in allocateRenderResources.
-        bridge->mpe.run(*bridge->processor, midi_in);
+        if (!bridge->mpe.run(*bridge->processor, midi_in)) {
+            midi_in.clear();
+            midi_in.clear_sysex();
+            ctx.reset_requested = true;
+        }
 
         bridge->processor->set_param_events(&bridge->param_events);
         {

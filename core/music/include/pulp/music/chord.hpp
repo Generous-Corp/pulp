@@ -30,6 +30,26 @@ enum class ChordQuality : std::uint8_t {
 
 inline constexpr std::size_t kChordQualityCount = 12;
 
+enum class ChordExtension : std::uint8_t {
+    ninth = 0,
+    eleventh = 1,
+    thirteenth = 2,
+};
+
+enum class ChordSuspension : std::uint8_t {
+    second = 0,
+    fourth = 1,
+};
+
+enum class ChordAlteration : std::uint8_t {
+    flat_fifth = 0,
+    sharp_fifth = 1,
+    flat_ninth = 2,
+    sharp_ninth = 3,
+    sharp_eleventh = 4,
+    flat_thirteenth = 5,
+};
+
 struct ChordCompatibilityEntry {
     std::string_view stored_name;
     ChordQuality quality;
@@ -138,6 +158,55 @@ class ChordFormula {
         return quality_;
     }
 
+    constexpr std::optional<ChordFormula> with_extension(ChordExtension extension) const noexcept {
+        constexpr std::array<int, 3> intervals{14, 17, 21};
+        const auto index = static_cast<std::size_t>(extension);
+        if (index >= intervals.size())
+            return std::nullopt;
+        return with_replacement(-1, intervals[index]);
+    }
+
+    constexpr std::optional<ChordFormula>
+    with_suspension(ChordSuspension suspension) const noexcept {
+        const auto index = static_cast<std::size_t>(suspension);
+        if (index > 1)
+            return std::nullopt;
+        const int replacement = index == 0 ? 2 : 5;
+        for (std::size_t note = 1; note < count_; ++note) {
+            const int interval_value = intervals_[note];
+            const auto pitch_class = wrap_pitch_class(interval_value);
+            if (pitch_class == PitchClass::d_sharp || pitch_class == PitchClass::e) {
+                const int replacement_interval =
+                    interval_value - static_cast<int>(pitch_class) + replacement;
+                return with_replacement(interval_value, replacement_interval);
+            }
+        }
+        for (std::size_t note = 1; note < count_; ++note) {
+            const int interval_value = intervals_[note];
+            const auto pitch_class = wrap_pitch_class(interval_value);
+            if ((pitch_class == PitchClass::d || pitch_class == PitchClass::f) &&
+                static_cast<int>(pitch_class) != replacement) {
+                const int replacement_interval =
+                    interval_value - static_cast<int>(pitch_class) + replacement;
+                return with_replacement(interval_value, replacement_interval);
+            }
+        }
+        for (std::size_t note = 1; note < count_; ++note)
+            if (intervals_[note] == replacement)
+                return *this;
+        return with_replacement(-1, replacement);
+    }
+
+    constexpr std::optional<ChordFormula>
+    with_alteration(ChordAlteration alteration) const noexcept {
+        constexpr std::array<int, 6> natural_intervals{7, 7, 14, 14, 17, 21};
+        constexpr std::array<int, 6> altered_intervals{6, 8, 13, 15, 18, 20};
+        const auto index = static_cast<std::size_t>(alteration);
+        if (index >= natural_intervals.size())
+            return std::nullopt;
+        return with_replacement(natural_intervals[index], altered_intervals[index]);
+    }
+
     constexpr PitchClassSet pitch_classes() const noexcept {
         std::uint16_t mask = 0;
         for (std::size_t i = 0; i < count_; ++i)
@@ -149,6 +218,32 @@ class ChordFormula {
     constexpr auto operator<=>(const ChordFormula&) const = default;
 
   private:
+    constexpr std::optional<ChordFormula> with_replacement(int removed, int added) const noexcept {
+        std::array<int, kMaxNotes> values{};
+        std::size_t size = 0;
+        bool removed_existing = false;
+        bool added_existing = false;
+        for (std::size_t note = 0; note < count_; ++note) {
+            const int interval_value = intervals_[note];
+            if (!removed_existing && interval_value == removed) {
+                removed_existing = true;
+                continue;
+            }
+            if (interval_value == added)
+                added_existing = true;
+            values[size++] = interval_value;
+        }
+        if (!added_existing) {
+            if (size >= kMaxNotes)
+                return std::nullopt;
+            values[size++] = added;
+        } else if (!removed_existing) {
+            return *this;
+        }
+        std::sort(values.begin(), values.begin() + static_cast<std::ptrdiff_t>(size));
+        return from_intervals(std::span<const int>(values.data(), size));
+    }
+
     std::array<std::int8_t, kMaxNotes> intervals_{};
     std::uint8_t count_ = 0;
     std::optional<ChordQuality> quality_;

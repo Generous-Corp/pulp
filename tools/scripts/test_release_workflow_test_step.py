@@ -719,6 +719,14 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
             run_block,
         )
         self.assertIn(
+            "[ \"$path\" = tools/scripts/sdk_capability_handoff.py ]",
+            run_block,
+        )
+        self.assertIn(
+            "[ \"$path\" = tools/scripts/json_schema_lite.py ]",
+            run_block,
+        )
+        self.assertIn(
             "[ \"$path\" = tools/cmake/PulpSdkProvenance.cmake ]",
             run_block,
         )
@@ -941,6 +949,10 @@ class SingleOwnerReleasePublication(unittest.TestCase):
         self.assertIn(
             'selected["inspector_sdk_floor"] = '
             'authoritative["inspector_sdk_floor"]',
+            run_block,
+        )
+        self.assertIn(
+            'selected["capability_handoff_floor"] = authoritative[',
             run_block,
         )
         self.assertIn(

@@ -44,6 +44,7 @@
 /// - Allocation-free `process_block()` after `prepare()`.
 /// - Streaming state survives buffer-size changes without click.
 
+#include <pulp/signal/mirrored_history_buffer.hpp>
 #include <pulp/signal/windowed_sinc_design.hpp>
 
 #include <algorithm>
@@ -161,15 +162,11 @@ public:
         }
         taps_per_phase_ = taps_per_phase;
 
-        // Pre-size delay lines so we never allocate in the hot path. Each line is
-        // DOUBLE the tap count: every input sample is written at both `write_pos`
-        // and `write_pos + taps` (a mirror), so the most-recent-`taps` window is
-        // always a contiguous physical span. The convolution then reads it with a
-        // plain pointer walk instead of a per-tap wrap branch — same taps in the
-        // same order (bit-identical), but branch-free and vectorizable.
-        delays_.assign(channels_, std::vector<SampleType>(taps_per_phase * 2u,
-                                                         SampleType{0.0f}));
-        write_pos_.assign(channels_, 0u);
+        // Each channel owns a fixed-capacity mirrored history, so the complete
+        // oldest-to-newest tap span stays contiguous at every write position.
+        delays_.clear();
+        delays_.resize(channels_);
+        for (auto& delay : delays_) delay.prepare(taps_per_phase);
 
         // Output scratch — worst-case output count for a max-size input block.
         const double ratio = output_rate_ / input_rate_;
@@ -197,8 +194,7 @@ public:
     /// concurrently with `process_*` — call from the audio thread
     /// between blocks, or while bypassed.
     void reset() {
-        for (auto& d : delays_) std::fill(d.begin(), d.end(), SampleType{0.0f});
-        std::fill(write_pos_.begin(), write_pos_.end(), 0u);
+        for (auto& delay : delays_) delay.reset();
         phase_acc_ = 0.0;
     }
 
@@ -230,15 +226,7 @@ public:
                     return {out_n, input_consumed};
                 }
                 for (std::size_t c = 0; c < channels_; ++c) {
-                    auto& d = delays_[c];
-                    const SampleType xs = input[c][input_consumed];
-                    // Mirror-write at `wp` and `wp + taps` so the read window stays
-                    // contiguous (see the convolution below).
-                    d[write_pos_[c]] = xs;
-                    d[write_pos_[c] + taps_per_phase_] = xs;
-                    // write_pos_ stays in [0, taps), so a compare-and-reset is the
-                    // same result as the modulo without the per-input-sample divide.
-                    if (++write_pos_[c] >= taps_per_phase_) write_pos_[c] = 0u;
+                    delays_[c].push(input[c][input_consumed]);
                 }
                 ++input_consumed;
                 phase_acc_ -= 1.0;
@@ -255,8 +243,7 @@ public:
             if (p1 >= L) { p1 = p0; frac = 0.0; }
 
             for (std::size_t c = 0; c < channels_; ++c) {
-                const auto& d = delays_[c];
-                const std::size_t wp = write_pos_[c];
+                const auto window = delays_[c].window();
                 const auto& ph0 = phases_[p0];
                 const auto& ph1 = phases_[p1];
 
@@ -273,7 +260,7 @@ public:
                 // error sits ~69 dB below the filter's stopband floor (the
                 // "float reassociation stays below the stopband" test asserts it),
                 // far under any audible or spec-relevant level.
-                const SampleType* win = &d[wp]; // window = win[0 .. taps-1], oldest→newest
+                const SampleType* win = window.data();
                 const std::size_t T = taps_per_phase_;
                 SampleType a0 = SampleType{0.0f};
                 SampleType a1 = SampleType{0.0f};
@@ -379,9 +366,8 @@ private:
     std::vector<std::vector<SampleType>> phases_;
     std::size_t taps_per_phase_ = 0;
 
-    // Per-channel circular delay line + write head.
-    std::vector<std::vector<SampleType>> delays_;
-    std::vector<std::size_t> write_pos_;
+    // Per-channel contiguous oldest-to-newest sample history.
+    std::vector<MirroredHistoryBuffer<SampleType>> delays_;
 
     // Per-channel scratch — not used directly by process_block but
     // kept available so future block-process variants can drain into

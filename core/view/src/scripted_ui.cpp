@@ -145,6 +145,17 @@ LogCallback ScriptedUiSession::engine_log_callback() {
 }
 
 ScriptedUiSession::~ScriptedUiSession() {
+    // A caller that evaluated and never pumped a frame still owes the realm
+    // reset. Destroying the session destroys the realm either way, so this is
+    // not what contains the evaluated code — it is what stops a reset FAILURE
+    // from being silently dropped by a session that never reached a frame.
+    // reset_after_runtime_evaluation() logs and quarantines on failure.
+    try {
+        (void)inspector_bridge_.run_pending_post_evaluation_reset();
+    } catch (...) {
+        // Destructors must not throw. The reset itself is already contained;
+        // this covers the allocation the drain does around it.
+    }
     // Detach so a blocked off-thread evaluate wakes with a "detached" result
     // and no later pump touches the engine being destroyed. NOTE: this wakes a
     // *blocked* waiter but does not join a background thread mid-interrupt()/
@@ -269,6 +280,16 @@ bool ScriptedUiSession::reload_from(std::filesystem::path script_path, std::stri
 }
 
 bool ScriptedUiSession::poll(std::string* error) {
+    // A completed Runtime.evaluate owes a realm reset. Discharge it first, at
+    // the top of the frame: before this frame's bridge pump could execute a
+    // timer, animation frame, Promise job, or patched callback the evaluated
+    // code left behind, and before this frame's request pump can queue another
+    // evaluation. Reconstructing here rather than inside evaluate() is what
+    // lets a caller keep the widget pointers it held across the request until
+    // it returns to its run loop; the containment is identical, because
+    // nothing evaluated reaches a frame on either schedule.
+    const auto pending_reset_error =
+        inspector_bridge_.run_pending_post_evaluation_reset();
     // Destruction of the realm retired by the previous inspector pump may call
     // platform hosts or user-supplied widget releasers. Run it before this
     // frame's request pump, never inside the previous response deadline.
@@ -315,6 +336,13 @@ bool ScriptedUiSession::poll(std::string* error) {
     // outside the Runtime.evaluate response fence (even if the realm stayed
     // quarantined).
     store_.flush_deferred_gesture_releases();
+    // Reported here rather than from evaluate(), which now returns before the
+    // reset has been attempted. The fail-closed path is unchanged: the reset
+    // already quarantined the partial realm and detached the engine.
+    if (!pending_reset_error.empty()) {
+        if (error) *error = "evaluated realm reset failed: " + pending_reset_error;
+        return false;
+    }
     if (runtime_realm_quarantined_)
         return false;
     bool changed = false;

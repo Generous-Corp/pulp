@@ -57,3 +57,57 @@ TEST_CASE("PulpMpeSynth allocates voices from an MpeBuffer", "[example][mpe]") {
     for (int i = 0; i < 64; ++i) peak = std::max(peak, std::abs(left[i]));
     REQUIRE(peak > 0.0f);
 }
+
+TEST_CASE("PulpMpeSynth clears allocator ownership on release and reset",
+          "[example][mpe][lifecycle]") {
+    Processor p;
+    state::StateStore store;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    format::PrepareContext pctx;
+    pctx.sample_rate = 48000;
+    pctx.max_buffer_size = 16;
+    pctx.output_channels = 1;
+    p.prepare(pctx);
+
+    midi::MpeBuffer buf;
+    midi::MpeNoteState note{};
+    note.active = true;
+    note.channel = 1;
+    note.note = 60;
+    note.velocity = 100;
+    note.note_id = 1;
+    REQUIRE(buf.add({0, Kind::NoteOn, note}));
+    p.set_mpe_input(&buf);
+
+    float samples[16]{};
+    float* channels[1] = {samples};
+    audio::BufferView<float> out(channels, 1, 16);
+    audio::BufferView<const float> in(nullptr, 0, 16);
+    midi::MidiBuffer midi_in, midi_out;
+    format::ProcessContext ctx;
+    ctx.sample_rate = 48000;
+    ctx.num_samples = 16;
+
+    p.process(out, in, midi_in, midi_out, ctx);
+    REQUIRE(p.allocator().active_count() == 1);
+    p.release();
+    REQUIRE(p.allocator().active_count() == 0);
+
+    note.note_id = 2;
+    buf.clear();
+    REQUIRE(buf.add({0, Kind::NoteOn, note}));
+    p.process(out, in, midi_in, midi_out, ctx);
+    REQUIRE(p.allocator().active_count() == 1);
+
+    buf.clear();
+    ctx.transport_jump = true;
+    p.process(out, in, midi_in, midi_out, ctx);
+    REQUIRE(p.allocator().active_count() == 1);
+
+    ctx.transport_jump = false;
+    ctx.reset_requested = true;
+    p.process(out, in, midi_in, midi_out, ctx);
+    REQUIRE(p.allocator().active_count() == 0);
+}

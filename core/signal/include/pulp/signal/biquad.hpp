@@ -23,6 +23,23 @@ struct BiquadCoefficientsT {
 
 using BiquadCoefficients = BiquadCoefficientsT<float>;
 
+/// Return whether a normalized real biquad's poles are strictly inside the
+/// unit circle. Non-finite coefficients fail the comparisons and are rejected.
+template <typename SampleType>
+inline bool biquad_is_stable(const BiquadCoefficientsT<SampleType>& c) noexcept {
+    // Jury criterion for z^2 + a1*z + a2 with real coefficients.
+    if (!(std::abs(c.a2) < SampleType{1}))
+        return false;
+
+    // FastTwoSum is exact here because |1| >= |a2|. Keep the residual so a
+    // rounded bound equal to |a1| still observes the strict real inequality.
+    const SampleType rounded_bound = SampleType{1} + c.a2;
+    const SampleType bound_error = c.a2 - (rounded_bound - SampleType{1});
+    const SampleType a1_magnitude = std::abs(c.a1);
+    return a1_magnitude < rounded_bound
+        || (a1_magnitude == rounded_bound && bound_error > SampleType{0});
+}
+
 // Biquad IIR filter — standard second-order section.
 // RT contract: coefficient calculation and process/reset paths allocate no
 // memory. Retune coefficients at a block boundary if parameter continuity
