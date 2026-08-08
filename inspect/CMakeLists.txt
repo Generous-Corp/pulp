@@ -80,6 +80,14 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS)
     target_compile_definitions(pulp-control-broker PRIVATE
         PULP_CONTROL_SDK_VERSION="${PROJECT_VERSION}")
     target_link_libraries(pulp-control-broker PRIVATE pulp::inspect-control)
+    if(PULP_BUILD_TESTS)
+        find_program(_pulp_control_broker_codesign codesign REQUIRED)
+        add_custom_command(TARGET pulp-control-broker POST_BUILD
+            COMMAND "${_pulp_control_broker_codesign}" --force --sign -
+                    "$<TARGET_FILE:pulp-control-broker>"
+            COMMENT "Ad-hoc signing control broker"
+            VERBATIM)
+    endif()
     install(TARGETS pulp-control-broker
         RUNTIME DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/pulp)
 endif()

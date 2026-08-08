@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <condition_variable>
 #include <cstring>
 #include <mutex>
@@ -28,6 +29,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #if defined(__APPLE__)
+#include <mach-o/dyld.h>
 #include <TargetConditionals.h>
 #if !TARGET_OS_IPHONE
 #include <sys/acl.h>
@@ -57,8 +59,40 @@ bool endpoint_accepts_connections(const std::filesystem::path& endpoint) {
     return true;
 }
 
+bool stale_observer_name(std::string_view name) {
+    constexpr std::string_view prefix = "bo-";
+    constexpr std::string_view suffix = ".sock";
+    if (!name.starts_with(prefix) || !name.ends_with(suffix) ||
+        name.size() != prefix.size() + 16 + suffix.size()) {
+        return false;
+    }
+    const auto nonce = name.substr(prefix.size(), 16);
+    return std::ranges::all_of(nonce, [](unsigned char character) {
+        return std::isxdigit(character) != 0;
+    });
+}
+
+bool remove_stale_observer_sockets(const std::filesystem::path& runtime_directory) {
+    std::error_code error;
+    for (std::filesystem::directory_iterator iterator(runtime_directory, error), end;
+         !error && iterator != end; iterator.increment(error)) {
+        const auto& entry = *iterator;
+        if (!stale_observer_name(entry.path().filename().string()))
+            continue;
+        const auto status = entry.symlink_status(error);
+        if (error)
+            return false;
+        if (status.type() == std::filesystem::file_type::socket)
+            (void)std::filesystem::remove(entry.path(), error);
+        if (error)
+            return false;
+    }
+    return !error;
+}
+
 std::optional<ControlPeerEvidence>
-observe_current_broker(const std::filesystem::path& observer_endpoint) {
+observe_current_broker(const std::filesystem::path& observer_endpoint,
+                       const ControlTrustedHostStaticExpectation& static_identity) {
     events::InterprocessConnectionServer observer;
     std::mutex mutex;
     std::condition_variable ready;
@@ -85,11 +119,39 @@ observe_current_broker(const std::filesystem::path& observer_endpoint) {
             return std::nullopt;
         }
     }
-    auto evidence = observe_control_peer(*accepted, ControlPeerRole::TrustedHostBridge);
+    const auto credentials = accepted->local_peer_credentials();
+    std::optional<ControlPeerEvidence> evidence;
+    if (credentials && credentials->process_id == ::getpid() &&
+        credentials->process_generation_id != 0) {
+        evidence = ControlPeerEvidence{
+            .role = ControlPeerRole::TrustedHostBridge,
+            .user_id = "uid:" + std::to_string(credentials->user_id),
+            .process_id = credentials->process_id,
+            .process_start_id =
+                "pidversion:" + std::to_string(credentials->process_generation_id),
+            .executable_identity = static_identity.executable_identity,
+            .publisher_id = static_identity.publisher_id,
+        };
+    }
     client.disconnect();
     accepted.reset();
     observer.stop();
     return evidence;
+}
+
+std::filesystem::path current_process_executable() {
+#if defined(__APPLE__)
+    std::uint32_t size = 0;
+    (void)_NSGetExecutablePath(nullptr, &size);
+    std::vector<char> buffer(size);
+    if (size == 0 || _NSGetExecutablePath(buffer.data(), &size) != 0)
+        return {};
+    std::error_code error;
+    const auto path = std::filesystem::weakly_canonical(buffer.data(), error);
+    return error ? std::filesystem::path{} : path;
+#else
+    return {};
+#endif
 }
 
 std::filesystem::path current_user_home_directory() {
@@ -237,6 +299,8 @@ struct ControlBrokerDaemon::Impl {
     std::unique_ptr<ControlEndpointEnrollmentContext> enrollment_context;
     std::unique_ptr<ControlTrustedHostInventory> trusted_inventory;
     std::unique_ptr<ControlTrustedHostLauncher> trusted_launcher;
+    std::mutex launched_hosts_mutex;
+    std::vector<std::unique_ptr<platform::ChildProcess>> launched_hosts;
     std::unique_ptr<ControlService> service;
     std::unique_ptr<ControlEndpoint> carrier;
 
@@ -244,6 +308,10 @@ struct ControlBrokerDaemon::Impl {
         if (carrier)
             carrier->stop();
         carrier.reset();
+        {
+            std::lock_guard lock(launched_hosts_mutex);
+            launched_hosts.clear();
+        }
         service.reset();
         trusted_launcher.reset();
         enrollment_context.reset();
@@ -293,6 +361,10 @@ struct ControlBrokerDaemon::Impl {
             reset();
             return false;
         }
+        if (!remove_stale_observer_sockets(runtime_directory)) {
+            reset();
+            return false;
+        }
         if (!prepare_control_state_directory(state_directory)) {
             reset();
             return false;
@@ -330,13 +402,22 @@ struct ControlBrokerDaemon::Impl {
             reset();
             return false;
         }
-        std::optional<ControlTrustedHostStaticExpectation> daemon_identity;
-        if (!config.executable_path.empty())
-            daemon_identity = detail::inspect_static_code_identity(config.executable_path);
-        if (!config.executable_path.empty() && !daemon_identity) {
+        const auto actual_executable = current_process_executable();
+        const auto broker_static_identity =
+            detail::inspect_static_code_identity(actual_executable);
+        std::error_code executable_error;
+        const auto configured_executable = config.executable_path.empty()
+                                               ? std::filesystem::path{}
+                                               : std::filesystem::weakly_canonical(
+                                                     config.executable_path, executable_error);
+        if (actual_executable.empty() || !broker_static_identity || executable_error ||
+            (!configured_executable.empty() && configured_executable != actual_executable)) {
             reset();
             return false;
         }
+        const auto daemon_identity = config.executable_path.empty()
+                                         ? std::optional<ControlTrustedHostStaticExpectation>{}
+                                         : broker_static_identity;
         std::vector<ControlTrustedHostStaticExpectation> trusted_clients;
         if (daemon_identity) {
             const auto broker_directory = config.executable_path.parent_path();
@@ -357,7 +438,15 @@ struct ControlBrokerDaemon::Impl {
             reset();
             return false;
         }
-        const auto broker_peer = observe_current_broker(runtime_directory / "broker-observer.sock");
+        const auto observer_nonce = runtime::secure_random_bytes(8);
+        if (!observer_nonce) {
+            reset();
+            return false;
+        }
+        const auto broker_peer = observe_current_broker(
+            runtime_directory /
+                ("bo-" + runtime::hex_encode(*observer_nonce) + ".sock"),
+            *broker_static_identity);
         if (!broker_peer) {
             reset();
             return false;
@@ -424,6 +513,35 @@ struct ControlBrokerDaemon::Impl {
                         : std::function<std::optional<std::string>(
                               const ControlPeerEvidence&)>{},
                 .decide_consent = config.decide_consent,
+                .trusted_hosts =
+                    {
+                        .prepare = [this](const ControlTrustedHostLaunchIntent& intent) {
+                            return trusted_inventory
+                                       ? trusted_inventory->prepare(intent)
+                                       : ControlTrustedHostInventoryPrepareResult{};
+                        },
+                        .launch = [this](std::string_view inventory_id) {
+                            if (!trusted_launcher)
+                                return ControlTrustedHostManagementLaunchResult{};
+                            platform::ProcessOptions options;
+                            options.capture_stdout = false;
+                            options.capture_stderr = false;
+                            auto result = trusted_launcher->launch(inventory_id, std::move(options));
+                            ControlTrustedHostManagementLaunchResult management_result{
+                                .status = result.status,
+                                .explanation = std::move(result.explanation),
+                            };
+                            if (result.launched()) {
+                                std::lock_guard lock(launched_hosts_mutex);
+                                std::erase_if(launched_hosts,
+                                              [](const auto& process) {
+                                                  return !process->is_running();
+                                              });
+                                launched_hosts.push_back(std::move(result.process));
+                            }
+                            return management_result;
+                        },
+                    },
             },
             host_router.get(), enrollment_context.get(), broker.get());
         if (!carrier->start()) {
@@ -459,21 +577,6 @@ const std::filesystem::path& ControlBrokerDaemon::endpoint_path() const noexcept
 
 const std::filesystem::path& ControlBrokerDaemon::state_directory() const noexcept {
     return impl_->state_directory;
-}
-
-ControlTrustedHostInventoryPrepareResult
-ControlBrokerDaemon::prepare_trusted_host(const ControlTrustedHostLaunchIntent& intent) {
-    if (!is_running() || !impl_->trusted_inventory)
-        return {};
-    return impl_->trusted_inventory->prepare(intent);
-}
-
-ControlTrustedHostLaunchResult
-ControlBrokerDaemon::launch_trusted_host(std::string_view inventory_id,
-                                         platform::ProcessOptions options) {
-    if (!is_running() || !impl_->trusted_launcher)
-        return {};
-    return impl_->trusted_launcher->launch(inventory_id, std::move(options));
 }
 
 } // namespace pulp::inspect

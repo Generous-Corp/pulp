@@ -8,10 +8,12 @@
 #include <pulp/inspect/control_client_connection.hpp>
 #include <pulp/inspect/control_operations.hpp>
 #include <pulp/inspect/control_protocol.hpp>
+#include <pulp/platform/child_process.hpp>
 #include <pulp/runtime/crypto.hpp>
 
 #include <chrono>
 #include <condition_variable>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -23,7 +25,11 @@
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
+#include <signal.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
+#include <unistd.h>
 #endif
 
 using namespace std::chrono_literals;
@@ -319,19 +325,11 @@ TEST_CASE("installed daemon composes host enrollment routing execution and resta
 
     const auto broker_executable = current_executable();
     REQUIRE_FALSE(broker_executable.empty());
-    const auto install = root.path / "install";
-    REQUIRE(std::filesystem::create_directory(install));
-    const auto installed_broker = install / "pulp-control-broker";
-    const auto installed_client = install / "pulp";
-    std::filesystem::copy_file(broker_executable, installed_broker);
-    std::filesystem::copy_file(broker_executable, installed_client);
-    ::chmod(installed_broker.c_str(), 0700);
-    ::chmod(installed_client.c_str(), 0700);
     ControlBrokerDaemonConfig config{
         .runtime_root = root.runtime,
         .state_root = root.state,
         .sdk_version = "0.795.2-test",
-        .executable_path = installed_broker,
+        .executable_path = broker_executable,
         .process_generation = 91,
         .decide_consent =
             [](const VerifiedControlPeerIdentity&, const ControlGrantRequest&) {
@@ -344,23 +342,6 @@ TEST_CASE("installed daemon composes host enrollment routing execution and resta
 
     const auto registration_path = root.path / "registration";
     const auto stop_path = root.path / "stop";
-    const auto prepared = daemon.prepare_trusted_host({
-        .executable = host_executable,
-        .arguments = {registration_path.string(), stop_path.string()},
-        .working_directory = source,
-        .host_tier = ControlHostTier::Standalone,
-    });
-    INFO(control_trusted_host_inventory_status_id(prepared.status));
-    REQUIRE(prepared.ticket);
-    pulp::platform::ProcessOptions options;
-    options.timeout_ms = 15'000;
-    auto launched = daemon.launch_trusted_host(prepared.ticket->inventory_id, options);
-    INFO(control_trusted_host_launch_status_id(launched.status));
-    INFO(launched.explanation);
-    REQUIRE(launched.launched());
-    const ControlRegistrationId registration_id{wait_for_registration(registration_path)};
-    REQUIRE(registration_id);
-
     ControlClientConnection connection({.endpoint_path = daemon.endpoint_path(),
                                         .expected_broker_executable = broker_executable});
     REQUIRE(connection.connect());
@@ -370,6 +351,30 @@ TEST_CASE("installed daemon composes host enrollment routing execution and resta
     const auto enrollment_data = choc::json::parse(enrolled.data_json);
     const auto client_id = std::string(enrollment_data["client_id"].getString());
     REQUIRE_FALSE(client_id.empty());
+
+    auto prepare_params = choc::value::createObject("");
+    prepare_params.addMember("executable", choc::value::createString(host_executable.string()));
+    auto arguments = choc::value::createEmptyArray();
+    arguments.addArrayElement(choc::value::createString(registration_path.string()));
+    arguments.addArrayElement(choc::value::createString(stop_path.string()));
+    prepare_params.addMember("arguments", arguments);
+    prepare_params.addMember("working_directory", choc::value::createString(source.string()));
+    prepare_params.addMember("host_tier", choc::value::createString("standalone"));
+    const auto prepared =
+        connection.manage("host-prepare", choc::json::toString(prepare_params, false));
+    INFO(prepared.explanation);
+    REQUIRE(prepared.status_id == "prepared");
+    const auto inventory_id =
+        std::string(choc::json::parse(prepared.data_json)["inventory_id"].getString());
+    REQUIRE_FALSE(inventory_id.empty());
+    auto launch_params = choc::value::createObject("");
+    launch_params.addMember("inventory_id", choc::value::createString(inventory_id));
+    const auto launched =
+        connection.manage("host-launch", choc::json::toString(launch_params, false));
+    INFO(launched.explanation);
+    REQUIRE(launched.status_id == "launched");
+    const ControlRegistrationId registration_id{wait_for_registration(registration_path)};
+    REQUIRE(registration_id);
 
     const auto inventory = connection.manage("instances");
     REQUIRE(inventory.status_id == "completed");
@@ -415,37 +420,159 @@ TEST_CASE("installed daemon composes host enrollment routing execution and resta
     CHECK((dispatched.response->state == ControlReceiptState::Completed ||
            dispatched.response->result_code == ControlResultCode::NotBuilt));
 
-    const auto pending = daemon.prepare_trusted_host({
-        .executable = host_executable,
-        .arguments = {registration_path.string(), stop_path.string()},
-        .working_directory = source,
-        .host_tier = ControlHostTier::Standalone,
-    });
-    REQUIRE(pending.ticket);
+    const auto pending =
+        connection.manage("host-prepare", choc::json::toString(prepare_params, false));
+    REQUIRE(pending.status_id == "prepared");
+    const auto pending_id =
+        std::string(choc::json::parse(pending.data_json)["inventory_id"].getString());
     connection.disconnect();
     daemon.stop();
 
     config.process_generation = 92;
     ControlBrokerDaemon restarted{config};
     REQUIRE(restarted.start());
-    CHECK(restarted.launch_trusted_host(pending.ticket->inventory_id).status ==
-          ControlTrustedHostLaunchStatus::InventoryUnavailable);
     ControlClientConnection after_restart({.endpoint_path = restarted.endpoint_path(),
                                            .expected_broker_executable = broker_executable});
     REQUIRE(after_restart.connect());
     REQUIRE(after_restart.manage("enroll").status_id == "accepted");
+    auto stale_launch_params = choc::value::createObject("");
+    stale_launch_params.addMember("inventory_id", choc::value::createString(pending_id));
+    CHECK(after_restart
+              .manage("host-launch", choc::json::toString(stale_launch_params, false))
+              .status_id == "inventory_unavailable");
     const auto empty_inventory = after_restart.manage("instances");
     REQUIRE(empty_inventory.status_id == "completed");
     CHECK(choc::json::parse(empty_inventory.data_json)["instances"].size() == 0);
     after_restart.disconnect();
 
-    std::ofstream(stop_path) << "stop";
-    const auto process = launched.process->wait();
-    INFO(process.stderr_output);
-    CHECK(process.exit_code == 0);
     restarted.stop();
 #else
     SUCCEED("installed daemon host composition is currently macOS-only");
+#endif
+}
+
+TEST_CASE("installed daemon process authenticates host launch and recovers after crash",
+          "[inspect][control][daemon][host][process][restart][security]") {
+#ifdef __APPLE__
+    DaemonRoot root;
+    const auto source = root.path / "process-source";
+    REQUIRE(std::filesystem::create_directory(source));
+    ::chmod(source.c_str(), 0700);
+    const auto host_executable = source / "trusted-host";
+    std::filesystem::copy_file(PULP_CONTROL_TRUSTED_HOST_E2E_FIXTURE, host_executable);
+    ::chmod(host_executable.c_str(), 0700);
+    {
+        std::ofstream manifest(host_executable.string() + ".inspector-capabilities.json");
+        manifest << kHostManifest;
+    }
+    ::chmod((host_executable.string() + ".inspector-capabilities.json").c_str(), 0600);
+
+    const std::filesystem::path installed_broker{PULP_CONTROL_BROKER_DAEMON};
+    REQUIRE(std::filesystem::exists(installed_broker));
+
+    REQUIRE(std::filesystem::create_directory(root.runtime));
+    ::chmod(root.runtime.c_str(), 0700);
+    const auto process_runtime = default_control_runtime_directory(root.runtime);
+    REQUIRE(std::filesystem::create_directory(process_runtime));
+    ::chmod(process_runtime.c_str(), 0700);
+    std::ofstream(process_runtime / "broker-observer.sock") << "stale crash residue";
+    const auto stale_observer = process_runtime / "bo-0000000000000000.sock";
+    const int stale_socket = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    REQUIRE(stale_socket >= 0);
+    sockaddr_un stale_address{};
+    stale_address.sun_family = AF_UNIX;
+    const auto stale_path = stale_observer.string();
+    REQUIRE(stale_path.size() < sizeof(stale_address.sun_path));
+    std::memcpy(stale_address.sun_path, stale_path.c_str(), stale_path.size() + 1);
+    REQUIRE(::bind(stale_socket, reinterpret_cast<const sockaddr*>(&stale_address),
+                   sizeof(stale_address)) == 0);
+    REQUIRE(::close(stale_socket) == 0);
+    REQUIRE(std::filesystem::exists(stale_observer));
+
+    const std::vector<std::string> daemon_arguments{
+        "PULP_CONTROL_BROKER_RUNTIME_ROOT=" + root.runtime.string(),
+        "PULP_CONTROL_BROKER_STATE_ROOT=" + root.state.string(),
+        installed_broker.string(),
+    };
+    pulp::platform::ProcessOptions daemon_options;
+    daemon_options.capture_stdout = true;
+    daemon_options.capture_stderr = true;
+    pulp::platform::ChildProcess daemon_process;
+    REQUIRE(daemon_process.start("/usr/bin/env", daemon_arguments, daemon_options));
+
+    const auto endpoint = default_control_endpoint_path(root.runtime);
+    std::unique_ptr<ControlClientConnection> connection;
+    for (unsigned attempt = 0; attempt < 10'000 && !connection; ++attempt) {
+        auto candidate = std::make_unique<ControlClientConnection>(
+            ControlClientConnectionConfig{.endpoint_path = endpoint,
+                                          .expected_broker_executable = installed_broker});
+        if (candidate->connect())
+            connection = std::move(candidate);
+        else
+            std::this_thread::sleep_for(1ms);
+    }
+    REQUIRE(connection);
+    CHECK_FALSE(std::filesystem::exists(stale_observer));
+    CHECK(connection->manage("host-prepare", "{}").status_id == "session-required");
+    REQUIRE(connection->manage("enroll").status_id == "accepted");
+
+    const auto registration_path = root.path / "process-registration";
+    const auto stop_path = root.path / "process-stop";
+    auto prepare_params = choc::value::createObject("");
+    prepare_params.addMember("executable", choc::value::createString(host_executable.string()));
+    auto arguments = choc::value::createEmptyArray();
+    arguments.addArrayElement(choc::value::createString(registration_path.string()));
+    arguments.addArrayElement(choc::value::createString(stop_path.string()));
+    prepare_params.addMember("arguments", arguments);
+    prepare_params.addMember("working_directory", choc::value::createString(source.string()));
+    prepare_params.addMember("host_tier", choc::value::createString("standalone"));
+    const auto prepared =
+        connection->manage("host-prepare", choc::json::toString(prepare_params, false));
+    INFO(prepared.explanation);
+    REQUIRE(prepared.status_id == "prepared");
+    const auto inventory_id =
+        std::string(choc::json::parse(prepared.data_json)["inventory_id"].getString());
+    auto launch_params = choc::value::createObject("");
+    launch_params.addMember("inventory_id", choc::value::createString(inventory_id));
+    const auto launched =
+        connection->manage("host-launch", choc::json::toString(launch_params, false));
+    INFO(launched.explanation);
+    REQUIRE(launched.status_id == "launched");
+    REQUIRE(ControlRegistrationId{wait_for_registration(registration_path)});
+    const auto inventory = connection->manage("instances");
+    REQUIRE(inventory.status_id == "completed");
+    REQUIRE(choc::json::parse(inventory.data_json)["instances"].size() == 1);
+    connection->disconnect();
+
+    REQUIRE(::kill(daemon_process.process_id(), SIGKILL) == 0);
+    const auto crashed = daemon_process.wait();
+    CHECK(crashed.exit_code != 0);
+
+    pulp::platform::ChildProcess restarted_process;
+    REQUIRE(restarted_process.start("/usr/bin/env", daemon_arguments, daemon_options));
+    std::unique_ptr<ControlClientConnection> restarted;
+    for (unsigned attempt = 0; attempt < 10'000 && !restarted; ++attempt) {
+        auto candidate = std::make_unique<ControlClientConnection>(
+            ControlClientConnectionConfig{.endpoint_path = endpoint,
+                                          .expected_broker_executable = installed_broker});
+        if (candidate->connect())
+            restarted = std::move(candidate);
+        else
+            std::this_thread::sleep_for(1ms);
+    }
+    REQUIRE(restarted);
+    REQUIRE(restarted->manage("enroll").status_id == "accepted");
+    const auto empty_inventory = restarted->manage("instances");
+    REQUIRE(empty_inventory.status_id == "completed");
+    CHECK(choc::json::parse(empty_inventory.data_json)["instances"].size() == 0);
+    restarted->disconnect();
+
+    std::ofstream(stop_path) << "stop";
+    restarted_process.cancel();
+    const auto stopped = restarted_process.wait();
+    INFO(stopped.stderr_output);
+#else
+    SUCCEED("installed daemon process hosting is currently macOS-only");
 #endif
 }
 
