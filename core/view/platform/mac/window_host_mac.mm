@@ -2388,17 +2388,15 @@ private:
         tracker_.invalidate_all();
     }
 
-    // A backing-scale (DPI) change at the SAME logical size — display move or
-    // hotplug — updates the layer's contentsScale/drawableSize but does not go
-    // through windowDidResize/handle_resize. Under partial repaint the retained
-    // scene is a FIXED-size buffer, so if the physical size changes underneath
-    // it, the 1:1 blit would leave an undefined region where the drawable grew
-    // (and the clip would mis-snap). Recreate the GPU surfaces + scene at the new
-    // physical size and force a full repaint. Gated on the flag: with partial
-    // repaint OFF the always-fresh drawable wrap already tracks the drawable, so
-    // this is a no-op and flag-off behavior is unchanged.
+    // A backing-scale (DPI) change at the SAME logical size — display move,
+    // hotplug, or the initial attachment of a view created before its window —
+    // updates the layer's contentsScale/drawableSize but does not go through
+    // windowDidResize/handle_resize. Both the GPU surface and Skia surface were
+    // configured at the previous scale, regardless of repaint mode. Recreate
+    // them at the new physical size and force a full repaint; otherwise a 1x
+    // first frame occupies only the top-left of a 2x Retina drawable until a
+    // manual window resize happens to resync the surfaces.
     void handle_backing_change() {
-        if (!partial_repaint_enabled_) return;
         if (!gpu_surface_ || !skia_surface_) return;
         const float scale = static_cast<float>(metal_view_.metalLayer.contentsScale);
         if (scale == configured_scale_ || scale <= 0.0f) return;  // no real change
