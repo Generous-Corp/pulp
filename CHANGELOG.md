@@ -8,6 +8,29 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07940"></a>
+## [0.794.0] - 2026-08-08
+
+- release/version bump ([#7241](https://github.com/Generous-Corp/pulp/pull/7241))
+- phase/capability control carrier 20260807 ([#7235](https://github.com/Generous-Corp/pulp/pull/7235))
+
+<a id="v07930"></a>
+## [0.793.0] - 2026-08-08
+
+- release/version bump ([#7237](https://github.com/Generous-Corp/pulp/pull/7237))
+- release/version bump ([#7236](https://github.com/Generous-Corp/pulp/pull/7236))
+- feature/program request sample rate 20260801 ([#6989](https://github.com/Generous-Corp/pulp/pull/6989))
+- feature/worktree lineage session warning 20260806 ([#7221](https://github.com/Generous-Corp/pulp/pull/7221))
+- test/corpus manifests assert values ([#6974](https://github.com/Generous-Corp/pulp/pull/6974))
+- feature/stochastic sources 20260805 ([#7193](https://github.com/Generous-Corp/pulp/pull/7193))
+
+<a id="v07920"></a>
+## [0.792.0] - 2026-08-08
+
+- release/version bump ([#7232](https://github.com/Generous-Corp/pulp/pull/7232))
+- release/post tag sync v0.791.0 ebcb0caba20b ([#7233](https://github.com/Generous-Corp/pulp/pull/7233))
+- phase/capability control protocol ledger 20260806 ([#7222](https://github.com/Generous-Corp/pulp/pull/7222))
+
 <a id="v07910"></a>
 ## [0.791.0] - 2026-08-07
 
@@ -7518,6 +7541,9 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.794.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.794.0
+[0.793.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.793.0
+[0.792.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.792.0
 [0.791.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.791.0
 [0.790.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.790.2
 [0.790.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.790.1
