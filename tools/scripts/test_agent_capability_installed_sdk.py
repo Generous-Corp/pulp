@@ -6,10 +6,12 @@ import argparse
 import copy
 import importlib.util
 import json
+import os
 import pathlib
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 
 import json_schema_lite
@@ -30,10 +32,46 @@ MAINTENANCE_ONLY = {
     "legacy-unreviewed-baseline.json",
     "contract-history.json",
 }
+IMPLICIT_BUILD_PATH_VARIABLES = {
+    "C_INCLUDE_PATH",
+    "CPLUS_INCLUDE_PATH",
+    "CPATH",
+    "CFLAGS",
+    "CXXFLAGS",
+    "LDFLAGS",
+    "LIBRARY_PATH",
+    "LD_LIBRARY_PATH",
+    "DYLD_LIBRARY_PATH",
+    "DYLD_FALLBACK_LIBRARY_PATH",
+    "OBJC_INCLUDE_PATH",
+    "OBJCPLUS_INCLUDE_PATH",
+    "PKG_CONFIG_PATH",
+    "PKG_CONFIG_LIBDIR",
+    "CMAKE_PREFIX_PATH",
+}
 
 
-def run(command: list[str], *, cwd: pathlib.Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, cwd=cwd, text=True, capture_output=True)
+def isolated_environment(source: dict[str, str] | None = None) -> dict[str, str]:
+    """Remove ambient compiler/linker search paths from installed-SDK proofs."""
+    environment = dict(os.environ if source is None else source)
+    for name in IMPLICIT_BUILD_PATH_VARIABLES:
+        environment.pop(name, None)
+    return environment
+
+
+def run(
+    command: list[str],
+    *,
+    cwd: pathlib.Path,
+    environment: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        cwd=cwd,
+        text=True,
+        capture_output=True,
+        env=isolated_environment(environment),
+    )
 
 
 def cache_value(cache: str, name: str) -> str | None:
@@ -535,6 +573,27 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory(prefix="pulp-installed-capability-") as temp:
         root = pathlib.Path(temp)
+        contaminated_environment = {
+            **os.environ,
+            **{name: str(source_root) for name in IMPLICIT_BUILD_PATH_VARIABLES},
+        }
+        environment_probe = run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import os,sys; names=sys.argv[1:]; "
+                    "raise SystemExit(any(name in os.environ for name in names))"
+                ),
+                *sorted(IMPLICIT_BUILD_PATH_VARIABLES),
+            ],
+            cwd=root,
+            environment=contaminated_environment,
+        )
+        if environment_probe.returncode != 0:
+            raise AssertionError(
+                "installed consumer subprocess retained an implicit build path override"
+            )
         prefix = root / "sdk"
         install_command = [args.cmake, "--install", str(build_dir)]
         if configuration:
@@ -907,7 +966,7 @@ def main() -> int:
 
     print(
         "agent-capabilities-installed-sdk: "
-        f"15 negative/install controls and {proofs} independent capability/binding "
+        f"16 negative/install controls and {proofs} independent capability/binding "
         f"configure-build-run proofs passed with {generator or 'default generator'} "
         f"in {configuration or 'the default single configuration'}"
     )

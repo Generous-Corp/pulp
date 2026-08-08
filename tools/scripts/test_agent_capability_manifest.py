@@ -13,6 +13,7 @@ import tempfile
 
 import agent_capability_manifest as manifest
 import agent_capability_surface as surface
+import agent_capability_transaction as transaction
 import json_schema_lite
 
 
@@ -368,6 +369,34 @@ def exercise_evolution(canonical: dict) -> int:
         ),
         "changed without a contract_version increase",
     )
+    checks += 1
+
+    with tempfile.TemporaryDirectory(prefix="pulp-agent-transaction-") as temp:
+        root = pathlib.Path(temp)
+        journal = root / "transaction.json"
+        outputs = {
+            root / "manifest.json": "new manifest\n",
+            root / "surface.json": "new surface\n",
+            root / "history.json": "new history\n",
+            root / "fixture.cpp": "new fixture\n",
+        }
+        for path in outputs:
+            path.write_text("old\n")
+        try:
+            transaction.write_transaction(outputs, journal, interrupt_after=2)
+        except transaction.SimulatedInterruption:
+            pass
+        else:
+            raise AssertionError("transaction interruption control did not interrupt")
+        assert journal.is_file()
+        assert {path.read_text() for path in outputs} == {
+            "old\n",
+            "new manifest\n",
+            "new surface\n",
+        }
+        assert transaction.recover_transaction(journal)
+        assert not journal.exists()
+        assert all(path.read_text() == expected for path, expected in outputs.items())
     checks += 1
 
     for field, weakened in (

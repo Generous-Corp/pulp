@@ -32,7 +32,16 @@ pulp_add_test_suite(pulp-test-mpe-tracker-per-note-management LIBRARIES pulp::mi
 
 # Bounded MIDI utility kernels + their existing-audio-contract bridge
 pulp_add_test_suite(pulp-test-midi-utility-kernels
-    SOURCES test_midi_utility_kernels.cpp harness/rt_allocation_probe.cpp
+    SOURCES test_midi_utility_routing.cpp
+    LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-midi-utility-note-length
+    SOURCES test_midi_utility_note_length.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-midi-utility-monophonic
+    SOURCES test_midi_utility_monophonic.cpp
+    LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-midi-utility-controller
+    SOURCES test_midi_utility_controller.cpp
     LIBRARIES pulp::midi)
 pulp_add_test_suite(pulp-test-midi-arpeggiator
     SOURCES test_midi_arpeggiator.cpp harness/rt_allocation_probe.cpp
