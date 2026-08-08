@@ -2080,6 +2080,50 @@ long history of capabilities whose caller had no caller.
 drive it with `simulate_click` / `simulate_drag` and assert the document's values survive, not that
 the view's internal state changed.
 
+### What "never a projection object" actually forbids
+
+Read literally the rule above would bar `TickProjection` and `PitchProjection`, and the piano roll
+consumes both. The line is not between a struct of floats and a class: it is between **resolved
+values and viewport policy**. A type that owns zoom, scroll position, or a device-pixel ratio — and
+therefore has to be kept in sync with the shell — is what a view must not hold. A `TickProjection`
+is a visible tick range plus a pixel span, and a `PitchProjection` is an inclusive pitch range plus
+a pixel span; neither decides anything, so handing one over is the same act as handing over
+`origin_tick` + `px_per_tick`, with the arithmetic named once instead of twice.
+
+Prefer consuming them. The arranger minted its own scalars and left both projections with no
+consumer outside their own test, which is how a capability ends up shipped and unused.
+
+### Note editing is a whole-content replacement, so the gesture shape is part of the design
+
+A note edit lowers to `ReplaceNoteContent`, which carries both note arrays. That makes the gesture
+bracket a design decision rather than a detail:
+
+- **Commit on release** — one `GesturePhase::Single` intent per edit. The session closes it on
+  admission and it becomes evictable, so a session takes any number of them.
+- **A continuous `Begin`/`Update`/.../`End` drag** coalesces into a group that stays open, and an
+  open group is evictable by nothing, so it dies partway through with `ConflictCode::UndoFull`.
+
+`lower_note_edit_intent` therefore refuses a non-Single phase with
+`NoteLoweringError::ContinuousGestureUnsupported` instead of emitting a transaction that fails
+mid-gesture. Serving a continuous drag needs granular note commands, not a different lowering of
+this one.
+
+The lowering takes the clip's **current note array as a parameter** rather than looking a project
+up. That keeps it pure for the same reason the clip lowering is pure, and it turns a stale view into
+a named refusal (`ExpectedNoteMismatch`) instead of a reducer conflict the caller has to decode.
+
+### Two traps when building a note-editing surface
+
+- **A fresh note identity must be at or above `project.next_item_id()`.** `plan_identity_insert`
+  rejects anything below it as `IdentityNotAvailable`, even for an id nothing has ever used. This is
+  why an insert gesture takes its identity from a caller-supplied factory: a view genuinely cannot
+  mint one, and the model enforces it rather than trusting the convention.
+- **`TickProjection::tick_at` clamps to the visible end**, so a gesture that reads its result can
+  never produce a tick past the viewport. A trailing-edge resize therefore stops exactly at the
+  clip end and needs no bounds refusal, while a *move* still can leave the clip, because the grab
+  offset is subtracted after the clamp. A bounds check written against the resize path alone is
+  unreachable code that looks like safety.
+
 ## Scope boundary
 
 This subsystem owns authored take/comp state, durable launch scenes, slots, and
