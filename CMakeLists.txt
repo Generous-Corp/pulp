@@ -518,6 +518,37 @@ if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/mcp)
 endif()
 
+# The Phase 15 aggregate exercises the real CLI and MCP binaries, so define it
+# only after both tool subdirectories have had a chance to create their targets.
+# CPU-only and embedded configurations intentionally omit this process-level
+# test while retaining the transport-free control suites under test/.
+if(PULP_BUILD_TESTS AND APPLE AND NOT IOS AND NOT PULP_IOS
+   AND TARGET pulp-cli AND TARGET pulp-mcp)
+    add_executable(pulp-test-control-phase15-aggregate-e2e
+        test/test_control_phase15_aggregate_e2e.cpp
+        ${CMAKE_SOURCE_DIR}/inspect/src/control_broker_daemon.cpp)
+    target_include_directories(pulp-test-control-phase15-aggregate-e2e PRIVATE
+        ${CMAKE_SOURCE_DIR}/inspect/src)
+    target_link_libraries(pulp-test-control-phase15-aggregate-e2e PRIVATE
+        pulp::inspect-client Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-control-phase15-aggregate-e2e PRIVATE
+        PULP_CONTROL_TRUSTED_HOST_E2E_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-e2e-fixture>"
+        PULP_CONTROL_PHASE15_CLI="$<TARGET_FILE:pulp-cli>"
+        PULP_CONTROL_PHASE15_MCP="$<TARGET_FILE:pulp-mcp>")
+    set_target_properties(pulp-test-control-phase15-aggregate-e2e PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/phase15-control-aggregate/bin")
+    add_dependencies(pulp-test-control-phase15-aggregate-e2e
+        pulp-control-trusted-host-e2e-fixture pulp-cli pulp-mcp)
+    find_program(_pulp_phase15_codesign codesign REQUIRED)
+    add_custom_command(TARGET pulp-test-control-phase15-aggregate-e2e POST_BUILD
+        COMMAND "${_pulp_phase15_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-test-control-phase15-aggregate-e2e>"
+        COMMENT "Signing the Phase 15 aggregate process fixture"
+        VERBATIM)
+    catch_discover_tests(pulp-test-control-phase15-aggregate-e2e
+        PROPERTIES LABELS "inspect;control;e2e;phase15;aggregate;cli;mcp")
+endif()
+
 # ── Screenshot Tool ────────────────────────────────────────────────────────
 if(PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/screenshot)

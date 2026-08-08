@@ -370,28 +370,6 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS)
     catch_discover_tests(pulp-test-control-broker-daemon
         PROPERTIES LABELS "inspect;control;carrier;daemon")
 
-    add_executable(pulp-test-control-phase15-aggregate-e2e
-        test_control_phase15_aggregate_e2e.cpp
-        ${CMAKE_SOURCE_DIR}/inspect/src/control_broker_daemon.cpp)
-    target_include_directories(pulp-test-control-phase15-aggregate-e2e PRIVATE
-        ${CMAKE_SOURCE_DIR}/inspect/src)
-    target_link_libraries(pulp-test-control-phase15-aggregate-e2e PRIVATE
-        pulp::inspect-client Catch2::Catch2WithMain)
-    target_compile_definitions(pulp-test-control-phase15-aggregate-e2e PRIVATE
-        PULP_CONTROL_TRUSTED_HOST_E2E_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-e2e-fixture>"
-        PULP_CONTROL_PHASE15_CLI="$<TARGET_FILE:pulp-cli>"
-        PULP_CONTROL_PHASE15_MCP="$<TARGET_FILE:pulp-mcp>")
-    set_target_properties(pulp-test-control-phase15-aggregate-e2e PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/phase15-control-aggregate/bin")
-    add_dependencies(pulp-test-control-phase15-aggregate-e2e
-        pulp-control-trusted-host-e2e-fixture pulp-cli pulp-mcp)
-    add_custom_command(TARGET pulp-test-control-phase15-aggregate-e2e POST_BUILD
-        COMMAND "${_pulp_daemon_test_codesign}" --force --sign -
-                "$<TARGET_FILE:pulp-test-control-phase15-aggregate-e2e>"
-        COMMENT "Signing the Phase 15 aggregate process fixture"
-        VERBATIM)
-    catch_discover_tests(pulp-test-control-phase15-aggregate-e2e
-        PROPERTIES LABELS "inspect;control;e2e;phase15;aggregate;cli;mcp")
 endif()
 
 add_executable(pulp-test-control-grants test_control_grants.cpp)
