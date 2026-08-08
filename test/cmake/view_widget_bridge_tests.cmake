@@ -337,13 +337,20 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS)
     target_link_libraries(pulp-test-control-broker-daemon PRIVATE
         pulp::inspect-client Catch2::Catch2WithMain)
     target_compile_definitions(pulp-test-control-broker-daemon PRIVATE
-        PULP_CONTROL_TRUSTED_HOST_E2E_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-e2e-fixture>")
+        PULP_CONTROL_TRUSTED_HOST_E2E_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-e2e-fixture>"
+        PULP_CONTROL_BROKER_DAEMON="$<TARGET_FILE:pulp-control-broker>")
     add_dependencies(pulp-test-control-broker-daemon
-        pulp-control-trusted-host-e2e-fixture)
+        pulp-control-trusted-host-e2e-fixture pulp-control-broker)
     find_program(_pulp_daemon_test_codesign codesign REQUIRED)
     add_custom_command(TARGET pulp-test-control-broker-daemon POST_BUILD
         COMMAND "${_pulp_daemon_test_codesign}" --force --sign -
                 "$<TARGET_FILE:pulp-test-control-broker-daemon>"
+        COMMAND "${CMAKE_COMMAND}" -E copy
+                "$<TARGET_FILE:pulp-test-control-broker-daemon>"
+                "$<TARGET_FILE_DIR:pulp-test-control-broker-daemon>/pulp"
+        COMMAND "${CMAKE_COMMAND}" -E copy
+                "$<TARGET_FILE:pulp-test-control-broker-daemon>"
+                "$<TARGET_FILE_DIR:pulp-control-broker>/pulp"
         COMMENT "Ad-hoc signing control broker daemon test"
         VERBATIM)
     catch_discover_tests(pulp-test-control-broker-daemon

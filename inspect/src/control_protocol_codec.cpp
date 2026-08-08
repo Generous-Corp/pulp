@@ -96,7 +96,7 @@ bool valid_session_open_result(const ControlSessionOpenResult& message) {
 
 bool valid_management_command(std::string_view command) {
     return command == "enroll" || command == "instances" || command == "grant-request" ||
-           command == "revoke";
+           command == "revoke" || command == "host-prepare" || command == "host-launch";
 }
 
 bool valid_management(const ControlManagementEnvelope& message) {

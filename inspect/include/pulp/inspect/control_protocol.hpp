@@ -131,9 +131,9 @@ struct ControlSessionOpenResult {
 };
 
 /// Finite broker-management family used by installed control adapters. The
-/// command is one of enroll, instances, grant-request, or revoke; params and
-/// data are bounded canonical JSON objects whose per-command shape is checked
-/// by the endpoint/client API.
+/// command is one of enroll, instances, grant-request, revoke, host-prepare, or
+/// host-launch; params and data are bounded canonical JSON objects whose
+/// per-command shape is checked by the endpoint/client API.
 struct ControlManagementEnvelope {
     std::string request_id;
     std::string command;

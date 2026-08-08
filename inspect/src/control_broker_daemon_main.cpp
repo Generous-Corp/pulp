@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <csignal>
+#include <cstdlib>
 #include <filesystem>
 #include <thread>
 #include <vector>
@@ -32,6 +33,11 @@ std::filesystem::path executable_path() {
     return error ? std::filesystem::path{} : path;
 }
 
+std::filesystem::path environment_path(const char* name) {
+    const auto* value = std::getenv(name);
+    return value != nullptr ? std::filesystem::path{value} : std::filesystem::path{};
+}
+
 } // namespace
 
 int main() {
@@ -39,6 +45,8 @@ int main() {
     std::signal(SIGTERM, request_stop);
 
     pulp::inspect::ControlBrokerDaemon daemon({
+        .runtime_root = environment_path("PULP_CONTROL_BROKER_RUNTIME_ROOT"),
+        .state_root = environment_path("PULP_CONTROL_BROKER_STATE_ROOT"),
         .sdk_version = PULP_CONTROL_SDK_VERSION,
         .executable_path = executable_path(),
     });

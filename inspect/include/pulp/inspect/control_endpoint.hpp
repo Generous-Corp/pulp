@@ -3,6 +3,7 @@
 #include <pulp/inspect/control_connection_admission.hpp>
 #include <pulp/inspect/control_host_enrollment.hpp>
 #include <pulp/inspect/control_service.hpp>
+#include <pulp/inspect/control_trusted_host_launcher.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -32,6 +33,17 @@ struct ControlEndpointEnrollmentContext {
 using ControlAdmissionConsumer =
     std::function<std::optional<ControlConnectionAdmission>(std::string_view admission_id)>;
 
+struct ControlTrustedHostManagementLaunchResult {
+    ControlTrustedHostLaunchStatus status = ControlTrustedHostLaunchStatus::InvalidConfiguration;
+    std::string explanation;
+};
+
+struct ControlTrustedHostManagement {
+    std::function<ControlTrustedHostInventoryPrepareResult(const ControlTrustedHostLaunchIntent&)>
+        prepare;
+    std::function<ControlTrustedHostManagementLaunchResult(std::string_view)> launch;
+};
+
 struct ControlEndpointConfig {
     std::filesystem::path endpoint_path;
     std::string sdk_version;
@@ -54,6 +66,9 @@ struct ControlEndpointConfig {
     std::function<ControlConsentDecision(const VerifiedControlPeerIdentity&,
                                          const ControlGrantRequest&)>
         decide_consent;
+    /// Typed broker-owned host launch seam. It remains unreachable until the
+    /// local peer has completed canonical client enrollment.
+    ControlTrustedHostManagement trusted_hosts;
 };
 
 /// OS-local carrier for one ControlService composition root.

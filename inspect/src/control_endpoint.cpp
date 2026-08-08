@@ -117,6 +117,55 @@ bool same_peer(const ControlPeerEvidence& left, const ControlPeerEvidence& right
            left.publisher_id == right.publisher_id;
 }
 
+bool has_only_members(const choc::value::Value& object,
+                      std::initializer_list<std::string_view> allowed) {
+    for (std::uint32_t index = 0; index < object.size(); ++index) {
+        const auto name = object.getObjectMemberAt(index).name;
+        if (std::ranges::find(allowed, name) == allowed.end())
+            return false;
+    }
+    return true;
+}
+
+std::optional<ControlTrustedHostLaunchIntent>
+trusted_host_intent_from_json(const choc::value::Value& params) {
+    if (!has_only_members(params, {"executable", "arguments", "working_directory", "host_tier"}) ||
+        !params.hasObjectMember("executable") || !params["executable"].isString() ||
+        !params.hasObjectMember("arguments") || !params["arguments"].isArray() ||
+        !params.hasObjectMember("working_directory") ||
+        !params["working_directory"].isString() || !params.hasObjectMember("host_tier") ||
+        !params["host_tier"].isString() || params["arguments"].size() > 128) {
+        return std::nullopt;
+    }
+    const auto executable = std::string(params["executable"].getString());
+    const auto working_directory = std::string(params["working_directory"].getString());
+    if (executable.size() > 4096 || working_directory.size() > 4096)
+        return std::nullopt;
+    ControlTrustedHostLaunchIntent intent{
+        .executable = executable,
+        .working_directory = working_directory,
+    };
+    std::size_t argument_bytes = 0;
+    for (std::uint32_t index = 0; index < params["arguments"].size(); ++index) {
+        const auto argument = params["arguments"][index];
+        if (!argument.isString())
+            return std::nullopt;
+        auto value = std::string(argument.getString());
+        argument_bytes += value.size();
+        if (argument_bytes > 64u * 1024u)
+            return std::nullopt;
+        intent.arguments.push_back(std::move(value));
+    }
+    const auto tier = params["host_tier"].getString();
+    if (tier == control_host_tier_id(ControlHostTier::Standalone))
+        intent.host_tier = ControlHostTier::Standalone;
+    else if (tier == control_host_tier_id(ControlHostTier::OfflineJob))
+        intent.host_tier = ControlHostTier::OfflineJob;
+    else
+        return std::nullopt;
+    return intent;
+}
+
 std::string service_request_id(const ControlEnvelope& envelope) {
     if (const auto* request = std::get_if<ControlRequestEnvelope>(&envelope.payload))
         return request->request_id;
@@ -565,6 +614,48 @@ struct ControlEndpoint::Impl {
         }
         if (!params.isObject()) {
             (void)reply("invalid-request", "{}", "management parameters must be an object");
+            return;
+        }
+        if (request.command == "host-prepare") {
+            if (!config.trusted_hosts.prepare) {
+                (void)reply("unavailable", "{}", "trusted host preparation is unavailable");
+                return;
+            }
+            const auto intent = trusted_host_intent_from_json(params);
+            if (!intent) {
+                (void)reply("invalid-request", "{}",
+                            "host-prepare requires a bounded exact launch intent");
+                return;
+            }
+            const auto prepared = config.trusted_hosts.prepare(*intent);
+            auto data = choc::value::createObject("");
+            if (prepared.ticket)
+                data.addMember("inventory_id",
+                               choc::value::createString(prepared.ticket->inventory_id));
+            data.addMember("schema", choc::value::createString("pulp.control.host-prepare.v1"));
+            (void)reply(std::string(control_trusted_host_inventory_status_id(prepared.status)),
+                        choc::json::toString(data, false));
+            return;
+        }
+        if (request.command == "host-launch") {
+            if (!config.trusted_hosts.launch || !has_only_members(params, {"inventory_id"}) ||
+                !params.hasObjectMember("inventory_id") ||
+                !params["inventory_id"].isString()) {
+                (void)reply("invalid-request", "{}",
+                            "host-launch requires one broker inventory id");
+                return;
+            }
+            const auto inventory_id = std::string(params["inventory_id"].getString());
+            if (inventory_id.empty() || inventory_id.size() > 256) {
+                (void)reply("invalid-request", "{}", "the inventory id is invalid");
+                return;
+            }
+            const auto launched = config.trusted_hosts.launch(inventory_id);
+            auto data = choc::value::createObject("");
+            data.addMember("inventory_id", choc::value::createString(inventory_id));
+            data.addMember("schema", choc::value::createString("pulp.control.host-launch.v1"));
+            (void)reply(std::string(control_trusted_host_launch_status_id(launched.status)),
+                        choc::json::toString(data, false), launched.explanation);
             return;
         }
         if (request.command == "revoke") {
