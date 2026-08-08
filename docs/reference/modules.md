@@ -239,8 +239,11 @@ client lineage, including artifact reads. The optional
 `pulp-control-broker` executable owns the per-user endpoint and currently
 serves bounded health requests only; authority-bearing admission remains
 fail-closed until signed launcher, host registration, consent, and execution
-adapters are connected. The legacy Inspector session/server is not exposed as
-a compatibility transport or second authority path.
+adapters are connected. Socket, singleton, and liveness state remain in the
+temporary owner-private runtime directory. Durable receipts and artifacts live
+separately under `~/.pulp/state/control-broker/v1`; stopping or uninstalling the
+service does not remove that state. The legacy Inspector session/server is not
+exposed as a compatibility transport or second authority path.
 Each service session must negotiate its own protocol version and mandatory
 receipt support. The broker validates operation input JSON before admission and
 successful output JSON before terminal completion. A started operation that
