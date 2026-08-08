@@ -1888,7 +1888,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
             // decode. Discard the partial stream and present a coordinated
             // empty/reset block instead of losing a release.
             self->mpe.reset();
-            self->midi_in.clear();
+            clear_midi_event_buffers(*self);
             self->ump_buffer.clear();
             (void)clap_phase_prepare_sidecars(self, false);
             self->reset_requested = true;

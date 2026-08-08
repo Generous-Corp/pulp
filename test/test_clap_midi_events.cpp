@@ -755,6 +755,7 @@ public:
     std::size_t observed_ump_count = 0;
     std::size_t observed_ump_capacity = 0;
     std::uint32_t observed_ump_drops = 0;
+    std::size_t observed_sysex_count = 0;
 
     PluginDescriptor descriptor() const override {
         PluginDescriptor d;
@@ -771,9 +772,10 @@ public:
     void prepare(const PrepareContext&) override {}
     void process(audio::BufferView<float>&,
                  const audio::BufferView<const float>&,
-                 midi::MidiBuffer&,
+                 midi::MidiBuffer& midi_in,
                  midi::MidiBuffer&,
                  const ProcessContext& context) override {
+        observed_sysex_count = midi_in.sysex_size();
         observed_reset_requested = context.reset_requested;
         observed_mpe_attached = mpe_input() != nullptr;
         observed_ump_attached = ump_input() != nullptr;
@@ -4225,6 +4227,14 @@ TEST_CASE("CLAP MPE sidecar reconciles after realtime expression overflow",
         in.push(ev);
     }
 
+    const std::array<uint8_t, 4> sysex_payload{0xF0, 0x7D, 0x01, 0xF7};
+    clap_event_midi_sysex_t sysex{};
+    sysex.header = make_header(sizeof(sysex), CLAP_EVENT_MIDI_SYSEX, 9);
+    sysex.port_index = 0;
+    sysex.buffer = sysex_payload.data();
+    sysex.size = static_cast<uint32_t>(sysex_payload.size());
+    in.push(sysex);
+
     REQUIRE(h.run(in) == CLAP_PROCESS_CONTINUE);
     REQUIRE(g_observing_sidecar != nullptr);
     REQUIRE(g_observing_sidecar->observed_mpe_attached);
@@ -4232,6 +4242,7 @@ TEST_CASE("CLAP MPE sidecar reconciles after realtime expression overflow",
             state::ParameterEventQueue::kCapacity);
     REQUIRE(g_observing_sidecar->observed_mpe_count == 0);
     REQUIRE(g_observing_sidecar->observed_mpe_drops == 0);
+    REQUIRE(g_observing_sidecar->observed_sysex_count == 0);
     REQUIRE(g_observing_sidecar->observed_reset_requested);
 }
 
