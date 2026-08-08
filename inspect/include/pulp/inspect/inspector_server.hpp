@@ -3,6 +3,7 @@
 #pragma once
 
 #include <pulp/inspect/discovery_publisher.hpp>
+#include <pulp/inspect/inspector_delivery.hpp>
 #include <pulp/inspect/main_thread_rpc.hpp>
 #include <pulp/inspect/protocol.hpp>
 #include <pulp/inspect/publication_binding.hpp>
@@ -73,19 +74,6 @@ struct InspectorServerConfig {
     // example Runtime.interrupt) while the first request is still in flight.
     std::vector<std::string> asynchronous_methods;
     std::size_t max_asynchronous_requests = 64;
-};
-
-/// Outcome of delivering one generation-scoped event to one authenticated
-/// transport client. Telemetry brokers use the lossy outcomes as debt carried
-/// into their next delivered sample; reliable overflow closes the client.
-enum class InspectorTargetedEventResult {
-    Queued,
-    QueuedAfterLossyEviction,
-    DroppedLossy,
-    ReliableOverflow,
-    ClientNotFound,
-    EventUnavailable,
-    MessageTooLarge,
 };
 
 /// TCP server exposing the inspector protocol to external tools.

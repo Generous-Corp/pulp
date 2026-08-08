@@ -1,7 +1,6 @@
 #pragma once
 
-#include <pulp/inspect/inspector_server.hpp>
-#include <pulp/inspect/session.hpp>
+#include <pulp/inspect/inspector_delivery.hpp>
 #include <pulp/view/value_channel_telemetry.hpp>
 
 #include <chrono>
@@ -19,10 +18,8 @@ namespace pulp::inspect {
 class ValueChannelTelemetryBroker {
   public:
     using Clock = std::function<std::chrono::steady_clock::time_point()>;
-    using EventSink = std::function<InspectorTargetedEventResult(
-        std::string_view client_id, const InspectorMessage& event, std::string_view loss_owner)>;
-    using EventRetirementSink = std::function<void(
-        std::string_view client_id, std::string_view loss_owner)>;
+    using EventSink = InspectorTargetedEventSink;
+    using EventRetirementSink = InspectorEventRetirementSink;
 
     struct Config {
         double default_rate_hz = 15.0;

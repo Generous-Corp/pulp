@@ -6,7 +6,6 @@
 
 #include <pulp/inspect/motion_scrubber.hpp>
 
-#include <pulp/inspect/inspector_server.hpp>
 #include <pulp/view/motion.hpp>
 
 #include <choc/text/choc_JSON.h>
@@ -15,6 +14,7 @@
 #include <cmath>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace pulp::inspect {
@@ -124,7 +124,8 @@ choc::value::Value event_to_params(const SampleEvent& e) {
 
 // ── ctor / dtor ──────────────────────────────────────────────────────
 
-MotionScrubber::MotionScrubber(InspectorServer* server) : server_(server) {}
+MotionScrubber::MotionScrubber(InspectorEventSink event_sink)
+    : event_sink_(std::move(event_sink)) {}
 
 MotionScrubber::~MotionScrubber() {
     std::lock_guard<std::mutex> lock(mtx_);
@@ -183,7 +184,7 @@ bool MotionScrubber::load_fixture(const std::string& path) {
 std::size_t MotionScrubber::scrub_to(std::uint64_t frame) {
     std::vector<view::motion::SampleEvent> snapshot;
     std::vector<SinkSlot> sinks_snapshot;
-    InspectorServer* server_snapshot = nullptr;
+    InspectorEventSink event_sink_snapshot;
     {
         std::lock_guard<std::mutex> lock(mtx_);
         if (!loaded_) return 0;
@@ -193,16 +194,16 @@ std::size_t MotionScrubber::scrub_to(std::uint64_t frame) {
             if (e.frame <= frame) snapshot.push_back(e);
         }
         sinks_snapshot = sinks_;
-        server_snapshot = server_;
+        event_sink_snapshot = event_sink_;
     }
-    dispatch_snapshot(snapshot, sinks_snapshot, server_snapshot);
+    dispatch_snapshot(snapshot, sinks_snapshot, event_sink_snapshot);
     return snapshot.size();
 }
 
 std::size_t MotionScrubber::play() {
     std::vector<view::motion::SampleEvent> snapshot;
     std::vector<SinkSlot> sinks_snapshot;
-    InspectorServer* server_snapshot = nullptr;
+    InspectorEventSink event_sink_snapshot;
     {
         std::lock_guard<std::mutex> lock(mtx_);
         if (!loaded_) return 0;
@@ -210,9 +211,9 @@ std::size_t MotionScrubber::play() {
         playhead_frame_ = max_frame_;
         snapshot = events_;
         sinks_snapshot = sinks_;
-        server_snapshot = server_;
+        event_sink_snapshot = event_sink_;
     }
-    dispatch_snapshot(snapshot, sinks_snapshot, server_snapshot);
+    dispatch_snapshot(snapshot, sinks_snapshot, event_sink_snapshot);
     return snapshot.size();
 }
 
@@ -265,24 +266,24 @@ view::motion::FixtureHeader MotionScrubber::header() const {
 
 // ── emission ────────────────────────────────────────────────────────
 
-// Dispatch a snapshot of events to the given sinks + server WITHOUT
+// Dispatch a snapshot of events to the given sinks + callback WITHOUT
 // holding mtx_. A sink that re-enters add_sink/remove_sink/scrub_to
 // (or any other MotionScrubber method) used to self-deadlock under
 // the old emit_prefix_locked design.
 void MotionScrubber::dispatch_snapshot(
     const std::vector<view::motion::SampleEvent>& events,
     const std::vector<SinkSlot>& sinks,
-    InspectorServer* server
+    const InspectorEventSink& event_sink
 ) {
     for (const auto& e : events) {
         for (const auto& slot : sinks) {
             if (slot.sink) slot.sink(e);
         }
-        if (server) {
+        if (event_sink) {
             auto params = event_to_params(e);
             InspectorMessage ev = make_event(event_method_for_kind(e.kind),
                                              choc::json::toString(params, false));
-            server->broadcast(ev);
+            event_sink(ev);
         }
     }
 }

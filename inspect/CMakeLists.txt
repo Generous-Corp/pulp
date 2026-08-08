@@ -154,7 +154,7 @@ target_include_directories(pulp-inspect-telemetry
         $<INSTALL_INTERFACE:include>)
 target_link_libraries(pulp-inspect-telemetry
     PUBLIC
-        pulp::inspect-runtime
+        pulp::inspect-protocol
         pulp::view-core)
 
 add_library(pulp-inspect-authoring src/tweak_store.cpp)

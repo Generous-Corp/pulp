@@ -2,14 +2,13 @@
 /// Catch2 integration tests for the inspector-side Motion.* domain.
 /// Drives MotionInspector::handle() with synthesized requests against
 /// a real View tree + FrameClock and asserts request/response shapes,
-/// trace registration, and event broadcasting through a captured
-/// InspectorServer broadcast sink.
+/// trace registration, and event delivery through a captured callback.
 
 #include <pulp/inspect/motion_inspector.hpp>
 #include <pulp/inspect/protocol.hpp>
-#include <pulp/inspect/inspector_server.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/motion.hpp>
+#include <pulp/view/motion_cost.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 
@@ -18,6 +17,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include <algorithm>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -25,7 +25,6 @@
 
 using Catch::Approx;
 using pulp::inspect::InspectorMessage;
-using pulp::inspect::InspectorServer;
 using pulp::inspect::MotionInspector;
 using pulp::inspect::make_request;
 using pulp::view::FrameClock;
@@ -42,6 +41,7 @@ namespace {
 struct Scaffold {
     Scaffold() {
         Coordinator::instance().reset();
+        pulp::view::motion::CostAttributor::instance().reset();
         Coordinator::instance().bind(clock);
 
         parent.set_bounds({ 10.f, 20.f, 400.f, 300.f });
@@ -66,6 +66,7 @@ struct Scaffold {
     ~Scaffold() {
         if (coord_sink_id) Coordinator::instance().remove_sink(coord_sink_id);
         Coordinator::instance().reset();
+        pulp::view::motion::CostAttributor::instance().reset();
     }
 
     FrameClock clock;
@@ -159,6 +160,41 @@ TEST_CASE("Ticking the clock samples the registered geometry trace", "[motion-in
     REQUIRE(start_n == 1);
     REQUIRE(sample_n == 1);
     REQUIRE(end_n == 1);
+}
+
+TEST_CASE("MotionInspector delivers live and cost events through its event sink",
+          "[motion-inspector][protocol]") {
+    Scaffold s;
+    std::vector<InspectorMessage> delivered;
+    MotionInspector mi(s.parent,
+                       [&](const InspectorMessage& event) { delivered.push_back(event); });
+
+    const std::string params = R"({
+        "view_name": "Delivered", "fps": 60,
+        "metrics": [{ "kind": "geometry", "name": "frame", "node_id": "card" }]
+    })";
+    REQUIRE_FALSE(mi.handle(make_request(1, "Motion.startTrace", params)).is_error);
+    REQUIRE_FALSE(mi.handle(make_request(2, "Motion.enableCost")).is_error);
+
+    s.clock.tick(1.0f / 60.0f);
+
+    const auto event =
+        std::find_if(delivered.begin(), delivered.end(), [](const InspectorMessage& candidate) {
+            return candidate.method == "Motion.sample";
+        });
+    REQUIRE(event != delivered.end());
+    const auto event_params = parse_obj(event->params_json);
+    CHECK(event_params["view_name"].getString() == "Delivered");
+    CHECK(event_params["metric_name"].getString() == "frame");
+
+    const auto cost =
+        std::find_if(delivered.begin(), delivered.end(), [](const InspectorMessage& candidate) {
+            return candidate.method == "Motion.cost";
+        });
+    REQUIRE(cost != delivered.end());
+    const auto cost_params = parse_obj(cost->params_json);
+    CHECK(cost_params.hasObjectMember("frame"));
+    CHECK(cost_params.hasObjectMember("active_trace_ids"));
 }
 
 // ── Stop trace removes the registration ───────────────────────────────

@@ -2,6 +2,7 @@
 
 #include <pulp/inspect/audit.hpp>
 #include <pulp/inspect/capabilities.hpp>
+#include <pulp/inspect/inspector_delivery.hpp>
 #include <pulp/inspect/protocol.hpp>
 #include <pulp/inspect/test_input.hpp>
 
@@ -127,17 +128,6 @@ struct InspectorSessionInfo {
     std::string instance_id;
     std::string plugin_id;
     std::string protocol_version = "1";
-};
-
-/// Authenticated transport identity attached to a domain request.
-///
-/// Domain handlers that own per-client state (for example, telemetry
-/// subscriptions) must key it from this context instead of trusting a client
-/// identifier supplied in request JSON.
-struct InspectorRequestContext {
-    /// Borrowed for the duration of the handler call; copy it when retaining
-    /// per-client state beyond the request.
-    std::string_view client_id;
 };
 
 /// Capability-enforcing dispatch facade. Transport supplies an authenticated
