@@ -6,6 +6,7 @@
 #include <array>
 #include <limits>
 #include <set>
+#include <type_traits>
 
 namespace pulp::inspect {
 namespace control_protocol_detail {
@@ -292,6 +293,38 @@ std::optional<std::string> control_request_hash(const ControlRequestEnvelope& re
     binding.push_back(';');
     binding.append(*params);
     return runtime::sha256_hex(binding);
+}
+
+bool control_envelope_allowed(const ControlEnvelope& envelope, ControlEnvelopeDirection direction) {
+    return std::visit(
+        [direction](const auto& payload) {
+            using T = std::decay_t<decltype(payload)>;
+            if constexpr (std::is_same_v<T, ControlHealthEnvelope>) {
+                return direction == ControlEnvelopeDirection::ClientToBroker ||
+                       direction == ControlEnvelopeDirection::HostToBroker;
+            } else if constexpr (std::is_same_v<T, ControlHealthResult> ||
+                                 std::is_same_v<T, ControlErrorEnvelope>) {
+                return direction == ControlEnvelopeDirection::BrokerToClient ||
+                       direction == ControlEnvelopeDirection::BrokerToHost;
+            } else if constexpr (std::is_same_v<T, ControlHostOpenEnvelope> ||
+                                 std::is_same_v<T, ControlHostProgressEnvelope> ||
+                                 std::is_same_v<T, ControlHostCompleteEnvelope>) {
+                return direction == ControlEnvelopeDirection::HostToBroker;
+            } else if constexpr (std::is_same_v<T, ControlHostOpenResult> ||
+                                 std::is_same_v<T, ControlHostExecuteEnvelope> ||
+                                 std::is_same_v<T, ControlHostCancelEnvelope>) {
+                return direction == ControlEnvelopeDirection::BrokerToHost;
+            } else if constexpr (std::is_same_v<T, ControlNegotiationOffer> ||
+                                 std::is_same_v<T, ControlRequestEnvelope> ||
+                                 std::is_same_v<T, ControlCancelEnvelope> ||
+                                 std::is_same_v<T, ControlSessionOpenEnvelope> ||
+                                 std::is_same_v<T, ControlArtifactReadEnvelope>) {
+                return direction == ControlEnvelopeDirection::ClientToBroker;
+            } else {
+                return direction == ControlEnvelopeDirection::BrokerToClient;
+            }
+        },
+        envelope.payload);
 }
 
 } // namespace pulp::inspect

@@ -806,3 +806,40 @@ TEST_CASE("progress codec strictly rejects invalid shape and bounds",
     invalid.detail_json = std::string(33u * 1024u, 'x');
     CHECK(encode_control_envelope(ControlEnvelope{.payload = invalid}).empty());
 }
+
+TEST_CASE("host control frames round trip and enforce role direction",
+          "[inspect][control-protocol][host]") {
+    const ControlEnvelope execute{.payload = ControlHostExecuteEnvelope{
+                                      .route_id = "route-1",
+                                      .receipt_id = "receipt-1",
+                                      .operation_id = "session.describe",
+                                      .operation_version = 1,
+                                      .deadline_unix_ms = 1786000000000,
+                                      .expected_state_generation = 9,
+                                      .params_json = R"({"scope":"host"})",
+                                  }};
+    const auto encoded = encode_control_envelope(execute);
+    REQUIRE_FALSE(encoded.empty());
+    const auto decoded = decode_control_envelope(encoded);
+    REQUIRE(decoded.has_value());
+    const auto* decoded_execute = std::get_if<ControlHostExecuteEnvelope>(&decoded->payload);
+    REQUIRE(decoded_execute != nullptr);
+    CHECK(decoded_execute->route_id == "route-1");
+    CHECK(decoded_execute->receipt_id == "receipt-1");
+    CHECK(decoded_execute->operation_id == "session.describe");
+    CHECK(decoded_execute->expected_state_generation == 9);
+    CHECK(control_envelope_allowed(execute, ControlEnvelopeDirection::BrokerToHost));
+    CHECK_FALSE(control_envelope_allowed(execute, ControlEnvelopeDirection::BrokerToClient));
+
+    const ControlEnvelope completed{.payload = ControlHostCompleteEnvelope{
+                                        .route_id = "route-1",
+                                        .terminal_state = ControlReceiptState::Completed,
+                                    }};
+    REQUIRE(decode_control_envelope(encode_control_envelope(completed)) == completed);
+    CHECK(control_envelope_allowed(completed, ControlEnvelopeDirection::HostToBroker));
+    CHECK_FALSE(control_envelope_allowed(completed, ControlEnvelopeDirection::ClientToBroker));
+
+    auto invalid = std::get<ControlHostCompleteEnvelope>(completed.payload);
+    invalid.result_code = ControlResultCode::InternalError;
+    CHECK(encode_control_envelope(ControlEnvelope{.payload = invalid}).empty());
+}
