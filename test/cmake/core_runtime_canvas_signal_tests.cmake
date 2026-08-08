@@ -224,8 +224,8 @@ pulp_add_test_suite(pulp-test-mirrored-history-buffer
     LIBRARIES pulp::signal)
 
 # Public signal headers are consumed by WAM/WebCLAP translation units compiled
-# without an exception runtime. This small executable makes any explicit
-# throw/try/catch in the new history surface a native compile failure too.
+# without an exception runtime. This small executable instantiates allocating
+# prepare paths so exception-only syntax in template bodies fails natively too.
 add_executable(pulp-test-signal-no-exceptions test_signal_no_exceptions.cpp)
 target_link_libraries(pulp-test-signal-no-exceptions PRIVATE pulp::signal)
 if(MSVC)
