@@ -4,6 +4,7 @@
 #include <pulp/music/harmony.hpp>
 #include <pulp/music/markov.hpp>
 #include <pulp/music/pattern.hpp>
+#include <pulp/music/pattern_development.hpp>
 #include <pulp/music/pitch.hpp>
 #include <pulp/music/rhythm_relationship.hpp>
 #include <pulp/music/spelling.hpp>
