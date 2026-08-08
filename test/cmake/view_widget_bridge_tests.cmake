@@ -378,6 +378,13 @@ target_link_libraries(pulp-test-control-main-thread-executor PRIVATE
 catch_discover_tests(pulp-test-control-main-thread-executor
     PROPERTIES LABELS "inspect;control;main-thread;executor")
 
+add_executable(pulp-test-control-trace-session-executor
+    test_control_trace_session_executor.cpp)
+target_link_libraries(pulp-test-control-trace-session-executor PRIVATE
+    pulp::inspect-runtime pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-trace-session-executor
+    PROPERTIES LABELS "inspect;control;main-thread;trace")
+
 add_executable(pulp-test-inspector-audit
     test_inspector_audit.cpp
     test_main_thread_rpc_timeout.cpp

@@ -79,6 +79,7 @@ file(WRITE "${_consumer_source}/main.cpp" [=[
 #include <pulp/inspect/control_host_preflight.hpp>
 #include <pulp/inspect/control_host_router.hpp>
 #include <pulp/inspect/control_main_thread_executor.hpp>
+#include <pulp/inspect/control_trace_session_executor.hpp>
 #include <pulp/inspect/control_operations.hpp>
 #include <pulp/inspect/control_protocol.hpp>
 #include <pulp/inspect/control_service.hpp>
@@ -158,7 +159,14 @@ int main() {
           pulp::inspect::ControlRegistrationId{"installed-registration"}};
   auto rpc = std::make_shared<pulp::inspect::InspectorMainThreadRpc>();
   pulp::inspect::ControlMainThreadExecutor main_thread_executor{rpc, {}};
-  const auto slot_installed = executor_slot.install(host_router.executor());
+  auto trace = std::make_shared<pulp::inspect::TraceInspector>();
+  auto trace_executor = pulp::inspect::ControlTraceSessionExecutor::create({
+      .main_thread_rpc = rpc,
+      .trace_inspector = trace,
+      .registration_id = pulp::inspect::ControlRegistrationId{"installed-registration"},
+  });
+  const auto slot_installed =
+      trace_executor && executor_slot.install(trace_executor->executor());
   pulp::inspect::ControlRequestEnvelope request;
   pulp::inspect::ControlAdmissionRequest admission;
   pulp::inspect::ControlOperationStoreConfig operations;
@@ -186,6 +194,7 @@ int main() {
              && !host_connection.is_connected()
              && enrollment_open.error_code == "invalid-host-open"
              && slot_installed
+             && trace_executor
              && std::holds_alternative<pulp::inspect::ControlHostConnectionPrincipal>(principal)
              && operations.max_receipts > 0
              && artifacts.maximum_blob_bytes > 0
