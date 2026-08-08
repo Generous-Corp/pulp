@@ -113,6 +113,23 @@ bool required_i64(ValueView value, std::string_view name, std::int64_t& out,
     return true;
 }
 
+bool required_bool(ValueView value, std::string_view name, bool& out,
+                   ControlProtocolDiagnostics& diagnostics) {
+    if (!value.hasObjectMember(name)) {
+        diagnostics = {ControlProtocolError::MissingField,
+                       "missing field '" + std::string(name) + "'"};
+        return false;
+    }
+    const auto field = value[name];
+    if (!field.isBool()) {
+        diagnostics = {ControlProtocolError::InvalidType,
+                       "field '" + std::string(name) + "' must be a boolean"};
+        return false;
+    }
+    out = field.getBool();
+    return true;
+}
+
 bool parse_features(ValueView value, std::string_view name, std::vector<std::string>& out,
                     ControlProtocolDiagnostics& diagnostics) {
     if (!value.hasObjectMember(name)) {
@@ -168,6 +185,224 @@ std::optional<Enum> enum_from_id(std::string_view id, const std::array<Enum, Siz
         if (to_id(value) == id)
             return value;
     return std::nullopt;
+}
+
+bool valid_base64(std::string_view value) {
+    if (value.size() > kControlMaximumArtifactChunkBase64Bytes || value.size() % 4 != 0)
+        return false;
+    const auto padding = value.ends_with("==") ? 2u : value.ends_with('=') ? 1u : 0u;
+    const auto content_size = value.size() - padding;
+    for (std::size_t index = 0; index < content_size; ++index) {
+        const auto c = static_cast<unsigned char>(value[index]);
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+              c == '+' || c == '/'))
+            return false;
+    }
+    return std::ranges::all_of(value.substr(content_size), [](char c) { return c == '='; });
+}
+
+bool valid_artifact_wire_metadata(const ControlArtifactWireMetadata& metadata) {
+    constexpr auto signed_max =
+        static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+    const std::array<std::string_view, 11> lineage{
+        metadata.broker_id,
+        metadata.receipt_id,
+        metadata.producer_client_id,
+        metadata.producer_registration_id,
+        metadata.session_id,
+        metadata.instance_id,
+        metadata.publication_id,
+        metadata.producer_capability_id,
+        metadata.producer_operation_id,
+        metadata.original_grant_id,
+        metadata.consent_decision_id,
+    };
+    return valid_token(metadata.artifact_id, kControlReceiptMaximumArtifactIdBytes) &&
+           std::ranges::all_of(lineage,
+                               [](std::string_view value) {
+                                   return valid_token(value,
+                                                      kControlMaximumArtifactMetadataFieldBytes);
+                               }) &&
+           metadata.producer_operation_version != 0 && valid_hash(metadata.manifest_digest) &&
+           valid_hash(metadata.producer_artifact_digest) && valid_hash(metadata.sha256) &&
+           metadata.byte_size <= signed_max && metadata.created_at_unix_ms != 0 &&
+           metadata.created_at_unix_ms <= signed_max && metadata.expires_at_unix_ms <= signed_max &&
+           metadata.expires_at_unix_ms > metadata.created_at_unix_ms &&
+           valid_token(metadata.content_type, kControlMaximumArtifactContentTypeBytes) &&
+           valid_token(metadata.sensitivity_id, kControlMaximumStatusIdBytes) &&
+           valid_token(metadata.deletion_state_id, kControlMaximumStatusIdBytes) &&
+           valid_token(metadata.redaction_state_id, kControlMaximumStatusIdBytes);
+}
+
+bool valid_session_open(const ControlSessionOpenEnvelope& message) {
+    return valid_token(message.request_id, kMaximumIdBytes) &&
+           valid_token(message.admission_id, kMaximumIdBytes);
+}
+
+bool valid_session_open_result(const ControlSessionOpenResult& message) {
+    if (!valid_token(message.request_id, kMaximumIdBytes) ||
+        !valid_text(message.explanation, kMaximumExplanationBytes))
+        return false;
+    if (message.accepted)
+        return valid_token(message.client_id, kMaximumIdBytes) && message.error_code.empty() &&
+               message.explanation.empty();
+    return message.client_id.empty() &&
+           valid_token(message.error_code, kControlMaximumErrorCodeBytes) &&
+           !message.explanation.empty();
+}
+
+bool valid_artifact_read(const ControlArtifactReadEnvelope& message) {
+    constexpr auto signed_max =
+        static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+    return valid_token(message.request_id, kMaximumIdBytes) &&
+           valid_token(message.artifact_id, kControlReceiptMaximumArtifactIdBytes) &&
+           message.offset <= signed_max && message.maximum_bytes > 0 &&
+           message.maximum_bytes <= kControlMaximumArtifactReadBytes;
+}
+
+bool valid_artifact_read_response(const ControlArtifactReadResponseEnvelope& message) {
+    return valid_token(message.request_id, kMaximumIdBytes) &&
+           valid_token(message.status_id, kControlMaximumStatusIdBytes) &&
+           (!message.metadata || valid_artifact_wire_metadata(*message.metadata)) &&
+           valid_base64(message.bytes_base64) &&
+           (message.bytes_base64.empty() || message.metadata.has_value()) &&
+           valid_text(message.explanation, kMaximumExplanationBytes);
+}
+
+bool valid_health(const ControlHealthEnvelope& message) {
+    return valid_token(message.request_id, kMaximumIdBytes);
+}
+
+bool valid_health_result(const ControlHealthResult& message) {
+    constexpr auto signed_max =
+        static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+    return valid_token(message.request_id, kMaximumIdBytes) &&
+           valid_token(message.sdk_version, kControlMaximumSdkVersionBytes) &&
+           message.protocol_versions.minimum != 0 &&
+           message.protocol_versions.minimum <= message.protocol_versions.maximum &&
+           valid_token(message.broker_id, kMaximumIdBytes) && message.process_generation != 0 &&
+           message.process_generation <= signed_max;
+}
+
+bool valid_error(const ControlErrorEnvelope& message) {
+    return valid_token(message.request_id, kMaximumIdBytes) &&
+           valid_token(message.error_code, kControlMaximumErrorCodeBytes) &&
+           !message.explanation.empty() &&
+           valid_text(message.explanation, kMaximumExplanationBytes);
+}
+
+choc::value::Value encode_artifact_wire_metadata(const ControlArtifactWireMetadata& metadata) {
+    auto value = choc::value::createObject("");
+    value.addMember("artifact_id", choc::value::createString(metadata.artifact_id));
+    value.addMember("broker_id", choc::value::createString(metadata.broker_id));
+    value.addMember("byte_size",
+                    choc::value::createInt64(static_cast<std::int64_t>(metadata.byte_size)));
+    value.addMember("consent_decision_id", choc::value::createString(metadata.consent_decision_id));
+    value.addMember("content_type", choc::value::createString(metadata.content_type));
+    value.addMember("created_at_unix_ms", choc::value::createInt64(static_cast<std::int64_t>(
+                                              metadata.created_at_unix_ms)));
+    value.addMember("deletion_state_id", choc::value::createString(metadata.deletion_state_id));
+    value.addMember("expires_at_unix_ms", choc::value::createInt64(static_cast<std::int64_t>(
+                                              metadata.expires_at_unix_ms)));
+    value.addMember("instance_id", choc::value::createString(metadata.instance_id));
+    value.addMember("manifest_digest", choc::value::createString(metadata.manifest_digest));
+    value.addMember("original_grant_id", choc::value::createString(metadata.original_grant_id));
+    value.addMember("producer_artifact_digest",
+                    choc::value::createString(metadata.producer_artifact_digest));
+    value.addMember("producer_capability_id",
+                    choc::value::createString(metadata.producer_capability_id));
+    value.addMember("producer_client_id", choc::value::createString(metadata.producer_client_id));
+    value.addMember("producer_operation_id",
+                    choc::value::createString(metadata.producer_operation_id));
+    value.addMember("producer_operation_version",
+                    choc::value::createInt64(metadata.producer_operation_version));
+    value.addMember("producer_registration_id",
+                    choc::value::createString(metadata.producer_registration_id));
+    value.addMember("publication_id", choc::value::createString(metadata.publication_id));
+    value.addMember("receipt_id", choc::value::createString(metadata.receipt_id));
+    value.addMember("redaction_state_id", choc::value::createString(metadata.redaction_state_id));
+    value.addMember("sensitivity_id", choc::value::createString(metadata.sensitivity_id));
+    value.addMember("session_id", choc::value::createString(metadata.session_id));
+    value.addMember("sha256", choc::value::createString(metadata.sha256));
+    return value;
+}
+
+bool decode_artifact_wire_metadata(ValueView value, ControlArtifactWireMetadata& metadata,
+                                   ControlProtocolDiagnostics& diagnostics) {
+    if (!only_fields(value,
+                     {"artifact_id",
+                      "broker_id",
+                      "byte_size",
+                      "consent_decision_id",
+                      "content_type",
+                      "created_at_unix_ms",
+                      "deletion_state_id",
+                      "expires_at_unix_ms",
+                      "instance_id",
+                      "manifest_digest",
+                      "original_grant_id",
+                      "producer_artifact_digest",
+                      "producer_capability_id",
+                      "producer_client_id",
+                      "producer_operation_id",
+                      "producer_operation_version",
+                      "producer_registration_id",
+                      "publication_id",
+                      "receipt_id",
+                      "redaction_state_id",
+                      "sensitivity_id",
+                      "session_id",
+                      "sha256"},
+                     diagnostics))
+        return false;
+    if (!required_string(value, "artifact_id", metadata.artifact_id,
+                         kControlReceiptMaximumArtifactIdBytes, diagnostics) ||
+        !required_string(value, "broker_id", metadata.broker_id,
+                         kControlMaximumArtifactMetadataFieldBytes, diagnostics) ||
+        !required_u64(value, "byte_size", metadata.byte_size, diagnostics) ||
+        !required_string(value, "consent_decision_id", metadata.consent_decision_id,
+                         kControlMaximumArtifactMetadataFieldBytes, diagnostics) ||
+        !required_string(value, "content_type", metadata.content_type,
+                         kControlMaximumArtifactContentTypeBytes, diagnostics) ||
+        !required_u64(value, "created_at_unix_ms", metadata.created_at_unix_ms, diagnostics) ||
+        !required_string(value, "deletion_state_id", metadata.deletion_state_id,
+                         kControlMaximumStatusIdBytes, diagnostics) ||
+        !required_u64(value, "expires_at_unix_ms", metadata.expires_at_unix_ms, diagnostics) ||
+        !required_string(value, "instance_id", metadata.instance_id,
+                         kControlMaximumArtifactMetadataFieldBytes, diagnostics) ||
+        !required_string(value, "manifest_digest", metadata.manifest_digest, 64, diagnostics) ||
+        !required_string(value, "original_grant_id", metadata.original_grant_id,
+                         kControlMaximumArtifactMetadataFieldBytes, diagnostics) ||
+        !required_string(value, "producer_artifact_digest", metadata.producer_artifact_digest, 64,
+                         diagnostics) ||
+        !required_string(value, "producer_capability_id", metadata.producer_capability_id,
+                         kControlMaximumArtifactMetadataFieldBytes, diagnostics) ||
+        !required_string(value, "producer_client_id", metadata.producer_client_id,
+                         kControlMaximumArtifactMetadataFieldBytes, diagnostics) ||
+        !required_string(value, "producer_operation_id", metadata.producer_operation_id,
+                         kControlMaximumArtifactMetadataFieldBytes, diagnostics) ||
+        !required_u32(value, "producer_operation_version", metadata.producer_operation_version,
+                      diagnostics) ||
+        !required_string(value, "producer_registration_id", metadata.producer_registration_id,
+                         kControlMaximumArtifactMetadataFieldBytes, diagnostics) ||
+        !required_string(value, "publication_id", metadata.publication_id,
+                         kControlMaximumArtifactMetadataFieldBytes, diagnostics) ||
+        !required_string(value, "receipt_id", metadata.receipt_id,
+                         kControlMaximumArtifactMetadataFieldBytes, diagnostics) ||
+        !required_string(value, "redaction_state_id", metadata.redaction_state_id,
+                         kControlMaximumStatusIdBytes, diagnostics) ||
+        !required_string(value, "sensitivity_id", metadata.sensitivity_id,
+                         kControlMaximumStatusIdBytes, diagnostics) ||
+        !required_string(value, "session_id", metadata.session_id,
+                         kControlMaximumArtifactMetadataFieldBytes, diagnostics) ||
+        !required_string(value, "sha256", metadata.sha256, 64, diagnostics))
+        return false;
+    if (!valid_artifact_wire_metadata(metadata)) {
+        diagnostics = {ControlProtocolError::InvalidValue,
+                       "artifact wire metadata fields are invalid"};
+        return false;
+    }
+    return true;
 }
 
 } // namespace
@@ -263,7 +498,7 @@ std::string encode_control_envelope(const ControlEnvelope& envelope) {
                                                   static_cast<std::int64_t>(message.sequence)));
                 payload.addMember(
                     "total", choc::value::createInt64(static_cast<std::int64_t>(message.total)));
-            } else {
+            } else if constexpr (std::is_same_v<T, ControlReceiptEnvelope>) {
                 valid = valid_receipt(message);
                 kind = "receipt";
                 if (!valid)
@@ -296,6 +531,77 @@ std::string encode_control_envelope(const ControlEnvelope& envelope) {
                                                control_retry_classification_id(message.retry)));
                 payload.addMember(
                     "state", choc::value::createString(control_receipt_state_id(message.state)));
+            } else if constexpr (std::is_same_v<T, ControlSessionOpenEnvelope>) {
+                valid = valid_session_open(message);
+                kind = "session-open";
+                if (!valid)
+                    return;
+                payload.addMember("admission_id", choc::value::createString(message.admission_id));
+                payload.addMember("request_id", choc::value::createString(message.request_id));
+            } else if constexpr (std::is_same_v<T, ControlSessionOpenResult>) {
+                valid = valid_session_open_result(message);
+                kind = "session-opened";
+                if (!valid)
+                    return;
+                payload.addMember("accepted", choc::value::createBool(message.accepted));
+                payload.addMember("client_id", choc::value::createString(message.client_id));
+                payload.addMember("error_code", choc::value::createString(message.error_code));
+                payload.addMember("explanation", choc::value::createString(message.explanation));
+                payload.addMember("request_id", choc::value::createString(message.request_id));
+            } else if constexpr (std::is_same_v<T, ControlArtifactReadEnvelope>) {
+                valid = valid_artifact_read(message);
+                kind = "artifact-read";
+                if (!valid)
+                    return;
+                payload.addMember("artifact_id", choc::value::createString(message.artifact_id));
+                payload.addMember(
+                    "maximum_bytes",
+                    choc::value::createInt64(static_cast<std::int64_t>(message.maximum_bytes)));
+                payload.addMember(
+                    "offset", choc::value::createInt64(static_cast<std::int64_t>(message.offset)));
+                payload.addMember("request_id", choc::value::createString(message.request_id));
+            } else if constexpr (std::is_same_v<T, ControlArtifactReadResponseEnvelope>) {
+                valid = valid_artifact_read_response(message);
+                kind = "artifact-read-response";
+                if (!valid)
+                    return;
+                payload.addMember("bytes_base64", choc::value::createString(message.bytes_base64));
+                payload.addMember("eof", choc::value::createBool(message.eof));
+                payload.addMember("explanation", choc::value::createString(message.explanation));
+                payload.addMember("metadata", message.metadata
+                                                  ? encode_artifact_wire_metadata(*message.metadata)
+                                                  : choc::value::Value{});
+                payload.addMember("request_id", choc::value::createString(message.request_id));
+                payload.addMember("status_id", choc::value::createString(message.status_id));
+            } else if constexpr (std::is_same_v<T, ControlHealthEnvelope>) {
+                valid = valid_health(message);
+                kind = "health";
+                if (!valid)
+                    return;
+                payload.addMember("request_id", choc::value::createString(message.request_id));
+            } else if constexpr (std::is_same_v<T, ControlHealthResult>) {
+                valid = valid_health_result(message);
+                kind = "health-result";
+                if (!valid)
+                    return;
+                payload.addMember("broker_id", choc::value::createString(message.broker_id));
+                payload.addMember("max_version",
+                                  choc::value::createInt64(message.protocol_versions.maximum));
+                payload.addMember("min_version",
+                                  choc::value::createInt64(message.protocol_versions.minimum));
+                payload.addMember("process_generation",
+                                  choc::value::createInt64(
+                                      static_cast<std::int64_t>(message.process_generation)));
+                payload.addMember("request_id", choc::value::createString(message.request_id));
+                payload.addMember("sdk_version", choc::value::createString(message.sdk_version));
+            } else if constexpr (std::is_same_v<T, ControlErrorEnvelope>) {
+                valid = valid_error(message);
+                kind = "error";
+                if (!valid)
+                    return;
+                payload.addMember("error_code", choc::value::createString(message.error_code));
+                payload.addMember("explanation", choc::value::createString(message.explanation));
+                payload.addMember("request_id", choc::value::createString(message.request_id));
             }
         },
         envelope.payload);
@@ -581,6 +887,144 @@ std::optional<ControlEnvelope> decode_control_envelope(std::string_view json,
                 return std::nullopt;
             }
             envelope.payload = std::move(receipt);
+        } else if (kind == "session-open") {
+            if (!only_fields(payload, {"admission_id", "request_id"}, error))
+                return std::nullopt;
+            ControlSessionOpenEnvelope message;
+            if (!required_string(payload, "request_id", message.request_id, kMaximumIdBytes,
+                                 error) ||
+                !required_string(payload, "admission_id", message.admission_id, kMaximumIdBytes,
+                                 error))
+                return std::nullopt;
+            if (!valid_session_open(message)) {
+                error = {ControlProtocolError::InvalidValue, "session-open fields are invalid"};
+                return std::nullopt;
+            }
+            envelope.payload = std::move(message);
+        } else if (kind == "session-opened") {
+            if (!only_fields(payload,
+                             {"accepted", "client_id", "error_code", "explanation", "request_id"},
+                             error))
+                return std::nullopt;
+            ControlSessionOpenResult result;
+            if (!required_string(payload, "request_id", result.request_id, kMaximumIdBytes,
+                                 error) ||
+                !required_bool(payload, "accepted", result.accepted, error) ||
+                !required_string(payload, "client_id", result.client_id, kMaximumIdBytes, error,
+                                 false) ||
+                !required_string(payload, "error_code", result.error_code,
+                                 kControlMaximumErrorCodeBytes, error, false) ||
+                !required_string(payload, "explanation", result.explanation,
+                                 kMaximumExplanationBytes, error, false))
+                return std::nullopt;
+            if (!valid_session_open_result(result)) {
+                error = {ControlProtocolError::InvalidValue,
+                         "session-open result fields are inconsistent"};
+                return std::nullopt;
+            }
+            envelope.payload = std::move(result);
+        } else if (kind == "artifact-read") {
+            if (!only_fields(payload, {"artifact_id", "maximum_bytes", "offset", "request_id"},
+                             error))
+                return std::nullopt;
+            ControlArtifactReadEnvelope message;
+            std::uint64_t maximum_bytes = 0;
+            if (!required_string(payload, "request_id", message.request_id, kMaximumIdBytes,
+                                 error) ||
+                !required_string(payload, "artifact_id", message.artifact_id,
+                                 kControlReceiptMaximumArtifactIdBytes, error) ||
+                !required_u64(payload, "offset", message.offset, error) ||
+                !required_u64(payload, "maximum_bytes", maximum_bytes, error))
+                return std::nullopt;
+            if (maximum_bytes > std::numeric_limits<std::size_t>::max()) {
+                error = {ControlProtocolError::LimitExceeded,
+                         "field 'maximum_bytes' exceeds the platform limit"};
+                return std::nullopt;
+            }
+            message.maximum_bytes = static_cast<std::size_t>(maximum_bytes);
+            if (!valid_artifact_read(message)) {
+                error = {ControlProtocolError::InvalidValue, "artifact-read fields are invalid"};
+                return std::nullopt;
+            }
+            envelope.payload = std::move(message);
+        } else if (kind == "artifact-read-response") {
+            if (!only_fields(
+                    payload,
+                    {"bytes_base64", "eof", "explanation", "metadata", "request_id", "status_id"},
+                    error))
+                return std::nullopt;
+            ControlArtifactReadResponseEnvelope response;
+            if (!required_string(payload, "request_id", response.request_id, kMaximumIdBytes,
+                                 error) ||
+                !required_string(payload, "status_id", response.status_id,
+                                 kControlMaximumStatusIdBytes, error) ||
+                !required_string(payload, "bytes_base64", response.bytes_base64,
+                                 kControlMaximumArtifactChunkBase64Bytes, error, false) ||
+                !required_bool(payload, "eof", response.eof, error) ||
+                !required_string(payload, "explanation", response.explanation,
+                                 kMaximumExplanationBytes, error, false))
+                return std::nullopt;
+            if (!payload.hasObjectMember("metadata")) {
+                error = {ControlProtocolError::MissingField, "missing field 'metadata'"};
+                return std::nullopt;
+            }
+            const auto metadata = payload["metadata"];
+            if (!metadata.isVoid()) {
+                ControlArtifactWireMetadata decoded_metadata;
+                if (!decode_artifact_wire_metadata(metadata, decoded_metadata, error))
+                    return std::nullopt;
+                response.metadata = std::move(decoded_metadata);
+            }
+            if (!valid_artifact_read_response(response)) {
+                error = {ControlProtocolError::InvalidValue,
+                         "artifact-read response fields are invalid"};
+                return std::nullopt;
+            }
+            envelope.payload = std::move(response);
+        } else if (kind == "health") {
+            if (!only_fields(payload, {"request_id"}, error))
+                return std::nullopt;
+            ControlHealthEnvelope message;
+            if (!required_string(payload, "request_id", message.request_id, kMaximumIdBytes, error))
+                return std::nullopt;
+            envelope.payload = std::move(message);
+        } else if (kind == "health-result") {
+            if (!only_fields(payload,
+                             {"broker_id", "max_version", "min_version", "process_generation",
+                              "request_id", "sdk_version"},
+                             error))
+                return std::nullopt;
+            ControlHealthResult result;
+            if (!required_string(payload, "request_id", result.request_id, kMaximumIdBytes,
+                                 error) ||
+                !required_string(payload, "sdk_version", result.sdk_version,
+                                 kControlMaximumSdkVersionBytes, error) ||
+                !required_u32(payload, "min_version", result.protocol_versions.minimum, error) ||
+                !required_u32(payload, "max_version", result.protocol_versions.maximum, error) ||
+                !required_string(payload, "broker_id", result.broker_id, kMaximumIdBytes, error) ||
+                !required_u64(payload, "process_generation", result.process_generation, error))
+                return std::nullopt;
+            if (!valid_health_result(result)) {
+                error = {ControlProtocolError::InvalidValue, "health result fields are invalid"};
+                return std::nullopt;
+            }
+            envelope.payload = std::move(result);
+        } else if (kind == "error") {
+            if (!only_fields(payload, {"error_code", "explanation", "request_id"}, error))
+                return std::nullopt;
+            ControlErrorEnvelope message;
+            if (!required_string(payload, "request_id", message.request_id, kMaximumIdBytes,
+                                 error) ||
+                !required_string(payload, "error_code", message.error_code,
+                                 kControlMaximumErrorCodeBytes, error) ||
+                !required_string(payload, "explanation", message.explanation,
+                                 kMaximumExplanationBytes, error, false))
+                return std::nullopt;
+            if (!valid_error(message)) {
+                error = {ControlProtocolError::InvalidValue, "error fields are invalid"};
+                return std::nullopt;
+            }
+            envelope.payload = std::move(message);
         } else {
             error = {ControlProtocolError::InvalidValue, "unknown control envelope kind"};
             return std::nullopt;

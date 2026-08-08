@@ -8,8 +8,18 @@
 #include "cli_common.hpp"
 #include "package_registry.hpp"
 
+#ifndef PULP_CLI_HAS_CONTROL_HEALTH
+#define PULP_CLI_HAS_CONTROL_HEALTH 0
+#endif
+
+#if PULP_CLI_HAS_CONTROL_HEALTH
+#include <pulp/inspect/control_carrier.hpp>
+#include <pulp/inspect/control_health.hpp>
+#endif
+
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -110,6 +120,36 @@ bool file_contains_text(const fs::path& path, const std::string& needle) {
     std::string text((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
     return text.find(needle) != std::string::npos;
 }
+
+DoctorCheck control_broker_check() {
+    DoctorCheck check{"Control broker", false, {}, {}, true};
+#if PULP_CLI_HAS_CONTROL_HEALTH
+    pulp::inspect::ControlHealthProbeConfig config{
+        .endpoint_path = pulp::inspect::default_control_endpoint_path(),
+        .connect_timeout = std::chrono::milliseconds(250),
+        .write_timeout = std::chrono::milliseconds(250),
+        .frame_read_timeout = std::chrono::milliseconds(250),
+    };
+    const auto result = pulp::inspect::probe_control_broker(config);
+    switch (result.status) {
+        case pulp::inspect::ControlBrokerHealthProbeStatus::Unavailable:
+            check.detail = "unavailable — no accepting local control carrier";
+            break;
+        case pulp::inspect::ControlBrokerHealthProbeStatus::ReachableUnverified:
+            check.detail = "reachable-unverified — the local carrier accepted a connection, "
+                           "but broker identity was not verified";
+            break;
+        case pulp::inspect::ControlBrokerHealthProbeStatus::HealthyVerified:
+        case pulp::inspect::ControlBrokerHealthProbeStatus::Incompatible:
+        case pulp::inspect::ControlBrokerHealthProbeStatus::Malformed:
+            check.detail = "unavailable — the observation returned an invalid untrusted result";
+            break;
+    }
+#else
+    check.detail = "unavailable — control health support is not compiled into this CLI";
+#endif
+    return check;
+}
 }  // namespace
 
 // -- Doctor checks -------------------------------------------------------------
@@ -123,6 +163,10 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
                                            const std::string& only_filter) {
     std::vector<DoctorCheck> checks;
     auto repo_root = standalone_mode ? fs::path{} : active_root;
+
+    if (doctor_check_matches_only_filter(only_filter, "Control broker")) {
+        checks.push_back(control_broker_check());
+    }
 
     // 1. C++20 compiler
     if (doctor_check_matches_only_filter(only_filter, "C++20 compiler")) {

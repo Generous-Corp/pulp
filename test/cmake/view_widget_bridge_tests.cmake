@@ -136,6 +136,38 @@ endif()
 catch_discover_tests(pulp-test-control-peer
     PROPERTIES LABELS "inspect;control;identity;peer")
 
+add_executable(pulp-test-control-endpoint test_control_endpoint.cpp)
+target_link_libraries(pulp-test-control-endpoint PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+if(APPLE)
+    find_program(_pulp_endpoint_test_codesign codesign REQUIRED)
+    add_custom_command(TARGET pulp-test-control-endpoint POST_BUILD
+        COMMAND "${_pulp_endpoint_test_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-test-control-endpoint>"
+        COMMENT "Ad-hoc signing control endpoint test fixture"
+        VERBATIM)
+endif()
+catch_discover_tests(pulp-test-control-endpoint
+    PROPERTIES LABELS "inspect;control;carrier")
+
+add_executable(pulp-test-control-carrier test_control_carrier.cpp)
+target_link_libraries(pulp-test-control-carrier PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-carrier
+    PROPERTIES LABELS "inspect;control;carrier;security")
+
+if(APPLE AND NOT IOS AND NOT PULP_IOS)
+    add_executable(pulp-test-control-broker-daemon
+        test_control_broker_daemon.cpp
+        ${CMAKE_SOURCE_DIR}/inspect/src/control_broker_daemon.cpp)
+    target_include_directories(pulp-test-control-broker-daemon PRIVATE
+        ${CMAKE_SOURCE_DIR}/inspect/src)
+    target_link_libraries(pulp-test-control-broker-daemon PRIVATE
+        pulp::inspect-control Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-control-broker-daemon
+        PROPERTIES LABELS "inspect;control;carrier;daemon")
+endif()
+
 add_executable(pulp-test-control-grants test_control_grants.cpp)
 target_link_libraries(pulp-test-control-grants PRIVATE
     pulp::inspect-control Catch2::Catch2WithMain)
@@ -171,6 +203,35 @@ target_link_libraries(pulp-test-control-service PRIVATE
     pulp::inspect-control pulp::inspect-client Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-control-service
     PROPERTIES LABELS "inspect;control;service;client")
+
+add_executable(pulp-test-control-client-connection
+    test_control_client_connection.cpp)
+target_link_libraries(pulp-test-control-client-connection PRIVATE
+    pulp::inspect-client Catch2::Catch2WithMain)
+if(APPLE)
+    find_program(_pulp_client_connection_codesign codesign REQUIRED)
+    add_custom_command(TARGET pulp-test-control-client-connection POST_BUILD
+        COMMAND "${_pulp_client_connection_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-test-control-client-connection>"
+        COMMENT "Ad-hoc signing control client connection test fixture"
+        VERBATIM)
+endif()
+catch_discover_tests(pulp-test-control-client-connection
+    PROPERTIES LABELS "inspect;control;carrier;client")
+
+add_executable(pulp-test-control-health test_control_health.cpp)
+target_link_libraries(pulp-test-control-health PRIVATE
+    pulp::inspect-client Catch2::Catch2WithMain)
+if(APPLE)
+    find_program(_pulp_control_health_codesign codesign REQUIRED)
+    add_custom_command(TARGET pulp-test-control-health POST_BUILD
+        COMMAND "${_pulp_control_health_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-test-control-health>"
+        COMMENT "Ad-hoc signing control health test fixture"
+        VERBATIM)
+endif()
+catch_discover_tests(pulp-test-control-health
+    PROPERTIES LABELS "inspect;control;carrier;health")
 
 add_executable(pulp-test-control-main-thread-executor
     test_control_main_thread_executor.cpp)

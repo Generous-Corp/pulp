@@ -918,9 +918,9 @@ pub fn clean(cwd: &Path, out: &mut impl Write) -> Result<()> {
 
 // ── status ───────────────────────────────────────────────────────────
 
-/// Print a full project-status summary: mode, git branch/commit,
-/// build state, SDK detail (standalone) or source-tree file counts
-/// + format availability.
+/// Print a full project-status summary through the installed C++ delegate when
+/// available. The delegate owns the canonical observational control-health
+/// probe; the Rust implementation remains the fallback for Rust-only builds.
 ///
 /// The `git` branch/commit lines shell out through a test-friendly
 /// captor so tests can pin deterministic output.
@@ -929,7 +929,16 @@ pub fn clean(cwd: &Path, out: &mut impl Write) -> Result<()> {
 ///
 /// [`CliError::Other`] when no project root is found.
 pub fn status(cwd: &Path, out: &mut impl Write) -> Result<()> {
-    status_with(cwd, &SystemGitProbe, out)
+    let argv = vec!["status".to_owned()];
+    match crate::fallthrough::delegate(&argv)? {
+        crate::fallthrough::Outcome::Delegated(0) => Ok(()),
+        crate::fallthrough::Outcome::Delegated(rc) => {
+            Err(CliError::Other(format!("pulp-cpp status exited {rc}")))
+        }
+        crate::fallthrough::Outcome::Disabled | crate::fallthrough::Outcome::NotFound => {
+            status_with(cwd, &SystemGitProbe, out)
+        }
+    }
 }
 
 /// Read branch + last commit line. Returns `None` when the probe
