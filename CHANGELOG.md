@@ -8,7 +8,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-## Capability-control MCP migration (0.796.0)
+<a id="v07960"></a>
+## [0.796.0] - 2026-08-08
 
 - Added generated typed `pulp_control_*` tools over the shared authenticated
   control client, with exact `instance_id`, structured receipts, progress,
@@ -22,6 +23,13 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - `pulp_create` and fixture-only screenshot/Motion tools remain outside the
   live-instance capability model; their local workspace/fixture side effects
   are documented in the MCP control guide.
+- release/version bump ([#7274](https://github.com/Generous-Corp/pulp/pull/7274))
+- fix/7004 refresh 20260808 ([#7273](https://github.com/Generous-Corp/pulp/pull/7273))
+- feature/remove remote view 20260808 ([#7248](https://github.com/Generous-Corp/pulp/pull/7248))
+- fix/7246 refresh 20260808 ([#7271](https://github.com/Generous-Corp/pulp/pull/7271))
+- fix/ipc consolidated 20260808 ([#7270](https://github.com/Generous-Corp/pulp/pull/7270))
+- release/post tag sync v0.795.2 4171d496747d ([#7268](https://github.com/Generous-Corp/pulp/pull/7268))
+- release/post tag sync v0.795.1 26d1d2339fe3 ([#7262](https://github.com/Generous-Corp/pulp/pull/7262))
 
 <a id="v07952"></a>
 ## [0.795.2] - 2026-08-08
@@ -7577,6 +7585,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.796.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.796.0
 [0.795.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.795.2
 [0.795.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.795.1
 [0.795.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.795.0

@@ -349,7 +349,14 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
     add(forge_lofi::drywet_descriptor(), {realization("default", forge_lofi::make_drywet_node())});
     add(forge_lofi::noise_descriptor(), {realization("default", forge_lofi::make_noise_node())});
     add(forge_lofi::bitcrush_descriptor(),
-        {realization("default", forge_lofi::make_bitcrush_node())});
+        {realization("legacy", forge_lofi::make_bitcrush_node()),
+         realization("tpdf", forge_lofi::make_bitcrush_node(signal::DitherMode::tpdf)),
+         realization("tpdf_first",
+                     forge_lofi::make_bitcrush_node(signal::DitherMode::tpdf,
+                                                    signal::NoiseShapingOrder::first)),
+         realization("tpdf_second",
+                     forge_lofi::make_bitcrush_node(signal::DitherMode::tpdf,
+                                                    signal::NoiseShapingOrder::second))});
     add(forge_lofi::trim_descriptor(), {realization("default", forge_lofi::make_trim_node())});
     add(forge_lofi::ping_pong_descriptor(),
         {realization("default", forge_lofi::make_ping_pong_node())});

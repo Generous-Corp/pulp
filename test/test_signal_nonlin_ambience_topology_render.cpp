@@ -1,5 +1,49 @@
 #include "test_signal_nonlin_ambience_support.hpp"
 
+#include <limits>
+
+TEST_CASE("Nonlin ambience: public velvet tap design fails closed outside its domain",
+          "[signal][nonlin-ambience][velvet-noise][invalid]") {
+    using Draw = pulp::signal::VelvetNoiseDrawT<double>;
+    auto design = [](double position, double grid, int window, int predelay,
+                     double hold, double attack, Draw draw) {
+        return na::design_velvet_tap(NonlinProgram::gated, position, grid, window,
+                                     predelay, hold, attack, draw);
+    };
+    auto require_closed = [](const na::VelvetTapDesign& tap) {
+        CHECK_FALSE(tap.audible);
+        CHECK(tap.delay == 0);
+        CHECK(tap.magnitude == 0.0);
+        CHECK(tap.gain == 0.0);
+        CHECK(tap.segment == 0);
+    };
+
+    constexpr Draw kDraw{0.25, 1};
+    const auto valid = design(8.0, 4.0, 64, 3, 0.7, 0.2, kDraw);
+    REQUIRE(valid.audible);
+    REQUIRE(valid.delay >= 3);
+    REQUIRE(std::isfinite(valid.gain));
+
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    require_closed(design(8.0, 4.0, 0, 3, 0.7, 0.2, kDraw));
+    require_closed(design(-1.0, 4.0, 64, 3, 0.7, 0.2, kDraw));
+    require_closed(design(nan, 4.0, 64, 3, 0.7, 0.2, kDraw));
+    require_closed(design(8.0, -1.0, 64, 3, 0.7, 0.2, kDraw));
+    require_closed(design(8.0, inf, 64, 3, 0.7, 0.2, kDraw));
+    require_closed(design(8.0, 4.0, 64, 3, 0.7, 0.2, Draw{1.0, 1}));
+    require_closed(design(8.0, 4.0, 64, 3, 0.7, 0.2, Draw{nan, 1}));
+    require_closed(design(8.0, 4.0, 64, 3, 0.7, 0.2, Draw{0.25, 0}));
+    require_closed(design(8.0, 4.0, 64, -1, 0.7, 0.2, kDraw));
+    require_closed(design(8.0, 4.0, 64, std::numeric_limits<int>::max(),
+                          0.7, 0.2, kDraw));
+    require_closed(design(8.0, 4.0, 64, 3, nan, 0.2, kDraw));
+    require_closed(design(8.0, 4.0, 64, 3, 0.7, inf, kDraw));
+    require_closed(design(std::numeric_limits<double>::max(),
+                          std::numeric_limits<double>::max(),
+                          64, 3, 0.7, 0.2, kDraw));
+}
+
 TEST_CASE("Nonlin ambience: every tap gain traces the designed envelope exactly",
           "[signal][nonlin-ambience][envelope]") {
     // The envelope IS the tap-gain sequence, so this is the claim in its

@@ -92,15 +92,29 @@ inline ForgeNodeDescriptor noise_descriptor() {
 }
 
 inline ForgeNodeDescriptor bitcrush_descriptor() {
-    return descriptor_detail::single(
-        "lofi_bitcrush", "Bit Crusher", "Reduces amplitude resolution and sample-update rate.",
-        kBitcrushTypeId,
-        {{"bit_depth", kBitcrushBitDepth, "Bit Depth", "bit",
-          "Number of quantization bits retained.", ForgeParamKind::continuous,
-          ForgeParamCurve::linear},
-         {"rate_division", kBitcrushRateDiv, "Rate Division", "x",
-          "Number of input samples held for each reduced-rate output sample.",
-          ForgeParamKind::continuous, ForgeParamCurve::logarithmic}});
+    ForgeNodeDescriptor d;
+    d.key = "lofi_bitcrush";
+    d.label = "Bit Crusher";
+    d.description = "Reduces amplitude resolution and sample-update rate.";
+    d.axes = {{"quantization", "Quantization",
+               "Fixed output-correctness policy selected when the node is built.",
+               {{"legacy", "Legacy", 0.0f},
+                {"tpdf", "TPDF", 1.0f},
+                {"tpdf_first", "TPDF + First-Order Shaping", 2.0f},
+                {"tpdf_second", "TPDF + Second-Order Shaping", 3.0f}}}};
+    d.realizations = {{"legacy", kBitcrushTypeId, {{"quantization", "legacy"}}},
+                      {"tpdf", kBitcrushTpdfTypeId, {{"quantization", "tpdf"}}},
+                      {"tpdf_first", kBitcrushTpdfFirstTypeId,
+                       {{"quantization", "tpdf_first"}}},
+                      {"tpdf_second", kBitcrushTpdfSecondTypeId,
+                       {{"quantization", "tpdf_second"}}}};
+    d.params = {{"bit_depth", kBitcrushBitDepth, "Bit Depth", "bit",
+                 "Number of quantization bits retained.", ForgeParamKind::continuous,
+                 ForgeParamCurve::linear},
+                {"rate_division", kBitcrushRateDiv, "Rate Division", "x",
+                 "Number of input samples held for each reduced-rate output sample.",
+                 ForgeParamKind::continuous, ForgeParamCurve::logarithmic}};
+    return d;
 }
 
 inline ForgeNodeDescriptor trim_descriptor() {

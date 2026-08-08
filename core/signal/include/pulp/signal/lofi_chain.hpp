@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/signal/denormal.hpp>
+#include <pulp/signal/dither.hpp>
 #include <pulp/signal/tpt_filter.hpp>
 
 #include <algorithm>
@@ -203,7 +204,18 @@ public:
     void set_sample_rate(double sr) { reducer_.set_sample_rate(sr); }
 
     /// Word length in bits. 24 or above bypasses the quantiser.
-    void set_bits(double bits) { bits_ = std::clamp(bits, 1.0, 24.0); }
+    void set_bits(double bits) {
+        bits_ = std::isfinite(bits) ? std::clamp(bits, 1.0, 24.0) : 24.0;
+        quantizer_.set_bits(static_cast<SampleType>(bits_));
+    }
+
+    /// Quantizer dither is opt-in so existing chains remain bit-exact.
+    void set_dither_mode(DitherMode mode) { quantizer_.set_dither_mode(mode); }
+
+    /// Error feedback is opt-in and may be used with or without dither.
+    void set_noise_shaping(NoiseShapingOrder order) {
+        quantizer_.set_noise_shaping(order);
+    }
 
     /// Hold clock in Hz. At or above the sample rate the reducer is
     /// transparent.
@@ -216,7 +228,10 @@ public:
     /// Fraction of full scale the output stage cannot represent, 0 to 0.9.
     void set_dead_zone(double amount) { dead_zone_ = std::clamp(amount, 0.0, 0.9); }
 
-    void set_seed(std::uint32_t seed) { reducer_.set_seed(seed); }
+    void set_seed(std::uint32_t seed) {
+        reducer_.set_seed(seed);
+        quantizer_.set_seed(seed);
+    }
 
     /// Mirror parameter configuration while preserving this chain's
     /// independent reducer/filter state.
@@ -224,13 +239,25 @@ public:
         bits_ = other.bits_;
         dead_zone_ = other.dead_zone_;
         reducer_.sync_configuration_from(other.reducer_);
+        quantizer_.sync_configuration_from(other.quantizer_);
     }
 
-    void reset() { reducer_.reset(); }
+    void reset() {
+        reducer_.reset();
+        quantizer_.reset();
+    }
     bool has_tail() const noexcept { return reducer_.has_tail(); }
 
     SampleType process(SampleType input) {
-        double x = quantize_bits(static_cast<double>(input), bits_);
+        double x;
+        if (quantizer_.dither_mode() == DitherMode::none &&
+            quantizer_.noise_shaping() == NoiseShapingOrder::none) {
+            // Preserve the original double-precision arithmetic exactly for
+            // callers that do not opt into the output-correctness policy.
+            x = quantize_bits(static_cast<double>(input), bits_);
+        } else {
+            x = static_cast<double>(quantizer_.process(input));
+        }
         x = static_cast<double>(reducer_.process(static_cast<SampleType>(x)));
         if (dead_zone_ > 0.0) x = dead_zone_saturate(x, dead_zone_);
         return static_cast<SampleType>(x);
@@ -242,6 +269,7 @@ public:
 
 private:
     SampleRateReducerT<SampleType> reducer_;
+    DitherQuantizerT<SampleType> quantizer_;
     double bits_ = 24.0;
     double dead_zone_ = 0.0;
 };

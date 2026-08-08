@@ -639,6 +639,27 @@ mixer.push_dry(input_channels, 2, num_frames);
 mixer.mix_wet(output_channels, 2, num_frames);
 ```
 
+### Routing and parallel-path alignment
+
+The signal module owns shared routing math so fixed-topology processors and
+runtime graphs use the same gain and latency contracts:
+
+| Primitive | Header | Contract |
+|---|---|---|
+| Orthonormal mid/side | `mid_side.hpp` | Self-inverse, mono-compatible, energy-preserving stereo transform plus mono-safe width |
+| Signed audio matrix | `audio_matrix_mixer.hpp` | Fixed 16×16 default capacity, sample-continuous cell automation, explicit raw or peak-normalized headroom |
+| N-way crossfade | `nway_crossfade.hpp` | Adjacent-path cosine/sine weights with unit summed power |
+| Click-free path switcher | `path_switcher.hpp` | Fixed-capacity, retargetable smoothstep transitions with block-split deterministic weights |
+| Path latency aligner | `path_latency_aligner.hpp` | Prepared N-path/channel delay storage with maximum-path latency reporting and impulse-exact alignment |
+
+All process paths are allocation-free after preparation. The matrix copies its
+inputs to bounded scratch and therefore supports input/output aliasing. The path
+switcher requires disjoint mono source/destination buffers. The latency aligner
+supports only exact corresponding in-place pairs, not partial or cross-path
+aliases. Overlap checks cover the full processed byte ranges. Latency-set
+changes clear alignment history; matrix and switch automation preserve their
+sample trajectory across host block boundaries.
+
 ### Convolution — load an impulse response
 
 `PartitionedConvolver` is partitioned for one fixed block size, and `process()`
@@ -690,6 +711,8 @@ a working convolution and would hide the bug. Assert
 | Convolver | `convolver.hpp` | Partitioned frequency-domain convolution for reverb impulse responses |
 | Delay Line | `delay_line.hpp` | Sample-accurate delay with linear, cubic, or sinc interpolation |
 | [Fractional Delay](fractional-delay.md) | `fractional_delay.hpp` | Prepared Thiran-1/Lagrange delay lines plus bounded shared history with stateless multitap Lagrange-3/5 heads, explicit causal ranges, and typed fault recovery |
+| Dither Quantizer | `dither.hpp` | Deterministic TPDF dither with opt-in bounded first- or second-order error-feedback noise shaping; zero latency and allocation-free |
+| Lo-Fi Chain | `lofi_chain.hpp` | Bit-depth reduction, sample-and-hold rate reduction, and dead-zone saturation; dither/noise shaping are opt-in so the legacy default remains exact |
 | Oversampling | `oversampling.hpp` | 2x/4x/8x/16x realtime up/downsampling; minimum-phase IIR and 96/140 dB-prototype linear-phase FIR tiers with exact latency reporting |
 | Phaser | `phaser.hpp` | All-pass filter chain with LFO modulation for sweeping comb effects |
 | FDN Reverb | [`fdn_reverb.hpp`](../guides/fdn-reverb.md) | 16-line feedback delay network with a selectable internal tank sample rate (16-96 kHz), Jot decay law, granular shimmer, and a provably bounded loop gain; wet-only |
@@ -715,6 +738,7 @@ a working convolution and would hide the bug. Assert
 | Multi-Channel Meter | `multi_channel_meter.hpp` | Sample peak, RMS, stereo correlation, and channel-based BS.1770-5 K-weighted momentary plus gated integrated loudness; not true-peak, short-term, LRA, or a complete EBU Mode meter |
 | Oscillator | `oscillator.hpp` | Legacy polyBLEP oscillator with sine, saw, square, triangle waveforms (float phase, integrated triangle) |
 | Oscillator suite (`osc/`) | `osc/va.hpp`, `osc/vco.hpp`, `osc/dco.hpp`, `osc/wt.hpp`, `osc/wt_lofi.hpp` | Newer VA/VCO/DCO/wavetable family sharing a phase accumulator and BLEP/BLAMP kernels — see the [oscillators guide](../guides/oscillators.md) |
+| Velvet Noise Grid | `velvet_noise.hpp` | Coordinate-keyed jitter/sign draws for sparse velvet-noise tap grids; full and incremental builders produce identical draws |
 | Spectrogram | `spectrogram.hpp` | Rolling time-frequency analysis for visual display of spectral content |
 | STFT | `stft.hpp` | Short-time Fourier Transform for visualization (analysis-only; for processing use `spectral_frame_engine.hpp`) |
 
@@ -780,6 +804,9 @@ mode span into a prepared bank. Link `pulp::signal-modal-spec` in addition to
 | Log Ramped Value | `log_ramped_value.hpp` | Logarithmic smoothing for perceptually linear parameter transitions |
 | Lookup Table | `lookup_table.hpp` | Pre-computed function table for fast repeated evaluation of expensive functions |
 | Matrix | `matrix.hpp` | 2×2 through 4×4 matrix math for mid/side encoding, rotation, spatial processing |
+| Routing matrix | `audio_matrix_mixer.hpp` | Fixed-capacity signed audio routing with continuous gain automation and explicit headroom policy |
+| Mid/side | `mid_side.hpp` | Orthonormal stereo encode/decode and mono-safe width |
+| N-way routing | `nway_crossfade.hpp`, `path_switcher.hpp`, `path_latency_aligner.hpp` | Constant-power path morphing, click-free selection, and exact latency alignment |
 | Panner | `panner.hpp` | Stereo and surround panning with equal-power or linear law |
 | Polynomial Math | `poly_math.hpp` | Polynomial evaluation and Horner's method for waveshaper transfer functions |
 | Processor Chain | `processor_chain.hpp` | Connect multiple processors in series — automatic prepare/process forwarding |
