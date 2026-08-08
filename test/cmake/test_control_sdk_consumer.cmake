@@ -138,6 +138,13 @@ int main() {
       std::chrono::duration_cast<std::chrono::milliseconds>(
           (std::chrono::system_clock::now() + std::chrono::minutes(1)).time_since_epoch()).count();
   const auto bootstrap_bytes = pulp::inspect::encode_control_host_bootstrap(bootstrap);
+  pulp::inspect::ControlHostBootstrapRecord enrollment_bootstrap;
+  enrollment_bootstrap.endpoint_path = bootstrap.endpoint_path;
+  enrollment_bootstrap.expected_broker = bootstrap.expected_broker;
+  enrollment_bootstrap.enrollment_id = "installed-enrollment";
+  enrollment_bootstrap.expires_at_unix_ms = bootstrap.expires_at_unix_ms;
+  const auto enrollment_bootstrap_bytes =
+      pulp::inspect::encode_control_host_bootstrap(enrollment_bootstrap);
   pulp::inspect::ControlConnectionPrincipal principal =
       pulp::inspect::ControlHostConnectionPrincipal{
           pulp::inspect::ControlRegistrationId{"installed-registration"}};
@@ -163,6 +170,7 @@ int main() {
              && !client.is_connected()
              && !host_connection.is_connected()
              && !bootstrap_bytes.empty()
+             && !enrollment_bootstrap_bytes.empty()
              && std::holds_alternative<pulp::inspect::ControlHostConnectionPrincipal>(principal)
              && operations.max_receipts > 0
              && artifacts.maximum_blob_bytes > 0

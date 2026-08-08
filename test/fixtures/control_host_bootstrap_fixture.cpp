@@ -22,7 +22,8 @@ namespace {
 
 bool contains_authority_material(std::string_view value) {
     return value.find("admission-1") != std::string_view::npos ||
-           value.find("registration-1") != std::string_view::npos;
+           value.find("registration-1") != std::string_view::npos ||
+           value.find("ZW5yb2xsbWVudC0x+/==") != std::string_view::npos;
 }
 
 } // namespace
@@ -85,7 +86,7 @@ int main(int argc, char** argv) {
     if (second)
         return 66;
 
-    std::cout << first->registration_id.value << '\n'
+    std::cout << (first->enrollment_id.empty() ? "decoded-preissued" : "decoded-enrollment") << '\n'
               << static_cast<unsigned>(second_diagnostics.status) << '\n';
     return 0;
 }
