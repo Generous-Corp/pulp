@@ -1103,20 +1103,8 @@ commands:
 
   - name: inspect
     status: experimental
-    summary: Read-only metadata and artifact-audit client for Development Inspector profiles and explicitly activated publications. The Rust pulp binary delegates to its sibling pulp-cpp; raw live calls and mutations are not exposed.
+    summary: Read static Development Inspector profiles and perform offline artifact audit. The legacy live authority is deleted; this temporary capability reduction remains until the Phases 4–7 canonical replacement lands.
     args:
-      - name: --session
-        kind: option
-        required: false
-        description: Select an exact live inspector session
-      - name: --instance
-        kind: option
-        required: false
-        description: Disambiguate an exact instance when a session ID is shared
-      - name: --publication
-        kind: option
-        required: false
-        description: Pin one non-reusable publication generation; requires --session and --instance
       - name: --json
         kind: flag
         required: false
@@ -1135,12 +1123,6 @@ commands:
             description: Emit the pulp.control.audit.v1 result
       - name: profiles
         summary: List the declared off, observe, and develop profiles and capabilities
-      - name: list
-        summary: Discover live publications and return exact session, instance, and non-reusable publication identities
-      - name: capabilities
-        summary: Authenticate and report available/effective capabilities for one exact publication
-      - name: doctor
-        summary: Report discovery runtime-directory readiness and live-session count
     docs: reference/cli.md#inspect
 
   - name: trace
@@ -1150,7 +1132,7 @@ commands:
       - name: --json
         kind: flag
         required: false
-        description: Emit the raw inspector JSON response instead of the pretty form
+        description: Emit the canonical control response instead of the pretty form
     subcommands:
       - name: start
         summary: Begin trace capture through the canonical broker-authorized control client.

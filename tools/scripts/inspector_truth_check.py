@@ -39,8 +39,9 @@ FORBIDDEN_CLAIMS = {
         "Connect to a running plugin inspector",
     ),
     "experimental/pulp-rs/src/main.rs": (
-        "PULP_MOTION_SERVER=1",
-        "PULP_TRACE_SERVER=1",
+        "Normal launches publish no endpoint",
+        "InspectorServer",
+        "authenticated discovery",
     ),
     "docs/reference/scripted-ui-inspector.md": (
         "binds all interfaces",
@@ -49,12 +50,18 @@ FORBIDDEN_CLAIMS = {
         "port-file hint",
     ),
     ".claude/commands/inspect.md": (
-        "`Runtime.evaluate`, `Capture.screenshot`, and `Capture.screenshotNode`",
-        "transitional port-file hint",
-        "without authenticated session identity",
+        "pulp inspect doctor",
+        "pulp inspect list",
+        "pulp inspect capabilities",
+        "--session",
+        "--instance",
+        "--publication",
     ),
     "docs/agent-integrations.md": (
-        "`pulp_inspect_evaluate` and `pulp_inspect_screenshot` currently",
+        "pulp_inspect_list",
+        "pulp_inspect_capabilities",
+        "pulp_inspect_doctor",
+        "discovery, capabilities, and doctor",
     ),
     "docs/reference/cli.md": (
         "`Runtime.evaluate`, `Capture.screenshot`, and `Capture.screenshotNode`",
@@ -63,6 +70,10 @@ FORBIDDEN_CLAIMS = {
         "pulp trace start --categories dsp,render --out",
         "start [--categories LIST] [--out FILE.pftrace]",
         "- `--host HOST` - inspector host, defaulting to `127.0.0.1`",
+        "pulp inspect doctor",
+        "pulp inspect list",
+        "pulp inspect capabilities",
+        "--session SESSION_ID",
     ),
     "docs/reference/development-inspector-capabilities.md": (
         "current dispatch does not enforce the registry",
@@ -74,6 +85,11 @@ FORBIDDEN_CLAIMS = {
         "Production standalone session owner",
         "Production standalone attachment",
         "Production standalone activation",
+        "pulp inspect list",
+        "pulp_inspect_list",
+        "owner-private ephemeral record/token files",
+        "nonce/HMAC",
+        "real standalone workflow",
     ),
     "tools/mcp/pulp_mcp.cpp": (
         "lacks authenticated main-thread dispatch",
@@ -92,13 +108,6 @@ FORBIDDEN_CLAIMS = {
     ),
     "docs/guides/motion-observability.md": (
         "probes `127.0.0.1:9147`",
-    ),
-    "experimental/pulp-rs/src/cmd/motion.rs": (
-        "pub const DEFAULT_INSPECTOR_PORT: u16 = 9147",
-        ".arg(\"--port\")\n            .arg(port.to_string())",
-        "use std::net::TcpStream;",
-        "fn inspector_reachable(",
-        "PULP_MOTION_SERVER=1",
     ),
     "experimental/pulp-rs/src/cmd/trace.rs": (
         "pub const DEFAULT_INSPECTOR_PORT: u16 = 9147",
@@ -123,65 +132,63 @@ FORBIDDEN_CLAIMS = {
     ".agents/skills/cli-maintenance/SKILL.md": (
         "inspector transport has no authentication",
         "transport is unauthenticated",
+        "profiles, list, capabilities, doctor",
+        "explicitly hosted inspector fixture",
     ),
 }
 
 REQUIRED_CLAIMS = {
     ".claude/commands/inspect.md": (
-        "GPU-enabled desktop",
-        "pulp run --inspect",
         "installed `pulp` command",
+        "pulp inspect profiles",
+        "pulp inspect audit",
+        "temporary capability reduction",
     ),
     "docs/agent-integrations.md": (
-        "unavailable in normal launches",
-        "explicitly wired custom fixture",
+        "pulp_inspect_profiles",
+        "temporary capability reduction",
+        "4–7 retain",
     ),
     "docs/reference/cli.md": (
-        "unavailable in normal launches",
-        "explicitly wired",
-        "remote clients cannot select a filesystem path",
-        "select one exact",
-        "authenticated publication; all three are required",
-        "trace_control_available",
+        "Static metadata and offline artifact audit",
+        "temporary capability reduction",
+        "Phases 4–7",
+        "No phase may restore a legacy Inspector",
     ),
     "docs/reference/development-inspector-capabilities.md": (
-        "pulp run --inspect",
-        "source checkout.",
-        "selected standalone window",
-        "owner-private ephemeral record/token files",
-        "extended ACLs",
+        "temporary capability reduction",
+        "Phases 4–7",
+        "legacy server, raw client, discovery",
         "Capability dispatch is fail-closed",
     ),
     "tools/mcp/pulp_mcp.cpp": (
-        "pulp run --inspect",
         "Installed in-process",
-        "Standalone profiles do not grant runtime.eval",
+        "canonical capability-control client",
+        "legacy Inspector publication and raw host/port selectors are not accepted",
     ),
     "docs/reference/scripted-ui-inspector.md": (
-        "nonce/HMAC",
-        "owner-private per-session credential",
+        "not currently reachable",
+        "canonical capability-control replacement",
+        "capability reduction",
     ),
     ".agents/skills/motion/SKILL.md": (
-        "explicitly wired custom fixture",
-        "authenticated discovery",
-        "nonce/HMAC",
         "intentionally unavailable",
-        "--session ID --instance ID --publication ID",
+        "in-process fixture APIs",
+        "canonical broker/control replacement",
     ),
     ".agents/skills/trace-analysis/SKILL.md": (
-        "explicitly wired custom fixture",
-        "authenticated discovery",
+        "canonical capability-control client",
+        "fails closed",
     ),
     ".agents/skills/cli-maintenance/SKILL.md": (
-        "nonce/HMAC",
-        "owner-private per-session credential",
-        "defense-in-depth",
+        "static metadata and offline artifact audit",
+        "temporary capability reduction",
+        "Phases 4–7",
     ),
     "docs/status/cli-commands.yaml": (
-        "Exact authenticated session id; must be paired with --instance",
-        "Exact authenticated instance id; must be paired with --session",
-        "Non-reusable publication id",
-        "trace_control_available",
+        "Read static Development Inspector profiles and perform offline artifact audit",
+        "temporary capability reduction",
+        "no legacy Inspector fallback",
     ),
 }
 
@@ -195,7 +202,8 @@ REQUIRED_BUILD_CONTRACTS = {
         "if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)",
         "src/control_inspector_client.cpp",
         "src/control_broker.cpp",
-        "src/trace_inspector.cpp",
+        "src/control_client.cpp",
+        "src/control_trace_session_executor.cpp",
     ),
     "tools/cmake/PulpInstallRules.cmake": (
         "inspect/include/pulp/inspect/control_inspector_client.hpp",
@@ -235,6 +243,21 @@ REMOVED_AUTHORITY_PATHS = (
     "inspect/include/pulp/inspect/discovery_publisher.hpp",
     "core/format/src/standalone_inspector.cpp",
     "core/format/include/pulp/format/detail/standalone_inspector.hpp",
+    "core/format/src/standalone_inspector_capture.cpp",
+    "core/format/src/standalone_inspector_policy.cpp",
+    "core/format/src/standalone_runtime_eval_dispatch.cpp",
+    "experimental/pulp-rs/src/cmd/motion.rs",
+    "experimental/pulp-rs/src/cmd/motion_tests.rs",
+    ".claude/commands/motion.md",
+)
+
+RETIRED_MCP_TOOLS = (
+    "pulp_inspect_list",
+    "pulp_inspect_capabilities",
+    "pulp_inspect_doctor",
+    "pulp_inspect_evaluate",
+    "pulp_inspect_screenshot",
+    "pulp_motion_",
 )
 
 
@@ -272,6 +295,45 @@ def security_implementation_errors(root: pathlib.Path) -> list[str]:
     ):
         if retired_target in inspect_cmake:
             errors.append(f"retired Inspector authority target remains: {retired_target}")
+    return errors
+
+
+def public_surface_errors(root: pathlib.Path) -> list[str]:
+    """Pin the intentionally reduced Phase 3 CLI/MCP surface."""
+    errors: list[str] = []
+    inspect_source = (root / "tools/cli/cmd_inspect.cpp").read_text(encoding="utf-8")
+    help_text = _without_source_comments(inspect_source)
+    for required in (
+        "pulp inspect profiles [--json]",
+        "pulp inspect audit ARTIFACT [--json]",
+    ):
+        if required not in help_text:
+            errors.append(f"inspect CLI omits reduced surface: {required}")
+    for retired in ("list", "capabilities", "doctor"):
+        if re.search(rf'\bverb\s*==\s*"{re.escape(retired)}"', help_text):
+            errors.append(f"inspect CLI restores retired live route: {retired}")
+    for retired_flag in ("--host", "--port"):
+        if re.search(rf'\barg\s*==\s*"{re.escape(retired_flag)}"', help_text):
+            errors.append(f"inspect CLI restores retired live selector: {retired_flag}")
+
+    mcp_source = (root / "tools/mcp/pulp_mcp.cpp").read_text(encoding="utf-8")
+    for retired in RETIRED_MCP_TOOLS:
+        if f'"name":"{retired}' in mcp_source:
+            errors.append(f"retired Inspector/Motion MCP tool remains: {retired}")
+    for required in ("pulp_inspect_profiles", "pulp_trace_start", "pulp_trace_stop"):
+        if f'"name":"{required}"' not in mcp_source:
+            errors.append(f"required reduced/canonical MCP tool is missing: {required}")
+
+    trace_dispatch = (root / "experimental/pulp-rs/src/cmd/trace_dispatch.rs").read_text(
+        encoding="utf-8"
+    )
+    for claim in (
+        "legacy live Trace.query/snapshot/explain authority was removed",
+        "pulp trace start/stop use canonical capability control",
+        "legacy --port/--session/--instance/--publication selectors",
+    ):
+        if claim not in trace_dispatch:
+            errors.append(f"trace dispatch omits canonical-only contract: {claim}")
     return errors
 
 def check_root(
@@ -404,6 +466,7 @@ def check_root(
                 )
 
     errors.extend(security_implementation_errors(root))
+    errors.extend(public_surface_errors(root))
 
     inspect_cmake = (root / "inspect/CMakeLists.txt").read_text(encoding="utf-8")
     for target in ("pulp-inspect-runtime",):
@@ -434,10 +497,10 @@ def check_root(
                 errors.append(
                     f"{tool_name} must disclose its installed in-process client path"
                 )
-        elif "source-checkout" not in description:
-            errors.append(
-                f"{tool_name} must disclose its source-checkout-only client path"
-            )
+        elif tool_name.startswith("pulp_motion_"):
+            errors.append(f"retired Motion MCP tool remains: {tool_name}")
+        elif "canonical capability-control" not in description:
+            errors.append(f"{tool_name} must disclose its canonical control path")
 
     return errors
 

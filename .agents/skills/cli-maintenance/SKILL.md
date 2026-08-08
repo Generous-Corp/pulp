@@ -203,7 +203,11 @@ commands), but a new MCP sub-tool still needs its baseline `mcp_only` entry. Dis
 gate-oriented `pulp audio validate compare` (null/spectral diff, nonzero exit): `pulp audio
 compare` is an advisory *judgment*, never a gate.
 
-**The shipped `pulp inspect` command is metadata-only.** It exposes profiles, list, capabilities, doctor, and the offline audit surface. Generic `--host`, `--port`, `--command`, `--params`, interactive REPL, typed mutation, and screenshot routes were retired with the legacy authority path. Do not recreate them as fallbacks; live operations belong to the canonical broker/control platform.
+**The shipped `pulp inspect` command exposes only static metadata and offline artifact audit.** Its public verbs are `profiles` and `audit`. Discovery, live capability queries, doctor, generic `--host`, `--port`, `--command`, `--params`, interactive REPL, typed mutation, and screenshot routes were retired with the legacy authority path. Do not recreate them as fallbacks; live operations belong to the canonical broker/control platform.
+
+This is an intentional temporary capability reduction. Phases 4–7 retain the
+replacement work for trusted launcher/host adapters, broker-routed typed
+execution, supported-client migration, and shipping evidence.
 
 **`pulp inspect audit ARTIFACT` is different from every live Inspector
 subcommand.** It is a read-only Phase 1 artifact preflight and must never load,
@@ -344,7 +348,12 @@ will auto-detect the new coverage; remove the baseline entry in the same PR.
 
 ### Inspector MCP boundary
 
-Only `pulp_inspect_profiles`, `pulp_inspect_list`, `pulp_inspect_capabilities`, `pulp_inspect_doctor`, and the unrelated in-process `pulp_inspect_pending_requests` queue reader remain. Do not add generic inspector RPC, mutation, evaluation, screenshot, audio, DOM, parameter, or Motion wrapper tools. Authorized live operations must use a canonical control capability with an explicit schema and receipt.
+Only `pulp_inspect_profiles` and the unrelated in-process
+`pulp_inspect_pending_requests` queue reader remain. Canonical trace lifecycle
+uses `pulp_trace_start` / `pulp_trace_stop`. Do not add discovery, live
+capability/doctor, generic inspector RPC, mutation, evaluation, screenshot,
+audio, DOM, parameter, or Motion wrapper tools. Authorized live operations must
+use a canonical control capability with an explicit schema and receipt.
 
 ## Modifying a CLI Command
 
@@ -1178,8 +1187,9 @@ themselves prove archive stripping, unlinkage, or endpoint reachability.
 
 Keep the two flags together when editing the SDK configure command. A developer
 can re-enable the guarded inspector components with
-`-DPULP_ENABLE_INSPECTOR=ON`, but that still does not create a normal runtime
-endpoint: a custom host must explicitly construct and own `InspectorServer`.
+`-DPULP_ENABLE_INSPECTOR=ON`, but that still does not create a product runtime
+endpoint. Endpoint composition belongs to the canonical capability-control
+replacement.
 The standalone `pulp` CLI and the MCP server (`tools/mcp/pulp_mcp.cpp`) are
 **separate binaries** — not compiled into a plugin — so this flag never strips
 them; bundling them alongside a plugin distribution is a packaging choice.

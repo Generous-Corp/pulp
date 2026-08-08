@@ -232,7 +232,7 @@ promise.
 ```bash
 pulp trace start --categories render,gpu,text,js,layout
 # ... open the plugin editor (or launch the standalone app) ...
-pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp trace stop
 # Give the printed .pftrace to an agent using the trace-analysis skill.
 ```
 
@@ -260,9 +260,9 @@ A representative L1 answer:
 
 ```bash
 pulp trace start --categories render,layout,canvas,text,js,gpu
-pulp motion record --view Knob --out knob.jsonl        # motion trace_id joins in
+# Motion correlation currently requires an in-process fixture capture.
 # ... sweep the knob ...
-pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp trace stop
 # Run the trace-sql frame/layout queries against the printed file:
 pulp trace query "<SQL from trace-sql>" --trace /tmp/pulp-trace.pftrace
 ```
@@ -281,7 +281,7 @@ one-row-per-stage cost split.
 # reproduces exactly.
 pulp trace start --categories dsp,dsp.node
 # ... offline-render a fixed MIDI/audio clip through the plugin ...
-pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp trace stop
 # Give the printed .pftrace to an agent using the trace-analysis skill.
 ```
 

@@ -152,13 +152,10 @@ enum Command {
     /// `run`, `doctor`). Archive installation delegates to `pulp-cpp`.
     Tool(PkgTailArgs),
 
-    /// Agent-facing wrappers around the inspector `Trace.*` Perfetto
-    /// protocol — start / stop / query / snapshot / explain plus the
-    /// L0 preset verbs (slowest-frames / xruns / dsp-hotspots /
-    /// layout-vs-paint). Pairs with the `/trace` slash command and the
-    /// `pulp_trace_*` MCP tools. Normal launches publish no endpoint;
-    /// live use requires an explicitly owned custom host that wires
-    /// `InspectorServer`, `DomainHandler`, and authenticated discovery.
+    /// Canonical capability-control start/stop plus offline Perfetto query,
+    /// fetch, doctor, and open. Legacy live query/snapshot/explain and raw
+    /// Inspector discovery are rejected. Pairs with `/trace` and the
+    /// canonical `pulp_trace_start` / `pulp_trace_stop` MCP tools.
     #[command(name = "trace")]
     Trace(PkgTailArgs),
 

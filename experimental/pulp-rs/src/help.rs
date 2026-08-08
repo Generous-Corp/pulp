@@ -137,11 +137,11 @@ pub const COMMANDS: &[Entry] = &[
     },
     Entry {
         name: "inspect",
-        summary: "Connect to an explicitly hosted inspector fixture",
+        summary: "Read static inspector profiles or audit an artifact offline",
     },
     Entry {
         name: "trace",
-        summary: "Agent-facing wrappers around inspector Trace (Perfetto) protocol",
+        summary: "Canonical trace lifecycle plus offline Perfetto analysis",
     },
     Entry {
         name: "scan",

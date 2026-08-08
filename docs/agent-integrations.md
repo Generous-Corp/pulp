@@ -65,10 +65,10 @@ The plugin extends Claude Code with:
   `/import-design`, `/version`, `/upgrade` — convenience wrappers over
   the CLI.
 - **MCP server**: Claude can call build/test and other installed tools as MCP
-  calls instead of shell-and-parse. The remaining `pulp_inspect_*` entries are
-  read-only profile, discovery, capability, and doctor metadata tools. Generic
-  live RPC, evaluation, mutation, and capture proxies are not exposed; those
-  operations belong to the canonical control platform.
+  calls instead of shell-and-parse. `pulp_inspect_profiles` is the only
+  Development Inspector MCP metadata tool; it reads the compiled profile
+  registry in process. Generic live RPC, discovery, evaluation, mutation,
+  capture, and Motion proxies are not exposed.
   For project screenshot artifacts, call `pulp_validate` with
   `screenshot=true` or run `pulp run --headless --screenshot <png>`;
   both use the same capture contract documented for the CLI. The
@@ -93,6 +93,13 @@ The plugin extends Claude Code with:
 If `pulp` is missing when a slash command is invoked, the command
 itself also prints the install command before failing. Pulp CLI is
 always the dependency the plugin sits on top of.
+
+The reduced Inspector surface is an intentional temporary capability reduction
+after deleting the legacy server/client/discovery/standalone authority. Phases
+4–7 retain the canonical replacement work: trusted launcher and host adapters,
+broker-routed typed execution, client migration, and shipping proof. Trace
+start/stop already use that canonical control path and never fall back to the
+legacy transport.
 
 ## Why the split
 

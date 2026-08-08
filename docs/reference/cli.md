@@ -1324,38 +1324,36 @@ Remaining limitation:
 
 **Status**: experimental
 
-Read-only metadata and artifact-audit client for Development Inspector. Normal
-launches publish no endpoint. An explicitly enabled session can be discovered
-and its effective capability envelope authenticated, but the shipped command no
-longer exposes generic RPC, mutation, screenshot, host, or port routes.
+Static metadata and offline artifact audit for Development Inspector. The
+legacy server, raw client, discovery, and standalone authority were deleted in
+Phase 3. The shipped command has no live session route.
 
 ```bash
 pulp inspect profiles --json
 pulp inspect audit path/to/MyProduct --json
-pulp inspect doctor --json
-pulp inspect list --json
-pulp inspect capabilities --json \
-  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
 ```
 
 | Command | Result |
 |---|---|
 | `profiles` | Declared `off`, `observe`, and `develop` capability sets. |
 | `audit ARTIFACT` | Read-only artifact check for the canonical manifest, profile/digest markers, declared capabilities, and known external surfaces. The artifact is never loaded. |
-| `list` | Live publications and their exact session, instance, and non-reusable publication IDs. |
-| `capabilities` | Authenticated available/effective capabilities for one exact publication. |
-| `doctor` | Discovery runtime directory, live-session count, and issues. |
 
-Options are `--json` and, for `capabilities`, the required exact `--session`,
-`--instance`, and `--publication` identity. Raw inspector methods and live
-mutations must use the canonical broker/control platform; there is no legacy
-CLI fallback.
+The only option is `--json`. There are no `list`, `capabilities`, `doctor`,
+generic method, mutation, screenshot, host, port, or publication-selector
+routes.
 
 `audit` ships even when `PULP_ENABLE_INSPECTOR=OFF`, never connects to a
 session, and exits 0 for pass, 1 for block, and 2 for invalid invocation. JSON
 uses `pulp.control.audit.v1`. Artifact and manifest symlinks are rejected,
 sidecars are capped at 1 MiB, and direct-file and directory modes apply the same
 safe-identity rules.
+
+This is an intentional temporary capability reduction, not a claim that live
+inspection is complete. Phases 4–7 retain the replacement roadmap: finish the
+trusted launcher and host adapters, route typed live operations through the
+canonical broker/control platform, migrate supported clients, and close the
+shipping/negative-control evidence. No phase may restore a legacy Inspector
+fallback.
 
 ### trace
 
@@ -1383,7 +1381,7 @@ Options:
 
 - Legacy `--port` and `--session/--instance/--publication` selectors were
   removed. The broker owns lifecycle target selection.
-- `--json` - emit the raw inspector JSON response instead of the pretty form
+- `--json` - emit the canonical control response instead of the pretty form
 
 Subcommands:
 

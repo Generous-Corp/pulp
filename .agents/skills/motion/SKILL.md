@@ -1,6 +1,6 @@
 ---
 name: motion
-description: Debug or validate Pulp animations / transitions / scroll behavior using the runtime motion-trace system. TRIGGER on phrases like "animation is wrong", "transition timing off", "fade too late", "card slides too far", "scroll jumps on restore", "scroll offset wrong on restore", "frame jump in the timeline", "easing looks wonky", "imported Figma motion doesn't match source", "settle time / overshoot / drift / monotonic", "what value does the knob reach at frame N", "record this animation so I can replay it", "this animation is expensive — which one and why", "reduced-motion broken", "scrub a captured fixture". Runs over the inspector wire (no source edits needed), captures fixtures (.motion.jsonl), and ships assertion helpers (is_monotonic / settling_time_seconds / overshoot / start_delay_seconds / final_value / local_step_outlier_ratio) and the `scroll_geometry` trace for `ScrollView` content-offset / visible-rect / content-size observability. Off by default in prod.
+description: Debug or validate Pulp animations / transitions / scroll behavior using in-process motion fixtures and offline visual analysis. TRIGGER on phrases like "animation is wrong", "transition timing off", "fade too late", "card slides too far", "scroll jumps on restore", "scroll offset wrong on restore", "frame jump in the timeline", "easing looks wonky", "imported Figma motion doesn't match source", "settle time / overshoot / drift / monotonic", "what value does the knob reach at frame N", "record this animation so I can replay it", "this animation is expensive — which one and why", "reduced-motion broken", "scrub a captured fixture". Captures fixtures (.motion.jsonl), and ships assertion helpers (is_monotonic / settling_time_seconds / overshoot / start_delay_seconds / final_value / local_step_outlier_ratio) and the `scroll_geometry` trace for `ScrollView` content-offset / visible-rect / content-size observability. Off by default in prod.
 ---
 
 # Motion
@@ -37,7 +37,7 @@ provenance work identically across surfaces.
 
 | You have | Path | Tool |
 |---|---|---|
-| A running app + a node id + a scalar / geometry of interest | **A — Runtime trace** | `Motion.startTrace` over the inspector wire |
+| C++ fixture code + a node id + a scalar / geometry of interest | **A — In-process trace** | `motion::Coordinator` / `MotionInspector` fixture APIs |
 | A `ScrollView` whose offset / visible rect / content size you need to observe | **A — Runtime trace (scroll)** | `Trace.scroll_geometry(name, scroll_view, props)` — emits `contentOffsetX/Y`, `visibleRect*`, `contentSize*`, `scrollableMax*`, `inset*` |
 | A captured frame sequence (no app instrumentation available) | **B — Visual analysis** | `tools/motion/visual/analyze_sequence.py` |
 | A previously recorded `.motion.jsonl` fixture | **C — Replay + assert** | `motion::replay_fixture` + `motion::assert_matches` |
@@ -48,15 +48,13 @@ provenance work identically across surfaces.
 | Jetpack Compose or Android `View` code path | **H — Android native** | `Modifier.pulpMotionGeometry { +Trace.* }` / `View.pulpMotionTrace` |
 | Imported design + intent doc (e.g. "fade in 350 ms ease-out") | **Both A + C** | Record a fixture from the import, assert timing / monotonicity |
 
-## Path A — Runtime trace
+## Path A — In-process fixture trace
 
-The runtime path attaches a trace over an authenticated inspector session.
-Normal Pulp launches do not create that endpoint: use a source-checkout,
-explicitly wired custom fixture that owns an `InspectorServer`, motion domain
-handler, and authenticated discovery publication. The composition root binds
-the `MotionInspector` and `MotionScrubber` event callbacks to
-`InspectorServer::broadcast`; neither motion helper owns server authority.
-Trace teardown is still explicit.
+The runtime path is currently an in-process fixture API. The shipped `pulp
+motion` command, Motion MCP wrappers, and legacy remote transport are
+intentionally unavailable after Phase 3 authority deletion. Remote Motion work
+waits for a typed canonical broker/control replacement; do not rebuild the old
+wire path in a custom fixture.
 
 ### 1. Confirm the complaint as a measurable property
 
@@ -67,20 +65,18 @@ Translate "looks off" into a metric and a target. Example mappings:
 - "two cards drift" → two `frame` traces, deltas correlate
 - "scroll jumps on restore" → child-of-ScrollView geometry, presentation source
 
-### 2. Start an explicitly wired custom fixture
+### 2. Start an owned in-process fixture
 
-No environment flag turns a normal app or `pulp-ui-preview` launch into an
-inspector host. The custom fixture must construct and retain the inspector
-server, attach the Motion domain handler, and publish its owner-private
-session record and credential for authenticated discovery.
+Use the test host's in-process fixture APIs. No environment flag or public CLI
+turns a normal app or `pulp-ui-preview` launch into a remotely controlled Motion
+host.
 
 ### 3. Attach a trace
 
 The shipped `pulp motion` command and `pulp_motion_*` MCP wrappers were retired
-with the raw inspector authority path. A custom fixture may still use the
-in-process Motion APIs for tests, but agents must not connect to its framing or
-recreate a shell-out fallback. Live remote operations require a canonical
-broker/control capability with a frozen schema and receipt.
+with the raw inspector authority path. Use the in-process fixture APIs for
+tests. Live remote operations require a canonical broker/control capability
+with a frozen schema and receipt.
 
 ### 4. Trigger the interaction
 
@@ -281,13 +277,12 @@ primitives — matches the originally-recorded one within
 `FixtureMatchOptions::timing_epsilon_seconds`. Use the ID-keyed
 `assert_matches` for the comparison so reordered identical bursts don't
 false-fail.
-## Path E — Timeline scrubber (inspector replay)
+## Path E — Timeline scrubber (in-process replay)
 
 `pulp::inspect::MotionScrubber` loads a `.motion.jsonl` fixture in trusted
 host/test code and
-re-emits the prefix of events with `frame <= playhead` to caller
-sinks and (when attached to an `InspectorServer`) to inspector clients
-over the wire. The scrubber is passive — no clock is pumped, no
+re-emits the prefix of events with `frame <= playhead` to caller sinks. The
+scrubber is passive — no clock is pumped, no
 animation runs live; `play()` is a jump-to-end that emits every event.
 Real-time pacing and live overlay drawing are intentionally Phase 11+.
 
@@ -300,10 +295,9 @@ Protocol surface (routed by `DomainHandler::handle_motion`):
 | `Motion.play`        | `{}`                | `{ playing:true, emitted_count, playhead_frame }`       |
 | `Motion.pause`       | `{}`                | `{ playing:false, playhead_frame }`                     |
 
-Broadcast events reuse `MotionInspector`'s `Motion.start / .sample /
-.end` shape, with an additional `"replay":true` marker so clients can
-distinguish replayed bursts from live coordinator events on the same
-wire.
+Emitted events reuse `MotionInspector`'s `Motion.start / .sample / .end` shape,
+with an additional `"replay":true` marker so fixture consumers can distinguish
+replayed bursts from live coordinator events.
 
 After trusted host/test code loads the fixture, use the in-process
 `MotionScrubber` API to scrub, play, or pause. The retired `pulp motion` command
