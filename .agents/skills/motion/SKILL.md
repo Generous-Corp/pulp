@@ -53,8 +53,10 @@ provenance work identically across surfaces.
 The runtime path attaches a trace over an authenticated inspector session.
 Normal Pulp launches do not create that endpoint: use a source-checkout,
 explicitly wired custom fixture that owns an `InspectorServer`, motion domain
-handler, and authenticated discovery publication. Trace teardown is still
-explicit.
+handler, and authenticated discovery publication. The composition root binds
+the `MotionInspector` and `MotionScrubber` event callbacks to
+`InspectorServer::broadcast`; neither motion helper owns server authority.
+Trace teardown is still explicit.
 
 ### 1. Confirm the complaint as a measurable property
 

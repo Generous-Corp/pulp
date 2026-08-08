@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include <pulp/inspect/protocol.hpp>
+#include <pulp/inspect/inspector_delivery.hpp>
 #include <pulp/view/motion.hpp>
 #include <pulp/view/motion_cost.hpp>
 
@@ -17,15 +17,13 @@ namespace pulp::view { class View; }
 
 namespace pulp::inspect {
 
-class InspectorServer;
-
 class MotionInspector {
 public:
-    /// Construct with a root view for node-id lookup and an optional
-    /// InspectorServer for event broadcasting. Without a server, traces
-    /// still register and tick; events fan out to any sinks installed
-    /// directly on the coordinator.
-    MotionInspector(pulp::view::View& root, InspectorServer* server);
+    /// Construct with a root view for node-id lookup and an optional event
+    /// delivery callback. Without a callback, traces still register and tick;
+    /// events fan out to sinks installed directly on the coordinator.
+    explicit MotionInspector(pulp::view::View& root,
+                             InspectorEventSink event_sink = {});
     ~MotionInspector();
 
     MotionInspector(const MotionInspector&) = delete;
@@ -39,7 +37,7 @@ public:
 
 private:
     pulp::view::View* root_ = nullptr;
-    InspectorServer* server_ = nullptr;
+    InspectorEventSink event_sink_;
     int sink_id_ = 0;
     int cost_sink_id_ = 0;
 

@@ -210,6 +210,34 @@ TEST_CASE("MotionScrubber play() emits every loaded event",
     std::remove(path.c_str());
 }
 
+TEST_CASE("MotionScrubber delivers replay wire events through its event sink",
+          "[motion-scrubber][protocol]") {
+    FrameClock clock;
+    const auto path = record_sample_fixture("event-sink", clock);
+
+    std::vector<InspectorMessage> delivered;
+    MotionScrubber* scrubber = nullptr;
+    MotionScrubber scrub([&](const InspectorMessage& event) {
+        REQUIRE(scrubber != nullptr);
+        CHECK(scrubber->loaded());
+        delivered.push_back(event);
+    });
+    scrubber = &scrub;
+    REQUIRE(scrub.load_fixture(path));
+
+    const auto emitted = scrub.play();
+    REQUIRE(emitted > 0);
+    REQUIRE(delivered.size() == emitted);
+    for (const auto& event : delivered) {
+        CHECK((event.method == "Motion.start" || event.method == "Motion.sample" ||
+               event.method == "Motion.end"));
+        const auto params = choc::json::parse(event.params_json);
+        CHECK(params["replay"].getBool());
+    }
+
+    std::remove(path.c_str());
+}
+
 // ── Unloaded scrubber rejects scrub / play gracefully ────────────────
 
 TEST_CASE("MotionScrubber scrub_to / play are no-ops when no fixture loaded",
