@@ -5,8 +5,10 @@
 #include <pulp/runtime/crypto.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cerrno>
+#include <charconv>
 #include <limits>
 #include <thread>
 
@@ -47,21 +49,12 @@ void wipe_byte_storage(std::vector<std::uint8_t>& value) noexcept {
     value.clear();
 }
 
-class StringStorageWiper {
-  public:
-    explicit StringStorageWiper(std::string& value) : value_(value) {}
-    ~StringStorageWiper() { wipe_string_storage(value_); }
-    StringStorageWiper(const StringStorageWiper&) = delete;
-    StringStorageWiper& operator=(const StringStorageWiper&) = delete;
-
-  private:
-    std::string& value_;
-};
-
 class ByteStorageWiper {
   public:
     explicit ByteStorageWiper(std::vector<std::uint8_t>& value) : value_(value) {}
-    ~ByteStorageWiper() { wipe_byte_storage(value_); }
+    ~ByteStorageWiper() {
+        wipe_byte_storage(value_);
+    }
     ByteStorageWiper(const ByteStorageWiper&) = delete;
     ByteStorageWiper& operator=(const ByteStorageWiper&) = delete;
 
@@ -69,7 +62,6 @@ class ByteStorageWiper {
     std::vector<std::uint8_t>& value_;
 };
 
-using control_protocol_detail::ValueView;
 using namespace std::chrono_literals;
 
 constexpr std::size_t kMaximumPathBytes = 4096;
@@ -81,44 +73,274 @@ void set_diagnostics(ControlHostBootstrapDiagnostics* diagnostics,
         *diagnostics = {.status = status, .explanation = std::move(explanation)};
 }
 
-void wipe_value_strings(choc::value::Value& value) noexcept {
-    auto* dictionary = dynamic_cast<choc::value::SimpleStringDictionary*>(value.getDictionary());
-    if (!dictionary)
-        return;
-    runtime::secure_zero_memory(const_cast<char*>(dictionary->getRawData()),
-                                dictionary->getRawDataSize());
-}
-
-class ValueStringWiper {
+class SecureJsonWriter {
   public:
-    explicit ValueStringWiper(choc::value::Value& value) : value_(value) {}
-    ~ValueStringWiper() { wipe_value_strings(value_); }
-    ValueStringWiper(const ValueStringWiper&) = delete;
-    ValueStringWiper& operator=(const ValueStringWiper&) = delete;
+    SecureJsonWriter() {
+        bytes_.reserve(kControlHostBootstrapMaximumBytes);
+    }
+    ~SecureJsonWriter() {
+        wipe_byte_storage(bytes_);
+    }
+    SecureJsonWriter(const SecureJsonWriter&) = delete;
+    SecureJsonWriter& operator=(const SecureJsonWriter&) = delete;
+
+    bool append(std::string_view value) {
+        if (value.size() > kControlHostBootstrapMaximumBytes - bytes_.size())
+            return false;
+        bytes_.insert(bytes_.end(), value.begin(), value.end());
+        return true;
+    }
+
+    bool append_string(std::string_view value) {
+        if (!append("\""))
+            return false;
+        static constexpr char hex[] = "0123456789abcdef";
+        for (const auto c : value) {
+            switch (static_cast<unsigned char>(c)) {
+            case '"':
+                if (!append("\\\""))
+                    return false;
+                break;
+            case '\\':
+                if (!append("\\\\"))
+                    return false;
+                break;
+            case '\b':
+                if (!append("\\b"))
+                    return false;
+                break;
+            case '\f':
+                if (!append("\\f"))
+                    return false;
+                break;
+            case '\n':
+                if (!append("\\n"))
+                    return false;
+                break;
+            case '\r':
+                if (!append("\\r"))
+                    return false;
+                break;
+            case '\t':
+                if (!append("\\t"))
+                    return false;
+                break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    const std::array escaped{'\\',
+                                             'u',
+                                             '0',
+                                             '0',
+                                             hex[(static_cast<unsigned char>(c) >> 4u) & 0x0fu],
+                                             hex[static_cast<unsigned char>(c) & 0x0fu]};
+                    if (!append(std::string_view(escaped.data(), escaped.size())))
+                        return false;
+                } else if (!append(std::string_view(&c, 1))) {
+                    return false;
+                }
+            }
+        }
+        return append("\"");
+    }
+
+    template <typename Integer> bool append_integer(Integer value) {
+        std::array<char, 32> text{};
+        const auto [end, error] = std::to_chars(text.data(), text.data() + text.size(), value);
+        return error == std::errc{} &&
+               append(std::string_view(text.data(), static_cast<std::size_t>(end - text.data())));
+    }
+
+    std::vector<std::uint8_t> take() {
+        return std::move(bytes_);
+    }
 
   private:
-    choc::value::Value& value_;
+    std::vector<std::uint8_t> bytes_;
 };
 
-std::optional<choc::value::Value> parse_secure_bootstrap_json(std::string_view json) {
-    if (!control_protocol_detail::valid_control_json_bytes(
-            json, kControlHostBootstrapMaximumBytes, 64))
-        return std::nullopt;
-    std::vector<std::uint8_t> terminated(json.begin(), json.end());
-    ByteStorageWiper wipe_terminated(terminated);
-    terminated.push_back(0);
-    try {
-        auto parsed = choc::json::parseValue(std::string_view(
-            reinterpret_cast<const char*>(terminated.data()), json.size()));
-        std::size_t remaining_nodes = 64;
-        if (!control_protocol_detail::bounded_json_shape(parsed, 0, remaining_nodes)) {
-            wipe_value_strings(parsed);
-            return std::nullopt;
+void skip_json_whitespace(std::span<std::uint8_t> json, std::size_t& cursor) {
+    while (cursor < json.size() && (json[cursor] == ' ' || json[cursor] == '\t' ||
+                                    json[cursor] == '\r' || json[cursor] == '\n'))
+        ++cursor;
+}
+
+int hex_digit(std::uint8_t value) {
+    if (value >= '0' && value <= '9')
+        return value - '0';
+    if (value >= 'a' && value <= 'f')
+        return 10 + value - 'a';
+    if (value >= 'A' && value <= 'F')
+        return 10 + value - 'A';
+    return -1;
+}
+
+bool parse_ascii_json_string(std::span<std::uint8_t> json, std::size_t& cursor, std::string& out,
+                             bool redact) {
+    if (cursor >= json.size() || json[cursor] != '"')
+        return false;
+    const auto content_begin = ++cursor;
+    out.clear();
+    while (cursor < json.size()) {
+        auto value = json[cursor++];
+        if (value == '"') {
+            if (redact)
+                std::fill(json.begin() + static_cast<std::ptrdiff_t>(content_begin),
+                          json.begin() + static_cast<std::ptrdiff_t>(cursor - 1), 'x');
+            return true;
         }
-        return parsed;
-    } catch (...) {
-        return std::nullopt;
+        if (value != '\\') {
+            if (value > 0x7e)
+                return false;
+            out.push_back(static_cast<char>(value));
+            continue;
+        }
+        if (cursor >= json.size())
+            return false;
+        value = json[cursor++];
+        switch (value) {
+        case '"':
+        case '\\':
+        case '/':
+            out.push_back(static_cast<char>(value));
+            break;
+        case 'b':
+            out.push_back('\b');
+            break;
+        case 'f':
+            out.push_back('\f');
+            break;
+        case 'n':
+            out.push_back('\n');
+            break;
+        case 'r':
+            out.push_back('\r');
+            break;
+        case 't':
+            out.push_back('\t');
+            break;
+        case 'u': {
+            if (json.size() - cursor < 4)
+                return false;
+            unsigned decoded = 0;
+            for (unsigned index = 0; index < 4; ++index) {
+                const auto digit = hex_digit(json[cursor++]);
+                if (digit < 0)
+                    return false;
+                decoded = (decoded << 4u) | static_cast<unsigned>(digit);
+            }
+            if (decoded > 0x7e)
+                return false;
+            out.push_back(static_cast<char>(decoded));
+            break;
+        }
+        default:
+            return false;
+        }
     }
+    return false;
+}
+
+bool skip_json_value(std::span<std::uint8_t> json, std::size_t& cursor) {
+    std::size_t depth = 0;
+    bool in_string = false;
+    bool escaped = false;
+    for (; cursor < json.size(); ++cursor) {
+        const auto value = json[cursor];
+        if (in_string) {
+            if (escaped)
+                escaped = false;
+            else if (value == '\\')
+                escaped = true;
+            else if (value == '"')
+                in_string = false;
+            continue;
+        }
+        if (value == '"') {
+            in_string = true;
+        } else if (value == '{' || value == '[') {
+            ++depth;
+        } else if (value == '}' || value == ']') {
+            if (depth == 0)
+                return true;
+            --depth;
+        } else if (value == ',' && depth == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool extract_and_redact_credentials(std::span<std::uint8_t> json,
+                                    ControlHostBootstrapRecord& record,
+                                    ControlProtocolDiagnostics& diagnostics) {
+    record.admission_id.reserve(control_protocol_detail::kMaximumIdBytes);
+    record.registration_id.value.reserve(control_protocol_detail::kMaximumIdBytes);
+    record.enrollment_id.reserve(control_protocol_detail::kMaximumIdBytes);
+    bool found_admission = false;
+    bool found_registration = false;
+    bool found_enrollment = false;
+    std::size_t cursor = 0;
+    skip_json_whitespace(json, cursor);
+    if (cursor >= json.size() || json[cursor++] != '{')
+        return false;
+    for (;;) {
+        skip_json_whitespace(json, cursor);
+        if (cursor < json.size() && json[cursor] == '}')
+            break;
+        std::string name;
+        if (!parse_ascii_json_string(json, cursor, name, false))
+            return false;
+        skip_json_whitespace(json, cursor);
+        if (cursor >= json.size() || json[cursor++] != ':')
+            return false;
+        skip_json_whitespace(json, cursor);
+
+        std::string* credential = nullptr;
+        bool* found = nullptr;
+        if (name == "admission_id") {
+            credential = &record.admission_id;
+            found = &found_admission;
+        } else if (name == "registration_id") {
+            credential = &record.registration_id.value;
+            found = &found_registration;
+        } else if (name == "enrollment_id") {
+            credential = &record.enrollment_id;
+            found = &found_enrollment;
+        }
+        if (credential) {
+            if (*found)
+                return false;
+            if (!parse_ascii_json_string(json, cursor, *credential, true)) {
+                diagnostics = {ControlProtocolError::InvalidType,
+                               "credential fields must be strings"};
+                return false;
+            }
+            *found = true;
+            if (!credential->empty() &&
+                !control_protocol_detail::valid_token(*credential,
+                                                      control_protocol_detail::kMaximumIdBytes)) {
+                diagnostics = {ControlProtocolError::InvalidValue, "a credential field is invalid"};
+                return false;
+            }
+        } else if (!skip_json_value(json, cursor)) {
+            return false;
+        }
+        skip_json_whitespace(json, cursor);
+        if (cursor < json.size() && json[cursor] == ',') {
+            ++cursor;
+            continue;
+        }
+        if (cursor < json.size() && json[cursor] == '}')
+            break;
+        return false;
+    }
+    if (!found_admission || !found_registration) {
+        diagnostics = {ControlProtocolError::MissingField, "missing required credential field"};
+        return false;
+    }
+    if (!found_enrollment)
+        record.enrollment_id.clear();
+    return true;
 }
 
 std::string_view role_id(ControlPeerRole role) {
@@ -161,33 +383,6 @@ bool valid_credentials(const ControlHostBootstrapRecord& record) {
     const bool enrollment = record.admission_id.empty() && record.registration_id.value.empty() &&
                             valid_id(record.enrollment_id);
     return preissued || enrollment;
-}
-
-bool credential_field(ValueView value, std::string_view name, std::string& out, bool required,
-                      ControlProtocolDiagnostics& diagnostics) {
-    if (!value.hasObjectMember(name)) {
-        if (!required) {
-            out.clear();
-            return true;
-        }
-        diagnostics = {ControlProtocolError::MissingField,
-                       "missing field '" + std::string(name) + "'"};
-        return false;
-    }
-    const auto field = value[name];
-    if (!field.isString()) {
-        diagnostics = {ControlProtocolError::InvalidType,
-                       "field '" + std::string(name) + "' must be a string"};
-        return false;
-    }
-    out = std::string(field.getString());
-    if (!out.empty() &&
-        !control_protocol_detail::valid_token(out, control_protocol_detail::kMaximumIdBytes)) {
-        diagnostics = {ControlProtocolError::InvalidValue,
-                       "field '" + std::string(name) + "' is invalid"};
-        return false;
-    }
-    return true;
 }
 
 bool valid_record(const ControlHostBootstrapRecord& record,
@@ -403,31 +598,33 @@ ControlHostBootstrapBytes encode_control_host_bootstrap(const ControlHostBootstr
     if (!valid_record(record, std::chrono::system_clock::now(), nullptr))
         return {};
     const auto& peer = record.expected_broker.evidence;
-    auto broker = choc::value::createObject("");
-    broker.addMember("executable_identity", choc::value::createString(peer.executable_identity));
-    broker.addMember("process_id", choc::value::createInt64(peer.process_id));
-    broker.addMember("process_start_id", choc::value::createString(peer.process_start_id));
-    broker.addMember("publisher_id", choc::value::createString(peer.publisher_id));
-    broker.addMember("role", choc::value::createString(role_id(peer.role)));
-    broker.addMember("user_id", choc::value::createString(peer.user_id));
-
-    auto root = choc::value::createObject("");
-    ValueStringWiper wipe_root(root);
-    root.addMember("admission_id", std::string_view(record.admission_id));
-    root.addMember("endpoint", choc::value::createString(record.endpoint_path.string()));
-    root.addMember("enrollment_id", std::string_view(record.enrollment_id));
-    root.addMember("expected_broker", std::move(broker));
-    root.addMember("expires_at_unix_ms", choc::value::createInt64(record.expires_at_unix_ms));
-    root.addMember("registration_id", std::string_view(record.registration_id.value));
-    root.addMember("schema", choc::value::createString(record.schema));
-    root.addMember("version", choc::value::createInt32(static_cast<std::int32_t>(record.version)));
-    auto encoded = choc::json::toString(root, false);
-    StringStorageWiper wipe_encoded(encoded);
-    if (encoded.empty() || encoded.size() > kControlHostBootstrapMaximumBytes) {
+    SecureJsonWriter encoded;
+    const auto endpoint = record.endpoint_path.string();
+    bool complete = encoded.append("{ \"admission_id\": ") &&
+                    encoded.append_string(record.admission_id) &&
+                    encoded.append(", \"endpoint\": ") && encoded.append_string(endpoint);
+    if (complete && !record.enrollment_id.empty())
+        complete =
+            encoded.append(", \"enrollment_id\": ") && encoded.append_string(record.enrollment_id);
+    complete =
+        complete && encoded.append(", \"expected_broker\": { \"executable_identity\": ") &&
+        encoded.append_string(peer.executable_identity) && encoded.append(", \"process_id\": ") &&
+        encoded.append_integer(peer.process_id) && encoded.append(", \"process_start_id\": ") &&
+        encoded.append_string(peer.process_start_id) && encoded.append(", \"publisher_id\": ") &&
+        encoded.append_string(peer.publisher_id) && encoded.append(", \"role\": ") &&
+        encoded.append_string(role_id(peer.role)) && encoded.append(", \"user_id\": ") &&
+        encoded.append_string(peer.user_id) && encoded.append(" }, \"expires_at_unix_ms\": ") &&
+        encoded.append_integer(record.expires_at_unix_ms) &&
+        encoded.append(", \"registration_id\": ") &&
+        encoded.append_string(record.registration_id.value) && encoded.append(", \"schema\": ") &&
+        encoded.append_string(record.schema) && encoded.append(", \"version\": ") &&
+        encoded.append_integer(record.version) && encoded.append(" }");
+    auto bytes = encoded.take();
+    if (!complete || bytes.empty()) {
+        wipe_byte_storage(bytes);
         return {};
     }
-    ControlHostBootstrapBytes result{{encoded.begin(), encoded.end()}};
-    return result;
+    return ControlHostBootstrapBytes{std::move(bytes)};
 }
 
 std::optional<ControlHostBootstrapRecord>
@@ -445,19 +642,44 @@ decode_control_host_bootstrap(std::span<const std::uint8_t> bytes,
         return std::nullopt;
     }
     const auto text = std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-    auto parsed = parse_secure_bootstrap_json(text);
-    if (!parsed) {
+    if (!control_protocol_detail::valid_control_json_bytes(text, kControlHostBootstrapMaximumBytes,
+                                                           64)) {
         set_diagnostics(diagnostics, ControlHostBootstrapStatus::Truncated,
                         "the bootstrap record is not complete bounded JSON");
         return std::nullopt;
     }
-    ValueStringWiper wipe_parsed(*parsed);
+    std::vector<std::uint8_t> redacted(bytes.size() + 1);
+    ByteStorageWiper wipe_redacted(redacted);
+    std::ranges::copy(bytes, redacted.begin());
+    ControlHostBootstrapRecord record;
+    ControlProtocolDiagnostics fields;
+    if (!extract_and_redact_credentials(std::span<std::uint8_t>(redacted.data(), bytes.size()),
+                                        record, fields)) {
+        if (fields.explanation.empty())
+            set_diagnostics(diagnostics, ControlHostBootstrapStatus::Truncated,
+                            "the bootstrap record is not complete bounded JSON");
+        else
+            set_diagnostics(diagnostics, ControlHostBootstrapStatus::InvalidRecord,
+                            fields.explanation);
+        return std::nullopt;
+    }
+    std::optional<choc::value::Value> parsed;
+    try {
+        parsed = choc::json::parseValue(
+            std::string_view(reinterpret_cast<const char*>(redacted.data()), bytes.size()));
+    } catch (...) {
+    }
+    std::size_t remaining_nodes = 64;
+    if (!parsed || !control_protocol_detail::bounded_json_shape(*parsed, 0, remaining_nodes)) {
+        set_diagnostics(diagnostics, ControlHostBootstrapStatus::Truncated,
+                        "the bootstrap record is not complete bounded JSON");
+        return std::nullopt;
+    }
     if (!parsed->isObject()) {
         set_diagnostics(diagnostics, ControlHostBootstrapStatus::Truncated,
                         "the bootstrap record is not complete bounded JSON");
         return std::nullopt;
     }
-    ControlProtocolDiagnostics fields;
     if (!control_protocol_detail::only_fields(*parsed,
                                               {"admission_id", "endpoint", "expected_broker",
                                                "enrollment_id", "expires_at_unix_ms",
@@ -477,7 +699,6 @@ decode_control_host_bootstrap(std::span<const std::uint8_t> bytes,
         return std::nullopt;
     }
 
-    ControlHostBootstrapRecord record;
     std::string endpoint;
     std::string role;
     if (!control_protocol_detail::required_string(*parsed, "schema", record.schema, 128, fields,
@@ -485,9 +706,6 @@ decode_control_host_bootstrap(std::span<const std::uint8_t> bytes,
         !control_protocol_detail::required_u32(*parsed, "version", record.version, fields) ||
         !control_protocol_detail::required_string(*parsed, "endpoint", endpoint, kMaximumPathBytes,
                                                   fields, false) ||
-        !credential_field(*parsed, "admission_id", record.admission_id, true, fields) ||
-        !credential_field(*parsed, "registration_id", record.registration_id.value, true, fields) ||
-        !credential_field(*parsed, "enrollment_id", record.enrollment_id, false, fields) ||
         !control_protocol_detail::required_i64(*parsed, "expires_at_unix_ms",
                                                record.expires_at_unix_ms, fields) ||
         !control_protocol_detail::required_string(broker, "role", role, 64, fields, false) ||
