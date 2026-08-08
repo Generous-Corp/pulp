@@ -39,6 +39,7 @@ def _write_staged(path: pathlib.Path, payload: bytes) -> None:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
+        _fsync_directory(path.parent)
     except BaseException:
         path.unlink(missing_ok=True)
         raise

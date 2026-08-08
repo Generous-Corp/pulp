@@ -374,6 +374,17 @@ def exercise_evolution(canonical: dict) -> int:
     with tempfile.TemporaryDirectory(prefix="pulp-agent-transaction-") as temp:
         root = pathlib.Path(temp)
         journal = root / "transaction.json"
+        staged = root / ".staged-output"
+        synced_directories: list[pathlib.Path] = []
+        original_fsync_directory = transaction._fsync_directory
+        transaction._fsync_directory = synced_directories.append
+        try:
+            transaction._write_staged(staged, b"durable staged output\n")
+        finally:
+            transaction._fsync_directory = original_fsync_directory
+        assert staged.read_bytes() == b"durable staged output\n"
+        assert synced_directories == [root]
+
         outputs = {
             root / "manifest.json": "new manifest\n",
             root / "surface.json": "new surface\n",
