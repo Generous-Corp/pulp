@@ -1,4 +1,5 @@
 #include <pulp/events/interprocess_connection.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/named_pipe.hpp>
 #include <pulp/runtime/socket.hpp>
 #include <algorithm>
@@ -562,6 +563,10 @@ void InterprocessConnection::set_frame_read_timeout(
         std::memory_order_relaxed);
 }
 
+void InterprocessConnection::set_secure_receive_buffer(bool enabled) {
+    secure_receive_buffer_.store(enabled, std::memory_order_relaxed);
+}
+
 void InterprocessConnection::start_read_thread(bool allow_active_disconnect_owner,
                                                std::uint64_t expected_connection_generation) {
     const auto start_gate = std::make_shared<std::atomic<bool>>(false);
@@ -599,6 +604,14 @@ void InterprocessConnection::read_loop(std::uint64_t generation) {
     const auto alive = alive_.capture();
     const auto lifecycle = impl_->lifecycle;
     std::vector<uint8_t> buffer;
+    struct ReceiveBufferWiper {
+        std::vector<uint8_t>& buffer;
+        bool enabled;
+        ~ReceiveBufferWiper() {
+            if (enabled && !buffer.empty())
+                runtime::secure_zero_memory(buffer.data(), buffer.size());
+        }
+    };
     auto is_current = [this, generation] {
         return running_.load(std::memory_order_acquire) &&
                read_generation_.load(std::memory_order_acquire) == generation;
@@ -686,6 +699,8 @@ void InterprocessConnection::read_loop(std::uint64_t generation) {
 
         // Read payload
         buffer.resize(msg_len);
+        ReceiveBufferWiper receive_buffer_wiper{
+            buffer, secure_receive_buffer_.load(std::memory_order_relaxed)};
         if (!read_exact(buffer.data(), msg_len)) {
             if (is_current())
                 notify_lost();
