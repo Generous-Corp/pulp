@@ -98,6 +98,24 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME inspector-truth-check-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_inspector_truth_check.py")
 
+    # Product B collaboration remains an explicit NO-GO. Scan the complete
+    # shipped source/docs surface and the CLI/broker binaries after the build.
+    set(_control_product_b_absence_args --root "${CMAKE_SOURCE_DIR}")
+    if(TARGET pulp-cli)
+        list(APPEND _control_product_b_absence_args
+            --binary "$<TARGET_FILE:pulp-cli>")
+    endif()
+    if(TARGET pulp-control-broker)
+        list(APPEND _control_product_b_absence_args
+            --binary "$<TARGET_FILE:pulp-control-broker>")
+    endif()
+    add_test(NAME control-product-b-absence COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/control_product_b_absence_check.py"
+        ${_control_product_b_absence_args})
+    set_tests_properties(control-product-b-absence PROPERTIES LABELS "inspect;control;docs")
+    add_test(NAME control-product-b-absence-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_control_product_b_absence_check.py")
+
     # Governed-build wrapper: the bound on Shipyard's `local` mac backend, which
     # runs the build string directly on the host and so never sees the pulp
     # CLI's lease integration. Pins the lease-denial contract (back off to the

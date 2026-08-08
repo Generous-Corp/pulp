@@ -161,6 +161,17 @@ add_custom_command(TARGET pulp-rust-cli POST_BUILD
     COMMENT "Staging Rust pulp at ${_pulp_rs_dest_bin}"
     VERBATIM)
 
+if(PULP_BUILD_TESTS AND BUILD_TESTING)
+    # This is the installed user-facing CLI (unlike the C++ pulp-cpp delegate).
+    # Keep its bytes inside the Product B absence boundary after cargo stages it.
+    add_test(NAME control-product-b-rust-cli-absence COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/control_product_b_absence_check.py"
+        --root "${CMAKE_SOURCE_DIR}"
+        --binary "${_pulp_rs_dest_bin}")
+    set_tests_properties(control-product-b-rust-cli-absence PROPERTIES
+        LABELS "inspect;control;docs")
+endif()
+
 # Install into the active prefix's bindir so `cmake --install`
 # emits both Rust `pulp` and C++ `pulp-cpp` side-by-side. We install
 # the staged copy under
