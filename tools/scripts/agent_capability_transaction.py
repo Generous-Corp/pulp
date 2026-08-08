@@ -61,6 +61,27 @@ def _write_journal(path: pathlib.Path, document: dict[str, object]) -> None:
         temporary_path.unlink(missing_ok=True)
 
 
+def _validated_target(path: pathlib.Path, root: pathlib.Path) -> pathlib.Path:
+    root = root.resolve(strict=True)
+    if not path.is_absolute():
+        path = root / path
+    if path.is_symlink():
+        raise RuntimeError(f"generated capability output may not be a symlink: {path}")
+    try:
+        target = path.parent.resolve(strict=True) / path.name
+    except OSError as error:
+        raise RuntimeError(
+            f"invalid generated capability output path {path}: {error}"
+        ) from error
+    try:
+        target.relative_to(root)
+    except ValueError as error:
+        raise RuntimeError(f"generated capability output escapes repository: {path}") from error
+    if target.exists() and not target.is_file():
+        raise RuntimeError(f"generated capability output is not a file: {path}")
+    return target
+
+
 def _load_journal(path: pathlib.Path) -> list[dict[str, str]]:
     try:
         document = json.loads(path.read_text())
@@ -90,13 +111,14 @@ def recover_transaction(
     journal: pathlib.Path,
     expected_targets: Iterable[pathlib.Path],
     *,
+    root: pathlib.Path,
     interrupt_after: int | None = None,
 ) -> bool:
     """Finish a journaled replacement, returning whether recovery was needed."""
     if not journal.exists():
         return False
     entries = _load_journal(journal)
-    expected_target_set = {path.resolve() for path in expected_targets}
+    expected_target_set = {_validated_target(path, root) for path in expected_targets}
     actual = [pathlib.Path(entry["target"]) for entry in entries]
     if len(actual) != len(expected_target_set) or set(actual) != expected_target_set:
         raise RuntimeError(
@@ -124,6 +146,10 @@ def recover_transaction(
         target = pathlib.Path(entry["target"])
         staged = pathlib.Path(entry["staged"])
         expected = entry["sha256"]
+        if target.is_symlink():
+            raise RuntimeError(f"generated capability output became a symlink: {target}")
+        if staged.is_symlink():
+            raise RuntimeError(f"staged capability output may not be a symlink: {staged}")
         if staged.is_file():
             if _digest(staged.read_bytes()) != expected:
                 raise RuntimeError(f"staged capability output digest mismatch: {staged}")
@@ -146,17 +172,18 @@ def write_transaction(
     outputs: Mapping[pathlib.Path, str],
     journal: pathlib.Path,
     *,
+    root: pathlib.Path,
     interrupt_after: int | None = None,
 ) -> None:
     """Stage every output durably, journal the batch, then commit and recover it."""
     if journal.exists():
-        recover_transaction(journal, outputs)
+        recover_transaction(journal, outputs, root=root)
     transaction_id = uuid.uuid4().hex
     entries: list[dict[str, str]] = []
     staged_paths: list[pathlib.Path] = []
     try:
         for target, text in outputs.items():
-            target = target.resolve()
+            target = _validated_target(target, root)
             payload = text.encode("utf-8")
             staged = target.with_name(f".{target.name}.{transaction_id}.staged")
             _write_staged(staged, payload)
@@ -165,7 +192,9 @@ def write_transaction(
                 {"target": str(target), "staged": str(staged), "sha256": _digest(payload)}
             )
         _write_journal(journal, {"schema": TRANSACTION_SCHEMA, "entries": entries})
-        recover_transaction(journal, outputs, interrupt_after=interrupt_after)
+        recover_transaction(
+            journal, outputs, root=root, interrupt_after=interrupt_after
+        )
     except SimulatedInterruption:
         raise
     except BaseException:

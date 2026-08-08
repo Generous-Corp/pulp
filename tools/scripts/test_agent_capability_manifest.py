@@ -413,7 +413,9 @@ def exercise_evolution(canonical: dict) -> int:
         for path in outputs:
             path.write_text("old\n")
         try:
-            transaction.write_transaction(outputs, journal, interrupt_after=2)
+            transaction.write_transaction(
+                outputs, journal, root=root, interrupt_after=2
+            )
         except transaction.SimulatedInterruption:
             pass
         else:
@@ -424,7 +426,7 @@ def exercise_evolution(canonical: dict) -> int:
             "new manifest\n",
             "new surface\n",
         }
-        assert transaction.recover_transaction(journal, outputs)
+        assert transaction.recover_transaction(journal, outputs, root=root)
         assert not journal.exists()
         assert all(path.read_text() == expected for path, expected in outputs.items())
 
@@ -449,7 +451,7 @@ def exercise_evolution(canonical: dict) -> int:
             )
         )
         try:
-            transaction.recover_transaction(journal, outputs)
+            transaction.recover_transaction(journal, outputs, root=root)
         except RuntimeError as error:
             assert "targets do not match generated outputs" in str(error)
         else:
@@ -474,11 +476,31 @@ def exercise_evolution(canonical: dict) -> int:
             json.dumps({"schema": transaction.TRANSACTION_SCHEMA, "entries": entries})
         )
         try:
-            transaction.recover_transaction(journal, outputs)
+            transaction.recover_transaction(journal, outputs, root=root)
         except RuntimeError as error:
             assert "invalid staged capability output path" in str(error)
         else:
             raise AssertionError("malicious staged path unexpectedly accepted")
+
+        if os.name != "nt":
+            journal.unlink()
+            repository = root / "repository"
+            repository.mkdir()
+            outside_output = root / "outside-generated-output"
+            outside_output.write_text("preserve me\n")
+            linked_output = repository / "manifest.json"
+            linked_output.symlink_to(outside_output)
+            try:
+                transaction.write_transaction(
+                    {linked_output: "overwrite\n"},
+                    repository / "transaction.json",
+                    root=repository,
+                )
+            except RuntimeError as error:
+                assert "may not be a symlink" in str(error)
+            else:
+                raise AssertionError("symlinked transaction target unexpectedly accepted")
+            assert outside_output.read_text() == "preserve me\n"
     checks += 1
 
     for field, weakened in (

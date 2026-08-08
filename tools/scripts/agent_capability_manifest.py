@@ -733,7 +733,9 @@ def main() -> int:
     # as the "previous" contract, or history could preserve a hybrid state.
     if args.write:
         recover_transaction(
-            transaction_path, (snapshot, surface_snapshot, history_path, fixture)
+            transaction_path,
+            (snapshot, surface_snapshot, history_path, fixture),
+            root=root,
         )
 
     if args.bootstrap_surface:
@@ -833,6 +835,7 @@ def main() -> int:
                 fixture: compile_fixture(),
             },
             transaction_path,
+            root=root,
         )
         print(
             f"agent-capabilities: wrote {SNAPSHOT}, {surface.SURFACE_SNAPSHOT}, "
