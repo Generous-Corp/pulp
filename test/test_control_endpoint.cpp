@@ -223,7 +223,8 @@ TEST_CASE("control endpoint authenticates a host role and routes on the canonica
                     .terminal_state = ControlReceiptState::Completed,
                     .result = {.artifacts = {{.artifact_id = "unsupported-artifact"}}}};
             blocked_execution_started.store(true);
-            while (!release_blocked_execution.load())
+            while (
+                !release_blocked_execution.load()) // unbounded-wait: allow caller always releases
                 std::this_thread::sleep_for(1ms);
             return ControlExecutionOutcome{.terminal_state = ControlReceiptState::Completed};
         }};
@@ -284,9 +285,10 @@ TEST_CASE("control endpoint authenticates a host role and routes on the canonica
     });
     for (unsigned attempt = 0; attempt != 100 && !blocked_execution_started.load(); ++attempt)
         std::this_thread::sleep_for(1ms);
-    REQUIRE(blocked_execution_started.load());
+    const bool execution_started = blocked_execution_started.load();
     endpoint.stop();
     release_blocked_execution.store(true);
+    REQUIRE(execution_started);
     REQUIRE(interrupted.wait_for(1s) == std::future_status::ready);
     CHECK(interrupted.get().terminal_state == ControlReceiptState::UnknownNeedsRefresh);
     for (unsigned attempt = 0;
