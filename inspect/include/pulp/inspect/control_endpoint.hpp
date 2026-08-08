@@ -1,6 +1,7 @@
 #pragma once
 
-#include <pulp/inspect/control_peer.hpp>
+#include <pulp/inspect/control_connection_admission.hpp>
+#include <pulp/inspect/control_host_enrollment.hpp>
 #include <pulp/inspect/control_service.hpp>
 
 #include <chrono>
@@ -15,11 +16,17 @@
 
 namespace pulp::inspect {
 
-struct ControlConnectionAdmission {
-    std::string admission_id;
-    ControlPeerExpectation expected_peer;
-    ControlClientId client_id;
-    std::chrono::steady_clock::time_point expires_at;
+class ControlHostRouter;
+class ControlBroker;
+
+/// Explicit injection seam for endpoint-owned enrollment. It is null in the
+/// production daemon until an endpoint-owned private preflight rendezvous can
+/// supply an exact VerifiedControlPeerIdentity; a PID-only launcher is
+/// intentionally insufficient.
+struct ControlEndpointEnrollmentContext {
+    ControlHostEnrollmentStore& enrollments;
+    ControlBroker& broker;
+    ControlConnectionAdmissionStore& admissions;
 };
 
 using ControlAdmissionConsumer =
@@ -45,7 +52,8 @@ struct ControlEndpointConfig {
 class ControlEndpoint {
   public:
     ControlEndpoint(ControlService& service, ControlAdmissionConsumer consume_admission,
-                    ControlEndpointConfig config);
+                    ControlEndpointConfig config, ControlHostRouter* host_router = nullptr,
+                    ControlEndpointEnrollmentContext* enrollment_context = nullptr);
     ~ControlEndpoint();
 
     ControlEndpoint(const ControlEndpoint&) = delete;

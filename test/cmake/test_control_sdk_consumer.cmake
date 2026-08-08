@@ -71,10 +71,16 @@ file(WRITE "${_consumer_source}/main.cpp" [=[
 #include <pulp/inspect/control_artifacts.hpp>
 #include <pulp/inspect/control_broker.hpp>
 #include <pulp/inspect/control_client.hpp>
+#include <pulp/inspect/control_endpoint.hpp>
+#include <pulp/inspect/control_executor_slot.hpp>
+#include <pulp/inspect/control_host_enrollment.hpp>
+#include <pulp/inspect/control_host_connection.hpp>
+#include <pulp/inspect/control_host_router.hpp>
 #include <pulp/inspect/control_main_thread_executor.hpp>
 #include <pulp/inspect/control_operations.hpp>
 #include <pulp/inspect/control_protocol.hpp>
 #include <pulp/inspect/control_service.hpp>
+#include <pulp/inspect/control_trusted_host_inventory.hpp>
 
 #include <chrono>
 #include <memory>
@@ -108,16 +114,28 @@ class InstalledControlTransport final
 
 int main() {
   pulp::inspect::ControlBroker broker;
+  pulp::inspect::ControlHostEnrollmentStore enrollments;
   pulp::inspect::InspectorClient client;
   InstalledControlTransport transport;
   pulp::inspect::ControlClient control_client{transport};
   pulp::inspect::ControlService service{broker};
+  pulp::inspect::ControlHostRouter host_router;
+  pulp::inspect::ControlOperationExecutorSlot executor_slot;
+  pulp::inspect::ControlHostConnection host_connection{
+      {.endpoint_path = "/tmp/not-connected-control.sock"}, executor_slot.executor()};
+  const auto enrollment_open =
+      host_connection.open_host_enrollment("installed-enrollment", std::chrono::milliseconds(1));
+  pulp::inspect::ControlConnectionPrincipal principal =
+      pulp::inspect::ControlHostConnectionPrincipal{
+          pulp::inspect::ControlRegistrationId{"installed-registration"}};
   auto rpc = std::make_shared<pulp::inspect::InspectorMainThreadRpc>();
   pulp::inspect::ControlMainThreadExecutor main_thread_executor{rpc, {}};
+  const auto slot_installed = executor_slot.install(host_router.executor());
   pulp::inspect::ControlRequestEnvelope request;
   pulp::inspect::ControlAdmissionRequest admission;
   pulp::inspect::ControlOperationStoreConfig operations;
   pulp::inspect::ControlArtifactStoreConfig artifacts;
+  pulp::inspect::ControlTrustedHostInventoryConfig inventory;
   const auto artifact = control_client.read_artifact("artifact-installed", 0, 16);
   (void)main_thread_executor.executor();
 
@@ -125,8 +143,13 @@ int main() {
   admission.operation_version = request.operation_version;
   return !broker.is_listening() && !service.is_listening()
              && !client.is_connected()
+             && !host_connection.is_connected()
+             && enrollment_open.error_code == "invalid-host-open"
+             && slot_installed
+             && std::holds_alternative<pulp::inspect::ControlHostConnectionPrincipal>(principal)
              && operations.max_receipts > 0
              && artifacts.maximum_blob_bytes > 0
+             && inventory.maximum_entries > 0
              && admission.operation_version == 1
              && artifact.status == pulp::inspect::ControlArtifactStatus::Read
              && artifact.metadata

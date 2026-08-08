@@ -48,6 +48,12 @@ inline std::vector<SeedCorpusEntry> control_protocol_seed_corpus() {
         {.payload = ControlCancelEnvelope{"request-fuzz", "bounded fuzz cancellation"}});
     add("progress.json", {.payload = ControlProgressEnvelope{"request-fuzz", "receipt-fuzz", 2, 5,
                                                              10, R"({"stage":"render"})"}});
+    add("host-open-admission.json",
+        {.payload = ControlHostOpenEnvelope{.request_id = "host-open-fuzz",
+                                            .admission_id = "admission-fuzz"}});
+    add("host-open-enrollment.json",
+        {.payload = ControlHostOpenEnvelope{.request_id = "host-enrollment-fuzz",
+                                            .enrollment_id = "enrollment-fuzz"}});
     add("receipt.json", {.payload = ControlReceiptEnvelope{
                              .request_id = "request-fuzz",
                              .receipt_id = "receipt-fuzz",

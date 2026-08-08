@@ -128,6 +128,54 @@ struct ControlSessionOpenResult {
                            const ControlSessionOpenResult&) = default;
 };
 
+struct ControlHostOpenEnvelope {
+    std::string request_id;
+    std::string admission_id;
+    std::string enrollment_id;
+    friend bool operator==(const ControlHostOpenEnvelope&,
+                           const ControlHostOpenEnvelope&) = default;
+};
+
+struct ControlHostOpenResult {
+    std::string request_id;
+    bool accepted = false;
+    std::string registration_id;
+    std::string error_code;
+    std::string explanation;
+    friend bool operator==(const ControlHostOpenResult&, const ControlHostOpenResult&) = default;
+};
+
+/// Broker-to-host execution request. Client and grant identities deliberately
+/// remain broker-private; the host receives only the fields needed to run the
+/// already-admitted operation.
+struct ControlHostExecuteEnvelope {
+    std::string route_id;
+    std::string receipt_id;
+    std::string operation_id;
+    std::uint32_t operation_version = 1;
+    std::int64_t deadline_unix_ms = 0;
+    std::uint64_t expected_state_generation = 0;
+    std::string params_json = "{}";
+    friend bool operator==(const ControlHostExecuteEnvelope&,
+                           const ControlHostExecuteEnvelope&) = default;
+};
+
+struct ControlHostProgressEnvelope {
+    std::string route_id;
+    std::uint64_t current = 0;
+    std::uint64_t total = 0;
+    std::string detail_json = "{}";
+    friend bool operator==(const ControlHostProgressEnvelope&,
+                           const ControlHostProgressEnvelope&) = default;
+};
+
+struct ControlHostCancelEnvelope {
+    std::string route_id;
+    std::string reason;
+    friend bool operator==(const ControlHostCancelEnvelope&,
+                           const ControlHostCancelEnvelope&) = default;
+};
+
 struct ControlArtifactReadEnvelope {
     std::string request_id;
     std::string artifact_id;
@@ -237,6 +285,20 @@ enum class ControlRetryClassification : std::uint8_t {
     AfterBackoff,
 };
 
+/// Host-authored execution outcome. CompletedAfterRevocation is intentionally
+/// unavailable here; only the broker may derive that durable receipt state.
+struct ControlHostCompleteEnvelope {
+    std::string route_id;
+    ControlReceiptState terminal_state = ControlReceiptState::Failed;
+    std::optional<ControlResultCode> result_code;
+    ControlRetryClassification retry = ControlRetryClassification::Never;
+    std::string explanation;
+    std::string detail_json = "{}";
+    std::string cancellation_reason;
+    friend bool operator==(const ControlHostCompleteEnvelope&,
+                           const ControlHostCompleteEnvelope&) = default;
+};
+
 struct ControlArtifactHandle {
     std::string artifact_id;
     std::string media_type;
@@ -263,7 +325,9 @@ using ControlEnvelopePayload =
                  ControlCancelEnvelope, ControlProgressEnvelope, ControlReceiptEnvelope,
                  ControlSessionOpenEnvelope, ControlSessionOpenResult, ControlArtifactReadEnvelope,
                  ControlArtifactReadResponseEnvelope, ControlHealthEnvelope, ControlHealthResult,
-                 ControlErrorEnvelope>;
+                 ControlErrorEnvelope, ControlHostOpenEnvelope, ControlHostOpenResult,
+                 ControlHostExecuteEnvelope, ControlHostProgressEnvelope, ControlHostCancelEnvelope,
+                 ControlHostCompleteEnvelope>;
 
 struct ControlEnvelope {
     std::uint32_t schema_version = kControlProtocolVersion;
@@ -290,6 +354,17 @@ struct ControlProtocolDiagnostics {
     ControlProtocolError code = ControlProtocolError::None;
     std::string explanation;
 };
+
+enum class ControlEnvelopeDirection : std::uint8_t {
+    ClientToBroker,
+    BrokerToClient,
+    HostToBroker,
+    BrokerToHost,
+};
+
+/// Direction is transport state, not payload authority. Carriers call this
+/// after decoding and close on a role-incompatible frame.
+bool control_envelope_allowed(const ControlEnvelope& envelope, ControlEnvelopeDirection direction);
 
 enum class ControlJsonSchemaError : std::uint8_t {
     None,

@@ -121,7 +121,7 @@ catch_discover_tests(pulp-test-control-identity
 add_executable(pulp-test-control-peer test_control_peer.cpp)
 target_link_libraries(pulp-test-control-peer PRIVATE
     pulp::inspect-control Catch2::Catch2WithMain)
-if(APPLE)
+if(APPLE AND NOT IOS AND NOT PULP_IOS)
     find_program(_pulp_test_codesign codesign REQUIRED)
     # Apple Silicon's linker emits an ad-hoc signature for native executables,
     # but a cross-built x86_64 test binary may be unsigned. This security test
@@ -149,6 +149,88 @@ if(APPLE)
 endif()
 catch_discover_tests(pulp-test-control-endpoint
     PROPERTIES LABELS "inspect;control;carrier")
+
+add_executable(pulp-test-control-connection-admission
+    test_control_connection_admission.cpp)
+target_link_libraries(pulp-test-control-connection-admission PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-connection-admission
+    PROPERTIES LABELS "inspect;control;carrier;admission;security")
+
+add_executable(pulp-control-trusted-host-fixture
+    control_trusted_host_fixture.cpp)
+add_executable(pulp-test-control-trusted-host-inventory
+    test_control_trusted_host_inventory.cpp)
+target_link_libraries(pulp-test-control-trusted-host-inventory PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-control-trusted-host-inventory PRIVATE
+    PULP_CONTROL_TRUSTED_HOST_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-fixture>")
+add_dependencies(pulp-test-control-trusted-host-inventory
+    pulp-control-trusted-host-fixture)
+
+add_executable(pulp-test-control-host-enrollment
+    test_control_host_enrollment.cpp)
+target_link_libraries(pulp-test-control-host-enrollment PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-control-host-enrollment PRIVATE
+    PULP_CONTROL_TRUSTED_HOST_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-fixture>")
+add_dependencies(pulp-test-control-host-enrollment
+    pulp-control-trusted-host-fixture)
+catch_discover_tests(pulp-test-control-host-enrollment
+    PROPERTIES LABELS "inspect;control;enrollment;security")
+
+add_executable(pulp-test-control-endpoint-enrollment
+    test_control_endpoint_enrollment.cpp)
+add_executable(pulp-control-enrollment-host-fixture
+    control_enrollment_host_fixture.cpp)
+target_link_libraries(pulp-control-enrollment-host-fixture PRIVATE
+    pulp::inspect-control)
+if(APPLE)
+    target_link_options(pulp-control-enrollment-host-fixture PRIVATE LINKER:-dead_strip)
+endif()
+target_link_libraries(pulp-test-control-endpoint-enrollment PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-control-endpoint-enrollment PRIVATE
+    PULP_CONTROL_ENROLLMENT_HOST_FIXTURE="$<TARGET_FILE:pulp-control-enrollment-host-fixture>")
+add_dependencies(pulp-test-control-endpoint-enrollment
+    pulp-control-enrollment-host-fixture)
+if(APPLE)
+    find_program(_pulp_endpoint_enrollment_codesign codesign REQUIRED)
+    add_custom_command(TARGET pulp-control-enrollment-host-fixture POST_BUILD
+        COMMAND "${_pulp_endpoint_enrollment_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-control-enrollment-host-fixture>"
+        COMMENT "Ad-hoc signing control enrollment host fixture"
+        VERBATIM)
+    add_custom_command(TARGET pulp-test-control-endpoint-enrollment POST_BUILD
+        COMMAND "${_pulp_endpoint_enrollment_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-test-control-endpoint-enrollment>"
+        COMMENT "Ad-hoc signing control endpoint enrollment test fixture"
+        VERBATIM)
+endif()
+catch_discover_tests(pulp-test-control-endpoint-enrollment
+    PROPERTIES LABELS "inspect;control;carrier;enrollment;security")
+if(APPLE)
+    find_program(_pulp_inventory_test_codesign codesign REQUIRED)
+    add_custom_command(TARGET pulp-control-trusted-host-fixture POST_BUILD
+        COMMAND "${_pulp_inventory_test_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-control-trusted-host-fixture>"
+        COMMENT "Ad-hoc signing trusted host inventory fixture"
+        VERBATIM)
+endif()
+catch_discover_tests(pulp-test-control-trusted-host-inventory
+    PROPERTIES LABELS "inspect;control;inventory;security")
+
+add_executable(pulp-test-control-host-router test_control_host_router.cpp)
+target_link_libraries(pulp-test-control-host-router PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-host-router
+    PROPERTIES LABELS "inspect;control;host;router")
+
+add_executable(pulp-test-control-executor-slot test_control_executor_slot.cpp)
+target_link_libraries(pulp-test-control-executor-slot PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-executor-slot
+    PROPERTIES LABELS "inspect;control;host;executor;slot")
 
 add_executable(pulp-test-control-carrier test_control_carrier.cpp)
 target_link_libraries(pulp-test-control-carrier PRIVATE

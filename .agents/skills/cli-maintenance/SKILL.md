@@ -30,6 +30,13 @@ For Rust-native commands, the source of truth is
 `experimental/pulp-rs/src/help.rs` too; the installed Rust binary's help banner
 is user-facing even when there is no C++ table entry.
 
+Rust command names beginning with `__` are reserved for installed-product
+plumbing such as installer reconciliation. Intercept them before public clap
+dispatch instead of adding them to `enum Command`; that keeps them out of help,
+the public command manifest, slash commands, CLI/MCP parity, and Vellum's
+tooling inventory. Pin their private argument parser and installer invocation
+with focused tests; do not baseline an internal verb as a user-facing command.
+
 #### Where a new helper declaration goes
 
 `cli_common.hpp` is split along the implementation seam — each header carries

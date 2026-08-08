@@ -401,6 +401,11 @@ if(UNIX)
     # It cannot mask a hang: every subprocess the script spawns is a bounded
     # shell, awk, or sed invocation, with no network, sleep, or polling.
     set_tests_properties(pulp-installer-mcp-contract PROPERTIES TIMEOUT 120)
+    add_test(NAME install-control-broker-activation
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_install_control_broker_activation.sh)
+    set_tests_properties(install-control-broker-activation PROPERTIES
+        LABELS "tooling;installer"
+        TIMEOUT 30)
 endif()
 if(Python3_Interpreter_FOUND)
     # tools/mcp is added after test/, so TARGET is necessarily false here even

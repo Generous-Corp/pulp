@@ -1,6 +1,8 @@
 #include <pulp/inspect/control_endpoint.hpp>
 
+#include <pulp/inspect/control_broker.hpp>
 #include <pulp/inspect/control_carrier.hpp>
+#include <pulp/inspect/control_host_router.hpp>
 
 #include <pulp/events/interprocess_connection.hpp>
 #include <pulp/runtime/base64.hpp>
@@ -94,6 +96,13 @@ ControlEnvelope error_envelope(std::string request_id, std::string code, std::st
             }};
 }
 
+bool same_peer(const ControlPeerEvidence& left, const ControlPeerEvidence& right) {
+    return left.role == right.role && left.user_id == right.user_id &&
+           left.process_id == right.process_id && left.process_start_id == right.process_start_id &&
+           left.executable_identity == right.executable_identity &&
+           left.publisher_id == right.publisher_id;
+}
+
 std::string service_request_id(const ControlEnvelope& envelope) {
     if (const auto* request = std::get_if<ControlRequestEnvelope>(&envelope.payload))
         return request->request_id;
@@ -115,12 +124,16 @@ struct ControlEndpoint::Impl {
         bool closing = false;
         std::atomic<bool> finished{false};
         std::optional<ControlService::Session> session;
+        std::optional<ControlRegistrationId> host_registration;
+        std::optional<VerifiedControlPeerIdentity> enrolled_peer;
         std::thread worker;
     };
 
     ControlService& service;
     ControlAdmissionConsumer consume_admission;
     ControlEndpointConfig config;
+    ControlHostRouter* host_router = nullptr;
+    ControlEndpointEnrollmentContext* enrollment_context = nullptr;
     InterprocessConnectionServer server;
     std::atomic<bool> stopping{false};
     std::atomic<std::uint64_t> next_connection_id{1};
@@ -129,9 +142,10 @@ struct ControlEndpoint::Impl {
     std::unordered_map<std::uint64_t, std::shared_ptr<ConnectionState>> connections;
 
     Impl(ControlService& service_in, ControlAdmissionConsumer consumer,
-         ControlEndpointConfig config_in)
-        : service(service_in), consume_admission(std::move(consumer)),
-          config(std::move(config_in)) {}
+         ControlEndpointConfig config_in, ControlHostRouter* router,
+         ControlEndpointEnrollmentContext* enrollment)
+        : service(service_in), consume_admission(std::move(consumer)), config(std::move(config_in)),
+          host_router(router), enrollment_context(enrollment) {}
 
     bool send(ConnectionState& state, const ControlEnvelope& envelope) {
         const auto encoded = encode_control_envelope(envelope);
@@ -158,7 +172,7 @@ struct ControlEndpoint::Impl {
 
     void handle_open(ConnectionState& state, const ControlSessionOpenEnvelope& request,
                      const std::shared_ptr<ConnectionState>& shared_state) {
-        if (state.session) {
+        if (state.session || state.host_registration) {
             send_error(state, request.request_id, "session-already-open",
                        "the connection already owns a control session");
             return;
@@ -181,6 +195,19 @@ struct ControlEndpoint::Impl {
             return;
         }
 
+        const auto* principal =
+            std::get_if<ControlClientConnectionPrincipal>(&admission->principal);
+        if (!principal) {
+            send(state,
+                 ControlEnvelope{.payload = ControlSessionOpenResult{
+                                     .request_id = request.request_id,
+                                     .accepted = false,
+                                     .error_code = "principal-role-mismatch",
+                                     .explanation = "the admission belongs to a host principal",
+                                 }});
+            return;
+        }
+
         auto peer = verify_control_peer(*state.connection, admission->expected_peer);
         if (!peer) {
             send(state,
@@ -195,7 +222,7 @@ struct ControlEndpoint::Impl {
 
         std::weak_ptr<ConnectionState> weak_state = shared_state;
         auto session = service.open_session(
-            *peer, admission->client_id, [weak_state](const ControlProgressEnvelope& progress) {
+            *peer, principal->client_id, [weak_state](const ControlProgressEnvelope& progress) {
                 const auto locked = weak_state.lock();
                 if (!locked)
                     return false;
@@ -224,8 +251,169 @@ struct ControlEndpoint::Impl {
         if (!send(state, ControlEnvelope{.payload = ControlSessionOpenResult{
                                              .request_id = request.request_id,
                                              .accepted = true,
-                                             .client_id = admission->client_id.value,
+                                             .client_id = principal->client_id.value,
                                          }}))
+            close(state);
+    }
+
+    void handle_host_enrollment(ConnectionState& state, const ControlHostOpenEnvelope& request,
+                                const std::shared_ptr<ConnectionState>& shared_state) {
+        ControlHostOpenResult response{.request_id = request.request_id};
+        if (!enrollment_context) {
+            response.error_code = "enrollment-denied";
+            response.explanation = "host enrollment is not enabled for this endpoint";
+            (void)send(state, ControlEnvelope{.payload = std::move(response)});
+            return;
+        }
+
+        // This is deliberately the first authority operation for a claim. A
+        // malformed, mismatched, or racing claimant permanently burns it.
+        auto plan = enrollment_context->enrollments.consume(request.enrollment_id);
+        if (!plan) {
+            response.error_code = "enrollment-denied";
+            response.explanation = "enrollment is missing, expired, or replayed";
+            (void)send(state, ControlEnvelope{.payload = std::move(response)});
+            return;
+        }
+        if (state.session || state.host_registration || !host_router ||
+            plan->broker_generation() != config.process_generation ||
+            plan->expires_at() <= std::chrono::steady_clock::now()) {
+            response.error_code = "enrollment-denied";
+            response.explanation = "the endpoint cannot accept this enrollment";
+            (void)send(state, ControlEnvelope{.payload = std::move(response)});
+            return;
+        }
+
+        auto peer = verify_control_peer(*state.connection, plan->expected_peer());
+        if (!peer) {
+            response.error_code = "peer-verification-failed";
+            response.explanation = "the live local peer did not match the launched host";
+            (void)send(state, ControlEnvelope{.payload = std::move(response)});
+            return;
+        }
+
+        auto registered =
+            enrollment_context->broker.register_instance(*peer, plan->snapshot().registration());
+        if (registered.status != ControlIdentityStatus::Accepted || !registered.registration) {
+            response.error_code = "registration-denied";
+            response.explanation = "the broker rejected the trusted host registration";
+            (void)send(state, ControlEnvelope{.payload = std::move(response)});
+            return;
+        }
+        const auto registration_id = registered.registration->registration_id;
+        auto rollback_registration = [&] {
+            (void)enrollment_context->broker.unregister_instance(registration_id, *peer,
+                                                                 "endpoint-enrollment-rollback");
+        };
+
+        auto issued = enrollment_context->admissions.issue(
+            ControlPeerExpectation{.evidence = peer->evidence()},
+            ControlHostConnectionPrincipal{registration_id});
+        if (issued.status != ControlConnectionAdmissionStatus::Issued || !issued.ticket) {
+            rollback_registration();
+            response.error_code = "admission-denied";
+            response.explanation = "the endpoint could not bind the registered host admission";
+            (void)send(state, ControlEnvelope{.payload = std::move(response)});
+            return;
+        }
+        auto admission = enrollment_context->admissions.consume(issued.ticket->admission_id);
+        const auto* principal =
+            admission ? std::get_if<ControlHostConnectionPrincipal>(&admission->principal)
+                      : nullptr;
+        if (!admission || admission->admission_id != issued.ticket->admission_id ||
+            admission->expires_at <= std::chrono::steady_clock::now() || !principal ||
+            principal->registration_id != registration_id ||
+            !same_peer(admission->expected_peer.evidence, peer->evidence())) {
+            rollback_registration();
+            response.error_code = "admission-denied";
+            response.explanation = "the endpoint could not consume the exact host admission";
+            (void)send(state, ControlEnvelope{.payload = std::move(response)});
+            return;
+        }
+
+        std::weak_ptr<ConnectionState> weak_state = shared_state;
+        if (!host_router->attach(
+                registration_id, state.id, [weak_state](const ControlEnvelope& envelope) {
+                    const auto locked = weak_state.lock();
+                    if (!locked || !locked->connection->is_connected())
+                        return false;
+                    const auto encoded = encode_control_envelope(envelope);
+                    return !encoded.empty() && locked->connection->send_message(encoded);
+                })) {
+            rollback_registration();
+            response.error_code = "host-already-connected";
+            response.explanation = "the registration could not attach to the host router";
+            (void)send(state, ControlEnvelope{.payload = std::move(response)});
+            return;
+        }
+
+        state.host_registration = registration_id;
+        state.enrolled_peer = std::move(*peer);
+        response.accepted = true;
+        response.registration_id = registration_id.value;
+        if (!send(state, ControlEnvelope{.payload = std::move(response)}))
+            close(state);
+    }
+
+    void handle_host_open(ConnectionState& state, const ControlHostOpenEnvelope& request,
+                          const std::shared_ptr<ConnectionState>& shared_state) {
+        if (!request.enrollment_id.empty()) {
+            handle_host_enrollment(state, request, shared_state);
+            return;
+        }
+
+        ControlHostOpenResult response{.request_id = request.request_id};
+        if (state.session || state.host_registration || !host_router) {
+            response.error_code = "host-routing-unavailable";
+            response.explanation = "the endpoint is not accepting a host connection";
+            (void)send(state, ControlEnvelope{.payload = std::move(response)});
+            return;
+        }
+
+        std::optional<ControlConnectionAdmission> admission;
+        {
+            std::lock_guard lock(admission_mutex);
+            admission = consume_admission ? consume_admission(request.admission_id) : std::nullopt;
+        }
+        if (!admission || admission->admission_id != request.admission_id ||
+            admission->expires_at <= std::chrono::steady_clock::now()) {
+            response.error_code = "admission-denied";
+            response.explanation = "admission is missing, expired, or replayed";
+            (void)send(state, ControlEnvelope{.payload = std::move(response)});
+            return;
+        }
+        const auto* principal = std::get_if<ControlHostConnectionPrincipal>(&admission->principal);
+        if (!principal) {
+            response.error_code = "principal-role-mismatch";
+            response.explanation = "the admission belongs to a client principal";
+            (void)send(state, ControlEnvelope{.payload = std::move(response)});
+            return;
+        }
+        if (!verify_control_peer(*state.connection, admission->expected_peer)) {
+            response.error_code = "peer-verification-failed";
+            response.explanation = "the live local peer did not match admission";
+            (void)send(state, ControlEnvelope{.payload = std::move(response)});
+            return;
+        }
+        std::weak_ptr<ConnectionState> weak_state = shared_state;
+        if (!host_router->attach(principal->registration_id, state.id,
+                                 [weak_state](const ControlEnvelope& envelope) {
+                                     const auto locked = weak_state.lock();
+                                     if (!locked || !locked->connection->is_connected())
+                                         return false;
+                                     const auto encoded = encode_control_envelope(envelope);
+                                     return !encoded.empty() &&
+                                            locked->connection->send_message(encoded);
+                                 })) {
+            response.error_code = "host-already-connected";
+            response.explanation = "the registration already owns a live host connection";
+            (void)send(state, ControlEnvelope{.payload = std::move(response)});
+            return;
+        }
+        state.host_registration = principal->registration_id;
+        response.accepted = true;
+        response.registration_id = principal->registration_id.value;
+        if (!send(state, ControlEnvelope{.payload = std::move(response)}))
             close(state);
     }
 
@@ -280,10 +468,23 @@ struct ControlEndpoint::Impl {
             close(state);
             return;
         }
+        if (!control_envelope_allowed(*envelope, ControlEnvelopeDirection::ClientToBroker) &&
+            !control_envelope_allowed(*envelope, ControlEnvelopeDirection::HostToBroker)) {
+            close(state);
+            return;
+        }
         if (const auto* health = std::get_if<ControlHealthEnvelope>(&envelope->payload)) {
             handle_health(state, *health);
         } else if (const auto* open = std::get_if<ControlSessionOpenEnvelope>(&envelope->payload)) {
             handle_open(state, *open, shared_state);
+        } else if (const auto* open = std::get_if<ControlHostOpenEnvelope>(&envelope->payload)) {
+            handle_host_open(state, *open, shared_state);
+        } else if (state.host_registration) {
+            if (!host_router ||
+                !host_router->receive(*state.host_registration, state.id, *envelope))
+                close(state);
+        } else if (control_envelope_allowed(*envelope, ControlEnvelopeDirection::HostToBroker)) {
+            close(state);
         } else if (const auto* read =
                        std::get_if<ControlArtifactReadEnvelope>(&envelope->payload)) {
             handle_artifact_read(state, *read);
@@ -317,6 +518,14 @@ struct ControlEndpoint::Impl {
             handle_frame(*state, state, frame);
         }
         state->connection->disconnect();
+        if (state->host_registration && host_router)
+            host_router->detach(*state->host_registration, state->id);
+        if (state->host_registration && state->enrolled_peer && enrollment_context)
+            (void)enrollment_context->broker.unregister_instance(
+                *state->host_registration, *state->enrolled_peer,
+                "endpoint-enrolled-host-disconnected");
+        state->host_registration.reset();
+        state->enrolled_peer.reset();
         state->session.reset();
         state->finished.store(true, std::memory_order_release);
     }
@@ -448,8 +657,10 @@ struct ControlEndpoint::Impl {
 
 ControlEndpoint::ControlEndpoint(ControlService& service,
                                  ControlAdmissionConsumer consume_admission,
-                                 ControlEndpointConfig config)
-    : impl_(std::make_unique<Impl>(service, std::move(consume_admission), std::move(config))) {}
+                                 ControlEndpointConfig config, ControlHostRouter* host_router,
+                                 ControlEndpointEnrollmentContext* enrollment_context)
+    : impl_(std::make_unique<Impl>(service, std::move(consume_admission), std::move(config),
+                                   host_router, enrollment_context)) {}
 
 ControlEndpoint::~ControlEndpoint() {
     stop();

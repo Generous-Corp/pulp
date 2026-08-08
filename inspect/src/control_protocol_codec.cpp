@@ -11,163 +11,6 @@ namespace {
 
 using namespace control_protocol_detail;
 
-bool only_fields(ValueView value, std::initializer_list<std::string_view> allowed,
-                 ControlProtocolDiagnostics& diagnostics) {
-    if (!value.isObject()) {
-        diagnostics = {ControlProtocolError::InvalidType, "value must be an object"};
-        return false;
-    }
-    std::set<std::string_view> seen;
-    for (std::uint32_t index = 0; index < value.size(); ++index) {
-        const auto member = value.getObjectMemberAt(index);
-        if (!seen.insert(member.name).second) {
-            diagnostics = {ControlProtocolError::InvalidValue,
-                           "duplicate field '" + std::string(member.name) + "'"};
-            return false;
-        }
-        if (std::ranges::find(allowed, member.name) == allowed.end()) {
-            diagnostics = {ControlProtocolError::UnknownField,
-                           "unknown field '" + std::string(member.name) + "'"};
-            return false;
-        }
-    }
-    return true;
-}
-
-bool required_string(ValueView value, std::string_view name, std::string& out, std::size_t maximum,
-                     ControlProtocolDiagnostics& diagnostics, bool token = true) {
-    if (!value.hasObjectMember(name)) {
-        diagnostics = {ControlProtocolError::MissingField,
-                       "missing field '" + std::string(name) + "'"};
-        return false;
-    }
-    const auto field = value[name];
-    if (!field.isString()) {
-        diagnostics = {ControlProtocolError::InvalidType,
-                       "field '" + std::string(name) + "' must be a string"};
-        return false;
-    }
-    out = std::string(field.getString());
-    if ((token && !valid_token(out, maximum)) || (!token && !valid_text(out, maximum))) {
-        diagnostics = {ControlProtocolError::InvalidValue,
-                       "field '" + std::string(name) + "' is invalid"};
-        return false;
-    }
-    return true;
-}
-
-bool required_u32(ValueView value, std::string_view name, std::uint32_t& out,
-                  ControlProtocolDiagnostics& diagnostics, bool nonzero = true) {
-    if (!value.hasObjectMember(name)) {
-        diagnostics = {ControlProtocolError::MissingField,
-                       "missing field '" + std::string(name) + "'"};
-        return false;
-    }
-    const auto field = value[name];
-    if (!field.isInt()) {
-        diagnostics = {ControlProtocolError::InvalidType,
-                       "field '" + std::string(name) + "' must be an integer"};
-        return false;
-    }
-    const auto number = field.getInt64();
-    if (number < (nonzero ? 1 : 0) || number > std::numeric_limits<std::uint32_t>::max()) {
-        diagnostics = {ControlProtocolError::InvalidValue,
-                       "field '" + std::string(name) + "' is out of range"};
-        return false;
-    }
-    out = static_cast<std::uint32_t>(number);
-    return true;
-}
-
-bool required_u64(ValueView value, std::string_view name, std::uint64_t& out,
-                  ControlProtocolDiagnostics& diagnostics) {
-    if (!value.hasObjectMember(name)) {
-        diagnostics = {ControlProtocolError::MissingField,
-                       "missing field '" + std::string(name) + "'"};
-        return false;
-    }
-    const auto field = value[name];
-    if (!field.isInt() || field.getInt64() < 0) {
-        diagnostics = {ControlProtocolError::InvalidType,
-                       "field '" + std::string(name) + "' must be a non-negative integer"};
-        return false;
-    }
-    out = static_cast<std::uint64_t>(field.getInt64());
-    return true;
-}
-
-bool required_i64(ValueView value, std::string_view name, std::int64_t& out,
-                  ControlProtocolDiagnostics& diagnostics) {
-    if (!value.hasObjectMember(name)) {
-        diagnostics = {ControlProtocolError::MissingField,
-                       "missing field '" + std::string(name) + "'"};
-        return false;
-    }
-    const auto field = value[name];
-    if (!field.isInt()) {
-        diagnostics = {ControlProtocolError::InvalidType,
-                       "field '" + std::string(name) + "' must be an integer"};
-        return false;
-    }
-    out = field.getInt64();
-    return true;
-}
-
-bool required_bool(ValueView value, std::string_view name, bool& out,
-                   ControlProtocolDiagnostics& diagnostics) {
-    if (!value.hasObjectMember(name)) {
-        diagnostics = {ControlProtocolError::MissingField,
-                       "missing field '" + std::string(name) + "'"};
-        return false;
-    }
-    const auto field = value[name];
-    if (!field.isBool()) {
-        diagnostics = {ControlProtocolError::InvalidType,
-                       "field '" + std::string(name) + "' must be a boolean"};
-        return false;
-    }
-    out = field.getBool();
-    return true;
-}
-
-bool parse_features(ValueView value, std::string_view name, std::vector<std::string>& out,
-                    ControlProtocolDiagnostics& diagnostics) {
-    if (!value.hasObjectMember(name)) {
-        diagnostics = {ControlProtocolError::MissingField,
-                       "missing field '" + std::string(name) + "'"};
-        return false;
-    }
-    const auto field = value[name];
-    if (!field.isArray()) {
-        diagnostics = {ControlProtocolError::InvalidType,
-                       "field '" + std::string(name) + "' must be an array"};
-        return false;
-    }
-    if (field.size() > kMaximumFeatures) {
-        diagnostics = {ControlProtocolError::LimitExceeded, "feature limit exceeded"};
-        return false;
-    }
-    for (std::uint32_t index = 0; index < field.size(); ++index) {
-        if (!field[index].isString()) {
-            diagnostics = {ControlProtocolError::InvalidType, "features must be strings"};
-            return false;
-        }
-        out.emplace_back(field[index].getString());
-    }
-    if (!valid_features(out)) {
-        diagnostics = {ControlProtocolError::InvalidValue, "features are invalid or duplicated"};
-        return false;
-    }
-    return true;
-}
-
-choc::value::Value string_array(const std::vector<std::string>& strings) {
-    auto result = choc::value::createEmptyArray();
-    for (const auto& string : strings)
-        result.addArrayElement(choc::value::createString(string));
-    return result;
-}
-
 std::optional<ControlNegotiationStatus> negotiation_status_from_id(std::string_view id) {
     for (const auto status :
          {ControlNegotiationStatus::Accepted, ControlNegotiationStatus::InvalidOffer,
@@ -548,6 +391,80 @@ std::string encode_control_envelope(const ControlEnvelope& envelope) {
                 payload.addMember("error_code", choc::value::createString(message.error_code));
                 payload.addMember("explanation", choc::value::createString(message.explanation));
                 payload.addMember("request_id", choc::value::createString(message.request_id));
+            } else if constexpr (std::is_same_v<T, ControlHostOpenEnvelope>) {
+                valid = valid_host_open(message);
+                kind = "host-open";
+                payload.addMember("admission_id", choc::value::createString(message.admission_id));
+                payload.addMember("enrollment_id",
+                                  choc::value::createString(message.enrollment_id));
+                payload.addMember("request_id", choc::value::createString(message.request_id));
+            } else if constexpr (std::is_same_v<T, ControlHostOpenResult>) {
+                valid = valid_host_open_result(message);
+                kind = "host-opened";
+                payload.addMember("accepted", choc::value::createBool(message.accepted));
+                payload.addMember("error_code", choc::value::createString(message.error_code));
+                payload.addMember("explanation", choc::value::createString(message.explanation));
+                payload.addMember("registration_id",
+                                  choc::value::createString(message.registration_id));
+                payload.addMember("request_id", choc::value::createString(message.request_id));
+            } else if constexpr (std::is_same_v<T, ControlHostExecuteEnvelope>) {
+                valid = valid_host_execute(message);
+                kind = "host-execute";
+                payload.addMember("deadline_unix_ms",
+                                  choc::value::createInt64(message.deadline_unix_ms));
+                payload.addMember("expected_state_generation",
+                                  choc::value::createInt64(static_cast<std::int64_t>(
+                                      message.expected_state_generation)));
+                payload.addMember("operation_id", choc::value::createString(message.operation_id));
+                payload.addMember("operation_version",
+                                  choc::value::createInt64(message.operation_version));
+                if (const auto params =
+                        parse_bounded_control_json(message.params_json, kMaximumPayloadBytes))
+                    payload.addMember("params", *params);
+                else
+                    valid = false;
+                payload.addMember("receipt_id", choc::value::createString(message.receipt_id));
+                payload.addMember("route_id", choc::value::createString(message.route_id));
+            } else if constexpr (std::is_same_v<T, ControlHostProgressEnvelope>) {
+                valid = valid_host_progress(message);
+                kind = "host-progress";
+                payload.addMember("current", choc::value::createInt64(
+                                                 static_cast<std::int64_t>(message.current)));
+                if (const auto detail = parse_bounded_control_json(
+                        message.detail_json, kMaximumProgressBytes, kMaximumProgressJsonNodes))
+                    payload.addMember("detail", *detail);
+                else
+                    valid = false;
+                payload.addMember("route_id", choc::value::createString(message.route_id));
+                payload.addMember(
+                    "total", choc::value::createInt64(static_cast<std::int64_t>(message.total)));
+            } else if constexpr (std::is_same_v<T, ControlHostCancelEnvelope>) {
+                valid = valid_host_cancel(message);
+                kind = "host-cancel";
+                payload.addMember("reason", choc::value::createString(message.reason));
+                payload.addMember("route_id", choc::value::createString(message.route_id));
+            } else if constexpr (std::is_same_v<T, ControlHostCompleteEnvelope>) {
+                valid = valid_host_complete(message);
+                kind = "host-complete";
+                payload.addMember("cancellation_reason",
+                                  choc::value::createString(message.cancellation_reason));
+                if (const auto detail = parse_bounded_control_json(message.detail_json,
+                                                                   kControlMaximumResultDetailBytes,
+                                                                   kMaximumResultJsonNodes))
+                    payload.addMember("detail", *detail);
+                else
+                    valid = false;
+                payload.addMember("explanation", choc::value::createString(message.explanation));
+                payload.addMember(
+                    "result_code",
+                    message.result_code
+                        ? choc::value::createString(control_result_code_id(*message.result_code))
+                        : choc::value::Value{});
+                payload.addMember("retry", choc::value::createString(
+                                               control_retry_classification_id(message.retry)));
+                payload.addMember("route_id", choc::value::createString(message.route_id));
+                payload.addMember("state", choc::value::createString(
+                                               control_receipt_state_id(message.terminal_state)));
             } else if constexpr (std::is_same_v<T, ControlArtifactReadEnvelope>) {
                 valid = valid_artifact_read(message);
                 kind = "artifact-read";
@@ -923,6 +840,11 @@ std::optional<ControlEnvelope> decode_control_envelope(std::string_view json,
                 return std::nullopt;
             }
             envelope.payload = std::move(result);
+        } else if (is_host_control_kind(kind)) {
+            auto host = decode_host_control_payload(kind, payload, error);
+            if (!host)
+                return std::nullopt;
+            envelope.payload = std::move(*host);
         } else if (kind == "artifact-read") {
             if (!only_fields(payload, {"artifact_id", "maximum_bytes", "offset", "request_id"},
                              error))
