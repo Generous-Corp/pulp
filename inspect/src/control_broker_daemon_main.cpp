@@ -5,6 +5,8 @@
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
+#include <iostream>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -13,6 +15,9 @@
 #ifndef PULP_CONTROL_SDK_VERSION
 #define PULP_CONTROL_SDK_VERSION "unknown"
 #endif
+
+extern "C" __attribute__((used, visibility("default"))) const volatile char
+    pulp_control_broker_version_query_v1[] = "PULP_CONTROL_BROKER_VERSION_QUERY_V1";
 
 namespace {
 
@@ -40,7 +45,14 @@ std::filesystem::path environment_path(const char* name) {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--version") {
+        std::cout << PULP_CONTROL_SDK_VERSION << '\n';
+        return 0;
+    }
+    if (argc != 1)
+        return 2;
+
     std::signal(SIGINT, request_stop);
     std::signal(SIGTERM, request_stop);
 

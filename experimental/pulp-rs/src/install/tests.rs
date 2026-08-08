@@ -371,10 +371,16 @@ fn control_broker_install_commits_only_after_reconcile() {
         is_zip: false,
     };
     let archive = locate_binaries_in_archive(arch_dir.path()).unwrap();
-    let result = install_control_broker_with(&plan, &archive, |installed, _| {
-        assert_eq!(fs::read(installed).unwrap(), b"new-broker");
-        Ok(())
-    })
+    let result = install_control_broker_path_with_version_probe(
+        &plan,
+        archive.new_control_broker.as_deref().unwrap(),
+        |installed, _| {
+            assert_eq!(fs::read(installed).unwrap(), b"new-broker");
+            Ok(())
+        },
+        |_| Ok(Some("0.795.0".to_owned())),
+        |_| Ok(Some("0.794.0".to_owned())),
+    )
     .unwrap();
 
     if cfg!(target_os = "macos") {
@@ -411,9 +417,13 @@ fn control_broker_install_restores_previous_binary_on_reconcile_failure() {
         is_zip: false,
     };
     let archive = locate_binaries_in_archive(arch_dir.path()).unwrap();
-    let result = install_control_broker_with(&plan, &archive, |_, _| {
-        Err(CliError::Other("synthetic activation failure".into()))
-    });
+    let result = install_control_broker_path_with_version_probe(
+        &plan,
+        archive.new_control_broker.as_deref().unwrap(),
+        |_, _| Err(CliError::Other("synthetic activation failure".into())),
+        |_| Ok(Some("0.795.0".to_owned())),
+        |_| Ok(Some("0.794.0".to_owned())),
+    );
 
     if cfg!(target_os = "macos") {
         let error = result.unwrap_err();
@@ -450,13 +460,19 @@ fn control_broker_service_rollback_restores_binary_before_prior_restart() {
     };
     let archive = locate_binaries_in_archive(arch_dir.path()).unwrap();
     let restored_before_restart = std::cell::Cell::new(false);
-    let result = install_control_broker_with(&plan, &archive, |installed, rollback_binary| {
-        assert_eq!(fs::read(installed).unwrap(), b"new-broker");
-        rollback_binary()?;
-        assert_eq!(fs::read(installed).unwrap(), b"old-broker");
-        restored_before_restart.set(true);
-        Err(CliError::Other("synthetic activation failure".into()))
-    });
+    let result = install_control_broker_path_with_version_probe(
+        &plan,
+        archive.new_control_broker.as_deref().unwrap(),
+        |installed, rollback_binary| {
+            assert_eq!(fs::read(installed).unwrap(), b"new-broker");
+            rollback_binary()?;
+            assert_eq!(fs::read(installed).unwrap(), b"old-broker");
+            restored_before_restart.set(true);
+            Err(CliError::Other("synthetic activation failure".into()))
+        },
+        |_| Ok(Some("0.795.0".to_owned())),
+        |_| Ok(Some("0.794.0".to_owned())),
+    );
 
     if cfg!(target_os = "macos") {
         assert!(result.is_err());
@@ -467,6 +483,163 @@ fn control_broker_service_rollback_restores_binary_before_prior_restart() {
     }
     assert_eq!(fs::read(&broker_dst).unwrap(), b"old-broker");
     assert!(!backup_path(&broker_dst).exists());
+}
+
+fn broker_lifecycle_fixture(
+    installed_version: &str,
+    candidate_version: &str,
+) -> (tempfile::TempDir, tempfile::TempDir, InstallPlan, PathBuf) {
+    let root = tempfile::tempdir().unwrap();
+    let archive = tempfile::tempdir().unwrap();
+    let bin = root.path().join("bin");
+    let state = root.path().join("state");
+    fs::create_dir_all(&bin).unwrap();
+    fs::create_dir_all(state.join("operations")).unwrap();
+    let pulp = bin.join(pulp_basename());
+    let broker = bin.join(control_broker_basename());
+    fs::write(&pulp, b"pulp").unwrap();
+    fs::write(&broker, b"installed-broker").unwrap();
+    fs::write(
+        state.join("control-broker-service.marker"),
+        format!(
+            "schema=1\ninstall_root={}\nrelease_version={installed_version}\ncdhash=installed\nplist_fingerprint=fnv1a64:1\noutcome=success\nattempt_count=1\nerror_code=none\n",
+            root.path().display()
+        ),
+    )
+    .unwrap();
+    fs::write(state.join("operations/terminal.json"), b"terminal").unwrap();
+    fs::write(state.join("operations/running.json"), b"running").unwrap();
+    let staged = archive.path().join(control_broker_basename());
+    fs::write(&staged, b"candidate-broker").unwrap();
+    let plan = InstallPlan {
+        version: candidate_version.to_owned(),
+        url: "ignored".into(),
+        asset: "ignored".into(),
+        self_path: pulp,
+        cpp_path: None,
+        mcp_path: None,
+        is_zip: false,
+    };
+    (root, archive, plan, broker)
+}
+
+#[test]
+fn broker_upgrade_preserves_durable_terminal_and_running_state() {
+    let (root, archive, plan, broker) = broker_lifecycle_fixture("0.794.0", "0.795.0");
+    let staged = archive.path().join(control_broker_basename());
+
+    let result = install_control_broker_path_with_version_probe(
+        &plan,
+        &staged,
+        |installed, _| {
+            assert_eq!(fs::read(installed).unwrap(), b"candidate-broker");
+            Ok(())
+        },
+        |_| Ok(Some("0.795.0".to_owned())),
+        |_| Ok(Some("0.794.0".to_owned())),
+    )
+    .unwrap();
+
+    if cfg!(target_os = "macos") {
+        assert_eq!(result, ControlBrokerInstall::Replaced);
+        assert_eq!(fs::read(&broker).unwrap(), b"candidate-broker");
+    } else {
+        assert_eq!(result, ControlBrokerInstall::NotPresent);
+    }
+    assert_eq!(
+        fs::read(root.path().join("state/operations/terminal.json")).unwrap(),
+        b"terminal"
+    );
+    assert_eq!(
+        fs::read(root.path().join("state/operations/running.json")).unwrap(),
+        b"running"
+    );
+}
+
+#[test]
+fn broker_downgrade_refuses_without_disturbing_service_or_state() {
+    let (root, archive, plan, broker) = broker_lifecycle_fixture("0.796.0", "0.795.0");
+    let staged = archive.path().join(control_broker_basename());
+    let reconciled = std::cell::Cell::new(false);
+
+    let result = install_control_broker_path_with_version_probe(
+        &plan,
+        &staged,
+        |_, _| {
+            reconciled.set(true);
+            Ok(())
+        },
+        |_| Ok(Some("0.795.0".to_owned())),
+        |_| Ok(Some("0.796.0".to_owned())),
+    );
+
+    if cfg!(target_os = "macos") {
+        let error = result.unwrap_err();
+        assert!(error.to_string().contains("refusing to downgrade"));
+        assert!(!reconciled.get());
+    } else {
+        assert_eq!(result.unwrap(), ControlBrokerInstall::NotPresent);
+    }
+    assert_eq!(fs::read(&broker).unwrap(), b"installed-broker");
+    assert_eq!(
+        fs::read(root.path().join("state/operations/terminal.json")).unwrap(),
+        b"terminal"
+    );
+    assert_eq!(
+        fs::read(root.path().join("state/operations/running.json")).unwrap(),
+        b"running"
+    );
+}
+
+#[test]
+fn staged_broker_version_mismatch_refuses_before_installed_state_is_read() {
+    let (root, archive, plan, broker) = broker_lifecycle_fixture("0.794.0", "0.795.0");
+    let staged = archive.path().join(control_broker_basename());
+
+    let error = install_control_broker_path_with_version_probe(
+        &plan,
+        &staged,
+        |_, _| panic!("mismatched staged broker must not reconcile"),
+        |_| Ok(Some("0.793.0".to_owned())),
+        |_| panic!("mismatched staged broker must not inspect installed state"),
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().contains("does not match installer plan"));
+    assert_eq!(fs::read(&broker).unwrap(), b"installed-broker");
+    assert_eq!(
+        fs::read(root.path().join("state/operations/terminal.json")).unwrap(),
+        b"terminal"
+    );
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn competing_broker_installer_cannot_replace_the_active_transaction() {
+    let (_root, archive, plan, broker) = broker_lifecycle_fixture("0.794.0", "0.795.0");
+    let staged = archive.path().join(control_broker_basename());
+    let _winner = ControlBrokerInstallerLock::acquire(&broker).unwrap();
+
+    let error = install_control_broker_path_with_version_probe(
+        &plan,
+        &staged,
+        |_, _| Ok(()),
+        |_| panic!("the losing installer must not inspect the staged broker"),
+        |_| panic!("the losing installer must not inspect or replace the active broker"),
+    )
+    .unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("another control broker installer is already active"));
+    assert_eq!(fs::read(&broker).unwrap(), b"installed-broker");
+}
+
+#[test]
+fn broker_version_comparison_fails_closed_for_unversioned_release() {
+    let (_, _, plan, _) = broker_lifecycle_fixture("0.794.0", "development");
+    let error = refuse_downgrade(&plan.version, Some("0.794.0")).unwrap_err();
+    assert!(error.to_string().contains("cannot compare"));
 }
 
 #[test]
@@ -492,11 +665,22 @@ fn legacy_transition_recovers_once_for_exact_canonical_release() {
         mcp_path: None,
         is_zip: false,
     };
-    let recovered = recover_legacy_control_broker_once_with(
+    let recovered = recover_legacy_control_broker_once_with_installer(
         &plan,
         home.path(),
         || locate_binaries_in_archive(archive_dir.path()),
-        |_, _| Ok(()),
+        |plan, archive| {
+            let broker = archive.new_control_broker.as_ref().unwrap();
+            fs::copy(
+                broker,
+                plan.self_path
+                    .parent()
+                    .unwrap()
+                    .join(control_broker_basename()),
+            )
+            .unwrap();
+            Ok(ControlBrokerInstall::Created)
+        },
     )
     .unwrap();
 
