@@ -237,6 +237,8 @@ public:
                     .outcome = ControlSecurityOutcome::Expired,
                     .reason = "expired",
                 });
+                if (!it->second.durable_principal.empty())
+                    durable_clients.erase(it->second.durable_principal);
                 it = clients.erase(it);
             }
         }
@@ -269,6 +271,7 @@ public:
     mutable std::mutex mutex;
     std::unordered_map<std::string, BootstrapState> tickets;
     std::unordered_map<std::string, ControlClientIdentity> clients;
+    std::unordered_map<std::string, std::string> durable_clients;
     std::unordered_map<std::string, ControlRegistration> registrations;
     std::unordered_map<std::string, std::string> exact_registrations;
 };
@@ -368,7 +371,8 @@ ControlBootstrapResult ControlIdentityRegistry::issue_bootstrap(
 ControlClientResult ControlIdentityRegistry::redeem_bootstrap(
     std::string_view ticket_id,
     std::span<const std::uint8_t> secret,
-    const VerifiedControlPeerIdentity& observed_peer) {
+    const VerifiedControlPeerIdentity& observed_peer,
+    std::string_view durable_principal) {
     ControlClientResult result;
     const auto now = impl_->clock();
     Impl::BootstrapState ticket;
@@ -413,8 +417,45 @@ ControlClientResult ControlIdentityRegistry::redeem_bootstrap(
         return result;
     }
 
+    if (durable_principal.size() > 256 ||
+        durable_principal.find('\0') != std::string_view::npos) {
+        result.status = ControlIdentityStatus::InvalidRequest;
+        impl_->audit(ControlSecurityAuditEntry{
+            .action = "bootstrap.redeem",
+            .peer_fingerprint = std::string(observed_peer.fingerprint()),
+            .outcome = ControlSecurityOutcome::Denied,
+            .reason = "invalid-durable-principal",
+        });
+        return result;
+    }
+
+    if (!durable_principal.empty()) {
+        std::lock_guard lock(impl_->mutex);
+        impl_->sweep_locked(now);
+        const auto durable = impl_->durable_clients.find(std::string(durable_principal));
+        if (durable != impl_->durable_clients.end()) {
+            const auto found = impl_->clients.find(durable->second);
+            if (found != impl_->clients.end()) {
+                found->second.peer_fingerprint = std::string(observed_peer.fingerprint());
+                result.status = ControlIdentityStatus::Accepted;
+                result.client = found->second;
+                impl_->audit(ControlSecurityAuditEntry{
+                    .action = "bootstrap.resume",
+                    .peer_fingerprint = std::string(observed_peer.fingerprint()),
+                    .client_id = found->second.client_id.value,
+                    .outcome = ControlSecurityOutcome::Accepted,
+                    .reason = "accepted",
+                });
+                return result;
+            }
+            impl_->durable_clients.erase(durable);
+        }
+    }
+
     const auto client_id = random_id("client-");
-    const auto expires = expiry_after(now, impl_->config.client_ttl);
+    const auto expires = durable_principal.empty()
+                             ? expiry_after(now, impl_->config.client_ttl)
+                             : std::optional{std::chrono::steady_clock::time_point::max()};
     if (!client_id || !expires) {
         result.status = client_id ? ControlIdentityStatus::InvalidRequest
                                   : ControlIdentityStatus::EntropyUnavailable;
@@ -429,10 +470,31 @@ ControlClientResult ControlIdentityRegistry::redeem_bootstrap(
     }
     ControlClientIdentity client{
         ControlClientId{*client_id}, impl_->broker_id,
-        std::string(observed_peer.fingerprint()), *expires};
+        std::string(observed_peer.fingerprint()), *expires,
+        std::string(durable_principal)};
     {
         std::lock_guard lock(impl_->mutex);
         impl_->sweep_locked(now);
+        if (!client.durable_principal.empty()) {
+            const auto durable = impl_->durable_clients.find(client.durable_principal);
+            if (durable != impl_->durable_clients.end()) {
+                const auto found = impl_->clients.find(durable->second);
+                if (found != impl_->clients.end()) {
+                    found->second.peer_fingerprint = std::string(observed_peer.fingerprint());
+                    result.status = ControlIdentityStatus::Accepted;
+                    result.client = found->second;
+                    impl_->audit(ControlSecurityAuditEntry{
+                        .action = "bootstrap.resume",
+                        .peer_fingerprint = std::string(observed_peer.fingerprint()),
+                        .client_id = found->second.client_id.value,
+                        .outcome = ControlSecurityOutcome::Accepted,
+                        .reason = "accepted",
+                    });
+                    return result;
+                }
+                impl_->durable_clients.erase(durable);
+            }
+        }
         if (impl_->clients.size() >= impl_->config.max_clients) {
             result.status = ControlIdentityStatus::ResourceExhausted;
             impl_->audit(ControlSecurityAuditEntry{
@@ -445,6 +507,8 @@ ControlClientResult ControlIdentityRegistry::redeem_bootstrap(
             return result;
         }
         impl_->clients.emplace(client.client_id.value, client);
+        if (!client.durable_principal.empty())
+            impl_->durable_clients.emplace(client.durable_principal, client.client_id.value);
     }
     result.status = ControlIdentityStatus::Accepted;
     result.client = client;
@@ -505,6 +569,8 @@ bool ControlIdentityRegistry::disconnect_client(
         const auto found = impl_->clients.find(client_id.value);
         if (found != impl_->clients.end()) {
             disconnected = found->second;
+            if (!found->second.durable_principal.empty())
+                impl_->durable_clients.erase(found->second.durable_principal);
             impl_->clients.erase(found);
         }
     }

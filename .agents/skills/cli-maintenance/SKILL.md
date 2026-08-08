@@ -493,7 +493,10 @@ delegate listed in Rust help and reached through the single installed sibling
 fallthrough. It accepts exact `--instance` IDs and typed registry operations;
 never add host, port, discovery-file, newest-instance, human-label, or raw
 protocol flags. Grant requests remain broker-consent-owned, and artifact reads
-remain connection-bound through `ControlClient`.
+remain connection-bound through `ControlClient`. The installed broker may
+rebind its client ID and bounded grants across separate CLI processes only after
+every new connection independently passes kernel and static-code authentication;
+never persist a bearer token or accept a client-supplied durable principal.
 
 After the v0.78.1 cutover, the user-facing CLI is Rust `pulp`. Release
 archives install `pulp` plus sibling `pulp-cpp`, and source builds stage the

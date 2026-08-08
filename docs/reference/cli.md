@@ -1361,8 +1361,9 @@ fallback.
 
 `pulp control` is the canonical installed adapter for the owner-local capability
 broker. It authenticates the broker against the installed signed
-`pulp-control-broker`, enrolls the signed CLI as a connection-bound client, and
-selects live targets only by exact broker-issued `instance_id`. There are no
+`pulp-control-broker`, authenticates each signed CLI connection, associates it
+with a broker-owned reconnectable installed-client ID, and selects live targets
+only by exact broker-issued `instance_id`. There are no
 host, port, discovery-file, newest-instance, label-selection, or raw protocol
 flags.
 
@@ -1378,6 +1379,12 @@ pulp control audit path/to/MyProduct --json
 
 `grant-request` never mints authority in the CLI. A trusted broker consent
 source must approve it; otherwise the stable result is `consent-required`.
+The broker derives a reconnectable client principal only after each invocation
+passes kernel peer observation and installed-code identity policy. Grants remain
+usable by later CLI invocations for their bounded lifetime and can therefore be
+revoked by a later `pulp control revoke`; a broker restart intentionally drops
+that in-memory authority.
+
 `call` and `watch` request a connection-bound grant when `--grant` is omitted,
 so consent and invocation share one authenticated process session. They validate
 `--params` against the operation registry before dispatch and print the broker

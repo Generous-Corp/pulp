@@ -147,6 +147,9 @@ struct ControlClientIdentity {
     ControlBrokerId broker_id;
     std::string peer_fingerprint;
     std::chrono::steady_clock::time_point expires_at;
+    /// Broker-owned stable principal for a re-authenticating installed client.
+    /// Empty identities remain strictly connection-scoped.
+    std::string durable_principal;
 };
 
 struct ControlClientResult {
@@ -216,7 +219,8 @@ public:
     ControlClientResult redeem_bootstrap(
         std::string_view ticket_id,
         std::span<const std::uint8_t> secret,
-        const VerifiedControlPeerIdentity& observed_peer);
+        const VerifiedControlPeerIdentity& observed_peer,
+        std::string_view durable_principal = {});
     bool refresh_client(const ControlClientId& client_id,
                         const VerifiedControlPeerIdentity& peer);
     bool disconnect_client(const ControlClientId& client_id);

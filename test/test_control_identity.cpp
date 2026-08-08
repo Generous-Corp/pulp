@@ -127,6 +127,35 @@ TEST_CASE("bootstrap is single-use and bound to the verified peer generation",
     }
 }
 
+TEST_CASE("durable installed clients reauthenticate across process generations",
+          "[inspect][control][identity][carrier]") {
+    auto now = std::chrono::steady_clock::time_point{};
+    ControlIdentityRegistryConfig config;
+    config.client_ttl = 1s;
+    ControlIdentityRegistry identities(config, {}, [&] { return now; });
+    const auto first_process = peer(ControlPeerRole::Client, 60, "process-start-a");
+    const auto second_process = peer(ControlPeerRole::Client, 61, "process-start-b");
+
+    auto first_ticket = identities.issue_bootstrap(first_process);
+    REQUIRE(first_ticket.ticket.has_value());
+    const auto first = identities.redeem_bootstrap(
+        first_ticket.ticket->ticket_id, first_ticket.ticket->secret.bytes(), first_process,
+        "installed-cli-principal-a");
+    REQUIRE(first.client.has_value());
+    CHECK(first.client->peer_fingerprint == first_process.fingerprint());
+
+    now += 10s;
+    auto second_ticket = identities.issue_bootstrap(second_process);
+    REQUIRE(second_ticket.ticket.has_value());
+    const auto resumed = identities.redeem_bootstrap(
+        second_ticket.ticket->ticket_id, second_ticket.ticket->secret.bytes(), second_process,
+        "installed-cli-principal-a");
+    REQUIRE(resumed.client.has_value());
+    CHECK(resumed.client->client_id == first.client->client_id);
+    CHECK(resumed.client->peer_fingerprint == second_process.fingerprint());
+    CHECK_FALSE(resumed.client->peer_fingerprint == first_process.fingerprint());
+}
+
 TEST_CASE("bootstrap and client expiry fail closed across broker restart",
           "[inspect][control][identity]") {
     auto now = std::chrono::steady_clock::time_point{};

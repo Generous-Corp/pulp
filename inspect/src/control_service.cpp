@@ -125,6 +125,7 @@ ControlService::Session::Session(Session&& other) noexcept
     : service_(std::exchange(other.service_, nullptr)),
       broker_(std::exchange(other.broker_, nullptr)), peer_(std::move(other.peer_)),
       client_id_(std::move(other.client_id_)), progress_sink_(std::move(other.progress_sink_)),
+      disconnect_client_on_close_(other.disconnect_client_on_close_),
       negotiated_features_(std::move(other.negotiated_features_)) {}
 
 ControlService::Session& ControlService::Session::operator=(Session&& other) noexcept {
@@ -136,6 +137,7 @@ ControlService::Session& ControlService::Session::operator=(Session&& other) noe
     peer_ = std::move(other.peer_);
     client_id_ = std::move(other.client_id_);
     progress_sink_ = std::move(other.progress_sink_);
+    disconnect_client_on_close_ = other.disconnect_client_on_close_;
     negotiated_features_ = std::move(other.negotiated_features_);
     return *this;
 }
@@ -147,15 +149,18 @@ void ControlService::Session::close() noexcept {
     if (!broker_)
         return;
     auto* broker = std::exchange(broker_, nullptr);
-    (void)broker->disconnect_client(client_id_, peer_, "control-session-disconnect");
+    if (disconnect_client_on_close_)
+        (void)broker->disconnect_client(client_id_, peer_, "control-session-disconnect");
 }
 
 ControlService::Session ControlService::open_session(const VerifiedControlPeerIdentity& peer,
                                                      const ControlClientId& connection_client_id,
-                                                     ProgressSink progress_sink) {
+                                                     ProgressSink progress_sink,
+                                                     bool disconnect_client_on_close) {
     const auto client = broker_.client(connection_client_id);
     const bool accepted = client && client->peer_fingerprint == peer.fingerprint();
-    return Session{*this, peer, connection_client_id, std::move(progress_sink), accepted};
+    return Session{*this, peer, connection_client_id, std::move(progress_sink), accepted,
+                   disconnect_client_on_close};
 }
 
 ControlServiceResult ControlService::Session::dispatch(std::string_view encoded_envelope) {
