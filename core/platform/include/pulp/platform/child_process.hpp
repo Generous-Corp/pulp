@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -31,6 +33,7 @@ struct ProcessOptions {
     std::function<void(std::string_view line)> on_stdout_line;
     /// Called for each complete captured line on stderr while output is drained.
     std::function<void(std::string_view line)> on_stderr_line;
+    int standard_input_timeout_ms = 3000;  ///< Bound inherited-input delivery
 };
 
 /// Cross-platform child process with timeout, cancellation, and line-by-line
@@ -56,6 +59,12 @@ public:
                const std::vector<std::string>& args,
                const ProcessOptions& options = {});
 
+    /// Start with bytes delivered through a private inherited standard-input
+    /// pipe. Delivery is bounded and unrelated child handles are closed.
+    bool start_with_standard_input(const std::string& command, const std::vector<std::string>& args,
+                                   std::span<const std::uint8_t> bytes,
+                                   const ProcessOptions& options = {});
+
     /// Check if the started process is still running.
     bool is_running() const;
 
@@ -75,6 +84,10 @@ public:
     std::string read_available_output();
 
 private:
+    bool start_impl(const std::string& command, const std::vector<std::string>& args,
+                    const ProcessOptions& options,
+                    const std::span<const std::uint8_t>* standard_input);
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

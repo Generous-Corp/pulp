@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: MIT
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
 #include <pulp/platform/child_process.hpp>
 
 #ifndef _WIN32
@@ -6,19 +9,30 @@
 #include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <future>
+#include <limits>
 #include <mutex>
 #include <thread>
 
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
 #ifndef __ANDROID__
 #include <spawn.h>
 #endif
 #if defined(__APPLE__)
-#  include <TargetConditionals.h>
+#include <TargetConditionals.h>
 #endif
+#include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+#if defined(__GLIBC__)
+#include <features.h>
+#if __GLIBC_PREREQ(2, 34)
+#define PULP_HAS_POSIX_SPAWN_CLOSEFROM 1
+#endif
+#endif
 
 extern char** environ;
 
@@ -39,6 +53,84 @@ struct Pipe {
     int read_end() const { return fd[0]; }
     int write_end() const { return fd[1]; }
 };
+
+struct InputChannel {
+    int parent = -1;
+    int child = -1;
+
+    bool create() {
+        int pair[2] = {-1, -1};
+#if defined(SOCK_CLOEXEC)
+        if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair) != 0)
+            return false;
+#else
+        if (::socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0)
+            return false;
+        for (const auto descriptor : pair) {
+            const auto flags = ::fcntl(descriptor, F_GETFD);
+            if (flags < 0 || ::fcntl(descriptor, F_SETFD, flags | FD_CLOEXEC) != 0) {
+                ::close(pair[0]);
+                ::close(pair[1]);
+                return false;
+            }
+        }
+#endif
+        parent = pair[0];
+        child = pair[1];
+        const auto status_flags = ::fcntl(parent, F_GETFL);
+        if (status_flags < 0 || ::fcntl(parent, F_SETFL, status_flags | O_NONBLOCK) != 0) {
+            close_all();
+            return false;
+        }
+        return true;
+    }
+
+    void close_parent() {
+        if (parent >= 0) {
+            ::close(parent);
+            parent = -1;
+        }
+    }
+    void close_child() {
+        if (child >= 0) {
+            ::close(child);
+            child = -1;
+        }
+    }
+    void close_all() {
+        close_parent();
+        close_child();
+    }
+};
+
+bool write_all(int descriptor, std::span<const std::uint8_t> bytes,
+               std::chrono::steady_clock::time_point deadline) {
+    std::size_t written = 0;
+    while (written < bytes.size()) {
+        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now());
+        if (remaining <= std::chrono::milliseconds::zero())
+            return false;
+        pollfd ready{.fd = descriptor, .events = POLLOUT, .revents = 0};
+        const auto wait_ms = static_cast<int>(
+            std::min<std::int64_t>(remaining.count(), std::numeric_limits<int>::max()));
+        const auto polled = ::poll(&ready, 1, wait_ms);
+        if (polled < 0 && errno == EINTR)
+            continue;
+        if (polled <= 0 || (ready.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
+            return false;
+        const auto count = ::send(descriptor, bytes.data() + written, bytes.size() - written,
+                                  MSG_NOSIGNAL | MSG_DONTWAIT);
+        if (count > 0) {
+            written += static_cast<std::size_t>(count);
+            continue;
+        }
+        if (count < 0 && errno == EINTR)
+            continue;
+        return false;
+    }
+    return true;
+}
 
 // Read available bytes from a non-blocking fd.
 // Appends to full_output (for ProcessResult), and to line_buf (for
@@ -82,6 +174,7 @@ struct ChildProcess::Impl {
     pid_t pid = -1;
     Pipe stdout_pipe;
     Pipe stderr_pipe;
+    InputChannel standard_input;
     ProcessOptions options;
     std::string stdout_full;       // complete captured output for ProcessResult
     std::string stderr_full;
@@ -105,9 +198,21 @@ ChildProcess::~ChildProcess() {
 ChildProcess::ChildProcess(ChildProcess&&) noexcept = default;
 ChildProcess& ChildProcess::operator=(ChildProcess&&) noexcept = default;
 
-bool ChildProcess::start(const std::string& command,
-                         const std::vector<std::string>& args,
+bool ChildProcess::start(const std::string& command, const std::vector<std::string>& args,
                          const ProcessOptions& options) {
+    return start_impl(command, args, options, nullptr);
+}
+
+bool ChildProcess::start_with_standard_input(const std::string& command,
+                                             const std::vector<std::string>& args,
+                                             std::span<const std::uint8_t> bytes,
+                                             const ProcessOptions& options) {
+    return start_impl(command, args, options, &bytes);
+}
+
+bool ChildProcess::start_impl(const std::string& command, const std::vector<std::string>& args,
+                              const ProcessOptions& options,
+                              const std::span<const std::uint8_t>* standard_input) {
     std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
     if (impl_->started && !impl_->finished) {
         if (is_running())
@@ -128,8 +233,11 @@ bool ChildProcess::start(const std::string& command,
     impl_->cached_exit_status = -1;
     impl_->result = {};
 
-    if ((options.capture_stdout && !impl_->stdout_pipe.create()) ||
+    if ((standard_input && (options.standard_input_timeout_ms <= 0 ||
+                            !impl_->standard_input.create())) ||
+        (options.capture_stdout && !impl_->stdout_pipe.create()) ||
         (options.capture_stderr && !impl_->stderr_pipe.create())) {
+        impl_->standard_input.close_all();
         impl_->stdout_pipe.close_all();
         impl_->stderr_pipe.close_all();
         impl_->result.exit_code = -1;
@@ -139,7 +247,8 @@ bool ChildProcess::start(const std::string& command,
     // Build argv
     std::vector<const char*> argv;
     argv.push_back(command.c_str());
-    for (auto& a : args) argv.push_back(a.c_str());
+    for (auto& a : args)
+        argv.push_back(a.c_str());
     argv.push_back(nullptr);
 
     int rc;
@@ -149,6 +258,8 @@ bool ChildProcess::start(const std::string& command,
     impl_->pid = fork();
     if (impl_->pid == 0) {
         // Child process
+        if (standard_input && dup2(impl_->standard_input.child, STDIN_FILENO) < 0)
+            _exit(126);
         if (options.capture_stdout) {
             dup2(impl_->stdout_pipe.write_end(), STDOUT_FILENO);
         } else {
@@ -169,53 +280,118 @@ bool ChildProcess::start(const std::string& command,
         }
         impl_->stdout_pipe.close_all();
         impl_->stderr_pipe.close_all();
+        impl_->standard_input.close_all();
+        if (standard_input) {
+            const auto descriptor_limit = ::sysconf(_SC_OPEN_MAX);
+            const auto upper = descriptor_limit > 0 ? descriptor_limit : 1024;
+            for (int descriptor = 3; descriptor < upper; ++descriptor)
+                ::close(descriptor);
+        }
         if (!options.working_directory.empty())
             chdir(options.working_directory.c_str());
         execvp(command.c_str(), const_cast<char* const*>(argv.data()));
-        _exit(127);  // exec failed
+        _exit(127); // exec failed
     }
     rc = (impl_->pid > 0) ? 0 : errno;
 #else
     // Set up file actions: redirect stdout/stderr to pipes
     posix_spawn_file_actions_t actions;
-    posix_spawn_file_actions_init(&actions);
+    if (posix_spawn_file_actions_init(&actions) != 0) {
+        impl_->standard_input.close_all();
+        impl_->stdout_pipe.close_all();
+        impl_->stderr_pipe.close_all();
+        impl_->result.exit_code = -1;
+        return false;
+    }
+    int setup_error = 0;
+    const auto add_action = [&](int result) {
+        if (setup_error == 0 && result != 0)
+            setup_error = result;
+    };
+    posix_spawnattr_t attributes;
+    posix_spawnattr_t* attributes_pointer = nullptr;
+    if (standard_input) {
+#if defined(__APPLE__)
+        const auto attribute_error = posix_spawnattr_init(&attributes);
+        if (attribute_error == 0) {
+            attributes_pointer = &attributes;
+            add_action(posix_spawnattr_setflags(&attributes, POSIX_SPAWN_CLOEXEC_DEFAULT));
+        } else {
+            setup_error = attribute_error;
+        }
+#endif
+    }
+    if (standard_input) {
+        add_action(posix_spawn_file_actions_adddup2(&actions, impl_->standard_input.child,
+                                                    STDIN_FILENO));
+        add_action(posix_spawn_file_actions_addclose(&actions, impl_->standard_input.parent));
+        add_action(posix_spawn_file_actions_addclose(&actions, impl_->standard_input.child));
+    }
     if (options.capture_stdout) {
-        posix_spawn_file_actions_adddup2(&actions, impl_->stdout_pipe.write_end(), STDOUT_FILENO);
-        posix_spawn_file_actions_addclose(&actions, impl_->stdout_pipe.read_end());
-        posix_spawn_file_actions_addclose(&actions, impl_->stdout_pipe.write_end());
+        add_action(posix_spawn_file_actions_adddup2(&actions, impl_->stdout_pipe.write_end(),
+                                                    STDOUT_FILENO));
+        add_action(posix_spawn_file_actions_addclose(&actions, impl_->stdout_pipe.read_end()));
+        add_action(posix_spawn_file_actions_addclose(&actions, impl_->stdout_pipe.write_end()));
     } else {
-        posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+        add_action(posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY,
+                                                    0));
     }
     if (options.capture_stderr) {
-        posix_spawn_file_actions_adddup2(&actions, impl_->stderr_pipe.write_end(), STDERR_FILENO);
-        posix_spawn_file_actions_addclose(&actions, impl_->stderr_pipe.read_end());
-        posix_spawn_file_actions_addclose(&actions, impl_->stderr_pipe.write_end());
+        add_action(posix_spawn_file_actions_adddup2(&actions, impl_->stderr_pipe.write_end(),
+                                                    STDERR_FILENO));
+        add_action(posix_spawn_file_actions_addclose(&actions, impl_->stderr_pipe.read_end()));
+        add_action(posix_spawn_file_actions_addclose(&actions, impl_->stderr_pipe.write_end()));
     } else {
-        posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+        add_action(posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY,
+                                                    0));
     }
 
     // Working directory
     // posix_spawn_file_actions_addchdir_np is available on macOS 10.15+
     // and glibc 2.29+, but NOT on iOS/tvOS/watchOS simulators.
-#if (defined(__APPLE__) && !(TARGET_OS_IPHONE || TARGET_OS_TV || TARGET_OS_WATCH)) \
-    || (defined(__GLIBC__) && __GLIBC__ >= 2 && __GLIBC_MINOR__ >= 29)
+#if (defined(__APPLE__) && !(TARGET_OS_IPHONE || TARGET_OS_TV || TARGET_OS_WATCH)) ||              \
+    (defined(__GLIBC__) && __GLIBC__ >= 2 && __GLIBC_MINOR__ >= 29)
     if (!options.working_directory.empty()) {
-        posix_spawn_file_actions_addchdir_np(&actions, options.working_directory.c_str());
+        add_action(posix_spawn_file_actions_addchdir_np(&actions,
+                                                        options.working_directory.c_str()));
     }
 #else
     // working_directory is silently ignored on iOS/older glibc
 #endif
 
-    rc = posix_spawnp(&impl_->pid,
-                          command.c_str(),
-                          &actions,
-                          nullptr,  // default attributes
-                          const_cast<char* const*>(argv.data()),
-                          environ);
+    if (standard_input) {
+#if defined(PULP_HAS_POSIX_SPAWN_CLOSEFROM)
+        add_action(posix_spawn_file_actions_addclosefrom_np(&actions, 3));
+#elif !defined(__APPLE__)
+        posix_spawn_file_actions_destroy(&actions);
+        impl_->standard_input.close_all();
+        impl_->stdout_pipe.close_all();
+        impl_->stderr_pipe.close_all();
+        impl_->result.exit_code = -1;
+        return false;
+#endif
+    }
+
+    if (setup_error != 0) {
+        posix_spawn_file_actions_destroy(&actions);
+        if (attributes_pointer)
+            posix_spawnattr_destroy(attributes_pointer);
+        impl_->standard_input.close_all();
+        impl_->stdout_pipe.close_all();
+        impl_->stderr_pipe.close_all();
+        impl_->result.exit_code = -1;
+        return false;
+    }
+
+    rc = posix_spawnp(&impl_->pid, command.c_str(), &actions, attributes_pointer,
+                      const_cast<char* const*>(argv.data()), environ);
 
     posix_spawn_file_actions_destroy(&actions);
+    if (attributes_pointer)
+        posix_spawnattr_destroy(attributes_pointer);
 #endif
 
+    impl_->standard_input.close_child();
     // Close write ends in parent
     impl_->stdout_pipe.close_write();
     impl_->stderr_pipe.close_write();
@@ -223,12 +399,36 @@ bool ChildProcess::start(const std::string& command,
     if (rc != 0) {
         impl_->stdout_pipe.close_all();
         impl_->stderr_pipe.close_all();
+        impl_->standard_input.close_all();
         impl_->pid = -1;
         impl_->result.exit_code = -1;
         return false;
     }
 
     impl_->started = true;
+    if (standard_input) {
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::milliseconds(options.standard_input_timeout_ms);
+        std::promise<bool> completion;
+        auto completed = completion.get_future();
+        std::thread writer([&] {
+            completion.set_value(write_all(impl_->standard_input.parent, *standard_input, deadline));
+        });
+        while (completed.wait_for(std::chrono::milliseconds(1)) != std::future_status::ready) {
+            drain_pipe(impl_->stdout_pipe.read_end(), impl_->stdout_full, impl_->stdout_lines_buf,
+                       options.max_output_bytes, options.on_stdout_line);
+            drain_pipe(impl_->stderr_pipe.read_end(), impl_->stderr_full, impl_->stderr_lines_buf,
+                       options.max_output_bytes, options.on_stderr_line);
+        }
+        writer.join();
+        const bool delivered = completed.get();
+        ::shutdown(impl_->standard_input.parent, SHUT_WR);
+        impl_->standard_input.close_parent();
+        if (!delivered) {
+            cancel();
+            return false;
+        }
+    }
     return true;
 }
 

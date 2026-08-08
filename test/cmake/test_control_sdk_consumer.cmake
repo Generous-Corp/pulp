@@ -73,6 +73,7 @@ file(WRITE "${_consumer_source}/main.cpp" [=[
 #include <pulp/inspect/control_client.hpp>
 #include <pulp/inspect/control_endpoint.hpp>
 #include <pulp/inspect/control_host_connection.hpp>
+#include <pulp/inspect/control_host_bootstrap.hpp>
 #include <pulp/inspect/control_host_router.hpp>
 #include <pulp/inspect/control_main_thread_executor.hpp>
 #include <pulp/inspect/control_operations.hpp>
@@ -118,6 +119,21 @@ int main() {
   pulp::inspect::ControlHostRouter host_router;
   pulp::inspect::ControlHostConnection host_connection{
       {.endpoint_path = "/tmp/not-connected-control.sock"}, host_router.executor()};
+  pulp::inspect::ControlHostBootstrapRecord bootstrap;
+  bootstrap.endpoint_path = "/tmp/not-connected-control.sock";
+  bootstrap.expected_broker.evidence = {
+      .role = pulp::inspect::ControlPeerRole::TrustedHostBridge,
+      .user_id = "installed-user",
+      .process_id = 1,
+      .process_start_id = "installed-start",
+      .executable_identity = "installed-executable",
+      .publisher_id = "installed-publisher"};
+  bootstrap.admission_id = "installed-admission";
+  bootstrap.registration_id = pulp::inspect::ControlRegistrationId{"installed-registration"};
+  bootstrap.expires_at_unix_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          (std::chrono::system_clock::now() + std::chrono::minutes(1)).time_since_epoch()).count();
+  const auto bootstrap_bytes = pulp::inspect::encode_control_host_bootstrap(bootstrap);
   pulp::inspect::ControlConnectionPrincipal principal =
       pulp::inspect::ControlHostConnectionPrincipal{
           pulp::inspect::ControlRegistrationId{"installed-registration"}};
@@ -135,6 +151,7 @@ int main() {
   return !broker.is_listening() && !service.is_listening()
              && !client.is_connected()
              && !host_connection.is_connected()
+             && !bootstrap_bytes.empty()
              && std::holds_alternative<pulp::inspect::ControlHostConnectionPrincipal>(principal)
              && operations.max_receipts > 0
              && artifacts.maximum_blob_bytes > 0
