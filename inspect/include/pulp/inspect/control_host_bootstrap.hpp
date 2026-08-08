@@ -49,8 +49,12 @@ class ControlHostBootstrapRecord {
     std::uint32_t version = kControlHostBootstrapVersion;
     std::filesystem::path endpoint_path;
     ControlPeerExpectation expected_broker;
+    /// Exactly one credential form is valid: admission plus registration, or
+    /// enrollment alone. An absent enrollment field decodes as the legacy
+    /// admission form; new encodings always include it.
     std::string admission_id;
     ControlRegistrationId registration_id;
+    std::string enrollment_id;
     std::int64_t expires_at_unix_ms = 0;
 
     ControlHostBootstrapRecord() = default;

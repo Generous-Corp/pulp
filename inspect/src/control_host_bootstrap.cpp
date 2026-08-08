@@ -23,6 +23,52 @@
 namespace pulp::inspect {
 namespace {
 
+void wipe_string_storage(std::string& value) noexcept {
+    // Credentials are public fields for legacy API compatibility, so callers
+    // can shorten them without first wiping the old suffix. Expand within the
+    // retained allocation before zeroing to cover that suffix as well.
+    try {
+        value.resize(value.capacity());
+    } catch (...) {
+        // A conforming implementation does not allocate when resizing within
+        // capacity. Preserve noexcept cleanup and still wipe the live value if
+        // an implementation reports a failure.
+    }
+    runtime::secure_zero_memory(value.data(), value.size());
+    value.clear();
+}
+
+void wipe_byte_storage(std::vector<std::uint8_t>& value) noexcept {
+    try {
+        value.resize(value.capacity());
+    } catch (...) {
+    }
+    runtime::secure_zero_memory(value.data(), value.size());
+    value.clear();
+}
+
+class StringStorageWiper {
+  public:
+    explicit StringStorageWiper(std::string& value) : value_(value) {}
+    ~StringStorageWiper() { wipe_string_storage(value_); }
+    StringStorageWiper(const StringStorageWiper&) = delete;
+    StringStorageWiper& operator=(const StringStorageWiper&) = delete;
+
+  private:
+    std::string& value_;
+};
+
+class ByteStorageWiper {
+  public:
+    explicit ByteStorageWiper(std::vector<std::uint8_t>& value) : value_(value) {}
+    ~ByteStorageWiper() { wipe_byte_storage(value_); }
+    ByteStorageWiper(const ByteStorageWiper&) = delete;
+    ByteStorageWiper& operator=(const ByteStorageWiper&) = delete;
+
+  private:
+    std::vector<std::uint8_t>& value_;
+};
+
 using control_protocol_detail::ValueView;
 using namespace std::chrono_literals;
 
@@ -33,6 +79,46 @@ void set_diagnostics(ControlHostBootstrapDiagnostics* diagnostics,
                      ControlHostBootstrapStatus status, std::string explanation) {
     if (diagnostics)
         *diagnostics = {.status = status, .explanation = std::move(explanation)};
+}
+
+void wipe_value_strings(choc::value::Value& value) noexcept {
+    auto* dictionary = dynamic_cast<choc::value::SimpleStringDictionary*>(value.getDictionary());
+    if (!dictionary)
+        return;
+    runtime::secure_zero_memory(const_cast<char*>(dictionary->getRawData()),
+                                dictionary->getRawDataSize());
+}
+
+class ValueStringWiper {
+  public:
+    explicit ValueStringWiper(choc::value::Value& value) : value_(value) {}
+    ~ValueStringWiper() { wipe_value_strings(value_); }
+    ValueStringWiper(const ValueStringWiper&) = delete;
+    ValueStringWiper& operator=(const ValueStringWiper&) = delete;
+
+  private:
+    choc::value::Value& value_;
+};
+
+std::optional<choc::value::Value> parse_secure_bootstrap_json(std::string_view json) {
+    if (!control_protocol_detail::valid_control_json_bytes(
+            json, kControlHostBootstrapMaximumBytes, 64))
+        return std::nullopt;
+    std::vector<std::uint8_t> terminated(json.begin(), json.end());
+    ByteStorageWiper wipe_terminated(terminated);
+    terminated.push_back(0);
+    try {
+        auto parsed = choc::json::parseValue(std::string_view(
+            reinterpret_cast<const char*>(terminated.data()), json.size()));
+        std::size_t remaining_nodes = 64;
+        if (!control_protocol_detail::bounded_json_shape(parsed, 0, remaining_nodes)) {
+            wipe_value_strings(parsed);
+            return std::nullopt;
+        }
+        return parsed;
+    } catch (...) {
+        return std::nullopt;
+    }
 }
 
 std::string_view role_id(ControlPeerRole role) {
@@ -65,6 +151,45 @@ std::int64_t unix_ms(std::chrono::system_clock::time_point time) {
     return std::chrono::duration_cast<std::chrono::milliseconds>(time.time_since_epoch()).count();
 }
 
+bool valid_credentials(const ControlHostBootstrapRecord& record) {
+    const auto valid_id = [](std::string_view value) {
+        return control_protocol_detail::valid_token(value,
+                                                    control_protocol_detail::kMaximumIdBytes);
+    };
+    const bool preissued = record.enrollment_id.empty() && valid_id(record.admission_id) &&
+                           valid_id(record.registration_id.value);
+    const bool enrollment = record.admission_id.empty() && record.registration_id.value.empty() &&
+                            valid_id(record.enrollment_id);
+    return preissued || enrollment;
+}
+
+bool credential_field(ValueView value, std::string_view name, std::string& out, bool required,
+                      ControlProtocolDiagnostics& diagnostics) {
+    if (!value.hasObjectMember(name)) {
+        if (!required) {
+            out.clear();
+            return true;
+        }
+        diagnostics = {ControlProtocolError::MissingField,
+                       "missing field '" + std::string(name) + "'"};
+        return false;
+    }
+    const auto field = value[name];
+    if (!field.isString()) {
+        diagnostics = {ControlProtocolError::InvalidType,
+                       "field '" + std::string(name) + "' must be a string"};
+        return false;
+    }
+    out = std::string(field.getString());
+    if (!out.empty() &&
+        !control_protocol_detail::valid_token(out, control_protocol_detail::kMaximumIdBytes)) {
+        diagnostics = {ControlProtocolError::InvalidValue,
+                       "field '" + std::string(name) + "' is invalid"};
+        return false;
+    }
+    return true;
+}
+
 bool valid_record(const ControlHostBootstrapRecord& record,
                   std::chrono::system_clock::time_point now,
                   ControlHostBootstrapDiagnostics* diagnostics) {
@@ -82,11 +207,7 @@ bool valid_record(const ControlHostBootstrapRecord& record,
         peer.process_id <= 0 || peer.process_start_id.empty() ||
         peer.process_start_id.size() > kMaximumPeerFieldBytes || peer.executable_identity.empty() ||
         peer.executable_identity.size() > kMaximumPeerFieldBytes || peer.publisher_id.empty() ||
-        peer.publisher_id.size() > kMaximumPeerFieldBytes ||
-        !control_protocol_detail::valid_token(record.admission_id,
-                                              control_protocol_detail::kMaximumIdBytes) ||
-        !control_protocol_detail::valid_token(record.registration_id.value,
-                                              control_protocol_detail::kMaximumIdBytes) ||
+        peer.publisher_id.size() > kMaximumPeerFieldBytes || !valid_credentials(record) ||
         record.expires_at_unix_ms <= 0) {
         set_diagnostics(diagnostics, ControlHostBootstrapStatus::InvalidRecord,
                         "the bootstrap record is incomplete or outside its bounds");
@@ -224,7 +345,7 @@ ControlHostBootstrapRecord::ControlHostBootstrapRecord(ControlHostBootstrapRecor
       expected_broker(std::move(other.expected_broker)),
       admission_id(std::move(other.admission_id)),
       registration_id(std::move(other.registration_id)),
-      expires_at_unix_ms(other.expires_at_unix_ms) {
+      enrollment_id(std::move(other.enrollment_id)), expires_at_unix_ms(other.expires_at_unix_ms) {
     other.clear();
 }
 
@@ -238,6 +359,7 @@ ControlHostBootstrapRecord::operator=(ControlHostBootstrapRecord&& other) noexce
         expected_broker = std::move(other.expected_broker);
         admission_id = std::move(other.admission_id);
         registration_id = std::move(other.registration_id);
+        enrollment_id = std::move(other.enrollment_id);
         expires_at_unix_ms = other.expires_at_unix_ms;
         other.clear();
     }
@@ -245,10 +367,9 @@ ControlHostBootstrapRecord::operator=(ControlHostBootstrapRecord&& other) noexce
 }
 
 void ControlHostBootstrapRecord::clear() noexcept {
-    runtime::secure_zero_memory(admission_id.data(), admission_id.size());
-    runtime::secure_zero_memory(registration_id.value.data(), registration_id.value.size());
-    admission_id.clear();
-    registration_id.value.clear();
+    wipe_string_storage(admission_id);
+    wipe_string_storage(registration_id.value);
+    wipe_string_storage(enrollment_id);
     expires_at_unix_ms = 0;
 }
 
@@ -275,8 +396,7 @@ ControlHostBootstrapBytes::operator=(ControlHostBootstrapBytes&& other) noexcept
 }
 
 void ControlHostBootstrapBytes::clear() noexcept {
-    runtime::secure_zero_memory(bytes_.data(), bytes_.size());
-    bytes_.clear();
+    wipe_byte_storage(bytes_);
 }
 
 ControlHostBootstrapBytes encode_control_host_bootstrap(const ControlHostBootstrapRecord& record) {
@@ -292,17 +412,22 @@ ControlHostBootstrapBytes encode_control_host_bootstrap(const ControlHostBootstr
     broker.addMember("user_id", choc::value::createString(peer.user_id));
 
     auto root = choc::value::createObject("");
-    root.addMember("admission_id", choc::value::createString(record.admission_id));
+    ValueStringWiper wipe_root(root);
+    root.addMember("admission_id", std::string_view(record.admission_id));
     root.addMember("endpoint", choc::value::createString(record.endpoint_path.string()));
+    root.addMember("enrollment_id", std::string_view(record.enrollment_id));
     root.addMember("expected_broker", std::move(broker));
     root.addMember("expires_at_unix_ms", choc::value::createInt64(record.expires_at_unix_ms));
-    root.addMember("registration_id", choc::value::createString(record.registration_id.value));
+    root.addMember("registration_id", std::string_view(record.registration_id.value));
     root.addMember("schema", choc::value::createString(record.schema));
     root.addMember("version", choc::value::createInt32(static_cast<std::int32_t>(record.version)));
-    const auto encoded = choc::json::toString(root, false);
-    if (encoded.empty() || encoded.size() > kControlHostBootstrapMaximumBytes)
+    auto encoded = choc::json::toString(root, false);
+    StringStorageWiper wipe_encoded(encoded);
+    if (encoded.empty() || encoded.size() > kControlHostBootstrapMaximumBytes) {
         return {};
-    return ControlHostBootstrapBytes{{encoded.begin(), encoded.end()}};
+    }
+    ControlHostBootstrapBytes result{{encoded.begin(), encoded.end()}};
+    return result;
 }
 
 std::optional<ControlHostBootstrapRecord>
@@ -320,9 +445,14 @@ decode_control_host_bootstrap(std::span<const std::uint8_t> bytes,
         return std::nullopt;
     }
     const auto text = std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-    const auto parsed = control_protocol_detail::parse_bounded_control_json(
-        text, kControlHostBootstrapMaximumBytes, 64);
-    if (!parsed || !parsed->isObject()) {
+    auto parsed = parse_secure_bootstrap_json(text);
+    if (!parsed) {
+        set_diagnostics(diagnostics, ControlHostBootstrapStatus::Truncated,
+                        "the bootstrap record is not complete bounded JSON");
+        return std::nullopt;
+    }
+    ValueStringWiper wipe_parsed(*parsed);
+    if (!parsed->isObject()) {
         set_diagnostics(diagnostics, ControlHostBootstrapStatus::Truncated,
                         "the bootstrap record is not complete bounded JSON");
         return std::nullopt;
@@ -330,8 +460,8 @@ decode_control_host_bootstrap(std::span<const std::uint8_t> bytes,
     ControlProtocolDiagnostics fields;
     if (!control_protocol_detail::only_fields(*parsed,
                                               {"admission_id", "endpoint", "expected_broker",
-                                               "expires_at_unix_ms", "registration_id", "schema",
-                                               "version"},
+                                               "enrollment_id", "expires_at_unix_ms",
+                                               "registration_id", "schema", "version"},
                                               fields)) {
         set_diagnostics(diagnostics, ControlHostBootstrapStatus::InvalidRecord, fields.explanation);
         return std::nullopt;
@@ -349,19 +479,15 @@ decode_control_host_bootstrap(std::span<const std::uint8_t> bytes,
 
     ControlHostBootstrapRecord record;
     std::string endpoint;
-    std::string registration;
     std::string role;
     if (!control_protocol_detail::required_string(*parsed, "schema", record.schema, 128, fields,
                                                   false) ||
         !control_protocol_detail::required_u32(*parsed, "version", record.version, fields) ||
         !control_protocol_detail::required_string(*parsed, "endpoint", endpoint, kMaximumPathBytes,
                                                   fields, false) ||
-        !control_protocol_detail::required_string(*parsed, "admission_id", record.admission_id,
-                                                  control_protocol_detail::kMaximumIdBytes,
-                                                  fields) ||
-        !control_protocol_detail::required_string(*parsed, "registration_id", registration,
-                                                  control_protocol_detail::kMaximumIdBytes,
-                                                  fields) ||
+        !credential_field(*parsed, "admission_id", record.admission_id, true, fields) ||
+        !credential_field(*parsed, "registration_id", record.registration_id.value, true, fields) ||
+        !credential_field(*parsed, "enrollment_id", record.enrollment_id, false, fields) ||
         !control_protocol_detail::required_i64(*parsed, "expires_at_unix_ms",
                                                record.expires_at_unix_ms, fields) ||
         !control_protocol_detail::required_string(broker, "role", role, 64, fields, false) ||
@@ -389,7 +515,6 @@ decode_control_host_bootstrap(std::span<const std::uint8_t> bytes,
         return std::nullopt;
     }
     record.endpoint_path = std::filesystem::path(endpoint);
-    record.registration_id = ControlRegistrationId{std::move(registration)};
     record.expected_broker.evidence.role = *parsed_role;
     if (!valid_record(record, now, diagnostics))
         return std::nullopt;
