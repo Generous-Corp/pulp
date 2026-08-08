@@ -9,6 +9,7 @@ struct MemoryFileSystem {
     symlinks: RefCell<HashSet<PathBuf>>,
     private_files: RefCell<HashSet<PathBuf>>,
     fail_next_rename: Cell<bool>,
+    fail_rename_to: RefCell<Option<PathBuf>>,
 }
 
 impl MemoryFileSystem {
@@ -46,7 +47,8 @@ impl FileSystem for MemoryFileSystem {
     }
 
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
-        if self.fail_next_rename.replace(false) {
+        let fail_selected = self.fail_rename_to.borrow().as_deref() == Some(to);
+        if self.fail_next_rename.replace(false) || fail_selected {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "scripted rename failure",
@@ -244,6 +246,37 @@ fn explicit_reconcile_validates_then_starts_and_requires_unverified_health() {
         .private_files
         .borrow()
         .contains(&paths_for(&config).marker.with_extension("marker.new")));
+}
+
+#[test]
+fn successful_activation_is_not_rolled_back_when_marker_publication_fails() {
+    let config = config();
+    let fs = populated_fs(&config);
+    let paths = paths_for(&config);
+    *fs.fail_rename_to.borrow_mut() = Some(paths.marker.clone());
+    let runner = ScriptedRunner::new(successful_script());
+    let rollback_called = Cell::new(false);
+    let callback: RollbackCallback<'_> = Box::new(|| {
+        rollback_called.set(true);
+        Ok(())
+    });
+
+    let outcome =
+        reconcile_with_callback(&config, &fs, &runner, AttemptMode::Explicit, Some(callback))
+            .unwrap();
+
+    assert_eq!(outcome, ControlBrokerServiceOutcome::Reconciled);
+    assert!(!rollback_called.get());
+    assert!(!fs.is_file(&paths.marker));
+    assert_eq!(
+        runner
+            .calls
+            .borrow()
+            .iter()
+            .filter(|call| call.args.first().map(String::as_str) == Some("bootstrap"))
+            .count(),
+        1
+    );
 }
 
 fn paths_for(config: &ControlBrokerServiceConfig) -> ServicePaths {

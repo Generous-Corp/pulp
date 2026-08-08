@@ -341,6 +341,13 @@ struct CacheArgs {
 }
 
 fn main() -> ExitCode {
+    // Installer-only reconciliation must stay in the Rust binary even when a
+    // user's environment enables the public C++ rollback lever. The legacy
+    // binary does not implement this private command, and forwarding it would
+    // silently bypass broker activation during an upgrade.
+    if let Some(exit) = control_broker_reconcile_entrypoint() {
+        return exit;
+    }
     // Rollback lever. When `$PULP_USE_CPP=1` is set, skip the Rust
     // dispatch entirely and exec the C++ binary with the user's full
     // argv unchanged.
@@ -349,9 +356,6 @@ fn main() -> ExitCode {
     // to enable rollback" message and exit 2.
     if std::env::var_os("PULP_USE_CPP").is_some_and(|v| !v.is_empty()) {
         return force_cpp_fallthrough();
-    }
-    if let Some(exit) = control_broker_reconcile_entrypoint() {
-        return exit;
     }
     match real_main() {
         Ok(()) => ExitCode::SUCCESS,

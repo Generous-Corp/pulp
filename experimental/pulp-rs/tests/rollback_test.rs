@@ -107,6 +107,35 @@ fn pulp_use_cpp_with_resolvable_stub_forwards_argv() {
     );
 }
 
+#[test]
+fn installer_reconcile_bypasses_pulp_use_cpp_fallthrough() {
+    let td = tempfile::tempdir().expect("tempdir");
+    let stub_path = td.path().join(stub_binary_name());
+    fs::write(&stub_path, stub_script_body()).expect("write stub");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&stub_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&stub_path, perms).unwrap();
+    }
+
+    let output = Command::cargo_bin(BIN_NAME)
+        .expect("binary")
+        .arg("__control-broker-reconcile")
+        .env("PULP_USE_CPP", "1")
+        .env("PATH", td.path())
+        .env_remove("PULP_RS_CPP_BINARY")
+        .env_remove("PULP_RS_FALLTHROUGH")
+        .output()
+        .expect("run");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty(), "legacy stub must not run");
+    let stderr = String::from_utf8(output.stderr).expect("utf8");
+    assert!(stderr.contains("--broker"), "unexpected stderr: {stderr:?}");
+}
+
 /// `pulp ship sign` (and friends) aren't declared as Rust `Command`
 /// variants — `ship`, `validate`, `host`, `audio`, `inspect`,
 /// `import-design`, `export-tokens`, `design-debug` all stay in the
