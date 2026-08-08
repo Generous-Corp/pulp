@@ -467,6 +467,9 @@ struct ControlBrokerDaemon::Impl {
                 .endpoint_path = endpoint,
                 .expected_broker = {.evidence = *broker_peer},
                 .broker_generation = generation,
+                // Fresh signed hosts can spend several seconds in dyld and
+                // code-signature validation on a busy macOS machine.
+                .preflight_timeout = 10s,
             });
         service = std::make_unique<ControlService>(*broker, host_router->executor());
         auto* admission_store = admissions.get();
