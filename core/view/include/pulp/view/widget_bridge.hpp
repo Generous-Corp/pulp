@@ -125,15 +125,11 @@ public:
     }
     const std::vector<std::filesystem::path>& asset_roots() const noexcept { return asset_roots_; }
 
-    /// Base directory for resolving RELATIVE filesystem paths handed to the
-    /// path-taking bridge APIs (setImageSource, setKnobSpriteStrip,
-    /// registerFont, loadFont). Import codegen emits `assets/<file>` relative
-    /// to the generated script so the artifact is self-contained; a host that
-    /// knows where the script lives sets this so those paths resolve
-    /// regardless of the process working directory. Unset (the default)
-    /// leaves relative paths untouched — the historical CWD resolution.
-    /// Unlike set_asset_roots() this never RESTRICTS loading; it is purely a
-    /// resolution base.
+    /// Preferred directory for resolving RELATIVE filesystem paths handed to
+    /// path-taking bridge APIs. Imported code emits `assets/<file>` beside its
+    /// generated script; a host may instead keep the script in a scratch file
+    /// and provide the durable artifact directory through set_asset_roots().
+    /// The script directory is tried first, followed by those reviewed roots.
     void set_script_base_dir(std::filesystem::path dir) {
         if (dir.empty()) { script_base_dir_.clear(); return; }
         std::error_code ec;
@@ -142,20 +138,11 @@ public:
     }
     const std::filesystem::path& script_base_dir() const noexcept { return script_base_dir_; }
 
-    /// Resolve `path` against script_base_dir(): relative fs paths (no
-    /// `scheme://` prefix) that exist under the base resolve to the joined
-    /// absolute path; everything else — absolute paths, URIs, an unset base,
-    /// or a join that names no existing file — passes through unchanged.
-    std::string resolve_script_relative(const std::string& path) const {
-        if (path.empty() || script_base_dir_.empty()) return path;
-        if (path.find("://") != std::string::npos) return path;
-        std::filesystem::path p(path);
-        if (p.is_absolute()) return path;
-        auto joined = (script_base_dir_ / p).lexically_normal();
-        std::error_code ec;
-        if (!std::filesystem::exists(joined, ec) || ec) return path;
-        return joined.generic_string();
-    }
+    /// Resolve an existing relative file against the script directory or a
+    /// reviewed asset root. Asset-root candidates are canonicalized and must
+    /// remain inside their root so symlinks and `..` cannot escape it.
+    /// Absolute paths, URIs, and misses pass through unchanged.
+    std::string resolve_script_relative(const std::string& path) const;
 
     /// load_script overload that retains a script identifier. `script_id` is
     /// recorded as `active_script_id_` and threaded into every rAF callback

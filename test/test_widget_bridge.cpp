@@ -5779,6 +5779,12 @@ TEST_CASE("WidgetBridge resolves script-relative asset paths against the script 
            + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(base / "assets");
     { std::ofstream f(base / "assets" / "hero.png", std::ios::binary); f << "png"; }
+    const auto reviewed_root = base / "reviewed";
+    const auto scratch_root = base / "scratch";
+    fs::create_directories(reviewed_root / "assets");
+    fs::create_directories(scratch_root);
+    { std::ofstream f(reviewed_root / "assets" / "captured.png", std::ios::binary);
+      f << "captured"; }
 
     ScriptEngine engine;
     View root;
@@ -5806,6 +5812,60 @@ TEST_CASE("WidgetBridge resolves script-relative asset paths against the script 
         auto* image = dynamic_cast<ImageView*>(bridge.widget("img"));
         REQUIRE(image != nullptr);
         REQUIRE(image->image_path() == "file://assets/hero.png");
+    }
+
+    SECTION("a scratch script falls back to its reviewed artifact root") {
+        static constexpr unsigned char tiny_png[] = {
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+            0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+            0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+            0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41,
+            0x54, 0x78, 0x9c, 0x63, 0xf8, 0x0f, 0x04, 0x00,
+            0x09, 0xfb, 0x03, 0xfd, 0xa7, 0xe9, 0x81, 0x86,
+            0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44,
+            0xae, 0x42, 0x60, 0x82,
+        };
+        {
+            std::ofstream f(reviewed_root / "assets" / "body.png", std::ios::binary);
+            f.write(reinterpret_cast<const char*>(tiny_png), sizeof(tiny_png));
+        }
+        {
+            std::ofstream f(reviewed_root / "assets" / "indicator.png", std::ios::binary);
+            f.write(reinterpret_cast<const char*>(tiny_png), sizeof(tiny_png));
+        }
+        bridge.set_script_base_dir(scratch_root);
+        bridge.set_asset_roots({reviewed_root});
+        bridge.load_script(R"(
+            createImage('img', '');
+            setImageSource('img', 'assets/captured.png');
+            createFader('fader', 0, 0, 100, 20, 'horizontal');
+            setFaderCapturedArt('fader', 'assets/body.png', 1, 1,
+                               'assets/indicator.png', 1, 1, 0.5,
+                               0, 0, 100, 20);
+        )");
+        auto* image = dynamic_cast<ImageView*>(bridge.widget("img"));
+        REQUIRE(image != nullptr);
+        REQUIRE(image->image_path()
+                == "file://" + fs::canonical(
+                    reviewed_root / "assets" / "captured.png").generic_string());
+        auto* fader = dynamic_cast<Fader*>(bridge.widget("fader"));
+        REQUIRE(fader != nullptr);
+        REQUIRE(fader->has_captured_indicator_art());
+    }
+
+    SECTION("reviewed roots reject a symlink escape") {
+        const auto outside = base / "outside.png";
+        { std::ofstream f(outside, std::ios::binary); f << "outside"; }
+        std::error_code symlink_error;
+        fs::create_symlink(outside, reviewed_root / "assets" / "escape.png",
+                           symlink_error);
+        if (!symlink_error) {
+            bridge.set_script_base_dir(scratch_root);
+            bridge.set_asset_roots({reviewed_root});
+            REQUIRE(bridge.resolve_script_relative("assets/escape.png")
+                    == "assets/escape.png");
+        }
     }
 
     SECTION("absolute paths and misses pass through unchanged") {
