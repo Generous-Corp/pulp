@@ -538,7 +538,9 @@ std::string pulp_mcp::server::tools_list_json() {
     out +=
         R"JSON({"name":"pulp_docs_search","description":"Search local docs for a query string","inputSchema":{"type":"object","properties":{"query":{"type":"string","description":"Search query"}}}},)JSON";
     out +=
-        R"JSON({"name":"pulp_inspect_profiles","description":"Installed in-process client that lists the stable Development Inspector profiles and their declared capabilities.","inputSchema":{"type":"object","properties":{}}},)JSON";
+        R"JSON({"name":"pulp_control_profiles","description":"List the stable capability-control profiles and their declared capabilities from the canonical registry. This is static metadata and does not connect to the broker.","inputSchema":{"type":"object","properties":{}}},)JSON";
+    out +=
+        R"JSON({"name":"pulp_inspect_profiles","description":"Deprecated compatibility alias for pulp_control_profiles. Installed in-process client; it will be removed in Pulp 0.800.0 on 2026-10-01.","inputSchema":{"type":"object","properties":{}}},)JSON";
     out +=
         R"JSON({"name":"pulp_inspect_pending_requests","description":"Read the pull-based agent-request queue (.pulp-design-requests.json) for a design project: the not-yet-consumed free-text requests a human raised from the running design's send-to-agent affordance. Returns a JSON array of pending requests, each with id, text, design, screen, editmode_state, screenshot_path, created_at, and consumed. An empty or absent queue returns an empty array, not an error.","inputSchema":{"type":"object","properties":{"project_dir":{"type":"string","description":"Design project directory containing .pulp-design-requests.json (defaults to the enclosing Pulp project root)"}}}},)JSON";
     out +=
@@ -696,7 +698,7 @@ static std::string handle_request_raw(const std::string& json) {
         }
         if (pulp_mcp::is_control_mcp_tool(name)) {
             result = pulp_mcp::handle_control_mcp_tool(name, args_json, progress_token);
-        } else if (name == "pulp_inspect_profiles") {
+        } else if (name == "pulp_control_profiles" || name == "pulp_inspect_profiles") {
             result = inspector_profiles_payload();
         } else if (name == "pulp_compat")
             result = handle_compat();

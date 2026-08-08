@@ -1,6 +1,7 @@
 #include "cli_common.hpp"
 #include "inspector_shipping_report.hpp"
 
+#include <pulp/inspect/capabilities.hpp>
 #include <pulp/inspect/control_carrier.hpp>
 #include <pulp/inspect/control_client.hpp>
 #include <pulp/inspect/control_client_connection.hpp>
@@ -144,7 +145,8 @@ std::optional<std::string> token(std::string_view prefix) {
 
 void help() {
     std::cout << "pulp control — authenticated local capability control\n\n"
-                 "Usage: pulp control instances [--json]\n"
+                 "Usage: pulp control profiles [--json]\n"
+                 "       pulp control instances [--json]\n"
                  "       pulp control status --instance ID [--explain] [--json]\n"
                  "       pulp control grant-request --instance ID --profile PROFILE [--json]\n"
                  "       pulp control call --instance ID OPERATION [--grant ID] [--profile "
@@ -155,6 +157,33 @@ void help() {
                  "       pulp control revoke --grant ID [--json]\n"
                  "       pulp control audit ARTIFACT [--baseline ARTIFACT] [--json]\n\n"
                  "No host, port, discovery-file, or raw protocol options are exposed.\n";
+}
+
+void print_profiles(bool json) {
+    if (json) {
+        auto profiles = choc::value::createEmptyArray();
+        for (const auto profile :
+             {InspectorProfile::Off, InspectorProfile::Observe, InspectorProfile::Develop}) {
+            auto value = choc::value::createObject("");
+            value.addMember("id", choc::value::createString(profile_id(profile)));
+            auto capabilities = choc::value::createEmptyArray();
+            for (const auto capability : profile_capabilities(profile))
+                capabilities.addArrayElement(choc::value::createString(capability_id(capability)));
+            value.addMember("capabilities", capabilities);
+            profiles.addArrayElement(value);
+        }
+        auto root = choc::value::createObject("");
+        root.addMember("schemaVersion", choc::value::createInt32(1));
+        root.addMember("profiles", profiles);
+        std::cout << choc::json::toString(root, false) << '\n';
+        return;
+    }
+    for (const auto profile :
+         {InspectorProfile::Off, InspectorProfile::Observe, InspectorProfile::Develop}) {
+        std::cout << profile_id(profile) << '\n';
+        for (const auto capability : profile_capabilities(profile))
+            std::cout << "  " << capability_id(capability) << '\n';
+    }
 }
 
 bool take(const std::vector<std::string>& args, std::size_t& i, std::string& value) {
@@ -172,7 +201,7 @@ int cmd_control(const std::vector<std::string>& args) {
         return args.empty() ? 2 : 0;
     }
     const auto verb = args[0];
-    bool json = false, explain = false;
+    bool json = false, explain = false, params_provided = false;
     std::string instance_id, grant_id, profile, params = "{}", output, artifact_id, baseline;
     std::string positional;
     for (std::size_t i = 1; i < args.size(); ++i) {
@@ -193,6 +222,7 @@ int cmd_control(const std::vector<std::string>& args) {
         } else if (arg == "--params") {
             if (!take(args, i, params))
                 return fail("invalid-request", "--params requires JSON", json);
+            params_provided = true;
         } else if (arg == "--out") {
             if (!take(args, i, output))
                 return fail("invalid-request", "--out requires FILE", json);
@@ -267,6 +297,14 @@ int cmd_control(const std::vector<std::string>& args) {
         std::cout << (json ? pulp::cli::inspector_shipping::audit_json(report) + "\n"
                            : pulp::cli::inspector_shipping::audit_human(report));
         return report.complete ? 0 : 1;
+    }
+    if (verb == "profiles") {
+        if (!positional.empty() || explain || !instance_id.empty() || !grant_id.empty() ||
+            !profile.empty() || params_provided || !output.empty() || !artifact_id.empty() ||
+            !baseline.empty())
+            return fail("invalid-request", "profiles accepts only --json", json);
+        print_profiles(json);
+        return 0;
     }
     if (verb != "instances" && verb != "status" && verb != "grant-request" && verb != "call" &&
         verb != "watch" && verb != "artifact" && verb != "revoke")

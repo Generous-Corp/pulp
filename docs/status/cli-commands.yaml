@@ -1103,7 +1103,7 @@ commands:
 
   - name: inspect
     status: experimental
-    summary: Read static Development Inspector profiles and perform offline artifact audit. The legacy live authority is deleted; this temporary capability reduction remains until the Phases 4–7 canonical replacement lands.
+    summary: Read static Development Inspector profiles and perform offline artifact audit. `profiles` is a deprecated compatibility alias; use `pulp control profiles`, removed in Pulp 0.800.0 on 2026-10-01. The legacy live authority is deleted; this temporary capability reduction has no legacy Inspector fallback.
     args:
       - name: --json
         kind: flag
@@ -1122,18 +1122,20 @@ commands:
             required: false
             description: Emit the pulp.control.audit.v1 result
       - name: profiles
-        summary: List the declared off, observe, and develop profiles and capabilities
+        summary: Deprecated alias for `pulp control profiles`; removal deadline Pulp 0.800.0 on 2026-10-01
     docs: reference/cli.md#inspect
 
   - name: control
     status: experimental
-    summary: Authenticated local capability control through the canonical broker; exposes no host, port, discovery-file, or raw protocol options.
+    summary: Authenticated local capability control through the canonical broker, including static profile metadata; exposes no host, port, discovery-file, or raw protocol options.
     args:
       - name: --json
         kind: flag
         required: false
         description: Emit stable machine-readable output and structured errors
     subcommands:
+      - name: profiles
+        summary: List the canonical off, observe, and develop profiles and capabilities without connecting to the broker
       - name: instances
         summary: List broker-owned exact live instance registrations
       - name: status

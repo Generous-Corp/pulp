@@ -12,8 +12,8 @@
 namespace fs = std::filesystem;
 using namespace pulp_test_cli;
 
-TEST_CASE("pulp inspect profiles expose stable human and JSON contracts",
-          "[cli][shellout][inspect][profiles]") {
+TEST_CASE("pulp control profiles is canonical and inspect profiles is a dated alias",
+          "[cli][shellout][inspect][control][profiles]") {
     if (!binary_exists()) {
         SUCCEED("skipped: pulp not built");
         return;
@@ -22,23 +22,42 @@ TEST_CASE("pulp inspect profiles expose stable human and JSON contracts",
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
     update_disabled.set("1");
 
-    const auto profiles = run_pulp({"inspect", "profiles", "--json"}, 10000);
-    INFO(profiles.stderr_output);
-    REQUIRE_FALSE(profiles.timed_out);
-    REQUIRE(profiles.exit_code == 0);
-    const auto profiles_json = choc::json::parse(profiles.stdout_output);
+    const auto canonical = run_pulp({"control", "profiles", "--json"}, 10000);
+    INFO(canonical.stderr_output);
+    REQUIRE_FALSE(canonical.timed_out);
+    REQUIRE(canonical.exit_code == 0);
+    const auto profiles_json = choc::json::parse(canonical.stdout_output);
     CHECK(profiles_json["schemaVersion"].getInt64() == 1);
     REQUIRE(profiles_json["profiles"].size() == 3);
     CHECK(profiles_json["profiles"][0]["id"].getString() == "off");
     CHECK(profiles_json["profiles"][1]["id"].getString() == "observe");
     CHECK(profiles_json["profiles"][2]["id"].getString() == "develop");
 
-    const auto human = run_pulp({"inspect", "profiles"}, 10000);
+    const auto alias = run_pulp({"inspect", "profiles", "--json"}, 10000);
+    INFO(alias.stderr_output);
+    REQUIRE_FALSE(alias.timed_out);
+    REQUIRE(alias.exit_code == 0);
+    CHECK(alias.stdout_output == canonical.stdout_output);
+    CHECK(alias.stderr_output.find("deprecated; use `pulp control profiles`") !=
+          std::string::npos);
+    CHECK(alias.stderr_output.find("Pulp 0.800.0 on 2026-10-01") != std::string::npos);
+
+    const auto human = run_pulp({"control", "profiles"}, 10000);
     REQUIRE_FALSE(human.timed_out);
     REQUIRE(human.exit_code == 0);
     CHECK(human.stdout_output.find("off\n") != std::string::npos);
     CHECK(human.stdout_output.find("observe\n") != std::string::npos);
     CHECK(human.stdout_output.find("develop\n") != std::string::npos);
+
+    const auto rejected = run_pulp({"control", "profiles", "--instance", "wrong"}, 10000);
+    REQUIRE_FALSE(rejected.timed_out);
+    CHECK(rejected.exit_code == 2);
+    CHECK(rejected.stderr_output.find("profiles accepts only --json") != std::string::npos);
+
+    const auto rejected_default_params =
+        run_pulp({"control", "profiles", "--params", "{}"}, 10000);
+    REQUIRE_FALSE(rejected_default_params.timed_out);
+    CHECK(rejected_default_params.exit_code == 2);
 }
 
 TEST_CASE("pulp inspect rejects retired authority and arbitrary commands",

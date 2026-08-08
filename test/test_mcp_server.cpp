@@ -796,6 +796,7 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_docs_check",
         "pulp_docs_search",
         "pulp_get_view_tree",
+        "pulp_control_profiles",
         "pulp_inspect_profiles",
         "pulp_kit",
         "pulp_kit_apply",
@@ -887,14 +888,19 @@ TEST_CASE("MCP tools report required argument errors before side effects", "[mcp
     }
 }
 
-TEST_CASE("MCP exposes static inspector profiles without legacy discovery tools",
+TEST_CASE("MCP exposes canonical profiles and retains the dated inspector alias",
           "[mcp][tools][inspect][metadata]") {
-    const auto profiles = handle_request(tool_call("601", "pulp_inspect_profiles"));
-    require_contains(profiles, R"JSON("schema_version": 1)JSON");
-    require_contains(profiles, R"JSON("id": "observe")JSON");
+    const auto canonical = handle_request(tool_call("601", "pulp_control_profiles"));
+    const auto alias = handle_request(tool_call("602", "pulp_inspect_profiles"));
+    require_contains(canonical, R"JSON("schema_version": 1)JSON");
+    require_contains(canonical, R"JSON("id": "observe")JSON");
+    REQUIRE(canonical.substr(canonical.find("\"structuredContent\":")) ==
+            alias.substr(alias.find("\"structuredContent\":")));
 
     const auto tools = handle_request(
-        R"JSON({"jsonrpc":"2.0","id":602,"method":"tools/list","params":{}})JSON");
+        R"JSON({"jsonrpc":"2.0","id":603,"method":"tools/list","params":{}})JSON");
+    require_contains(tools, "Deprecated compatibility alias for pulp_control_profiles");
+    require_contains(tools, "Pulp 0.800.0 on 2026-10-01");
     for (const char* removed : {"pulp_inspect_list", "pulp_inspect_capabilities",
                                 "pulp_inspect_doctor"}) {
         REQUIRE(tools.find(std::string(R"JSON("name":")JSON") + removed + '"') ==
