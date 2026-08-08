@@ -15,6 +15,12 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#if !TARGET_OS_IPHONE
+#include <sys/acl.h>
+#endif
+#endif
 #endif
 
 namespace pulp::inspect::detail {
@@ -171,23 +177,56 @@ bool create_owner_private_directory_tree(const std::filesystem::path& directory)
 } // namespace
 #endif
 
+#ifndef _WIN32
+bool has_no_extended_acl(const std::filesystem::path& path) {
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+    errno = 0;
+    acl_t acl = ::acl_get_file(path.c_str(), ACL_TYPE_EXTENDED);
+    const int error = errno;
+    if (acl != nullptr) {
+        ::acl_free(acl);
+        return false;
+    }
+    return error == ENOENT || error == ENOATTR;
+#else
+    (void)path;
+    return true;
+#endif
+}
+
+bool owner_private_directory(const std::filesystem::path& directory) {
+    struct stat status{};
+    return ::lstat(directory.c_str(), &status) == 0 && S_ISDIR(status.st_mode) &&
+           !S_ISLNK(status.st_mode) && status.st_uid == ::geteuid() &&
+           (status.st_mode & 07777) == 0700 && has_no_extended_acl(directory);
+}
+#endif
+
 bool ensure_owner_private_directory(const std::filesystem::path& directory) {
 #ifdef _WIN32
     return !directory.empty() && create_owner_private_directory_tree(directory);
 #else
-    std::error_code error;
-    std::filesystem::create_directories(directory, error);
-    if (error)
+    if (directory.empty())
         return false;
+    std::vector<std::filesystem::path> missing;
+    auto cursor = directory;
     struct stat status{};
-    if (::lstat(directory.c_str(), &status) != 0 || !S_ISDIR(status.st_mode) ||
-        S_ISLNK(status.st_mode) || status.st_uid != ::geteuid()) {
-        return false;
+    while (::lstat(cursor.c_str(), &status) != 0) {
+        if (errno != ENOENT || cursor.empty() || cursor == cursor.root_path())
+            return false;
+        missing.push_back(cursor);
+        cursor = cursor.parent_path();
     }
-    if (::chmod(directory.c_str(), 0700) != 0 || ::lstat(directory.c_str(), &status) != 0) {
+    if (!S_ISDIR(status.st_mode) || S_ISLNK(status.st_mode))
         return false;
+
+    for (auto iterator = missing.rbegin(); iterator != missing.rend(); ++iterator) {
+        if (::mkdir(iterator->c_str(), 0700) != 0 && errno != EEXIST)
+            return false;
+        if (!owner_private_directory(*iterator))
+            return false;
     }
-    return (status.st_mode & 077) == 0;
+    return owner_private_directory(directory);
 #endif
 }
 

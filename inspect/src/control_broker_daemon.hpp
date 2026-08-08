@@ -9,6 +9,7 @@ namespace pulp::inspect {
 
 struct ControlBrokerDaemonConfig {
     std::filesystem::path runtime_root;
+    std::filesystem::path state_root;
     std::string sdk_version;
     std::uint64_t process_generation = 0;
 };
@@ -25,6 +26,7 @@ class ControlBrokerDaemon {
     void stop() noexcept;
     bool is_running() const noexcept;
     const std::filesystem::path& endpoint_path() const noexcept;
+    const std::filesystem::path& state_directory() const noexcept;
 
   private:
     struct Impl;
