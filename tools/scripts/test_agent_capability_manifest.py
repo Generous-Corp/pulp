@@ -913,6 +913,9 @@ def exercise_compatibility(canonical: dict) -> int:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     header_projection = module.scan_headers()
+    assert list(header_projection) == sorted(header_projection), (
+        "legacy signal projection must be filesystem-order independent"
+    )
     expected_json = json.dumps(header_projection, indent=2) + "\n"
     legacy = subprocess.run(
         [sys.executable, str(vocabulary_tool), "--json"],
@@ -954,7 +957,7 @@ def exercise_compatibility(canonical: dict) -> int:
     # those bindings, while this assertion proves that its legacy-compatible
     # subset still flows through the generated projection.
     assert projected_type_bindings > 0
-    return 2
+    return 3
 
 
 def main() -> int:

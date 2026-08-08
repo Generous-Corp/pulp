@@ -122,7 +122,9 @@ def scan_headers():
                     classes.append({"class": cls, "methods": meth})
             if classes:
                 found[rel] = classes
-    return found
+    # os.walk() does not promise directory traversal order. Preserve a canonical
+    # projection so APFS and Linux filesystems generate byte-identical manifests.
+    return {rel: found[rel] for rel in sorted(found)}
 
 
 def scan():
