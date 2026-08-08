@@ -78,6 +78,7 @@ file(WRITE "${_consumer_source}/main.cpp" [=[
 #include <pulp/inspect/control_operations.hpp>
 #include <pulp/inspect/control_protocol.hpp>
 #include <pulp/inspect/control_service.hpp>
+#include <pulp/inspect/control_trusted_host_inventory.hpp>
 
 #include <chrono>
 #include <memory>
@@ -127,6 +128,7 @@ int main() {
   pulp::inspect::ControlAdmissionRequest admission;
   pulp::inspect::ControlOperationStoreConfig operations;
   pulp::inspect::ControlArtifactStoreConfig artifacts;
+  pulp::inspect::ControlTrustedHostInventoryConfig inventory;
   const auto artifact = control_client.read_artifact("artifact-installed", 0, 16);
   (void)main_thread_executor.executor();
 
@@ -138,6 +140,7 @@ int main() {
              && std::holds_alternative<pulp::inspect::ControlHostConnectionPrincipal>(principal)
              && operations.max_receipts > 0
              && artifacts.maximum_blob_bytes > 0
+             && inventory.maximum_entries > 0
              && admission.operation_version == 1
              && artifact.status == pulp::inspect::ControlArtifactStatus::Read
              && artifact.metadata

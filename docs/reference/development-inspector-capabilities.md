@@ -129,6 +129,32 @@ identity, but has no executor unless a later runtime adapter injects one.
 Signed service activation, consent UI, host execution routing, and live
 Inspector migration remain later work.
 
+The control SDK also exposes a dormant macOS `ControlTrustedHostInventory`
+primitive for the first raw-executable launcher slice. Other platforms retain
+an explicit fail-closed `platform_unavailable` seam until they have a native
+static-identity verifier. A broker-owned prepare operation
+accepts only an explicit T0 offline-job or T1 standalone executable, copies the
+executable and its exact `.inspector-capabilities.json` sidecar into an injected
+owner-private, broker-generation directory, then derives the manifest digest,
+artifact digest, and strict static code-signing expectation from those staged
+destination bytes. All session, instance, publication, storage, and inventory
+identifiers are broker-minted; the one-use inventory ticket remains in memory
+and is not encoded into the staging path or files. Source mutation after prepare
+cannot change the snapshot. A later launcher must still re-hash and re-check the
+static signature immediately before spawn and compare the live carrier peer
+with that exact expectation because filesystem permissions are not a same-UID
+integrity boundary. The derived Team or exact ad-hoc CDHash expectation proves
+snapshot/peer consistency; it is not a publisher allowlist or source-selection
+authority. A production broker must own the inventory instance and its source
+selection. Tickets and minted registration fields have meaning only inside that
+one process-local instance; another SDK consumer can construct an inert
+inventory but cannot admit or register anything with the broker. This primitive
+is not wired into the daemon, admission
+store, host router, grants, or consent path and therefore grants no authority.
+Version 1 deliberately rejects `.app` directories, AUv3/app extensions, plugin
+bundles, `SharedPluginHost`, symlinks, and hard-linked inputs; `.app` enrollment
+requires a separately reviewed bundle-aware snapshot design.
+
 The foundation accepts only carrier-observed `VerifiedControlPeerIdentity`
 values minted by the broker's peer verifier. Its fingerprint binds the peer
 role, UID/SID, PID, process-start generation, executable identity, and verified

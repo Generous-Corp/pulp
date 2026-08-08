@@ -121,7 +121,7 @@ catch_discover_tests(pulp-test-control-identity
 add_executable(pulp-test-control-peer test_control_peer.cpp)
 target_link_libraries(pulp-test-control-peer PRIVATE
     pulp::inspect-control Catch2::Catch2WithMain)
-if(APPLE)
+if(APPLE AND NOT IOS AND NOT PULP_IOS)
     find_program(_pulp_test_codesign codesign REQUIRED)
     # Apple Silicon's linker emits an ad-hoc signature for native executables,
     # but a cross-built x86_64 test binary may be unsigned. This security test
@@ -156,6 +156,27 @@ target_link_libraries(pulp-test-control-connection-admission PRIVATE
     pulp::inspect-control Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-control-connection-admission
     PROPERTIES LABELS "inspect;control;carrier;admission;security")
+
+add_executable(pulp-control-trusted-host-fixture
+    control_trusted_host_fixture.cpp)
+add_executable(pulp-test-control-trusted-host-inventory
+    test_control_trusted_host_inventory.cpp)
+target_link_libraries(pulp-test-control-trusted-host-inventory PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-control-trusted-host-inventory PRIVATE
+    PULP_CONTROL_TRUSTED_HOST_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-fixture>")
+add_dependencies(pulp-test-control-trusted-host-inventory
+    pulp-control-trusted-host-fixture)
+if(APPLE)
+    find_program(_pulp_inventory_test_codesign codesign REQUIRED)
+    add_custom_command(TARGET pulp-control-trusted-host-fixture POST_BUILD
+        COMMAND "${_pulp_inventory_test_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-control-trusted-host-fixture>"
+        COMMENT "Ad-hoc signing trusted host inventory fixture"
+        VERBATIM)
+endif()
+catch_discover_tests(pulp-test-control-trusted-host-inventory
+    PROPERTIES LABELS "inspect;control;inventory;security")
 
 add_executable(pulp-test-control-host-router test_control_host_router.cpp)
 target_link_libraries(pulp-test-control-host-router PRIVATE
