@@ -487,9 +487,10 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     if (standard_input_session) {
         auto channel = ChildProcessInputChannel(impl_->standard_input.release_parent());
         std::atomic<bool> session_finished{false};
-        std::thread output_drainer([this, spawned_pid, &session_finished] {
+        std::atomic<bool> output_drain_failed{false};
+        std::thread output_drainer([this, spawned_pid, &session_finished, &output_drain_failed] {
             while (!session_finished.load(std::memory_order_acquire)) {
-                {
+                try {
                     std::lock_guard<std::recursive_mutex> drain_lock(impl_->mutex);
                     if (impl_->pid != spawned_pid || !impl_->started || impl_->finished)
                         break;
@@ -499,6 +500,9 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
                     drain_pipe(impl_->stderr_pipe.read_end(), impl_->stderr_full,
                                impl_->stderr_lines_buf, impl_->options.max_output_bytes,
                                impl_->options.on_stderr_line);
+                } catch (...) {
+                    output_drain_failed.store(true, std::memory_order_release);
+                    break;
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
@@ -507,12 +511,14 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
         lock.unlock();
         try {
             completed = (*standard_input_session)(static_cast<int>(spawned_pid),
-                                                  std::move(channel));
+                                                  std::move(channel), deadline);
         } catch (...) {
             completed = false;
         }
         session_finished.store(true, std::memory_order_release);
         output_drainer.join();
+        if (output_drain_failed.load(std::memory_order_acquire))
+            completed = false;
         lock.lock();
         if (impl_->pid != spawned_pid || !impl_->started || impl_->finished)
             return false;

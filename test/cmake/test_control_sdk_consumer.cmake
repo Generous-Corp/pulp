@@ -182,7 +182,8 @@ int main() {
         static_cast<std::uint8_t>(child_process_id & 0xff)};
   };
   pulp::platform::StandardInputChannelSession input_session =
-      [](int, pulp::platform::ChildProcessInputChannel) { return false; };
+      [](int, pulp::platform::ChildProcessInputChannel,
+         std::chrono::steady_clock::time_point) { return false; };
   pulp::inspect::ControlHostPreflightDiagnostics preflight_diagnostics;
   const auto artifact = control_client.read_artifact("artifact-installed", 0, 16);
   (void)main_thread_executor.executor();

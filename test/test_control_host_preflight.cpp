@@ -3,9 +3,11 @@
 #include <pulp/inspect/control_host_preflight.hpp>
 #include <pulp/platform/child_process.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -55,11 +57,17 @@ struct LaunchResult {
 LaunchResult launch(std::string mode = "--normal", std::optional<int> expected_pid = std::nullopt,
                     bool reject_authority = false, std::string extra_argument = {},
                     std::chrono::milliseconds preflight_timeout = 8s,
-                    std::chrono::milliseconds bootstrap_lifetime = 1min) {
+                    std::chrono::milliseconds bootstrap_lifetime = 1min,
+                    bool throw_from_output_callback = false) {
     LaunchResult result;
     pulp::platform::ProcessOptions options;
     options.standard_input_timeout_ms = static_cast<int>(preflight_timeout.count() + 1000);
     options.timeout_ms = options.standard_input_timeout_ms + 1000;
+    if (throw_from_output_callback) {
+        options.on_stdout_line = [](std::string_view) {
+            throw std::runtime_error("output callback failure");
+        };
+    }
     const ControlPeerVerifier verifier([&](const ControlPeerEvidence& evidence) {
         return !reject_authority && evidence.role == ControlPeerRole::StandaloneHost &&
                evidence.process_id == result.actual_pid &&
@@ -73,8 +81,12 @@ LaunchResult launch(std::string mode = "--normal", std::optional<int> expected_p
         arguments.push_back(std::move(extra_argument));
     result.started = child.start_with_standard_input_channel(
         PULP_CONTROL_HOST_PREFLIGHT_FIXTURE, arguments,
-        [&](int actual_pid, pulp::platform::ChildProcessInputChannel channel) {
+        [&](int actual_pid, pulp::platform::ChildProcessInputChannel channel,
+            std::chrono::steady_clock::time_point deadline) {
             result.actual_pid = actual_pid;
+            const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+                deadline - std::chrono::steady_clock::now());
+            const auto bounded_timeout = std::min(preflight_timeout, remaining);
             auto record = make_record();
             record.expires_at_unix_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                             (std::chrono::system_clock::now() + bootstrap_lifetime)
@@ -84,7 +96,7 @@ LaunchResult launch(std::string mode = "--normal", std::optional<int> expected_p
                 preflight_control_host(std::move(channel), expected_pid.value_or(actual_pid),
                                        ControlPeerRole::StandaloneHost, verifier,
                                        encode_control_host_bootstrap(record),
-                                       preflight_timeout, &result.diagnostics);
+                                       bounded_timeout, &result.diagnostics);
             if (verified)
                 result.peer = verified->evidence();
             return verified.has_value();
@@ -178,6 +190,10 @@ TEST_CASE("private preflight drains startup output and validates expiry at recei
     CHECK(verbose.process.exit_code == 0);
     CHECK(verbose.process.stdout_output.size() > 256u * 1024u);
 
+    auto throwing_callback = launch("--verbose", std::nullopt, false, {}, 2s, 1min, true);
+    CHECK_FALSE(throwing_callback.started);
+    CHECK(throwing_callback.process.was_cancelled);
+
     auto expired = launch("--delayed", std::nullopt, false, {}, 2s, 50ms);
     REQUIRE(expired.started);
     CHECK(expired.process.exit_code == 70);
@@ -204,7 +220,8 @@ TEST_CASE("private input channel survives closed inherited standard descriptors"
         pulp::platform::ChildProcess child;
         const bool started = child.start_with_standard_input_channel(
             "/bin/cat", {},
-            [](int, pulp::platform::ChildProcessInputChannel channel) {
+            [](int, pulp::platform::ChildProcessInputChannel channel,
+               std::chrono::steady_clock::time_point) {
                 const char byte = 'x';
                 const bool sent = ::write(static_cast<int>(channel.native_handle()), &byte, 1) == 1;
                 (void)::shutdown(static_cast<int>(channel.native_handle()), SHUT_WR);

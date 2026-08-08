@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -65,9 +66,12 @@ private:
 };
 
 /// Owns a post-spawn exchange over the child's private inherited input channel.
-/// The callback runs synchronously outside ChildProcess's internal lock.
+/// The callback runs synchronously outside ChildProcess's internal lock and
+/// must bound every blocking operation to the supplied deadline. Like the byte
+/// provider above, it is caller code and cannot safely be preempted.
 using StandardInputChannelSession =
-    std::function<bool(int child_process_id, ChildProcessInputChannel channel)>;
+    std::function<bool(int child_process_id, ChildProcessInputChannel channel,
+                       std::chrono::steady_clock::time_point deadline)>;
 
 /// Cross-platform child process with timeout, cancellation, and line-by-line
 /// output callbacks. Uses posix_spawn on POSIX (sandbox-compatible for AU

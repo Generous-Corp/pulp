@@ -90,7 +90,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (mode == "--verbose") {
-        const std::string output(256u * 1024u, 'v');
+        const std::string output = std::string(256u * 1024u, 'v') + "\n";
         std::cout << output << std::flush;
     }
     if (mode == "--delayed")
