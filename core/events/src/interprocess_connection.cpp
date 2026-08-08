@@ -765,7 +765,8 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
     accept_thread_ = std::thread([this]() {
         while (running_.load()) {
             if (server_impl_->transport != IpcTransport::NamedPipe) {
-                auto client_sock = server_impl_->listen_socket.accept();
+                auto client_sock = server_impl_->listen_socket.accept(
+                    std::chrono::milliseconds(100));
                 if (!client_sock) continue;
                 if (!running_.load()) {
                     client_sock->close();
@@ -819,28 +820,7 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
 }
 
 void InterprocessConnectionServer::stop() {
-    const bool was_running = running_.exchange(false);
-    if (was_running && server_impl_->transport != IpcTransport::NamedPipe &&
-        server_impl_->listen_socket.is_open()) {
-        // Wake accept() with a connection rather than closing the descriptor
-        // while the accept thread is reading it. The thread observes running_
-        // after accept and closes this wake-up connection without dispatching it.
-        Socket wake_socket;
-        if (server_impl_->transport == IpcTransport::Socket) {
-            if (const auto endpoint = parse_socket_endpoint(server_impl_->name)) {
-                const auto host = endpoint->host.empty() || endpoint->host == "0.0.0.0"
-                                      ? std::string{"127.0.0.1"}
-                                      : endpoint->host;
-                const auto port = server_impl_->listen_socket.local_port();
-                if (wake_socket.create(SocketType::TCP))
-                    (void)wake_socket.connect(host, port,
-                                              std::chrono::milliseconds(250));
-            }
-        } else if (wake_socket.create(SocketType::Local)) {
-            (void)wake_socket.connect_local(server_impl_->name,
-                                            std::chrono::milliseconds(250));
-        }
-    }
+    running_.store(false);
     if (accept_thread_.joinable()) accept_thread_.join();
     // Idempotent; keeps non-socket and partially started server cleanup simple.
     server_impl_->listen_socket.close();

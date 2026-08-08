@@ -237,13 +237,105 @@ bool Socket::listen(int backlog) {
     return ::listen(NATIVE_SOCKET(fd_), backlog) == 0;
 }
 
-std::optional<Socket> Socket::accept() {
+std::optional<Socket> Socket::accept(std::chrono::milliseconds timeout) {
     if (fd_ == kInvalidSocketHandle) return std::nullopt;
 
     struct sockaddr_storage client_addr{};
     socklen_t addr_len = sizeof(client_addr);
-    auto client_fd =
-        ::accept(NATIVE_SOCKET(fd_), reinterpret_cast<struct sockaddr*>(&client_addr), &addr_len);
+#ifdef _WIN32
+    SOCKET client_fd = INVALID_SOCKET;
+#else
+    int client_fd = -1;
+#endif
+
+    if (timeout > std::chrono::milliseconds(0)) {
+#ifdef _WIN32
+        u_long nonblocking = 1;
+        if (::ioctlsocket(NATIVE_SOCKET(fd_), FIONBIO, &nonblocking) != 0)
+            return std::nullopt;
+        const auto restore_blocking = [&] {
+            u_long blocking = 0;
+            return ::ioctlsocket(NATIVE_SOCKET(fd_), FIONBIO, &blocking) == 0;
+        };
+#else
+        const int original_flags = ::fcntl(NATIVE_SOCKET(fd_), F_GETFL, 0);
+        if (original_flags < 0 ||
+            ::fcntl(NATIVE_SOCKET(fd_), F_SETFL, original_flags | O_NONBLOCK) != 0) {
+            return std::nullopt;
+        }
+        const auto restore_blocking = [&] {
+            return ::fcntl(NATIVE_SOCKET(fd_), F_SETFL, original_flags) == 0;
+        };
+#endif
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        for (;;) {
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= deadline)
+                break;
+            const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+                deadline - now);
+            const int wait_ms = static_cast<int>(
+                std::min<std::int64_t>(
+                    std::max<std::int64_t>(remaining.count(), 1), INT_MAX));
+#ifdef _WIN32
+            WSAPOLLFD descriptor{};
+            descriptor.fd = NATIVE_SOCKET(fd_);
+            descriptor.events = POLLRDNORM;
+            const int ready = ::WSAPoll(&descriptor, 1, wait_ms);
+            if (ready == SOCKET_ERROR && ::WSAGetLastError() == WSAEINTR)
+                continue;
+#else
+            struct pollfd descriptor {
+                NATIVE_SOCKET(fd_), POLLIN, 0
+            };
+            const int ready = ::poll(&descriptor, 1, wait_ms);
+            if (ready < 0 && errno == EINTR)
+                continue;
+#endif
+            if (ready <= 0) break;
+
+            addr_len = sizeof(client_addr);
+            client_fd = ::accept(
+                NATIVE_SOCKET(fd_),
+                reinterpret_cast<struct sockaddr*>(&client_addr), &addr_len);
+            if (client_fd != static_cast<decltype(client_fd)>(kInvalidSocketHandle))
+                break;
+#ifdef _WIN32
+            const int accept_error = ::WSAGetLastError();
+            if (accept_error == WSAEINTR || accept_error == WSAEWOULDBLOCK)
+                continue;
+#else
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
+                continue;
+#endif
+            break;
+        }
+        if (!restore_blocking()) {
+            if (client_fd != static_cast<decltype(client_fd)>(kInvalidSocketHandle))
+                SOCKET_CLOSE(client_fd);
+            return std::nullopt;
+        }
+        if (client_fd != static_cast<decltype(client_fd)>(kInvalidSocketHandle)) {
+#ifdef _WIN32
+            u_long blocking = 0;
+            if (::ioctlsocket(client_fd, FIONBIO, &blocking) != 0) {
+                SOCKET_CLOSE(client_fd);
+                return std::nullopt;
+            }
+#else
+            const int client_flags = ::fcntl(client_fd, F_GETFL, 0);
+            if (client_flags < 0 ||
+                ::fcntl(client_fd, F_SETFL, client_flags & ~O_NONBLOCK) != 0) {
+                SOCKET_CLOSE(client_fd);
+                return std::nullopt;
+            }
+#endif
+        }
+    } else {
+        client_fd = ::accept(
+            NATIVE_SOCKET(fd_), reinterpret_cast<struct sockaddr*>(&client_addr),
+            &addr_len);
+    }
 
     if (client_fd == static_cast<decltype(client_fd)>(kInvalidSocketHandle)) return std::nullopt;
 
