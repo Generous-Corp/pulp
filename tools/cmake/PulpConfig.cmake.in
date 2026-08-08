@@ -57,7 +57,13 @@ include("${CMAKE_CURRENT_LIST_DIR}/PulpLinkFontconfig.cmake")
 # Pulp::canvas is a static SDK target and its build exports retain
 # LINK_ONLY references to private static dependencies. SheenBidi installs its
 # own package into the same SDK prefix, so load it before PulpTargets.cmake
-# validates referenced imported targets.
+# validates referenced imported targets. Consumers commonly select this package
+# with Pulp_DIR instead of adding the whole SDK to CMAKE_PREFIX_PATH, so make the
+# co-installed dependency discoverable explicitly rather than relying on a
+# machine-global package registry.
+if(NOT DEFINED SheenBidi_DIR)
+    set(SheenBidi_DIR "${PULP_SDK_LIBRARY_DIR}/cmake/SheenBidi")
+endif()
 find_dependency(SheenBidi CONFIG)
 
 # Pulp::canvas links system ICU on Linux (UNIX-not-Apple-not-Android): the
