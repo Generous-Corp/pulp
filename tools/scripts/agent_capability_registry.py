@@ -239,6 +239,16 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/midi/detail/arpeggiator_math.hpp",
+        "fingerprint": "sha256:6e7b7fcda5c9691f3eb98d4613b6c35bd2dd5460c29c010fb9828fbda9e033a3",
+        "disposition": "capability_support",
+        "capability_keys": ["midi.arpeggiator"],
+        "rationale": (
+            "Shared saturating clock and projection arithmetic supports the "
+            "arpeggiator implementation without defining a separate capability."
+        ),
+    },
+    {
         "include": "pulp/midi/midi.hpp",
         "fingerprint": "sha256:874271b4160eac446ab91943b192f7652c4e340afbb373b70c3affc8ee6a49e8",
         "disposition": "infrastructure",
@@ -247,7 +257,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/midi/mpe_buffer.hpp",
-        "fingerprint": "sha256:024033345347c33b06bc1df4f05240496933797410640ea7eb38bfe810ff8eaa",
+        "fingerprint": "sha256:c6d418b5b04448082aef5da305e1f092aaebef2e826d7bb94eb44a7f968507ac",
         "disposition": "capability_support",
         "capability_keys": ["midi.mpe-voice-tracker"],
         "rationale": (

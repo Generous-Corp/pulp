@@ -279,7 +279,7 @@ EXPORTS = [
             include="pulp/midi/arpeggiator.hpp",
             qualified_name="pulp::midi::Arpeggiator<>",
             target="Pulp::midi",
-            header_fingerprint="sha256:5178607c04e0070ad9e22ab028a2c87aa80c925350e0743614c0fb44aa426445",
+            header_fingerprint="sha256:7ebb777b9c33fbf66871da573e6a1c4c5bdd7809a03cec01cbc27fcb5a1d7278",
         )],
         _link_probes=[{
             "role": "entrypoint",

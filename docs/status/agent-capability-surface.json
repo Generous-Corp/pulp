@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 9,
+  "inventory_version": 10,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,13 +37,13 @@
     }
   ],
   "counts": {
-    "public_headers": 400,
-    "reviewed_headers": 98,
+    "public_headers": 401,
+    "reviewed_headers": 99,
     "legacy_unreviewed_headers": 302,
     "unsupported_headers": 1,
     "by_disposition": {
       "capability_entrypoint": 57,
-      "capability_support": 35,
+      "capability_support": 36,
       "infrastructure": 5,
       "legacy_unreviewed": 302,
       "unsupported_capability": 1
@@ -56,8 +56,8 @@
         "unsupported_headers": 0
       },
       "midi": {
-        "public_headers": 41,
-        "reviewed_headers": 12,
+        "public_headers": 42,
+        "reviewed_headers": 13,
         "legacy_unreviewed_headers": 29,
         "unsupported_headers": 0
       },
@@ -1110,7 +1110,7 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/arpeggiator.hpp",
-      "fingerprint": "sha256:5178607c04e0070ad9e22ab028a2c87aa80c925350e0743614c0fb44aa426445",
+      "fingerprint": "sha256:7ebb777b9c33fbf66871da573e6a1c4c5bdd7809a03cec01cbc27fcb5a1d7278",
       "include": "pulp/midi/arpeggiator.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1174,6 +1174,17 @@
         "midi.scale-aware-mpe-pitch"
       ],
       "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "midi",
+      "source": "core/midi/include/pulp/midi/detail/arpeggiator_math.hpp",
+      "fingerprint": "sha256:6e7b7fcda5c9691f3eb98d4613b6c35bd2dd5460c29c010fb9828fbda9e033a3",
+      "include": "pulp/midi/detail/arpeggiator_math.hpp",
+      "disposition": "capability_support",
+      "capability_keys": [
+        "midi.arpeggiator"
+      ],
+      "rationale": "Shared saturating clock and projection arithmetic supports the arpeggiator implementation without defining a separate capability."
     },
     {
       "domain": "midi",
@@ -1286,7 +1297,7 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/mpe_buffer.hpp",
-      "fingerprint": "sha256:024033345347c33b06bc1df4f05240496933797410640ea7eb38bfe810ff8eaa",
+      "fingerprint": "sha256:c6d418b5b04448082aef5da305e1f092aaebef2e826d7bb94eb44a7f968507ac",
       "include": "pulp/midi/mpe_buffer.hpp",
       "disposition": "capability_support",
       "capability_keys": [
