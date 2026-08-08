@@ -433,6 +433,13 @@ target_link_libraries(pulp-test-control-main-thread-executor PRIVATE
 catch_discover_tests(pulp-test-control-main-thread-executor
     PROPERTIES LABELS "inspect;control;main-thread;executor")
 
+add_executable(pulp-test-control-state-write-executor
+    test_control_state_write_executor.cpp)
+target_link_libraries(pulp-test-control-state-write-executor PRIVATE
+    pulp::inspect-runtime pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-state-write-executor
+    PROPERTIES LABELS "inspect;control;main-thread;mutation;t1;t2a")
+
 add_executable(pulp-test-control-trace-session-executor
     test_control_trace_session_executor.cpp)
 target_link_libraries(pulp-test-control-trace-session-executor PRIVATE
@@ -455,6 +462,13 @@ target_link_libraries(pulp-test-inspector-value-channel-telemetry PRIVATE
     pulp::inspect-telemetry
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-value-channel-telemetry)
+
+add_executable(pulp-test-control-telemetry-tap
+    test_control_telemetry_tap.cpp)
+target_link_libraries(pulp-test-control-telemetry-tap PRIVATE
+    pulp::inspect-telemetry Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-telemetry-tap
+    PROPERTIES LABELS "inspect;control;telemetry;t1;t2a")
 
 # Inspector tests — only when GPU is enabled (pulp-inspect requires GPU stack).
 if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)

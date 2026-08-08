@@ -9,6 +9,7 @@
 #include <charconv>
 #include <limits>
 #include <mutex>
+#include <set>
 #include <system_error>
 #include <utility>
 
@@ -18,6 +19,7 @@ namespace {
 namespace fs = std::filesystem;
 
 constexpr std::string_view kMetadataSchema = "pulp.control.artifact.v1";
+constexpr std::string_view kDeletionAuditSchema = "pulp.control.artifact-deletions.v1";
 constexpr std::size_t kMaximumLineageFieldBytes = 512;
 constexpr std::size_t kMaximumContentTypeBytes = 256;
 
@@ -349,7 +351,124 @@ bool authorization_matches(const ControlArtifactMetadata& metadata,
            actual.producer_artifact_digest == expected.producer_artifact_digest;
 }
 
+std::string encode_deletion_audit(std::span<const ControlArtifactDeletionRecord> records) {
+    std::string text(kDeletionAuditSchema);
+    text.push_back('\n');
+    for (const auto& record : records) {
+        text.append(record.artifact_id);
+        text.push_back(' ');
+        text.append(record.sha256);
+        text.push_back(' ');
+        text.append(std::to_string(record.byte_size));
+        text.push_back(' ');
+        text.append(std::to_string(record.deleted_at_unix_ms));
+        text.push_back(' ');
+        text.append(control_artifact_deletion_reason_id(record.reason));
+        text.push_back('\n');
+    }
+    return text;
+}
+
+std::optional<std::vector<ControlArtifactDeletionRecord>>
+decode_deletion_audit(std::string_view text, std::size_t maximum_records) {
+    const auto newline = text.find('\n');
+    if (newline == std::string_view::npos || text.substr(0, newline) != kDeletionAuditSchema)
+        return std::nullopt;
+    text.remove_prefix(newline + 1);
+    std::vector<ControlArtifactDeletionRecord> records;
+    while (!text.empty()) {
+        const auto end = text.find('\n');
+        if (end == std::string_view::npos || records.size() >= maximum_records)
+            return std::nullopt;
+        auto line = text.substr(0, end);
+        text.remove_prefix(end + 1);
+        std::array<std::string_view, 5> fields;
+        for (std::size_t index = 0; index < fields.size(); ++index) {
+            const auto separator = line.find(' ');
+            if (index + 1 == fields.size()) {
+                if (separator != std::string_view::npos)
+                    return std::nullopt;
+                fields[index] = line;
+            } else {
+                if (separator == std::string_view::npos)
+                    return std::nullopt;
+                fields[index] = line.substr(0, separator);
+                line.remove_prefix(separator + 1);
+            }
+        }
+        std::uint64_t byte_size = 0;
+        std::uint64_t deleted_at = 0;
+        const auto bytes_result =
+            std::from_chars(fields[2].data(), fields[2].data() + fields[2].size(), byte_size);
+        const auto time_result =
+            std::from_chars(fields[3].data(), fields[3].data() + fields[3].size(), deleted_at);
+        std::optional<ControlArtifactDeletionReason> reason;
+        if (fields[4] == "expired")
+            reason = ControlArtifactDeletionReason::Expired;
+        else if (fields[4] == "quota-collection")
+            reason = ControlArtifactDeletionReason::QuotaCollection;
+        else if (fields[4] == "explicit-deletion")
+            reason = ControlArtifactDeletionReason::ExplicitDeletion;
+        else if (fields[4] == "crash-cleanup")
+            reason = ControlArtifactDeletionReason::CrashCleanup;
+        if (!valid_artifact_id(fields[0]) || !lowercase_hex(fields[1], 64) || !reason ||
+            bytes_result.ec != std::errc{} ||
+            bytes_result.ptr != fields[2].data() + fields[2].size() ||
+            time_result.ec != std::errc{} || time_result.ptr != fields[3].data() + fields[3].size())
+            return std::nullopt;
+        records.push_back(
+            {std::string(fields[0]), std::string(fields[1]), byte_size, deleted_at, *reason});
+    }
+    return records;
+}
+
 } // namespace
+
+std::string_view control_artifact_deletion_reason_id(ControlArtifactDeletionReason reason) {
+    switch (reason) {
+    case ControlArtifactDeletionReason::Expired:
+        return "expired";
+    case ControlArtifactDeletionReason::QuotaCollection:
+        return "quota-collection";
+    case ControlArtifactDeletionReason::ExplicitDeletion:
+        return "explicit-deletion";
+    case ControlArtifactDeletionReason::CrashCleanup:
+        return "crash-cleanup";
+    }
+    return "crash-cleanup";
+}
+
+std::string_view control_evidence_content_type(ControlEvidenceKind kind) {
+    switch (kind) {
+    case ControlEvidenceKind::Screenshot:
+        return "image/png";
+    case ControlEvidenceKind::OfflineRender:
+        return "audio/wav";
+    case ControlEvidenceKind::StateSnapshot:
+        return "application/vnd.pulp.state-snapshot+json";
+    case ControlEvidenceKind::PerfettoTrace:
+        return "application/vnd.pulp.perfetto-trace";
+    }
+    return {};
+}
+
+bool control_evidence_contract_matches(ControlEvidenceKind kind, std::string_view content_type,
+                                       ControlArtifactSensitivity sensitivity,
+                                       ControlArtifactRedactionState redaction_state) {
+    if (content_type != control_evidence_content_type(kind))
+        return false;
+    switch (kind) {
+    case ControlEvidenceKind::Screenshot:
+    case ControlEvidenceKind::StateSnapshot:
+    case ControlEvidenceKind::PerfettoTrace:
+        return (sensitivity == ControlArtifactSensitivity::Sensitive ||
+                sensitivity == ControlArtifactSensitivity::Restricted) &&
+               redaction_state == ControlArtifactRedactionState::Redacted;
+    case ControlEvidenceKind::OfflineRender:
+        return sensitivity != ControlArtifactSensitivity::Public;
+    }
+    return false;
+}
 
 std::string_view control_artifact_status_id(ControlArtifactStatus status) {
     switch (status) {
@@ -377,11 +496,14 @@ class ControlArtifactStore::Impl {
   public:
     explicit Impl(ControlArtifactStoreConfig config_in, WallClock clock_in)
         : config(std::move(config_in)), blobs(config.root / "blobs"),
-          artifacts(config.root / "artifacts"), clock(std::move(clock_in)) {
+          artifacts(config.root / "artifacts"), audit(config.root / "audit"),
+          audit_file(audit / "deletions.log"), clock(std::move(clock_in)) {
         if (config.root.empty() || config.maximum_blob_bytes == 0 ||
             config.maximum_chunk_bytes == 0 ||
             config.maximum_chunk_bytes > config.maximum_blob_bytes ||
-            config.maximum_lifetime.count() <= 0) {
+            config.maximum_total_bytes == 0 || config.maximum_artifacts == 0 ||
+            config.maximum_artifacts_per_client == 0 ||
+            config.maximum_deletion_audit_records == 0 || config.maximum_lifetime.count() <= 0) {
             return;
         }
         std::error_code error;
@@ -390,7 +512,8 @@ class ControlArtifactStore::Impl {
             return;
         ready = detail::ensure_owner_private_directory(config.root) &&
                 detail::ensure_owner_private_directory(blobs) &&
-                detail::ensure_owner_private_directory(artifacts);
+                detail::ensure_owner_private_directory(artifacts) &&
+                detail::ensure_owner_private_directory(audit);
     }
 
     fs::path blob_path(std::string_view sha256) const {
@@ -408,16 +531,80 @@ class ControlArtifactStore::Impl {
         return count > 0 ? static_cast<std::uint64_t>(count) : 0;
     }
 
-    void expire(const fs::path& path) const {
-        // Removing the metadata revokes discovery and authorization. Shared
-        // content-addressed blobs remain orphaned for the aggregate retention
-        // and quota collector; an orphan blob is never readable alone.
-        (void)detail::remove_owner_private_file_durable(path);
+    std::optional<std::vector<ControlArtifactMetadata>> active_metadata() const {
+        std::vector<ControlArtifactMetadata> result;
+        std::error_code error;
+        for (fs::directory_iterator it(artifacts, error), end; !error && it != end;
+             it.increment(error)) {
+            if (it->path().extension() != ".meta")
+                continue;
+            const auto bytes = detail::read_owner_private_file(it->path(), 64u * 1024u);
+            if (!bytes)
+                return std::nullopt;
+            const auto decoded = decode_metadata(
+                std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size()));
+            if (!decoded)
+                return std::nullopt;
+            if (decoded->deletion_state == ControlArtifactDeletionState::Active)
+                result.push_back(*decoded);
+        }
+        return error ? std::nullopt : std::optional{std::move(result)};
+    }
+
+    std::optional<std::vector<ControlArtifactDeletionRecord>> read_audit() const {
+        std::error_code error;
+        if (!fs::exists(audit_file, error))
+            return error ? std::nullopt
+                         : std::optional{std::vector<ControlArtifactDeletionRecord>{}};
+        const auto bytes = detail::read_owner_private_file(audit_file, 2u * 1024u * 1024u);
+        if (!bytes)
+            return std::nullopt;
+        return decode_deletion_audit(
+            std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size()),
+            config.maximum_deletion_audit_records);
+    }
+
+    bool record_deletion(const ControlArtifactMetadata& metadata,
+                         ControlArtifactDeletionReason reason,
+                         std::uint64_t deleted_at_unix_ms) const {
+        auto records = read_audit();
+        if (!records)
+            return false;
+        records->push_back({metadata.artifact_id, metadata.sha256, metadata.byte_size,
+                            deleted_at_unix_ms, reason});
+        if (records->size() > config.maximum_deletion_audit_records)
+            records->erase(records->begin(),
+                           records->begin() +
+                               static_cast<std::ptrdiff_t>(records->size() -
+                                                           config.maximum_deletion_audit_records));
+        const auto encoded = encode_deletion_audit(*records);
+        const auto bytes =
+            std::span(reinterpret_cast<const std::uint8_t*>(encoded.data()), encoded.size());
+        return detail::write_owner_private_file_atomic(audit_file, bytes);
+    }
+
+    enum class ExpireResult : std::uint8_t { Failed, RemovedAndAudited, RemovedWithoutAudit };
+
+    ExpireResult expire(const fs::path& path, const ControlArtifactMetadata& metadata,
+                        ControlArtifactDeletionReason reason,
+                        std::uint64_t deleted_at_unix_ms) const {
+        if (!detail::remove_owner_private_file_durable(path))
+            return ExpireResult::Failed;
+        if (record_deletion(metadata, reason, deleted_at_unix_ms))
+            return ExpireResult::RemovedAndAudited;
+        const auto encoded = encode_metadata(metadata);
+        const auto bytes =
+            std::span(reinterpret_cast<const std::uint8_t*>(encoded.data()), encoded.size());
+        return detail::write_owner_private_file_atomic(path, bytes)
+                   ? ExpireResult::Failed
+                   : ExpireResult::RemovedWithoutAudit;
     }
 
     ControlArtifactStoreConfig config;
     fs::path blobs;
     fs::path artifacts;
+    fs::path audit;
+    fs::path audit_file;
     WallClock clock;
     bool ready = false;
     mutable std::mutex mutex;
@@ -452,6 +639,30 @@ ControlArtifactStoreResult ControlArtifactStore::store(std::span<const std::uint
         return {.status = bytes.size() > impl_->config.maximum_blob_bytes
                               ? ControlArtifactStatus::ResourceExhausted
                               : ControlArtifactStatus::InvalidRequest};
+    }
+
+    std::uint64_t logical_bytes = 0;
+    std::size_t artifact_count = 0;
+    std::size_t client_count = 0;
+    const auto active = impl_->active_metadata();
+    if (!active)
+        return {.status = ControlArtifactStatus::IoError};
+    for (const auto& existing : *active) {
+        if (existing.expires_at_unix_ms <= now) {
+            continue;
+        }
+        if (logical_bytes > std::numeric_limits<std::uint64_t>::max() - existing.byte_size)
+            return {.status = ControlArtifactStatus::ResourceExhausted};
+        logical_bytes += existing.byte_size;
+        ++artifact_count;
+        if (existing.lineage.producer_client_id == lineage.producer_client_id)
+            ++client_count;
+    }
+    if (artifact_count >= impl_->config.maximum_artifacts ||
+        client_count >= impl_->config.maximum_artifacts_per_client ||
+        bytes.size() > impl_->config.maximum_total_bytes ||
+        logical_bytes > impl_->config.maximum_total_bytes - bytes.size()) {
+        return {.status = ControlArtifactStatus::ResourceExhausted};
     }
 
     const auto hash = runtime::sha256_hex(bytes.data(), bytes.size());
@@ -518,7 +729,7 @@ ControlArtifactStore::metadata(std::string_view artifact_id) const {
         decoded->deletion_state != ControlArtifactDeletionState::Active)
         return std::nullopt;
     if (decoded->expires_at_unix_ms <= now) {
-        impl_->expire(path);
+        (void)impl_->expire(path, *decoded, ControlArtifactDeletionReason::Expired, now);
         return std::nullopt;
     }
     return decoded;
@@ -558,7 +769,7 @@ ControlArtifactStore::read_authorized(std::string_view artifact_id, std::uint64_
     if (metadata->deletion_state != ControlArtifactDeletionState::Active)
         return {.status = ControlArtifactStatus::NotFound};
     if (metadata->expires_at_unix_ms <= now) {
-        impl_->expire(metadata_path);
+        (void)impl_->expire(metadata_path, *metadata, ControlArtifactDeletionReason::Expired, now);
         return {.status = ControlArtifactStatus::NotFound};
     }
     if (!authorization_matches(*metadata, authorized_metadata)) {
@@ -587,6 +798,73 @@ ControlArtifactStore::read_authorized(std::string_view artifact_id, std::uint64_
     result.bytes.insert(result.bytes.end(), blob->begin() + static_cast<std::ptrdiff_t>(offset),
                         blob->begin() + static_cast<std::ptrdiff_t>(offset + count));
     return result;
+}
+
+ControlArtifactCollectionResult ControlArtifactStore::collect() {
+    const auto now = impl_->now_unix_ms();
+    std::lock_guard lock(impl_->mutex);
+    ControlArtifactCollectionResult result;
+    if (!impl_->ready)
+        return result;
+
+    const auto active = impl_->active_metadata();
+    if (!active)
+        return result;
+    std::set<std::string, std::less<>> referenced;
+    for (const auto& metadata : *active) {
+        if (metadata.expires_at_unix_ms <= now) {
+            const auto expired = impl_->expire(impl_->metadata_path(metadata.artifact_id), metadata,
+                                               ControlArtifactDeletionReason::Expired, now);
+            if (expired == Impl::ExpireResult::RemovedAndAudited) {
+                ++result.deleted_artifacts;
+            } else if (expired == Impl::ExpireResult::RemovedWithoutAudit) {
+                ++result.deletion_audit_failures;
+            }
+        } else {
+            referenced.insert(metadata.sha256);
+        }
+    }
+
+    const auto remove_partial_files = [&](const fs::path& directory) {
+        std::error_code error;
+        for (fs::directory_iterator iterator(directory, error), end; !error && iterator != end;
+             iterator.increment(error)) {
+            const auto name = iterator->path().filename().string();
+            if (name.starts_with(".private-publish-") || name.find(".tmp-") != std::string::npos) {
+                if (detail::remove_owner_private_file_durable(iterator->path()))
+                    ++result.deleted_partial_files;
+            }
+        }
+    };
+    remove_partial_files(impl_->artifacts);
+    remove_partial_files(impl_->blobs);
+    remove_partial_files(impl_->audit);
+
+    std::error_code error;
+    for (fs::directory_iterator iterator(impl_->blobs, error), end; !error && iterator != end;
+         iterator.increment(error)) {
+        if (iterator->path().extension() != ".blob")
+            continue;
+        const auto hash = iterator->path().stem().string();
+        if (!lowercase_hex(hash, 64) || referenced.contains(hash))
+            continue;
+        const auto size = iterator->file_size(error);
+        if (error)
+            break;
+        if (detail::remove_owner_private_file_durable(iterator->path())) {
+            ++result.deleted_orphan_blobs;
+            result.reclaimed_bytes += size;
+        }
+    }
+    return result;
+}
+
+std::vector<ControlArtifactDeletionRecord> ControlArtifactStore::deletion_audit() const {
+    std::lock_guard lock(impl_->mutex);
+    if (!impl_->ready)
+        return {};
+    auto records = impl_->read_audit();
+    return records ? std::move(*records) : std::vector<ControlArtifactDeletionRecord>{};
 }
 
 } // namespace pulp::inspect

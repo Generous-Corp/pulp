@@ -99,6 +99,7 @@ target_link_libraries(pulp-inspect-client
 
 add_library(pulp-inspect-runtime
     src/control_state_read_executor.cpp
+    src/control_state_write_executor.cpp
     src/control_main_thread_executor.cpp
     src/control_trace_session_executor.cpp
     src/main_thread_rpc.cpp
@@ -128,6 +129,7 @@ target_link_libraries(pulp-inspect-offline-runtime
     PUBLIC pulp::inspect-control pulp::format)
 
 add_library(pulp-inspect-telemetry
+    src/control_telemetry_tap.cpp
     src/value_channel_telemetry_broker.cpp)
 add_library(pulp::inspect-telemetry ALIAS pulp-inspect-telemetry)
 target_include_directories(pulp-inspect-telemetry

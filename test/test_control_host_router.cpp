@@ -2,6 +2,7 @@
 
 #include <pulp/inspect/control_host_router.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <future>
 #include <mutex>
@@ -16,6 +17,8 @@ namespace {
 ControlAdmissionPlan plan(std::int64_t deadline) {
     ControlAdmissionPlan result;
     result.registration_id = ControlRegistrationId{"registration-1"};
+    result.instance_id = "slot-1";
+    result.instance_generation = "process-7/slot-3";
     result.receipt_id = ControlReceiptId{"receipt-1"};
     result.deadline_unix_ms = deadline;
     return result;
@@ -41,6 +44,26 @@ ControlExecutionContext context() {
 }
 
 } // namespace
+
+TEST_CASE("Pulp host slot routing rejects stale instance generation and unload") {
+    ControlHostRouter router;
+    std::atomic<unsigned> deliveries{0};
+    REQUIRE(router.attach_slot(ControlRegistrationId{"registration-1"}, 3, "slot-1",
+                               "process-7/slot-3", [&](const ControlEnvelope&) {
+                                   ++deliveries;
+                                   return false;
+                               }));
+    auto stale = plan(future_deadline());
+    stale.instance_generation = "process-7/slot-2";
+    const auto stale_result = router.executor()(stale, request(), context());
+    CHECK(stale_result.result.result_code == ControlResultCode::SessionStale);
+    CHECK(deliveries == 0);
+
+    router.detach(ControlRegistrationId{"registration-1"}, 3);
+    const auto unloaded = router.executor()(plan(future_deadline()), request(), context());
+    CHECK(unloaded.result.result_code == ControlResultCode::HostUnavailable);
+    CHECK(deliveries == 0);
+}
 
 TEST_CASE("host router correlates completion to exact registration generation") {
     ControlHostRouter router;
