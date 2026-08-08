@@ -648,6 +648,7 @@ public:
     std::array<uint8_t, 8> observed_first_sysex_prefix{};
     std::uint32_t observed_event_drops = 0;
     std::uint32_t observed_sysex_drops = 0;
+    bool observed_reset_requested = false;
 
     PluginDescriptor descriptor() const override {
         PluginDescriptor d;
@@ -664,7 +665,7 @@ public:
                  const audio::BufferView<const float>&,
                  midi::MidiBuffer& midi_in,
                  midi::MidiBuffer&,
-                 const ProcessContext&) override {
+                 const ProcessContext& context) override {
         observed_event_count = midi_in.size();
         observed_event_capacity = midi_in.event_capacity();
         observed_sysex_count = midi_in.sysex_size();
@@ -682,6 +683,7 @@ public:
         }
         observed_event_drops = midi_in.dropped_event_count();
         observed_sysex_drops = midi_in.dropped_sysex_count();
+        observed_reset_requested = context.reset_requested;
     }
 };
 
@@ -1385,7 +1387,8 @@ TEST_CASE("CLAP resets MPE sidecar ownership across reset and reactivation",
     REQUIRE(h.run(continued_held_input) == CLAP_PROCESS_CONTINUE);
     REQUIRE(h.plugin.mpe.tracker.active_count() == 1);
 
-    for (const uint8_t controller : {uint8_t{64}, uint8_t{66}, uint8_t{123}}) {
+    for (const uint8_t controller :
+         {uint8_t{64}, uint8_t{66}, uint8_t{69}, uint8_t{123}}) {
         clap_event_midi_t control{};
         control.header = make_header(sizeof(control), CLAP_EVENT_MIDI, 0);
         control.data[0] = 0xB0 | static_cast<uint8_t>(held_note.channel);
@@ -3487,6 +3490,19 @@ TEST_CASE("CLAP reconciles UMP ownership across skipped and overflowing blocks",
         REQUIRE(g_capturing->captured_ump.empty());
     }
 
+    SECTION("a dropped native Hold 2 release resets the current render") {
+        g_pending_opts_ump = true;
+        Harness h(make_capturing);
+        InputEventList overflow;
+        for (std::size_t i = 0; i < state::ParameterEventQueue::kCapacity; ++i)
+            append_midi2(overflow, midi::UmpPacket::cc_2(0, 1, 74,
+                                                         static_cast<uint32_t>(i)));
+        append_midi2(overflow, midi::UmpPacket::cc_2(0, 1, 69, 0));
+        REQUIRE(h.run(overflow) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(g_capturing->captured_context.reset_requested);
+        REQUIRE(g_capturing->captured_ump.empty());
+    }
+
     SECTION("mixed native UMP and synthesized MIDI cannot drop a release") {
         g_pending_opts_ump = true;
         Harness h(make_capturing);
@@ -3875,8 +3891,8 @@ TEST_CASE("CLAP retries rejected outbound ownership releases before new attacks"
     SECTION("pedal and channel reset releases retry canonically") {
         g_emitting->to_emit = {
             midi::MidiEvent::cc(4, 64, 0), midi::MidiEvent::cc(4, 66, 0),
-            midi::MidiEvent::cc(4, 120, 0), midi::MidiEvent::cc(4, 121, 0),
-            midi::MidiEvent::cc(4, 123, 0),
+            midi::MidiEvent::cc(4, 69, 0), midi::MidiEvent::cc(4, 120, 0),
+            midi::MidiEvent::cc(4, 121, 0), midi::MidiEvent::cc(4, 123, 0),
         };
         OutputEventList rejecting;
         rejecting.accept_at_most(0);
@@ -3885,12 +3901,23 @@ TEST_CASE("CLAP retries rejected outbound ownership releases before new attacks"
         OutputEventList accepted;
         REQUIRE(h.run(in, &accepted) == CLAP_PROCESS_CONTINUE);
         auto events = accepted.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI);
-        REQUIRE(events.size() == 5);
+        REQUIRE(events.size() == 6);
         for (std::size_t i = 0; i < events.size(); ++i) {
             CHECK(events[i]->header.time == 0);
             CHECK(events[i]->data[1] ==
-                  std::array<uint8_t, 5>{64, 66, 120, 121, 123}[i]);
+                  std::array<uint8_t, 6>{64, 66, 69, 120, 121, 123}[i]);
         }
+    }
+
+    SECTION("Hold 2 engagement creates no release debt") {
+        g_emitting->to_emit = {midi::MidiEvent::cc(6, 69, 64)};
+        OutputEventList rejecting;
+        rejecting.accept_at_most(0);
+        REQUIRE(h.run(in, &rejecting) == CLAP_PROCESS_CONTINUE);
+        CHECK(std::all_of(h.plugin.outbound_control_release_debt.begin(),
+                          h.plugin.outbound_control_release_debt.end(),
+                          [](uint8_t count) { return count == 0; }));
+        CHECK_FALSE(h.plugin.outbound_panic_debt[6]);
     }
 
     SECTION("repeated refusal is stable and saturation collapses to panic") {
@@ -4109,7 +4136,7 @@ TEST_CASE("midi_out shorts + sysex interleave by sample_offset on out_events",
     REQUIRE(out.at(2)->type == CLAP_EVENT_MIDI);
 }
 
-TEST_CASE("CLAP inbound MIDI drops past realtime event capacity without growing",
+TEST_CASE("CLAP fail-closes incomplete realtime MIDI ingress without growing",
           "[clap][midi][realtime]") {
     Harness h(make_observing_midi_in);
     InputEventList in;
@@ -4128,9 +4155,9 @@ TEST_CASE("CLAP inbound MIDI drops past realtime event capacity without growing"
     REQUIRE(g_observing_midi_in != nullptr);
     REQUIRE(g_observing_midi_in->observed_event_capacity ==
             state::ParameterEventQueue::kCapacity);
-    REQUIRE(g_observing_midi_in->observed_event_count ==
-            state::ParameterEventQueue::kCapacity);
-    REQUIRE(g_observing_midi_in->observed_event_drops == 1);
+    REQUIRE(g_observing_midi_in->observed_event_count == 0);
+    REQUIRE(g_observing_midi_in->observed_event_drops == 0);
+    REQUIRE(g_observing_midi_in->observed_reset_requested);
 }
 
 TEST_CASE("CLAP inbound SysEx drops past realtime sidecar capacity without growing",

@@ -643,7 +643,8 @@ static bool is_midi_ownership_event(const midi::MidiEvent& event) {
     if (!event.is_cc())
         return false;
     const auto cc = event.cc_number();
-    return cc == 64 || cc == 66 || cc == 120 || cc == 121 || cc == 123;
+    return cc == 64 || cc == 66 || cc == 69 || cc == 120 || cc == 121 ||
+           cc == 123;
 }
 
 static bool is_midi_mpe_state_event(const midi::MidiEvent& event) {
@@ -665,7 +666,8 @@ static bool is_ump_ownership_event(const midi::UmpPacket& packet) {
     if (status != 0xB0)
         return false;
     const auto cc = static_cast<uint8_t>((packet.words[0] >> 8) & 0x7F);
-    return cc == 64 || cc == 66 || cc == 120 || cc == 121 || cc == 123;
+    return cc == 64 || cc == 66 || cc == 69 || cc == 120 || cc == 121 ||
+           cc == 123;
 }
 
 static bool is_ump_expression_state_event(const midi::UmpPacket& packet) {
@@ -1140,14 +1142,15 @@ static void clap_phase_clear_constant_mask(const clap_process_t* process) {
     }
 }
 
-static constexpr std::array<uint8_t, 5> kOutboundReleaseControllers{
-    64, 66, 120, 121, 123};
+static constexpr std::array<uint8_t, 6> kOutboundReleaseControllers{
+    64, 66, 69, 120, 121, 123};
 
 static int outbound_release_controller_index(const midi::MidiEvent& event) {
     if (!event.is_cc())
         return -1;
     const auto controller = event.cc_number();
-    if ((controller == 64 || controller == 66) && event.cc_value() >= 64)
+    if ((controller == 64 || controller == 66 || controller == 69) &&
+        event.cc_value() >= 64)
         return -1;
     for (std::size_t i = 0; i < kOutboundReleaseControllers.size(); ++i)
         if (controller == kOutboundReleaseControllers[i])
@@ -1221,7 +1224,8 @@ static OutboundReleaseDrainResult drain_outbound_release_debt(
     // every debt slot a turn; debt remaining after the budget is exhausted
     // suppresses fresh MIDI attacks until a later block completes the drain.
     constexpr std::size_t kMaxReleaseRetriesPerBlock = 64;
-    constexpr std::size_t kSlotsPerChannel = 1 + 128 + 5;
+    constexpr std::size_t kSlotsPerChannel =
+        1 + 128 + kOutboundReleaseControllers.size();
     constexpr std::size_t kReleaseDebtSlotCount = 16 * kSlotsPerChannel;
     std::size_t emitted = 0;
     std::size_t visited = 0;

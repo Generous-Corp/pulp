@@ -207,7 +207,7 @@ struct PulpClapPlugin {
     // attacks. Saturated per-key/control counters collapse to one channel
     // All Sound Off debt, so this path remains allocation-free and bounded.
     std::array<std::uint8_t, 16 * 128> outbound_note_release_debt{};
-    std::array<std::uint8_t, 16 * 5> outbound_control_release_debt{};
+    std::array<std::uint8_t, 16 * 6> outbound_control_release_debt{};
     std::array<bool, 16> outbound_panic_debt{};
     std::size_t outbound_release_drain_cursor = 0;
 
