@@ -24,8 +24,9 @@ const volatile char kStandalone[] = "PULP_STANDALONE_COMPONENT_V1";
 const volatile char kShipping[] = "PULP_INSPECT_SHIPPING_MANIFEST_V1";
 const volatile char kProfile[] = "PULP_CONTROL_PROFILE_DEVELOPER_LOCAL_V1";
 const volatile char kManifest[] =
-    "PULP_CONTROL_MANIFEST_SHA256_d28b4e962334ae18f0d9ecd8d40798b1d6b745a2d49de65723dd35f95e03bf51_"
+    "PULP_CONTROL_MANIFEST_SHA256_4c761fc1d01625a6dae0c7d47e455901f5023a063a812c3322bf50161c8f7534_"
     "V1";
+const volatile char kSessionDescribe[] = "PULP_INSPECT_CAPABILITY_SESSION_DESCRIBE_V1";
 const volatile char kSessionControl[] = "PULP_INSPECT_CAPABILITY_SESSION_CONTROL_V1";
 const volatile char kTraceControl[] = "PULP_INSPECT_CAPABILITY_TRACE_SESSION_CONTROL_V1";
 
@@ -42,8 +43,8 @@ std::shared_ptr<InspectorMainThreadRpc> inline_rpc() {
 
 int main(int argc, char** argv) {
     if ((argc != 3 && argc != 4) || kStandalone[0] != 'P' || kShipping[0] != 'P' ||
-        kProfile[0] != 'P' ||
-        kManifest[0] != 'P' || kSessionControl[0] != 'P' || kTraceControl[0] != 'P')
+        kProfile[0] != 'P' || kManifest[0] != 'P' || kSessionDescribe[0] != 'P' ||
+        kSessionControl[0] != 'P' || kTraceControl[0] != 'P')
         return 64;
 
     ControlHostPreflightDiagnostics diagnostics;
@@ -105,7 +106,9 @@ int main(int argc, char** argv) {
                            << 0 << '\n'
 #endif
         ;
-    for (unsigned attempt = 0; attempt < 10'000 && !std::filesystem::exists(argv[2]); ++attempt)
+    // Installed process tests own teardown explicitly and may exercise several
+    // client timeout budgets before signalling this fixture to stop.
+    for (unsigned attempt = 0; attempt < 60'000 && !std::filesystem::exists(argv[2]); ++attempt)
         std::this_thread::sleep_for(1ms);
     const bool stopped = std::filesystem::exists(argv[2]);
     slot.close();

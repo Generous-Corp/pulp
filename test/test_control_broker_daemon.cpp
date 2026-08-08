@@ -50,7 +50,7 @@ constexpr std::string_view kHostManifest = R"({
   "endpoint_included": true,
   "unsafe_runtime_eval_acknowledged": false,
   "permission_terms": ["implemented", "built", "host_available", "activated", "policy_eligible", "client_granted", "session_live"],
-  "capabilities": ["dev.pulp.session/control@1", "dev.pulp.trace/session-control@1"]
+  "capabilities": ["dev.pulp.instance/read@1", "dev.pulp.session/control@1", "dev.pulp.trace/session-control@1"]
 }
 )";
 
