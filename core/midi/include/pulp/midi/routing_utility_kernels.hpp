@@ -490,8 +490,10 @@ class ChannelRouter {
             if (held_notes_.consume_suppressed_release(event))
                 continue;
             const auto channel = event.channel();
-            if ((spec_.accepted_channels & (std::uint16_t{1} << channel)) == 0)
+            if ((spec_.accepted_channels & (std::uint16_t{1} << channel)) == 0) {
+                held_notes_.record(event, false);
                 continue;
+            }
             if (!held_notes_.can_forward(event)) {
                 held_notes_.record(event, false);
                 ++report.dropped;
@@ -513,8 +515,10 @@ class ChannelRouter {
                 if (held_notes_.consume_suppressed_release(event.packet))
                     continue;
                 const auto channel = event.packet.channel();
-                if ((spec_.accepted_channels & (std::uint16_t{1} << channel)) == 0)
+                if ((spec_.accepted_channels & (std::uint16_t{1} << channel)) == 0) {
+                    held_notes_.record(event.packet, false);
                     continue;
+                }
                 auto routed = event;
                 routed.packet =
                     utility_detail::with_channel(event.packet, spec_.output_channel[channel]);
@@ -658,8 +662,10 @@ class NoteRangeFilter {
             if (held_notes_.consume_suppressed_release(event))
                 continue;
             if (utility_detail::is_note_addressed(event) &&
-                (event.note() < spec_.lowest || event.note() > spec_.highest))
+                (event.note() < spec_.lowest || event.note() > spec_.highest)) {
+                held_notes_.record(event, false);
                 continue;
+            }
             if (!held_notes_.can_forward(event)) {
                 held_notes_.record(event, false);
                 ++report.dropped;
@@ -676,8 +682,10 @@ class NoteRangeFilter {
                     continue;
                 if (utility_detail::is_note_addressed(event.packet) &&
                     (event.packet.note_number() < spec_.lowest ||
-                     event.packet.note_number() > spec_.highest))
+                     event.packet.note_number() > spec_.highest)) {
+                    held_notes_.record(event.packet, false);
                     continue;
+                }
                 if (!held_notes_.can_forward(event.packet)) {
                     held_notes_.record(event.packet, false);
                     ++report.dropped;

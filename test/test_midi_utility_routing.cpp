@@ -535,6 +535,56 @@ TEST_CASE("routing lifecycle flushes owned notes and suppresses stale releases",
         CHECK(output_ump[0].packet.channel() == 4);
         CHECK(output_ump[1].packet.channel() == 4);
     }
+
+    SECTION("a newly accepted route does not forward a previously rejected release") {
+        auto rejecting = initial;
+        rejecting.accepted_channels &= ~(std::uint16_t{1} << 3);
+        midi::ChannelRouter changing(rejecting);
+        input.clear();
+        input.add(midi::MidiEvent::note_on(3, 69, 100));
+        REQUIRE(changing.process(input, output).complete);
+        CHECK(output.empty());
+        REQUIRE(changing.replace_spec(replacement, output).complete);
+
+        input.clear();
+        input.add(midi::MidiEvent::note_off(3, 69));
+        REQUIRE(changing.process(input, output).complete);
+        CHECK(output.empty());
+    }
+
+    SECTION("a newly accepted range does not forward a previously rejected release") {
+        midi::NoteRangeFilter changing({70, 80});
+        input.clear();
+        input.add(midi::MidiEvent::note_on(0, 64, 100));
+        REQUIRE(changing.process(input, output).complete);
+        CHECK(output.empty());
+        REQUIRE(changing.replace_spec({60, 69}, output).complete);
+
+        input.clear();
+        input.add(midi::MidiEvent::note_off(0, 64));
+        REQUIRE(changing.process(input, output).complete);
+        CHECK(output.empty());
+    }
+
+    SECTION("a newly accepted UMP route consumes a previously rejected release") {
+        auto rejecting = initial;
+        rejecting.accepted_channels &= ~(std::uint16_t{1} << 3);
+        midi::ChannelRouter changing(rejecting);
+        midi::UmpBuffer input_ump;
+        midi::UmpBuffer output_ump;
+        prepare_sidecars(input, input_ump);
+        prepare_sidecars(output, output_ump);
+        input.clear();
+        REQUIRE(input_ump.add(midi::UmpPacket::note_on_2(5, 3, 69, 0x8000), 4));
+        REQUIRE(changing.process(input, output).complete);
+        CHECK(output_ump.empty());
+        REQUIRE(changing.replace_spec(replacement, output).complete);
+
+        input_ump.clear();
+        REQUIRE(input_ump.add(midi::UmpPacket::note_off_2(5, 3, 69), 5));
+        REQUIRE(changing.process(input, output).complete);
+        CHECK(output_ump.empty());
+    }
 }
 
 TEST_CASE("routing kernels retain ownership when output preparation rejects a block",
