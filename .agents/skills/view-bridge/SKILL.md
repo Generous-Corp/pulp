@@ -359,16 +359,12 @@ view::View* ViewBridge::attach_secondary_view(std::unique_ptr<view::View>, ViewR
 bool        ViewBridge::detach_secondary_view(view::View*);
 size_t      ViewBridge::view_count()                const;
 view::View* ViewBridge::view_at(size_t index);
-ViewRole    ViewBridge::role_at(size_t index)       const;  // Editor, Inspector, Remote
+ViewRole    ViewBridge::role_at(size_t index)       const;  // Editor, Inspector
 ```
 
 Roles are opaque — the bridge only uses them for introspection.
 Parameter bindings propagate automatically because every attached view
 polls the same `StateStore`; there is no explicit broadcast step.
-
-Remote views attach through `ViewBridge::attach_remote_channel(channel, label)`
-as `ViewRole::Remote` secondaries. The bridge does not own URL parsing or socket
-creation; callers connect a `MessageChannel` first and hand it to the bridge.
 
 ## Parameter type-in round-trips through `ParamInfo` (shared with the editor)
 
@@ -752,54 +748,6 @@ and look like it worked.
   (pitfall 9); build the pump, `reset()` the bridge, call the pump → no UAF.
 
 Run with `ctest --test-dir build -R ViewBridge --output-on-failure`.
-
-## Remote views
-
-`ViewBridge::attach_remote_channel(channel, label)` registers a
-`RemoteViewSession` driving a `MessageChannel` (WebSocket or in-process
-loopback) as a `ViewRole::Remote` secondary. The session speaks the
-protocol in `docs/reference/remote-view-protocol.md`:
-
-- `view.hello` + `view.metadata` handshake
-- `view.param_changed` publishes trusted host-side `StateStore` updates
-- `view.param_get` request/response
-- `view.input` (reserved notification; logged and ignored by the host)
-- `view.close` (either side)
-
-Remote View is observation-only. It deliberately has no inbound
-`view.param_set` handler, and `view.input` is not dispatched into the primary
-view. Do not restore either as an authority shortcut: future parameter or input
-mutation must pass through Pulp's capability/grant controller and audit path.
-
-Tests: `test/test_remote_view.cpp` covers handshake, metadata escaping,
-parameter sync, input forwarding, close handling, null-channel rejection, and
-stale-session detach behavior via MemoryMessageChannel loopback.
-
-### Attaching from an MCP server
-
-An MCP server that runs alongside a Pulp plugin host can open a
-`RemoteViewSession` to inspect the plugin's view from Claude Code:
-
-1. MCP server can declare read-only tools (for example `view_attach` and
-   `view_param_get`) backed by `pulp::runtime::WebSocketChannel::connect(...)`.
-2. Tool handler calls `bridge->attach_remote_channel(std::move(ws), "mcp")`
-   where `bridge` is the host's ViewBridge (same process) — or opens
-   the socket *to* a separate Pulp host process that listens via
-   `WebSocketChannel::accept`.
-3. Subsequent MCP tool calls may read through
-   `RemoteViewSession::get_parameter` and detach the session. Do not expose
-   `set_parameter` or `send_input` as remote mutation tools; the former is a
-   trusted host-side publish helper, and the latter has no host dispatch path.
-
-This is the pattern. A concrete MCP-tool wrapper bundled with Pulp is
-a small follow-up on top of `tools/mcp/pulp_mcp.cpp`.
-
-### Paint-op streaming
-
-Not yet wired. Current MVP: the remote renderer is expected to mirror
-its own view hierarchy informed by `view.metadata`. Canvas-command
-streaming is the next increment — see the "Not yet wired" section of
-the protocol doc.
 
 ### AU editor `dealloc` ordering — never call `bridge->close()` explicitly
 
@@ -1312,13 +1260,11 @@ so the top row clipped and the ScrollView couldn't reach it. Now
   `DESIGN_WIDTH/HEIGHT` import, or even an `editor_size()` override (which
   surfaces as a non-default preferred) all bypass the fit.
 
-Two seams to know: `uses_auto_ui_` is set in the `build_editor_ui`
+One seam to know: `uses_auto_ui_` is set in the `build_editor_ui`
 fallback branch (custom `create_view()` keeps it false, so a native
 editor still reports its own laid-out bounds instead of a store-derived
 size); and the fit is applied in `open()`, not the constructor, because
-"is this AutoUi?" isn't known until `create_view()` returns null. The
-`RemoteViewSession` path reads `processor.view_size()` directly and does
-NOT get the fit — out-of-process editors are effectively always custom.
+"is this AutoUi?" isn't known until `create_view()` returns null.
 
 Separately, the AutoUi scroll body top-aligns its grid's wrapped rows
 once they overflow the viewport (`align_content: start`) instead of
@@ -1472,14 +1418,11 @@ this boundary. Parameter text and custom state have matching containment in
   unchanged — that include is the compatibility contract, not an incidental
   one. The same split moved `ProcessContext` to `process_context.hpp` and
   `PrepareContext` to `prepare_resources.hpp`.
-- `core/format/include/pulp/format/remote_view_session.hpp` — remote session API
 - `core/view/include/pulp/view/editor_bridge.hpp` — EditorBridge API
 - `core/view/src/editor_bridge.cpp` — EditorBridge implementation
 - `docs/guides/view-bridge.md` — user-facing guide
 - `docs/reference/editor-bridge.md` — EditorBridge reference
-- `docs/reference/remote-view-protocol.md` — remote-view wire format
 - `examples/view-bridge-demo/main.cpp` — runnable headless demo
-- `test/test_remote_view.cpp` — loopback tests for the remote protocol
 - `test/test_editor_bridge.cpp` — EditorBridge unit tests
 - `planning/next-features-plan.md` § Feature 1 — historical planning context
 
