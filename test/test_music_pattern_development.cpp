@@ -309,6 +309,31 @@ TEST_CASE("regional fill conflicts and result overflow fail without partial outp
     CHECK(overflow.error == PatternDevelopmentError::capacity_exceeded);
 }
 
+TEST_CASE("candidate anchor roles do not become base preservation constraints",
+          "[music][pattern-development]") {
+    const DevelopmentPattern<4> empty;
+    const auto candidates = pattern_from<4>(std::array{make_event(1, 10, PatternEventRole::anchor),
+                                                       make_event(2, 20, PatternEventRole::fill)});
+    const RegionalFillSelection zero{{0}, {30}, 0, 19, {{0}, 1, 2, 3}};
+    const auto none = apply_regional_fill(empty, candidates, zero);
+    REQUIRE(none);
+    CHECK(none.pattern.empty());
+
+    auto one = zero;
+    one.target_region_onsets = 1;
+    const auto selected = apply_regional_fill(empty, candidates, one);
+    REQUIRE(selected);
+    REQUIRE(selected.pattern.size() == 1);
+    const auto event = *selected.pattern.event(0);
+    CHECK(event == *candidates.find_id(event.id));
+
+    const auto base = pattern_from<4>(std::array{make_event(1, 40)});
+    const auto moved_same_id = pattern_from<4>(std::array{make_event(1, 10)});
+    const auto conflict = apply_regional_fill(base, moved_same_id, zero);
+    CHECK(conflict.error == PatternDevelopmentError::conflicting_event);
+    CHECK(conflict.pattern.empty());
+}
+
 TEST_CASE("integer A B morph preserves IDs and exact endpoints", "[music][pattern-development]") {
     const auto a = pattern_from<8>(std::array{
         make_event(1, -1000, PatternEventRole::anchor, 200),
