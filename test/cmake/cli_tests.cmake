@@ -235,6 +235,14 @@ catch_discover_tests(pulp-test-cli-shellout-pr)
 # diagnostics surface of the CLI.
 add_executable(pulp-test-cli-shellout-lifecycle test_cli_shellout_lifecycle.cpp)
 target_link_libraries(pulp-test-cli-shellout-lifecycle PRIVATE pulp::platform Catch2::Catch2WithMain)
+if(TARGET pulp::inspect-client)
+    target_link_libraries(pulp-test-cli-shellout-lifecycle PRIVATE pulp::events)
+    target_compile_definitions(pulp-test-cli-shellout-lifecycle PRIVATE
+        PULP_TEST_CONTROL_HEALTH_ENABLED=1)
+else()
+    target_compile_definitions(pulp-test-cli-shellout-lifecycle PRIVATE
+        PULP_TEST_CONTROL_HEALTH_ENABLED=0)
+endif()
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout-lifecycle)
 catch_discover_tests(pulp-test-cli-shellout-lifecycle)
 

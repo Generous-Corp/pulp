@@ -3,7 +3,7 @@
 //! # What parity means here
 //!
 //! The orchestrator commands (`build`, `test`, `run`, `clean`,
-//! `status`, `cache`, `sdk`) don't emit structured JSON that can be
+//! `cache`, `sdk`) don't emit structured JSON that can be
 //! diffed byte-for-byte against the C++ CLI. Instead these tests
 //! pin the *observable human prefix* — the handful of lines the C++
 //! CLI has always emitted and that downstream tooling relies on. If
@@ -15,11 +15,11 @@
 //!
 //! The full output includes paths (absolute, platform-specific),
 //! SDK version numbers, file-size strings that scale with disk
-//! state, and — for `status` — git branch + commit from a live `git
-//! log`. Locking that against a fixture would require a comedy of
-//! normalisers. The Rust port documents a narrower surface (no
-//! `SDK version`, no git info) on purpose, so we pin only the
-//! parts we know are stable.
+//! state. Locking that against a fixture would require a comedy of
+//! normalisers, so we pin only the parts we know are stable. Installed
+//! `status` deliberately delegates to the C++ binary because that side owns
+//! the canonical control-health transport; its Rust-native renderer remains a
+//! fallback for Rust-only builds and is tested separately.
 //!
 //! # Running
 //!
@@ -197,7 +197,7 @@ fn status_reports_standalone_mode_for_pulp_toml_project() {
         "[pulp]\nsdk_version = \"0.40.0\"\n",
     )
     .unwrap();
-    let out = pulp_rs()
+    let out = pulp_rs_no_fallthrough()
         .arg("status")
         .current_dir(td.path())
         .env("PULP_HOME", td.path().join("home"))
@@ -208,6 +208,37 @@ fn status_reports_standalone_mode_for_pulp_toml_project() {
     assert!(s.contains("Pulp Project Status"));
     assert!(s.contains("Mode: sdk mode"));
     assert!(s.contains("Build: not configured"));
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_status_delegates_to_the_canonical_cpp_probe() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let td = tempdir().unwrap();
+    let delegate = td.path().join("pulp-cpp-status-fixture");
+    let argv_log = td.path().join("argv.txt");
+    std::fs::write(
+        &delegate,
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PULP_STATUS_ARGV_LOG\"\nprintf 'Pulp Project Status\\nControl broker: unavailable\\n'\n",
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&delegate).unwrap().permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&delegate, permissions).unwrap();
+
+    let out = pulp_rs()
+        .arg("status")
+        .env_remove("PULP_RS_NO_FALLTHROUGH")
+        .env_remove("PULP_RS_FALLTHROUGH")
+        .env("PULP_RS_CPP_BINARY", &delegate)
+        .env("PULP_STATUS_ARGV_LOG", &argv_log)
+        .output()
+        .expect("run");
+    assert!(out.status.success(), "exit: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("Control broker: unavailable"), "{stdout}");
+    assert_eq!(std::fs::read_to_string(argv_log).unwrap(), "status\n");
 }
 
 #[test]

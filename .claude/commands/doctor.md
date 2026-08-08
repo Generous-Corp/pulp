@@ -30,7 +30,8 @@ Options:
 - `pulp doctor --au-cache --dry-run` — preview macOS AudioComponentRegistrar refresh after AU metadata changes
 - `pulp doctor list` / `pulp doctor --only "<name>"` — enumerate checks or run one targeted probe
 - `pulp doctor --only WidgetBridge` — check generated WidgetBridge `.d.ts`, mock function lists, and JS bridge docs for source-tree input-fingerprint freshness
+- `pulp doctor --only "Control broker"` — run only the observational local carrier probe
 
-Default checks include C++20 compiler availability, CMake, git/git-lfs, LFS-backed Skia binaries when present, generated WidgetBridge API artifacts in source-tree mode, VST3/AudioUnit SDKs where relevant, optional AAX setup, package/platform alignment, Cmajor when used, build configuration, and pulp-mcp availability. Mobile subcommands add Android SDK/NDK/adb/emulator and iOS/Xcode/Simulator checks.
+Default checks include C++20 compiler availability, CMake, git/git-lfs, LFS-backed Skia binaries when present, generated WidgetBridge API artifacts in source-tree mode, VST3/AudioUnit SDKs where relevant, optional AAX setup, package/platform alignment, Cmajor when used, build configuration, pulp-mcp availability, and optional local control-broker reachability. Broker absence is nonfatal. `reachable-unverified` means only that a carrier accepted a connection; without a trusted peer expectation, do not describe it as healthy or verified. This probe must not create or repair the runtime directory, start a daemon, open a session, or acquire authority.
 
 Run this first when builds fail unexpectedly or on a new machine. Run `pulp doctor --validators` if `pulp validate` aborts with "broken code signature", `pulp doctor --caches` if build/test reports FetchContent cache drift, and `pulp doctor --host-quirks` when DAW accommodations or host-specific runtime behavior look suspicious.

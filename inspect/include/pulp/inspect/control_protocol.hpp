@@ -25,8 +25,18 @@ inline constexpr std::size_t kControlReceiptMaximumArtifactIdBytes = 128;
 inline constexpr std::size_t kControlReceiptMaximumArtifactMediaTypeBytes = 128;
 inline constexpr std::size_t kControlReceiptMaximumEvidenceIds = 64;
 inline constexpr std::size_t kControlReceiptMaximumEvidenceIdBytes = 128;
+inline constexpr std::size_t kControlMaximumArtifactReadBytes = 1024u * 1024u;
+inline constexpr std::size_t kControlMaximumArtifactChunkBase64Bytes =
+    ((kControlMaximumArtifactReadBytes + 2u) / 3u) * 4u;
+inline constexpr std::size_t kControlMaximumStatusIdBytes = 64;
+inline constexpr std::size_t kControlMaximumErrorCodeBytes = 128;
+inline constexpr std::size_t kControlMaximumSdkVersionBytes = 128;
+inline constexpr std::size_t kControlMaximumArtifactMetadataFieldBytes = 512;
+inline constexpr std::size_t kControlMaximumArtifactContentTypeBytes = 256;
 static_assert(kControlMaximumRequestPayloadBytes + 256u * 1024u <= kControlMaximumEnvelopeBytes);
 static_assert(kControlMaximumResultDetailBytes + 256u * 1024u <= kControlMaximumEnvelopeBytes);
+static_assert(kControlMaximumArtifactChunkBase64Bytes + 256u * 1024u <=
+              kControlMaximumEnvelopeBytes);
 
 struct ControlProtocolRange {
     std::uint32_t minimum = kControlProtocolVersion;
@@ -101,6 +111,94 @@ struct ControlProgressEnvelope {
                            const ControlProgressEnvelope&) = default;
 };
 
+struct ControlSessionOpenEnvelope {
+    std::string request_id;
+    std::string admission_id;
+    friend bool operator==(const ControlSessionOpenEnvelope&,
+                           const ControlSessionOpenEnvelope&) = default;
+};
+
+struct ControlSessionOpenResult {
+    std::string request_id;
+    bool accepted = false;
+    std::string client_id;
+    std::string error_code;
+    std::string explanation;
+    friend bool operator==(const ControlSessionOpenResult&,
+                           const ControlSessionOpenResult&) = default;
+};
+
+struct ControlArtifactReadEnvelope {
+    std::string request_id;
+    std::string artifact_id;
+    std::uint64_t offset = 0;
+    std::size_t maximum_bytes = 0;
+    friend bool operator==(const ControlArtifactReadEnvelope&,
+                           const ControlArtifactReadEnvelope&) = default;
+};
+
+/// Flattened, bounded wire representation of artifact metadata. Carrier code
+/// explicitly maps this DTO to the broker-owned artifact model.
+struct ControlArtifactWireMetadata {
+    std::string artifact_id;
+    std::string broker_id;
+    std::string receipt_id;
+    std::string producer_client_id;
+    std::string producer_registration_id;
+    std::string session_id;
+    std::string instance_id;
+    std::string publication_id;
+    std::string producer_capability_id;
+    std::string producer_operation_id;
+    std::uint32_t producer_operation_version = 0;
+    std::string original_grant_id;
+    std::string consent_decision_id;
+    std::string manifest_digest;
+    std::string producer_artifact_digest;
+    std::string sha256;
+    std::uint64_t byte_size = 0;
+    std::string content_type;
+    std::uint64_t created_at_unix_ms = 0;
+    std::uint64_t expires_at_unix_ms = 0;
+    std::string sensitivity_id;
+    std::string deletion_state_id;
+    std::string redaction_state_id;
+    friend bool operator==(const ControlArtifactWireMetadata&,
+                           const ControlArtifactWireMetadata&) = default;
+};
+
+struct ControlArtifactReadResponseEnvelope {
+    std::string request_id;
+    std::string status_id;
+    std::optional<ControlArtifactWireMetadata> metadata;
+    std::string bytes_base64;
+    bool eof = false;
+    std::string explanation;
+    friend bool operator==(const ControlArtifactReadResponseEnvelope&,
+                           const ControlArtifactReadResponseEnvelope&) = default;
+};
+
+struct ControlHealthEnvelope {
+    std::string request_id;
+    friend bool operator==(const ControlHealthEnvelope&, const ControlHealthEnvelope&) = default;
+};
+
+struct ControlHealthResult {
+    std::string request_id;
+    std::string sdk_version;
+    ControlProtocolRange protocol_versions;
+    std::string broker_id;
+    std::uint64_t process_generation = 0;
+    friend bool operator==(const ControlHealthResult&, const ControlHealthResult&) = default;
+};
+
+struct ControlErrorEnvelope {
+    std::string request_id;
+    std::string error_code;
+    std::string explanation;
+    friend bool operator==(const ControlErrorEnvelope&, const ControlErrorEnvelope&) = default;
+};
+
 enum class ControlReceiptState : std::uint8_t {
     Admitted,
     Running,
@@ -162,7 +260,10 @@ struct ControlReceiptEnvelope {
 
 using ControlEnvelopePayload =
     std::variant<ControlNegotiationOffer, ControlNegotiationResult, ControlRequestEnvelope,
-                 ControlCancelEnvelope, ControlProgressEnvelope, ControlReceiptEnvelope>;
+                 ControlCancelEnvelope, ControlProgressEnvelope, ControlReceiptEnvelope,
+                 ControlSessionOpenEnvelope, ControlSessionOpenResult, ControlArtifactReadEnvelope,
+                 ControlArtifactReadResponseEnvelope, ControlHealthEnvelope, ControlHealthResult,
+                 ControlErrorEnvelope>;
 
 struct ControlEnvelope {
     std::uint32_t schema_version = kControlProtocolVersion;
