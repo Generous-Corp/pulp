@@ -21,7 +21,6 @@
 #include <vector>
 
 #if PULP_MCP_ENABLE_INSPECTOR_CLIENT
-#include <pulp/inspect/client.hpp>
 #include <pulp/inspect/control_inspector_client.hpp>
 #endif
 #include <pulp/inspect/capabilities.hpp>
@@ -133,17 +132,6 @@ format_inspector_command_result(pulp::inspect::InspectorClientResult result) {
     return {std::move(result), output};
 }
 
-InspectorCommandResult run_inspector_command(const fs::path& root, const std::string& method,
-                                             const std::string& params_json = "{}",
-                                             const std::string& session_id = {},
-                                             const std::string& instance_id = {},
-                                             const std::string& publication_id = {}) {
-    (void)root;
-    auto result = pulp::inspect::request_inspector(method, params_json,
-                                                   {session_id, instance_id, publication_id});
-    return format_inspector_command_result(std::move(result));
-}
-
 InspectorCommandResult run_control_trace_command(const std::string& method,
                                                  const std::string& params_json = "{}") {
     return format_inspector_command_result(
@@ -167,40 +155,14 @@ struct InspectorCommandResult {
     }
 };
 
-InspectorCommandResult run_inspector_command(const fs::path&, const std::string&,
-                                             const std::string& = "{}", const std::string& = {},
-                                             const std::string& = {}, const std::string& = {}) {
+InspectorCommandResult run_control_trace_command(const std::string&, const std::string& = "{}") {
     return {inspector_component_unavailable_payload()};
 }
 #endif
 
-bool valid_inspector_identity(const std::string& value) {
-    return !value.empty() && std::all_of(value.begin(), value.end(), [](unsigned char byte) {
-        return (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') ||
-               (byte >= '0' && byte <= '9') || byte == '-' || byte == '_';
-    });
-}
-
-struct InspectorSelectionFields {
-    bool session_id = false;
-    bool instance_id = false;
-    bool publication_id = false;
-
-    bool any() const {
-        return session_id || instance_id || publication_id;
-    }
-
-    bool all() const {
-        return session_id && instance_id && publication_id;
-    }
-};
-
 struct InspectorToolArguments {
     choc::value::Value arguments;
-    std::string session_id;
-    std::string instance_id;
-    std::string publication_id;
-    InspectorSelectionFields selection_fields;
+    bool has_legacy_selector = false;
 };
 
 bool strict_json_lexemes(std::string_view json) {
@@ -363,42 +325,17 @@ parse_inspector_tool_arguments(const choc::value::ValueView& request,
 
         InspectorToolArguments parsed;
         parsed.arguments = choc::value::Value(arguments);
-        const auto read_selector = [&](std::string_view name, std::string& value, bool& present) {
-            present = arguments.hasObjectMember(std::string(name));
-            if (!present)
-                return true;
-            const auto member = arguments[std::string(name)];
-            if (!member.isString())
-                return false;
-            value = std::string(member.getString());
-            return true;
-        };
-        if (!read_selector("session_id", parsed.session_id, parsed.selection_fields.session_id) ||
-            !read_selector("instance_id", parsed.instance_id,
-                           parsed.selection_fields.instance_id) ||
-            !read_selector("publication_id", parsed.publication_id,
-                           parsed.selection_fields.publication_id) ||
-            (parsed.selection_fields.any() &&
-             (!parsed.selection_fields.all() || !valid_inspector_identity(parsed.session_id) ||
-              !valid_inspector_identity(parsed.instance_id) ||
-              !valid_inspector_identity(parsed.publication_id)))) {
-            error = "Error: session_id, instance_id, and publication_id "
-                    "must be supplied together as exact safe identities";
-            return std::nullopt;
-        }
+        parsed.has_legacy_selector = arguments.hasObjectMember("session_id") ||
+                                     arguments.hasObjectMember("instance_id") ||
+                                     arguments.hasObjectMember("publication_id") ||
+                                     arguments.hasObjectMember("host") ||
+                                     arguments.hasObjectMember("port");
 
         return parsed;
     } catch (...) {
         error = "Error: malformed JSON in inspector tool request";
         return std::nullopt;
     }
-}
-
-std::string inspector_argument_string(const InspectorToolArguments& tool, std::string_view name) {
-    const auto key = std::string(name);
-    if (!tool.arguments.hasObjectMember(key) || !tool.arguments[key].isString())
-        return {};
-    return std::string(tool.arguments[key].getString());
 }
 
 std::string inspector_argument_json(const InspectorToolArguments& tool, std::string_view name) {
@@ -408,66 +345,12 @@ std::string inspector_argument_json(const InspectorToolArguments& tool, std::str
     return choc::json::toString(tool.arguments[key], false);
 }
 
-bool has_inspector_selection(const std::string& session_id, const std::string& instance_id,
-                             const std::string& publication_id) {
-    return !session_id.empty() || !instance_id.empty() || !publication_id.empty();
-}
-
-bool valid_exact_inspector_selection(const std::string& session_id, const std::string& instance_id,
-                                     const std::string& publication_id) {
-    return valid_inspector_identity(session_id) && valid_inspector_identity(instance_id) &&
-           valid_inspector_identity(publication_id);
-}
-
-struct InspectorSelection {
-    std::string session_id;
-    std::string instance_id;
-    std::string publication_id;
-};
-
-std::optional<InspectorSelection>
-resolve_inspector_selection(const fs::path& root, const std::string& session_id = {},
-                            const std::string& instance_id = {},
-                            const std::string& publication_id = {}) {
-    const bool has_explicit_selection =
-        has_inspector_selection(session_id, instance_id, publication_id);
-    if (has_explicit_selection) {
-        if (!valid_exact_inspector_selection(session_id, instance_id, publication_id)) {
-            return std::nullopt;
-        }
-        return InspectorSelection{session_id, instance_id, publication_id};
-    }
-#if PULP_MCP_ENABLE_INSPECTOR_CLIENT
-    auto capabilities = run_inspector_command(root, "Session.getCapabilities");
-    if (!capabilities.succeeded())
-        return std::nullopt;
-    const auto& publication = *capabilities.client.publication;
-    auto discovered_session_id = publication.session_id;
-    auto discovered_instance_id = publication.instance_id;
-    auto discovered_publication_id = publication.publication_id;
-    if (!valid_inspector_identity(discovered_session_id) ||
-        !valid_inspector_identity(discovered_instance_id) ||
-        !valid_inspector_identity(discovered_publication_id))
-        return std::nullopt;
-    return InspectorSelection{std::move(discovered_session_id), std::move(discovered_instance_id),
-                              std::move(discovered_publication_id)};
-#else
-    (void)root;
-    return std::nullopt;
-#endif
-}
-
 #if PULP_MCP_ENABLE_INSPECTOR_CLIENT
 std::string inspector_tool_payload(InspectorCommandResult command) {
     auto payload =
         "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(command.output) + "}]";
     if (command.succeeded()) {
-        const auto& publication = *command.client.publication;
-        payload += ",\"structuredContent\":{\"ok\":true,\"session\":{";
-        payload += "\"session_id\":" + json_string(publication.session_id);
-        payload += ",\"instance_id\":" + json_string(publication.instance_id);
-        payload +=
-            ",\"publication_id\":" + json_string(publication.publication_id) + "},\"result\":";
+        payload += ",\"structuredContent\":{\"ok\":true,\"result\":";
         try {
             (void)choc::json::parse(command.client.response.params_json);
             payload += command.client.response.params_json;
@@ -509,38 +392,11 @@ std::string inspector_error_payload(const std::string& message) {
            json_string(message) + ",\"data\":{}}}}";
 }
 
-#if PULP_MCP_ENABLE_INSPECTOR_CLIENT
-choc::value::Value
-inspector_publication_value(const pulp::inspect::InspectorDiscoveryRecord& record) {
-    auto value = choc::value::createObject("");
-    value.addMember("session_id", choc::value::createString(record.session_id));
-    value.addMember("instance_id", choc::value::createString(record.instance_id));
-    value.addMember("publication_id", choc::value::createString(record.publication_id));
-    value.addMember("plugin_id", choc::value::createString(record.plugin_id));
-    value.addMember("profile",
-                    choc::value::createString(pulp::inspect::profile_id(record.profile)));
-    value.addMember("endpoint", choc::value::createString(record.endpoint));
-    value.addMember("protocol_version", choc::value::createString(record.protocol_version));
-    return value;
-}
-#endif
-
 std::string inspector_metadata_payload(const choc::value::Value& result) {
     const auto json = choc::json::toString(result, false);
     return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(json) +
            "}],\"structuredContent\":{\"ok\":true,\"result\":" + json + "}}";
 }
-
-#if PULP_MCP_ENABLE_INSPECTOR_CLIENT
-std::string inspector_metadata_error_payload(const std::string& code, const std::string& message,
-                                             const std::filesystem::path& runtime_directory) {
-    return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(message) +
-           "}],\"isError\":true,\"structuredContent\":{\"ok\":false,"
-           "\"error\":{\"code\":" +
-           json_string(code) + ",\"message\":" + json_string(message) +
-           ",\"data\":{\"runtime_directory\":" + json_string(runtime_directory.string()) + "}}}}";
-}
-#endif
 
 std::string inspector_profiles_payload() {
     auto profiles = choc::value::createEmptyArray();
@@ -561,48 +417,6 @@ std::string inspector_profiles_payload() {
     result.addMember("schema_version", choc::value::createInt32(1));
     result.addMember("profiles", profiles);
     return inspector_metadata_payload(result);
-}
-
-std::string inspector_list_payload() {
-#if PULP_MCP_ENABLE_INSPECTOR_CLIENT
-    pulp::inspect::InspectorDiscoveryReader discovery;
-    std::string discovery_issue;
-    auto sessions = choc::value::createEmptyArray();
-    for (const auto& record : discovery.list(&discovery_issue))
-        sessions.addArrayElement(inspector_publication_value(record));
-    if (!discovery_issue.empty())
-        return inspector_metadata_error_payload("discovery_unavailable", discovery_issue,
-                                                discovery.runtime_directory());
-    auto result = choc::value::createObject("");
-    result.addMember("schema_version", choc::value::createInt32(1));
-    result.addMember("sessions", sessions);
-    return inspector_metadata_payload(result);
-#else
-    return inspector_component_unavailable_payload();
-#endif
-}
-
-std::string inspector_doctor_payload() {
-#if PULP_MCP_ENABLE_INSPECTOR_CLIENT
-    pulp::inspect::InspectorDiscoveryReader discovery;
-    std::string discovery_issue;
-    const auto records = discovery.list(&discovery_issue);
-    const bool ok = discovery_issue.empty();
-    if (!ok)
-        return inspector_metadata_error_payload("discovery_unavailable", discovery_issue,
-                                                discovery.runtime_directory());
-    auto result = choc::value::createObject("");
-    result.addMember("schema_version", choc::value::createInt32(1));
-    result.addMember("ok", choc::value::createBool(ok));
-    result.addMember("runtime_directory",
-                     choc::value::createString(discovery.runtime_directory().string()));
-    result.addMember("session_count",
-                     choc::value::createInt64(static_cast<std::int64_t>(records.size())));
-    result.addMember("issues", choc::value::createEmptyArray());
-    return inspector_metadata_payload(result);
-#else
-    return inspector_component_unavailable_payload();
-#endif
 }
 
 } // namespace
@@ -699,12 +513,6 @@ std::string pulp_mcp::server::tools_list_json() {
         R"JSON({"name":"pulp_docs_search","description":"Search local docs for a query string","inputSchema":{"type":"object","properties":{"query":{"type":"string","description":"Search query"}}}},)JSON";
     out +=
         R"JSON({"name":"pulp_inspect_profiles","description":"Installed in-process client that lists the stable Development Inspector profiles and their declared capabilities.","inputSchema":{"type":"object","properties":{}}},)JSON";
-    out +=
-        R"JSON({"name":"pulp_inspect_list","description":"Installed in-process client that discovers live owner-private inspector publications and returns their exact session, instance, and non-reusable publication identities.","inputSchema":{"type":"object","properties":{}}},)JSON";
-    out +=
-        R"JSON({"name":"pulp_inspect_capabilities","description":"Installed in-process client that authenticates to one exact inspector publication and returns its available and effective capabilities with structured errors.","inputSchema":{"type":"object","required":["session_id","instance_id","publication_id"],"properties":{"session_id":{"type":"string","description":"Exact session id from pulp_inspect_list"},"instance_id":{"type":"string","description":"Exact instance id from pulp_inspect_list"},"publication_id":{"type":"string","description":"Exact non-reusable publication id from pulp_inspect_list"}}}},)JSON";
-    out +=
-        R"JSON({"name":"pulp_inspect_doctor","description":"Installed in-process client that reports inspector discovery-directory readiness and the current live-publication count.","inputSchema":{"type":"object","properties":{}}},)JSON";
     out +=
         R"JSON({"name":"pulp_inspect_pending_requests","description":"Read the pull-based agent-request queue (.pulp-design-requests.json) for a design project: the not-yet-consumed free-text requests a human raised from the running design's send-to-agent affordance. Returns a JSON array of pending requests, each with id, text, design, screen, editmode_state, screenshot_path, created_at, and consumed. An empty or absent queue returns an empty array, not an error.","inputSchema":{"type":"object","properties":{"project_dir":{"type":"string","description":"Design project directory containing .pulp-design-requests.json (defaults to the enclosing Pulp project root)"}}}},)JSON";
     out +=
@@ -822,46 +630,15 @@ static std::string handle_request_raw(const std::string& json) {
 
         std::string result;
         const auto* inspector_tool = find_inspector_mcp_tool(name);
-        const bool inspector_capabilities_tool = name == "pulp_inspect_capabilities";
-        const bool installed_inspector_tool =
-            inspector_tool != nullptr && name.starts_with("pulp_inspect_");
         std::optional<InspectorToolArguments> inspector_arguments;
-        if (inspector_tool != nullptr || inspector_capabilities_tool) {
+        if (inspector_tool != nullptr) {
             std::string parse_error;
             inspector_arguments = parse_inspector_tool_arguments(request, name, parse_error);
-            if (!inspector_arguments && !installed_inspector_tool && !inspector_capabilities_tool &&
-                find_project_root().empty()) {
-                return json_result(id, "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in "
-                                       "a Pulp project\"}]}");
-            }
             if (!inspector_arguments)
                 return json_result(id, inspector_error_payload(parse_error));
-            const bool uses_canonical_control =
-                name == "pulp_trace_start" || name == "pulp_trace_stop";
-            if (!uses_canonical_control && !inspector_arguments->selection_fields.all()) {
-                if (!installed_inspector_tool && !inspector_capabilities_tool &&
-                    find_project_root().empty()) {
-                    return json_result(id, "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not "
-                                           "in a Pulp project\"}]}");
-                }
-                return json_result(id,
-                                   inspector_error_payload(
-                                       "Error: session_id, instance_id, and publication_id "
-                                       "are required to select one exact inspector publication"));
-            }
         }
         if (name == "pulp_inspect_profiles") {
             result = inspector_profiles_payload();
-        } else if (name == "pulp_inspect_list") {
-            result = inspector_list_payload();
-        } else if (name == "pulp_inspect_doctor") {
-            result = inspector_doctor_payload();
-        } else if (name == "pulp_inspect_capabilities") {
-            auto command = run_inspector_command(
-                {}, std::string(pulp::inspect::methods::kSessionGetCapabilities), "{}",
-                inspector_arguments->session_id, inspector_arguments->instance_id,
-                inspector_arguments->publication_id);
-            result = inspector_tool_payload(std::move(command));
         } else if (name == "pulp_compat")
             result = handle_compat();
         else if (name == "pulp_build")
@@ -1039,10 +816,10 @@ static std::string handle_request_raw(const std::string& json) {
                 inspector_params += "}";
             }
 
-            if (inspector_arguments->selection_fields.any()) {
+            if (inspector_arguments->has_legacy_selector) {
                 result = inspector_error_payload(
                     "Error: canonical trace lifecycle does not accept legacy "
-                    "session_id, instance_id, or publication_id selectors");
+                    "host, port, session_id, instance_id, or publication_id selectors");
             } else {
                 result = inspector_tool_payload(
                     run_control_trace_command(inspector_method, inspector_params));
