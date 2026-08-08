@@ -34,9 +34,12 @@ use std::process::Command;
 
 use crate::error::{CliError, Result};
 
+#[path = "install_control_broker.rs"]
+mod install_control_broker;
 #[path = "install_import_design.rs"]
 mod install_import_design;
 
+use install_control_broker::{refuse_downgrade, InstallerLock as ControlBrokerInstallerLock};
 pub use install_import_design::import_design_basename;
 
 /// Build the release-asset URL for a target. Mirrors the
@@ -624,10 +627,64 @@ pub fn install_control_broker_path_with(
     src: &Path,
     reconcile: impl FnOnce(&Path, &mut dyn FnMut() -> Result<()>) -> Result<()>,
 ) -> Result<ControlBrokerInstall> {
+    install_control_broker_path_with_version_probe(
+        plan,
+        src,
+        reconcile,
+        |candidate| {
+            crate::control_broker_service::control_broker_payload_release_version(
+                candidate,
+                std::time::Duration::from_secs(5),
+            )
+            .map_err(|error| {
+                CliError::Other(format!(
+                    "could not verify staged control broker release [{}]: {error}",
+                    error.code()
+                ))
+            })
+        },
+        |installed| {
+            crate::control_broker_service::installed_control_broker_release_version(
+                installed,
+                std::time::Duration::from_secs(5),
+            )
+            .map_err(|error| {
+                CliError::Other(format!(
+                    "could not verify installed control broker release [{}]: {error}",
+                    error.code()
+                ))
+            })
+        },
+    )
+}
+
+fn install_control_broker_path_with_version_probe(
+    plan: &InstallPlan,
+    src: &Path,
+    reconcile: impl FnOnce(&Path, &mut dyn FnMut() -> Result<()>) -> Result<()>,
+    inspect_candidate_version: impl FnOnce(&Path) -> Result<Option<String>>,
+    inspect_installed_version: impl FnOnce(&Path) -> Result<Option<String>>,
+) -> Result<ControlBrokerInstall> {
     if !cfg!(target_os = "macos") {
         return Ok(ControlBrokerInstall::NotPresent);
     }
     let (dst, existed, backup) = control_broker_install_paths(plan, src)?;
+    let _install_lock = ControlBrokerInstallerLock::acquire(&dst)?;
+    let candidate_version = inspect_candidate_version(src)?.ok_or_else(|| {
+        CliError::Other("staged control broker did not report a release version".to_owned())
+    })?;
+    if candidate_version != plan.version {
+        return Err(CliError::Other(format!(
+            "staged control broker release {candidate_version} does not match installer plan {}",
+            plan.version
+        )));
+    }
+    let installed_version = if existed {
+        inspect_installed_version(&dst)?
+    } else {
+        None
+    };
+    refuse_downgrade(&candidate_version, installed_version.as_deref())?;
     if backup.exists() {
         fs::remove_file(&backup).map_err(|e| {
             CliError::Other(format!(

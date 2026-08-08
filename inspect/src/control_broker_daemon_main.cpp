@@ -4,6 +4,8 @@
 #include <chrono>
 #include <csignal>
 #include <filesystem>
+#include <iostream>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -34,7 +36,14 @@ std::filesystem::path executable_path() {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--version") {
+        std::cout << PULP_CONTROL_SDK_VERSION << '\n';
+        return 0;
+    }
+    if (argc != 1)
+        return 2;
+
     std::signal(SIGINT, request_stop);
     std::signal(SIGTERM, request_stop);
 
