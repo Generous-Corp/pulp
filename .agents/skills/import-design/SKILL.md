@@ -4338,15 +4338,9 @@ PULP_FRESHNESS_BYPASS=1 tools/import-validation/spectr-roundtrip.sh
 tools/scripts/check_workspace_freshness.sh --max-behind 10 && tools/import-validation/spectr-roundtrip.sh
 ```
 
-The Spectr roundtrip launches its standalone with the observe inspector and
-captures via `pulp inspect screenshot`, not macOS `screencapture`, so it works
-from SSH without Screen Recording permission. When validating a feature
-worktree whose CLI is not installed yet, point the harness at that build:
-
-```bash
-PULP_CAPTURE_CLI="$PWD/build/tools/cli/pulp-cpp" \
-  PULP_FRESHNESS_BYPASS=1 tools/import-validation/spectr-roundtrip.sh
-```
+The Spectr roundtrip no longer opens a raw inspector screenshot route. Capture
+the candidate through the canonical control platform, place it at the harness's
+reported output path, and run with `--skip-capture`.
 
 Also verify the **installed SDK** matches your expectations:
 ```bash
@@ -4509,9 +4503,9 @@ reviewing** (hiding the defect it was meant to catch) and a **verdict-less
    dir, changed files, render/log outputs, image-input status} and the prompt in
    [`verifier-prompt.md`](verifier-prompt.md). It checks logs, runs the
    unresolved-token audit (`pulp design lint-adherence`, exact and non-visual),
-   and does root-cause layout probes (`pulp_inspect_dom` /
-   `pulp_inspect_evaluate` — dump the offending element AND its parent so the
-   finding names the *constraint*, not the pixel). It **may not edit**.
+   and does root-cause layout probes through an explicitly granted canonical
+   control capability (dump the offending element AND its parent so the finding
+   names the *constraint*, not the pixel). It **may not edit**.
 
 3. **Verdict contract.** The verifier's entire final message is `done` or
    `needs_work: <root cause>` — never prose. The main agent fixes the named

@@ -14,7 +14,6 @@
 #   PULP_HARNESS_THRESHOLD  similarity threshold for PASS (default 0.85)
 #   PULP_DIR               override pulp checkout path (default /Users/danielraffel/Code/pulp)
 #   SPECTR_DIR             override spectr checkout path (default /Users/danielraffel/Code/spectr)
-#   PULP_CAPTURE_CLI       pulp/pulp-cpp binary with `inspect screenshot` (default: PATH pulp)
 #
 # Exit codes:
 #   0  PASS  — Spectr native render matches reference within tolerance
@@ -30,7 +29,6 @@ REFERENCE="$PULP/planning/screenshots/REFERENCE-spectr-editor-html.png"
 OUT_DIR="$PULP/planning/screenshots"
 OUT="$OUT_DIR/spectr-native-latest.png"
 THRESHOLD="${PULP_HARNESS_THRESHOLD:-0.85}"
-CAPTURE_CLI="${PULP_CAPTURE_CLI:-$(command -v pulp || true)}"
 
 SKIP_IMPORT=0
 SKIP_BUILD=0
@@ -52,7 +50,6 @@ yel()   { printf '\033[33m%s\033[0m\n' "$*"; }
 [[ -f "$REFERENCE" ]] || { red "ERROR: missing reference $REFERENCE — capture via Chrome first"; exit 2; }
 [[ -f "$EDITOR_HTML" ]] || { red "ERROR: missing $EDITOR_HTML"; exit 2; }
 which pulp >/dev/null || { red "ERROR: pulp CLI not in PATH"; exit 2; }
-[[ -x "$CAPTURE_CLI" ]] || { red "ERROR: capture CLI is not executable: $CAPTURE_CLI"; exit 2; }
 which python3 >/dev/null || { red "ERROR: python3 required for diff"; exit 2; }
 
 # Freshness — refuse to validate from a checkout behind origin/main.
@@ -111,71 +108,14 @@ else
   yel "[2/5] Skipped build (--skip-build)"
 fi
 
-# ── [3/5] Launch Spectr directly + verify it's our binary ──────────────────
+# ── [3-4/5] Candidate capture ──────────────────────────────────────────────
 if [[ $SKIP_CAPTURE -eq 0 ]]; then
-  echo "[3/5] Launch Spectr (direct binary, bypass LaunchServices)…"
-  pkill -f "Spectr.app/Contents/MacOS/Spectr" 2>/dev/null || true
-  sleep 0.5
-  BINARY="$SPECTR/build/Spectr.app/Contents/MacOS/Spectr"
-  [[ -x "$BINARY" ]] || { red "ERROR: $BINARY missing or not executable"; exit 2; }
-  PULP_INSPECT_PROFILE=observe "$BINARY" >/tmp/spectr-rt-runtime.log 2>&1 &
-  PID=$!
-  sleep 4
-  if ! kill -0 $PID 2>/dev/null; then
-    red "ERROR: Spectr crashed at launch"
-    tail -30 /tmp/spectr-rt-runtime.log
-    exit 2
-  fi
-  # Verify it's our binary path
-  CMD=$(ps -p $PID -o command= 2>&1 | head -1)
-  if [[ "$CMD" != *"$BINARY"* ]]; then
-    red "ERROR: launched process is not the binary we built"
-    echo "  expected: $BINARY"
-    echo "  running:  $CMD"
-    kill $PID 2>/dev/null || true
-    exit 2
-  fi
-  green "  Spectr running (PID=$PID, path verified)"
-
-  # ── [4/5] Capture window ────────────────────────────────────────────────
-  echo "[4/5] Capture Spectr window in-process…"
-  # Match discovery by PID so another live inspector session cannot be
-  # captured accidentally. This path runs inside Spectr and therefore works
-  # over SSH without Screen Recording or Accessibility permission.
-  IDENTITY=""
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
-    IDENTITY=$("$CAPTURE_CLI" inspect list --json 2>/dev/null | \
-      python3 -c 'import json,sys; p=int(sys.argv[1]); rows=json.load(sys.stdin).get("sessions", []); matches=[r for r in rows if r.get("processId")==p]; print("\t".join((matches[0]["sessionId"], matches[0]["instanceId"], matches[0]["publicationId"]))) if len(matches)==1 else None' "$PID" || true)
-    [[ -n "$IDENTITY" ]] && break
-    sleep 0.25
-  done
-  if [[ -z "$IDENTITY" ]]; then
-    red "ERROR: Spectr did not publish one inspector session for pid=$PID."
-    red "  Ensure it was rebuilt against a Pulp SDK with standalone inspector support."
-    kill $PID 2>/dev/null || true
-    exit 2
-  fi
-  IFS=$'\t' read -r SESSION_ID INSTANCE_ID PUBLICATION_ID <<< "$IDENTITY"
-  if "$CAPTURE_CLI" inspect screenshot --out "$OUT" \
-      --session "$SESSION_ID" --instance "$INSTANCE_ID" \
-      --publication "$PUBLICATION_ID"; then
-    :
-  else
-    status=$?
-    red "ERROR: in-process Spectr capture failed (status=$status)."
-    red "  Status 3 means this standalone host explicitly lacks capture capability."
-    kill $PID 2>/dev/null || true
-    exit 2
-  fi
-  [[ -f "$OUT" ]] || { red "ERROR: screenshot was not written to $OUT"; kill $PID 2>/dev/null; exit 2; }
-  green "  captured to $OUT ($(stat -f %z "$OUT") bytes)"
-  # Leave Spectr running so user can click to test — or kill if env says so
-  if [[ -n "${PULP_HARNESS_KILL_AFTER:-}" ]]; then
-    kill $PID 2>/dev/null || true
-  fi
-else
-  yel "[3-4/5] Skipped launch+capture (--skip-capture)"
+  red "ERROR: automatic inspector screenshot capture was retired."
+  red "  Capture the candidate through the canonical control platform, save it to $OUT,"
+  red "  then rerun with --skip-capture."
+  exit 2
 fi
+yel "[3-4/5] Using externally captured candidate (--skip-capture)"
 
 # ── [5/5] Diff against reference ───────────────────────────────────────────
 echo "[5/5] Diff native render against REFERENCE…"

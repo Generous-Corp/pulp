@@ -1324,17 +1324,10 @@ Remaining limitation:
 
 **Status**: experimental
 
-Authenticated low-level client for an explicitly enabled inspector session.
-Use `pulp run --inspect` (or `--inspect=<profile>`) in a GPU-enabled desktop
-build to activate a standalone; normal `pulp run`, GPU-off/mobile builds, and
-plugin-format launches start no endpoint. The client reads
-owner-private ephemeral discovery records, selects
-an exact non-reusable publication when requested, and proves possession of the
-session credential before sending a request.
-The offline `audit` subcommand is the exception: it ships even when
-`PULP_ENABLE_INSPECTOR=OFF`, never connects to a session, and blocks empty or
-unauditable targets. Artifact and manifest symlinks are rejected rather than
-followed, so an audit cannot escape the directory containing its evidence.
+Read-only metadata and artifact-audit client for Development Inspector. Normal
+launches publish no endpoint. An explicitly enabled session can be discovered
+and its effective capability envelope authenticated, but the shipped command no
+longer exposes generic RPC, mutation, screenshot, host, or port routes.
 
 ```bash
 pulp inspect profiles --json
@@ -1343,180 +1336,26 @@ pulp inspect doctor --json
 pulp inspect list --json
 pulp inspect capabilities --json \
   --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
-pulp inspect --session SESSION_ID --instance INSTANCE_ID \
-  --publication PUBLICATION_ID --command State.getParameters
-pulp inspect set-parameter --id 7 --value 0.75 --json \
-  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
-pulp inspect inject-midi --kind note_on --channel 1 --note 60 --velocity 100 \
-  --duration-ms 250 --json \
-  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
-pulp inspect set-transport --playing true --position-samples 0 --tempo-bpm 120 --json \
-  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
 ```
-
-The named commands are the stable orientation surface:
 
 | Command | Result |
 |---|---|
 | `profiles` | Declared `off`, `observe`, and `develop` capability sets. |
-| `audit ARTIFACT` | Read-only artifact check: canonical control manifest, profile/digest markers, declared capabilities, and known external surfaces. The artifact is never loaded. |
-| `list` | Live publications, including the exact session, instance, and non-reusable publication IDs needed by every operation. |
-| `capabilities` | Authenticated available/effective authority for one exact publication; all three identity options are required. |
+| `audit ARTIFACT` | Read-only artifact check for the canonical manifest, profile/digest markers, declared capabilities, and known external surfaces. The artifact is never loaded. |
+| `list` | Live publications and their exact session, instance, and non-reusable publication IDs. |
+| `capabilities` | Authenticated available/effective capabilities for one exact publication. |
 | `doctor` | Discovery runtime directory, live-session count, and issues. |
-| `screenshot` | Decode and save the selected standalone's in-process whole-window PNG. Missing host capability is an explicit unsupported result (exit 3), never an empty file. |
-| `set-parameter` | One bounded numeric parameter mutation under `state.write`. |
-| `inject-midi` | One bounded note-on/off event under `test.input`. |
-| `set-transport` | One idempotent partial standalone transport update under `test.input`. |
 
-Each supports human output and `--json`; JSON includes `schemaVersion: 1`.
-The installed Rust `pulp` forwards `inspect` to its installed sibling
-`pulp-cpp`, so these commands do not require source-build paths.
+Options are `--json` and, for `capabilities`, the required exact `--session`,
+`--instance`, and `--publication` identity. Raw inspector methods and live
+mutations must use the canonical broker/control platform; there is no legacy
+CLI fallback.
 
-Options:
-
-- `--session ID` - select the exact live session
-- `--instance ID` - disambiguate an exact instance when a session ID is shared
-- `--publication ID` - pin one non-reusable publication generation; requires
-  `--session` and `--instance`
-- `--host HOST` - filter discovery by loopback host
-- `--port PORT` - filter discovery by port; this never bypasses authentication
-- `--command METHOD` - send one inspector command and print the response
-- `--params JSON` - JSON params for `--command`
-- `--output FILE` - write a one-shot command response to a file
-- `--out FILE` - write decoded PNG bytes for `screenshot`
-- `--id`, `--value`, `--normalized` - typed `set-parameter` fields
-- `--kind`, `--channel`, `--note`, `--velocity`, `--duration-ms` - bounded
-  `inject-midi` fields; note-on duration is 1 through 2000 ms
-- `--playing`, `--position-samples`, `--tempo-bpm` - partial `set-transport` fields
-- `--json` - stable JSON for named commands
-
-`audit` is the Phase 1 authoring spelling; it needs only an artifact path and
-does not use live-session options. It exits 0 for `pass`, 1 for `block`, and 2
-for invalid invocation. JSON uses `pulp.control.audit.v1`. A later `pulp
-control audit` command may become the canonical spelling; this command remains
-the no-activation developer preflight. Sidecars are capped at 1 MiB. Directory
-mode rejects absolute or traversing artifact identities and reads each candidate
-executable once; direct-file mode applies the same safe-identity rules and
-requires an exact-named sidecar's target or product identity to match the
-artifact filename. Canonical directory sidecars must also use the manifest
-target as their stem and cannot fall back to a uniquely marker-bearing renamed
-sibling. Plugin-format subtrees never count as standalone evidence. The same
-immutable bytes are used for selection,
-known-surface detection, marker verification, `artifactDigest`, and
-`consentIdentity`.
-
-Typed parameter, MIDI, and transport mutations require the exact three-part
-publication identity and a same-connection controller lease. `inject-midi`
-accepts only note-on/off events on public channels 1–16 with byte-range note
-and velocity values. A note-on requires a bounded duration and the client sends
-the matching note-off on the same connection before releasing its lease; a
-separate note-off is only an individual cleanup event. `set-transport` requires at least one of play state,
-nonnegative sample position, or finite tempo from 20 through 400 BPM. Their
-schema versions are `pulp.inspect.set-parameter.v1`,
-`pulp.inspect.inject-midi.v1`, and `pulp.inspect.set-transport.v1`.
-
-This is not a preset/filesystem or raw-event API. Parameter writes remain under
-`state.write`; transient authoring controls remain under `authoring.tweaks`;
-generic preset/filesystem operations, raw MIDI, and arbitrary scripting remain
-unavailable. Injected notes are released on lease loss, disconnect, or teardown.
-None of these typed commands routes through `Runtime.evaluate`.
-
-The transport is loopback-only, token-authenticated, bounded, and
-capability-enforced. Mutations additionally require the controller lease.
-If a sent request times out or the connection closes while awaiting its
-response, the client reports `{"mayHaveApplied":true}`; a timeout also fences
-the connection. Do not automatically retry that operation: the server may
-already have executed it.
-
-Use the named capture command when the artifact itself is wanted:
-
-```bash
-pulp inspect screenshot --out artifacts/live.png
-# Pin a specific publication when more than one app is live:
-pulp inspect screenshot --out artifacts/live.png \
-  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
-```
-
-The command requests `Capture.screenshot` inside the running app, decodes the
-base64 response, verifies the PNG signature and dimensions, and atomically
-writes the output. It therefore works from an SSH shell without granting the
-shell or `sshd` macOS Screen Recording permission. It prefers the selected
-Pulp standalone's readable back buffer and otherwise uses Pulp's in-process
-`capture_view()` renderer (portable Skia/GPU or a registered provider). It does
-not capture a plugin editor as composited by Logic, REAPER, or another external
-host. An active design viewport requires live back-buffer capture; Pulp does not
-re-layout that live tree at window size and mislabel the result as the visible
-frame. If neither capture route is available, or the view contains an
-OS-composited native overlay, the app does not advertise `capture.image`; the
-command reports `unsupported`, exits 3, and writes nothing. `--json` uses the
-`pulp.inspect.screenshot.v1` schema. Capability publication reflects the initial
-tree. If an in-place UI reload later introduces a native overlay or another
-unsupported requirement, the existing session remains stable but the request
-returns `capture_unavailable` instead of emitting an incomplete frame.
-
-The underlying `Capture.screenshot` response contains a base64 PNG plus the
-selected standalone window's dimensions. Screenshot-capable sessions and
-clients use a bounded 16 MiB message ceiling (large enough for ordinary
-multi-megabyte window PNGs); larger responses fail explicitly.
-`Capture.screenshotNode` remains explicitly unavailable.
-`Runtime.evaluate` is unavailable in normal launches, but an explicitly wired
-and enabled custom fixture can evaluate code; treat that opt-in as remote code
-execution.
-
-Installed `pulp-mcp` uses the same in-process typed client rather than spawning
-the CLI. Its `pulp_inspect_profiles`, `pulp_inspect_list`,
-`pulp_inspect_capabilities`, and `pulp_inspect_doctor` tools provide orientation;
-operational tools require the exact identity returned by `list`. Success
-payloads include that identity, and errors use
-`structuredContent: {ok:false,error:{code,message,data}}`.
-
-### motion
-
-**Status**: experimental
-
-Experimental wrappers around the inspector `Motion.*` protocol. Normal Pulp
-launches do not start this endpoint, and `PULP_MOTION_SERVER` is not
-implemented. The live commands require a Pulp source checkout plus a custom
-fixture that explicitly constructs and wires the inspector server.
-
-```bash
-pulp motion record --view Card --out card-fade.motion.jsonl
-# copy the exact stop command printed by record:
-pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE --publication PUBLICATION
-pulp motion snapshot
-pulp motion list-traces
-pulp motion scrub 30 --session SESSION --instance INSTANCE --publication PUBLICATION
-pulp motion play --session SESSION --instance INSTANCE --publication PUBLICATION
-pulp motion pause --session SESSION --instance INSTANCE --publication PUBLICATION
-pulp motion cost enable --session SESSION --instance INSTANCE --publication PUBLICATION
-pulp motion cost disable --session SESSION --instance INSTANCE --publication PUBLICATION
-```
-
-Options:
-
-- `--port PORT` - inspector port; defaults to owner-private authenticated discovery
-- `--session ID --instance ID --publication ID` - select one exact
-  authenticated publication; all three are required for stop, scrub, play,
-  pause, and cost mutations
-- `--json` - emit JSON where the subcommand supports it
-
-Subcommands:
-
-| Subcommand | Inspector method | Description |
-|------------|------------------|-------------|
-| `record [--view NAME] [--out FILE] [--fps N] [--metrics SPEC]` | `Motion.startTrace` | Resolve one exact publication, start a trace against it, and print the trace id plus a pinned stop command. `--out` names the intended fixture path and prints sink guidance; the CLI does not write JSONL itself. |
-| `stop [--trace-id N] --session ID --instance ID --publication ID` | `Motion.stopTrace` | Release an active trace on the exact publication selected by `record`; the full selector is required. |
-| `snapshot` | `Motion.snapshot` | Print tracing, active-trace, emitted-event, and cost-attribution state. |
-| `list-traces` | `Motion.listTraces` | List inspector-owned trace ids. |
-| `scrub FRAME --session ID --instance ID --publication ID` | `Motion.scrubTo` | Move the exact publication's scrubber playhead to a frame. |
-| `play` / `pause` with exact selection | `Motion.play` / `Motion.pause` | Control fixture playback without rediscovering a replacement process. |
-| `cost enable` / `cost disable` with exact selection | `Motion.enableCost` / `Motion.disableCost` | Toggle the cost-attribution channel for the exact publication. |
-
-See [Motion Observability](../guides/motion-observability.md) for the full
-runtime trace, fixture replay, and cost-attribution workflow.
-`Motion.loadFixture` is intentionally unavailable over an authenticated
-inspector because its server-side path parameter would grant filesystem
-authority. Load replay fixtures inside an explicitly owned test host instead.
+`audit` ships even when `PULP_ENABLE_INSPECTOR=OFF`, never connects to a
+session, and exits 0 for pass, 1 for block, and 2 for invalid invocation. JSON
+uses `pulp.control.audit.v1`. Artifact and manifest symlinks are rejected,
+sidecars are capped at 1 MiB, and direct-file and directory modes apply the same
+safe-identity rules.
 
 ### trace
 

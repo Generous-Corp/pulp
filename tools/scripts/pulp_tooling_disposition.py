@@ -82,7 +82,7 @@ INITIAL_POLICY: dict[str, dict[str, set[str]]] = {
         "candidate-shared-later": {
             "build", "cache", "clean", "coverage", "create", "design",
             "design-debug", "dev", "doctor", "export-tokens", "harness",
-            "import-design", "inspect", "motion", "run", "sdk", "ship",
+            "import-design", "inspect", "run", "sdk", "ship",
             "status", "test", "trace", "upgrade", "validate", "version",
         },
         "pulp-owned": {
@@ -97,7 +97,7 @@ INITIAL_POLICY: dict[str, dict[str, set[str]]] = {
     "claude_commands": {
         "candidate-shared-later": {
             "coverage-diff", "create", "design", "doctor", "import-design",
-            "inspect", "motion", "run", "ship", "status", "test", "trace",
+            "inspect", "run", "ship", "status", "test", "trace",
             "upgrade", "validate", "version",
         },
         "pulp-owned": {
@@ -131,15 +131,10 @@ INITIAL_POLICY: dict[str, dict[str, set[str]]] = {
     "mcp_tools": {
         "candidate-shared-later": {
             "pulp_build", "pulp_compat", "pulp_create", "pulp_docs_check",
-            "pulp_docs_search", "pulp_get_view_tree", "pulp_inspect_dom",
-            "pulp_inspect_evaluate", "pulp_inspect_params",
-            "pulp_inspect_pending_requests", "pulp_inspect_performance",
-            "pulp_inspect_screenshot", "pulp_inspect_set_param",
-            "pulp_motion_disable_cost", "pulp_motion_enable_cost",
-            "pulp_motion_list_traces",
-            "pulp_motion_pause", "pulp_motion_play", "pulp_motion_scrub_to",
-            "pulp_motion_snapshot", "pulp_motion_start_trace",
-            "pulp_motion_stop_trace", "pulp_screenshot", "pulp_simulate_click",
+            "pulp_docs_search", "pulp_get_view_tree",
+            "pulp_inspect_capabilities", "pulp_inspect_doctor",
+            "pulp_inspect_list", "pulp_inspect_pending_requests",
+            "pulp_inspect_profiles", "pulp_screenshot", "pulp_simulate_click",
             "pulp_status", "pulp_test", "pulp_trace_explain",
             "pulp_trace_query", "pulp_trace_snapshot", "pulp_trace_start",
             "pulp_trace_stop", "pulp_validate",

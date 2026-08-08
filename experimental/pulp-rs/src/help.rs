@@ -140,10 +140,6 @@ pub const COMMANDS: &[Entry] = &[
         summary: "Connect to an explicitly hosted inspector fixture",
     },
     Entry {
-        name: "motion",
-        summary: "Agent-facing wrappers around inspector Motion protocol",
-    },
-    Entry {
         name: "trace",
         summary: "Agent-facing wrappers around inspector Trace (Perfetto) protocol",
     },

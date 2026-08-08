@@ -203,31 +203,7 @@ commands), but a new MCP sub-tool still needs its baseline `mcp_only` entry. Dis
 gate-oriented `pulp audio validate compare` (null/spectral diff, nonzero exit): `pulp audio
 compare` is an advisory *judgment*, never a gate.
 
-**The inspector server binds loopback and nothing else — do not "fix" this.**
-`InspectorServer::start` hands `InterprocessConnectionServer` an explicit
-`127.0.0.1:<port>` endpoint. A bare port string means *all interfaces* to that
-general-purpose class (a deliberate capability it tests, via
-`start_socket_server_on_any_interface`), which is the wrong one here: the
-inspector transport mutually authenticates with nonce/HMAC proof backed by an
-owner-private per-session credential, but its protocol can still expose
-high-authority operations. Loopback is a separate, non-negotiable
-defense-in-depth boundary. `pulp inspect --host` is the *client* side and
-stays — it is how you reach a remote machine's loopback through an SSH tunnel.
-`test_inspector_server.cpp`'s `[security]` case pins this: loopback must connect
-(the control) and the host's real IPv4 must be refused.
-
-Normal Pulp standalone and plugin-format launches do **not** construct this
-server. `pulp inspect` is currently an experimental client for an explicitly
-hosted custom/test fixture, and the inspector-proxy MCP tools additionally
-shell through a Pulp source checkout's build-tree CLI. Do not describe either
-surface as an installed-user or ordinary `pulp run` workflow. Keep
-`tools/cli/pulp_cli.cpp`, `cmd_inspect.cpp`,
-`experimental/pulp-rs/src/help.rs`, the slash commands, MCP tool descriptions,
-`docs/reference/cli.md`, and
-`docs/reference/development-inspector-capabilities.md` aligned; the
-`inspector_truth_check.py` mutation gate protects selected documentation and
-client-description claims, including these shipped agent workflows, but does
-not prove runtime construction sites.
+**The shipped `pulp inspect` command is metadata-only.** It exposes profiles, list, capabilities, doctor, and the offline audit surface. Generic `--host`, `--port`, `--command`, `--params`, interactive REPL, typed mutation, and screenshot routes were retired with the legacy authority path. Do not recreate them as fallbacks; live operations belong to the canonical broker/control platform.
 
 **`pulp inspect audit ARTIFACT` is different from every live Inspector
 subcommand.** It is a read-only Phase 1 artifact preflight and must never load,
@@ -249,20 +225,11 @@ plugin-format subtrees from standalone scanning in every traversal. Keep
 the shared Product A client and canonical control-audit namespace land; do not wrap
 the CLI as an MCP side door.
 
-**Inspector-proxy MCP tools use a different, lighter pattern than the
-`mcp_tools.cpp`-handler tools above.** `pulp_motion_*` and `pulp_trace_*` do NOT
-have `mcp_tools.cpp` handlers — they **inline-forward** in `pulp_mcp.cpp`'s
-dispatch (an `else if (name == "pulp_X_*" || …)` block that maps each tool to an
-`inspector_method` + `--params '<args_json>'` and shells `pulp inspect --command`).
-So a new inspector-proxy tool needs only: tool JSON in `tools_list_json()`, the
-inline dispatch block, membership in `test/test_mcp_server.cpp`'s expected list,
-and the `docs/guides/claude-code-plugin.md` table — no handler, no `mcp_tools.*`.
-Parity: a tool whose top-level CLI command already carries a `cli_only` baseline
-entry (e.g. `trace`) needs NO new baseline row; only add an `mcp_only` entry for
-a tool with no CLI peer at all. Client-side CLI verbs with no inspector RPC
-(`trace doctor` / `open` / `fetch`, offline `query --trace`) get **no** MCP tool —
-say so in the plugin-table row and the `cli_only` reason so the asymmetry reads
-as intentional.
+**Legacy inspector and Motion proxy tools are retired.** Do not expose a live
+operation by shelling through `pulp inspect --command` or by adding a generic
+`pulp_inspect_*` / `pulp_motion_*` wrapper. The remaining inspector MCP surface
+is metadata-only; Trace tools and future live operations must use their
+canonical control facade with explicit capability schemas and receipts.
 
 Not every slash command wraps a `pulp` CLI subcommand. A slash command may
 also document a developer-tool *surface* with no CLI backing — e.g.
@@ -375,60 +342,9 @@ When promoting an entry off the `cli_only` list, add the matching
 `pulp_<command>` tool to `tools/mcp/pulp_mcp.cpp` and the parity check
 will auto-detect the new coverage; remove the baseline entry in the same PR.
 
-### Adding an inspector sub-tool (e.g. `pulp_inspect_set_param`)
+### Inspector MCP boundary
 
-Inspector tools are MCP sub-tools of `pulp inspect`, so they live in the
-`mcp_only` baseline (no top-level CLI command of their own) — add the new
-`pulp_inspect_*` name there or the parity check hard-fails. Two gotchas when
-the tool takes arguments:
-
-- **Pass arguments via `pulp inspect --params '<json>'`, not by concatenating
-  the JSON after `--command METHOD`.** The CLI parses `--command` and `--params`
-  as separate flags; a bare `{...}` token is ignored. Read-only tools that take
-  no args sidestep this, so don't copy their dispatch shape for a tool that
-  carries a payload.
-- **Do not wrap inspector error text as media.** Protocol-reserved methods that
-  are not wired yet (for example the screenshot surface waiting on a WindowHost
-  reference) should return ordinary text/error content through MCP until the
-  inspector method returns a real payload.
-- **The scripted-UI runtime inspector IS wired now.** `Runtime.evaluate`,
-  `Runtime.getCapabilities`, `Runtime.interrupt`, and `Console.getMessages`
-  (device-log cursor poll) reach the live JS engine when a host retains the
-  result of `make_script_runtime_evaluator(session.script_inspector())` and
-  passes its borrowed pointer through
-  `DomainHandler::handle_runtime_with_evaluator()` for the exact request.
-  Destroy the evaluator before destroying the scripted-UI session. Evaluate is
-  marshaled onto the engine thread by `ScriptInspectorBridge` — single in-flight,
-  ~2 s timeout, auto-interrupt on hang. The standalone server uses one owned,
-  bounded asynchronous worker so the same authenticated controller connection
-  can deliver `Runtime.interrupt`, and its shutdown fence includes that worker.
-  It is an honest evaluate/inspect console,
-  NOT a step debugger: mainline QuickJS has no breakpoint protocol, so
-  `getCapabilities` reports `canBreak/canStep/canInspectLocals=false`. Cover these
-  in `test_inspector_domains.cpp`. See `docs/reference/scripted-ui-inspector.md`
-  and the `engine` skill's interrupt section.
-- **A read-only inspector tool that describes something the scripted-UI bridge
-  ALSO describes must share one serializer.** `State.getValueChannels` and the
-  bridge's `listValueChannels()` both emit `{name, unit, shape, neutral}` and
-  both call `core/view/value_channel_json` — the bridge's hand-rolled copy was
-  deleted when the inspector gained the method. Two implementations drift the
-  day either side gains a field, and a UI built against one shape then silently
-  mis-reads the other; the same reason `param_json` backs both
-  `getParamMetadata` and `State.getParameters`. Assert the two payloads are
-  byte-identical (and not vacuously equal on two empty results) in
-  `test_inspector_domains.cpp`. Keep its binder guidance complete as shapes
-  land: `meter` → `bindMeter`, `vector` → `bindScope`, and `events` →
-  `bindEvents`.
-- **An inspector-proxy tool that reads an optional processor surface returns the
-  EMPTY value, not an error, when the processor declares none** — e.g.
-  `State.getValueChannels` yields `[]` for a processor that never overrode
-  `value_channels()`, which is most of them. An error there would make callers
-  special-case the common case.
-- **Mutating tools must go through a typed inspector method** (e.g.
-  `State.setParameter`) with validation + gesture wrapping in
-  `StateInspector`/`DomainHandler` — never via `Runtime.evaluate`. Cover the
-  happy path, the unknown-id error, and any normalized/raw mode in
-  `test_inspector_domains.cpp`.
+Only `pulp_inspect_profiles`, `pulp_inspect_list`, `pulp_inspect_capabilities`, `pulp_inspect_doctor`, and the unrelated in-process `pulp_inspect_pending_requests` queue reader remain. Do not add generic inspector RPC, mutation, evaluation, screenshot, audio, DOM, parameter, or Motion wrapper tools. Authorized live operations must use a canonical control capability with an explicit schema and receipt.
 
 ## Modifying a CLI Command
 

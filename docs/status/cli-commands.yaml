@@ -1103,7 +1103,7 @@ commands:
 
   - name: inspect
     status: experimental
-    summary: Installed authenticated client for an explicitly activated Development Inspector. The Rust pulp binary delegates to its sibling pulp-cpp; normal Pulp launches publish no endpoint.
+    summary: Read-only metadata and artifact-audit client for Development Inspector profiles and explicitly activated publications. The Rust pulp binary delegates to its sibling pulp-cpp; raw live calls and mutations are not exposed.
     args:
       - name: --session
         kind: option
@@ -1117,78 +1117,10 @@ commands:
         kind: option
         required: false
         description: Pin one non-reusable publication generation; requires --session and --instance
-      - name: --host
-        kind: option
-        required: false
-        description: Inspector host, defaulting to 127.0.0.1
-      - name: --port
-        kind: option
-        required: false
-        description: Filter owner-private authenticated discovery records by port
-      - name: --command
-        kind: option
-        required: false
-        description: Inspector method to send once before exiting
-      - name: --params
-        kind: option
-        required: false
-        description: JSON params for --command
-      - name: --output
-        kind: option
-        required: false
-        description: File path for a legacy one-shot command response
-      - name: --out
-        kind: option
-        required: false
-        description: Screenshot subcommand output path for decoded PNG bytes
-      - name: --id
-        kind: option
-        required: false
-        description: Numeric parameter ID for set-parameter
-      - name: --value
-        kind: option
-        required: false
-        description: Finite parameter value for set-parameter
-      - name: --normalized
-        kind: flag
-        required: false
-        description: Interpret set-parameter value in normalized 0 through 1 space
-      - name: --kind
-        kind: option
-        required: false
-        description: MIDI kind note_on or note_off for inject-midi
-      - name: --channel
-        kind: option
-        required: false
-        description: Public MIDI channel 1 through 16 for inject-midi
-      - name: --note
-        kind: option
-        required: false
-        description: MIDI note 0 through 127 for inject-midi
-      - name: --velocity
-        kind: option
-        required: false
-        description: MIDI velocity 0 through 127 for inject-midi
-      - name: --duration-ms
-        kind: option
-        required: false
-        description: Required bounded note_on hold from 1 through 2000 milliseconds for inject-midi
-      - name: --playing
-        kind: option
-        required: false
-        description: Boolean standalone play state for set-transport
-      - name: --position-samples
-        kind: option
-        required: false
-        description: Nonnegative standalone sample position for set-transport
-      - name: --tempo-bpm
-        kind: option
-        required: false
-        description: Finite standalone tempo from 20 through 400 BPM for set-transport
       - name: --json
         kind: flag
         required: false
-        description: Emit stable JSON for named commands, including screenshot capture or unsupported status
+        description: Emit stable JSON for read-only commands
     subcommands:
       - name: audit
         summary: Read-only artifact preflight for the canonical control manifest, profile and digest markers, declared capabilities, and known external surfaces; never loads or activates the artifact.
@@ -1209,90 +1141,7 @@ commands:
         summary: Authenticate and report available/effective capabilities for one exact publication
       - name: doctor
         summary: Report discovery runtime-directory readiness and live-session count
-      - name: screenshot
-        summary: Save the selected standalone's deterministic in-process back buffer as validated PNG bytes; unsupported hosts exit 3 without creating an output
-      - name: set-parameter
-        summary: Apply one typed numeric parameter mutation under state.write and a controller lease
-      - name: inject-midi
-        summary: Inject one bounded standalone note; note_on is paired with note_off on the same controller lease
-      - name: set-transport
-        summary: Apply one coherent partial standalone play, position, or tempo update under test.input and a controller lease
     docs: reference/cli.md#inspect
-
-  - name: motion
-    status: experimental
-    summary: Experimental Motion.* clients requiring a custom source-checkout fixture that explicitly constructs the inspector server; normal Pulp launches do not.
-    args:
-      - name: --session
-        kind: option
-        required: false
-        description: Exact authenticated session id; must be paired with --instance
-      - name: --instance
-        kind: option
-        required: false
-        description: Exact authenticated instance id; must be paired with --session
-      - name: --publication
-        kind: option
-        required: false
-        description: Non-reusable publication id; required with --session and --instance for mutations
-      - name: --port
-        kind: option
-        required: false
-        description: Inspector port; defaults to owner-private authenticated discovery
-      - name: --json
-        kind: flag
-        required: false
-        description: Emit JSON for subcommands that support it
-    subcommands:
-      - name: record
-        summary: Start a `Motion.startTrace` session and print the trace id; `--out` names the intended fixture path and prints sink guidance but does not write JSONL itself.
-        args:
-          - name: --view
-            kind: option
-            required: false
-            description: Human-readable trace/view name
-          - name: --out
-            kind: option
-            required: false
-            description: Intended fixture path for sink guidance
-          - name: --fps
-            kind: option
-            required: false
-            description: Target sample rate in frames per second
-          - name: --metrics
-            kind: option
-            required: false
-            description: Metric probe spec; may be repeated
-      - name: stop
-        summary: Stop a previously started trace via `Motion.stopTrace`
-        args:
-          - name: --trace-id
-            kind: option
-            required: false
-            description: Trace id returned by record
-      - name: snapshot
-        summary: Print tracing, active-trace, emitted-event, and cost-attribution state via `Motion.snapshot`
-      - name: list-traces
-        summary: List inspector-owned trace ids via `Motion.listTraces`
-      - name: scrub
-        summary: Move the scrubber playhead to a frame via `Motion.scrubTo`
-        args:
-          - name: frame
-            kind: positional
-            required: true
-            description: Target frame
-      - name: play
-        summary: Resume scrubber playback from the current playhead via `Motion.play`
-      - name: pause
-        summary: Pause scrubber playback via `Motion.pause`
-      - name: cost
-        summary: Toggle the cost-attribution channel via `Motion.enableCost` or `Motion.disableCost`
-        args:
-          - name: mode
-            kind: positional
-            required: true
-            description: enable or disable
-    docs: reference/cli.md#motion
 
   - name: trace
     status: experimental

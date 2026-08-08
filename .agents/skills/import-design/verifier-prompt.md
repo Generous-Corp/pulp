@@ -31,9 +31,9 @@ contamination that hides the very defect a reviewer is meant to catch.
    escaped the token system. This is the exact, non-visual half of verification
    and works even when `image_input` is unavailable.
 3. **Root-cause layout probe (name the constraint, not the pixel).** When a
-   widget is mis-sized or mis-placed, dump the computed layout of the offending
-   element **and its parent** via `pulp_inspect_dom` / `pulp_inspect_evaluate`
-   and state the constraint that produced it (e.g. "parent flex-direction=row +
+   widget is mis-sized or mis-placed and an explicitly granted canonical
+   control capability is available, dump the computed layout of the offending
+   element **and its parent** and state the constraint that produced it (e.g. "parent flex-direction=row +
    justify-content=center with a fixed-width child → the child cannot fill").
    Report the cause, not "the knob looks too small".
 4. **Visual check (only if `image_input == available`).** Read the render
