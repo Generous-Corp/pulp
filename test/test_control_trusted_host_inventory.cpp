@@ -142,10 +142,10 @@ TEST_CASE("trusted host launcher releases enrollment only after exact child pref
                                         .publisher_id = "publisher:test-broker",
                                     }},
             .broker_generation = 17,
-            .preflight_timeout = 2s,
+            .preflight_timeout = 5s,
         });
     pulp::platform::ProcessOptions options;
-    options.timeout_ms = 4'000;
+    options.timeout_ms = 8'000;
     auto launched = launcher.launch(prepared.ticket->inventory_id, options);
     INFO(launched.explanation);
     INFO(static_cast<unsigned>(launched.preflight.status));

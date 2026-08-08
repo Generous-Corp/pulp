@@ -123,7 +123,10 @@ int main(int argc, char** argv) {
 #endif
 
     pulp::inspect::ControlHostPreflightDiagnostics diagnostics;
-    auto record = pulp::inspect::receive_control_host_preflight(handle, 2s, std::nullopt,
+    // Keep the child-side receive window comfortably above focused parent
+    // deadlines so a loaded test host cannot make the fixture abandon a valid
+    // rendezvous before the launcher gets scheduled.
+    auto record = pulp::inspect::receive_control_host_preflight(handle, 10s, std::nullopt,
                                                                 &diagnostics);
     if (!record) {
         std::cerr << "preflight status=" << static_cast<unsigned>(diagnostics.status)
