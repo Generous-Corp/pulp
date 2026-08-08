@@ -11,6 +11,8 @@
 #   PULP_INSTALL_DIR  — install directory (default: ~/.pulp/bin)
 #   PULP_VERSION      — version to install (default: latest)
 #   PULP_NO_MODIFY_PATH — set to 1 to skip shell-profile modification
+#   PULP_ACCEPT_CONTROL_BROKER_CUSTOM_INSTALL_ROOT — set to 1 to allow the
+#     macOS health-only broker LaunchAgent when using a custom install root
 #
 # Scope:
 #   Installs Pulp CLI artifacts only. It does not install Shipyard or the
@@ -46,6 +48,8 @@ for arg in "$@"; do
             echo "  PULP_VERSION       Version to install"
             echo "  PULP_NO_MODIFY_PATH"
             echo "                       Don't modify the shell profile"
+            echo "  PULP_ACCEPT_CONTROL_BROKER_CUSTOM_INSTALL_ROOT"
+            echo "                       Allow macOS broker activation from a custom root"
             echo ""
             echo "Scope:"
             echo "  Installs Pulp CLI artifacts only."
@@ -145,10 +149,46 @@ fi
 mkdir -p "$INSTALL_DIR"
 
 echo "Extracting to $INSTALL_DIR..."
-tar xzf "$TMP_DIR/pulp.tar.gz" -C "$INSTALL_DIR"
+CONTROL_BROKER_STAGE=""
+if tar -tzf "$TMP_DIR/pulp.tar.gz" | grep -qx 'pulp-control-broker'; then
+    mkdir -p "$TMP_DIR/control-broker-stage"
+    tar xzf "$TMP_DIR/pulp.tar.gz" \
+        -C "$TMP_DIR/control-broker-stage" pulp-control-broker
+    CONTROL_BROKER_STAGE="$TMP_DIR/control-broker-stage/pulp-control-broker"
+    # The Rust installer owns the broker binary + LaunchAgent transaction.
+    # Excluding it here prevents a reinstall from overwriting the running
+    # service before its previous binary has been retained for rollback.
+    tar --exclude='pulp-control-broker' \
+        -xzf "$TMP_DIR/pulp.tar.gz" -C "$INSTALL_DIR"
+else
+    tar xzf "$TMP_DIR/pulp.tar.gz" -C "$INSTALL_DIR"
+fi
 chmod +x "$INSTALL_DIR/pulp"
 
-# Verify
+# The broker is deliberately health-only here. The hidden Rust reconciler
+# owns codesign/plist/launchctl validation and rollback; this shell installer
+# never duplicates those security-sensitive operations.
+if [ -n "$CONTROL_BROKER_STAGE" ]; then
+    CONTROL_BROKER_RECONCILE_FAILED=0
+    if [ "${PULP_ACCEPT_CONTROL_BROKER_CUSTOM_INSTALL_ROOT:-0}" = "1" ]; then
+        "$INSTALL_DIR/pulp" __control-broker-reconcile \
+            --broker "$CONTROL_BROKER_STAGE" --accept-custom-root || \
+            CONTROL_BROKER_RECONCILE_FAILED=1
+    else
+        "$INSTALL_DIR/pulp" __control-broker-reconcile \
+            --broker "$CONTROL_BROKER_STAGE" || \
+            CONTROL_BROKER_RECONCILE_FAILED=1
+    fi
+    if [ "$CONTROL_BROKER_RECONCILE_FAILED" = "1" ]; then
+        echo "Error: Pulp CLI installed, but control broker activation failed."
+        echo "Run 'pulp doctor --only Control broker' after correcting the reported error."
+        exit 1
+    fi
+fi
+
+# Verify only after service reconciliation. Running the newly installed CLI
+# earlier would enter the bounded legacy-upgrade recovery path while the fresh
+# installer's broker is still deliberately staged outside the install root.
 INSTALLED_VERSION=$("$INSTALL_DIR/pulp" --version 2>/dev/null || echo "unknown")
 echo "Installed: pulp $INSTALLED_VERSION"
 

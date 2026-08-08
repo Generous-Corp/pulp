@@ -17,9 +17,6 @@ catch_discover_tests(pulp-test-view-bridge
     TEST_PREFIX "lifecycle::"
     PROPERTIES LABELS lifecycle)
 
-# Remote View Protocol loopback tests.
-pulp_add_test_suite(pulp-test-remote-view LIBRARIES pulp::format pulp::runtime)
-
 # Script engine tests (legacy API)
 pulp_add_test_suite(pulp-test-script SOURCES test_script_engine.cpp LIBRARIES pulp::view)
 

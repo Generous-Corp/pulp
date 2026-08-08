@@ -175,6 +175,37 @@ if(NOT _osc_target_found)
         "Add pulp-osc to PULP_SDK_TARGETS in PulpInstallRules.cmake so "
         "find_package(Pulp) consumers can link pulp::osc.")
 endif()
+
+# Plugin control is exposed through the capability-controlled service rather
+# than the retired format-local Remote View session. Keep both the old header
+# and its entry points out of the installed SDK so downstream code cannot
+# silently recreate the parallel authority path.
+set(_remote_view_header
+    "${_prefix}/include/pulp/format/remote_view_session.hpp")
+if(EXISTS "${_remote_view_header}")
+    message(FATAL_ERROR
+        "Retired Remote View session header leaked into the installed SDK: "
+        "${_remote_view_header}")
+endif()
+set(_installed_view_bridge
+    "${_prefix}/include/pulp/format/view_bridge.hpp")
+if(NOT EXISTS "${_installed_view_bridge}")
+    message(FATAL_ERROR
+        "Installed ViewBridge header is missing: ${_installed_view_bridge}")
+endif()
+file(READ "${_installed_view_bridge}" _installed_view_bridge_text)
+foreach(_retired_remote_view_symbol IN ITEMS
+        "RemoteViewSession" "attach_remote_channel" "detach_remote"
+        "ViewRole::Remote")
+    string(FIND "${_installed_view_bridge_text}"
+        "${_retired_remote_view_symbol}" _retired_symbol_index)
+    if(NOT _retired_symbol_index EQUAL -1)
+        message(FATAL_ERROR
+            "Installed ViewBridge exposes retired Remote View entry point: "
+            "${_retired_remote_view_symbol}")
+    endif()
+endforeach()
+
 file(READ "${_pulp_config}" _installed_config_alias_text)
 if(NOT _installed_config_alias_text MATCHES "pulp-osc")
     message(FATAL_ERROR
