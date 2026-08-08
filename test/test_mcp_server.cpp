@@ -1006,9 +1006,6 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         // fetch and offline `query --trace` have no inspector RPC, so no tool).
         "pulp_trace_start",
         "pulp_trace_stop",
-        "pulp_trace_snapshot",
-        "pulp_trace_query",
-        "pulp_trace_explain",
         "pulp_screenshot",
         "pulp_simulate_click",
         "pulp_status",
@@ -1182,7 +1179,6 @@ TEST_CASE("MCP inspector families execute the shared typed client",
     const std::pair<const char*, const char*> cases[] = {
         {"pulp_inspect_dom", "DOM.getDocument"},
         {"pulp_motion_snapshot", "Motion.snapshot"},
-        {"pulp_trace_snapshot", "Trace.snapshot"},
     };
     int id = 61;
     for (const auto& [tool, method] : cases) {
@@ -1249,23 +1245,24 @@ TEST_CASE("MCP capture workflows pin start and require the same stop identity",
 
     const auto trace_start =
         handle_request(tool_call("62", "pulp_trace_start", R"JSON({"categories":["dsp"]})JSON"));
-    require_contains(trace_start, R"JSON("structuredContent":{"ok":true)JSON");
-    CHECK(fixture.saw("Trace.startSession"));
-    require_contains(trace_start, "Exact selection:");
-    require_contains(trace_start, fixture.publication().publication_id);
+    require_contains(trace_start, R"JSON("isError":true)JSON");
+    require_contains(trace_start, R"JSON("code":"control_session_unavailable")JSON");
+    CHECK_FALSE(fixture.saw("Trace.startSession"));
 
     const auto trace_start_without_arguments = handle_request(
         R"JSON({"jsonrpc":"2.0","id":621,"method":"tools/call","params":{"name":"pulp_trace_start"}})JSON");
-    require_contains(trace_start_without_arguments, R"JSON("structuredContent":{"ok":true)JSON");
-    CHECK(fixture.saw("Trace.startSession"));
+    require_contains(trace_start_without_arguments, R"JSON("isError":true)JSON");
+    require_contains(trace_start_without_arguments,
+                     R"JSON("code":"control_session_unavailable")JSON");
+    CHECK_FALSE(fixture.saw("Trace.startSession"));
 
     const auto trace_query = handle_request(
         tool_call("63", "pulp_trace_query", fixture.exact_arguments(R"("sql":"select 1")")));
-    require_contains(trace_query, R"JSON("code":"capability_unavailable")JSON");
+    require_contains(trace_query, "Unknown tool");
 
     const auto trace_explain = handle_request(tool_call(
         "64", "pulp_trace_explain", fixture.exact_arguments(R"("question":"why slow?")")));
-    require_contains(trace_explain, R"JSON("code":"capability_unavailable")JSON");
+    require_contains(trace_explain, "Unknown tool");
 
     const auto exact_motion_start =
         handle_request(tool_call("65", "pulp_motion_start_trace",
@@ -1280,9 +1277,9 @@ TEST_CASE("MCP capture workflows pin start and require the same stop identity",
         handle_request(tool_call("67", "pulp_motion_play", fixture.exact_arguments()));
     CHECK(fixture.saw("Motion.play"));
 
-    const auto unpinned_stop = handle_request(tool_call("68", "pulp_trace_stop"));
-    require_contains(unpinned_stop, R"JSON("isError":true)JSON");
-    require_contains(unpinned_stop, "session_id, instance_id, and publication_id are required");
+    const auto canonical_stop = handle_request(tool_call("68", "pulp_trace_stop"));
+    require_contains(canonical_stop, R"JSON("isError":true)JSON");
+    require_contains(canonical_stop, R"JSON("code":"control_session_unavailable")JSON");
 }
 
 TEST_CASE("MCP operational inspector wrappers require exact selectors",
@@ -1299,7 +1296,6 @@ TEST_CASE("MCP operational inspector wrappers require exact selectors",
              "pulp_inspect_audio",
              "pulp_motion_snapshot",
              "pulp_motion_list_traces",
-             "pulp_trace_snapshot",
          }) {
         INFO("tool=" << tool);
         const auto position = tools.find(std::string(R"JSON("name":")JSON") + tool + "\"");
@@ -1327,7 +1323,6 @@ TEST_CASE("MCP read-only inspector wrappers forward only complete exact selector
         {"pulp_inspect_dom", "DOM.getDocument"},
         {"pulp_motion_snapshot", "Motion.snapshot"},
         {"pulp_motion_list_traces", "Motion.listTraces"},
-        {"pulp_trace_snapshot", "Trace.snapshot"},
     };
     int id = 70;
     for (const auto& [tool, method] : exact_cases) {
@@ -1342,7 +1337,6 @@ TEST_CASE("MCP read-only inspector wrappers forward only complete exact selector
     for (const char* tool : {
              "pulp_inspect_dom",
              "pulp_motion_snapshot",
-             "pulp_trace_snapshot",
          }) {
         INFO("partial selector tool=" << tool);
         const auto response = handle_request(
@@ -1355,7 +1349,6 @@ TEST_CASE("MCP read-only inspector wrappers forward only complete exact selector
     for (const char* tool : {
              "pulp_inspect_dom",
              "pulp_motion_snapshot",
-             "pulp_trace_snapshot",
          }) {
         INFO("omitted selector tool=" << tool);
         const auto response = handle_request(tool_call(std::to_string(id++), tool));
@@ -1386,8 +1379,8 @@ TEST_CASE("MCP inspector wrappers reject malformed selector fields instead of di
     InspectorMcpFixture fixture;
 
     const char* tools[] = {
-        "pulp_inspect_dom",     "pulp_inspect_evaluate", "pulp_inspect_set_param",
-        "pulp_motion_snapshot", "pulp_trace_snapshot",
+        "pulp_inspect_dom", "pulp_inspect_evaluate", "pulp_inspect_set_param",
+        "pulp_motion_snapshot",
     };
     const char* malformed_selectors[] = {
         R"JSON({"session_id":""})JSON",
@@ -1441,7 +1434,6 @@ TEST_CASE("MCP inspector families preserve structured protocol failures",
     for (const char* tool : {
              "pulp_inspect_dom",
              "pulp_motion_snapshot",
-             "pulp_trace_snapshot",
          }) {
         INFO("tool=" << tool);
         const auto response = handle_request(tool_call("64", tool, fixture.exact_arguments()));
@@ -2906,9 +2898,6 @@ TEST_CASE("MCP inspector registry derives methods, capabilities, and description
         {"pulp_motion_disable_cost", methods::kMotionDisableCost},
         {"pulp_trace_start", methods::kTraceStartSession},
         {"pulp_trace_stop", methods::kTraceStopSession},
-        {"pulp_trace_snapshot", methods::kTraceSnapshot},
-        {"pulp_trace_query", methods::kTraceQuery},
-        {"pulp_trace_explain", methods::kTraceExplain},
     });
 
     const auto registry = inspector_mcp_tool_registry();
@@ -3396,27 +3385,18 @@ TEST_CASE("MCP pulp_trace_* tools route to the trace dispatch arm", "[mcp][tools
     TempDir temp;
     ScopedCurrentPath cwd(temp.path);
 
-    const auto no_param_tools = {"pulp_trace_snapshot"};
     int id = 90;
-    for (const char* tool : no_param_tools) {
-        INFO("trace tool (no params): " << tool);
-        auto response = handle_request(tool_call(std::to_string(id++), tool));
-        // Reaching find_project_root() proves the dispatcher recognized the
-        // tool; guards against a tools/list registration with no dispatch arm.
-        require_contains(response, "Error: not in a Pulp project");
-        REQUIRE(response.find("Unknown tool") == std::string::npos);
-    }
 
     auto start =
         handle_request(tool_call(std::to_string(id++), "pulp_trace_start",
                                  R"JSON({"categories":["dsp","render"],"ring_mb":32})JSON"));
-    require_contains(start, "Error: not in a Pulp project");
+    require_contains(start, "control_session_unavailable");
     REQUIRE(start.find("Unknown tool") == std::string::npos);
 
     auto stop = handle_request(
         tool_call(std::to_string(id++), "pulp_trace_stop",
-                  R"JSON({"session_id":"session-a","instance_id":"instance-b"})JSON"));
-    require_contains(stop, "Error: not in a Pulp project");
+                  R"JSON({"session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"})JSON"));
+    require_contains(stop, "does not accept legacy");
     REQUIRE(stop.find("Unknown tool") == std::string::npos);
 
     const auto tools =
@@ -3428,30 +3408,28 @@ TEST_CASE("MCP pulp_trace_* tools route to the trace dispatch arm", "[mcp][tools
     const auto trace_schema = tools.substr(trace_start, trace_stop - trace_start);
     require_contains(trace_schema, R"("minimum":1)");
     require_contains(trace_schema, R"("maximum":512)");
-    require_contains(trace_schema, R"JSON("session_id":{"type":"string")JSON");
-    require_contains(trace_schema, R"JSON("instance_id":{"type":"string")JSON");
-    require_contains(trace_schema, R"JSON("publication_id":{"type":"string")JSON");
+    REQUIRE(trace_schema.find(R"JSON("session_id":{"type":"string")JSON") ==
+            std::string::npos);
+    REQUIRE(trace_schema.find(R"JSON("instance_id":{"type":"string")JSON") ==
+            std::string::npos);
+    REQUIRE(trace_schema.find(R"JSON("publication_id":{"type":"string")JSON") ==
+            std::string::npos);
     REQUIRE(trace_schema.find(R"("out_path")") == std::string::npos);
     const auto trace_stop_schema = tools.substr(
-        trace_stop, tools.find(R"("name":"pulp_trace_snapshot")", trace_stop) - trace_stop);
-    require_contains(trace_stop_schema,
-                     R"JSON("required":["session_id","instance_id","publication_id"])JSON");
+        trace_stop, tools.find(R"("name":"pulp_minos")", trace_stop) - trace_stop);
+    REQUIRE(trace_stop_schema.find(R"JSON("required":[)JSON") == std::string::npos);
 
     auto query = handle_request(tool_call(std::to_string(id++), "pulp_trace_query",
                                           R"JSON({"sql":"select 1","format":"json"})JSON"));
-    require_contains(query, "Error: not in a Pulp project");
-    REQUIRE(query.find("Unknown tool") == std::string::npos);
+    require_contains(query, "Unknown tool");
 
     auto explain = handle_request(tool_call(std::to_string(id++), "pulp_trace_explain",
                                             R"JSON({"question":"why is startup slow?"})JSON"));
-    require_contains(explain, "Error: not in a Pulp project");
-    REQUIRE(explain.find("Unknown tool") == std::string::npos);
+    require_contains(explain, "Unknown tool");
 }
 
-// Code-shape check that the pulp_trace_* MCP tools map to the right Trace.*
-// inspector method names. Source-text assertion mirrors the motion mapping
-// test; the round-trip itself lands at TraceInspector::handle, covered by
-// test_trace_inspector.cpp.
+// Code-shape check that lifecycle tools enter canonical control and removed
+// live trace utilities have no registered mapping.
 TEST_CASE("MCP pulp_trace_* tools map to expected Trace.* methods", "[mcp][tools][trace]") {
     auto src_path = repo_root_path() / "tools" / "mcp" / "pulp_mcp.cpp";
     REQUIRE(std::filesystem::exists(src_path));
@@ -3461,47 +3439,18 @@ TEST_CASE("MCP pulp_trace_* tools map to expected Trace.* methods", "[mcp][tools
     buf << in.rdbuf();
     const std::string src = buf.str();
 
-    const std::pair<const char*, const char*> mappings[] = {
-        {"pulp_trace_start", "Trace.startSession"}, {"pulp_trace_stop", "Trace.stopSession"},
-        {"pulp_trace_snapshot", "Trace.snapshot"},  {"pulp_trace_query", "Trace.query"},
-        {"pulp_trace_explain", "Trace.explain"},
-    };
-    for (const auto& [tool, method] : mappings) {
-        INFO("trace tool=" << tool << " method=" << method);
-        REQUIRE(src.find(tool) != std::string::npos);
-        REQUIRE(src.find(method) != std::string::npos);
+    REQUIRE(src.find("run_control_trace_command") != std::string::npos);
+    for (const char* removed : {"pulp_trace_snapshot", "pulp_trace_query",
+                                "pulp_trace_explain"}) {
+        REQUIRE(src.find(std::string("\"name\":\"") + removed + "\"") == std::string::npos);
     }
 }
 
 TEST_CASE("MCP pulp_trace_* tools carry discoverable input schemas", "[mcp][tools][trace]") {
     auto tools = handle_request(R"JSON({"jsonrpc":"2.0","id":98,"method":"tools/list"})JSON");
 
-    // Explain requires a question in addition to the exact capture selector.
-    {
-        std::string name_key = R"JSON("name":"pulp_trace_explain")JSON";
-        auto pos = tools.find(name_key);
-        REQUIRE(pos != std::string::npos);
-        auto window = tools.substr(pos, 1500);
-        REQUIRE(window.find(R"JSON("description":")JSON") != std::string::npos);
-        auto req_pos = window.find(R"JSON("required":[)JSON");
-        REQUIRE(req_pos != std::string::npos);
-        auto req_end = window.find(']', req_pos);
-        REQUIRE(req_end != std::string::npos);
-        auto required_window = window.substr(req_pos, req_end - req_pos + 1);
-        REQUIRE(required_window.find(R"JSON("question")JSON") != std::string::npos);
-    }
-    for (const char* tool : {"pulp_trace_query", "pulp_trace_explain"}) {
-        const auto position = tools.find(std::string(R"JSON("name":")JSON") + tool + "\"");
-        REQUIRE(position != std::string::npos);
-        const auto schema = tools.substr(position, 1600);
-        require_contains(schema, R"JSON("session_id","instance_id","publication_id")JSON");
-    }
-
     // Every trace tool needs a description + an inputSchema object.
-    const auto all_trace_tools = {
-        "pulp_trace_start", "pulp_trace_stop",    "pulp_trace_snapshot",
-        "pulp_trace_query", "pulp_trace_explain",
-    };
+    const auto all_trace_tools = {"pulp_trace_start", "pulp_trace_stop"};
     for (const char* tool : all_trace_tools) {
         INFO("trace tool: " << tool);
         std::string name_key = std::string(R"JSON("name":")JSON") + tool + R"JSON(")JSON";

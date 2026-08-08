@@ -293,7 +293,7 @@ fn resolve_prefers_pinned_over_path_when_env_unset() {
 }
 
 #[test]
-fn dispatch_doctor_uses_the_authenticated_protocol_connection() {
+fn dispatch_doctor_does_not_use_the_removed_inspector_connection() {
     let t = RecordingTalker::new(vec![
         "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\",\
          \"publicationId\":\"publication-c\",\
@@ -309,56 +309,28 @@ fn dispatch_doctor_uses_the_authenticated_protocol_connection() {
     dispatch(&Sub::Doctor, &flags, &t, &mut buf).unwrap();
     let out = String::from_utf8(buf).unwrap();
     assert!(out.contains("pulp trace doctor"), "{out}");
-    assert!(out.contains("reachable"), "{out}");
-    assert_eq!(
-        &*t.calls.borrow(),
-        &[
-            (1, "Session.getCapabilities".to_owned(), "{}".to_owned()),
-            (1, "Trace.snapshot".to_owned(), "{}".to_owned()),
-        ]
-    );
-    assert_eq!(
-        &*t.selections.borrow(),
-        &[
-            None,
-            Some(crate::cmd::inspector::SessionSelection {
-                session_id: "session-a".to_owned(),
-                instance_id: "instance-b".to_owned(),
-                publication_id: "publication-c".to_owned(),
-            }),
-        ]
-    );
+    assert!(out.contains("UNREACHABLE"), "{out}");
+    assert!(t.calls.borrow().is_empty());
 }
 
 #[test]
-fn dispatch_doctor_upgrades_partial_selection_for_snapshot() {
+fn dispatch_doctor_rejects_removed_publication_selection() {
     let talker = RecordingTalker::new(vec![
         "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\",\
          \"publicationId\":\"publication-c\",\
          \"effective\":[\"session.control\",\"trace.session.control\"]}",
         "{}",
     ]);
-    let mut output = Vec::new();
-    let (sub, flags) = parse(&s(&[
+    let error = parse(&s(&[
         "doctor",
         "--session",
         "session-a",
         "--instance",
         "instance-b",
     ]))
-    .unwrap();
-    dispatch(&sub, &flags, &talker, &mut output).unwrap();
-    let partial = Some(crate::cmd::inspector::SessionSelection {
-        session_id: "session-a".to_owned(),
-        instance_id: "instance-b".to_owned(),
-        publication_id: String::new(),
-    });
-    let exact = Some(crate::cmd::inspector::SessionSelection {
-        session_id: "session-a".to_owned(),
-        instance_id: "instance-b".to_owned(),
-        publication_id: "publication-c".to_owned(),
-    });
-    assert_eq!(&*talker.selections.borrow(), &[partial, exact]);
+    .unwrap_err();
+    assert!(error.to_string().contains("removed"), "{error}");
+    assert!(talker.calls.borrow().is_empty());
 }
 
 #[test]

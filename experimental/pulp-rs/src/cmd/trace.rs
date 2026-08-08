@@ -3,56 +3,26 @@
 //!
 //! # What this module ports
 //!
-//! Every `pulp trace <verb>` subcommand is sugar over one
-//! `pulp-cpp inspect --command Trace.<verb> --params <JSON>` call —
-//! the same shape `pulp motion` uses for `Motion.*`. The MCP wrapper
-//! (`tools/mcp/pulp_mcp.cpp`) uses the same routing pattern for the
-//! `pulp_trace_*` tools; the CLI commands here keep the terminal Trace
-//! surface aligned with the MCP tool surface.
+//! Trace lifecycle commands delegate to the C++ canonical capability-control
+//! client. They never select a legacy Inspector publication or raw port. The
+//! remaining client-side utilities keep their existing offline behavior.
 //!
-//! Subcommands (and the inspector method each one forwards to):
+//! Supported paths:
 //!
 //! | `pulp trace <verb>`                    | Inspector method       |
 //! |----------------------------------------|------------------------|
 //! | `start [--categories …] [--ring-mb N]` | `Trace.startSession`   |
 //! | `stop`                                 | `Trace.stopSession`    |
-//! | `query "<SQL>" [--format …]`           | `Trace.query`          |
 //! | `query "<SQL>" --trace FILE.pftrace`   | `trace_processor` (offline) |
 //! | `fetch`                                | pinned `trace_processor` download |
-//! | `snapshot`                             | `Trace.snapshot`       |
-//! | `explain "<question>"`                 | `Trace.explain`        |
-//! | `slowest-frames` / `xruns` / …         | `Trace.query` (preset) |
-//! | `query --preset <name>`                | `Trace.query` (preset) |
 //!
-//! The L0 preset verbs (`slowest-frames`, `xruns`, `dsp-hotspots`,
-//! `layout-vs-paint`) are deterministic canned queries — each maps 1:1
-//! onto a named trace-stdlib view via a `Trace.query` `preset` param,
-//! so a novice gets a plain table with no SQL and no agent. `explain`
-//! is the L1 one-shot: the inspector loads the investigation protocol
-//! and returns a narrated root cause.
+//! # Why lifecycle delegates to `pulp-cpp inspect`
 //!
-//! # Why we delegate to `pulp-cpp inspect`
+//! The C++ adapter owns the canonical capability-control client. Reusing that
+//! adapter keeps broker authentication and fail-closed behavior in one place.
 //!
-//! The inspector socket uses a 4-byte little-endian length-prefix
-//! frame (`core/events/src/interprocess_connection.cpp`), and the
-//! C++ `pulp inspect --command METHOD --params JSON` path already
-//! speaks it correctly, knows how to auto-discover the port, and
-//! prints the parsed JSON response. Re-implementing length-prefix
-//! framing + port discovery in Rust would duplicate logic that already
-//! lives in the inspect adapter. The shell-out is what the MCP wrapper
-//! does too.
-//!
-//! # Authenticated discovery (off-by-default ergonomics)
-//!
-//! `--session ID --instance ID --publication ID` selects one exact
-//! publication. An explicit
-//! `--port` or `PULP_INSPECTOR_PORT` is an additional discovery filter. The
-//! C++ client performs authenticated ephemeral discovery and the real protocol
-//! connection is the only connection opened. If no session is available it
-//! prints a clear explanation that live capture requires an explicitly owned
-//! source-checkout host which constructs `InspectorServer`, wires
-//! `DomainHandler`, and publishes authenticated discovery. Normal Pulp hosts do
-//! not start this endpoint, and `PULP_TRACE_SERVER` is not implemented.
+//! `start` and `stop` are default-denied when the broker cannot open a trusted,
+//! consented control session. There is intentionally no legacy fallback.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -64,9 +34,6 @@ pub use crate::cmd::trace_dispatch::dispatch;
 pub use crate::cmd::trace_doctor::{
     resolve_trace_processor, TraceProcessorSource, TraceProcessorStatus,
 };
-
-/// Optional explicit discovery filter understood by the wrapper.
-pub const INSPECTOR_PORT_ENV: &str = crate::cmd::inspector::PORT_ENV;
 
 /// Output format for `pulp trace query`. JSON is the default because
 /// it is the easiest for agents to parse; humans reach for `table`.
@@ -148,8 +115,8 @@ pub struct GlobalFlags {
     /// `--json` — emit the raw inspector JSON instead of the
     /// pretty-printed default.
     pub json: bool,
-    /// Optional explicit port. Falls back to `$PULP_INSPECTOR_PORT`;
-    /// zero means authenticated auto-discovery.
+    /// Removed legacy selector fields remain private implementation state only
+    /// so direct callers cannot bypass the parser's fail-closed rejection.
     pub port: Option<u16>,
     /// Exact session identity forwarded as `pulp inspect --session`.
     pub session_id: Option<String>,
@@ -198,8 +165,8 @@ pub struct QueryArgs {
 /// - [`CliError::BadUsage`] when required positional / value
 ///   arguments are missing or malformed.
 pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
-    // Sweep top-level shared flags out first so `--json` / `--port`
-    // work on either side of the verb, exactly like `pulp motion`.
+    // Sweep the one supported global flag out first. Reject removed authority
+    // selectors on either side of the verb.
     let mut globals = GlobalFlags::default();
     let mut rest: Vec<String> = Vec::with_capacity(args.len());
     let mut i = 0;
@@ -207,55 +174,18 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
         let a = &args[i];
         if a == "--json" {
             globals.json = true;
-        } else if a == "--port" {
-            i += 1;
-            let v = args
-                .get(i)
-                .ok_or_else(|| CliError::BadUsage("--port requires a value".to_owned()))?;
-            let port = v
-                .parse::<u16>()
-                .map_err(|_| CliError::BadUsage(format!("--port: invalid u16 value `{v}`")))?;
-            if port == 0 {
-                return Err(CliError::BadUsage(
-                    "--port must be between 1 and 65535".to_owned(),
-                ));
-            }
-            globals.port = Some(port);
-        } else if a == "--session" || a == "--instance" || a == "--publication" {
-            i += 1;
-            let v = args
-                .get(i)
-                .ok_or_else(|| CliError::BadUsage(format!("{a} requires a value")))?;
-            if !crate::cmd::inspector::valid_session_identity(v) {
-                return Err(CliError::BadUsage(format!(
-                    "{a} must contain only ASCII letters, digits, `-`, or `_`"
-                )));
-            }
-            if a == "--session" {
-                globals.session_id = Some(v.clone());
-            } else if a == "--instance" {
-                globals.instance_id = Some(v.clone());
-            } else {
-                globals.publication_id = Some(v.clone());
-            }
+        } else if matches!(
+            a.as_str(),
+            "--port" | "--session" | "--instance" | "--publication"
+        ) {
+            return Err(CliError::BadUsage(format!(
+                "{a} was removed from `pulp trace`; canonical control owns target selection"
+            )));
         } else {
             rest.push(a.clone());
         }
         i += 1;
     }
-    if globals.session_id.is_some() != globals.instance_id.is_some() {
-        return Err(CliError::BadUsage(
-            "--session and --instance must be supplied together".to_owned(),
-        ));
-    }
-    if globals.publication_id.is_some()
-        && (globals.session_id.is_none() || globals.instance_id.is_none())
-    {
-        return Err(CliError::BadUsage(
-            "--publication requires --session and --instance".to_owned(),
-        ));
-    }
-
     let Some(verb) = rest.first() else {
         return Ok((Sub::Help, globals));
     };
@@ -466,12 +396,7 @@ pub fn to_inspector_call(sub: &Sub) -> Option<(&'static str, String)> {
         Sub::Help => None,
         Sub::Start(s) => Some(("Trace.startSession", build_start_params(s))),
         Sub::Stop => Some(("Trace.stopSession", "{}".to_owned())),
-        Sub::Query(q) => Some(("Trace.query", build_query_params(q))),
-        Sub::Snapshot => Some(("Trace.snapshot", "{}".to_owned())),
-        Sub::Explain { question } => Some((
-            "Trace.explain",
-            format!("{{\"question\":\"{}\"}}", escape_json(question)),
-        )),
+        Sub::Query(_) | Sub::Snapshot | Sub::Explain { .. } => None,
         // Doctor and Open are client-side, not a single inspector call —
         // dispatch() runs them before reaching here.
         Sub::Doctor | Sub::Open(_) | Sub::Fetch => None,
@@ -506,27 +431,6 @@ fn build_start_params(s: &StartArgs) -> String {
         buf.push_str(&ring_mb.to_string());
     }
     buf.push('}');
-    buf
-}
-
-/// Build the `Trace.query` params object. Exactly one of `sql` /
-/// `preset` is present (the parser enforces it); `format` is always
-/// emitted so the inspector never has to guess.
-fn build_query_params(q: &QueryArgs) -> String {
-    let mut buf = String::with_capacity(128);
-    buf.push('{');
-    if let Some(ref sql) = q.sql {
-        buf.push_str("\"sql\":\"");
-        buf.push_str(&escape_json(sql));
-        buf.push('"');
-    } else if let Some(ref preset) = q.preset {
-        buf.push_str("\"preset\":\"");
-        buf.push_str(&escape_json(preset));
-        buf.push('"');
-    }
-    buf.push_str(",\"format\":\"");
-    buf.push_str(q.format.as_str());
-    buf.push_str("\"}");
     buf
 }
 
@@ -614,48 +518,17 @@ pub(crate) fn print_help(out: &mut impl Write) -> std::io::Result<()> {
         out,
         "  stop                          Flush + print the .pftrace path (Trace.stopSession)"
     )?;
-    writeln!(out, "  snapshot                      Trace.snapshot")?;
     writeln!(out)?;
-    writeln!(out, "Query verbs:")?;
+    writeln!(out, "Offline analysis:")?;
     writeln!(
         out,
         "  query \"<sql>\" --trace FILE.pftrace        Run SQL offline via trace_processor"
-    )?;
-    writeln!(
-        out,
-        "  query \"<sql>\" [--format json|table|csv]   Reserved live command; currently unavailable"
-    )?;
-    writeln!(
-        out,
-        "  query --preset <name>         Reserved live command; currently unavailable"
-    )?;
-    writeln!(
-        out,
-        "  slowest-frames                Frames over the vsync budget, worst first"
-    )?;
-    writeln!(
-        out,
-        "  xruns                         Audio xrun / deadline-miss events"
-    )?;
-    writeln!(
-        out,
-        "  dsp-hotspots                  Per-node DSP cost, most expensive first"
-    )?;
-    writeln!(
-        out,
-        "  layout-vs-paint               One-row-per-category frame cost split"
-    )?;
-    writeln!(out)?;
-    writeln!(out, "Investigation:")?;
-    writeln!(
-        out,
-        "  explain \"<question>\"          Reserved live command; currently unavailable"
     )?;
     writeln!(out)?;
     writeln!(out, "Readiness:")?;
     writeln!(
         out,
-        "  doctor                        Check inspector + tracing build + trace_processor readiness"
+        "  doctor                        Check offline trace_processor readiness"
     )?;
     writeln!(
         out,
@@ -679,28 +552,11 @@ pub(crate) fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     )?;
     writeln!(
         out,
-        "  --port N                      Filter authenticated discovery by port (or use $PULP_INSPECTOR_PORT)"
+        "Live capture requires a broker-authorized canonical control session."
     )?;
-    writeln!(
-        out,
-        "  --session ID --instance ID --publication ID\n\
-                                        Select one exact authenticated publication\n"
-    )?;
-    writeln!(
-        out,
-        "Live capture requires a custom host owning InspectorServer + DomainHandler."
-    )?;
-    writeln!(out, "After that host publishes discovery:")?;
+    writeln!(out, "After the broker grants trace session control:")?;
     writeln!(out, "  pulp trace start --categories dsp,render")?;
-    writeln!(
-        out,
-        "  pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION"
-    )?;
-    writeln!(
-        out,
-        "  pulp trace explain \"why is my plugin slow to open?\" --session SESSION \
-         --instance INSTANCE --publication PUBLICATION"
-    )?;
+    writeln!(out, "  pulp trace stop")?;
     Ok(())
 }
 

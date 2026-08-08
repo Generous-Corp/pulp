@@ -94,6 +94,17 @@ InspectorMessage invalid_response(std::string explanation, bool may_have_applied
 
 } // namespace
 
+InspectorClientResult request_control_inspector(std::string method, std::string params_json,
+                                                std::chrono::milliseconds timeout) {
+    class DefaultDeniedOpener final : public InspectorControlSessionOpener {
+      public:
+        std::optional<InspectorControlSession> open(std::chrono::milliseconds) override {
+            return std::nullopt;
+        }
+    } opener;
+    return request_control_inspector(opener, std::move(method), std::move(params_json), timeout);
+}
+
 InspectorClientResult request_control_inspector(InspectorControlSessionOpener& opener,
                                                 std::string method, std::string params_json,
                                                 std::chrono::milliseconds timeout) {

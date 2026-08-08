@@ -1296,31 +1296,15 @@ commands:
 
   - name: trace
     status: experimental
-    summary: Experimental source-checkout wrappers for live `Trace.startSession` / `Trace.stopSession` capture plus offline `query --trace` analysis. Live SQL, named presets, and `Trace.explain` are reserved and currently return `capability_unavailable`.
+    summary: Experimental canonical capability-control client for live `Trace.startSession` / `Trace.stopSession` capture plus offline `query --trace` analysis. Lifecycle commands have no legacy Inspector fallback or raw host/port selector.
     args:
-      - name: --session
-        kind: option
-        required: false
-        description: Exact authenticated session id; must be paired with --instance for live commands
-      - name: --instance
-        kind: option
-        required: false
-        description: Exact authenticated instance id; must be paired with --session for live commands
-      - name: --publication
-        kind: option
-        required: false
-        description: Non-reusable publication id; required with --session and --instance for stop
-      - name: --port
-        kind: option
-        required: false
-        description: Optional owner-private authenticated discovery filter; `$PULP_INSPECTOR_PORT` supplies the same explicit filter
       - name: --json
         kind: flag
         required: false
         description: Emit the raw inspector JSON response instead of the pretty form
     subcommands:
       - name: start
-        summary: Begin a `Trace.startSession` recording the selected span categories into an in-process ring.
+        summary: Begin trace capture through the canonical broker-authorized control client.
         args:
           - name: --categories
             kind: option
@@ -1331,45 +1315,24 @@ commands:
             required: false
             description: In-process ring size in mebibytes (default 80; accepted range 1 through 512). The host owns the flushed trace destination.
       - name: stop
-        summary: Flush the session and print the `.pftrace` path via `Trace.stopSession`
+        summary: Flush the broker-authorized trace session and print the `.pftrace` path through canonical control
       - name: query
-        summary: Run SQL offline against a `.pftrace` with `--trace`. The live `Trace.query` path and presets are reserved and currently return `capability_unavailable`.
+        summary: Run SQL offline against a `.pftrace` with `--trace`; live Inspector query authority was removed.
         args:
           - name: sql
             kind: positional
             required: false
-            description: SQL query string (omit when using --preset)
-          - name: --preset
-            kind: option
-            required: false
-            description: Reserved live preset; currently unavailable
+            description: SQL query string
           - name: --trace
             kind: option
-            required: false
+            required: true
             description: Run the SQL offline against a flushed FILE.pftrace via trace_processor instead of the live inspector; returns trace_processor's native table
           - name: --format
             kind: option
             required: false
             description: Reserved for the live path; offline queries return the native table
-      - name: slowest-frames
-        summary: Reserved L0 preset; currently returns `capability_unavailable`
-      - name: xruns
-        summary: Reserved L0 preset; currently returns `capability_unavailable`
-      - name: dsp-hotspots
-        summary: Reserved L0 preset; currently returns `capability_unavailable`
-      - name: layout-vs-paint
-        summary: Reserved L0 preset; currently returns `capability_unavailable`
-      - name: snapshot
-        summary: Print `compiled_in`, process-global `active`, per-publication `trace_control_available`, and optional `last_trace_path` via `Trace.snapshot`
-      - name: explain
-        summary: Reserved live surface; currently returns `capability_unavailable`. Use the trace-analysis skill with a flushed `.pftrace`.
-        args:
-          - name: question
-            kind: positional
-            required: true
-            description: Plain-English question to investigate
       - name: doctor
-        summary: Readiness check. Uses the authenticated `Trace.snapshot` request as the inspector availability check, then combines it with `trace_processor` availability (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`) and the inspector's `compiled_in` / `active` / `trace_control_available` / `last_trace_path` to report `ready_to_capture` and `ready_to_query`. `--json` emits the flat readiness object.
+        summary: Report offline trace_processor readiness without contacting a legacy Inspector publication.
       - name: fetch
         summary: Download + SHA-256-verify the pinned `trace_processor_shell` (Perfetto v57.2) into `$PULP_HOME`, so offline `query --trace` works zero-install. Idempotent; no-op when already present. `--json` emits `{version, platform, path, already_present}`.
       - name: open
