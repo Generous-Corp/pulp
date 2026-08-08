@@ -267,13 +267,14 @@ std::optional<Socket> Socket::accept(std::chrono::milliseconds timeout) {
             return ::fcntl(NATIVE_SOCKET(fd_), F_SETFL, original_flags) == 0;
         };
 #endif
-        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        const auto started = std::chrono::steady_clock::now();
         for (;;) {
-            const auto now = std::chrono::steady_clock::now();
-            if (now >= deadline)
+            const auto elapsed =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - started);
+            if (elapsed >= timeout)
                 break;
-            const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
-                deadline - now);
+            const auto remaining = timeout - elapsed;
             const int wait_ms = static_cast<int>(
                 std::min<std::int64_t>(
                     std::max<std::int64_t>(remaining.count(), 1), INT_MAX));
