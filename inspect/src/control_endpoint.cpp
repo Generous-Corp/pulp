@@ -7,6 +7,8 @@
 #include <pulp/events/interprocess_connection.hpp>
 #include <pulp/runtime/base64.hpp>
 
+#include <choc/text/choc_JSON.h>
+
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
@@ -134,6 +136,7 @@ struct ControlEndpoint::Impl {
     ControlEndpointConfig config;
     ControlHostRouter* host_router = nullptr;
     ControlEndpointEnrollmentContext* enrollment_context = nullptr;
+    ControlBroker* management_broker = nullptr;
     InterprocessConnectionServer server;
     std::atomic<bool> stopping{false};
     std::atomic<std::uint64_t> next_connection_id{1};
@@ -143,9 +146,12 @@ struct ControlEndpoint::Impl {
 
     Impl(ControlService& service_in, ControlAdmissionConsumer consumer,
          ControlEndpointConfig config_in, ControlHostRouter* router,
-         ControlEndpointEnrollmentContext* enrollment)
+         ControlEndpointEnrollmentContext* enrollment, ControlBroker* management)
         : service(service_in), consume_admission(std::move(consumer)), config(std::move(config_in)),
-          host_router(router), enrollment_context(enrollment) {}
+          host_router(router), enrollment_context(enrollment),
+          management_broker(management   ? management
+                            : enrollment ? &enrollment->broker
+                                         : nullptr) {}
 
     bool send(ConnectionState& state, const ControlEnvelope& envelope) {
         const auto encoded = encode_control_envelope(envelope);
@@ -417,6 +423,198 @@ struct ControlEndpoint::Impl {
             close(state);
     }
 
+    void handle_management(ConnectionState& state, const ControlManagementEnvelope& request,
+                           const std::shared_ptr<ConnectionState>& shared_state) {
+        auto reply = [&](std::string status, std::string data = "{}",
+                         std::string explanation = {}) {
+            return send(state, ControlEnvelope{.payload = ControlManagementResult{
+                                                   .request_id = request.request_id,
+                                                   .status_id = std::move(status),
+                                                   .data_json = std::move(data),
+                                                   .explanation = std::move(explanation)}});
+        };
+        if (!management_broker) {
+            (void)reply("unavailable", "{}", "broker management is unavailable");
+            return;
+        }
+        if (request.command == "enroll") {
+            if (state.session || request.params_json != "{}" || !config.authorize_client) {
+                (void)reply("enrollment-denied", "{}", "client enrollment is denied");
+                return;
+            }
+            auto evidence = observe_control_peer(*state.connection, ControlPeerRole::Client);
+            if (!evidence || !config.authorize_client(*evidence)) {
+                (void)reply("enrollment-denied", "{}",
+                            "the local client did not satisfy broker policy");
+                return;
+            }
+            ControlPeerVerifier verifier([](const ControlPeerEvidence&) { return true; });
+            auto peer = verifier.verify(std::move(*evidence));
+            auto bootstrap =
+                peer ? management_broker->issue_bootstrap(*peer) : ControlBootstrapResult{};
+            auto client =
+                bootstrap.ticket
+                    ? management_broker->redeem_bootstrap(bootstrap.ticket->ticket_id,
+                                                          bootstrap.ticket->secret.bytes(), *peer)
+                    : ControlClientResult{};
+            if (!client.client) {
+                (void)reply("enrollment-denied", "{}", "the broker rejected client identity");
+                return;
+            }
+            std::weak_ptr<ConnectionState> weak_state = shared_state;
+            auto session = service.open_session(
+                *peer, client.client->client_id,
+                [weak_state](const ControlProgressEnvelope& progress) {
+                    const auto locked = weak_state.lock();
+                    if (!locked || !locked->connection->is_connected())
+                        return false;
+                    const auto encoded =
+                        encode_control_envelope(ControlEnvelope{.payload = progress});
+                    return !encoded.empty() && locked->connection->send_message(encoded);
+                });
+            if (!session.is_open()) {
+                (void)management_broker->disconnect_client(client.client->client_id, *peer,
+                                                           "enrollment-rollback");
+                (void)reply("enrollment-denied", "{}", "the broker could not open a session");
+                return;
+            }
+            const auto id = client.client->client_id.value;
+            state.enrolled_peer = *peer;
+            state.session.emplace(std::move(session));
+            auto data = choc::value::createObject("");
+            data.addMember("client_id", choc::value::createString(id));
+            data.addMember("schema", choc::value::createString("pulp.control.enrollment.v1"));
+            if (!reply("accepted", choc::json::toString(data, false)))
+                close(state);
+            return;
+        }
+        if (!state.session) {
+            (void)reply("session-required", "{}", "management requires an enrolled client");
+            return;
+        }
+        if (request.command == "instances") {
+            if (request.params_json != "{}") {
+                (void)reply("invalid-request", "{}", "instances accepts no parameters");
+                return;
+            }
+            auto instances = choc::value::createEmptyArray();
+            for (const auto& registration : management_broker->registrations()) {
+                auto item = choc::value::createObject("");
+                item.addMember("artifact_digest",
+                               choc::value::createString(registration.artifact_digest));
+                auto capabilities = choc::value::createEmptyArray();
+                for (const auto capability : registration.capabilities)
+                    capabilities.addArrayElement(
+                        choc::value::createString(capability_contract_id(capability)));
+                item.addMember("capabilities", capabilities);
+                item.addMember("instance_id", choc::value::createString(registration.instance_id));
+                item.addMember("manifest_digest",
+                               choc::value::createString(registration.manifest_digest));
+                item.addMember("plugin_id", choc::value::createString(registration.plugin_id));
+                item.addMember("profile",
+                               choc::value::createString(control_profile_id(registration.profile)));
+                item.addMember("publication_id",
+                               choc::value::createString(registration.publication_id));
+                item.addMember("registration_id",
+                               choc::value::createString(registration.registration_id.value));
+                item.addMember("session_id", choc::value::createString(registration.session_id));
+                instances.addArrayElement(item);
+            }
+            auto data = choc::value::createObject("");
+            data.addMember("instances", instances);
+            data.addMember("schema", choc::value::createString("pulp.control.instances.v1"));
+            (void)reply("completed", choc::json::toString(data, false));
+            return;
+        }
+        choc::value::Value params;
+        try {
+            params = choc::json::parse(request.params_json);
+        } catch (...) {
+            (void)reply("invalid-request", "{}", "management parameters are invalid JSON");
+            return;
+        }
+        if (!params.isObject()) {
+            (void)reply("invalid-request", "{}", "management parameters must be an object");
+            return;
+        }
+        if (request.command == "revoke") {
+            if (!params.hasObjectMember("grant_id") || !params["grant_id"].isString()) {
+                (void)reply("invalid-request", "{}", "revoke requires grant_id");
+                return;
+            }
+            const ControlGrantId grant_id{std::string(params["grant_id"].getString())};
+            const auto grant = management_broker->grant(grant_id);
+            if (!grant || grant->client_id != state.session->client_id()) {
+                (void)reply("not-found", "{}", "grant is unavailable to this client");
+                return;
+            }
+            const auto status = management_broker->revoke_grant(grant_id, "cli-revoke");
+            auto data = choc::value::createObject("");
+            data.addMember("grant_id", choc::value::createString(grant_id.value));
+            data.addMember("schema", choc::value::createString("pulp.control.revoke.v1"));
+            (void)reply(std::string(control_grant_status_id(status)),
+                        choc::json::toString(data, false));
+            return;
+        }
+        if (request.command == "grant-request") {
+            if (!params.hasObjectMember("instance_id") || !params["instance_id"].isString() ||
+                !params.hasObjectMember("profile") || !params["profile"].isString()) {
+                (void)reply("invalid-request", "{}",
+                            "grant-request requires instance_id and profile");
+                return;
+            }
+            const auto instance_id = std::string(params["instance_id"].getString());
+            const auto profile_id_value = std::string(params["profile"].getString());
+            std::vector<ControlRegistration> matches;
+            for (const auto& registration : management_broker->registrations())
+                if (registration.instance_id == instance_id)
+                    matches.push_back(registration);
+            if (matches.size() != 1) {
+                (void)reply(matches.empty() ? "not-found" : "ambiguous-instance", "{}",
+                            matches.empty() ? "the exact instance is not live"
+                                            : "the instance selector is ambiguous");
+                return;
+            }
+            const auto profile = profile_id_value == "inspect-readonly"
+                                     ? std::optional{InspectorProfile::Observe}
+                                     : profile_from_id(profile_id_value);
+            if (!profile || *profile == InspectorProfile::Off ||
+                *profile == InspectorProfile::Custom) {
+                (void)reply("invalid-request", "{}", "the grant profile is unknown");
+                return;
+            }
+            ControlGrantRequest grant_request{.client_id = state.session->client_id(),
+                                              .registration_id = matches.front().registration_id};
+            for (const auto capability : profile_capabilities(*profile))
+                if (std::ranges::find(matches.front().capabilities, capability) !=
+                    matches.front().capabilities.end())
+                    grant_request.capabilities.push_back(capability);
+            if (grant_request.capabilities.empty()) {
+                (void)reply("capability-unavailable", "{}",
+                            "the instance exposes none of the requested profile");
+                return;
+            }
+            const auto consent = config.decide_consent
+                                     ? config.decide_consent(state.session->peer(), grant_request)
+                                     : ControlConsentDecision{};
+            const auto issued =
+                management_broker->issue_grant(state.session->peer(), grant_request, consent);
+            auto data = choc::value::createObject("");
+            if (issued.grant) {
+                data.addMember("grant_id", choc::value::createString(issued.grant->grant_id.value));
+                data.addMember("instance_id", choc::value::createString(issued.grant->instance_id));
+            }
+            data.addMember("schema", choc::value::createString("pulp.control.grant.v1"));
+            (void)reply(std::string(control_grant_status_id(issued.status)),
+                        choc::json::toString(data, false),
+                        issued.status == ControlGrantStatus::ConsentRequired
+                            ? "broker-owned consent is required"
+                            : std::string{});
+            return;
+        }
+        (void)reply("invalid-request", "{}", "unsupported management command");
+    }
+
     void handle_artifact_read(ConnectionState& state, const ControlArtifactReadEnvelope& request) {
         if (!state.session) {
             send_error(state, request.request_id, "session-required",
@@ -479,6 +677,9 @@ struct ControlEndpoint::Impl {
             handle_open(state, *open, shared_state);
         } else if (const auto* open = std::get_if<ControlHostOpenEnvelope>(&envelope->payload)) {
             handle_host_open(state, *open, shared_state);
+        } else if (const auto* management =
+                       std::get_if<ControlManagementEnvelope>(&envelope->payload)) {
+            handle_management(state, *management, shared_state);
         } else if (state.host_registration) {
             if (!host_router ||
                 !host_router->receive(*state.host_registration, state.id, *envelope))
@@ -658,9 +859,10 @@ struct ControlEndpoint::Impl {
 ControlEndpoint::ControlEndpoint(ControlService& service,
                                  ControlAdmissionConsumer consume_admission,
                                  ControlEndpointConfig config, ControlHostRouter* host_router,
-                                 ControlEndpointEnrollmentContext* enrollment_context)
+                                 ControlEndpointEnrollmentContext* enrollment_context,
+                                 ControlBroker* management_broker)
     : impl_(std::make_unique<Impl>(service, std::move(consume_admission), std::move(config),
-                                   host_router, enrollment_context)) {}
+                                   host_router, enrollment_context, management_broker)) {}
 
 ControlEndpoint::~ControlEndpoint() {
     stop();

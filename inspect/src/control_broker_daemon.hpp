@@ -11,6 +11,7 @@ struct ControlBrokerDaemonConfig {
     std::filesystem::path runtime_root;
     std::filesystem::path state_root;
     std::string sdk_version;
+    std::filesystem::path executable_path;
     std::uint64_t process_generation = 0;
 };
 

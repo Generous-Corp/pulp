@@ -85,6 +85,9 @@ int cmd_inspect(const std::vector<std::string>& args) {
         }
     }
 
+    std::cerr << "Warning: `pulp inspect` is a compatibility facade; use `pulp control "
+              << (verb == "audit" ? "audit" : "status") << "` for canonical control.\n";
+
     if (verb == "audit") {
         std::filesystem::path artifact;
         for (std::size_t index = first_option; index < args.size(); ++index) {

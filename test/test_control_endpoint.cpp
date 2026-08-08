@@ -8,6 +8,8 @@
 
 #include "support/thread_progress.hpp"
 
+#include <choc/text/choc_JSON.h>
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -63,6 +65,11 @@ struct ReceivedEnvelope {
     bool wait() {
         std::unique_lock lock(mutex);
         return ready.wait_for(lock, 2s, [&] { return envelope.has_value(); });
+    }
+
+    void clear() {
+        std::lock_guard lock(mutex);
+        envelope.reset();
     }
 };
 
@@ -726,6 +733,93 @@ TEST_CASE("control endpoint serializes one-time admission consumption",
 
     first.disconnect();
     second.disconnect();
+    endpoint.stop();
+#else
+    SUCCEED("the authenticated control endpoint is currently macOS-only");
+#endif
+}
+
+TEST_CASE("control endpoint enrolls an authenticated local client and returns broker inventory",
+          "[inspect][control][carrier][management]") {
+#ifdef __APPLE__
+    EndpointDirectory directory;
+    ControlBroker broker;
+    const auto host_peer = mint_verified(
+        observe_current_process(directory.path / "m.sock", ControlPeerRole::StandaloneHost));
+    ControlManifest manifest;
+    manifest.profile = ControlBuildProfile::DeveloperLocal;
+    manifest.target = "Fixture";
+    manifest.product_name = "Fixture";
+    manifest.bundle_id = "dev.pulp.fixture";
+    manifest.build_id = "build:0123456789abcdef0123456789abcdef";
+    manifest.endpoint_included = true;
+    manifest.capabilities = {InspectorCapability::SessionDescribe, InspectorCapability::StateRead};
+    const auto registered = broker.register_instance(
+        host_peer,
+        ControlRegistrationRequest{ControlHostTier::Standalone, "session-a", "instance-a",
+                                   "publication-a", std::move(manifest), std::string(64, 'a')});
+    REQUIRE(registered.registration.has_value());
+    ControlService service{broker};
+    ControlEndpoint endpoint{
+        service,
+        [](std::string_view) -> std::optional<ControlConnectionAdmission> { return std::nullopt; },
+        {
+            .endpoint_path = directory.socket,
+            .sdk_version = "0.791.0-test",
+            .broker_id = broker.broker_id().value,
+            .process_generation = 42,
+            .authorize_client =
+                [](const ControlPeerEvidence& peer) {
+                    return peer.role == ControlPeerRole::Client;
+                },
+        },
+        nullptr,
+        nullptr,
+        &broker};
+    REQUIRE(endpoint.start());
+
+    ReceivedEnvelope received;
+    InterprocessConnection client;
+    client.set_on_message(
+        [&](const void* data, std::size_t size) { received.receive(data, size); });
+    REQUIRE(client.connect(directory.socket.string(), IpcTransport::LocalSocket, 2s));
+    REQUIRE(client.send_message(encode_control_envelope(
+        ControlEnvelope{.payload = ControlManagementEnvelope{.request_id = "management-enroll",
+                                                             .command = "enroll"}})));
+    REQUIRE(received.wait());
+    const auto* enrolled = std::get_if<ControlManagementResult>(&received.envelope->payload);
+    REQUIRE(enrolled != nullptr);
+    CHECK(enrolled->request_id == "management-enroll");
+    CHECK(enrolled->status_id == "accepted");
+
+    received.clear();
+    REQUIRE(client.send_message(encode_control_envelope(
+        ControlEnvelope{.payload = ControlManagementEnvelope{.request_id = "management-instances",
+                                                             .command = "instances"}})));
+    REQUIRE(received.wait());
+    const auto* inventory = std::get_if<ControlManagementResult>(&received.envelope->payload);
+    REQUIRE(inventory != nullptr);
+    CHECK(inventory->request_id == "management-instances");
+    CHECK(inventory->status_id == "completed");
+    const auto inventory_data = choc::json::parse(inventory->data_json);
+    REQUIRE(inventory_data.isObject());
+    CHECK(inventory_data["schema"].getString() == "pulp.control.instances.v1");
+    CHECK(inventory_data["instances"].size() == 1);
+    CHECK(inventory_data["instances"][0]["instance_id"].getString() == "instance-a");
+
+    received.clear();
+    REQUIRE(client.send_message(encode_control_envelope(ControlEnvelope{
+        .payload = ControlManagementEnvelope{
+            .request_id = "management-grant",
+            .command = "grant-request",
+            .params_json = R"({"instance_id":"instance-a","profile":"inspect-readonly"})"}})));
+    REQUIRE(received.wait());
+    const auto* grant = std::get_if<ControlManagementResult>(&received.envelope->payload);
+    REQUIRE(grant != nullptr);
+    CHECK(grant->request_id == "management-grant");
+    CHECK(grant->status_id == "consent-required");
+
+    client.disconnect();
     endpoint.stop();
 #else
     SUCCEED("the authenticated control endpoint is currently macOS-only");

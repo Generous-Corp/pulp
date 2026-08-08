@@ -239,11 +239,15 @@ class ControlIdentityRegistry {
                    const VerifiedControlPeerIdentity& peer);
     bool unregister_instance(const ControlRegistrationId& registration_id,
                              const VerifiedControlPeerIdentity& peer);
-    std::optional<ControlRegistration> registration(std::string_view session_id,
-                                                    std::string_view instance_id,
-                                                    std::string_view publication_id) const;
-    std::optional<ControlRegistration>
-    registration(const ControlRegistrationId& registration_id) const;
+    std::optional<ControlRegistration> registration(
+        std::string_view session_id,
+        std::string_view instance_id,
+        std::string_view publication_id) const;
+    std::optional<ControlRegistration> registration(
+        const ControlRegistrationId& registration_id) const;
+    /// Snapshot of every currently-live exact registration. Human labels are
+    /// metadata only; callers must select by instance_id and reject ambiguity.
+    std::vector<ControlRegistration> registrations() const;
 
     void sweep_expired();
 

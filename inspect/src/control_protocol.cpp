@@ -372,6 +372,7 @@ bool control_envelope_allowed(const ControlEnvelope& envelope, ControlEnvelopeDi
                                  std::is_same_v<T, ControlRequestEnvelope> ||
                                  std::is_same_v<T, ControlCancelEnvelope> ||
                                  std::is_same_v<T, ControlSessionOpenEnvelope> ||
+                                 std::is_same_v<T, ControlManagementEnvelope> ||
                                  std::is_same_v<T, ControlArtifactReadEnvelope>) {
                 return direction == ControlEnvelopeDirection::ClientToBroker;
             } else {

@@ -114,6 +114,7 @@ add_executable(pulp-cli
     kit_commands.cpp
     kit_manifest_validation.cpp
     cmd_pr.cpp
+    cmd_control.cpp
     ${_pulp_inspect_command_source}
     ${_pulp_tweaks_command_source}
     design_binding.cpp

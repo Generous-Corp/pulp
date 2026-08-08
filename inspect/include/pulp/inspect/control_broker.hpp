@@ -134,6 +134,7 @@ class ControlBroker {
     std::optional<ControlClientIdentity> client(const ControlClientId& client_id) const;
     std::optional<ControlRegistration>
     registration(const ControlRegistrationId& registration_id) const;
+    std::vector<ControlRegistration> registrations() const;
     std::optional<ControlGrant> grant(const ControlGrantId& grant_id);
 
     void sweep_expired();

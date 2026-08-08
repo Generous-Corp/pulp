@@ -65,6 +65,12 @@ class ControlService {
         bool is_open() const {
             return broker_ != nullptr;
         }
+        const ControlClientId& client_id() const {
+            return client_id_;
+        }
+        const VerifiedControlPeerIdentity& peer() const {
+            return peer_;
+        }
 
         ControlServiceResult dispatch(std::string_view encoded_envelope);
         /// Reads only artifacts produced by this connection-bound client ID.

@@ -1,6 +1,7 @@
 #include "control_broker_daemon.hpp"
 
 #include "control_private_store.hpp"
+#include "control_static_code_identity.hpp"
 
 #include <pulp/events/interprocess_connection.hpp>
 #include <pulp/inspect/control_broker.hpp>
@@ -10,6 +11,7 @@
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/inter_process_lock.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <optional>
@@ -264,6 +266,27 @@ struct ControlBrokerDaemon::Impl {
         }
         service = std::make_unique<ControlService>(*broker);
 
+        std::optional<ControlTrustedHostStaticExpectation> daemon_identity;
+        if (!config.executable_path.empty())
+            daemon_identity = detail::inspect_static_code_identity(config.executable_path);
+        if (!config.executable_path.empty() && !daemon_identity) {
+            reset();
+            return false;
+        }
+        std::vector<ControlTrustedHostStaticExpectation> trusted_clients;
+        if (daemon_identity) {
+            const auto broker_directory = config.executable_path.parent_path();
+            for (const auto& candidate :
+                 {broker_directory / "pulp", broker_directory / "pulp-cpp",
+                  broker_directory.parent_path() / "pulp",
+                  broker_directory.parent_path() / "tools" / "cli" / "pulp-cpp",
+                  broker_directory.parent_path().parent_path() / "bin" / "pulp",
+                  broker_directory.parent_path().parent_path() / "bin" / "pulp-cpp"}) {
+                if (const auto identity = detail::inspect_static_code_identity(candidate))
+                    trusted_clients.push_back(*identity);
+            }
+        }
+
         const auto generation = config.process_generation != 0 ? config.process_generation
                                                                : random_process_generation();
         if (generation == 0) {
@@ -280,7 +303,23 @@ struct ControlBrokerDaemon::Impl {
                 .sdk_version = config.sdk_version,
                 .broker_id = broker->broker_id().value,
                 .process_generation = generation,
-            });
+                .authorize_client =
+                    daemon_identity
+                        ? std::function<bool(
+                              const ControlPeerEvidence&)>{[trusted_clients =
+                                                                std::move(trusted_clients)](
+                                                               const ControlPeerEvidence& peer) {
+                              return peer.role == ControlPeerRole::Client &&
+                                     std::ranges::any_of(
+                                         trusted_clients, [&](const auto& expected) {
+                                             return peer.executable_identity ==
+                                                        expected.executable_identity &&
+                                                    peer.publisher_id == expected.publisher_id;
+                                         });
+                          }}
+                        : std::function<bool(const ControlPeerEvidence&)>{},
+            },
+            nullptr, nullptr, broker.get());
         if (!carrier->start()) {
             reset();
             return false;

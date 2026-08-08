@@ -12,6 +12,7 @@
     "ci-local": "Long-running orchestrator; agents drive `shipyard pr` instead",
     "clean": "Trivial via Bash (rm -rf build/); no MCP gain",
     "config": "Trivial via Bash on ~/.pulp/config.toml",
+    "control": "Canonical authenticated CLI adapter; the equivalent finite MCP family lands in the dedicated MCP adapter slice",
     "coverage": "Wraps tools/scripts/local_diff_cover.sh; agents call the script directly",
     "design": "AI design tool \u2014 interactive surface, not RPC-shaped",
     "design-debug": "Headless debug runner; not RPC-shaped",

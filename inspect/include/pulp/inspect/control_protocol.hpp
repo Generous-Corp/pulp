@@ -130,6 +130,27 @@ struct ControlSessionOpenResult {
                            const ControlSessionOpenResult&) = default;
 };
 
+/// Finite broker-management family used by installed control adapters. The
+/// command is one of enroll, instances, grant-request, or revoke; params and
+/// data are bounded canonical JSON objects whose per-command shape is checked
+/// by the endpoint/client API.
+struct ControlManagementEnvelope {
+    std::string request_id;
+    std::string command;
+    std::string params_json = "{}";
+    friend bool operator==(const ControlManagementEnvelope&,
+                           const ControlManagementEnvelope&) = default;
+};
+
+struct ControlManagementResult {
+    std::string request_id;
+    std::string status_id;
+    std::string data_json = "{}";
+    std::string explanation;
+    friend bool operator==(const ControlManagementResult&,
+                           const ControlManagementResult&) = default;
+};
+
 struct ControlHostOpenEnvelope {
     std::string request_id;
     std::string admission_id;
@@ -356,7 +377,8 @@ struct ControlLegacyInspectorError {
 using ControlEnvelopePayload =
     std::variant<ControlNegotiationOffer, ControlNegotiationResult, ControlRequestEnvelope,
                  ControlCancelEnvelope, ControlProgressEnvelope, ControlReceiptEnvelope,
-                 ControlSessionOpenEnvelope, ControlSessionOpenResult, ControlArtifactReadEnvelope,
+                 ControlSessionOpenEnvelope, ControlSessionOpenResult, ControlManagementEnvelope,
+                 ControlManagementResult, ControlArtifactReadEnvelope,
                  ControlArtifactReadResponseEnvelope, ControlHealthEnvelope, ControlHealthResult,
                  ControlErrorEnvelope, ControlHostOpenEnvelope, ControlHostOpenResult,
                  ControlHostPreflightChallengeEnvelope, ControlHostPreflightResponseEnvelope,
