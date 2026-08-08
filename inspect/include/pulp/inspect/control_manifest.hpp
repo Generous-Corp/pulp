@@ -88,6 +88,19 @@ struct ControlManifestValidation {
     std::string error;
 };
 
+struct ControlArtifactExpectation {
+    std::string profile_id;
+    std::string manifest_digest;
+    bool endpoint_included = false;
+    bool runtime_eval_included = false;
+    std::vector<std::string> capability_ids;
+};
+
+struct ControlArtifactValidation {
+    bool valid = false;
+    std::string error;
+};
+
 /// A frozen Product A operation contract. Schema bodies are canonical JSON
 /// Schema, not projections of the legacy Inspector transport.
 struct ControlArtifactResultBinding {
@@ -152,6 +165,12 @@ std::string serialize_control_manifest(const ControlManifest& manifest);
 std::string control_manifest_digest(const ControlManifest& manifest);
 std::string control_consent_identity(std::string_view manifest_digest,
                                      std::string_view artifact_digest);
+
+/// Validates the immutable markers embedded in one exact executable snapshot.
+/// Callers remain responsible for obtaining bytes through a race-safe snapshot.
+ControlArtifactValidation
+validate_control_artifact_bytes(std::string_view bytes,
+                                const ControlArtifactExpectation& expectation);
 
 std::span<const ControlOperationDescriptor> control_operation_registry();
 const ControlOperationDescriptor* resolve_control_operation(std::string_view id,

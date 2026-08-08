@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <set>
@@ -13,6 +14,18 @@
 
 namespace pulp::inspect {
 namespace {
+
+std::string artifact_marker(std::string_view prefix, std::string_view value) {
+    std::string marker(prefix);
+    for (const auto character : value) {
+        marker.push_back(
+            std::isalnum(static_cast<unsigned char>(character))
+                ? static_cast<char>(std::toupper(static_cast<unsigned char>(character)))
+                : '_');
+    }
+    marker += "_V1";
+    return marker;
+}
 
 constexpr std::array<std::string_view, 7> kPermissionTerms{
     "implemented",     "built",          "host_available", "activated",
@@ -696,6 +709,52 @@ std::string control_consent_identity(std::string_view manifest_digest,
         return {};
     return runtime::sha256_hex("dev.pulp.control/consent-identity@1:" +
                                std::string(manifest_digest) + ":" + std::string(artifact_digest));
+}
+
+ControlArtifactValidation
+validate_control_artifact_bytes(std::string_view bytes,
+                                const ControlArtifactExpectation& expectation) {
+    const auto contains = [&](std::string_view token) {
+        return bytes.find(token) != std::string_view::npos;
+    };
+    std::string standalone = "PULP_STANDALONE_";
+    standalone += "COMPONENT_V1";
+    if (!contains(standalone))
+        return {false, "missing standalone component marker"};
+    if (contains("PULP_INSPECT_SHIPPING_MANIFEST_V1") != expectation.endpoint_included)
+        return {false, "inspector endpoint marker mismatch"};
+    if (expectation.profile_id.empty() || expectation.manifest_digest.size() != 64)
+        return {false, "invalid control artifact expectation"};
+    if (!contains(artifact_marker("PULP_CONTROL_PROFILE_", expectation.profile_id)))
+        return {false, "control profile marker mismatch"};
+    if (!contains("PULP_CONTROL_MANIFEST_SHA256_" + expectation.manifest_digest + "_V1"))
+        return {false, "control manifest digest marker mismatch"};
+    if (expectation.profile_id == "production-stripped" &&
+        (contains("PULP_REMOTE_VIEW_PARAMETER_AUTHORITY_V1") || contains("view.param_set")))
+        return {false, "production-stripped artifact contains Remote View parameter authority"};
+
+    std::vector<std::string> declared;
+    declared.reserve(expectation.capability_ids.size());
+    for (const auto& capability : expectation.capability_ids) {
+        declared.push_back(artifact_marker("PULP_INSPECT_CAPABILITY_", capability));
+        if (!contains(declared.back()))
+            return {false, "missing declared capability marker: " + capability};
+    }
+    constexpr std::string_view prefix = "PULP_INSPECT_CAPABILITY_";
+    for (std::size_t position = 0;
+         (position = bytes.find(prefix, position)) != std::string_view::npos;) {
+        const auto end = bytes.find("_V1", position);
+        if (end == std::string_view::npos)
+            break;
+        const auto marker = bytes.substr(position, end + 3 - position);
+        if (std::find(declared.begin(), declared.end(), marker) == declared.end())
+            return {false, "undeclared capability marker"};
+        position = end + 3;
+    }
+    if (contains("PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1") !=
+        expectation.runtime_eval_included)
+        return {false, "runtime evaluation marker mismatch"};
+    return {true, {}};
 }
 
 std::span<const ControlOperationDescriptor> control_operation_registry() {

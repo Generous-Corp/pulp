@@ -395,6 +395,8 @@ std::string encode_control_envelope(const ControlEnvelope& envelope) {
                 valid = valid_host_open(message);
                 kind = "host-open";
                 payload.addMember("admission_id", choc::value::createString(message.admission_id));
+                payload.addMember("enrollment_id",
+                                  choc::value::createString(message.enrollment_id));
                 payload.addMember("request_id", choc::value::createString(message.request_id));
             } else if constexpr (std::is_same_v<T, ControlHostOpenResult>) {
                 valid = valid_host_open_result(message);

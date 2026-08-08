@@ -75,6 +75,7 @@ add_library(pulp-inspect-control
     src/control_connection_admission.cpp
     src/control_endpoint.cpp
     src/control_grants.cpp
+    src/control_host_enrollment.cpp
     src/control_host_connection.cpp
     src/control_host_router.cpp
     src/control_identity.cpp
@@ -83,10 +84,16 @@ add_library(pulp-inspect-control
     src/control_peer.cpp
     src/control_private_store.cpp
     src/control_service.cpp)
+target_sources(pulp-inspect-control PRIVATE
+    src/control_trusted_host_inventory.cpp)
 if(APPLE AND NOT IOS AND NOT PULP_IOS)
-    target_sources(pulp-inspect-control PRIVATE src/control_peer_mac.cpp)
+    target_sources(pulp-inspect-control PRIVATE
+        src/control_peer_mac.cpp
+        src/control_static_code_identity_mac.cpp)
 else()
-    target_sources(pulp-inspect-control PRIVATE src/control_peer_stub.cpp)
+    target_sources(pulp-inspect-control PRIVATE
+        src/control_peer_stub.cpp
+        src/control_static_code_identity_stub.cpp)
 endif()
 add_library(pulp::inspect-control ALIAS pulp-inspect-control)
 target_include_directories(pulp-inspect-control
