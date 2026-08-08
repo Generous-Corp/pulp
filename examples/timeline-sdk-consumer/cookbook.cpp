@@ -117,6 +117,7 @@ bool compile_and_publish(const timeline::CommitResult& committed) {
     request.project = committed.snapshot;
     request.sequence_id = committed.snapshot->root_sequence_id();
     request.tempo_map = tempo;
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = committed.revision.value;
     // This one-shot example publishes in full. A long-lived engine retains the
     // registry beside the compiler so later commits can resolve exact dirtiness

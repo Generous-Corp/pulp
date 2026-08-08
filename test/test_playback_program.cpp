@@ -117,6 +117,7 @@ ProgramCompileRequest request(std::shared_ptr<const Project> project,
     result.project = std::move(project);
     result.sequence_id = {2};
     result.tempo_map = std::move(map);
+    result.sample_rate = result.tempo_map->sample_rate();
     result.document_revision = revision;
     result.dirty = std::move(dirty);
     return result;

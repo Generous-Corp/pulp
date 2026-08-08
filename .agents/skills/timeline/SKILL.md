@@ -24,7 +24,10 @@ description: Build, edit, validate, explain, render, import, or integrate Pulp t
   recorder, or durable session. Keep document mutation in `DocumentSession`,
   playback derivation in `PlaybackProgramCompiler`, realtime rendering behind
   immutable programs and transport snapshots, and capture publication as
-  ordinary timeline commands.
+  ordinary timeline commands. A `ProgramCompileRequest` must declare its exact
+  `sample_rate` explicitly and carry a `CompiledTempoMap` built at the same
+  normalized `RationalRate`; omission or disagreement is a synchronous invalid
+  request rather than an inferred default.
 - Link `Pulp::timeline-agent-view` when an agent or remote client needs a
   bounded, deterministic projection of one pinned `DocumentView`. `AgentView`
   exposes a committed outline, cursor-paged clip regions, and a projection of

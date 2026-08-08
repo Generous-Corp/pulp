@@ -92,6 +92,7 @@ struct ProgramHarness {
         request.project = std::move(project);
         request.sequence_id = {2};
         request.tempo_map = std::move(map);
+        request.sample_rate = request.tempo_map->sample_rate();
         request.document_revision = next_revision++;
         request.dirty = {.all = true};
         REQUIRE(compiler.submit(std::move(request)));
@@ -640,6 +641,7 @@ TEST_CASE("A ratchet that would collapse below one rendered sample is refused",
     request.project = project;
     request.sequence_id = {2};
     request.tempo_map = map;
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty = {.all = true};
     REQUIRE(compiler.submit(std::move(request)));
@@ -669,6 +671,7 @@ TEST_CASE("Ratchet expansion respects the compiled event budget",
     request.project = std::move(project);
     request.sequence_id = {2};
     request.tempo_map = map;
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty = {.all = true};
     request.maximum_note_events_per_track = 0;
