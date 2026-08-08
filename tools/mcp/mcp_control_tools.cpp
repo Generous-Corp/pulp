@@ -58,7 +58,8 @@ std::string operation_tool_name(std::string_view id) {
 
 const ControlOperationDescriptor* operation_for_tool(std::string_view name) {
     for (const auto& operation : control_operation_registry())
-        if (capability_is_grantable(operation.capability) &&
+        if ((capability_is_grantable(operation.capability) ||
+             operation.capability == InspectorCapability::ArtifactRead) &&
             operation_tool_name(operation.id) == name)
             return &operation;
     return nullptr;
@@ -487,7 +488,8 @@ ControlMcpAdapter::~ControlMcpAdapter() = default;
 std::string ControlMcpAdapter::tools_json_fragment() const {
     std::string out = management_tool_json();
     for (const auto& operation : control_operation_registry()) {
-        if (!capability_is_grantable(operation.capability))
+        if (!capability_is_grantable(operation.capability) &&
+            operation.capability != InspectorCapability::ArtifactRead)
             continue;
         const auto name = operation_tool_name(operation.id);
         const auto risk = capability_risk(operation.capability);
@@ -691,12 +693,18 @@ std::string ControlMcpAdapter::call_tool(std::string_view name, std::string_view
     ControlJsonSchemaDiagnostics diagnostics;
     if (!validate_control_json_schema(input_json, operation->input_schema_json, &diagnostics))
         return error_payload("invalid-arguments", diagnostics.explanation);
+    const auto timeout_value = arguments->hasObjectMember("timeout_ms")
+                                   ? (*arguments)["timeout_ms"].getInt64()
+                                   : 3000;
+    if (timeout_value < 1 || timeout_value > 300000)
+        return error_payload("invalid-arguments", "timeout_ms must be between 1 and 300000");
+    const auto timeout = std::chrono::milliseconds(timeout_value);
 
     if (operation->capability == InspectorCapability::ArtifactRead) {
         const auto negotiation = client.negotiate({
             .versions = {kControlProtocolVersion, kControlProtocolVersion},
             .mandatory_features = {"artifacts", "receipts"},
-        });
+        }, timeout);
         if (!negotiation.response ||
             negotiation.response->status != ControlNegotiationStatus::Accepted)
             return error_payload(negotiation.error_code.empty() ? "negotiation-failed"
@@ -708,7 +716,7 @@ std::string ControlMcpAdapter::call_tool(std::string_view name, std::string_view
             return error_payload("invalid-arguments", "artifact read input is incomplete");
         const auto offset = static_cast<std::uint64_t>(input["offset"].getInt64());
         const auto max_bytes = static_cast<std::size_t>(input["max_bytes"].getInt64());
-        const auto result = client.read_artifact(*artifact_id, offset, max_bytes);
+        const auto result = client.read_artifact(*artifact_id, offset, max_bytes, timeout);
         if (result.status != ControlArtifactStatus::Read)
             return error_payload(control_artifact_status_id(result.status), result.explanation);
         if (!result.metadata ||
@@ -769,13 +777,6 @@ std::string ControlMcpAdapter::call_tool(std::string_view name, std::string_view
     const auto idempotency = random_token("mcp-idempotency-");
     if (request_id.empty() || idempotency.empty())
         return error_payload("entropy-unavailable", "request entropy is unavailable");
-    const auto timeout_value = arguments->hasObjectMember("timeout_ms") &&
-                                       ((*arguments)["timeout_ms"].isInt32() || (*arguments)["timeout_ms"].isInt64())
-                                   ? (*arguments)["timeout_ms"].getInt64()
-                                   : 3000;
-    if (timeout_value < 1 || timeout_value > 300000)
-        return error_payload("invalid-arguments", "timeout_ms must be between 1 and 300000");
-    const auto timeout = std::chrono::milliseconds(timeout_value);
     const auto expected_generation_value = arguments->hasObjectMember("expected_state_generation") &&
                                              ((*arguments)["expected_state_generation"].isInt32() ||
                                               (*arguments)["expected_state_generation"].isInt64())

@@ -220,7 +220,8 @@ TEST_CASE("control MCP bindings are generated from every canonical operation",
         suffix.resize(suffix.size() - 2);
         for (auto& character : suffix)
             if (!std::isalnum(static_cast<unsigned char>(character))) character = '_';
-        if (capability_is_grantable(operation.capability)) {
+        if (capability_is_grantable(operation.capability) ||
+            operation.capability == InspectorCapability::ArtifactRead) {
             REQUIRE(tools.find("\"name\":\"pulp_control_" + suffix + "\"") != std::string::npos);
             REQUIRE(tools.find(std::string(operation.input_schema_json)) != std::string::npos);
             REQUIRE(tools.find(std::string(operation.output_schema_json)) != std::string::npos);

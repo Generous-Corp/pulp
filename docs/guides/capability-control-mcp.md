@@ -9,15 +9,15 @@ artifact ACL checks all remain owned by the installed broker and shared
 
 ## Typed tools
 
-Every broker-grantable frozen `dev.pulp.*@1` operation is exposed as a stable
+Every broker-authorizable frozen `dev.pulp.*@1` operation is exposed as a stable
 `pulp_control_*` tool generated from the canonical operation registry. For
 example, `dev.pulp.state/read@1` becomes `pulp_control_state_read`,
 `dev.pulp.state/parameter-gesture@1` becomes
 `pulp_control_state_parameter_gesture`, and
 `dev.pulp.runtime/evaluate@1` becomes `pulp_control_runtime_evaluate`.
-Registry operations whose capability is explicitly non-grantable are not
-advertised: no MCP annotation or caller-supplied value can create authority for
-them.
+Registry operations with neither a grant path nor broker-owned artifact ACL
+authorization are not advertised: no MCP annotation or caller-supplied value
+can create authority for them.
 Each operation takes:
 
 - `instance_id`: the exact broker-owned live instance;

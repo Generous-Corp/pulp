@@ -102,8 +102,9 @@ migration, and shipping proof. The old Inspector mutation, evaluation, and
 screenshot tool names were removed without a read-only alias. Their canonical
 replacements and the disposition of `pulp_create` and fixture-only Motion tools
 are published in the MCP control guide. Trace start/stop and all generated
-broker-grantable live operations use canonical control and never fall back to
-the legacy transport; explicitly non-grantable registry entries are omitted.
+broker-authorizable live operations use canonical control and never fall back
+to the legacy transport; registry entries without a broker authority path are
+omitted.
 
 ## Why the split
 
