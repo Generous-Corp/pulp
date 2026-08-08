@@ -12,6 +12,7 @@ namespace pulp::inspect {
 
 inline constexpr std::uint32_t kControlProtocolVersion = 1;
 inline constexpr std::string_view kControlEnvelopeSchema = "dev.pulp.control/envelope@1";
+inline constexpr std::string_view kControlLegacyInspectorJsonEncoding = "legacy-inspector-json-v1";
 inline constexpr std::size_t kControlMaximumRequestPayloadBytes = 512u * 1024u;
 inline constexpr std::size_t kControlMaximumEnvelopeBytes = 2u * 1024u * 1024u;
 inline constexpr std::size_t kControlMaximumResultDetailBytes = 1600u * 1024u;
@@ -319,6 +320,18 @@ struct ControlReceiptEnvelope {
     friend bool operator==(const ControlReceiptEnvelope&, const ControlReceiptEnvelope&) = default;
 };
 
+/// Lossless compatibility detail for a failed operation declared with the
+/// legacy-inspector-json-v1 adapter encoding. The typed receipt result remains
+/// authoritative for policy and retry behavior; this tuple preserves the
+/// existing client-facing error contract without deriving codes from prose.
+struct ControlLegacyInspectorError {
+    std::string error_code;
+    std::string error_message;
+    std::string error_data_json;
+    friend bool operator==(const ControlLegacyInspectorError&,
+                           const ControlLegacyInspectorError&) = default;
+};
+
 using ControlEnvelopePayload =
     std::variant<ControlNegotiationOffer, ControlNegotiationResult, ControlRequestEnvelope,
                  ControlCancelEnvelope, ControlProgressEnvelope, ControlReceiptEnvelope,
@@ -413,6 +426,14 @@ std::optional<std::string> canonicalize_control_json(std::string_view json);
 /// Hashes the authority and operation binding plus canonical request parameters.
 /// The transport request_id and deadline are deliberately not part of replay identity.
 std::optional<std::string> control_request_hash(const ControlRequestEnvelope& request);
+
+/// Encodes/decodes the strict compatibility object carried in a failed
+/// adapter receipt's detail_json. Unknown structured error data is retained as
+/// its original JSON spelling. Malformed or out-of-bounds input fails closed.
+std::optional<std::string>
+encode_control_legacy_inspector_error(const ControlLegacyInspectorError& error);
+std::optional<ControlLegacyInspectorError>
+decode_control_legacy_inspector_error(std::string_view detail_json);
 
 /// Emits one deterministic JSON representation. Returns an empty string if the
 /// in-memory envelope violates the same bounds enforced by the decoder.

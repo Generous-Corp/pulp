@@ -3,6 +3,8 @@
 #include <pulp/inspect/control_trace_session_executor.hpp>
 #include <pulp/runtime/trace.hpp>
 
+#include <choc/text/choc_JSON.h>
+
 #include <chrono>
 #include <memory>
 
@@ -120,9 +122,25 @@ TEST_CASE("canonical trace-session executor owns one registration for its full e
 #if defined(PULP_TRACING_ENABLED) && PULP_TRACING_ENABLED
     REQUIRE(started.terminal_state == ControlReceiptState::Completed);
     CHECK_FALSE(started.result.result_code.has_value());
+    CHECK_FALSE(decode_control_legacy_inspector_error(started.result.detail_json));
+    const auto started_detail = choc::json::parse(started.result.detail_json);
+    CHECK(started_detail["compiled_in"].getBool());
+    CHECK(started_detail["active"].getBool());
+    CHECK(started_detail["ok"].getBool());
 
-    const auto legacy_stop = trace->handle(
-        make_request(1, std::string(methods::kTraceStopSession), "{}"));
+    const auto already_active = invoke(executor);
+    REQUIRE(already_active.terminal_state == ControlReceiptState::Failed);
+    CHECK(already_active.result.result_code == ControlResultCode::LeaseConflict);
+    CHECK(already_active.result.retry == ControlRetryClassification::AfterRefresh);
+    const auto already_active_error =
+        decode_control_legacy_inspector_error(already_active.result.detail_json);
+    REQUIRE(already_active_error);
+    CHECK(already_active_error->error_code == "trace_already_active");
+    CHECK(already_active_error->error_message == already_active.result.explanation);
+    CHECK(already_active_error->error_data_json == "{}");
+
+    const auto legacy_stop =
+        trace->handle(make_request(1, std::string(methods::kTraceStopSession), "{}"));
     CHECK(legacy_stop.is_error);
     CHECK(legacy_stop.error_code == "trace_owner_unbound");
     CHECK(pulp::runtime::Tracing::active());
@@ -130,9 +148,30 @@ TEST_CASE("canonical trace-session executor owns one registration for its full e
     const auto stopped = invoke(executor, plan(), request(R"({"action":"stop"})"));
     REQUIRE(stopped.terminal_state == ControlReceiptState::Completed);
     CHECK_FALSE(stopped.result.result_code.has_value());
+    CHECK_FALSE(decode_control_legacy_inspector_error(stopped.result.detail_json));
+
+    auto external = pulp::runtime::Tracing::start_exclusive({}, {}, 1024);
+    REQUIRE(external.status == pulp::runtime::TraceStartStatus::Started);
+    REQUIRE(external.ownership);
+    const auto owned_elsewhere = invoke(executor);
+    const auto external_stop = pulp::runtime::Tracing::stop_owned(*external.ownership);
+    REQUIRE(external_stop.ok);
+    REQUIRE(owned_elsewhere.terminal_state == ControlReceiptState::Failed);
+    CHECK(owned_elsewhere.result.result_code == ControlResultCode::LeaseConflict);
+    CHECK(owned_elsewhere.result.retry == ControlRetryClassification::AfterRefresh);
+    const auto owned_elsewhere_error =
+        decode_control_legacy_inspector_error(owned_elsewhere.result.detail_json);
+    REQUIRE(owned_elsewhere_error);
+    CHECK(owned_elsewhere_error->error_code == "trace_owned_by_another_controller");
+    CHECK(owned_elsewhere_error->error_code != already_active_error->error_code);
 #else
     CHECK(started.terminal_state == ControlReceiptState::Failed);
     CHECK(started.result.result_code == ControlResultCode::NotBuilt);
+    const auto detail = decode_control_legacy_inspector_error(started.result.detail_json);
+    REQUIRE(detail);
+    CHECK(detail->error_code == "tracing_unavailable");
+    CHECK(detail->error_message == started.result.explanation);
+    CHECK(detail->error_data_json == "{}");
 #endif
 
     executor = {};
@@ -140,6 +179,52 @@ TEST_CASE("canonical trace-session executor owns one registration for its full e
         .main_thread_rpc = inline_rpc(),
         .trace_inspector = trace,
         .registration_id = ControlRegistrationId{"registration-b"},
+    }));
+}
+
+TEST_CASE("legacy inspector adapter error detail is canonical and lossless",
+          "[inspect][control][adapter][error]") {
+    const ControlLegacyInspectorError original{
+        .error_code = "future_trace_failure",
+        .error_message = "future trace failure with no typed specialization",
+        .error_data_json = "  { \"opaque\" : [1, {\"z\":true}], \"order\" : \"kept\" }  ",
+    };
+    const auto encoded = encode_control_legacy_inspector_error(original);
+    REQUIRE(encoded);
+    CHECK(canonicalize_control_json(*encoded) == encoded);
+    const auto decoded = decode_control_legacy_inspector_error(*encoded);
+    REQUIRE(decoded);
+    CHECK(*decoded == original);
+
+    const ControlLegacyInspectorError without_data{
+        .error_code = "future_trace_failure",
+        .error_message = "no structured detail",
+        .error_data_json = "",
+    };
+    const auto encoded_without_data = encode_control_legacy_inspector_error(without_data);
+    REQUIRE(encoded_without_data);
+    CHECK(decode_control_legacy_inspector_error(*encoded_without_data) == without_data);
+}
+
+TEST_CASE("legacy inspector adapter error detail rejects malformed compatibility data",
+          "[inspect][control][adapter][error][security]") {
+    for (
+        const std::string_view malformed : {
+            "{}",
+            R"({"error_code":"x","error_message":"message"})",
+            R"({"error_code":"x","error_message":"message","error_data_json":"{}","extra":true})",
+            R"({"error_code":1,"error_message":"message","error_data_json":"{}"})",
+            R"({"error_code":"x","error_code":"y","error_message":"message","error_data_json":"{}"})",
+            R"({"error_code":"x","error_message":"message","error_data_json":"{"})",
+            "{",
+        }) {
+        INFO(malformed);
+        CHECK_FALSE(decode_control_legacy_inspector_error(malformed));
+    }
+    CHECK_FALSE(encode_control_legacy_inspector_error({
+        .error_code = "future_trace_failure",
+        .error_message = "message",
+        .error_data_json = "{",
     }));
 }
 
