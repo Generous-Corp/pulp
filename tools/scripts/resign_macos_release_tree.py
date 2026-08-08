@@ -29,6 +29,11 @@ def macho_files(root: Path) -> list[Path]:
         for path in sorted(directory.rglob("*")):
             if path.is_file() and is_macho(path):
                 candidates.append(path)
+    libexec = root / "libexec"
+    if libexec.is_dir():
+        for path in sorted(libexec.rglob("*")):
+            if path.is_file() and is_macho(path):
+                candidates.append(path)
     if not candidates:
         raise SigningError(f"no Mach-O products found below {root}")
     return candidates

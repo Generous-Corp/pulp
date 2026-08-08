@@ -13,6 +13,7 @@ import tempfile
 import unittest
 import zipfile
 import sys
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
@@ -245,6 +246,7 @@ def write_archive(
             default_mode = (
                 0o755
                 if "/bin/" in name
+                or "/libexec/" in name
                 or name in rac.cli_binary_members(
                     platform, rac.DEFAULT_MATRIX, VERSION
                 )
@@ -299,6 +301,28 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
         self.assertLessEqual(runtime_members, windows_members)
         self.assertIn("pulp-import-design", unix_members)
         self.assertIn("pulp-import-design.exe", windows_members)
+        self.assertIn("pulp-control-broker", unix_members)
+        self.assertNotIn("pulp-control-broker", windows_members)
+
+    def test_control_broker_contract_is_darwin_only_and_version_floored(self) -> None:
+        self.assertNotIn(
+            "pulp-control-broker",
+            rac.cli_members("darwin-arm64", rac.DEFAULT_MATRIX, "0.794.0"),
+        )
+        self.assertIn(
+            "pulp-control-broker",
+            rac.cli_members("darwin-arm64", rac.DEFAULT_MATRIX, "0.795.0"),
+        )
+        self.assertIn(
+            "pulp-sdk/libexec/pulp/pulp-control-broker",
+            rac.required_sdk_members(
+                "darwin-arm64", rac.DEFAULT_MATRIX, "0.795.0"
+            ),
+        )
+        self.assertNotIn(
+            "pulp-sdk/libexec/pulp/pulp-control-broker",
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "9.8.7"),
+        )
 
     def test_cli_contract_preserves_pre_import_design_releases(self) -> None:
         members = rac.cli_members(
@@ -534,6 +558,24 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                     root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
                 )
 
+    def test_negative_control_rejects_pre_floor_sdk_broker(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            matrix = replace(rac.DEFAULT_MATRIX, control_broker_floor="10.0.0")
+            sdk = set(
+                rac.required_sdk_members("darwin-arm64", matrix, VERSION)
+            )
+            sdk.add(rac.CONTROL_BROKER_SDK_MEMBER)
+            path = root / rac.sdk_asset_name("darwin-arm64")
+            write_archive(
+                path, sdk, as_zip=False, platform="darwin-arm64"
+            )
+
+            with self.assertRaisesRegex(rac.ContentError, "stale pre-floor"):
+                rac.verify_sdk_archive(
+                    path, "darwin-arm64", VERSION, SOURCE_SHA, matrix
+                )
+
     def test_negative_control_invalid_signature_fires(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -726,11 +768,17 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             del document["sdk_provenance_floor"]
             del document["capability_handoff_floor"]
             del document["inspector_sdk_floor"]
+            del document["control_broker_floor"]
             path.write_text(json.dumps(document), encoding="utf-8")
             historical = rac.ProductMatrix.load(path)
             self.assertEqual(historical.sdk_provenance_floor, "999999.0.0")
             self.assertEqual(historical.capability_handoff_floor, "999999.0.0")
             self.assertEqual(historical.inspector_sdk_floor, "999999.0.0")
+            self.assertEqual(historical.control_broker_floor, "999999.0.0")
+            self.assertNotIn(
+                "pulp-control-broker",
+                rac.cli_members("darwin-arm64", historical, "0.795.0"),
+            )
             self.assertNotIn(
                 "pulp-sdk/sdk-provenance.json",
                 rac.required_sdk_members("linux-x64", historical, "0.763.0"),
