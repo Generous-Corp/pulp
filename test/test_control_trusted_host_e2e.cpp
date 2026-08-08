@@ -180,6 +180,7 @@ TEST_CASE("raw signed T1 host reaches a correlated trace receipt through canonic
     process_options.timeout_ms = 12'000;
     auto launched = launcher.launch(prepared.ticket->inventory_id, process_options);
     INFO(launched.explanation);
+    INFO(static_cast<unsigned>(launched.preflight.status));
     REQUIRE(launched.launched());
 
     const ControlRegistrationId registration_id{wait_for_registration(result_path)};
