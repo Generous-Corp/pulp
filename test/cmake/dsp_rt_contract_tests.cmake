@@ -117,7 +117,7 @@ pulp_add_test_suite(pulp-test-decay-envelope
     TIMEOUT 300)
 
 pulp_add_test_suite(pulp-test-lofi-chain
-    SOURCES test_lofi_chain.cpp harness/rt_allocation_probe.cpp
+    SOURCES test_lofi_chain.cpp test_dither_velvet_noise.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
     TIMEOUT 300)
 

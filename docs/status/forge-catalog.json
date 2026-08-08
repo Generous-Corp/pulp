@@ -1157,11 +1157,13 @@
       "key": "lofi_bitcrush",
       "label": "Bit Crusher",
       "description": "Reduces amplitude resolution and sample-update rate.",
-      "realization_axes": [],
-      "realizations": [{"mode": "default", "type_id": "forge_lofi_bitcrush", "settings": {}}],
+      "realization_axes": [
+        {"key": "quantization", "label": "Quantization", "description": "Fixed output-correctness policy selected when the node is built.", "values": [{"token": "legacy", "label": "Legacy", "value": 0}, {"token": "tpdf", "label": "TPDF", "value": 1}, {"token": "tpdf_first", "label": "TPDF + First-Order Shaping", "value": 2}, {"token": "tpdf_second", "label": "TPDF + Second-Order Shaping", "value": 3}]}
+      ],
+      "realizations": [{"mode": "legacy", "type_id": "forge_lofi_bitcrush", "settings": {"quantization": "legacy"}}, {"mode": "tpdf", "type_id": "forge_lofi_bitcrush_tpdf", "settings": {"quantization": "tpdf"}}, {"mode": "tpdf_first", "type_id": "forge_lofi_bitcrush_tpdf_first", "settings": {"quantization": "tpdf_first"}}, {"mode": "tpdf_second", "type_id": "forge_lofi_bitcrush_tpdf_second", "settings": {"quantization": "tpdf_second"}}],
       "parameters": [
-        {"key": "bit_depth", "label": "Bit Depth", "unit": "bit", "kind": "continuous", "curve": "linear", "description": "Number of quantization bits retained.", "choices": [], "contracts": [{"realization_mode": "default", "min": 1, "max": 16, "default": 16}], "realization_modes": []},
-        {"key": "rate_division", "label": "Rate Division", "unit": "x", "kind": "continuous", "curve": "logarithmic", "description": "Number of input samples held for each reduced-rate output sample.", "choices": [], "contracts": [{"realization_mode": "default", "min": 1, "max": 64, "default": 1}], "realization_modes": []}
+        {"key": "bit_depth", "label": "Bit Depth", "unit": "bit", "kind": "continuous", "curve": "linear", "description": "Number of quantization bits retained.", "choices": [], "contracts": [{"realization_mode": "legacy", "min": 1, "max": 16, "default": 16}, {"realization_mode": "tpdf", "min": 1, "max": 16, "default": 16}, {"realization_mode": "tpdf_first", "min": 1, "max": 16, "default": 16}, {"realization_mode": "tpdf_second", "min": 1, "max": 16, "default": 16}], "realization_modes": []},
+        {"key": "rate_division", "label": "Rate Division", "unit": "x", "kind": "continuous", "curve": "logarithmic", "description": "Number of input samples held for each reduced-rate output sample.", "choices": [], "contracts": [{"realization_mode": "legacy", "min": 1, "max": 64, "default": 1}, {"realization_mode": "tpdf", "min": 1, "max": 64, "default": 1}, {"realization_mode": "tpdf_first", "min": 1, "max": 64, "default": 1}, {"realization_mode": "tpdf_second", "min": 1, "max": 64, "default": 1}], "realization_modes": []}
       ]
     },
     {

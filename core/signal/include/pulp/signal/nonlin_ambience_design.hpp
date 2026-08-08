@@ -226,12 +226,14 @@
 #include <pulp/signal/smoothed_value.hpp>
 #include <pulp/signal/tpt_filter.hpp>
 #include <pulp/signal/units.hpp>
+#include <pulp/signal/velvet_noise.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace pulp::signal {
@@ -455,6 +457,58 @@ inline double pulse_density(double u, double density_pct, double gamma) {
     const double nd_min = kNdMin * (density_pct / kDensityRefPct);
     const double clamped = std::clamp(u, 0.0, 1.0);
     return nd_min + (kNdMax - nd_min) * std::pow(clamped, gamma);
+}
+
+/// Pure intermediate for one candidate in a velvet tap grid. Both immediate
+/// and incremental builders consume this result so their layouts cannot drift.
+struct VelvetTapDesign {
+    int delay = 0;
+    double magnitude = 0.0;
+    double gain = 0.0;
+    int segment = 0;
+    bool audible = false;
+};
+
+inline VelvetTapDesign design_velvet_tap(NonlinProgram program,
+                                         double position_samples,
+                                         double grid_samples,
+                                         int window_samples,
+                                         int predelay_samples,
+                                         double gate_hold,
+                                         double attack,
+                                         const VelvetNoiseDrawT<double>& draw) noexcept {
+    VelvetTapDesign result;
+    // Public fail-closed domain: a non-empty window, non-negative finite grid
+    // coordinates, normalized jitter, a ternary pulse sign, finite envelope
+    // controls, and a predelay whose largest in-window tap cannot overflow.
+    // Invalid input produces the default inaudible design before any floating
+    // to integer conversion, division, square root, or signed addition.
+    if (window_samples <= 0 || predelay_samples < 0 ||
+        predelay_samples > std::numeric_limits<int>::max() - (window_samples - 1) ||
+        !std::isfinite(position_samples) || position_samples < 0.0 ||
+        !std::isfinite(grid_samples) || grid_samples < 0.0 ||
+        !std::isfinite(draw.jitter) || draw.jitter < 0.0 || draw.jitter >= 1.0 ||
+        (draw.sign != -1 && draw.sign != 1) ||
+        !std::isfinite(gate_hold) || !std::isfinite(attack)) {
+        return result;
+    }
+
+    const double candidate = position_samples +
+                             draw.jitter * std::max(0.0, grid_samples - 1.0);
+    if (!std::isfinite(candidate)) return result;
+    const double bounded = std::clamp(candidate, 0.0,
+                                      static_cast<double>(window_samples - 1));
+    const int delay = static_cast<int>(std::lround(bounded));
+    const double tau = static_cast<double>(delay) / static_cast<double>(window_samples);
+    const double env = program_envelope(program, tau, gate_hold, attack);
+    result.delay = predelay_samples + delay;
+    result.audible = env > 0.0;
+    if (!result.audible) return result;
+    result.magnitude = env * std::sqrt(grid_samples);
+    result.gain = static_cast<double>(draw.sign) * result.magnitude;
+    int segment = std::clamp(static_cast<int>(tau * kSegments), 0, kSegments - 1);
+    result.segment = program == NonlinProgram::reverse ? kSegments - 1 - segment : segment;
+    return result;
 }
 
 }  // namespace nonlin_ambience
