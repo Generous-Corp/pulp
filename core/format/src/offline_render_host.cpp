@@ -153,6 +153,11 @@ bool OfflineRenderHost::prepare(const OfflineRenderConfig& config) {
 }
 
 OfflineRenderResult OfflineRenderHost::render(const OfflineRenderOptions& options) {
+    return render(options, {});
+}
+
+OfflineRenderResult OfflineRenderHost::render(const OfflineRenderOptions& options,
+                                              std::function<bool()> should_continue) {
     OfflineRenderResult result;
     if (!prepared_ || !valid_options(options)) return result;
 
@@ -187,6 +192,8 @@ OfflineRenderResult OfflineRenderHost::render(const OfflineRenderOptions& option
         state::ParameterEventQueue parameter_events;
 
         for (std::uint64_t frame = 0; frame < options.frame_count; frame += block_frames) {
+            if (should_continue && !should_continue())
+                return result;
             const auto frames_remaining = options.frame_count - frame;
             const auto frames_this_block = static_cast<std::uint32_t>(
                 std::min<std::uint64_t>(block_frames, frames_remaining));

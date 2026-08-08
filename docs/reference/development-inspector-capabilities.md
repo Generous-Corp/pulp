@@ -74,7 +74,7 @@ one stable reason such as `not-built`, `client-not-granted`, or
 | `dev.pulp.instance/read@1` (`session.describe`) | yes | yes | The standalone owner publishes identity, agent context, and authenticated capability reporting |
 | `dev.pulp.session/control@1` (`session.control`) | no | yes | One-controller lease with expiry, renewal, disconnect release, and structured conflict errors |
 | `dev.pulp.state/read@1` (`state.read`) | yes | yes | The standalone session exposes its exact `StateStore` parameter catalog and values |
-| `dev.pulp.render/offline@1` (`render.offline`) | no | no | Frozen Product A contract; no current executor or grant path |
+| `dev.pulp.render/offline@1` (`render.offline`) | no | no | T0-only headless executor resolves launcher-trusted in-memory inputs, renders through `OfflineRenderHost`, and publishes broker-owned WAV artifacts; no profile enables it implicitly |
 | `dev.pulp.ui/observe@1` (`ui.read`) | yes | yes | The standalone session exposes its live view tree and value-channel catalog |
 | `dev.pulp.diagnostics/read@1` (`diagnostics.read`) | yes | yes | Agent context and audio configuration are attached; individual performance sources may report unavailable |
 | `dev.pulp.logs/read@1` (`logs.read`) | yes | yes | Scripted-UI console capture remains attached across in-place reloads |

@@ -376,6 +376,13 @@ target_link_libraries(pulp-test-control-service PRIVATE
 catch_discover_tests(pulp-test-control-service
     PROPERTIES LABELS "inspect;control;service;client")
 
+add_executable(pulp-test-control-offline-render-executor
+    test_control_offline_render_executor.cpp)
+target_link_libraries(pulp-test-control-offline-render-executor PRIVATE
+    pulp::inspect-offline-runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-offline-render-executor
+    PROPERTIES LABELS "inspect;control;offline;t0;artifact")
+
 add_executable(pulp-test-control-client-connection
     test_control_client_connection.cpp)
 target_link_libraries(pulp-test-control-client-connection PRIVATE

@@ -433,6 +433,10 @@ bool ControlArtifactStore::is_ready() const {
     return impl_->ready;
 }
 
+std::size_t ControlArtifactStore::maximum_blob_bytes() const noexcept {
+    return impl_->config.maximum_blob_bytes;
+}
+
 ControlArtifactStoreResult ControlArtifactStore::store(std::span<const std::uint8_t> bytes,
                                                        ControlArtifactLineage lineage,
                                                        ControlArtifactProperties properties) {

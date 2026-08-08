@@ -113,6 +113,14 @@ class ControlBroker {
     store_operation_artifact(const VerifiedControlPeerIdentity& client_peer,
                              const ControlAdmissionPlan& plan, std::span<const std::uint8_t> bytes,
                              ControlArtifactProperties properties);
+    /// Broker-timestamped publication used by trusted operation adapters.
+    ControlArtifactStoreResult
+    store_operation_artifact(const VerifiedControlPeerIdentity& client_peer,
+                             const ControlAdmissionPlan& plan, std::span<const std::uint8_t> bytes,
+                             std::string content_type, ControlArtifactSensitivity sensitivity,
+                             ControlArtifactRedactionState redaction_state,
+                             std::chrono::milliseconds lifetime);
+    std::size_t artifact_maximum_blob_bytes() const noexcept;
 
     /// Retrieves an artifact by opaque ID after broker-side reauthorization of
     /// its original producer grant, exact receipt lineage, and exact producing

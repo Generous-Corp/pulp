@@ -70,8 +70,8 @@ constexpr auto kControlOperations =
         PULP_PRODUCED_ARTIFACT_OPERATION(
             RenderOffline, "render/offline",
             R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"input_artifact_id":{"maxLength":128,"minLength":1,"type":"string"},"max_frames":{"maximum":11520000,"minimum":1,"type":"integer"},"timeout_ms":{"maximum":300000,"minimum":1,"type":"integer"}},"required":["input_artifact_id","max_frames","timeout_ms"],"type":"object"})",
-            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"artifact_id":{"maxLength":128,"minLength":1,"type":"string"},"frames":{"minimum":0,"type":"integer"},"sha256":{"pattern":"^[0-9a-f]{64}$","type":"string"}},"required":["artifact_id","frames","sha256"],"type":"object"})",
-            "", ""),
+            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"artifact_id":{"maxLength":128,"minLength":1,"type":"string"},"blocks":{"minimum":0,"type":"integer"},"byte_count":{"minimum":1,"type":"integer"},"channels":{"minimum":1,"type":"integer"},"frames":{"minimum":1,"type":"integer"},"midi_events":{"minimum":0,"type":"integer"},"mime_type":{"const":"audio/wav"},"parameter_count":{"minimum":0,"type":"integer"},"parameter_events":{"minimum":0,"type":"integer"},"plugin_id":{"maxLength":255,"minLength":1,"type":"string"},"sample_rate":{"minimum":1,"type":"integer"},"sha256":{"pattern":"^[0-9a-f]{64}$","type":"string"}},"required":["artifact_id","mime_type","sha256","byte_count","frames","blocks","sample_rate","channels","midi_events","parameter_events","plugin_id","parameter_count"],"type":"object"})",
+            "byte_count", "mime_type"),
         PULP_PRODUCED_ARTIFACT_OPERATION(
             UiRead, "ui/observe",
             R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"include_geometry":{"default":true,"type":"boolean"},"selector":{"maxLength":1024,"type":"string"}},"type":"object"})",
