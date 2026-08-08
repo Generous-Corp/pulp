@@ -90,14 +90,20 @@ ControlTrustedHostLauncher::launch(std::string_view inventory_id,
     auto snapshot_for_session = std::move(*snapshot);
     const bool started = process->start_with_standard_input_channel(
         executable, arguments,
-        [&](int child_process_id, platform::ChildProcessInputChannel channel) {
+        [&](int child_process_id, platform::ChildProcessInputChannel channel,
+            std::chrono::steady_clock::time_point deadline) {
             preflight_attempted = true;
+            const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+                deadline - std::chrono::steady_clock::now());
+            const auto bounded_timeout = std::min(config_.preflight_timeout, remaining);
+            if (bounded_timeout <= std::chrono::milliseconds::zero())
+                return false;
             auto verified = preflight_control_host(
                 std::move(channel), child_process_id, child_role, verifier,
                 [&](const VerifiedControlPeerIdentity& child) {
                     const auto now = std::chrono::steady_clock::now();
-                    const auto expires_at = std::min(snapshot_for_session.expires_at(),
-                                                     now + config_.preflight_timeout);
+                    const auto expires_at =
+                        std::min(snapshot_for_session.expires_at(), now + bounded_timeout);
                     auto enrollment = enrollments_->create(std::move(snapshot_for_session), child,
                                                            config_.broker_generation, expires_at);
                     if (!enrollment.ticket) {
@@ -123,7 +129,7 @@ ControlTrustedHostLauncher::launch(std::string_view inventory_id,
                     }
                     return encoded;
                 },
-                config_.preflight_timeout, &result.preflight);
+                bounded_timeout, &result.preflight);
             return verified.has_value();
         },
         options);
