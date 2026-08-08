@@ -822,9 +822,23 @@ void InterprocessConnectionServer::stop() {
     const bool was_running = running_.exchange(false);
     if (was_running && server_impl_->transport != IpcTransport::NamedPipe &&
         server_impl_->listen_socket.is_open()) {
-        // Close before join so accept() cannot keep the accept thread blocked
-        // on a listener that is no longer meant to serve clients.
-        server_impl_->listen_socket.close();
+        // Wake accept() with a connection rather than closing the descriptor
+        // while the accept thread is reading it. The thread observes running_
+        // after accept and closes this wake-up connection without dispatching it.
+        Socket wake_socket;
+        if (server_impl_->transport == IpcTransport::Socket) {
+            if (const auto endpoint = parse_socket_endpoint(server_impl_->name)) {
+                const auto host = endpoint->host.empty() || endpoint->host == "0.0.0.0"
+                                      ? std::string{"127.0.0.1"}
+                                      : endpoint->host;
+                if (wake_socket.create(SocketType::TCP))
+                    (void)wake_socket.connect(host, endpoint->port,
+                                              std::chrono::milliseconds(250));
+            }
+        } else if (wake_socket.create(SocketType::Local)) {
+            (void)wake_socket.connect_local(server_impl_->name,
+                                            std::chrono::milliseconds(250));
+        }
     }
     if (accept_thread_.joinable()) accept_thread_.join();
     // Idempotent; keeps non-socket and partially started server cleanup simple.
