@@ -1630,8 +1630,9 @@ TEST_CASE("pulp inspect help and no-discovery paths are deterministic",
     REQUIRE(help.stdout_output.find(
                 "Usage: pulp inspect <profiles|list|capabilities|doctor> [options]") !=
             std::string::npos);
-    REQUIRE(help.stdout_output.find("--port PORT") != std::string::npos);
-    REQUIRE(help.stdout_output.find("--output FILE") != std::string::npos);
+    REQUIRE(help.stdout_output.find("--port PORT") == std::string::npos);
+    REQUIRE(help.stdout_output.find("--command METHOD") == std::string::npos);
+    REQUIRE(help.stdout_output.find("Raw inspector calls") != std::string::npos);
 
     auto base = unique_temp_dir("pulp-inspect-no-discovery");
     fs::create_directories(base);
@@ -1642,105 +1643,15 @@ TEST_CASE("pulp inspect help and no-discovery paths are deterministic",
 #endif
     temp_dir.set(base.string());
 
-    auto missing = run_pulp({"inspect"}, 10000);
+    auto missing = run_pulp({"inspect", "list"}, 10000);
     fs::remove_all(base);
 
     REQUIRE_FALSE(missing.timed_out);
-    REQUIRE(missing.exit_code == 1);
-    REQUIRE(missing.stderr_output.find("No live inspector sessions were discovered") !=
-            std::string::npos);
+    REQUIRE(missing.exit_code == 0);
+    REQUIRE(missing.stdout_output.find("No live inspector sessions") != std::string::npos);
     REQUIRE(missing.stdout_output.find("Connecting to") == std::string::npos);
 }
 
-TEST_CASE("pulp inspect explicit port filters discovery without bypassing authentication",
-          "[cli][shellout][inspect][issue-643][issue-641]") {
-    if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
-    }
-
-    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
-    update_disabled.set("1");
-
-    auto base = unique_temp_dir("pulp-inspect-explicit-port");
-    fs::create_directories(base);
-#if defined(_WIN32)
-    ScopedEnvVar temp_dir("TEMP");
-#else
-    ScopedEnvVar temp_dir("TMPDIR");
-#endif
-    temp_dir.set(base.string());
-    auto output = base / "inspect-response.json";
-
-    auto r = run_pulp({"inspect", "--host", "127.0.0.1", "--port", "1", "--command",
-                       "DOM.getDocument", "--params", "{\"depth\":1}", "--output", output.string()},
-                      5000);
-    const bool wrote_output = fs::exists(output);
-    fs::remove_all(base);
-
-    REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code == 1);
-    REQUIRE(r.stdout_output.find("Connecting to") == std::string::npos);
-    REQUIRE(r.stderr_output.find("No live inspector sessions were discovered") !=
-            std::string::npos);
-    REQUIRE(r.stderr_output.find("requested host 127.0.0.1 port 1") !=
-            std::string::npos);
-    REQUIRE_FALSE(wrote_output);
-}
-
-TEST_CASE("pulp inspect rejects invalid arguments before networking",
-          "[cli][shellout][inspect][issue-643][issue-641]") {
-    if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
-    }
-
-    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
-    update_disabled.set("1");
-
-    auto missing_port = run_pulp({"inspect", "--port"}, 10000);
-    REQUIRE_FALSE(missing_port.timed_out);
-    REQUIRE(missing_port.exit_code == 2);
-    REQUIRE(missing_port.stderr_output.find("--port requires a value") != std::string::npos);
-    REQUIRE(missing_port.stdout_output.find("Connecting to") == std::string::npos);
-
-    auto invalid_port = run_pulp({"inspect", "--port", "not-a-port"}, 10000);
-    REQUIRE_FALSE(invalid_port.timed_out);
-    REQUIRE(invalid_port.exit_code == 2);
-    REQUIRE(invalid_port.stderr_output.find("invalid --port value: not-a-port") !=
-            std::string::npos);
-    REQUIRE(invalid_port.stdout_output.find("Connecting to") == std::string::npos);
-
-    for (const char* port : {"0", "65536", "123abc"}) {
-        INFO("port=" << port);
-        auto rejected_port = run_pulp({"inspect", "--port", port}, 10000);
-        REQUIRE_FALSE(rejected_port.timed_out);
-        REQUIRE(rejected_port.exit_code == 2);
-        REQUIRE(rejected_port.stderr_output.find(std::string("invalid --port value: ") + port) !=
-                std::string::npos);
-        REQUIRE(rejected_port.stdout_output.find("Connecting to") == std::string::npos);
-    }
-
-    auto output_without_command = run_pulp({"inspect", "--output", "out.json"}, 10000);
-    REQUIRE_FALSE(output_without_command.timed_out);
-    REQUIRE(output_without_command.exit_code == 2);
-    REQUIRE(output_without_command.stderr_output.find("--output requires --command") !=
-            std::string::npos);
-    REQUIRE(output_without_command.stdout_output.find("Connecting to") == std::string::npos);
-
-    auto params_without_command = run_pulp({"inspect", "--params", "{}"}, 10000);
-    REQUIRE_FALSE(params_without_command.timed_out);
-    REQUIRE(params_without_command.exit_code == 2);
-    REQUIRE(params_without_command.stderr_output.find("--params requires --command") !=
-            std::string::npos);
-    REQUIRE(params_without_command.stdout_output.find("Connecting to") == std::string::npos);
-
-    auto unknown = run_pulp({"inspect", "--definitely-not-an-inspect-flag"}, 10000);
-    REQUIRE_FALSE(unknown.timed_out);
-    REQUIRE(unknown.exit_code == 2);
-    REQUIRE(unknown.stderr_output.find("unknown inspect argument") != std::string::npos);
-    REQUIRE(unknown.stdout_output.find("Connecting to") == std::string::npos);
-}
 #else
 TEST_CASE("pulp inspect fails explicitly when the inspector component is disabled",
           "[cli][shellout][inspect]") {
@@ -1758,7 +1669,6 @@ TEST_CASE("pulp inspect fails explicitly when the inspector component is disable
     for (const auto& args : std::vector<std::vector<std::string>>{
              {"inspect", "--help"},
              {"inspect"},
-             {"inspect", "--port"},
          }) {
         auto result = run_pulp(args, 10000);
         REQUIRE_FALSE(result.timed_out);

@@ -152,16 +152,6 @@ enum Command {
     /// `run`, `doctor`). Archive installation delegates to `pulp-cpp`.
     Tool(PkgTailArgs),
 
-    /// Agent-facing wrappers around the inspector `Motion.*`
-    /// protocol — record / stop / snapshot / list-traces /
-    /// scrub / play / pause / cost. Pairs with the
-    /// `/motion` slash command and the `pulp_motion_*` MCP tools.
-    /// Normal launches publish no endpoint; live use requires an
-    /// explicitly owned custom host that wires `InspectorServer`,
-    /// `DomainHandler`, and authenticated discovery.
-    #[command(name = "motion")]
-    Motion(PkgTailArgs),
-
     /// Agent-facing wrappers around the inspector `Trace.*` Perfetto
     /// protocol — start / stop / query / snapshot / explain plus the
     /// L0 preset verbs (slowest-frames / xruns / dsp-hotspots /
@@ -917,28 +907,6 @@ fn real_main() -> Result<(), ExitCode> {
             };
             let cmake = root.join("CMakeLists.txt");
             map_exit(cmd::identity::run(&root, &cmake, &parsed, &mut out))
-        }
-        Command::Motion(args) => {
-            let (sub, flags) = cmd::motion::parse(&args.tail).map_err(|e| match e {
-                CliError::UnknownSubcommand => {
-                    eprintln!("pulp motion: unknown subcommand");
-                    eprintln!(
-                        "  supported: record, stop, snapshot, list-traces, \
-                         scrub, play, pause, cost"
-                    );
-                    ExitCode::from(2)
-                }
-                CliError::BadUsage(msg) => {
-                    eprintln!("{msg}");
-                    ExitCode::from(2)
-                }
-                other => {
-                    eprintln!("pulp motion: {other}");
-                    ExitCode::from(2)
-                }
-            })?;
-            let talker = cmd::motion::SystemInspector;
-            cmd::motion::dispatch(&sub, &flags, &talker, &mut out).map_err(|e| map_err(&e))
         }
         Command::Trace(args) => {
             let (sub, flags) = cmd::trace::parse(&args.tail).map_err(|e| match e {

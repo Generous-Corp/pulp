@@ -44,7 +44,7 @@ These were built deliberately for exactly this. Reaching for a hand-written
 | Magnitude response / THD / phase + group delay from rendered buffers | `response_relative_to_input()`, `measure_thd()`, `measure_group_delay()` (gate on `defined_at(hz)` for delay, and the stricter `phase_defined_at(hz)` for phase — a stopband reports undefined, and the accessors return NaN) | `pulp/audio/analysis/audio_spectrum.hpp` |
 | Command-line: render/inspect/compare a WAV without writing C++ | **`pulp audio validate <summarize\|doctor\|compare\|assert>`** (assert checks: `no_nan_inf`, `not_silent`, `silent`, `peak_below`, `frequency_near`) | `tools/cli/cmd_audio_validate.cpp` |
 | Live per-callback metering / MIDI log / buffer-underrun capture | `pulp::inspect::AudioInspector` | `inspect/include/pulp/inspect/audio_inspector.hpp` |
-| Interactive inspection from an agent session | the **`pulp_inspect_audio`** MCP tool (the Audio Inspector) | MCP |
+| Interactive inspection from an agent session | the canonical broker/control audio capability | Control platform |
 
 Rule of thumb: if you typed `std::sqrt`, `* x[i]`, or `20.0 * log10` in a test,
 stop — `analyze()` already did it correctly. The only thing you author is the

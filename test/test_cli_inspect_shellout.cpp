@@ -195,273 +195,7 @@ struct InspectServerFixture {
     }
 };
 
-std::string read_text_file(const fs::path& path) {
-    std::ifstream in(path);
-    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-}
-
-std::string compact_json_for_assertion(std::string text) {
-    text.erase(
-        std::remove_if(text.begin(), text.end(), [](unsigned char c) { return std::isspace(c); }),
-        text.end());
-    return text;
-}
-
 } // namespace
-
-TEST_CASE("pulp inspect one-shot prints a server response", "[cli][shellout][inspect]") {
-    if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
-    }
-
-    InspectServerFixture fixture;
-    fixture.handler = [&](const InspectorMessage& request) {
-        return make_response(request.id, R"({"ok":true,"source":"inspect-test"})");
-    };
-
-    auto result = run_pulp({"inspect", "--host", "localhost", "--port", fixture.port_string(),
-                            "--command", "DOM.getDocument", "--params", R"({"depth":2})"},
-                           10000);
-
-    INFO("stdout: " << result.stdout_output);
-    INFO("stderr: " << result.stderr_output);
-    REQUIRE_FALSE(result.timed_out);
-    REQUIRE(result.exit_code == 0);
-    REQUIRE(result.stderr_output.find("Connecting to 127.0.0.1:" + fixture.port_string()) !=
-            std::string::npos);
-    REQUIRE(result.stderr_output.find("Connected to inspector") != std::string::npos);
-    REQUIRE(result.stdout_output == R"({"ok": true, "source": "inspect-test"})"
-                                    "\n");
-    REQUIRE(fixture.seen.size() == 1);
-    REQUIRE(fixture.seen[0].id >= 2);
-    REQUIRE(fixture.seen[0].method == "DOM.getDocument");
-    REQUIRE(compact_json_for_assertion(fixture.seen[0].params_json) == R"({"depth":2})");
-}
-
-TEST_CASE("pulp inspect one-shot can discover the advertised server port",
-          "[cli][shellout][inspect]") {
-    if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
-    }
-
-    InspectServerFixture fixture;
-    fixture.handler = [&](const InspectorMessage& request) {
-        return make_response(request.id, R"({"discovered":true})");
-    };
-
-    auto result = run_pulp({"inspect", "--command", "DOM.getDocument"}, 10000);
-
-    INFO("stdout: " << result.stdout_output);
-    INFO("stderr: " << result.stderr_output);
-    REQUIRE_FALSE(result.timed_out);
-    REQUIRE(result.exit_code == 0);
-    REQUIRE(result.stderr_output.find("Found inspector session " +
-                                      fixture.session.info().session_id) != std::string::npos);
-    REQUIRE(result.stderr_output.find("Connecting to 127.0.0.1:" + fixture.port_string()) !=
-            std::string::npos);
-    REQUIRE(result.stdout_output == R"({"discovered": true})"
-                                    "\n");
-    REQUIRE(fixture.seen.size() == 1);
-    REQUIRE(fixture.seen[0].method == "DOM.getDocument");
-    REQUIRE((fixture.seen[0].params_json.empty() || fixture.seen[0].params_json == "{}"));
-}
-
-TEST_CASE("pulp inspect screenshot writes decoded PNG bytes",
-          "[cli][shellout][inspect][screenshot]") {
-    if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
-    }
-
-    InspectServerFixture fixture;
-    fixture.handler = [](const InspectorMessage& request) {
-        REQUIRE(request.method == pulp::inspect::methods::kCaptureScreenshot);
-        return make_response(
-            request.id,
-            R"({"mimeType":"image/png","width":1,"height":1,"data":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="})");
-    };
-
-    const auto nested = fixture.temp / "artifacts" / "live.png";
-    const auto result = run_pulp(
-        {"inspect", "screenshot", "--out", nested.string(), "--json"}, 10000);
-    INFO("stdout: " << result.stdout_output);
-    INFO("stderr: " << result.stderr_output);
-    REQUIRE_FALSE(result.timed_out);
-    REQUIRE(result.exit_code == 0);
-    REQUIRE(fs::exists(nested));
-    const auto bytes = read_text_file(nested);
-    REQUIRE(bytes.size() > 24);
-    CHECK(static_cast<unsigned char>(bytes[0]) == 0x89);
-    CHECK(bytes.substr(1, 3) == "PNG");
-    const auto output = choc::json::parse(result.stdout_output);
-    CHECK(output["schemaVersion"].getString() == "pulp.inspect.screenshot.v1");
-    CHECK(output["status"].getString() == "captured");
-    CHECK(output["width"].getInt64() == 1);
-    CHECK(output["height"].getInt64() == 1);
-    CHECK(output["path"].getString() == nested.string());
-    REQUIRE(fixture.seen.size() == 1);
-
-    const auto bare_path = fixture.temp / "bare.png";
-    {
-        std::ofstream existing(bare_path, std::ios::binary);
-        existing << "old screenshot";
-    }
-    const auto bare = run_pulp_in_directory(
-        fixture.temp, {"inspect", "screenshot", "--out", "bare.png"}, 10000);
-    REQUIRE_FALSE(bare.timed_out);
-    REQUIRE(bare.exit_code == 0);
-    const auto bare_bytes = read_text_file(bare_path);
-    CHECK(bare_bytes.size() > 24);
-    CHECK(bare_bytes.substr(1, 3) == "PNG");
-}
-
-TEST_CASE("pulp inspect screenshot reports unsupported and malformed captures",
-          "[cli][shellout][inspect][screenshot][errors]") {
-    if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
-    }
-
-    InspectServerFixture fixture;
-    const auto output = fixture.temp / "should-not-exist.png";
-    const auto missing = run_pulp(
-        {"inspect", "screenshot", "--out", output.string(), "--json",
-         "--session", "missing-session", "--instance", "missing-instance",
-         "--publication", "missing-publication"},
-        10000);
-    REQUIRE_FALSE(missing.timed_out);
-    CHECK(missing.exit_code == 1);
-    const auto missing_payload = choc::json::parse(missing.stdout_output);
-    CHECK(missing_payload["schemaVersion"].getString() ==
-          "pulp.inspect.screenshot.v1");
-    CHECK(missing_payload["status"].getString() == "failed");
-    CHECK(missing_payload["error"]["code"].getString() == "selection_failed");
-
-    fixture.handler = [](const InspectorMessage& request) {
-        return make_error(request.id, "No capture source attached", "capture_unavailable");
-    };
-    auto unsupported = run_pulp(
-        {"inspect", "screenshot", "--out", output.string()}, 10000);
-    REQUIRE_FALSE(unsupported.timed_out);
-    CHECK(unsupported.exit_code == 3);
-    CHECK(unsupported.stderr_output.find("Screenshot unsupported [capture_unavailable]") !=
-          std::string::npos);
-    CHECK_FALSE(fs::exists(output));
-
-    auto unsupported_json = run_pulp(
-        {"inspect", "screenshot", "--out", output.string(), "--json"}, 10000);
-    REQUIRE_FALSE(unsupported_json.timed_out);
-    CHECK(unsupported_json.exit_code == 3);
-    const auto unsupported_payload = choc::json::parse(unsupported_json.stdout_output);
-    CHECK(unsupported_payload["schemaVersion"].getString() ==
-          "pulp.inspect.screenshot.v1");
-    CHECK_FALSE(unsupported_payload["ok"].getWithDefault<bool>(true));
-    CHECK(unsupported_payload["status"].getString() == "unsupported");
-    CHECK(unsupported_payload["error"]["code"].getString() == "capture_unavailable");
-    CHECK_FALSE(fs::exists(output));
-
-    fixture.handler = [](const InspectorMessage& request) {
-        return make_response(request.id,
-                             R"({"mimeType":"image/png","width":1,"height":1,"data":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"})");
-    };
-    auto malformed = run_pulp(
-        {"inspect", "screenshot", "--out", output.string(), "--json"}, 10000);
-    REQUIRE_FALSE(malformed.timed_out);
-    CHECK(malformed.exit_code == 1);
-    const auto malformed_payload = choc::json::parse(malformed.stdout_output);
-    CHECK(malformed_payload["schemaVersion"].getString() ==
-          "pulp.inspect.screenshot.v1");
-    CHECK(malformed_payload["status"].getString() == "failed");
-    CHECK(malformed_payload["error"]["code"].getString() == "invalid_response");
-    CHECK(malformed_payload["error"]["message"].getString().find("malformed PNG") !=
-          std::string::npos);
-    CHECK_FALSE(fs::exists(output));
-}
-
-TEST_CASE("pulp inspect exposes bounded typed MIDI and transport commands",
-          "[cli][shellout][inspect][test-input]") {
-    if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
-    }
-
-    InspectServerFixture fixture;
-    fixture.handler = [](const InspectorMessage& request) {
-        if (request.method == pulp::inspect::methods::kTestInjectMidi)
-            return make_response(request.id, R"({"accepted":true})");
-        if (request.method == pulp::inspect::methods::kTestSetTransport)
-            return make_response(request.id, R"({"applied":true})");
-        if (request.method == pulp::inspect::methods::kStateSetParameter)
-            return make_response(request.id, R"({"applied":true})");
-        return make_response(request.id, "{}");
-    };
-    REQUIRE(fixture.publisher.record().has_value());
-    const auto& record = *fixture.publisher.record();
-    const std::vector<std::string> exact{"--session",     record.session_id,
-                                         "--instance",    record.instance_id,
-                                         "--publication", record.publication_id};
-    auto run_exact = [&](std::vector<std::string> command) {
-        command.insert(command.end(), exact.begin(), exact.end());
-        return run_pulp(command, 10000);
-    };
-
-    const auto parameter = run_exact(
-        {"inspect", "set-parameter", "--id", "7", "--value", "0.25", "--normalized", "--json"});
-    REQUIRE_FALSE(parameter.timed_out);
-    REQUIRE(parameter.exit_code == 0);
-    CHECK(parameter.stdout_output.find("pulp.inspect.set-parameter.v1") != std::string::npos);
-    CHECK(parameter.stdout_output.find("\"parameterId\": 7") != std::string::npos);
-    CHECK(parameter.stdout_output.find("\"normalized\": true") != std::string::npos);
-
-    const auto note_on =
-        run_exact({"inspect", "inject-midi", "--kind", "note_on", "--channel", "1", "--note", "60",
-                   "--velocity", "100", "--duration-ms", "10", "--json"});
-    REQUIRE_FALSE(note_on.timed_out);
-    REQUIRE(note_on.exit_code == 0);
-    CHECK(note_on.stdout_output.find("pulp.inspect.inject-midi.v1") != std::string::npos);
-    CHECK(note_on.stdout_output.find(record.publication_id) != std::string::npos);
-    CHECK(note_on.stdout_output.find("\"accepted\": true") != std::string::npos);
-    CHECK(note_on.stdout_output.find("\"durationMs\": 10") != std::string::npos);
-
-    const auto note_off = run_exact({"inspect", "inject-midi", "--kind", "note_off", "--channel",
-                                     "1", "--note", "60", "--json"});
-    REQUIRE_FALSE(note_off.timed_out);
-    REQUIRE(note_off.exit_code == 0);
-
-    const auto transport = run_exact({"inspect", "set-transport", "--playing", "true",
-                                      "--position-samples", "0", "--tempo-bpm", "120", "--json"});
-    REQUIRE_FALSE(transport.timed_out);
-    REQUIRE(transport.exit_code == 0);
-    CHECK(transport.stdout_output.find("pulp.inspect.set-transport.v1") != std::string::npos);
-    CHECK(transport.stdout_output.find("\"applied\": true") != std::string::npos);
-
-    const auto missing_velocity = run_pulp(
-        {"inspect", "inject-midi", "--kind", "note_on", "--channel", "1", "--note", "60", "--json"},
-        10000);
-    REQUIRE(missing_velocity.exit_code == 2);
-    CHECK(missing_velocity.stderr_output.find("note_on requires --velocity") != std::string::npos);
-
-    const auto missing_duration =
-        run_pulp({"inspect", "inject-midi", "--kind", "note_on", "--channel", "1", "--note", "60",
-                  "--velocity", "100", "--json"},
-                 10000);
-    REQUIRE(missing_duration.exit_code == 2);
-    CHECK(missing_duration.stderr_output.find("note_on requires --duration-ms") !=
-          std::string::npos);
-
-    const auto empty_transport = run_pulp({"inspect", "set-transport", "--json"}, 10000);
-    REQUIRE(empty_transport.exit_code == 2);
-    CHECK(empty_transport.stderr_output.find(
-              "set-transport requires --playing, --position-samples, or --tempo-bpm") !=
-          std::string::npos);
-
-    const auto bad_parameter =
-        run_pulp({"inspect", "set-parameter", "--id", "gain", "--value", "0.5", "--json"}, 10000);
-    REQUIRE(bad_parameter.exit_code == 2);
-    CHECK(bad_parameter.stderr_output.find("invalid --id value: gain") != std::string::npos);
-}
 
 TEST_CASE("pulp inspect named commands expose stable human and JSON contracts",
           "[cli][shellout][inspect][commands]") {
@@ -619,7 +353,7 @@ TEST_CASE("pulp inspect selects an exact instance within a shared session",
 
     InspectServerFixture first;
     first.handler = [&](const InspectorMessage& request) {
-        return make_response(request.id, R"({"instance":"first"})");
+        return make_response(request.id, "{}");
     };
 
     InspectorDiscoveryPublisher second_publisher{first.temp};
@@ -630,7 +364,7 @@ TEST_CASE("pulp inspect selects an exact instance within a shared session",
                              first.session.info().plugin_id, "1"},
         second_policy, [&](const InspectorMessage& request) {
             second_seen.push_back(request);
-            return make_response(request.id, R"({"instance":"second"})");
+            return make_response(request.id, "{}");
         }};
     InspectorServer second_server;
     auto second_rpc = first.main_thread.make_rpc();
@@ -648,19 +382,21 @@ TEST_CASE("pulp inspect selects an exact instance within a shared session",
     second_config.main_thread_rpc = second_rpc;
     REQUIRE(second_server.start_authenticated(std::move(second_config)));
 
-    const auto result =
-        run_pulp({"inspect", "--session", first.session.info().session_id, "--instance",
-                  second_session.info().instance_id, "--command", "DOM.getDocument"},
-                 10000);
+    REQUIRE(second_publisher.record().has_value());
+    const auto result = run_pulp(
+        {"inspect", "capabilities", "--session", first.session.info().session_id, "--instance",
+         second_session.info().instance_id, "--publication",
+         second_publisher.record()->publication_id, "--json"},
+        10000);
 
     INFO("stdout: " << result.stdout_output);
     INFO("stderr: " << result.stderr_output);
     REQUIRE_FALSE(result.timed_out);
     REQUIRE(result.exit_code == 0);
-    CHECK(result.stdout_output == R"({"instance": "second"})"
-                                  "\n");
+    CHECK(result.stdout_output.find(second_publisher.record()->publication_id) !=
+          std::string::npos);
     CHECK(first.seen.empty());
-    REQUIRE(second_seen.size() == 1);
+    CHECK(second_seen.empty());
     second_server.stop();
 }
 
@@ -698,9 +434,9 @@ TEST_CASE("pulp inspect rejects a stale publication after server restart",
     const auto current_publication = fixture.publisher.record()->publication_id;
     REQUIRE(current_publication != stale_publication);
 
-    const auto stale = run_pulp({"inspect", "--session", fixture.session.info().session_id,
+    const auto stale = run_pulp({"inspect", "capabilities", "--session", fixture.session.info().session_id,
                                  "--instance", fixture.session.info().instance_id, "--publication",
-                                 stale_publication, "--command", "Session.getCapabilities"},
+                                 stale_publication},
                                 10000);
     REQUIRE_FALSE(stale.timed_out);
     REQUIRE(stale.exit_code == 1);
@@ -708,144 +444,15 @@ TEST_CASE("pulp inspect rejects a stale publication after server restart",
     CHECK(fixture.seen.empty());
 
     const auto current =
-        run_pulp({"inspect", "--session", fixture.session.info().session_id, "--instance",
+        run_pulp({"inspect", "capabilities", "--session", fixture.session.info().session_id, "--instance",
                   fixture.session.info().instance_id, "--publication", current_publication,
-                  "--command", "Session.getCapabilities"},
+                  "--json"},
                  10000);
     REQUIRE_FALSE(current.timed_out);
     REQUIRE(current.exit_code == 0);
     CHECK(current.stdout_output.find("\"publicationId\": \"" + current_publication + "\"") !=
           std::string::npos);
     CHECK(fixture.seen.empty());
-}
-
-TEST_CASE("pulp inspect one-shot acquires a controller for mutations",
-          "[cli][shellout][inspect][controller]") {
-    if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
-    }
-
-    InspectServerFixture fixture;
-    fixture.handler = [&](const InspectorMessage& request) {
-        return make_response(request.id, R"({"applied":true})");
-    };
-
-    auto result = run_pulp({"inspect", "--port", fixture.port_string(), "--command",
-                            "State.setParameter", "--params", R"({"id":7,"value":0.75})"},
-                           10000);
-
-    INFO("stdout: " << result.stdout_output);
-    INFO("stderr: " << result.stderr_output);
-    REQUIRE_FALSE(result.timed_out);
-    REQUIRE(result.exit_code == 0);
-    REQUIRE(result.stdout_output == R"({"applied": true})"
-                                    "\n");
-    REQUIRE(fixture.seen.size() == 1);
-    CHECK(fixture.seen.front().method == "State.setParameter");
-    CHECK(compact_json_for_assertion(fixture.seen.front().params_json) ==
-          R"({"id":7,"value":0.75})");
-
-    result = run_pulp({"inspect", "--port", fixture.port_string(), "--command",
-                       "State.setParameter", "--params", R"({"id":7,"value":0.5})"},
-                      10000);
-    REQUIRE_FALSE(result.timed_out);
-    REQUIRE(result.exit_code == 0);
-    REQUIRE(fixture.seen.size() == 2);
-    CHECK(compact_json_for_assertion(fixture.seen.back().params_json) == R"({"id":7,"value":0.5})");
-}
-
-#if PULP_TEST_INSPECT_DOMAIN_HANDLER
-TEST_CASE("pulp inspect applies a typed parameter mutation through the production domain",
-          "[cli][shellout][inspect][controller][state]") {
-    if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
-    }
-
-    pulp::state::StateStore store;
-    pulp::state::ParamInfo gain;
-    gain.id = 7;
-    gain.name = "Gain";
-    gain.range = {0.0f, 1.0f, 0.25f, 0.0f};
-    store.add_parameter(gain);
-    pulp::inspect::StateInspector state_inspector(store);
-    pulp::inspect::DomainHandler domains;
-    domains.set_state_inspector(&state_inspector);
-    InspectServerFixture fixture;
-    fixture.handler = [&](const InspectorMessage& request) { return domains.handle(request); };
-
-    auto result = run_pulp({"inspect", "--port", fixture.port_string(), "--command",
-                            "State.setParameter", "--params", R"({"id":7,"value":0.75})"},
-                           10000);
-
-    INFO("stdout: " << result.stdout_output);
-    INFO("stderr: " << result.stderr_output);
-    REQUIRE_FALSE(result.timed_out);
-    REQUIRE(result.exit_code == 0);
-    REQUIRE(result.stdout_output == R"({"ok": true})"
-                                    "\n");
-    CHECK(store.get_value(7) == 0.75f);
-    REQUIRE(fixture.seen.size() == 1);
-    CHECK(fixture.seen.front().method == "State.setParameter");
-    CHECK(compact_json_for_assertion(fixture.seen.front().params_json) ==
-          R"({"id":7,"value":0.75})");
-
-    result = run_pulp({"inspect", "--port", fixture.port_string(), "--command",
-                       "State.setParameter", "--params", R"({"id":"gain","value":0.5})"},
-                      10000);
-    REQUIRE_FALSE(result.timed_out);
-    REQUIRE(result.exit_code == 1);
-    CHECK(result.stderr_output.find("Invalid params for State.setParameter") != std::string::npos);
-    CHECK(store.get_value(7) == 0.75f);
-    REQUIRE(fixture.seen.size() == 2);
-}
-#endif
-
-TEST_CASE("pulp inspect one-shot writes output files and propagates errors",
-          "[cli][shellout][inspect]") {
-    if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
-    }
-
-    InspectServerFixture fixture;
-    const auto out = fixture.temp / "inspect-response.json";
-
-    fixture.handler = [&](const InspectorMessage& request) {
-        if (request.method == "Inspector.getInfo")
-            return make_error(request.id, "server rejected request");
-        return make_response(request.id, R"({"file":true,"value":42})");
-    };
-
-    auto written = run_pulp({"inspect", "--port", fixture.port_string(), "--command",
-                             "State.getParameters", "--output", out.string()},
-                            10000);
-
-    INFO("stdout: " << written.stdout_output);
-    INFO("stderr: " << written.stderr_output);
-    REQUIRE_FALSE(written.timed_out);
-    REQUIRE(written.exit_code == 0);
-    REQUIRE(written.stderr_output.find("Connecting to 127.0.0.1:" + fixture.port_string()) !=
-            std::string::npos);
-    REQUIRE(written.stderr_output.find("Connected to inspector") != std::string::npos);
-    REQUIRE(written.stdout_output.find("Written to " + out.string()) != std::string::npos);
-    REQUIRE(fs::exists(out));
-    REQUIRE(compact_json_for_assertion(read_text_file(out)) == R"({"file":true,"value":42})");
-    REQUIRE(fixture.seen.size() == 1);
-    REQUIRE(fixture.seen[0].method == "State.getParameters");
-
-    auto failed =
-        run_pulp({"inspect", "--port", fixture.port_string(), "--command", "Inspector.getInfo",
-                  "--output", (fixture.temp / "failed.json").string()},
-                 10000);
-
-    REQUIRE_FALSE(failed.timed_out);
-    REQUIRE(failed.exit_code == 1);
-    REQUIRE(failed.stderr_output.find("server rejected request") != std::string::npos);
-    REQUIRE_FALSE(fs::exists(fixture.temp / "failed.json"));
-    REQUIRE(fixture.seen.size() == 2);
-    REQUIRE(fixture.seen[1].method == "Inspector.getInfo");
 }
 
 TEST_CASE("pulp inspect validates missing values before connecting", "[cli][shellout][inspect]") {
@@ -863,12 +470,8 @@ TEST_CASE("pulp inspect validates missing values before connecting", "[cli][shel
     };
 
     const std::vector<Case> cases = {
-        {{"inspect", "--host"}, "--host requires a value"},
         {{"inspect", "--session"}, "--session requires a value"},
         {{"inspect", "--publication"}, "--publication requires a value"},
-        {{"inspect", "--command"}, "--command requires a value"},
-        {{"inspect", "--params"}, "--params requires a value"},
-        {{"inspect", "--output"}, "--output requires a value"},
     };
 
     for (const auto& c : cases) {
@@ -880,20 +483,15 @@ TEST_CASE("pulp inspect validates missing values before connecting", "[cli][shel
         REQUIRE(result.stdout_output.find("Connecting to") == std::string::npos);
     }
 
-    auto invalid_negative = run_pulp({"inspect", "--port", "-1"}, 10000);
-    REQUIRE_FALSE(invalid_negative.timed_out);
-    REQUIRE(invalid_negative.exit_code == 2);
-    REQUIRE(invalid_negative.stderr_output.find("invalid --port value: -1") != std::string::npos);
-    REQUIRE(invalid_negative.stdout_output.find("Connecting to") == std::string::npos);
+    for (const char* removed : {"--host", "--port", "--command", "--params", "--output"}) {
+        auto result = run_pulp({"inspect", removed}, 10000);
+        REQUIRE_FALSE(result.timed_out);
+        REQUIRE(result.exit_code == 2);
+        REQUIRE(result.stderr_output.find("unknown inspect argument") != std::string::npos);
+    }
 
-    auto unmatched_port =
-        run_pulp({"inspect", "--port", "1", "--command", "Motion.snapshot"}, 10000);
-    REQUIRE_FALSE(unmatched_port.timed_out);
-    REQUIRE(unmatched_port.exit_code == 1);
-    REQUIRE(unmatched_port.stderr_output.find("requested port 1") != std::string::npos);
-    REQUIRE(unmatched_port.stdout_output.empty());
-
-    auto unpaired_publication = run_pulp({"inspect", "--publication", "publication-a"}, 10000);
+    auto unpaired_publication =
+        run_pulp({"inspect", "capabilities", "--publication", "publication-a"}, 10000);
     REQUIRE_FALSE(unpaired_publication.timed_out);
     REQUIRE(unpaired_publication.exit_code == 2);
     REQUIRE(unpaired_publication.stderr_output.find(

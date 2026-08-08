@@ -21,7 +21,7 @@ configure_file(
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 if(TARGET pulp::inspect-client)
-    set(_pulp_inspect_command_source cmd_inspect.cpp cmd_inspect_screenshot.cpp)
+    set(_pulp_inspect_command_source cmd_inspect.cpp)
 else()
     set(_pulp_inspect_command_source cmd_inspect_unavailable.cpp)
 endif()

@@ -76,53 +76,11 @@ session record and credential for authenticated discovery.
 
 ### 3. Attach a trace
 
-Three discovery surfaces — pick whichever is at hand. All three terminate
-at the same `Coordinator`.
-
-**3a. `pulp motion *` CLI** (terminal, one verb per Motion.* method,
-prints the trace_id so you can copy it into `motion stop`):
-
-```bash
-pulp motion record --view Card --fps 30 --out card-fade.jsonl
-# → --out is a fixture-path hint; wire make_fixture_sink("card-fade.jsonl")
-#   in the app or test when you need an on-disk JSONL artifact.
-# → trace started — trace_id=1
-# →   stop with: pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE --publication PUBLICATION
-```
-
-`record` resolves authenticated discovery to one exact publication before it
-mutates, then prints that selector in the stop command. `stop` requires the
-exact `--session ID --instance ID --publication ID` selector so a replacement
-process that reuses the other IDs cannot inherit the operation. `scrub`,
-`play`, `pause`, and cost toggles also mutate process-owned state and require
-an exact publication. Read-only `snapshot` and `list-traces` accept
-auto-discovery or exact selection; `--port` remains a discovery filter, and
-`--json` includes the resolved selector for `record`. The command exits 1 with
-custom-fixture guidance when no eligible session exists. Full list: `record /
-stop / snapshot / list-traces / scrub / play / pause / cost
-{enable|disable}`. Fixture loading is deliberately absent
-because a remote client cannot grant the server authority to read an arbitrary
-host filesystem path.
-
-Do not connect to the raw TCP framing yourself. The client performs mutual
-nonce/HMAC authentication with the owner-private per-session credential before
-it sends a request.
-
-**3b. `pulp_motion_*` MCP wrapper tools** — same payload shape as
-the wire path, called as a `tools/call` JSON-RPC request when an
-agent is driving an MCP server (see
-`docs/guides/motion-observability.md` Tooling section).
-
-Stream of events: `Motion.start`, `Motion.sample` (one per change), `Motion.end`
-(with deltas).
-
-`Motion.startTrace` is a closed, bounded request. It accepts 1–32 metrics;
-view and metric names are 1–128 Unicode codepoints; node IDs are 1–256; and
-geometry/scroll property arrays contain only unique members of their published
-enums. Unknown fields, invalid spaces or sources, and malformed property arrays
-return `invalid_params` before a trace is created. When extending the wire
-shape, update the frozen control schema, executor validation, negative
-no-trace tests, this skill, and the motion guide together.
+The shipped `pulp motion` command and `pulp_motion_*` MCP wrappers were retired
+with the raw inspector authority path. A custom fixture may still use the
+in-process Motion APIs for tests, but agents must not connect to its framing or
+recreate a shell-out fallback. Live remote operations require a canonical
+broker/control capability with a frozen schema and receipt.
 
 ### 4. Trigger the interaction
 
@@ -131,16 +89,8 @@ animation. The motion server emits events as the values change.
 
 ### 5. Stop the trace
 
-```bash
-pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE --publication PUBLICATION
-# → trace stopped (removed=true)
-```
-
-Or the raw wire-protocol equivalent:
-
-```jsonc
-{ "id": 2, "method": "Motion.stopTrace", "params": { "trace_id": 1 } }
-```
+Stop through the same fixture-owned in-process API or canonical control
+operation that started the trace. No shipped Motion CLI/MCP stop route exists.
 
 ### 6. Compare against intent
 
@@ -355,11 +305,9 @@ Broadcast events reuse `MotionInspector`'s `Motion.start / .sample /
 distinguish replayed bursts from live coordinator events on the same
 wire.
 
-After trusted host/test code loads the fixture, an authenticated client with
-the granted trace-control capability may call `pulp motion scrub 120
---session SESSION --instance INSTANCE --publication PUBLICATION`, `play` with
-the same selector,
-or `pause`. `pulp motion load-fixture` is intentionally unavailable.
+After trusted host/test code loads the fixture, use the in-process
+`MotionScrubber` API to scrub, play, or pause. The retired `pulp motion` command
+must not be recreated as a remote filesystem or mutation fallback.
 
 Direct C++ usage:
 
@@ -427,14 +375,8 @@ sink with:
 enabled, `Motion.cost` events broadcast per frame. `Motion.snapshot`
 also reports `cost_enabled` and `cost_samples_emitted`.
 
-CLI shortcut:
-
-```bash
-pulp motion cost enable --session SESSION --instance INSTANCE --publication PUBLICATION
-# ... drive the suspect animation ...
-pulp motion cost disable --session SESSION --instance INSTANCE --publication PUBLICATION
-pulp motion snapshot --json | jq '.cost_samples_emitted'
-```
+Toggle cost attribution through the explicitly owned in-process host/test API;
+the retired CLI and MCP mutation wrappers are not control surfaces.
 
 ### Notes
 

@@ -134,25 +134,6 @@ TEST_CASE("Explicit standalone subprocess serves its deterministic back-buffer f
     REQUIRE(records.front().plugin_id
             == "com.pulp.test.inspector-process-fixture");
 
-    const auto cli_png = scratch.path / "cli-inspector.png";
-    const auto cli_capture = pulp::platform::exec(
-        PULP_INSPECT_CLI_BINARY,
-        {"inspect", "screenshot", "--out", cli_png.string(), "--json",
-         "--session", records.front().session_id,
-         "--instance", records.front().instance_id,
-         "--publication", records.front().publication_id},
-        10'000);
-    INFO("cli stdout=" << cli_capture.stdout_output);
-    INFO("cli stderr=" << cli_capture.stderr_output);
-    REQUIRE_FALSE(cli_capture.timed_out);
-    REQUIRE(cli_capture.exit_code == 0);
-    const auto cli_capture_json = choc::json::parse(cli_capture.stdout_output);
-    REQUIRE(cli_capture_json["schemaVersion"].getString()
-            == "pulp.inspect.screenshot.v1");
-    const auto cli_capture_bytes = read_bytes(cli_png);
-    REQUIRE(pulp::view::analyze_screenshot_content(cli_capture_bytes)
-                .passes_content_floor());
-
     pulp::inspect::InspectorClient client;
     REQUIRE(client.connect(records.front(), reader));
     const auto capabilities = client.request(
