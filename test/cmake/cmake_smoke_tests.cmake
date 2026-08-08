@@ -687,6 +687,14 @@ add_test(NAME cmake-inspector-shipping-scanner
 set_tests_properties(cmake-inspector-shipping-scanner PROPERTIES
     LABELS "cmake;inspect;ship" TIMEOUT 30)
 
+add_test(NAME cmake-control-shipping-matrix
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/control-shipping-matrix
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_control_shipping_matrix.cmake)
+set_tests_properties(cmake-control-shipping-matrix PROPERTIES
+    LABELS "cmake;control;ship;matrix" TIMEOUT 180)
+
 # Validation contract tests — schema and reality snapshot
 add_executable(pulp-test-validation-contract test_validation_contract.cpp)
 target_link_libraries(pulp-test-validation-contract PRIVATE Catch2::Catch2WithMain)

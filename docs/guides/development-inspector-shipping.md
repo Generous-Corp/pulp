@@ -77,14 +77,60 @@ also writes `artifacts/inspector-capability-package-input.json`.
 JSON package failures remain JSON and include a nonzero `exit_code` plus the
 fail-closed diagnostic.
 
-Every standalone build runs a manifest-versus-binary scanner using retained,
-Pulp-specific shipping and capability markers. Intentional artifacts fail if
-their endpoint or high-risk evaluator marker is missing, or if the evaluator
-appears without its separate acknowledgement. Generic class or symbol names
-are not treated as proof because unrelated product code may use the same text.
-The scanner also rejects legacy Remote View parameter authority from
-`production-stripped` artifacts. OSC UDP is reported as a separate external
-surface, not misrepresented as Product A protection.
+Every plugin and standalone binary runs a post-link control shipping scan.
+This includes Standalone, VST3, CLAP, LV2, AU v2, both executable AUv3 pieces,
+the AUv3 container, and AAX when that SDK is available. Multi-plugin VST3 and
+CLAP bundles enter the same scanner as ordinary `production-stripped`
+artifacts; the bundle helper is not a packaging bypass.
+Control endpoints are Standalone-only: in a mixed developer build, each
+non-Standalone artifact receives its own `production-stripped` manifest rather
+than inheriting the intentional Standalone profile.
+
+The scanner verifies the canonical manifest digest together with retained
+profile, format, platform, and architecture markers. It measures the actual
+artifact size and records which native symbol and dependency scanners ran in a
+`<target>.<format>.control-shipping-report.json` sidecar. On macOS those tools
+are `nm`, `otool`, and `lipo`; Linux uses `nm` and `readelf`; Windows uses
+`dumpbin`. A missing native scanner blocks the artifact, so each platform lane
+must provide its native toolchain rather than silently claiming evidence.
+
+For an intentional profile, every declared capability and endpoint marker must
+be retained from the linked control implementations; the shipping helper emits
+only artifact identity and cannot make an empty target satisfy its declaration.
+Source-bearing control components own these markers, and a real-component link
+fixture constructs the endpoint and resolves a declared capability before its
+final executable is scanned.
+The high-risk evaluator marker must exactly match its separate acknowledgement.
+For `production-stripped`, the scanner rejects endpoint,
+capability, runtime-evaluation, and Remote View authority strings, known control
+symbols, and known control dynamic dependencies. It also scans native binaries
+inside the package closure (or resolved sibling loader dependencies), so
+renaming a helper library cannot hide retained control code. The check reads
+the final linked artifact, so a CMake option or an unlinked declaration is not
+accepted as shipping proof.
+
+The generated `dev.pulp.control/shipping-artifact@1` sidecar is per binary and
+names its format, platform, complete architecture list, profile, and canonical
+manifest digest. This makes diagnostic and research artifacts visibly distinct
+from ordinary production output while preserving the canonical standalone
+manifest used by the read-only audit command.
+
+Custom `pulp-install-<target>` targets depend on every format binary they copy.
+That dependency is load-bearing: installation cannot copy a stale format while
+skipping its post-link scan. A persisted scan stamp depends on the artifact,
+both manifests, and the scanner itself, so changing shipping policy invalidates
+an earlier report even when the binary did not relink. The helper and scanner
+are both exported in the installed CMake SDK, and an installed-layout test
+builds the complete profile and format policy matrix without reaching back into
+the Pulp source tree.
+
+The repository matrix exercises all five profiles and the Standalone, VST3,
+CLAP, LV2, AU v2, AUv3, and AAX policy labels. The local macOS proof builds
+universal `arm64` and `x86_64` artifacts and verifies both slices with `lipo`.
+Linux `x86_64`/`aarch64`, Windows `x64`, and real AAX vendor-SDK artifacts
+remain native CI responsibilities: a synthetic format label does not claim
+that a platform SDK or package validator ran. Each available real format target
+still receives the scanner automatically when that CI leg builds it.
 
 Directory and direct-file audits resolve artifact names only as safe basenames
 beside their sidecars. An exact-named direct sidecar is not sufficient by

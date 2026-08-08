@@ -1,5 +1,17 @@
 #include <pulp/inspect/value_channel_telemetry_broker.hpp>
 
+#if defined(_MSC_VER)
+#define PULP_CONTROL_COMPONENT_MARKER __declspec(dllexport)
+#else
+#define PULP_CONTROL_COMPONENT_MARKER __attribute__((used, visibility("default")))
+#endif
+
+extern "C" PULP_CONTROL_COMPONENT_MARKER const volatile char
+    pulp_control_telemetry_capability_marker_v1[] =
+        "PULP_INSPECT_CAPABILITY_TELEMETRY_STREAM_V1";
+
+#undef PULP_CONTROL_COMPONENT_MARKER
+
 #include <pulp/inspect/protocol.hpp>
 
 #include <choc/text/choc_JSON.h>

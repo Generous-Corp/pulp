@@ -209,7 +209,7 @@ REQUIRED_BUILD_CONTRACTS = {
         "inspect/include/pulp/inspect/control_inspector_client.hpp",
         "inspect/include/pulp/inspect/trace_inspector.hpp",
     ),
-    "tools/cmake/PulpInspectorShipping.cmake": (
+    "tools/cmake/PulpControlShipping.cmake": (
         "function(_pulp_cache_control_declarations target profile capabilities eval_ack)",
         'set(PULP_${target}_CONTROL_PROFILE "${profile}" CACHE INTERNAL "" FORCE)',
         'set(PULP_${target}_CONTROL_CAPABILITIES "${capabilities}" CACHE INTERNAL "" FORCE)',
@@ -400,7 +400,7 @@ def check_root(
                 f"`{capability_id}`; expected {expected_text}"
             )
 
-    shipping_cmake_path = root / "tools/cmake/PulpInspectorShipping.cmake"
+    shipping_cmake_path = root / "tools/cmake/PulpControlShipping.cmake"
     if shipping_cmake_path.exists():
         shipping_cmake = shipping_cmake_path.read_text(encoding="utf-8")
 

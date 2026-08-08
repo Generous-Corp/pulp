@@ -1,5 +1,17 @@
 #include <pulp/inspect/control_endpoint.hpp>
 
+#if defined(_MSC_VER)
+#define PULP_CONTROL_COMPONENT_MARKER __declspec(dllexport)
+#else
+#define PULP_CONTROL_COMPONENT_MARKER __attribute__((used, visibility("default")))
+#endif
+
+extern "C" PULP_CONTROL_COMPONENT_MARKER const volatile char
+    pulp_control_endpoint_shipping_marker_v1[] =
+        "PULP_INSPECT_SHIPPING_MANIFEST_V1";
+
+#undef PULP_CONTROL_COMPONENT_MARKER
+
 #include <pulp/inspect/control_broker.hpp>
 #include <pulp/inspect/control_carrier.hpp>
 #include <pulp/inspect/control_host_router.hpp>
