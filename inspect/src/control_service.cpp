@@ -1,3 +1,4 @@
+#include <pulp/inspect/control_read_operations.hpp>
 #include <pulp/inspect/control_service.hpp>
 
 #include <choc/text/choc_UTF8.h>
@@ -296,8 +297,11 @@ ControlServiceResult ControlService::dispatch_request(Session& session,
             .explanation = "artifacts feature was not negotiated",
         };
     }
-    auto admission = executor_ ? broker_.admit_operation(session.peer_, request)
-                               : broker_.replay_operation(session.peer_, request);
+    const bool broker_owned_instance_read =
+        request.operation_id == "dev.pulp.instance/read@1" && request.operation_version == 1;
+    const bool has_executor = broker_owned_instance_read || static_cast<bool>(executor_);
+    auto admission = has_executor ? broker_.admit_operation(session.peer_, request)
+                                  : broker_.replay_operation(session.peer_, request);
     if (admission.receipt && !admission.should_dispatch &&
         (admission.status == ControlAdmissionStatus::Admitted ||
          admission.status == ControlAdmissionStatus::CancelledBeforeDispatch)) {
@@ -306,7 +310,7 @@ ControlServiceResult ControlService::dispatch_request(Session& session,
         // denial would discard the receipt ID needed for correlated replay.
         return receipt_response(*admission.receipt, request.request_id);
     }
-    if (!executor_) {
+    if (!has_executor) {
         if (admission.status == ControlAdmissionStatus::IdempotencyConflict ||
             admission.status == ControlAdmissionStatus::RequestIdConflict ||
             admission.status == ControlAdmissionStatus::ReplayWindowExpired) {
@@ -486,18 +490,19 @@ ControlServiceResult ControlService::dispatch_request(Session& session,
                                            ControlArtifactPublication publication) {
                 std::lock_guard lock(completion_owner->mutex);
                 if (!completion_owner->broker)
-                    return ControlArtifactStoreResult{
-                        .status = ControlArtifactStatus::Unauthorized};
+                    return ControlArtifactStoreResult{.status =
+                                                          ControlArtifactStatus::Unauthorized};
                 return completion_owner->broker->store_operation_artifact(
-                    peer, plan, bytes, std::move(publication.content_type),
-                    publication.sensitivity, publication.redaction_state,
-                    publication.lifetime);
+                    peer, plan, bytes, std::move(publication.content_type), publication.sensitivity,
+                    publication.redaction_state, publication.lifetime);
             },
     };
 
     ControlExecutionOutcome outcome;
     try {
-        outcome = executor_(plan, request, context);
+        outcome = broker_owned_instance_read
+                      ? execute_control_instance_read(broker_, plan, request, context)
+                      : executor_(plan, request, context);
     } catch (const std::exception& error) {
         outcome.terminal_state = ControlReceiptState::Failed;
         outcome.result = internal_failure(error.what());

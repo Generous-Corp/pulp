@@ -235,7 +235,10 @@ and artifact state in `ControlBroker`. Installed `ControlService` and
 `ControlClient` types expose the same typed protocol used by the canonical
 macOS `LocalSocket` endpoint and `ControlClientConnection`. A
 `ControlClientTransport` represents one authenticated connection and owns its
-client lineage, including artifact reads. The optional
+client lineage, including artifact reads. Phase 4's runtime adapters add
+broker-owned exact T0/T1 instance status plus bounded `StateStore` catalog and
+value reads; they add no listener and have no CLI/MCP or legacy Inspector
+fallback. The optional
 `pulp-control-broker` executable owns the per-user endpoint and currently
 serves bounded health requests only; authority-bearing admission remains
 fail-closed until signed launcher, host registration, consent, and execution

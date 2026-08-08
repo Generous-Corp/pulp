@@ -550,8 +550,9 @@ TEST_CASE("registry request and result maxima fit their bounded protocol budgets
             state_request += ',';
             state_result += ',';
         }
-        state_request += "4294967295";
-        state_result += R"({"id":4294967295,"normalized":0.5,"sensitive":false})";
+        state_request += std::to_string(index);
+        state_result += R"({"id":)" + std::to_string(index) +
+                        R"(,"normalized":0.5,"sensitive":false})";
     }
     state_request += "]}";
     state_result += "]}";

@@ -35,9 +35,9 @@ availability.
 
 | Canonical capability (legacy spelling) | `observe` | `develop` | Current reality |
 |---|---:|---:|---|
-| `dev.pulp.instance/read@1` (`session.describe`) | yes | yes | Schema and broker operation exist; no public general-live client route |
+| `dev.pulp.instance/read@1` (`session.describe`) | yes | yes | Broker-owned T0/T1 executor returns the exact active registration, tier, publication generation, build/artifact identity, liveness generation, and declared capabilities after canonical admission |
 | `dev.pulp.session/control@1` (`session.control`) | no | yes | Broker lease/grant machinery exists; no general product host adapter |
-| `dev.pulp.state/read@1` (`state.read`) | yes | yes | Typed contract exists; not publicly reachable through `pulp inspect` or MCP |
+| `dev.pulp.state/read@1` (`state.read`) | yes | yes | T0/T1 runtime executor returns bounded parameter catalog/value snapshots through the shared `StateStore` serializer, with explicit sensitive-field redaction; no CLI/MCP adapter yet |
 | `dev.pulp.render/offline@1` (`render.offline`) | no | no | T0-only headless executor resolves authority-bound, launcher-trusted in-memory inputs, renders through `OfflineRenderHost`, and publishes broker-owned WAV artifacts; no profile enables it implicitly |
 | `dev.pulp.ui/observe@1` (`ui.read`) | yes | yes | Typed contract/components exist; no general product host adapter |
 | `dev.pulp.diagnostics/read@1` (`diagnostics.read`) | yes | yes | Typed contract/components exist; no general product host adapter |
@@ -128,7 +128,32 @@ Phases 4–7 preserve these boundaries:
 
 The deleted legacy TCP server/discovery path is not a compatibility fallback.
 There is one centralized authority path, and unavailable operations remain
-unavailable until that path owns them end to end.
+unavailable until that path owns them end to end rather than falling back to an
+Inspector selector.
+
+## Phase 4 read-only runtime slice
+
+`dev.pulp.instance/read@1` is settled inside `ControlService` from
+`ControlBroker`'s live registration after exact grant admission and a final
+authority checkpoint. It does not ask a host payload to describe its own
+identity. Offline jobs and standalone instances are distinguished explicitly,
+and a heartbeat advances only the liveness generation; unregister/restart
+mints a new registration identity and revokes the old grants.
+
+`dev.pulp.state/read@1` is an injected runtime executor. T0 compositions may
+install it directly; T1 hosts provide it to the canonical authenticated host
+connection. Its resolver receives only the admitted registration plan and an
+exact runtime `StateStore` selection. The adapter runs on the control/host
+worker, never the audio thread, performs no mutation or file I/O, and uses the
+shared parameter JSON serializer for catalog and values. Requests are bounded
+to 4096 unique parameter IDs. Sensitive parameters are omitted unless the
+request explicitly opts in, and the response reports the redacted count.
+
+These adapters do not create a listener, discovery path, CLI command, MCP
+tool, capture/eval/reload surface, or legacy Inspector fallback. A
+`production-stripped` manifest still cannot contain an endpoint or either
+capability; developer/test/support artifacts remain explicit opt-ins whose
+manifests are only an upper bound, not a grant.
 
 ## High-risk and typed-operation boundaries
 

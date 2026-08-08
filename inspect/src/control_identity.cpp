@@ -15,17 +15,14 @@ constexpr std::size_t kBootstrapSecretBytes = 32;
 
 bool valid_peer_evidence(const ControlPeerEvidence& evidence) {
     return !evidence.user_id.empty() && evidence.process_id > 0 &&
-           !evidence.process_start_id.empty() &&
-           !evidence.executable_identity.empty() &&
+           !evidence.process_start_id.empty() && !evidence.executable_identity.empty() &&
            !evidence.publisher_id.empty();
 }
 
 std::string peer_fingerprint(const ControlPeerEvidence& evidence) {
     std::string canonical;
-    canonical.reserve(evidence.user_id.size() +
-                      evidence.process_start_id.size() +
-                      evidence.executable_identity.size() +
-                      evidence.publisher_id.size() + 48);
+    canonical.reserve(evidence.user_id.size() + evidence.process_start_id.size() +
+                      evidence.executable_identity.size() + evidence.publisher_id.size() + 48);
     canonical.append(std::to_string(static_cast<unsigned>(evidence.role)));
     canonical.push_back('\0');
     canonical.append(evidence.user_id);
@@ -48,10 +45,9 @@ std::optional<std::string> random_id(std::string_view prefix) {
 }
 
 template <typename Duration>
-std::optional<std::chrono::steady_clock::time_point> expiry_after(
-    std::chrono::steady_clock::time_point now, Duration ttl) {
-    const auto duration =
-        std::chrono::duration_cast<std::chrono::steady_clock::duration>(ttl);
+std::optional<std::chrono::steady_clock::time_point>
+expiry_after(std::chrono::steady_clock::time_point now, Duration ttl) {
+    const auto duration = std::chrono::duration_cast<std::chrono::steady_clock::duration>(ttl);
     if (duration <= std::chrono::steady_clock::duration::zero() ||
         duration > std::chrono::steady_clock::time_point::max() - now) {
         return std::nullopt;
@@ -98,12 +94,10 @@ bool peer_can_register(ControlHostTier tier, ControlPeerRole role) {
     return role == ControlPeerRole::TrustedHostBridge;
 }
 
-std::string exact_key(std::string_view session_id,
-                      std::string_view instance_id,
+std::string exact_key(std::string_view session_id, std::string_view instance_id,
                       std::string_view publication_id) {
     std::string key;
-    key.reserve(session_id.size() + instance_id.size() +
-                publication_id.size() + 3);
+    key.reserve(session_id.size() + instance_id.size() + publication_id.size() + 3);
     key.append(session_id);
     key.push_back('\0');
     key.append(instance_id);
@@ -114,58 +108,70 @@ std::string exact_key(std::string_view session_id,
 
 } // namespace
 
-ControlPeerVerifier::ControlPeerVerifier(Authority authority)
-    : authority_(std::move(authority)) {}
+ControlPeerVerifier::ControlPeerVerifier(Authority authority) : authority_(std::move(authority)) {}
 
-std::optional<VerifiedControlPeerIdentity> ControlPeerVerifier::verify(
-    ControlPeerEvidence evidence) const {
-    if (!authority_ || !valid_peer_evidence(evidence) ||
-        !authority_(evidence)) {
+std::optional<VerifiedControlPeerIdentity>
+ControlPeerVerifier::verify(ControlPeerEvidence evidence) const {
+    if (!authority_ || !valid_peer_evidence(evidence) || !authority_(evidence)) {
         return std::nullopt;
     }
     auto fingerprint = peer_fingerprint(evidence);
-    return VerifiedControlPeerIdentity(
-        std::move(evidence), std::move(fingerprint));
+    return VerifiedControlPeerIdentity(std::move(evidence), std::move(fingerprint));
 }
 
 std::string_view control_identity_status_id(ControlIdentityStatus status) {
     switch (status) {
-        case ControlIdentityStatus::Accepted: return "accepted";
-        case ControlIdentityStatus::InvalidRequest: return "invalid-request";
-        case ControlIdentityStatus::PeerRoleMismatch:
-            return "peer-role-mismatch";
-        case ControlIdentityStatus::HostUnavailable: return "host-unavailable";
-        case ControlIdentityStatus::AttestationUnavailable:
-            return "attestation-unavailable";
-        case ControlIdentityStatus::IdentityMismatch:
-            return "identity-mismatch";
-        case ControlIdentityStatus::NotFound: return "not-found";
-        case ControlIdentityStatus::Expired: return "expired";
-        case ControlIdentityStatus::Replay: return "replay";
-        case ControlIdentityStatus::ResourceExhausted:
-            return "resource-exhausted";
-        case ControlIdentityStatus::EntropyUnavailable:
-            return "entropy-unavailable";
+    case ControlIdentityStatus::Accepted:
+        return "accepted";
+    case ControlIdentityStatus::InvalidRequest:
+        return "invalid-request";
+    case ControlIdentityStatus::PeerRoleMismatch:
+        return "peer-role-mismatch";
+    case ControlIdentityStatus::HostUnavailable:
+        return "host-unavailable";
+    case ControlIdentityStatus::AttestationUnavailable:
+        return "attestation-unavailable";
+    case ControlIdentityStatus::IdentityMismatch:
+        return "identity-mismatch";
+    case ControlIdentityStatus::NotFound:
+        return "not-found";
+    case ControlIdentityStatus::Expired:
+        return "expired";
+    case ControlIdentityStatus::Replay:
+        return "replay";
+    case ControlIdentityStatus::ResourceExhausted:
+        return "resource-exhausted";
+    case ControlIdentityStatus::EntropyUnavailable:
+        return "entropy-unavailable";
     }
     return "invalid-request";
 }
 
-ControlBootstrapSecret::ControlBootstrapSecret(
-    std::span<const std::uint8_t> bytes)
+std::string_view control_host_tier_id(ControlHostTier tier) {
+    switch (tier) {
+    case ControlHostTier::OfflineJob:
+        return "offline-job";
+    case ControlHostTier::Standalone:
+        return "standalone";
+    case ControlHostTier::SharedPluginHost:
+        return "shared-plugin-host";
+    }
+    return "unknown";
+}
+
+ControlBootstrapSecret::ControlBootstrapSecret(std::span<const std::uint8_t> bytes)
     : bytes_(bytes.begin(), bytes.end()) {}
 
 ControlBootstrapSecret::~ControlBootstrapSecret() {
     clear();
 }
 
-ControlBootstrapSecret::ControlBootstrapSecret(
-    ControlBootstrapSecret&& other) noexcept
+ControlBootstrapSecret::ControlBootstrapSecret(ControlBootstrapSecret&& other) noexcept
     : bytes_(std::move(other.bytes_)) {
     other.bytes_.clear();
 }
 
-ControlBootstrapSecret& ControlBootstrapSecret::operator=(
-    ControlBootstrapSecret&& other) noexcept {
+ControlBootstrapSecret& ControlBootstrapSecret::operator=(ControlBootstrapSecret&& other) noexcept {
     if (this != &other) {
         clear();
         bytes_ = std::move(other.bytes_);
@@ -180,7 +186,7 @@ void ControlBootstrapSecret::clear() noexcept {
 }
 
 class ControlIdentityRegistry::Impl {
-public:
+  public:
     struct BootstrapState {
         std::vector<std::uint8_t> secret;
         std::string peer_fingerprint;
@@ -188,10 +194,8 @@ public:
     };
 
     Impl(ControlIdentityRegistryConfig config_in,
-         std::shared_ptr<ControlSecurityAuditLog> audit_log_in,
-         Clock clock_in)
-        : config(std::move(config_in)),
-          audit_log(std::move(audit_log_in)),
+         std::shared_ptr<ControlSecurityAuditLog> audit_log_in, Clock clock_in)
+        : config(std::move(config_in)), audit_log(std::move(audit_log_in)),
           clock(std::move(clock_in)) {
         if (const auto id = random_id("broker-"))
             broker_id.value = *id;
@@ -199,8 +203,7 @@ public:
 
     ~Impl() {
         for (auto& [_, ticket] : tickets)
-            pulp::runtime::secure_zero_memory(
-                ticket.secret.data(), ticket.secret.size());
+            pulp::runtime::secure_zero_memory(ticket.secret.data(), ticket.secret.size());
     }
 
     void audit(ControlSecurityAuditEntry entry) {
@@ -216,8 +219,7 @@ public:
                 ++it;
                 continue;
             }
-            pulp::runtime::secure_zero_memory(
-                it->second.secret.data(), it->second.secret.size());
+            pulp::runtime::secure_zero_memory(it->second.secret.data(), it->second.secret.size());
             audit(ControlSecurityAuditEntry{
                 .action = "bootstrap.expire",
                 .peer_fingerprint = it->second.peer_fingerprint,
@@ -245,9 +247,8 @@ public:
                 ++it;
                 continue;
             }
-            exact_registrations.erase(exact_key(
-                it->second.session_id, it->second.instance_id,
-                it->second.publication_id));
+            exact_registrations.erase(exact_key(it->second.session_id, it->second.instance_id,
+                                                it->second.publication_id));
             audit(ControlSecurityAuditEntry{
                 .action = "registration.expire",
                 .peer_fingerprint = it->second.peer_fingerprint,
@@ -273,12 +274,10 @@ public:
     std::unordered_map<std::string, std::string> exact_registrations;
 };
 
-ControlIdentityRegistry::ControlIdentityRegistry(
-    ControlIdentityRegistryConfig config,
-    std::shared_ptr<ControlSecurityAuditLog> audit_log,
-    Clock clock)
-    : impl_(std::make_unique<Impl>(
-          std::move(config), std::move(audit_log), std::move(clock))) {}
+ControlIdentityRegistry::ControlIdentityRegistry(ControlIdentityRegistryConfig config,
+                                                 std::shared_ptr<ControlSecurityAuditLog> audit_log,
+                                                 Clock clock)
+    : impl_(std::make_unique<Impl>(std::move(config), std::move(audit_log), std::move(clock))) {}
 
 ControlIdentityRegistry::~ControlIdentityRegistry() = default;
 
@@ -286,14 +285,12 @@ const ControlBrokerId& ControlIdentityRegistry::broker_id() const {
     return impl_->broker_id;
 }
 
-ControlBootstrapResult ControlIdentityRegistry::issue_bootstrap(
-    const VerifiedControlPeerIdentity& expected_peer) {
+ControlBootstrapResult
+ControlIdentityRegistry::issue_bootstrap(const VerifiedControlPeerIdentity& expected_peer) {
     ControlBootstrapResult result;
-    if (!impl_->broker_id ||
-        expected_peer.evidence().role != ControlPeerRole::Client) {
-        result.status = impl_->broker_id
-                            ? ControlIdentityStatus::PeerRoleMismatch
-                            : ControlIdentityStatus::EntropyUnavailable;
+    if (!impl_->broker_id || expected_peer.evidence().role != ControlPeerRole::Client) {
+        result.status = impl_->broker_id ? ControlIdentityStatus::PeerRoleMismatch
+                                         : ControlIdentityStatus::EntropyUnavailable;
         impl_->audit(ControlSecurityAuditEntry{
             .action = "bootstrap.issue",
             .peer_fingerprint = std::string(expected_peer.fingerprint()),
@@ -315,8 +312,7 @@ ControlBootstrapResult ControlIdentityRegistry::issue_bootstrap(
         return result;
     }
     const auto ticket_id = random_id("bootstrap-");
-    auto secret =
-        pulp::runtime::secure_random_bytes(kBootstrapSecretBytes);
+    auto secret = pulp::runtime::secure_random_bytes(kBootstrapSecretBytes);
     if (!ticket_id || !secret) {
         result.status = ControlIdentityStatus::EntropyUnavailable;
         impl_->audit(ControlSecurityAuditEntry{
@@ -337,8 +333,7 @@ ControlBootstrapResult ControlIdentityRegistry::issue_bootstrap(
             result.status = ControlIdentityStatus::ResourceExhausted;
             impl_->audit(ControlSecurityAuditEntry{
                 .action = "bootstrap.issue",
-                .peer_fingerprint =
-                    std::string(expected_peer.fingerprint()),
+                .peer_fingerprint = std::string(expected_peer.fingerprint()),
                 .outcome = ControlSecurityOutcome::Denied,
                 .reason = "resource-exhausted",
             });
@@ -346,16 +341,14 @@ ControlBootstrapResult ControlIdentityRegistry::issue_bootstrap(
         }
         impl_->tickets.emplace(
             *ticket_id,
-            Impl::BootstrapState{
-                {transient_secret.bytes().begin(),
-                 transient_secret.bytes().end()},
-                std::string(expected_peer.fingerprint()), *expires});
+            Impl::BootstrapState{{transient_secret.bytes().begin(), transient_secret.bytes().end()},
+                                 std::string(expected_peer.fingerprint()),
+                                 *expires});
     }
 
     result.status = ControlIdentityStatus::Accepted;
     result.ticket.emplace(ControlBootstrapTicket{
-        *ticket_id, impl_->broker_id,
-        ControlBootstrapSecret(transient_secret.bytes()), *expires});
+        *ticket_id, impl_->broker_id, ControlBootstrapSecret(transient_secret.bytes()), *expires});
     impl_->audit(ControlSecurityAuditEntry{
         .action = "bootstrap.issue",
         .peer_fingerprint = std::string(expected_peer.fingerprint()),
@@ -365,10 +358,10 @@ ControlBootstrapResult ControlIdentityRegistry::issue_bootstrap(
     return result;
 }
 
-ControlClientResult ControlIdentityRegistry::redeem_bootstrap(
-    std::string_view ticket_id,
-    std::span<const std::uint8_t> secret,
-    const VerifiedControlPeerIdentity& observed_peer) {
+ControlClientResult
+ControlIdentityRegistry::redeem_bootstrap(std::string_view ticket_id,
+                                          std::span<const std::uint8_t> secret,
+                                          const VerifiedControlPeerIdentity& observed_peer) {
     ControlClientResult result;
     const auto now = impl_->clock();
     Impl::BootstrapState ticket;
@@ -379,8 +372,7 @@ ControlClientResult ControlIdentityRegistry::redeem_bootstrap(
             result.status = ControlIdentityStatus::Replay;
             impl_->audit(ControlSecurityAuditEntry{
                 .action = "bootstrap.redeem",
-                .peer_fingerprint =
-                    std::string(observed_peer.fingerprint()),
+                .peer_fingerprint = std::string(observed_peer.fingerprint()),
                 .outcome = ControlSecurityOutcome::Denied,
                 .reason = "replay",
             });
@@ -391,19 +383,15 @@ ControlClientResult ControlIdentityRegistry::redeem_bootstrap(
     }
 
     const bool expired = now >= ticket.expires_at;
-    const bool peer_matches =
-        ticket.peer_fingerprint == observed_peer.fingerprint();
+    const bool peer_matches = ticket.peer_fingerprint == observed_peer.fingerprint();
     const bool secret_matches =
-        secret.size() == ticket.secret.size() &&
-        !secret.empty() &&
-        pulp::runtime::constant_time_equal(
-            secret.data(), ticket.secret.data(), secret.size());
-    pulp::runtime::secure_zero_memory(
-        ticket.secret.data(), ticket.secret.size());
+        secret.size() == ticket.secret.size() && !secret.empty() &&
+        pulp::runtime::constant_time_equal(secret.data(), ticket.secret.data(), secret.size());
+    pulp::runtime::secure_zero_memory(ticket.secret.data(), ticket.secret.size());
 
     if (expired || !peer_matches || !secret_matches) {
-        result.status = expired ? ControlIdentityStatus::Expired
-                                : ControlIdentityStatus::IdentityMismatch;
+        result.status =
+            expired ? ControlIdentityStatus::Expired : ControlIdentityStatus::IdentityMismatch;
         impl_->audit(ControlSecurityAuditEntry{
             .action = "bootstrap.redeem",
             .peer_fingerprint = std::string(observed_peer.fingerprint()),
@@ -420,16 +408,14 @@ ControlClientResult ControlIdentityRegistry::redeem_bootstrap(
                                   : ControlIdentityStatus::EntropyUnavailable;
         impl_->audit(ControlSecurityAuditEntry{
             .action = "bootstrap.redeem",
-            .peer_fingerprint =
-                std::string(observed_peer.fingerprint()),
+            .peer_fingerprint = std::string(observed_peer.fingerprint()),
             .outcome = ControlSecurityOutcome::Denied,
             .reason = std::string(control_identity_status_id(result.status)),
         });
         return result;
     }
-    ControlClientIdentity client{
-        ControlClientId{*client_id}, impl_->broker_id,
-        std::string(observed_peer.fingerprint()), *expires};
+    ControlClientIdentity client{ControlClientId{*client_id}, impl_->broker_id,
+                                 std::string(observed_peer.fingerprint()), *expires};
     {
         std::lock_guard lock(impl_->mutex);
         impl_->sweep_locked(now);
@@ -437,8 +423,7 @@ ControlClientResult ControlIdentityRegistry::redeem_bootstrap(
             result.status = ControlIdentityStatus::ResourceExhausted;
             impl_->audit(ControlSecurityAuditEntry{
                 .action = "bootstrap.redeem",
-                .peer_fingerprint =
-                    std::string(observed_peer.fingerprint()),
+                .peer_fingerprint = std::string(observed_peer.fingerprint()),
                 .outcome = ControlSecurityOutcome::Denied,
                 .reason = "resource-exhausted",
             });
@@ -458,9 +443,8 @@ ControlClientResult ControlIdentityRegistry::redeem_bootstrap(
     return result;
 }
 
-bool ControlIdentityRegistry::refresh_client(
-    const ControlClientId& client_id,
-    const VerifiedControlPeerIdentity& peer) {
+bool ControlIdentityRegistry::refresh_client(const ControlClientId& client_id,
+                                             const VerifiedControlPeerIdentity& peer) {
     const auto now = impl_->clock();
     const auto expires = expiry_after(now, impl_->config.client_ttl);
     if (!expires) {
@@ -478,8 +462,7 @@ bool ControlIdentityRegistry::refresh_client(
         std::lock_guard lock(impl_->mutex);
         impl_->sweep_locked(now);
         auto found = impl_->clients.find(client_id.value);
-        if (found != impl_->clients.end() &&
-            found->second.peer_fingerprint == peer.fingerprint()) {
+        if (found != impl_->clients.end() && found->second.peer_fingerprint == peer.fingerprint()) {
             found->second.expires_at = *expires;
             refreshed = true;
         }
@@ -488,8 +471,7 @@ bool ControlIdentityRegistry::refresh_client(
         .action = "client.refresh",
         .peer_fingerprint = std::string(peer.fingerprint()),
         .client_id = client_id.value,
-        .outcome = refreshed ? ControlSecurityOutcome::Accepted
-                             : ControlSecurityOutcome::Denied,
+        .outcome = refreshed ? ControlSecurityOutcome::Accepted : ControlSecurityOutcome::Denied,
         .reason = refreshed ? "accepted" : "identity-mismatch",
     });
     if (!refreshed)
@@ -497,8 +479,7 @@ bool ControlIdentityRegistry::refresh_client(
     return true;
 }
 
-bool ControlIdentityRegistry::disconnect_client(
-    const ControlClientId& client_id) {
+bool ControlIdentityRegistry::disconnect_client(const ControlClientId& client_id) {
     std::optional<ControlClientIdentity> disconnected;
     {
         std::lock_guard lock(impl_->mutex);
@@ -510,19 +491,16 @@ bool ControlIdentityRegistry::disconnect_client(
     }
     impl_->audit(ControlSecurityAuditEntry{
         .action = "client.disconnect",
-        .peer_fingerprint = disconnected
-                                ? disconnected->peer_fingerprint
-                                : std::string{},
+        .peer_fingerprint = disconnected ? disconnected->peer_fingerprint : std::string{},
         .client_id = client_id.value,
-        .outcome = disconnected ? ControlSecurityOutcome::Revoked
-                                : ControlSecurityOutcome::Denied,
+        .outcome = disconnected ? ControlSecurityOutcome::Revoked : ControlSecurityOutcome::Denied,
         .reason = disconnected ? "disconnected" : "not-found",
     });
     return disconnected.has_value();
 }
 
-std::optional<ControlClientIdentity> ControlIdentityRegistry::client(
-    const ControlClientId& client_id) const {
+std::optional<ControlClientIdentity>
+ControlIdentityRegistry::client(const ControlClientId& client_id) const {
     const auto now = impl_->clock();
     std::lock_guard lock(impl_->mutex);
     const auto found = impl_->clients.find(client_id.value);
@@ -531,9 +509,9 @@ std::optional<ControlClientIdentity> ControlIdentityRegistry::client(
     return found->second;
 }
 
-ControlRegistrationResult ControlIdentityRegistry::register_instance(
-    const VerifiedControlPeerIdentity& peer,
-    ControlRegistrationRequest request) {
+ControlRegistrationResult
+ControlIdentityRegistry::register_instance(const VerifiedControlPeerIdentity& peer,
+                                           ControlRegistrationRequest request) {
     ControlRegistrationResult result;
     const auto audit_denial = [&](ControlIdentityStatus status) {
         impl_->audit(ControlSecurityAuditEntry{
@@ -570,13 +548,13 @@ ControlRegistrationResult ControlIdentityRegistry::register_instance(
     const auto expires = expiry_after(now, impl_->config.registration_ttl);
     const auto registration_id = random_id("registration-");
     if (!expires || !registration_id) {
-        result.status = registration_id
-                            ? ControlIdentityStatus::InvalidRequest
-                            : ControlIdentityStatus::EntropyUnavailable;
+        result.status = registration_id ? ControlIdentityStatus::InvalidRequest
+                                        : ControlIdentityStatus::EntropyUnavailable;
         audit_denial(result.status);
         return result;
     }
 
+    const auto build_id = request.manifest.build_id;
     ControlRegistration registration{
         ControlRegistrationId{*registration_id},
         impl_->broker_id,
@@ -593,12 +571,13 @@ ControlRegistrationResult ControlIdentityRegistry::register_instance(
         std::move(request.manifest.capabilities),
         std::string(peer.fingerprint()),
         *expires,
+        build_id,
+        1,
     };
-    registration.consent_identity = control_consent_identity(
-        registration.manifest_digest, registration.artifact_digest);
-    const auto key = exact_key(registration.session_id,
-                               registration.instance_id,
-                               registration.publication_id);
+    registration.consent_identity =
+        control_consent_identity(registration.manifest_digest, registration.artifact_digest);
+    const auto key =
+        exact_key(registration.session_id, registration.instance_id, registration.publication_id);
     {
         std::lock_guard lock(impl_->mutex);
         impl_->sweep_locked(now);
@@ -612,10 +591,8 @@ ControlRegistrationResult ControlIdentityRegistry::register_instance(
             audit_denial(result.status);
             return result;
         }
-        impl_->registrations.emplace(
-            registration.registration_id.value, registration);
-        impl_->exact_registrations.emplace(
-            key, registration.registration_id.value);
+        impl_->registrations.emplace(registration.registration_id.value, registration);
+        impl_->exact_registrations.emplace(key, registration.registration_id.value);
     }
     result.status = ControlIdentityStatus::Accepted;
     result.registration = registration;
@@ -632,9 +609,8 @@ ControlRegistrationResult ControlIdentityRegistry::register_instance(
     return result;
 }
 
-bool ControlIdentityRegistry::heartbeat(
-    const ControlRegistrationId& registration_id,
-    const VerifiedControlPeerIdentity& peer) {
+bool ControlIdentityRegistry::heartbeat(const ControlRegistrationId& registration_id,
+                                        const VerifiedControlPeerIdentity& peer) {
     const auto now = impl_->clock();
     const auto expires = expiry_after(now, impl_->config.registration_ttl);
     if (!expires) {
@@ -655,6 +631,8 @@ bool ControlIdentityRegistry::heartbeat(
         if (found != impl_->registrations.end() &&
             found->second.peer_fingerprint == peer.fingerprint()) {
             found->second.expires_at = *expires;
+            if (found->second.liveness_generation != std::numeric_limits<std::uint64_t>::max())
+                ++found->second.liveness_generation;
             refreshed = true;
         }
     }
@@ -662,8 +640,7 @@ bool ControlIdentityRegistry::heartbeat(
         .action = "registration.heartbeat",
         .peer_fingerprint = std::string(peer.fingerprint()),
         .registration_id = registration_id.value,
-        .outcome = refreshed ? ControlSecurityOutcome::Accepted
-                             : ControlSecurityOutcome::Denied,
+        .outcome = refreshed ? ControlSecurityOutcome::Accepted : ControlSecurityOutcome::Denied,
         .reason = refreshed ? "accepted" : "identity-mismatch",
     });
     if (!refreshed)
@@ -671,9 +648,8 @@ bool ControlIdentityRegistry::heartbeat(
     return true;
 }
 
-bool ControlIdentityRegistry::unregister_instance(
-    const ControlRegistrationId& registration_id,
-    const VerifiedControlPeerIdentity& peer) {
+bool ControlIdentityRegistry::unregister_instance(const ControlRegistrationId& registration_id,
+                                                  const VerifiedControlPeerIdentity& peer) {
     std::optional<ControlRegistration> removed;
     {
         std::lock_guard lock(impl_->mutex);
@@ -682,8 +658,7 @@ bool ControlIdentityRegistry::unregister_instance(
             found->second.peer_fingerprint == peer.fingerprint()) {
             removed = found->second;
             impl_->exact_registrations.erase(exact_key(
-                found->second.session_id, found->second.instance_id,
-                found->second.publication_id));
+                found->second.session_id, found->second.instance_id, found->second.publication_id));
             impl_->registrations.erase(found);
         }
     }
@@ -694,17 +669,15 @@ bool ControlIdentityRegistry::unregister_instance(
         .session_id = removed ? removed->session_id : std::string{},
         .instance_id = removed ? removed->instance_id : std::string{},
         .publication_id = removed ? removed->publication_id : std::string{},
-        .outcome = removed ? ControlSecurityOutcome::Revoked
-                           : ControlSecurityOutcome::Denied,
+        .outcome = removed ? ControlSecurityOutcome::Revoked : ControlSecurityOutcome::Denied,
         .reason = removed ? "unregistered" : "identity-mismatch",
     });
     return removed.has_value();
 }
 
-std::optional<ControlRegistration> ControlIdentityRegistry::registration(
-    std::string_view session_id,
-    std::string_view instance_id,
-    std::string_view publication_id) const {
+std::optional<ControlRegistration>
+ControlIdentityRegistry::registration(std::string_view session_id, std::string_view instance_id,
+                                      std::string_view publication_id) const {
     if (session_id.empty() || instance_id.empty() || publication_id.empty())
         return std::nullopt;
     const auto now = impl_->clock();
@@ -714,20 +687,18 @@ std::optional<ControlRegistration> ControlIdentityRegistry::registration(
     if (exact == impl_->exact_registrations.end())
         return std::nullopt;
     const auto found = impl_->registrations.find(exact->second);
-    if (found == impl_->registrations.end() ||
-        now >= found->second.expires_at) {
+    if (found == impl_->registrations.end() || now >= found->second.expires_at) {
         return std::nullopt;
     }
     return found->second;
 }
 
-std::optional<ControlRegistration> ControlIdentityRegistry::registration(
-    const ControlRegistrationId& registration_id) const {
+std::optional<ControlRegistration>
+ControlIdentityRegistry::registration(const ControlRegistrationId& registration_id) const {
     const auto now = impl_->clock();
     std::lock_guard lock(impl_->mutex);
     const auto found = impl_->registrations.find(registration_id.value);
-    if (found == impl_->registrations.end() ||
-        now >= found->second.expires_at) {
+    if (found == impl_->registrations.end() || now >= found->second.expires_at) {
         return std::nullopt;
     }
     return found->second;

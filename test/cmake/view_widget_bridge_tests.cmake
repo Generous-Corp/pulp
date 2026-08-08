@@ -383,6 +383,13 @@ target_link_libraries(pulp-test-control-offline-render-executor PRIVATE
 catch_discover_tests(pulp-test-control-offline-render-executor
     PROPERTIES LABELS "inspect;control;offline;t0;artifact")
 
+add_executable(pulp-test-control-read-operations
+    test_control_read_operations.cpp)
+target_link_libraries(pulp-test-control-read-operations PRIVATE
+    pulp::inspect-runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-read-operations
+    PROPERTIES LABELS "inspect;control;read;t0;t1;state")
+
 add_executable(pulp-test-control-client-connection
     test_control_client_connection.cpp)
 target_link_libraries(pulp-test-control-client-connection PRIVATE
