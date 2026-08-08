@@ -46,7 +46,7 @@ preflight_control_host(platform::ChildProcessInputChannel channel, std::int64_t 
 /// The supplied handle is consumed and closed on every path.
 std::optional<ControlHostBootstrapRecord> receive_control_host_preflight(
     ControlHostBootstrapHandle handle, std::chrono::milliseconds timeout = std::chrono::seconds(3),
-    std::chrono::system_clock::time_point now = std::chrono::system_clock::now(),
+    std::optional<std::chrono::system_clock::time_point> now = std::nullopt,
     ControlHostPreflightDiagnostics* diagnostics = nullptr);
 
 } // namespace pulp::inspect

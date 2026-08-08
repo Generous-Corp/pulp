@@ -97,6 +97,10 @@ public:
     /// disconnected when this cumulative deadline expires.
     void set_frame_read_timeout(std::chrono::milliseconds timeout);
 
+    /// Securely clear each received frame buffer after callbacks return.
+    /// Enable this before attaching transports that carry credential material.
+    void set_secure_receive_buffer(bool enabled);
+
     // ── Callbacks (override or set) ─────────────────────────────────────
 
     /// Called when a connection is established.
@@ -146,6 +150,7 @@ private:
     std::atomic<std::size_t> max_message_bytes_{64u * 1024u * 1024u};
     std::atomic<std::int64_t> write_timeout_ms_{0};
     std::atomic<std::int64_t> frame_read_timeout_ms_{0};
+    std::atomic<bool> secure_receive_buffer_{false};
     std::atomic<bool> write_poisoned_{false};
     std::atomic<bool> defer_first_dispatch_until_callback_{false};
     std::shared_ptr<std::atomic<bool>> first_dispatch_gate_;

@@ -138,6 +138,7 @@ bool attach(events::InterprocessConnection& connection, std::intptr_t handle,
     connection.set_max_message_bytes(32u * 1024u);
     connection.set_write_timeout(timeout);
     connection.set_frame_read_timeout(timeout);
+    connection.set_secure_receive_buffer(true);
     return connection.attach_inherited_local_socket(handle);
 }
 
@@ -226,7 +227,7 @@ preflight_control_host(platform::ChildProcessInputChannel channel, std::int64_t 
 
 std::optional<ControlHostBootstrapRecord>
 receive_control_host_preflight(ControlHostBootstrapHandle handle, std::chrono::milliseconds timeout,
-                               std::chrono::system_clock::time_point now,
+                               std::optional<std::chrono::system_clock::time_point> now,
                                ControlHostPreflightDiagnostics* diagnostics) {
     events::InterprocessConnection connection;
     const auto inbox = install_inbox(connection);
@@ -270,21 +271,32 @@ receive_control_host_preflight(ControlHostBootstrapHandle handle, std::chrono::m
                         "the launcher sent a role-incompatible bootstrap frame");
         return std::nullopt;
     }
-    const auto* bootstrap_message =
+    auto* bootstrap_message =
         std::get_if<ControlHostPreflightBootstrapEnvelope>(&delivery.message->payload);
-    if (!bootstrap_message || bootstrap_message->nonce != request->nonce) {
+    if (!bootstrap_message) {
+        set_diagnostics(diagnostics, ControlHostPreflightStatus::NonceMismatch,
+                        "the bootstrap frame does not belong to this preflight");
+        return std::nullopt;
+    }
+    const bool nonce_matches = bootstrap_message->nonce == request->nonce;
+    if (!nonce_matches) {
+        runtime::secure_zero_memory(bootstrap_message->bootstrap_base64.data(),
+                                    bootstrap_message->bootstrap_base64.size());
         set_diagnostics(diagnostics, ControlHostPreflightStatus::NonceMismatch,
                         "the bootstrap frame does not belong to this preflight");
         return std::nullopt;
     }
     auto bytes = runtime::base64_decode(bootstrap_message->bootstrap_base64);
+    runtime::secure_zero_memory(bootstrap_message->bootstrap_base64.data(),
+                                bootstrap_message->bootstrap_base64.size());
     if (!bytes || bytes->size() > kControlHostBootstrapMaximumBytes) {
         set_diagnostics(diagnostics, ControlHostPreflightStatus::BootstrapInvalid,
                         "the bootstrap frame is invalid or oversized");
         return std::nullopt;
     }
     ControlHostBootstrapDiagnostics bootstrap_diagnostics;
-    auto record = decode_control_host_bootstrap(*bytes, now, &bootstrap_diagnostics);
+    auto record = decode_control_host_bootstrap(
+        *bytes, now.value_or(std::chrono::system_clock::now()), &bootstrap_diagnostics);
     runtime::secure_zero_memory(bytes->data(), bytes->size());
     if (!record) {
         set_diagnostics(diagnostics, ControlHostPreflightStatus::BootstrapInvalid,
