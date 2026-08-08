@@ -339,7 +339,10 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    not your change) vs REGRESSED (green on main, red here). Advisory +
    pre-existing red (e.g. a known-broken sanitizer lane on main) does NOT block
    the merge and is not yours to fix; only a REQUIRED + REGRESSED row needs
-   action. This alone avoids chasing main-side breakage.
+   action. This alone avoids chasing main-side breakage. Its check-run query
+   must keep `gh api --paginate --slurp`, `filter=latest`, and `per_page=100`:
+   bare `--paginate` concatenates page documents and breaks JSON decoding past
+   100 check runs.
 3. **Only THEN consider capacity — and verify, don't assume.** The required
    `macos` gate runs on the **fast local JIT VM pool** selected by
    `pulp-gate-fast` (M3 + M5), which is usually idle. Confirm with:

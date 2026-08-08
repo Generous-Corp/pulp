@@ -13,7 +13,7 @@ This tool answers it mechanically. For each non-green check on a PR it prints:
   - a verdict: PRE-EXISTING (also red / not run on main — not your change),
     REGRESSED (green on main, red here — look at it), or NEW (PR-only check).
 
-The comparison logic is a pure function (`triage`) so it is unit-tested without
+The comparison logic and paginated check-run decoding are unit-tested without
 GitHub; the CLI is a thin `gh api` wrapper.
 
 See planning/2026-07-07-parallel-merge-land-coordination.md (T0.3).
@@ -120,10 +120,12 @@ def _gh(gh: str, *args: str) -> str:
 def _checks_for_sha(gh: str, repo: str, sha: str) -> dict[str, str | None]:
     """{name -> conclusion|status} merging check-runs and legacy statuses."""
     out: dict[str, str | None] = {}
-    runs = json.loads(_gh(gh, "api", "--paginate",
-                           f"repos/{repo}/commits/{sha}/check-runs"))
-    for cr in runs.get("check_runs", []):
-        out[cr["name"]] = cr.get("conclusion") or cr.get("status")
+    pages = json.loads(_gh(gh, "api", "--paginate", "--slurp",
+                            f"repos/{repo}/commits/{sha}/check-runs"
+                            "?filter=latest&per_page=100"))
+    for page in pages:
+        for cr in page.get("check_runs", []):
+            out[cr["name"]] = cr.get("conclusion") or cr.get("status")
     status = json.loads(_gh(gh, "api", f"repos/{repo}/commits/{sha}/status"))
     for s in status.get("statuses", []):
         out.setdefault(s["context"], s.get("state"))
