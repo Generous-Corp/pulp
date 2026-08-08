@@ -137,10 +137,22 @@ the Pulp source tree.
 The repository matrix exercises all five profiles and the Standalone, VST3,
 CLAP, LV2, AU v2, AUv3, and AAX policy labels. The local macOS proof builds
 universal `arm64` and `x86_64` artifacts and verifies both slices with `lipo`.
-Linux `x86_64`/`aarch64`, Windows `x64`, and real AAX vendor-SDK artifacts
-remain native CI responsibilities: a synthetic format label does not claim
-that a platform SDK or package validator ran. Each available real format target
-still receives the scanner automatically when that CI leg builds it.
+The path-scoped `Control shipping native matrix` workflow closes the native CI
+boundary with real installed-SDK consumers: macOS universal, Linux `x86_64`
+and `aarch64`, and Windows `x64`. It builds every available real plug-in format
+for each platform and aggregates the canonical `nm`/`otool`/`lipo`,
+`nm`/`readelf`, or `dumpbin /UNDNAME` reports into
+`dev.pulp.control/native-shipping-evidence@1`. A synthetic format label does
+not count as proof.
+
+AAX remains developer-supplied. On a protected-main push, when both
+`PULP_AAX_SDK_ZIP_URL` and `PULP_AAX_SDK_ZIP_SHA256` repository secrets exist,
+the macOS universal leg builds and scans a real AAX bundle from the verified
+out-of-tree SDK. Pull requests and manual runs never receive those secrets; they
+record `status: unavailable`, `proof: false`, and
+`aax-sdk-secret-withheld-untrusted-event`. A trusted run without the URL uses
+`aax-sdk-secret-unavailable`. Both are explicit availability dispositions, not
+AAX proof, and a configured URL without its checksum fails closed.
 
 Directory and direct-file audits resolve artifact names only as safe basenames
 beside their sidecars. An exact-named direct sidecar is not sufficient by

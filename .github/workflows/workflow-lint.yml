@@ -48,6 +48,9 @@ on:
       - 'tools/ci/linux_build_deps_workflows.json'
       - 'tools/ci/test_install_linux_build_deps.py'
       - 'tools/scripts/test_ci_throughput_workflows.py'
+      - 'tools/scripts/verify_control_shipping_native_evidence.py'
+      - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
+      - 'tools/scripts/test_control_shipping_native_workflow.py'
       - 'tools/scripts/test_workflow_lint.py'
       - 'tools/scripts/example_validation_paths.py'
       - 'tools/scripts/test_example_validation_paths.py'
@@ -85,6 +88,9 @@ on:
       - 'tools/ci/linux_build_deps_workflows.json'
       - 'tools/ci/test_install_linux_build_deps.py'
       - 'tools/scripts/test_ci_throughput_workflows.py'
+      - 'tools/scripts/verify_control_shipping_native_evidence.py'
+      - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
+      - 'tools/scripts/test_control_shipping_native_workflow.py'
       - 'tools/scripts/test_workflow_lint.py'
       - 'tools/scripts/example_validation_paths.py'
       - 'tools/scripts/test_example_validation_paths.py'
@@ -168,6 +174,8 @@ jobs:
           python3 tools/ci/test_install_linux_build_deps.py
           python3 tools/scripts/test_example_validation_paths.py
           python3 tools/scripts/test_ci_throughput_workflows.py
+          python3 tools/scripts/test_verify_control_shipping_native_evidence.py
+          python3 tools/scripts/test_control_shipping_native_workflow.py
           python3 tools/scripts/test_codecov_upload_contract.py
 
       - name: Workflow lint regression contract
