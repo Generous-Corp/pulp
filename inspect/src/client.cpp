@@ -495,6 +495,11 @@ InspectorClientResult run_inspector_operation(InspectorClientTarget target,
                                      "selection_failed", choc::json::toString(data, false));
         return result;
     }
+    result.target = InspectorClientTarget{
+        result.publication->session_id,
+        result.publication->instance_id,
+        result.publication->publication_id,
+    };
 
     const auto connect_timeout = remaining();
     if (connect_timeout <= std::chrono::milliseconds(0)) {

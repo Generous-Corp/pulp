@@ -71,6 +71,7 @@ file(WRITE "${_consumer_source}/main.cpp" [=[
 #include <pulp/inspect/control_artifacts.hpp>
 #include <pulp/inspect/control_broker.hpp>
 #include <pulp/inspect/control_client.hpp>
+#include <pulp/inspect/control_inspector_client.hpp>
 #include <pulp/inspect/control_endpoint.hpp>
 #include <pulp/inspect/control_host_connection.hpp>
 #include <pulp/inspect/control_host_router.hpp>
@@ -110,10 +111,20 @@ class InstalledControlTransport final
   }
 };
 
+class InstalledControlSessionOpener final
+    : public pulp::inspect::InspectorControlSessionOpener {
+ public:
+  std::optional<pulp::inspect::InspectorControlSession> open(
+      std::chrono::milliseconds) override {
+    return std::nullopt;
+  }
+};
+
 int main() {
   pulp::inspect::ControlBroker broker;
   pulp::inspect::InspectorClient client;
   InstalledControlTransport transport;
+  InstalledControlSessionOpener session_opener;
   pulp::inspect::ControlClient control_client{transport};
   pulp::inspect::ControlService service{broker};
   pulp::inspect::ControlHostRouter host_router;
@@ -145,6 +156,8 @@ int main() {
   const auto decoded_legacy_error = encoded_legacy_error
       ? pulp::inspect::decode_control_legacy_inspector_error(*encoded_legacy_error)
       : std::nullopt;
+  const auto unsupported = pulp::inspect::request_control_inspector(
+      session_opener, "DOM.getDocument");
   (void)main_thread_executor.executor();
 
   request.operation_version = 1;
@@ -154,6 +167,7 @@ int main() {
              && !host_connection.is_connected()
              && trace_executor
              && decoded_legacy_error == legacy_error
+             && unsupported.response.error_code == "method_not_found"
              && std::holds_alternative<pulp::inspect::ControlHostConnectionPrincipal>(principal)
              && operations.max_receipts > 0
              && artifacts.maximum_blob_bytes > 0

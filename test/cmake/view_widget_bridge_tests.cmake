@@ -239,6 +239,13 @@ endif()
 catch_discover_tests(pulp-test-control-health
     PROPERTIES LABELS "inspect;control;carrier;health")
 
+add_executable(pulp-test-control-inspector-client
+    test_control_inspector_client.cpp)
+target_link_libraries(pulp-test-control-inspector-client PRIVATE
+    pulp::inspect-client Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-inspector-client
+    PROPERTIES LABELS "inspect;control;client;trace")
+
 add_executable(pulp-test-control-main-thread-executor
     test_control_main_thread_executor.cpp)
 target_link_libraries(pulp-test-control-main-thread-executor PRIVATE

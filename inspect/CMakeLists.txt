@@ -118,6 +118,7 @@ add_library(pulp-inspect-client
     src/client.cpp
     src/control_client.cpp
     src/control_client_connection.cpp
+    src/control_inspector_client.cpp
     src/control_health.cpp)
 add_library(pulp::inspect-client ALIAS pulp-inspect-client)
 target_include_directories(pulp-inspect-client
