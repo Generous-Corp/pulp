@@ -175,7 +175,10 @@ TEST_CASE("raw signed T1 host reaches a correlated trace receipt through canonic
                                         {.endpoint_path = directory.root / "broker.sock",
                                          .expected_broker = {.evidence = broker_evidence},
                                          .broker_generation = 17,
-                                         .preflight_timeout = 3s});
+                                         // A freshly copied signed fixture can spend several
+                                         // seconds in dyld/code-signature validation on a busy
+                                         // macOS host before it reaches the inherited channel.
+                                         .preflight_timeout = 10s});
     pulp::platform::ProcessOptions process_options;
     process_options.timeout_ms = 12'000;
     auto launched = launcher.launch(prepared.ticket->inventory_id, process_options);

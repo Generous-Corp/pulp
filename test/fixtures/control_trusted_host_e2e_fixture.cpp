@@ -40,7 +40,7 @@ int main(int argc, char** argv) {
         return 64;
 
     ControlHostPreflightDiagnostics diagnostics;
-    auto bootstrap = receive_control_host_preflight(inherited_control_host_bootstrap_handle(), 3s,
+    auto bootstrap = receive_control_host_preflight(inherited_control_host_bootstrap_handle(), 10s,
                                                     std::chrono::system_clock::now(), &diagnostics);
     if (!bootstrap || bootstrap->enrollment_id.empty())
         return 65;

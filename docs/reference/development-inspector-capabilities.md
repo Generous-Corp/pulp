@@ -66,8 +66,28 @@ registration, grant, typed admission, receipt, cancellation, quota, progress,
 artifact-lineage, local carrier, trusted-host inventory, and launcher
 foundations. `pulp::inspect-client` is the canonical control client, not the
 deleted raw Inspector client. The optional macOS `pulp-control-broker` owns one
-per-user local endpoint and currently fails closed when trusted launcher/host
-composition is unavailable.
+per-user `LocalSocket` endpoint and currently exposes only a bounded health
+probe: the trusted launcher and host foundations are not yet composed into that
+service, so authority-bearing session admission fails closed.
+
+Darwin CLI installs place the broker beside `pulp` and `pulp-cpp` and reconcile
+the owner-only `dev.pulp.control-broker` LaunchAgent. A successful
+reconciliation proves only `reachable-unverified`; install-time code-signature
+validation is an integrity check, not a publisher-trust or authorization
+decision. Canonical `~/.pulp/bin` installs activate automatically. A custom
+install root requires explicit acceptance on first install, and an upgrade may
+reuse it only when the existing owned plist already names that exact broker
+path. Ephemeral socket and liveness files remain separate from owner-private
+durable receipts and artifacts under `~/.pulp/state/control-broker/v1`; service
+stop or removal leaves that durable state intact.
+
+The installed `ControlClient` accepts a typed `ControlClientTransport`
+representing one authenticated, connection-bound peer and client identity; its
+artifact-read API therefore has no caller-supplied client ID. `ControlService`
+accepts a carrier-verified peer and connection-bound client identity, but has no
+executor unless a runtime adapter injects one. The deleted legacy
+`InspectorSession`/server is not a compatibility transport or a second
+capability-control authority path.
 
 The control path validates bounded schemas, exact grants, deadlines,
 idempotency, replay, cancellation, operation quotas, and receipt lineage. The
@@ -88,8 +108,8 @@ and have no legacy Inspector fallback. Offline `trace query --trace`, `doctor`,
 |---|---|---|
 | CLI | `pulp inspect profiles`; offline `pulp inspect audit ARTIFACT`; canonical trace start/stop; offline trace analysis | Inspector discovery, live capability query, generic calls, mutation, capture, and Motion |
 | MCP | In-process `pulp_inspect_profiles`; canonical `pulp_trace_start` and `pulp_trace_stop` | Inspector list/capabilities/doctor, generic inspect, evaluation, capture, mutation, and Motion wrappers |
-| Build/link | Separate protocol, control, canonical client, runtime, telemetry, authoring, and high-risk eval components; ordinary targets do not gain authority merely because components are built | Trusted product host composition and cross-platform verified-peer parity |
-| Shipping | Canonical manifests, registry digest, artifact audit, stripped ordinary targets, and marker checks | Final trusted-host composition and complete release negative-control proof |
+| Build/link/install | Separate protocol, control, canonical client, runtime, telemetry, authoring, and high-risk eval components; ordinary targets do not gain authority merely because components are built. A clean-prefix consumer compiles and runs the installed protocol/control/client targets while rejecting direct GPU/render/format/host/CLI/MCP closure | Trusted product host composition, per-target shipped-product declarations, and cross-platform verified-peer parity |
+| Shipping | Canonical manifests, registry digest, artifact audit, stripped ordinary targets, marker checks, and the owner-only macOS health-service LaunchAgent | Final trusted-host composition and complete release negative-control proof |
 
 ## Replacement roadmap
 

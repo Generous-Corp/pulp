@@ -6,6 +6,8 @@
 #include <pulp/inspect/control_host_router.hpp>
 #include <pulp/runtime/crypto.hpp>
 
+#include "support/thread_progress.hpp"
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -300,9 +302,7 @@ TEST_CASE("control endpoint authenticates a host role and routes on the canonica
                     .terminal_state = ControlReceiptState::Completed,
                     .result = {.artifacts = {{.artifact_id = "unsupported-artifact"}}}};
             blocked_execution_started.store(true);
-            while (
-                !release_blocked_execution.load()) // unbounded-wait: allow caller always releases
-                std::this_thread::sleep_for(1ms);
+            pulp::test::wait_for_condition([&] { return release_blocked_execution.load(); });
             return ControlExecutionOutcome{.terminal_state = ControlReceiptState::Completed};
         }};
     REQUIRE(host.connect());
