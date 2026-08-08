@@ -47,6 +47,10 @@ public:
     /// Accept an incoming TCP or OS-local connection. Returns a new Socket.
     std::optional<Socket> accept();
 
+    /// Wait up to `timeout` for and accept an incoming connection. A
+    /// non-positive timeout preserves the blocking behavior of accept().
+    std::optional<Socket> accept(std::chrono::milliseconds timeout);
+
     /// Connect to a remote address (TCP). A positive timeout bounds the
     /// nonblocking connect phase; non-positive preserves blocking behavior.
     bool connect(std::string_view address, uint16_t port,

@@ -1220,6 +1220,22 @@ TEST_CASE("IPC socket server stops while waiting for a client",
     REQUIRE_FALSE(server.is_running());
 }
 
+TEST_CASE("IPC socket server repeatedly stops while accept is idle",
+          "[events][ipc][socket][lifecycle][thread]") {
+    const auto started = std::chrono::steady_clock::now();
+    for (int iteration = 0; iteration < 100; ++iteration) {
+        INFO("iteration " << iteration);
+        InterprocessConnectionServer server;
+        REQUIRE(server.start("127.0.0.1:0", IpcTransport::Socket));
+        REQUIRE(server.bound_port() != 0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        server.stop();
+        REQUIRE_FALSE(server.is_running());
+    }
+    REQUIRE(std::chrono::steady_clock::now() - started <
+            std::chrono::seconds(5));
+}
+
 TEST_CASE("IPC socket server stop releases listener for immediate reuse",
           "[events][ipc][socket][lifecycle]") {
     InterprocessConnectionServer first;
