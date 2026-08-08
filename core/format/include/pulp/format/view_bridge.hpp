@@ -10,7 +10,6 @@
 #include <string>
 #include <vector>
 
-namespace pulp::runtime { class MessageChannel; }
 namespace pulp::view {
 class ScriptedUiSession;
 class HostActionSurface;
@@ -38,12 +37,11 @@ inline bool dev_editor_hot_reload_enabled() {
 }
 
 /// Role of a view attached to a ViewBridge. The primary editor is
-/// `Editor`; auxiliary panels (component inspector, remote preview)
-/// attach as secondary views with a matching role.
+/// `Editor`; auxiliary inspector panels attach as secondary views with
+/// the `Inspector` role.
 enum class ViewRole {
     Editor,
     Inspector,
-    Remote,
 };
 
 /// Manages editor-view lifecycle for a single `Processor` across all
@@ -53,8 +51,8 @@ enum class ViewRole {
 /// processor.
 ///
 /// One processor can have multiple ViewBridges (multi-view):
-/// each host editor window, the inspector, and any remote views each
-/// own their own primary View instance. Parameter binding is shared
+/// each host editor window and inspector own their own primary View
+/// instance. Parameter binding is shared
 /// through the processor's `StateStore`, so all attached views stay in
 /// sync automatically.
 ///
@@ -253,7 +251,7 @@ public:
 
     const std::string& last_error() const { return last_error_; }
 
-    /// Attach a secondary view (e.g. inspector, remote) to this bridge.
+    /// Attach a secondary inspector view to this bridge.
     /// The bridge takes ownership. Returns a non-owning pointer the caller
     /// can use to reference the attached view. Multiple secondary views
     /// may share the same role.
@@ -262,20 +260,6 @@ public:
     /// Detach and destroy a previously-attached secondary view. Returns
     /// true if the view was found and removed.
     bool detach_secondary_view(view::View* view);
-
-    /// Attach a remote view session driving a `MessageChannel` (usually
-    /// a `WebSocketChannel`). The session speaks the Remote View
-    /// Protocol — see `docs/reference/remote-view-protocol.md`. The
-    /// bridge takes ownership of the session and its channel; callers
-    /// use the returned non-owning pointer to drive the protocol.
-    /// Returns nullptr if the handshake fails; the bridge's
-    /// `last_error()` records the reason.
-    class RemoteViewSession* attach_remote_channel(
-        std::unique_ptr<runtime::MessageChannel> channel,
-        std::string label = {});
-
-    /// Detach and destroy a remote view session. Idempotent.
-    bool detach_remote(class RemoteViewSession* session);
 
     /// Total number of attached views (primary + secondary). Zero when
     /// not open and no secondaries are attached.
@@ -369,8 +353,6 @@ private:
         ViewRole role;
     };
     std::vector<Secondary> secondaries_;
-
-    std::vector<std::unique_ptr<class RemoteViewSession>> remotes_;
 
     ViewSize size_hints_;
     uint32_t width_ = 0;

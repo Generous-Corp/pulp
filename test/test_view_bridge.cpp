@@ -6,7 +6,6 @@
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/view_bridge.hpp>
-#include <pulp/runtime/message_channel.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/state/listener_token.hpp>
 #include <pulp/view/auto_ui.hpp>
@@ -506,7 +505,7 @@ TEST_CASE("ViewBridge secondary helpers handle nulls, bounds, and close cleanup"
     p.define_parameters(store);
 
     format::ViewBridge bridge(p, store);
-    REQUIRE(bridge.attach_secondary_view(nullptr, format::ViewRole::Remote) == nullptr);
+    REQUIRE(bridge.attach_secondary_view(nullptr, format::ViewRole::Inspector) == nullptr);
     REQUIRE(bridge.view_count() == 0);
 
     REQUIRE(bridge.open());
@@ -514,12 +513,12 @@ TEST_CASE("ViewBridge secondary helpers handle nulls, bounds, and close cleanup"
 
     auto secondary = std::make_unique<view::View>();
     auto* secondary_raw = secondary.get();
-    auto* attached = bridge.attach_secondary_view(std::move(secondary), format::ViewRole::Remote);
+    auto* attached = bridge.attach_secondary_view(std::move(secondary), format::ViewRole::Inspector);
     REQUIRE(attached == secondary_raw);
     REQUIRE(bridge.view_count() == 2);
     REQUIRE(bridge.view_at(0) == primary);
     REQUIRE(bridge.view_at(1) == secondary_raw);
-    REQUIRE(bridge.role_at(1) == format::ViewRole::Remote);
+    REQUIRE(bridge.role_at(1) == format::ViewRole::Inspector);
     REQUIRE(bridge.view_at(2) == nullptr);
     REQUIRE(bridge.role_at(2) == format::ViewRole::Editor);
     REQUIRE_FALSE(bridge.detach_secondary_view(nullptr));
@@ -617,26 +616,6 @@ TEST_CASE("ViewBridge close without attach does not fire on_view_closed", "[view
 
     bridge.close();
     REQUIRE(p.closed_count == 0);
-}
-
-TEST_CASE("ViewBridge reports null remote channels without blocking later open",
-          "[view_bridge][issue-493]") {
-    StubProcessor p;
-    state::StateStore store;
-    p.set_state_store(&store);
-    p.define_parameters(store);
-
-    format::ViewBridge bridge(p, store);
-    REQUIRE(bridge.last_error().empty());
-
-    std::unique_ptr<runtime::MessageChannel> channel;
-    REQUIRE(bridge.attach_remote_channel(std::move(channel), "missing") == nullptr);
-    REQUIRE(bridge.last_error() == "attach_remote_channel: null channel");
-    REQUIRE_FALSE(bridge.detach_remote(nullptr));
-
-    REQUIRE(bridge.open());
-    REQUIRE(bridge.last_error().empty());
-    REQUIRE(bridge.is_open());
 }
 
 // Simulates each format adapter's call sequence against ViewBridge and

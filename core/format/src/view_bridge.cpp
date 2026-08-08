@@ -1,6 +1,5 @@
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/format/editor_ui.hpp>
-#include <pulp/format/remote_view_session.hpp>
 #include <pulp/runtime/exceptions.hpp>
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/host_param_surface.hpp>
@@ -398,7 +397,7 @@ bool ViewBridge::set_preferred_size(uint32_t width, uint32_t height) {
 view::View* ViewBridge::attach_secondary_view(std::unique_ptr<view::View> v, ViewRole role) {
     if (!v) return nullptr;
     auto* raw = v.get();
-    // A secondary view (inspector, remote preview) binds against the same
+    // A secondary inspector view binds against the same
     // parameter store as the primary editor, so it gets the same surfaces.
     raw->set_host_params(host_param_surface_.get());
     raw->set_host_actions(host_actions_);
@@ -445,40 +444,6 @@ ViewRole ViewBridge::role_at(size_t index) const {
     }
     if (index < secondaries_.size()) return secondaries_[index].role;
     return ViewRole::Editor;
-}
-
-RemoteViewSession* ViewBridge::attach_remote_channel(
-    std::unique_ptr<runtime::MessageChannel> channel,
-    std::string label)
-{
-    if (!owner_is_alive()) {
-        last_error_ = "attach_remote_channel: processor owner has been destroyed";
-        return nullptr;
-    }
-    if (!channel) {
-        last_error_ = "attach_remote_channel: null channel";
-        return nullptr;
-    }
-    auto session = std::unique_ptr<RemoteViewSession>(
-        new RemoteViewSession(std::move(label), store_, std::move(channel)));
-    if (!session->handshake_(processor_)) {
-        last_error_ = session->last_error();
-        return nullptr;
-    }
-    auto* raw = session.get();
-    remotes_.push_back(std::move(session));
-    return raw;
-}
-
-bool ViewBridge::detach_remote(RemoteViewSession* session) {
-    for (auto it = remotes_.begin(); it != remotes_.end(); ++it) {
-        if (it->get() == session) {
-            (*it)->close();
-            remotes_.erase(it);
-            return true;
-        }
-    }
-    return false;
 }
 
 } // namespace pulp::format

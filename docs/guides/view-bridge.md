@@ -4,7 +4,7 @@ ViewBridge is the editor-lifecycle layer that sits between your `Processor`
 and each host adapter that exposes a Pulp editor surface (VST3, AU v2/v3,
 CLAP, and standalone today). It owns the constructed view tree, dispatches
 open / close / resize callbacks, and lets one processor serve multiple
-simultaneous views (editor + inspector + remote).
+simultaneous views (editor + inspector).
 
 ## Why it exists
 
@@ -65,12 +65,9 @@ public:
   uint32_t width() const;
   uint32_t height() const;
 
-  // Secondary views (inspector, remote preview, …)
+  // Secondary inspector views
   view::View* attach_secondary_view(std::unique_ptr<view::View>, ViewRole);
   bool        detach_secondary_view(view::View*);
-  RemoteViewSession* attach_remote_channel(std::unique_ptr<runtime::MessageChannel>,
-                                           std::string label = {});
-  bool        detach_remote(RemoteViewSession*);
   size_t      view_count() const;
   view::View* view_at(size_t);
   ViewRole    role_at(size_t) const;
@@ -185,9 +182,8 @@ than pretending native child embedding exists.
 
 ### Multiple views for one processor
 
-ViewBridge can host a primary editor plus secondary views (inspector,
-remote preview). They all share the processor's `StateStore`, so parameter
-binding keeps them in sync.
+ViewBridge can host a primary editor plus secondary inspector views. They all
+share the processor's `StateStore`, so parameter binding keeps them in sync.
 
 ```cpp
 format::ViewBridge bridge(processor, store);
@@ -258,17 +254,3 @@ See `examples/view-bridge-demo/` for a runnable demo that:
 1. Implements a `Processor` subclass with a custom `create_view()`.
 2. Attaches a secondary inspector view via `attach_secondary_view()`.
 3. Exercises lifecycle callbacks and a resize.
-
-## Remote views
-
-`ViewBridge::attach_remote_channel(channel, label)` is implemented. It takes
-ownership of an already-connected `runtime::MessageChannel` (usually a
-`WebSocketChannel`) and registers a `RemoteViewSession` as a `ViewRole::Remote`
-secondary.
-
-There is no public `attach_remote_view(url)` convenience helper. Callers that
-need WebSocket transport should connect the channel first, then pass it to
-`attach_remote_channel(...)`. Paint-op streaming remains a follow-up; today's
-remote session covers metadata, read-only parameter observation, and close.
-It deliberately accepts no remote parameter writes; writable automation must
-use Pulp's capability-controlled control surface rather than Remote View.
