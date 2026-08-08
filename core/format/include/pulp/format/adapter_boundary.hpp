@@ -515,25 +515,25 @@ struct MpeSidecar {
     ///
     /// @p midi_in must already be in the order the adapter wants the tracker to
     /// see (VST3 sorts its buffer first; CLAP and AU use host delivery order).
-    /// Returns false after reconciling to an empty tracker/buffer if expression
-    /// output could not be represented completely. RT-safe provided `reserve()`
-    /// ran off the audio thread.
+    /// Returns false after reconciling when the source stream or expression
+    /// output could not be represented completely. Source incompleteness is
+    /// rejected even when MPE is disabled. RT-safe provided `reserve()` ran off
+    /// the audio thread.
     template <typename MidiRange>
     [[nodiscard]] bool run(Processor& processor, const MidiRange& midi_in) {
+        if constexpr (requires { midi_in.dropped_event_count(); }) {
+            if (midi_in.dropped_event_count() != 0) {
+                // Source-stream completeness is required even when the
+                // processor did not opt into MPE: a retained attack followed
+                // by a dropped release can stick an ordinary MIDI voice too.
+                reset();
+                processor.set_mpe_input(enabled ? &buffer : nullptr);
+                return false;
+            }
+        }
         if (enabled) {
             buffer.clear();
             expression_event_dropped = false;
-            if constexpr (requires { midi_in.dropped_event_count(); }) {
-                if (midi_in.dropped_event_count() != 0) {
-                    // The adapter could not retain the complete source stream.
-                    // Do not advance note identity from a prefix that may have
-                    // lost a release; adapters pair this failure with a
-                    // processor reset and discard the partial MIDI block.
-                    reset();
-                    processor.set_mpe_input(&buffer);
-                    return false;
-                }
-            }
             // Releases that could not fit at the end of the previous block
             // must lead this block before any new starts. The tracker blocks
             // note-ons while this fixed queue is nonempty, so no voice can be

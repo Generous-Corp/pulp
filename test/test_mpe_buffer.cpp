@@ -469,6 +469,27 @@ TEST_CASE("MpeSidecar rejects a truncated source MIDI lifecycle",
     REQUIRE(sidecar.tracker.pending_note_off_count() == 0);
 }
 
+TEST_CASE("MpeSidecar rejects truncated source MIDI without MPE enabled",
+          "[midi][sidecar][overflow][rt-safety]") {
+    pulp::format::boundary::MpeSidecar sidecar;
+    SidecarProcessor processor;
+    sidecar.configure(false);
+
+    MidiBuffer truncated;
+    truncated.reserve(1);
+    truncated.set_realtime_capacity_limit();
+    REQUIRE(truncated.add(MidiEvent::note_on(1, 60, 100)));
+    REQUIRE_FALSE(truncated.add(MidiEvent::note_off(1, 60)));
+
+    {
+        pulp::test::RtAllocationProbe probe;
+        REQUIRE_FALSE(sidecar.run(processor, truncated));
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    REQUIRE(processor.mpe_input() == nullptr);
+    REQUIRE(sidecar.tracker.active_count() == 0);
+}
+
 TEST_CASE("MpeSidecar reconciles after an atomic retrigger append drops",
           "[midi][mpe][sidecar][lifecycle][overflow][rt-safety]") {
     pulp::format::boundary::MpeSidecar sidecar;
