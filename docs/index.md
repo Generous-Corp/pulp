@@ -31,6 +31,7 @@ MIT-licensed. No royalties. No copyleft.
 ## Reference
 
 - [Processing Models](reference/processing-models.md) — author a `Processor` (the default) vs. compose with `SignalGraph`, and what goes inside a node
+- [Audio Matrix Mixer](reference/audio-matrix-mixer.md) — fixed-capacity N×M internal routing, gain/headroom laws, transactional plan publication, and RT buffer rules
 - [Modules](reference/modules.md) — subsystems with status, dependencies, and key headers
 - [Skills](reference/skills.md) — the full catalog of AI-agent skills Pulp ships (Claude Code + Codex)
 - [API Reference](api/index.html) — Doxygen-generated class and function documentation

@@ -184,6 +184,10 @@ pulp_add_test_suite(pulp-test-oversampling-quality
 # proven to beat the shipped zero-crossing detector on dense material.
 pulp_add_test_suite(pulp-test-pitch-track LIBRARIES pulp::audio-analysis)
 pulp_add_test_suite(pulp-test-transition-mixer LIBRARIES pulp::signal)
+# Fixed-capacity N-input/M-output signal routing. Independent scalar matrix
+# oracle, conservative-headroom law, transactional publication, partition
+# invariance, invalid-buffer fail-closed behavior, and Release RT allocation.
+pulp_add_test_suite(pulp-test-audio-matrix-mixer LIBRARIES pulp::signal)
 # Signal filter tests extracted from test_signal.cpp.
 # Biquad / SVF / LadderFilter / LinkwitzRiley TEST_CASE clusters moved
 # verbatim into a sibling TU to keep test_signal.cpp under ~1,200 lines.
