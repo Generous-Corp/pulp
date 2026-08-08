@@ -6,18 +6,19 @@
 #include <pulp/inspect/control_client_connection.hpp>
 #include <pulp/inspect/control_manifest.hpp>
 #include <pulp/runtime/crypto.hpp>
+#include <pulp/runtime/detail/durable_file_replacement.hpp>
 
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <iterator>
 #include <limits>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -376,9 +377,11 @@ int cmd_control(const std::vector<std::string>& args) {
             return fail(negotiation.error_code.empty() ? "negotiation-failed"
                                                        : negotiation.error_code,
                         negotiation.explanation, json);
-        std::ofstream stream(output, std::ios::binary | std::ios::trunc);
-        if (!stream)
-            return fail("io-error", "cannot open artifact output", json);
+        using pulp::runtime::detail::DurableFileCommitOutcome;
+        using pulp::runtime::detail::DurableFileReplacement;
+        auto replacement = DurableFileReplacement::create(output);
+        if (!replacement)
+            return fail("io-error", "cannot create a temporary artifact output", json);
         std::uint64_t offset = 0;
         ControlArtifactReadResult result;
         do {
@@ -387,12 +390,20 @@ int cmd_control(const std::vector<std::string>& args) {
             if (result.status != ControlArtifactStatus::Read)
                 return fail(std::string(control_artifact_status_id(result.status)),
                             result.explanation, json);
-            stream.write(reinterpret_cast<const char*>(result.bytes.data()),
-                         static_cast<std::streamsize>(result.bytes.size()));
+            if (!replacement->write_all(std::span<const std::uint8_t>{result.bytes}))
+                return fail("io-error", "artifact output write failed", json);
             offset += result.bytes.size();
         } while (!result.eof);
-        if (!stream)
-            return fail("io-error", "artifact output write failed", json);
+        switch (replacement->commit()) {
+        case DurableFileCommitOutcome::ReplacedDurably:
+            break;
+        case DurableFileCommitOutcome::ReplacedButDirectorySyncFailed:
+            return fail("io-error",
+                        "artifact output was replaced but its directory could not be synced",
+                        json);
+        case DurableFileCommitOutcome::NotReplaced:
+            return fail("io-error", "artifact output could not be atomically replaced", json);
+        }
         if (json) {
             auto root = choc::value::createObject("");
             root.addMember("artifact_id", choc::value::createString(artifact_id));
