@@ -1,19 +1,25 @@
 {
   "activation": {
-    "accepted_at": null,
-    "accepted_by": null,
-    "authority_record_path": null,
-    "initial_transition_event": null,
+    "accepted_at": "2026-07-24T12:03:00Z",
+    "accepted_by": "@danielraffel",
+    "authority_record_path": "provenance/authority/records/native-design-kernel-v1-attempt-2.json",
+    "initial_transition_event": "20260724-authority-activation-attempt-2",
     "pulp_extraction_base": "2ccff748f0d59da34b01ce1fbceabcf19f452731",
-    "state": "prepared",
-    "vellum_authority_commit": null
+    "state": "active",
+    "vellum_authority_commit": "a106a02816a0cde53daac83f36a6630d664f6637"
   },
   "framework_repository": "Generous-Corp/vellum",
   "freeze_owner": "@danielraffel",
   "schema_version": 2,
   "slices": [
     {
-      "authority": null,
+      "authority": {
+        "accepted_at": "2026-07-24T12:03:00Z",
+        "accepted_by": "@danielraffel",
+        "counterpart": "provenance/authority/records/native-design-kernel-v1-attempt-2.json",
+        "event_id": "20260724-authority-activation-attempt-2",
+        "vellum_commit": "a106a02816a0cde53daac83f36a6630d664f6637"
+      },
       "id": "canvas-kernel",
       "paths": [
         "core/canvas/include/pulp/canvas/affine_transform.hpp",
@@ -94,7 +100,7 @@
         "core/canvas/src/text_run_planner.cpp",
         "core/canvas/src/text_shaper.cpp"
       ],
-      "state": "pulp-authoritative-untransferred"
+      "state": "framework-authoritative-transferred"
     },
     {
       "authority": null,
@@ -129,7 +135,13 @@
       "state": "excluded"
     },
     {
-      "authority": null,
+      "authority": {
+        "accepted_at": "2026-07-24T12:03:00Z",
+        "accepted_by": "@danielraffel",
+        "counterpart": "provenance/authority/records/native-design-kernel-v1-attempt-2.json",
+        "event_id": "20260724-authority-activation-attempt-2",
+        "vellum_commit": "a106a02816a0cde53daac83f36a6630d664f6637"
+      },
       "id": "capture-primitives",
       "paths": [
         "core/view/include/pulp/view/screenshot.hpp",
@@ -140,7 +152,7 @@
         "core/view/src/screenshot_skia.cpp",
         "core/view/src/screenshot_stub.cpp"
       ],
-      "state": "pulp-authoritative-untransferred"
+      "state": "framework-authoritative-transferred"
     },
     {
       "authority": null,
@@ -152,7 +164,13 @@
       "state": "excluded"
     },
     {
-      "authority": null,
+      "authority": {
+        "accepted_at": "2026-07-24T12:03:00Z",
+        "accepted_by": "@danielraffel",
+        "counterpart": "provenance/authority/records/native-design-kernel-v1-attempt-2.json",
+        "event_id": "20260724-authority-activation-attempt-2",
+        "vellum_commit": "a106a02816a0cde53daac83f36a6630d664f6637"
+      },
       "id": "design-schema-compiler",
       "paths": [
         "core/view/include/pulp/view/anchor_strategy.hpp",
@@ -163,7 +181,7 @@
         "packages/pulp-import-ir/src/diff.ts",
         "packages/pulp-import-ir/src/tweaks.ts"
       ],
-      "state": "pulp-authoritative-untransferred"
+      "state": "framework-authoritative-transferred"
     },
     {
       "authority": null,
@@ -203,12 +221,18 @@
       "state": "pulp-authoritative-untransferred"
     },
     {
-      "authority": null,
+      "authority": {
+        "accepted_at": "2026-07-24T12:03:00Z",
+        "accepted_by": "@danielraffel",
+        "counterpart": "provenance/authority/records/native-design-kernel-v1-attempt-2.json",
+        "event_id": "20260724-authority-activation-attempt-2",
+        "vellum_commit": "a106a02816a0cde53daac83f36a6630d664f6637"
+      },
       "id": "macos-shell",
       "paths": [
         "core/view/platform/mac/accessibility_mac.mm"
       ],
-      "state": "pulp-authoritative-untransferred"
+      "state": "framework-authoritative-transferred"
     },
     {
       "authority": null,
@@ -250,7 +274,13 @@
       "state": "pulp-only"
     },
     {
-      "authority": null,
+      "authority": {
+        "accepted_at": "2026-07-24T12:03:00Z",
+        "accepted_by": "@danielraffel",
+        "counterpart": "provenance/authority/records/native-design-kernel-v1-attempt-2.json",
+        "event_id": "20260724-authority-activation-attempt-2",
+        "vellum_commit": "a106a02816a0cde53daac83f36a6630d664f6637"
+      },
       "id": "render-skia-dawn",
       "paths": [
         "core/render/include/pulp/render/dirty_tracker.hpp",
@@ -271,7 +301,7 @@
         "core/render/src/skia_surface.cpp",
         "core/render/src/skia_surface_ganesh.cpp"
       ],
-      "state": "pulp-authoritative-untransferred"
+      "state": "framework-authoritative-transferred"
     },
     {
       "authority": null,
@@ -310,7 +340,13 @@
       "state": "excluded"
     },
     {
-      "authority": null,
+      "authority": {
+        "accepted_at": "2026-07-24T12:03:00Z",
+        "accepted_by": "@danielraffel",
+        "counterpart": "provenance/authority/records/native-design-kernel-v1-attempt-2.json",
+        "event_id": "20260724-authority-activation-attempt-2",
+        "vellum_commit": "a106a02816a0cde53daac83f36a6630d664f6637"
+      },
       "id": "retained-ui-kernel",
       "paths": [
         "core/view/include/pulp/view/accessibility.hpp",
@@ -347,7 +383,7 @@
         "core/view/src/svg_path_widget.cpp",
         "core/view/src/yoga_layout.cpp"
       ],
-      "state": "pulp-authoritative-untransferred"
+      "state": "framework-authoritative-transferred"
     },
     {
       "authority": null,
