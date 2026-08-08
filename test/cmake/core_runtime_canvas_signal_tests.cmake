@@ -176,9 +176,6 @@ pulp_add_test_suite(pulp-test-analysis-frontends
 pulp_add_test_suite(pulp-test-modulation-language
     SOURCES test_modulation_language.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
-pulp_add_test_suite(pulp-test-analysis-frontends
-    SOURCES test_analysis_frontends.cpp harness/rt_allocation_probe.cpp
-    LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-units LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-mod-events LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-mod-voice LIBRARIES pulp::signal)
