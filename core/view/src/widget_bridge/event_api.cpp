@@ -36,7 +36,7 @@ std::string point_payload(const View* owner, Point local) {
            "offsetY:" + std::to_string(local.y);
 }
 
-void dispatch_gesture_js(const std::shared_ptr<std::atomic<bool>>& alive,
+void dispatch_gesture_js(const std::shared_ptr<BridgeCallbackState>& alive,
                          ScriptEngine* engine,
                          const std::string& id,
                          const std::string& event_name,
@@ -57,9 +57,11 @@ void BridgeRegistrars::register_hover_event_api(WidgetBridge& self) {
             auto alive = self.callback_alive_;
             auto* engine = &self.engine_;
             it->second->on_hover_enter = [alive, engine, id]() {
+                BridgeCallbackScope scope(alive);
                 dispatch_event(alive, engine, id, "mouseenter", "0");
             };
             it->second->on_hover_leave = [alive, engine, id]() {
+                BridgeCallbackScope scope(alive);
                 dispatch_event(alive, engine, id, "mouseleave", "0");
             };
         }
@@ -78,6 +80,7 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
             auto alive = self.callback_alive_;
             auto* engine = &self.engine_;
             it->second->on_click = [alive, engine, id]() {
+                BridgeCallbackScope scope(alive);
                 dispatch_event(alive, engine, id, "click", "0");
             };
         }
@@ -94,6 +97,7 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
             auto alive = self.callback_alive_;
             auto* engine = &self.engine_;
             it->second->on_overlay_dismissed = [alive, engine, id]() {
+                BridgeCallbackScope scope(alive);
                 dispatch_event(alive, engine, id, "dismiss", "0");
             };
             it->second->claim_overlay();
@@ -131,6 +135,7 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
             auto* engine = &self.engine_;
             auto previous_pointer = w->on_pointer_event;
             w->on_pointer_event = [alive, engine, id, previous_pointer](const MouseEvent& me) {
+                BridgeCallbackScope scope(alive);
                 if (previous_pointer) {
                     previous_pointer(me);
                 }
@@ -203,6 +208,7 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
 
             // W3C PointerEvents: forward drag as pointermove.
             w->on_drag = [alive, engine, id, w](Point pos) {
+                BridgeCallbackScope scope(alive);
                 float wx = pos.x, wy = pos.y;
                 for (View* cur = w; cur; cur = cur->parent()) {
                     wx += cur->bounds().x;
@@ -225,6 +231,7 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
 
             // Identity-preserving pointermove for iOS multi-touch.
             w->on_pointer_move = [alive, engine, id](const MouseEvent& me) {
+                BridgeCallbackScope scope(alive);
                 std::string data = "{"
                     "clientX:" + std::to_string(me.window_position.x) + ","
                     "clientY:" + std::to_string(me.window_position.y) + ","
@@ -251,6 +258,7 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
             auto alive = self.callback_alive_;
             auto* engine = &self.engine_;
             it->second->on_gesture_cb = [alive, engine, id](const GestureEvent& ge) {
+                BridgeCallbackScope scope(alive);
                 std::string type;
                 switch (ge.phase) {
                     case GesturePhase::began:     type = "gesturestart"; break;
@@ -305,6 +313,7 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
         auto alive = self.callback_alive_;
         auto* engine = &self.engine_;
         tap->on_ended = [alive, engine, id](GestureRecognizer& recognizer) {
+            BridgeCallbackScope scope(alive);
             auto& tap_ref = static_cast<TapRecognizer&>(recognizer);
             dispatch_gesture_js(alive, engine, id, "tap",
                 point_payload(recognizer.owner(), tap_ref.position()) + ",tapCount:1");
@@ -319,6 +328,7 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
         auto alive = self.callback_alive_;
         auto* engine = &self.engine_;
         tap->on_ended = [alive, engine, id](GestureRecognizer& recognizer) {
+            BridgeCallbackScope scope(alive);
             auto& tap_ref = static_cast<TapRecognizer&>(recognizer);
             dispatch_gesture_js(alive, engine, id, "doubletap",
                 point_payload(recognizer.owner(), tap_ref.position()) + ",tapCount:2");
@@ -333,6 +343,7 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
         auto alive = self.callback_alive_;
         auto* engine = &self.engine_;
         long_press->on_began = [alive, engine, id](GestureRecognizer& recognizer) {
+            BridgeCallbackScope scope(alive);
             auto& long_press_ref = static_cast<LongPressRecognizer&>(recognizer);
             dispatch_gesture_js(alive, engine, id, "longpress",
                 point_payload(recognizer.owner(), long_press_ref.position()));
@@ -348,6 +359,7 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
         auto* engine = &self.engine_;
         auto dispatch_pan = [alive, engine, id](const char* event_name,
                                                 GestureRecognizer& recognizer) {
+            BridgeCallbackScope scope(alive);
             auto& pan_ref = static_cast<PanRecognizer&>(recognizer);
             const auto t = pan_ref.translation();
             const auto v = pan_ref.velocity();
@@ -376,6 +388,7 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
         auto alive = self.callback_alive_;
         auto* engine = &self.engine_;
         swipe->on_ended = [alive, engine, id](GestureRecognizer& recognizer) {
+            BridgeCallbackScope scope(alive);
             auto& swipe_ref = static_cast<SwipeRecognizer&>(recognizer);
             const auto t = swipe_ref.translation();
             const auto v = swipe_ref.velocity();
@@ -395,6 +408,7 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
         auto alive = self.callback_alive_;
         auto* engine = &self.engine_;
         fling->on_ended = [alive, engine, id](GestureRecognizer& recognizer) {
+            BridgeCallbackScope scope(alive);
             auto& fling_ref = static_cast<FlingRecognizer&>(recognizer);
             const auto t = fling_ref.translation();
             const auto v = fling_ref.velocity();
@@ -415,6 +429,7 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
         auto* engine = &self.engine_;
         auto dispatch_pinch = [alive, engine, id](const char* event_name,
                                                   GestureRecognizer& recognizer) {
+            BridgeCallbackScope scope(alive);
             auto& pinch_ref = static_cast<PinchRecognizer&>(recognizer);
             dispatch_gesture_js(alive, engine, id, event_name,
                 point_payload(recognizer.owner(), pinch_ref.center()) + "," +
@@ -442,6 +457,7 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
         auto* engine = &self.engine_;
         auto dispatch_rotate = [alive, engine, id](const char* event_name,
                                                    GestureRecognizer& recognizer) {
+            BridgeCallbackScope scope(alive);
             auto& rotate_ref = static_cast<RotateRecognizer&>(recognizer);
             dispatch_gesture_js(alive, engine, id, event_name,
                 point_payload(recognizer.owner(), rotate_ref.center()) + "," +
@@ -493,6 +509,7 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
         auto alive = self.callback_alive_;
         auto* engine = &self.engine_;
         self.root_.on_global_click = [alive, engine](const std::string& id, uint16_t mods) {
+            BridgeCallbackScope scope(alive);
             bool cmd = (mods & (0x10 | 0x08)) != 0;
             if (cmd) {
                 dispatch_event(alive, engine, "__inspect__", "click", js_string_literal(id));
@@ -521,6 +538,7 @@ void BridgeRegistrars::register_wheel_event_api(WidgetBridge& self) {
             auto* engine = &self.engine_;
             auto previous_pointer = w->on_pointer_event;
             w->on_pointer_event = [alive, engine, id, previous_pointer](const MouseEvent& me) {
+                BridgeCallbackScope scope(alive);
                 if (previous_pointer) {
                     previous_pointer(me);
                 }
@@ -552,6 +570,7 @@ void BridgeRegistrars::register_context_menu_event_api(WidgetBridge& self) {
             auto alive = self.callback_alive_;
             auto* engine = &self.engine_;
             v->on_context_menu = [alive, engine, cb](Point pos) {
+                BridgeCallbackScope scope(alive);
                 safe_dispatch_eval(alive, engine,
                     cb + "(" + std::to_string(pos.x) + "," + std::to_string(pos.y) + ")",
                     "context menu");
@@ -619,6 +638,7 @@ void BridgeRegistrars::register_drop_event_api(WidgetBridge& self) {
             auto alive = self.callback_alive_;
             auto* engine = &self.engine_;
             v->on_drop = [alive, engine, cb](const std::string& type, const std::string& data, float x, float y) {
+                BridgeCallbackScope scope(alive);
                 std::string safe_data;
                 for (char c : data) {
                     if (c == '\'') safe_data += "\\'";

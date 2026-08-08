@@ -231,6 +231,7 @@
 #include <pulp/signal/biquad.hpp>
 #include <pulp/signal/denormal.hpp>
 #include <pulp/signal/dynamics_core.hpp>
+#include <pulp/signal/dynamics_contract.hpp>
 #include <pulp/signal/units.hpp>
 #include <pulp/signal/windowed_sinc_design.hpp>
 
@@ -573,6 +574,9 @@ public:
     /// tests can measure it directly instead of inferring it from audio that
     /// crosses zero every half cycle.
     double gain_reduction_db() const { return detector_db_; }
+    GainReduction gain_reduction() const noexcept {
+        return GainReduction::from_magnitude_db(detector_db_);
+    }
 
     /// The control voltage currently driving the divider, 0..1.
     double control_voltage() const { return control_; }

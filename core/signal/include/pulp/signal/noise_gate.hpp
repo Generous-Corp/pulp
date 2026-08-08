@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/signal/denormal.hpp>
+#include <pulp/signal/dynamics_contract.hpp>
 
 #include <cmath>
 #include <algorithm>
@@ -90,6 +91,11 @@ public:
 
         for (int i = 0; i < num_samples; ++i)
             buffer[i] = process(buffer[i]);
+    }
+
+    /// Canonical non-negative attenuation magnitude for shared meters.
+    GainReduction gain_reduction() const noexcept {
+        return GainReduction::from_signed_db(static_cast<double>(envelope_db_));
     }
 
     void reset() { envelope_db_ = SampleType{0.0f}; }

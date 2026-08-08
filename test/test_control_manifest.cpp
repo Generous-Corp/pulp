@@ -31,17 +31,16 @@ bool schema_strings_are_bounded(choc::value::ValueView value) {
     if (value.isObject()) {
         const auto type = value["type"];
         if (type.isString() && type.getString() == "string" &&
-            !value.hasObjectMember("maxLength") &&
-            !value.hasObjectMember("pattern"))
+            !value.hasObjectMember("maxLength") && !value.hasObjectMember("pattern"))
             return false;
         for (std::uint32_t index = 0; index < value.size(); ++index) {
-            if (!schema_strings_are_bounded(
-                    value.getObjectMemberAt(index).value))
+            if (!schema_strings_are_bounded(value.getObjectMemberAt(index).value))
                 return false;
         }
     } else if (value.isArray()) {
         for (std::uint32_t index = 0; index < value.size(); ++index) {
-            if (!schema_strings_are_bounded(value[index])) return false;
+            if (!schema_strings_are_bounded(value[index]))
+                return false;
         }
     }
     return true;
@@ -53,30 +52,32 @@ bool required_output_identifiers_are_nonempty(choc::value::ValueView value) {
         const auto properties = value["properties"];
         if (required.isArray() && properties.isObject()) {
             static const std::set<std::string_view> semantic_identifiers{
-                "artifact_id", "build_id", "id", "lease_id", "out_path",
-                "plugin_id", "receipt_id", "stream_id",
+                "artifact_id", "build_id",  "id",         "lease_id",
+                "out_path",    "plugin_id", "receipt_id", "stream_id",
             };
             for (std::uint32_t index = 0; index < required.size(); ++index) {
-                if (!required[index].isString()) continue;
+                if (!required[index].isString())
+                    continue;
                 const std::string_view name = required[index].getString();
-                if (!semantic_identifiers.contains(name)) continue;
+                if (!semantic_identifiers.contains(name))
+                    continue;
                 const auto property = properties[name];
                 if (!property.isObject() || !property["type"].isString())
                     return false;
-                if (property["type"].getString() != "string") continue;
-                if (!property["minLength"].isInt32() &&
-                    !property["minLength"].isInt64())
+                if (property["type"].getString() != "string")
+                    continue;
+                if (!property["minLength"].isInt32() && !property["minLength"].isInt64())
                     return false;
-                const auto minimum = property["minLength"].isInt32()
-                    ? static_cast<std::int64_t>(
-                          property["minLength"].getInt32())
-                    : property["minLength"].getInt64();
-                if (minimum < 1) return false;
+                const auto minimum =
+                    property["minLength"].isInt32()
+                        ? static_cast<std::int64_t>(property["minLength"].getInt32())
+                        : property["minLength"].getInt64();
+                if (minimum < 1)
+                    return false;
             }
         }
         for (std::uint32_t index = 0; index < value.size(); ++index) {
-            if (!required_output_identifiers_are_nonempty(
-                    value.getObjectMemberAt(index).value))
+            if (!required_output_identifiers_are_nonempty(value.getObjectMemberAt(index).value))
                 return false;
         }
     } else if (value.isArray()) {
@@ -90,29 +91,24 @@ bool required_output_identifiers_are_nonempty(choc::value::ValueView value) {
 
 } // namespace
 
-TEST_CASE("control manifest canonical round trip is reproducible",
-          "[inspect][control-manifest]") {
+TEST_CASE("control manifest canonical round trip is reproducible", "[inspect][control-manifest]") {
     const auto manifest = developer_manifest();
     const auto canonical = serialize_control_manifest(manifest);
     REQUIRE_FALSE(canonical.empty());
-    REQUIRE(canonical.find("dev.pulp.control/artifact-manifest@1") !=
-            std::string::npos);
-    REQUIRE(canonical.find("dev.pulp.instance/read@1") <
-            canonical.find("dev.pulp.state/read@1"));
+    REQUIRE(canonical.find("dev.pulp.control/artifact-manifest@1") != std::string::npos);
+    REQUIRE(canonical.find("dev.pulp.instance/read@1") < canonical.find("dev.pulp.state/read@1"));
 
     ControlManifestDiagnostics diagnostics;
     const auto parsed = parse_control_manifest(canonical, &diagnostics);
     INFO(diagnostics.error);
     REQUIRE(parsed.has_value());
     REQUIRE(serialize_control_manifest(*parsed) == canonical);
-    REQUIRE(control_manifest_digest(*parsed) ==
-            control_manifest_digest(manifest));
+    REQUIRE(control_manifest_digest(*parsed) == control_manifest_digest(manifest));
 
     auto reordered = manifest;
     std::reverse(reordered.capabilities.begin(), reordered.capabilities.end());
     REQUIRE(serialize_control_manifest(reordered) == canonical);
-    REQUIRE(control_manifest_digest(reordered) ==
-            control_manifest_digest(manifest));
+    REQUIRE(control_manifest_digest(reordered) == control_manifest_digest(manifest));
 }
 
 TEST_CASE("control manifest rejects unknown fields and version downgrades",
@@ -126,11 +122,9 @@ TEST_CASE("control manifest rejects unknown fields and version downgrades",
     ControlManifestDiagnostics diagnostics;
     REQUIRE_FALSE(parse_control_manifest(unknown, &diagnostics).has_value());
     REQUIRE(diagnostics.code == ControlManifestError::UnknownField);
-    REQUIRE(control_manifest_error_id(diagnostics.code) ==
-            "manifest.unknown-field");
+    REQUIRE(control_manifest_error_id(diagnostics.code) == "manifest.unknown-field");
     REQUIRE(diagnostics.error.find("unknown field") != std::string::npos);
-    REQUIRE(diagnostics.unknown_fields ==
-            std::vector<std::string>{"future_authority"});
+    REQUIRE(diagnostics.unknown_fields == std::vector<std::string>{"future_authority"});
 
     auto downgraded = canonical;
     const auto version = downgraded.find("\"schema_version\": 1");
@@ -150,36 +144,27 @@ TEST_CASE("control manifest rejects unknown fields and version downgrades",
     REQUIRE(diagnostics.error.find("newer") != std::string::npos);
 }
 
-TEST_CASE("control denial reasons are stable protocol identifiers",
-          "[inspect][control-manifest]") {
-    REQUIRE(control_denial_reason_id(ControlDenialReason::NotBuilt) ==
-            "not-built");
+TEST_CASE("control denial reasons are stable protocol identifiers", "[inspect][control-manifest]") {
+    REQUIRE(control_denial_reason_id(ControlDenialReason::NotBuilt) == "not-built");
     REQUIRE(control_denial_reason_id(ControlDenialReason::ClientNotGranted) ==
             "client-not-granted");
     REQUIRE(control_denial_reason_id(ControlDenialReason::PublicationMismatch) ==
             "publication-mismatch");
 }
 
-TEST_CASE("control permission equation fails closed at every term",
-          "[inspect][control-manifest]") {
+TEST_CASE("control permission equation fails closed at every term", "[inspect][control-manifest]") {
     ControlPermissionInputs inputs;
     const struct {
-        bool ControlPermissionInputs::*term;
+        bool ControlPermissionInputs::* term;
         ControlDenialReason denial;
     } terms[] = {
-        {&ControlPermissionInputs::implemented,
-         ControlDenialReason::NotImplemented},
+        {&ControlPermissionInputs::implemented, ControlDenialReason::NotImplemented},
         {&ControlPermissionInputs::built, ControlDenialReason::NotBuilt},
-        {&ControlPermissionInputs::host_available,
-         ControlDenialReason::HostUnavailable},
-        {&ControlPermissionInputs::activated,
-         ControlDenialReason::NotActivated},
-        {&ControlPermissionInputs::policy_eligible,
-         ControlDenialReason::PolicyIneligible},
-        {&ControlPermissionInputs::client_granted,
-         ControlDenialReason::ClientNotGranted},
-        {&ControlPermissionInputs::session_live,
-         ControlDenialReason::SessionNotLive},
+        {&ControlPermissionInputs::host_available, ControlDenialReason::HostUnavailable},
+        {&ControlPermissionInputs::activated, ControlDenialReason::NotActivated},
+        {&ControlPermissionInputs::policy_eligible, ControlDenialReason::PolicyIneligible},
+        {&ControlPermissionInputs::client_granted, ControlDenialReason::ClientNotGranted},
+        {&ControlPermissionInputs::session_live, ControlDenialReason::SessionNotLive},
     };
 
     for (const auto& term : terms) {
@@ -199,8 +184,7 @@ TEST_CASE("control permission equation fails closed at every term",
     CHECK(*denied.denial == ControlDenialReason::ClientNotGranted);
 }
 
-TEST_CASE("control profile validation is fail closed",
-          "[inspect][control-manifest]") {
+TEST_CASE("control profile validation is fail closed", "[inspect][control-manifest]") {
     std::string error;
     ControlManifest stripped;
     stripped.target = "Production";
@@ -251,8 +235,7 @@ TEST_CASE("artifact and registry identity participate in manifest consent digest
             control_consent_identity(manifest_digest, artifact_b));
 }
 
-TEST_CASE("manifest validation returns typed semantic failures",
-          "[inspect][control-manifest]") {
+TEST_CASE("manifest validation returns typed semantic failures", "[inspect][control-manifest]") {
     auto manifest = developer_manifest();
     manifest.profile = static_cast<ControlBuildProfile>(255);
     auto result = validate_control_manifest_detailed(manifest);
@@ -294,15 +277,13 @@ TEST_CASE("canonical manifest validation requires controller authority",
 
     manifest.capabilities.push_back(InspectorCapability::SessionControl);
     auto json = serialize_control_manifest(manifest);
-    const std::string controller =
-        "\"dev.pulp.session/control@1\", ";
+    const std::string controller = "\"dev.pulp.session/control@1\", ";
     const auto controller_position = json.find(controller);
     REQUIRE(controller_position != std::string::npos);
     json.erase(controller_position, controller.size());
     ControlManifestDiagnostics diagnostics;
     REQUIRE_FALSE(parse_control_manifest(json, &diagnostics).has_value());
-    REQUIRE(diagnostics.code ==
-            ControlManifestError::MissingCapabilityDependency);
+    REQUIRE(diagnostics.code == ControlManifestError::MissingCapabilityDependency);
     REQUIRE(control_manifest_error_id(diagnostics.code) ==
             "manifest.missing-capability-dependency");
 }
@@ -313,30 +294,22 @@ TEST_CASE("control registry projects capability and operation metadata",
     const auto registry_digest = pulp::runtime::sha256_hex(registry);
     INFO("registry digest: " << registry_digest);
     REQUIRE(registry_digest == kControlRegistryDigest);
-    REQUIRE(registry.find("dev.pulp.state/parameter-gesture@1") !=
-            std::string::npos);
+    REQUIRE(registry.find("dev.pulp.state/parameter-gesture@1") != std::string::npos);
     REQUIRE(registry.find("\"risk\":\"mutating\"") != std::string::npos);
-    REQUIRE(registry.find("\"risk\":\"high-risk-mutation\"") !=
-            std::string::npos);
+    REQUIRE(registry.find("\"risk\":\"high-risk-mutation\"") != std::string::npos);
     REQUIRE(registry.find("\"risk\":\"critical\"") != std::string::npos);
-    REQUIRE(registry.find("\"executor\":\"host-main\"") !=
-            std::string::npos);
-    REQUIRE(registry.find("\"evidence\":\"receipt\"") !=
-            std::string::npos);
+    REQUIRE(registry.find("\"executor\":\"host-main\"") != std::string::npos);
+    REQUIRE(registry.find("\"evidence\":\"receipt\"") != std::string::npos);
     REQUIRE(registry.find("State.setParameter") != std::string::npos);
-    REQUIRE(registry.find("\"input_schema_id\":\"dev.pulp.schema/") !=
-            std::string::npos);
-    REQUIRE(registry.find("\"output_schema_id\":\"dev.pulp.schema/") !=
-            std::string::npos);
-    REQUIRE(registry.find("\"input_schema\":{\"$schema\"") !=
-            std::string::npos);
-    REQUIRE(registry.find("\"result_kind\":\"receipt\"") !=
-            std::string::npos);
+    REQUIRE(registry.find("\"input_schema_id\":\"dev.pulp.schema/") != std::string::npos);
+    REQUIRE(registry.find("\"output_schema_id\":\"dev.pulp.schema/") != std::string::npos);
+    REQUIRE(registry.find("\"input_schema\":{\"$schema\"") != std::string::npos);
+    REQUIRE(registry.find("\"result_kind\":\"receipt\"") != std::string::npos);
+    REQUIRE(registry.find("\"receipt_binding\":{\"kind\":\"durable-receipt\",\"receipt_id_field\":"
+                          "\"receipt_id\"}") != std::string::npos);
     REQUIRE(registry.find("\"input_schema_digest\":") != std::string::npos);
-    REQUIRE(registry.find("\"maximum\":4294967295") !=
-            std::string::npos);
-    REQUIRE(registry.find("\"required_build_feature\":") !=
-            std::string::npos);
+    REQUIRE(registry.find("\"maximum\":4294967295") != std::string::npos);
+    REQUIRE(registry.find("\"required_build_feature\":") != std::string::npos);
     REQUIRE(registry.find("\"runtime_contexts\":") != std::string::npos);
     REQUIRE(registry.find("\"host_tiers\":") != std::string::npos);
     REQUIRE(registry.find("\"cancellation\":") != std::string::npos);
@@ -348,6 +321,19 @@ TEST_CASE("control registry projects capability and operation metadata",
             ++capability_count;
     }
     REQUIRE(control_operation_registry().size() == capability_count);
+
+    std::size_t receipt_binding_count = 0;
+    for (const auto& operation : control_operation_registry()) {
+        const bool schema_has_receipt_id =
+            operation.output_schema_json.find("\"receipt_id\"") != std::string_view::npos;
+        CHECK(operation.receipt_binding.bound == schema_has_receipt_id);
+        if (operation.receipt_binding.bound) {
+            ++receipt_binding_count;
+            CHECK(operation.result_kind == "receipt");
+            CHECK(operation.receipt_binding.receipt_id_field == "receipt_id");
+        }
+    }
+    CHECK(receipt_binding_count == 8);
     std::set<std::string_view> operation_ids;
     std::set<std::string_view> schema_ids;
     for (const auto& operation : control_operation_registry()) {
@@ -358,81 +344,58 @@ TEST_CASE("control registry projects capability and operation metadata",
         CHECK(schema_ids.insert(operation.output_schema_id).second);
         CHECK(choc::json::parse(operation.input_schema_json).isObject());
         CHECK(choc::json::parse(operation.output_schema_json).isObject());
-        CHECK(operation.input_schema_json.find("additionalProperties") !=
-              std::string_view::npos);
+        CHECK(operation.input_schema_json.find("additionalProperties") != std::string_view::npos);
         CHECK_FALSE(operation.result_kind.empty());
-        CHECK(schema_strings_are_bounded(
-            choc::json::parse(operation.input_schema_json)));
-        CHECK(schema_strings_are_bounded(
-            choc::json::parse(operation.output_schema_json)));
+        CHECK(schema_strings_are_bounded(choc::json::parse(operation.input_schema_json)));
+        CHECK(schema_strings_are_bounded(choc::json::parse(operation.output_schema_json)));
         CHECK(required_output_identifiers_are_nonempty(
             choc::json::parse(operation.output_schema_json)));
         if (operation.capability == InspectorCapability::UiInput ||
             operation.capability == InspectorCapability::TestInput) {
-            CHECK(operation.input_schema_json.find("\"oneOf\"") !=
-                  std::string_view::npos);
-            CHECK(operation.input_schema_json.find(
-                      "\"event\":{\"type\":\"object\"}") ==
+            CHECK(operation.input_schema_json.find("\"oneOf\"") != std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"event\":{\"type\":\"object\"}") ==
                   std::string_view::npos);
         }
-        if (operation.capability == InspectorCapability::AuthoringTweaks)
-        {
-            CHECK(operation.input_schema_json.find("\"propertyNames\"") !=
-                  std::string_view::npos);
-            CHECK(operation.input_schema_json.find("\"anchor_id\"") !=
-                  std::string_view::npos);
-            CHECK(operation.input_schema_json.find("\"allOf\"") !=
-                  std::string_view::npos);
+        if (operation.capability == InspectorCapability::AuthoringTweaks) {
+            CHECK(operation.input_schema_json.find("\"propertyNames\"") != std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"anchor_id\"") != std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"allOf\"") != std::string_view::npos);
             CHECK(operation.input_schema_json.find(
-                      "\"highlight_node_id\":{\"maxLength\":256,\"minLength\":1,\"type\":\"string\",\"x-pulp-maxUtf8Bytes\":256}") !=
-                  std::string_view::npos);
+                      "\"highlight_node_id\":{\"maxLength\":256,\"minLength\":1,\"type\":"
+                      "\"string\",\"x-pulp-maxUtf8Bytes\":256}") != std::string_view::npos);
         }
         if (operation.capability == InspectorCapability::CaptureImage) {
-            CHECK(operation.input_schema_json.find("\"oneOf\"") !=
-                  std::string_view::npos);
-            CHECK(operation.input_schema_json.find("\"const\":\"node\"") !=
-                  std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"oneOf\"") != std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"const\":\"node\"") != std::string_view::npos);
         }
         if (operation.capability == InspectorCapability::TestInput) {
-            CHECK(operation.input_schema_json.find("\"maximum\":400") !=
-                  std::string_view::npos);
-            CHECK(operation.input_schema_json.find("\"minimum\":20") !=
-                  std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"maximum\":400") != std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"minimum\":20") != std::string_view::npos);
         }
         if (operation.capability == InspectorCapability::TelemetryStream) {
-            CHECK(operation.input_schema_json.find("\"maxItems\":32") !=
-                  std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"maxItems\":32") != std::string_view::npos);
             CHECK(operation.input_schema_json.find("\"uniqueItems\":true") !=
                   std::string_view::npos);
         }
         if (operation.capability == InspectorCapability::TraceControl) {
-            CHECK(operation.input_schema_json.find(
-                      "\"const\":\"motion-start-trace\"") !=
+            CHECK(operation.input_schema_json.find("\"const\":\"motion-start-trace\"") !=
                   std::string_view::npos);
-            CHECK(operation.input_schema_json.find("\"maxItems\":32") !=
-                  std::string_view::npos);
-            CHECK(operation.output_schema_json.find("\"trace_id\"") !=
-                  std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"maxItems\":32") != std::string_view::npos);
+            CHECK(operation.output_schema_json.find("\"trace_id\"") != std::string_view::npos);
             CHECK(operation.output_schema_json.find(
                       "\"required\":[\"action\",\"receipt_id\",\"applied\",\"trace_id\"]") !=
                   std::string_view::npos);
         }
-        if (operation.capability ==
-            InspectorCapability::TraceSessionControl) {
-            CHECK(operation.input_schema_json.find("\"maximum\":512") !=
+        if (operation.capability == InspectorCapability::TraceSessionControl) {
+            CHECK(operation.input_schema_json.find("\"maximum\":512") != std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"x-pulp-maxUtf8Bytes\":128") !=
                   std::string_view::npos);
-            CHECK(operation.input_schema_json.find(
-                      "\"x-pulp-maxUtf8Bytes\":128") !=
-                  std::string_view::npos);
-            CHECK(operation.output_schema_json.find("\"out_path\"") !=
-                  std::string_view::npos);
+            CHECK(operation.output_schema_json.find("\"out_path\"") != std::string_view::npos);
         }
         if (operation.capability == InspectorCapability::RuntimeEval) {
-            CHECK(operation.input_schema_json.find(
-                      "\"x-pulp-maxUtf8Bytes\":65536") !=
+            CHECK(operation.input_schema_json.find("\"x-pulp-maxUtf8Bytes\":65536") !=
                   std::string_view::npos);
-            CHECK(operation.input_schema_json.find("\\\\u0000") !=
-                  std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\\\\u0000") != std::string_view::npos);
         }
     }
     REQUIRE(registry.find("dev.pulp.render/offline@1") != std::string::npos);

@@ -354,6 +354,11 @@ pulp_add_test_suite(pulp-test-instrument-envelope LIBRARIES pulp::audio)
 # Prepared voice-slot allocation, stealing, release, and choke-group policy.
 pulp_add_test_suite(pulp-test-instrument-voice-allocator LIBRARIES pulp::audio)
 
+# Non-owning facade over the existing MIDI and prepared instrument voice owners.
+pulp_add_test_suite(pulp-test-voice-runtime-facade
+    SOURCES test_voice_runtime_facade.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio)
+
 # Loop metadata validation and off-RT loop candidate analysis.
 pulp_add_test_suite(pulp-test-loop-analysis LIBRARIES pulp::audio)
 

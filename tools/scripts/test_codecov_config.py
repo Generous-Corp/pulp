@@ -52,6 +52,7 @@ EXPECTED_UPLOAD_ONLY_FLAGS = {
     "os-linux",
     "os-macos",
     "os-windows",
+    "python-tools",
 }
 
 
@@ -246,8 +247,8 @@ class CodecovYamlStructure(unittest.TestCase):
                 flag = flags[flag_name]
                 self.assertIs(
                     flag.get("carryforward"),
-                    True,
-                    f"{flag_name} upload flag must carry forward coverage",
+                    False,
+                    f"{flag_name} upload flag must expose a missing current report",
                 )
                 self.assertNotIn(
                     "paths",

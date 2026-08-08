@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/signal/detail/modular_sequencing_common.hpp>
+#include <pulp/signal/lfsr.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -124,6 +125,7 @@ public:
     void set_feedback_tap(int tap) {
         tap_ = tap;
         clamp_config();
+        (void)register_.set_feedback_mask(feedback_mask());
     }
     int feedback_tap() const { return tap_; }
 
@@ -152,9 +154,9 @@ public:
     static constexpr int latency_samples() { return 0; }
 
     /// Current register contents, bit `i` at bit position `i`.
-    std::uint32_t register_bits() const { return reg_; }
+    std::uint32_t register_bits() const { return register_.state(); }
     /// Current DAC code in `0 .. 2^D − 1`.
-    int dac_code() const { return static_cast<int>(reg_ & dac_mask()); }
+    int dac_code() const { return static_cast<int>(register_.state() & dac_mask()); }
     SampleType value() const { return out_; }
 
     /// Advances one sample. `data_in` is XOR-ed into the serial input when
@@ -165,19 +167,17 @@ public:
         if (!run_high) return out_;
         if (!clock_edge) return out_;
 
-        const std::uint32_t last = (reg_ >> (bits_ - 1)) & 1u;
-        const std::uint32_t tap = (reg_ >> tap_) & 1u;
-        std::uint32_t new_bit = last ^ tap;
-        if (external_data_ && data_in) new_bit ^= 1u;
-
-        reg_ = ((reg_ << 1) | new_bit) & reg_mask();
+        register_.clock(external_data_ && data_in);
         refresh_output();
         return out_;
     }
 
 private:
-    std::uint32_t reg_mask() const { return (1u << bits_) - 1u; }
     std::uint32_t dac_mask() const { return (1u << dac_bits_) - 1u; }
+
+    std::uint32_t feedback_mask() const {
+        return (std::uint32_t{1} << (bits_ - 1)) | (std::uint32_t{1} << tap_);
+    }
 
     void clamp_config() {
         if (dac_bits_ > bits_) dac_bits_ = bits_;
@@ -186,13 +186,13 @@ private:
 
     void load_seed() {
         clamp_config();
-        reg_ = seed_pattern_ & reg_mask();
+        (void)register_.configure(bits_, feedback_mask(), seed_pattern_);
         refresh_output();
     }
 
     void refresh_output() {
         const double levels = static_cast<double>(dac_mask());
-        const double k = static_cast<double>(reg_ & dac_mask());
+        const double k = static_cast<double>(register_.state() & dac_mask());
         const double unit = levels > 0.0 ? (2.0 * k / levels - 1.0) : 0.0;
         out_ = static_cast<SampleType>(range_v_ * unit);
     }
@@ -205,7 +205,7 @@ private:
     bool external_data_ = false;
     std::uint32_t seed_pattern_ = kSeedPattern;
 
-    std::uint32_t reg_ = 0;
+    LfsrT<SampleType> register_{};
     SampleType out_ = SampleType{0};
 };
 

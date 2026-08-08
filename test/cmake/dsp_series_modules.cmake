@@ -39,12 +39,16 @@ function(pulp_dsp_series_catalog_suite name)
     catch_discover_tests(${name})
 endfunction()
 
+pulp_dsp_series_signal_suite(pulp-test-signal-analysis-frontends
+                             test_signal_analysis_frontends.cpp)
+
 # Each extracted production header is compiled in its own translation unit.
 # This catches accidental reliance on an umbrella header's include order while
 # keeping the public umbrella APIs unchanged.
 add_library(pulp-dsp-series-header-self-containment OBJECT
     header_compile/additive_spectral_envelope.cpp
     header_compile/cartesian_walk.cpp
+    header_compile/dynamics_contract.cpp
     header_compile/gate_logic.cpp
     header_compile/leslie_rotary.cpp
     header_compile/probability_gate.cpp
@@ -58,6 +62,9 @@ add_library(pulp-dsp-series-header-self-containment OBJECT
     header_compile/nonlin_ambience_design.cpp
     header_compile/zero_latency_convolver_support.cpp)
 target_link_libraries(pulp-dsp-series-header-self-containment PRIVATE pulp::signal)
+
+pulp_dsp_series_signal_suite(pulp-test-signal-fractional-delay
+                             test_signal_fractional_delay.cpp)
 
 # ── The modules ───────────────────────────────────────────────────────────
 pulp_dsp_series_signal_suite(pulp-test-signal-tape-machine   test_signal_tape_machine_eq_nonlinearity_archetypes.cpp
@@ -104,6 +111,7 @@ pulp_dsp_series_signal_suite(pulp-test-signal-granular       test_signal_granula
     test_signal_granular_live_rt_safety.cpp)
 pulp_dsp_series_signal_suite(pulp-test-signal-additive-bank  test_signal_additive_bank_spectrum_envelopes.cpp
     test_signal_additive_bank_gain_rt_voices.cpp)
+pulp_dsp_series_signal_suite(pulp-test-signal-fm-operator-engine test_signal_fm_operator_engine.cpp)
 pulp_dsp_series_signal_suite(pulp-test-signal-vocoder        test_signal_vocoder_filter_voicing_formant.cpp
     test_signal_vocoder_rt_composition_safety.cpp)
 

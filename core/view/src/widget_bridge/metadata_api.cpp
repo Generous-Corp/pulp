@@ -19,6 +19,7 @@ void BridgeRegistrars::register_metadata_removal_api(WidgetBridge& self) {
             if (parent) {
                 auto removed = parent->remove_child(w);
                 self.forget_widget_subtree(removed.get());
+                self.retire_removed_widget(std::move(removed));
             }
         }
         return choc::value::Value();
