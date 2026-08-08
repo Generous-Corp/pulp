@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 6,
+  "manifest_revision": 7,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -41,7 +41,7 @@
       },
       "timebase": {
         "state": "partial",
-        "capabilities": 8
+        "capabilities": 9
       }
     }
   },
@@ -3483,6 +3483,109 @@
       "contract_digest": "sha256:0a468de7ae3072dd866d43617c2090348ccf8cf9bdff8000cd3bb9f0b4ac2c3f"
     },
     {
+      "key": "timebase.tempo-map",
+      "domain": "timebase",
+      "summary": "Validated sample-rate-specific tempo compilation with deterministic, allocation-free tick and sample lookup.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "factory-validation-on-control",
+        "process": "audio",
+        "reset": "replace-immutable-value",
+        "release": "control-after-readers-quiesce"
+      },
+      "state_model": "Immutable owned compiled segments produced by a validating control-thread factory; published lookup values are allocation-free.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "authored tempo points, rational sample rate, ticks, and samples",
+      "output_domain": "integer sample positions and nearest canonical ticks with explicit sample error",
+      "units": [
+        "ticks",
+        "samples",
+        "beats per minute",
+        "rational sample rate"
+      ],
+      "latency": "zero",
+      "tail": "none",
+      "scheduling": "pure coordinate conversion after control-thread compilation",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/timebase/compiled_tempo_map.hpp",
+          "qualified_name": "pulp::timebase::CompiledTempoMap",
+          "target": "Pulp::timebase",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "validated-factory",
+          "kind": "cpp_function",
+          "include": "pulp/timebase/compiled_tempo_map.hpp",
+          "qualified_name": "pulp::timebase::CompiledTempoMap::compile",
+          "target": "Pulp::timebase",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "ticks-to-samples",
+          "kind": "cpp_function",
+          "include": "pulp/timebase/compiled_tempo_map.hpp",
+          "qualified_name": "pulp::timebase::CompiledTempoMap::ticks_to_samples",
+          "target": "Pulp::timebase",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "resolve-sample",
+          "kind": "cpp_function",
+          "include": "pulp/timebase/compiled_tempo_map.hpp",
+          "qualified_name": "pulp::timebase::CompiledTempoMap::resolve_sample",
+          "target": "Pulp::timebase",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:55389be38f68658c491db5486b15d1889d6c5bfd2c44bfcecb2faf89f401ccab"
+    },
+    {
       "key": "timebase.tick",
       "contract_version": {
         "major": 1,
@@ -3603,7 +3706,7 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 52,
+    "total": 53,
     "by_domain": {
       "audio": 6,
       "midi": 9,
@@ -3611,7 +3714,7 @@
       "offline": 0,
       "sequence": 1,
       "signal": 22,
-      "timebase": 8
+      "timebase": 9
     }
   },
   "compatibility": {
