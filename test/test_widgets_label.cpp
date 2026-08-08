@@ -807,13 +807,44 @@ TEST_CASE("Label attributed cache distinguishes nowrap from multiline",
     label.set_multi_line(true);
     RecordingCanvas multiline;
     label.paint(multiline);
-    CHECK(text_shaper_prepare_call_count() > after_one_line);
+    // The line-layout policy changed, so the layout cache is rebuilt, but the
+    // attributed glyph preparation remains valid and is reused.
+    CHECK(text_shaper_prepare_call_count() == after_one_line);
     const auto multiline_fills = commands_of(multiline, DrawCommand::Type::fill_text);
     REQUIRE(multiline_fills.size() > 1);
     CHECK(std::any_of(multiline_fills.begin(), multiline_fills.end(),
                       [&](const auto& command) {
                           return command.f[1] != Catch::Approx(multiline_fills.front().f[1]);
                       }));
+}
+
+TEST_CASE("Label reuses attributed preparation across identical paints",
+          "[view][widget][label-cache][attributed]") {
+    Label label("1111 9999");
+    label.set_bounds({0, 0, 48, 80});
+    label.set_multi_line(true);
+    label.set_font_variant("tabular-nums");
+    AttributedString attributed;
+    TextSpan first;
+    first.text = "1111 ";
+    first.font_family = "Inter";
+    first.font_size = 12.0f;
+    attributed.append(first);
+    TextSpan second = first;
+    second.text = "9999";
+    second.font_weight = 700;
+    attributed.append(second);
+    label.set_attributed_string(std::move(attributed));
+
+    RecordingCanvas first_paint;
+    label.paint(first_paint);
+    const auto after_first = text_shaper_prepare_call_count();
+    REQUIRE(commands_of(first_paint, DrawCommand::Type::fill_text).size() >= 2);
+
+    RecordingCanvas second_paint;
+    label.paint(second_paint);
+    CHECK(text_shaper_prepare_call_count() == after_first);
+    CHECK(fill_text_signature(first_paint) == fill_text_signature(second_paint));
 }
 
 TEST_CASE("Label attributed cache follows an inherited family change",
@@ -950,6 +981,53 @@ TEST_CASE("Label mixed-size attributed runs share measurement and paint metrics"
     REQUIRE(fills.size() >= 2);
     for (const auto& fill : fills)
         CHECK(fill.f[1] == Catch::Approx(mixed.baseline_y()));
+}
+
+TEST_CASE("Label automatic attributed line boxes use per-line metrics",
+          "[view][widget][label-cache][attributed][metrics]") {
+    Label label("BIG\nsmall");
+    AttributedString attributed;
+    TextSpan large;
+    large.text = "BIG\n";
+    large.font_family = "Inter";
+    large.font_size = 28.0f;
+    attributed.append(large);
+    TextSpan small;
+    small.text = "small";
+    small.font_family = "Inter";
+    small.font_size = 10.0f;
+    attributed.append(small);
+    label.set_attributed_string(std::move(attributed));
+    label.set_multi_line(true);
+
+    const float measured = label.measured_height(200.0f);
+    TextShaper shaper;
+    AttributedString expected_text;
+    TextSpan expected_large;
+    expected_large.text = "BIG\n";
+    expected_large.font_family = "Inter";
+    expected_large.font_size = 28.0f;
+    expected_text.append(expected_large);
+    TextSpan expected_small;
+    expected_small.text = "small";
+    expected_small.font_family = "Inter";
+    expected_small.font_size = 10.0f;
+    expected_text.append(expected_small);
+    const auto prepared = shaper.prepare(expected_text);
+    const auto layout = shaper.layout_with_lines(prepared, 200.0f);
+    REQUIRE(layout.lines.size() == 2);
+    CHECK(measured == Catch::Approx(std::ceil(layout.total_height)));
+    CHECK(measured < std::ceil(prepared.line_height() * 2.0f));
+
+    label.set_bounds({0, 0, 200, measured});
+    label.set_vertical_align(TextVerticalAlign::top);
+    RecordingCanvas canvas;
+    label.paint(canvas);
+    const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(fills.size() == 2);
+    CHECK(fills[1].f[1] - fills[0].f[1] ==
+          Catch::Approx(layout.lines[0].height - layout.lines[0].ascent +
+                        layout.lines[1].ascent));
 }
 
 TEST_CASE("Label attributed mutation invalidates an older captured line basis",
@@ -1103,6 +1181,7 @@ TEST_CASE("Label rejects invalid captured line geometry at its public boundary",
     label.set_cached_line_boxes(
         {{0, 0, 20, 18, 0, 5}}, 100.0f, "", true);
     CHECK(label.cached_line_boxes().empty());
+    CHECK(label.captured_wrap_fallback());
 }
 
 TEST_CASE("Label ellipsis preserves a captured single-line horizontal offset",

@@ -1844,7 +1844,11 @@ export function materializeFrame(scene, frame, ctx) {
     if (typeof family === 'string' && family) {
       out.font_family = family;
       const style = node.fontName.style;
-      if (typeof style === 'string' && style) out.font_style = semanticFontSlant(style);
+      if (typeof style === 'string' && style) {
+        out.font_style = semanticFontSlant(style);
+        const weight = weightFromFontStyleName(style);
+        if (weight !== null) out.font_weight = weight;
+      }
       fontsSeen.add(style && style !== 'Regular' ? `${family} ${style}` : family);
     }
     return out;

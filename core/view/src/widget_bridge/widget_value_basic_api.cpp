@@ -4,6 +4,7 @@
 #include "api_registry.hpp"
 
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/gap_widgets.hpp>
 
 #include <cstdint>
 #include <string>
@@ -51,6 +52,16 @@ void BridgeRegistrars::register_widget_value_basic_api(WidgetBridge& self) {
         if (auto* k = dynamic_cast<Knob*>(v)) k->set_render_style(style);
         else if (auto* f = dynamic_cast<Fader*>(v)) f->set_render_style(style);
         else if (auto* m = dynamic_cast<Meter*>(v)) m->set_render_style(style);
+        return choc::value::Value();
+    });
+
+    register_bridge_function(api, "setDesignedOverlay", [&self](choc::javascript::ArgumentList args) {
+        auto* v = self.widget(args.get<std::string>(0, ""));
+        const bool enabled = args.get<bool>(1, true);
+        if (auto* stepper = dynamic_cast<Stepper*>(v)) stepper->set_designed_overlay(enabled);
+        else if (auto* segmented = dynamic_cast<SegmentedControl*>(v)) segmented->set_designed_overlay(enabled);
+        else if (auto* toggle = dynamic_cast<Toggle*>(v)) toggle->set_designed_overlay(enabled);
+        else if (auto* toggle = dynamic_cast<ToggleButton*>(v)) toggle->set_designed_overlay(enabled);
         return choc::value::Value();
     });
 

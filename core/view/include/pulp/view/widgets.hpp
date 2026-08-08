@@ -489,6 +489,14 @@ private:
     ShapedLayoutKey shaped_cache_key_;
     canvas::ShapedLayout shaped_cache_layout_;
     bool shaped_cache_valid_ = false;
+    // The shaped-layout cache cannot prevent work performed before its lookup.
+    // Retain the expensive attributed preparation separately so an unchanged
+    // paint performs no shaping even though it still resolves inherited spans.
+    canvas::AttributedString attributed_prepare_source_;
+    std::vector<canvas::Canvas::FontFeature> attributed_prepare_features_;
+    canvas::PreparedText attributed_prepare_cache_;
+    std::uint64_t attributed_prepare_font_gen_ = 0;
+    bool attributed_prepare_valid_ = false;
 
 public:
     /// Set text direction (LTR, RTL, vertical top-to-bottom, vertical bottom-to-top).
@@ -1333,6 +1341,9 @@ public:
     float hover_opacity() const { return hover_opacity_.value(); }
     void advance_animations(float dt) override;
 
+    void set_designed_overlay(bool enabled) { designed_overlay_ = enabled; request_repaint(); }
+    bool designed_overlay() const { return designed_overlay_; }
+
     // Custom body shader comes from CustomShaderHost.
     void set_widget_schema(std::string json) { widget_schema_ = std::move(json); }
     const std::string& widget_schema() const { return widget_schema_; }
@@ -1350,6 +1361,7 @@ private:
     std::string widget_schema_;
     std::string lottie_json_;
     float lottie_time_ = 0.0f;
+    bool designed_overlay_ = false;
 };
 
 // ── Checkbox ────────────────────────────────────────────────────────────────
@@ -1488,6 +1500,10 @@ public:
     const std::optional<canvas::Color>& off_border_color_override() const { return off_border_color_; }
     std::optional<float> corner_radius_override() const { return corner_radius_; }
     std::optional<float> font_size_override() const { return font_size_; }
+    /// Marks a browser-captured control as a live replacement. Paint remains
+    /// complete so captured ON/OFF pixels cannot survive a state change.
+    void set_designed_overlay(bool enabled) { designed_overlay_ = enabled; request_repaint(); }
+    bool designed_overlay() const { return designed_overlay_; }
 
     std::function<void(bool)> on_toggle;
 
@@ -1509,6 +1525,7 @@ private:
     std::optional<canvas::Color> off_border_color_;
     std::optional<float> corner_radius_;
     std::optional<float> font_size_;
+    bool designed_overlay_ = false;
 };
 
 // ── Icon ────────────────────────────────────────────────────────────────────

@@ -1667,8 +1667,8 @@ void apply_label_style(Label& label, const IRStyle& style) {
         label.set_vertical_align(canvas::TextVerticalAlign::center);
 }
 
-void apply_text_runs(Label& label, const IRNode& node) {
-    if (node.text_runs.empty() || node.text_content.empty()) return;
+canvas::AttributedString build_attributed_text(const IRNode& node) {
+    if (node.text_runs.empty() || node.text_content.empty()) return {};
 
     canvas::TextSpan base;
     base.inherit_font_family = !node.style.font_family.has_value();
@@ -1769,7 +1769,13 @@ void apply_text_runs(Label& label, const IRNode& node) {
         cursor = end;
     }
     append(cursor, text_size, base);
-    label.set_attributed_string(std::move(attributed));
+    return attributed;
+}
+
+void apply_text_runs(Label& label, const IRNode& node) {
+    auto attributed = build_attributed_text(node);
+    if (!attributed.empty())
+        label.set_attributed_string(std::move(attributed));
 }
 
 void apply_svg_paint(SvgPathWidget& path, const IRNode& node) {
@@ -2151,6 +2157,7 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             stepper->set_value(stepper_plain_value(semantics.normalized_value,
                                                    node.audio_min, node.audio_max,
                                                    semantics.stepper_step));
+            stepper->set_designed_overlay(body_is_painted_beneath(node));
             return stepper;
         }
         case NativeWidgetKind::segmented: {
@@ -2164,6 +2171,7 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             segmented->set_segments(std::move(labels));
             segmented->set_selected_silent(
                 selector_segment_index(semantics.normalized_value, count));
+            segmented->set_designed_overlay(body_is_painted_beneath(node));
             return segmented;
         }
         case NativeWidgetKind::toggle_button: {
@@ -2204,18 +2212,12 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             // palette should not light up in whatever colour the surrounding
             // app happens to use.
             if (body_is_painted_beneath(node)) {
-                const auto clear = canvas::Color::rgba(0.0f, 0.0f, 0.0f, 0.0f);
                 button->set_label({});
-                button->set_off_background_color(clear);
-                button->set_off_border_color(clear);
-                button->set_on_border_color(clear);
-                button->set_off_text_color(clear);
-                button->set_on_text_color(clear);
                 auto lit = canvas::Color::rgba(1.0f, 1.0f, 1.0f, 1.0f);
                 if (const auto hex = attr(node, "design_accent"); hex && !hex->empty())
                     lit = parse_css_color(*hex);
-                lit.a *= 0.45f;
                 button->set_on_background_color(lit);
+                button->set_designed_overlay(true);
             }
             return button;
         }
@@ -2482,6 +2484,10 @@ std::unique_ptr<View> materialize_error_view(const char* message,
 }
 
 } // namespace
+
+canvas::AttributedString attributed_text_for_node(const IRNode& node) {
+    return build_attributed_text(node);
+}
 
 float normalized_audio_default(const IRNode& node) {
     return normalized_audio_default_impl(node);

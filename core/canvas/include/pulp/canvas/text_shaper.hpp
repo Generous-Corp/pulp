@@ -25,6 +25,7 @@ struct ShapedSegment {
     float width = 0;            // Measured width in pixels
     float ascent = 0;           // Distance above baseline
     float descent = 0;          // Distance below baseline
+    float leading = 0;          // Extra inter-line gap
     bool is_whitespace = false;  // Can break here
     bool is_newline = false;     // Hard line break
     // This segment begins in the same logical word as its predecessor. Rich
@@ -97,6 +98,10 @@ struct ShapedLayout {
 
         float width = 0;
         float y = 0;
+        float ascent = 0;
+        float descent = 0;
+        float leading = 0;
+        float height = 0;
         /// Horizontal offset from the block's own left edge. Zero for text a
         /// shaper broke, because every such line starts at the edge. Non-zero
         /// only for a captured layout whose run resumes a line an earlier
@@ -175,8 +180,12 @@ public:
         float letter_spacing = 0.0f,
         const std::vector<Canvas::FontFeature>& font_features = {});
 
-    /// Prepare an attributed string (mixed styles)
-    PreparedText prepare(const AttributedString& text);
+    /// Prepare an attributed string (mixed styles). Paragraph-wide OpenType
+    /// features still affect every span's advances, just as they do when the
+    /// attributed string is painted by Label.
+    PreparedText prepare(
+        const AttributedString& text,
+        const std::vector<Canvas::FontFeature>& font_features = {});
 
     /// Layout prepared text at a specific width — this is the cheap call.
     /// Pure arithmetic over cached segment widths. Call on every resize.

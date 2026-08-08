@@ -15,6 +15,12 @@
 namespace pulp::view::cpp_codegen {
 namespace {
 
+bool body_is_painted_beneath(const IRNode& node) {
+    const auto it = node.attributes.find("designed_body");
+    return it != node.attributes.end() &&
+           (it->second == "underlay" || it->second == "capture");
+}
+
 std::string widget_make_expr(const IRNode& node,
                              const ResolvedNativeNode& resolved,
                              const IRAssetManifest& manifest) {
@@ -63,6 +69,110 @@ std::string widget_make_expr(const IRNode& node,
     return "std::make_unique<pulp::view::View>()";
 }
 
+std::string span_color_expr(const EmitContext& ctx, canvas::Color color) {
+    return "pulp::canvas::Color::rgba(" + float_expr(ctx, color.r) + ", " +
+           float_expr(ctx, color.g) + ", " + float_expr(ctx, color.b) + ", " +
+           float_expr(ctx, color.a) + ")";
+}
+
+void emit_attributed_text(std::ostringstream& out,
+                          int depth,
+                          const EmitContext& ctx,
+                          std::string_view var,
+                          const IRNode& node) {
+    if (node.text_runs.empty()) return;
+    auto attributed = attributed_text_for_node(node);
+    if (attributed.empty()) return;
+
+    const std::string attributed_var = std::string(var) + "_attributed";
+    emit_line(out, depth, ctx.opts.indent_spaces,
+              "pulp::canvas::AttributedString " + attributed_var + ";");
+    for (const auto& span : attributed.spans()) {
+        emit_line(out, depth, ctx.opts.indent_spaces, "{");
+        emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                  "pulp::canvas::TextSpan span;");
+        emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                  "span.text = " + cpp_string_literal(span.text) + ";");
+        emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                  "span.font_family = " + cpp_string_literal(span.font_family) + ";");
+        emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                  "span.font_size = " + float_expr(ctx, span.font_size) + ";");
+        emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                  "span.font_weight = " + std::to_string(span.font_weight) + ";");
+        emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                  std::string("span.italic = ") + (span.italic ? "true;" : "false;"));
+        emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                  "span.font_slant = " + std::to_string(span.font_slant) + ";");
+        emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                  "span.color = " + span_color_expr(ctx, span.color) + ";");
+        const char* decoration = "none";
+        if (span.decoration == canvas::TextDecoration::underline)
+            decoration = "underline";
+        else if (span.decoration == canvas::TextDecoration::strikethrough)
+            decoration = "strikethrough";
+        else if (span.decoration == canvas::TextDecoration::overline)
+            decoration = "overline";
+        emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                  "span.decoration = pulp::canvas::TextDecoration::" +
+                      std::string(decoration) + ";");
+        emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                  std::string("span.decoration_override = ") +
+                      (span.decoration_override ? "true;" : "false;"));
+        emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                  "span.letter_spacing = " +
+                      float_expr(ctx, span.letter_spacing) + ";");
+        const auto emit_inherit = [&](std::string_view field, bool value) {
+            emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                      "span." + std::string(field) + " = " +
+                          (value ? "true;" : "false;"));
+        };
+        emit_inherit("inherit_font_family", span.inherit_font_family);
+        emit_inherit("inherit_font_size", span.inherit_font_size);
+        emit_inherit("inherit_font_weight", span.inherit_font_weight);
+        emit_inherit("inherit_font_slant", span.inherit_font_slant);
+        emit_inherit("inherit_color", span.inherit_color);
+        emit_inherit("inherit_letter_spacing", span.inherit_letter_spacing);
+        emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                  attributed_var + ".append(std::move(span));");
+        emit_line(out, depth, ctx.opts.indent_spaces, "}");
+    }
+    emit_line(out, depth, ctx.opts.indent_spaces,
+              std::string(var) + "->set_attributed_string(std::move(" +
+                  attributed_var + "));");
+}
+
+void emit_captured_text_layout(std::ostringstream& out,
+                               int depth,
+                               const EmitContext& ctx,
+                               std::string_view var,
+                               const IRNode& node) {
+    if (node.text_line_boxes.empty() || !node.text_layout_basis) return;
+    std::string boxes = "{";
+    for (std::size_t i = 0; i < node.text_line_boxes.size(); ++i) {
+        const auto& box = node.text_line_boxes[i];
+        if (i) boxes += ", ";
+        boxes += "{" + float_expr(ctx, box.left) + ", " +
+                 float_expr(ctx, box.top) + ", " +
+                 float_expr(ctx, box.width) + ", " +
+                 float_expr(ctx, box.height) + ", " +
+                 std::to_string(box.start) + ", " +
+                 std::to_string(box.length) + "}";
+    }
+    boxes += "}";
+    const bool explicit_nowrap =
+        node.style.white_space && *node.style.white_space == "nowrap";
+    const bool wrap_on_cache_miss =
+        !explicit_nowrap && node.text_line_boxes.size() == 1;
+    emit_line(out, depth, ctx.opts.indent_spaces,
+              std::string(var) + "->set_cached_line_boxes(" + boxes + ", " +
+                  float_expr(ctx, node.text_layout_basis->width) + ", " +
+                  cpp_string_literal(node.text_layout_basis->resolved_face) +
+                  ", " + (wrap_on_cache_miss ? "true" : "false") + ");");
+    if (!explicit_nowrap && node.text_line_boxes.size() > 1)
+        emit_line(out, depth, ctx.opts.indent_spaces,
+                  std::string(var) + "->set_multi_line(true);");
+}
+
 void emit_widget_specific(std::ostringstream& out,
                           int depth,
                           const EmitContext& ctx,
@@ -76,6 +186,8 @@ void emit_widget_specific(std::ostringstream& out,
     switch (resolved.kind) {
         case NativeWidgetKind::label:
             emit_label_style(out, depth, ctx, var, node.style);
+            emit_attributed_text(out, depth, ctx, var, node);
+            emit_captured_text_layout(out, depth, ctx, var, node);
             break;
         case NativeWidgetKind::text_editor:
             if (semantics.text_placeholder)
@@ -120,6 +232,8 @@ void emit_widget_specific(std::ostringstream& out,
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_corner_radius(" + float_expr(ctx, *semantics.toggle_corner_radius) + ");");
             if (semantics.toggle_font_size)
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_font_size(" + float_expr(ctx, *semantics.toggle_font_size) + ");");
+            if (body_is_painted_beneath(node))
+                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_designed_overlay(true);");
             break;
         case NativeWidgetKind::segmented: {
             std::string labels = "{";
@@ -136,6 +250,8 @@ void emit_widget_specific(std::ostringstream& out,
                               semantics.normalized_value,
                               static_cast<int>(semantics.segments.size()))) +
                           ");");
+            if (body_is_painted_beneath(node))
+                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_designed_overlay(true);");
             break;
         }
         case NativeWidgetKind::stepper:
@@ -153,6 +269,8 @@ void emit_widget_specific(std::ostringstream& out,
                               semantics.normalized_value, node.audio_min,
                               node.audio_max, semantics.stepper_step))) +
                           ");");
+            if (body_is_painted_beneath(node))
+                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_designed_overlay(true);");
             break;
         case NativeWidgetKind::knob: {
             if (!text.empty())

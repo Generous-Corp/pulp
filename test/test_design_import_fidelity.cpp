@@ -1233,10 +1233,8 @@ TEST_CASE("parse_design_ir_json reads per-range text style runs",
     CHECK(t.text_runs[0].font_style == "italic");
 }
 
-TEST_CASE("web codegen emits per-range text style runs as nested spans",
+TEST_CASE("web codegen installs per-range text style runs on one inline Label",
           "[view][import][codegen][text]") {
-    // Every segment owns a child span so a run can cancel the dominant text
-    // decoration without CSS propagation from the parent reapplying it.
     DesignIR ir;
     ir.root.type = "frame"; ir.root.name = "Root";
     ir.root.style.width = 200.0f; ir.root.style.height = 40.0f;
@@ -1251,11 +1249,11 @@ TEST_CASE("web codegen emits per-range text style runs as nested spans",
     opts.mode = CodeGenMode::web_compat;
     const auto js = generate_pulp_js(ir, opts);
     INFO(js);
-    CHECK(js.find(".textContent = 'Hello '") != std::string::npos);
-    CHECK(js.find("document.createElement('span')") != std::string::npos);
-    CHECK(js.find(".style.fontWeight = '700'") != std::string::npos);
-    CHECK(js.find(".style.color = '#ff0000'") != std::string::npos);
-    CHECK(js.find(".textContent = 'world'") != std::string::npos);
+    CHECK(js.find(".textContent = 'Hello world'") != std::string::npos);
+    CHECK(js.find("setTextRuns(") != std::string::npos);
+    CHECK(js.find("fontWeight: 700") != std::string::npos);
+    CHECK(js.find("color: '#ff0000'") != std::string::npos);
+    CHECK(js.find("_r0") == std::string::npos);
 }
 
 TEST_CASE("single-run text keeps the plain textContent path (no regression)",
@@ -1298,15 +1296,16 @@ TEST_CASE("mixed text runs with a multibyte char flow end to end on UTF-8 byte o
     CHECK(native_js.find("start: 7, end: 12") != std::string::npos);
     CHECK(native_js.find("color: '#00ff00'") != std::string::npos);
 
-    // Web-compat arm: two styled <span>s sliced on the byte boundaries.
+    // Web-compat arm: the same bridge contract targets the materialized parent
+    // Label, preserving one inline wrapping flow.
     CodeGenOptions web_opts;
     web_opts.mode = CodeGenMode::web_compat;
     const auto web_js = generate_pulp_js(ir, web_opts);
     INFO(web_js);
-    CHECK(web_js.find(".style.fontWeight = '700'") != std::string::npos);
-    CHECK(web_js.find(".style.color = '#00ff00'") != std::string::npos);
-    CHECK(web_js.find("Héllo ") != std::string::npos);   // byte-exact slice
-    CHECK(web_js.find("'world'") != std::string::npos);
+    CHECK(web_js.find("start: 0, end: 7, fontWeight: 700") != std::string::npos);
+    CHECK(web_js.find("start: 7, end: 12") != std::string::npos);
+    CHECK(web_js.find("color: '#00ff00'") != std::string::npos);
+    CHECK(web_js.find(".textContent = 'Héllo world'") != std::string::npos);
 }
 
 TEST_CASE("explicit verticalAlign is design authority in both JS arms",
@@ -1448,11 +1447,10 @@ TEST_CASE("grid container with no explicit columns gets a default column",
     CHECK(js.find("'template_columns', '1fr')") != std::string::npos);
 }
 
-TEST_CASE("per-range run children carry the node's dominant style",
+TEST_CASE("per-range runs inherit the parent Label's dominant style",
           "[view][import][codegen][text]") {
-    // A run that overrides only weight must still render the base size/color —
-    // web-compat Labels don't inherit, so the base style is copied onto each run
-    // child (so it appears on both the base span AND the run child).
+    // A run that overrides only weight inherits the base size/color from the
+    // single attributed Label rather than materializing child Labels.
     DesignIR ir;
     ir.root.type = "frame"; ir.root.name = "Root";
     IRNode t; t.type = "text"; t.name = "Mixed"; t.text_content = "ab cd";
@@ -1465,14 +1463,10 @@ TEST_CASE("per-range run children carry the node's dominant style",
     opts.mode = CodeGenMode::web_compat;
     const auto js = generate_pulp_js(ir, opts);
     INFO(js);
-    auto count = [&](const std::string& needle) {
-        size_t n = 0, p = 0;
-        while ((p = js.find(needle, p)) != std::string::npos) { n++; p += needle.size(); }
-        return n;
-    };
-    CHECK(js.find(".style.fontWeight = '700'") != std::string::npos);
-    CHECK(count(".style.fontSize = '18px'") >= 2);   // base span + run child
-    CHECK(count(".style.color = '#222222'") >= 2);
+    CHECK(js.find(".style.fontSize = '18px'") != std::string::npos);
+    CHECK(js.find(".style.color = '#222222'") != std::string::npos);
+    CHECK(js.find("setTextRuns(Mixed0._id, [{ start: 3, end: 5, fontWeight: 700 }])") != std::string::npos);
+    CHECK(js.find("Mixed0_r") == std::string::npos);
 }
 
 TEST_CASE("STRETCH constraint fills its axis even with an explicit size",
@@ -1545,11 +1539,11 @@ TEST_CASE("web codegen escapes clip-path / mask CSS (no JS string break)",
     CHECK(js.find("clipPath = 'url('#a')'") == std::string::npos);  // not raw
 }
 
-TEST_CASE("per-range text runs slice multibyte text on byte offsets",
+TEST_CASE("per-range text runs preserve multibyte byte offsets",
           "[view][import][codegen][text]") {
     // "café world" — é is 2 UTF-8 bytes, so "world" begins at BYTE offset 6.
-    // The run must slice on bytes (not char index 5), leaving the "café " gap
-    // intact and the run text == "world".
+    // The bridge receives those byte offsets unchanged and slices the single
+    // parent Label's attributed string.
     DesignIR ir;
     ir.root.type = "frame"; ir.root.name = "Root";
     IRNode t; t.type = "text"; t.name = "M";
@@ -1560,8 +1554,8 @@ TEST_CASE("per-range text runs slice multibyte text on byte offsets",
     CodeGenOptions opts; opts.mode = CodeGenMode::web_compat;
     const auto js = generate_pulp_js(ir, opts);
     INFO(js);
-    CHECK(js.find(".textContent = 'caf\xc3\xa9 '") != std::string::npos);  // gap intact
-    CHECK(js.find(".textContent = 'world'") != std::string::npos);          // run text
+    CHECK(js.find(".textContent = 'caf\xc3\xa9 world'") != std::string::npos);
+    CHECK(js.find("start: 6, end: 11, fontWeight: 700") != std::string::npos);
 }
 
 TEST_CASE("codegen emits mix-blend-mode on native + web-compat paths",

@@ -23,8 +23,8 @@ void BridgeRegistrars::register_widget_text_runs_api(WidgetBridge& self) {
     // letterSpacing?}, ...]) — per-range styled text. Builds a
     // canvas::AttributedString over the Label's text (offsets are UTF-8 BYTE
     // offsets) so mixed text renders each run with its own style through both
-    // captured and responsively reflowed lines (the native equivalent of the
-    // web nested-<span> path). The dominant style
+    // captured and responsively reflowed lines. Both generated JS surfaces use
+    // this attributed-Label path so mixed text remains one inline flow. The dominant style
     // is read from the Label (codegen emits the single-style setters first).
     register_bridge_function(api, "setTextRuns", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");

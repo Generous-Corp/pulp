@@ -133,6 +133,7 @@ setAnchor	metadata	function	core/view/src/widget_bridge/metadata_api.cpp
 setSource	metadata	function	core/view/src/widget_bridge/metadata_api.cpp
 setStyle	widget_value	function	core/view/src/widget_bridge/widget_value_basic_api.cpp
 setWidgetStyle	widget_value	function	core/view/src/widget_bridge/widget_value_basic_api.cpp
+setDesignedOverlay	widget_value	function	core/view/src/widget_bridge/widget_value_basic_api.cpp
 setItems	widget_value	function	core/view/src/widget_bridge/widget_value_basic_api.cpp
 setSegments	widget_value	function	core/view/src/widget_bridge/widget_value_basic_api.cpp
 setSelected	widget_value	function	core/view/src/widget_bridge/widget_value_basic_api.cpp

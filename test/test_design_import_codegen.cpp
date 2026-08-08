@@ -2297,6 +2297,16 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     CHECK(js.find("setWhiteSpace('StyledSingle") != std::string::npos);
     CHECK(js.find("setFontStyle('Oblique") != std::string::npos);
 
+    const auto cpp = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    CHECK(cpp.source.find("pulp::canvas::AttributedString") != std::string::npos);
+    CHECK(cpp.source.find("span.font_family = \"Courier\"") !=
+          std::string::npos);
+    CHECK(cpp.source.find("span.font_weight = 700") != std::string::npos);
+    CHECK(cpp.source.find("span.font_slant = 2") != std::string::npos);
+    CHECK(cpp.source.find("set_attributed_string(std::move(") !=
+          std::string::npos);
+    CHECK(cpp.source.find("set_cached_line_boxes(") != std::string::npos);
+
     ScriptEngine engine;
     View host;
     host.set_bounds({0, 0, 320, 200});
@@ -2550,10 +2560,10 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     const auto web_js = generate_pulp_js(ir, web_opts);
     CHECK(web_js.find(".style.textDecoration = 'underline';") !=
           std::string::npos);
-    CHECK(web_js.find(".style.textDecoration = 'none';") !=
+    CHECK(web_js.find("textDecoration: 'none'") !=
           std::string::npos);
     CHECK(count_occurrences(
-              web_js, ".style.textDecoration = 'underline';") == 3);
+              web_js, ".style.textDecoration = 'underline';") == 1);
 
 }
 
@@ -2668,12 +2678,12 @@ TEST_CASE("web text-run gaps retain the node dominant typography",
     opts.mode = CodeGenMode::web_compat;
     const auto js = generate_pulp_js(ir, opts);
     INFO(js);
-    for (const char* child : {"Mixed0_r0", "Mixed0_r2"}) {
-        CHECK(js.find(std::string(child) + ".style.fontFamily = 'Inter';") != std::string::npos);
-        CHECK(js.find(std::string(child) + ".style.fontSize = '18px';") != std::string::npos);
-        CHECK(js.find(std::string(child) + ".style.fontWeight = '500';") != std::string::npos);
-        CHECK(js.find(std::string(child) + ".style.color = '#223344';") != std::string::npos);
-    }
+    CHECK(js.find("Mixed0.style.fontFamily = 'Inter';") != std::string::npos);
+    CHECK(js.find("Mixed0.style.fontSize = '18px';") != std::string::npos);
+    CHECK(js.find("Mixed0.style.fontWeight = '500';") != std::string::npos);
+    CHECK(js.find("Mixed0.style.color = '#223344';") != std::string::npos);
+    CHECK(js.find("setTextRuns(Mixed0._id, [{ start: 5, end: 9, fontWeight: 700 }])") != std::string::npos);
+    CHECK(js.find("Mixed0_r0") == std::string::npos);
 }
 
 TEST_CASE("direct native styled paragraphs use responsive multiline layout",
@@ -4601,6 +4611,60 @@ TEST_CASE("an overlay control keeps the capture visible beneath it",
     REQUIRE(js.find(".style.backgroundColor") == std::string::npos);
 }
 
+TEST_CASE("discrete control emitters configure choices, defaults, and designed overlays",
+          "[view][import][codegen][discrete-controls][overlay]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    IRNode selector;
+    selector.type = "frame";
+    selector.audio_widget = AudioWidgetType::selector;
+    selector.audio_min = 1.0f;
+    selector.audio_max = 5.0f;
+    selector.audio_default = 3.0f;
+    selector.attributes["pulpRouteId"] = "selector";
+    selector.attributes["pulpChoices"] = "Pulse|Saw|Noise";
+    selector.attributes["designed_body"] = "underlay";
+    ir.root.children.push_back(std::move(selector));
+
+    for (const auto mode : {CodeGenMode::web_compat,
+                            CodeGenMode::bridge_native_js}) {
+        CodeGenOptions opts;
+        opts.mode = mode;
+        opts.include_comments = false;
+        const auto js = generate_pulp_js(ir, opts);
+        INFO(js);
+        const auto segments_at = js.find("setSegments(");
+        const auto value_at = js.find("setValue(", segments_at);
+        REQUIRE(segments_at != std::string::npos);
+        REQUIRE(value_at != std::string::npos);
+        CHECK(segments_at < value_at);
+        CHECK(js.substr(value_at, 80).find("0.5") != std::string::npos);
+        CHECK(js.find("setDesignedOverlay(") != std::string::npos);
+    }
+}
+
+TEST_CASE("selector emitters keep a usable fallback segment",
+          "[view][import][codegen][discrete-controls][fallback]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    IRNode selector;
+    selector.type = "frame";
+    selector.audio_widget = AudioWidgetType::selector;
+    selector.text_content = "Only";
+    ir.root.children.push_back(std::move(selector));
+
+    for (const auto mode : {CodeGenMode::web_compat,
+                            CodeGenMode::bridge_native_js}) {
+        CodeGenOptions opts;
+        opts.mode = mode;
+        opts.include_comments = false;
+        const auto js = generate_pulp_js(ir, opts);
+        INFO(js);
+        CHECK(js.find("setSegments(") != std::string::npos);
+        CHECK(js.find("'Only'") != std::string::npos);
+    }
+}
+
 // A tiled background is a gradient PLUS a size, and the JS emitter wrote only
 // the gradient — so the tile collapsed to one stretched copy.
 //
@@ -4664,6 +4728,39 @@ TEST_CASE("the web-compat JS emitter carries white-space nowrap",
     const auto native_white_space = native_js.find("setWhiteSpace(");
     REQUIRE(native_white_space != std::string::npos);
     CHECK(native_js.substr(native_white_space, 120).find("'nowrap'") !=
+          std::string::npos);
+}
+
+TEST_CASE("web-compat attributed text keeps responsive paragraph wrapping",
+          "[view][import][codegen][attributed][web-compat][wrapping]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    IRNode paragraph;
+    paragraph.type = "text";
+    paragraph.name = "paragraph";
+    paragraph.text_content = "mixed style paragraph";
+    IRTextRun emphasized;
+    emphasized.start = 0;
+    emphasized.end = 5;
+    emphasized.font_weight = 700;
+    paragraph.text_runs.push_back(std::move(emphasized));
+    ir.root.children.push_back(paragraph);
+
+    paragraph.name = "nowrap";
+    paragraph.style.white_space = "nowrap";
+    ir.root.children.push_back(std::move(paragraph));
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    const auto js = generate_pulp_js(ir, opts);
+
+    const auto paragraph_at = js.find("setTextRuns(paragraph0._id");
+    REQUIRE(paragraph_at != std::string::npos);
+    CHECK(js.find("setMultiLine(paragraph0._id, true)", paragraph_at) !=
+          std::string::npos);
+    const auto nowrap_at = js.find("setTextRuns(nowrap1._id");
+    REQUIRE(nowrap_at != std::string::npos);
+    CHECK(js.find("setMultiLine(nowrap1._id, true)", nowrap_at) ==
           std::string::npos);
 }
 

@@ -363,6 +363,55 @@ TEST_CASE("TextShaper attributed metrics enclose every mixed-size span",
     CHECK(mixed.line_height() >= large.line_height());
 }
 
+TEST_CASE("TextShaper automatic attributed line height follows each wrapped line",
+          "[canvas][text_shaper][attributed][metrics]") {
+    TextShaper shaper;
+    AttributedString text;
+    TextSpan large;
+    large.text = "BIG\n";
+    large.font_family = "Inter";
+    large.font_size = 28.0f;
+    text.append(large);
+    TextSpan small;
+    small.text = "small";
+    small.font_family = "Inter";
+    small.font_size = 10.0f;
+    text.append(small);
+
+    const auto prepared = shaper.prepare(text);
+    const auto layout = shaper.layout_with_lines(prepared, 200.0f);
+    REQUIRE(layout.lines.size() == 2);
+    CHECK(layout.lines[0].height > layout.lines[1].height);
+    CHECK_THAT(layout.total_height,
+               WithinAbs(layout.lines[0].height + layout.lines[1].height,
+                         1e-5f));
+    CHECK_THAT(layout.lines[1].y, WithinAbs(layout.lines[0].height, 1e-5f));
+}
+
+TEST_CASE("TextShaper applies paragraph font features to attributed spans",
+          "[canvas][text_shaper][attributed][font-features]") {
+    TextShaper shaper;
+    AttributedString ones;
+    TextSpan ones_span;
+    ones_span.text = "111111";
+    ones_span.font_family = "Inter";
+    ones_span.font_size = 24.0f;
+    ones.append(ones_span);
+    AttributedString nines;
+    TextSpan nines_span = ones_span;
+    nines_span.text = "999999";
+    nines.append(nines_span);
+
+    const std::vector<Canvas::FontFeature> tnum{
+        {Canvas::make_font_feature_tag("tnum"), 1}};
+    const auto prepared_ones = shaper.prepare(ones, tnum);
+    const auto prepared_nines = shaper.prepare(nines, tnum);
+    REQUIRE(prepared_ones.total_width() > 0.0f);
+    REQUIRE(prepared_nines.total_width() > 0.0f);
+    CHECK_THAT(prepared_ones.total_width(),
+               WithinAbs(prepared_nines.total_width(), 0.5f));
+}
+
 TEST_CASE("TextShaper fallback glyph metrics stay finite and enclose the primary face",
           "[canvas][text_shaper][metrics][fallback]") {
     TextShaper shaper;
@@ -728,6 +777,20 @@ TEST_CASE("TextShaper BreakMode preserves remnant when the over-wide segment is 
     bool ok = (reconstructed == canonical) || (reconstructed == with_space);
     INFO("reconstructed='" << reconstructed << "'");
     REQUIRE(ok);
+}
+
+TEST_CASE("TextShaper break-word preserves the whitespace break after a carried remnant",
+          "[canvas][text_shaper][issue-1737]") {
+    TextShaper shaper;
+    auto prepared = shaper.prepare(
+        "Antidisestablishmentarianism follows", "system", 14);
+    auto layout = shaper.layout_with_lines(
+        prepared, 48.0f, 0, 0, BreakMode::break_word);
+
+    bool intact_following_word = false;
+    for (const auto& line : layout.lines)
+        intact_following_word = intact_following_word || line.text == "follows";
+    REQUIRE(intact_following_word);
 }
 
 TEST_CASE("TextRunPlanner emits UTF-8 scalar offsets and line breaks",

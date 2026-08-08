@@ -752,7 +752,7 @@ export function semanticExpression(snapshotClickableIndexes = []) {
     ['pulp-barmeter', 'meter'], ['pulp-ledmeter', 'meter'],
     ['pulp-spectrum', 'meter'], ['pulp-scope', 'meter'],
     ['pulp-progress', 'meter'], ['pulp-tab', 'tab'],
-    ['pulp-combo', 'select'], ['pulp-select', 'select'],
+    ['pulp-combo', 'combo'], ['pulp-select', 'select'],
   ]);
   const componentKind = element => {
     try {

@@ -75,6 +75,7 @@ CppExportResult generate_pulp_cpp(const DesignIR& ir,
            << "#include <string_view>\n"
            << "#include <utility>\n"
            << "#include <vector>\n"
+           << "#include <pulp/canvas/attributed_string.hpp>\n"
            << "#include <pulp/view/buttons.hpp>\n"
            << "#include <pulp/view/canvas_widget.hpp>\n"
            << "#include <pulp/view/css_gradient.hpp>\n"

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/view/design_import.hpp>
+#include <pulp/canvas/attributed_string.hpp>
 
 #include <filesystem>
 #include <optional>
@@ -97,6 +98,12 @@ struct ImportedWidgetSemantics {
 
 ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
                                                   const ResolvedNativeNode& resolved);
+
+// Canonical IR text-run lowering shared by the live native materializer and
+// baked C++ exporter. Keeping segmentation here prevents output lanes from
+// disagreeing about UTF-8 boundaries, inherited base style, or explicit
+// decoration removal.
+canvas::AttributedString attributed_text_for_node(const IRNode& node);
 
 // A stepper grid must be finite and positive in every output lane. Invalid or
 // absent author data falls back to the documented count-grid default; capture

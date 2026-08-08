@@ -104,11 +104,33 @@ static void append_segment_range(ShapedLayout::Line& line,
 }
 
 static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segments,
-                                          float max_width, float line_height, bool materialize,
+                                          float max_width, float explicit_line_height,
+                                          float fallback_line_height, bool materialize,
                                           int max_lines = 0,
                                           BreakMode break_mode = BreakMode::normal) {
     ShapedLayout result;
     if (segments.empty()) return result;
+    float y = 0;
+    const auto finish_line = [&](ShapedLayout::Line& line, int begin, int end,
+                                 int extra_segment = -1) {
+        const auto include = [&](const ShapedSegment& segment) {
+            if (segment.is_newline) return;
+            line.ascent = std::max(line.ascent, segment.ascent);
+            line.descent = std::max(line.descent, segment.descent);
+            line.leading = std::max(line.leading, segment.leading);
+        };
+        for (int i = std::max(0, begin);
+             i < std::min(end, static_cast<int>(segments.size())); ++i)
+            include(segments[static_cast<std::size_t>(i)]);
+        if (extra_segment >= 0 && extra_segment < static_cast<int>(segments.size()))
+            include(segments[static_cast<std::size_t>(extra_segment)]);
+        line.height = explicit_line_height > 0.0f
+            ? explicit_line_height
+            : line.ascent + line.descent + line.leading;
+        if (line.height <= 0.0f) line.height = fallback_line_height;
+        line.y = y;
+        y += line.height;
+    };
 
     // `white-space: nowrap` path. Force a single line that
     // includes every segment (including hard newlines flattened to
@@ -130,13 +152,12 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
                 break;
             }
         }
-        if (whitespace_width == 0.0f && line_height > 0)
-            whitespace_width = line_height * 0.18f;
+        if (whitespace_width == 0.0f && fallback_line_height > 0)
+            whitespace_width = fallback_line_height * 0.18f;
 
         ShapedLayout::Line line;
         line.first_segment = 0;
         line.segment_count = static_cast<int>(segments.size());
-        line.y = 0;
         float w = 0;
         for (const auto& seg : segments) {
             if (seg.is_newline) {
@@ -158,21 +179,22 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
             }
         }
         line.width = w;
+        finish_line(line, 0, static_cast<int>(segments.size()));
         result.lines.push_back(std::move(line));
         result.total_width = w;
-        result.total_height = line_height;
+        result.total_height = y;
         result.line_count = 1;
         return result;
     }
 
     float current_width = 0;
     int line_start = 0;
-    float y = 0;
     int last_break = -1;
     float width_at_break = 0;
     float max_line_width = 0;
     std::string carried_text;
     std::vector<ShapedLayout::Line::Fragment> carried_fragments;
+    int carried_metric_segment = -1;
     const auto append_carried = [&](ShapedLayout::Line& line) {
         if (!materialize || carried_text.empty()) return;
         line.text += carried_text;
@@ -182,6 +204,7 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
     const auto clear_carried = [&] {
         carried_text.clear();
         carried_fragments.clear();
+        carried_metric_segment = -1;
     };
 
     for (int i = 0; i < static_cast<int>(segments.size()); ++i) {
@@ -191,7 +214,6 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
             // Hard line break
             ShapedLayout::Line line;
             line.width = current_width;
-            line.y = y;
             line.first_segment = line_start;
             line.segment_count = i - line_start;
             if (materialize) {
@@ -200,11 +222,11 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
                     line.text += segments[j].text;
                 append_segment_range(line, segments, line_start, i);
             }
+            finish_line(line, line_start, i, carried_metric_segment);
             result.lines.push_back(std::move(line));
             clear_carried();
             max_line_width = std::max(max_line_width, current_width);
 
-            y += line_height;
             current_width = 0;
             line_start = i + 1;
             last_break = -1;
@@ -245,7 +267,8 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
             //     subsequent segments would have fit a clean boundary;
             //     here the two modes coincide because we only enter this
             //     branch on actual overflow.
-            const bool has_ws_break = (last_break > line_start);
+            const bool has_ws_break = last_break > line_start ||
+                (!carried_text.empty() && last_break == line_start);
             if (break_mode == BreakMode::normal &&
                 seg.joins_previous_word && !has_ws_break) {
                 // A rich-text style boundary inside a word is not a soft-wrap
@@ -286,7 +309,6 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
 
                     ShapedLayout::Line line;
                     line.width = current_width + head_w;
-                    line.y = y;
                     line.first_segment = line_start;
                     line.segment_count = i - line_start;  // segments BEFORE this one stay grouped
                     if (materialize) {
@@ -297,11 +319,11 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
                         append_segment_range(line, segments, line_start, i);
                         append_fragment(line, seg, head, head_w);
                     }
+                    finish_line(line, line_start, i + 1, carried_metric_segment);
                     result.lines.push_back(std::move(line));
                     clear_carried();
                     max_line_width = std::max(max_line_width, current_width + head_w);
 
-                    y += line_height;
 
                     // Emit the tail in repeated max_width chunks until
                     // what remains fits on a single line. For a segment
@@ -323,16 +345,15 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
                         const float chunk_w = per_cp * static_cast<float>(chunk_cps);
                         ShapedLayout::Line chunk_line;
                         chunk_line.width = chunk_w;
-                        chunk_line.y = y;
                         chunk_line.first_segment = i;
                         chunk_line.segment_count = 1;
                         if (materialize) {
                             chunk_line.text = chunk;
                             append_fragment(chunk_line, seg, chunk, chunk_w);
                         }
+                        finish_line(chunk_line, i, i + 1);
                         result.lines.push_back(std::move(chunk_line));
                         max_line_width = std::max(max_line_width, chunk_w);
-                        y += line_height;
                         remaining_text = remaining_text.substr(chunk_cut);
                         remaining_w -= chunk_w;
                         ++safety;
@@ -349,6 +370,7 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
                             {carried_text, remaining_w, seg.style_index});
                     line_start = i + 1;
                     current_width = remaining_w;
+                    carried_metric_segment = carried_text.empty() ? -1 : i;
                     last_break = -1;
                     continue;
                 }
@@ -362,7 +384,6 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
 
             ShapedLayout::Line line;
             line.width = break_width;
-            line.y = y;
             line.first_segment = line_start;
             line.segment_count = break_at - line_start;
             if (materialize) {
@@ -371,11 +392,11 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
                     line.text += segments[j].text;
                 append_segment_range(line, segments, line_start, break_at);
             }
+            finish_line(line, line_start, break_at, carried_metric_segment);
             result.lines.push_back(std::move(line));
             clear_carried();
             max_line_width = std::max(max_line_width, break_width);
 
-            y += line_height;
 
             // Skip whitespace at break point
             line_start = has_ws_break ? last_break + 1 : i;
@@ -393,7 +414,6 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
     if (line_start < static_cast<int>(segments.size()) || !carried_text.empty()) {
         ShapedLayout::Line line;
         line.width = current_width;
-        line.y = y;
         line.first_segment = line_start;
         line.segment_count = static_cast<int>(segments.size()) - line_start;
         if (materialize) {
@@ -403,9 +423,10 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
             append_segment_range(line, segments, line_start,
                                  static_cast<int>(segments.size()));
         }
+        finish_line(line, line_start, static_cast<int>(segments.size()),
+                    carried_metric_segment);
         result.lines.push_back(std::move(line));
         max_line_width = std::max(max_line_width, current_width);
-        y += line_height;
     }
 
     // Clamp to max_lines (>1) by dropping trailing lines.
@@ -415,7 +436,11 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
         max_line_width = 0;
         for (const auto& line : result.lines)
             max_line_width = std::max(max_line_width, line.width);
-        y = max_lines * line_height;
+        y = 0.0f;
+        for (auto& line : result.lines) {
+            line.y = y;
+            y += line.height;
+        }
     }
 
     result.total_width = max_line_width;
@@ -1059,10 +1084,18 @@ PreparedText TextShaper::prepare(
         result.segments_.push_back(std::move(seg));
     }
 
+    for (auto& segment : result.segments_) {
+        segment.ascent = result.ascent_;
+        segment.descent = result.descent_;
+        segment.leading = result.leading_;
+    }
+
     return result;
 }
 
-PreparedText TextShaper::prepare(const AttributedString& text) {
+PreparedText TextShaper::prepare(
+    const AttributedString& text,
+    const std::vector<Canvas::FontFeature>& font_features) {
     detail_prepare_calls().fetch_add(1, std::memory_order_relaxed);
     // For attributed strings, prepare each span separately
     PreparedText result;
@@ -1082,7 +1115,7 @@ PreparedText TextShaper::prepare(const AttributedString& text) {
         auto span_prepared = prepare(
             span.text, span.font_family, span.font_size, span.font_weight,
             span.font_slant != 0 ? span.font_slant : (span.italic ? 1 : 0),
-            span.letter_spacing);
+            span.letter_spacing, font_features);
         // A mixed-size line needs the largest real metric on each side of the
         // shared baseline. Taking only the largest aggregate line height can
         // still clip (for example, a tall ascender in one face plus a deep
@@ -1118,15 +1151,15 @@ PreparedText TextShaper::prepare(const AttributedString& text) {
 ShapedLayout TextShaper::layout(const PreparedText& prepared, float max_width,
                                  float line_height, int max_lines,
                                  BreakMode break_mode) const {
-    float lh = line_height > 0 ? line_height : prepared.line_height();
-    return layout_from_segments(prepared.segments(), max_width, lh, false, max_lines, break_mode);
+    return layout_from_segments(prepared.segments(), max_width, line_height,
+                                prepared.line_height(), false, max_lines, break_mode);
 }
 
 ShapedLayout TextShaper::layout_with_lines(const PreparedText& prepared, float max_width,
                                             float line_height, int max_lines,
                                             BreakMode break_mode) const {
-    float lh = line_height > 0 ? line_height : prepared.line_height();
-    return layout_from_segments(prepared.segments(), max_width, lh, true, max_lines, break_mode);
+    return layout_from_segments(prepared.segments(), max_width, line_height,
+                                prepared.line_height(), true, max_lines, break_mode);
 }
 
 float TextShaper::measure_height(const PreparedText& prepared, float max_width,

@@ -77,8 +77,8 @@ TEST_CASE("generate_pulp_cpp checkpoint artifact stays byte-exact",
 
     CHECK(result.header.size() == 494);
     CHECK(header_hash == "53c5ce7b1e23e25eb0616b132485ca3ef46df0e85c6d1a56fc06114e512a3ffc");
-    CHECK(result.source.size() == 5687);
-    CHECK(source_hash == "fced15f19f0ddee2247d883246236008df819f1e172f47d7da2658b23eca6b46");
+    CHECK(result.source.size() == 5732);
+    CHECK(source_hash == "2ae5e62c2b47632f4272bb32cc4e446a2da69f9dc60a10f67da5e27422409d87");
     CHECK(result.binding_manifest.size() == 413);
     CHECK(binding_hash == "1afbdd18d296b7d27a0b72f42c106e485cc7640a02771b51267c5c66e71d95a5");
 }
@@ -209,6 +209,7 @@ TEST_CASE("baked C++ emits and binds segmented selectors and numeric steppers",
     selector.attributes["pulpBindingModule"] = "OSC";
     selector.attributes["pulpBindingParam"] = "wave_shape";
     selector.attributes["pulpChoices"] = "Pulse|Saw|Noise";
+    selector.attributes["designed_body"] = "underlay";
     ir.root.children.push_back(std::move(selector));
 
     IRNode stepper;
@@ -225,6 +226,7 @@ TEST_CASE("baked C++ emits and binds segmented selectors and numeric steppers",
     stepper.attributes["pulpBindingModule"] = "OSC";
     stepper.attributes["pulpBindingParam"] = "octave";
     stepper.attributes["pulpStep"] = "1";
+    stepper.attributes["designed_body"] = "capture";
     ir.root.children.push_back(std::move(stepper));
 
     CppExportOptions opts;
@@ -243,6 +245,7 @@ TEST_CASE("baked C++ emits and binds segmented selectors and numeric steppers",
     CHECK(result.source.find("->set_range(-2.0f, 2.0f);") != std::string::npos);
     CHECK(result.source.find("->set_step(1.0f);") != std::string::npos);
     CHECK(result.source.find("->set_value(0.0f);") != std::string::npos);
+    CHECK(count_occurrences(result.source, "->set_designed_overlay(true);") == 2);
     CHECK(count_occurrences(result.source, "ctx.bind_segmented(") == 1);
     CHECK(count_occurrences(result.source, "ctx.bind_stepper(") == 1);
     CHECK(result.source.find("NativeImportSegmentedBindingDescriptor{") !=

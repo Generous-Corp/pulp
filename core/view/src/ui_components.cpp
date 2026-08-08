@@ -979,12 +979,11 @@ void SegmentedControl::paint(canvas::Canvas& canvas) {
     if (segments_.empty()) return;
 
     const float radius = 6.0f;
+    const float seg_w = b.width / static_cast<float>(segments_.size());
 
     // Inset track — the darker recessed groove the pills sit in.
     canvas.set_fill_color(resolve_color("bg.surface", canvas::Color::hex(0x12161f)));
     canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, radius);
-
-    const float seg_w = b.width / static_cast<float>(segments_.size());
     const auto active_text   = resolve_color("text.primary",  canvas::Color::hex(0xe0e0e0));
     const auto inactive_text = resolve_color("tab.inactive",  canvas::Color::hex(0x808090));
 

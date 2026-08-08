@@ -10,7 +10,7 @@
 //
 // A typed `IRStyle`/`IRLayout` field can be lowered in one surface and
 // silently skipped in the others (real examples: `h_constraint`/`v_constraint`
-// lower only in the JS lane; `text_runs` skips cpp+native).
+// lower only in the JS lane).
 // This test makes that gap loud: every lowerable field must either be
 // referenced by ALL FOUR surfaces, or carry an explicit allowlist entry
 // below naming exactly which surfaces skip it and why. Adding a new IR field
@@ -139,8 +139,6 @@ const std::map<std::string, AllowlistEntry>& allowlist() {
          {{"cpp", "swift", "native"},
           "js-only; native-common derives vertical centering from a "
           "slot-vs-font heuristic instead of reading the IR field"}},
-        {"letter_spacing",
-         {{"swift"}, "js+cpp+native lower it; SwiftUI kerning deferred"}},
         {"line_height",
          {{"swift"}, "js+cpp+native lower it; SwiftUI line spacing deferred"}},
         {"text_transform",
@@ -223,10 +221,6 @@ const std::map<std::string, AllowlistEntry>& allowlist() {
           "but not auto-flow yet"}},
 
         // ── IRNode extras (see checked_node_fields) ────────────────────────
-        {"text_runs",
-         {{"cpp"},
-          "js+swift+native lower per-range mixed-text styling; cpp codegen "
-          "still emits the plain text only"}},
     };
     return a;
 }

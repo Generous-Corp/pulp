@@ -2657,6 +2657,8 @@ test('mixed text style runs lower to ordered UTF-8 byte-offset runs', () => {
   const [mixed, plain] = root.children;
 
   assert.equal(mixed.content, 'Héllo world');
+  assert.equal(mixed.style.font_weight, 400,
+    'base font style must survive when matching run deltas are suppressed');
   assert.ok(Array.isArray(mixed.runs), 'range overrides become runs');
   assert.equal(mixed.runs.length, 1);
   assert.deepEqual(mixed.runs[0], {

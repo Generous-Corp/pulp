@@ -98,6 +98,10 @@ canvas::AttributedString Label::resolved_attributed_string() const {
 void Label::set_cached_line_boxes(std::vector<CachedLineBox> boxes,
                                   float basis_width, std::string basis_face,
                                   bool wrap_on_cache_miss) {
+    // Cache acceptance and responsive fallback are separate contracts. A
+    // missing platform face or malformed capture must reject the boxes, but a
+    // caller that observed wrappable browser text still needs normal reflow.
+    captured_wrap_fallback_ = wrap_on_cache_miss;
     if (boxes.empty() || boxes.size() > 4096 ||
         !std::isfinite(basis_width) || basis_width <= 0.0f ||
         basis_face.empty())
@@ -115,7 +119,6 @@ void Label::set_cached_line_boxes(std::vector<CachedLineBox> boxes,
         previous_end = start + length;
     }
     cached_line_boxes_ = std::move(boxes);
-    captured_wrap_fallback_ = wrap_on_cache_miss;
     cached_line_basis_width_ = basis_width;
     cached_line_basis_face_ = std::move(basis_face);
     cached_line_basis_text_ = apply_text_transform(text_);
@@ -157,6 +160,32 @@ static std::string utf16_slice(const std::string& text, int start, int length) {
     }
     if (byte_begin == std::string::npos) return {};
     return text.substr(byte_begin);
+}
+
+static bool same_attributed_source(const canvas::AttributedString& a,
+                                   const canvas::AttributedString& b) {
+    const auto& lhs = a.spans();
+    const auto& rhs = b.spans();
+    if (lhs.size() != rhs.size()) return false;
+    for (std::size_t i = 0; i < lhs.size(); ++i) {
+        const auto& x = lhs[i];
+        const auto& y = rhs[i];
+        if (x.text != y.text || x.font_family != y.font_family ||
+            x.font_size != y.font_size || x.font_weight != y.font_weight ||
+            x.italic != y.italic || x.font_slant != y.font_slant ||
+            x.color != y.color || x.decoration != y.decoration ||
+            x.decoration_override != y.decoration_override ||
+            x.decoration_color != y.decoration_color ||
+            x.letter_spacing != y.letter_spacing ||
+            x.inherit_font_family != y.inherit_font_family ||
+            x.inherit_font_size != y.inherit_font_size ||
+            x.inherit_font_weight != y.inherit_font_weight ||
+            x.inherit_font_slant != y.inherit_font_slant ||
+            x.inherit_color != y.inherit_color ||
+            x.inherit_letter_spacing != y.inherit_letter_spacing)
+            return false;
+    }
+    return true;
 }
 
 bool Label::cached_line_layout_usable(
@@ -279,6 +308,7 @@ canvas::ShapedLayout Label::layout_attributed_from_cached_lines(
         line.width = box.width;
         line.x_offset = box.left;
         line.y = line_height * static_cast<float>(layout.lines.size());
+        line.height = line_height;
 
         int span_start = 0;
         const int line_start = box.start;
@@ -358,7 +388,7 @@ float Label::intrinsic_height() const {
     auto resolved_attributed = has_attributed_
         ? resolved_attributed_string() : canvas::AttributedString{};
     auto prepared = has_attributed_
-        ? shaper.prepare(resolved_attributed)
+        ? shaper.prepare(resolved_attributed, resolved_font_features())
         : shaper.prepare(text_.empty() ? std::string(" ") : text_,
                          effective_family, effective_font_size,
                          effective_font_weight(), font_style_);
@@ -446,7 +476,8 @@ float Label::measured_height(float available_width) const {
     float auto_lh = effective_font_size * lh_mult;
     if (has_attributed_) {
         auto& shaper = canvas::global_text_shaper();
-        auto attributed = shaper.prepare(resolved_attributed_string());
+        auto attributed = shaper.prepare(resolved_attributed_string(),
+                                          resolved_font_features());
         if (attributed.line_height() > 0) auto_lh = attributed.line_height();
     }
     const float lh = line_height_ > 0 ? line_height_ : auto_lh;
@@ -484,7 +515,7 @@ float Label::measured_height(float available_width) const {
     const std::string& family = font_family_.empty() ? std::string("Inter") : font_family_;
     auto& shaper = canvas::global_text_shaper();
     auto prepared = has_attributed_
-        ? shaper.prepare(resolved_attributed_string())
+        ? shaper.prepare(resolved_attributed_string(), resolved_font_features())
         : shaper.prepare(display_text, family, effective_font_size,
                          effective_font_weight(), font_style_,
                          effective_letter_spacing, resolved_font_features());
@@ -496,12 +527,20 @@ float Label::measured_height(float available_width) const {
     canvas::BreakMode break_mode = canvas::BreakMode::normal;
     if      (wb == "break-word") break_mode = canvas::BreakMode::break_word;
     else if (wb == "anywhere")   break_mode = canvas::BreakMode::anywhere;
-    auto layout = shaper.layout(prepared, available_width, lh, /*max_lines=*/0, break_mode);
+    const float shaping_line_height = has_attributed_ && line_height_ <= 0.0f
+        ? 0.0f : lh;
+    auto layout = shaper.layout(prepared, available_width, shaping_line_height,
+                                /*max_lines=*/0, break_mode);
 
     int line_count = std::max(1, layout.line_count);
     if (line_clamp_ > 0 && line_clamp_ < line_count)
         line_count = line_clamp_;
-    return std::ceil(lh * static_cast<float>(line_count));
+    if (line_count == layout.line_count)
+        return std::ceil(layout.total_height);
+    float visible_height = 0.0f;
+    for (int i = 0; i < line_count; ++i)
+        visible_height += layout.lines[static_cast<std::size_t>(i)].height;
+    return std::ceil(visible_height);
 }
 
 float Label::baseline_y() const {
@@ -539,7 +578,7 @@ float Label::baseline_y() const {
     auto resolved_attributed = has_attributed_
         ? resolved_attributed_string() : canvas::AttributedString{};
     auto prepared = has_attributed_
-        ? shaper.prepare(resolved_attributed)
+        ? shaper.prepare(resolved_attributed, resolved_font_features())
         : shaper.prepare(text_.empty() ? std::string(" ") : text_,
                          effective_family, effective_font_size,
                          effective_font_weight(), font_style_);
@@ -592,7 +631,8 @@ float Label::intrinsic_width() const {
         float auto_lh = effective_font_size * lh_mult;
         if (has_attributed_) {
             auto& shaper = canvas::global_text_shaper();
-            auto attributed = shaper.prepare(resolved_attributed_string());
+            auto attributed = shaper.prepare(resolved_attributed_string(),
+                                              resolved_font_features());
             if (attributed.line_height() > 0) auto_lh = attributed.line_height();
         }
         return std::ceil(line_height_ > 0 ? line_height_ : auto_lh);
@@ -639,7 +679,7 @@ float Label::intrinsic_width() const {
 
     auto& shaper = canvas::global_text_shaper();
     auto prepared = has_attributed_
-        ? shaper.prepare(resolved_attributed_string())
+        ? shaper.prepare(resolved_attributed_string(), resolved_font_features())
         : shaper.prepare(display_text, effective_family, effective_font_size,
                          effective_font_weight(), font_style_,
                          effective_letter_spacing, resolved_font_features());
@@ -1015,7 +1055,10 @@ void Label::paint_attributed_lines_(canvas::Canvas& canvas,
                                  style.letter_spacing);
             canvas.set_fill_color({style.color.r, style.color.g,
                                    style.color.b, style.color.a});
-            const float fragment_baseline = baseline_y + emitted * line_height;
+            const float fragment_baseline = captured_positions
+                ? baseline_y + emitted * line_height
+                : baseline_y + line.y + line.ascent -
+                      (layout.lines.empty() ? 0.0f : layout.lines.front().ascent);
             canvas.fill_text(fragment.text, x, fragment_baseline);
             const float painted_width = fragment.width;
             auto paint_span_decoration = [&] {
@@ -1126,17 +1169,33 @@ void Label::paint(canvas::Canvas& canvas) {
     const float lh_mult = effective_font_size < 12.0f ? 1.6f : 1.4f;
     float automatic_lh = effective_font_size * lh_mult;
     float first_line_ascent = effective_font_size * 0.85f;
+    canvas::AttributedString resolved_attributed;
+    std::vector<canvas::Canvas::FontFeature> attributed_features;
     if (has_attributed_) {
         auto& shaper = canvas::global_text_shaper();
-        const auto resolved = resolved_attributed_string();
-        auto attributed = shaper.prepare(resolved);
+        resolved_attributed = resolved_attributed_string();
+        attributed_features = resolved_font_features();
+        const auto font_gen = canvas::font_registration_generation();
+        if (!attributed_prepare_valid_ ||
+            attributed_prepare_font_gen_ != font_gen ||
+            attributed_prepare_features_ != attributed_features ||
+            !same_attributed_source(attributed_prepare_source_,
+                                    resolved_attributed)) {
+            attributed_prepare_cache_ =
+                shaper.prepare(resolved_attributed, attributed_features);
+            attributed_prepare_source_ = resolved_attributed;
+            attributed_prepare_features_ = attributed_features;
+            attributed_prepare_font_gen_ = font_gen;
+            attributed_prepare_valid_ = true;
+        }
+        const auto& attributed = attributed_prepare_cache_;
         if (attributed.line_height() > 0)
             automatic_lh = attributed.line_height();
         if (attributed.ascent() > 0)
             first_line_ascent = attributed.ascent();
         else
             first_line_ascent = fallback_attributed_ascent(
-                resolved, effective_font_size);
+                resolved_attributed, effective_font_size);
     }
     float lh = line_height_ > 0 ? line_height_ : automatic_lh;
 
@@ -1190,8 +1249,6 @@ void Label::paint(canvas::Canvas& canvas) {
         // serve that stale wrap until some other key field happened to change.
         const int shaped_max_lines = has_attributed_ && !multi_line_ &&
                 !captured_wrap_fallback_ ? 1 : 0;
-        auto resolved_attributed = has_attributed_
-            ? resolved_attributed_string() : canvas::AttributedString{};
         std::string shaped_family_key = family;
         if (has_attributed_) {
             shaped_family_key.clear();
@@ -1222,16 +1279,20 @@ void Label::paint(canvas::Canvas& canvas) {
             } else {
                 if (cached_line_boxes_.empty()) ++line_break_counts().uncached;
                 else ++line_break_counts().reflowed;
-                auto prepared = has_attributed_
-                    ? shaper.prepare(resolved_attributed)
-                    : shaper.prepare(display_text, family, effective_font_size,
-                                     effective_font_weight(), font_style_,
-                                     effective_letter_spacing,
-                                     resolved_font_features());
-                shaped_cache_layout_ = shaper.layout_with_lines(
-                    prepared, shape_width, lh,
-                    /*max_lines=*/shaped_max_lines,
-                    break_mode);
+                if (has_attributed_) {
+                    shaped_cache_layout_ = shaper.layout_with_lines(
+                        attributed_prepare_cache_, shape_width,
+                        line_height_ > 0.0f ? lh : 0.0f,
+                        /*max_lines=*/shaped_max_lines, break_mode);
+                } else {
+                    auto prepared = shaper.prepare(
+                        display_text, family, effective_font_size,
+                        effective_font_weight(), font_style_,
+                        effective_letter_spacing, resolved_font_features());
+                    shaped_cache_layout_ = shaper.layout_with_lines(
+                        prepared, shape_width, lh,
+                        /*max_lines=*/shaped_max_lines, break_mode);
+                }
             }
             shaped_cache_key_ = std::move(key);
             shaped_cache_valid_ = true;
@@ -1269,10 +1330,21 @@ void Label::paint(canvas::Canvas& canvas) {
         shaped_layout->line_count == 1;
     const float single_line_text_height = has_attributed_
         ? automatic_lh : effective_font_size;
+    if (has_attributed_ && shaped_layout != nullptr &&
+        !captured_cache_usable && !shaped_layout->lines.empty() &&
+        shaped_layout->lines.front().ascent > 0.0f)
+        first_line_ascent = shaped_layout->lines.front().ascent;
     float text_h = paint_as_lines
         ? captured_single_line
             ? single_line_text_height
-            : lh * static_cast<float>(visible_lines)
+            : [&] {
+                  if (!has_attributed_ || shaped_layout == nullptr ||
+                      captured_cache_usable) return lh * static_cast<float>(visible_lines);
+                  float height = 0.0f;
+                  for (int i = 0; i < visible_lines; ++i)
+                      height += shaped_layout->lines[static_cast<std::size_t>(i)].height;
+                  return height;
+              }()
         : single_line_text_height;
     float baseline_y;
     switch (vertical_align_) {

@@ -492,7 +492,9 @@ TEST_CASE("generate_pulp_swift lowers mixed-style text_runs to concatenated Text
     ir.source = DesignSource::figma;
     ir.root = frame_node("r", "R", 200.0f, 40.0f, LayoutDirection::column);
     auto label = text_node("label", "Hello bold world", 14.0f, "#111111");
+    label.style.letter_spacing = 0.5f;
     IRTextRun bold; bold.start = 6; bold.end = 10; bold.font_weight = 700;  // "bold"
+    bold.letter_spacing = 1.25f;
     label.text_runs.push_back(bold);
     ir.root.children.push_back(std::move(label));
 
@@ -501,6 +503,8 @@ TEST_CASE("generate_pulp_swift lowers mixed-style text_runs to concatenated Text
     REQUIRE(contains(view, "Text(\"Hello \")"));
     REQUIRE(contains(view, "+ Text(\"bold\")"));
     REQUIRE(contains(view, ".fontWeight(.bold)"));
+    REQUIRE(contains(view, ".kerning(0.5)"));
+    REQUIRE(contains(view, ".kerning(1.25)"));
     REQUIRE(contains(view, "+ Text(\" world\")"));
 }
 

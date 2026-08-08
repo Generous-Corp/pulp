@@ -188,90 +188,27 @@ static const char* align_to_css(LayoutAlign a) {
     return "flex-start";
 }
 
-// Emit a text node's content as per-range <span>s (web-compat). Runs that
-// override style become styled <span> children; the gaps between them are
-// appended as plain text so they inherit the node's dominant style. Offsets are
-// byte indices into text_content (UTF-16 surrogate handling is intentionally
-// out of scope here; callers/tests use byte-safe ranges).
+// Install mixed typography on the parent Label itself. Web-compat materializes
+// a DOM-looking text element as one native Label, so nested span elements would
+// become child Labels and participate in flex layout instead of one inline text
+// flow. The shared bridge verb preserves inline shaping and wrapping.
 static void emit_web_text_runs(std::ostringstream& ss, const std::string& ind,
                                const std::string& var, const IRNode& node) {
-    const std::string& text = node.text_content;
-    const int n = static_cast<int>(text.size());
-    std::vector<const IRTextRun*> runs;
-    for (const auto& r : node.text_runs)
-        if (r.start < r.end && r.start < n) runs.push_back(&r);
-    std::sort(runs.begin(), runs.end(),
-              [](const IRTextRun* a, const IRTextRun* b) { return a->start < b->start; });
-
-    // Run offsets are UTF-8 byte offsets, but defend against a source that
-    // passes a boundary landing mid-codepoint: snap forward to the next
-    // codepoint start (continuation bytes are 10xxxxxx) so we never slice a
-    // multibyte character in half and emit invalid UTF-8.
-    auto snap = [&](int k) {
-        while (k > 0 && k < n && (static_cast<unsigned char>(text[k]) & 0xC0) == 0x80) ++k;
-        return k;
-    };
-
-    int cursor = 0, idx = 0;
-    auto append_base_style = [&](const std::string& child) {
-        const auto& base = node.style;
-        if (base.font_family)
-            ss << ind << child << ".style.fontFamily = '" << js_single_quote_escape(*base.font_family) << "';\n";
-        if (base.font_size)
-            ss << ind << child << ".style.fontSize = '" << *base.font_size << "px';\n";
-        if (base.font_weight)
-            ss << ind << child << ".style.fontWeight = '" << *base.font_weight << "';\n";
-        if (base.font_style)
-            ss << ind << child << ".style.fontStyle = '" << js_single_quote_escape(*base.font_style) << "';\n";
-        if (base.color)
-            ss << ind << child << ".style.color = '" << js_single_quote_escape(*base.color) << "';\n";
-        if (base.letter_spacing)
-            ss << ind << child << ".style.letterSpacing = '" << *base.letter_spacing << "px';\n";
-        if (base.text_decoration)
-            ss << ind << child << ".style.textDecoration = '"
-               << js_single_quote_escape(*base.text_decoration) << "';\n";
-    };
-    auto append_plain = [&](int a, int b) {
-        if (b <= a) return;
-        const std::string child = var + "_r" + std::to_string(idx++);
-        ss << ind << "const " << child << " = document.createElement('span');\n";
-        append_base_style(child);
-        ss << ind << child << ".textContent = '"
-           << js_single_quote_escape(text.substr(a, b - a)) << "';\n";
-        ss << ind << var << ".appendChild(" << child << ");\n";
-    };
-
-    for (const auto* r : runs) {
-        int rs = snap(std::max(0, r->start)), re = snap(std::min(n, r->end));
-        if (re <= cursor) continue;          // wholly behind cursor (overlap) — skip
-        if (rs < cursor) rs = cursor;        // clip a partial overlap
-        append_plain(cursor, rs);            // base-styled gap before the run
-        const std::string child = var + "_r" + std::to_string(idx++);
-        ss << ind << "const " << child << " = document.createElement('span');\n";
-        // Carry the node's dominant style onto the run child first — Pulp's
-        // web-compat Labels do not inherit from the parent span, so without this
-        // a run that overrides only one field would render the rest with Label
-        // defaults. The run overrides below win over these base values.
-        append_base_style(child);
-        if (r->font_weight)
-            ss << ind << child << ".style.fontWeight = '" << *r->font_weight << "';\n";
-        if (r->font_family)
-            ss << ind << child << ".style.fontFamily = '" << js_single_quote_escape(*r->font_family) << "';\n";
-        if (r->font_size)
-            ss << ind << child << ".style.fontSize = '" << *r->font_size << "px';\n";
-        if (r->font_style)
-            ss << ind << child << ".style.fontStyle = '" << js_single_quote_escape(*r->font_style) << "';\n";
-        if (r->color)
-            ss << ind << child << ".style.color = '" << js_single_quote_escape(*r->color) << "';\n";
-        if (r->letter_spacing)
-            ss << ind << child << ".style.letterSpacing = '" << *r->letter_spacing << "px';\n";
-        if (r->text_decoration)
-            ss << ind << child << ".style.textDecoration = '" << js_single_quote_escape(*r->text_decoration) << "';\n";
-        ss << ind << child << ".textContent = '" << js_single_quote_escape(text.substr(rs, re - rs)) << "';\n";
-        ss << ind << var << ".appendChild(" << child << ");\n";
-        cursor = re;
+    ss << ind << "setTextRuns(" << var << "._id, [";
+    for (std::size_t i = 0; i < node.text_runs.size(); ++i) {
+        const auto& r = node.text_runs[i];
+        if (i) ss << ", ";
+        ss << "{ start: " << r.start << ", end: " << r.end;
+        if (r.font_weight) ss << ", fontWeight: " << *r.font_weight;
+        if (r.font_size) ss << ", fontSize: " << *r.font_size;
+        if (r.font_family) ss << ", fontFamily: '" << js_single_quote_escape(*r.font_family) << "'";
+        if (r.font_style) ss << ", fontStyle: '" << js_single_quote_escape(*r.font_style) << "'";
+        if (r.color) ss << ", color: '" << js_single_quote_escape(*r.color) << "'";
+        if (r.letter_spacing) ss << ", letterSpacing: " << *r.letter_spacing;
+        if (r.text_decoration) ss << ", textDecoration: '" << js_single_quote_escape(*r.text_decoration) << "'";
+        ss << " }";
     }
-    append_plain(cursor, n);  // trailing base-styled text
+    ss << "]);\n";
 }
 
 /// A selector's segment labels, as the author declared them. Pipe separated
@@ -280,7 +217,12 @@ static void emit_web_text_runs(std::ostringstream& ss, const std::string& ind,
 static std::vector<std::string> selector_segments(const IRNode& node) {
     std::vector<std::string> out;
     const auto choices = node.attributes.find("pulpChoices");
-    if (choices == node.attributes.end() || choices->second.empty()) return out;
+    if (choices == node.attributes.end() || choices->second.empty()) {
+        const auto& fallback = node.text_content.empty()
+            ? node.audio_label : node.text_content;
+        out.push_back(fallback.empty() ? std::string("1") : fallback);
+        return out;
+    }
     std::string current;
     for (const char c : choices->second) {
         if (c == '|') { out.push_back(current); current.clear(); }
@@ -493,6 +435,12 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
                    << js_single_quote_escape(node.audio_label) << "');\n";
             ss << ind << "setMin(" << var << "._id, " << node.audio_min << ");\n";
             ss << ind << "setMax(" << var << "._id, " << node.audio_max << ");\n";
+            if (const auto labels = selector_segments(node); !labels.empty()) {
+                ss << ind << "setSegments(" << var << "._id, [";
+                for (std::size_t i = 0; i < labels.size(); ++i)
+                    ss << (i ? ", " : "") << "'" << js_single_quote_escape(labels[i]) << "'";
+                ss << "]);\n";
+            }
             if (node.audio_widget == AudioWidgetType::stepper) {
                 const auto step = imported_stepper_step(node);
                 ss << ind << "setStep(" << var << "._id, " << step << ");\n";
@@ -502,8 +450,9 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
                                           node.audio_max, step)
                    << ");\n";
             } else {
-                ss << ind << "setValue(" << var << "._id, " << node.audio_default
-                   << ");\n";
+                const auto initial = node.audio_widget == AudioWidgetType::selector
+                    ? normalized_audio_default(node) : node.audio_default;
+                ss << ind << "setValue(" << var << "._id, " << initial << ");\n";
             }
 
             if (node.audio_widget == AudioWidgetType::fader) {
@@ -573,15 +522,11 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
                 ss << ind << "setAccentColor(" << var << "._id, '"
                    << js_single_quote_escape(accent->second) << "');\n";
             }
-            // Labels before the binding: the binding's own value table is
-            // sized by the segment count, and a selector the bridge has not
-            // been given segments for has nothing to light.
-            if (const auto labels = selector_segments(node); !labels.empty()) {
-                ss << ind << "setSegments(" << var << "._id, [";
-                for (std::size_t i = 0; i < labels.size(); ++i)
-                    ss << (i ? ", " : "") << "'" << js_single_quote_escape(labels[i]) << "'";
-                ss << "]);\n";
-            }
+            if (browser_control_overlay &&
+                (node.audio_widget == AudioWidgetType::toggle ||
+                 node.audio_widget == AudioWidgetType::stepper ||
+                 node.audio_widget == AudioWidgetType::selector))
+                ss << ind << "setDesignedOverlay(" << var << "._id, true);\n";
             emit_js_param_binding(ss, ind, var + "._id", node);
 
             // Same anchor contract as every non-widget node below: the
@@ -707,7 +652,7 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     emit_px("letterSpacing", s.letter_spacing);
     emit_float("lineHeight", s.line_height);
     emit_str("textTransform", s.text_transform);
-    if (node.text_runs.empty()) emit_str("textDecoration", s.text_decoration);
+    emit_str("textDecoration", s.text_decoration);
     emit_str("textOverflow", s.text_overflow);
     emit_str("whiteSpace", s.white_space);
     emit_str("overflow", s.overflow);
@@ -758,11 +703,9 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
                             *opts.fidelity_report);
     }
 
-    // Text content. Mixed-style text (per-range runs) emits nested styled
-    // <span>s; plain single-style text keeps the simple textContent assignment.
-    if (!node.text_runs.empty() && !node.text_content.empty())
-        emit_web_text_runs(ss, ind, var, node);
-    else if (!node.text_content.empty())
+    // Text content is always owned by the parent Label. Mixed runs are
+    // installed after appendChild materializes that Label in the bridge.
+    if (!node.text_content.empty())
         ss << ind << var << ".textContent = '" << js_single_quote_escape(node.text_content) << "';\n";
     if (node.type == "image") {
         if (auto image = node.attributes.find("asset_path");
@@ -775,6 +718,15 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     // Append to parent
     if (!parent_var.empty())
         ss << ind << parent_var << ".appendChild(" << var << ");\n";
+    if (!node.text_runs.empty() && !node.text_content.empty()) {
+        emit_web_text_runs(ss, ind, var, node);
+        // One native Label owns the complete attributed paragraph. Without
+        // this explicit bridge setting Label::paint takes its single-line path
+        // and silently drops every wrapped line after the first. Explicit
+        // nowrap remains authoritative for badges, ellipsis, and fitted text.
+        if (!node.style.white_space || *node.style.white_space != "nowrap")
+            ss << ind << "setMultiLine(" << var << "._id, true);\n";
+    }
 
     // Bind the anchor to the live widget so the inspector
     // can key tweaks against it. Emitted unconditionally (NOT gated on
@@ -1838,6 +1790,8 @@ static void emit_js_audio_widget(const NativeEmit& e) {
                 ss << (i ? ", " : "") << "'" << js_single_quote_escape(labels[i]) << "'";
             ss << "]);\n";
         }
+        ss << ind << "setValue('" << id << "', "
+           << normalized_audio_default(node) << ");\n";
         if (!label_text.empty()) {
             const std::string lbl_id = id + "_lbl";
             ss << ind << "createLabel('" << lbl_id << "', '"
@@ -1888,6 +1842,11 @@ static void emit_js_audio_widget(const NativeEmit& e) {
     // read as disabled came out indistinguishable from a live one.
     if (!needs_label_wrapper) emit_js_absolute_position(e, id);
     emit_js_visual_overrides(e, id);
+    if (browser_control_overlay &&
+        (wtype == AudioWidgetType::toggle ||
+         wtype == AudioWidgetType::stepper ||
+         wtype == AudioWidgetType::selector))
+        ss << ind << "setDesignedOverlay('" << id << "', true);\n";
     // The binding is the reason an audio widget exists, and this arm did not
     // emit one. It printed the parameter's name in the grey sub-stack above
     // instead, which reads as wiring and is a caption.

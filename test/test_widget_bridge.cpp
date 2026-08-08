@@ -5548,6 +5548,45 @@ TEST_CASE("WidgetBridge discrete factories and DOM tags share gesture-safe callb
     }
 }
 
+TEST_CASE("WidgetBridge exposes designed overlays for every scripted discrete control",
+          "[view][bridge][design-system][discrete][overlay]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(
+        "createToggle('toggle', ''); setDesignedOverlay('toggle', true);"
+        "createStepper('stepper', ''); setDesignedOverlay('stepper', true);"
+        "createSegmented('selector', ''); setDesignedOverlay('selector', true);");
+
+    auto* toggle = dynamic_cast<Toggle*>(bridge.widget("toggle"));
+    auto* stepper = dynamic_cast<Stepper*>(bridge.widget("stepper"));
+    auto* selector = dynamic_cast<SegmentedControl*>(bridge.widget("selector"));
+    REQUIRE(toggle != nullptr);
+    REQUIRE(stepper != nullptr);
+    REQUIRE(selector != nullptr);
+    CHECK(toggle->designed_overlay());
+    CHECK(stepper->designed_overlay());
+    CHECK(selector->designed_overlay());
+}
+
+TEST_CASE("WidgetBridge range updates silently clamp Stepper state",
+          "[view][bridge][design-system][stepper][range]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(
+        "createStepper('stepper', '');"
+        "setValue('stepper', 8);"
+        "setMax('stepper', 4);");
+
+    auto* stepper = dynamic_cast<Stepper*>(bridge.widget("stepper"));
+    REQUIRE(stepper != nullptr);
+    CHECK(stepper->maximum() == 4.0);
+    CHECK(stepper->value() == 4.0);
+}
+
 TEST_CASE("WidgetBridge design-system stepper/pan dispatch change events",
           "[view][bridge][design-system]") {
     ScriptEngine engine;

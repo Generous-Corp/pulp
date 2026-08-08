@@ -1050,7 +1050,8 @@ std::string text_segment_expr(std::string_view slice,
                               const std::string& family,
                               const std::string& font_style,
                               const std::string& color_tok,
-                              const std::string& decoration) {
+                              const std::string& decoration,
+                              std::optional<float> letter_spacing) {
     std::string e = "Text(" + swift_string_literal(slice) + ")";
     const auto concrete_family = swift_concrete_font_family(family);
     if (!concrete_family.empty())
@@ -1068,6 +1069,7 @@ std::string text_segment_expr(std::string_view slice,
     }
     if (decoration == "underline")        e += ".underline()";
     else if (decoration == "line-through") e += ".strikethrough()";
+    if (letter_spacing) e += ".kerning(" + format_float(*letter_spacing) + ")";
     return e;
 }
 
@@ -1103,6 +1105,9 @@ void emit_text_node(std::ostringstream& out, const SwiftEmitCtx& ctx,
             if (!color.empty())
                 emit_line(out, depth + 1, s, ".foregroundColor(" + color + ")");
         }
+        if (base.letter_spacing)
+            emit_line(out, depth + 1, s,
+                      ".kerning(" + format_float(*base.letter_spacing) + ")");
         return;
     }
 
@@ -1123,7 +1128,8 @@ void emit_text_node(std::ostringstream& out, const SwiftEmitCtx& ctx,
         segs.push_back(text_segment_expr(std::string_view(full).substr(a, b - a),
                                          base.font_size, base.font_weight,
                                          base_family, base_style,
-                                         base_color, base_deco));
+                                         base_color, base_deco,
+                                         base.letter_spacing));
     };
     std::size_t cursor = 0;
     for (const auto& r : runs) {
@@ -1141,7 +1147,8 @@ void emit_text_node(std::ostringstream& out, const SwiftEmitCtx& ctx,
             r.font_family ? *r.font_family : base_family,
             r.font_style ? *r.font_style : base_style,
             r.color ? *r.color : base_color,
-            r.text_decoration ? *r.text_decoration : base_deco));
+            r.text_decoration ? *r.text_decoration : base_deco,
+            r.letter_spacing ? r.letter_spacing : base.letter_spacing));
         cursor = b;
     }
     base_seg(cursor, full.size());
