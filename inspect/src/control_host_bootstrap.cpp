@@ -600,11 +600,14 @@ ControlHostBootstrapBytes encode_control_host_bootstrap(const ControlHostBootstr
     const auto& peer = record.expected_broker.evidence;
     SecureJsonWriter encoded;
     const auto endpoint = record.endpoint_path.string();
-    const bool complete =
-        encoded.append("{ \"admission_id\": ") && encoded.append_string(record.admission_id) &&
-        encoded.append(", \"endpoint\": ") && encoded.append_string(endpoint) &&
-        encoded.append(", \"enrollment_id\": ") && encoded.append_string(record.enrollment_id) &&
-        encoded.append(", \"expected_broker\": { \"executable_identity\": ") &&
+    bool complete = encoded.append("{ \"admission_id\": ") &&
+                    encoded.append_string(record.admission_id) &&
+                    encoded.append(", \"endpoint\": ") && encoded.append_string(endpoint);
+    if (complete && !record.enrollment_id.empty())
+        complete =
+            encoded.append(", \"enrollment_id\": ") && encoded.append_string(record.enrollment_id);
+    complete =
+        complete && encoded.append(", \"expected_broker\": { \"executable_identity\": ") &&
         encoded.append_string(peer.executable_identity) && encoded.append(", \"process_id\": ") &&
         encoded.append_integer(peer.process_id) && encoded.append(", \"process_start_id\": ") &&
         encoded.append_string(peer.process_start_id) && encoded.append(", \"publisher_id\": ") &&

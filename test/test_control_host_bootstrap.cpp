@@ -145,7 +145,7 @@ TEST_CASE("control host bootstrap codec accepts exactly one credential mode",
     auto preissued = make_record();
     const auto encoded_preissued = encode_control_host_bootstrap(preissued);
     REQUIRE_FALSE(encoded_preissued.empty());
-    CHECK(encoded_text(encoded_preissued).find(R"("enrollment_id": "")") != std::string::npos);
+    CHECK(encoded_text(encoded_preissued).find("enrollment_id") == std::string::npos);
     auto decoded_preissued =
         decode_control_host_bootstrap(encoded_preissued.bytes(), now, &diagnostics);
     REQUIRE(decoded_preissued);
@@ -156,19 +156,14 @@ TEST_CASE("control host bootstrap codec accepts exactly one credential mode",
     auto enrollment = make_enrollment_record();
     const auto encoded_enrollment = encode_control_host_bootstrap(enrollment);
     REQUIRE_FALSE(encoded_enrollment.empty());
+    CHECK(encoded_text(encoded_enrollment).find(R"("enrollment_id": "ZW5yb2xsbWVudC0x+/==")") !=
+          std::string::npos);
     auto decoded_enrollment =
         decode_control_host_bootstrap(encoded_enrollment.bytes(), now, &diagnostics);
     REQUIRE(decoded_enrollment);
     CHECK(decoded_enrollment->admission_id.empty());
     CHECK(decoded_enrollment->registration_id.value.empty());
     CHECK(decoded_enrollment->enrollment_id == "ZW5yb2xsbWVudC0x+/==");
-
-    const auto legacy = replace_once(encoded_preissued, R"(, "enrollment_id": "")", "");
-    auto decoded_legacy = decode_control_host_bootstrap(legacy, now, &diagnostics);
-    REQUIRE(decoded_legacy);
-    CHECK(decoded_legacy->admission_id == "admission-1");
-    CHECK(decoded_legacy->registration_id.value == "registration-1");
-    CHECK(decoded_legacy->enrollment_id.empty());
 
     const auto carrier = pulp::runtime::base64_encode(encoded_enrollment.bytes().data(),
                                                       encoded_enrollment.bytes().size());

@@ -50,8 +50,8 @@ class ControlHostBootstrapRecord {
     std::filesystem::path endpoint_path;
     ControlPeerExpectation expected_broker;
     /// Exactly one credential form is valid: admission plus registration, or
-    /// enrollment alone. An absent enrollment field decodes as the legacy
-    /// admission form; new encodings always include it.
+    /// enrollment alone. The preissued form retains its legacy encoding without
+    /// an enrollment field; enrollment encodings include it.
     std::string admission_id;
     ControlRegistrationId registration_id;
     std::string enrollment_id;
@@ -77,8 +77,12 @@ class ControlHostBootstrapBytes {
     ControlHostBootstrapBytes(ControlHostBootstrapBytes&&) noexcept;
     ControlHostBootstrapBytes& operator=(ControlHostBootstrapBytes&&) noexcept;
 
-    bool empty() const noexcept { return bytes_.empty(); }
-    std::span<const std::uint8_t> bytes() const noexcept { return bytes_; }
+    bool empty() const noexcept {
+        return bytes_.empty();
+    }
+    std::span<const std::uint8_t> bytes() const noexcept {
+        return bytes_;
+    }
     void clear() noexcept;
 
   private:
