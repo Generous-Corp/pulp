@@ -831,8 +831,9 @@ void InterprocessConnectionServer::stop() {
                 const auto host = endpoint->host.empty() || endpoint->host == "0.0.0.0"
                                       ? std::string{"127.0.0.1"}
                                       : endpoint->host;
+                const auto port = server_impl_->listen_socket.local_port();
                 if (wake_socket.create(SocketType::TCP))
-                    (void)wake_socket.connect(host, endpoint->port,
+                    (void)wake_socket.connect(host, port,
                                               std::chrono::milliseconds(250));
             }
         } else if (wake_socket.create(SocketType::Local)) {
