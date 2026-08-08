@@ -79,11 +79,15 @@ file(WRITE "${_consumer_source}/main.cpp" [=[
 #include <pulp/inspect/control_operations.hpp>
 #include <pulp/inspect/control_protocol.hpp>
 #include <pulp/inspect/control_service.hpp>
+#include <pulp/platform/child_process.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 class InstalledControlTransport final
     : public pulp::inspect::ControlClientTransport {
@@ -143,6 +147,13 @@ int main() {
   pulp::inspect::ControlAdmissionRequest admission;
   pulp::inspect::ControlOperationStoreConfig operations;
   pulp::inspect::ControlArtifactStoreConfig artifacts;
+  pulp::platform::ProcessOptions process_options;
+  process_options.max_standard_input_provider_bytes = 4096;
+  pulp::platform::StandardInputByteProvider input_provider =
+      [](int child_process_id) -> std::optional<std::vector<std::uint8_t>> {
+    return std::vector<std::uint8_t>{
+        static_cast<std::uint8_t>(child_process_id & 0xff)};
+  };
   const auto artifact = control_client.read_artifact("artifact-installed", 0, 16);
   (void)main_thread_executor.executor();
 
@@ -155,6 +166,8 @@ int main() {
              && std::holds_alternative<pulp::inspect::ControlHostConnectionPrincipal>(principal)
              && operations.max_receipts > 0
              && artifacts.maximum_blob_bytes > 0
+             && process_options.max_standard_input_provider_bytes == 4096
+             && input_provider(7).has_value()
              && admission.operation_version == 1
              && artifact.status == pulp::inspect::ControlArtifactStatus::Read
              && artifact.metadata
