@@ -379,6 +379,12 @@ apply_regional_fill(const DevelopmentPattern<MaxEvents>& base,
         const auto event = *candidates.event(index);
         if (event.onset < selection.begin || event.onset >= selection.end)
             continue;
+        const auto base_event = base.find_id(event.id);
+        if (base_event && *base_event != event) {
+            result.error = PatternDevelopmentError::conflicting_event;
+            result.pattern = {};
+            return result;
+        }
         const auto existing = region.find_onset(event.onset);
         if (existing) {
             if (*existing != event) {
@@ -395,15 +401,27 @@ apply_regional_fill(const DevelopmentPattern<MaxEvents>& base,
         }
     }
 
+    DevelopmentPattern<MaxEvents> selectable_region;
+    for (std::size_t index = 0; index < region.size(); ++index) {
+        auto event = *region.event(index);
+        if (event.role == PatternEventRole::anchor && !base.find_id(event.id))
+            event.role = PatternEventRole::fill;
+        result.error = selectable_region.insert(event);
+        if (result.error != PatternDevelopmentError::none) {
+            result.pattern = {};
+            return result;
+        }
+    }
     const auto selected = select_pattern_density(
-        region, {selection.target_region_onsets, selection.seed, selection.coordinate});
+        selectable_region, {selection.target_region_onsets, selection.seed, selection.coordinate});
     if (!selected) {
         result.error = selected.error;
         result.pattern = {};
         return result;
     }
     for (std::size_t index = 0; index < selected.pattern.size(); ++index) {
-        result.error = result.pattern.insert(*selected.pattern.event(index));
+        const auto original = region.find_id(selected.pattern.event(index)->id);
+        result.error = result.pattern.insert(*original);
         if (result.error != PatternDevelopmentError::none) {
             result.pattern = {};
             return result;
