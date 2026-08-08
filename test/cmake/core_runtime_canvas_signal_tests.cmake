@@ -188,6 +188,11 @@ pulp_add_test_suite(pulp-test-transition-mixer LIBRARIES pulp::signal)
 # oracle, conservative-headroom law, transactional publication, partition
 # invariance, invalid-buffer fail-closed behavior, and Release RT allocation.
 pulp_add_test_suite(pulp-test-audio-matrix-mixer LIBRARIES pulp::signal)
+# Fixed-capacity ordered-path morph: exact endpoints, normalization/headroom,
+# independent scalar oracle, block partitions, fail-closed validation, and RT proof.
+pulp_add_test_suite(pulp-test-nway-crossfade
+    SOURCES test_nway_crossfade.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
 # Signal filter tests extracted from test_signal.cpp.
 # Biquad / SVF / LadderFilter / LinkwitzRiley TEST_CASE clusters moved
 # verbatim into a sibling TU to keep test_signal.cpp under ~1,200 lines.
