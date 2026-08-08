@@ -2244,7 +2244,11 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // buffer to the processor for the duration of this process() call. Events
     // stay sample-ordered because midi_in_ was just sorted. Mirrors the CLAP
     // adapter's set_mpe_input contract; clears per block, allocation-free.
-    mpe_.run(*processor_, midi_in_);
+    if (!mpe_.run(*processor_, midi_in_)) {
+        midi_in_.clear();
+        midi_in_.clear_sysex();
+        ctx.reset_requested = true;
+    }
 
     // Wrap the plugin call in a ScopedNoAlloc so debug hooks can flag a
     // plugin that allocates on the audio thread.

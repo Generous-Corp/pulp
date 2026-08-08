@@ -464,6 +464,8 @@ struct MpeSidecar {
     std::int32_t current_sample_offset = 0;
     /// Mirrors `PluginDescriptor::effective_capabilities().supports_mpe`.
     bool enabled = false;
+    /// Set by the bound expression callbacks when fixed storage is exhausted.
+    bool expression_event_dropped = false;
 
     MpeSidecar() = default;
     MpeSidecar(const MpeSidecar&) = delete;
@@ -478,7 +480,8 @@ struct MpeSidecar {
     void configure(bool supports_mpe) {
         enabled = supports_mpe;
         if (enabled) {
-            midi::bind_tracker_to_buffer(tracker, buffer, current_sample_offset);
+            midi::bind_tracker_to_buffer(
+                tracker, buffer, current_sample_offset, &expression_event_dropped);
         }
     }
 
@@ -502,6 +505,7 @@ struct MpeSidecar {
         tracker.reset();
         buffer.clear();
         current_sample_offset = 0;
+        expression_event_dropped = false;
     }
 
     /// Per-block: when enabled, clear the buffer, run @p midi_in through the
@@ -511,11 +515,14 @@ struct MpeSidecar {
     ///
     /// @p midi_in must already be in the order the adapter wants the tracker to
     /// see (VST3 sorts its buffer first; CLAP and AU use host delivery order).
-    /// RT-safe provided `reserve()` ran off the audio thread.
+    /// Returns false after reconciling to an empty tracker/buffer if expression
+    /// output could not be represented completely. RT-safe provided `reserve()`
+    /// ran off the audio thread.
     template <typename MidiRange>
-    void run(Processor& processor, const MidiRange& midi_in) {
+    [[nodiscard]] bool run(Processor& processor, const MidiRange& midi_in) {
         if (enabled) {
             buffer.clear();
+            expression_event_dropped = false;
             // Releases that could not fit at the end of the previous block
             // must lead this block before any new starts. The tracker blocks
             // note-ons while this fixed queue is nonempty, so no voice can be
@@ -526,10 +533,20 @@ struct MpeSidecar {
                 current_sample_offset = ev.sample_offset;
                 tracker.process(ev);
             }
+            if (expression_event_dropped) {
+                // Expression callbacks observe tracker state after mutation. If
+                // any fixed-capacity append fails, discard the partial stream
+                // and tracker state together; the adapter requests a processor
+                // reset so neither side retains a newer voice snapshot.
+                reset();
+                processor.set_mpe_input(&buffer);
+                return false;
+            }
             processor.set_mpe_input(&buffer);
         } else {
             processor.set_mpe_input(nullptr);
         }
+        return true;
     }
 };
 

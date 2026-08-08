@@ -152,10 +152,13 @@ private:
 };
 
 /// Convenience: install tracker callbacks that forward events to `out` with
-/// the given sample offset. Call once on the host thread during setup.
+/// the given sample offset. When provided, `expression_event_dropped` is set
+/// if a bounded expression append fails so the owner can reconcile tracker and
+/// consumer state. Call once on the host thread during setup.
 inline void bind_tracker_to_buffer(MpeVoiceTracker& tracker,
                                    MpeBuffer& out,
-                                   int32_t& current_sample_offset) {
+                                   int32_t& current_sample_offset,
+                                   bool* expression_event_dropped = nullptr) {
     using K = MpeExpressionEvent::Kind;
     tracker.on_note_lifecycle = [&out, &current_sample_offset](
         const MpeNoteState* note_off, const MpeNoteState* note_on) {
@@ -169,14 +172,26 @@ inline void bind_tracker_to_buffer(MpeVoiceTracker& tracker,
         }
         return out.add_batch(std::span<const MpeExpressionEvent>{events.data(), count});
     };
-    tracker.on_pitch_bend = [&out, &current_sample_offset](const MpeNoteState& s) {
-        out.add({current_sample_offset, K::PitchBend, s});
+    tracker.on_pitch_bend = [&out, &current_sample_offset,
+                             expression_event_dropped](const MpeNoteState& s) {
+        if (!out.add({current_sample_offset, K::PitchBend, s}) &&
+            expression_event_dropped) {
+            *expression_event_dropped = true;
+        }
     };
-    tracker.on_pressure = [&out, &current_sample_offset](const MpeNoteState& s) {
-        out.add({current_sample_offset, K::Pressure, s});
+    tracker.on_pressure = [&out, &current_sample_offset,
+                           expression_event_dropped](const MpeNoteState& s) {
+        if (!out.add({current_sample_offset, K::Pressure, s}) &&
+            expression_event_dropped) {
+            *expression_event_dropped = true;
+        }
     };
-    tracker.on_timbre = [&out, &current_sample_offset](const MpeNoteState& s) {
-        out.add({current_sample_offset, K::Timbre, s});
+    tracker.on_timbre = [&out, &current_sample_offset,
+                         expression_event_dropped](const MpeNoteState& s) {
+        if (!out.add({current_sample_offset, K::Timbre, s}) &&
+            expression_event_dropped) {
+            *expression_event_dropped = true;
+        }
     };
 }
 

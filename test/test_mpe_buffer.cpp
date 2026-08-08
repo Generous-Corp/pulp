@@ -335,7 +335,7 @@ TEST_CASE("MpeSidecar drains a deferred release before next-block input",
     auto physical_off = MidiEvent::note_off(1, 60);
     physical_off.sample_offset = 31;
     first_block.push_back(physical_off);
-    sidecar.run(processor, first_block);
+    REQUIRE(sidecar.run(processor, first_block));
 
     REQUIRE(processor.mpe_input() == &sidecar.buffer);
     REQUIRE(sidecar.buffer.size() == sidecar.buffer.capacity());
@@ -350,7 +350,7 @@ TEST_CASE("MpeSidecar drains a deferred release before next-block input",
     const std::array second_block{MidiEvent::note_on(1, 60, 110)};
     {
         pulp::test::RtAllocationProbe probe;
-        sidecar.run(processor, second_block);
+        REQUIRE(sidecar.run(processor, second_block));
         allocator.dispatch_all(sidecar.buffer);
         REQUIRE_FALSE(probe.saw_allocation());
     }
@@ -385,7 +385,7 @@ TEST_CASE("MpeSidecar reset clears buffer and deferred releases across reactivat
     auto physical_off = MidiEvent::note_off(1, 60);
     physical_off.sample_offset = 15;
     overflowing_block.push_back(physical_off);
-    sidecar.run(processor, overflowing_block);
+    REQUIRE(sidecar.run(processor, overflowing_block));
     REQUIRE(sidecar.tracker.pending_note_off_count() == 1);
 
     MpeNoteGeneration previous_generation = sidecar.buffer[0].state.note_id;
@@ -404,13 +404,44 @@ TEST_CASE("MpeSidecar reset clears buffer and deferred releases across reactivat
             1, static_cast<uint8_t>(61 + cycle), 90);
         note_on.sample_offset = 9;
         const std::array input{note_on};
-        sidecar.run(processor, input);
+        REQUIRE(sidecar.run(processor, input));
         REQUIRE(sidecar.buffer.size() == 1);
         REQUIRE(sidecar.buffer[0].kind == Kind::NoteOn);
         REQUIRE(sidecar.buffer[0].sample_offset == 9);
         REQUIRE(sidecar.buffer[0].state.note_id > previous_generation);
         previous_generation = sidecar.buffer[0].state.note_id;
     }
+}
+
+TEST_CASE("MpeSidecar reconciles tracker state after an expression append drops",
+          "[midi][mpe][sidecar][overflow][rt-safety]") {
+    pulp::format::boundary::MpeSidecar sidecar;
+    SidecarProcessor processor;
+    sidecar.configure(true);
+    sidecar.reserve(sidecar.buffer.capacity());
+
+    std::vector<MidiEvent> overflowing_block;
+    overflowing_block.reserve(sidecar.buffer.capacity() + 1);
+    overflowing_block.push_back(MidiEvent::note_on(1, 60, 100));
+    while (overflowing_block.size() <= sidecar.buffer.capacity()) {
+        overflowing_block.push_back(MidiEvent::pitch_bend(1, 16383));
+    }
+
+    {
+        pulp::test::RtAllocationProbe probe;
+        REQUIRE_FALSE(sidecar.run(processor, overflowing_block));
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    REQUIRE(processor.mpe_input() == &sidecar.buffer);
+    REQUIRE(sidecar.buffer.empty());
+    REQUIRE(sidecar.tracker.active_count() == 0);
+    REQUIRE(sidecar.tracker.pending_note_off_count() == 0);
+
+    const std::array next_block{MidiEvent::note_on(1, 62, 90)};
+    REQUIRE(sidecar.run(processor, next_block));
+    REQUIRE(sidecar.buffer.size() == 1);
+    REQUIRE(sidecar.buffer[0].kind == Kind::NoteOn);
+    REQUIRE(sidecar.buffer[0].state.note == 62);
 }
 
 TEST_CASE("MpeBuffer emits retrigger retirement and replacement atomically",

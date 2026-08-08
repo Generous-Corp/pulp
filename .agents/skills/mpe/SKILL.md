@@ -191,9 +191,11 @@ This matters for CLAP because one short MIDI event can fan out to many
 MPE sidecar callbacks, and native `CLAP_EVENT_MIDI2` packets append
 directly to the UMP sidecar before `Processor::process()`. The CLAP
 adapter reserves both sidecars in `clap_activate()` and drops rather
-than growing vectors during `clap_process()`. If you add a new adapter
-or widen the sidecar contract, test the overflow path without copying
-large event vectors inside the processor no-allocation guard.
+than growing vectors during `clap_process()`. An ownership-event drop or MPE
+expression drop is fail-closed: CLAP, VST3, and AUv3 clear the partial input,
+reset the tracker, and request a processor reset in that render. If you add a
+new adapter or widen the sidecar contract, test the overflow path without
+copying large event vectors inside the processor no-allocation guard.
 
 `bind_tracker_to_buffer()` treats a same-note retrigger as one atomic pair:
 `NoteOff(old generation)` then `NoteOn(new generation)` at the same sample

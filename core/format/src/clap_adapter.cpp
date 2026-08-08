@@ -938,7 +938,7 @@ static bool clap_phase_prepare_sidecars(PulpClapPlugin* self,
     // the resulting expression buffer to the processor for the duration
     // of this process() call. Events stay sample-ordered because midi_in
     // is already in host delivery order.
-    self->mpe.run(*self->processor, midi_in);
+    const bool mpe_complete = self->mpe.run(*self->processor, midi_in);
 
     // UMP sidecar. The host can deliver three event streams in the same
     // block:
@@ -978,7 +978,7 @@ static bool clap_phase_prepare_sidecars(PulpClapPlugin* self,
     self->processor->set_param_events(&self->param_events);
     self->output_param_events.clear();
     self->processor->set_output_param_events(&self->output_param_events);
-    return ownership_event_dropped;
+    return ownership_event_dropped || !mpe_complete;
 }
 
 static void clap_phase_bypass_passthrough(

@@ -751,6 +751,7 @@ public:
     std::size_t observed_mpe_count = 0;
     std::size_t observed_mpe_capacity = 0;
     std::uint32_t observed_mpe_drops = 0;
+    bool observed_reset_requested = false;
     std::size_t observed_ump_count = 0;
     std::size_t observed_ump_capacity = 0;
     std::uint32_t observed_ump_drops = 0;
@@ -772,7 +773,8 @@ public:
                  const audio::BufferView<const float>&,
                  midi::MidiBuffer&,
                  midi::MidiBuffer&,
-                 const ProcessContext&) override {
+                 const ProcessContext& context) override {
+        observed_reset_requested = context.reset_requested;
         observed_mpe_attached = mpe_input() != nullptr;
         observed_ump_attached = ump_input() != nullptr;
         if (auto* mpe = mpe_input()) {
@@ -4193,7 +4195,7 @@ TEST_CASE("CLAP outbound MIDI drops past realtime event capacity without growing
     REQUIRE(g_overflowing_midi_out->observed_sysex_drops == 1);
 }
 
-TEST_CASE("CLAP MPE sidecar drops past realtime event capacity without growing",
+TEST_CASE("CLAP MPE sidecar reconciles after realtime expression overflow",
           "[clap][midi][realtime]") {
     g_pending_opts_mpe = true;
     g_pending_opts_ump = false;
@@ -4228,9 +4230,9 @@ TEST_CASE("CLAP MPE sidecar drops past realtime event capacity without growing",
     REQUIRE(g_observing_sidecar->observed_mpe_attached);
     REQUIRE(g_observing_sidecar->observed_mpe_capacity ==
             state::ParameterEventQueue::kCapacity);
-    REQUIRE(g_observing_sidecar->observed_mpe_count ==
-            state::ParameterEventQueue::kCapacity);
-    REQUIRE(g_observing_sidecar->observed_mpe_drops == 128);
+    REQUIRE(g_observing_sidecar->observed_mpe_count == 0);
+    REQUIRE(g_observing_sidecar->observed_mpe_drops == 0);
+    REQUIRE(g_observing_sidecar->observed_reset_requested);
 }
 
 #if defined(CLAP_VERSION_GE) && CLAP_VERSION_GE(1, 1, 0)
