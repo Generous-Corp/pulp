@@ -43,9 +43,17 @@
         "tools/check-docs.sh",
         "tools/cmake/PulpInstallRules.cmake",
         "tools/dsp_vocabulary.py",
+        "tools/scripts/agent_capability_catalog_foundations.py",
+        "tools/scripts/agent_capability_catalog_performance.py",
+        "tools/scripts/agent_capability_catalog_signal.py",
+        "tools/scripts/agent_capability_catalog_timing.py",
         "tools/scripts/agent_capability_evolution.py",
+        "tools/scripts/agent_capability_history.py",
         "tools/scripts/agent_capability_manifest.py",
+        "tools/scripts/agent_capability_registry.py",
+        "tools/scripts/agent_capability_registry_types.py",
         "tools/scripts/agent_capability_surface.py",
+        "tools/scripts/agent_capability_transaction.py",
         "tools/scripts/test_agent_capability_installed_sdk.py",
         "tools/scripts/test_agent_capability_manifest.py"
       ]

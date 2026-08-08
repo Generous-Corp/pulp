@@ -36,12 +36,15 @@ For a new public header or symbol:
 
 1. Decide whether it is a generator-facing capability. Do not infer this from a
    plausible class name.
-2. If yes, add an explicit row to `EXPORTS` in
-   `tools/scripts/agent_capability_manifest.py`, add typed bindings for every
-   advertised entrypoint/operation, and record the current header fingerprint.
-   Add a nonempty `_link_probe` that constructs or invokes the real API rather
-   than merely taking `sizeof`, and start a new key at contract version `1.0`.
-3. If no, add a reviewed header classification instead:
+2. If yes, add an explicit row to `EXPORTS` in the domain-appropriate
+   `tools/scripts/agent_capability_catalog_*.py` module, add typed bindings for
+   every advertised entrypoint/operation, and record the current header
+   fingerprint. Add a nonempty `_link_probe` that constructs or invokes the
+   real API rather than merely taking `sizeof`, and start a new key at contract
+   version `1.0`. `agent_capability_manifest.py` assembles those catalogs; do
+   not put capability rows back into that orchestrator.
+3. If no, add a reviewed header classification to
+   `tools/scripts/agent_capability_registry.py` instead:
    `capability_support`, `infrastructure`, or `unsupported_capability`. Give a
    durable rationale. Never grow the frozen `legacy_unreviewed` baseline.
 4. Increase `SURFACE_INVENTORY_VERSION` for any ledger change. Increase
