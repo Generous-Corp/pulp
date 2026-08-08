@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 12,
+  "inventory_version": 13,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -1360,7 +1360,7 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/routing_utility_kernels.hpp",
-      "fingerprint": "sha256:0090aca546341f6958fde703b8e0c7641999ecdd58186d2adb96957267d55718",
+      "fingerprint": "sha256:b37237cdb793ec5b300da4bb4c0850be8dab0c2bb24b243b45c554af6929a64a",
       "include": "pulp/midi/routing_utility_kernels.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
