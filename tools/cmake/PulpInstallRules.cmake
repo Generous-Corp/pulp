@@ -341,6 +341,8 @@ elseif(TARGET pulp-inspect-protocol)
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_admission.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_artifacts.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_broker.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_carrier.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_endpoint.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_execution.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_grants.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_identity.hpp"
@@ -353,6 +355,8 @@ elseif(TARGET pulp-inspect-protocol)
         install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/client.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_client.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_client_connection.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_health.hpp"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
     endif()
     if(TARGET pulp-inspect-runtime)

@@ -98,23 +98,26 @@ acknowledgement; custom also has to name `runtime.eval` and `session.control`.
 The acknowledgement is one-run state and is not part of standalone persisted
 preferences.
 
-## Dormant broker service and shared client foundation
+## Broker service and local carrier foundation
 
 The optional `pulp::inspect-control` component contains the broker-owned
 identity, registration, grant, typed admission, durable receipt, cancellation,
 quota, progress, and artifact-lineage state needed by the capability-control
-migration. It is deliberately dormant in this phase: it opens no listener, is
-not linked into ordinary plugin-format artifacts, and does not replace the
-current explicitly activated standalone inspector transport. The installed
-`ControlClient` accepts a typed `ControlClientTransport` representing one
-authenticated, connection-bound peer and client identity; its artifact-read API
-therefore has no caller-supplied client ID. Phase 3c will supply the canonical
-carrier; the legacy `InspectorSession`/server is not a compatibility transport
-or a second capability-control authority path.
+migration. It is not linked into ordinary plugin-format artifacts and does not
+replace the current explicitly activated standalone inspector transport. On
+macOS, the optional `pulp-control-broker` executable owns the canonical
+per-user `LocalSocket` endpoint. It currently exposes only a bounded health
+probe: it has no signed launcher bootstrap, host registration channel, consent
+surface, or operation executor, so authority-bearing session admission fails
+closed. The installed `ControlClient` accepts a typed
+`ControlClientTransport` representing one authenticated, connection-bound peer
+and client identity; its artifact-read API therefore has no caller-supplied
+client ID. The legacy `InspectorSession`/server is not a compatibility
+transport or a second capability-control authority path.
 `ControlService` accepts a carrier-verified peer and connection-bound client
 identity, but has no executor unless a later runtime adapter injects one.
-Per-user service activation, consent UI, and live Inspector/Remote View
-migration remain later work.
+Signed service activation, consent UI, host execution routing, and live
+Inspector migration remain later work.
 
 The foundation accepts only carrier-observed `VerifiedControlPeerIdentity`
 values minted by the broker's peer verifier. Its fingerprint binds the peer
@@ -191,13 +194,13 @@ broker authorization is not an at-rest secrecy boundary against such a process.
 |---|---|---|
 | Constructor/reachability | Explicit `pulp run --inspect[=PROFILE]` activation constructs one authenticated owner for a compatible GPU desktop standalone window; ordinary and plugin-format launches remain endpoint-free | Additional host-format ownership |
 | Window host | Built-in macOS standalone hosts keep their owning-thread dispatcher alive after native-loop stop until accepted inspector work retires, and schedule startup-failure close on a later native event turn | Windows/Linux external factories must implement `event_loop_supports_exit_drain()` with `run_event_loop_until()`, plus `supports_deferred_close()` with `request_close_deferred()`, to opt into active profiles |
-| Build/link/install | Optional protocol, reader discovery, neutral discovery-path support, publisher/runtime, client, authoring, and dormant `pulp::inspect-control` targets are component-gated and separate from the GPU overlay. Installed protocol/control/client components expose the fail-closed broker, typed service, and shared client but no listener. A mandatory non-slow clean-prefix consumer compiles and runs those installed targets while rejecting direct GPU/render/format/host/CLI/MCP closure. Publisher/runtime link closure does not grant reader authority; an ordinary `pulp::format` fixture proves no inspector symbols are present | Per-target shipped-product declaration and final product-manifest proof |
+| Build/link/install | Optional protocol, reader discovery, neutral discovery-path support, publisher/runtime, client, authoring, and `pulp::inspect-control` targets are component-gated and separate from the GPU overlay. Installed protocol/control/client components expose the fail-closed broker, typed service, canonical local client transport, health probe, and macOS health-only broker executable. A mandatory non-slow clean-prefix consumer compiles and runs those installed targets while rejecting direct GPU/render/format/host/CLI/MCP closure. Publisher/runtime link closure does not grant reader authority; an ordinary `pulp::format` fixture proves no inspector symbols are present | Per-target shipped-product declaration and final product-manifest proof |
 | Threading | The standalone owner uses bounded owning-thread RPC, responds after timely application, cancels queued work during teardown, and fences started timeouts as `mayHaveApplied` while discarding late responses. Reload generations rebind owned channel metadata, the sole telemetry attachment, and scripted inspector sources on the UI tick | Additional host-format ownership |
-| Discovery/security | The explicitly activated standalone path retains owner-private ephemeral record/token files, exact publication selection, mutual nonce/HMAC proofs, replay rejection, timeouts, teardown, and one-controller lease. Separately, the dormant broker composition root owns identity-bound single-use bootstrap, exact T0/T1 registration, trusted-consent grants, lifecycle revocation, per-session negotiated envelopes, per-operation input/output schema enforcement, durable replay receipts/cancellation, active-operation quotas, and original-lineage broker reads from the minimal artifact store. Its macOS local carrier binds accepted-socket UID/GID/PID and audit-token PID generation to a rechecked live code-signing identifier, CDHash, and Team or per-artifact ad-hoc identity; insecure endpoint parents, TCP/FIFO identity, malformed UTF-8/JSON, dead peers, and mismatches fail closed | Canonical per-user service activation, trusted consent surface, non-macOS verified-peer implementations, migration of live operations to that path, and Phase 7 aggregate artifact quota/retention/redaction/deletion policy; owner-private files are not secret from a same-UID process |
+| Discovery/security | The explicitly activated standalone path retains owner-private ephemeral record/token files, exact publication selection, mutual nonce/HMAC proofs, replay rejection, timeouts, teardown, and one-controller lease. Separately, the broker composition root owns identity-bound single-use bootstrap, exact T0/T1 registration, trusted-consent grants, lifecycle revocation, per-session negotiated envelopes, per-operation input/output schema enforcement, durable replay receipts/cancellation, active-operation quotas, and original-lineage broker reads from the minimal artifact store. Its macOS local carrier owns one endpoint in an owner-only runtime directory and binds accepted-socket UID/GID/PID and audit-token PID generation to a rechecked live code-signing identifier, CDHash, and Team or per-artifact ad-hoc identity; stale-path replacement is device/inode guarded, while insecure endpoint parents, TCP/FIFO identity, malformed UTF-8/JSON, dead peers, and mismatches fail closed | Signed launcher and host registration, trusted consent surface, execution routing, non-macOS verified-peer implementations, migration of live operations to that path, and Phase 7 aggregate artifact quota/retention/redaction/deletion policy; owner-private files are not secret from a same-UID process |
 | CLI | `pulp inspect profiles/list/capabilities/doctor` and typed parameter/MIDI/transport mutations provide stable JSON; every live operation uses exact session/instance/publication targeting through the shared client | Telemetry subscription lands in the next phase |
 | MCP | Installed in-process shared client exposes profiles/list/capabilities/doctor plus typed parameter, MIDI, and transport tools; success carries publication identity and failures carry structured code/message/data | Telemetry subscription lands in the next phase |
 | Capture/telemetry | Whole-window in-process capture (live host back-buffer when available, portable view rendering otherwise), owned value-channel metadata, snapshots, and bounded scalar/meter/vector/event subscriptions are attached to the standalone session; delivery is targeted by authenticated client identity and carries explicit source, stale, coalescing, overflow, and transport-loss state | Node capture, external-host compositing, and CLI/MCP watch commands |
-| Shipping | The component gate removes live inspector targets and the dormant control core; live CLI commands fail explicitly when disabled, while read-only `inspect audit` remains available. Ordinary-format symbol stripping, per-target declarations, canonical manifests, and manifest-versus-binary checks are continuously tested. The macOS carrier and peer verifier are linked only into the optional headless control target and open no endpoint by themselves | Signed service distribution, broker-owned consent proof, and platform parity beyond the fail-closed macOS v1 verifier |
+| Shipping | The component gate removes live inspector targets and the control core; live CLI commands fail explicitly when disabled, while read-only `inspect audit` remains available. Ordinary-format symbol stripping, per-target declarations, canonical manifests, and manifest-versus-binary checks are continuously tested. The optional macOS `pulp-control-broker` is installed under `libexec/pulp`, opens only the owner-private local endpoint, and refuses authority-bearing admission until signed launcher and host adapters are supplied | Signed service activation, broker-owned consent proof, host execution routing, and platform parity beyond the fail-closed macOS v1 verifier |
 
 The production server binds loopback only and requires fresh, role-separated
 nonce/HMAC proofs from both client and server using an owner-private

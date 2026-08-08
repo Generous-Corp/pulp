@@ -454,6 +454,24 @@ else Tier 0 (the CLI's built-in bounded builds). Coverage lives in
 `test/test_cli_tartci_lease.cpp`. Keep the tier semantics in step with the
 lease-acquisition path in the same file.
 
+`pulp status` and the default `pulp doctor` also share the optional `Control
+broker` check from `run_doctor_checks()`. It calls `probe_control_broker()` with
+the deterministic local endpoint and no `ControlPeerExpectation`, so the probe
+is connection-only: it must not prepare the runtime directory, remove a stale
+endpoint, start a child/daemon, open a session, consume admission, register, or
+grant. An accepting socket is therefore `reachable-unverified`, never healthy
+or verified; absence is nonfatal. Keep the check in the doctor registry so
+`doctor list` discovers it and `doctor --only "Control broker"` short-circuits
+every unrelated probe. Status must invoke it before the SDK-mode early return.
+
+The installed Rust `pulp status` delegates to the sibling `pulp-cpp status`
+when available so there is one socket/protocol implementation. The Rust-native
+renderer remains a fallback for Rust-only builds; do not copy the carrier or
+control codec into Rust merely to avoid the delegate. When adding status output
+that exists in the Rust fallback first, mirror it in `cmd_misc.cpp` before
+making installed status delegate, so the delegation does not drop existing
+diagnostics.
+
 ### Package command CMake generation
 
 `pulp add` can now generate CMake for source-backed FetchContent packages, not

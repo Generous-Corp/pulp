@@ -378,6 +378,7 @@ struct TimelineMultitrackArrangementProcessor::Impl {
         request.project = std::move(project);
         request.sequence_id = kSequenceId;
         request.tempo_map = map;
+        request.sample_rate = request.tempo_map->sample_rate();
         request.document_revision = 1;
         request.audio_assets = std::move(pool).value();
         request.audio_limits.max_tracks = 3;

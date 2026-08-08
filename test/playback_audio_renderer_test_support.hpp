@@ -147,6 +147,7 @@ struct CompiledFixture {
         request.project = std::move(project);
         request.sequence_id = {2};
         request.tempo_map = std::move(map);
+        request.sample_rate = request.tempo_map->sample_rate();
         request.document_revision = 1;
         request.dirty.all = true;
         request.audio_assets = std::move(assets);

@@ -290,10 +290,12 @@ class ArbitraryWhatException final : public std::exception {
     std::string message_;
 };
 
-ControlService::Session negotiate(ControlService& service, const ServiceFixture& fixture,
-                                  bool progress = false, bool cancellation = true,
-                                  bool artifacts = false) {
-    auto session = service.open_session(fixture.client, fixture.client_identity.client_id);
+ControlService::Session negotiate(ControlService& service, const VerifiedControlPeerIdentity& peer,
+                                  const ControlClientId& client_id, bool progress = false,
+                                  bool cancellation = true, bool artifacts = false,
+                                  ControlService::ProgressSink progress_sink = {}) {
+    auto session = service.open_session(peer, client_id, std::move(progress_sink));
+    REQUIRE(session.is_open());
     std::vector<std::string> optional_features;
     if (cancellation)
         optional_features.emplace_back("cancellation");
@@ -316,6 +318,14 @@ ControlService::Session negotiate(ControlService& service, const ServiceFixture&
     REQUIRE(negotiated);
     REQUIRE(negotiated->status == ControlNegotiationStatus::Accepted);
     return session;
+}
+
+ControlService::Session negotiate(ControlService& service, const ServiceFixture& fixture,
+                                  bool progress = false, bool cancellation = true,
+                                  bool artifacts = false,
+                                  ControlService::ProgressSink progress_sink = {}) {
+    return negotiate(service, fixture.client, fixture.client_identity.client_id, progress,
+                     cancellation, artifacts, std::move(progress_sink));
 }
 
 } // namespace
@@ -383,6 +393,52 @@ TEST_CASE("control service is dormant and negotiates without a listener",
     }));
     CHECK(after_activation.status == ControlServiceStatus::Responded);
     CHECK(executions == 1);
+}
+
+TEST_CASE("control service validates the connection peer when opening a session",
+          "[inspect][control][service][identity][security]") {
+    ServiceFixture fixture;
+    ControlService service{fixture.broker};
+    const auto offer = encode_control_envelope({
+        .schema_version = kControlProtocolVersion,
+        .payload =
+            ControlNegotiationOffer{
+                .versions = {1, 1},
+                .mandatory_features = {"receipts"},
+            },
+    });
+
+    SECTION("unknown client is rejected without disconnecting the registered client") {
+        {
+            auto rejected = service.open_session(fixture.client, ControlClientId{"missing-client"});
+            CHECK_FALSE(rejected.is_open());
+            const auto result = rejected.dispatch(offer);
+            CHECK(result.status == ControlServiceStatus::AdmissionDenied);
+            CHECK(result.admission_status == ControlAdmissionStatus::IdentityMismatch);
+            const auto artifact = rejected.read_artifact("artifact", 0, 1);
+            CHECK(artifact.status == ControlArtifactStatus::Unauthorized);
+        }
+        CHECK(fixture.broker.client(fixture.client_identity.client_id).has_value());
+    }
+
+    SECTION("client owned by another peer is rejected at open") {
+        {
+            auto rejected = service.open_session(
+                verified_peer(ControlPeerRole::Client, 102, "other-client-start"),
+                fixture.client_identity.client_id);
+            CHECK_FALSE(rejected.is_open());
+            const auto result = rejected.dispatch(offer);
+            CHECK(result.status == ControlServiceStatus::AdmissionDenied);
+            CHECK(result.admission_status == ControlAdmissionStatus::IdentityMismatch);
+        }
+        CHECK(fixture.broker.client(fixture.client_identity.client_id).has_value());
+    }
+
+    SECTION("matching peer and client opens normally") {
+        auto accepted = service.open_session(fixture.client, fixture.client_identity.client_id);
+        REQUIRE(accepted.is_open());
+        CHECK(accepted.dispatch(offer).status == ControlServiceStatus::Responded);
+    }
 }
 
 TEST_CASE("control service gates artifact operations and reads on negotiated support",
@@ -489,8 +545,7 @@ TEST_CASE("control service session teardown revokes its client and requests canc
     }
 
     CHECK_FALSE(fixture.broker.client(fixture.client_identity.client_id));
-    CHECK_FALSE(fixture.broker.is_granted(fixture.grant.grant_id,
-                                          fixture.client_identity.client_id,
+    CHECK_FALSE(fixture.broker.is_granted(fixture.grant.grant_id, fixture.client_identity.client_id,
                                           fixture.registration.registration_id,
                                           InspectorCapability::StateRead));
     const auto cancelled = fixture.broker.operation_receipt(receipt_id);
@@ -603,12 +658,12 @@ TEST_CASE("control service emits bounded monotonic progress with backpressure",
                 CHECK(context.report_progress(2, 2, R"({"stage":"done"})"));
                 return successful_state_read();
             },
-            [&](const ControlProgressEnvelope& progress) {
-                observed.push_back(progress);
-                return true;
-            },
         };
-        auto session = negotiate(service, fixture, true);
+        auto session = negotiate(service, fixture, true, true, false,
+                                 [&](const ControlProgressEnvelope& progress) {
+                                     observed.push_back(progress);
+                                     return true;
+                                 });
         const auto completed = session.dispatch(encode_control_envelope({
             .schema_version = kControlProtocolVersion,
             .payload = fixture.request(),
@@ -633,15 +688,15 @@ TEST_CASE("control service emits bounded monotonic progress with backpressure",
                 CHECK_FALSE(context.report_progress(2, 2, "{}"));
                 return successful_state_write(plan.receipt_id.value);
             },
-            [&](const ControlProgressEnvelope&) {
-                ++progress_deliveries;
-                return true;
-            },
             ControlServiceConfig{
                 .maximum_progress_events_per_operation = 1,
             },
         };
-        auto session = negotiate(service, fixture, true);
+        auto session =
+            negotiate(service, fixture, true, true, false, [&](const ControlProgressEnvelope&) {
+                ++progress_deliveries;
+                return true;
+            });
         const auto encoded = encode_control_envelope({
             .schema_version = kControlProtocolVersion,
             .payload = fixture.mutation_request(),
@@ -683,15 +738,15 @@ TEST_CASE("control service emits bounded monotonic progress with backpressure",
                     .deferred = true,
                 };
             },
-            [&](const ControlProgressEnvelope&) {
-                ++progress_deliveries;
-                return true;
-            },
             ControlServiceConfig{
                 .maximum_progress_events_per_operation = 1,
             },
         };
-        auto session = negotiate(service, fixture, true);
+        auto session =
+            negotiate(service, fixture, true, true, false, [&](const ControlProgressEnvelope&) {
+                ++progress_deliveries;
+                return true;
+            });
         const auto encoded = encode_control_envelope({
             .schema_version = kControlProtocolVersion,
             .payload = fixture.mutation_request(),
@@ -714,6 +769,74 @@ TEST_CASE("control service emits bounded monotonic progress with backpressure",
         CHECK(receipt(replayed).receipt_id == receipt(pending).receipt_id);
         CHECK(executions == 1);
     }
+}
+
+TEST_CASE("control service routes progress through the originating session",
+          "[inspect][control][service][progress][isolation]") {
+    ServiceFixture fixture;
+    const auto second_peer = verified_peer(ControlPeerRole::Client, 102, "second-client-start");
+    const auto second_ticket = fixture.broker.issue_bootstrap(second_peer);
+    REQUIRE(second_ticket.ticket.has_value());
+    const auto second_connection = fixture.broker.redeem_bootstrap(
+        second_ticket.ticket->ticket_id, second_ticket.ticket->secret.bytes(), second_peer);
+    REQUIRE(second_connection.client.has_value());
+    const auto second_grant =
+        fixture.broker.issue_grant(second_peer,
+                                   {
+                                       .client_id = second_connection.client->client_id,
+                                       .registration_id = fixture.registration.registration_id,
+                                       .capabilities = {InspectorCapability::StateRead},
+                                       .ttl = 5min,
+                                   },
+                                   {
+                                       .approved = true,
+                                       .authority = ControlConsentAuthority::TrustedPulpCli,
+                                       .decision_id = "decision-b",
+                                   });
+    REQUIRE(second_grant.grant.has_value());
+    ControlService service{
+        fixture.broker,
+        [](const ControlAdmissionPlan&, const ControlRequestEnvelope&,
+           const ControlExecutionContext& context) {
+            CHECK(context.report_progress(1, 1, "{}"));
+            return successful_state_read();
+        },
+    };
+    std::vector<std::string> first_requests;
+    std::vector<std::string> second_requests;
+    auto first = negotiate(service, fixture, true, true, false,
+                           [&](const ControlProgressEnvelope& progress) {
+                               first_requests.push_back(progress.request_id);
+                               return true;
+                           });
+    auto second = negotiate(service, second_peer, second_connection.client->client_id, true, true,
+                            false, [&](const ControlProgressEnvelope& progress) {
+                                second_requests.push_back(progress.request_id);
+                                return true;
+                            });
+
+    auto moved_first = std::move(first);
+    CHECK_FALSE(first.is_open());
+    REQUIRE(moved_first.is_open());
+    const auto first_result = moved_first.dispatch(encode_control_envelope({
+        .schema_version = kControlProtocolVersion,
+        .payload = fixture.request(),
+    }));
+    REQUIRE(first_result.status == ControlServiceStatus::Responded);
+    CHECK(first_requests == std::vector<std::string>{"request-a"});
+    CHECK(second_requests.empty());
+
+    auto second_request = fixture.request("{}", "request-b", "idempotency-b");
+    second_request.client_id = second_connection.client->client_id.value;
+    second_request.grant_id = second_grant.grant->grant_id.value;
+    second_request.request_hash = *control_request_hash(second_request);
+    const auto second_result = second.dispatch(encode_control_envelope({
+        .schema_version = kControlProtocolVersion,
+        .payload = std::move(second_request),
+    }));
+    REQUIRE(second_result.status == ControlServiceStatus::Responded);
+    CHECK(first_requests == std::vector<std::string>{"request-a"});
+    CHECK(second_requests == std::vector<std::string>{"request-b"});
 }
 
 TEST_CASE("control service returns deterministic active-operation backpressure",
@@ -795,12 +918,12 @@ TEST_CASE("control service retains quota until a started timeout settles",
                 .deferred = true,
             };
         },
-        [&](const ControlProgressEnvelope&) {
+    };
+    auto session =
+        negotiate(service, fixture, true, true, false, [&](const ControlProgressEnvelope&) {
             ++progress_deliveries;
             return true;
-        },
-    };
-    auto session = negotiate(service, fixture, true);
+        });
     auto dispatch = [&](ControlRequestEnvelope request) {
         return session.dispatch(encode_control_envelope({
             .schema_version = kControlProtocolVersion,

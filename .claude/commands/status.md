@@ -21,6 +21,11 @@ Also include the `Import design defaults:` line from `pulp status` when
 present; it shows whether `pulp import-design` will default to live JS,
 baked DesignIR, or baked C++, and whether that came from built-ins, config,
 or environment overrides.
+Include the `Control broker:` line. Treat `unavailable` as nonfatal and
+`reachable-unverified` only as evidence that a local carrier accepted a
+connection. Without a trusted peer expectation, never paraphrase that state as
+healthy or verified. The status probe is observational and must not be followed
+by starting or repairing a broker unless the user separately asks for mutation.
 
 If the CLI binary doesn't exist, fall back to showing:
 1. `git status` — current branch and changes

@@ -8,8 +8,18 @@
 #include "cli_common.hpp"
 #include "package_registry.hpp"
 
+#ifndef PULP_CLI_HAS_CONTROL_HEALTH
+#define PULP_CLI_HAS_CONTROL_HEALTH 0
+#endif
+
+#if PULP_CLI_HAS_CONTROL_HEALTH
+#include <pulp/inspect/control_carrier.hpp>
+#include <pulp/inspect/control_health.hpp>
+#endif
+
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -110,6 +120,36 @@ bool file_contains_text(const fs::path& path, const std::string& needle) {
     std::string text((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
     return text.find(needle) != std::string::npos;
 }
+
+DoctorCheck control_broker_check() {
+    DoctorCheck check{"Control broker", false, {}, {}, true};
+#if PULP_CLI_HAS_CONTROL_HEALTH
+    pulp::inspect::ControlHealthProbeConfig config{
+        .endpoint_path = pulp::inspect::default_control_endpoint_path(),
+        .connect_timeout = std::chrono::milliseconds(250),
+        .write_timeout = std::chrono::milliseconds(250),
+        .frame_read_timeout = std::chrono::milliseconds(250),
+    };
+    const auto result = pulp::inspect::probe_control_broker(config);
+    switch (result.status) {
+        case pulp::inspect::ControlBrokerHealthProbeStatus::Unavailable:
+            check.detail = "unavailable — no accepting local control carrier";
+            break;
+        case pulp::inspect::ControlBrokerHealthProbeStatus::ReachableUnverified:
+            check.detail = "reachable-unverified — the local carrier accepted a connection, "
+                           "but broker identity was not verified";
+            break;
+        case pulp::inspect::ControlBrokerHealthProbeStatus::HealthyVerified:
+        case pulp::inspect::ControlBrokerHealthProbeStatus::Incompatible:
+        case pulp::inspect::ControlBrokerHealthProbeStatus::Malformed:
+            check.detail = "unavailable — the observation returned an invalid untrusted result";
+            break;
+    }
+#else
+    check.detail = "unavailable — control health support is not compiled into this CLI";
+#endif
+    return check;
+}
 }  // namespace
 
 // -- Doctor checks -------------------------------------------------------------
@@ -123,6 +163,10 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
                                            const std::string& only_filter) {
     std::vector<DoctorCheck> checks;
     auto repo_root = standalone_mode ? fs::path{} : active_root;
+
+    if (doctor_check_matches_only_filter(only_filter, "Control broker")) {
+        checks.push_back(control_broker_check());
+    }
 
     // 1. C++20 compiler
     if (doctor_check_matches_only_filter(only_filter, "C++20 compiler")) {
@@ -285,56 +329,64 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
             checks.push_back(c);
         }
 
-        auto sdk_resolution = resolve_standalone_sdk(active_root, false);
-        auto version = sdk_resolution.requested_version;
-        auto sdk_hint = sdk_resolution.sdk_path_hint;
-        auto checkout_hint = sdk_resolution.sdk_checkout_hint;
+        const bool check_installed_sdk =
+            doctor_check_matches_only_filter(only_filter, "Installed SDK");
+        const bool check_sdk_checkout =
+            doctor_check_matches_only_filter(only_filter, "SDK checkout");
+        if (check_installed_sdk || check_sdk_checkout) {
+            auto sdk_resolution = resolve_standalone_sdk(active_root, false);
+            auto version = sdk_resolution.requested_version;
+            auto sdk_hint = sdk_resolution.sdk_path_hint;
+            auto checkout_hint = sdk_resolution.sdk_checkout_hint;
 
-        DoctorCheck sdk{"Installed SDK", false, {}, {}};
-        if (!sdk_hint.empty() &&
-            sdk_resolution.sdk_path_version_known &&
-            !sdk_resolution.sdk_path_version_matches) {
-            sdk.detail = sdk_resolution.warning;
-            sdk.fix = "pulp build";
-        } else if (sdk_resolution.used_sdk_path_hint &&
-                   sdk_resolution.sdk_path_custom_unverifiable) {
-            sdk.passed = true;
-            sdk.detail = sdk_hint.string() + " (custom sdk_path; version unverifiable)";
-        } else if (sdk_resolution.used_sdk_path_hint) {
-            sdk.passed = true;
-            sdk.detail = sdk_hint.string();
-        } else if (!sdk_resolution.resolved_sdk_dir.empty()) {
-            sdk.passed = true;
-            auto local_sdk = local_sdk_cache_path(version);
-            auto downloaded_sdk = sdk_cache_path(version);
-            if (sdk_resolution.resolved_sdk_dir == local_sdk) {
-                sdk.detail = sdk_resolution.resolved_sdk_dir.string() + " (local cache)";
-            } else if (sdk_resolution.resolved_sdk_dir == downloaded_sdk) {
-                sdk.detail = sdk_resolution.resolved_sdk_dir.string() + " (download cache)";
-            } else {
-                sdk.detail = sdk_resolution.resolved_sdk_dir.string();
+            if (check_installed_sdk) {
+                DoctorCheck sdk{"Installed SDK", false, {}, {}};
+                if (!sdk_hint.empty() &&
+                    sdk_resolution.sdk_path_version_known &&
+                    !sdk_resolution.sdk_path_version_matches) {
+                    sdk.detail = sdk_resolution.warning;
+                    sdk.fix = "pulp build";
+                } else if (sdk_resolution.used_sdk_path_hint &&
+                           sdk_resolution.sdk_path_custom_unverifiable) {
+                    sdk.passed = true;
+                    sdk.detail = sdk_hint.string() + " (custom sdk_path; version unverifiable)";
+                } else if (sdk_resolution.used_sdk_path_hint) {
+                    sdk.passed = true;
+                    sdk.detail = sdk_hint.string();
+                } else if (!sdk_resolution.resolved_sdk_dir.empty()) {
+                    sdk.passed = true;
+                    auto local_sdk = local_sdk_cache_path(version);
+                    auto downloaded_sdk = sdk_cache_path(version);
+                    if (sdk_resolution.resolved_sdk_dir == local_sdk) {
+                        sdk.detail = sdk_resolution.resolved_sdk_dir.string() + " (local cache)";
+                    } else if (sdk_resolution.resolved_sdk_dir == downloaded_sdk) {
+                        sdk.detail = sdk_resolution.resolved_sdk_dir.string() + " (download cache)";
+                    } else {
+                        sdk.detail = sdk_resolution.resolved_sdk_dir.string();
+                    }
+                } else if (!sdk_hint.empty()) {
+                    sdk.detail = sdk_hint.string() + " missing PulpConfig.cmake";
+                    sdk.fix = "pulp build";
+                } else if (!checkout_hint.empty()) {
+                    sdk.detail = "SDK v" + version + " not materialized from checkout";
+                    sdk.fix = "pulp build";
+                } else {
+                    sdk.detail = "SDK v" + version + " not installed";
+                    sdk.fix = "pulp build";
+                }
+                checks.push_back(sdk);
             }
-        } else if (!sdk_hint.empty()) {
-            sdk.detail = sdk_hint.string() + " missing PulpConfig.cmake";
-            sdk.fix = "pulp build";
-        } else if (!checkout_hint.empty()) {
-            sdk.detail = "SDK v" + version + " not materialized from checkout";
-            sdk.fix = "pulp build";
-        } else {
-            sdk.detail = "SDK v" + version + " not installed";
-            sdk.fix = "pulp build";
-        }
-        checks.push_back(sdk);
 
-        if (!checkout_hint.empty()) {
-            DoctorCheck checkout{"SDK checkout", false, {}, {}};
-            if (fs::exists(checkout_hint / "setup.sh")) {
-                checkout.passed = true;
-                checkout.detail = checkout_hint.string();
-            } else {
-                checkout.detail = checkout_hint.string() + " missing setup.sh";
+            if (check_sdk_checkout && !checkout_hint.empty()) {
+                DoctorCheck checkout{"SDK checkout", false, {}, {}};
+                if (fs::exists(checkout_hint / "setup.sh")) {
+                    checkout.passed = true;
+                    checkout.detail = checkout_hint.string();
+                } else {
+                    checkout.detail = checkout_hint.string() + " missing setup.sh";
+                }
+                checks.push_back(checkout);
             }
-            checks.push_back(checkout);
         }
     }
 

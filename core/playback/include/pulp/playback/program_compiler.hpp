@@ -75,6 +75,9 @@ struct ProgramCompileRequest {
     std::shared_ptr<const timeline::Project> project;
     timeline::ItemId sequence_id;
     std::shared_ptr<const timebase::CompiledTempoMap> tempo_map;
+    /// The render rate requested by the caller. Submission requires its normalized
+    /// value to match tempo_map so compilation cannot mix two sample domains.
+    timebase::RationalRate sample_rate{0, 1};
     std::uint64_t document_revision = 0;
     DirtyTrackSet dirty;
     std::vector<TrackCompilePolicy> track_policies;

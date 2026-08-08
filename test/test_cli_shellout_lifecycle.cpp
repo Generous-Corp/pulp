@@ -8,9 +8,180 @@
 
 #include "test_cli_shellout_helpers.hpp"
 
+#ifndef PULP_TEST_CONTROL_HEALTH_ENABLED
+#define PULP_TEST_CONTROL_HEALTH_ENABLED 0
+#endif
+
+#if PULP_TEST_CONTROL_HEALTH_ENABLED
+#include <pulp/events/interprocess_connection.hpp>
+#endif
+
+#include <condition_variable>
+#include <mutex>
+
 using namespace pulp::platform;
 namespace fs = std::filesystem;
 using namespace pulp_test_cli;
+
+namespace {
+
+fs::path control_runtime_directory_for(const fs::path& runtime_root) {
+#ifdef _WIN32
+    return runtime_root / "Pulp-Control";
+#else
+    return runtime_root / ("pulp-control-" + std::to_string(::geteuid()));
+#endif
+}
+
+} // namespace
+
+TEST_CASE("status and doctor observe an absent control broker without side effects",
+          "[cli][shellout][doctor][control][observational]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+
+    auto temp_root = unique_temp_dir("pulp-cli-control-health-absent");
+    auto project = temp_root / "project";
+    auto fake_bin = temp_root / "fake-bin";
+    auto sentinel = temp_root / "broker-launched";
+    fs::create_directories(project);
+    fs::create_directories(fake_bin);
+    {
+        std::ofstream file(project / "pulp.toml");
+        file << "[pulp]\nsdk_version = \"latest\"\n";
+    }
+#ifndef _WIN32
+    auto fake_broker = fake_bin / "pulp-control-broker";
+    {
+        std::ofstream file(fake_broker);
+        file << "#!/bin/sh\nprintf launched > \"$PULP_CONTROL_BROKER_SENTINEL\"\n";
+    }
+    fs::permissions(fake_broker, fs::perms::owner_all, fs::perm_options::replace);
+#endif
+
+    ScopedEnvVar temp_dir("TMPDIR");
+    ScopedEnvVar path("PATH");
+    ScopedEnvVar sentinel_env("PULP_CONTROL_BROKER_SENTINEL");
+    ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
+    temp_dir.set(temp_root.string());
+    path.set(fake_bin.string());
+    sentinel_env.set(sentinel.string());
+    updates.set("1");
+
+    const auto runtime_dir = control_runtime_directory_for(temp_root);
+    REQUIRE_FALSE(fs::exists(runtime_dir));
+
+    const auto status = run_pulp_in_directory(project, {"status"});
+    INFO("status stdout: " << status.stdout_output);
+    INFO("status stderr: " << status.stderr_output);
+    REQUIRE_FALSE(status.timed_out);
+    REQUIRE(status.exit_code == 0);
+    REQUIRE(status.stdout_output.find("Control broker: unavailable") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(runtime_dir));
+    REQUIRE_FALSE(fs::exists(sentinel));
+
+    const auto doctor = run_pulp_in_directory(project, {"doctor", "--only", "Control broker"});
+    INFO("doctor stdout: " << doctor.stdout_output);
+    INFO("doctor stderr: " << doctor.stderr_output);
+    REQUIRE_FALSE(doctor.timed_out);
+    REQUIRE(doctor.exit_code == 0);
+    REQUIRE(doctor.stdout_output.find("Control broker") != std::string::npos);
+    REQUIRE(doctor.stdout_output.find("unavailable") != std::string::npos);
+    REQUIRE(doctor.stdout_output.find("optional skipped") != std::string::npos);
+    REQUIRE(doctor.stdout_output.find("Installed SDK") == std::string::npos);
+    REQUIRE_FALSE(fs::exists(runtime_dir));
+    REQUIRE_FALSE(fs::exists(sentinel));
+
+    std::error_code ignored;
+    fs::remove_all(temp_root, ignored);
+}
+
+TEST_CASE("status and doctor describe an accepting untrusted carrier as reachable-unverified",
+          "[cli][shellout][doctor][control][identity]") {
+#if PULP_TEST_CONTROL_HEALTH_ENABLED && !defined(_WIN32)
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+
+    const auto temp_root =
+        fs::path{"/tmp"} /
+        ("pulp-ctl-" + std::to_string(::getpid()) + "-" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto project = temp_root / "project";
+    auto runtime_dir = control_runtime_directory_for(temp_root);
+    auto endpoint = runtime_dir / "broker.sock";
+    fs::create_directories(project);
+    fs::create_directories(runtime_dir);
+    fs::permissions(runtime_dir, fs::perms::owner_all, fs::perm_options::replace);
+    {
+        std::ofstream file(project / "pulp.toml");
+        file << "[pulp]\nsdk_version = \"latest\"\n";
+    }
+
+    std::mutex connections_mutex;
+    std::condition_variable connection_accepted;
+    std::vector<std::unique_ptr<pulp::events::InterprocessConnection>> connections;
+    unsigned accepted_connections = 0;
+    std::atomic<unsigned> messages{0};
+    pulp::events::InterprocessConnectionServer server;
+    server.on_client_connected = [&](std::unique_ptr<pulp::events::InterprocessConnection> c) {
+        c->set_on_message([&](const void*, std::size_t) { ++messages; });
+        std::lock_guard lock(connections_mutex);
+        connections.push_back(std::move(c));
+        ++accepted_connections;
+        connection_accepted.notify_all();
+    };
+    REQUIRE(server.start(endpoint.string(), pulp::events::IpcTransport::LocalSocket));
+
+    ScopedEnvVar temp_dir("TMPDIR");
+    ScopedEnvVar updates("PULP_UPDATE_CHECK_DISABLED");
+    temp_dir.set(temp_root.string());
+    updates.set("1");
+
+    const auto status = run_pulp_in_directory(project, {"status"});
+    INFO("status stdout: " << status.stdout_output);
+    INFO("status stderr: " << status.stderr_output);
+    REQUIRE_FALSE(status.timed_out);
+    REQUIRE(status.exit_code == 0);
+    REQUIRE(status.stdout_output.find("Control broker: reachable-unverified") != std::string::npos);
+    REQUIRE(status.stdout_output.find("broker identity was not verified") != std::string::npos);
+    REQUIRE(status.stdout_output.find("healthy-verified") == std::string::npos);
+    {
+        std::unique_lock lock(connections_mutex);
+        REQUIRE(connection_accepted.wait_for(lock, std::chrono::seconds(1),
+                                             [&] { return accepted_connections >= 1; }));
+        connections.clear();
+    }
+
+    const auto doctor = run_pulp_in_directory(project, {"doctor", "--only", "Control broker"});
+    INFO("doctor stdout: " << doctor.stdout_output);
+    INFO("doctor stderr: " << doctor.stderr_output);
+    REQUIRE_FALSE(doctor.timed_out);
+    REQUIRE(doctor.exit_code == 0);
+    REQUIRE(doctor.stdout_output.find("reachable-unverified") != std::string::npos);
+    REQUIRE(doctor.stdout_output.find("healthy-verified") == std::string::npos);
+    REQUIRE(doctor.stdout_output.find("Installed SDK") == std::string::npos);
+    {
+        std::unique_lock lock(connections_mutex);
+        REQUIRE(connection_accepted.wait_for(lock, std::chrono::seconds(1),
+                                             [&] { return accepted_connections >= 2; }));
+    }
+    REQUIRE(messages.load() == 0);
+
+    server.stop();
+    {
+        std::lock_guard lock(connections_mutex);
+        connections.clear();
+    }
+    std::error_code ignored;
+    fs::remove_all(temp_root, ignored);
+#else
+    SUCCEED("local control health carrier is unavailable in this build");
+#endif
+}
 
 TEST_CASE("pulp doctor android|ios are recognized subcommands",
           "[cli][shellout][doctor][issue-355]") {

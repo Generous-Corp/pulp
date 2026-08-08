@@ -69,6 +69,8 @@ add_library(pulp-inspect-control
     src/control_admission.cpp
     src/control_artifacts.cpp
     src/control_broker.cpp
+    src/control_carrier.cpp
+    src/control_endpoint.cpp
     src/control_grants.cpp
     src/control_identity.cpp
     src/control_operation_store.cpp
@@ -95,9 +97,24 @@ elseif(WIN32)
     target_link_libraries(pulp-inspect-control PRIVATE Advapi32)
 endif()
 
+if(APPLE AND NOT IOS AND NOT PULP_IOS)
+    add_executable(pulp-control-broker
+        src/control_broker_daemon.cpp
+        src/control_broker_daemon_main.cpp)
+    target_include_directories(pulp-control-broker PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_definitions(pulp-control-broker PRIVATE
+        PULP_CONTROL_SDK_VERSION="${PROJECT_VERSION}")
+    target_link_libraries(pulp-control-broker PRIVATE pulp::inspect-control)
+    install(TARGETS pulp-control-broker
+        RUNTIME DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/pulp)
+endif()
+
 add_library(pulp-inspect-client
     src/client.cpp
-    src/control_client.cpp)
+    src/control_client.cpp
+    src/control_client_connection.cpp
+    src/control_health.cpp)
 add_library(pulp::inspect-client ALIAS pulp-inspect-client)
 target_include_directories(pulp-inspect-client
     PUBLIC
@@ -105,7 +122,7 @@ target_include_directories(pulp-inspect-client
         $<INSTALL_INTERFACE:include>)
 target_link_libraries(pulp-inspect-client
     PUBLIC pulp::inspect-discovery
-    PRIVATE pulp::events)
+           pulp::inspect-control)
 
 add_library(pulp-inspect-runtime
     src/control_main_thread_executor.cpp
