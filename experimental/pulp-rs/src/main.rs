@@ -152,13 +152,8 @@ enum Command {
     /// `run`, `doctor`). Archive installation delegates to `pulp-cpp`.
     Tool(PkgTailArgs),
 
-    /// Agent-facing wrappers around the inspector `Trace.*` Perfetto
-    /// protocol — start / stop / query / snapshot / explain plus the
-    /// L0 preset verbs (slowest-frames / xruns / dsp-hotspots /
-    /// layout-vs-paint). Pairs with the `/trace` slash command and the
-    /// `pulp_trace_*` MCP tools. Normal launches publish no endpoint;
-    /// live use requires an explicitly owned custom host that wires
-    /// `InspectorServer`, `DomainHandler`, and authenticated discovery.
+    /// Canonical trace lifecycle control plus offline Perfetto query, fetch,
+    /// doctor, and open utilities.
     #[command(name = "trace")]
     Trace(PkgTailArgs),
 
@@ -912,10 +907,7 @@ fn real_main() -> Result<(), ExitCode> {
             let (sub, flags) = cmd::trace::parse(&args.tail).map_err(|e| match e {
                 CliError::UnknownSubcommand => {
                     eprintln!("pulp trace: unknown subcommand");
-                    eprintln!(
-                        "  supported: start, stop, query, snapshot, explain, \
-                         slowest-frames, xruns, dsp-hotspots, layout-vs-paint"
-                    );
+                    eprintln!("  supported: start, stop, query, doctor, fetch, open");
                     ExitCode::from(2)
                 }
                 CliError::BadUsage(msg) => {

@@ -1145,12 +1145,12 @@ commands:
 
   - name: trace
     status: experimental
-    summary: Experimental canonical capability-control client for live `Trace.startSession` / `Trace.stopSession` capture plus offline `query --trace` analysis. Lifecycle commands have no legacy Inspector fallback or raw host/port selector.
+    summary: Experimental canonical capability-control client for `Trace.startSession` / `Trace.stopSession` capture plus wholly offline query, doctor, fetch, and open utilities. Rust exposes no alternate target-selection path.
     args:
       - name: --json
         kind: flag
         required: false
-        description: Emit the raw inspector JSON response instead of the pretty form
+        description: Emit machine-readable output
     subcommands:
       - name: start
         summary: Begin trace capture through the canonical broker-authorized control client.
@@ -1166,22 +1166,22 @@ commands:
       - name: stop
         summary: Flush the broker-authorized trace session and print the `.pftrace` path through canonical control
       - name: query
-        summary: Run SQL offline against a `.pftrace` with `--trace`; live Inspector query authority was removed.
+        summary: Run SQL offline against a `.pftrace` with required `--trace`.
         args:
           - name: sql
             kind: positional
-            required: false
+            required: true
             description: SQL query string
           - name: --trace
             kind: option
             required: true
-            description: Run the SQL offline against a flushed FILE.pftrace via trace_processor instead of the live inspector; returns trace_processor's native table
+            description: Run the SQL offline against a flushed FILE.pftrace via trace_processor; returns trace_processor's native table
           - name: --format
             kind: option
             required: false
-            description: Reserved for the live path; offline queries return the native table
+            description: Offline queries support only the native table format
       - name: doctor
-        summary: Report offline trace_processor readiness without contacting a legacy Inspector publication.
+        summary: Report offline trace_processor readiness.
       - name: fetch
         summary: Download + SHA-256-verify the pinned `trace_processor_shell` (Perfetto v57.2) into `$PULP_HOME`, so offline `query --trace` works zero-install. Idempotent; no-op when already present. `--json` emits `{version, platform, path, already_present}`.
       - name: open
