@@ -528,6 +528,11 @@ if(UNIX)
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_inject_claude_prefs_hook.sh)
     set_tests_properties(inject-claude-prefs-hook PROPERTIES TIMEOUT 15)
 
+    # Branch-independent continuity warning for old/superseded worktrees.
+    add_test(NAME inject-worktree-lineage-hook
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_inject_worktree_lineage_hook.sh)
+    set_tests_properties(inject-worktree-lineage-hook PROPERTIES TIMEOUT 15)
+
     # tool-registry-reminder.sh — the PostToolUse hook that catches an agent
     # hand-rolling a tool the registry already lists. Hermetic (synthetic tool
     # payloads). Asserts it fires on the real incident's signature and, just as

@@ -2,6 +2,11 @@
 
 Read `CLAUDE.md` before making any changes.
 
+Before changing files, run `tools/scripts/worktree_lineage.sh show --path .`.
+If the worktree is superseded, merged, or archived, follow its recorded
+successor/disposition instead of resuming it. If no status is recorded,
+classify the worktree before editing.
+
 ## Decisions contract (read before touching fleet/CI config)
 
 Settled build-system, CI, and release-automation decisions are recorded in
