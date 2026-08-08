@@ -12,7 +12,6 @@
 #pragma once
 
 #include <pulp/inspect/protocol.hpp>
-#include <pulp/inspect/publication_binding.hpp>
 #include <pulp/runtime/trace_session.hpp>
 
 #include <cstdint>
@@ -43,7 +42,7 @@ struct TracePublicationOwner {
 };
 
 /// Handles Trace.* protocol requests by driving pulp::runtime::Tracing.
-class TraceInspector : public InspectorPublicationBinding {
+class TraceInspector {
 public:
     TraceInspector() = default;
     ~TraceInspector();
@@ -52,9 +51,6 @@ public:
     TraceInspector& operator=(const TraceInspector&) = delete;
     TraceInspector(TraceInspector&&) = delete;
     TraceInspector& operator=(TraceInspector&&) = delete;
-
-    std::unique_ptr<InspectorPublicationLease> bind_publication(
-        const InspectorDiscoveryRecord& record) override;
 
     /// Bind process-global trace ownership to one authenticated control
     /// registration. Releasing the lease also stops an abandoned capture.
@@ -69,8 +65,7 @@ public:
     static bool owns_method(const std::string& method);
 
 private:
-    enum class OwnerKind { None, Publication, ControlRegistration };
-    class PublicationLease;
+    enum class OwnerKind { None, ControlRegistration };
     class OwnerLease;
     std::unique_ptr<TraceOwnerLease> bind_owner(OwnerKind kind);
     void release_owner(const std::shared_ptr<void>& owner_token) noexcept;

@@ -435,45 +435,10 @@ target_link_libraries(pulp-test-inspector-audit PRIVATE
 catch_discover_tests(pulp-test-inspector-audit
     PROPERTIES LABELS "inspect;control;main-thread;timeout")
 
-add_executable(pulp-test-inspector-server
-    test_inspector_server.cpp
-    unsafe_legacy_inspector_server.cpp)
-target_link_libraries(pulp-test-inspector-server PRIVATE
-    pulp::inspect-protocol pulp::events Catch2::Catch2WithMain)
-if(WIN32)
-    catch_discover_tests(pulp-test-inspector-server
-        PROPERTIES
-            ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1"
-            LABELS "windows-pr-quarantine")
-else()
-    catch_discover_tests(pulp-test-inspector-server
-        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
-endif()
-
-add_executable(pulp-test-inspector-discovery test_inspector_discovery.cpp)
-target_link_libraries(pulp-test-inspector-discovery PRIVATE
-    pulp::inspect-discovery
-    pulp::inspect-publication
-    Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-inspector-discovery)
-
-add_executable(
-    pulp-test-inspector-client
-    test_inspector_client.cpp
-    test_inspector_server_async_lifecycle.cpp
-    test_inspector_server_lifecycle.cpp
-    test_inspector_client_limits.cpp
-)
-target_link_libraries(pulp-test-inspector-client PRIVATE
-    pulp::inspect-client pulp::inspect-runtime Catch2::Catch2WithMain)
-target_include_directories(pulp-test-inspector-client PRIVATE
-    ${PROJECT_SOURCE_DIR}/inspect/src)
-catch_discover_tests(pulp-test-inspector-client)
-
 add_executable(pulp-test-inspector-value-channel-telemetry
     test_value_channel_telemetry_broker.cpp)
 target_link_libraries(pulp-test-inspector-value-channel-telemetry PRIVATE
-    pulp::inspect-telemetry pulp::inspect-client pulp::inspect-runtime
+    pulp::inspect-telemetry
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-value-channel-telemetry)
 
@@ -628,9 +593,6 @@ add_executable(pulp-test-inspector-stripped-artifact
     fixtures/inspector_stripped_artifact.cpp)
 target_link_libraries(pulp-test-inspector-stripped-artifact PRIVATE
     pulp::standalone)
-set(PULP_pulp-test-inspector-stripped-artifact_SHIP_INSPECTOR FALSE)
-set(PULP_pulp-test-inspector-stripped-artifact_SHIP_INSPECTOR_RUNTIME_EVAL FALSE)
-set(PULP_pulp-test-inspector-stripped-artifact_INSPECTOR_CAPABILITIES "")
 set(PULP_pulp-test-inspector-stripped-artifact_INSPECTOR_MANIFEST_DIRECTORY
     "${CMAKE_BINARY_DIR}/pulp-inspector-test-manifests")
 _pulp_configure_inspector_shipping(

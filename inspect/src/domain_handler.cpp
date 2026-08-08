@@ -36,16 +36,6 @@ void DomainHandler::set_trace_inspector(
     trace_binding_ = std::move(trace);
 }
 
-std::vector<InspectorPublicationBindingRegistration>
-DomainHandler::publication_bindings() const {
-    if (!trace_binding_)
-        return {};
-    return {{
-        InspectorCapability::TraceSessionControl,
-        trace_binding_,
-    }};
-}
-
 void DomainHandler::set_config(InspectorConfig config) {
     config_ = std::move(config);
     // Keep the overlay's `J`-hotkey config in lockstep with the

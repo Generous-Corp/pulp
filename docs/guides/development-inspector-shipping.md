@@ -64,7 +64,8 @@ acknowledgement keyword:
 ```
 
 The legacy `SHIP_INSPECTOR`, `SHIP_INSPECTOR_RUNTIME_EVAL`, and
-`INSPECTOR_CAPABILITIES` spellings remain a temporary compatibility projection.
+`INSPECTOR_CAPABILITIES` spellings have been removed. Use the canonical control
+profile and capability declarations.
 They cannot be mixed with `CONTROL_*`; new projects should use only the
 canonical form.
 

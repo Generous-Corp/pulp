@@ -148,7 +148,7 @@ ScriptedUiSession::~ScriptedUiSession() {
     // Detach so a blocked off-thread evaluate wakes with a "detached" result
     // and no later pump touches the engine being destroyed. NOTE: this wakes a
     // *blocked* waiter but does not join a background thread mid-interrupt()/
-    // capabilities(); a host that wired the bridge to an InspectorServer must
+    // capabilities(); a host that wired the bridge to a control router must
     // stop that server's reader thread, clear DomainHandler's borrowed runtime
     // evaluator, and destroy the evaluator BEFORE destroying this session.
     inspector_bridge_.detach();

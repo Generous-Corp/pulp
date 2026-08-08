@@ -426,56 +426,6 @@ target_compile_definitions(pulp-standalone PRIVATE PULP_ENABLE_INSPECTOR=0)
 # returns after that foundation in production-stripped configurations.
 add_subdirectory(inspect)
 
-# Inspector-capable standalone archives are optional SDK components. The
-# ordinary `pulp::standalone` target above is deliberately inspector-free;
-# pulp_add_plugin selects one of these only after an exact shipping declaration.
-if(PULP_ENABLE_INSPECTOR AND TARGET pulp::inspect AND NOT IOS)
-    set(_pulp_standalone_inspector_sources
-        ${_pulp_standalone_sources}
-        core/format/src/standalone_inspector.cpp
-        core/format/src/standalone_inspector_capture.cpp
-        core/format/src/standalone_inspector_policy.cpp
-        core/format/src/standalone_runtime_eval_dispatch.cpp)
-    add_library(pulp-standalone-inspector STATIC
-        ${_pulp_standalone_inspector_sources})
-    add_library(pulp::standalone-inspector ALIAS pulp-standalone-inspector)
-    _pulp_configure_standalone_target(pulp-standalone-inspector)
-    target_link_libraries(pulp-standalone-inspector PRIVATE pulp::inspect)
-    target_compile_definitions(pulp-standalone-inspector PRIVATE
-        PULP_ENABLE_INSPECTOR=1 PULP_HAS_INSPECT=1
-        PULP_STANDALONE_RUNTIME_EVAL_COMPONENT=0)
-
-    add_library(pulp-standalone-inspector-runtime-eval STATIC
-        ${_pulp_standalone_inspector_sources})
-    add_library(pulp::standalone-inspector-runtime-eval ALIAS
-        pulp-standalone-inspector-runtime-eval)
-    _pulp_configure_standalone_target(pulp-standalone-inspector-runtime-eval)
-    target_link_libraries(pulp-standalone-inspector-runtime-eval PRIVATE
-        pulp::inspect pulp::inspect-runtime-eval)
-    target_compile_definitions(pulp-standalone-inspector-runtime-eval PRIVATE
-        PULP_ENABLE_INSPECTOR=1 PULP_HAS_INSPECT=1
-        PULP_STANDALONE_RUNTIME_EVAL_COMPONENT=1)
-
-    get_target_property(_ordinary_standalone_links pulp-standalone LINK_LIBRARIES)
-    get_target_property(_inspector_standalone_links pulp-standalone-inspector LINK_LIBRARIES)
-    get_target_property(_eval_standalone_links
-        pulp-standalone-inspector-runtime-eval LINK_LIBRARIES)
-    if("pulp::inspect" IN_LIST _ordinary_standalone_links OR
-       "pulp::inspect-runtime-eval" IN_LIST _ordinary_standalone_links)
-        message(FATAL_ERROR "ordinary pulp::standalone inherited an inspector component")
-    endif()
-    if("pulp::inspect-runtime-eval" IN_LIST _inspector_standalone_links)
-        message(FATAL_ERROR "generic inspector standalone inherited runtime.eval")
-    endif()
-    if(NOT "pulp::inspect" IN_LIST _inspector_standalone_links OR
-       NOT "pulp::inspect-runtime-eval" IN_LIST _eval_standalone_links)
-        message(FATAL_ERROR "declared standalone inspector component graph is incomplete")
-    endif()
-    unset(_ordinary_standalone_links)
-    unset(_inspector_standalone_links)
-    unset(_eval_standalone_links)
-    unset(_pulp_standalone_inspector_sources)
-endif()
 unset(_pulp_standalone_sources)
 add_subdirectory(ship)
 # tools/audio (offline Audio Doctor CLI) is a dev tool — only when top-level.

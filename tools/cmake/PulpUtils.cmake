@@ -24,10 +24,6 @@ _pulp_pick_target(_PULP_VIEW_TARGET Pulp::view pulp::view)
 _pulp_pick_target(_PULP_AUDIO_TARGET Pulp::audio pulp::audio)
 _pulp_pick_target(_PULP_MIDI_TARGET Pulp::midi pulp::midi)
 _pulp_pick_target(_PULP_STANDALONE_TARGET Pulp::standalone pulp::standalone)
-_pulp_pick_target(_PULP_STANDALONE_INSPECTOR_TARGET
-    Pulp::standalone-inspector pulp::standalone-inspector)
-_pulp_pick_target(_PULP_STANDALONE_INSPECTOR_RUNTIME_EVAL_TARGET
-    Pulp::standalone-inspector-runtime-eval pulp::standalone-inspector-runtime-eval)
 include("${CMAKE_CURRENT_LIST_DIR}/PulpInspectorShipping.cmake")
 _pulp_pick_target(_PULP_VST3_SDK_TARGET Pulp::vst3-sdk vst3-sdk)
 _pulp_pick_target(_PULP_CLAP_TARGET Pulp::clap clap)
@@ -670,12 +666,10 @@ function(pulp_add_plugin target)
     set(PULP_${target}_CONTENT_KINDS "${PLUGIN_CONTENT_KINDS}" CACHE INTERNAL "")
     set(PULP_${target}_CONTENT_HOT_RELOAD_KINDS "${PLUGIN_CONTENT_HOT_RELOAD_KINDS}" CACHE INTERNAL "")
     set(PULP_${target}_CONTENT_MANUAL_RESCAN_KINDS "${PLUGIN_CONTENT_MANUAL_RESCAN_KINDS}" CACHE INTERNAL "")
-    if((PLUGIN_CONTROL_PROFILE OR PLUGIN_CONTROL_CAPABILITIES OR
-        PLUGIN_ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL) AND
-       (PLUGIN_SHIP_INSPECTOR OR PLUGIN_SHIP_INSPECTOR_RUNTIME_EVAL OR
-        PLUGIN_INSPECTOR_CAPABILITIES))
+    if(PLUGIN_SHIP_INSPECTOR OR PLUGIN_SHIP_INSPECTOR_RUNTIME_EVAL OR
+       PLUGIN_INSPECTOR_CAPABILITIES)
         message(FATAL_ERROR
-            "pulp_add_plugin(${target}): CONTROL_* declarations cannot be mixed with legacy SHIP_INSPECTOR/INSPECTOR_CAPABILITIES declarations")
+            "pulp_add_plugin(${target}): SHIP_INSPECTOR and INSPECTOR_CAPABILITIES were removed; use CONTROL_PROFILE and CONTROL_CAPABILITIES")
     endif()
 
     if(PLUGIN_CONTROL_CAPABILITIES AND NOT PLUGIN_CONTROL_PROFILE)
@@ -694,14 +688,6 @@ function(pulp_add_plugin target)
         set(_pulp_control_profile "${PLUGIN_CONTROL_PROFILE}")
         set(_pulp_control_capabilities "${PLUGIN_CONTROL_CAPABILITIES}")
         set(_pulp_control_eval_ack "${PLUGIN_ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL}")
-    elseif(PLUGIN_SHIP_INSPECTOR_RUNTIME_EVAL)
-        set(_pulp_control_profile "research-unsafe")
-        set(_pulp_control_capabilities "")
-        set(_pulp_control_eval_ack "")
-    elseif(PLUGIN_SHIP_INSPECTOR)
-        set(_pulp_control_profile "developer-local")
-        set(_pulp_control_capabilities "")
-        set(_pulp_control_eval_ack "")
     else()
         set(_pulp_control_profile "production-stripped")
         set(_pulp_control_capabilities "")
@@ -711,53 +697,11 @@ function(pulp_add_plugin target)
         "${_pulp_control_profile}"
         "${_pulp_control_capabilities}"
         "${_pulp_control_eval_ack}")
-    if(PLUGIN_INSPECTOR_CAPABILITIES AND NOT PLUGIN_SHIP_INSPECTOR)
-        message(FATAL_ERROR
-            "pulp_add_plugin(${target}): INSPECTOR_CAPABILITIES requires the deliberate SHIP_INSPECTOR acknowledgement")
-    endif()
-    if(PLUGIN_SHIP_INSPECTOR AND NOT PLUGIN_INSPECTOR_CAPABILITIES)
-        message(FATAL_ERROR
-            "pulp_add_plugin(${target}): SHIP_INSPECTOR requires an explicit INSPECTOR_CAPABILITIES list")
-    endif()
-    if((PLUGIN_SHIP_INSPECTOR OR PLUGIN_CONTROL_CAPABILITIES) AND
+    if(PLUGIN_CONTROL_CAPABILITIES AND
        NOT "Standalone" IN_LIST PLUGIN_FORMATS)
         message(FATAL_ERROR
             "pulp_add_plugin(${target}): control endpoints are supported only for Standalone targets")
     endif()
-    if("runtime.eval" IN_LIST PLUGIN_INSPECTOR_CAPABILITIES AND
-       NOT PLUGIN_SHIP_INSPECTOR_RUNTIME_EVAL)
-        message(FATAL_ERROR
-            "pulp_add_plugin(${target}): runtime.eval requires the separate unsafe SHIP_INSPECTOR_RUNTIME_EVAL acknowledgement")
-    endif()
-    if(PLUGIN_SHIP_INSPECTOR_RUNTIME_EVAL AND
-       NOT "runtime.eval" IN_LIST PLUGIN_INSPECTOR_CAPABILITIES)
-        message(FATAL_ERROR
-            "pulp_add_plugin(${target}): SHIP_INSPECTOR_RUNTIME_EVAL does not imply runtime.eval; declare that capability explicitly")
-    endif()
-    set(_inspector_controller_capabilities
-        state.write test.input authoring.tweaks runtime.eval)
-    foreach(_inspector_capability IN LISTS PLUGIN_INSPECTOR_CAPABILITIES)
-        if(_inspector_capability IN_LIST _inspector_controller_capabilities AND
-           NOT "session.control" IN_LIST PLUGIN_INSPECTOR_CAPABILITIES)
-            message(FATAL_ERROR
-                "pulp_add_plugin(${target}): inspector mutation capability '${_inspector_capability}' requires session.control")
-        endif()
-    endforeach()
-    unset(_inspector_capability)
-    unset(_inspector_controller_capabilities)
-    if(PLUGIN_CONTROL_CAPABILITIES)
-        set(_pulp_control_endpoint TRUE)
-    else()
-        set(_pulp_control_endpoint "${PLUGIN_SHIP_INSPECTOR}")
-    endif()
-    if(PLUGIN_ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL)
-        set(_pulp_control_eval TRUE)
-    else()
-        set(_pulp_control_eval "${PLUGIN_SHIP_INSPECTOR_RUNTIME_EVAL}")
-    endif()
-    set(PULP_${target}_SHIP_INSPECTOR "${_pulp_control_endpoint}" CACHE INTERNAL "" FORCE)
-    set(PULP_${target}_SHIP_INSPECTOR_RUNTIME_EVAL "${_pulp_control_eval}" CACHE INTERNAL "" FORCE)
-    set(PULP_${target}_INSPECTOR_CAPABILITIES "${PLUGIN_INSPECTOR_CAPABILITIES}" CACHE INTERNAL "" FORCE)
     _pulp_configure_inspector_shipping(
         ${target} "${PLUGIN_BUNDLE_ID}" "${PLUGIN_PLUGIN_NAME}")
 

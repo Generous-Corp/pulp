@@ -188,28 +188,17 @@ REQUIRED_CLAIMS = {
 REQUIRED_BUILD_CONTRACTS = {
     "CMakeLists.txt": (
         "add_subdirectory(inspect)",
-        "if(PULP_ENABLE_INSPECTOR AND TARGET pulp::inspect AND NOT IOS)",
         "target_compile_definitions(pulp-standalone PRIVATE PULP_ENABLE_INSPECTOR=0)",
-        "target_link_libraries(pulp-standalone-inspector PRIVATE pulp::inspect)",
-        "pulp-standalone-inspector-runtime-eval PRIVATE\n        pulp::inspect pulp::inspect-runtime-eval",
     ),
     "inspect/CMakeLists.txt": (
         "if(NOT PULP_ENABLE_INSPECTOR)\n    return()\nendif()",
         "if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)",
-        "src/discovery_common.cpp",
-        "src/discovery_paths.cpp",
-        "src/discovery_security.cpp",
-        "pulp::inspect-discovery-support",
-        "pulp-inspect-discovery-support PRIVATE Advapi32",
-        "add_library(pulp-inspect-discovery src/discovery_reader.cpp)",
-        "add_library(pulp-inspect-publication",
-        "src/discovery_publisher.cpp",
-        "src/discovery_security_write.cpp",
-        "pulp::inspect-publication",
+        "src/control_inspector_client.cpp",
+        "src/control_broker.cpp",
         "src/trace_inspector.cpp",
     ),
     "tools/cmake/PulpInstallRules.cmake": (
-        "inspect/include/pulp/inspect/publication_binding.hpp",
+        "inspect/include/pulp/inspect/control_inspector_client.hpp",
         "inspect/include/pulp/inspect/trace_inspector.hpp",
     ),
     "tools/cmake/PulpInspectorShipping.cmake": (
@@ -236,11 +225,16 @@ REQUIRED_BUILD_CONTRACTS = {
     ),
 }
 
-SECURITY_IMPLEMENTATION_PATHS = (
+REMOVED_AUTHORITY_PATHS = (
     "inspect/src/client.cpp",
     "inspect/src/inspector_server.cpp",
     "inspect/src/discovery_reader.cpp",
-    "experimental/pulp-rs/src/cmd/inspector.rs",
+    "inspect/src/discovery_publisher.cpp",
+    "inspect/include/pulp/inspect/inspector_server.hpp",
+    "inspect/include/pulp/inspect/discovery.hpp",
+    "inspect/include/pulp/inspect/discovery_publisher.hpp",
+    "core/format/src/standalone_inspector.cpp",
+    "core/format/include/pulp/format/detail/standalone_inspector.hpp",
 )
 
 
@@ -260,92 +254,24 @@ def _contains_in_order(text: str, fragments: tuple[str, ...]) -> bool:
 
 
 def security_implementation_errors(root: pathlib.Path) -> list[str]:
-    """Check executable security invariants in production implementations."""
-    sources = {
-        path: _without_source_comments((root / path).read_text(encoding="utf-8"))
-        for path in SECURITY_IMPLEMENTATION_PATHS
-    }
-    client = sources["inspect/src/client.cpp"]
-    server = sources["inspect/src/inspector_server.cpp"]
-    discovery = sources["inspect/src/discovery_reader.cpp"]
-    rust = sources["experimental/pulp-rs/src/cmd/inspector.rs"]
+    """Prove the retired standalone Inspector authority cannot be rebuilt."""
     errors: list[str] = []
-
-    if not re.search(
-        r"challenge\.session_id\s*!=\s*record\.session_id\s*\|\|\s*"
-        r"challenge\.instance_id\s*!=\s*record\.instance_id\s*\|\|\s*"
-        r"challenge\.publication_id\s*!=\s*record\.publication_id",
-        client,
+    for relative_path in REMOVED_AUTHORITY_PATHS:
+        if (root / relative_path).exists():
+            errors.append(f"retired Inspector authority path still exists: {relative_path}")
+    client_header = (root / "inspect/include/pulp/inspect/client.hpp").read_text(
+        encoding="utf-8"
+    )
+    if "class InspectorClient" in client_header or "request_inspector(" in client_header:
+        errors.append("installed client header still exposes the raw Inspector client")
+    inspect_cmake = (root / "inspect/CMakeLists.txt").read_text(encoding="utf-8")
+    for retired_target in (
+        "pulp-inspect-discovery-support",
+        "pulp-inspect-discovery",
+        "pulp-inspect-publication",
     ):
-        errors.append("client authentication no longer binds the exact publication")
-    if "verify_inspector_server_auth_proof(" not in client:
-        errors.append("client authentication no longer verifies the server proof")
-    if not re.search(
-        r"if\s*\(!event_state->authenticated\).*?"
-        r"event_state->pre_auth_events\.push_back",
-        client,
-        re.DOTALL,
-    ):
-        errors.append("client events are no longer quarantined before authentication")
-
-    if not re.search(
-        r"if\s*\(!authenticated\)\s*\{.*?"
-        r"request\.method\s*!=\s*methods::kSessionAuthenticate",
-        server,
-        re.DOTALL,
-    ):
-        errors.append("server accepts requests before authentication")
-    if not _contains_in_order(
-        server,
-        (
-            "found->second->verifier->authenticate(proof)",
-            "found->second->verifier.reset()",
-            "found->second->authenticated =",
-        ),
-    ):
-        errors.append("server authentication verifier can be replayed")
-    if not _contains_in_order(
-        server,
-        (
-            "session->suspend_dispatches()",
-            "server.stop()",
-            "client->outbound->shutdown()",
-            "cleanup_cv.wait(",
-            "publication.clear_after_endpoint_stop()",
-            "secure_zero_memory(token.data(), token.size())",
-        ),
-    ):
-        errors.append("server teardown no longer drains clients before retirement")
-
-    if not re.search(
-        r"current->session_id\s*!=\s*record\.session_id\s*\|\|\s*"
-        r"current->instance_id\s*!=\s*record\.instance_id\s*\|\|\s*"
-        r"current->publication_id\s*!=\s*record\.publication_id",
-        discovery,
-    ):
-        errors.append("credential reread no longer rejects stale publication identity")
-    if not re.search(
-        r"record\.session_id\s*!=\s*session_id\).*?"
-        r"record\.instance_id\s*!=\s*instance_id\).*?"
-        r"record\.publication_id\s*!=\s*publication_id",
-        discovery,
-        re.DOTALL,
-    ):
-        errors.append("discovery selection no longer matches the complete identity")
-
-    if "is_some_and(|selection| !selection.publication_id.is_empty())" not in rust:
-        errors.append("Rust mutation routing no longer requires a publication id")
-    if not _contains_in_order(
-        rust,
-        (
-            'value.get("sessionId")?.as_str()?',
-            'value.get("instanceId")?.as_str()?',
-            'value.get("publicationId")?.as_str()?',
-            "!valid_session_identity(publication_id)",
-        ),
-    ):
-        errors.append("Rust capability discovery no longer validates exact identity")
-
+        if retired_target in inspect_cmake:
+            errors.append(f"retired Inspector authority target remains: {retired_target}")
     return errors
 
 def check_root(
@@ -479,23 +405,8 @@ def check_root(
 
     errors.extend(security_implementation_errors(root))
 
-    reader_header = (
-        root / "inspect/include/pulp/inspect/discovery.hpp"
-    ).read_text(encoding="utf-8")
-    publisher_header = (
-        root / "inspect/include/pulp/inspect/discovery_publisher.hpp"
-    ).read_text(encoding="utf-8")
-    if "InspectorDiscoveryPublisher" in reader_header:
-        errors.append(
-            "read-only discovery header exposes publisher authority"
-        )
-    if "class InspectorDiscoveryPublisher" not in publisher_header:
-        errors.append(
-            "publisher authority header omits InspectorDiscoveryPublisher"
-        )
-
     inspect_cmake = (root / "inspect/CMakeLists.txt").read_text(encoding="utf-8")
-    for target in ("pulp-inspect-publication", "pulp-inspect-runtime"):
+    for target in ("pulp-inspect-runtime",):
         match = re.search(
             rf"target_link_libraries\(\s*{re.escape(target)}\b(.*?)\)",
             inspect_cmake,

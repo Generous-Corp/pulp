@@ -228,28 +228,26 @@ TEST_CASE("legacy inspector adapter error detail rejects malformed compatibility
     }));
 }
 
-TEST_CASE("trace ownership stays exclusive across publication and control bindings",
+TEST_CASE("trace ownership stays exclusive across control bindings",
           "[inspect][control][trace][lifetime]") {
     auto trace = std::make_shared<TraceInspector>();
-    InspectorDiscoveryRecord record;
-    record.session_id = "session-a";
-    record.instance_id = "instance-a";
-    record.publication_id = "publication-a";
-
-    auto publication = trace->bind_publication(record);
-    REQUIRE(publication);
-    CHECK_FALSE(ControlTraceSessionExecutor::create({
-        .main_thread_rpc = inline_rpc(),
-        .trace_inspector = trace,
-        .registration_id = ControlRegistrationId{"registration-a"},
-    }));
-
-    publication.reset();
-    auto control = ControlTraceSessionExecutor::create({
+    auto first = ControlTraceSessionExecutor::create({
         .main_thread_rpc = inline_rpc(),
         .trace_inspector = trace,
         .registration_id = ControlRegistrationId{"registration-a"},
     });
-    REQUIRE(control);
-    CHECK_FALSE(trace->bind_publication(record));
+    REQUIRE(first);
+    CHECK_FALSE(ControlTraceSessionExecutor::create({
+        .main_thread_rpc = inline_rpc(),
+        .trace_inspector = trace,
+        .registration_id = ControlRegistrationId{"registration-b"},
+    }));
+
+    first.reset();
+    auto second = ControlTraceSessionExecutor::create({
+        .main_thread_rpc = inline_rpc(),
+        .trace_inspector = trace,
+        .registration_id = ControlRegistrationId{"registration-b"},
+    });
+    REQUIRE(second);
 }
