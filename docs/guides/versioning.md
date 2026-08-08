@@ -392,12 +392,23 @@ reddening `main` (previously only the `os-windows` leg was spared, so a slow
 macOS/linux run broke `main`). A genuine build failure — no budget hit, no
 report — still fails loudly. The suite runs ctest in parallel with a per-test
 `--timeout` (`scripts/run_coverage.sh`) so it finishes well under budget; the
-`coverage-staleness-check` watchdog is the alarm if coverage genuinely stops
+receipt-aware upload watchdog is the alarm if coverage genuinely stops
 flowing. Report verification and Codecov transport are separate contracts:
 missing or structurally empty reports fail the producing leg, while the shared
 upload action records transport failure without making Codecov availability a
-merge prerequisite. `coverage-upload-watchdog.yml` counts a main run as fresh
-only when the action emitted both Linux and macOS upload receipts.
+merge prerequisite. Failed native/Python suites retain partial artifacts for
+diagnosis but cannot upload or mint freshness receipts; either lane can still
+upload a valid report when the other verifier fails.
+`coverage-upload-watchdog.yml` counts a main run as fresh
+only when the action emitted exact, non-expired Linux, macOS, and Python-tools
+receipts for that run's commit. Upload-axis Codecov flags do not carry forward,
+so a failed current lane cannot masquerade as fresh coverage from an older SHA.
+The native graph retains example-driven tests that exercise first-party core
+code; hosted macOS reclaims only inactive Xcodes and bounds linker parallelism
+to avoid ENOSPC without shrinking the measured test surface.
+The native suite's 90-minute internal budget reserves the final hour of the
+150-minute job for setup, report generation, side-language coverage, artifacts,
+and receipts, avoiding a hard job cancellation after a nominal budget hit.
 
 ---
 

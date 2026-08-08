@@ -2,6 +2,7 @@
 #include <catch2/catch_approx.hpp>
 #include <pulp/format/host_parameter_edit.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/format/detail/vst3_bus_layout.hpp>
 #include <pulp/format/vst3_adapter.hpp>
 #include <pulp/format/vst3_plug_view.hpp>
 #include <pulp/view/text_editor.hpp>
@@ -174,7 +175,9 @@ struct TestVst3Config {
     // edge is observable without flagging on every block.
     bool flag_latency_in_process = false;
     bool flag_tail_in_process = false;
-    bool veto_bus_layout = false;  // is_bus_layout_supported() always returns false
+    // Reject host negotiation after allowing the adapter's mandatory initial
+    // descriptor-layout validation.
+    bool veto_bus_layout = false;
     bool capture_param_event_vector = true;
     int latency_samples = 0;
     // When set, declare a real plug-in parameter whose ID lands inside the
@@ -203,8 +206,10 @@ public:
 
     bool is_bus_layout_supported(const BusesLayout& layout) const override {
         // Simulate a processor that enforces a layout contract (e.g. linked
-        // main/sidechain counts). When set, EVERY proposal is vetoed.
-        if (config_.veto_bus_layout) return false;
+        // main/sidechain counts). Initialization validates the advertised
+        // default first; when enabled, subsequent host proposals are vetoed.
+        if (config_.veto_bus_layout && bus_layout_check_count_++ > 0)
+            return false;
         return Processor::is_bus_layout_supported(layout);
     }
 
@@ -320,6 +325,7 @@ public:
 
 private:
     TestVst3Config config_;
+    mutable int bus_layout_check_count_ = 0;
 };
 
 TestVst3Processor* TestVst3Processor::g_last_processor = nullptr;
@@ -2300,9 +2306,9 @@ TEST_CASE("VST3 routes the full aux channel count negotiated by setBusArrangemen
 
     REQUIRE(proc->wrote_aux);
     // The processor received BOTH negotiated channels (not clamped to the mono
-    // descriptor default), and declared_channels still reports the descriptor.
+    // descriptor default), and the active declared layout matches negotiation.
     REQUIRE(proc->aux_channels == 2);
-    REQUIRE(proc->aux_declared_seen == 1);
+    REQUIRE(proc->aux_declared_seen == 2);
     for (int i = 0; i < kFrames; ++i) {
         REQUIRE_THAT(aux_l[i], WithinAbs(Vst3MultiOutProcessor::kAuxValue, 1e-6f));
         REQUIRE_THAT(aux_r[i], WithinAbs(Vst3MultiOutProcessor::kAuxValue, 1e-6f));
@@ -3384,7 +3390,7 @@ TEST_CASE("VST3 honors a processor mono/stereo bus-layout veto even with the qui
           "[vst3][host-quirks][p3][bus-arrangement]") {
     pulp::format::set_host_quirk_policy(pulp::format::QuirkFilter{});  // quirk on
     TestVst3Config config;
-    config.veto_bus_layout = true;  // processor rejects every proposed layout
+    config.veto_bus_layout = true;  // processor rejects host-proposed layouts
     reset_test_processor(config);
     HostApp host_app;
     pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
@@ -3405,6 +3411,8 @@ TEST_CASE("VST3 resolves only descriptor-declared bus layouts",
     config.descriptor.supported_bus_layouts = {
         {.inputs = {2}, .outputs = {2}, .name = "Stereo"},
         {.inputs = {1}, .outputs = {1}, .name = "Mono"},
+        {.inputs = {6}, .outputs = {6}, .name = "5.1"},
+        {.inputs = {8}, .outputs = {8}, .name = "7.1"},
     };
     reset_test_processor(config);
     HostApp host_app;
@@ -3413,16 +3421,279 @@ TEST_CASE("VST3 resolves only descriptor-declared bus layouts",
 
     Steinberg::Vst::SpeakerArrangement stereo[1] = {SpeakerArr::kStereo};
     Steinberg::Vst::SpeakerArrangement mono[1] = {SpeakerArr::kMono};
-    Steinberg::Vst::SpeakerArrangement surround[1] = {SpeakerArr::k51};
+    Steinberg::Vst::SpeakerArrangement surround_51[1] = {SpeakerArr::k51};
+    Steinberg::Vst::SpeakerArrangement surround_71[1] = {SpeakerArr::k71Music};
+    Steinberg::Vst::SpeakerArrangement quad[1] = {SpeakerArr::k40Music};
     REQUIRE(processor.setBusArrangements(stereo, 1, stereo, 1) ==
             Steinberg::kResultTrue);
     REQUIRE(processor.setBusArrangements(mono, 1, mono, 1) ==
             Steinberg::kResultTrue);
     REQUIRE(processor.setBusArrangements(mono, 1, stereo, 1) ==
             Steinberg::kResultFalse);
-    REQUIRE(processor.setBusArrangements(surround, 1, surround, 1) ==
+    REQUIRE(processor.setBusArrangements(surround_51, 1, surround_51, 1) ==
+            Steinberg::kResultTrue);
+    REQUIRE(processor.setBusArrangements(surround_71, 1, surround_71, 1) ==
+            Steinberg::kResultTrue);
+    REQUIRE(processor.setBusArrangements(quad, 1, quad, 1) ==
             Steinberg::kResultFalse);
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 advertises canonical speaker arrangements for common bus widths",
+          "[vst3][bus-layout][initialization]") {
+    TestVst3Config config;
+    config.descriptor.input_buses = {{"5.1 In", 6, false}};
+    config.descriptor.output_buses = {{"7.1 Out", 8, false}};
+    config.descriptor.supported_bus_layouts = {
+        {.inputs = {6}, .outputs = {8}, .name = "5.1 to 7.1"},
+    };
+    reset_test_processor(config);
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    Steinberg::Vst::SpeakerArrangement input = SpeakerArr::kEmpty;
+    Steinberg::Vst::SpeakerArrangement output = SpeakerArr::kEmpty;
+    REQUIRE(processor.getBusArrangement(Steinberg::Vst::kInput, 0, input) ==
+            Steinberg::kResultTrue);
+    REQUIRE(processor.getBusArrangement(Steinberg::Vst::kOutput, 0, output) ==
+            Steinberg::kResultTrue);
+    REQUIRE(input == SpeakerArr::k51);
+    REQUIRE(output == SpeakerArr::k71Music);
+
+    REQUIRE(processor.setBusArrangements(&input, 1, &output, 1) ==
+            Steinberg::kResultTrue);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 64;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+    auto* test_processor = TestVst3Processor::g_last_processor;
+    REQUIRE(test_processor != nullptr);
+    REQUIRE(test_processor->last_prepare.input_channels == 6);
+    REQUIRE(test_processor->last_prepare.output_channels == 8);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 advertises the first explicit layout as its initial configuration",
+          "[vst3][bus-layout][initialization]") {
+    TestVst3Config config;
+    config.descriptor.supported_bus_layouts = {
+        {.inputs = {1}, .outputs = {1}, .name = "Mono"},
+        {.inputs = {6}, .outputs = {6}, .name = "5.1"},
+    };
+    reset_test_processor(config);
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    Steinberg::Vst::SpeakerArrangement input = SpeakerArr::kEmpty;
+    Steinberg::Vst::SpeakerArrangement output = SpeakerArr::kEmpty;
+    REQUIRE(processor.getBusArrangement(Steinberg::Vst::kInput, 0, input) ==
+            Steinberg::kResultTrue);
+    REQUIRE(processor.getBusArrangement(Steinberg::Vst::kOutput, 0, output) ==
+            Steinberg::kResultTrue);
+    REQUIRE(input == SpeakerArr::kMono);
+    REQUIRE(output == SpeakerArr::kMono);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 does not advertise a default surround layout the Processor rejects",
+          "[vst3][bus-layout][initialization][veto]") {
+    TestVst3Config config;
+    config.descriptor.input_buses = {{"5.1 In", 6, false}};
+    config.descriptor.output_buses = {{"5.1 Out", 6, false}};
+    reset_test_processor(config);
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultFalse);
+}
+
+TEST_CASE("VST3 routes every channel of a widened native sidechain",
+          "[vst3][bus-layout][sidechain][f64]") {
+    TestVst3Config config;
+    config.descriptor.input_buses = {
+        {"Main In", 2, false},
+        {"Sidechain", 2, true},
+    };
+    config.descriptor.output_buses = {{"Main Out", 2, false}};
+    config.descriptor.supports_f64_audio = true;
+    config.descriptor.supported_bus_layouts = {
+        {.inputs = {2, 6}, .outputs = {2}, .name = "Stereo plus 5.1 sidechain"},
+    };
+    reset_test_processor(config);
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    Steinberg::Vst::SpeakerArrangement inputs[2] = {
+        SpeakerArr::kStereo,
+        SpeakerArr::k51,
+    };
+    Steinberg::Vst::SpeakerArrangement output = SpeakerArr::kStereo;
+    REQUIRE(processor.setBusArrangements(inputs, 2, &output, 1) ==
+            Steinberg::kResultTrue);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample64;
+    setup.maxSamplesPerBlock = 8;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+
+    constexpr int kFrames = 8;
+    std::array<double, kFrames> main_l{}, main_r{}, out_l{}, out_r{};
+    std::array<std::array<double, kFrames>, 6> sidechain{};
+    double* main_inputs[2] = {main_l.data(), main_r.data()};
+    double* sidechain_inputs[6]{};
+    for (std::size_t ch = 0; ch < sidechain.size(); ++ch) {
+        sidechain[ch].fill(static_cast<double>(ch + 1));
+        sidechain_inputs[ch] = sidechain[ch].data();
+    }
+    double* outputs[2] = {out_l.data(), out_r.data()};
+
+    Steinberg::Vst::AudioBusBuffers audio_inputs[2]{};
+    audio_inputs[0].numChannels = 2;
+    audio_inputs[0].channelBuffers64 = main_inputs;
+    audio_inputs[1].numChannels = 6;
+    audio_inputs[1].channelBuffers64 = sidechain_inputs;
+    Steinberg::Vst::AudioBusBuffers audio_output{};
+    audio_output.numChannels = 2;
+    audio_output.channelBuffers64 = outputs;
+
+    Steinberg::Vst::ProcessData data{};
+    data.symbolicSampleSize = Steinberg::Vst::kSample64;
+    data.numSamples = kFrames;
+    data.numInputs = 2;
+    data.numOutputs = 1;
+    data.inputs = audio_inputs;
+    data.outputs = &audio_output;
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+
+    auto* test_processor = TestVst3Processor::g_last_processor;
+    REQUIRE(test_processor != nullptr);
+    REQUIRE(test_processor->last_sidechain_channels == 6);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 clamps an accommodated sidechain to its declared safe width",
+          "[vst3][host-quirks][bus-layout][sidechain][f64]") {
+    pulp::format::set_host_quirk_policy(pulp::format::QuirkFilter{});
+    TestVst3Config config;
+    config.descriptor.input_buses = {
+        {"Main In", 2, false},
+        {"Sidechain", 2, true},
+    };
+    config.descriptor.output_buses = {{"Main Out", 2, false}};
+    reset_test_processor(config);
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    Steinberg::Vst::SpeakerArrangement inputs[2] = {
+        SpeakerArr::kStereo,
+        SpeakerArr::k51,
+    };
+    Steinberg::Vst::SpeakerArrangement output = SpeakerArr::kStereo;
+    REQUIRE(processor.setBusArrangements(inputs, 2, &output, 1) ==
+            Steinberg::kResultTrue);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample64;
+    setup.maxSamplesPerBlock = 8;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+
+    constexpr int kFrames = 8;
+    std::array<double, kFrames> main_l{}, main_r{}, out_l{}, out_r{};
+    std::array<std::array<double, kFrames>, 6> sidechain{};
+    double* main_inputs[2] = {main_l.data(), main_r.data()};
+    double* sidechain_inputs[6]{};
+    for (std::size_t ch = 0; ch < sidechain.size(); ++ch) {
+        sidechain_inputs[ch] = sidechain[ch].data();
+    }
+    double* outputs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers audio_inputs[2]{};
+    audio_inputs[0].numChannels = 2;
+    audio_inputs[0].channelBuffers64 = main_inputs;
+    audio_inputs[1].numChannels = 6;
+    audio_inputs[1].channelBuffers64 = sidechain_inputs;
+    Steinberg::Vst::AudioBusBuffers audio_output{};
+    audio_output.numChannels = 2;
+    audio_output.channelBuffers64 = outputs;
+    Steinberg::Vst::ProcessData data{};
+    data.symbolicSampleSize = Steinberg::Vst::kSample64;
+    data.numSamples = kFrames;
+    data.numInputs = 2;
+    data.numOutputs = 1;
+    data.inputs = audio_inputs;
+    data.outputs = &audio_output;
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+
+    auto* test_processor = TestVst3Processor::g_last_processor;
+    REQUIRE(test_processor != nullptr);
+    REQUIRE(test_processor->last_sidechain_channels == 2);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+    pulp::format::set_host_quirk_policy(std::nullopt);
+}
+
+TEST_CASE("VST3 preserves valid zero-channel bus descriptors",
+          "[vst3][bus-layout][initialization]") {
+    TestVst3Config config;
+    config.descriptor.input_buses = {{"Empty In", 0, false}};
+    config.descriptor.output_buses = {{"Main Out", 2, false}};
+    reset_test_processor(config);
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    Steinberg::Vst::SpeakerArrangement arrangement = SpeakerArr::kStereo;
+    REQUIRE(processor.getBusArrangement(Steinberg::Vst::kInput, 0, arrangement) ==
+            Steinberg::kResultTrue);
+    REQUIRE(arrangement == SpeakerArr::kEmpty);
+    Steinberg::Vst::SpeakerArrangement output = SpeakerArr::kStereo;
+    REQUIRE(processor.setBusArrangements(&arrangement, 1, &output, 1) ==
+            Steinberg::kResultTrue);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 preserves a processor veto for an empty bus arrangement",
+          "[vst3][bus-layout][initialization][veto]") {
+    TestVst3Config config;
+    config.descriptor.input_buses = {{"Empty In", 0, false}};
+    config.descriptor.output_buses = {{"Main Out", 2, false}};
+    config.veto_bus_layout = true;
+    reset_test_processor(config);
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    Steinberg::Vst::SpeakerArrangement input = SpeakerArr::kEmpty;
+    Steinberg::Vst::SpeakerArrangement output = SpeakerArr::kStereo;
+    REQUIRE(processor.setBusArrangements(&input, 1, &output, 1) ==
+            Steinberg::kResultFalse);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 canonical speaker mapping covers conventional widths only",
+          "[vst3][bus-layout][mapping]") {
+    using pulp::format::detail::vst3_canonical_speaker_arrangement;
+    using pulp::format::detail::vst3_common_channel_count;
+    REQUIRE(vst3_canonical_speaker_arrangement(0) == SpeakerArr::kEmpty);
+    REQUIRE(vst3_canonical_speaker_arrangement(1) == SpeakerArr::kMono);
+    REQUIRE(vst3_canonical_speaker_arrangement(2) == SpeakerArr::kStereo);
+    REQUIRE(vst3_canonical_speaker_arrangement(3) == SpeakerArr::k30Cine);
+    REQUIRE(vst3_canonical_speaker_arrangement(4) == SpeakerArr::k40Music);
+    REQUIRE(vst3_canonical_speaker_arrangement(5) == SpeakerArr::k50);
+    REQUIRE(vst3_canonical_speaker_arrangement(6) == SpeakerArr::k51);
+    REQUIRE(vst3_canonical_speaker_arrangement(7) == SpeakerArr::k70Music);
+    REQUIRE(vst3_canonical_speaker_arrangement(8) == SpeakerArr::k71Music);
+    REQUIRE_FALSE(vst3_canonical_speaker_arrangement(-1));
+    REQUIRE_FALSE(vst3_canonical_speaker_arrangement(9));
+    REQUIRE(vst3_common_channel_count(SpeakerArr::k51) == 6);
+    REQUIRE(vst3_common_channel_count(SpeakerArr::k40Music) == 4);
+    REQUIRE_FALSE(vst3_common_channel_count(SpeakerArr::k60Cine));
+    REQUIRE_FALSE(vst3_common_channel_count(SpeakerArr::kAmbi1stOrderACN));
 }
 
 // A spec-violating host that renders MORE frames than the prepared

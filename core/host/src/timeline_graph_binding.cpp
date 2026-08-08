@@ -331,15 +331,13 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::build_candidate(
                 route.post_mixer_audio_destination,
                 static_cast<PortIndex>(route.post_mixer_audio_destination_first_port + channel),
             };
-            if (std::find(desired_detached_bypasses.begin(), desired_detached_bypasses.end(),
-                          edge) == desired_detached_bypasses.end())
+            if (!contains_detached_audio_edge(desired_detached_bypasses, edge))
                 desired_detached_bypasses.push_back(edge);
         }
     }
     if (previous) {
         for (const auto& edge : previous->detached_post_device_bypasses) {
-            if (std::find(desired_detached_bypasses.begin(), desired_detached_bypasses.end(),
-                          edge) != desired_detached_bypasses.end())
+            if (contains_detached_audio_edge(desired_detached_bypasses, edge))
                 continue;
             if (edit->node(edge.source_node) == nullptr || edit->node(edge.dest_node) == nullptr)
                 continue;
@@ -356,9 +354,7 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::build_candidate(
     }
     for (const auto& edge : desired_detached_bypasses) {
         const bool previously_detached =
-            previous && std::find(previous->detached_post_device_bypasses.begin(),
-                                  previous->detached_post_device_bypasses.end(),
-                                  edge) != previous->detached_post_device_bypasses.end();
+            previous && contains_detached_audio_edge(previous->detached_post_device_bypasses, edge);
         const auto direct = std::find_if(
             edit->connections().begin(), edit->connections().end(),
             [&](const Connection& connection) { return is_plain_audio_edge(connection, edge); });

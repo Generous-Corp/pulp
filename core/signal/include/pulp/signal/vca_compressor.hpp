@@ -129,6 +129,7 @@
 
 #include <pulp/signal/denormal.hpp>
 #include <pulp/signal/dynamics_core.hpp>
+#include <pulp/signal/dynamics_contract.hpp>
 #include <pulp/signal/units.hpp>
 
 #include <algorithm>
@@ -331,6 +332,9 @@ public:
 
     /// Metering taps, as of the last processed sample.
     double gain_reduction_db() const noexcept { return gain_reduction_db_; }
+    GainReduction gain_reduction() const noexcept {
+        return GainReduction::from_signed_db(gain_reduction_db_);
+    }
     double level_db() const noexcept { return level_db_; }
     double mean_square() const noexcept { return mean_square_; }
     double current_gain_linear() const noexcept { return gain_linear_; }

@@ -167,6 +167,9 @@ pulp_add_test_suite(pulp-test-signal-mod-event-api LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-mod-sources LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-mod-source-api LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-mod-tools LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-modulation-language
+    SOURCES test_modulation_language.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-mod-events LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-mod-voice LIBRARIES pulp::signal)
 # Alias/passband claims here are measured with the shared tone-projection
@@ -182,6 +185,11 @@ pulp_add_test_suite(pulp-test-transition-mixer LIBRARIES pulp::signal)
 # Biquad / SVF / LadderFilter / LinkwitzRiley TEST_CASE clusters moved
 # verbatim into a sibling TU to keep test_signal.cpp under ~1,200 lines.
 pulp_add_test_suite(pulp-test-signal-filters LIBRARIES pulp::signal)
+# Fixed-capacity N-way LR4 crossover: independent complex-response and
+# time-domain reconstruction oracles, automation, fault recovery, and RT proof.
+pulp_add_test_suite(pulp-test-nway-linkwitz-riley
+    SOURCES test_nway_linkwitz_riley.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
 # Filter analysis: coefficients -> magnitude response -> sampled curve. Asserts
 # the SHAPE of each filter type (a lowpass rolls off, a notch nulls, a shelf
 # plateaus), which is what distinguishes a real response from an approximation.

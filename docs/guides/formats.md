@@ -226,10 +226,18 @@ Audio buses from `descriptor().input_buses` and `descriptor().output_buses` are 
 
 - Bus type: `kMain` for required buses, `kAux` for optional (sidechain) buses
 - Activity: `kDefaultActive` for required, 0 (inactive by default) for optional
-- Speaker arrangement: `kMono` or `kStereo` based on `default_channels`
+- Speaker arrangement: an empty arrangement for zero channels, or a canonical
+  topology for 1–8 channels (`kMono`, `kStereo`, 3.0, quad, 5.0, 5.1, 7.0, or ITU 7.1) based on
+  `default_channels`
 - Bus names are converted from `std::string` to VST3 `String128`
 
-`setBusArrangements()` accepts any arrangement where at least one input and one output bus are present.
+When `supported_bus_layouts` is explicit, its first entry supplies the initial
+advertised bus configuration; subsequent entries are host-negotiable options.
+
+`setBusArrangements()` translates the same canonical VST3 speaker arrangements to Pulp's
+count-only `BusesLayout` model. A descriptor's `supported_bus_layouts` can
+therefore opt into host-negotiated surround layouts such as 5.1 and 7.1; the
+Processor still gets the final accept/reject decision before bus state changes.
 
 ### Latency and Tail
 

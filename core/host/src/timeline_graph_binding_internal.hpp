@@ -61,6 +61,15 @@ struct DetachedAudioEdge {
     constexpr bool operator==(const DetachedAudioEdge&) const = default;
 };
 
+template <typename Range>
+inline bool contains_detached_audio_edge(const Range& edges,
+                                         const DetachedAudioEdge& edge) noexcept {
+    // Keep this as a predicate search: clang-cl with MSVC STL 14.51 routes
+    // std::find for this 16-byte record through an unsupported vectorized path.
+    return std::any_of(edges.begin(), edges.end(),
+                       [&](const DetachedAudioEdge& candidate) { return candidate == edge; });
+}
+
 inline bool is_plain_audio_edge(const Connection& connection,
                                 const DetachedAudioEdge& edge) noexcept {
     return connection.source_node == edge.source_node &&

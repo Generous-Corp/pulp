@@ -214,6 +214,21 @@ endif()
 # links every optional CPU inspector archive through find_package(Pulp), and
 # executes the result outside the source tree.
 if(PULP_ENABLE_INSPECTOR)
+    add_test(NAME cmake-control-sdk-consumer
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+            "-DPULP_PARENT_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+            "-DPULP_PARENT_SANITIZER=${PULP_SANITIZER}"
+            "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+            "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+            "-DPULP_PARENT_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}"
+            "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
+            "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_control_sdk_consumer.cmake)
+    set_tests_properties(cmake-control-sdk-consumer PROPERTIES
+        LABELS "cmake;sdk;inspect;control;headless"
+        TIMEOUT 180)
+
     add_test(NAME cmake-inspector-sdk-consumer
         COMMAND ${CMAKE_COMMAND}
             -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
@@ -512,6 +527,11 @@ if(UNIX)
     add_test(NAME inject-claude-prefs-hook
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_inject_claude_prefs_hook.sh)
     set_tests_properties(inject-claude-prefs-hook PROPERTIES TIMEOUT 15)
+
+    # Branch-independent continuity warning for old/superseded worktrees.
+    add_test(NAME inject-worktree-lineage-hook
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_inject_worktree_lineage_hook.sh)
+    set_tests_properties(inject-worktree-lineage-hook PROPERTIES TIMEOUT 15)
 
     # tool-registry-reminder.sh — the PostToolUse hook that catches an agent
     # hand-rolling a tool the registry already lists. Hermetic (synthetic tool

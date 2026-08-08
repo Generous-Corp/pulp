@@ -1,11 +1,11 @@
-name: Timeline document fuzzing
+name: Timeline and control protocol fuzzing
 
-# Fuzzing over the untrusted-document parse surface: `deserialize_project`,
-# `peek_project_summary`, and `deserialize_commands`.
+# Fuzzing over the untrusted Timeline document parsers and the bounded local
+# capability-control protocol decoder.
 #
-# Two lanes over ONE oracle implementation (test/fuzz/timeline_document_oracle.*),
-# because the properties are what makes this a quota fuzzer and two copies of
-# them would drift into disagreeing about what a finding is:
+# Two lanes share each parser's oracle implementation
+# (`timeline_document_oracle.*` and `control_protocol_fuzz_oracle.hpp`), because
+# duplicated properties would drift into disagreeing about what a finding is:
 #
 #   deterministic  Replays a seeded mutation corpus. Runs on every PR that
 #                  touches the parse surface, reproduces any case from its
@@ -33,7 +33,11 @@ on:
   pull_request:
     paths:
       - 'core/timeline/**'
+      - 'inspect/include/pulp/inspect/control_protocol.hpp'
+      - 'inspect/src/control_protocol*.cpp'
+      - 'inspect/src/control_json_*.cpp'
       - 'test/fuzz/**'
+      - 'test/test_control_protocol_fuzz.cpp'
       - 'test/test_timeline_document_fuzz.cpp'
       - 'test/fixtures/timeline/**'
       - 'test/cmake/timeline_tests.cmake'
@@ -92,7 +96,7 @@ jobs:
       - name: Build
         run: |
           cmake --build build-fuzz \
-            --target pulp-test-timeline-document-fuzz \
+            --target pulp-test-timeline-document-fuzz pulp-test-control-protocol-fuzz \
             -j"$(getconf _NPROCESSORS_ONLN)"
 
       - name: Replay
@@ -102,6 +106,8 @@ jobs:
           # the same failure they can reproduce locally.
           PULP_TIMELINE_FUZZ_SEED: ${{ github.event_name == 'schedule' && github.run_id || 1 }}
           PULP_TIMELINE_FUZZ_CASES: ${{ inputs.cases || (github.event_name == 'pull_request' && '20000' || '2000000') }}
+          PULP_CONTROL_PROTOCOL_FUZZ_SEED: ${{ github.event_name == 'schedule' && github.run_id || 1 }}
+          PULP_CONTROL_PROTOCOL_FUZZ_CASES: ${{ inputs.cases || (github.event_name == 'pull_request' && '20000' || '2000000') }}
         run: |
           ctest --test-dir build-fuzz --output-on-failure -L fuzz
 
@@ -141,12 +147,13 @@ jobs:
       - name: Build
         run: |
           cmake --build build-libfuzzer \
-            --target pulp-fuzz-timeline-document \
+            --target pulp-fuzz-timeline-document pulp-fuzz-control-protocol \
+              pulp-generate-control-protocol-fuzz-corpus \
             -j"$(getconf _NPROCESSORS_ONLN)"
 
       - name: Seed the corpus
         run: |
-          mkdir -p fuzz-corpus
+          mkdir -p fuzz-corpus/timeline fuzz-corpus/control-protocol
           # Only the entries corpus.index declares as timeline JSON. Feeding it
           # the payload blobs and foreign-format inputs it deliberately excludes
           # would seed the engine with documents whose rejection means nothing.
@@ -154,16 +161,25 @@ jobs:
             test/fixtures/timeline/corpus.index \
             | while read -r entry; do
                 cp "test/fixtures/timeline/$entry" \
-                   "fuzz-corpus/$(echo "$entry" | tr '/' '_')"
+                   "fuzz-corpus/timeline/$(echo "$entry" | tr '/' '_')"
               done
-          ls -l fuzz-corpus
+          ./build-libfuzzer/test/pulp-generate-control-protocol-fuzz-corpus \
+            fuzz-corpus/control-protocol
+          find fuzz-corpus -type f -print | sort
 
       - name: Fuzz
         env:
           ASAN_OPTIONS: 'detect_leaks=0:halt_on_error=1'
         run: |
           ./build-libfuzzer/test/pulp-fuzz-timeline-document \
-            fuzz-corpus \
+            fuzz-corpus/timeline \
+            -max_total_time=${{ inputs.libfuzzer_seconds || 900 }} \
+            -max_len=1048576 \
+            -rss_limit_mb=2048 \
+            -timeout=25 \
+            -print_final_stats=1
+          ./build-libfuzzer/test/pulp-fuzz-control-protocol \
+            fuzz-corpus/control-protocol \
             -max_total_time=${{ inputs.libfuzzer_seconds || 900 }} \
             -max_len=1048576 \
             -rss_limit_mb=2048 \
@@ -174,7 +190,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: timeline-fuzz-reproducers
+          name: protocol-fuzz-reproducers
           path: |
             crash-*
             timeout-*

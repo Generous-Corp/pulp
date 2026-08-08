@@ -4787,7 +4787,7 @@ would make CI flakier than it needs to be.
 `.github/workflows/coverage.yml`'s major jobs include:
 
 - `resolve-runners` — shared-helper resolver (`tools/scripts/resolve_runs_on.py`) that picks per-OS runs-on labels in priority order: workflow_dispatch input → `PULP_COVERAGE_<OS>_RUNS_ON_JSON` repo variable → hard-coded default (`ubuntu-latest` / `macos-latest` / `windows-latest`). Coverage deliberately does not read `PULP_NAMESPACE_BUILD_*`; use dedicated ephemeral coverage labels such as `pulp-coverage-vm-macos`, never the warm macOS gate labels or shared build-pilot labels. Change runner for one OS by setting the repo variable — no workflow edit required.
-- `coverage` — event-conditional matrix over {macos} on PRs and {linux, macos, windows} on push-to-main / workflow_dispatch. Every leg builds with Clang source-based coverage, runs the native test suite, uploads HTML + summary + Cobertura artifacts, and sends one explicit, semantically verified per-OS report set through `upload-codecov-report` with flag `os-linux`, `os-macos`, or `os-windows`. The Linux report set includes Python tooling coverage; the macOS set includes Swift LCOV when that lane is in scope. Successful Codecov transport emits a per-OS receipt artifact; the main watchdog requires Linux and macOS receipts. Subsystem / platform / surface slicing comes from `codecov.yml`'s `component_management` path globs. Has `fail-fast: false` on the matrix — a flake on any one OS never cancels the others, while the in-repo diff gate remains authoritative.
+- `coverage` — event-conditional matrix over {macos} on PRs and {linux, macos, windows} on push-to-main / workflow_dispatch. Every leg builds with Clang source-based coverage, runs the native test suite, uploads HTML + summary + Cobertura artifacts, and sends one explicit, semantically verified per-OS report set through `upload-codecov-report` with flag `os-linux`, `os-macos`, or `os-windows`. Python tooling is a separate `python-tools` upload from the Linux leg; the macOS native set includes Swift LCOV when that lane is in scope. A native suite failure cannot upload a partial native report, and a Python-suite failure cannot upload a partial Python report, but either verified surface can upload independently of the other. Successful Codecov transport emits an exact SHA-and-attempt receipt artifact; the main watchdog requires current Linux, macOS, and Python-tools receipts. Subsystem / platform / surface slicing comes from `codecov.yml`'s `component_management` path globs. Has `fail-fast: false` on the matrix — a flake on any one OS never cancels the others, while the in-repo diff gate remains authoritative.
 - `android-kotlin-coverage` — Gradle/JaCoCo coverage for `android/app/src/main/kotlin/**`, uploaded to Codecov from the canonical Coverage workflow on push-to-main / workflow_dispatch so main snapshots keep Android JVM coverage fresh without spending a PR runner.
 - `pulp-react-coverage` — Vitest/Cobertura coverage for `packages/pulp-react/**` on push-to-main and workflow_dispatch. PR upload remains in `pulp-react-build.yml`; main upload is centralized here so side coverage cannot advance Codecov when native Coverage for the same SHA was cancelled before upload.
 - `coverage-diff-gate` — downloads all three OS Cobertura artifacts (`coverage-cobertura-${sha}` for Linux, `coverage-cobertura-macos-${sha}`, `coverage-cobertura-windows-${sha}`), merges them with `tools/scripts/merge_cobertura.py` (taking `max(hits)` per `(filename, line)`), then runs `diff-cover --fail-under=75` against `origin/<base>` on the merged XML. Hard-fails the PR when the global diff-coverage floor is missed. The job still renders and upserts the diff-coverage PR comment via `tools/scripts/coverage_diff_comment.py` even on failure, and it also runs the per-tier gate (`tools/scripts/coverage_tier_check.py`) in advisory mode against the same merged XML.
@@ -5833,16 +5833,23 @@ skill (skill-sync map).
 
 ## Coverage watchdogs require PROOF OF UPLOAD, not just a green run
 
-Both coverage watchdogs historically keyed off "a `conclusion==success` coverage.yml
+Coverage watchdogs historically keyed off "a `conclusion==success` coverage.yml
 run on main." That proxy is blinded once a budget/timeout hit is made non-fatal: the run
 concludes `success` but its C++ Cobertura upload was skipped, so coverage silently stops
 while CI stays green (the 2-week silent-degradation class these watchdogs exist to catch).
-`coverage-upload-watchdog.yml` now requires both
-`codecov-upload-linux-*` and `codecov-upload-macos-*` receipt artifacts on one run before
-counting it as fresh coverage (checked via the actions API — `actions: read`, no Codecov
-token). The shared upload action creates a receipt only after local file validation and
-successful Codecov transport. A persistently over-budget, build-broken, or transport-broken
-leg therefore raises the stalled-uploads issue instead of hiding behind run conclusion.
+`coverage-upload-watchdog.yml` is the single authority. It requires exact, non-expired
+`codecov-upload-{linux,macos,python-tools}-<sha>-attempt-<n>` artifacts, using each required
+job's latest actual rerun attempt so a partial "rerun failed jobs" remains valid without
+accepting an older receipt for a lane that was rerun. It scans completed runs regardless of
+their overall conclusion because an advisory side job can fail after valid uploads, and it
+bases freshness on the oldest required receipt's creation time rather than workflow
+`updated_at`. Any Actions API pagination/read failure leaves issue state unchanged instead
+of producing a false stale alarm. The shared upload action creates a receipt only after
+semantic report verification and successful Codecov transport. Upload-axis flags
+(`os-linux`, `os-macos`, `os-windows`, `python-tools`) must keep `carryforward: false` in
+`codecov.yml`; otherwise an old OS report can masquerade as current coverage. A persistently
+over-budget, build-broken, or transport-broken leg therefore raises the stalled-uploads
+issue instead of hiding behind run conclusion.
 
 ## MSVC-only breaks pass every blocking gate
 

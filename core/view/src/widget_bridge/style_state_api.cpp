@@ -2,6 +2,7 @@
 
 #include <pulp/view/widget_bridge.hpp>
 #include "api_registry.hpp"
+#include "bridge_dispatch.hpp"
 #include "css_color.hpp"
 
 #include <functional>
@@ -27,27 +28,32 @@ void BridgeRegistrars::register_widget_style_state_api(WidgetBridge& self) {
         // Then register hover/focus callbacks that apply/revert.
 
         if (state == "hover") {
+            auto alive = self.callback_alive_;
             // Capture current value as "normal" state.
             if (prop == "background") {
                 auto target_color = parse_bridge_css_color(val_str);
                 auto* view = v;
                 // Wire hover enter/leave to apply/revert background.
-                view->on_hover_enter = [&self, id, view, target_color]() {
+                view->on_hover_enter = [&self, alive, id, view, target_color]() {
+                    BridgeCallbackScope scope(alive);
                     view->set_background_color(target_color);
                     self.engine_.evaluate("__dispatch__('" + id + "', 'mouseenter', 0)");
                 };
-                view->on_hover_leave = [&self, id, view]() {
+                view->on_hover_leave = [&self, alive, id, view]() {
+                    BridgeCallbackScope scope(alive);
                     view->clear_background_color();
                     self.engine_.evaluate("__dispatch__('" + id + "', 'mouseleave', 0)");
                 };
             } else if (prop == "scale") {
                 float target_scale = std::stof(val_str);
                 auto* view = v;
-                view->on_hover_enter = [&self, id, view, target_scale]() {
+                view->on_hover_enter = [&self, alive, id, view, target_scale]() {
+                    BridgeCallbackScope scope(alive);
                     view->set_scale(target_scale);
                     self.engine_.evaluate("__dispatch__('" + id + "', 'mouseenter', 0)");
                 };
-                view->on_hover_leave = [&self, id, view]() {
+                view->on_hover_leave = [&self, alive, id, view]() {
+                    BridgeCallbackScope scope(alive);
                     view->set_scale(1.0f);
                     self.engine_.evaluate("__dispatch__('" + id + "', 'mouseleave', 0)");
                 };
@@ -55,11 +61,13 @@ void BridgeRegistrars::register_widget_style_state_api(WidgetBridge& self) {
                 float target_opacity = std::stof(val_str);
                 auto* view = v;
                 float original = view->opacity();
-                view->on_hover_enter = [&self, id, view, target_opacity]() {
+                view->on_hover_enter = [&self, alive, id, view, target_opacity]() {
+                    BridgeCallbackScope scope(alive);
                     view->set_opacity(target_opacity);
                     self.engine_.evaluate("__dispatch__('" + id + "', 'mouseenter', 0)");
                 };
-                view->on_hover_leave = [&self, id, view, original]() {
+                view->on_hover_leave = [&self, alive, id, view, original]() {
+                    BridgeCallbackScope scope(alive);
                     view->set_opacity(original);
                     self.engine_.evaluate("__dispatch__('" + id + "', 'mouseleave', 0)");
                 };

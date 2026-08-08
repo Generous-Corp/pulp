@@ -77,6 +77,41 @@ target_link_libraries(pulp-test-control-manifest PRIVATE
 catch_discover_tests(pulp-test-control-manifest
     PROPERTIES LABELS "inspect;control;manifest")
 
+add_executable(pulp-test-control-protocol test_control_protocol.cpp)
+target_link_libraries(pulp-test-control-protocol PRIVATE
+    pulp::inspect-protocol Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-protocol
+    PROPERTIES LABELS "inspect;control;protocol")
+
+add_executable(pulp-test-control-protocol-fuzz
+    test_control_protocol_fuzz.cpp)
+target_include_directories(pulp-test-control-protocol-fuzz PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(pulp-test-control-protocol-fuzz PRIVATE
+    pulp::inspect-protocol Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-protocol-fuzz
+    PROPERTIES LABELS "inspect;control;protocol;fuzz")
+
+add_executable(pulp-generate-control-protocol-fuzz-corpus
+    fuzz/control_protocol_seed_corpus_main.cpp)
+target_include_directories(pulp-generate-control-protocol-fuzz-corpus PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/fuzz)
+target_link_libraries(pulp-generate-control-protocol-fuzz-corpus PRIVATE
+    pulp::inspect-protocol)
+
+if(PULP_ENABLE_FUZZING)
+    add_executable(pulp-fuzz-control-protocol
+        fuzz/control_protocol_fuzz_target.cpp)
+    target_include_directories(pulp-fuzz-control-protocol PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(pulp-fuzz-control-protocol PRIVATE
+        pulp::inspect-protocol)
+    target_compile_options(pulp-fuzz-control-protocol PRIVATE
+        -fsanitize=fuzzer,address -fno-omit-frame-pointer)
+    target_link_options(pulp-fuzz-control-protocol PRIVATE
+        -fsanitize=fuzzer,address)
+endif()
+
 add_executable(pulp-test-control-identity test_control_identity.cpp)
 target_link_libraries(pulp-test-control-identity PRIVATE
     pulp::inspect-control Catch2::Catch2WithMain)
@@ -113,12 +148,45 @@ target_link_libraries(pulp-test-control-broker PRIVATE
 catch_discover_tests(pulp-test-control-broker
     PROPERTIES LABELS "inspect;control;broker")
 
+add_executable(pulp-test-control-admission test_control_admission.cpp)
+target_link_libraries(pulp-test-control-admission PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-admission
+    PROPERTIES LABELS "inspect;control;admission")
+
+add_executable(pulp-test-control-operations test_control_operations.cpp)
+target_link_libraries(pulp-test-control-operations PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-operations
+    PROPERTIES LABELS "inspect;control;receipt")
+
+add_executable(pulp-test-control-artifacts test_control_artifacts.cpp)
+target_link_libraries(pulp-test-control-artifacts PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-artifacts
+    PROPERTIES LABELS "inspect;control;artifact")
+
+add_executable(pulp-test-control-service test_control_service.cpp)
+target_link_libraries(pulp-test-control-service PRIVATE
+    pulp::inspect-control pulp::inspect-client Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-service
+    PROPERTIES LABELS "inspect;control;service;client")
+
+add_executable(pulp-test-control-main-thread-executor
+    test_control_main_thread_executor.cpp)
+target_link_libraries(pulp-test-control-main-thread-executor PRIVATE
+    pulp::inspect-runtime pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-main-thread-executor
+    PROPERTIES LABELS "inspect;control;main-thread;executor")
+
 add_executable(pulp-test-inspector-audit
     test_inspector_audit.cpp
+    test_main_thread_rpc_timeout.cpp
     ${CMAKE_SOURCE_DIR}/inspect/src/main_thread_rpc.cpp)
 target_link_libraries(pulp-test-inspector-audit PRIVATE
     pulp::inspect-protocol pulp::events Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-inspector-audit)
+catch_discover_tests(pulp-test-inspector-audit
+    PROPERTIES LABELS "inspect;control;main-thread;timeout")
 
 add_executable(pulp-test-inspector-server
     test_inspector_server.cpp
@@ -369,6 +437,8 @@ if(TARGET pulp-render)
 endif()
 pulp_add_test_suite(pulp-test-widget-bridge LIBRARIES ${_pulp_widget_bridge_test_libs})
 pulp_add_test_suite(pulp-test-widget-bridge-capabilities LIBRARIES ${_pulp_widget_bridge_test_libs})
+pulp_add_test_suite(pulp-test-widget-bridge-removal-lifetime
+    LIBRARIES ${_pulp_widget_bridge_test_libs})
 
 # Widget bridge — source-level API contract. Keeps JS-native registrations
 # unique and matched to the reviewed bridge API manifest so future registrar

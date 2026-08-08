@@ -9,13 +9,14 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace pulp::view {
 
 namespace {
 
-void dispatch_virtual_list_row_release(const std::shared_ptr<std::atomic<bool>>& alive,
+void dispatch_virtual_list_row_release(const std::shared_ptr<BridgeCallbackState>& alive,
                                        ScriptEngine* engine,
                                        const std::string& id_literal,
                                        const std::string& row_id) {
@@ -33,11 +34,13 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
     if (auto* k = dynamic_cast<Knob*>(w)) {
         wire_parameter_gestures(id, w);
         k->on_change = [alive, engine, id](float v) {
+            BridgeCallbackScope scope(alive);
             dispatch_event(alive, engine, id, "change", std::to_string(v));
         };
     } else if (auto* f = dynamic_cast<Fader*>(w)) {
         wire_parameter_gestures(id, w);
         f->on_change = [alive, engine, id](float v) {
+            BridgeCallbackScope scope(alive);
             dispatch_event(alive, engine, id, "change", std::to_string(v));
         };
     } else if (auto* t = dynamic_cast<Toggle*>(w)) {
@@ -49,6 +52,7 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
         // gesture so the host records it and the binding yields to it.
         wire_parameter_gestures(id, w);
         t->on_toggle = [this, alive, engine, id](bool v) {
+            BridgeCallbackScope scope(alive);
             begin_param_gesture(id);
             dispatch_event(alive, engine, id, "toggle", v ? "1" : "0");
             end_param_gesture(id);
@@ -59,6 +63,7 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
         // post-quantisation value, not normalized, so JS callers see the same
         // number they handed us via setValue/setMin/setMax/setStep.
         r->on_change = [alive, engine, id](float v) {
+            BridgeCallbackScope scope(alive);
             dispatch_event(alive, engine, id, "change", std::to_string(v));
         };
     } else if (auto* c = dynamic_cast<ComboBox*>(w)) {
@@ -66,19 +71,23 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
         // routed through __domAppend dispatches the same `select` event as the
         // factory path.
         c->on_change = [alive, engine, id](int idx) {
+            BridgeCallbackScope scope(alive);
             dispatch_event(alive, engine, id, "select", std::to_string(idx));
         };
     } else if (auto* cb = dynamic_cast<Checkbox*>(w)) {
         // Mirror createCheckbox's inline `change` wiring.
         cb->on_change = [alive, engine, id](bool v) {
+            BridgeCallbackScope scope(alive);
             dispatch_event(alive, engine, id, "change", v ? "1" : "0");
         };
     } else if (auto* lb = dynamic_cast<ListBox*>(w)) {
         // Mirror createListBox's inline select/activate wiring.
         lb->on_select = [alive, engine, id](int idx) {
+            BridgeCallbackScope scope(alive);
             dispatch_event(alive, engine, id, "select", std::to_string(idx));
         };
         lb->on_activate = [alive, engine, id](int idx) {
+            BridgeCallbackScope scope(alive);
             dispatch_event(alive, engine, id, "activate", std::to_string(idx));
         };
     } else if (auto* vl = dynamic_cast<VirtualList*>(w)) {
@@ -86,6 +95,7 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
         auto* widgets = &widgets_;
         auto row_bindings = std::make_shared<std::unordered_map<std::string, std::size_t>>();
         vl->set_row_releaser([this, alive, engine, id_literal, row_bindings](View& row) {
+            BridgeCallbackScope scope(alive);
             if (!alive || !alive->load(std::memory_order_acquire)) return;
             row_bindings->erase(row.id());
             dispatch_virtual_list_row_release(alive, engine, id_literal, row.id());
@@ -93,6 +103,7 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
             forget_widget_subtree(&row);
         });
         vl->set_row_factory([widgets, alive, id](std::size_t slot) {
+            BridgeCallbackScope scope(alive);
             auto row = std::make_unique<View>();
             row->set_id(id + "__row_" + std::to_string(slot));
             if (alive && alive->load(std::memory_order_acquire)) {
@@ -102,6 +113,7 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
             return row;
         });
         vl->set_row_binder([this, alive, engine, id_literal, row_bindings](View& row, std::size_t index) {
+            BridgeCallbackScope scope(alive);
             if (!alive || !alive->load(std::memory_order_acquire)) return;
             const auto row_id = row.id();
             if (row_bindings->find(row_id) != row_bindings->end()) {
@@ -110,6 +122,7 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
                     auto* child = row.child_at(row.child_count() - 1);
                     auto removed = row.remove_child(child);
                     forget_widget_subtree(removed.get());
+                    retire_removed_widget(std::move(removed));
                 }
             }
             (*row_bindings)[row_id] = index;
@@ -119,6 +132,7 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
                 "virtual list bindrow");
         });
         vl->on_selection_changed([alive, engine, id_literal](const std::vector<std::size_t>& selection) {
+            BridgeCallbackScope scope(alive);
             std::string payload = "[";
             for (std::size_t i = 0; i < selection.size(); ++i) {
                 if (i > 0) payload += ",";
@@ -129,6 +143,7 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
                                "virtual list change");
         });
         vl->on_row_activated([alive, engine, id_literal](std::size_t index) {
+            BridgeCallbackScope scope(alive);
             safe_dispatch_eval(alive, engine, "__dispatch__(" + id_literal + ", 'activate', " +
                                std::to_string(index) + ")", "virtual list activate");
         });

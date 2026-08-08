@@ -23,6 +23,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/query_service.hpp>
 #include "api_registry.hpp"
+#include "bridge_dispatch.hpp"
 
 #include <atomic>
 #include <cstddef>
