@@ -49,22 +49,45 @@ def module_of(path: str) -> str | None:
 def load_module_flags(cc_path: Path) -> dict[str, tuple[list[str], str]]:
     """module-root -> (filtered compile flags, working directory).
 
-    The first TU seen per module wins; its -I/-D/-std/-isystem flags apply to
-    every header in that module's include tree.
+    Prefer a TU compiled by the module's canonical ``pulp-<module>`` target.
+    A source file can be reused by another target in a different module; taking
+    the first matching path would then test public headers with the consumer's
+    incomplete include closure instead of their owning target's flags.
     """
     entries = json.loads(cc_path.read_text())
     by_module: dict[str, tuple[list[str], str]] = {}
+    scores: dict[str, int] = {}
     for e in entries:
         f = e.get("file", "")
         mod = module_of(f)
-        if not mod or mod in by_module:
+        if not mod:
             continue
         args = e.get("arguments")
         if args is None:
             # `command` form — split naively (compile_commands rarely quotes).
             args = e.get("command", "").split()
+        score = module_target_score(args, mod)
+        if mod in by_module and score <= scores[mod]:
+            continue
         by_module[mod] = (filter_args(args, f), e.get("directory", "."))
+        scores[mod] = score
     return by_module
+
+
+def module_target_score(args: list[str], module: str) -> int:
+    """Rank a compile entry by how directly its object belongs to ``module``."""
+    output = ""
+    for index, arg in enumerate(args[:-1]):
+        if arg == "-o":
+            output = args[index + 1]
+            break
+    normalized = output.replace(os.sep, "/")
+    module_name = module.rsplit("/", 1)[-1].replace("_", "-")
+    if f"{module}/CMakeFiles/pulp-{module_name}.dir/" in normalized:
+        return 2
+    if f"{module}/CMakeFiles/" in normalized:
+        return 1
+    return 0
 
 
 def filter_args(args: list[str], src_file: str) -> list[str]:

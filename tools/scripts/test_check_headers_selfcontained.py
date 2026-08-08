@@ -67,8 +67,13 @@ class HeaderSelfContainedTests(unittest.TestCase):
                         },
                         {
                             "file": "core/audio/src/a.cpp",
+                            "directory": "/tmp/consumer",
+                            "command": "c++ -Iconsumer -c a.cpp -o core/other/CMakeFiles/consumer.dir/a.o",
+                        },
+                        {
+                            "file": "core/audio/src/a.cpp",
                             "directory": "/tmp/audio",
-                            "command": "c++ -Iaudio -c a.cpp -o a.o",
+                            "command": "c++ -Iaudio -c a.cpp -o core/audio/CMakeFiles/pulp-audio.dir/src/a.cpp.o",
                         },
                         {"file": "tools/scripts/x.py", "directory": "/tmp/tools", "arguments": ["python"]},
                     ]
@@ -81,6 +86,29 @@ class HeaderSelfContainedTests(unittest.TestCase):
         self.assertEqual(flags["core/view"], (["-Iview"], "/tmp/view"))
         self.assertEqual(flags["core/audio"], (["-Iaudio"], "/tmp/audio"))
         self.assertNotIn("tools/scripts", flags)
+
+    def test_module_target_score_prefers_canonical_owner(self) -> None:
+        self.assertEqual(
+            checker.module_target_score(
+                ["c++", "-o", "core/audio/CMakeFiles/pulp-audio.dir/src/a.cpp.o"],
+                "core/audio",
+            ),
+            2,
+        )
+        self.assertEqual(
+            checker.module_target_score(
+                ["c++", "-o", "core/audio/CMakeFiles/helper.dir/src/a.cpp.o"],
+                "core/audio",
+            ),
+            1,
+        )
+        self.assertEqual(
+            checker.module_target_score(
+                ["c++", "-o", "core/sample_bank_manifest/CMakeFiles/consumer.dir/a.cpp.o"],
+                "core/audio",
+            ),
+            0,
+        )
 
     def test_collect_headers_supports_lists_changed_and_default_scan(self) -> None:
         with tempfile.TemporaryDirectory() as td:
