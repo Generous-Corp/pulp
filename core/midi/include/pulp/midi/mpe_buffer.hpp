@@ -160,7 +160,8 @@ inline void bind_tracker_to_buffer(MpeVoiceTracker& tracker,
                                    int32_t& current_sample_offset,
                                    bool* expression_event_dropped = nullptr) {
     using K = MpeExpressionEvent::Kind;
-    tracker.on_note_lifecycle = [&out, &current_sample_offset](
+    tracker.on_note_lifecycle = [&out, &current_sample_offset,
+                                 expression_event_dropped](
         const MpeNoteState* note_off, const MpeNoteState* note_on) {
         std::array<MpeExpressionEvent, 2> events{};
         std::size_t count = 0;
@@ -170,7 +171,14 @@ inline void bind_tracker_to_buffer(MpeVoiceTracker& tracker,
         if (note_on) {
             events[count++] = {current_sample_offset, K::NoteOn, *note_on};
         }
-        return out.add_batch(std::span<const MpeExpressionEvent>{events.data(), count});
+        const bool appended = out.add_batch(
+            std::span<const MpeExpressionEvent>{events.data(), count});
+        // A rejected start/retrigger would let raw MIDI advance without the
+        // matching MPE lifecycle. Pure releases instead use the tracker's
+        // bounded deferred-release queue and are flushed at the next block.
+        if (!appended && note_on && expression_event_dropped)
+            *expression_event_dropped = true;
+        return appended;
     };
     tracker.on_pitch_bend = [&out, &current_sample_offset,
                              expression_event_dropped](const MpeNoteState& s) {

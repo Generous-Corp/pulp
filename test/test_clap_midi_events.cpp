@@ -4279,6 +4279,69 @@ TEST_CASE("CLAP UMP sidecar drops past realtime event capacity without growing",
     REQUIRE(g_observing_sidecar->observed_ump_count == 0);
     REQUIRE(g_observing_sidecar->observed_ump_drops == 0);
 }
+
+TEST_CASE("CLAP UMP expression overflow fails closed for native and synthesized input",
+          "[clap][midi][ump][realtime]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = true;
+
+    SECTION("native MIDI 2 expression") {
+        Harness h(make_observing_sidecar);
+        InputEventList in;
+        for (std::size_t i = 0; i < state::ParameterEventQueue::kCapacity; ++i) {
+            const auto filler = midi::UmpPacket::cc_2(0, 1, 1, 0);
+            clap_event_midi2_t ev{};
+            ev.header = make_header(sizeof(ev), CLAP_EVENT_MIDI2, 0);
+            ev.port_index = 0;
+            ev.data[0] = filler.words[0];
+            ev.data[1] = filler.words[1];
+            ev.data[2] = filler.words[2];
+            ev.data[3] = filler.words[3];
+            in.push(ev);
+        }
+        const auto expression =
+            midi::UmpPacket::pitch_bend_2(0, 1, 0xFFFFFFFFu);
+        clap_event_midi2_t ev{};
+        ev.header = make_header(sizeof(ev), CLAP_EVENT_MIDI2, 1);
+        ev.port_index = 0;
+        ev.data[0] = expression.words[0];
+        ev.data[1] = expression.words[1];
+        ev.data[2] = expression.words[2];
+        ev.data[3] = expression.words[3];
+        in.push(ev);
+
+        REQUIRE(h.run(in) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(g_observing_sidecar->observed_ump_count == 0);
+        REQUIRE(g_observing_sidecar->observed_reset_requested);
+    }
+
+    SECTION("MIDI 1 expression synthesized after native UMP filler") {
+        Harness h(make_observing_sidecar);
+        InputEventList in;
+        for (std::size_t i = 0; i < state::ParameterEventQueue::kCapacity; ++i) {
+            const auto filler = midi::UmpPacket::cc_2(0, 1, 1, 0);
+            clap_event_midi2_t ev{};
+            ev.header = make_header(sizeof(ev), CLAP_EVENT_MIDI2, 0);
+            ev.port_index = 0;
+            ev.data[0] = filler.words[0];
+            ev.data[1] = filler.words[1];
+            ev.data[2] = filler.words[2];
+            ev.data[3] = filler.words[3];
+            in.push(ev);
+        }
+        clap_event_midi_t bend{};
+        bend.header = make_header(sizeof(bend), CLAP_EVENT_MIDI, 1);
+        bend.port_index = 0;
+        bend.data[0] = 0xE1;
+        bend.data[1] = 0x7F;
+        bend.data[2] = 0x7F;
+        in.push(bend);
+
+        REQUIRE(h.run(in) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(g_observing_sidecar->observed_ump_count == 0);
+        REQUIRE(g_observing_sidecar->observed_reset_requested);
+    }
+}
 #endif
 
 // ─────────────────────────────────────────────────────────────────────

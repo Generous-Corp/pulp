@@ -469,6 +469,31 @@ TEST_CASE("MpeSidecar rejects a truncated source MIDI lifecycle",
     REQUIRE(sidecar.tracker.pending_note_off_count() == 0);
 }
 
+TEST_CASE("MpeSidecar reconciles after an atomic retrigger append drops",
+          "[midi][mpe][sidecar][lifecycle][overflow][rt-safety]") {
+    pulp::format::boundary::MpeSidecar sidecar;
+    SidecarProcessor processor;
+    sidecar.configure(true);
+    sidecar.reserve(sidecar.buffer.capacity());
+
+    std::vector<MidiEvent> overflowing_block;
+    overflowing_block.reserve(sidecar.buffer.capacity());
+    overflowing_block.push_back(MidiEvent::note_on(1, 60, 90));
+    while (overflowing_block.size() + 1 < sidecar.buffer.capacity())
+        overflowing_block.push_back(MidiEvent::pitch_bend(1, 8192));
+    overflowing_block.push_back(MidiEvent::note_on(1, 60, 110));
+
+    {
+        pulp::test::RtAllocationProbe probe;
+        REQUIRE_FALSE(sidecar.run(processor, overflowing_block));
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    REQUIRE(processor.mpe_input() == &sidecar.buffer);
+    REQUIRE(sidecar.buffer.empty());
+    REQUIRE(sidecar.tracker.active_count() == 0);
+    REQUIRE(sidecar.tracker.pending_note_off_count() == 0);
+}
+
 TEST_CASE("MpeBuffer emits retrigger retirement and replacement atomically",
           "[midi][mpe][lifecycle]") {
     MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};

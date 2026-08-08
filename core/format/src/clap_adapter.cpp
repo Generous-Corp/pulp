@@ -689,7 +689,7 @@ static bool is_ump_expression_state_event(const midi::UmpPacket& packet) {
 static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
                                           const clap_process_t* process,
                                           bool& sidecar_event_seen,
-                                          bool& ownership_event_dropped) {
+                                          bool& state_event_dropped) {
     // Build MIDI from CLAP note events. Reuse per-instance scratch buffers so
     // capacity survives warmup and the steady-state process path stays RT-safe.
     auto& midi_in = self->midi_in;
@@ -703,7 +703,7 @@ static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
     // that only consume MIDI 1.0.
     bool host_delivered_ump = false;
     sidecar_event_seen = false;
-    ownership_event_dropped = false;
+    state_event_dropped = false;
     // Clear the UMP sidecar up-front: we append to it directly when the
     // host sends CLAP_EVENT_MIDI2 during the event loop below.
     if (self->ump_enabled) {
@@ -725,7 +725,7 @@ static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
                     static_cast<uint8_t>(ev.key),
                     static_cast<uint8_t>(ev.velocity * 127.0));
                 me.sample_offset = static_cast<int32_t>(hdr->time);
-                ownership_event_dropped |= !midi_in.add(me);
+                state_event_dropped |= !midi_in.add(me);
             } else if (hdr->type == CLAP_EVENT_NOTE_OFF) {
                 sidecar_event_seen = true;
                 const auto ev = load_event<clap_event_note_t>(hdr);
@@ -734,7 +734,7 @@ static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
                     static_cast<uint8_t>(ev.key),
                     static_cast<uint8_t>(ev.velocity * 127.0));
                 me.sample_offset = static_cast<int32_t>(hdr->time);
-                ownership_event_dropped |= !midi_in.add(me);
+                state_event_dropped |= !midi_in.add(me);
             } else if (hdr->type == CLAP_EVENT_NOTE_CHOKE) {
                 sidecar_event_seen = true;
                 // NOTE_CHOKE has no MIDI 1.0 equivalent (the host is
@@ -749,7 +749,7 @@ static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
                     static_cast<uint8_t>(ev.key),
                     0);
                 me.sample_offset = static_cast<int32_t>(hdr->time);
-                ownership_event_dropped |= !midi_in.add(me);
+                state_event_dropped |= !midi_in.add(me);
             } else if (hdr->type == CLAP_EVENT_NOTE_EXPRESSION) {
                 // CLAP per-note expression. Pulp already has an MPE
                 // sidecar (`MpeBuffer`); map the expression to the
@@ -836,8 +836,11 @@ static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
                             break;
                     }
                     if (emitted) {
-                        sidecar_event_seen |= is_midi_mpe_state_event(me);
-                        midi_in.add(me);
+                        const bool expression_state =
+                            is_midi_mpe_state_event(me);
+                        sidecar_event_seen |= expression_state;
+                        if (!midi_in.add(me) && expression_state)
+                            state_event_dropped = true;
                     }
                 }
             } else if (hdr->type == CLAP_EVENT_MIDI) {
@@ -851,11 +854,12 @@ static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
                     static_cast<int32_t>(hdr->time),
                     0.0};
                 const bool ownership_event = is_midi_ownership_event(me);
-                sidecar_event_seen |= ownership_event ||
-                                        (self->mpe.enabled &&
-                                         is_midi_mpe_state_event(me));
-                if (!midi_in.add(me) && ownership_event)
-                    ownership_event_dropped = true;
+                const bool state_event = ownership_event ||
+                    ((self->mpe.enabled || self->ump_enabled) &&
+                     is_midi_mpe_state_event(me));
+                sidecar_event_seen |= state_event;
+                if (!midi_in.add(me) && state_event)
+                    state_event_dropped = true;
             } else if (hdr->type == CLAP_EVENT_MIDI_SYSEX) {
                 // CLAP gives us a host-owned payload pointer. midi_in owns a
                 // preallocated payload pool so the copy below does not allocate
@@ -888,9 +892,11 @@ static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
                     const bool ownership_event = is_ump_ownership_event(p);
                     sidecar_event_seen |= ownership_event ||
                                             is_ump_expression_state_event(p);
-                    if (!self->ump_buffer.add(p, static_cast<int32_t>(hdr->time)) &&
-                        ownership_event)
-                        ownership_event_dropped = true;
+                    const bool state_event = ownership_event ||
+                        is_ump_expression_state_event(p);
+                    if (!self->ump_buffer.add(
+                            p, static_cast<int32_t>(hdr->time)) && state_event)
+                        state_event_dropped = true;
                     host_delivered_ump = true;
                 }
 #endif
@@ -962,13 +968,14 @@ static bool clap_phase_prepare_sidecars(PulpClapPlugin* self,
     // retained as a hint for future MIDI2-aware filtering (e.g. only
     // synthesize event types not present in the native stream) but no
     // longer gates the synthesis itself.
-    bool ownership_event_dropped = false;
+    bool state_event_dropped = false;
     if (self->ump_enabled) {
         for (const auto& event : midi_in) {
             if (!self->ump_buffer.add(
                     {midi::midi1_event_to_ump2(event), event.sample_offset}) &&
-                is_midi_ownership_event(event))
-                ownership_event_dropped = true;
+                (is_midi_ownership_event(event) ||
+                 is_midi_mpe_state_event(event)))
+                state_event_dropped = true;
         }
         (void)host_delivered_ump;
         self->processor->set_ump_input(&self->ump_buffer);
@@ -978,7 +985,7 @@ static bool clap_phase_prepare_sidecars(PulpClapPlugin* self,
     self->processor->set_param_events(&self->param_events);
     self->output_param_events.clear();
     self->processor->set_output_param_events(&self->output_param_events);
-    return ownership_event_dropped || !mpe_complete;
+    return state_event_dropped || !mpe_complete;
 }
 
 static void clap_phase_bypass_passthrough(
@@ -1846,13 +1853,14 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     }
 
     bool sidecar_event_seen = false;
-    bool ownership_event_dropped = false;
+    bool state_event_dropped = false;
     const bool host_delivered_ump =
         clap_phase_decode_midi_events(self, process, sidecar_event_seen,
-                                      ownership_event_dropped);
-    if (ownership_event_dropped) {
-        // A partial ownership stream is unsafe even on a normal render: a
-        // retained attack followed by a dropped release can stick forever.
+                                      state_event_dropped);
+    if (state_event_dropped) {
+        // A partial stateful stream is unsafe even on a normal render: a
+        // retained attack followed by a dropped release can stick forever,
+        // while dropped expression can leave downstream state stale.
         // Discard the partial block and reset both owners in this render.
         clear_midi_event_buffers(*self);
         self->ump_buffer.clear();
