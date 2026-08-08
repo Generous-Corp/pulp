@@ -698,6 +698,8 @@ void InterprocessConnection::read_loop(std::uint64_t generation) {
 // ── InterprocessConnectionServer ────────────────────────────────────────
 
 struct InterprocessConnectionServer::ServerImpl {
+    static constexpr auto accept_poll_interval = std::chrono::milliseconds(20);
+
     IpcTransport transport = IpcTransport::Socket;
     Socket listen_socket;
     std::string name;
@@ -766,7 +768,7 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
         while (running_.load()) {
             if (server_impl_->transport != IpcTransport::NamedPipe) {
                 auto client_sock = server_impl_->listen_socket.accept(
-                    std::chrono::milliseconds(100));
+                    ServerImpl::accept_poll_interval);
                 if (!client_sock) continue;
                 if (!running_.load()) {
                     client_sock->close();
@@ -822,7 +824,9 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
 void InterprocessConnectionServer::stop() {
     running_.store(false);
     if (accept_thread_.joinable()) accept_thread_.join();
-    // Idempotent; keeps non-socket and partially started server cleanup simple.
+    // The accept loop owns all listener operations until it exits. Closing
+    // afterward prevents both a descriptor data race and descriptor-reuse
+    // hazards while keeping stop bounded by the accept poll interval.
     server_impl_->listen_socket.close();
     clients_.clear();
 }

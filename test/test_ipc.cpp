@@ -171,6 +171,16 @@ struct CapturingServer : InterprocessConnectionServer {
         cv.notify_all();
     }
 
+    void disconnect_accepted() {
+        std::unique_ptr<InterprocessConnection> connection;
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            connection = std::move(accepted);
+        }
+        if (connection)
+            connection->disconnect();
+    }
+
     std::mutex mutex;
     std::condition_variable cv;
     std::unique_ptr<InterprocessConnection> accepted;
@@ -1228,6 +1238,22 @@ TEST_CASE("IPC socket server stops while waiting for a client",
     REQUIRE_FALSE(server.is_running());
 }
 
+TEST_CASE("IPC socket server repeatedly stops while accept is idle",
+          "[events][ipc][socket][lifecycle][thread]") {
+    const auto started = std::chrono::steady_clock::now();
+    for (int iteration = 0; iteration < 100; ++iteration) {
+        INFO("iteration " << iteration);
+        InterprocessConnectionServer server;
+        REQUIRE(server.start("127.0.0.1:0", IpcTransport::Socket));
+        REQUIRE(server.bound_port() != 0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        server.stop();
+        REQUIRE_FALSE(server.is_running());
+    }
+    REQUIRE(std::chrono::steady_clock::now() - started <
+            std::chrono::seconds(5));
+}
+
 TEST_CASE("IPC socket server stop releases listener for immediate reuse",
           "[events][ipc][socket][lifecycle]") {
     InterprocessConnectionServer first;
@@ -1607,7 +1633,7 @@ TEST_CASE("IPC socket server virtual callback accepts empty frames",
     }
 
     client.disconnect();
-    if (server.accepted) server.accepted->disconnect();
+    server.disconnect_accepted();
     server.stop();
     REQUIRE_FALSE(server.is_running());
 }
@@ -1641,7 +1667,7 @@ TEST_CASE("IPC socket server receives binary payload frames",
     }
 
     client.disconnect();
-    if (server.accepted) server.accepted->disconnect();
+    server.disconnect_accepted();
     server.stop();
     REQUIRE_FALSE(server.is_running());
 }
@@ -1916,7 +1942,7 @@ TEST_CASE("IPC socket server observes client disconnect",
         }));
     }
 
-    if (server.accepted) server.accepted->disconnect();
+    server.disconnect_accepted();
     server.stop();
     REQUIRE_FALSE(server.is_running());
 }
@@ -1945,7 +1971,7 @@ TEST_CASE("IPC socket client reports disconnect callback once",
     REQUIRE_FALSE(client.is_connected());
     REQUIRE(client.state() == IpcState::Disconnected);
 
-    if (server.accepted) server.accepted->disconnect();
+    server.disconnect_accepted();
     server.stop();
     REQUIRE_FALSE(server.is_running());
 }
@@ -2007,10 +2033,8 @@ TEST_CASE("IPC concurrent disconnect also tears down a callback reconnect",
     CHECK_FALSE(client.is_connected());
     CHECK(client.state() == IpcState::Disconnected);
 
-    if (first_server.accepted)
-        first_server.accepted->disconnect();
-    if (second_server.accepted)
-        second_server.accepted->disconnect();
+    first_server.disconnect_accepted();
+    second_server.disconnect_accepted();
     first_server.stop();
     second_server.stop();
 }
@@ -2065,10 +2089,8 @@ TEST_CASE("IPC disconnect callback reconnect starts the replacement reader",
     }
 
     client.disconnect();
-    if (first_server.accepted)
-        first_server.accepted->disconnect();
-    if (second_server.accepted)
-        second_server.accepted->disconnect();
+    first_server.disconnect_accepted();
+    second_server.disconnect_accepted();
     first_server.stop();
     second_server.stop();
 }
@@ -2150,10 +2172,8 @@ TEST_CASE("IPC message callback reconnect retires the original reader",
     }
 
     client.disconnect();
-    if (first_server.accepted)
-        first_server.accepted->disconnect();
-    if (second_server.accepted)
-        second_server.accepted->disconnect();
+    first_server.disconnect_accepted();
+    second_server.disconnect_accepted();
     first_server.stop();
     second_server.stop();
 }
@@ -2225,10 +2245,8 @@ TEST_CASE("IPC connected callback reconnect starts only the replacement reader",
     }
 
     client.disconnect();
-    if (first_server.accepted)
-        first_server.accepted->disconnect();
-    if (second_server.accepted)
-        second_server.accepted->disconnect();
+    first_server.disconnect_accepted();
+    second_server.disconnect_accepted();
     first_server.stop();
     second_server.stop();
 }
@@ -2284,10 +2302,8 @@ TEST_CASE("IPC virtual connected callback fences stale lambda dispatch",
     }
 
     client.disconnect();
-    if (first_server.accepted)
-        first_server.accepted->disconnect();
-    if (second_server.accepted)
-        second_server.accepted->disconnect();
+    first_server.disconnect_accepted();
+    second_server.disconnect_accepted();
     first_server.stop();
     second_server.stop();
 }
@@ -2345,7 +2361,7 @@ TEST_CASE("IPC EOF reconnect teardown waits for the replacement reader",
             lock, std::chrono::seconds(2),
             [&] { return first_server.accepted != nullptr; }));
     }
-    first_server.accepted->disconnect();
+    first_server.disconnect_accepted();
     {
         std::unique_lock lock(mutex);
         REQUIRE(cv.wait_for(lock, std::chrono::seconds(2), [&] {
@@ -2393,8 +2409,7 @@ TEST_CASE("IPC EOF reconnect teardown waits for the replacement reader",
     destroyer.join();
     CHECK(destructor_finished);
 
-    if (second_server.accepted)
-        second_server.accepted->disconnect();
+    second_server.disconnect_accepted();
     first_server.stop();
     second_server.stop();
 }
@@ -2424,8 +2439,7 @@ TEST_CASE("IPC disconnect callback may destroy its own connection",
     CHECK(destroyed);
     CHECK_FALSE(client);
 
-    if (server.accepted)
-        server.accepted->disconnect();
+    server.disconnect_accepted();
     server.stop();
 }
 
@@ -2472,7 +2486,7 @@ TEST_CASE("IPC destruction waits for an in-flight disconnect callback",
         }
         callback_cv.notify_all();
         disconnect_thread.join();
-        if (server.accepted) server.accepted->disconnect();
+        server.disconnect_accepted();
         server.stop();
     }
     REQUIRE(entered);
@@ -2502,7 +2516,7 @@ TEST_CASE("IPC destruction waits for an in-flight disconnect callback",
         callback_cv.notify_all();
         disconnect_thread.join();
         destroy_thread.join();
-        if (server.accepted) server.accepted->disconnect();
+        server.disconnect_accepted();
         server.stop();
     }
     REQUIRE(started);
@@ -2519,6 +2533,6 @@ TEST_CASE("IPC destruction waits for an in-flight disconnect callback",
     destroy_thread.join();
     CHECK(destruction_finished.load(std::memory_order_acquire));
 
-    if (server.accepted) server.accepted->disconnect();
+    server.disconnect_accepted();
     server.stop();
 }

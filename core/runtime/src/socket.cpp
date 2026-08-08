@@ -237,6 +237,10 @@ bool Socket::listen(int backlog) {
     return ::listen(NATIVE_SOCKET(fd_), backlog) == 0;
 }
 
+std::optional<Socket> Socket::accept() {
+    return accept(std::chrono::milliseconds(0));
+}
+
 std::optional<Socket> Socket::accept(std::chrono::milliseconds timeout) {
     if (fd_ == kInvalidSocketHandle) return std::nullopt;
 

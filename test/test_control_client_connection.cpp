@@ -70,7 +70,7 @@ ControlPeerExpectation current_process_expectation(const std::filesystem::path& 
 
 class LocalControlServer {
   public:
-    using Handler = std::function<bool(const ControlEnvelope&)>;
+    using Handler = std::function<void(LocalControlServer&, const ControlEnvelope&)>;
 
     LocalControlServer(std::filesystem::path endpoint, Handler handler)
         : endpoint_(std::move(endpoint)), handler_(std::move(handler)) {
@@ -86,8 +86,11 @@ class LocalControlServer {
             connection->set_on_message([this](const void* data, std::size_t size) {
                 const auto envelope =
                     decode_control_envelope(std::string_view(static_cast<const char*>(data), size));
-                if (!envelope || !handler_(*envelope))
-                    handler_succeeded_.store(false, std::memory_order_relaxed);
+                if (!envelope) {
+                    record_background_failure("server received a malformed control envelope");
+                    return;
+                }
+                handler_(*this, *envelope);
             });
             {
                 std::lock_guard lock(mutex_);
@@ -114,6 +117,47 @@ class LocalControlServer {
         return connection_ && connection_->send_message(bytes);
     }
 
+    bool send_or_record(ControlEnvelope envelope, std::string_view failure) {
+        if (send(envelope))
+            return true;
+        record_background_failure(failure);
+        return false;
+    }
+
+    bool reply_to_session_open(const ControlEnvelope& envelope) {
+        const auto* open = std::get_if<ControlSessionOpenEnvelope>(&envelope.payload);
+        if (!open)
+            return false;
+        send_or_record(
+            ControlEnvelope{.payload = ControlSessionOpenResult{
+                                .request_id = open->request_id,
+                                .accepted = true,
+                                .client_id = "client-a",
+                            }},
+            "failed to send the session-open response");
+        return true;
+    }
+
+    template <typename Payload>
+    const Payload* payload_or_record(const ControlEnvelope& envelope,
+                                     std::string_view failure) {
+        const auto* payload = std::get_if<Payload>(&envelope.payload);
+        if (!payload)
+            record_background_failure(failure);
+        return payload;
+    }
+
+    bool background_check(bool condition, std::string_view failure) {
+        if (!condition)
+            record_background_failure(failure);
+        return condition;
+    }
+
+    std::optional<std::string> background_failure() const {
+        std::lock_guard lock(mutex_);
+        return background_failure_;
+    }
+
     bool wait_for_connection() {
         std::unique_lock lock(mutex_);
         return ready_.wait_for(lock, 2s, [&] { return connection_ != nullptr; });
@@ -122,10 +166,6 @@ class LocalControlServer {
     bool wait_for_disconnect() {
         std::unique_lock lock(mutex_);
         return ready_.wait_for(lock, 2s, [&] { return disconnected_; });
-    }
-
-    bool handler_succeeded() const {
-        return handler_succeeded_.load(std::memory_order_relaxed);
     }
 
     void stop() {
@@ -140,14 +180,23 @@ class LocalControlServer {
     }
 
   private:
+    void record_background_failure(std::string_view failure) {
+        {
+            std::lock_guard lock(mutex_);
+            if (!background_failure_)
+                background_failure_ = std::string(failure);
+        }
+        ready_.notify_all();
+    }
+
     std::filesystem::path endpoint_;
     Handler handler_;
     InterprocessConnectionServer server_;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::condition_variable ready_;
     std::unique_ptr<InterprocessConnection> connection_;
     bool disconnected_ = false;
-    std::atomic<bool> handler_succeeded_{true};
+    std::optional<std::string> background_failure_;
 };
 
 ControlClientConnectionConfig connection_config(const std::filesystem::path& endpoint,
@@ -174,28 +223,24 @@ TEST_CASE("control client verifies the broker before opening a session",
     SocketDirectory directory;
     const auto expectation = current_process_expectation(directory.path / "observer.sock");
     std::atomic<unsigned> messages{0};
-    LocalControlServer* server_ptr = nullptr;
     LocalControlServer server{
         directory.path / "broker.sock",
-        [&](const ControlEnvelope& envelope) {
+        [&](LocalControlServer& local_server, const ControlEnvelope& envelope) {
             ++messages;
-            const auto* open = std::get_if<ControlSessionOpenEnvelope>(&envelope.payload);
-            if (open) {
-                return server_ptr->send(ControlEnvelope{.payload = ControlSessionOpenResult{
-                                                            .request_id = open->request_id,
-                                                            .accepted = true,
-                                                            .client_id = "client-a",
-                                                        }});
-            }
-            return std::holds_alternative<ControlNegotiationOffer>(envelope.payload) &&
-                   server_ptr->send(ControlEnvelope{.payload = ControlErrorEnvelope{
-                                                        .request_id = "unknown",
-                                                        .error_code = "negotiation-denied",
-                                                        .explanation = "negotiation denied for test",
-                                                    }});
+            if (local_server.reply_to_session_open(envelope))
+                return;
+            if (!local_server.payload_or_record<ControlNegotiationOffer>(
+                    envelope, "expected a negotiation offer"))
+                return;
+            local_server.send_or_record(
+                ControlEnvelope{.payload = ControlErrorEnvelope{
+                                    .request_id = "unknown",
+                                    .error_code = "negotiation-denied",
+                                    .explanation = "negotiation denied for test",
+                                }},
+                "failed to send the negotiation denial");
         },
     };
-    server_ptr = &server;
 
     auto wrong_expectation = expectation;
     wrong_expectation.evidence.process_start_id += "-wrong";
@@ -222,7 +267,9 @@ TEST_CASE("control client verifies the broker before opening a session",
     CHECK(denied.error_code == "negotiation-denied");
     CHECK(denied.explanation == "negotiation denied for test");
     CHECK(messages.load() == 2);
-    CHECK(server.handler_succeeded());
+    const auto background_failure = server.background_failure();
+    INFO(background_failure.value_or(""));
+    CHECK_FALSE(background_failure.has_value());
 #else
     SUCCEED("authenticated local peer verification is currently macOS-only");
 #endif
@@ -241,20 +288,16 @@ TEST_CASE("control client serializes requests and routes progress separately",
     std::atomic<bool> delayed_progress_sent{false};
     std::atomic<bool> delayed_response_sent{false};
     std::thread delayed_response;
-    LocalControlServer* server_ptr = nullptr;
     LocalControlServer server{
         directory.path / "broker.sock",
-        [&](const ControlEnvelope& envelope) {
-            if (const auto* open = std::get_if<ControlSessionOpenEnvelope>(&envelope.payload)) {
-                return server_ptr->send(ControlEnvelope{.payload = ControlSessionOpenResult{
-                                                            .request_id = open->request_id,
-                                                            .accepted = true,
-                                                            .client_id = "client-a",
-                                                        }});
-            }
-            const auto* cancellation = std::get_if<ControlCancelEnvelope>(&envelope.payload);
-            if (cancellation == nullptr)
-                return false;
+        [&](LocalControlServer& local_server, const ControlEnvelope& envelope) {
+            if (local_server.reply_to_session_open(envelope))
+                return;
+            const auto* cancellation =
+                local_server.payload_or_record<ControlCancelEnvelope>(
+                    envelope, "expected a cancellation request");
+            if (!cancellation)
+                return;
             const auto request_id = cancellation->request_id;
             unsigned request_number = 0;
             {
@@ -264,42 +307,56 @@ TEST_CASE("control client serializes requests and routes progress separately",
             ready.notify_all();
             if (request_number == 1) {
                 delayed_response = std::thread([&, request_id] {
+                    bool released = false;
                     {
                         std::unique_lock lock(mutex);
-                        ready.wait_for(lock, 2s, [&] { return release_first; });
+                        released = ready.wait_for(
+                            lock, 2s, [&] { return release_first; });
                     }
+                    if (!local_server.background_check(
+                            released, "timed out waiting to release the first response"))
+                        return;
                     delayed_progress_sent =
-                        server_ptr->send(ControlEnvelope{.payload = ControlProgressEnvelope{
-                                                             .request_id = "request-a",
-                                                             .receipt_id = "receipt-a",
-                                                             .sequence = 1,
-                                                             .current = 1,
-                                                             .total = 1,
-                                                         }});
+                        local_server.send(ControlEnvelope{
+                            .payload = ControlProgressEnvelope{
+                                .request_id = "request-a",
+                                .receipt_id = "receipt-a",
+                                .sequence = 1,
+                                .current = 1,
+                                .total = 1,
+                            }});
                     delayed_response_sent =
-                        server_ptr->send(ControlEnvelope{.payload = ControlErrorEnvelope{
-                                                             .request_id = request_id,
-                                                             .error_code = "test-denied",
-                                                             .explanation = "test response",
-                                                         }});
+                        local_server.send(ControlEnvelope{
+                            .payload = ControlErrorEnvelope{
+                                .request_id = request_id,
+                                .error_code = "test-denied",
+                                .explanation = "test response",
+                            }});
                     {
                         std::lock_guard lock(mutex);
                         first_response_sent = true;
                     }
                     ready.notify_all();
                 });
-                return true;
             } else {
-                return first_response_sent &&
-                       server_ptr->send(ControlEnvelope{.payload = ControlErrorEnvelope{
-                                                            .request_id = cancellation->request_id,
-                                                            .error_code = "test-denied",
-                                                            .explanation = "test response",
-                                                        }});
+                bool response_sent = false;
+                {
+                    std::lock_guard lock(mutex);
+                    response_sent = first_response_sent;
+                }
+                if (!local_server.background_check(
+                        response_sent, "second request arrived before the first response"))
+                    return;
+                local_server.send_or_record(
+                    ControlEnvelope{.payload = ControlErrorEnvelope{
+                                        .request_id = cancellation->request_id,
+                                        .error_code = "test-denied",
+                                        .explanation = "test response",
+                                    }},
+                    "failed to send the second response");
             }
         },
     };
-    server_ptr = &server;
     ControlClientConnection connection{
         connection_config(directory.path / "broker.sock", expectation)};
     REQUIRE(connection.connect());
@@ -335,10 +392,15 @@ TEST_CASE("control client serializes requests and routes progress separately",
     CHECK(delayed_response_sent.load());
     CHECK(first.error_code == "test-denied");
     CHECK(second.error_code == "test-denied");
-    CHECK(requests == 2);
-    CHECK(server.handler_succeeded());
+    {
+        std::lock_guard lock(mutex);
+        CHECK(requests == 2);
+    }
     std::lock_guard progress_lock(progress_mutex);
     CHECK(progress_requests == std::vector<std::string>{"request-a"});
+    const auto background_failure = server.background_failure();
+    INFO(background_failure.value_or(""));
+    CHECK_FALSE(background_failure.has_value());
 #else
     SUCCEED("authenticated local peer verification is currently macOS-only");
 #endif
@@ -352,26 +414,18 @@ TEST_CASE("control client timeout disconnects and disconnect wakes a waiter",
     std::mutex mutex;
     std::condition_variable received;
     bool request_received = false;
-    LocalControlServer* server_ptr = nullptr;
     LocalControlServer server{
         directory.path / "broker.sock",
-        [&](const ControlEnvelope& envelope) {
-            if (const auto* open = std::get_if<ControlSessionOpenEnvelope>(&envelope.payload)) {
-                return server_ptr->send(ControlEnvelope{.payload = ControlSessionOpenResult{
-                                                            .request_id = open->request_id,
-                                                            .accepted = true,
-                                                            .client_id = "client-a",
-                                                        }});
-            }
+        [&](LocalControlServer& local_server, const ControlEnvelope& envelope) {
+            if (local_server.reply_to_session_open(envelope))
+                return;
             {
                 std::lock_guard lock(mutex);
                 request_received = true;
             }
             received.notify_all();
-            return true;
         },
     };
-    server_ptr = &server;
     const auto offer =
         encode_control_envelope(ControlEnvelope{.payload = ControlNegotiationOffer{
                                                     .versions = {},
@@ -405,7 +459,9 @@ TEST_CASE("control client timeout disconnects and disconnect wakes a waiter",
         CHECK(std::chrono::steady_clock::now() - start < 1s);
         CHECK(result.error_code == "connection-lost");
     }
-    CHECK(server.handler_succeeded());
+    const auto background_failure = server.background_failure();
+    INFO(background_failure.value_or(""));
+    CHECK_FALSE(background_failure.has_value());
 #else
     SUCCEED("authenticated local peer verification is currently macOS-only");
 #endif
@@ -416,20 +472,13 @@ TEST_CASE("control client protocol violations poison and close the authenticated
 #ifdef __APPLE__
     SocketDirectory directory;
     const auto expectation = current_process_expectation(directory.path / "observer.sock");
-    LocalControlServer* server_ptr = nullptr;
     LocalControlServer server{
         directory.path / "broker.sock",
-        [&](const ControlEnvelope& envelope) {
-            const auto* open = std::get_if<ControlSessionOpenEnvelope>(&envelope.payload);
-            return open != nullptr &&
-                   server_ptr->send(ControlEnvelope{.payload = ControlSessionOpenResult{
-                                                        .request_id = open->request_id,
-                                                        .accepted = true,
-                                                        .client_id = "client-a",
-                                                    }});
+        [&](LocalControlServer& local_server, const ControlEnvelope& envelope) {
+            if (!local_server.reply_to_session_open(envelope))
+                local_server.background_check(false, "expected a session-open request");
         },
     };
-    server_ptr = &server;
     ControlClientConnection connection{
         connection_config(directory.path / "broker.sock", expectation)};
     REQUIRE(connection.connect());
@@ -440,7 +489,9 @@ TEST_CASE("control client protocol violations poison and close the authenticated
     CHECK_FALSE(connection.is_connected());
     CHECK_FALSE(connection.is_session_open());
     CHECK(connection.last_error_code() == "malformed-response");
-    CHECK(server.handler_succeeded());
+    const auto background_failure = server.background_failure();
+    INFO(background_failure.value_or(""));
+    CHECK_FALSE(background_failure.has_value());
 #else
     SUCCEED("authenticated local peer verification is currently macOS-only");
 #endif
@@ -451,26 +502,23 @@ TEST_CASE("control client rejects a response correlated to another request",
 #ifdef __APPLE__
     SocketDirectory directory;
     const auto expectation = current_process_expectation(directory.path / "observer.sock");
-    LocalControlServer* server_ptr = nullptr;
     LocalControlServer server{
         directory.path / "broker.sock",
-        [&](const ControlEnvelope& envelope) {
-            if (const auto* open = std::get_if<ControlSessionOpenEnvelope>(&envelope.payload)) {
-                return server_ptr->send(ControlEnvelope{.payload = ControlSessionOpenResult{
-                                                            .request_id = open->request_id,
-                                                            .accepted = true,
-                                                            .client_id = "client-a",
-                                                        }});
-            }
-            return std::holds_alternative<ControlCancelEnvelope>(envelope.payload) &&
-                   server_ptr->send(ControlEnvelope{.payload = ControlErrorEnvelope{
-                                                        .request_id = "unrelated-request",
-                                                        .error_code = "test-denied",
-                                                        .explanation = "test response",
-                                                    }});
+        [&](LocalControlServer& local_server, const ControlEnvelope& envelope) {
+            if (local_server.reply_to_session_open(envelope))
+                return;
+            if (!local_server.payload_or_record<ControlCancelEnvelope>(
+                    envelope, "expected a cancellation request"))
+                return;
+            local_server.send_or_record(
+                ControlEnvelope{.payload = ControlErrorEnvelope{
+                                    .request_id = "unrelated-request",
+                                    .error_code = "test-denied",
+                                    .explanation = "test response",
+                                }},
+                "failed to send the unrelated response");
         },
     };
-    server_ptr = &server;
     ControlClientConnection connection{
         connection_config(directory.path / "broker.sock", expectation)};
     REQUIRE(connection.connect());
@@ -481,7 +529,9 @@ TEST_CASE("control client rejects a response correlated to another request",
     CHECK(result.error_code == "unexpected-response");
     REQUIRE(server.wait_for_disconnect());
     CHECK_FALSE(connection.is_connected());
-    CHECK(server.handler_succeeded());
+    const auto background_failure = server.background_failure();
+    INFO(background_failure.value_or(""));
+    CHECK_FALSE(background_failure.has_value());
 #else
     SUCCEED("authenticated local peer verification is currently macOS-only");
 #endif
@@ -492,29 +542,27 @@ TEST_CASE("control client disconnect from a progress callback closes the carrier
 #ifdef __APPLE__
     SocketDirectory directory;
     const auto expectation = current_process_expectation(directory.path / "observer.sock");
-    LocalControlServer* server_ptr = nullptr;
     LocalControlServer server{
         directory.path / "broker.sock",
-        [&](const ControlEnvelope& envelope) {
-            if (const auto* open = std::get_if<ControlSessionOpenEnvelope>(&envelope.payload)) {
-                return server_ptr->send(ControlEnvelope{.payload = ControlSessionOpenResult{
-                                                            .request_id = open->request_id,
-                                                            .accepted = true,
-                                                            .client_id = "client-a",
-                                                        }});
-            }
-            const auto* cancellation = std::get_if<ControlCancelEnvelope>(&envelope.payload);
-            return cancellation != nullptr &&
-                   server_ptr->send(ControlEnvelope{.payload = ControlProgressEnvelope{
-                                                        .request_id = cancellation->request_id,
-                                                        .receipt_id = "receipt-a",
-                                                        .sequence = 1,
-                                                        .current = 0,
-                                                        .total = 1,
-                                                    }});
+        [&](LocalControlServer& local_server, const ControlEnvelope& envelope) {
+            if (local_server.reply_to_session_open(envelope))
+                return;
+            const auto* cancellation =
+                local_server.payload_or_record<ControlCancelEnvelope>(
+                    envelope, "expected a cancellation request");
+            if (!cancellation)
+                return;
+            local_server.send_or_record(
+                ControlEnvelope{.payload = ControlProgressEnvelope{
+                                    .request_id = cancellation->request_id,
+                                    .receipt_id = "receipt-a",
+                                    .sequence = 1,
+                                    .current = 0,
+                                    .total = 1,
+                                }},
+                "failed to send progress");
         },
     };
-    server_ptr = &server;
     ControlClientConnection connection{
         connection_config(directory.path / "broker.sock", expectation)};
     REQUIRE(connection.connect());
@@ -526,7 +574,9 @@ TEST_CASE("control client disconnect from a progress callback closes the carrier
     CHECK(result.error_code == "connection-lost");
     REQUIRE(server.wait_for_disconnect());
     CHECK_FALSE(connection.is_connected());
-    CHECK(server.handler_succeeded());
+    const auto background_failure = server.background_failure();
+    INFO(background_failure.value_or(""));
+    CHECK_FALSE(background_failure.has_value());
 #else
     SUCCEED("authenticated local peer verification is currently macOS-only");
 #endif
@@ -537,19 +587,17 @@ TEST_CASE("control client maps artifact wire metadata without dropping lineage",
 #ifdef __APPLE__
     SocketDirectory directory;
     const auto expectation = current_process_expectation(directory.path / "observer.sock");
-    LocalControlServer* server_ptr = nullptr;
     LocalControlServer server{
         directory.path / "broker.sock",
-        [&](const ControlEnvelope& envelope) {
-            if (const auto* open = std::get_if<ControlSessionOpenEnvelope>(&envelope.payload)) {
-                return server_ptr->send(ControlEnvelope{.payload = ControlSessionOpenResult{
-                                                            .request_id = open->request_id,
-                                                            .accepted = true,
-                                                            .client_id = "client-a",
-                                                        }});
-            }
-            const auto* read = std::get_if<ControlArtifactReadEnvelope>(&envelope.payload);
-            return read != nullptr && server_ptr->send(
+        [&](LocalControlServer& local_server, const ControlEnvelope& envelope) {
+            if (local_server.reply_to_session_open(envelope))
+                return;
+            const auto* read =
+                local_server.payload_or_record<ControlArtifactReadEnvelope>(
+                    envelope, "expected an artifact-read request");
+            if (!read)
+                return;
+            local_server.send_or_record(
                 ControlEnvelope{.payload = ControlArtifactReadResponseEnvelope{
                                     .request_id = read->request_id,
                                     .status_id = "read",
@@ -581,10 +629,10 @@ TEST_CASE("control client maps artifact wire metadata without dropping lineage",
                                         },
                                     .bytes_base64 = "AAEC/w==",
                                     .eof = true,
-                                }});
+                                }},
+                "failed to send the artifact-read response");
         },
     };
-    server_ptr = &server;
     ControlClientConnection connection{
         connection_config(directory.path / "broker.sock", expectation)};
     REQUIRE(connection.connect());
@@ -618,7 +666,9 @@ TEST_CASE("control client maps artifact wire metadata without dropping lineage",
     CHECK(metadata.redaction_state == ControlArtifactRedactionState::Redacted);
     CHECK(result.bytes == std::vector<std::uint8_t>{0, 1, 2, 255});
     CHECK(result.eof);
-    CHECK(server.handler_succeeded());
+    const auto background_failure = server.background_failure();
+    INFO(background_failure.value_or(""));
+    CHECK_FALSE(background_failure.has_value());
 
 #else
     SUCCEED("authenticated local peer verification is currently macOS-only");

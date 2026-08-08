@@ -1,0 +1,646 @@
+use super::*;
+
+#[test]
+fn upgrade_url_macos_arm64_uses_targz() {
+    let (asset, url) = upgrade_url_for("0.50.0", "darwin", "arm64");
+    assert_eq!(asset, "pulp-darwin-arm64.tar.gz");
+    assert_eq!(
+        url,
+        "https://github.com/Generous-Corp/pulp/releases/download/v0.50.0/pulp-darwin-arm64.tar.gz"
+    );
+}
+
+#[test]
+fn upgrade_url_windows_x64_uses_zip() {
+    let (asset, url) = upgrade_url_for("0.50.0", "windows", "x64");
+    assert_eq!(asset, "pulp-windows-x64.zip");
+    assert!(url.ends_with("/v0.50.0/pulp-windows-x64.zip"));
+}
+
+#[test]
+fn upgrade_url_linux_x64_uses_targz() {
+    let (asset, _url) = upgrade_url_for("1.2.3", "linux", "x64");
+    assert_eq!(asset, "pulp-linux-x64.tar.gz");
+}
+
+#[test]
+fn current_platform_matches_target_os() {
+    let p = current_platform();
+    if cfg!(target_os = "macos") {
+        assert_eq!(p, "darwin");
+    } else if cfg!(target_os = "windows") {
+        assert_eq!(p, "windows");
+    } else {
+        assert_eq!(p, "linux");
+    }
+}
+
+#[test]
+fn current_arch_matches_target_arch() {
+    let a = current_arch();
+    if cfg!(target_arch = "aarch64") {
+        assert_eq!(a, "arm64");
+    } else if cfg!(target_arch = "x86_64") {
+        assert_eq!(a, "x64");
+    } else {
+        assert_eq!(a, "unknown");
+    }
+}
+
+#[test]
+fn pulp_basename_includes_exe_on_windows() {
+    if cfg!(target_os = "windows") {
+        assert_eq!(pulp_basename(), "pulp.exe");
+        assert_eq!(cpp_basename(), "pulp-cpp.exe");
+        assert_eq!(mcp_basename(), "pulp-mcp.exe");
+        assert_eq!(import_design_basename(), "pulp-import-design.exe");
+    } else {
+        assert_eq!(pulp_basename(), "pulp");
+        assert_eq!(cpp_basename(), "pulp-cpp");
+        assert_eq!(mcp_basename(), "pulp-mcp");
+        assert_eq!(import_design_basename(), "pulp-import-design");
+    }
+    assert_eq!(control_broker_basename(), "pulp-control-broker");
+}
+
+#[test]
+fn sibling_cpp_path_is_under_self_parent() {
+    let me = PathBuf::from("/opt/pulp/bin/pulp");
+    let cpp = sibling_cpp_path(&me).unwrap();
+    assert_eq!(cpp.parent().unwrap(), Path::new("/opt/pulp/bin"));
+    assert_eq!(cpp.file_name().unwrap(), cpp_basename());
+}
+
+#[test]
+fn sibling_mcp_path_is_under_self_parent() {
+    let me = PathBuf::from("/opt/pulp/bin/pulp");
+    let mcp = sibling_mcp_path(&me).unwrap();
+    assert_eq!(mcp.parent().unwrap(), Path::new("/opt/pulp/bin"));
+    assert_eq!(mcp.file_name().unwrap(), mcp_basename());
+}
+
+#[test]
+fn locate_binaries_requires_pulp() {
+    let td = tempfile::tempdir().unwrap();
+    let err = locate_binaries_in_archive(td.path()).unwrap_err();
+    assert!(err.to_string().contains("does not contain"));
+}
+
+#[test]
+fn locate_binaries_finds_pulp_only() {
+    let td = tempfile::tempdir().unwrap();
+    let pulp = td.path().join(pulp_basename());
+    fs::write(&pulp, b"new-pulp").unwrap();
+    let arch = locate_binaries_in_archive(td.path()).unwrap();
+    assert_eq!(arch.new_pulp, pulp);
+    assert!(arch.new_cpp.is_none(), "pre-swap layout: no pulp-cpp");
+    assert!(arch.new_mcp.is_none(), "pre-MCP layout: no pulp-mcp");
+    assert!(arch.new_import_design.is_none());
+    assert!(arch.browser_capture_runtime.is_none());
+}
+
+#[test]
+fn locate_binaries_finds_pulp_cpp_mcp_and_control_broker() {
+    let td = tempfile::tempdir().unwrap();
+    fs::write(td.path().join(pulp_basename()), b"new-pulp").unwrap();
+    fs::write(td.path().join(cpp_basename()), b"new-cpp").unwrap();
+    fs::write(td.path().join(mcp_basename()), b"new-mcp").unwrap();
+    fs::write(
+        td.path().join(control_broker_basename()),
+        b"new-control-broker",
+    )
+    .unwrap();
+    let arch = locate_binaries_in_archive(td.path()).unwrap();
+    assert!(arch.new_cpp.is_some(), "post-swap layout: pulp-cpp present");
+    assert!(arch.new_mcp.is_some(), "MCP server binary present");
+    assert!(
+        arch.new_control_broker.is_some(),
+        "Darwin control broker present"
+    );
+}
+
+#[test]
+fn replace_binary_atomic_overwrites_and_cleans_backup() {
+    let td = tempfile::tempdir().unwrap();
+    let dst = td.path().join("pulp");
+    let src = td.path().join("new");
+    fs::write(&dst, b"old").unwrap();
+    fs::write(&src, b"new-content").unwrap();
+    replace_binary_atomic(&dst, &src).unwrap();
+    assert_eq!(fs::read(&dst).unwrap(), b"new-content");
+    assert!(!backup_path(&dst).exists(), "backup should be cleaned");
+}
+
+#[test]
+fn replace_binary_atomic_clears_stale_backup_first() {
+    let td = tempfile::tempdir().unwrap();
+    let dst = td.path().join("pulp");
+    let src = td.path().join("new");
+    fs::write(&dst, b"old").unwrap();
+    fs::write(&src, b"new-content").unwrap();
+    // Plant a stale backup from a "previous failed run".
+    fs::write(backup_path(&dst), b"stale").unwrap();
+    replace_binary_atomic(&dst, &src).unwrap();
+    assert_eq!(fs::read(&dst).unwrap(), b"new-content");
+}
+
+#[test]
+fn install_new_binary_creates_new_file_with_exec_perms() {
+    let td = tempfile::tempdir().unwrap();
+    let dst = td.path().join("pulp-cpp");
+    let src = td.path().join("new");
+    fs::write(&src, b"cpp-content").unwrap();
+    assert!(!dst.exists());
+    install_new_binary(&dst, &src).unwrap();
+    assert!(dst.exists());
+    assert_eq!(fs::read(&dst).unwrap(), b"cpp-content");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(&dst).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o755, "exec perms must be set");
+    }
+}
+
+#[test]
+fn install_extracted_replaces_siblings_when_archive_has_them() {
+    let bin_dir = tempfile::tempdir().unwrap();
+    let arch_dir = tempfile::tempdir().unwrap();
+
+    // Existing install: all release binaries present.
+    let pulp_dst = bin_dir.path().join(pulp_basename());
+    let cpp_dst = bin_dir.path().join(cpp_basename());
+    let mcp_dst = bin_dir.path().join(mcp_basename());
+    fs::write(&pulp_dst, b"old-pulp").unwrap();
+    fs::write(&cpp_dst, b"old-cpp").unwrap();
+    fs::write(&mcp_dst, b"old-mcp").unwrap();
+
+    // Archive: current release tarball.
+    fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
+    fs::write(arch_dir.path().join(cpp_basename()), b"new-cpp").unwrap();
+    fs::write(arch_dir.path().join(mcp_basename()), b"new-mcp").unwrap();
+
+    let plan = InstallPlan {
+        version: "0.50.0".into(),
+        url: "ignored".into(),
+        asset: "ignored".into(),
+        self_path: pulp_dst.clone(),
+        cpp_path: Some(cpp_dst.clone()),
+        mcp_path: Some(mcp_dst.clone()),
+        is_zip: false,
+    };
+    let arch = locate_binaries_in_archive(arch_dir.path()).unwrap();
+    let report = install_extracted(&plan, &arch).unwrap();
+
+    assert!(report.pulp_replaced);
+    assert!(report.cpp_replaced);
+    assert!(!report.cpp_created);
+    assert!(report.mcp_replaced);
+    assert!(!report.mcp_created);
+    assert_eq!(fs::read(&pulp_dst).unwrap(), b"new-pulp");
+    assert_eq!(fs::read(&cpp_dst).unwrap(), b"new-cpp");
+    assert_eq!(fs::read(&mcp_dst).unwrap(), b"new-mcp");
+}
+
+#[test]
+fn install_extracted_creates_cpp_when_sibling_slot_empty() {
+    // Pre-swap → post-swap transition: user has only `pulp`, no
+    // `pulp-cpp` yet. Install should drop pulp-cpp into the sibling
+    // slot so the user's next invocation can delegate cleanly.
+    let bin_dir = tempfile::tempdir().unwrap();
+    let arch_dir = tempfile::tempdir().unwrap();
+
+    let pulp_dst = bin_dir.path().join(pulp_basename());
+    let cpp_dst = bin_dir.path().join(cpp_basename());
+    fs::write(&pulp_dst, b"old-pulp").unwrap();
+    // cpp_dst intentionally absent.
+
+    fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
+    fs::write(arch_dir.path().join(cpp_basename()), b"new-cpp").unwrap();
+
+    let plan = InstallPlan {
+        version: "0.50.0".into(),
+        url: "ignored".into(),
+        asset: "ignored".into(),
+        self_path: pulp_dst.clone(),
+        cpp_path: Some(cpp_dst.clone()),
+        mcp_path: None,
+        is_zip: false,
+    };
+    let arch = locate_binaries_in_archive(arch_dir.path()).unwrap();
+    let report = install_extracted(&plan, &arch).unwrap();
+
+    assert!(report.pulp_replaced);
+    assert!(!report.cpp_replaced);
+    assert!(
+        report.cpp_created,
+        "first dual-binary upgrade must create pulp-cpp"
+    );
+    assert!(cpp_dst.exists());
+    assert_eq!(fs::read(&cpp_dst).unwrap(), b"new-cpp");
+}
+
+#[test]
+fn install_extracted_creates_mcp_when_sibling_slot_empty() {
+    // Pre-MCP install: user has `pulp`, but no `pulp-mcp` yet.
+    // Install should drop pulp-mcp into the sibling slot so the
+    // Claude Code plugin's launcher can resolve the server.
+    let bin_dir = tempfile::tempdir().unwrap();
+    let arch_dir = tempfile::tempdir().unwrap();
+
+    let pulp_dst = bin_dir.path().join(pulp_basename());
+    let mcp_dst = bin_dir.path().join(mcp_basename());
+    fs::write(&pulp_dst, b"old-pulp").unwrap();
+    // mcp_dst intentionally absent.
+
+    fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
+    fs::write(arch_dir.path().join(mcp_basename()), b"new-mcp").unwrap();
+
+    let plan = InstallPlan {
+        version: "0.50.0".into(),
+        url: "ignored".into(),
+        asset: "ignored".into(),
+        self_path: pulp_dst.clone(),
+        cpp_path: None,
+        mcp_path: Some(mcp_dst.clone()),
+        is_zip: false,
+    };
+    let arch = locate_binaries_in_archive(arch_dir.path()).unwrap();
+    let report = install_extracted(&plan, &arch).unwrap();
+
+    assert!(report.pulp_replaced);
+    assert!(!report.mcp_replaced);
+    assert!(
+        report.mcp_created,
+        "first MCP-capable upgrade must create pulp-mcp"
+    );
+    assert!(mcp_dst.exists());
+    assert_eq!(fs::read(&mcp_dst).unwrap(), b"new-mcp");
+}
+
+#[test]
+fn install_extracted_skips_cpp_when_archive_lacks_it() {
+    // Pre-swap tarball: only `pulp`. Install replaces pulp; leaves
+    // the (possibly absent) pulp-cpp slot alone. This is the
+    // single-binary-tarball flow that pre-swap users will see when
+    // they upgrade between two pre-swap versions.
+    let bin_dir = tempfile::tempdir().unwrap();
+    let arch_dir = tempfile::tempdir().unwrap();
+
+    let pulp_dst = bin_dir.path().join(pulp_basename());
+    let cpp_dst = bin_dir.path().join(cpp_basename());
+    fs::write(&pulp_dst, b"old-pulp").unwrap();
+
+    fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
+    // No pulp-cpp in archive.
+
+    let plan = InstallPlan {
+        version: "0.46.0".into(),
+        url: "ignored".into(),
+        asset: "ignored".into(),
+        self_path: pulp_dst.clone(),
+        cpp_path: Some(cpp_dst.clone()),
+        mcp_path: None,
+        is_zip: false,
+    };
+    let arch = locate_binaries_in_archive(arch_dir.path()).unwrap();
+    let report = install_extracted(&plan, &arch).unwrap();
+
+    assert!(report.pulp_replaced);
+    assert!(!report.cpp_replaced);
+    assert!(!report.cpp_created);
+    assert!(
+        !cpp_dst.exists(),
+        "single-binary tarball must not invent pulp-cpp"
+    );
+}
+
+#[test]
+fn install_extracted_skips_mcp_when_archive_lacks_it() {
+    // Older tarball: no `pulp-mcp`. Install replaces pulp; leaves the
+    // (possibly absent) pulp-mcp slot alone.
+    let bin_dir = tempfile::tempdir().unwrap();
+    let arch_dir = tempfile::tempdir().unwrap();
+
+    let pulp_dst = bin_dir.path().join(pulp_basename());
+    let mcp_dst = bin_dir.path().join(mcp_basename());
+    fs::write(&pulp_dst, b"old-pulp").unwrap();
+
+    fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
+    // No pulp-mcp in archive.
+
+    let plan = InstallPlan {
+        version: "0.46.0".into(),
+        url: "ignored".into(),
+        asset: "ignored".into(),
+        self_path: pulp_dst.clone(),
+        cpp_path: None,
+        mcp_path: Some(mcp_dst.clone()),
+        is_zip: false,
+    };
+    let arch = locate_binaries_in_archive(arch_dir.path()).unwrap();
+    let report = install_extracted(&plan, &arch).unwrap();
+
+    assert!(report.pulp_replaced);
+    assert!(!report.mcp_replaced);
+    assert!(!report.mcp_created);
+    assert!(!mcp_dst.exists(), "older tarball must not invent pulp-mcp");
+}
+
+#[test]
+fn control_broker_install_commits_only_after_reconcile() {
+    let bin_dir = tempfile::tempdir().unwrap();
+    let arch_dir = tempfile::tempdir().unwrap();
+    let pulp_dst = bin_dir.path().join(pulp_basename());
+    let broker_dst = bin_dir.path().join(control_broker_basename());
+    fs::write(&pulp_dst, b"pulp").unwrap();
+    fs::write(&broker_dst, b"old-broker").unwrap();
+    fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
+    fs::write(
+        arch_dir.path().join(control_broker_basename()),
+        b"new-broker",
+    )
+    .unwrap();
+    let plan = InstallPlan {
+        version: "0.795.0".into(),
+        url: "ignored".into(),
+        asset: "ignored".into(),
+        self_path: pulp_dst,
+        cpp_path: None,
+        mcp_path: None,
+        is_zip: false,
+    };
+    let archive = locate_binaries_in_archive(arch_dir.path()).unwrap();
+    let result = install_control_broker_with(&plan, &archive, |installed, _| {
+        assert_eq!(fs::read(installed).unwrap(), b"new-broker");
+        Ok(())
+    })
+    .unwrap();
+
+    if cfg!(target_os = "macos") {
+        assert_eq!(result, ControlBrokerInstall::Replaced);
+        assert_eq!(fs::read(&broker_dst).unwrap(), b"new-broker");
+        assert!(!backup_path(&broker_dst).exists());
+    } else {
+        assert_eq!(result, ControlBrokerInstall::NotPresent);
+        assert_eq!(fs::read(&broker_dst).unwrap(), b"old-broker");
+    }
+}
+
+#[test]
+fn control_broker_install_restores_previous_binary_on_reconcile_failure() {
+    let bin_dir = tempfile::tempdir().unwrap();
+    let arch_dir = tempfile::tempdir().unwrap();
+    let pulp_dst = bin_dir.path().join(pulp_basename());
+    let broker_dst = bin_dir.path().join(control_broker_basename());
+    fs::write(&pulp_dst, b"pulp").unwrap();
+    fs::write(&broker_dst, b"old-broker").unwrap();
+    fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
+    fs::write(
+        arch_dir.path().join(control_broker_basename()),
+        b"new-broker",
+    )
+    .unwrap();
+    let plan = InstallPlan {
+        version: "0.795.0".into(),
+        url: "ignored".into(),
+        asset: "ignored".into(),
+        self_path: pulp_dst,
+        cpp_path: None,
+        mcp_path: None,
+        is_zip: false,
+    };
+    let archive = locate_binaries_in_archive(arch_dir.path()).unwrap();
+    let result = install_control_broker_with(&plan, &archive, |_, _| {
+        Err(CliError::Other("synthetic activation failure".into()))
+    });
+
+    if cfg!(target_os = "macos") {
+        let error = result.unwrap_err();
+        assert!(error.to_string().contains("synthetic activation failure"));
+    } else {
+        assert_eq!(result.unwrap(), ControlBrokerInstall::NotPresent);
+    }
+    assert_eq!(fs::read(&broker_dst).unwrap(), b"old-broker");
+    assert!(!backup_path(&broker_dst).exists());
+}
+
+#[test]
+fn control_broker_service_rollback_restores_binary_before_prior_restart() {
+    let bin_dir = tempfile::tempdir().unwrap();
+    let arch_dir = tempfile::tempdir().unwrap();
+    let pulp_dst = bin_dir.path().join(pulp_basename());
+    let broker_dst = bin_dir.path().join(control_broker_basename());
+    fs::write(&pulp_dst, b"pulp").unwrap();
+    fs::write(&broker_dst, b"old-broker").unwrap();
+    fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
+    fs::write(
+        arch_dir.path().join(control_broker_basename()),
+        b"new-broker",
+    )
+    .unwrap();
+    let plan = InstallPlan {
+        version: "0.795.0".into(),
+        url: "ignored".into(),
+        asset: "ignored".into(),
+        self_path: pulp_dst,
+        cpp_path: None,
+        mcp_path: None,
+        is_zip: false,
+    };
+    let archive = locate_binaries_in_archive(arch_dir.path()).unwrap();
+    let restored_before_restart = std::cell::Cell::new(false);
+    let result = install_control_broker_with(&plan, &archive, |installed, rollback_binary| {
+        assert_eq!(fs::read(installed).unwrap(), b"new-broker");
+        rollback_binary()?;
+        assert_eq!(fs::read(installed).unwrap(), b"old-broker");
+        restored_before_restart.set(true);
+        Err(CliError::Other("synthetic activation failure".into()))
+    });
+
+    if cfg!(target_os = "macos") {
+        assert!(result.is_err());
+        assert!(restored_before_restart.get());
+    } else {
+        assert_eq!(result.unwrap(), ControlBrokerInstall::NotPresent);
+        assert!(!restored_before_restart.get());
+    }
+    assert_eq!(fs::read(&broker_dst).unwrap(), b"old-broker");
+    assert!(!backup_path(&broker_dst).exists());
+}
+
+#[test]
+fn legacy_transition_recovers_once_for_exact_canonical_release() {
+    let home = tempfile::tempdir().unwrap();
+    let bin = home.path().join(".pulp/bin");
+    let archive_dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(&bin).unwrap();
+    let pulp = bin.join(pulp_basename());
+    fs::write(&pulp, b"pulp").unwrap();
+    fs::write(archive_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
+    fs::write(
+        archive_dir.path().join(control_broker_basename()),
+        b"broker",
+    )
+    .unwrap();
+    let plan = InstallPlan {
+        version: crate::build_info::control_broker_floor().into(),
+        url: "ignored".into(),
+        asset: "ignored".into(),
+        self_path: pulp,
+        cpp_path: None,
+        mcp_path: None,
+        is_zip: false,
+    };
+    let recovered = recover_legacy_control_broker_once_with(
+        &plan,
+        home.path(),
+        || locate_binaries_in_archive(archive_dir.path()),
+        |_, _| Ok(()),
+    )
+    .unwrap();
+
+    if cfg!(target_os = "macos") {
+        assert_eq!(recovered, LegacyControlBrokerRecovery::Recovered);
+        assert_eq!(
+            fs::read(bin.join(control_broker_basename())).unwrap(),
+            b"broker"
+        );
+        let second = recover_legacy_control_broker_once_with(
+            &plan,
+            home.path(),
+            || panic!("successful transition must not fetch again"),
+            |_, _| panic!("successful transition must not reconcile again"),
+        )
+        .unwrap();
+        assert_eq!(second, LegacyControlBrokerRecovery::NotNeeded);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let marker = home
+                .path()
+                .join(".pulp/state/control-broker-legacy-transition.marker");
+            assert_eq!(
+                fs::metadata(marker).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    } else {
+        assert_eq!(recovered, LegacyControlBrokerRecovery::NotNeeded);
+    }
+}
+
+#[test]
+fn legacy_transition_failure_marker_suppresses_repeated_fetch() {
+    let home = tempfile::tempdir().unwrap();
+    let bin = home.path().join(".pulp/bin");
+    fs::create_dir_all(&bin).unwrap();
+    let pulp = bin.join(pulp_basename());
+    fs::write(&pulp, b"pulp").unwrap();
+    let plan = InstallPlan {
+        version: crate::build_info::control_broker_floor().into(),
+        url: "ignored".into(),
+        asset: "ignored".into(),
+        self_path: pulp,
+        cpp_path: None,
+        mcp_path: None,
+        is_zip: false,
+    };
+    let first = recover_legacy_control_broker_once_with(
+        &plan,
+        home.path(),
+        || Err(CliError::Other("synthetic download failure".into())),
+        |_, _| Ok(()),
+    );
+
+    if cfg!(target_os = "macos") {
+        assert!(first
+            .unwrap_err()
+            .to_string()
+            .contains("synthetic download failure"));
+        let second = recover_legacy_control_broker_once_with(
+            &plan,
+            home.path(),
+            || panic!("hard failure marker must suppress a repeated fetch"),
+            |_, _| panic!("hard failure marker must suppress reconciliation"),
+        )
+        .unwrap();
+        assert_eq!(
+            second,
+            LegacyControlBrokerRecovery::AlreadyAttempted { succeeded: false }
+        );
+    } else {
+        assert_eq!(first.unwrap(), LegacyControlBrokerRecovery::NotNeeded);
+    }
+}
+
+#[test]
+fn install_plan_from_version_resolves_self_and_sibling() {
+    let plan = InstallPlan::from_version("0.50.0").unwrap();
+    assert_eq!(plan.version, "0.50.0");
+    assert!(plan.url.contains("/v0.50.0/"));
+    assert_eq!(plan.is_zip, cfg!(target_os = "windows"));
+    // self_path is the test binary; sibling is its parent + cpp_basename().
+    let sib = plan.cpp_path.expect("test binary must have a parent");
+    assert_eq!(sib.parent(), plan.self_path.parent());
+    assert_eq!(sib.file_name().unwrap(), cpp_basename());
+    let mcp = plan.mcp_path.expect("test binary must have a parent");
+    assert_eq!(mcp.parent(), plan.self_path.parent());
+    assert_eq!(mcp.file_name().unwrap(), mcp_basename());
+}
+
+#[test]
+fn looks_like_build_artifact_detects_cargo_target() {
+    assert!(looks_like_build_artifact(Path::new(
+        "/Users/x/proj/target/release/pulp"
+    )));
+    assert!(looks_like_build_artifact(Path::new(
+        "/tmp/pulp-validate/experimental/pulp-rs/target/release/deps/pulp_rs-abcd1234"
+    )));
+    assert!(!looks_like_build_artifact(Path::new("/usr/local/bin/pulp")));
+    assert!(!looks_like_build_artifact(Path::new(
+        "/opt/pulp/bin/pulp-cpp"
+    )));
+    assert!(!looks_like_build_artifact(Path::new(
+        "C:\\Program Files\\Pulp\\bin\\pulp.exe"
+    )));
+}
+
+#[test]
+fn install_extracted_refuses_target_dir_without_live_override() {
+    // Build a plan whose self_path lives under a `target/`
+    // component. Without PULP_UPGRADE_INSTALL_LIVE the swap must
+    // refuse to run.
+    let arch_dir = tempfile::tempdir().unwrap();
+    fs::write(arch_dir.path().join(pulp_basename()), b"new").unwrap();
+    let archive = locate_binaries_in_archive(arch_dir.path()).unwrap();
+
+    let plan = InstallPlan {
+        version: "0.50.0".into(),
+        url: "ignored".into(),
+        asset: "ignored".into(),
+        self_path: PathBuf::from("/some/proj/target/release/pulp"),
+        cpp_path: None,
+        mcp_path: None,
+        is_zip: false,
+    };
+    // Make sure the override env var isn't set from a parallel test.
+    std::env::remove_var("PULP_UPGRADE_INSTALL_LIVE");
+    let err = install_extracted(&plan, &archive).unwrap_err();
+    assert!(
+        err.to_string().contains("cargo build artifact"),
+        "expected build-artifact guard, got: {err}"
+    );
+}
+
+#[test]
+fn backup_path_appends_dot_bak() {
+    assert_eq!(
+        backup_path(Path::new("/x/y/pulp")),
+        PathBuf::from("/x/y/pulp.bak")
+    );
+    assert_eq!(
+        backup_path(Path::new("C:\\bin\\pulp.exe")),
+        PathBuf::from("C:\\bin\\pulp.exe.bak")
+    );
+}

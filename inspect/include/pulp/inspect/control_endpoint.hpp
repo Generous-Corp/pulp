@@ -12,13 +12,31 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
 
 namespace pulp::inspect {
+
+class ControlHostRouter;
+
+struct ControlClientConnectionPrincipal {
+    ControlClientId client_id;
+    friend bool operator==(const ControlClientConnectionPrincipal&,
+                           const ControlClientConnectionPrincipal&) = default;
+};
+
+struct ControlHostConnectionPrincipal {
+    ControlRegistrationId registration_id;
+    friend bool operator==(const ControlHostConnectionPrincipal&,
+                           const ControlHostConnectionPrincipal&) = default;
+};
+
+using ControlConnectionPrincipal =
+    std::variant<ControlClientConnectionPrincipal, ControlHostConnectionPrincipal>;
 
 struct ControlConnectionAdmission {
     std::string admission_id;
     ControlPeerExpectation expected_peer;
-    ControlClientId client_id;
+    ControlConnectionPrincipal principal;
     std::chrono::steady_clock::time_point expires_at;
 };
 
@@ -45,7 +63,7 @@ struct ControlEndpointConfig {
 class ControlEndpoint {
   public:
     ControlEndpoint(ControlService& service, ControlAdmissionConsumer consume_admission,
-                    ControlEndpointConfig config);
+                    ControlEndpointConfig config, ControlHostRouter* host_router = nullptr);
     ~ControlEndpoint();
 
     ControlEndpoint(const ControlEndpoint&) = delete;

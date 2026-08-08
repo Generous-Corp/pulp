@@ -2,12 +2,17 @@
 
 #include <pulp/events/interprocess_connection.hpp>
 #include <pulp/inspect/control_endpoint.hpp>
+#include <pulp/inspect/control_host_connection.hpp>
+#include <pulp/inspect/control_host_router.hpp>
 #include <pulp/runtime/crypto.hpp>
+
+#include "support/thread_progress.hpp"
 
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
+#include <future>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -62,7 +67,8 @@ struct ReceivedEnvelope {
 };
 
 #ifdef __APPLE__
-ControlPeerEvidence observe_current_process(const std::filesystem::path& endpoint) {
+ControlPeerEvidence observe_current_process(const std::filesystem::path& endpoint,
+                                            ControlPeerRole role = ControlPeerRole::Client) {
     InterprocessConnectionServer observer;
     std::mutex mutex;
     std::condition_variable ready;
@@ -81,7 +87,7 @@ ControlPeerEvidence observe_current_process(const std::filesystem::path& endpoin
         std::unique_lock lock(mutex);
         REQUIRE(ready.wait_for(lock, 2s, [&] { return accepted != nullptr; }));
     }
-    const auto evidence = observe_control_peer(*accepted, ControlPeerRole::Client);
+    const auto evidence = observe_control_peer(*accepted, role);
     REQUIRE(evidence.has_value());
     client.disconnect();
     accepted.reset();
@@ -94,6 +100,12 @@ VerifiedControlPeerIdentity mint_verified(ControlPeerEvidence evidence) {
     auto verified = verifier.verify(std::move(evidence));
     REQUIRE(verified.has_value());
     return std::move(*verified);
+}
+
+std::int64_t host_deadline() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::system_clock::now().time_since_epoch() + 2s)
+        .count();
 }
 #endif
 
@@ -146,6 +158,199 @@ TEST_CASE("control endpoint health is observational and uses the canonical envel
     client.disconnect();
     endpoint.stop();
     CHECK_FALSE(endpoint.is_listening());
+#else
+    SUCCEED("the authenticated control endpoint is currently macOS-only");
+#endif
+}
+
+TEST_CASE("control endpoint authenticates a host role and routes on the canonical carrier",
+          "[inspect][control][carrier][host]") {
+#ifdef __APPLE__
+    EndpointDirectory directory;
+    const auto host_evidence =
+        observe_current_process(directory.path / "h.sock", ControlPeerRole::StandaloneHost);
+    const auto broker_evidence =
+        observe_current_process(directory.path / "b.sock", ControlPeerRole::TrustedHostBridge);
+    ControlBroker broker;
+    ControlHostRouter router;
+    ControlService service{broker, router.executor()};
+    std::optional<ControlConnectionAdmission> admission{ControlConnectionAdmission{
+        .admission_id = "host-admission-1",
+        .expected_peer = {.evidence = host_evidence},
+        .principal = ControlHostConnectionPrincipal{ControlRegistrationId{"registration-1"}},
+        .expires_at = std::chrono::steady_clock::now() + 1min,
+    }};
+    ControlEndpoint endpoint{
+        service,
+        [&](std::string_view id) -> std::optional<ControlConnectionAdmission> {
+            if (!admission || admission->admission_id != id)
+                return std::nullopt;
+            auto consumed = std::move(admission);
+            admission.reset();
+            return consumed;
+        },
+        {
+            .endpoint_path = directory.socket,
+            .sdk_version = "0.791.0-test",
+            .broker_id = broker.broker_id().value,
+            .process_generation = 42,
+        },
+        &router,
+    };
+    REQUIRE(endpoint.start());
+
+    std::atomic<unsigned> execution_count{0};
+    std::atomic<bool> blocked_execution_started{false};
+    std::atomic<bool> release_blocked_execution{false};
+    ControlHostConnection host{
+        {.endpoint_path = directory.socket, .expected_broker = {.evidence = broker_evidence}},
+        [&](const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
+            const ControlExecutionContext& context) {
+            CHECK(plan.registration_id == ControlRegistrationId{"registration-1"});
+            CHECK(request.client_id.empty());
+            CHECK(request.grant_id.empty());
+            const auto execution = execution_count.fetch_add(1);
+            if (execution == 0)
+                return ControlExecutionOutcome{
+                    .terminal_state = ControlReceiptState::CompletedAfterRevocation,
+                    .result = {.result_code = ControlResultCode::CompletedAfterRevocation}};
+            if (execution == 1) {
+                context.complete_deferred(ControlExecutionOutcome{
+                    .terminal_state = ControlReceiptState::UnknownNeedsRefresh,
+                    .result = {.result_code = ControlResultCode::UnknownNeedsRefresh}});
+                return ControlExecutionOutcome{.deferred = true};
+            }
+            if (execution == 2)
+                return ControlExecutionOutcome{
+                    .terminal_state = ControlReceiptState::Completed,
+                    .result = {.artifacts = {{.artifact_id = "unsupported-artifact"}}}};
+            blocked_execution_started.store(true);
+            pulp::test::wait_for_condition([&] { return release_blocked_execution.load(); });
+            return ControlExecutionOutcome{.terminal_state = ControlReceiptState::Completed};
+        }};
+    REQUIRE(host.connect());
+    const auto opened = host.open_host("host-admission-1");
+    REQUIRE(opened.accepted);
+    CHECK(opened.registration_id == "registration-1");
+    REQUIRE(router.connected(ControlRegistrationId{"registration-1"}));
+
+    ControlAdmissionPlan execution_plan;
+    execution_plan.registration_id = ControlRegistrationId{"registration-1"};
+    execution_plan.receipt_id = ControlReceiptId{"receipt-1"};
+    execution_plan.deadline_unix_ms = host_deadline();
+    ControlRequestEnvelope request{.request_id = "request-1",
+                                   .operation_id = "session.describe",
+                                   .operation_version = 1,
+                                   .params_json = "{}"};
+    const auto outcome = router.executor()(
+        execution_plan, request,
+        {.report_progress = [](std::uint64_t, std::uint64_t, std::string) { return true; },
+         .checkpoint = [] { return ControlExecutionCheckpoint::Continue; },
+         .complete_deferred = [](ControlExecutionOutcome) {}});
+    CHECK(outcome.terminal_state == ControlReceiptState::Failed);
+    CHECK(outcome.result.result_code == ControlResultCode::InternalError);
+    CHECK(outcome.result.explanation == "host executor returned a non-authorable terminal result");
+
+    execution_plan.receipt_id = ControlReceiptId{"receipt-2"};
+    request.request_id = "request-2";
+    const auto unknown = router.executor()(
+        execution_plan, request,
+        {.report_progress = [](std::uint64_t, std::uint64_t, std::string) { return true; },
+         .checkpoint = [] { return ControlExecutionCheckpoint::Continue; },
+         .complete_deferred = [](ControlExecutionOutcome) {}});
+    CHECK(unknown.terminal_state == ControlReceiptState::Failed);
+    CHECK(unknown.result.result_code == ControlResultCode::InternalError);
+    CHECK(unknown.result.explanation == "host executor returned a non-authorable terminal result");
+
+    execution_plan.receipt_id = ControlReceiptId{"receipt-3"};
+    request.request_id = "request-3";
+    const auto artifacts = router.executor()(
+        execution_plan, request,
+        {.report_progress = [](std::uint64_t, std::uint64_t, std::string) { return true; },
+         .checkpoint = [] { return ControlExecutionCheckpoint::Continue; },
+         .complete_deferred = [](ControlExecutionOutcome) {}});
+    CHECK(artifacts.terminal_state == ControlReceiptState::Failed);
+    CHECK(artifacts.result.result_code == ControlResultCode::InternalError);
+    CHECK(artifacts.result.explanation ==
+          "host result artifacts are not supported by this protocol revision");
+
+    execution_plan.receipt_id = ControlReceiptId{"receipt-4"};
+    request.request_id = "request-4";
+    auto interrupted = std::async(std::launch::async, [&] {
+        return router.executor()(
+            execution_plan, request,
+            {.report_progress = [](std::uint64_t, std::uint64_t, std::string) { return true; },
+             .checkpoint = [] { return ControlExecutionCheckpoint::Continue; },
+             .complete_deferred = [](ControlExecutionOutcome) {}});
+    });
+    for (unsigned attempt = 0; attempt != 100 && !blocked_execution_started.load(); ++attempt)
+        std::this_thread::sleep_for(1ms);
+    REQUIRE(blocked_execution_started.load());
+    endpoint.stop();
+    release_blocked_execution.store(true);
+    REQUIRE(interrupted.wait_for(1s) == std::future_status::ready);
+    CHECK(interrupted.get().terminal_state == ControlReceiptState::UnknownNeedsRefresh);
+    for (unsigned attempt = 0;
+         attempt != 100 && host.last_error_code() != "host-completion-send-failed"; ++attempt)
+        std::this_thread::sleep_for(1ms);
+    CHECK(host.last_error_code() == "host-completion-send-failed");
+    CHECK_FALSE(host.is_connected());
+
+    host.disconnect();
+#else
+    SUCCEED("the authenticated control endpoint is currently macOS-only");
+#endif
+}
+
+TEST_CASE("host connection reliably poisons malformed broker input off the reader thread",
+          "[inspect][control][carrier][host][security]") {
+#ifdef __APPLE__
+    EndpointDirectory directory;
+    const auto broker_evidence =
+        observe_current_process(directory.path / "p.sock", ControlPeerRole::TrustedHostBridge);
+    InterprocessConnectionServer server;
+    std::mutex mutex;
+    std::condition_variable ready;
+    std::unique_ptr<InterprocessConnection> peer;
+    bool disconnected = false;
+    server.on_client_connected = [&](std::unique_ptr<InterprocessConnection> connection) {
+        connection->set_on_disconnected([&] {
+            {
+                std::lock_guard lock(mutex);
+                disconnected = true;
+            }
+            ready.notify_all();
+        });
+        {
+            std::lock_guard lock(mutex);
+            peer = std::move(connection);
+        }
+        ready.notify_all();
+    };
+    REQUIRE(server.start(directory.socket.string(), IpcTransport::LocalSocket));
+    ControlHostConnection host{
+        {.endpoint_path = directory.socket, .expected_broker = {.evidence = broker_evidence}},
+        [](const ControlAdmissionPlan&, const ControlRequestEnvelope&,
+           const ControlExecutionContext&) {
+            return ControlExecutionOutcome{.terminal_state = ControlReceiptState::Completed};
+        }};
+    REQUIRE(host.connect());
+    InterprocessConnection* connected_peer = nullptr;
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(ready.wait_for(lock, 2s, [&] { return peer != nullptr; }));
+        connected_peer = peer.get();
+    }
+    REQUIRE(connected_peer->send_message("not-json"));
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(ready.wait_for(lock, 2s, [&] { return disconnected; }));
+    }
+    CHECK(host.last_error_code() == "malformed-host-frame");
+    CHECK_FALSE(host.is_connected());
+    host.disconnect();
+    peer.reset();
+    server.stop();
 #else
     SUCCEED("the authenticated control endpoint is currently macOS-only");
 #endif
@@ -215,7 +420,7 @@ TEST_CASE("control endpoint consumes one admission and binds the live peer to it
     std::optional<ControlConnectionAdmission> admission{ControlConnectionAdmission{
         .admission_id = "admission-1",
         .expected_peer = {.evidence = evidence},
-        .client_id = client_id,
+        .principal = ControlClientConnectionPrincipal{client_id},
         .expires_at = std::chrono::steady_clock::now() + 1min,
     }};
     std::size_t admission_calls = 0;

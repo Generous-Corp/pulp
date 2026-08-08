@@ -71,6 +71,9 @@ file(WRITE "${_consumer_source}/main.cpp" [=[
 #include <pulp/inspect/control_artifacts.hpp>
 #include <pulp/inspect/control_broker.hpp>
 #include <pulp/inspect/control_client.hpp>
+#include <pulp/inspect/control_endpoint.hpp>
+#include <pulp/inspect/control_host_connection.hpp>
+#include <pulp/inspect/control_host_router.hpp>
 #include <pulp/inspect/control_main_thread_executor.hpp>
 #include <pulp/inspect/control_operations.hpp>
 #include <pulp/inspect/control_protocol.hpp>
@@ -112,6 +115,12 @@ int main() {
   InstalledControlTransport transport;
   pulp::inspect::ControlClient control_client{transport};
   pulp::inspect::ControlService service{broker};
+  pulp::inspect::ControlHostRouter host_router;
+  pulp::inspect::ControlHostConnection host_connection{
+      {.endpoint_path = "/tmp/not-connected-control.sock"}, host_router.executor()};
+  pulp::inspect::ControlConnectionPrincipal principal =
+      pulp::inspect::ControlHostConnectionPrincipal{
+          pulp::inspect::ControlRegistrationId{"installed-registration"}};
   auto rpc = std::make_shared<pulp::inspect::InspectorMainThreadRpc>();
   pulp::inspect::ControlMainThreadExecutor main_thread_executor{rpc, {}};
   pulp::inspect::ControlRequestEnvelope request;
@@ -125,6 +134,8 @@ int main() {
   admission.operation_version = request.operation_version;
   return !broker.is_listening() && !service.is_listening()
              && !client.is_connected()
+             && !host_connection.is_connected()
+             && std::holds_alternative<pulp::inspect::ControlHostConnectionPrincipal>(principal)
              && operations.max_receipts > 0
              && artifacts.maximum_blob_bytes > 0
              && admission.operation_version == 1

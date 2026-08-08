@@ -109,10 +109,22 @@ macOS, the optional `pulp-control-broker` executable owns the canonical
 per-user `LocalSocket` endpoint. It currently exposes only a bounded health
 probe: it has no signed launcher bootstrap, host registration channel, consent
 surface, or operation executor, so authority-bearing session admission fails
-closed. Ephemeral socket and liveness files are isolated from owner-private
-durable receipts and artifacts under `~/.pulp/state/control-broker/v1`; service
-stop or removal leaves that durable state intact. The installed `ControlClient`
-accepts a typed `ControlClientTransport` representing one authenticated,
+closed. Darwin CLI installs place the broker beside `pulp` and `pulp-cpp` and
+reconcile the owner-only `dev.pulp.control-broker` LaunchAgent. A successful
+reconciliation proves only `reachable-unverified`; strict code-signature
+validation at install time is an integrity check, not a trusted publisher or
+authorization decision. Canonical `~/.pulp/bin` installs activate
+automatically. A custom install root requires explicit acceptance on first
+install, and later upgrades may reuse it only when the existing owned plist
+already names that exact broker path. The installed `ControlClient` accepts a typed
+`ControlClientTransport` representing one authenticated, connection-bound peer
+and client identity; its artifact-read API therefore has no caller-supplied
+client ID. The legacy `InspectorSession`/server is not a compatibility
+transport or a second capability-control authority path.
+Ephemeral socket and liveness files are isolated from owner-private durable
+receipts and artifacts under `~/.pulp/state/control-broker/v1`; service stop or
+removal leaves that durable state intact. The installed `ControlClient` accepts
+a typed `ControlClientTransport` representing one authenticated,
 connection-bound peer and client identity; its artifact-read API therefore has
 no caller-supplied client ID. The legacy `InspectorSession`/server is not a
 compatibility transport or a second capability-control authority path.
@@ -202,7 +214,7 @@ broker authorization is not an at-rest secrecy boundary against such a process.
 | CLI | `pulp inspect profiles/list/capabilities/doctor` and typed parameter/MIDI/transport mutations provide stable JSON; every live operation uses exact session/instance/publication targeting through the shared client | Telemetry subscription lands in the next phase |
 | MCP | Installed in-process shared client exposes profiles/list/capabilities/doctor plus typed parameter, MIDI, and transport tools; success carries publication identity and failures carry structured code/message/data | Telemetry subscription lands in the next phase |
 | Capture/telemetry | Whole-window in-process capture (live host back-buffer when available, portable view rendering otherwise), owned value-channel metadata, snapshots, and bounded scalar/meter/vector/event subscriptions are attached to the standalone session; delivery is targeted by authenticated client identity and carries explicit source, stale, coalescing, overflow, and transport-loss state | Node capture, external-host compositing, and CLI/MCP watch commands |
-| Shipping | The component gate removes live inspector targets and the control core; live CLI commands fail explicitly when disabled, while read-only `inspect audit` remains available. Ordinary-format symbol stripping, per-target declarations, canonical manifests, and manifest-versus-binary checks are continuously tested. The optional macOS `pulp-control-broker` is installed under `libexec/pulp`, opens only the owner-private local endpoint, and refuses authority-bearing admission until signed launcher and host adapters are supplied | Signed service activation, broker-owned consent proof, host execution routing, and platform parity beyond the fail-closed macOS v1 verifier |
+| Shipping | The component gate removes live inspector targets and the control core; live CLI commands fail explicitly when disabled, while read-only `inspect audit` remains available. Ordinary-format symbol stripping, per-target declarations, canonical manifests, and manifest-versus-binary checks are continuously tested. The optional macOS `pulp-control-broker` ships in the Darwin CLI archive, installs beside the CLI, and is reconciled as the owner-only `dev.pulp.control-broker` LaunchAgent. It opens only the owner-private local endpoint, reports at most `reachable-unverified`, and refuses authority-bearing admission until signed launcher and host adapters are supplied | Trusted service identity, broker-owned consent proof, host execution routing, and platform parity beyond the fail-closed macOS v1 verifier |
 
 The production server binds loopback only and requires fresh, role-separated
 nonce/HMAC proofs from both client and server using an owner-private
