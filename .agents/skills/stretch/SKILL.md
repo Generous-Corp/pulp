@@ -35,6 +35,10 @@ failure to police capacity.
 Optional FFT overrides must satisfy the spectral engine's 256–16384 power-of-two
 window and `analysis_hop <= fft_size/2` invariants or preparation rejects them
 without changing prior state.
+The realtime processor also stages its spectral-envelope analyzer before it
+publishes any new configuration or retained processing state. Keep that prepare
+transactional: an analyzer capacity failure must leave the previously prepared
+processor usable rather than half-adopting the new geometry.
 `feed()` is all-or-nothing: on
 `backpressure`, drain `available_stretched()` with `read_stretched()` and retry
 the identical input block. Never advance a decoder on a rejected feed.

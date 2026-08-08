@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 8,
+  "inventory_version": 9,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,33 +37,33 @@
     }
   ],
   "counts": {
-    "public_headers": 361,
-    "reviewed_headers": 33,
-    "legacy_unreviewed_headers": 328,
-    "unsupported_headers": 2,
+    "public_headers": 400,
+    "reviewed_headers": 98,
+    "legacy_unreviewed_headers": 302,
+    "unsupported_headers": 1,
     "by_disposition": {
-      "capability_entrypoint": 19,
-      "capability_support": 9,
-      "infrastructure": 3,
-      "legacy_unreviewed": 328,
-      "unsupported_capability": 2
+      "capability_entrypoint": 57,
+      "capability_support": 35,
+      "infrastructure": 5,
+      "legacy_unreviewed": 302,
+      "unsupported_capability": 1
     },
     "by_domain": {
       "audio": {
-        "public_headers": 108,
-        "reviewed_headers": 1,
-        "legacy_unreviewed_headers": 107,
+        "public_headers": 111,
+        "reviewed_headers": 5,
+        "legacy_unreviewed_headers": 106,
         "unsupported_headers": 0
       },
       "midi": {
-        "public_headers": 35,
-        "reviewed_headers": 1,
-        "legacy_unreviewed_headers": 34,
+        "public_headers": 41,
+        "reviewed_headers": 12,
+        "legacy_unreviewed_headers": 29,
         "unsupported_headers": 0
       },
       "music": {
-        "public_headers": 6,
-        "reviewed_headers": 6,
+        "public_headers": 10,
+        "reviewed_headers": 10,
         "legacy_unreviewed_headers": 0,
         "unsupported_headers": 0
       },
@@ -74,10 +74,10 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 198,
-        "reviewed_headers": 16,
-        "legacy_unreviewed_headers": 182,
-        "unsupported_headers": 2
+        "public_headers": 224,
+        "reviewed_headers": 62,
+        "legacy_unreviewed_headers": 162,
+        "unsupported_headers": 1
       },
       "timebase": {
         "public_headers": 12,
@@ -443,6 +443,17 @@
     },
     {
       "domain": "audio",
+      "source": "core/audio/include/pulp/audio/midi_voice_modulation_adapter.hpp",
+      "fingerprint": "sha256:8fb955d00ce0ed708d96c397d5bd9cc7f2926c1414ce9ac9976ad6abdae9ef7a",
+      "include": "pulp/audio/midi_voice_modulation_adapter.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "audio.midi-voice-modulation-adapter"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "audio",
       "source": "core/audio/include/pulp/audio/mmap_reader.hpp",
       "fingerprint": "sha256:483e1c322fc564087a3594548ae7b57d53fc76b1823253a92b6e07c459d91650",
       "include": "pulp/audio/mmap_reader.hpp",
@@ -462,11 +473,13 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/onset_detector.hpp",
-      "fingerprint": "sha256:ac3f1d1f1a455ffdcf4f6fd855ee3ad111fa0c4a2796139260e576340168727f",
+      "fingerprint": "sha256:d0cac999018c626de8cbd2165150788c1d3be62777cc639d550d7f80f9f56560",
       "include": "pulp/audio/onset_detector.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "audio.onset-detection"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "audio",
@@ -992,12 +1005,35 @@
     },
     {
       "domain": "audio",
+      "source": "core/audio/include/pulp/audio/unison_voice_stack.hpp",
+      "fingerprint": "sha256:e5cef314c00880c58fc33618a6657b27811c1afcf003220b9e3176435d8c737d",
+      "include": "pulp/audio/unison_voice_stack.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "audio.unison-voice-stack"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "audio",
       "source": "core/audio/include/pulp/audio/voice_modulation_buffer.hpp",
       "fingerprint": "sha256:291ed39f552efec999bb542f86500560e82a220c57305e98fccc5c7ad69cbd77",
       "include": "pulp/audio/voice_modulation_buffer.hpp",
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "audio",
+      "source": "core/audio/include/pulp/audio/voice_runtime_facade.hpp",
+      "fingerprint": "sha256:4237f8cdf64ed1a28330822f41ea8d3fc5a42d955a5b964a54ba24106a7ceab6",
+      "include": "pulp/audio/voice_runtime_facade.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "audio.voice-note-modulation",
+        "audio.voice-runtime-facade"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "audio",
@@ -1073,6 +1109,17 @@
     },
     {
       "domain": "midi",
+      "source": "core/midi/include/pulp/midi/arpeggiator.hpp",
+      "fingerprint": "sha256:5178607c04e0070ad9e22ab028a2c87aa80c925350e0743614c0fb44aa426445",
+      "include": "pulp/midi/arpeggiator.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "midi.arpeggiator"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "midi",
       "source": "core/midi/include/pulp/midi/ble_midi.hpp",
       "fingerprint": "sha256:926bf54d18762c875c7a26591b191e1532e20c228d9ab18c160e6cc76a5c89b9",
       "include": "pulp/midi/ble_midi.hpp",
@@ -1092,11 +1139,20 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/block_ops.hpp",
-      "fingerprint": "sha256:d0ab39f9d6b333f754a1e658607bfa64ad098c80f9d62be3da60c3839fdeea29",
+      "fingerprint": "sha256:563569c0bb61029b1b374a8d91812a77818cb9f3db18cc2706a4c570860dd8a0",
       "include": "pulp/midi/block_ops.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "midi.arpeggiator",
+        "midi.channel-routing",
+        "midi.controller-mapping",
+        "midi.keyboard-split",
+        "midi.monophonic-note-selection",
+        "midi.note-length-shaping",
+        "midi.note-range-filtering",
+        "midi.scale-aware-mpe-pitch"
+      ],
+      "rationale": "Shared clear, drop, copy, and sidecar-accounting operations support the bounded MIDI utility block contracts without defining a semantic transform."
     },
     {
       "domain": "midi",
@@ -1106,6 +1162,18 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "midi",
+      "source": "core/midi/include/pulp/midi/controller_utility_kernels.hpp",
+      "fingerprint": "sha256:4e28f94ab7787db493e743d3f8cf65d1d6c0015dfd15e9425f6006dfe1d9c711",
+      "include": "pulp/midi/controller_utility_kernels.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "midi.controller-mapping",
+        "midi.scale-aware-mpe-pitch"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "midi",
@@ -1155,11 +1223,11 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/midi.hpp",
-      "fingerprint": "sha256:e28f7965cbf55cb0fc0fd1bcda671a15a87de7bd7960c60a812dab797211d082",
+      "fingerprint": "sha256:874271b4160eac446ab91943b192f7652c4e340afbb373b70c3affc8ee6a49e8",
       "include": "pulp/midi/midi.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Convenience umbrella include only; operation-owning headers are bound directly."
     },
     {
       "domain": "midi",
@@ -1218,25 +1286,29 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/mpe_buffer.hpp",
-      "fingerprint": "sha256:55d1ce24a0ddd8c7f914cc12dcc608224a3be1b436323c82b39de575e6ac07d8",
+      "fingerprint": "sha256:024033345347c33b06bc1df4f05240496933797410640ea7eb38bfe810ff8eaa",
       "include": "pulp/midi/mpe_buffer.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "midi.mpe-voice-tracker"
+      ],
+      "rationale": "Transactional prepared event storage and tracker binding support MPE voice ownership but are not a distinct musical transform."
     },
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/mpe_synth_voice.hpp",
-      "fingerprint": "sha256:56cd71c417411386ef5baab86915094bd39d95b6299344908a75d7444d385d57",
+      "fingerprint": "sha256:2426bb49591fb4510aaab4a70931899c4928793f34b23935f14b6af19c918db4",
       "include": "pulp/midi/mpe_synth_voice.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "midi.mpe-voice-tracker"
+      ],
+      "rationale": "The allocator adapter is parameterized by a consumer-defined abstract Voice; the concrete tracker remains the honest typed entrypoint."
     },
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/mpe_voice_tracker.hpp",
-      "fingerprint": "sha256:5244ad204106b63719ccdd729260b5f0874715bc91c8ec863e05f85208554fd6",
+      "fingerprint": "sha256:aca221889b5e62dd37fe9890c1d8009f7d8479a0b83f4a49986bde3fa2a6dbdc",
       "include": "pulp/midi/mpe_voice_tracker.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1255,12 +1327,37 @@
     },
     {
       "domain": "midi",
+      "source": "core/midi/include/pulp/midi/note_utility_kernels.hpp",
+      "fingerprint": "sha256:6b4005421eb2f5f98b88765883154451e800a76188a8608887755201f9cc21e6",
+      "include": "pulp/midi/note_utility_kernels.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "midi.monophonic-note-selection",
+        "midi.note-length-shaping"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "midi",
       "source": "core/midi/include/pulp/midi/raw_midi_parser.hpp",
       "fingerprint": "sha256:48adcd006d27381b0d80fc5d1f40b70c5ff007afe0c20bdec3642cc3cfe1e48b",
       "include": "pulp/midi/raw_midi_parser.hpp",
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "midi",
+      "source": "core/midi/include/pulp/midi/routing_utility_kernels.hpp",
+      "fingerprint": "sha256:0090aca546341f6958fde703b8e0c7641999ecdd58186d2adb96957267d55718",
+      "include": "pulp/midi/routing_utility_kernels.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "midi.channel-routing",
+        "midi.keyboard-split",
+        "midi.note-range-filtering"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "midi",
@@ -1328,11 +1425,21 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/ump_buffer.hpp",
-      "fingerprint": "sha256:5837b645aee78cb09cd5031d779930b5da49ab04cd343e0c0f86655ce7343406",
+      "fingerprint": "sha256:bc5816405c9ef8a2fdf9336d86212319dd70a83a9633c7d515b6c3010c5019e6",
       "include": "pulp/midi/ump_buffer.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "midi.arpeggiator",
+        "midi.channel-routing",
+        "midi.controller-mapping",
+        "midi.keyboard-split",
+        "midi.monophonic-note-selection",
+        "midi.mpe-voice-tracker",
+        "midi.note-length-shaping",
+        "midi.note-range-filtering",
+        "midi.scale-aware-mpe-pitch"
+      ],
+      "rationale": "Prepared UMP sidecar storage and overflow accounting support the complete-block contracts; semantic routing remains in the bound utility kernels."
     },
     {
       "domain": "midi",
@@ -1380,6 +1487,33 @@
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
     },
     {
+      "domain": "midi",
+      "source": "core/midi/include/pulp/midi/utility_contract.hpp",
+      "fingerprint": "sha256:3ecd5aa5c92a2ac31e133059c97915257df2018b904f9fce39d1b0c6f1dadb70",
+      "include": "pulp/midi/utility_contract.hpp",
+      "disposition": "capability_support",
+      "capability_keys": [
+        "midi.arpeggiator",
+        "midi.channel-routing",
+        "midi.controller-mapping",
+        "midi.keyboard-split",
+        "midi.monophonic-note-selection",
+        "midi.note-length-shaping",
+        "midi.note-range-filtering",
+        "midi.scale-aware-mpe-pitch"
+      ],
+      "rationale": "Shared overflow, ordering, transport, reporting, and fail-closed emission vocabulary supports every MIDI utility kernel."
+    },
+    {
+      "domain": "midi",
+      "source": "core/midi/include/pulp/midi/utility_kernels.hpp",
+      "fingerprint": "sha256:d768529f97202108cc87903ac71ccfc727adeade6ecd50c66db8c3e394d98865",
+      "include": "pulp/midi/utility_kernels.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Convenience umbrella include only; each utility family is bound directly."
+    },
+    {
       "domain": "music",
       "source": "core/music/include/pulp/music/chord.hpp",
       "fingerprint": "sha256:2715a6ef063ec9815edd4955a23906bc38182b7c5e99db0a75073f14f9ce8323",
@@ -1394,6 +1528,18 @@
     },
     {
       "domain": "music",
+      "source": "core/music/include/pulp/music/detail/random_range.hpp",
+      "fingerprint": "sha256:dd46f6f6f589aafdb08cc00c896cd87fc5465d5e1bd88c8266cf7e45808e5faf",
+      "include": "pulp/music/detail/random_range.hpp",
+      "disposition": "capability_support",
+      "capability_keys": [
+        "music.markov-transition",
+        "music.pattern-generation"
+      ],
+      "rationale": "Portable bit-exact bounded reduction supports caller-random Markov and pattern draws but is an implementation detail rather than a musical operation."
+    },
+    {
+      "domain": "music",
       "source": "core/music/include/pulp/music/harmony.hpp",
       "fingerprint": "sha256:8e5ce059f95c6817e05a9b6cf6bf94599d54fdf82da7fe7e9a12ffe27b0b9e60",
       "include": "pulp/music/harmony.hpp",
@@ -1405,12 +1551,34 @@
     },
     {
       "domain": "music",
+      "source": "core/music/include/pulp/music/markov.hpp",
+      "fingerprint": "sha256:8b013fa744ad12df04d4efc454330258afa3977371a66582b91448e6f1c086ef",
+      "include": "pulp/music/markov.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "music.markov-transition"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "music",
       "source": "core/music/include/pulp/music/music.hpp",
-      "fingerprint": "sha256:7afe6a1c5c2bcbc5de65eac6290a8e0e4c92215bcb940558f18caec3177c227d",
+      "fingerprint": "sha256:5db5616ed1cd0cf326f31638f7c351d8d982d7c8b51d99f516fe3ac3edf5929b",
       "include": "pulp/music/music.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
       "rationale": "Convenience umbrella include only; consumers use the operation-owning headers named by each typed capability binding."
+    },
+    {
+      "domain": "music",
+      "source": "core/music/include/pulp/music/pattern.hpp",
+      "fingerprint": "sha256:ca7cc580012662880465801996dca4b6b6e23aec07c6ec07d573788347bf32f5",
+      "include": "pulp/music/pattern.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "music.pattern-generation"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "music",
@@ -1424,6 +1592,17 @@
         "music.chord-voicing"
       ],
       "rationale": "Checked 12-TET pitch-class values and sets are shared inputs to the curated spelling, recognition, and voicing operations."
+    },
+    {
+      "domain": "music",
+      "source": "core/music/include/pulp/music/rhythm_relationship.hpp",
+      "fingerprint": "sha256:bcb234becb7b912a516ebf4d33152fcbf4e326b59251a5977b4c1a2e653de433",
+      "include": "pulp/music/rhythm_relationship.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "music.rhythm-relationship"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "music",
@@ -1505,12 +1684,36 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/analysis_frontends.hpp",
+      "fingerprint": "sha256:5ccf5005856974faaf4e834abd28a0fc9e25cd816cf8a8a91d3baffc0f92a17e",
+      "include": "pulp/signal/analysis_frontends.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.streaming-analysis-frontends"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/audio_matrix_mixer.hpp",
+      "fingerprint": "sha256:80ac853fa55eb0bee8730a05dd7cfac32847832eb4f44cb6e0ad5507781db6b1",
+      "include": "pulp/signal/audio_matrix_mixer.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.routing-primitives"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/ballistics_filter.hpp",
-      "fingerprint": "sha256:38b75ea9928b3e2fa233713822b433e37e354970091d25aa677e978c2cd3dc03",
+      "fingerprint": "sha256:58f673ad243d35a4df20b30d0bd68b76034ac04d57f028b9835df9ead58498c1",
       "include": "pulp/signal/ballistics_filter.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.dynamics-envelope-contract"
+      ],
+      "rationale": "Implementation base for the exact EnvelopeFollower contract while retaining the established legacy ballistics timing convention."
     },
     {
       "domain": "signal",
@@ -1531,6 +1734,17 @@
         "signal.sos-cascade"
       ],
       "rationale": "The bounded SOS executor consumes the normalized biquad coefficient type and uses its shared stability predicate and runtime section."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/breakpoint_envelope.hpp",
+      "fingerprint": "sha256:c70262f82754eff2117acabf88d55e8ccc86d0e783d6cea6e04d6af6a671a9f7",
+      "include": "pulp/signal/breakpoint_envelope.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.modulation-primitives"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
@@ -1652,11 +1866,13 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/character_delay/vintage.hpp",
-      "fingerprint": "sha256:14800ba2cf8a3727ec2982ba0ba8f9aa1b9d325bea8a29b8119d18a3d982632e",
+      "fingerprint": "sha256:b7a48feafacc26cd0329f97b7d898fbb8921dbb7e779498dc1eabd178ed2ab32",
       "include": "pulp/signal/character_delay/vintage.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.dither-quantizer"
+      ],
+      "rationale": "Existing processor now consumes the deterministic dither and noise-shaping primitive while preserving its established default processing contract."
     },
     {
       "domain": "signal",
@@ -1688,11 +1904,13 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/compressor.hpp",
-      "fingerprint": "sha256:a33363f8c737fe94231f427d1bb1bf4ec8ba41d369d284e49a1efd7b90fd9201",
+      "fingerprint": "sha256:9bf4c81430a11eedaae9e69b19dd8c5ce9fd5c50191e111fe86c3cada3e73fb3",
       "include": "pulp/signal/compressor.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.dynamics-envelope-contract"
+      ],
+      "rationale": "Existing dynamics processor adopting the shared exact envelope or canonical non-negative gain-reduction telemetry contract; its topology is not a new capability claim in this slice."
     },
     {
       "domain": "signal",
@@ -1777,6 +1995,17 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/detail/audio_range.hpp",
+      "fingerprint": "sha256:de70fcaa00f30b7a20c1f8632619635fa774e239f81ae7d6c09cf03ded64ba0b",
+      "include": "pulp/signal/detail/audio_range.hpp",
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.routing-primitives"
+      ],
+      "rationale": "Installed byte-range overlap predicates enforce the routing primitives' aliasing contracts; they are not an independent DSP operation."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/detail/fractional_synthesis_hop_accumulator.hpp",
       "fingerprint": "sha256:75b761a7b99590f6ddc3edae4abafaef951c45cbb36fde84969edb599bef8fe7",
       "include": "pulp/signal/detail/fractional_synthesis_hop_accumulator.hpp",
@@ -1805,11 +2034,13 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/diode_bridge_compressor.hpp",
-      "fingerprint": "sha256:031664e86d4ad3e46ce1a97c584845d782da6845bbe3d7663f45fa3fe75f318a",
+      "fingerprint": "sha256:2384a18231c9cfcff6b8823613050334776113aac5e6c7de76f6f3cd44e942a3",
       "include": "pulp/signal/diode_bridge_compressor.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.dynamics-envelope-contract"
+      ],
+      "rationale": "Existing dynamics processor adopting the shared exact envelope or canonical non-negative gain-reduction telemetry contract; its topology is not a new capability claim in this slice."
     },
     {
       "domain": "signal",
@@ -1819,6 +2050,17 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/dither.hpp",
+      "fingerprint": "sha256:72536ca7644208062b3769cceddfc8aa935d4b441db999b5a61171947446a9af",
+      "include": "pulp/signal/dither.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.dither-quantizer"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
@@ -1850,20 +2092,24 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/drum/fm.hpp",
-      "fingerprint": "sha256:6f2b53a4baa98a7af6615f01a7b593efe64fa6c9bb5aa5ff4278e19d9da9befe",
+      "fingerprint": "sha256:6858bf1217026bddf4a89db818ba528c8671261236304393c61626bf4fbe9219",
       "include": "pulp/signal/drum/fm.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.fm-operator-engine"
+      ],
+      "rationale": "Existing drum voice composes the reusable fixed-capacity FM operator engine while retaining its voice-specific contract."
     },
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/drum/fm6.hpp",
-      "fingerprint": "sha256:f5f2ef3b0b075c72c5158f2a4b486c29a9c7521b742f4abeaaba6a134b233be1",
+      "fingerprint": "sha256:1059887e7cfa8785366482b2171b0306d49f950adf35da2a88b64067249b57e6",
       "include": "pulp/signal/drum/fm6.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.fm-operator-engine"
+      ],
+      "rationale": "Existing drum voice composes the reusable fixed-capacity FM operator engine while retaining its voice-specific contract."
     },
     {
       "domain": "signal",
@@ -1999,6 +2245,28 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/dust.hpp",
+      "fingerprint": "sha256:89ad91c2a9a54ab6f897d379c3587df4566c402abad75b1f71a802b66291684d",
+      "include": "pulp/signal/dust.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.stochastic-sources"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/dynamics_contract.hpp",
+      "fingerprint": "sha256:968978abf54ee71ee7789cfc79fe21347b97708b9f068812908a5b855d35a406",
+      "include": "pulp/signal/dynamics_contract.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.dynamics-envelope-contract"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
@@ -2147,29 +2415,36 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/feedforward_compressor.hpp",
-      "fingerprint": "sha256:df1462e7ee9a77d171f3b890da4f5b3c3c5ac1c4f797209941dd0725faff33b7",
+      "fingerprint": "sha256:afcd1e63df356725f2256c0b449900c894e1120f016ac511512cc94b11263524",
       "include": "pulp/signal/feedforward_compressor.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.dynamics-envelope-contract"
+      ],
+      "rationale": "Existing dynamics processor adopting the shared exact envelope or canonical non-negative gain-reduction telemetry contract; its topology is not a new capability claim in this slice."
     },
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fet_compressor.hpp",
-      "fingerprint": "sha256:d82e7903e48701c5afdc35128d45666ad4749fda73c3143d5760178e9a695cca",
+      "fingerprint": "sha256:45e9524c1ca8d7a5e5a3c7e18c997710e0d5a13b05a5c3c2717f7640c5dd03ee",
       "include": "pulp/signal/fet_compressor.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.dynamics-envelope-contract"
+      ],
+      "rationale": "Existing dynamics processor adopting the shared exact envelope or canonical non-negative gain-reduction telemetry contract; its topology is not a new capability claim in this slice."
     },
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fft.hpp",
-      "fingerprint": "sha256:3fc300d8283a795ca2bb1ab16f054995d66bb90fe3cb351ec8ae8e061e7c14b3",
+      "fingerprint": "sha256:534bc21f2c1c023d11871a7fe2ebd387f13194603117f00df7fcf20bc7c41c60",
       "include": "pulp/signal/fft.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.source-filter-analysis",
+        "signal.streaming-analysis-frontends"
+      ],
+      "rationale": "Shared prepared FFT and retained-storage accounting underpin the curated analysis capabilities; this slice adds no separate FFT authoring promise."
     },
     {
       "domain": "signal",
@@ -2215,6 +2490,28 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/fm_operator_engine.hpp",
+      "fingerprint": "sha256:b92825aa49b916e8c346bf3331fa1dc45759e9589b16a726d861e13c0815c452",
+      "include": "pulp/signal/fm_operator_engine.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.fm-operator-engine"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/fractional_delay.hpp",
+      "fingerprint": "sha256:df2c07847d8b5f49134a7f274c1114cd475c8ed9ac820044ec8c7da3906a5a17",
+      "include": "pulp/signal/fractional_delay.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.fractional-delay"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
@@ -2402,21 +2699,36 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/lfsr.hpp",
+      "fingerprint": "sha256:16f353a4e8c715db25f84696bf5ff50ecdbd96aa29364dc3be1232c9e8a209de",
+      "include": "pulp/signal/lfsr.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.stochastic-sources"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/linkwitz_riley.hpp",
-      "fingerprint": "sha256:f272ce58a7112a6d85d043f12223606035509476ffc3d0b53fc6bc6dd269df3a",
+      "fingerprint": "sha256:38fca0b926e0b4cb492528f95a69af89eb7ec5a0e83ed8692eb195c0cd35fa64",
       "include": "pulp/signal/linkwitz_riley.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.linkwitz-riley-crossover"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/lofi_chain.hpp",
-      "fingerprint": "sha256:6679adfd8937683a7fe12c9517626de825cf72ce0080c0454b35f7ec6525f391",
+      "fingerprint": "sha256:8c3ed2535478714195f46f13591c90b3b7c63affc6a6e8a7407ebedbf9f1799b",
       "include": "pulp/signal/lofi_chain.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.dither-quantizer"
+      ],
+      "rationale": "Existing processor now consumes the deterministic dither and noise-shaping primitive while preserving its established default processing contract."
     },
     {
       "domain": "signal",
@@ -2462,6 +2774,17 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/mid_side.hpp",
+      "fingerprint": "sha256:709cb80f95a21bd20ec21ac9f055da2d41cf47b86ce91cdd444a408e00ff6443",
+      "include": "pulp/signal/mid_side.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.routing-primitives"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
@@ -2521,12 +2844,25 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/modulation_curve.hpp",
+      "fingerprint": "sha256:da89147c18e3c0479bf02294273bc7ec8ff76bc83cc7e198e645b14fe100a298",
+      "include": "pulp/signal/modulation_curve.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.modulation-primitives"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/multi_channel_meter.hpp",
-      "fingerprint": "sha256:3ccb8f63241c150c00a4ce323f9de0501d2d54c0ef4ec3f0f307ac72111c329d",
+      "fingerprint": "sha256:a9437e126faff12dfc60d80e59381fe0f5f005b3638d445d06daf4b8cb2fd695",
       "include": "pulp/signal/multi_channel_meter.hpp",
-      "disposition": "unsupported_capability",
-      "capability_keys": [],
-      "rationale": "The multi-channel meter is a public DSP and presentation helper, but it does not yet have the typed bindings, lifecycle contract, parameter semantics, and link probe required for a generator-facing capability claim."
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.multi-channel-meter"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
@@ -2540,11 +2876,13 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/noise_gate.hpp",
-      "fingerprint": "sha256:e23710aac665491fdac9fa5a2830c2e107215ab0e82ef85427580dbfe3e5dfc3",
+      "fingerprint": "sha256:da905cabc0fd988ab957fbd5d7f55c95119d1883a1384ef6be854d12f6d4f6ce",
       "include": "pulp/signal/noise_gate.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.dynamics-envelope-contract"
+      ],
+      "rationale": "Existing dynamics processor adopting the shared exact envelope or canonical non-negative gain-reduction telemetry contract; its topology is not a new capability claim in this slice."
     },
     {
       "domain": "signal",
@@ -2566,21 +2904,59 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/noise_tilt.hpp",
+      "fingerprint": "sha256:016c8e7e818ad23543da6e37c1e96e41557ed53f898afe80f8d9d65666912adb",
+      "include": "pulp/signal/noise_tilt.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.stochastic-sources"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/nonlin_ambience.hpp",
-      "fingerprint": "sha256:6564b9e03b1ca746c0b24865fdc1448d17a9c21fb8b2700727f6ac300a214288",
+      "fingerprint": "sha256:aa58d912e15593e959118a912f5146774523a213446de5c8f19212d3eb9e7375",
       "include": "pulp/signal/nonlin_ambience.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.dither-quantizer",
+        "signal.stochastic-sources"
+      ],
+      "rationale": "Existing ambience processor adopts deterministic dither and velvet-noise primitives without a new ambience contract in this slice."
     },
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/nonlin_ambience_design.hpp",
-      "fingerprint": "sha256:d99dcc9b99d22c4a89a8e7968b52a848eed3380e1f0f98e1be07fe3e115327a0",
+      "fingerprint": "sha256:1b9e4b5a8178283964fcacac595ac5540576f35bdffb717b77e3aaf92bf98cd4",
       "include": "pulp/signal/nonlin_ambience_design.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.stochastic-sources"
+      ],
+      "rationale": "Control-side velvet tap design consumes deterministic coordinate draws; it is design support rather than a runtime entrypoint."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/nonlinear_shaping.hpp",
+      "fingerprint": "sha256:bce155041cc613f9e47890bd07c1a4fa9717695dc3fb5c43c32d4152a471a219",
+      "include": "pulp/signal/nonlinear_shaping.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.nonlinear-shaping"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/nway_crossfade.hpp",
+      "fingerprint": "sha256:b1d33521a93b3cefd167f9441b6523b83fdffe1b873a20fb50caedac790ce9be",
+      "include": "pulp/signal/nway_crossfade.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.routing-primitives"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
@@ -2623,7 +2999,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/osc/minblep.hpp",
-      "fingerprint": "sha256:f310b561f6e616926b2079050c1b49cc762e8ab8ad8d1b518677d77a98cd2631",
+      "fingerprint": "sha256:838567bf66f86f232dc6239d74b77cb7a456eb854831b73f70e9641e0d21c9f6",
       "include": "pulp/signal/osc/minblep.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -2679,11 +3055,13 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/oscillator.hpp",
-      "fingerprint": "sha256:83f8be4c5ed70776dc18e28579a42aa3cc02ac000a152d4f596516d4d2f9d23d",
+      "fingerprint": "sha256:eeec21c0a6b5e6cdbf9f81af6ad99fd873029ca6b0f154daadf3c72732ba4509",
       "include": "pulp/signal/oscillator.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.unison-voice-primitives"
+      ],
+      "rationale": "Supersaw uses validated phase reset for deterministic per-voice phases; the generic oscillator remains outside this slice's promise."
     },
     {
       "domain": "signal",
@@ -2720,6 +3098,28 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/path_latency_aligner.hpp",
+      "fingerprint": "sha256:1b50ede989667a0a3354900646e3079df8a550474604cf7958c92a7b27f58e8a",
+      "include": "pulp/signal/path_latency_aligner.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.routing-primitives"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/path_switcher.hpp",
+      "fingerprint": "sha256:adbf41862725587e477711ac144f5326cdcff3a31560aba47708a42d5cd471f1",
+      "include": "pulp/signal/path_switcher.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.routing-primitives"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
@@ -2814,20 +3214,24 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/realtime_pitch_time_geometry.hpp",
-      "fingerprint": "sha256:223e7ba078434feaec55040093bbca020d4d4879deda414d6200a1c4fd6d6a93",
+      "fingerprint": "sha256:ffdb4ca7daa0ba17d53f78cf42eab0759c084cb2df4f0aa10bcf6be3e355fab0",
       "include": "pulp/signal/realtime_pitch_time_geometry.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.source-filter-analysis"
+      ],
+      "rationale": "Existing pitch-time or formant-warping surface composes the transactional cepstral analyzer and retained-storage admission contract."
     },
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/realtime_pitch_time_processor.hpp",
-      "fingerprint": "sha256:0eb29002be4e3af46d2212d4bcb0dbe11a39b3989c226e60d6edafae89d5a2fa",
+      "fingerprint": "sha256:519987d3e9742d2be9fcab3289808ed58b8f1fe5e245e92885c900726ad15809",
       "include": "pulp/signal/realtime_pitch_time_processor.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.source-filter-analysis"
+      ],
+      "rationale": "Existing pitch-time or formant-warping surface composes the transactional cepstral analyzer and retained-storage admission contract."
     },
     {
       "domain": "signal",
@@ -2851,6 +3255,17 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/rise_fall_generator.hpp",
+      "fingerprint": "sha256:67185305462aff7fef2f089d00f0bf6eeaa5708436e3f042fca6b8271c4b3fa3",
+      "include": "pulp/signal/rise_fall_generator.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.modulation-primitives"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/rng.hpp",
       "fingerprint": "sha256:eada9a6663082e3844a1b0f7bd7a39524519bc8c60ed3e387901b6d151a68203",
       "include": "pulp/signal/rng.hpp",
@@ -2861,11 +3276,13 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/rungler.hpp",
-      "fingerprint": "sha256:7a1ed7467f98faa570b9f3efe852406cf03af4011e1c91cc94c7b6d360395a40",
+      "fingerprint": "sha256:c45a151c41449b0a7823ff148f1ed8cc0174f9c369a9bb95c07213ef97b19b1b",
       "include": "pulp/signal/rungler.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.stochastic-sources"
+      ],
+      "rationale": "The established Rungler now composes the configurable LFSR while preserving its existing DAC and event behavior."
     },
     {
       "domain": "signal",
@@ -2898,6 +3315,17 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/scope_capture.hpp",
+      "fingerprint": "sha256:0989e11d3171977da2f2e61d945fb1442fe9a9dfa9df94eb436b19fed3f104b5",
+      "include": "pulp/signal/scope_capture.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.scope-capture"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/scoped_flush_denormals.hpp",
       "fingerprint": "sha256:989e43be3e1f6f2f806f3896116b98f21e6959fda976530659ccf4f7d99c6e16",
       "include": "pulp/signal/scoped_flush_denormals.hpp",
@@ -2908,7 +3336,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:957d2e652931e29de41e360044c05ede7f21511097e3dbf6272908c4d7d8ee08",
+      "fingerprint": "sha256:4f065844dfc4347b27fa302b922af2a99d74dae295be6958c11f51aa3394381a",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -2931,6 +3359,17 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/six_band_eq.hpp",
+      "fingerprint": "sha256:85f2051455ad88b04aa92f73aa44605ec07007acd8761df8deecaa755b08066a",
+      "include": "pulp/signal/six_band_eq.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.six-band-eq"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
@@ -2962,11 +3401,22 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/sos_cascade.hpp",
-      "fingerprint": "sha256:8e6d177601b3167a8033a7e51c33174169b05a8719930964562fd22d5a4b5c3a",
+      "fingerprint": "sha256:8cdd74d36ba12f1b19d85a28d57b501e5b96f8c3a1eae3f82cd96dbb7f027d79",
       "include": "pulp/signal/sos_cascade.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
         "signal.sos-cascade"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/source_filter_analysis.hpp",
+      "fingerprint": "sha256:eb64faa37ff3e4b93fc884943fda3ea4acc723b61b9b8593abac3f0102dd3d26",
+      "include": "pulp/signal/source_filter_analysis.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.source-filter-analysis"
       ],
       "rationale": "Public binding for a curated consumer capability."
     },
@@ -2991,11 +3441,13 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/spectral_envelope_shifter.hpp",
-      "fingerprint": "sha256:66173ce70b65e07bf40269f08658f8401c905bcc77b07c2e42b0711eaba222ae",
+      "fingerprint": "sha256:7b5faef1b77c5bf406357f58c8988c5fc4d2e769ec5882d17f053f672f24fe42",
       "include": "pulp/signal/spectral_envelope_shifter.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.source-filter-analysis"
+      ],
+      "rationale": "Existing pitch-time or formant-warping surface composes the transactional cepstral analyzer and retained-storage admission contract."
     },
     {
       "domain": "signal",
@@ -3014,6 +3466,17 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/spectrum_trace.hpp",
+      "fingerprint": "sha256:2db177e808a86cbe881d3a8c636eb33716db1a0ed556fbf1049a5d23583c5bee",
+      "include": "pulp/signal/spectrum_trace.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.spectrum-trace"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
@@ -3062,6 +3525,17 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/supersaw.hpp",
+      "fingerprint": "sha256:c790c2b734d6a86f02ffedd560a0b14ba7529dbb5ce50b4e93a29b414217f338",
+      "include": "pulp/signal/supersaw.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.unison-voice-primitives"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
@@ -3146,12 +3620,34 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/true_peak_limiter.hpp",
+      "fingerprint": "sha256:027278e6f446a6eb769576cea18e0007648d7d5bcd25231023f1d09a844a84ca",
+      "include": "pulp/signal/true_peak_limiter.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.true-peak-limiter"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/two_pole_resonator.hpp",
       "fingerprint": "sha256:090ff7de0a8d1eb6d9abc4260f09eb40062b83a8018f5728edd9da111f3cf202",
       "include": "pulp/signal/two_pole_resonator.hpp",
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/unison.hpp",
+      "fingerprint": "sha256:0a3a14899d57ff5040b47823bb98c36ed055bf98b6946d2a8892c44a95a686a5",
+      "include": "pulp/signal/unison.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.unison-voice-primitives"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
@@ -3185,11 +3681,24 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/vca_compressor.hpp",
-      "fingerprint": "sha256:00468bcca3606cb167b0b32a12fe551d327085388789a20bdb4e8ddef6ead150",
+      "fingerprint": "sha256:2f484f202dc2d75d2e87fc5683d8a6efa34f4143b120c761f5c16c330877077c",
       "include": "pulp/signal/vca_compressor.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.dynamics-envelope-contract"
+      ],
+      "rationale": "Existing dynamics processor adopting the shared exact envelope or canonical non-negative gain-reduction telemetry contract; its topology is not a new capability claim in this slice."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/velvet_noise.hpp",
+      "fingerprint": "sha256:22c73b19189ad33fe12be75c3e8d20f6c7b098810756e31c6bd2dc3f02b75973",
+      "include": "pulp/signal/velvet_noise.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.stochastic-sources"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",

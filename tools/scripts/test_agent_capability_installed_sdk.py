@@ -132,12 +132,23 @@ def load_installed_manifest(prefix: pathlib.Path, owners: dict[str, str]) -> dic
     return document
 
 
-def binding_source(row: dict, binding: dict) -> str:
+def binding_identity(row: dict, binding: dict) -> tuple[str, str, str]:
+    return row["key"], binding["role"], binding["qualified_name"]
+
+
+def binding_source(
+    row: dict,
+    binding: dict,
+    addresses: dict[tuple[str, str, str], str],
+) -> str:
     name = binding["qualified_name"]
     reference = (
         f"static_assert(sizeof({name}) > 0);"
         if binding["kind"] == "cpp_type"
-        else f"auto *volatile binding = &{name}; (void)binding;"
+        else (
+            "auto *volatile binding = "
+            f"{addresses[binding_identity(row, binding)]}; (void)binding;"
+        )
     )
     return (
         f"#include <{binding['include']}>\n\n"
@@ -146,7 +157,13 @@ def binding_source(row: dict, binding: dict) -> str:
     )
 
 
-def load_source_contract(source_root: pathlib.Path) -> tuple[dict[str, str], dict[str, str]]:
+def load_source_contract(
+    source_root: pathlib.Path,
+) -> tuple[
+    dict[str, str],
+    dict[str, str],
+    dict[tuple[str, str, str], str],
+]:
     path = source_root / "tools/scripts/agent_capability_manifest.py"
     spec = importlib.util.spec_from_file_location("pulp_agent_capability_source", path)
     if spec is None or spec.loader is None:
@@ -164,10 +181,21 @@ def load_source_contract(source_root: pathlib.Path) -> tuple[dict[str, str], dic
         row["key"]: module.render_link_probe(row)
         for row in module.EXPORTS
     }
-    return probes, dict(module.REVIEWED_MINIMAL_TARGETS)
+    addresses = {
+        binding_identity(row, binding): binding.get(
+            "_address_expression", f"&{binding['qualified_name']}"
+        )
+        for row in module.EXPORTS
+        for binding in row["bindings"]
+    }
+    return probes, dict(module.REVIEWED_MINIMAL_TARGETS), addresses
 
 
-def capability_source(row: dict, probe: str) -> str:
+def capability_source(
+    row: dict,
+    probe: str,
+    addresses: dict[tuple[str, str, str], str],
+) -> str:
     includes = sorted({binding["include"] for binding in row["bindings"]})
     lines = [*(f"#include <{include}>" for include in includes), "", "int main() {"]
     for index, binding in enumerate(row["bindings"]):
@@ -175,7 +203,10 @@ def capability_source(row: dict, probe: str) -> str:
         if binding["kind"] == "cpp_type":
             lines.append(f"    static_assert(sizeof({name}) > 0);")
         else:
-            lines.append(f"    auto *binding_{index} = &{name}; (void)binding_{index};")
+            address = addresses[binding_identity(row, binding)]
+            lines.append(
+                f"    auto *binding_{index} = {address}; (void)binding_{index};"
+            )
     lines.append(f"    {probe}")
     lines.extend(["    return 0;", "}", ""])
     return "\n".join(lines)
@@ -439,7 +470,7 @@ def main() -> int:
     if source_line is None:
         raise RuntimeError("build CMakeCache.txt does not identify its source checkout")
     source_root = pathlib.Path(source_line.split("=", 1)[1]).resolve()
-    probes, owners = load_source_contract(source_root)
+    probes, owners, addresses = load_source_contract(source_root)
     generator = args.generator or ("Ninja" if shutil.which("ninja") else None)
     generator_options: list[str] = []
     forwarded_definitions: set[str] = set()
@@ -653,7 +684,7 @@ def main() -> int:
         try:
             configured = configure_consumer(
                 args.cmake, prefix, leaked_archive_project,
-                source=binding_source(first, first_binding),
+                source=binding_source(first, first_binding, addresses),
                 target=first_binding["target"], generator=generator,
                 generator_options=generator_options, configuration=configuration,
             )
@@ -712,7 +743,7 @@ def main() -> int:
         try:
             configure_build_run(
                 args.cmake, prefix, root / "lib64-layout",
-                binding_source(first, first_binding), first_binding["target"],
+                binding_source(first, first_binding, addresses), first_binding["target"],
                 generator, generator_options, configuration, [source_root, build_dir],
                 use_pulp_dir=False,
             )
@@ -726,7 +757,7 @@ def main() -> int:
             args.cmake,
             prefix,
             leaked_flag_project,
-            source=binding_source(first, first_binding),
+            source=binding_source(first, first_binding, addresses),
             target=first_binding["target"],
             generator=generator,
             generator_options=[
@@ -757,7 +788,9 @@ def main() -> int:
             args.cmake,
             prefix,
             wrong_target_project,
-            source=capability_source(linked_row, probes[linked_row["key"]]),
+            source=capability_source(
+                linked_row, probes[linked_row["key"]], addresses
+            ),
             target="Pulp::platform",
             generator=generator,
             generator_options=generator_options,
@@ -808,7 +841,7 @@ def main() -> int:
                 args.cmake,
                 prefix,
                 root / "missing-export",
-                source=binding_source(first, first_binding),
+                source=binding_source(first, first_binding, addresses),
                 target=first_binding["target"],
                 generator=generator,
                 generator_options=generator_options,
@@ -833,7 +866,7 @@ def main() -> int:
                 args.cmake,
                 prefix,
                 root / f"capability-{row_index}",
-                capability_source(row, probes[row["key"]]),
+                capability_source(row, probes[row["key"]], addresses),
                 target,
                 generator,
                 generator_options,
@@ -846,7 +879,7 @@ def main() -> int:
                     args.cmake,
                     prefix,
                     root / f"binding-{row_index}-{binding_index}",
-                    binding_source(row, binding),
+                    binding_source(row, binding, addresses),
                     binding["target"],
                     generator,
                     generator_options,

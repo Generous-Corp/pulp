@@ -2,15 +2,53 @@
 // Every typed binding is mechanically referenced below.
 
 #include <pulp/audio/instrument_voice_allocator.hpp>
+#include <pulp/audio/midi_voice_modulation_adapter.hpp>
+#include <pulp/audio/onset_detector.hpp>
+#include <pulp/audio/unison_voice_stack.hpp>
+#include <pulp/audio/voice_runtime_facade.hpp>
+#include <pulp/midi/arpeggiator.hpp>
+#include <pulp/midi/controller_utility_kernels.hpp>
 #include <pulp/midi/mpe_voice_tracker.hpp>
+#include <pulp/midi/note_utility_kernels.hpp>
+#include <pulp/midi/routing_utility_kernels.hpp>
 #include <pulp/music/harmony.hpp>
+#include <pulp/music/markov.hpp>
+#include <pulp/music/pattern.hpp>
+#include <pulp/music/rhythm_relationship.hpp>
 #include <pulp/music/spelling.hpp>
 #include <pulp/music/voicing.hpp>
 #include <pulp/sequence/host_transport_projector.hpp>
+#include <pulp/signal/analysis_frontends.hpp>
+#include <pulp/signal/audio_matrix_mixer.hpp>
+#include <pulp/signal/breakpoint_envelope.hpp>
+#include <pulp/signal/dither.hpp>
+#include <pulp/signal/dust.hpp>
+#include <pulp/signal/dynamics_contract.hpp>
+#include <pulp/signal/fm_operator_engine.hpp>
+#include <pulp/signal/fractional_delay.hpp>
+#include <pulp/signal/lfsr.hpp>
+#include <pulp/signal/linkwitz_riley.hpp>
+#include <pulp/signal/mid_side.hpp>
 #include <pulp/signal/mirrored_history_buffer.hpp>
+#include <pulp/signal/modulation_curve.hpp>
+#include <pulp/signal/multi_channel_meter.hpp>
+#include <pulp/signal/noise_tilt.hpp>
+#include <pulp/signal/nonlinear_shaping.hpp>
+#include <pulp/signal/nway_crossfade.hpp>
 #include <pulp/signal/osc/minblep.hpp>
+#include <pulp/signal/path_latency_aligner.hpp>
+#include <pulp/signal/path_switcher.hpp>
+#include <pulp/signal/rise_fall_generator.hpp>
 #include <pulp/signal/saturator.hpp>
+#include <pulp/signal/scope_capture.hpp>
+#include <pulp/signal/six_band_eq.hpp>
 #include <pulp/signal/sos_cascade.hpp>
+#include <pulp/signal/source_filter_analysis.hpp>
+#include <pulp/signal/spectrum_trace.hpp>
+#include <pulp/signal/supersaw.hpp>
+#include <pulp/signal/true_peak_limiter.hpp>
+#include <pulp/signal/unison.hpp>
+#include <pulp/signal/velvet_noise.hpp>
 #include <pulp/signal/windowing.hpp>
 #include <pulp/timebase/beat_division.hpp>
 #include <pulp/timebase/coordinate_random.hpp>
@@ -28,29 +66,95 @@ int main() {
         pulp::audio::InstrumentVoiceAllocator probe_value_0{}; (void)probe_value_0.prepare(1);
     }
     {
+        // audio.midi-voice-modulation-adapter
+        static_assert(sizeof(pulp::audio::MidiVoiceModulationAdapter<128>) > 0);
+        pulp::audio::MidiVoiceModulationAdapter<128> probe_value_0{}; (void)probe_value_0.reset();
+    }
+    {
+        // audio.onset-detection
+        static_assert(sizeof(pulp::audio::OnsetDetector) > 0);
+        pulp::audio::OnsetDetector probe_value_0{}; (void)probe_value_0.detect(pulp::audio::BufferView<const float>{}, pulp::audio::OnsetDetectionConfig{});
+    }
+    {
+        // audio.unison-voice-stack
+        static_assert(sizeof(pulp::audio::UnisonVoiceStackManager<>) > 0);
+        pulp::audio::UnisonVoiceStackManager<> probe_value_0{}; (void)probe_value_0.prepared();
+    }
+    {
+        // audio.voice-note-modulation
+        auto *volatile binding_4 = &pulp::audio::VoiceNoteModulationBridge::write;
+        (void)binding_4;
+        (void)pulp::audio::VoiceNoteModulationBridge::write(*[]() { static pulp::audio::VoiceModulationBuffer value; return &value; }(), 1u, pulp::audio::VoiceNoteModulationInput{}, pulp::audio::VoiceNoteModulationRouting{});
+    }
+    {
+        // audio.voice-runtime-facade
+        static_assert(sizeof(pulp::audio::VoiceRuntimeFacade<pulp::audio::InstrumentVoiceAllocator>) > 0);
+        pulp::audio::VoiceRuntimeFacade<pulp::audio::InstrumentVoiceAllocator> probe_value_0{*[]() { static pulp::audio::InstrumentVoiceAllocator value; return &value; }()}; (void)probe_value_0;
+    }
+    {
+        // midi.arpeggiator
+        static_assert(sizeof(pulp::midi::Arpeggiator<>) > 0);
+        pulp::midi::Arpeggiator<> probe_value_0{}; (void)probe_value_0.valid();
+    }
+    {
+        // midi.channel-routing
+        static_assert(sizeof(pulp::midi::ChannelRouter) > 0);
+        pulp::midi::ChannelRouter probe_value_0{}; (void)probe_value_0.valid();
+    }
+    {
+        // midi.controller-mapping
+        static_assert(sizeof(pulp::midi::ControllerMapper<>) > 0);
+        pulp::midi::ControllerMapper<> probe_value_0{}; (void)probe_value_0.reset();
+    }
+    {
+        // midi.keyboard-split
+        static_assert(sizeof(pulp::midi::KeyboardSplit) > 0);
+        pulp::midi::KeyboardSplit probe_value_0{}; (void)probe_value_0.valid();
+    }
+    {
+        // midi.monophonic-note-selection
+        static_assert(sizeof(pulp::midi::MonophonicNoteSelector) > 0);
+        pulp::midi::MonophonicNoteSelector probe_value_0{}; (void)probe_value_0.pitch_state();
+    }
+    {
         // midi.mpe-voice-tracker
         static_assert(sizeof(pulp::midi::MpeVoiceTracker) > 0);
         pulp::midi::MpeVoiceTracker probe_value_0{}; (void)probe_value_0.reset();
     }
     {
+        // midi.note-length-shaping
+        static_assert(sizeof(pulp::midi::NoteLengthShaper<>) > 0);
+        pulp::midi::NoteLengthShaper<> probe_value_0{}; (void)probe_value_0.valid();
+    }
+    {
+        // midi.note-range-filtering
+        static_assert(sizeof(pulp::midi::NoteRangeFilter) > 0);
+        pulp::midi::NoteRangeFilter probe_value_0{}; (void)probe_value_0.valid();
+    }
+    {
+        // midi.scale-aware-mpe-pitch
+        static_assert(sizeof(pulp::midi::ScaleAwareMpePitch) > 0);
+        pulp::midi::ScaleAwareMpePitch probe_value_0{}; (void)probe_value_0.reset();
+    }
+    {
         // music.chord-recognition
-        auto *volatile binding_2 = static_cast<std::optional<pulp::music::ChordRecognitionList> (*)(pulp::music::PitchClassSet, std::optional<pulp::music::PitchClass>) noexcept>(&pulp::music::recognize_chord);
-        (void)binding_2;
-        auto *volatile binding_3 = static_cast<std::optional<pulp::music::ChordRecognitionList> (*)(std::span<const int>) noexcept>(&pulp::music::recognize_chord);
-        (void)binding_3;
+        auto *volatile binding_15 = static_cast<std::optional<pulp::music::ChordRecognitionList> (*)(pulp::music::PitchClassSet, std::optional<pulp::music::PitchClass>) noexcept>(&pulp::music::recognize_chord);
+        (void)binding_15;
+        auto *volatile binding_16 = static_cast<std::optional<pulp::music::ChordRecognitionList> (*)(std::span<const int>) noexcept>(&pulp::music::recognize_chord);
+        (void)binding_16;
         (void)pulp::music::recognize_chord(*pulp::music::PitchClassSet::from_mask(0x091u), pulp::music::PitchClass::c);
         (void)pulp::music::recognize_chord([]() { static constexpr int pitches[]{60, 64, 67}; return std::span<const int>{pitches}; }());
     }
     {
         // music.chord-spelling
-        auto *volatile binding_4 = &pulp::music::spell_pitch_class;
-        (void)binding_4;
-        auto *volatile binding_5 = &pulp::music::spelling_name;
-        (void)binding_5;
-        auto *volatile binding_6 = static_cast<std::optional<pulp::music::SpelledChord> (*)(pulp::music::PitchClass, const pulp::music::ChordFormula&, pulp::music::AccidentalPolicy) noexcept>(&pulp::music::spell_chord);
-        (void)binding_6;
-        auto *volatile binding_7 = static_cast<std::optional<pulp::music::SpelledChord> (*)(const pulp::music::Chord&, pulp::music::AccidentalPolicy) noexcept>(&pulp::music::spell_chord);
-        (void)binding_7;
+        auto *volatile binding_17 = &pulp::music::spell_pitch_class;
+        (void)binding_17;
+        auto *volatile binding_18 = &pulp::music::spelling_name;
+        (void)binding_18;
+        auto *volatile binding_19 = static_cast<std::optional<pulp::music::SpelledChord> (*)(pulp::music::PitchClass, const pulp::music::ChordFormula&, pulp::music::AccidentalPolicy) noexcept>(&pulp::music::spell_chord);
+        (void)binding_19;
+        auto *volatile binding_20 = static_cast<std::optional<pulp::music::SpelledChord> (*)(const pulp::music::Chord&, pulp::music::AccidentalPolicy) noexcept>(&pulp::music::spell_chord);
+        (void)binding_20;
         (void)pulp::music::spell_pitch_class(pulp::music::PitchClass::c_sharp, pulp::music::AccidentalPolicy::prefer_flats);
         (void)pulp::music::spelling_name(pulp::music::SpelledPitchClass{});
         (void)pulp::music::spell_chord(pulp::music::PitchClass::c, *pulp::music::ChordFormula::for_quality(pulp::music::ChordQuality::major), pulp::music::AccidentalPolicy::prefer_sharps);
@@ -58,12 +162,40 @@ int main() {
     }
     {
         // music.chord-voicing
-        auto *volatile binding_8 = &pulp::music::voice_chord;
-        (void)binding_8;
-        auto *volatile binding_9 = &pulp::music::minimum_motion_voice_leading;
-        (void)binding_9;
+        auto *volatile binding_21 = &pulp::music::voice_chord;
+        (void)binding_21;
+        auto *volatile binding_22 = &pulp::music::minimum_motion_voice_leading;
+        (void)binding_22;
         (void)pulp::music::voice_chord(60, *pulp::music::ChordFormula::for_quality(pulp::music::ChordQuality::major), pulp::music::VoicingConstraints{});
         (void)pulp::music::minimum_motion_voice_leading([]() { static constexpr int pitches[]{60, 64, 67}; return std::span<const int>{pitches}; }(), pulp::music::PitchClass::f, *pulp::music::ChordFormula::for_quality(pulp::music::ChordQuality::major), pulp::music::MidiRange{});
+    }
+    {
+        // music.markov-transition
+        static_assert(sizeof(pulp::music::PreparedMarkovModel<>) > 0);
+        pulp::music::PreparedMarkovModel<> probe_value_0{}; (void)probe_value_0.clear();
+    }
+    {
+        // music.pattern-generation
+        auto *volatile binding_24 = &pulp::music::euclidean_pattern<64>;
+        (void)binding_24;
+        auto *volatile binding_25 = &pulp::music::materialize_pattern<64>;
+        (void)binding_25;
+        static_assert(sizeof(pulp::music::PatternWalker<>) > 0);
+        auto *volatile binding_27 = &pulp::music::cellular_evolve<64>;
+        (void)binding_27;
+        auto *volatile binding_28 = &pulp::music::looping_shift_register<64>;
+        (void)binding_28;
+        (void)pulp::music::euclidean_pattern<64>(8u, 3u, 0);
+        (void)pulp::music::materialize_pattern<64>(pulp::music::EuclideanPatternRecipe{});
+        pulp::music::PatternWalker<> probe_value_2{}; (void)probe_value_2.reset();
+        (void)pulp::music::cellular_evolve<64>(pulp::music::BinaryPattern<>{}, 30u, pulp::music::CellularBoundary::wrap);
+        (void)pulp::music::looping_shift_register<64>(pulp::music::BinaryPattern<>{}, pulp::music::MutationChance{}, 0u);
+    }
+    {
+        // music.rhythm-relationship
+        auto *volatile binding_29 = &pulp::music::derive_rhythm_relationship<64>;
+        (void)binding_29;
+        (void)pulp::music::derive_rhythm_relationship<64>(pulp::music::BinaryPattern<>{}, pulp::music::RhythmRelationshipConfig{});
     }
     {
         // sequence.host-transport-projector
@@ -76,9 +208,76 @@ int main() {
         pulp::signal::MirroredHistoryBuffer<float> probe_value_0{}; (void)probe_value_0.prepare(8);
     }
     {
+        // signal.dither-quantizer
+        static_assert(sizeof(pulp::signal::DitherQuantizerT<float>) > 0);
+        pulp::signal::DitherQuantizerT<float> probe_value_0{}; (void)probe_value_0.reset();
+    }
+    {
+        // signal.dynamics-envelope-contract
+        static_assert(sizeof(pulp::signal::EnvelopeFollowerT<float>) > 0);
+        static_assert(sizeof(pulp::signal::StereoEnvelopeFollowerT<float>) > 0);
+        pulp::signal::EnvelopeFollowerT<float> probe_value_0{}; (void)probe_value_0.reset();
+        pulp::signal::StereoEnvelopeFollowerT<float> probe_value_1{}; (void)probe_value_1.reset();
+    }
+    {
+        // signal.fm-operator-engine
+        static_assert(sizeof(pulp::signal::FmOperatorEngineT<float>) > 0);
+        pulp::signal::FmOperatorEngineT<float> probe_value_0{}; (void)probe_value_0.reset();
+    }
+    {
+        // signal.fractional-delay
+        static_assert(sizeof(pulp::signal::FractionalDelayLineT<float>) > 0);
+        static_assert(sizeof(pulp::signal::FractionalDelayHistoryT<float>) > 0);
+        pulp::signal::FractionalDelayLineT<float> probe_value_0{}; (void)probe_value_0.reset();
+        pulp::signal::FractionalDelayHistoryT<float> probe_value_1{}; (void)probe_value_1.reset();
+    }
+    {
+        // signal.linkwitz-riley-crossover
+        static_assert(sizeof(pulp::signal::LinkwitzRileyCrossoverT<float>) > 0);
+        pulp::signal::LinkwitzRileyCrossoverT<float> probe_value_0{}; (void)probe_value_0.reset();
+    }
+    {
         // signal.minblep
         static_assert(sizeof(pulp::signal::osc::MinBlepAccumulator<>) > 0);
         pulp::signal::osc::MinBlepAccumulator<> probe_value_0{}; (void)probe_value_0.insert(0.5, 1.0);
+    }
+    {
+        // signal.modulation-primitives
+        static_assert(sizeof(pulp::signal::ModulationCurve) > 0);
+        static_assert(sizeof(pulp::signal::BreakpointEnvelopeT<float>) > 0);
+        static_assert(sizeof(pulp::signal::RiseFallGeneratorT<float>) > 0);
+        pulp::signal::ModulationCurve probe_value_0{}; (void)probe_value_0;
+        pulp::signal::BreakpointEnvelopeT<float> probe_value_1{}; (void)probe_value_1.reset();
+        pulp::signal::RiseFallGeneratorT<float> probe_value_2{}; (void)probe_value_2.reset();
+    }
+    {
+        // signal.multi-channel-meter
+        static_assert(sizeof(pulp::signal::MultiChannelMeterT<float>) > 0);
+        pulp::signal::MultiChannelMeterT<float> probe_value_0{}; (void)probe_value_0.reset();
+    }
+    {
+        // signal.nonlinear-shaping
+        static_assert(sizeof(pulp::signal::MultistageWavefolderT<float>) > 0);
+        static_assert(sizeof(pulp::signal::ChebyshevHarmonicShaperT<float>) > 0);
+        static_assert(sizeof(pulp::signal::NonlinearRingModulatorT<float>) > 0);
+        pulp::signal::MultistageWavefolderT<float> probe_value_0{}; (void)probe_value_0.reset();
+        pulp::signal::ChebyshevHarmonicShaperT<float> probe_value_1{}; (void)probe_value_1.reset();
+        pulp::signal::NonlinearRingModulatorT<float> probe_value_2{}; (void)probe_value_2.reset();
+    }
+    {
+        // signal.routing-primitives
+        static_assert(sizeof(pulp::signal::AudioMatrixMixerT<float>) > 0);
+        auto *volatile binding_48 = static_cast<bool (*)(const float*, const float*, float*, float*, std::size_t) noexcept>(&pulp::signal::mid_side_encode_block<float>);
+        (void)binding_48;
+        auto *volatile binding_49 = static_cast<bool (*)(float, std::span<float>) noexcept>(&pulp::signal::nway_constant_power_gains<float>);
+        (void)binding_49;
+        static_assert(sizeof(pulp::signal::PathLatencyAlignerT<float>) > 0);
+        static_assert(sizeof(pulp::signal::ClickFreePathSwitcherT<float>) > 0);
+        pulp::signal::AudioMatrixMixerT<float> probe_value_0{}; (void)probe_value_0.reset();
+        (void)pulp::signal::mid_side_encode_block<float>(nullptr, nullptr, nullptr, nullptr, 0);
+        (void)pulp::signal::nway_constant_power_gains<float>(0.0f, std::span<float>{});
+        pulp::signal::PathLatencyAlignerT<float> probe_value_3{}; (void)probe_value_3.reset();
+        pulp::signal::ClickFreePathSwitcherT<float> probe_value_4{}; (void)probe_value_4.reset();
     }
     {
         // signal.saturator
@@ -86,9 +285,61 @@ int main() {
         pulp::signal::SaturatorT<float> probe_value_0{}; (void)probe_value_0.prepare(48000.0);
     }
     {
+        // signal.scope-capture
+        static_assert(sizeof(pulp::signal::ScopeCaptureT<float>) > 0);
+        pulp::signal::ScopeCaptureT<float> probe_value_0{}; (void)probe_value_0.reset();
+    }
+    {
+        // signal.six-band-eq
+        static_assert(sizeof(pulp::signal::SixBandEqT<float>) > 0);
+        pulp::signal::SixBandEqT<float> probe_value_0{}; (void)probe_value_0.reset();
+    }
+    {
         // signal.sos-cascade
         static_assert(sizeof(pulp::signal::SosCascadeT<float>) > 0);
         pulp::signal::SosCascadeT<float> probe_value_0{}; (void)probe_value_0.prepare(4);
+    }
+    {
+        // signal.source-filter-analysis
+        static_assert(sizeof(pulp::signal::CepstralEnvelopeAnalyzerT<float>) > 0);
+        static_assert(sizeof(pulp::signal::LpcAnalyzerT<float>) > 0);
+        pulp::signal::CepstralEnvelopeAnalyzerT<float> probe_value_0{}; (void)probe_value_0;
+        pulp::signal::LpcAnalyzerT<float> probe_value_1{}; (void)probe_value_1;
+    }
+    {
+        // signal.spectrum-trace
+        static_assert(sizeof(pulp::signal::SpectrumTraceT<float>) > 0);
+        pulp::signal::SpectrumTraceT<float> probe_value_0{}; (void)probe_value_0.reset();
+    }
+    {
+        // signal.stochastic-sources
+        static_assert(sizeof(pulp::signal::DustT<float>) > 0);
+        static_assert(sizeof(pulp::signal::LfsrT<float>) > 0);
+        static_assert(sizeof(pulp::signal::NoiseTiltT<float>) > 0);
+        static_assert(sizeof(pulp::signal::VelvetNoiseGridT<float>) > 0);
+        pulp::signal::DustT<float> probe_value_0{}; (void)probe_value_0.reset();
+        pulp::signal::LfsrT<float> probe_value_1{}; (void)probe_value_1.reset();
+        pulp::signal::NoiseTiltT<float> probe_value_2{}; (void)probe_value_2.reset();
+        pulp::signal::VelvetNoiseGridT<float> probe_value_3{}; (void)probe_value_3.reset();
+    }
+    {
+        // signal.streaming-analysis-frontends
+        static_assert(sizeof(pulp::signal::ChromaFrontEndT<float>) > 0);
+        static_assert(sizeof(pulp::signal::OnsetNoveltyFrontEndT<float>) > 0);
+        pulp::signal::ChromaFrontEndT<float> probe_value_0{}; (void)probe_value_0.reset();
+        pulp::signal::OnsetNoveltyFrontEndT<float> probe_value_1{}; (void)probe_value_1.reset();
+    }
+    {
+        // signal.true-peak-limiter
+        static_assert(sizeof(pulp::signal::TruePeakLimiterT<float>) > 0);
+        pulp::signal::TruePeakLimiterT<float> probe_value_0{}; (void)probe_value_0.reset();
+    }
+    {
+        // signal.unison-voice-primitives
+        static_assert(sizeof(pulp::signal::UnisonLayout<>) > 0);
+        static_assert(sizeof(pulp::signal::SupersawT<float>) > 0);
+        pulp::signal::UnisonLayout<> probe_value_0{}; (void)probe_value_0.configure(pulp::signal::UnisonSpec{});
+        pulp::signal::SupersawT<float> probe_value_1{}; (void)probe_value_1.reset();
     }
     {
         // signal.window-functions
@@ -98,44 +349,44 @@ int main() {
     {
         // timebase.beat-division
         static_assert(sizeof(pulp::timebase::BeatDivision) > 0);
-        auto *volatile binding_17 = &pulp::timebase::division_ticks;
-        (void)binding_17;
+        auto *volatile binding_70 = &pulp::timebase::division_ticks;
+        (void)binding_70;
         pulp::timebase::BeatDivision probe_value_0{pulp::timebase::BeatDivision::Quarter}; (void)probe_value_0;
         (void)pulp::timebase::division_ticks(pulp::timebase::BeatDivision::Quarter);
     }
     {
         // timebase.coordinate-random
         static_assert(sizeof(pulp::timebase::RandomCoordinate) > 0);
-        auto *volatile binding_19 = &pulp::timebase::coordinate_chance;
-        (void)binding_19;
+        auto *volatile binding_72 = &pulp::timebase::coordinate_chance;
+        (void)binding_72;
         pulp::timebase::RandomCoordinate probe_value_0{pulp::timebase::TickPosition{0}, 0, 0, 0}; (void)probe_value_0;
         (void)pulp::timebase::coordinate_chance(0, pulp::timebase::RandomCoordinate{}, 1, 2);
     }
     {
         // timebase.grid-projection
-        auto *volatile binding_20 = &pulp::timebase::project_grid;
-        (void)binding_20;
+        auto *volatile binding_73 = &pulp::timebase::project_grid;
+        (void)binding_73;
         (void)pulp::timebase::project_grid(pulp::timebase::CompiledTempoMap::compile(pulp::timebase::TempoMap{}, pulp::timebase::RationalRate{48000, 1}).value(), pulp::timebase::CompiledMeterMap::compile(pulp::timebase::MeterMap{}).value(), pulp::timebase::GridProjectionRequest{}, std::span<const pulp::timebase::GridProjectionRange>{}, std::span<pulp::timebase::GridProjectionPoint>{});
     }
     {
         // timebase.groove-kernel
-        auto *volatile binding_21 = &pulp::timebase::OrderPreservingGrooveKernel::create;
-        (void)binding_21;
+        auto *volatile binding_74 = &pulp::timebase::OrderPreservingGrooveKernel::create;
+        (void)binding_74;
         (void)pulp::timebase::OrderPreservingGrooveKernel::create(pulp::timebase::GrooveKernelInput{});
     }
     {
         // timebase.ratchet
-        auto *volatile binding_22 = &pulp::timebase::project_ratchet_interval<>;
-        (void)binding_22;
+        auto *volatile binding_75 = &pulp::timebase::project_ratchet_interval<>;
+        (void)binding_75;
         (void)pulp::timebase::project_ratchet_interval<>(pulp::timebase::TickPosition{0}, pulp::timebase::TickPosition{4}, 2, pulp::timebase::TickPosition{0}, pulp::timebase::TickPosition{4}, std::span<pulp::timebase::TickPosition>{});
     }
     {
         // timebase.swing
         static_assert(sizeof(pulp::timebase::SwingRatio) > 0);
-        auto *volatile binding_24 = &pulp::timebase::swing_position;
-        (void)binding_24;
-        auto *volatile binding_25 = &pulp::timebase::unswing_position;
-        (void)binding_25;
+        auto *volatile binding_77 = &pulp::timebase::swing_position;
+        (void)binding_77;
+        auto *volatile binding_78 = &pulp::timebase::unswing_position;
+        (void)binding_78;
         pulp::timebase::SwingRatio probe_value_0{1, 2}; (void)probe_value_0;
         (void)pulp::timebase::swing_position(pulp::timebase::TickPosition{1}, pulp::timebase::TickDuration{2}, pulp::timebase::kStraightSwing);
         (void)pulp::timebase::unswing_position(pulp::timebase::TickPosition{1}, pulp::timebase::TickDuration{2}, pulp::timebase::kStraightSwing);

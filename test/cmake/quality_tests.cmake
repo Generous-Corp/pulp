@@ -65,7 +65,9 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_installed_sdk.py"
             ${_pulp_agent_capability_installed_args})
     unset(_pulp_agent_capability_installed_args)
-    set_tests_properties(agent-capability-installed-sdk PROPERTIES TIMEOUT 180)
+    # This installs the SDK, then configures, builds, and runs an independent
+    # consumer for every capability row and typed binding.
+    set_tests_properties(agent-capability-installed-sdk PROPERTIES TIMEOUT 600)
 
     add_test(NAME ci-python-selector-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_find_python311.py")

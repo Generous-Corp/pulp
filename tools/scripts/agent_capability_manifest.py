@@ -29,8 +29,8 @@ from agent_capability_evolution import (
 
 SCHEMA = "pulp.agent-capabilities.v1"
 SCHEMA_MINOR = 1
-MANIFEST_REVISION = 5
-SURFACE_INVENTORY_VERSION = 8
+MANIFEST_REVISION = 6
+SURFACE_INVENTORY_VERSION = 9
 HISTORY_SCHEMA = "pulp.agent-capability-history.v1"
 HISTORY_FILE = pathlib.Path("tools/agent-capabilities/contract-history.json")
 SNAPSHOT = pathlib.Path("docs/status/agent-capabilities.json")
@@ -87,16 +87,54 @@ FORBIDDEN_RUNTIME_CONTROL_FIELDS = {
 # link ownership: source-bearing APIs can live behind specialized targets.
 REVIEWED_MINIMAL_TARGETS = {
     "pulp/audio/instrument_voice_allocator.hpp": "Pulp::audio",
+    "pulp/audio/midi_voice_modulation_adapter.hpp": "Pulp::audio",
+    "pulp/audio/onset_detector.hpp": "Pulp::audio",
+    "pulp/audio/unison_voice_stack.hpp": "Pulp::audio",
+    "pulp/audio/voice_runtime_facade.hpp": "Pulp::audio",
+    "pulp/midi/arpeggiator.hpp": "Pulp::midi",
+    "pulp/midi/controller_utility_kernels.hpp": "Pulp::midi",
     "pulp/midi/mpe_voice_tracker.hpp": "Pulp::midi",
+    "pulp/midi/note_utility_kernels.hpp": "Pulp::midi",
+    "pulp/midi/routing_utility_kernels.hpp": "Pulp::midi",
     "pulp/music/chord.hpp": "Pulp::music",
     "pulp/music/harmony.hpp": "Pulp::music",
+    "pulp/music/markov.hpp": "Pulp::music",
     "pulp/music/music.hpp": "Pulp::music",
     "pulp/music/pitch.hpp": "Pulp::music",
+    "pulp/music/pattern.hpp": "Pulp::music",
+    "pulp/music/rhythm_relationship.hpp": "Pulp::music",
     "pulp/music/spelling.hpp": "Pulp::music",
     "pulp/music/voicing.hpp": "Pulp::music",
     "pulp/sequence/host_transport_projector.hpp": "Pulp::sequence",
     "pulp/signal/saturator.hpp": "Pulp::signal",
+    "pulp/signal/analysis_frontends.hpp": "Pulp::signal",
+    "pulp/signal/audio_matrix_mixer.hpp": "Pulp::signal",
+    "pulp/signal/breakpoint_envelope.hpp": "Pulp::signal",
+    "pulp/signal/dither.hpp": "Pulp::signal",
+    "pulp/signal/dust.hpp": "Pulp::signal",
+    "pulp/signal/dynamics_contract.hpp": "Pulp::signal",
+    "pulp/signal/fm_operator_engine.hpp": "Pulp::signal",
+    "pulp/signal/fractional_delay.hpp": "Pulp::signal",
+    "pulp/signal/lfsr.hpp": "Pulp::signal",
+    "pulp/signal/linkwitz_riley.hpp": "Pulp::signal",
+    "pulp/signal/mid_side.hpp": "Pulp::signal",
+    "pulp/signal/modulation_curve.hpp": "Pulp::signal",
+    "pulp/signal/multi_channel_meter.hpp": "Pulp::signal",
+    "pulp/signal/noise_tilt.hpp": "Pulp::signal",
+    "pulp/signal/nonlinear_shaping.hpp": "Pulp::signal",
+    "pulp/signal/nway_crossfade.hpp": "Pulp::signal",
+    "pulp/signal/path_latency_aligner.hpp": "Pulp::signal",
+    "pulp/signal/path_switcher.hpp": "Pulp::signal",
+    "pulp/signal/rise_fall_generator.hpp": "Pulp::signal",
+    "pulp/signal/scope_capture.hpp": "Pulp::signal",
+    "pulp/signal/six_band_eq.hpp": "Pulp::signal",
+    "pulp/signal/source_filter_analysis.hpp": "Pulp::signal",
+    "pulp/signal/spectrum_trace.hpp": "Pulp::signal",
     "pulp/signal/sos_cascade.hpp": "Pulp::signal",
+    "pulp/signal/supersaw.hpp": "Pulp::signal",
+    "pulp/signal/true_peak_limiter.hpp": "Pulp::signal",
+    "pulp/signal/unison.hpp": "Pulp::signal",
+    "pulp/signal/velvet_noise.hpp": "Pulp::signal",
     "pulp/signal/fft_backend.hpp": "Pulp::signal-fft-backend",
     "pulp/signal/modal_spec.hpp": "Pulp::signal-modal-spec",
     "pulp/signal/mirrored_history_buffer.hpp": "Pulp::signal",
@@ -198,7 +236,7 @@ EXPORTS = [
                 qualified_name="pulp::signal::osc::MinBlepAccumulator<>",
                 target="Pulp::signal",
                 header_fingerprint=(
-                    "sha256:f310b561f6e616926b2079050c1b49cc762e8ab8ad8d1b518677d77a98cd2631"
+                    "sha256:838567bf66f86f232dc6239d74b77cb7a456eb854831b73f70e9641e0d21c9f6"
                 ),
             ),
         ],
@@ -409,7 +447,7 @@ EXPORTS = [
                 qualified_name="pulp::signal::SosCascadeT<float>",
                 target="Pulp::signal",
                 header_fingerprint=(
-                    "sha256:8e6d177601b3167a8033a7e51c33174169b05a8719930964562fd22d5a4b5c3a"
+                    "sha256:8cdd74d36ba12f1b19d85a28d57b501e5b96f8c3a1eae3f82cd96dbb7f027d79"
                 ),
             )
         ],
@@ -491,8 +529,9 @@ EXPORTS = [
             "release": "none",
         },
         state_model=(
-            "Fixed 128-slot note table with explicit reset and monotonic note "
-            "identities."
+            "Fixed 128-slot note table with nonzero uint64 generations, "
+            "fail-closed generation exhaustion, FIFO deferred note-offs, and "
+            "transactional lifecycle rejection."
         ),
         seed_model="none",
         determinism={
@@ -515,7 +554,7 @@ EXPORTS = [
                 qualified_name="pulp::midi::MpeVoiceTracker",
                 target="Pulp::midi",
                 header_fingerprint=(
-                    "sha256:5244ad204106b63719ccdd729260b5f0874715bc91c8ec863e05f85208554fd6"
+                    "sha256:aca221889b5e62dd37fe9890c1d8009f7d8479a0b83f4a49986bde3fa2a6dbdc"
                 ),
             )
         ],
@@ -1323,11 +1362,1365 @@ EXPORTS = [
             "arguments": "",
         }],
     ),
+    capability(
+        key="audio.midi-voice-modulation-adapter",
+        domain="audio",
+        summary=(
+            "Fixed-capacity translation from MIDI voice state into generation-qualified "
+            "per-voice modulation state."
+        ),
+        rt_class="audio",
+        lifecycle={
+            "construction": "any",
+            "prepare": "destination modulation buffers on control; adapter none",
+            "process": "audio",
+            "reset": "audio",
+            "release": "none",
+        },
+        state_model=(
+            "A compile-time-bounded voice array retains activity, note, channel, velocity, "
+            "expression, and a monotonic nonzero generation watermark."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "not_applicable",
+            "platform_scope": "same_build",
+            "transport_history": "irrelevant",
+        },
+        input_domain="MIDI note identity, expression, and generation-qualified voice events",
+        output_domain="fixed per-voice modulation state",
+        units=["MIDI note", "MIDI channel", "normalized controller", "generation"],
+        latency="zero",
+        tail="none",
+        scheduling="event-synchronous",
+        bindings=[binding(
+            role="entrypoint",
+            kind="cpp_type",
+            include="pulp/audio/midi_voice_modulation_adapter.hpp",
+            qualified_name="pulp::audio::MidiVoiceModulationAdapter<128>",
+            target="Pulp::audio",
+            header_fingerprint="sha256:8fb955d00ce0ed708d96c397d5bd9cc7f2926c1414ce9ac9976ad6abdae9ef7a",
+        )],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::audio::MidiVoiceModulationAdapter<128>",
+            "operation": "member_call",
+            "member": "reset",
+            "arguments": "",
+        }],
+    ),
+    capability(
+        key="audio.unison-voice-stack",
+        domain="audio",
+        summary=(
+            "Exclusive fixed-capacity unison stack ownership over a prepared instrument "
+            "voice allocator."
+        ),
+        rt_class="mixed",
+        lifecycle={
+            "construction": "control",
+            "prepare": "control with borrowed prepared-empty allocator",
+            "process": "audio",
+            "reset": "audio while ownership is exclusive and quiescent",
+            "release": "borrowed owner lifetime ends off audio",
+        },
+        state_model=(
+            "A fixed logical-note table owns allocator mutation and retains oldest serials, "
+            "generation-qualified child identities, and exact termination state."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "not_applicable",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
+        input_domain="logical note triggers, unison voice layouts, and voice terminations",
+        output_domain="generation-qualified child voice allocation and termination records",
+        units=["MIDI note", "cents", "normalized gain", "voice generation"],
+        latency="zero",
+        tail="caller-selected termination tail",
+        scheduling="event-synchronous exclusive allocator ownership",
+        bindings=[binding(
+            role="entrypoint",
+            kind="cpp_type",
+            include="pulp/audio/unison_voice_stack.hpp",
+            qualified_name="pulp::audio::UnisonVoiceStackManager<>",
+            target="Pulp::audio",
+            header_fingerprint="sha256:e5cef314c00880c58fc33618a6657b27811c1afcf003220b9e3176435d8c737d",
+        )],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::audio::UnisonVoiceStackManager<>",
+            "operation": "member_call",
+            "member": "prepared",
+            "arguments": "",
+        }],
+    ),
+    capability(
+        key="audio.voice-note-modulation",
+        domain="audio",
+        summary=(
+            "Transactional conversion of note and controller state into six constant "
+            "per-voice modulation lanes."
+        ),
+        rt_class="audio",
+        lifecycle={
+            "construction": "none",
+            "prepare": "destination modulation buffer on control",
+            "process": "audio",
+            "reset": "none",
+            "release": "none",
+        },
+        state_model="Stateless validation followed by an atomic six-lane destination overwrite.",
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "same_build",
+            "transport_history": "irrelevant",
+        },
+        input_domain="note, velocity, gate, pitch bend, pressure, timbre, and expression",
+        output_domain="typed constant voice-modulation lanes",
+        units=["MIDI note", "cents", "normalized controller", "frames"],
+        latency="zero",
+        tail="none",
+        scheduling="one transactional write per audio block",
+        bindings=[binding(
+            role="entrypoint",
+            kind="cpp_function",
+            include="pulp/audio/voice_runtime_facade.hpp",
+            qualified_name="pulp::audio::VoiceNoteModulationBridge::write",
+            target="Pulp::audio",
+            header_fingerprint="sha256:4237f8cdf64ed1a28330822f41ea8d3fc5a42d955a5b964a54ba24106a7ceab6",
+        )],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::audio::VoiceNoteModulationBridge::write",
+            "operation": "function_call",
+            "arguments": (
+                "*[]() { static pulp::audio::VoiceModulationBuffer value; return &value; }(), "
+                "1u, pulp::audio::VoiceNoteModulationInput{}, "
+                "pulp::audio::VoiceNoteModulationRouting{}"
+            ),
+        }],
+    ),
+    capability(
+        key="audio.voice-runtime-facade",
+        domain="audio",
+        summary=(
+            "Non-owning typed facade over Pulp instrument or synthesiser voice owners "
+            "without allocator type erasure."
+        ),
+        rt_class="mixed",
+        lifecycle={
+            "construction": "control borrow",
+            "prepare": "owner-specific control",
+            "process": "audio",
+            "reset": "owner-specific quiescent call",
+            "release": "none; facade is non-owning",
+        },
+        state_model=(
+            "The facade retains only an owner pointer; the owner retains voices and spans "
+            "passed to facade calls are never retained."
+        ),
+        seed_model="owner-defined",
+        determinism={
+            "repeatability": "not_promised",
+            "block_partition": "fixed_partition_only",
+            "platform_scope": "same_build",
+            "transport_history": "input",
+        },
+        input_domain="voice triggers, note expression, lifecycle events, and owner policy",
+        output_domain="typed voice allocation, modulation, telemetry, and termination records",
+        units=["MIDI note", "frames", "voice index", "voice generation"],
+        latency="owner-defined",
+        tail="owner-defined",
+        scheduling="event-synchronous over one exclusively borrowed owner",
+        bindings=[binding(
+            role="entrypoint",
+            kind="cpp_type",
+            include="pulp/audio/voice_runtime_facade.hpp",
+            qualified_name=(
+                "pulp::audio::VoiceRuntimeFacade<pulp::audio::InstrumentVoiceAllocator>"
+            ),
+            target="Pulp::audio",
+            header_fingerprint="sha256:4237f8cdf64ed1a28330822f41ea8d3fc5a42d955a5b964a54ba24106a7ceab6",
+        )],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::audio::VoiceRuntimeFacade<pulp::audio::InstrumentVoiceAllocator>",
+            "operation": "construct",
+            "arguments": (
+                "*[]() { static pulp::audio::InstrumentVoiceAllocator value; return &value; }()"
+            ),
+        }],
+    ),
+    capability(
+        key="audio.onset-detection",
+        domain="audio",
+        summary="Offline energy, spectral-flux, or high-frequency-content onset detection.",
+        rt_class="offline",
+        lifecycle={
+            "construction": "offline",
+            "prepare": "none",
+            "process": "offline",
+            "reset": "none",
+            "release": "result vector destruction off audio",
+        },
+        state_model="Each call is stateless and returns an owning bounded marker vector.",
+        seed_model="none",
+        determinism={
+            "repeatability": "tolerance_bounded",
+            "block_partition": "not_applicable",
+            "platform_scope": "same_build",
+            "transport_history": "irrelevant",
+        },
+        input_domain="finite mono audio frames and an offline analysis configuration",
+        output_domain="ordered onset frame markers with confidence and method",
+        units=["audio frames", "normalized confidence", "samples"],
+        latency="offline whole-input analysis",
+        tail="none",
+        scheduling="background or offline only",
+        bindings=[binding(
+            role="entrypoint",
+            kind="cpp_type",
+            include="pulp/audio/onset_detector.hpp",
+            qualified_name="pulp::audio::OnsetDetector",
+            target="Pulp::audio",
+            header_fingerprint="sha256:d0cac999018c626de8cbd2165150788c1d3be62777cc639d550d7f80f9f56560",
+        )],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::audio::OnsetDetector",
+            "operation": "member_call",
+            "member": "detect",
+            "arguments": (
+                "pulp::audio::BufferView<const float>{}, pulp::audio::OnsetDetectionConfig{}"
+            ),
+        }],
+    ),
+    capability(
+        key="midi.arpeggiator",
+        domain="midi",
+        summary=(
+            "Bounded sample-accurate held-note arpeggiator with latch, octave, gate, swing, "
+            "ordering, ownership, and transport policies."
+        ),
+        rt_class="audio",
+        lifecycle={
+            "construction": "control",
+            "prepare": "reserve output and compile tempo map on control",
+            "process": "audio",
+            "reset": "audio with prepared output",
+            "release": "none",
+        },
+        state_model=(
+            "Fixed held, pattern, sounding, ownership, and release-debt ledgers retain clock "
+            "state and one pending specification without allocation."
+        ),
+        seed_model="explicit spec random_seed indexed by musical step",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "same_build",
+            "transport_history": "input",
+        },
+        input_domain="held MIDI notes, absolute sample block, tempo map, and transport event",
+        output_domain="owned note-on and note-off MIDI event stream",
+        units=["samples", "beats", "MIDI note", "octaves", "rational gate"],
+        latency="sample-scheduled within the supplied block",
+        tail="owned note releases and bounded release debt",
+        scheduling="absolute-sample transport-aware",
+        bindings=[binding(
+            role="entrypoint",
+            kind="cpp_type",
+            include="pulp/midi/arpeggiator.hpp",
+            qualified_name="pulp::midi::Arpeggiator<>",
+            target="Pulp::midi",
+            header_fingerprint="sha256:5178607c04e0070ad9e22ab028a2c87aa80c925350e0743614c0fb44aa426445",
+        )],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::midi::Arpeggiator<>",
+            "operation": "member_call",
+            "member": "valid",
+            "arguments": "",
+        }],
+    ),
+    capability(
+        key="midi.controller-mapping",
+        domain="midi",
+        summary="Fixed-capacity controller remapping with bounded physical-domain smoothing.",
+        rt_class="audio",
+        lifecycle={
+            "construction": "any",
+            "prepare": "set rules and reserve output on control",
+            "process": "audio",
+            "reset": "audio",
+            "release": "none",
+        },
+        state_model="Fixed rule table plus per-rule smoother value, target, and absolute sample.",
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "same_build",
+            "transport_history": "input",
+        },
+        input_domain="MIDI controller events, mapping rules, and absolute samples",
+        output_domain="remapped MIDI controller events and smoothed values",
+        units=["MIDI controller", "normalized value", "samples"],
+        latency="zero event latency",
+        tail="smoothing state until target convergence or reset",
+        scheduling="absolute-sample event stream",
+        bindings=[binding(
+            role="entrypoint", kind="cpp_type",
+            include="pulp/midi/controller_utility_kernels.hpp",
+            qualified_name="pulp::midi::ControllerMapper<>", target="Pulp::midi",
+            header_fingerprint="sha256:4e28f94ab7787db493e743d3f8cf65d1d6c0015dfd15e9425f6006dfe1d9c711",
+        )],
+        _link_probes=[{
+            "role": "entrypoint", "binding": "pulp::midi::ControllerMapper<>",
+            "operation": "member_call", "member": "reset", "arguments": "",
+        }],
+    ),
+    capability(
+        key="midi.scale-aware-mpe-pitch",
+        domain="midi",
+        summary="Scale-aware conversion of MPE member pitch into bounded cents with glide.",
+        rt_class="audio",
+        lifecycle={
+            "construction": "any", "prepare": "none", "process": "audio",
+            "reset": "audio", "release": "none",
+        },
+        state_model="Fixed sanitized specification and current, target, and initialized state.",
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact", "block_partition": "fixed_partition_only",
+            "platform_scope": "same_build", "transport_history": "irrelevant",
+        },
+        input_domain="MPE note state, musical scale, and glide sample count",
+        output_domain="current and target pitch offset",
+        units=["cents", "semitones", "samples", "seconds"],
+        latency="zero",
+        tail="glide state until convergence or reset",
+        scheduling="event update plus block advance",
+        bindings=[binding(
+            role="entrypoint", kind="cpp_type",
+            include="pulp/midi/controller_utility_kernels.hpp",
+            qualified_name="pulp::midi::ScaleAwareMpePitch", target="Pulp::midi",
+            header_fingerprint="sha256:4e28f94ab7787db493e743d3f8cf65d1d6c0015dfd15e9425f6006dfe1d9c711",
+        )],
+        _link_probes=[{
+            "role": "entrypoint", "binding": "pulp::midi::ScaleAwareMpePitch",
+            "operation": "member_call", "member": "reset", "arguments": "",
+        }],
+    ),
+    capability(
+        key="midi.note-length-shaping",
+        domain="midi",
+        summary="Fixed-capacity note duration shaping with overlap ownership and release debt.",
+        rt_class="audio",
+        lifecycle={
+            "construction": "any", "prepare": "reserve output on control",
+            "process": "audio", "reset": "audio with prepared output", "release": "none",
+        },
+        state_model=(
+            "Fixed due-note slots and ordered forwarded or suppressed ownership, release debt, "
+            "quarantine, and one pending specification."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact", "block_partition": "invariant",
+            "platform_scope": "cross_platform", "transport_history": "input",
+        },
+        input_domain="MIDI note stream, duration specification, and absolute sample block",
+        output_domain="duration-shaped owned MIDI note stream",
+        units=["samples", "MIDI note", "MIDI channel"],
+        latency="zero for attacks; releases scheduled by duration",
+        tail="scheduled releases and bounded release debt",
+        scheduling="absolute-sample transport-aware",
+        bindings=[binding(
+            role="entrypoint", kind="cpp_type",
+            include="pulp/midi/note_utility_kernels.hpp",
+            qualified_name="pulp::midi::NoteLengthShaper<>", target="Pulp::midi",
+            header_fingerprint="sha256:6b4005421eb2f5f98b88765883154451e800a76188a8608887755201f9cc21e6",
+        )],
+        _link_probes=[{
+            "role": "entrypoint", "binding": "pulp::midi::NoteLengthShaper<>",
+            "operation": "member_call", "member": "valid", "arguments": "",
+        }],
+    ),
+    capability(
+        key="midi.monophonic-note-selection",
+        domain="midi",
+        summary="Low, high, or last-note monophonic selection with legato and glide state.",
+        rt_class="audio",
+        lifecycle={
+            "construction": "any", "prepare": "reserve output on control",
+            "process": "audio", "reset": "audio with prepared output", "release": "none",
+        },
+        state_model=(
+            "Fixed 2048-key depth, velocity, and ordering tables retain selected pitch and "
+            "one pending specification."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact", "block_partition": "fixed_partition_only",
+            "platform_scope": "same_build", "transport_history": "irrelevant",
+        },
+        input_domain="MIDI notes, selection priority, legato policy, and glide advance",
+        output_domain="owned monophonic MIDI stream and pitch state",
+        units=["MIDI note", "samples", "seconds"],
+        latency="zero event latency",
+        tail="held-note selection and glide until release or reset",
+        scheduling="event stream plus explicit glide advance",
+        bindings=[binding(
+            role="entrypoint", kind="cpp_type",
+            include="pulp/midi/note_utility_kernels.hpp",
+            qualified_name="pulp::midi::MonophonicNoteSelector", target="Pulp::midi",
+            header_fingerprint="sha256:6b4005421eb2f5f98b88765883154451e800a76188a8608887755201f9cc21e6",
+        )],
+        _link_probes=[{
+            "role": "entrypoint", "binding": "pulp::midi::MonophonicNoteSelector",
+            "operation": "member_call", "member": "pitch_state", "arguments": "",
+        }],
+    ),
+    capability(
+        key="midi.channel-routing",
+        domain="midi",
+        summary="Lifecycle-safe MIDI channel routing with overlapping-note ownership.",
+        rt_class="audio",
+        lifecycle={
+            "construction": "any", "prepare": "reserve MIDI and UMP output on control",
+            "process": "audio", "reset": "audio with prepared output", "release": "none",
+        },
+        state_model="Fixed forwarded and suppressed MIDI and UMP ledgers plus release debt.",
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact", "block_partition": "fixed_partition_only",
+            "platform_scope": "cross_platform", "transport_history": "irrelevant",
+        },
+        input_domain="MIDI 1 or UMP channel voice events and a channel route specification",
+        output_domain="routed lifecycle-complete MIDI 1 or UMP event stream",
+        units=["MIDI channel", "MIDI group", "sample offset"],
+        latency="zero",
+        tail="bounded release debt until emitted or reset",
+        scheduling="input-stable event order with lifecycle reconciliation",
+        bindings=[binding(
+            role="entrypoint", kind="cpp_type", include="pulp/midi/routing_utility_kernels.hpp",
+            qualified_name="pulp::midi::ChannelRouter", target="Pulp::midi",
+            header_fingerprint="sha256:0090aca546341f6958fde703b8e0c7641999ecdd58186d2adb96957267d55718",
+        )],
+        _link_probes=[{
+            "role": "entrypoint", "binding": "pulp::midi::ChannelRouter",
+            "operation": "member_call", "member": "valid", "arguments": "",
+        }],
+    ),
+    capability(
+        key="midi.note-range-filtering",
+        domain="midi",
+        summary="Lifecycle-safe note-range filtering for MIDI 1 and UMP event streams.",
+        rt_class="audio",
+        lifecycle={
+            "construction": "any", "prepare": "reserve MIDI and UMP output on control",
+            "process": "audio", "reset": "audio with prepared output", "release": "none",
+        },
+        state_model="Fixed forwarded and suppressed MIDI and UMP ledgers plus release debt.",
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact", "block_partition": "fixed_partition_only",
+            "platform_scope": "cross_platform", "transport_history": "irrelevant",
+        },
+        input_domain="MIDI 1 or UMP notes and inclusive note-range specification",
+        output_domain="filtered lifecycle-complete MIDI 1 or UMP event stream",
+        units=["MIDI note", "sample offset"],
+        latency="zero", tail="bounded release debt until emitted or reset",
+        scheduling="input-stable event order with lifecycle reconciliation",
+        bindings=[binding(
+            role="entrypoint", kind="cpp_type", include="pulp/midi/routing_utility_kernels.hpp",
+            qualified_name="pulp::midi::NoteRangeFilter", target="Pulp::midi",
+            header_fingerprint="sha256:0090aca546341f6958fde703b8e0c7641999ecdd58186d2adb96957267d55718",
+        )],
+        _link_probes=[{
+            "role": "entrypoint", "binding": "pulp::midi::NoteRangeFilter",
+            "operation": "member_call", "member": "valid", "arguments": "",
+        }],
+    ),
+    capability(
+        key="midi.keyboard-split",
+        domain="midi",
+        summary="Lifecycle-safe two-way keyboard split for MIDI 1 and UMP event streams.",
+        rt_class="audio",
+        lifecycle={
+            "construction": "any", "prepare": "reserve both MIDI and UMP outputs on control",
+            "process": "audio", "reset": "audio with prepared outputs", "release": "none",
+        },
+        state_model="Two fixed forwarded and suppressed MIDI and UMP ledgers plus release debt.",
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact", "block_partition": "fixed_partition_only",
+            "platform_scope": "cross_platform", "transport_history": "irrelevant",
+        },
+        input_domain="MIDI 1 or UMP notes and split-point routing specification",
+        output_domain="two lifecycle-complete MIDI 1 or UMP event streams",
+        units=["MIDI note", "MIDI channel", "sample offset"],
+        latency="zero", tail="bounded release debt until emitted or reset",
+        scheduling="input-stable event order with lifecycle reconciliation",
+        bindings=[binding(
+            role="entrypoint", kind="cpp_type", include="pulp/midi/routing_utility_kernels.hpp",
+            qualified_name="pulp::midi::KeyboardSplit", target="Pulp::midi",
+            header_fingerprint="sha256:0090aca546341f6958fde703b8e0c7641999ecdd58186d2adb96957267d55718",
+        )],
+        _link_probes=[{
+            "role": "entrypoint", "binding": "pulp::midi::KeyboardSplit",
+            "operation": "member_call", "member": "valid", "arguments": "",
+        }],
+    ),
+    capability(
+        key="music.markov-transition",
+        domain="music",
+        summary="Prepared fixed-capacity weighted Markov transition selection.",
+        rt_class="any",
+        lifecycle={
+            "construction": "any", "prepare": "control or non-concurrent any",
+            "process": "any", "reset": "any", "release": "none",
+        },
+        state_model="Fixed prepared cumulative transition table and per-state totals.",
+        seed_model="caller supplies each uint64 random word",
+        determinism={
+            "repeatability": "bit_exact", "block_partition": "not_applicable",
+            "platform_scope": "cross_platform", "transport_history": "irrelevant",
+        },
+        input_domain="bounded transition weights, current state, and caller random word",
+        output_domain="next state index or explicit preparation error",
+        units=["state index", "integer weight", "random word"],
+        latency="zero", tail="none", scheduling="one draw per requested transition",
+        bindings=[binding(
+            role="entrypoint", kind="cpp_type", include="pulp/music/markov.hpp",
+            qualified_name="pulp::music::PreparedMarkovModel<>", target="Pulp::music",
+            header_fingerprint="sha256:8b013fa744ad12df04d4efc454330258afa3977371a66582b91448e6f1c086ef",
+        )],
+        _link_probes=[{
+            "role": "entrypoint", "binding": "pulp::music::PreparedMarkovModel<>",
+            "operation": "member_call", "member": "clear", "arguments": "",
+        }],
+    ),
+    capability(
+        key="music.pattern-generation",
+        domain="music",
+        summary=(
+            "Bounded Euclidean, versioned recipe, walking, cellular, and looping-shift-register "
+            "pattern operations."
+        ),
+        rt_class="any",
+        lifecycle={
+            "construction": "any", "prepare": "configure walker at any non-concurrent point",
+            "process": "any", "reset": "any", "release": "none",
+        },
+        state_model=(
+            "Functions return fixed BinaryPattern values; only PatternWalker retains bounded "
+            "cursor, direction, length, and mode state."
+        ),
+        seed_model="caller supplies each uint64 random word",
+        determinism={
+            "repeatability": "bit_exact", "block_partition": "not_applicable",
+            "platform_scope": "cross_platform", "transport_history": "irrelevant",
+        },
+        input_domain="step counts, pulses, signed rotation, rules, mutation chance, and random word",
+        output_domain="fixed-capacity binary patterns and walker step indices",
+        units=["steps", "pulses", "signed rotation", "probability ratio", "random word"],
+        latency="zero", tail="none", scheduling="caller-clocked",
+        bindings=[
+            binding(
+                role="euclidean", kind="cpp_function", include="pulp/music/pattern.hpp",
+                qualified_name="pulp::music::euclidean_pattern<64>", target="Pulp::music",
+                header_fingerprint="sha256:ca7cc580012662880465801996dca4b6b6e23aec07c6ec07d573788347bf32f5",
+            ),
+            binding(
+                role="recipe", kind="cpp_function", include="pulp/music/pattern.hpp",
+                qualified_name="pulp::music::materialize_pattern<64>", target="Pulp::music",
+                header_fingerprint="sha256:ca7cc580012662880465801996dca4b6b6e23aec07c6ec07d573788347bf32f5",
+            ),
+            binding(
+                role="walker", kind="cpp_type", include="pulp/music/pattern.hpp",
+                qualified_name="pulp::music::PatternWalker<>", target="Pulp::music",
+                header_fingerprint="sha256:ca7cc580012662880465801996dca4b6b6e23aec07c6ec07d573788347bf32f5",
+            ),
+            binding(
+                role="cellular", kind="cpp_function", include="pulp/music/pattern.hpp",
+                qualified_name="pulp::music::cellular_evolve<64>", target="Pulp::music",
+                header_fingerprint="sha256:ca7cc580012662880465801996dca4b6b6e23aec07c6ec07d573788347bf32f5",
+            ),
+            binding(
+                role="shift_register", kind="cpp_function", include="pulp/music/pattern.hpp",
+                qualified_name="pulp::music::looping_shift_register<64>", target="Pulp::music",
+                header_fingerprint="sha256:ca7cc580012662880465801996dca4b6b6e23aec07c6ec07d573788347bf32f5",
+            ),
+        ],
+        _link_probes=[
+            {"role": "euclidean", "binding": "pulp::music::euclidean_pattern<64>",
+             "operation": "function_call", "arguments": "8u, 3u, 0"},
+            {"role": "recipe", "binding": "pulp::music::materialize_pattern<64>",
+             "operation": "function_call", "arguments": "pulp::music::EuclideanPatternRecipe{}"},
+            {"role": "walker", "binding": "pulp::music::PatternWalker<>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+            {"role": "cellular", "binding": "pulp::music::cellular_evolve<64>",
+             "operation": "function_call",
+             "arguments": "pulp::music::BinaryPattern<>{}, 30u, pulp::music::CellularBoundary::wrap"},
+            {"role": "shift_register", "binding": "pulp::music::looping_shift_register<64>",
+             "operation": "function_call",
+             "arguments": "pulp::music::BinaryPattern<>{}, pulp::music::MutationChance{}, 0u"},
+        ],
+    ),
+    capability(
+        key="music.rhythm-relationship",
+        domain="music",
+        summary=(
+            "Deterministic derivation of a target rhythm from a source lane using relationship, "
+            "phase, length, collision, and density policies."
+        ),
+        rt_class="any",
+        lifecycle={
+            "construction": "none", "prepare": "none", "process": "any",
+            "reset": "none", "release": "none",
+        },
+        state_model="Pure fixed-capacity operation with no retained state.",
+        seed_model="explicit seed, cycle, and lane coordinates provide stateless draws",
+        determinism={
+            "repeatability": "bit_exact", "block_partition": "not_applicable",
+            "platform_scope": "cross_platform", "transport_history": "irrelevant",
+        },
+        input_domain="source mask and relationship, mapping, phase, collision, density, and draw policy",
+        output_domain="derived fixed-capacity target rhythm or explicit error",
+        units=["steps", "signed phase", "onset count", "seed", "cycle", "lane"],
+        latency="zero", tail="none", scheduling="caller-clocked whole-pattern derivation",
+        bindings=[binding(
+            role="entrypoint", kind="cpp_function",
+            include="pulp/music/rhythm_relationship.hpp",
+            qualified_name="pulp::music::derive_rhythm_relationship<64>", target="Pulp::music",
+            header_fingerprint="sha256:bcb234becb7b912a516ebf4d33152fcbf4e326b59251a5977b4c1a2e653de433",
+        )],
+        _link_probes=[{
+            "role": "entrypoint", "binding": "pulp::music::derive_rhythm_relationship<64>",
+            "operation": "function_call",
+            "arguments": "pulp::music::BinaryPattern<>{}, pulp::music::RhythmRelationshipConfig{}",
+        }],
+    ),
+    capability(
+        key="signal.streaming-analysis-frontends", domain="signal",
+        summary="Prepared streaming chroma and onset-novelty analysis frontends.",
+        rt_class="mixed",
+        lifecycle={"construction": "control", "prepare": "control; may allocate retained FFT storage",
+                   "process": "audio analysis owner", "reset": "audio analysis owner",
+                   "release": "destruction off audio"},
+        state_model=(
+            "Fixed-capacity window, history, and scratch plus retained FFT storage and "
+            "cadence, timestamp, chroma, and novelty state."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="prepared planar finite audio blocks",
+        output_domain="timestamped chroma or onset-novelty frames",
+        units=["samples", "frames", "hertz", "normalized magnitude"],
+        latency="analysis readiness N-1 samples; chroma center lookback N/2",
+        tail="no padded analysis tail", scheduling="streaming hop cadence",
+        bindings=[
+            binding(role="chroma", kind="cpp_type", include="pulp/signal/analysis_frontends.hpp",
+                    qualified_name="pulp::signal::ChromaFrontEndT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:5ccf5005856974faaf4e834abd28a0fc9e25cd816cf8a8a91d3baffc0f92a17e"),
+            binding(role="onset_novelty", kind="cpp_type", include="pulp/signal/analysis_frontends.hpp",
+                    qualified_name="pulp::signal::OnsetNoveltyFrontEndT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:5ccf5005856974faaf4e834abd28a0fc9e25cd816cf8a8a91d3baffc0f92a17e"),
+        ],
+        _link_probes=[
+            {"role": "chroma", "binding": "pulp::signal::ChromaFrontEndT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+            {"role": "onset_novelty", "binding": "pulp::signal::OnsetNoveltyFrontEndT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+        ],
+    ),
+    capability(
+        key="signal.routing-primitives", domain="signal",
+        summary=(
+            "Bounded matrix, mid-side, N-way crossfade, click-free switching, and path-latency "
+            "alignment primitives."
+        ),
+        rt_class="mixed",
+        lifecycle={"construction": "control", "prepare": "control for matrix and aligner storage",
+                   "process": "audio", "reset": "audio", "release": "destruction off audio"},
+        state_model=(
+            "Fixed matrix ramps and switch weights plus prepared bounded per-path delay storage."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="audio buffers, signed gains, path positions, and intrinsic latencies",
+        output_domain="routed, transformed, switched, and latency-aligned audio",
+        units=["samples", "frames", "linear gain", "path index"],
+        latency="zero except aligner maximum declared path latency",
+        tail="prepared delay history until drained or reset", scheduling="sample-continuous",
+        bindings=[
+            binding(role="matrix", kind="cpp_type", include="pulp/signal/audio_matrix_mixer.hpp",
+                    qualified_name="pulp::signal::AudioMatrixMixerT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:80ac853fa55eb0bee8730a05dd7cfac32847832eb4f44cb6e0ad5507781db6b1"),
+            binding(role="mid_side", kind="cpp_function", include="pulp/signal/mid_side.hpp",
+                    qualified_name="pulp::signal::mid_side_encode_block<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:709cb80f95a21bd20ec21ac9f055da2d41cf47b86ce91cdd444a408e00ff6443",
+                    address_expression=("static_cast<bool (*)(const float*, const float*, float*, "
+                                        "float*, std::size_t) noexcept>("
+                                        "&pulp::signal::mid_side_encode_block<float>)")),
+            binding(role="nway", kind="cpp_function", include="pulp/signal/nway_crossfade.hpp",
+                    qualified_name="pulp::signal::nway_constant_power_gains<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:b1d33521a93b3cefd167f9441b6523b83fdffe1b873a20fb50caedac790ce9be",
+                    address_expression=("static_cast<bool (*)(float, std::span<float>) noexcept>("
+                                        "&pulp::signal::nway_constant_power_gains<float>)")),
+            binding(role="aligner", kind="cpp_type", include="pulp/signal/path_latency_aligner.hpp",
+                    qualified_name="pulp::signal::PathLatencyAlignerT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:1b50ede989667a0a3354900646e3079df8a550474604cf7958c92a7b27f58e8a"),
+            binding(role="switcher", kind="cpp_type", include="pulp/signal/path_switcher.hpp",
+                    qualified_name="pulp::signal::ClickFreePathSwitcherT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:adbf41862725587e477711ac144f5326cdcff3a31560aba47708a42d5cd471f1"),
+        ],
+        _link_probes=[
+            {"role": "matrix", "binding": "pulp::signal::AudioMatrixMixerT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+            {"role": "mid_side", "binding": "pulp::signal::mid_side_encode_block<float>",
+             "operation": "function_call", "arguments": "nullptr, nullptr, nullptr, nullptr, 0"},
+            {"role": "nway", "binding": "pulp::signal::nway_constant_power_gains<float>",
+             "operation": "function_call", "arguments": "0.0f, std::span<float>{}"},
+            {"role": "aligner", "binding": "pulp::signal::PathLatencyAlignerT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+            {"role": "switcher", "binding": "pulp::signal::ClickFreePathSwitcherT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+        ],
+    ),
+    capability(
+        key="signal.modulation-primitives", domain="signal",
+        summary="Shared curve vocabulary, bounded breakpoint envelopes, and rise/fall generators.",
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control configuration",
+                   "process": "audio", "reset": "audio", "release": "none"},
+        state_model="Fixed-capacity breakpoint program plus sample phase and stage state.",
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="authored endpoints, curves, sample durations, and triggers",
+        output_domain="sample-synchronous caller-domain modulation values",
+        units=["samples", "frames", "caller-defined value", "normalized progress"],
+        latency="zero", tail="program-defined until idle", scheduling="sample-synchronous",
+        bindings=[
+            binding(role="curve", kind="cpp_type", include="pulp/signal/modulation_curve.hpp",
+                    qualified_name="pulp::signal::ModulationCurve", target="Pulp::signal",
+                    header_fingerprint="sha256:da89147c18e3c0479bf02294273bc7ec8ff76bc83cc7e198e645b14fe100a298"),
+            binding(role="breakpoint", kind="cpp_type", include="pulp/signal/breakpoint_envelope.hpp",
+                    qualified_name="pulp::signal::BreakpointEnvelopeT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:c70262f82754eff2117acabf88d55e8ccc86d0e783d6cea6e04d6af6a671a9f7"),
+            binding(role="rise_fall", kind="cpp_type", include="pulp/signal/rise_fall_generator.hpp",
+                    qualified_name="pulp::signal::RiseFallGeneratorT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:67185305462aff7fef2f089d00f0bf6eeaa5708436e3f042fca6b8271c4b3fa3"),
+        ],
+        _link_probes=[
+            {"role": "curve", "binding": "pulp::signal::ModulationCurve",
+             "operation": "construct", "arguments": ""},
+            {"role": "breakpoint", "binding": "pulp::signal::BreakpointEnvelopeT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+            {"role": "rise_fall", "binding": "pulp::signal::RiseFallGeneratorT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+        ],
+    ),
+    capability(
+        key="signal.dither-quantizer", domain="signal",
+        summary="Seeded quantization with selectable TPDF dither and first- or second-order shaping.",
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "none", "process": "audio",
+                   "reset": "audio", "release": "none"},
+        state_model="Fixed random generator and first- or second-order quantization error feedback.",
+        seed_model="public uint32 seed",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="audio samples, bit depth, dither mode, and shaping order",
+        output_domain="quantized audio samples", units=["samples", "bits", "normalized amplitude"],
+        latency="zero", tail="continuous dither while enabled; reset clears error state",
+        scheduling="sample-synchronous",
+        bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/dither.hpp",
+                         qualified_name="pulp::signal::DitherQuantizerT<float>", target="Pulp::signal",
+                         header_fingerprint="sha256:72536ca7644208062b3769cceddfc8aa935d4b441db999b5a61171947446a9af")],
+        _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::DitherQuantizerT<float>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
+    capability(
+        key="signal.stochastic-sources", domain="signal",
+        summary="Seeded dust, LFSR, tilted continuous noise, and velvet-noise grid sources.",
+        rt_class="mixed",
+        lifecycle={"construction": "control", "prepare": "control configuration and NoiseTilt prepare",
+                   "process": "audio", "reset": "audio", "release": "none"},
+        state_model="Fixed integer RNG, LFSR, and grid state plus fixed NoiseTilt biquad state.",
+        seed_model="public seed per instance",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="seed, event density, register mask, spectral tilt, and level",
+        output_domain="bounded stochastic audio samples, impulses, and control values",
+        units=["samples", "hertz", "decibels per octave", "normalized amplitude"],
+        latency="zero", tail="zero", scheduling="sample-synchronous",
+        bindings=[
+            binding(role="dust", kind="cpp_type", include="pulp/signal/dust.hpp",
+                    qualified_name="pulp::signal::DustT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:89ad91c2a9a54ab6f897d379c3587df4566c402abad75b1f71a802b66291684d"),
+            binding(role="lfsr", kind="cpp_type", include="pulp/signal/lfsr.hpp",
+                    qualified_name="pulp::signal::LfsrT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:16f353a4e8c715db25f84696bf5ff50ecdbd96aa29364dc3be1232c9e8a209de"),
+            binding(role="tilt", kind="cpp_type", include="pulp/signal/noise_tilt.hpp",
+                    qualified_name="pulp::signal::NoiseTiltT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:016c8e7e818ad23543da6e37c1e96e41557ed53f898afe80f8d9d65666912adb"),
+            binding(role="velvet", kind="cpp_type", include="pulp/signal/velvet_noise.hpp",
+                    qualified_name="pulp::signal::VelvetNoiseGridT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:22c73b19189ad33fe12be75c3e8d20f6c7b098810756e31c6bd2dc3f02b75973"),
+        ],
+        _link_probes=[
+            {"role": role, "binding": name, "operation": "member_call", "member": "reset", "arguments": ""}
+            for role, name in [
+                ("dust", "pulp::signal::DustT<float>"), ("lfsr", "pulp::signal::LfsrT<float>"),
+                ("tilt", "pulp::signal::NoiseTiltT<float>"),
+                ("velvet", "pulp::signal::VelvetNoiseGridT<float>"),
+            ]
+        ],
+    ),
+    capability(
+        key="signal.fm-operator-engine", domain="signal",
+        summary="Fixed-capacity eight-operator FM and phase-modulation synthesis engine.",
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control", "process": "audio",
+                   "reset": "audio", "release": "none"},
+        state_model="Fixed operator routing, phase, feedback, and linear envelope state.",
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="note frequency, velocity, operator settings, and routing matrices",
+        output_domain="mono FM or phase-modulated audio",
+        units=["samples", "hertz", "frames", "linear gain", "radians"],
+        latency="zero", tail="exact longest configured release", scheduling="sample-synchronous",
+        bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/fm_operator_engine.hpp",
+                         qualified_name="pulp::signal::FmOperatorEngineT<float>", target="Pulp::signal",
+                         header_fingerprint="sha256:b92825aa49b916e8c346bf3331fa1dc45759e9589b16a726d861e13c0815c452")],
+        _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::FmOperatorEngineT<float>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
+    capability(
+        key="signal.fractional-delay", domain="signal",
+        summary="Prepared causal fractional-delay history and line with Lagrange or Thiran interpolation.",
+        rt_class="mixed",
+        lifecycle={"construction": "control", "prepare": "control; may allocate bounded history",
+                   "process": "audio", "reset": "audio", "release": "destruction off audio"},
+        state_model="Prepared bounded circular history plus interpolation and first-order all-pass state.",
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="audio samples and causal fractional delay requests",
+        output_domain="delayed interpolated audio or explicit status",
+        units=["samples", "frames"],
+        latency="zero processing overhead; requested delay is signal-path latency",
+        tail="prepared delay history until overwritten or reset", scheduling="sample-synchronous",
+        bindings=[
+            binding(role="line", kind="cpp_type", include="pulp/signal/fractional_delay.hpp",
+                    qualified_name="pulp::signal::FractionalDelayLineT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:df2c07847d8b5f49134a7f274c1114cd475c8ed9ac820044ec8c7da3906a5a17"),
+            binding(role="history", kind="cpp_type", include="pulp/signal/fractional_delay.hpp",
+                    qualified_name="pulp::signal::FractionalDelayHistoryT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:df2c07847d8b5f49134a7f274c1114cd475c8ed9ac820044ec8c7da3906a5a17"),
+        ],
+        _link_probes=[
+            {"role": "line", "binding": "pulp::signal::FractionalDelayLineT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+            {"role": "history", "binding": "pulp::signal::FractionalDelayHistoryT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+        ],
+    ),
+    capability(
+        key="signal.nonlinear-shaping", domain="signal",
+        summary="Antialiased multistage wavefolding, Chebyshev harmonic shaping, and ring modulation.",
+        rt_class="mixed",
+        lifecycle={"construction": "control", "prepare": "control; may allocate oversampler storage",
+                   "process": "audio", "reset": "audio", "release": "destruction off audio"},
+        state_model="Oversampler state plus fixed shaper stages, DC policy, harmonics, and carrier state.",
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="audio and shaping, alias-policy, harmonic, or carrier controls",
+        output_domain="nonlinearly shaped audio",
+        units=["samples", "hertz", "normalized amplitude", "oversampling factor"],
+        latency="reported by alias policy", tail="twice FIR latency or infinite for nonzero DC output",
+        scheduling="sample-synchronous",
+        bindings=[
+            binding(role="wavefolder", kind="cpp_type", include="pulp/signal/nonlinear_shaping.hpp",
+                    qualified_name="pulp::signal::MultistageWavefolderT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:bce155041cc613f9e47890bd07c1a4fa9717695dc3fb5c43c32d4152a471a219"),
+            binding(role="chebyshev", kind="cpp_type", include="pulp/signal/nonlinear_shaping.hpp",
+                    qualified_name="pulp::signal::ChebyshevHarmonicShaperT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:bce155041cc613f9e47890bd07c1a4fa9717695dc3fb5c43c32d4152a471a219"),
+            binding(role="ring", kind="cpp_type", include="pulp/signal/nonlinear_shaping.hpp",
+                    qualified_name="pulp::signal::NonlinearRingModulatorT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:bce155041cc613f9e47890bd07c1a4fa9717695dc3fb5c43c32d4152a471a219"),
+        ],
+        _link_probes=[
+            {"role": role, "binding": name, "operation": "member_call", "member": "reset", "arguments": ""}
+            for role, name in [
+                ("wavefolder", "pulp::signal::MultistageWavefolderT<float>"),
+                ("chebyshev", "pulp::signal::ChebyshevHarmonicShaperT<float>"),
+                ("ring", "pulp::signal::NonlinearRingModulatorT<float>"),
+            ]
+        ],
+    ),
+    capability(
+        key="signal.scope-capture", domain="signal",
+        summary="Fixed-capacity triggered waveform capture with pretrigger and holdoff.",
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control configuration",
+                   "process": "audio", "reset": "audio", "release": "none"},
+        state_model="Fixed pretrigger ring plus armed, triggered, holdoff, and capture state.",
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="audio samples and trigger, pretrigger, holdoff, and capture policy",
+        output_domain="fixed-capacity captured waveform frame",
+        units=["samples", "frames", "normalized amplitude"],
+        latency="zero audio-path latency; capture readiness is separate",
+        tail="none", scheduling="sample-synchronous trigger observation",
+        bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/scope_capture.hpp",
+                         qualified_name="pulp::signal::ScopeCaptureT<float>", target="Pulp::signal",
+                         header_fingerprint="sha256:0989e11d3171977da2f2e61d945fb1442fe9a9dfa9df94eb436b19fed3f104b5")],
+        _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::ScopeCaptureT<float>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
+    capability(
+        key="signal.spectrum-trace", domain="signal",
+        summary="Fixed-capacity FFT-bin aggregation, smoothing, weighting, and peak-hold trace.",
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control configuration",
+                   "process": "audio analysis", "reset": "audio", "release": "none"},
+        state_model="Fixed trace, smoothing, weighting, and peak-hold arrays without FFT ownership.",
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="finite FFT magnitude bins and display-band configuration",
+        output_domain="conditioned spectrum trace bands",
+        units=["bins", "hertz", "decibels", "frames"],
+        latency="zero algorithmic", tail="smoothing and peak state until reset",
+        scheduling="one update per supplied spectrum frame",
+        bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/spectrum_trace.hpp",
+                         qualified_name="pulp::signal::SpectrumTraceT<float>", target="Pulp::signal",
+                         header_fingerprint="sha256:2db177e808a86cbe881d3a8c636eb33716db1a0ed556fbf1049a5d23583c5bee")],
+        _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::SpectrumTraceT<float>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
+    capability(
+        key="signal.six-band-eq", domain="signal",
+        summary="Fixed six-band stereo equalizer with atomic parameter updates and bounded transitions.",
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control coefficient design",
+                   "process": "audio", "reset": "audio", "release": "none"},
+        state_model="Fixed per-channel six-band biquad banks plus optional transition bank state.",
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="audio plus six plain-domain frequency, gain, and Q controls",
+        output_domain="equalized audio", units=["samples", "hertz", "decibels", "Q"],
+        latency="zero", tail="recursive IIR decay", scheduling="sample-synchronous",
+        bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/six_band_eq.hpp",
+                         qualified_name="pulp::signal::SixBandEqT<float>", target="Pulp::signal",
+                         header_fingerprint="sha256:85f2051455ad88b04aa92f73aa44605ec07007acd8761df8deecaa755b08066a")],
+        _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::SixBandEqT<float>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
+    capability(
+        key="signal.source-filter-analysis", domain="signal",
+        summary="Prepared offline cepstral spectral-envelope and linear-predictive analysis.",
+        rt_class="offline",
+        lifecycle={"construction": "control", "prepare": "offline; may allocate bounded storage",
+                   "process": "offline allocation-free after prepare",
+                   "reset": "reprepare or next analysis transaction",
+                   "release": "destruction off audio"},
+        state_model="Bounded FFT, scratch, coefficient, and model storage with transactional publication.",
+        seed_model="none",
+        determinism={"repeatability": "tolerance_bounded", "block_partition": "not_applicable",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="log-magnitude frames or finite time-domain samples",
+        output_domain="cepstral envelope or linear-predictive model",
+        units=["bins", "samples", "normalized coefficients", "power"],
+        latency="offline whole-frame analysis", tail="none", scheduling="offline request",
+        bindings=[
+            binding(role="cepstral", kind="cpp_type", include="pulp/signal/source_filter_analysis.hpp",
+                    qualified_name="pulp::signal::CepstralEnvelopeAnalyzerT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:eb64faa37ff3e4b93fc884943fda3ea4acc723b61b9b8593abac3f0102dd3d26"),
+            binding(role="lpc", kind="cpp_type", include="pulp/signal/source_filter_analysis.hpp",
+                    qualified_name="pulp::signal::LpcAnalyzerT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:eb64faa37ff3e4b93fc884943fda3ea4acc723b61b9b8593abac3f0102dd3d26"),
+        ],
+        _link_probes=[
+            {"role": "cepstral", "binding": "pulp::signal::CepstralEnvelopeAnalyzerT<float>",
+             "operation": "construct", "arguments": ""},
+            {"role": "lpc", "binding": "pulp::signal::LpcAnalyzerT<float>",
+             "operation": "construct", "arguments": ""},
+        ],
+    ),
+    capability(
+        key="signal.unison-voice-primitives", domain="signal",
+        summary="Deterministic unison voice layout and PolyBLEP supersaw oscillator bank.",
+        rt_class="mixed",
+        lifecycle={"construction": "control", "prepare": "control configure and prepare",
+                   "process": "audio", "reset": "audio", "release": "none"},
+        state_model="Fixed deterministic layout parameters and bounded oscillator array.",
+        seed_model="public seed and note-instance identity",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="note frequency, unison specification, seed, and absolute frame",
+        output_domain="stereo unison audio and per-child layout parameters",
+        units=["samples", "hertz", "cents", "frames", "pan", "linear gain"],
+        latency="zero", tail="continuous while voice is active", scheduling="absolute-frame audio",
+        bindings=[
+            binding(role="layout", kind="cpp_type", include="pulp/signal/unison.hpp",
+                    qualified_name="pulp::signal::UnisonLayout<>", target="Pulp::signal",
+                    header_fingerprint="sha256:0a3a14899d57ff5040b47823bb98c36ed055bf98b6946d2a8892c44a95a686a5"),
+            binding(role="supersaw", kind="cpp_type", include="pulp/signal/supersaw.hpp",
+                    qualified_name="pulp::signal::SupersawT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:c790c2b734d6a86f02ffedd560a0b14ba7529dbb5ce50b4e93a29b414217f338"),
+        ],
+        _link_probes=[
+            {"role": "layout", "binding": "pulp::signal::UnisonLayout<>",
+             "operation": "member_call", "member": "configure",
+             "arguments": "pulp::signal::UnisonSpec{}"},
+            {"role": "supersaw", "binding": "pulp::signal::SupersawT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+        ],
+    ),
+    capability(
+        key="signal.true-peak-limiter", domain="signal",
+        summary="Prepared intersample true-peak limiter with explicit lookahead and channel linking.",
+        rt_class="mixed",
+        lifecycle={"construction": "control", "prepare": "control; may allocate detector and delay storage",
+                   "process": "audio", "reset": "audio", "release": "destruction off audio"},
+        state_model="Prepared intersample detector, scheduling horizon, lookahead delay, and gain state.",
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="finite interleaved audio, ceiling, lookahead, release, and channel-link policy",
+        output_domain="true-peak-limited audio and gain-reduction telemetry",
+        units=["samples", "frames", "decibels true peak", "milliseconds"],
+        latency="detector latency plus scheduling horizon plus user lookahead",
+        tail="exact latency_samples", scheduling="sample-synchronous lookahead",
+        bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/true_peak_limiter.hpp",
+                         qualified_name="pulp::signal::TruePeakLimiterT<float>", target="Pulp::signal",
+                         header_fingerprint="sha256:027278e6f446a6eb769576cea18e0007648d7d5bcd25231023f1d09a844a84ca")],
+        _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::TruePeakLimiterT<float>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
+    capability(
+        key="signal.dynamics-envelope-contract", domain="signal",
+        summary="Canonical mono/stereo peak or RMS envelope followers and gain-reduction vocabulary.",
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control prepare and setters",
+                   "process": "audio", "reset": "audio", "release": "none"},
+        state_model="Fixed attack-release detector state and canonical scalar gain-reduction value.",
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="signed audio samples and attack, release, detector, and stereo-link policy",
+        output_domain="mono or stereo envelopes and non-negative attenuation magnitude",
+        units=["samples", "milliseconds", "decibels", "normalized link"],
+        latency="zero", tail="recursive envelope decay until reset", scheduling="sample-synchronous",
+        bindings=[
+            binding(role="mono", kind="cpp_type", include="pulp/signal/dynamics_contract.hpp",
+                    qualified_name="pulp::signal::EnvelopeFollowerT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:968978abf54ee71ee7789cfc79fe21347b97708b9f068812908a5b855d35a406"),
+            binding(role="stereo", kind="cpp_type", include="pulp/signal/dynamics_contract.hpp",
+                    qualified_name="pulp::signal::StereoEnvelopeFollowerT<float>", target="Pulp::signal",
+                    header_fingerprint="sha256:968978abf54ee71ee7789cfc79fe21347b97708b9f068812908a5b855d35a406"),
+        ],
+        _link_probes=[
+            {"role": "mono", "binding": "pulp::signal::EnvelopeFollowerT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+            {"role": "stereo", "binding": "pulp::signal::StereoEnvelopeFollowerT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+        ],
+    ),
+    capability(
+        key="signal.linkwitz-riley-crossover", domain="signal",
+        summary="Fixed-capacity multi-band Linkwitz-Riley crossover with bounded realtime retuning.",
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control prepare and bounded sweep configuration",
+                   "process": "audio", "reset": "audio", "release": "none"},
+        state_model="Fixed cascaded crossover and sweep banks with recursive filter state.",
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="audio, ordered crossover frequencies, band count, and transition samples",
+        output_domain="phase-aligned crossover bands",
+        units=["samples", "hertz", "bands", "frames"],
+        latency="zero", tail="recursive IIR decay", scheduling="sample-synchronous",
+        bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/linkwitz_riley.hpp",
+                         qualified_name="pulp::signal::LinkwitzRileyCrossoverT<float>", target="Pulp::signal",
+                         header_fingerprint="sha256:38fca0b926e0b4cb492528f95a69af89eb7ec5a0e83ed8692eb195c0cd35fa64")],
+        _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::LinkwitzRileyCrossoverT<float>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
+    capability(
+        key="signal.multi-channel-meter", domain="signal",
+        summary="Fixed-storage peak, RMS, loudness, correlation, and clip metering for up to 16 channels.",
+        rt_class="mixed",
+        lifecycle={"construction": "control", "prepare": "control", "process": "audio",
+                   "reset": "audio", "release": "none"},
+        state_model="Fixed peak, RMS, K-weighted loudness, correlation, and clip accumulators.",
+        seed_model="none",
+        determinism={"repeatability": "tolerance_bounded", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="finite planar audio, channel count, roles, and sample rate",
+        output_domain="lock-free multi-channel meter snapshot",
+        units=["samples", "frames", "decibels full scale", "LUFS", "correlation"],
+        latency="measurement-window readiness; no audio-path delay",
+        tail="measurement history until reset", scheduling="block accumulation and snapshot",
+        bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/multi_channel_meter.hpp",
+                         qualified_name="pulp::signal::MultiChannelMeterT<float>", target="Pulp::signal",
+                         header_fingerprint="sha256:a9437e126faff12dfc60d80e59381fe0f5f005b3638d445d06daf4b8cb2fd695")],
+        _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::MultiChannelMeterT<float>",
+                       "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
 ]
 
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {
+        "include": "pulp/signal/detail/audio_range.hpp",
+        "fingerprint": "sha256:de70fcaa00f30b7a20c1f8632619635fa774e239f81ae7d6c09cf03ded64ba0b",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.routing-primitives"],
+        "rationale": (
+            "Installed byte-range overlap predicates enforce the routing primitives' "
+            "aliasing contracts; they are not an independent DSP operation."
+        ),
+    },
+    {
+        "include": "pulp/signal/ballistics_filter.hpp",
+        "fingerprint": "sha256:58f673ad243d35a4df20b30d0bd68b76034ac04d57f028b9835df9ead58498c1",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.dynamics-envelope-contract"],
+        "rationale": (
+            "Implementation base for the exact EnvelopeFollower contract while retaining "
+            "the established legacy ballistics timing convention."
+        ),
+    },
+    *[
+        {
+            "include": include,
+            "fingerprint": fingerprint,
+            "disposition": "capability_support",
+            "capability_keys": ["signal.dynamics-envelope-contract"],
+            "rationale": (
+                "Existing dynamics processor adopting the shared exact envelope or canonical "
+                "non-negative gain-reduction telemetry contract; its topology is not a new "
+                "capability claim in this slice."
+            ),
+        }
+        for include, fingerprint in [
+            ("pulp/signal/compressor.hpp", "sha256:9bf4c81430a11eedaae9e69b19dd8c5ce9fd5c50191e111fe86c3cada3e73fb3"),
+            ("pulp/signal/diode_bridge_compressor.hpp", "sha256:2384a18231c9cfcff6b8823613050334776113aac5e6c7de76f6f3cd44e942a3"),
+            ("pulp/signal/feedforward_compressor.hpp", "sha256:afcd1e63df356725f2256c0b449900c894e1120f016ac511512cc94b11263524"),
+            ("pulp/signal/fet_compressor.hpp", "sha256:45e9524c1ca8d7a5e5a3c7e18c997710e0d5a13b05a5c3c2717f7640c5dd03ee"),
+            ("pulp/signal/noise_gate.hpp", "sha256:da905cabc0fd988ab957fbd5d7f55c95119d1883a1384ef6be854d12f6d4f6ce"),
+            ("pulp/signal/vca_compressor.hpp", "sha256:2f484f202dc2d75d2e87fc5683d8a6efa34f4143b120c761f5c16c330877077c"),
+        ]
+    ],
+    *[
+        {
+            "include": include,
+            "fingerprint": fingerprint,
+            "disposition": "capability_support",
+            "capability_keys": ["signal.dither-quantizer"],
+            "rationale": (
+                "Existing processor now consumes the deterministic dither and noise-shaping "
+                "primitive while preserving its established default processing contract."
+            ),
+        }
+        for include, fingerprint in [
+            ("pulp/signal/character_delay/vintage.hpp", "sha256:b7a48feafacc26cd0329f97b7d898fbb8921dbb7e779498dc1eabd178ed2ab32"),
+            ("pulp/signal/lofi_chain.hpp", "sha256:8c3ed2535478714195f46f13591c90b3b7c63affc6a6e8a7407ebedbf9f1799b"),
+        ]
+    ],
+    *[
+        {
+            "include": include,
+            "fingerprint": fingerprint,
+            "disposition": "capability_support",
+            "capability_keys": ["signal.fm-operator-engine"],
+            "rationale": (
+                "Existing drum voice composes the reusable fixed-capacity FM operator engine "
+                "while retaining its voice-specific contract."
+            ),
+        }
+        for include, fingerprint in [
+            ("pulp/signal/drum/fm.hpp", "sha256:6858bf1217026bddf4a89db818ba528c8671261236304393c61626bf4fbe9219"),
+            ("pulp/signal/drum/fm6.hpp", "sha256:1059887e7cfa8785366482b2171b0306d49f950adf35da2a88b64067249b57e6"),
+        ]
+    ],
+    {
+        "include": "pulp/signal/fft.hpp",
+        "fingerprint": "sha256:534bc21f2c1c023d11871a7fe2ebd387f13194603117f00df7fcf20bc7c41c60",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.source-filter-analysis", "signal.streaming-analysis-frontends"],
+        "rationale": (
+            "Shared prepared FFT and retained-storage accounting underpin the curated analysis "
+            "capabilities; this slice adds no separate FFT authoring promise."
+        ),
+    },
+    {
+        "include": "pulp/signal/nonlin_ambience.hpp",
+        "fingerprint": "sha256:aa58d912e15593e959118a912f5146774523a213446de5c8f19212d3eb9e7375",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.dither-quantizer", "signal.stochastic-sources"],
+        "rationale": (
+            "Existing ambience processor adopts deterministic dither and velvet-noise "
+            "primitives without a new ambience contract in this slice."
+        ),
+    },
+    {
+        "include": "pulp/signal/nonlin_ambience_design.hpp",
+        "fingerprint": "sha256:1b9e4b5a8178283964fcacac595ac5540576f35bdffb717b77e3aaf92bf98cd4",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.stochastic-sources"],
+        "rationale": (
+            "Control-side velvet tap design consumes deterministic coordinate draws; it is "
+            "design support rather than a runtime entrypoint."
+        ),
+    },
+    {
+        "include": "pulp/signal/oscillator.hpp",
+        "fingerprint": "sha256:eeec21c0a6b5e6cdbf9f81af6ad99fd873029ca6b0f154daadf3c72732ba4509",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.unison-voice-primitives"],
+        "rationale": (
+            "Supersaw uses validated phase reset for deterministic per-voice phases; the generic "
+            "oscillator remains outside this slice's promise."
+        ),
+    },
+    *[
+        {
+            "include": include,
+            "fingerprint": fingerprint,
+            "disposition": "capability_support",
+            "capability_keys": ["signal.source-filter-analysis"],
+            "rationale": (
+                "Existing pitch-time or formant-warping surface composes the transactional "
+                "cepstral analyzer and retained-storage admission contract."
+            ),
+        }
+        for include, fingerprint in [
+            ("pulp/signal/realtime_pitch_time_geometry.hpp", "sha256:ffdb4ca7daa0ba17d53f78cf42eab0759c084cb2df4f0aa10bcf6be3e355fab0"),
+            ("pulp/signal/realtime_pitch_time_processor.hpp", "sha256:519987d3e9742d2be9fcab3289808ed58b8f1fe5e245e92885c900726ad15809"),
+            ("pulp/signal/spectral_envelope_shifter.hpp", "sha256:7b5faef1b77c5bf406357f58c8988c5fc4d2e769ec5882d17f053f672f24fe42"),
+        ]
+    ],
+    {
+        "include": "pulp/signal/rungler.hpp",
+        "fingerprint": "sha256:c45a151c41449b0a7823ff148f1ed8cc0174f9c369a9bb95c07213ef97b19b1b",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.stochastic-sources"],
+        "rationale": (
+            "The established Rungler now composes the configurable LFSR while preserving its "
+            "existing DAC and event behavior."
+        ),
+    },
+    {
+        "include": "pulp/midi/block_ops.hpp",
+        "fingerprint": "sha256:563569c0bb61029b1b374a8d91812a77818cb9f3db18cc2706a4c570860dd8a0",
+        "disposition": "capability_support",
+        "capability_keys": [
+            "midi.arpeggiator", "midi.channel-routing", "midi.controller-mapping",
+            "midi.keyboard-split", "midi.monophonic-note-selection",
+            "midi.note-length-shaping", "midi.note-range-filtering",
+            "midi.scale-aware-mpe-pitch",
+        ],
+        "rationale": (
+            "Shared clear, drop, copy, and sidecar-accounting operations support the "
+            "bounded MIDI utility block contracts without defining a semantic transform."
+        ),
+    },
+    {
+        "include": "pulp/midi/midi.hpp",
+        "fingerprint": "sha256:874271b4160eac446ab91943b192f7652c4e340afbb373b70c3affc8ee6a49e8",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": "Convenience umbrella include only; operation-owning headers are bound directly.",
+    },
+    {
+        "include": "pulp/midi/mpe_buffer.hpp",
+        "fingerprint": "sha256:024033345347c33b06bc1df4f05240496933797410640ea7eb38bfe810ff8eaa",
+        "disposition": "capability_support",
+        "capability_keys": ["midi.mpe-voice-tracker"],
+        "rationale": (
+            "Transactional prepared event storage and tracker binding support MPE voice "
+            "ownership but are not a distinct musical transform."
+        ),
+    },
+    {
+        "include": "pulp/midi/mpe_synth_voice.hpp",
+        "fingerprint": "sha256:2426bb49591fb4510aaab4a70931899c4928793f34b23935f14b6af19c918db4",
+        "disposition": "capability_support",
+        "capability_keys": ["midi.mpe-voice-tracker"],
+        "rationale": (
+            "The allocator adapter is parameterized by a consumer-defined abstract Voice; "
+            "the concrete tracker remains the honest typed entrypoint."
+        ),
+    },
+    {
+        "include": "pulp/midi/ump_buffer.hpp",
+        "fingerprint": "sha256:bc5816405c9ef8a2fdf9336d86212319dd70a83a9633c7d515b6c3010c5019e6",
+        "disposition": "capability_support",
+        "capability_keys": [
+            "midi.arpeggiator", "midi.channel-routing", "midi.controller-mapping",
+            "midi.keyboard-split", "midi.monophonic-note-selection",
+            "midi.mpe-voice-tracker", "midi.note-length-shaping",
+            "midi.note-range-filtering", "midi.scale-aware-mpe-pitch",
+        ],
+        "rationale": (
+            "Prepared UMP sidecar storage and overflow accounting support the complete-block "
+            "contracts; semantic routing remains in the bound utility kernels."
+        ),
+    },
+    {
+        "include": "pulp/midi/utility_contract.hpp",
+        "fingerprint": "sha256:3ecd5aa5c92a2ac31e133059c97915257df2018b904f9fce39d1b0c6f1dadb70",
+        "disposition": "capability_support",
+        "capability_keys": [
+            "midi.arpeggiator", "midi.channel-routing", "midi.controller-mapping",
+            "midi.keyboard-split", "midi.monophonic-note-selection",
+            "midi.note-length-shaping", "midi.note-range-filtering",
+            "midi.scale-aware-mpe-pitch",
+        ],
+        "rationale": (
+            "Shared overflow, ordering, transport, reporting, and fail-closed emission "
+            "vocabulary supports every MIDI utility kernel."
+        ),
+    },
+    {
+        "include": "pulp/midi/utility_kernels.hpp",
+        "fingerprint": "sha256:d768529f97202108cc87903ac71ccfc727adeade6ecd50c66db8c3e394d98865",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": "Convenience umbrella include only; each utility family is bound directly.",
+    },
+    {
+        "include": "pulp/music/detail/random_range.hpp",
+        "fingerprint": "sha256:dd46f6f6f589aafdb08cc00c896cd87fc5465d5e1bd88c8266cf7e45808e5faf",
+        "disposition": "capability_support",
+        "capability_keys": ["music.markov-transition", "music.pattern-generation"],
+        "rationale": (
+            "Portable bit-exact bounded reduction supports caller-random Markov and pattern "
+            "draws but is an implementation detail rather than a musical operation."
+        ),
+    },
     {
         "include": "pulp/signal/units.hpp",
         "fingerprint": "sha256:2f0af86ba3fccbb3017339235c05b7d43b492939c111fc67e93ee2046ee6e264",
@@ -1355,7 +2748,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/music/music.hpp",
-        "fingerprint": "sha256:7afe6a1c5c2bcbc5de65eac6290a8e0e4c92215bcb940558f18caec3177c227d",
+        "fingerprint": "sha256:5db5616ed1cd0cf326f31638f7c351d8d982d7c8b51d99f516fe3ac3edf5929b",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1454,24 +2847,12 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:957d2e652931e29de41e360044c05ede7f21511097e3dbf6272908c4d7d8ee08",
+        "fingerprint": "sha256:4f065844dfc4347b27fa302b922af2a99d74dae295be6958c11f51aa3394381a",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
             "This is the signal module umbrella include; it exposes no distinct "
             "consumer capability beyond the headers it aggregates."
-        ),
-    },
-    {
-        "include": "pulp/signal/multi_channel_meter.hpp",
-        "fingerprint": "sha256:3ccb8f63241c150c00a4ce323f9de0501d2d54c0ef4ec3f0f307ac72111c329d",
-        "disposition": "unsupported_capability",
-        "capability_keys": [],
-        "rationale": (
-            "The multi-channel meter is a public DSP and presentation helper, "
-            "but it does not yet have the typed bindings, lifecycle contract, "
-            "parameter semantics, and link probe required for a generator-facing "
-            "capability claim."
         ),
     },
     {
