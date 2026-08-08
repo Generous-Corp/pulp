@@ -2,10 +2,13 @@
 
 #include <pulp/inspect/control_host_bootstrap.hpp>
 #include <pulp/platform/child_process.hpp>
+#include <pulp/runtime/base64.hpp>
 
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <optional>
+#include <random>
 #include <string>
 
 #ifdef _WIN32
@@ -47,6 +50,27 @@ ControlHostBootstrapRecord make_record(
     record.expires_at_unix_ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(expiry.time_since_epoch()).count();
     return record;
+}
+
+ControlHostBootstrapRecord make_enrollment_record() {
+    auto record = make_record();
+    record.admission_id.clear();
+    record.registration_id.value.clear();
+    record.enrollment_id = "ZW5yb2xsbWVudC0x+/==";
+    return record;
+}
+
+std::string encoded_text(const ControlHostBootstrapBytes& encoded) {
+    return {reinterpret_cast<const char*>(encoded.bytes().data()), encoded.bytes().size()};
+}
+
+std::vector<std::uint8_t> replace_once(const ControlHostBootstrapBytes& encoded,
+                                       std::string_view before, std::string_view after) {
+    auto text = encoded_text(encoded);
+    const auto at = text.find(before);
+    REQUIRE(at != std::string::npos);
+    text.replace(at, before.size(), after);
+    return {text.begin(), text.end()};
 }
 
 void replace_version(std::vector<std::uint8_t>& bytes) {
@@ -108,10 +132,184 @@ TEST_CASE("control host bootstrap codec rejects malformed and stale records",
         decode_control_host_bootstrap(unknown, std::chrono::system_clock::now(), &diagnostics));
     CHECK(diagnostics.status == ControlHostBootstrapStatus::UnsupportedVersion);
 
-    CHECK_FALSE(decode_control_host_bootstrap(encoded.bytes(),
-                                              std::chrono::system_clock::now() + 2min,
-                                              &diagnostics));
+    CHECK_FALSE(decode_control_host_bootstrap(
+        encoded.bytes(), std::chrono::system_clock::now() + 2min, &diagnostics));
     CHECK(diagnostics.status == ControlHostBootstrapStatus::Expired);
+}
+
+TEST_CASE("control host bootstrap codec accepts exactly one credential mode",
+          "[inspect][control][host][bootstrap][security]") {
+    const auto now = std::chrono::system_clock::now();
+    ControlHostBootstrapDiagnostics diagnostics;
+
+    auto preissued = make_record();
+    const auto encoded_preissued = encode_control_host_bootstrap(preissued);
+    REQUIRE_FALSE(encoded_preissued.empty());
+    CHECK(encoded_text(encoded_preissued).find("enrollment_id") == std::string::npos);
+    auto decoded_preissued =
+        decode_control_host_bootstrap(encoded_preissued.bytes(), now, &diagnostics);
+    REQUIRE(decoded_preissued);
+    CHECK(decoded_preissued->admission_id == "admission-1");
+    CHECK(decoded_preissued->registration_id.value == "registration-1");
+    CHECK(decoded_preissued->enrollment_id.empty());
+
+    auto enrollment = make_enrollment_record();
+    const auto encoded_enrollment = encode_control_host_bootstrap(enrollment);
+    REQUIRE_FALSE(encoded_enrollment.empty());
+    CHECK(encoded_text(encoded_enrollment).find(R"("enrollment_id": "ZW5yb2xsbWVudC0x+/==")") !=
+          std::string::npos);
+    auto decoded_enrollment =
+        decode_control_host_bootstrap(encoded_enrollment.bytes(), now, &diagnostics);
+    REQUIRE(decoded_enrollment);
+    CHECK(decoded_enrollment->admission_id.empty());
+    CHECK(decoded_enrollment->registration_id.value.empty());
+    CHECK(decoded_enrollment->enrollment_id == "ZW5yb2xsbWVudC0x+/==");
+
+    const auto carrier = pulp::runtime::base64_encode(encoded_enrollment.bytes().data(),
+                                                      encoded_enrollment.bytes().size());
+    const auto unpacked = pulp::runtime::base64_decode(carrier);
+    REQUIRE(unpacked);
+    auto decoded_carrier = decode_control_host_bootstrap(*unpacked, now, &diagnostics);
+    REQUIRE(decoded_carrier);
+    CHECK(decoded_carrier->enrollment_id == enrollment.enrollment_id);
+
+    auto escaped = make_enrollment_record();
+    escaped.enrollment_id = "enrollment-\"quoted\"-\\escaped";
+    const auto encoded_escaped = encode_control_host_bootstrap(escaped);
+    REQUIRE_FALSE(encoded_escaped.empty());
+    CHECK(encoded_text(encoded_escaped).find("enrollment-\\\"quoted\\\"-\\\\escaped") !=
+          std::string::npos);
+    auto decoded_escaped =
+        decode_control_host_bootstrap(encoded_escaped.bytes(), now, &diagnostics);
+    REQUIRE(decoded_escaped);
+    CHECK(decoded_escaped->enrollment_id == escaped.enrollment_id);
+}
+
+TEST_CASE("control host bootstrap codec rejects mixed and malformed credential modes",
+          "[inspect][control][host][bootstrap][security]") {
+    const auto now = std::chrono::system_clock::now();
+    ControlHostBootstrapDiagnostics diagnostics;
+
+    auto expect_encode_rejected = [&](ControlHostBootstrapRecord record) {
+        CHECK(encode_control_host_bootstrap(record).empty());
+    };
+
+    auto neither = make_record();
+    neither.admission_id.clear();
+    neither.registration_id.value.clear();
+    expect_encode_rejected(std::move(neither));
+
+    auto admission_only = make_record();
+    admission_only.registration_id.value.clear();
+    expect_encode_rejected(std::move(admission_only));
+
+    auto registration_only = make_record();
+    registration_only.admission_id.clear();
+    expect_encode_rejected(std::move(registration_only));
+
+    auto all = make_record();
+    all.enrollment_id = "enrollment-secret";
+    expect_encode_rejected(std::move(all));
+
+    auto enrollment_and_admission = make_enrollment_record();
+    enrollment_and_admission.admission_id = "admission-secret";
+    expect_encode_rejected(std::move(enrollment_and_admission));
+
+    auto oversized = make_enrollment_record();
+    oversized.enrollment_id.assign(129, 'x');
+    expect_encode_rejected(std::move(oversized));
+
+    auto enrollment = make_enrollment_record();
+    const auto encoded = encode_control_host_bootstrap(enrollment);
+    REQUIRE_FALSE(encoded.empty());
+    const auto duplicate =
+        replace_once(encoded, R"("enrollment_id": "ZW5yb2xsbWVudC0x+/==")",
+                     R"("enrollment_id": "duplicate", "enrollment_id": "ZW5yb2xsbWVudC0x+/==")");
+    CHECK_FALSE(decode_control_host_bootstrap(duplicate, now, &diagnostics));
+    CHECK(diagnostics.status == ControlHostBootstrapStatus::Truncated);
+    CHECK(diagnostics.explanation.find(enrollment.enrollment_id) == std::string::npos);
+
+    const auto unknown =
+        replace_once(encoded, R"("version": 1)", R"("unknown": "value", "version": 1)");
+    CHECK_FALSE(decode_control_host_bootstrap(unknown, now, &diagnostics));
+    CHECK(diagnostics.status == ControlHostBootstrapStatus::InvalidRecord);
+
+    const auto oversized_enrollment =
+        replace_once(encoded, R"("enrollment_id": "ZW5yb2xsbWVudC0x+/==")",
+                     "\"enrollment_id\": \"" + std::string(129, 'x') + "\"");
+    CHECK_FALSE(decode_control_host_bootstrap(oversized_enrollment, now, &diagnostics));
+    CHECK(diagnostics.status == ControlHostBootstrapStatus::InvalidRecord);
+
+    const auto mixed =
+        replace_once(encoded, R"("admission_id": "")", R"("admission_id": "admission-secret")");
+    CHECK_FALSE(decode_control_host_bootstrap(mixed, now, &diagnostics));
+    CHECK(diagnostics.status == ControlHostBootstrapStatus::InvalidRecord);
+    CHECK(diagnostics.explanation.find("admission-secret") == std::string::npos);
+    CHECK(diagnostics.explanation.find(enrollment.enrollment_id) == std::string::npos);
+
+    CHECK_FALSE(decode_control_host_bootstrap(encoded.bytes(), now + 2min, &diagnostics));
+    CHECK(diagnostics.status == ControlHostBootstrapStatus::Expired);
+}
+
+TEST_CASE("control host bootstrap credential storage clears every mode",
+          "[inspect][control][host][bootstrap][security]") {
+    auto preissued = make_record();
+    preissued.clear();
+    CHECK(preissued.admission_id.empty());
+    CHECK(preissued.registration_id.value.empty());
+    CHECK(preissued.enrollment_id.empty());
+
+    auto enrollment = make_enrollment_record();
+    auto moved = std::move(enrollment);
+    CHECK(enrollment.admission_id.empty());
+    CHECK(enrollment.registration_id.value.empty());
+    CHECK(enrollment.enrollment_id.empty());
+    moved.clear();
+    CHECK(moved.admission_id.empty());
+    CHECK(moved.registration_id.value.empty());
+    CHECK(moved.enrollment_id.empty());
+    CHECK(moved.expires_at_unix_ms == 0);
+}
+
+TEST_CASE("control host bootstrap decoder remains closed under deterministic mutation fuzz",
+          "[inspect][control][host][bootstrap][fuzz]") {
+    auto preissued = make_record();
+    auto enrollment = make_enrollment_record();
+    const auto preissued_bytes = encode_control_host_bootstrap(preissued);
+    const auto enrollment_bytes = encode_control_host_bootstrap(enrollment);
+    REQUIRE_FALSE(preissued_bytes.empty());
+    REQUIRE_FALSE(enrollment_bytes.empty());
+    const std::array seeds{encoded_text(preissued_bytes), encoded_text(enrollment_bytes)};
+    std::mt19937_64 random(0x7264u);
+    const auto now = std::chrono::system_clock::now();
+
+    for (std::size_t iteration = 0; iteration < 2000; ++iteration) {
+        auto bytes = seeds[iteration % seeds.size()];
+        const auto mutations = 1 + random() % 8;
+        for (std::size_t mutation = 0; mutation < mutations; ++mutation) {
+            if (bytes.empty() || (random() & 3u) == 0)
+                bytes.insert(bytes.begin() +
+                                 static_cast<std::ptrdiff_t>(random() % (bytes.size() + 1)),
+                             static_cast<char>(random() & 0xffu));
+            else if ((random() & 1u) == 0)
+                bytes[random() % bytes.size()] = static_cast<char>(random() & 0xffu);
+            else
+                bytes.erase(bytes.begin() + static_cast<std::ptrdiff_t>(random() % bytes.size()));
+        }
+        const auto decoded = decode_control_host_bootstrap(
+            std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(bytes.data()),
+                                          bytes.size()),
+            now);
+        if (!decoded)
+            continue;
+        const auto canonical = encode_control_host_bootstrap(*decoded);
+        REQUIRE_FALSE(canonical.empty());
+        auto repeated = decode_control_host_bootstrap(canonical.bytes(), now);
+        REQUIRE(repeated);
+        CHECK(repeated->admission_id == decoded->admission_id);
+        CHECK(repeated->registration_id == decoded->registration_id);
+        CHECK(repeated->enrollment_id == decoded->enrollment_id);
+    }
 }
 
 TEST_CASE("control host bootstrap handle is consumed exactly once",
@@ -132,6 +330,16 @@ TEST_CASE("control host bootstrap handle is consumed exactly once",
     CHECK_FALSE(
         read_control_host_bootstrap(-1, 100ms, std::chrono::system_clock::now(), &diagnostics));
     CHECK(diagnostics.status == ControlHostBootstrapStatus::Absent);
+
+    auto enrollment = make_enrollment_record();
+    const auto enrollment_encoded = encode_control_host_bootstrap(enrollment);
+    int enrollment_duplicate = -1;
+    auto enrollment_first =
+        read_from_socket(enrollment_encoded.bytes(), diagnostics, &enrollment_duplicate);
+    REQUIRE(enrollment_first);
+    CHECK(enrollment_first->enrollment_id == enrollment.enrollment_id);
+    CHECK_FALSE(read_control_host_bootstrap(enrollment_duplicate, 100ms,
+                                            std::chrono::system_clock::now(), &diagnostics));
 #else
     SUCCEED("the inherited HANDLE path is covered by the process fixture");
 #endif
@@ -140,6 +348,10 @@ TEST_CASE("control host bootstrap handle is consumed exactly once",
 TEST_CASE("control host bootstrap inherited input leaks no unrelated descriptor",
           "[inspect][control][host][bootstrap][process][security]") {
     auto record = make_record();
+    SECTION("preissued credentials") {}
+    SECTION("enrollment credential") {
+        record = make_enrollment_record();
+    }
     pulp::platform::ProcessOptions options;
     options.timeout_ms = 5000;
     options.max_output_bytes = 4u * 1024u * 1024u;
@@ -168,7 +380,14 @@ TEST_CASE("control host bootstrap inherited input leaks no unrelated descriptor"
                                             options));
     const auto result = child.wait();
     CHECK(result.exit_code == 0);
-    CHECK(result.stdout_output.find("registration-1") != std::string::npos);
+    const auto expected = record.enrollment_id.empty() ? "decoded-preissued" : "decoded-enrollment";
+    CHECK(result.stdout_output.find(expected) != std::string::npos);
+    const auto absent_from_output = [&](std::string_view credential) {
+        return credential.empty() || result.stdout_output.find(credential) == std::string::npos;
+    };
+    CHECK(absent_from_output(record.admission_id));
+    CHECK(absent_from_output(record.registration_id.value));
+    CHECK(absent_from_output(record.enrollment_id));
 
 #ifdef _WIN32
     CloseHandle(read_handle);
