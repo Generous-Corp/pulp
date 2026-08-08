@@ -96,10 +96,10 @@ std::string_view control_service_status_id(ControlServiceStatus status) {
     return "invalid-envelope";
 }
 
-ControlService::ControlService(ControlBroker& broker, Executor executor, ProgressSink progress_sink,
+ControlService::ControlService(ControlBroker& broker, Executor executor,
                                ControlServiceConfig config)
-    : broker_(broker), executor_(std::move(executor)), progress_sink_(std::move(progress_sink)),
-      config_(config), completion_owner_(std::make_shared<CompletionOwner>()) {
+    : broker_(broker), executor_(std::move(executor)), config_(config),
+      completion_owner_(std::make_shared<CompletionOwner>()) {
     completion_owner_->broker = &broker_;
     if (config_.maximum_progress_events_per_operation == 0)
         config_.maximum_progress_events_per_operation = 1;
@@ -124,7 +124,7 @@ ControlService::Session::~Session() {
 ControlService::Session::Session(Session&& other) noexcept
     : service_(std::exchange(other.service_, nullptr)),
       broker_(std::exchange(other.broker_, nullptr)), peer_(std::move(other.peer_)),
-      client_id_(std::move(other.client_id_)),
+      client_id_(std::move(other.client_id_)), progress_sink_(std::move(other.progress_sink_)),
       negotiated_features_(std::move(other.negotiated_features_)) {}
 
 ControlService::Session& ControlService::Session::operator=(Session&& other) noexcept {
@@ -135,12 +135,14 @@ ControlService::Session& ControlService::Session::operator=(Session&& other) noe
     broker_ = std::exchange(other.broker_, nullptr);
     peer_ = std::move(other.peer_);
     client_id_ = std::move(other.client_id_);
+    progress_sink_ = std::move(other.progress_sink_);
     negotiated_features_ = std::move(other.negotiated_features_);
     return *this;
 }
 
 void ControlService::Session::close() noexcept {
     service_ = nullptr;
+    progress_sink_ = {};
     negotiated_features_.reset();
     if (!broker_)
         return;
@@ -148,13 +150,34 @@ void ControlService::Session::close() noexcept {
     (void)broker->disconnect_client(client_id_, peer_, "control-session-disconnect");
 }
 
+ControlService::Session ControlService::open_session(const VerifiedControlPeerIdentity& peer,
+                                                     const ControlClientId& connection_client_id,
+                                                     ProgressSink progress_sink) {
+    const auto client = broker_.client(connection_client_id);
+    const bool accepted = client && client->peer_fingerprint == peer.fingerprint();
+    return Session{*this, peer, connection_client_id, std::move(progress_sink), accepted};
+}
+
 ControlServiceResult ControlService::Session::dispatch(std::string_view encoded_envelope) {
+    if (!service_ || !broker_) {
+        return {
+            .status = ControlServiceStatus::AdmissionDenied,
+            .admission_status = ControlAdmissionStatus::IdentityMismatch,
+            .explanation = "session peer does not own the connection client",
+        };
+    }
     return service_->dispatch(*this, encoded_envelope);
 }
 
 ControlArtifactReadResult ControlService::Session::read_artifact(std::string_view artifact_id,
                                                                  std::uint64_t offset,
                                                                  std::size_t maximum_bytes) {
+    if (!service_ || !broker_) {
+        return {
+            .status = ControlArtifactStatus::Unauthorized,
+            .explanation = "session peer does not own the connection client",
+        };
+    }
     return service_->read_artifact(*this, artifact_id, offset, maximum_bytes);
 }
 
@@ -340,7 +363,7 @@ ControlServiceResult ControlService::dispatch_request(Session& session,
     auto progress_state = std::make_shared<ProgressState>();
     const bool progress_negotiated = std::ranges::find(*session.negotiated_features_, "progress") !=
                                      session.negotiated_features_->end();
-    const auto progress_sink = progress_sink_;
+    const auto progress_sink = session.progress_sink_;
     const auto maximum_progress_events = config_.maximum_progress_events_per_operation;
     const ProgressReporter report_progress =
         [progress_state, progress_negotiated, progress_sink, maximum_progress_events,

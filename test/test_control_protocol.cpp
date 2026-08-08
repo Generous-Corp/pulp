@@ -27,6 +27,34 @@ ControlRequestEnvelope request_fixture() {
     return request;
 }
 
+ControlArtifactWireMetadata artifact_metadata_fixture() {
+    return {
+        .artifact_id = "artifact-0123456789abcdef0123456789abcdef",
+        .broker_id = "broker-1",
+        .receipt_id = "receipt-1",
+        .producer_client_id = "client-1",
+        .producer_registration_id = "registration-1",
+        .session_id = "session-1",
+        .instance_id = "instance-1",
+        .publication_id = "publication-1",
+        .producer_capability_id = "dev.pulp.ui.observe",
+        .producer_operation_id = "dev.pulp.ui/observe@1",
+        .producer_operation_version = 1,
+        .original_grant_id = "grant-1",
+        .consent_decision_id = "consent-1",
+        .manifest_digest = std::string(64, 'a'),
+        .producer_artifact_digest = std::string(64, 'b'),
+        .sha256 = std::string(64, 'c'),
+        .byte_size = 3,
+        .content_type = "application/json",
+        .created_at_unix_ms = 1'786'000'000'000,
+        .expires_at_unix_ms = 1'786'000'060'000,
+        .sensitivity_id = "sensitive",
+        .deletion_state_id = "active",
+        .redaction_state_id = "original",
+    };
+}
+
 template <typename Payload> Payload round_trip(Payload payload) {
     const auto encoded = encode_control_envelope(ControlEnvelope{
         .payload = payload,
@@ -118,6 +146,66 @@ TEST_CASE("all closed control envelope variants round trip canonically",
     progress.detail_json = canonicalize_control_json(progress.detail_json).value();
     CHECK(round_trip(progress) == progress);
 
+    const ControlSessionOpenEnvelope session_open{"session-request-1", "admission-1"};
+    CHECK(round_trip(session_open) == session_open);
+
+    const ControlSessionOpenResult session_opened{
+        .request_id = "session-request-1",
+        .accepted = true,
+        .client_id = "client-1",
+    };
+    CHECK(round_trip(session_opened) == session_opened);
+
+    const ControlSessionOpenResult session_rejected{
+        .request_id = "session-request-2",
+        .error_code = "admission-rejected",
+        .explanation = "admission was not accepted",
+    };
+    CHECK(round_trip(session_rejected) == session_rejected);
+
+    const ControlArtifactReadEnvelope artifact_read{
+        .request_id = "artifact-request-1",
+        .artifact_id = "artifact-0123456789abcdef0123456789abcdef",
+        .offset = 64,
+        .maximum_bytes = kControlMaximumArtifactReadBytes,
+    };
+    CHECK(round_trip(artifact_read) == artifact_read);
+
+    const ControlArtifactReadResponseEnvelope artifact_response{
+        .request_id = "artifact-request-1",
+        .status_id = "read",
+        .metadata = artifact_metadata_fixture(),
+        .bytes_base64 = "AQID",
+        .eof = true,
+    };
+    CHECK(round_trip(artifact_response) == artifact_response);
+
+    const ControlArtifactReadResponseEnvelope missing_artifact{
+        .request_id = "artifact-request-2",
+        .status_id = "not-found",
+        .explanation = "artifact does not exist",
+    };
+    CHECK(round_trip(missing_artifact) == missing_artifact);
+
+    const ControlHealthEnvelope health{"health-request-1"};
+    CHECK(round_trip(health) == health);
+
+    const ControlHealthResult health_result{
+        .request_id = "health-request-1",
+        .sdk_version = "0.748.0",
+        .protocol_versions = {1, 1},
+        .broker_id = "broker-1",
+        .process_generation = 47,
+    };
+    CHECK(round_trip(health_result) == health_result);
+
+    const ControlErrorEnvelope protocol_error{
+        .request_id = "artifact-request-1",
+        .error_code = "request-not-supported",
+        .explanation = "the request is not supported by this protocol version",
+    };
+    CHECK(round_trip(protocol_error) == protocol_error);
+
     const ControlReceiptEnvelope admitted{
         .request_id = "request-1",
         .receipt_id = "receipt-1",
@@ -179,6 +267,85 @@ TEST_CASE("all closed control envelope variants round trip canonically",
     };
     CHECK(encode_control_envelope({kControlProtocolVersion, std::move(cancellation_with_nul)})
               .empty());
+}
+
+TEST_CASE("carrier management envelopes enforce bounded fail-closed fields",
+          "[inspect][control-protocol][carrier]") {
+    auto accepted_with_error = ControlSessionOpenResult{
+        .request_id = "session-request-1",
+        .accepted = true,
+        .client_id = "client-1",
+        .error_code = "unexpected",
+    };
+    CHECK(encode_control_envelope({.payload = accepted_with_error}).empty());
+
+    auto rejected_without_error = ControlSessionOpenResult{
+        .request_id = "session-request-1",
+        .accepted = false,
+    };
+    CHECK(encode_control_envelope({.payload = rejected_without_error}).empty());
+
+    auto oversized_read = ControlArtifactReadEnvelope{
+        .request_id = "artifact-request-1",
+        .artifact_id = "artifact-0123456789abcdef0123456789abcdef",
+        .maximum_bytes = kControlMaximumArtifactReadBytes + 1,
+    };
+    CHECK(encode_control_envelope({.payload = oversized_read}).empty());
+    oversized_read.maximum_bytes = 0;
+    CHECK(encode_control_envelope({.payload = oversized_read}).empty());
+
+    auto malformed_chunk = ControlArtifactReadResponseEnvelope{
+        .request_id = "artifact-request-1",
+        .status_id = "read",
+        .metadata = artifact_metadata_fixture(),
+        .bytes_base64 = "not base64",
+    };
+    CHECK(encode_control_envelope({.payload = malformed_chunk}).empty());
+    malformed_chunk.bytes_base64 = "AQID";
+    malformed_chunk.metadata->manifest_digest = std::string(64, 'z');
+    CHECK(encode_control_envelope({.payload = malformed_chunk}).empty());
+
+    auto invalid_health = ControlHealthResult{
+        .request_id = "health-request-1",
+        .sdk_version = "0.748.0",
+        .protocol_versions = {2, 1},
+        .broker_id = "broker-1",
+        .process_generation = 1,
+    };
+    CHECK(encode_control_envelope({.payload = invalid_health}).empty());
+    invalid_health.protocol_versions = {1, 1};
+    invalid_health.process_generation = 0;
+    CHECK(encode_control_envelope({.payload = invalid_health}).empty());
+
+    const ControlErrorEnvelope empty_error{
+        .request_id = "request-1",
+        .error_code = "invalid-request",
+    };
+    CHECK(encode_control_envelope({.payload = empty_error}).empty());
+
+    const auto valid_session = encode_control_envelope(
+        {.payload = ControlSessionOpenResult{
+             .request_id = "session-request-1", .accepted = true, .client_id = "client-1"}});
+    REQUIRE_FALSE(valid_session.empty());
+    ControlProtocolDiagnostics diagnostics;
+    const auto wrong_accepted =
+        replace_once(valid_session, R"("accepted": true)", R"("accepted": "true")");
+    CHECK_FALSE(decode_control_envelope(wrong_accepted, &diagnostics));
+    CHECK(diagnostics.code == ControlProtocolError::InvalidType);
+
+    const auto valid_response =
+        encode_control_envelope({.payload = ControlArtifactReadResponseEnvelope{
+                                     .request_id = "artifact-request-1",
+                                     .status_id = "read",
+                                     .metadata = artifact_metadata_fixture(),
+                                     .bytes_base64 = "AQID",
+                                     .eof = true,
+                                 }});
+    REQUIRE_FALSE(valid_response.empty());
+    const auto unknown_metadata =
+        replace_once(valid_response, R"("artifact_id": )", R"("future": 1, "artifact_id": )");
+    CHECK_FALSE(decode_control_envelope(unknown_metadata, &diagnostics));
+    CHECK(diagnostics.code == ControlProtocolError::UnknownField);
 }
 
 TEST_CASE("control request hash binds authority operation and canonical content",

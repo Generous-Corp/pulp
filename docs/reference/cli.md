@@ -173,6 +173,11 @@ are contributor/source-checkout tools checked when the PR workflow needs them.
 It also reports the effective `pulp import-design` defaults, including whether
 they came from the built-in `live/js` default, `~/.pulp/config.toml`, or
 `PULP_IMPORT_DESIGN_DEFAULT_*` environment overrides.
+The `Control broker:` line is observational. It attempts only a local carrier
+connection: it does not create the runtime directory, remove a stale endpoint,
+start a daemon, open a session, consume admission, register a client, or grant a
+capability. With no trusted peer expectation, an accepting socket is reported
+as `reachable-unverified`; it is never described as healthy or verified.
 On macOS and Windows it also reports whether an optional AAX SDK is detected. On
 Linux and Ubuntu it reports AAX as unsupported.
 
@@ -435,7 +440,7 @@ Set `PULP_HOME` to relocate the cache, SDK, and config root.
 
 **Status**: usable
 
-Diagnose environment issues. Checks C++20 compiler, CMake version, git-lfs, LFS file state, generated WidgetBridge API artifacts, external SDKs (VST3, AudioUnit), platform-specific dependencies, and the expected project mode.
+Diagnose environment issues. Checks C++20 compiler, CMake version, git-lfs, LFS file state, generated WidgetBridge API artifacts, external SDKs (VST3, AudioUnit), platform-specific dependencies, the expected project mode, and optional observational local control-broker reachability.
 
 ```bash
 pulp doctor                          # show all checks
@@ -456,7 +461,13 @@ pulp doctor --host-quirks            # show the runtime DAW host-quirks policy +
 pulp doctor quirks                   # synonym for --host-quirks
 pulp doctor --au-cache --dry-run     # preview macOS AudioComponentRegistrar refresh
 pulp doctor --only WidgetBridge      # check generated WidgetBridge .d.ts/docs staleness
+pulp doctor --only "Control broker"  # run only the non-mutating local carrier probe
 ```
+
+The optional `Control broker` row never contributes to a failing doctor exit.
+It uses the same connection-only probe as `pulp status`, performs no daemon or
+authority mutation, and reports an accepting socket without a trusted peer
+expectation as `reachable-unverified`, not healthy or verified.
 
 `pulp doctor --host-quirks` reports whether Pulp is enforcing DAW
 host-quirk accommodations and under which policy. It prints the effective

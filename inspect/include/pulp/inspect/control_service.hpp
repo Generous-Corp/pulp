@@ -48,7 +48,7 @@ class ControlService {
     using Executor = ControlOperationExecutor;
 
     explicit ControlService(ControlBroker& broker, Executor executor = {},
-                            ProgressSink progress_sink = {}, ControlServiceConfig config = {});
+                            ControlServiceConfig config = {});
     ~ControlService();
 
     /// Carrier-owned state for exactly one authenticated local connection.
@@ -62,6 +62,10 @@ class ControlService {
         Session(Session&& other) noexcept;
         Session& operator=(Session&& other) noexcept;
 
+        bool is_open() const {
+            return broker_ != nullptr;
+        }
+
         ControlServiceResult dispatch(std::string_view encoded_envelope);
         /// Reads only artifacts produced by this connection-bound client ID.
         ControlArtifactReadResult read_artifact(std::string_view artifact_id, std::uint64_t offset,
@@ -70,9 +74,10 @@ class ControlService {
       private:
         friend class ControlService;
         Session(ControlService& service, VerifiedControlPeerIdentity peer,
-                ControlClientId client_id)
-            : service_(&service), broker_(&service.broker_), peer_(std::move(peer)),
-              client_id_(std::move(client_id)) {}
+                ControlClientId client_id, ProgressSink progress_sink, bool accepted)
+            : service_(&service), broker_(accepted ? &service.broker_ : nullptr),
+              peer_(std::move(peer)), client_id_(std::move(client_id)),
+              progress_sink_(std::move(progress_sink)) {}
 
         void close() noexcept;
 
@@ -80,13 +85,13 @@ class ControlService {
         ControlBroker* broker_ = nullptr;
         VerifiedControlPeerIdentity peer_;
         ControlClientId client_id_;
+        ProgressSink progress_sink_;
         std::optional<std::vector<std::string>> negotiated_features_;
     };
 
     Session open_session(const VerifiedControlPeerIdentity& peer,
-                         const ControlClientId& connection_client_id) {
-        return Session{*this, peer, connection_client_id};
-    }
+                         const ControlClientId& connection_client_id,
+                         ProgressSink progress_sink = {});
 
     bool is_listening() const {
         return false;
@@ -109,7 +114,6 @@ class ControlService {
 
     ControlBroker& broker_;
     Executor executor_;
-    ProgressSink progress_sink_;
     ControlServiceConfig config_;
     std::shared_ptr<CompletionOwner> completion_owner_;
 };

@@ -177,6 +177,24 @@ void print_pr_workflow_status(const fs::path& root, bool source_tree_mode) {
     std::cout << "Shipyard tracking: disabled by pr.workflow=manual\n";
 }
 
+void print_control_broker_status(const fs::path& root, bool standalone_mode) {
+    const auto checks = run_doctor_checks(root, standalone_mode, "Control broker");
+    if (checks.empty()) {
+        std::cout << "Control broker: unavailable\n";
+        return;
+    }
+    std::cout << "Control broker: " << checks.front().detail << "\n";
+}
+
+bool build_has_tracing_enabled(const fs::path& cache_path) {
+    std::ifstream cache(cache_path);
+    std::string line;
+    while (std::getline(cache, line)) {
+        if (line == "PULP_TRACING:BOOL=ON") return true;
+    }
+    return false;
+}
+
 }  // namespace
 
 // ── cmd_test ────────────────────────────────────────────────────────────────
@@ -242,6 +260,11 @@ int cmd_status(const std::vector<std::string>& args) {
         std::cout << "Mode detail: repo/examples build against the current checkout\n";
     }
 
+    // This is a connection-only observation with no trusted peer expectation.
+    // It cannot open a session or send a control request, and therefore reports
+    // an accepting socket as reachable-unverified rather than healthy.
+    print_control_broker_status(root, standalone_mode);
+
     auto branch = exec_output("git -C " + shell_quote(root.string()) +
                               " branch --show-current" + stderr_to_null());
     auto commit = exec_output("git -C " + shell_quote(root.string()) +
@@ -252,6 +275,10 @@ int cmd_status(const std::vector<std::string>& args) {
     auto build_dir = root / "build";
     if (fs::exists(build_dir / "CMakeCache.txt")) {
         std::cout << "Build: configured\n";
+        if (build_has_tracing_enabled(build_dir / "CMakeCache.txt")) {
+            std::cout << "⚠ Perfetto tracing is COMPILED IN this build (dev only) — do NOT ship; "
+                         "reconfigure with -DPULP_TRACING=OFF to disable.\n";
+        }
     } else {
         std::cout << "Build: not configured (run `pulp build`)\n";
     }

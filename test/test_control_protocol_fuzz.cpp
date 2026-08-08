@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdlib>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -13,6 +14,73 @@ using namespace pulp::inspect;
 using namespace pulp::test::control_protocol_fuzz;
 
 namespace {
+
+std::vector<std::string> carrier_seed_corpus() {
+    ControlArtifactWireMetadata metadata{
+        .artifact_id = "artifact-0123456789abcdef0123456789abcdef",
+        .broker_id = "broker-fuzz",
+        .receipt_id = "receipt-fuzz",
+        .producer_client_id = "client-fuzz",
+        .producer_registration_id = "registration-fuzz",
+        .session_id = "session-fuzz",
+        .instance_id = "instance-fuzz",
+        .publication_id = "publication-fuzz",
+        .producer_capability_id = "dev.pulp.ui.observe",
+        .producer_operation_id = "dev.pulp.ui/observe@1",
+        .producer_operation_version = 1,
+        .original_grant_id = "grant-fuzz",
+        .consent_decision_id = "consent-fuzz",
+        .manifest_digest = std::string(64, 'a'),
+        .producer_artifact_digest = std::string(64, 'b'),
+        .sha256 = std::string(64, 'c'),
+        .byte_size = 3,
+        .content_type = "application/json",
+        .created_at_unix_ms = 1'786'000'000'000,
+        .expires_at_unix_ms = 1'786'000'060'000,
+        .sensitivity_id = "sensitive",
+        .deletion_state_id = "active",
+        .redaction_state_id = "original",
+    };
+    std::vector<ControlEnvelope> envelopes;
+    envelopes.push_back({.payload = ControlSessionOpenEnvelope{"session-fuzz", "admission-fuzz"}});
+    envelopes.push_back({.payload = ControlSessionOpenResult{
+                             .request_id = "session-fuzz",
+                             .accepted = true,
+                             .client_id = "client-fuzz",
+                         }});
+    envelopes.push_back({.payload = ControlArtifactReadEnvelope{
+                             .request_id = "artifact-fuzz",
+                             .artifact_id = metadata.artifact_id,
+                             .offset = 0,
+                             .maximum_bytes = 1024,
+                         }});
+    envelopes.push_back({.payload = ControlArtifactReadResponseEnvelope{
+                             .request_id = "artifact-fuzz",
+                             .status_id = "read",
+                             .metadata = std::move(metadata),
+                             .bytes_base64 = "AQID",
+                             .eof = true,
+                         }});
+    envelopes.push_back({.payload = ControlHealthEnvelope{"health-fuzz"}});
+    envelopes.push_back({.payload = ControlHealthResult{
+                             .request_id = "health-fuzz",
+                             .sdk_version = "0.748.0",
+                             .protocol_versions = {1, 1},
+                             .broker_id = "broker-fuzz",
+                             .process_generation = 9,
+                         }});
+    envelopes.push_back({.payload = ControlErrorEnvelope{
+                             .request_id = "request-fuzz",
+                             .error_code = "invalid-request",
+                             .explanation = "bounded fuzz error",
+                         }});
+
+    std::vector<std::string> corpus;
+    corpus.reserve(envelopes.size());
+    for (const auto& envelope : envelopes)
+        corpus.push_back(encode_control_envelope(envelope));
+    return corpus;
+}
 
 class Random {
   public:
@@ -43,6 +111,9 @@ std::vector<std::string> seed_corpus() {
     std::vector<std::string> corpus;
     for (auto& entry : control_protocol_seed_corpus())
         corpus.push_back(std::move(entry.bytes));
+    auto carrier = carrier_seed_corpus();
+    corpus.insert(corpus.end(), std::make_move_iterator(carrier.begin()),
+                  std::make_move_iterator(carrier.end()));
     return corpus;
 }
 
@@ -141,6 +212,18 @@ TEST_CASE("control protocol fuzz oracle accepts every closed seed envelope",
             REQUIRE(request);
             CHECK(control_request_hash(*request) == request->request_hash);
         }
+    }
+}
+
+TEST_CASE("control protocol fuzz oracle covers canonical carrier management envelopes",
+          "[inspect][control-protocol][fuzz][carrier]") {
+    const auto corpus = carrier_seed_corpus();
+    REQUIRE(corpus.size() == 7);
+    for (const auto& bytes : corpus) {
+        REQUIRE_FALSE(bytes.empty());
+        const auto finding = inspect(bytes);
+        INFO(format_finding(finding));
+        REQUIRE_FALSE(finding);
     }
 }
 
