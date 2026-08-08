@@ -140,6 +140,16 @@ so wgpu-native and the GPU render path use genuine x86_64 binaries, and the
 release smoke lane runs each artifact natively. Both target macOS 13.4+
 (the arch-independent floor pinned by `tools/cmake/PulpMinOs.cmake`).
 
+Current Darwin CLI archives also contain the optional health-only
+`pulp-control-broker`. A canonical install under `~/.pulp/bin` reconciles the
+per-user `dev.pulp.control-broker` LaunchAgent automatically. This activation
+proves only that the owner-private local endpoint is reachable; it does not
+grant control authority or establish trusted publisher identity. Set
+`PULP_ACCEPT_CONTROL_BROKER_CUSTOM_INSTALL_ROOT=1` only when deliberately
+activating the service from a custom `PULP_INSTALL_DIR`. Subsequent upgrades
+can retain that custom root when the existing Pulp-owned plist already names
+the exact installed broker path.
+
 Plugins you build with Pulp can target Intel or a universal binary from source
 via `-DCMAKE_OSX_ARCHITECTURES=x86_64` or `"arm64;x86_64"` — the Skia, Dawn,
 and wgpu-native dependencies all publish x86_64 and universal slices.

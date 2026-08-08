@@ -399,7 +399,26 @@ fn do_install<F: Fetcher>(args: &UpgradeArgs, fetcher: &F, out: &mut impl Write)
         }
     };
 
+    let broker_config = verified_broker_config(&plan, &archive)?;
+
     let report = crate::install::install_extracted(&plan, &archive)?;
+    let broker_install = if let Some(broker_config) = broker_config {
+        crate::install::install_control_broker_with(&plan, &archive, |_, rollback_binary| {
+            crate::control_broker_service::reconcile_control_broker_service_transactional(
+                &broker_config,
+                rollback_binary,
+            )
+            .map(|_| ())
+            .map_err(|error| {
+                CliError::Other(format!(
+                    "control broker activation failed [{}]: {error}",
+                    error.code()
+                ))
+            })
+        })?
+    } else {
+        crate::install::ControlBrokerInstall::NotPresent
+    };
     persist_successful_install_cache(&target);
     // Best-effort cleanup of our own download dir; leave caller-
     // provided fixtures alone.
@@ -422,8 +441,43 @@ fn do_install<F: Fetcher>(args: &UpgradeArgs, fetcher: &F, out: &mut impl Write)
             writeln!(out, "    (pulp-mcp installed alongside)")
                 .map_err(|e| CliError::io("<stdout>", e))?;
         }
+        match broker_install {
+            crate::install::ControlBrokerInstall::Replaced => {
+                writeln!(
+                    out,
+                    "    (health-only control broker replaced and reachable-unverified)"
+                )
+                .map_err(|e| CliError::io("<stdout>", e))?;
+            }
+            crate::install::ControlBrokerInstall::Created => {
+                writeln!(
+                    out,
+                    "    (health-only control broker installed and reachable-unverified)"
+                )
+                .map_err(|e| CliError::io("<stdout>", e))?;
+            }
+            crate::install::ControlBrokerInstall::NotPresent => {}
+        }
     }
     Ok(())
+}
+
+fn verified_broker_config(
+    plan: &crate::install::InstallPlan,
+    archive: &crate::install::ExtractedArchive,
+) -> Result<Option<crate::control_broker_service::ControlBrokerServiceConfig>> {
+    let Some(broker) = archive.new_control_broker.as_deref() else {
+        return Ok(None);
+    };
+    let config = crate::install::control_broker_service_config_for_plan(plan, false)?;
+    crate::control_broker_service::verify_control_broker_payload(broker, config.command_timeout)
+        .map_err(|error| {
+            CliError::Other(format!(
+                "control broker payload verification failed [{}]: {error}",
+                error.code()
+            ))
+        })?;
+    Ok(Some(config))
 }
 
 fn resolve_target_version(args: &UpgradeArgs) -> Result<String> {

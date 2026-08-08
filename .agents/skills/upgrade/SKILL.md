@@ -58,6 +58,20 @@ upgrading into a Rust release: it must copy the archive's sibling
 payloads, including `pulp-cpp`, before replacing the running `pulp`
 binary.
 
+Darwin releases at or above the control-broker floor also carry sibling
+`pulp-control-broker`. The running CLI verifies the staged broker before any
+binary replacement, retains the prior broker until the health-only LaunchAgent
+reaches `reachable-unverified`, and rolls the binary, plist, and service back
+together on failure. The first broker-bearing release has one transition
+exception: an older CLI cannot preserve an archive member it does not know.
+The replacement CLI therefore performs one bounded exact-version recovery on
+its next invocation when the canonical sibling is missing, records the result,
+and does not retry a hard failure on every command. This recovery never claims
+trusted identity, consent, admission, or operation authority; retry explicitly
+with `pulp upgrade --install --to <current-version>` after correcting a reported
+failure. Custom install roots require explicit first-install acceptance rather
+than being activated merely because `PULP_INSTALL_DIR` was set.
+
 `pulp upgrade --notes` prints migration notes for the hop without
 downloading anything. `pulp upgrade --notes --json` emits the same data
 as a stable-shape JSON document for agent consumption (the `/upgrade`

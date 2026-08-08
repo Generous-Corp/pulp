@@ -241,6 +241,59 @@ fn installed_status_delegates_to_the_canonical_cpp_probe() {
     assert_eq!(std::fs::read_to_string(argv_log).unwrap(), "status\n");
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn installed_status_does_not_run_lazy_broker_activation() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let td = tempdir().unwrap();
+    let bin = td.path().join("bin");
+    let home = td.path().join("home");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::create_dir_all(&home).unwrap();
+
+    let source = Command::cargo_bin("pulp")
+        .expect("pulp-rs binary")
+        .get_program()
+        .to_owned();
+    let installed = bin.join("pulp");
+    std::fs::copy(source, &installed).unwrap();
+
+    // A sibling broker makes the startup hook observable: if status reaches
+    // reconciliation, this deliberately invalid payload produces an activation
+    // warning before the status delegate runs.
+    let broker = bin.join("pulp-control-broker");
+    std::fs::write(&broker, "not a signed Mach-O\n").unwrap();
+
+    let delegate = bin.join("pulp-cpp");
+    std::fs::write(
+        &delegate,
+        "#!/bin/sh\nprintf 'Pulp Project Status\\nControl broker: unavailable\\n'\n",
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&delegate).unwrap().permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&delegate, permissions).unwrap();
+
+    let out = Command::new(&installed)
+        .arg("status")
+        .env("HOME", &home)
+        .env("PULP_HOME", home.join(".pulp"))
+        .env("PULP_RS_CPP_BINARY", &delegate)
+        .output()
+        .expect("run installed status");
+
+    assert!(out.status.success(), "exit: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stdout.contains("Control broker: unavailable"), "{stdout}");
+    assert!(
+        !stderr.contains("control broker activation failed"),
+        "{stderr}"
+    );
+    assert!(!home.join("Library/LaunchAgents").exists());
+}
+
 #[test]
 fn clean_reports_canonical_strings() {
     let td = tempdir().unwrap();
