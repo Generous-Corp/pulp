@@ -90,6 +90,7 @@ TEST_CASE("status and doctor observe an absent control broker without side effec
     REQUIRE(doctor.stdout_output.find("Control broker") != std::string::npos);
     REQUIRE(doctor.stdout_output.find("unavailable") != std::string::npos);
     REQUIRE(doctor.stdout_output.find("optional skipped") != std::string::npos);
+    REQUIRE(doctor.stdout_output.find("Installed SDK") == std::string::npos);
     REQUIRE_FALSE(fs::exists(runtime_dir));
     REQUIRE_FALSE(fs::exists(sentinel));
 
@@ -162,6 +163,7 @@ TEST_CASE("status and doctor describe an accepting untrusted carrier as reachabl
     REQUIRE(doctor.exit_code == 0);
     REQUIRE(doctor.stdout_output.find("reachable-unverified") != std::string::npos);
     REQUIRE(doctor.stdout_output.find("healthy-verified") == std::string::npos);
+    REQUIRE(doctor.stdout_output.find("Installed SDK") == std::string::npos);
     {
         std::unique_lock lock(connections_mutex);
         REQUIRE(connection_accepted.wait_for(lock, std::chrono::seconds(1),
