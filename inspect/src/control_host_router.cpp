@@ -78,6 +78,8 @@ class ControlHostRouter::Impl {
   public:
     struct Host {
         ConnectionGeneration generation = 0;
+        std::string instance_id;
+        std::string instance_generation;
         Sender sender;
     };
 
@@ -98,12 +100,21 @@ class ControlHostRouter::Impl {
 
     bool attach(const ControlRegistrationId& registration_id, ConnectionGeneration generation,
                 Sender sender) {
+        return attach_slot(registration_id, generation, {}, {}, std::move(sender));
+    }
+
+    bool attach_slot(const ControlRegistrationId& registration_id, ConnectionGeneration generation,
+                     std::string instance_id, std::string instance_generation, Sender sender) {
         if (!registration_id || generation == 0 || !sender)
+            return false;
+        if (instance_id.empty() != instance_generation.empty())
             return false;
         std::lock_guard lock(mutex);
         if (stopping || hosts.contains(registration_id.value))
             return false;
-        hosts.emplace(registration_id.value, Host{generation, std::move(sender)});
+        hosts.emplace(registration_id.value,
+                      Host{generation, std::move(instance_id), std::move(instance_generation),
+                           std::move(sender)});
         return true;
     }
 
@@ -220,6 +231,13 @@ class ControlHostRouter::Impl {
                                ControlRetryClassification::AfterBackoff,
                                "no authenticated host owns the registration");
             host = found->second;
+            if (!host.instance_id.empty() &&
+                (host.instance_id != plan.instance_id ||
+                 host.instance_generation != plan.instance_generation)) {
+                return failure(ControlResultCode::SessionStale,
+                               ControlRetryClassification::AfterRefresh,
+                               "admitted instance no longer identifies the attached host slot");
+            }
             operation->generation = host.generation;
             operation->delivery_started = true;
             bool inserted = false;
@@ -352,6 +370,13 @@ ControlHostRouter::~ControlHostRouter() {
 bool ControlHostRouter::attach(const ControlRegistrationId& registration_id,
                                ConnectionGeneration generation, Sender sender) {
     return impl_->attach(registration_id, generation, std::move(sender));
+}
+
+bool ControlHostRouter::attach_slot(const ControlRegistrationId& registration_id,
+                                    ConnectionGeneration generation, std::string instance_id,
+                                    std::string instance_generation, Sender sender) {
+    return impl_->attach_slot(registration_id, generation, std::move(instance_id),
+                              std::move(instance_generation), std::move(sender));
 }
 
 void ControlHostRouter::detach(const ControlRegistrationId& registration_id,

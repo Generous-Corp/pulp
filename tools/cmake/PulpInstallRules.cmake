@@ -357,6 +357,7 @@ elseif(TARGET pulp-inspect-protocol)
         install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_main_thread_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_state_read_executor.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_state_write_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_trace_session_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/main_thread_rpc.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/trace_inspector.hpp"
@@ -370,6 +371,7 @@ elseif(TARGET pulp-inspect-protocol)
     if(TARGET pulp-inspect-telemetry)
         install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/value_channel_telemetry_broker.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_telemetry_tap.hpp"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
     endif()
 endif()

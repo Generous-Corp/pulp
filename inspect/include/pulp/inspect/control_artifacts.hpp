@@ -50,6 +50,18 @@ enum class ControlArtifactRedactionState : std::uint8_t {
     Redacted,
 };
 
+enum class ControlEvidenceKind : std::uint8_t {
+    Screenshot,
+    OfflineRender,
+    StateSnapshot,
+    PerfettoTrace,
+};
+
+std::string_view control_evidence_content_type(ControlEvidenceKind kind);
+bool control_evidence_contract_matches(ControlEvidenceKind kind, std::string_view content_type,
+                                       ControlArtifactSensitivity sensitivity,
+                                       ControlArtifactRedactionState redaction_state);
+
 struct ControlArtifactProperties {
     std::string content_type;
     std::uint64_t created_at_unix_ms = 0;
@@ -88,7 +100,41 @@ struct ControlArtifactStoreConfig {
     std::filesystem::path root;
     std::size_t maximum_blob_bytes = 16u * 1024u * 1024u;
     std::size_t maximum_chunk_bytes = 1u * 1024u * 1024u;
+    /// Logical publication quota. Content-addressed blob deduplication never
+    /// widens this bound: each ACL publication consumes its declared bytes.
+    std::uint64_t maximum_total_bytes = 256u * 1024u * 1024u;
+    std::size_t maximum_artifacts = 4096;
+    std::size_t maximum_artifacts_per_client = 256;
     std::chrono::milliseconds maximum_lifetime = std::chrono::hours{24};
+    std::size_t maximum_deletion_audit_records = 4096;
+};
+
+enum class ControlArtifactDeletionReason : std::uint8_t {
+    Expired,
+    QuotaCollection,
+    ExplicitDeletion,
+    CrashCleanup,
+};
+
+std::string_view control_artifact_deletion_reason_id(ControlArtifactDeletionReason reason);
+
+/// Persisted deletion evidence intentionally excludes client-provided content,
+/// paths, consent text, and plugin metadata. It is safe to expose only through
+/// the broker's dedicated local audit permission.
+struct ControlArtifactDeletionRecord {
+    std::string artifact_id;
+    std::string sha256;
+    std::uint64_t byte_size = 0;
+    std::uint64_t deleted_at_unix_ms = 0;
+    ControlArtifactDeletionReason reason = ControlArtifactDeletionReason::Expired;
+};
+
+struct ControlArtifactCollectionResult {
+    std::size_t deleted_artifacts = 0;
+    std::size_t deleted_orphan_blobs = 0;
+    std::size_t deleted_partial_files = 0;
+    std::size_t deletion_audit_failures = 0;
+    std::uint64_t reclaimed_bytes = 0;
 };
 
 struct ControlArtifactStoreResult {
@@ -132,6 +178,12 @@ class ControlArtifactStore {
     /// Possession of metadata does not authorize a blob read; byte retrieval is
     /// a private broker-only capability that revalidates exact receipt lineage.
     std::optional<ControlArtifactMetadata> metadata(std::string_view artifact_id) const;
+
+    /// Applies expiry and crash cleanup and returns bounded deletion evidence.
+    /// This performs filesystem work and must run on the broker/background
+    /// thread, never on a render or audio callback.
+    ControlArtifactCollectionResult collect();
+    std::vector<ControlArtifactDeletionRecord> deletion_audit() const;
 
   private:
     friend class ControlBroker;

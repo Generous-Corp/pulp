@@ -653,8 +653,15 @@ void StateStore::acquire_gesture(ParamID id) {
     flush_deferred_gesture_release(id);
     auto& leases = gesture_leases_[id];
     if (leases++ != 0) return;
-    if (open_gestures_.insert(id).second && on_begin_gesture_)
-        on_begin_gesture_(id);
+    const bool opened = open_gestures_.insert(id).second;
+    try {
+        if (opened && on_begin_gesture_)
+            on_begin_gesture_(id);
+    } catch (...) {
+        if (opened) open_gestures_.erase(id);
+        if (--leases == 0) gesture_leases_.erase(id);
+        throw;
+    }
 }
 
 void StateStore::release_gesture(ParamID id) {

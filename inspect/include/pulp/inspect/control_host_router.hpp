@@ -24,6 +24,12 @@ class ControlHostRouter {
 
     bool attach(const ControlRegistrationId& registration_id,
                 ConnectionGeneration connection_generation, Sender sender);
+    /// Attach one exact Pulp-host slot. The immutable instance identity and
+    /// process/slot generation are checked again at dispatch, so unloading and
+    /// recreating a slot cannot retarget an admitted operation.
+    bool attach_slot(const ControlRegistrationId& registration_id,
+                     ConnectionGeneration connection_generation, std::string instance_id,
+                     std::string instance_generation, Sender sender);
     void detach(const ControlRegistrationId& registration_id,
                 ConnectionGeneration connection_generation) noexcept;
     bool connected(const ControlRegistrationId& registration_id) const;

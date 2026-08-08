@@ -1,6 +1,9 @@
 # Development inspector capabilities
 
 The Development Inspector capability-control platform is under construction.
+
+The canonical broker evidence, bounded telemetry, and T1/T2a execution
+contracts are documented in [Control evidence and telemetry](control-evidence-and-telemetry.md).
 Phase 3 deleted the legacy server, raw client, discovery, and standalone
 authority before the canonical replacement became a general live product
 surface. That sequencing creates an intentional temporary capability reduction:
