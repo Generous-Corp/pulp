@@ -358,21 +358,21 @@ apply_regional_fill(const DevelopmentPattern<MaxEvents>& base,
         return result;
     }
 
-    DevelopmentPattern<MaxEvents> region;
+    std::size_t region_events = 0;
+    std::size_t region_anchors = 0;
+    std::size_t outside_events = 0;
     for (std::size_t index = 0; index < base.size(); ++index) {
         const auto event = *base.event(index);
         if (event.onset < selection.begin || event.onset >= selection.end) {
+            ++outside_events;
             result.error = result.pattern.insert(event);
             if (result.error != PatternDevelopmentError::none) {
                 result.pattern = {};
                 return result;
             }
         } else {
-            result.error = region.insert(event);
-            if (result.error != PatternDevelopmentError::none) {
-                result.pattern = {};
-                return result;
-            }
+            ++region_events;
+            region_anchors += event.role == PatternEventRole::anchor;
         }
     }
     for (std::size_t index = 0; index < candidates.size(); ++index) {
@@ -385,7 +385,7 @@ apply_regional_fill(const DevelopmentPattern<MaxEvents>& base,
             result.pattern = {};
             return result;
         }
-        const auto existing = region.find_onset(event.onset);
+        const auto existing = base.find_onset(event.onset);
         if (existing) {
             if (*existing != event) {
                 result.error = PatternDevelopmentError::conflicting_event;
@@ -394,34 +394,69 @@ apply_regional_fill(const DevelopmentPattern<MaxEvents>& base,
             }
             continue;
         }
-        result.error = region.insert(event);
-        if (result.error != PatternDevelopmentError::none) {
-            result.pattern = {};
-            return result;
-        }
+        ++region_events;
     }
 
-    DevelopmentPattern<MaxEvents> selectable_region;
-    for (std::size_t index = 0; index < region.size(); ++index) {
-        auto event = *region.event(index);
-        if (event.role == PatternEventRole::anchor && !base.find_id(event.id))
-            event.role = PatternEventRole::fill;
-        result.error = selectable_region.insert(event);
-        if (result.error != PatternDevelopmentError::none) {
-            result.pattern = {};
-            return result;
-        }
-    }
-    const auto selected = select_pattern_density(
-        selectable_region, {selection.target_region_onsets, selection.seed, selection.coordinate});
-    if (!selected) {
-        result.error = selected.error;
+    if (selection.target_region_onsets > region_events) {
+        result.error = PatternDevelopmentError::density_out_of_range;
         result.pattern = {};
         return result;
     }
-    for (std::size_t index = 0; index < selected.pattern.size(); ++index) {
-        const auto original = region.find_id(selected.pattern.event(index)->id);
-        result.error = result.pattern.insert(*original);
+    if (selection.target_region_onsets < region_anchors) {
+        result.error = PatternDevelopmentError::density_below_anchor_count;
+        result.pattern = {};
+        return result;
+    }
+    if (outside_events + selection.target_region_onsets > MaxEvents) {
+        result.error = PatternDevelopmentError::capacity_exceeded;
+        result.pattern = {};
+        return result;
+    }
+
+    const auto selected_nonanchors = selection.target_region_onsets - region_anchors;
+    const auto rank = [&](const PatternEvent& event) constexpr noexcept {
+        const auto priority = detail::event_priority(selection.seed, selection.coordinate, event);
+        std::size_t result_rank = 0;
+        const auto add_to_rank = [&](const PatternEvent& other) constexpr noexcept {
+            const auto other_priority =
+                detail::event_priority(selection.seed, selection.coordinate, other);
+            result_rank +=
+                other_priority < priority || (other_priority == priority && other.id < event.id);
+        };
+        for (std::size_t index = 0; index < base.size(); ++index) {
+            const auto other = *base.event(index);
+            if (other.onset >= selection.begin && other.onset < selection.end &&
+                other.role != PatternEventRole::anchor)
+                add_to_rank(other);
+        }
+        for (std::size_t index = 0; index < candidates.size(); ++index) {
+            const auto other = *candidates.event(index);
+            if (other.onset < selection.begin || other.onset >= selection.end ||
+                base.find_onset(other.onset))
+                continue;
+            add_to_rank(other);
+        }
+        return result_rank;
+    };
+
+    for (std::size_t index = 0; index < base.size(); ++index) {
+        const auto event = *base.event(index);
+        if (event.onset < selection.begin || event.onset >= selection.end)
+            continue;
+        if (event.role != PatternEventRole::anchor && rank(event) >= selected_nonanchors)
+            continue;
+        result.error = result.pattern.insert(event);
+        if (result.error != PatternDevelopmentError::none) {
+            result.pattern = {};
+            return result;
+        }
+    }
+    for (std::size_t index = 0; index < candidates.size(); ++index) {
+        const auto event = *candidates.event(index);
+        if (event.onset < selection.begin || event.onset >= selection.end ||
+            base.find_onset(event.onset) || rank(event) >= selected_nonanchors)
+            continue;
+        result.error = result.pattern.insert(event);
         if (result.error != PatternDevelopmentError::none) {
             result.pattern = {};
             return result;
