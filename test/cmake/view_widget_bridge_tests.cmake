@@ -226,6 +226,12 @@ target_link_libraries(pulp-test-control-host-router PRIVATE
 catch_discover_tests(pulp-test-control-host-router
     PROPERTIES LABELS "inspect;control;host;router")
 
+add_executable(pulp-test-control-executor-slot test_control_executor_slot.cpp)
+target_link_libraries(pulp-test-control-executor-slot PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-executor-slot
+    PROPERTIES LABELS "inspect;control;host;executor;slot")
+
 add_executable(pulp-test-control-carrier test_control_carrier.cpp)
 target_link_libraries(pulp-test-control-carrier PRIVATE
     pulp::inspect-control Catch2::Catch2WithMain)
