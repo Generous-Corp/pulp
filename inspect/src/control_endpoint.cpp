@@ -15,6 +15,7 @@ extern "C" PULP_CONTROL_COMPONENT_MARKER const volatile char
 #include <pulp/inspect/control_broker.hpp>
 #include <pulp/inspect/control_carrier.hpp>
 #include <pulp/inspect/control_host_router.hpp>
+#include <pulp/inspect/control_manifest.hpp>
 
 #include <pulp/events/interprocess_connection.hpp>
 #include <pulp/runtime/base64.hpp>
@@ -588,13 +589,14 @@ struct ControlEndpoint::Impl {
         }
         if (request.command == "grant-request") {
             if (!params.hasObjectMember("instance_id") || !params["instance_id"].isString() ||
-                !params.hasObjectMember("profile") || !params["profile"].isString()) {
+                (params.hasObjectMember("profile") == params.hasObjectMember("operation_id")) ||
+                (params.hasObjectMember("profile") && !params["profile"].isString()) ||
+                (params.hasObjectMember("operation_id") && !params["operation_id"].isString())) {
                 (void)reply("invalid-request", "{}",
-                            "grant-request requires instance_id and profile");
+                            "grant-request requires instance_id and exactly one of profile or operation_id");
                 return;
             }
             const auto instance_id = std::string(params["instance_id"].getString());
-            const auto profile_id_value = std::string(params["profile"].getString());
             std::vector<ControlRegistration> matches;
             for (const auto& registration : management_broker->registrations())
                 if (registration.instance_id == instance_id)
@@ -605,20 +607,33 @@ struct ControlEndpoint::Impl {
                                             : "the instance selector is ambiguous");
                 return;
             }
-            const auto profile = profile_id_value == "inspect-readonly"
-                                     ? std::optional{InspectorProfile::Observe}
-                                     : profile_from_id(profile_id_value);
-            if (!profile || *profile == InspectorProfile::Off ||
-                *profile == InspectorProfile::Custom) {
-                (void)reply("invalid-request", "{}", "the grant profile is unknown");
-                return;
-            }
             ControlGrantRequest grant_request{.client_id = state.session->client_id(),
                                               .registration_id = matches.front().registration_id};
-            for (const auto capability : profile_capabilities(*profile))
-                if (std::ranges::find(matches.front().capabilities, capability) !=
+            if (params.hasObjectMember("operation_id")) {
+                const auto operation_id = std::string(params["operation_id"].getString());
+                const auto* operation = resolve_control_operation(operation_id, 1);
+                if (!operation || !capability_is_grantable(operation->capability)) {
+                    (void)reply("invalid-request", "{}", "the grant operation is unknown or not grantable");
+                    return;
+                }
+                if (std::ranges::find(matches.front().capabilities, operation->capability) !=
                     matches.front().capabilities.end())
-                    grant_request.capabilities.push_back(capability);
+                    grant_request.capabilities.push_back(operation->capability);
+            } else {
+                const auto profile_id_value = std::string(params["profile"].getString());
+                const auto profile = profile_id_value == "inspect-readonly"
+                                         ? std::optional{InspectorProfile::Observe}
+                                         : profile_from_id(profile_id_value);
+                if (!profile || *profile == InspectorProfile::Off ||
+                    *profile == InspectorProfile::Custom) {
+                    (void)reply("invalid-request", "{}", "the grant profile is unknown");
+                    return;
+                }
+                for (const auto capability : profile_capabilities(*profile))
+                    if (std::ranges::find(matches.front().capabilities, capability) !=
+                        matches.front().capabilities.end())
+                        grant_request.capabilities.push_back(capability);
+            }
             if (grant_request.capabilities.empty()) {
                 (void)reply("capability-unavailable", "{}",
                             "the instance exposes none of the requested profile");

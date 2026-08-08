@@ -2,20 +2,26 @@
 // Exposes Pulp operations as tools via stdin/stdout JSON-RPC 2.0
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <future>
 #include <iostream>
 #include <limits>
 #include <optional>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -32,6 +38,7 @@
 #include <choc/text/choc_JSON.h>
 
 #include "mcp_compat.hpp"
+#include "mcp_control_tools.hpp"
 #include "mcp_json.hpp"
 #include "mcp_server.hpp"
 #include "mcp_shell.hpp"
@@ -110,6 +117,8 @@ using pulp_mcp::shell_quote;
 namespace {
 
 #if PULP_MCP_ENABLE_INSPECTOR_CLIENT
+std::shared_ptr<pulp::inspect::InspectorControlSessionOpener> g_trace_session_opener;
+
 struct InspectorCommandResult {
     pulp::inspect::InspectorClientResult client;
     std::string output;
@@ -134,6 +143,9 @@ format_inspector_command_result(pulp::inspect::InspectorClientResult result) {
 
 InspectorCommandResult run_control_trace_command(const std::string& method,
                                                  const std::string& params_json = "{}") {
+    if (g_trace_session_opener)
+        return format_inspector_command_result(pulp::inspect::request_control_inspector(
+            *g_trace_session_opener, method, params_json));
     return format_inspector_command_result(
         pulp::inspect::request_control_inspector(method, params_json));
 }
@@ -423,6 +435,15 @@ std::string inspector_profiles_payload() {
 
 // ── MCP Protocol Handler ─────────────────────────────────────────────────────
 
+void pulp_mcp::server::set_trace_control_session_opener_for_test(
+    std::shared_ptr<pulp::inspect::InspectorControlSessionOpener> opener) {
+#if PULP_MCP_ENABLE_INSPECTOR_CLIENT
+    g_trace_session_opener = std::move(opener);
+#else
+    (void)opener;
+#endif
+}
+
 std::string pulp_mcp::server::tools_list_json() {
     std::string out;
     out.reserve(32 * 1024);
@@ -431,6 +452,11 @@ std::string pulp_mcp::server::tools_list_json() {
     out += pulp_mcp::kTimelineMcpToolsArray;
     out += ",";
 #endif
+    const auto control_tools = pulp_mcp::control_mcp_tools_json_fragment();
+    if (!control_tools.empty()) {
+        out += control_tools;
+        out += ",";
+    }
     out +=
         R"JSON({"name":"pulp_build","description":"Build the Pulp project (configure + compile)","inputSchema":{"type":"object","properties":{}}},)JSON";
     out +=
@@ -549,6 +575,14 @@ static std::string compact_for_wire(std::string s) {
 
 static std::string handle_request_raw(const std::string& json);
 
+static std::string control_resource_result(const std::string& id, std::string payload) {
+    if (payload.find("\"isError\":true") == std::string::npos)
+        return json_result(id, payload);
+    const auto message = extract_string(payload, "message");
+    return json_error(id, -32002,
+                      message.empty() ? "Capability-control resource request failed" : message);
+}
+
 std::string pulp_mcp::server::handle_request(const std::string& json) {
     return compact_for_wire(handle_request_raw(json));
 }
@@ -579,7 +613,7 @@ static std::string handle_request_raw(const std::string& json) {
         // pulp-mcp and a newer plugin.
         std::string payload =
             std::string(
-                R"JSON({"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"pulp-mcp","version":")JSON") +
+                R"JSON({"protocolVersion":"2024-11-05","capabilities":{"tools":{},"resources":{"subscribe":false,"listChanged":false}},"serverInfo":{"name":"pulp-mcp","version":")JSON") +
             PULP_MCP_SERVER_VERSION + std::string(R"JSON("}})JSON");
         return json_result(id, payload);
     }
@@ -590,6 +624,22 @@ static std::string handle_request_raw(const std::string& json) {
 
     if (method == "tools/list") {
         return json_result(id, pulp_mcp::server::tools_list_json());
+    }
+
+    if (method == "resources/templates/list")
+        return json_result(id, pulp_mcp::control_mcp_resource_templates_payload());
+
+    if (method == "resources/list")
+        return control_resource_result(id, pulp_mcp::control_mcp_resources_list_payload());
+
+    if (method == "resources/read") {
+        if (!request.hasObjectMember("params") || !request["params"].isObject() ||
+            !has_unique_object_members(request["params"]) ||
+            !request["params"].hasObjectMember("uri") ||
+            !request["params"]["uri"].isString())
+            return json_error(id, -32602, "Invalid control resource params");
+        const auto uri = std::string(request["params"]["uri"].getString());
+        return control_resource_result(id, pulp_mcp::control_mcp_resource_read_payload(uri));
     }
 
     if (method == "tools/call") {
@@ -606,6 +656,13 @@ static std::string handle_request_raw(const std::string& json) {
                 return json_error(id, -32602, "Invalid tools/call arguments");
             args_json = choc::json::toString(params["arguments"], false);
         }
+        std::string progress_token;
+        if (params.hasObjectMember("_meta") && params["_meta"].isObject() &&
+            params["_meta"].hasObjectMember("progressToken") &&
+            (params["_meta"]["progressToken"].isString() ||
+             params["_meta"]["progressToken"].isInt32() ||
+             params["_meta"]["progressToken"].isInt64()))
+            progress_token = choc::json::toString(params["_meta"]["progressToken"], false);
 
         // Per-tool feature detection. If the tool declares a min_sdk floor
         // and the project pins an older SDK, return a structured error result
@@ -637,7 +694,9 @@ static std::string handle_request_raw(const std::string& json) {
             if (!inspector_arguments)
                 return json_result(id, inspector_error_payload(parse_error));
         }
-        if (name == "pulp_inspect_profiles") {
+        if (pulp_mcp::is_control_mcp_tool(name)) {
+            result = pulp_mcp::handle_control_mcp_tool(name, args_json, progress_token);
+        } else if (name == "pulp_inspect_profiles") {
             result = inspector_profiles_payload();
         } else if (name == "pulp_compat")
             result = handle_compat();
@@ -848,6 +907,24 @@ static std::string handle_request_raw(const std::string& json) {
 // ── Main: stdio JSON-RPC transport ───────────────────────────────────────────
 
 int pulp_mcp::server::run(int argc, char* argv[]) {
+    if (argc > 0 && argv != nullptr && argv[0] != nullptr) {
+        pulp_mcp::configure_control_mcp_executable(argv[0]);
+#if PULP_MCP_ENABLE_INSPECTOR_CLIENT
+        g_trace_session_opener = std::shared_ptr<pulp::inspect::InspectorControlSessionOpener>(
+            pulp::inspect::make_installed_inspector_control_session_opener({}));
+#endif
+    }
+    std::mutex output_mutex;
+    std::atomic_bool content_length_mode{false};
+    pulp_mcp::set_control_mcp_notification_sink(
+        [&output_mutex, &content_length_mode](std::string notification) {
+        std::lock_guard lock(output_mutex);
+        if (content_length_mode.load())
+            std::cout << "Content-Length: " << notification.size() << "\r\n\r\n" << notification;
+        else
+            std::cout << notification << "\n";
+        std::cout.flush();
+    });
     // Flag-only invocations short-circuit the JSON-RPC loop so the
     // release-CLI smoke gate and `pulp doctor` can probe the binary
     // without speaking MCP framing. Keep this list narrow — anything
@@ -878,6 +955,81 @@ int pulp_mcp::server::run(int argc, char* argv[]) {
     // newline-stripping contract lives inside `handle_request` itself,
     // so callers here just pass through.
 
+    std::vector<std::future<void>> cancellation_requests;
+    std::mutex request_mutex;
+    std::condition_variable request_condition;
+    std::deque<std::pair<std::string, bool>> requests;
+    bool input_finished = false;
+    const auto write_response = [&output_mutex](std::string response,
+                                                 bool content_length_framed) {
+        if (response.empty())
+            return;
+        std::lock_guard lock(output_mutex);
+        if (content_length_framed)
+            std::cout << "Content-Length: " << response.size() << "\r\n\r\n" << response;
+        else
+            std::cout << response << "\n";
+        std::cout.flush();
+    };
+    std::thread request_worker([&] {
+        while (true) {
+            std::pair<std::string, bool> request;
+            {
+                std::unique_lock lock(request_mutex);
+                request_condition.wait(lock, [&] { return input_finished || !requests.empty(); });
+                if (requests.empty())
+                    return;
+                request = std::move(requests.front());
+                requests.pop_front();
+            }
+            write_response(handle_request(request.first), request.second);
+        }
+    });
+    const auto is_cancellation = [](std::string_view body) {
+        try {
+            const auto request = choc::json::parse(body);
+            return request.isObject() && request.hasObjectMember("method") &&
+                   request["method"].isString() && request["method"].getString() == "tools/call" &&
+                   request.hasObjectMember("params") && request["params"].isObject() &&
+                   request["params"].hasObjectMember("name") &&
+                   request["params"]["name"].isString() &&
+                   request["params"]["name"].getString() == "pulp_control_cancel";
+        } catch (...) {
+            return false;
+        }
+    };
+    const auto dispatch = [&](std::string body, bool content_length_framed) {
+        if (!is_cancellation(body)) {
+            {
+                std::lock_guard lock(request_mutex);
+                if (requests.size() >= 64) {
+                    auto id = extract_raw(body, "id");
+                    write_response(json_error(id.empty() ? "null" : id, -32001,
+                                              "MCP request queue is full"),
+                                   content_length_framed);
+                    return;
+                }
+                requests.emplace_back(std::move(body), content_length_framed);
+            }
+            request_condition.notify_one();
+            return;
+        }
+        std::erase_if(cancellation_requests, [](std::future<void>& request) {
+            if (request.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+                return false;
+            request.get();
+            return true;
+        });
+        if (cancellation_requests.size() >= 64) {
+            cancellation_requests.front().get();
+            cancellation_requests.erase(cancellation_requests.begin());
+        }
+        cancellation_requests.emplace_back(std::async(
+            std::launch::async, [body = std::move(body), content_length_framed, &write_response] {
+                write_response(handle_request(body), content_length_framed);
+            }));
+    };
+
     std::string line;
     while (std::getline(std::cin, line)) {
         if (line.empty())
@@ -885,27 +1037,30 @@ int pulp_mcp::server::run(int argc, char* argv[]) {
 
         // MCP uses Content-Length header framing
         if (line.find("Content-Length:") == 0) {
+            content_length_mode.store(true);
             int length = std::stoi(line.substr(15));
             std::getline(std::cin, line); // empty line
             std::string body(length, '\0');
             std::cin.read(body.data(), length);
 
-            auto response = handle_request(body);
-            if (!response.empty()) {
-                std::cout << "Content-Length: " << response.size() << "\r\n\r\n" << response;
-                std::cout.flush();
-            }
+            dispatch(std::move(body), true);
             continue;
         }
 
         // Also handle bare JSON (for simpler testing AND the
         // newline-delimited MCP stdio transport that Claude Code uses).
-        auto response = handle_request(line);
-        if (!response.empty()) {
-            std::cout << response << "\n";
-            std::cout.flush();
-        }
+        dispatch(line, false);
     }
+
+    {
+        std::lock_guard lock(request_mutex);
+        input_finished = true;
+    }
+    request_condition.notify_one();
+    request_worker.join();
+    for (auto& request : cancellation_requests)
+        request.get();
+    pulp_mcp::set_control_mcp_notification_sink({});
 
     return 0;
 }

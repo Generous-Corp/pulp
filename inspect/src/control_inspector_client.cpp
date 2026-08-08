@@ -1,5 +1,7 @@
 #include <pulp/inspect/control_inspector_client.hpp>
 
+#include <pulp/inspect/control_carrier.hpp>
+#include <pulp/inspect/control_client_connection.hpp>
 #include <pulp/inspect/control_manifest.hpp>
 #include <pulp/runtime/crypto.hpp>
 
@@ -7,9 +9,15 @@
 
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
 #include <limits>
 #include <string_view>
 #include <utility>
+#include <vector>
+
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
 
 namespace pulp::inspect {
 namespace {
@@ -88,11 +96,154 @@ std::int64_t deadline_from(std::chrono::milliseconds timeout) {
     return now + timeout.count();
 }
 
+std::optional<std::string> object_string(const choc::value::Value& object,
+                                         std::string_view field) {
+    const auto key = std::string(field);
+    if (!object.isObject() || !object.hasObjectMember(key) || !object[key].isString() ||
+        object[key].getString().empty())
+        return std::nullopt;
+    return std::string(object[key].getString());
+}
+
+std::optional<choc::value::Value> parse_object(std::string_view json) {
+    try {
+        auto value = choc::json::parse(json);
+        if (value.isObject())
+            return value;
+    } catch (...) {
+    }
+    return std::nullopt;
+}
+
+std::filesystem::path resolve_installed_broker(const std::filesystem::path& executable) {
+    auto resolved_executable = executable;
+#if defined(__APPLE__)
+    if (resolved_executable.empty() || !resolved_executable.is_absolute()) {
+        std::uint32_t size = 0;
+        (void)_NSGetExecutablePath(nullptr, &size);
+        std::vector<char> buffer(size);
+        if (size > 0 && _NSGetExecutablePath(buffer.data(), &size) == 0)
+            resolved_executable = std::filesystem::path(buffer.data());
+    }
+#endif
+    if (resolved_executable.empty())
+        return {};
+    std::error_code resolved_error;
+    resolved_executable = std::filesystem::weakly_canonical(resolved_executable, resolved_error);
+    if (resolved_error)
+        return {};
+    const auto directory = resolved_executable.parent_path();
+    const std::vector<std::filesystem::path> candidates{
+        directory / "pulp-control-broker",
+        directory.parent_path() / "libexec" / "pulp" / "pulp-control-broker",
+        directory.parent_path().parent_path() / "inspect" / "pulp-control-broker",
+    };
+    for (const auto& candidate : candidates) {
+        std::error_code error;
+        if (!std::filesystem::is_regular_file(candidate, error))
+            continue;
+        const auto canonical = std::filesystem::weakly_canonical(candidate, error);
+        if (!error)
+            return canonical;
+    }
+    return {};
+}
+
+class InstalledInspectorControlSessionOpener final : public InspectorControlSessionOpener {
+  public:
+    InstalledInspectorControlSessionOpener(std::filesystem::path executable,
+                                           std::optional<std::string> instance_id,
+                                           std::string profile)
+        : executable_(std::move(executable)), instance_id_(std::move(instance_id)),
+          profile_(std::move(profile)) {}
+
+    std::optional<InspectorControlSession> open(std::chrono::milliseconds timeout) override {
+        const auto broker = resolve_installed_broker(executable_);
+        if (broker.empty())
+            return std::nullopt;
+        auto connection = std::make_unique<ControlClientConnection>(ControlClientConnectionConfig{
+            .endpoint_path = default_control_endpoint_path(),
+            .expected_broker_executable = broker,
+            .connect_timeout = timeout,
+        });
+        if (!connection->connect())
+            return std::nullopt;
+        const auto enrolled = connection->manage("enroll");
+        const auto enrollment = parse_object(enrolled.data_json);
+        const auto client_id = enrollment ? object_string(*enrollment, "client_id") : std::nullopt;
+        if (enrolled.status_id != "accepted" || !client_id)
+            return std::nullopt;
+
+        const auto inventory_result = connection->manage("instances");
+        const auto inventory = parse_object(inventory_result.data_json);
+        if (inventory_result.status_id != "completed" || !inventory ||
+            !inventory->hasObjectMember("instances") || !(*inventory)["instances"].isArray())
+            return std::nullopt;
+        std::optional<choc::value::Value> selected;
+        const auto instances = (*inventory)["instances"];
+        for (std::uint32_t index = 0; index < instances.size(); ++index) {
+            const auto candidate = choc::value::Value(instances[index]);
+            const auto id = object_string(candidate, "instance_id");
+            if (!id || (instance_id_ && *id != *instance_id_))
+                continue;
+            if (selected)
+                return std::nullopt;
+            selected = candidate;
+        }
+        if (!selected)
+            return std::nullopt;
+
+        const auto instance_id = object_string(*selected, "instance_id");
+        const auto registration_id = object_string(*selected, "registration_id");
+        const auto publication_id = object_string(*selected, "publication_id");
+        const auto session_id = object_string(*selected, "session_id");
+        if (!instance_id || !registration_id || !publication_id || !session_id)
+            return std::nullopt;
+        auto grant_params = choc::value::createObject("");
+        grant_params.addMember("instance_id", choc::value::createString(*instance_id));
+        grant_params.addMember("profile", choc::value::createString(profile_));
+        const auto granted = connection->manage(
+            "grant-request", choc::json::toString(grant_params, false));
+        const auto grant = parse_object(granted.data_json);
+        const auto grant_id = grant ? object_string(*grant, "grant_id") : std::nullopt;
+        if (granted.status_id != "granted" || !grant_id)
+            return std::nullopt;
+
+        return InspectorControlSession{
+            .transport = std::move(connection),
+            .client_id = ControlClientId{*client_id},
+            .registration_id = ControlRegistrationId{*registration_id},
+            .grant_id = ControlGrantId{*grant_id},
+            .instance_generation = *publication_id,
+            .target = {*session_id, *instance_id, *publication_id},
+        };
+    }
+
+  private:
+    std::filesystem::path executable_;
+    std::optional<std::string> instance_id_;
+    std::string profile_;
+};
+
 InspectorMessage invalid_response(std::string explanation, bool may_have_applied = true) {
     return client_error(std::move(explanation), "invalid_control_response", may_have_applied);
 }
 
 } // namespace
+
+std::filesystem::path
+installed_control_broker_executable(const std::filesystem::path& client_executable) {
+    return resolve_installed_broker(client_executable);
+}
+
+std::unique_ptr<InspectorControlSessionOpener>
+make_installed_inspector_control_session_opener(
+    std::filesystem::path client_executable,
+    std::optional<std::string> exact_instance_id,
+    std::string profile) {
+    return std::make_unique<InstalledInspectorControlSessionOpener>(
+        std::move(client_executable), std::move(exact_instance_id), std::move(profile));
+}
 
 InspectorClientResult request_control_inspector(std::string method, std::string params_json,
                                                 std::chrono::milliseconds timeout) {

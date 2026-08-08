@@ -493,7 +493,8 @@ TEST_CASE("MCP protocol handles initialize ping notification and unknown methods
     auto initialize = handle_request(R"JSON({"jsonrpc":"2.0","id":1,"method":"initialize"})JSON");
     require_contains(initialize, R"JSON("id":1)JSON");
     require_contains(initialize, R"JSON("protocolVersion":"2024-11-05")JSON");
-    require_contains(initialize, R"JSON("capabilities":{"tools":{}})JSON");
+    require_contains(initialize,
+                     R"JSON("capabilities":{"tools":{},"resources":{"subscribe":false,"listChanged":false}})JSON");
     // serverInfo.version now tracks PROJECT_VERSION (via
     // tools/mcp/pulp_mcp_version.h.in). Hard-coding "0.1.0" caused
     // every CLI release to look identical from the plugin side.

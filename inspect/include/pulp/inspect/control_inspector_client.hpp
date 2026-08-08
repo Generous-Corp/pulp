@@ -6,6 +6,7 @@
 #include <pulp/inspect/control_identity.hpp>
 
 #include <chrono>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -36,6 +37,23 @@ class InspectorControlSessionOpener {
 
     virtual std::optional<InspectorControlSession> open(std::chrono::milliseconds timeout) = 0;
 };
+
+/// Resolve the peer-verification anchor for a broker installed beside a CLI or
+/// MCP client. Returns empty rather than trusting a path that cannot be
+/// canonicalized and verified.
+std::filesystem::path
+installed_control_broker_executable(const std::filesystem::path& client_executable);
+
+/// Build the installed-process opener used by CLI and MCP compatibility
+/// adapters. The opener authenticates the sibling broker, enrolls a client,
+/// requires one unambiguous live instance unless an exact instance is given,
+/// and asks the broker for the named profile. Broker consent remains the only
+/// authority source.
+std::unique_ptr<InspectorControlSessionOpener>
+make_installed_inspector_control_session_opener(
+    std::filesystem::path client_executable,
+    std::optional<std::string> exact_instance_id = std::nullopt,
+    std::string profile = "develop");
 
 /// Execute one already-supported trace Inspector method through the canonical
 /// capability-control carrier. Only Trace.startSession and Trace.stopSession

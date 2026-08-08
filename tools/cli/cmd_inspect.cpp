@@ -151,7 +151,9 @@ int cmd_inspect(const std::vector<std::string>& args) {
                          "Trace.stopSession through canonical control\n";
             return 2;
         }
-        const auto result = request_control_inspector(command, params, std::chrono::seconds(3));
+        auto opener = make_installed_inspector_control_session_opener(current_executable_path());
+        const auto result = request_control_inspector(*opener, command, params,
+                                                      std::chrono::seconds(3));
         if (!result.succeeded()) {
             print_error(result.response);
             return 1;
