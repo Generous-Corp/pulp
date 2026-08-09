@@ -190,12 +190,13 @@ All signal processors live in the `signal` module. Each is a standalone, statele
 | Versioned modal-spec JSON loading and validation | usable | [signal](modules.md#signal) | modal specification fixtures |
 | Circuit-derived bridged-T resonator | usable | [signal](modules.md#signal) | |
 | Explicit frequency/Q resonator bank | usable | [signal](modules.md#signal) | Processor-composition primitive; no standalone Forge node |
+| Race-free spectral delay matrix | usable | [signal](modules.md#signal) | Processor-composition primitive; frame-boundary table publication |
 | Band-limited square-oscillator bank | usable | [signal](modules.md#signal) | |
 
 Key headers: all under `pulp/signal/` -- e.g., `pulp/signal/compressor.hpp`,
 `pulp/signal/modal_bank.hpp`, `pulp/signal/modal_spec.hpp`,
 `pulp/signal/bridged_t_resonator.hpp`, `pulp/signal/explicit_q_resonator_bank.hpp`,
-`pulp/signal/osc/va.hpp`
+`pulp/signal/spectral_delay_matrix.hpp`, `pulp/signal/osc/va.hpp`
 
 Oscillators live in `pulp/signal/osc/`: a phase accumulator, the polyBLEP/BLAMP
 kernels, and the virtual-analog shapes built from them, with hard sync and
