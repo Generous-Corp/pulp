@@ -1176,6 +1176,10 @@ commands:
       - name: start
         summary: Begin trace capture through the canonical broker-authorized control client.
         args:
+          - name: --instance
+            kind: option
+            required: false
+            description: Exact broker-owned live instance ID; omission preserves fail-closed unambiguous selection
           - name: --categories
             kind: option
             required: false
@@ -1186,6 +1190,11 @@ commands:
             description: In-process ring size in mebibytes (default 80; accepted range 1 through 512). The host owns the flushed trace destination.
       - name: stop
         summary: Flush the broker-authorized trace session and print the `.pftrace` path through canonical control
+        args:
+          - name: --instance
+            kind: option
+            required: false
+            description: Exact broker-owned live instance ID; omission preserves fail-closed unambiguous selection
       - name: query
         summary: Run SQL offline against a `.pftrace` with required `--trace`.
         args:

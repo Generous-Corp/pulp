@@ -108,8 +108,10 @@ already running as the same OS user.
 
 `pulp control` and the generated `pulp_control_*` MCP family are the general
 typed clients. Trace lifecycle is a narrow facade over the same client:
-`pulp trace start`/`stop` and `pulp_trace_start`/`stop` accept no raw host/port
-or legacy publication selector and have no legacy Inspector fallback. Offline
+`pulp trace start`/`stop` accept an optional exact broker-owned `--instance ID`;
+when omitted, the canonical opener retains its fail-closed unambiguous-selection
+behavior. They and `pulp_trace_start`/`stop` accept no raw host/port or legacy
+publication selector and have no legacy Inspector fallback. Offline
 `trace query --trace`, `doctor`, `fetch`, and `open` do not require a live
 target.
 

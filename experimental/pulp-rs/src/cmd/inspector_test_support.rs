@@ -9,7 +9,7 @@ pub(crate) fn s(strs: &[&str]) -> Vec<String> {
 /// responses. Lets us exercise `dispatch` without a real `pulp-cpp` binary.
 pub(crate) struct RecordingTalker {
     responses: std::cell::RefCell<Vec<String>>,
-    pub(crate) calls: std::cell::RefCell<Vec<(String, String)>>,
+    pub(crate) calls: std::cell::RefCell<Vec<(String, String, Option<String>)>>,
 }
 
 impl RecordingTalker {
@@ -20,10 +20,12 @@ impl RecordingTalker {
         }
     }
 
-    fn record_call(&self, method: &str, params: &str) -> Result<String> {
-        self.calls
-            .borrow_mut()
-            .push((method.to_owned(), params.to_owned()));
+    fn record_call(&self, method: &str, params: &str, instance_id: Option<&str>) -> Result<String> {
+        self.calls.borrow_mut().push((
+            method.to_owned(),
+            params.to_owned(),
+            instance_id.map(str::to_owned),
+        ));
         let mut responses = self.responses.borrow_mut();
         if responses.is_empty() {
             Ok("{}".to_owned())
@@ -34,7 +36,7 @@ impl RecordingTalker {
 }
 
 impl InspectorTalker for RecordingTalker {
-    fn call(&self, method: &str, params: &str) -> Result<String> {
-        self.record_call(method, params)
+    fn call(&self, method: &str, params: &str, instance_id: Option<&str>) -> Result<String> {
+        self.record_call(method, params, instance_id)
     }
 }

@@ -9,6 +9,7 @@
 #include <chrono>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -60,6 +61,7 @@ int cmd_inspect(const std::vector<std::string>& args) {
     std::string verb;
     std::string command;
     std::string params = "{}";
+    std::string instance_id;
     bool params_provided = false;
     bool json_output = false;
 
@@ -116,6 +118,9 @@ int cmd_inspect(const std::vector<std::string>& args) {
             if (!require_arg_value(args, index, "--params", params))
                 return 2;
             params_provided = true;
+        } else if (arg == "--instance") {
+            if (!require_arg_value(args, index, "--instance", instance_id))
+                return 2;
         } else if (arg == "--json") {
             json_output = true;
         } else {
@@ -136,7 +141,9 @@ int cmd_inspect(const std::vector<std::string>& args) {
                          "Trace.stopSession through canonical control\n";
             return 2;
         }
-        auto opener = make_installed_inspector_control_session_opener(current_executable_path());
+        auto opener = make_installed_inspector_control_session_opener(
+            current_executable_path(), instance_id.empty() ? std::nullopt
+                                                           : std::optional{instance_id});
         const auto result = request_control_inspector(*opener, command, params,
                                                       std::chrono::seconds(3));
         if (!result.succeeded()) {
@@ -149,6 +156,10 @@ int cmd_inspect(const std::vector<std::string>& args) {
 
     if (params_provided) {
         std::cerr << "Error: --params requires --command\n";
+        return 2;
+    }
+    if (!instance_id.empty()) {
+        std::cerr << "Error: --instance requires the private canonical Trace bridge\n";
         return 2;
     }
     if (verb.empty()) {

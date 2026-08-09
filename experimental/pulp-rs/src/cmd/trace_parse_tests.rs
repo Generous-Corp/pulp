@@ -31,6 +31,37 @@ fn legacy_authority_selectors_are_unknown_arguments() {
 }
 
 #[test]
+fn exact_instance_is_lifecycle_only() {
+    let (start, _) = parse(&s(&["start", "--instance", "instance-a"])).unwrap();
+    let Sub::Start(start) = start else {
+        panic!("expected start")
+    };
+    assert_eq!(start.instance_id.as_deref(), Some("instance-a"));
+
+    let (stop, _) = parse(&s(&["stop", "--instance", "instance-a"])).unwrap();
+    let Sub::Stop(stop) = stop else {
+        panic!("expected stop")
+    };
+    assert_eq!(stop.instance_id.as_deref(), Some("instance-a"));
+
+    for args in [
+        s(&[
+            "query",
+            "SELECT 1",
+            "--trace",
+            "/tmp/a.pftrace",
+            "--instance",
+            "instance-a",
+        ]),
+        s(&["doctor", "--instance", "instance-a"]),
+        s(&["fetch", "--instance", "instance-a"]),
+        s(&["open", "/tmp/a.pftrace", "--instance", "instance-a"]),
+    ] {
+        assert!(parse(&args).is_err());
+    }
+}
+
+#[test]
 fn removed_live_verbs_are_unknown() {
     for verb in [
         "snapshot",
@@ -109,7 +140,10 @@ fn control_calls_are_exactly_start_and_stop() {
             .0,
         "Trace.startSession"
     );
-    assert_eq!(to_control_call(&Sub::Stop).unwrap().0, "Trace.stopSession");
+    assert_eq!(
+        to_control_call(&Sub::Stop(StopArgs::default())).unwrap().0,
+        "Trace.stopSession"
+    );
     assert!(to_control_call(&Sub::Doctor).is_none());
     assert!(to_control_call(&Sub::Fetch).is_none());
     assert!(to_control_call(&Sub::Help).is_none());
@@ -119,11 +153,13 @@ fn control_calls_are_exactly_start_and_stop() {
 fn build_start_params_includes_only_set_fields() {
     assert_eq!(build_start_params(&StartArgs::default()), "{}");
     let params = build_start_params(&StartArgs {
+        instance_id: Some("instance-a".to_owned()),
         categories: vec!["dsp".to_owned(), "render".to_owned()],
         ring_mb: Some(64),
     });
     assert!(params.contains("\"categories\":[\"dsp\",\"render\"]"));
     assert!(params.contains("\"ring_mb\":64"));
+    assert!(!params.contains("instance-a"));
 }
 
 #[test]

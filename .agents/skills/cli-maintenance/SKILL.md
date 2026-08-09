@@ -352,7 +352,10 @@ will auto-detect the new coverage; remove the baseline entry in the same PR.
 `pulp_inspect_profiles` is its compatibility alias through Pulp 0.800.0 on
 2026-10-01. The unrelated in-process `pulp_inspect_pending_requests` queue
 reader remains. Canonical trace lifecycle uses `pulp_trace_start` /
-`pulp_trace_stop`. Do not add discovery, live
+`pulp_trace_stop`. Public `pulp trace start` / `stop` may pass an exact
+broker-owned `--instance ID` through the private C++ compatibility bridge; it
+must not enter the trace method params, and offline trace verbs must reject it.
+Do not add discovery, live
 capability/doctor, generic inspector RPC, mutation, evaluation, screenshot,
 audio, DOM, parameter, or Motion wrapper tools. Authorized live operations must
 use a canonical control capability with an explicit schema and receipt.

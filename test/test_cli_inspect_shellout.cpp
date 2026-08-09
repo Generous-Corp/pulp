@@ -99,13 +99,19 @@ TEST_CASE("pulp inspect rejects retired authority and arbitrary commands",
     }
 
     for (const char* selector :
-         {"--host", "--port", "--session", "--instance", "--publication", "--output"}) {
+         {"--host", "--port", "--session", "--publication", "--output"}) {
         const auto result = run_pulp({"inspect", selector}, 10000);
         INFO(selector << ": " << result.stderr_output);
         REQUIRE_FALSE(result.timed_out);
         CHECK(result.exit_code == 2);
         CHECK(result.stderr_output.find("unknown inspect argument") != std::string::npos);
     }
+
+    const auto unpaired_instance = run_pulp({"inspect", "--instance", "instance-a"}, 10000);
+    REQUIRE_FALSE(unpaired_instance.timed_out);
+    CHECK(unpaired_instance.exit_code == 2);
+    CHECK(unpaired_instance.stderr_output.find("--instance requires the private canonical Trace bridge") !=
+          std::string::npos);
 
     const auto arbitrary = run_pulp(
         {"inspect", "--command", "Runtime.evaluate", "--params", "{}"}, 10000);
@@ -174,6 +180,14 @@ TEST_CASE("pulp inspect canonical Trace bridge is narrow and default denied",
         REQUIRE_FALSE(result.timed_out);
         CHECK(result.exit_code == 1);
         CHECK(result.stderr_output.find("control_session_unavailable") != std::string::npos);
+
+        const auto exact = run_pulp(
+            {"inspect", "--command", method, "--params", "{}", "--instance", "instance-a"},
+            10000);
+        INFO(method << " exact: " << exact.stderr_output);
+        REQUIRE_FALSE(exact.timed_out);
+        CHECK(exact.exit_code == 1);
+        CHECK(exact.stderr_output.find("unknown inspect argument") == std::string::npos);
     }
 }
 

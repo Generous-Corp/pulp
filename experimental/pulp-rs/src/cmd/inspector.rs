@@ -9,24 +9,34 @@ use crate::error::{CliError, Result};
 /// Trace lifecycle transport abstraction.
 pub trait InspectorTalker {
     /// Send one canonical capability-control request.
-    fn call(&self, method: &str, params_json: &str) -> Result<String>;
+    fn call(&self, method: &str, params_json: &str, instance_id: Option<&str>) -> Result<String>;
 }
 
 /// Invoke the C++ canonical control adapter. Target selection, authentication,
 /// consent, and grants remain entirely inside that adapter.
-pub(crate) fn call(command_name: &str, method: &str, params_json: &str) -> Result<String> {
+pub(crate) fn call(
+    command_name: &str,
+    method: &str,
+    params_json: &str,
+    instance_id: Option<&str>,
+) -> Result<String> {
     let bin = resolve_binary().ok_or_else(|| {
         CliError::Other(format!(
             "pulp {command_name}: could not find `pulp-cpp` or `pulp` binary \
              on PATH (needed for canonical capability control). Install / build the CLI first."
         ))
     })?;
-    let output = Command::new(&bin)
+    let mut command = Command::new(&bin);
+    command
         .arg("inspect")
         .arg("--command")
         .arg(method)
         .arg("--params")
-        .arg(params_json)
+        .arg(params_json);
+    if let Some(instance_id) = instance_id {
+        command.arg("--instance").arg(instance_id);
+    }
+    let output = command
         .env_remove("PULP_INSPECTOR_PORT")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

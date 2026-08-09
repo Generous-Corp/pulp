@@ -1410,15 +1410,17 @@ usage errors exit 2 and broker/policy/operation failures exit 1.
 
 The live trace lifecycle is experimental. `start` and `stop` use the canonical
 capability-control client: broker authentication, trusted-host enrollment,
-consent, grants, and receipts determine the target and authority. Rust exposes
-no alternate discovery, publication-selection, or raw host/port path.
+consent, grants, and receipts determine the target and authority. `start` and
+`stop` optionally accept `--instance ID` for exact broker-owned selection;
+omitting it preserves fail-closed unambiguous selection. Rust exposes no
+alternate discovery, publication-selection, or raw host/port path.
 Production remains default-denied when no authorized control session can be
 opened. Offline
 `query --trace`, `fetch`, `doctor`, and `open` are wholly offline.
 
 ```bash
-pulp trace start --categories dsp,render --ring-mb 128
-pulp trace stop                                      # → prints the .pftrace path
+pulp trace start --instance INSTANCE_ID --categories dsp,render --ring-mb 128
+pulp trace stop --instance INSTANCE_ID               # → prints the .pftrace path
 pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20" --trace /tmp/x.pftrace
 pulp trace doctor                                 # offline trace_processor readiness
 pulp trace fetch                                  # download the pinned trace_processor (zero-install offline query)
@@ -1427,8 +1429,9 @@ pulp trace open /tmp/x.pftrace                    # serve on loopback + open in 
 
 Options:
 
-- Legacy `--port` and `--session/--instance/--publication` selectors were
-  removed. The broker owns lifecycle target selection.
+- `--instance ID` on `start` and `stop` selects one exact broker-owned live
+  instance. Legacy `--port`, `--session`, and `--publication` selectors remain
+  removed; offline trace verbs reject `--instance`.
 - `--json` - emit machine-readable output; live start/stop return the canonical
   control response
 
@@ -1436,8 +1439,8 @@ Subcommands:
 
 | Subcommand | Inspector method | Description |
 |------------|------------------|-------------|
-| `start [--categories LIST] [--ring-mb 1..512]` | canonical `dev.pulp.trace/session-control@1` | Begin a broker-authorized session recording selected span categories into a bounded in-process ring. The host owns the flushed trace destination. |
-| `stop` | canonical `dev.pulp.trace/session-control@1` | Flush the broker-authorized session and print the `.pftrace` path. |
+| `start [--instance ID] [--categories LIST] [--ring-mb 1..512]` | canonical `dev.pulp.trace/session-control@1` | Begin a broker-authorized session recording selected span categories into a bounded in-process ring. The host owns the flushed trace destination. |
+| `stop [--instance ID]` | canonical `dev.pulp.trace/session-control@1` | Flush the broker-authorized session and print the `.pftrace` path. |
 | `query "<sql>" --trace FILE.pftrace` | `trace_processor` (offline) | Run SQL against a flushed `.pftrace` via `trace_processor_shell` (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`; see `pulp trace fetch` / `doctor`). Returns trace_processor's native table; `--format table` is the only explicit format. |
 | `doctor` | client-side | Report offline `trace_processor` readiness. |
 | `fetch` | client-side | Download + SHA-256-verify the pinned `trace_processor_shell` (Perfetto v57.2) into `$PULP_HOME` so offline `query --trace` works zero-install. Idempotent (no-op when present). `--json` emits `{version, platform, path, already_present}`. |

@@ -35,11 +35,11 @@ pub fn dispatch<T: InspectorTalker>(
     if matches!(sub, Sub::Doctor) {
         return run_doctor(flags.json, out);
     }
-    if matches!(sub, Sub::Start(_) | Sub::Stop) {
-        let Some((method, params)) = to_control_call(sub) else {
+    if matches!(sub, Sub::Start(_) | Sub::Stop(_)) {
+        let Some((method, params, instance_id)) = to_control_call(sub) else {
             unreachable!("trace lifecycle has a canonical method")
         };
-        let response = talker.call(method, &params)?;
+        let response = talker.call(method, &params, instance_id)?;
         if flags.json {
             writeln!(out, "{}", response.trim_end()).map_err(io_err)?;
         } else {
@@ -56,7 +56,7 @@ fn write_pretty(out: &mut impl Write, sub: &Sub, response: &str) -> std::io::Res
     let trimmed = response.trim();
     let parsed = TraceResponse::parse(trimmed);
     match sub {
-        Sub::Start(_) => {
+        Sub::Start(start) => {
             if parsed.as_ref().and_then(|value| value.boolean("ok")) == Some(false) {
                 writeln!(out, "tracing did not start")?;
                 if let Some(message) = parsed.as_ref().and_then(|value| value.string("message")) {
@@ -72,9 +72,13 @@ fn write_pretty(out: &mut impl Write, sub: &Sub, response: &str) -> std::io::Res
                 writeln!(out, "tracing started")?;
                 writeln!(out, "  raw: {trimmed}")?;
             }
-            writeln!(out, "  stop with: pulp trace stop")?;
+            if let Some(instance_id) = &start.instance_id {
+                writeln!(out, "  stop with: pulp trace stop --instance {instance_id}")?;
+            } else {
+                writeln!(out, "  stop with: pulp trace stop")?;
+            }
         }
-        Sub::Stop => {
+        Sub::Stop(_) => {
             // The headline of `stop` is the `.pftrace` path — pull it
             // out so the user can hand it to ui.perfetto.dev.
             if let Some(path) = parsed.as_ref().and_then(|value| value.string("out_path")) {

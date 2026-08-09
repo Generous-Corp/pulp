@@ -11,8 +11,8 @@
 //!
 //! | `pulp trace <verb>`                    | Backend                |
 //! |----------------------------------------|------------------------|
-//! | `start [--categories …] [--ring-mb N]` | `Trace.startSession`   |
-//! | `stop`                                 | `Trace.stopSession`    |
+//! | `start [--instance ID] [--categories …] [--ring-mb N]` | `Trace.startSession` |
+//! | `stop [--instance ID]`                 | `Trace.stopSession`    |
 //! | `query "<SQL>" --trace FILE.pftrace`   | `trace_processor` (offline) |
 //! | `fetch`                                | pinned `trace_processor` download |
 //!
@@ -80,7 +80,7 @@ pub enum Sub {
     /// `pulp trace start [...]` — begin a Perfetto tracing session.
     Start(StartArgs),
     /// `pulp trace stop` — flush the session and print the `.pftrace`.
-    Stop,
+    Stop(StopArgs),
     /// `pulp trace query "<sql>" --trace <file.pftrace>`.
     Query(QueryArgs),
     /// `pulp trace doctor` — offline `trace_processor` readiness check.
@@ -105,12 +105,22 @@ pub struct GlobalFlags {
 /// `pulp trace start` flag set.
 #[derive(Debug, Clone, Default)]
 pub struct StartArgs {
+    /// `--instance ID` — exact broker-owned live instance. Omission preserves
+    /// the canonical opener's safe unambiguous-selection behavior.
+    pub instance_id: Option<String>,
     /// `--categories dsp,render,…` — the span categories to record.
     /// Empty means "let the canonical host pick its default taxonomy".
     pub categories: Vec<String>,
     /// `--ring-mb N` — in-process ring size in mebibytes. `None` means
     /// the host's default (80MB); accepted values are 1 through 512.
     pub ring_mb: Option<u32>,
+}
+
+/// `pulp trace stop` flag set.
+#[derive(Debug, Clone, Default)]
+pub struct StopArgs {
+    /// `--instance ID` — exact broker-owned live instance.
+    pub instance_id: Option<String>,
 }
 
 /// `pulp trace query` flag set.
@@ -157,7 +167,7 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
     match verb.as_str() {
         "help" | "--help" | "-h" => Ok((Sub::Help, globals)),
         "start" => parse_start(&rest[1..]).map(|s| (s, globals)),
-        "stop" => no_args("stop", &rest[1..]).map(|()| (Sub::Stop, globals)),
+        "stop" => parse_stop(&rest[1..]).map(|s| (s, globals)),
         "query" => parse_query(&rest[1..]).map(|s| (s, globals)),
         "doctor" => no_args("doctor", &rest[1..]).map(|()| (Sub::Doctor, globals)),
         "fetch" => no_args("fetch", &rest[1..]).map(|()| (Sub::Fetch, globals)),
@@ -192,6 +202,18 @@ fn parse_start(args: &[String]) -> Result<Sub> {
                     .map(str::to_owned)
                     .collect();
             }
+            "--instance" => {
+                i += 1;
+                let value = args
+                    .get(i)
+                    .ok_or_else(|| CliError::BadUsage("--instance requires a value".to_owned()))?;
+                if value.is_empty() {
+                    return Err(CliError::BadUsage(
+                        "--instance requires a non-empty value".to_owned(),
+                    ));
+                }
+                s.instance_id = Some(value.clone());
+            }
             "--out" => {
                 return Err(CliError::BadUsage(
                     "pulp trace start --out is unavailable: the controlled host owns \
@@ -223,6 +245,34 @@ fn parse_start(args: &[String]) -> Result<Sub> {
         i += 1;
     }
     Ok(Sub::Start(s))
+}
+
+fn parse_stop(args: &[String]) -> Result<Sub> {
+    let mut stop = StopArgs::default();
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--instance" => {
+                i += 1;
+                let value = args
+                    .get(i)
+                    .ok_or_else(|| CliError::BadUsage("--instance requires a value".to_owned()))?;
+                if value.is_empty() {
+                    return Err(CliError::BadUsage(
+                        "--instance requires a non-empty value".to_owned(),
+                    ));
+                }
+                stop.instance_id = Some(value.clone());
+            }
+            other => {
+                return Err(CliError::BadUsage(format!(
+                    "pulp trace stop: unknown argument `{other}`"
+                )));
+            }
+        }
+        i += 1;
+    }
+    Ok(Sub::Stop(stop))
 }
 
 fn parse_query(args: &[String]) -> Result<Sub> {
@@ -324,11 +374,19 @@ fn parse_open(args: &[String]) -> Result<Sub> {
 /// `(method, params_json)`. Pure function: easy to unit test without
 /// spawning anything.
 #[must_use]
-pub fn to_control_call(sub: &Sub) -> Option<(&'static str, String)> {
+pub fn to_control_call(sub: &Sub) -> Option<(&'static str, String, Option<&str>)> {
     match sub {
         Sub::Help => None,
-        Sub::Start(s) => Some(("Trace.startSession", build_start_params(s))),
-        Sub::Stop => Some(("Trace.stopSession", "{}".to_owned())),
+        Sub::Start(s) => Some((
+            "Trace.startSession",
+            build_start_params(s),
+            s.instance_id.as_deref(),
+        )),
+        Sub::Stop(s) => Some((
+            "Trace.stopSession",
+            "{}".to_owned(),
+            s.instance_id.as_deref(),
+        )),
         Sub::Query(_) | Sub::Doctor | Sub::Open(_) | Sub::Fetch => None,
     }
 }
@@ -382,8 +440,8 @@ pub use crate::cmd::inspector::InspectorTalker;
 pub struct SystemInspector;
 
 impl InspectorTalker for SystemInspector {
-    fn call(&self, method: &str, params_json: &str) -> Result<String> {
-        crate::cmd::inspector::call("trace", method, params_json)
+    fn call(&self, method: &str, params_json: &str, instance_id: Option<&str>) -> Result<String> {
+        crate::cmd::inspector::call("trace", method, params_json, instance_id)
     }
 }
 
@@ -396,7 +454,7 @@ pub(crate) fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(out, "Lifecycle verbs:")?;
     writeln!(
         out,
-        "  start [--categories dsp,render,…] [--ring-mb 1..512]"
+        "  start [--instance ID] [--categories dsp,render,…] [--ring-mb 1..512]"
     )?;
     writeln!(
         out,
@@ -404,7 +462,7 @@ pub(crate) fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     )?;
     writeln!(
         out,
-        "  stop                          Flush + print the .pftrace path (Trace.stopSession)"
+        "  stop [--instance ID]          Flush + print the .pftrace path (Trace.stopSession)"
     )?;
     writeln!(out)?;
     writeln!(out, "Offline analysis:")?;
@@ -441,6 +499,10 @@ pub(crate) fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(
         out,
         "Live capture requires a broker-authorized canonical control session."
+    )?;
+    writeln!(
+        out,
+        "Use --instance ID to select one exact broker-owned live instance."
     )?;
     writeln!(out, "After the broker grants trace session control:")?;
     writeln!(out, "  pulp trace start --categories dsp,render")?;
