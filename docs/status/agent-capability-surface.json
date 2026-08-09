@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 16,
+  "inventory_version": 17,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,12 +37,12 @@
     }
   ],
   "counts": {
-    "public_headers": 409,
-    "reviewed_headers": 108,
+    "public_headers": 410,
+    "reviewed_headers": 109,
     "legacy_unreviewed_headers": 301,
     "unsupported_headers": 1,
     "by_disposition": {
-      "capability_entrypoint": 66,
+      "capability_entrypoint": 67,
       "capability_support": 36,
       "infrastructure": 5,
       "legacy_unreviewed": 301,
@@ -74,8 +74,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 232,
-        "reviewed_headers": 70,
+        "public_headers": 233,
+        "reviewed_headers": 71,
         "legacy_unreviewed_headers": 162,
         "unsupported_headers": 1
       },
@@ -2938,6 +2938,17 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/nlms_adaptive_filter.hpp",
+      "fingerprint": "sha256:143749ae3e334aa928bd68333902f3b9e827edacd40b3123c595e1e797711711",
+      "include": "pulp/signal/nlms_adaptive_filter.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.nlms-adaptive-filter"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",

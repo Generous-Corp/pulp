@@ -48,6 +48,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/mid_side.hpp": "Pulp::signal",
     "pulp/signal/modulation_curve.hpp": "Pulp::signal",
     "pulp/signal/multi_channel_meter.hpp": "Pulp::signal",
+    "pulp/signal/nlms_adaptive_filter.hpp": "Pulp::signal",
     "pulp/signal/noise_tilt.hpp": "Pulp::signal",
     "pulp/signal/nonlinear_shaping.hpp": "Pulp::signal",
     "pulp/signal/nway_crossfade.hpp": "Pulp::signal",
