@@ -76,9 +76,9 @@ def matching_brace(text: str, opening: int) -> int:
     raise ValueError("unclosed class body")
 
 
-def public_declarations(text: str, cls: str) -> str:
+def public_declarations(text: str, cls: str, *, source_is_code: bool = False) -> str:
     """Return only top-level public class text, with method bodies blanked."""
-    source = code_only(text)
+    source = text if source_is_code else code_only(text)
     declaration = re.search(rf"\b(class|struct)\s+{re.escape(cls)}\b[^{{]*{{", source)
     if declaration is None:
         return ""
@@ -106,9 +106,9 @@ def public_declarations(text: str, cls: str) -> str:
     return "".join(out)
 
 
-def public_methods(text: str, cls: str):
+def public_methods(text: str, cls: str, *, source_is_code: bool = False):
     """Public methods of `cls`, in declaration order, as `name(args)`."""
-    src = public_declarations(text, cls)
+    src = public_declarations(text, cls, source_is_code=source_is_code)
     out = []
     for mm in re.finditer(
             r"^\s*(?:\[\[[^\]]*\]\]\s*)?(?:inline\s+|static\s+|constexpr\s+|virtual\s+)*"
@@ -136,14 +136,14 @@ def scan_headers():
                 continue
             path = os.path.join(root, fn)
             rel = os.path.relpath(path, SIGNAL)
-            text = open(path, errors="ignore").read()
+            text = code_only(open(path, errors="ignore").read())
             classes = []
             for m in re.finditer(r"^(?:template\s*<[^\n]*>\s*)?(?:class|struct)\s+(\w+T?)\b(?!\s*;)",
                                  text, re.M):
                 cls = m.group(1)
                 if cls.endswith("Params") or cls.startswith("_"):
                     continue
-                meth = public_methods(text, cls)
+                meth = public_methods(text, cls, source_is_code=True)
                 if meth:
                     classes.append({"class": cls, "methods": meth})
             if classes:
