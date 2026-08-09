@@ -165,7 +165,7 @@ def self_test() -> int:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from fetch_skia_for_release import MATRIX_TO_MANIFEST, expected_library_path
 
-    assert MATRIX_TO_MANIFEST["wasm"] == "wasm", MATRIX_TO_MANIFEST.get("wasm")
+    assert MATRIX_TO_MANIFEST["wasm"] == "wasm-wasm32", MATRIX_TO_MANIFEST.get("wasm")
     got = expected_library_path("wasm")
     want = Path("external/skia-build/build/wasm-gpu/lib/Release/libskia.a")
     assert got == want, f"expected_library_path('wasm') = {got}, want {want}"

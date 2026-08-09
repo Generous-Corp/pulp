@@ -3,7 +3,7 @@
 
 #if (defined(__linux__) || defined(_WIN32)) && UINTPTR_MAX > 0xffffffffULL
 
-// Skia m151 Linux and Windows prebuilts can reference Chromium BackupRefPtr and
+// Skia m151+ Linux and Windows prebuilts can reference Chromium BackupRefPtr and
 // PartitionAlloc support symbols even though the standalone bundle does not
 // ship PartitionAlloc. Pulp does not use Chromium PartitionAlloc, so these
 // definitions make Skia's raw_ptr use behave like ordinary pointer storage.

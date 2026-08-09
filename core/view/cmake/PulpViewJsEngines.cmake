@@ -91,9 +91,10 @@ if(PULP_JS_ENGINE STREQUAL "v8")
         # regardless of sibling-field order within the entry (a name→version text
         # bridge breaks when a braces-delimited field like "upstream": { ... } is
         # reordered ahead of "version"). The tag may carry an LKGR suffix (e.g.
-        # "v8-15.2.24-lkgr-<sha>" or the older bare "v8-15.1.27"); reduce it to the
-        # leading dotted-numeric run so the gate compares "15.2.24" against a
-        # runtime "15.2.24.0" (a startswith match) rather than the full tag.
+        # "v8-m152-15.2.124.7-<sha>", "v8-15.2.24-lkgr-<sha>", or the older
+        # bare "v8-15.1.27"); discard an optional milestone prefix and reduce
+        # it to the dotted-numeric run so the gate compares the runtime version
+        # rather than the full release tag.
         string(JSON _pulp_v8_dep_count ERROR_VARIABLE _pulp_v8_json_err
                LENGTH "${_pulp_v8_manifest_text}" dependencies)
         if(NOT _pulp_v8_json_err AND _pulp_v8_dep_count GREATER 0)
@@ -110,8 +111,8 @@ if(PULP_JS_ENGINE STREQUAL "v8")
                     string(JSON _pulp_v8_ver ERROR_VARIABLE _pulp_v8_verr
                            GET "${_pulp_v8_dep}" version)
                     if(NOT _pulp_v8_verr AND
-                       _pulp_v8_ver MATCHES "^v8-([0-9]+(\\.[0-9]+)*)")
-                        set(PULP_V8_EXPECTED_RUNTIME_VERSION "${CMAKE_MATCH_1}")
+                       _pulp_v8_ver MATCHES "^v8-(m[0-9]+-)?([0-9]+(\\.[0-9]+)*)")
+                        set(PULP_V8_EXPECTED_RUNTIME_VERSION "${CMAKE_MATCH_2}")
                     endif()
                     break()
                 endif()

@@ -337,7 +337,7 @@ if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
 
     set(SKIA_LIBRARIES ${_skia_all_libs})
 
-    # Skia m151 Linux prebuilts can reference Chromium BackupRefPtr /
+    # Skia m151+ Linux prebuilts can reference Chromium BackupRefPtr /
     # PartitionAlloc support symbols without shipping a matching
     # partition_alloc archive. If the archive has those unresolved symbols and
     # no Skia-side library defines them, link a tiny Pulp-owned compatibility
@@ -346,7 +346,7 @@ if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
     set(_pulp_skia_support_libraries "")
     set(_pulp_skia_needs_raw_ptr_compat FALSE)
     if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
-        # The m151 Windows archive has the same standalone-packaging gap as
+        # The m151+ Windows archive has the same standalone-packaging gap as
         # Linux. MSVC's linker reports the three missing support symbols at
         # final consumer link time, so include the no-PartitionAlloc shim.
         set(_pulp_skia_needs_raw_ptr_compat TRUE)

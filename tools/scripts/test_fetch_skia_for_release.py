@@ -99,6 +99,9 @@ class ExpectedLibraryPath(unittest.TestCase):
             str(p), "external/skia-build/build/win-gpu/lib/Release/skia.lib"
         )
 
+    def test_wasm_matrix_uses_manifest_asset_key(self):
+        self.assertEqual(fetch_skia.MATRIX_TO_MANIFEST["wasm"], "wasm-wasm32")
+
     def test_unknown(self):
         with self.assertRaises(SystemExit):
             fetch_skia.expected_library_path("haiku-ppc")
