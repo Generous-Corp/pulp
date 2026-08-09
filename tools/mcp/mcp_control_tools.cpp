@@ -334,12 +334,18 @@ class ControlMcpAdapter::Impl {
     }
 
     std::optional<Value> inventory(std::string& error,
-                                   std::chrono::milliseconds timeout = std::chrono::seconds(3)) {
+                                   std::chrono::milliseconds timeout = std::chrono::seconds(3),
+                                   const OperationDeadline* deadline = nullptr) {
         if (auto unavailable = ensure_session(timeout)) {
             error = *unavailable;
             return std::nullopt;
         }
-        const auto managed = session->manage("instances", "{}", timeout);
+        const auto inventory_timeout = deadline ? deadline->remaining() : timeout;
+        if (inventory_timeout <= std::chrono::milliseconds::zero()) {
+            error = error_payload("timeout", "the control operation timed out");
+            return std::nullopt;
+        }
+        const auto managed = session->manage("instances", "{}", inventory_timeout);
         if (managed.status_id != "completed") {
             if (is_terminal_session_status(managed.status_id))
                 mark_session_unhealthy();
@@ -356,8 +362,9 @@ class ControlMcpAdapter::Impl {
 
     std::optional<Value> exact_instance(std::string_view instance_id, std::string& error,
                                         std::chrono::milliseconds timeout =
-                                            std::chrono::seconds(3)) {
-        auto data = inventory(error, timeout);
+                                            std::chrono::seconds(3),
+                                        const OperationDeadline* deadline = nullptr) {
+        auto data = inventory(error, timeout, deadline);
         if (!data)
             return std::nullopt;
         std::optional<Value> match;
@@ -680,8 +687,9 @@ std::string ControlMcpAdapter::call_tool(std::string_view name, std::string_view
     };
     if (operation_deadline && remaining() <= std::chrono::milliseconds::zero())
         return error_payload("timeout", "the control operation timed out");
-    if (auto unavailable = impl_->ensure_session(remaining()))
-        return *unavailable;
+    if (!operation)
+        if (auto unavailable = impl_->ensure_session(remaining()))
+            return *unavailable;
 
     if (name == kInstancesTool) {
         std::string error;
@@ -749,7 +757,8 @@ std::string ControlMcpAdapter::call_tool(std::string_view name, std::string_view
     std::string error;
     if (operation_deadline && remaining() <= std::chrono::milliseconds::zero())
         return error_payload("timeout", "the control operation timed out");
-    auto item = impl_->exact_instance(*instance_id, error, remaining());
+    auto item = impl_->exact_instance(*instance_id, error, remaining(),
+                                      operation_deadline ? &*operation_deadline : nullptr);
     if (!item)
         return error;
 

@@ -332,6 +332,23 @@ TEST_CASE("control MCP stops when the shared operation deadline is exhausted",
     REQUIRE_FALSE(state->request.has_value());
 }
 
+TEST_CASE("control MCP cold session cannot reset the inventory budget",
+          "[mcp][control][timeout]") {
+    auto state = std::make_shared<FakeState>();
+    state->timeout_step_advance = std::chrono::milliseconds(100);
+    ControlMcpAdapter adapter(factory(state), {}, [state] { return state->timeout_clock; });
+
+    const auto result = adapter.call_tool(
+        "pulp_control_state_read",
+        R"({"instance_id":"instance-1","timeout_ms":100,"input":{"include_catalog":false,"include_sensitive":false}})");
+
+    REQUIRE(result.find("\"code\":\"timeout\"") != std::string::npos);
+    const std::vector<std::pair<std::string, std::chrono::milliseconds>> expected{
+        {"session", std::chrono::milliseconds(100)}};
+    REQUIRE(state->timeout_steps == expected);
+    REQUIRE_FALSE(state->request.has_value());
+}
+
 TEST_CASE("critical MCP operations require broker-owned single-use consent",
           "[mcp][control][consent]") {
     auto state = std::make_shared<FakeState>();
