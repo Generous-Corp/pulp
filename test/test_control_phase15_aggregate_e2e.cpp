@@ -446,6 +446,23 @@ TEST_CASE("Phase 15 aggregate exact-instance CLI MCP revocation and disconnect E
     CHECK(revoke_lines[1]["result"]["isError"].getWithDefault<bool>(false));
     CHECK(revoke_rpc.stdout_output.find("admission-denied") != std::string::npos);
 
+    // Normal one-shot MCP processes must not strand process-scoped durable
+    // clients. This exceeds the registry's 16-client bound while preserving
+    // the broker-durable CLI identity below.
+    for (int iteration = 0; iteration < 20; ++iteration) {
+        const auto probe = run_mcp(
+            mcp, root.runtime,
+            rpc_call(100 + iteration, "pulp_control_instances", "{}") + "\n");
+        INFO(iteration);
+        INFO(probe.stdout_output);
+        INFO(probe.stderr_output);
+        REQUIRE(probe.exit_code == 0);
+        const auto probe_lines = parse_lines(probe.stdout_output);
+        REQUIRE(probe_lines.size() == 1);
+        CHECK_FALSE(
+            probe_lines[0]["result"]["isError"].getWithDefault<bool>(false));
+    }
+
     const auto cli_grant = run_staged(
         cli, root.runtime,
         {"control", "grant-request", "--instance", first.instance_id, "--profile",

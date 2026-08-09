@@ -167,6 +167,17 @@ struct ControlClientResult {
     std::optional<ControlClientIdentity> client;
 };
 
+enum class ControlDurableClientLifetime : std::uint8_t {
+    Broker,
+    Process,
+};
+
+enum class ControlProcessLiveness : std::uint8_t {
+    Unknown,
+    Alive,
+    Dead,
+};
+
 struct ControlRegistrationRequest {
     ControlHostTier host_tier = ControlHostTier::Standalone;
     std::string session_id;
@@ -234,7 +245,15 @@ class ControlIdentityRegistry {
         std::string_view ticket_id,
         std::span<const std::uint8_t> secret,
         const VerifiedControlPeerIdentity& observed_peer,
-        std::string_view durable_principal = {});
+        std::string_view durable_principal = {},
+        ControlDurableClientLifetime durable_lifetime =
+            ControlDurableClientLifetime::Broker);
+    /// Removes process-scoped clients whose kernel process is gone or whose
+    /// reconnect lease expired. The broker owns grant/cancellation cleanup for
+    /// every returned identity.
+    std::vector<ControlClientId> reclaim_process_clients(
+        const std::function<ControlProcessLiveness(const ControlPeerEvidence&)>&
+            process_liveness);
     bool refresh_client(const ControlClientId& client_id,
                         const VerifiedControlPeerIdentity& peer);
     bool disconnect_client(const ControlClientId& client_id);

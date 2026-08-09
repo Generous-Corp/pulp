@@ -156,6 +156,44 @@ TEST_CASE("durable installed clients reauthenticate across process generations",
     CHECK_FALSE(resumed.client->peer_fingerprint == first_process.fingerprint());
 }
 
+TEST_CASE("process durable clients expire while broker durable clients persist",
+          "[inspect][control][identity][lifecycle][mcp]") {
+    auto now = std::chrono::steady_clock::time_point{};
+    ControlIdentityRegistryConfig config;
+    config.client_ttl = 5s;
+    ControlIdentityRegistry identities(config, {}, [&] { return now; });
+    const auto mcp = peer(ControlPeerRole::Client, 62, "mcp-process-start");
+    const auto cli = peer(ControlPeerRole::Client, 63, "cli-process-start");
+
+    auto mcp_ticket = identities.issue_bootstrap(mcp);
+    REQUIRE(mcp_ticket.ticket);
+    const auto mcp_client = identities.redeem_bootstrap(
+        mcp_ticket.ticket->ticket_id, mcp_ticket.ticket->secret.bytes(), mcp,
+        "installed-mcp-process", ControlDurableClientLifetime::Process);
+    REQUIRE(mcp_client.client);
+
+    auto cli_ticket = identities.issue_bootstrap(cli);
+    REQUIRE(cli_ticket.ticket);
+    const auto cli_client = identities.redeem_bootstrap(
+        cli_ticket.ticket->ticket_id, cli_ticket.ticket->secret.bytes(), cli,
+        "installed-cli-process", ControlDurableClientLifetime::Broker);
+    REQUIRE(cli_client.client);
+
+    now += 6s;
+    CHECK(identities
+              .reclaim_process_clients([](const ControlPeerEvidence&) {
+                  return ControlProcessLiveness::Alive;
+              })
+              .empty());
+    CHECK(identities.client(mcp_client.client->client_id));
+    const auto reclaimed = identities.reclaim_process_clients(
+        [](const ControlPeerEvidence&) { return ControlProcessLiveness::Unknown; });
+    REQUIRE(reclaimed.size() == 1);
+    CHECK(reclaimed[0] == mcp_client.client->client_id);
+    CHECK_FALSE(identities.client(mcp_client.client->client_id));
+    CHECK(identities.client(cli_client.client->client_id));
+}
+
 TEST_CASE("bootstrap and client expiry fail closed across broker restart",
           "[inspect][control][identity]") {
     auto now = std::chrono::steady_clock::time_point{};

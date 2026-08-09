@@ -512,9 +512,10 @@ struct ControlEndpoint::Impl {
             }
             const auto durable_principal = config.durable_client_principal
                                                ? config.durable_client_principal(*evidence)
-                                               : std::optional<std::string>{};
+                                               : std::optional<
+                                                     ControlEndpointConfig::DurableClientPrincipal>{};
             if (config.durable_client_principal &&
-                (!durable_principal || durable_principal->empty())) {
+                (!durable_principal || durable_principal->value.empty())) {
                 (void)reply("enrollment-denied", "{}",
                             "the broker could not derive a durable client principal");
                 return;
@@ -527,7 +528,12 @@ struct ControlEndpoint::Impl {
                 bootstrap.ticket
                     ? management_broker->redeem_bootstrap(bootstrap.ticket->ticket_id,
                                                           bootstrap.ticket->secret.bytes(), *peer,
-                                                          durable_principal.value_or(""))
+                                                          durable_principal
+                                                              ? durable_principal->value
+                                                              : std::string_view{},
+                                                          durable_principal
+                                                              ? durable_principal->lifetime
+                                                              : ControlDurableClientLifetime::Broker)
                     : ControlClientResult{};
             if (!client.client) {
                 (void)reply("enrollment-denied", "{}", "the broker rejected client identity");

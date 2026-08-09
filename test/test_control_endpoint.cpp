@@ -836,7 +836,10 @@ TEST_CASE("control endpoint enrolls an authenticated local client and returns br
                 },
             .durable_client_principal =
                 [](const ControlPeerEvidence&) {
-                    return std::optional<std::string>{"installed-cli-test-principal"};
+                    return std::optional{
+                        ControlEndpointConfig::DurableClientPrincipal{
+                            .value = "installed-cli-test-principal",
+                        }};
                 },
             .decide_consent =
                 [](const VerifiedControlPeerIdentity&, const ControlGrantRequest&) {

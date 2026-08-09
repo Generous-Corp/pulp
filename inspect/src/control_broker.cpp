@@ -111,6 +111,11 @@ bool receipt_result_matches(const ControlOperationDescriptor& operation,
 ControlBroker::ControlBroker(ControlBrokerConfig config,
                              std::shared_ptr<ControlSecurityAuditLog> audit_log, Clock clock)
     : audit_log_(audit_log ? std::move(audit_log) : std::make_shared<ControlSecurityAuditLog>()),
+      process_liveness_(config.process_liveness
+                            ? std::move(config.process_liveness)
+                            : [](const ControlPeerEvidence&) {
+                                  return ControlProcessLiveness::Unknown;
+                              }),
       identities_(std::move(config.identities), audit_log_, clock),
       grants_(identities_, audit_log_, std::move(config.grants), std::move(clock)),
       admission_policy_(std::move(config.admission)),
@@ -150,10 +155,21 @@ ControlBroker::issue_bootstrap(const VerifiedControlPeerIdentity& client_peer) {
 ControlClientResult
 ControlBroker::redeem_bootstrap(std::string_view ticket_id, std::span<const std::uint8_t> secret,
                                 const VerifiedControlPeerIdentity& client_peer,
-                                std::string_view durable_principal) {
-    std::lock_guard coordination_lock(coordination_mutex_);
-    auto result = identities_.redeem_bootstrap(ticket_id, secret, client_peer, durable_principal);
-    grants_.sweep_expired();
+                                std::string_view durable_principal,
+                                ControlDurableClientLifetime durable_lifetime) {
+    std::vector<ControlClientId> reclaimed;
+    ControlClientResult result;
+    {
+        std::lock_guard coordination_lock(coordination_mutex_);
+        reclaimed = identities_.reclaim_process_clients(process_liveness_);
+        for (const auto& client_id : reclaimed)
+            (void)grants_.revoke_client(client_id, "process-client-reclaimed");
+        result = identities_.redeem_bootstrap(ticket_id, secret, client_peer,
+                                              durable_principal, durable_lifetime);
+        grants_.sweep_expired();
+    }
+    for (const auto& client_id : reclaimed)
+        request_active_cancellation(client_id, {}, {}, "process-client-reclaimed");
     return result;
 }
 
@@ -910,35 +926,44 @@ std::optional<ControlGrant> ControlBroker::grant(const ControlGrantId& grant_id)
 }
 
 void ControlBroker::sweep_expired() {
-    std::lock_guard coordination_lock(coordination_mutex_);
-    identities_.sweep_expired();
-    grants_.sweep_expired();
-    if (!operation_store_ || !operation_store_->is_open())
-        return;
-    const auto now = wall_clock_unix_ms(wall_clock_);
-    for (const auto& receipt : operation_store_->receipts()) {
-        if (control_receipt_state_is_terminal(receipt.state))
-            continue;
-        const auto& binding = receipt.binding;
-        const auto client = identities_.client(binding.client_id);
-        const auto registration = identities_.registration(binding.registration_id);
-        const auto* operation =
-            resolve_control_operation(binding.operation_id, binding.operation_version);
-        const bool authority_live =
-            client && registration && operation &&
-            client->peer_fingerprint == binding.client_principal &&
-            registration->session_id == binding.session_id &&
-            registration->instance_id == binding.instance_id &&
-            registration->publication_id == binding.publication_id &&
-            registration->manifest_digest == binding.manifest_digest &&
-            grants_.is_granted(binding.grant_id, binding.client_id, binding.registration_id,
-                               operation->capability);
-        if (!authority_live || binding.deadline_unix_ms <= now) {
-            (void)operation_store_->request_cancellation(
-                receipt.receipt_id,
-                authority_live ? "operation-deadline-expired" : "operation-authority-expired");
+    std::vector<ControlClientId> reclaimed;
+    {
+        std::lock_guard coordination_lock(coordination_mutex_);
+        reclaimed = identities_.reclaim_process_clients(process_liveness_);
+        for (const auto& client_id : reclaimed)
+            (void)grants_.revoke_client(client_id, "process-client-reclaimed");
+        identities_.sweep_expired();
+        grants_.sweep_expired();
+        if (operation_store_ && operation_store_->is_open()) {
+            const auto now = wall_clock_unix_ms(wall_clock_);
+            for (const auto& receipt : operation_store_->receipts()) {
+                if (control_receipt_state_is_terminal(receipt.state))
+                    continue;
+                const auto& binding = receipt.binding;
+                const auto client = identities_.client(binding.client_id);
+                const auto registration = identities_.registration(binding.registration_id);
+                const auto* operation =
+                    resolve_control_operation(binding.operation_id, binding.operation_version);
+                const bool authority_live =
+                    client && registration && operation &&
+                    client->peer_fingerprint == binding.client_principal &&
+                    registration->session_id == binding.session_id &&
+                    registration->instance_id == binding.instance_id &&
+                    registration->publication_id == binding.publication_id &&
+                    registration->manifest_digest == binding.manifest_digest &&
+                    grants_.is_granted(binding.grant_id, binding.client_id,
+                                       binding.registration_id, operation->capability);
+                if (!authority_live || binding.deadline_unix_ms <= now) {
+                    (void)operation_store_->request_cancellation(
+                        receipt.receipt_id,
+                        authority_live ? "operation-deadline-expired"
+                                       : "operation-authority-expired");
+                }
+            }
         }
     }
+    for (const auto& client_id : reclaimed)
+        request_active_cancellation(client_id, {}, {}, "process-client-reclaimed");
 }
 
 void ControlBroker::audit_denial(std::string_view action,

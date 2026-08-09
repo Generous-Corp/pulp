@@ -30,4 +30,8 @@ std::optional<VerifiedControlPeerIdentity> verify_control_peer(
     return verifier.verify(std::move(*observed));
 }
 
+ControlProcessLiveness control_peer_process_liveness(const ControlPeerEvidence& evidence) {
+    return detail::platform_control_peer_process_liveness(evidence);
+}
+
 } // namespace pulp::inspect

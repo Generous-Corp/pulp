@@ -20,6 +20,11 @@ struct ControlBrokerConfig {
     /// coordination and must be bounded, non-blocking, and non-reentrant: it
     /// must not call this broker or any store owned by it.
     ControlOperationStore::WallClock wall_clock = [] { return std::chrono::system_clock::now(); };
+    /// Broker-owned process liveness. The daemon supplies the OS-backed
+    /// implementation; tests and unsupported compositions conservatively keep
+    /// process-scoped principals until their reconnect lease expires.
+    std::function<ControlProcessLiveness(const ControlPeerEvidence&)> process_liveness =
+        [](const ControlPeerEvidence&) { return ControlProcessLiveness::Unknown; };
 };
 
 struct ControlBrokerLifecycleResult {
@@ -56,7 +61,9 @@ class ControlBroker {
     ControlClientResult redeem_bootstrap(std::string_view ticket_id,
                                          std::span<const std::uint8_t> secret,
                                          const VerifiedControlPeerIdentity& client_peer,
-                                         std::string_view durable_principal = {});
+                                         std::string_view durable_principal = {},
+                                         ControlDurableClientLifetime durable_lifetime =
+                                             ControlDurableClientLifetime::Broker);
     bool refresh_client(const ControlClientId& client_id,
                         const VerifiedControlPeerIdentity& client_peer);
     ControlBrokerLifecycleResult disconnect_client(const ControlClientId& client_id,
@@ -161,6 +168,7 @@ class ControlBroker {
                                      const ControlGrantId& grant_id, std::string_view reason);
 
     std::shared_ptr<ControlSecurityAuditLog> audit_log_;
+    std::function<ControlProcessLiveness(const ControlPeerEvidence&)> process_liveness_;
     mutable std::mutex coordination_mutex_;
     ControlIdentityRegistry identities_;
     ControlGrantStore grants_;

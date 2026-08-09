@@ -8,6 +8,7 @@
 #include <pulp/inspect/control_carrier.hpp>
 #include <pulp/inspect/control_endpoint.hpp>
 #include <pulp/inspect/control_host_router.hpp>
+#include <pulp/inspect/control_peer.hpp>
 #include <pulp/inspect/control_service.hpp>
 #include <pulp/inspect/control_trusted_host_launcher.hpp>
 #include <pulp/runtime/crypto.hpp>
@@ -119,20 +120,11 @@ observe_current_broker(const std::filesystem::path& observer_endpoint,
             return std::nullopt;
         }
     }
-    const auto credentials = accepted->local_peer_credentials();
-    std::optional<ControlPeerEvidence> evidence;
-    if (credentials && credentials->process_id == ::getpid() &&
-        credentials->process_generation_id != 0) {
-        evidence = ControlPeerEvidence{
-            .role = ControlPeerRole::TrustedHostBridge,
-            .user_id = "uid:" + std::to_string(credentials->user_id),
-            .process_id = credentials->process_id,
-            .process_start_id =
-                "pidversion:" + std::to_string(credentials->process_generation_id),
-            .executable_identity = static_identity.executable_identity,
-            .publisher_id = static_identity.publisher_id,
-        };
-    }
+    auto evidence = observe_control_peer(*accepted, ControlPeerRole::TrustedHostBridge);
+    if (evidence && (evidence->process_id != ::getpid() ||
+                     evidence->executable_identity != static_identity.executable_identity ||
+                     evidence->publisher_id != static_identity.publisher_id))
+        evidence.reset();
     client.disconnect();
     accepted.reset();
     observer.stop();
@@ -397,6 +389,7 @@ struct ControlBrokerDaemon::Impl {
         broker_config.artifact_store = ControlArtifactStoreConfig{
             .root = state_directory / "artifacts",
         };
+        broker_config.process_liveness = control_peer_process_liveness;
         broker = std::make_unique<ControlBroker>(std::move(broker_config));
         if (!broker->operation_store_ready() || !broker->artifact_store_ready()) {
             reset();
@@ -506,7 +499,7 @@ struct ControlBrokerDaemon::Impl {
                         : std::function<bool(const ControlPeerEvidence&)>{},
                 .durable_client_principal =
                     daemon_identity
-                        ? std::function<std::optional<std::string>(
+                        ? std::function<std::optional<ControlEndpointConfig::DurableClientPrincipal>(
                               const ControlPeerEvidence&)>{[trusted_mcp_clients](
                                                                const ControlPeerEvidence& peer) {
                               const bool process_scoped = std::ranges::any_of(
@@ -537,11 +530,20 @@ struct ControlBrokerDaemon::Impl {
                                   canonical.push_back('\0');
                                   canonical.append(peer.process_start_id);
                               }
-                              return std::optional<std::string>{
-                                  std::string(process_scoped ? "installed-mcp-" : "installed-cli-") +
-                                  runtime::hex_encode(runtime::sha256(canonical))};
+                              return std::optional{
+                                  ControlEndpointConfig::DurableClientPrincipal{
+                                      .value =
+                                          std::string(process_scoped ? "installed-mcp-"
+                                                                     : "installed-cli-") +
+                                          runtime::hex_encode(runtime::sha256(canonical)),
+                                      .lifetime =
+                                          process_scoped
+                                              ? ControlDurableClientLifetime::Process
+                                              : ControlDurableClientLifetime::Broker,
+                                  }};
                           }}
-                        : std::function<std::optional<std::string>(
+                        : std::function<std::optional<
+                              ControlEndpointConfig::DurableClientPrincipal>(
                               const ControlPeerEvidence&)>{},
                 .decide_consent = config.decide_consent,
                 .trusted_hosts =

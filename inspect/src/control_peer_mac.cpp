@@ -3,8 +3,10 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <Security/Security.h>
 #include <libproc.h>
+#include <signal.h>
 #include <sys/proc.h>
 
+#include <cerrno>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -144,7 +146,9 @@ std::optional<ControlPeerEvidence> observe_signed_process(
     evidence.user_id = "uid:" + std::to_string(credentials.user_id);
     evidence.process_id = credentials.process_id;
     evidence.process_start_id =
-        "pidversion:" + std::to_string(credentials.process_generation_id);
+        "pidversion:" + std::to_string(credentials.process_generation_id) +
+        ":start:" + std::to_string(process.pbi_start_tvsec) + ":" +
+        std::to_string(process.pbi_start_tvusec);
     evidence.executable_identity = "signed:" + identifier + ":" + cdhash;
     evidence.publisher_id = team.empty() ? "adhoc:" + cdhash
                                          : "team:" + team;
@@ -157,6 +161,30 @@ std::optional<ControlPeerEvidence> observe_platform_control_peer(
     const runtime::LocalPeerCredentials& credentials,
     ControlPeerRole role) {
     return observe_signed_process(credentials, role);
+}
+
+ControlProcessLiveness platform_control_peer_process_liveness(
+    const ControlPeerEvidence& evidence) {
+    if (evidence.process_id <= 0 ||
+        evidence.process_id > std::numeric_limits<pid_t>::max())
+        return ControlProcessLiveness::Dead;
+    const auto pid = static_cast<pid_t>(evidence.process_id);
+    proc_bsdinfo process{};
+    if (::proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &process, sizeof(process)) !=
+        sizeof(process)) {
+        errno = 0;
+        if (::kill(pid, 0) != 0 && errno == ESRCH)
+            return ControlProcessLiveness::Dead;
+        return ControlProcessLiveness::Unknown;
+    }
+    if (process.pbi_pid != static_cast<std::uint32_t>(pid) || process.pbi_status == SZOMB)
+        return ControlProcessLiveness::Dead;
+    const auto suffix = ":start:" + std::to_string(process.pbi_start_tvsec) + ":" +
+                        std::to_string(process.pbi_start_tvusec);
+    if (evidence.process_start_id.find(":start:") == std::string::npos)
+        return ControlProcessLiveness::Unknown;
+    return evidence.process_start_id.ends_with(suffix) ? ControlProcessLiveness::Alive
+                                                       : ControlProcessLiveness::Dead;
 }
 
 } // namespace pulp::inspect::detail

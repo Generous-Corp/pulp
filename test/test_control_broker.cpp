@@ -586,6 +586,78 @@ TEST_CASE("expiry sweep removes identity-stale grants from capacity",
     CHECK(replacement.grant.has_value());
 }
 
+TEST_CASE("dead process principals are reclaimed with their grants",
+          "[inspect][control][broker][identity][lifecycle][mcp]") {
+    bool first_process_live = true;
+    ControlBrokerConfig config;
+    config.process_liveness = [&](const ControlPeerEvidence& evidence) {
+        return evidence.process_id != 451 || first_process_live
+                   ? ControlProcessLiveness::Alive
+                   : ControlProcessLiveness::Dead;
+    };
+    auto audit = std::make_shared<ControlSecurityAuditLog>();
+    ControlBroker broker{config, audit};
+    auto first_peer = std::move(*verify_peer(
+        ControlPeerRole::Client, 451, "mcp-process-a"));
+    auto second_peer = std::move(*verify_peer(
+        ControlPeerRole::Client, 452, "mcp-process-b"));
+    auto host_peer = std::move(*verify_peer(
+        ControlPeerRole::StandaloneHost, 453, "mcp-host"));
+
+    auto first_ticket = broker.issue_bootstrap(first_peer);
+    REQUIRE(first_ticket.ticket);
+    auto first = broker.redeem_bootstrap(
+        first_ticket.ticket->ticket_id, first_ticket.ticket->secret.bytes(), first_peer,
+        "installed-mcp-process-a", ControlDurableClientLifetime::Process);
+    REQUIRE(first.client);
+
+    // A second connection from the same live process resumes the identity and
+    // leaves its grants intact.
+    auto reconnect_ticket = broker.issue_bootstrap(first_peer);
+    REQUIRE(reconnect_ticket.ticket);
+    auto reconnect = broker.redeem_bootstrap(
+        reconnect_ticket.ticket->ticket_id, reconnect_ticket.ticket->secret.bytes(), first_peer,
+        "installed-mcp-process-a", ControlDurableClientLifetime::Process);
+    REQUIRE(reconnect.client);
+    CHECK(reconnect.client->client_id == first.client->client_id);
+
+    const auto registration = register_standalone(broker, host_peer, "mcp-reclaim");
+    auto grant = broker.issue_grant(
+        first_peer,
+        ControlGrantRequest{
+            first.client->client_id,
+            registration.registration_id,
+            {InspectorCapability::StateRead},
+            30min,
+        },
+        consent("mcp-reclaim-grant"));
+    REQUIRE(grant.grant);
+
+    first_process_live = false;
+    broker.sweep_expired();
+    CHECK_FALSE(broker.grant(grant.grant->grant_id));
+    CHECK_FALSE(broker.client(first.client->client_id));
+
+    auto second_ticket = broker.issue_bootstrap(second_peer);
+    REQUIRE(second_ticket.ticket);
+    auto second = broker.redeem_bootstrap(
+        second_ticket.ticket->ticket_id, second_ticket.ticket->secret.bytes(), second_peer,
+        "installed-mcp-process-b", ControlDurableClientLifetime::Process);
+    REQUIRE(second.client);
+
+    const auto events = audit->snapshot();
+    CHECK(std::ranges::any_of(events, [&](const auto& event) {
+        return event.action == "client.reclaim" &&
+               event.client_id == first.client->client_id.value &&
+               event.reason == "process-exited";
+    }));
+    CHECK(std::ranges::any_of(events, [&](const auto& event) {
+        return event.action == "grant.revoke-client" &&
+               event.grant_id == grant.grant->grant_id.value &&
+               event.outcome == ControlSecurityOutcome::Revoked;
+    }));
+}
+
 TEST_CASE("grant issue reclaims expired active capacity",
           "[inspect][control][broker][lifecycle][capacity]") {
     BlockingNthClock clock;

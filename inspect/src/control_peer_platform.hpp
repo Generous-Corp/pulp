@@ -10,5 +10,7 @@ namespace pulp::inspect::detail {
 std::optional<ControlPeerEvidence> observe_platform_control_peer(
     const runtime::LocalPeerCredentials& credentials,
     ControlPeerRole role);
+ControlProcessLiveness platform_control_peer_process_liveness(
+    const ControlPeerEvidence& evidence);
 
 } // namespace pulp::inspect::detail

@@ -26,4 +26,9 @@ std::optional<VerifiedControlPeerIdentity> verify_control_peer(
     const events::InterprocessConnection& connection,
     const ControlPeerExpectation& expectation);
 
+/// Conservatively reports whether the kernel process behind previously
+/// observed peer evidence is still live. PID reuse remains live until the
+/// process-scoped reconnect lease expires; it can never inherit the principal.
+ControlProcessLiveness control_peer_process_liveness(const ControlPeerEvidence& evidence);
+
 } // namespace pulp::inspect
