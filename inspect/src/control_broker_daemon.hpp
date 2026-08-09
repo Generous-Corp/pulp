@@ -1,11 +1,13 @@
 #pragma once
 
 #include <pulp/inspect/control_grants.hpp>
+#include <pulp/inspect/control_trusted_host_inventory.hpp>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace pulp::inspect {
 
@@ -15,6 +17,10 @@ struct ControlBrokerDaemonConfig {
     std::string sdk_version;
     std::filesystem::path executable_path;
     std::uint64_t process_generation = 0;
+    /// Exact broker-owned launch intents accepted from enrolled clients.
+    /// Empty disables remote host preparation. Executable, arguments, working
+    /// directory, and tier must all match one entry.
+    std::vector<ControlTrustedHostLaunchIntent> trusted_host_allowlist;
     std::function<ControlConsentDecision(const VerifiedControlPeerIdentity&,
                                          const ControlGrantRequest&)>
         decide_consent;

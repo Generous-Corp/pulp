@@ -126,6 +126,21 @@ bool private_snapshot_file(const fs::path& path, bool executable) {
 #endif
 }
 
+std::optional<std::pair<std::uint64_t, std::uint64_t>> directory_identity(
+    const fs::path& path) {
+#ifdef _WIN32
+    (void)path;
+    return std::nullopt;
+#else
+    struct stat status{};
+    if (::lstat(path.c_str(), &status) != 0 || !S_ISDIR(status.st_mode) ||
+        S_ISLNK(status.st_mode))
+        return std::nullopt;
+    return std::pair{static_cast<std::uint64_t>(status.st_dev),
+                     static_cast<std::uint64_t>(status.st_ino)};
+#endif
+}
+
 bool generation_directory_name(std::string_view name) {
     constexpr std::string_view prefix = "generation-";
     if (!name.starts_with(prefix) || name.size() == prefix.size())
@@ -460,12 +475,19 @@ struct ControlTrustedHostSnapshot::Impl {
     fs::path manifest;
     std::vector<std::string> arguments;
     fs::path working_directory;
+    int working_directory_descriptor = -1;
+    std::uint64_t working_directory_device = 0;
+    std::uint64_t working_directory_inode = 0;
     ControlRegistrationRequest registration;
     ControlTrustedHostStaticExpectation static_expectation;
     std::uint64_t generation = 0;
     std::chrono::steady_clock::time_point expiry;
 
     ~Impl() {
+#ifndef _WIN32
+        if (working_directory_descriptor >= 0)
+            ::close(working_directory_descriptor);
+#endif
         remove_snapshot_pair(directory, executable, manifest);
     }
 };
@@ -485,6 +507,21 @@ const std::vector<std::string>& ControlTrustedHostSnapshot::arguments() const {
 }
 const fs::path& ControlTrustedHostSnapshot::working_directory() const {
     return impl_->working_directory;
+}
+bool ControlTrustedHostSnapshot::working_directory_matches_policy() const {
+#ifdef _WIN32
+    return false;
+#else
+    struct stat status{};
+    return impl_->working_directory_descriptor >= 0 &&
+           ::fstat(impl_->working_directory_descriptor, &status) == 0 &&
+           S_ISDIR(status.st_mode) &&
+           static_cast<std::uint64_t>(status.st_dev) == impl_->working_directory_device &&
+           static_cast<std::uint64_t>(status.st_ino) == impl_->working_directory_inode;
+#endif
+}
+int ControlTrustedHostSnapshot::working_directory_descriptor() const {
+    return impl_->working_directory_descriptor;
 }
 const ControlRegistrationRequest& ControlTrustedHostSnapshot::registration() const {
     return impl_->registration;
@@ -556,7 +593,9 @@ ControlTrustedHostInventory::ControlTrustedHostInventory(ControlTrustedHostInven
 ControlTrustedHostInventory::~ControlTrustedHostInventory() = default;
 
 ControlTrustedHostInventoryPrepareResult
-ControlTrustedHostInventory::prepare(const ControlTrustedHostLaunchIntent& intent) {
+ControlTrustedHostInventory::prepare(
+    const ControlTrustedHostLaunchIntent& intent,
+    std::optional<ControlTrustedHostPreparationPolicy> policy) {
     if (!platform_supported())
         return {ControlTrustedHostInventoryStatus::PlatformUnavailable, std::nullopt};
     if (!impl_->ready)
@@ -565,6 +604,12 @@ ControlTrustedHostInventory::prepare(const ControlTrustedHostLaunchIntent& inten
         forbidden_artifact_path(intent.executable))
         return {ControlTrustedHostInventoryStatus::UnsupportedArtifact, std::nullopt};
     if (!valid_launch_intent(intent))
+        return {ControlTrustedHostInventoryStatus::InvalidRequest, std::nullopt};
+    const auto working_directory = directory_identity(intent.working_directory);
+    if (policy &&
+        (!working_directory ||
+         working_directory->first != policy->working_directory_device ||
+         working_directory->second != policy->working_directory_inode))
         return {ControlTrustedHostInventoryStatus::InvalidRequest, std::nullopt};
 
     if (!impl_->reserve_preparation())
@@ -662,6 +707,17 @@ ControlTrustedHostInventory::prepare(const ControlTrustedHostLaunchIntent& inten
         cleanup();
         return {ControlTrustedHostInventoryStatus::SignatureInvalid, std::nullopt};
     }
+    if (policy &&
+        (runtime::sha256_hex(snap_executable->data(), snap_executable->size()) !=
+             policy->executable_digest ||
+         runtime::sha256_hex(snap_manifest->data(), snap_manifest->size()) !=
+             policy->manifest_digest ||
+         static_identity->executable_identity !=
+             policy->static_expectation.executable_identity ||
+         static_identity->publisher_id != policy->static_expectation.publisher_id)) {
+        cleanup();
+        return {ControlTrustedHostInventoryStatus::InvalidRequest, std::nullopt};
+    }
     const auto signed_executable =
         detail::read_owner_private_file(final_executable, impl_->config.maximum_executable_bytes);
     const auto signed_manifest =
@@ -684,6 +740,42 @@ ControlTrustedHostInventory::prepare(const ControlTrustedHostLaunchIntent& inten
     snapshot->manifest = final_manifest;
     snapshot->arguments = intent.arguments;
     snapshot->working_directory = intent.working_directory;
+#ifdef _WIN32
+    cleanup();
+    return {ControlTrustedHostInventoryStatus::PlatformUnavailable, std::nullopt};
+#else
+    int working_directory_flags = O_RDONLY;
+#ifdef O_DIRECTORY
+    working_directory_flags |= O_DIRECTORY;
+#endif
+#ifdef O_NOFOLLOW
+    working_directory_flags |= O_NOFOLLOW;
+#endif
+#ifdef O_CLOEXEC
+    working_directory_flags |= O_CLOEXEC;
+#endif
+    const int working_directory_descriptor =
+        ::open(intent.working_directory.c_str(), working_directory_flags);
+    struct stat working_directory_status{};
+    if (working_directory_descriptor < 0 ||
+        ::fstat(working_directory_descriptor, &working_directory_status) != 0 ||
+        !S_ISDIR(working_directory_status.st_mode) ||
+        (policy &&
+         (static_cast<std::uint64_t>(working_directory_status.st_dev) !=
+              policy->working_directory_device ||
+          static_cast<std::uint64_t>(working_directory_status.st_ino) !=
+              policy->working_directory_inode))) {
+        if (working_directory_descriptor >= 0)
+            ::close(working_directory_descriptor);
+        cleanup();
+        return {ControlTrustedHostInventoryStatus::InvalidRequest, std::nullopt};
+    }
+    snapshot->working_directory_descriptor = working_directory_descriptor;
+    snapshot->working_directory_device =
+        static_cast<std::uint64_t>(working_directory_status.st_dev);
+    snapshot->working_directory_inode =
+        static_cast<std::uint64_t>(working_directory_status.st_ino);
+#endif
     snapshot->registration.host_tier = intent.host_tier;
     snapshot->registration.session_id = *session_id;
     snapshot->registration.instance_id = *instance_id;

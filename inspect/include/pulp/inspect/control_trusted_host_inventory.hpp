@@ -36,6 +36,8 @@ struct ControlTrustedHostLaunchIntent {
     std::vector<std::string> arguments;
     std::filesystem::path working_directory;
     ControlHostTier host_tier = ControlHostTier::Standalone;
+    friend bool operator==(const ControlTrustedHostLaunchIntent&,
+                           const ControlTrustedHostLaunchIntent&) = default;
 };
 
 struct ControlTrustedHostInventoryConfig {
@@ -65,6 +67,14 @@ struct ControlTrustedHostStaticExpectation {
     std::string publisher_id;
 };
 
+struct ControlTrustedHostPreparationPolicy {
+    std::string executable_digest;
+    std::string manifest_digest;
+    ControlTrustedHostStaticExpectation static_expectation;
+    std::uint64_t working_directory_device = 0;
+    std::uint64_t working_directory_inode = 0;
+};
+
 /// Immutable broker-owned launch material. The backing directory is removed
 /// when the last snapshot owner releases it; no admission credential is stored
 /// in that directory or encoded in its path.
@@ -79,6 +89,8 @@ class ControlTrustedHostSnapshot {
     const std::filesystem::path& executable() const;
     const std::vector<std::string>& arguments() const;
     const std::filesystem::path& working_directory() const;
+    bool working_directory_matches_policy() const;
+    int working_directory_descriptor() const;
     const ControlRegistrationRequest& registration() const;
     const ControlTrustedHostStaticExpectation& static_expectation() const;
     std::uint64_t broker_generation() const;
@@ -108,7 +120,9 @@ class ControlTrustedHostInventory {
 
     /// Raw snapshot preparation is available on macOS v1. Other platforms
     /// retain this API as a fail-closed seam for a future native verifier.
-    ControlTrustedHostInventoryPrepareResult prepare(const ControlTrustedHostLaunchIntent& intent);
+    ControlTrustedHostInventoryPrepareResult prepare(
+        const ControlTrustedHostLaunchIntent& intent,
+        std::optional<ControlTrustedHostPreparationPolicy> policy = std::nullopt);
     std::optional<ControlTrustedHostSnapshot> consume(std::string_view inventory_id);
     std::size_t sweep();
     std::size_t size() const;

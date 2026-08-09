@@ -274,6 +274,37 @@ bool roots_overlap(const std::filesystem::path& first, const std::filesystem::pa
     return path_is_at_or_below(first, second) || path_is_at_or_below(second, first);
 }
 
+std::optional<ControlTrustedHostPreparationPolicy>
+pin_trusted_host_policy(const ControlTrustedHostLaunchIntent& intent) {
+#ifdef _WIN32
+    (void)intent;
+    return std::nullopt;
+#else
+    constexpr std::size_t maximum_executable_bytes = 512u * 1024u * 1024u;
+    constexpr std::size_t maximum_manifest_bytes = 1024u * 1024u;
+    const auto executable =
+        detail::read_owner_private_file(intent.executable, maximum_executable_bytes);
+    const auto manifest_path = std::filesystem::path{
+        intent.executable.string() + ".inspector-capabilities.json"};
+    const auto manifest = detail::read_owner_private_file(manifest_path, maximum_manifest_bytes);
+    const auto static_expectation = detail::inspect_static_code_identity(intent.executable);
+    struct stat working_directory{};
+    if (!executable || !manifest || !static_expectation ||
+        ::lstat(intent.working_directory.c_str(), &working_directory) != 0 ||
+        !S_ISDIR(working_directory.st_mode) || S_ISLNK(working_directory.st_mode)) {
+        return std::nullopt;
+    }
+    return ControlTrustedHostPreparationPolicy{
+        .executable_digest =
+            runtime::sha256_hex(executable->data(), executable->size()),
+        .manifest_digest = runtime::sha256_hex(manifest->data(), manifest->size()),
+        .static_expectation = *static_expectation,
+        .working_directory_device = static_cast<std::uint64_t>(working_directory.st_dev),
+        .working_directory_inode = static_cast<std::uint64_t>(working_directory.st_ino),
+    };
+#endif
+}
+
 } // namespace
 
 struct ControlBrokerDaemon::Impl {
@@ -291,6 +322,11 @@ struct ControlBrokerDaemon::Impl {
     std::unique_ptr<ControlEndpointEnrollmentContext> enrollment_context;
     std::unique_ptr<ControlTrustedHostInventory> trusted_inventory;
     std::unique_ptr<ControlTrustedHostLauncher> trusted_launcher;
+    struct TrustedHostPolicyEntry {
+        ControlTrustedHostLaunchIntent intent;
+        ControlTrustedHostPreparationPolicy policy;
+    };
+    std::vector<TrustedHostPolicyEntry> trusted_host_policies;
     std::mutex launched_hosts_mutex;
     std::vector<std::unique_ptr<platform::ChildProcess>> launched_hosts;
     std::unique_ptr<ControlService> service;
@@ -313,6 +349,7 @@ struct ControlBrokerDaemon::Impl {
         admissions.reset();
         enrollments.reset();
         trusted_inventory.reset();
+        trusted_host_policies.clear();
         broker.reset();
         if (singleton)
             singleton->unlock();
@@ -394,6 +431,16 @@ struct ControlBrokerDaemon::Impl {
         if (!broker->operation_store_ready() || !broker->artifact_store_ready()) {
             reset();
             return false;
+        }
+        trusted_host_policies.clear();
+        trusted_host_policies.reserve(config.trusted_host_allowlist.size());
+        for (const auto& intent : config.trusted_host_allowlist) {
+            const auto policy = pin_trusted_host_policy(intent);
+            if (!policy) {
+                reset();
+                return false;
+            }
+            trusted_host_policies.push_back({intent, *policy});
         }
         const auto actual_executable = current_process_executable();
         const auto broker_static_identity =
@@ -549,9 +596,12 @@ struct ControlBrokerDaemon::Impl {
                 .trusted_hosts =
                     {
                         .prepare = [this](const ControlTrustedHostLaunchIntent& intent) {
-                            return trusted_inventory
-                                       ? trusted_inventory->prepare(intent)
-                                       : ControlTrustedHostInventoryPrepareResult{};
+                            const auto allowed = std::ranges::find_if(
+                                trusted_host_policies,
+                                [&](const auto& entry) { return entry.intent == intent; });
+                            if (!trusted_inventory || allowed == trusted_host_policies.end())
+                                return ControlTrustedHostInventoryPrepareResult{};
+                            return trusted_inventory->prepare(intent, allowed->policy);
                         },
                         .launch = [this](std::string_view inventory_id) {
                             if (!trusted_launcher)

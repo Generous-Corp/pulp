@@ -331,6 +331,18 @@ TEST_CASE("Phase 15 aggregate exact-instance CLI MCP revocation and disconnect E
     }
     ::chmod((host_executable.string() + ".inspector-capabilities.json").c_str(), 0600);
 
+    const auto allowed_host = [&](std::string_view suffix) {
+        return ControlTrustedHostLaunchIntent{
+            .executable = host_executable,
+            .arguments = {
+                (root.path / ("registration-" + std::string(suffix))).string(),
+                (root.path / ("stop-" + std::string(suffix))).string(),
+                (root.path / ("deferred-" + std::string(suffix))).string(),
+            },
+            .working_directory = host_executable.parent_path(),
+            .host_tier = ControlHostTier::Standalone,
+        };
+    };
     std::atomic<std::uint64_t> consent_sequence{0};
     ControlBrokerDaemon daemon({
         .runtime_root = root.runtime,
@@ -338,6 +350,7 @@ TEST_CASE("Phase 15 aggregate exact-instance CLI MCP revocation and disconnect E
         .sdk_version = "0.796.0-phase15-aggregate",
         .executable_path = executable,
         .process_generation = 1515,
+        .trusted_host_allowlist = {allowed_host("a"), allowed_host("b")},
         .decide_consent =
             [&consent_sequence](const VerifiedControlPeerIdentity&, const ControlGrantRequest&) {
                 return ControlConsentDecision{

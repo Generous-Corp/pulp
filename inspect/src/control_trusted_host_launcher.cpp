@@ -56,7 +56,8 @@ ControlTrustedHostLauncher::launch(std::string_view inventory_id,
     }
 
     auto snapshot = inventory_->consume(inventory_id);
-    if (!snapshot || snapshot->broker_generation() != config_.broker_generation ||
+    if (!snapshot || !snapshot->working_directory_matches_policy() ||
+        snapshot->broker_generation() != config_.broker_generation ||
         snapshot->expires_at() <= std::chrono::steady_clock::now()) {
         result.status = ControlTrustedHostLaunchStatus::InventoryUnavailable;
         result.explanation = "the trusted host inventory claim is missing, stale, or replayed";
@@ -65,7 +66,8 @@ ControlTrustedHostLauncher::launch(std::string_view inventory_id,
 
     const auto executable = snapshot->executable().string();
     const auto arguments = snapshot->arguments();
-    options.working_directory = snapshot->working_directory().string();
+    options.working_directory.clear();
+    options.working_directory_descriptor = snapshot->working_directory_descriptor();
     options.standard_input_timeout_ms = std::max(
         options.standard_input_timeout_ms,
         static_cast<int>(std::min<std::int64_t>(config_.preflight_timeout.count() + 1000, 60'000)));

@@ -105,6 +105,7 @@ int main(int argc, char** argv) {
 #else
                            << 0 << '\n'
 #endif
+                           << std::filesystem::current_path().string() << '\n'
         ;
     // Installed process tests own teardown explicitly and may exercise several
     // client timeout budgets before signalling this fixture to stop.

@@ -26,6 +26,9 @@ struct ProcessResult {
 /// Options for child process execution.
 struct ProcessOptions {
     std::string working_directory;
+    /// POSIX directory descriptor consumed atomically by spawn instead of
+    /// resolving working_directory. The caller retains ownership through start().
+    int working_directory_descriptor = -1;
     int timeout_ms = 0;                    ///< 0 = no timeout
     size_t max_output_bytes = 1 << 20;     ///< 1 MB default cap
     bool capture_stdout = true;

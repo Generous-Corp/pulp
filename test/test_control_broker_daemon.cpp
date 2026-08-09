@@ -198,6 +198,21 @@ int wait_for_host_pid(const std::filesystem::path& path) {
     return -1;
 }
 
+std::filesystem::path wait_for_host_working_directory(const std::filesystem::path& path) {
+    for (unsigned attempt = 0; attempt < 10'000; ++attempt) {
+        std::ifstream input(path);
+        std::string registration;
+        std::string process_id;
+        std::string working_directory;
+        if (std::getline(input, registration) && std::getline(input, process_id) &&
+            std::getline(input, working_directory) && !working_directory.empty()) {
+            return working_directory;
+        }
+        std::this_thread::sleep_for(1ms);
+    }
+    return {};
+}
+
 bool wait_for_path(const std::filesystem::path& path) {
     for (unsigned attempt = 0; attempt < 10'000; ++attempt) {
         if (std::filesystem::exists(path))
@@ -346,12 +361,21 @@ TEST_CASE("installed daemon composes host enrollment routing execution and resta
 
     const auto broker_executable = current_executable();
     REQUIRE_FALSE(broker_executable.empty());
+    const auto registration_path = root.path / "registration";
+    const auto stop_path = root.path / "stop";
+    const ControlTrustedHostLaunchIntent allowed_intent{
+        .executable = host_executable,
+        .arguments = {registration_path.string(), stop_path.string()},
+        .working_directory = source,
+        .host_tier = ControlHostTier::Standalone,
+    };
     ControlBrokerDaemonConfig config{
         .runtime_root = root.runtime,
         .state_root = root.state,
         .sdk_version = "0.795.2-test",
         .executable_path = broker_executable,
         .process_generation = 91,
+        .trusted_host_allowlist = {allowed_intent},
         .decide_consent =
             [](const VerifiedControlPeerIdentity&, const ControlGrantRequest&) {
                 return ControlConsentDecision{true, ControlConsentAuthority::TrustedHostUi,
@@ -361,8 +385,6 @@ TEST_CASE("installed daemon composes host enrollment routing execution and resta
     ControlBrokerDaemon daemon{config};
     REQUIRE(daemon.start());
 
-    const auto registration_path = root.path / "registration";
-    const auto stop_path = root.path / "stop";
     ControlClientConnection connection({.endpoint_path = daemon.endpoint_path(),
                                         .expected_broker_executable = broker_executable});
     REQUIRE(connection.connect());
@@ -381,6 +403,64 @@ TEST_CASE("installed daemon composes host enrollment routing execution and resta
     prepare_params.addMember("arguments", arguments);
     prepare_params.addMember("working_directory", choc::value::createString(source.string()));
     prepare_params.addMember("host_tier", choc::value::createString("standalone"));
+
+    const auto untrusted_executable = source / "untrusted-host";
+    std::filesystem::copy_file(host_executable, untrusted_executable);
+    std::filesystem::copy_file(host_executable.string() + ".inspector-capabilities.json",
+                               untrusted_executable.string() +
+                                   ".inspector-capabilities.json");
+    ::chmod(untrusted_executable.c_str(), 0700);
+    ::chmod((untrusted_executable.string() + ".inspector-capabilities.json").c_str(), 0600);
+    pulp::platform::ProcessOptions sign_options;
+    sign_options.timeout_ms = 5'000;
+    pulp::platform::ChildProcess signer;
+    REQUIRE(signer.start("/usr/bin/codesign",
+                         {"--force", "--sign", "-", "--identifier",
+                          "dev.pulp.test.untrusted-host", untrusted_executable.string()},
+                         sign_options));
+    const auto signed_variant = signer.wait();
+    INFO(signed_variant.stderr_output);
+    REQUIRE(signed_variant.exit_code == 0);
+    auto untrusted_params = choc::value::Value(prepare_params);
+    untrusted_params.setMember("executable",
+                               choc::value::createString(untrusted_executable.string()));
+    const auto untrusted = connection.manage(
+        "host-prepare", choc::json::toString(untrusted_params, false));
+    CHECK(untrusted.status_id == "invalid_request");
+
+    auto altered_arguments = choc::value::Value(prepare_params);
+    auto other_arguments = choc::value::createEmptyArray();
+    other_arguments.addArrayElement(choc::value::createString(registration_path.string()));
+    other_arguments.addArrayElement(choc::value::createString("--client-chosen"));
+    altered_arguments.setMember("arguments", other_arguments);
+    CHECK(connection
+              .manage("host-prepare", choc::json::toString(altered_arguments, false))
+              .status_id == "invalid_request");
+
+    auto altered_working_directory = choc::value::Value(prepare_params);
+    altered_working_directory.setMember("working_directory",
+                                        choc::value::createString(root.path.string()));
+    CHECK(connection
+              .manage("host-prepare",
+                      choc::json::toString(altered_working_directory, false))
+              .status_id == "invalid_request");
+
+    auto altered_tier = choc::value::Value(prepare_params);
+    altered_tier.setMember("host_tier", choc::value::createString("offline-job"));
+    CHECK(connection.manage("host-prepare", choc::json::toString(altered_tier, false))
+              .status_id == "invalid_request");
+
+    const auto allowed_backup = source / "trusted-host-backup";
+    REQUIRE(std::filesystem::copy_file(host_executable, allowed_backup));
+    REQUIRE(std::filesystem::copy_file(untrusted_executable, host_executable,
+                                       std::filesystem::copy_options::overwrite_existing));
+    ::chmod(host_executable.c_str(), 0700);
+    CHECK(connection.manage("host-prepare", choc::json::toString(prepare_params, false))
+              .status_id == "invalid_request");
+    REQUIRE(std::filesystem::copy_file(allowed_backup, host_executable,
+                                       std::filesystem::copy_options::overwrite_existing));
+    ::chmod(host_executable.c_str(), 0700);
+
     const auto prepared =
         connection.manage("host-prepare", choc::json::toString(prepare_params, false));
     INFO(prepared.explanation);
@@ -390,12 +470,19 @@ TEST_CASE("installed daemon composes host enrollment routing execution and resta
     REQUIRE_FALSE(inventory_id.empty());
     auto launch_params = choc::value::createObject("");
     launch_params.addMember("inventory_id", choc::value::createString(inventory_id));
+    const auto approved_source = root.path / "approved-source";
+    REQUIRE_NOTHROW(std::filesystem::rename(source, approved_source));
+    REQUIRE(std::filesystem::create_directory(source));
+    ::chmod(source.c_str(), 0700);
     const auto launched =
         connection.manage("host-launch", choc::json::toString(launch_params, false));
     INFO(launched.explanation);
     REQUIRE(launched.status_id == "launched");
     const ControlRegistrationId registration_id{wait_for_registration(registration_path)};
     REQUIRE(registration_id);
+    CHECK(wait_for_host_working_directory(registration_path) == approved_source);
+    REQUIRE(std::filesystem::remove(source));
+    REQUIRE_NOTHROW(std::filesystem::rename(approved_source, source));
 
     const auto inventory = connection.manage("instances");
     REQUIRE(inventory.status_id == "completed");
@@ -472,7 +559,7 @@ TEST_CASE("installed daemon composes host enrollment routing execution and resta
 #endif
 }
 
-TEST_CASE("installed daemon process authenticates host launch and recovers after crash",
+TEST_CASE("installed daemon process enforces host policy and recovers after crash",
           "[inspect][control][daemon][host][process][restart][security]") {
 #ifdef __APPLE__
     DaemonRoot root;
@@ -550,19 +637,7 @@ TEST_CASE("installed daemon process authenticates host launch and recovers after
     const auto prepared =
         connection->manage("host-prepare", choc::json::toString(prepare_params, false));
     INFO(prepared.explanation);
-    REQUIRE(prepared.status_id == "prepared");
-    const auto inventory_id =
-        std::string(choc::json::parse(prepared.data_json)["inventory_id"].getString());
-    auto launch_params = choc::value::createObject("");
-    launch_params.addMember("inventory_id", choc::value::createString(inventory_id));
-    const auto launched =
-        connection->manage("host-launch", choc::json::toString(launch_params, false));
-    INFO(launched.explanation);
-    REQUIRE(launched.status_id == "launched");
-    REQUIRE(ControlRegistrationId{wait_for_registration(registration_path)});
-    const auto inventory = connection->manage("instances");
-    REQUIRE(inventory.status_id == "completed");
-    REQUIRE(choc::json::parse(inventory.data_json)["instances"].size() == 1);
+    REQUIRE(prepared.status_id == "invalid_request");
     connection->disconnect();
 
     REQUIRE(::kill(daemon_process.process_id(), SIGKILL) == 0);
@@ -615,9 +690,17 @@ TEST_CASE("broker and host SIGKILL fail closed during a deferred operation",
 
     const std::filesystem::path broker_executable{PULP_CONTROL_BROKER_CRASH_FIXTURE};
     REQUIRE(std::filesystem::exists(broker_executable));
+    const auto registration_path = root.path / "crash-registration";
+    const auto stop_path = root.path / "crash-stop";
+    const auto deferred_path = root.path / "deferred-active";
     const std::vector<std::string> daemon_arguments{
         "PULP_CONTROL_BROKER_RUNTIME_ROOT=" + root.runtime.string(),
         "PULP_CONTROL_BROKER_STATE_ROOT=" + root.state.string(),
+        "PULP_CONTROL_TEST_TRUSTED_HOST_EXECUTABLE=" + host_executable.string(),
+        "PULP_CONTROL_TEST_TRUSTED_HOST_WORKING_DIRECTORY=" + source.string(),
+        "PULP_CONTROL_TEST_TRUSTED_HOST_REGISTRATION=" + registration_path.string(),
+        "PULP_CONTROL_TEST_TRUSTED_HOST_STOP=" + stop_path.string(),
+        "PULP_CONTROL_TEST_TRUSTED_HOST_DEFERRED=" + deferred_path.string(),
         broker_executable.string(),
     };
     pulp::platform::ProcessOptions daemon_options;
@@ -645,9 +728,6 @@ TEST_CASE("broker and host SIGKILL fail closed during a deferred operation",
         std::string(choc::json::parse(enrolled.data_json)["client_id"].getString());
     REQUIRE_FALSE(client_id.empty());
 
-    const auto registration_path = root.path / "crash-registration";
-    const auto stop_path = root.path / "crash-stop";
-    const auto deferred_path = root.path / "deferred-active";
     auto prepare_params = choc::value::createObject("");
     prepare_params.addMember("executable", choc::value::createString(host_executable.string()));
     auto arguments = choc::value::createEmptyArray();

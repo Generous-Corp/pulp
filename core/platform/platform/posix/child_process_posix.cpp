@@ -360,7 +360,9 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
             for (int descriptor = 3; descriptor < upper; ++descriptor)
                 ::close(descriptor);
         }
-        if (!options.working_directory.empty())
+        if (options.working_directory_descriptor >= 0)
+            fchdir(options.working_directory_descriptor);
+        else if (!options.working_directory.empty())
             chdir(options.working_directory.c_str());
         execvp(command.c_str(), const_cast<char* const*>(argv.data()));
         _exit(127); // exec failed
@@ -424,7 +426,14 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     // and glibc 2.29+, but NOT on iOS/tvOS/watchOS simulators.
 #if (defined(__APPLE__) && !(TARGET_OS_IPHONE || TARGET_OS_TV || TARGET_OS_WATCH)) ||              \
     (defined(__GLIBC__) && __GLIBC__ >= 2 && __GLIBC_MINOR__ >= 29)
-    if (!options.working_directory.empty()) {
+    if (options.working_directory_descriptor >= 0) {
+#if defined(__APPLE__) && !(TARGET_OS_IPHONE || TARGET_OS_TV || TARGET_OS_WATCH)
+        add_action(posix_spawn_file_actions_addfchdir_np(
+            &actions, options.working_directory_descriptor));
+#else
+        add_action(ENOTSUP);
+#endif
+    } else if (!options.working_directory.empty()) {
         add_action(posix_spawn_file_actions_addchdir_np(&actions,
                                                         options.working_directory.c_str()));
     }
