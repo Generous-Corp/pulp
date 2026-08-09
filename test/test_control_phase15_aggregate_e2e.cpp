@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "control_broker_daemon.hpp"
+#include "support/thread_progress.hpp"
 
 #include <pulp/inspect/control_carrier.hpp>
 #include <pulp/inspect/control_client_connection.hpp>
@@ -104,6 +105,15 @@ std::string wait_for_registration(const std::filesystem::path& path) {
         std::this_thread::sleep_for(2ms);
     }
     return {};
+}
+
+std::optional<pulp::platform::ProcessResult>
+wait_for_process_exit(pulp::platform::ChildProcess& child) {
+    if (!pulp::test::wait_for_condition([&] { return !child.is_running(); })) {
+        child.cancel();
+        return std::nullopt;
+    }
+    return child.wait();
 }
 
 void stage_signed_binary(const std::filesystem::path& source,
@@ -572,8 +582,10 @@ TEST_CASE("Phase 15 aggregate exact-instance CLI MCP revocation and disconnect E
           (*concurrent_cli_durable)["client_id"].getString());
 
     active_mcp.cancel();
-    const auto disconnected_mcp = active_mcp.wait();
-    CHECK((disconnected_mcp.was_cancelled || disconnected_mcp.exit_code != 0));
+    const auto disconnected_mcp = wait_for_process_exit(active_mcp);
+    INFO("cancelled MCP process must exit within the progress deadline");
+    REQUIRE(disconnected_mcp);
+    CHECK((disconnected_mcp->was_cancelled || disconnected_mcp->exit_code != 0));
 
     CHECK(running_receipt->second["operation_id"].getString() ==
           "dev.pulp.trace/session-control@1");

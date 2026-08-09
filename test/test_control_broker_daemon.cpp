@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "control_broker_daemon.hpp"
+#include "support/thread_progress.hpp"
 
 #include <pulp/events/interprocess_connection.hpp>
 #include <pulp/inspect/control_artifacts.hpp>
@@ -220,6 +221,15 @@ bool wait_for_path(const std::filesystem::path& path) {
         std::this_thread::sleep_for(1ms);
     }
     return false;
+}
+
+std::optional<pulp::platform::ProcessResult>
+wait_for_process_exit(pulp::platform::ChildProcess& child) {
+    if (!pulp::test::wait_for_condition([&] { return !child.is_running(); })) {
+        child.cancel();
+        return std::nullopt;
+    }
+    return child.wait();
 }
 #endif
 
@@ -641,8 +651,10 @@ TEST_CASE("installed daemon process enforces host policy and recovers after cras
     connection->disconnect();
 
     REQUIRE(::kill(daemon_process.process_id(), SIGKILL) == 0);
-    const auto crashed = daemon_process.wait();
-    CHECK(crashed.exit_code != 0);
+    const auto crashed = wait_for_process_exit(daemon_process);
+    INFO("killed installed broker must exit within the progress deadline");
+    REQUIRE(crashed);
+    CHECK(crashed->exit_code != 0);
 
     pulp::platform::ChildProcess restarted_process;
     REQUIRE(restarted_process.start("/usr/bin/env", daemon_arguments, daemon_options));
@@ -665,8 +677,10 @@ TEST_CASE("installed daemon process enforces host policy and recovers after cras
 
     std::ofstream(stop_path) << "stop";
     restarted_process.cancel();
-    const auto stopped = restarted_process.wait();
-    INFO(stopped.stderr_output);
+    const auto stopped = wait_for_process_exit(restarted_process);
+    INFO("cancelled installed broker must exit within the progress deadline");
+    REQUIRE(stopped);
+    INFO(stopped->stderr_output);
 #else
     SUCCEED("installed daemon process hosting is currently macOS-only");
 #endif
@@ -817,8 +831,10 @@ TEST_CASE("broker and host SIGKILL fail closed during a deferred operation",
     REQUIRE(std::filesystem::exists(partial));
 
     REQUIRE(::kill(daemon_process.process_id(), SIGKILL) == 0);
-    const auto crashed = daemon_process.wait();
-    CHECK(crashed.exit_code != 0);
+    const auto crashed = wait_for_process_exit(daemon_process);
+    INFO("killed crash fixture must exit within the progress deadline");
+    REQUIRE(crashed);
+    CHECK(crashed->exit_code != 0);
     for (unsigned attempt = 0; attempt < 2'000 && connection->is_connected(); ++attempt)
         std::this_thread::sleep_for(1ms);
     CHECK_FALSE(connection->is_connected());
@@ -880,8 +896,10 @@ TEST_CASE("broker and host SIGKILL fail closed during a deferred operation",
     restarted->disconnect();
 
     restarted_process.cancel();
-    const auto stopped = restarted_process.wait();
-    INFO(stopped.stderr_output);
+    const auto stopped = wait_for_process_exit(restarted_process);
+    INFO("cancelled crash fixture must exit within the progress deadline");
+    REQUIRE(stopped);
+    INFO(stopped->stderr_output);
     ControlOperationStore store{{.directory = root.state / "operations"}};
     REQUIRE(store.open().succeeded());
     const auto recovered = store.receipt(ControlReceiptId{receipt_id});
