@@ -870,6 +870,7 @@ a working convolution and would hide the bug. Assert
 |-----------|--------|-------------|
 | Biquad | `biquad.hpp` | Second-order IIR filter — low/high/band-pass, notch, shelf, peaking EQ |
 | Formant Filter Bank | `formant_filter_bank.hpp` | Fixed-capacity parallel resonant-peak filter with validated ordered recipes, A/E/I/O/U morphing, click-safe whole-bank retunes, normalized headroom, and zero latency |
+| Filter Morph | `filter_morph.hpp` | Stable parallel morph between validated second-order filter endpoints |
 | Six-band EQ | `six_band_eq.hpp` | Allocation-free low-shelf/four-peak/high-shelf cascade with optional stable cascade crossfades and endpoint response inspection |
 | SOS Cascade | `sos_cascade.hpp` | Fixed-capacity transactional runtime executor for stable normalized biquad cascades |
 | Graphic EQ | `graphic_eq.hpp` | Fixed-capacity configurable peaking-band cascade with transactional retune and exact endpoint response |

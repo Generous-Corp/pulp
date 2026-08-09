@@ -219,6 +219,11 @@ docs:
     kind: guide
     summary: DSP algorithm reference — 30+ processors with usage examples and parameter docs
 
+  - slug: filter-morph
+    path: guides/filter-morph.md
+    kind: guide
+    summary: Stable fixed-state morphing between validated low-pass, band-pass, high-pass, and notch endpoints
+
   - slug: source-filter-analysis
     path: guides/source-filter-analysis.md
     kind: guide

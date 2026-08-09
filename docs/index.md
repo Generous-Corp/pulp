@@ -24,6 +24,7 @@ MIT-licensed. No royalties. No copyleft.
 - [Sampler Playback Chooser](guides/sampler-playback.md) — select sequential,
   shared paged, resident, instrument, tempo-matched, Heritage-character, or
   analysis surfaces
+- [Stable Filter Morph](guides/filter-morph.md) — morph between validated filter endpoints without coefficient interpolation
 - **Plugin hosting and analysis** — [host third-party plugins](guides/hosting.md) or [inspect, render, and compare them](guides/plugin-interrogation.md)
 - [Capabilities](reference/capabilities.md) — full capability matrix with status
 - [Overview](concepts/overview.md) — what Pulp is and how it is organized

@@ -72,10 +72,14 @@ add_library(pulp-dsp-series-header-self-containment OBJECT
     header_compile/spectral_mask_processor.cpp
     header_compile/spectral_delay_matrix.cpp
     header_compile/zero_latency_convolver_support.cpp)
+target_sources(pulp-dsp-series-header-self-containment PRIVATE
+    header_compile/filter_morph.cpp)
 target_link_libraries(pulp-dsp-series-header-self-containment PRIVATE pulp::signal)
 
 pulp_dsp_series_signal_suite(pulp-test-signal-fractional-delay
                              test_signal_fractional_delay.cpp)
+pulp_dsp_series_signal_suite(pulp-test-signal-filter-morph
+                             test_signal_filter_morph.cpp)
 
 pulp_dsp_series_signal_suite(pulp-test-signal-explicit-q-resonator-bank
                              test_explicit_q_resonator_bank.cpp)
