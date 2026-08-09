@@ -112,7 +112,23 @@ struct HostOpenBroker {
         return *open;
     }
 
+    ControlHostReadyEnvelope wait_for_ready() {
+        REQUIRE(received.wait());
+        const auto* ready = std::get_if<ControlHostReadyEnvelope>(&received.envelope->payload);
+        REQUIRE(ready != nullptr);
+        return *ready;
+    }
+
     bool send(ControlHostOpenResult result) {
+        std::unique_lock lock(mutex);
+        REQUIRE(ready.wait_for(lock, 2s, [&] { return peer != nullptr; }));
+        auto* connected = peer.get();
+        lock.unlock();
+        return connected->send_message(
+            encode_control_envelope(ControlEnvelope{.payload = std::move(result)}));
+    }
+
+    bool send(ControlHostReadyResult result) {
         std::unique_lock lock(mutex);
         REQUIRE(ready.wait_for(lock, 2s, [&] { return peer != nullptr; }));
         auto* connected = peer.get();
@@ -191,6 +207,22 @@ std::int64_t host_deadline() {
                std::chrono::system_clock::now().time_since_epoch() + 2s)
         .count();
 }
+
+ControlHostOpenResult accepted_host_open(std::string request_id,
+                                         std::string registration_id) {
+    return {
+        .request_id = std::move(request_id),
+        .accepted = true,
+        .registration_id = std::move(registration_id),
+        .broker_id = "broker-1",
+        .session_id = "session-1",
+        .instance_id = "instance-1",
+        .publication_id = "publication-1",
+        .instance_generation = "publication-1",
+        .manifest_digest = std::string(64, 'a'),
+        .producer_artifact_digest = std::string(64, 'b'),
+    };
+}
 #endif
 
 } // namespace
@@ -256,12 +288,26 @@ TEST_CASE("control endpoint authenticates a host role and routes on the canonica
     const auto broker_evidence =
         observe_current_process(directory.path / "b.sock", ControlPeerRole::TrustedHostBridge);
     ControlBroker broker;
+    ControlManifest manifest;
+    manifest.profile = ControlBuildProfile::DeveloperLocal;
+    manifest.target = "ControlEndpointHostFixture";
+    manifest.product_name = "Control Endpoint Host Fixture";
+    manifest.bundle_id = "dev.pulp.control-endpoint-host-fixture";
+    manifest.build_id = "build:0123456789abcdef0123456789abcdef";
+    manifest.endpoint_included = true;
+    manifest.capabilities = {InspectorCapability::SessionDescribe};
+    const auto registered = broker.register_instance(
+        mint_verified(host_evidence),
+        ControlRegistrationRequest{ControlHostTier::Standalone, "session-1", "instance-1",
+                                   "publication-1", std::move(manifest), std::string(64, 'b')});
+    REQUIRE(registered.registration);
+    const auto registration = *registered.registration;
     ControlHostRouter router;
     ControlService service{broker, router.executor()};
     std::optional<ControlConnectionAdmission> admission{ControlConnectionAdmission{
         .admission_id = "host-admission-1",
         .expected_peer = {.evidence = host_evidence},
-        .principal = ControlHostConnectionPrincipal{ControlRegistrationId{"registration-1"}},
+        .principal = ControlHostConnectionPrincipal{registration.registration_id},
         .expires_at = std::chrono::steady_clock::now() + 1min,
     }};
     ControlEndpoint endpoint{
@@ -280,6 +326,8 @@ TEST_CASE("control endpoint authenticates a host role and routes on the canonica
             .process_generation = 42,
         },
         &router,
+        nullptr,
+        &broker,
     };
     REQUIRE(endpoint.start());
 
@@ -290,9 +338,11 @@ TEST_CASE("control endpoint authenticates a host role and routes on the canonica
         {.endpoint_path = directory.socket, .expected_broker = {.evidence = broker_evidence}},
         [&](const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
             const ControlExecutionContext& context) {
-            CHECK(plan.registration_id == ControlRegistrationId{"registration-1"});
-            CHECK(request.client_id.empty());
-            CHECK(request.grant_id.empty());
+            CHECK(plan.registration_id == registration.registration_id);
+            CHECK_FALSE(plan.client_principal.empty());
+            CHECK_FALSE(request.client_id.empty());
+            CHECK(request.client_id == request.grant_id);
+            CHECK(plan.client_principal != request.client_id);
             const auto execution = execution_count.fetch_add(1);
             if (execution == 0)
                 return ControlExecutionOutcome{
@@ -315,11 +365,26 @@ TEST_CASE("control endpoint authenticates a host role and routes on the canonica
     REQUIRE(host.connect());
     const auto opened = host.open_host("host-admission-1");
     REQUIRE(opened.accepted);
-    CHECK(opened.registration_id == "registration-1");
-    REQUIRE(router.connected(ControlRegistrationId{"registration-1"}));
+    CHECK(opened.registration_id == registration.registration_id.value);
+    CHECK(opened.broker_id == registration.broker_id.value);
+    CHECK(opened.manifest_digest == registration.manifest_digest);
+    REQUIRE(router.connected(registration.registration_id));
 
     ControlAdmissionPlan execution_plan;
-    execution_plan.registration_id = ControlRegistrationId{"registration-1"};
+    execution_plan.broker_id = registration.broker_id;
+    execution_plan.client_principal = "client-principal";
+    execution_plan.client_id = ControlClientId{"client-1"};
+    execution_plan.registration_id = registration.registration_id;
+    execution_plan.grant_id = ControlGrantId{"grant-1"};
+    execution_plan.session_id = registration.session_id;
+    execution_plan.instance_id = registration.instance_id;
+    execution_plan.publication_id = registration.publication_id;
+    execution_plan.instance_generation = registration.publication_id;
+    execution_plan.capability = InspectorCapability::SessionDescribe;
+    execution_plan.operation_id = "session.describe";
+    execution_plan.operation_version = 1;
+    execution_plan.manifest_digest = registration.manifest_digest;
+    execution_plan.producer_artifact_digest = registration.artifact_digest;
     execution_plan.receipt_id = ControlReceiptId{"receipt-1"};
     execution_plan.deadline_unix_ms = host_deadline();
     ControlRequestEnvelope request{.request_id = "request-1",
@@ -462,14 +527,25 @@ TEST_CASE("host connection enrollment open validates its exact exchange",
     const auto request = broker.wait_for_open();
     CHECK(request.admission_id.empty());
     CHECK(request.enrollment_id == "enrollment-one");
-    REQUIRE(broker.send({.request_id = request.request_id,
-                         .accepted = true,
-                         .registration_id = "broker-minted-registration"}));
+    REQUIRE(broker.send(
+        accepted_host_open(request.request_id, "broker-minted-registration")));
     REQUIRE(result.wait_for(2s) == std::future_status::ready);
     const auto opened = result.get();
     CHECK(opened.accepted);
     CHECK(opened.request_id == request.request_id);
     CHECK(opened.registration_id == "broker-minted-registration");
+    CHECK_FALSE(host.is_host_open());
+
+    broker.received.clear();
+    auto ready_result =
+        std::async(std::launch::async, [&] { return host.mark_executor_ready(); });
+    const auto ready = broker.wait_for_ready();
+    CHECK(ready.registration_id == "broker-minted-registration");
+    REQUIRE(broker.send({.request_id = ready.request_id,
+                         .accepted = true,
+                         .liveness_generation = 1}));
+    REQUIRE(ready_result.wait_for(2s) == std::future_status::ready);
+    CHECK(ready_result.get().accepted);
     CHECK(host.is_host_open());
 
     const auto enrollment_replay = host.open_host_enrollment("enrollment-one");
@@ -479,7 +555,7 @@ TEST_CASE("host connection enrollment open validates its exact exchange",
     CHECK_FALSE(cross_mode_replay.accepted);
     CHECK(cross_mode_replay.error_code == "invalid-host-open");
     std::this_thread::sleep_for(20ms);
-    CHECK(broker.message_count.load(std::memory_order_relaxed) == 1);
+    CHECK(broker.message_count.load(std::memory_order_relaxed) == 2);
     host.disconnect();
 #endif
 }
@@ -514,9 +590,8 @@ TEST_CASE("host connection enrollment failures poison or close the carrier",
     SECTION("mismatched request identity") {
         const auto [result_error, connection_error] =
             run([](HostOpenBroker& broker, const ControlHostOpenEnvelope& request) {
-                REQUIRE(broker.send({.request_id = request.request_id + "-wrong",
-                                     .accepted = true,
-                                     .registration_id = "broker-registration"}));
+                REQUIRE(broker.send(accepted_host_open(request.request_id + "-wrong",
+                                                       "broker-registration")));
                 REQUIRE(broker.wait_for_disconnect());
             });
         CHECK(result_error == "unexpected-host-opened");
