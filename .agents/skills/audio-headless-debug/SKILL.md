@@ -46,6 +46,12 @@ These were built deliberately for exactly this. Reaching for a hand-written
 | Live per-callback metering / MIDI log / buffer-underrun capture | `pulp::inspect::AudioInspector` | `inspect/include/pulp/inspect/audio_inspector.hpp` |
 | Interactive inspection from an agent session | the **`pulp_inspect_audio`** MCP tool (the Audio Inspector) | MCP |
 
+For offline modal extraction, keep the compiler on the analysis side of this
+table: malformed, non-finite, silent, or under-length input must fail as a typed
+result before any `ModalSpec` is published. A successful extraction is a
+deterministic evidence artifact, not realtime processor state or a DAW adapter
+probe.
+
 Rule of thumb: if you typed `std::sqrt`, `* x[i]`, or `20.0 * log10` in a test,
 stop — `analyze()` already did it correctly. The only thing you author is the
 *stimulus* (what signal, what parameter motion) and the *gate*

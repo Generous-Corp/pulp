@@ -233,6 +233,41 @@ EXPORTS = [
         ],
     ),
     capability(
+        key="signal.nlms-adaptive-filter", domain="signal",
+        summary="Prepared bounded normalized least-mean-squares adaptive FIR filtering.",
+        rt_class="mixed",
+        lifecycle={"construction": "control", "prepare": "control; allocates fixed retained storage",
+                   "process": "single audio writer", "reset": "single audio writer",
+                   "release": "destruction off audio"},
+        state_model=(
+            "Prepared double-precision reference history and adaptive weights plus a "
+            "three-slot single-writer/single-reader coefficient publication bank."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="finite primary/desired and reference audio samples",
+        output_domain="adaptive FIR estimate, residual error, and bounded coefficient snapshot",
+        units=["samples", "frames", "taps", "normalized step size", "linear amplitude"],
+        latency="zero",
+        tail="reference and coefficient history until reset",
+        scheduling="sample-synchronous single writer; one concurrent bounded snapshot reader",
+        bindings=[binding(
+            role="entrypoint", kind="cpp_type",
+            include="pulp/signal/nlms_adaptive_filter.hpp",
+            qualified_name="pulp::signal::NlmsAdaptiveFilterT<float>",
+            target="Pulp::signal",
+            header_fingerprint="sha256:ac5d8961a7dc69bd24a4ab8f6389e6e0f62eb5ac7dc433ebabe845e15366298b",
+        )],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::signal::NlmsAdaptiveFilterT<float>",
+            "operation": "member_call",
+            "member": "prepare",
+            "arguments": "48000.0, 8",
+        }],
+    ),
+    capability(
         key="signal.nonlinear-shaping", domain="signal",
         summary="Antialiased multistage wavefolding, Chebyshev harmonic shaping, and ring modulation.",
         rt_class="mixed",

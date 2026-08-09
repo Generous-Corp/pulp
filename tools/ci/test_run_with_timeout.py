@@ -7,6 +7,9 @@ import pathlib
 import subprocess
 import sys
 import unittest
+from unittest import mock
+
+import run_with_timeout
 
 
 SCRIPT = pathlib.Path(__file__).with_name("run_with_timeout.py")
@@ -40,6 +43,22 @@ class RunWithTimeoutTests(unittest.TestCase):
         self.assertEqual(self.run_helper().returncode, 2)
         self.assertEqual(self.run_helper("nope", "true").returncode, 2)
         self.assertEqual(self.run_helper("0", "true").returncode, 2)
+
+    def test_darwin_permission_race_waits_for_group_leader(self) -> None:
+        process = mock.Mock(pid=1234)
+        process.poll.return_value = None
+        process.wait.return_value = -15
+
+        with mock.patch.object(
+            run_with_timeout.os,
+            "killpg",
+            side_effect=[None, PermissionError(1, "Operation not permitted")],
+        ):
+            run_with_timeout.terminate_process_group(process)
+
+        process.wait.assert_called_once_with(
+            timeout=run_with_timeout.TERMINATION_GRACE_SECONDS
+        )
 
 
 if __name__ == "__main__":

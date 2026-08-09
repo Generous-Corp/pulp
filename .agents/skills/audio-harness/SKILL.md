@@ -26,6 +26,12 @@ It lives in **two** places, and the split is load-bearing:
   `RenderScenario`, contracts, and the scenario-driven Doctor wiring. Test-only;
   links the lib above.
 
+The analysis target also owns the deterministic modal-extraction compiler
+(`modal_extraction.hpp`). It is offline-only: validate finite,
+sample-rate-qualified input, preserve recipe identity, and gate candidates with
+confidence/SNR/T60 evidence before emitting a `ModalSpec`; do not link it into
+realtime DSP or treat ranked candidates as host-facing parameter state.
+
 Both use namespace `pulp::test::audio`, so the namespace does NOT tell you which
 target a symbol comes from — the include path does.
 

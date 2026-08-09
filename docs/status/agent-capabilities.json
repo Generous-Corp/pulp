@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 11,
+  "manifest_revision": 12,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 34
+        "capabilities": 35
       },
       "timebase": {
         "state": "partial",
@@ -2480,6 +2480,68 @@
       "contract_digest": "sha256:92fe44dd2a7168b44a90ab57a00d5c3e0435ab05e46327a9bc7422c05685efc6"
     },
     {
+      "key": "signal.nlms-adaptive-filter",
+      "domain": "signal",
+      "summary": "Prepared bounded normalized least-mean-squares adaptive FIR filtering.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control; allocates fixed retained storage",
+        "process": "single audio writer",
+        "reset": "single audio writer",
+        "release": "destruction off audio"
+      },
+      "state_model": "Prepared double-precision reference history and adaptive weights plus a three-slot single-writer/single-reader coefficient publication bank.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "finite primary/desired and reference audio samples",
+      "output_domain": "adaptive FIR estimate, residual error, and bounded coefficient snapshot",
+      "units": [
+        "samples",
+        "frames",
+        "taps",
+        "normalized step size",
+        "linear amplitude"
+      ],
+      "latency": "zero",
+      "tail": "reference and coefficient history until reset",
+      "scheduling": "sample-synchronous single writer; one concurrent bounded snapshot reader",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/nlms_adaptive_filter.hpp",
+          "qualified_name": "pulp::signal::NlmsAdaptiveFilterT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:3e8c5e6ad8d1b9483ba9a04023a52e57196e44b6e14efe5863875c1b5528deb2"
+    },
+    {
       "key": "signal.nonlinear-shaping",
       "domain": "signal",
       "summary": "Antialiased multistage wavefolding, Chebyshev harmonic shaping, and ring modulation.",
@@ -4493,14 +4555,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 65,
+    "total": 66,
     "by_domain": {
       "audio": 6,
       "midi": 9,
       "music": 6,
       "offline": 0,
       "sequence": 1,
-      "signal": 34,
+      "signal": 35,
       "timebase": 9
     }
   },
@@ -6707,6 +6769,20 @@
               "process_group(std::complex<SampleType>* const* frames, int num_bins, int analysis_hop, int synthesis_hop, SampleType reset_amount = SampleType{0})",
               "sum(SampleType{0}, SampleType{0})",
               "r(std::cos(rot)"
+            ]
+          }
+        ],
+        "nlms_adaptive_filter.hpp": [
+          {
+            "class": "NlmsAdaptiveFilterT",
+            "methods": [
+              "set_active_taps(int taps)",
+              "set_step_size(SampleType mu)",
+              "set_denominator_floor(SampleType eps)",
+              "set_leakage(SampleType leakage)",
+              "set_adapt_enabled(bool enabled)",
+              "process_sample(SampleType primary, SampleType reference)",
+              "process_block(const SampleType* primary, const SampleType* reference, Result* out, int n)"
             ]
           }
         ],

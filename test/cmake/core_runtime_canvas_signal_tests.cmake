@@ -162,6 +162,8 @@ pulp_add_test_suite(pulp-test-signal LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-unison
     SOURCES test_signal_unison.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal pulp::audio-analysis)
+pulp_add_test_suite(pulp-test-modal-extraction
+    LIBRARIES pulp::audio-analysis pulp::signal-modal-spec)
 # Modulation and utility toolkit. Contracts, sources, control tools, events,
 # and voice-level compositions have separate owners so the alias inventory and
 # behavioral suites can evolve without recreating a mixed test hotspot.
