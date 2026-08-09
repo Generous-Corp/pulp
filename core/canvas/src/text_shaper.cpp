@@ -737,6 +737,7 @@ struct TextShaper::Impl {
             font_weight, SkFontStyle::kNormal_Width,
             skia_slant_from_int(font_slant)));
         paragraph_style.setTextStyle(text_style);
+        auto collection_use = ctx->lock_font_collection_use();
         auto builder = skia::textlayout::ParagraphBuilder::make(
             paragraph_style, collection, shared_sk_unicode());
         if (!builder) return box;
@@ -868,6 +869,7 @@ struct TextShaper::Impl {
                         static_cast<int>(feature.value));
                 }
                 paragraph_style.setTextStyle(text_style);
+                auto collection_use = ctx->lock_font_collection_use();
                 auto builder = skia::textlayout::ParagraphBuilder::make(
                     paragraph_style, collection, shared_sk_unicode());
                 if (builder) {
@@ -953,6 +955,7 @@ struct TextShaper::Impl {
                     tstyle.setFontFamilies(families);
                     tstyle.setFontSize(font_size);
                     pstyle.setTextStyle(tstyle);
+                    auto collection_use = ctx->lock_font_collection_use();
                     auto pb = skia::textlayout::ParagraphBuilder::make(
                         pstyle, fc, shared_sk_unicode());
                     if (pb) {
