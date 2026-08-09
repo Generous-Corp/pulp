@@ -372,7 +372,9 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS)
 
 endif()
 
-add_executable(pulp-test-control-grants test_control_grants.cpp)
+add_executable(pulp-test-control-grants
+    test_control_grants.cpp
+    test_control_consent_authority.cpp)
 target_link_libraries(pulp-test-control-grants PRIVATE
     pulp::inspect-control Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-control-grants

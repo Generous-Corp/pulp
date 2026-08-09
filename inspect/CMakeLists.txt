@@ -30,6 +30,7 @@ add_library(pulp-inspect-control
     src/control_broker.cpp
     src/control_carrier.cpp
     src/control_connection_admission.cpp
+    src/control_consent_authority.cpp
     src/control_endpoint.cpp
     src/control_executor_slot.cpp
     src/control_grants.cpp

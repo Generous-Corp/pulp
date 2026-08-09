@@ -387,9 +387,9 @@ TEST_CASE("installed daemon composes host enrollment routing execution and resta
         .process_generation = 91,
         .trusted_host_allowlist = {allowed_intent},
         .decide_consent =
-            [](const VerifiedControlPeerIdentity&, const ControlGrantRequest&) {
+            [](const ControlGrantConsentRequest&) {
                 return ControlConsentDecision{true, ControlConsentAuthority::TrustedHostUi,
-                                              "daemon-host-e2e-consent"};
+                                              "daemon-host-e2e-consent", {}};
             },
     };
     ControlBrokerDaemon daemon{config};

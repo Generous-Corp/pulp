@@ -25,6 +25,7 @@ enum class ControlConsentAuthority : std::uint8_t {
     None,
     TrustedPulpCli,
     TrustedHostUi,
+    BrokerUserPrompt,
     ExistingUserPolicy,
     PluginUi,
     AgentClient,
@@ -37,6 +38,9 @@ struct ControlConsentDecision {
     bool approved = false;
     ControlConsentAuthority authority = ControlConsentAuthority::None;
     std::string decision_id;
+    /// Required for BrokerUserPrompt decisions and revalidated by the grant
+    /// store at issuance, after any endpoint scheduling or lock delay.
+    std::optional<std::chrono::steady_clock::time_point> expires_at;
 };
 
 enum class ControlGrantStatus : std::uint8_t {
@@ -61,6 +65,23 @@ struct ControlGrantRequest {
     ControlRegistrationId registration_id;
     std::vector<InspectorCapability> capabilities;
     std::chrono::milliseconds ttl = std::chrono::minutes(15);
+};
+
+enum class ControlGrantSelectorKind : std::uint8_t {
+    Profile,
+    Operation,
+};
+
+/// Consent input assembled only after the broker has authenticated the client
+/// and resolved an exact live registration and selector. No member is copied
+/// from a client assertion without broker-side validation.
+struct ControlGrantConsentRequest {
+    ControlPeerEvidence client_peer;
+    std::string client_peer_fingerprint;
+    ControlGrantRequest grant;
+    ControlRegistration registration;
+    ControlGrantSelectorKind selector_kind = ControlGrantSelectorKind::Profile;
+    std::string selector_id;
 };
 
 struct ControlGrant {

@@ -362,11 +362,11 @@ TEST_CASE("Phase 15 aggregate exact-instance CLI MCP revocation and disconnect E
         .process_generation = 1515,
         .trusted_host_allowlist = {allowed_host("a"), allowed_host("b")},
         .decide_consent =
-            [&consent_sequence](const VerifiedControlPeerIdentity&, const ControlGrantRequest&) {
+            [&consent_sequence](const ControlGrantConsentRequest&) {
                 return ControlConsentDecision{
                     true, ControlConsentAuthority::TrustedHostUi,
                     "phase15-aggregate-consent-" +
-                        std::to_string(consent_sequence.fetch_add(1, std::memory_order_relaxed))};
+                        std::to_string(consent_sequence.fetch_add(1, std::memory_order_relaxed)), {}};
             },
     });
     REQUIRE(daemon.start());

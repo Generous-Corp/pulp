@@ -96,7 +96,7 @@ struct GrantFixture {
             ControlConsentAuthority::TrustedPulpCli,
         std::string decision_id = "decision-a") {
         return ControlConsentDecision{
-            true, authority, std::move(decision_id)};
+            true, authority, std::move(decision_id), {}};
     }
 };
 
@@ -202,6 +202,36 @@ TEST_CASE("interactive consent decisions are single-use while policy is reusable
           ControlGrantStatus::Granted);
 }
 
+TEST_CASE("broker prompt consent must remain unexpired when the grant is issued",
+          "[inspect][control][grants][consent]") {
+    GrantFixture fixture;
+    auto decision = GrantFixture::consent(ControlConsentAuthority::BrokerUserPrompt,
+                                          "broker-prompt-a");
+    CHECK(fixture.grants.issue(fixture.request(), decision).status ==
+          ControlGrantStatus::ConsentRequired);
+
+    decision.expires_at = fixture.now + 2s;
+    REQUIRE(fixture.grants.issue(fixture.request(), decision).status ==
+            ControlGrantStatus::Granted);
+
+    fixture.now += 2s;
+    decision.decision_id = "broker-prompt-b";
+    CHECK(fixture.grants.issue(fixture.request(), decision).status ==
+          ControlGrantStatus::ConsentRequired);
+
+    fixture.now = {};
+    unsigned clock_calls = 0;
+    ControlGrantStore delayed_store{fixture.identities, fixture.audit, {}, [&] {
+        if (++clock_calls == 2)
+            fixture.now += 2s;
+        return fixture.now;
+    }};
+    decision.decision_id = "broker-prompt-c";
+    decision.expires_at = fixture.now + 2s;
+    CHECK(delayed_store.issue(fixture.request(), decision).status ==
+          ControlGrantStatus::ConsentRequired);
+}
+
 TEST_CASE("grant issue rejects unavailable and non-grantable capabilities",
           "[inspect][control][grants]") {
     GrantFixture fixture;
@@ -242,13 +272,13 @@ TEST_CASE("grant requests fail closed for missing identity consent scope and ttl
               fixture.request(),
               ControlConsentDecision{false,
                                      ControlConsentAuthority::TrustedPulpCli,
-                                     "denied"}).status ==
+                                     "denied", {}}).status ==
           ControlGrantStatus::ConsentRequired);
     CHECK(fixture.grants.issue(
               fixture.request(),
               ControlConsentDecision{true,
                                      ControlConsentAuthority::TrustedPulpCli,
-                                     {}}).status ==
+                                     {}, {}}).status ==
           ControlGrantStatus::ConsentRequired);
     CHECK(fixture.grants.issue(
               fixture.request({}),
@@ -442,7 +472,7 @@ TEST_CASE("grant store is bounded and audit contains no consent payload",
               fixture.request(),
               ControlConsentDecision{true,
                                      ControlConsentAuthority::TrustedPulpCli,
-                                     "sensitive-user-text"}).status ==
+                                     "sensitive-user-text", {}}).status ==
           ControlGrantStatus::ResourceExhausted);
 
     const auto events = fixture.audit->snapshot();
@@ -540,7 +570,7 @@ TEST_CASE("grant insertion time rejects identities that expired after lookup",
         };
         const ControlConsentDecision consent{
             true, ControlConsentAuthority::TrustedPulpCli,
-            "timed-consent-client"};
+            "timed-consent-client", {}};
         clock.advance_on_call(3, 2s);
         auto rejected = grants.issue(request, consent);
         CHECK(rejected.status == ControlGrantStatus::ClientUnavailable);
@@ -606,7 +636,7 @@ TEST_CASE("grant insertion time rejects identities that expired after lookup",
         };
         const ControlConsentDecision consent{
             true, ControlConsentAuthority::TrustedPulpCli,
-            "timed-consent-registration"};
+            "timed-consent-registration", {}};
         clock.advance_on_call(3, 2s);
         auto rejected = grants.issue(request, consent);
         CHECK(rejected.status == ControlGrantStatus::RegistrationUnavailable);

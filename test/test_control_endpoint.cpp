@@ -822,6 +822,7 @@ TEST_CASE("control endpoint enrolls an authenticated local client and returns br
     client.disconnect();
     endpoint.stop();
 
+    std::optional<ControlGrantConsentRequest> observed_consent;
     ControlEndpoint durable_endpoint{
         service,
         [](std::string_view) -> std::optional<ControlConnectionAdmission> { return std::nullopt; },
@@ -842,9 +843,10 @@ TEST_CASE("control endpoint enrolls an authenticated local client and returns br
                         }};
                 },
             .decide_consent =
-                [](const VerifiedControlPeerIdentity&, const ControlGrantRequest&) {
+                [&observed_consent](const ControlGrantConsentRequest& request) {
+                    observed_consent = request;
                     return ControlConsentDecision{true, ControlConsentAuthority::TrustedHostUi,
-                                                  "trusted-ui-decision-a"};
+                                                  "trusted-ui-decision-a", {}};
                 },
         },
         nullptr,
@@ -881,6 +883,11 @@ TEST_CASE("control endpoint enrolls an authenticated local client and returns br
         std::get_if<ControlManagementResult>(&first_invocation_received.envelope->payload);
     REQUIRE(durable_grant != nullptr);
     REQUIRE(durable_grant->status_id == "granted");
+    REQUIRE(observed_consent);
+    CHECK(observed_consent->grant.client_id.value == durable_client_id);
+    CHECK(observed_consent->registration.instance_id == "instance-a");
+    CHECK(observed_consent->selector_kind == ControlGrantSelectorKind::Profile);
+    CHECK(observed_consent->selector_id == "inspect-readonly");
     const auto durable_grant_data = choc::json::parse(durable_grant->data_json);
     const auto durable_grant_id = std::string(durable_grant_data["grant_id"].getString());
     first_invocation.disconnect();

@@ -21,9 +21,7 @@ struct ControlBrokerDaemonConfig {
     /// Empty disables remote host preparation. Executable, arguments, working
     /// directory, and tier must all match one entry.
     std::vector<ControlTrustedHostLaunchIntent> trusted_host_allowlist;
-    std::function<ControlConsentDecision(const VerifiedControlPeerIdentity&,
-                                         const ControlGrantRequest&)>
-        decide_consent;
+    std::function<ControlConsentDecision(const ControlGrantConsentRequest&)> decide_consent;
 };
 
 class ControlBrokerDaemon {

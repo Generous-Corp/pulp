@@ -67,9 +67,7 @@ struct ControlEndpointConfig {
         durable_client_principal;
     /// Optional trusted consent source. Absence means grant requests return
     /// consent-required; request payloads can never claim this authority.
-    std::function<ControlConsentDecision(const VerifiedControlPeerIdentity&,
-                                         const ControlGrantRequest&)>
-        decide_consent;
+    std::function<ControlConsentDecision(const ControlGrantConsentRequest&)> decide_consent;
     /// Typed broker-owned host launch seam. It remains unreachable until the
     /// local peer has completed canonical client enrollment.
     ControlTrustedHostManagement trusted_hosts;

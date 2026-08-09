@@ -1,11 +1,14 @@
 #include "control_broker_daemon.hpp"
 
+#include <pulp/inspect/control_consent_authority.hpp>
+
 #include <atomic>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -56,16 +59,21 @@ int main(int argc, char** argv) {
     std::signal(SIGINT, request_stop);
     std::signal(SIGTERM, request_stop);
 
+    auto consent_authority = std::make_shared<pulp::inspect::ControlBrokerConsentAuthority>();
     pulp::inspect::ControlBrokerDaemon daemon({
         .runtime_root = environment_path("PULP_CONTROL_BROKER_RUNTIME_ROOT"),
         .state_root = environment_path("PULP_CONTROL_BROKER_STATE_ROOT"),
         .sdk_version = PULP_CONTROL_SDK_VERSION,
         .executable_path = executable_path(),
+        .decide_consent = [consent_authority](const auto& request) {
+            return consent_authority->decide(request);
+        },
     });
     if (!daemon.start())
         return 1;
     while (!stopping.load(std::memory_order_relaxed))
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    consent_authority->reset();
     daemon.stop();
     return 0;
 }

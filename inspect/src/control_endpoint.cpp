@@ -706,8 +706,12 @@ struct ControlEndpoint::Impl {
             }
             ControlGrantRequest grant_request{.client_id = state.session->client_id(),
                                               .registration_id = matches.front().registration_id};
+            ControlGrantSelectorKind selector_kind = ControlGrantSelectorKind::Profile;
+            std::string selector_id;
             if (params.hasObjectMember("operation_id")) {
                 const auto operation_id = std::string(params["operation_id"].getString());
+                selector_kind = ControlGrantSelectorKind::Operation;
+                selector_id = operation_id;
                 const auto* operation = resolve_control_operation(operation_id, 1);
                 if (!operation || !capability_is_grantable(operation->capability)) {
                     (void)reply("invalid-request", "{}", "the grant operation is unknown or not grantable");
@@ -718,6 +722,7 @@ struct ControlEndpoint::Impl {
                     grant_request.capabilities.push_back(operation->capability);
             } else {
                 const auto profile_id_value = std::string(params["profile"].getString());
+                selector_id = profile_id_value;
                 const auto profile = profile_id_value == "inspect-readonly"
                                          ? std::optional{InspectorProfile::Observe}
                                          : profile_from_id(profile_id_value);
@@ -737,7 +742,15 @@ struct ControlEndpoint::Impl {
                 return;
             }
             const auto consent = config.decide_consent
-                                     ? config.decide_consent(state.session->peer(), grant_request)
+                                     ? config.decide_consent(ControlGrantConsentRequest{
+                                           .client_peer = state.session->peer().evidence(),
+                                           .client_peer_fingerprint =
+                                               std::string(state.session->peer().fingerprint()),
+                                           .grant = grant_request,
+                                           .registration = matches.front(),
+                                           .selector_kind = selector_kind,
+                                           .selector_id = std::move(selector_id),
+                                       })
                                      : ControlConsentDecision{};
             const auto issued =
                 management_broker->issue_grant(state.session->peer(), grant_request, consent);

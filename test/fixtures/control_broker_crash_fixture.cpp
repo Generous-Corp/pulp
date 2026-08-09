@@ -52,11 +52,10 @@ int main(int argc, char** argv) {
         .executable_path = executable,
         .trusted_host_allowlist = {trusted_host},
         .decide_consent =
-            [](const pulp::inspect::VerifiedControlPeerIdentity&,
-               const pulp::inspect::ControlGrantRequest&) {
+            [](const pulp::inspect::ControlGrantConsentRequest&) {
                 return pulp::inspect::ControlConsentDecision{
                     true, pulp::inspect::ControlConsentAuthority::TrustedHostUi,
-                    "phase15-crash-fixture-consent"};
+                    "phase15-crash-fixture-consent", {}};
             },
     });
     if (!daemon.start())
