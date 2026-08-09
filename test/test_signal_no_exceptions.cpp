@@ -35,6 +35,12 @@ int main() {
     pulp::signal::CrossFeedbackMultitapDelay multitap_delay;
     if (!multitap_delay.prepare(48000.0, 100.0))
         return 10;
+    pulp::signal::WaveguideJunction waveguide_junction;
+    const float waveguide_in[2] {0.25f, -0.5f};
+    float waveguide_out[2] {};
+    waveguide_junction.scatter(waveguide_in, waveguide_out, 2);
+    if (!std::isfinite(waveguide_out[0]) || !std::isfinite(waveguide_out[1]))
+        return 14;
     pulp::signal::Expander expander;
     if (expander.prepare(48000.0f) != pulp::signal::ExpanderStatus::ready)
         return 11;
