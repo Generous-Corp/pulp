@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 14,
+  "manifest_revision": 15,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 36
+        "capabilities": 37
       },
       "timebase": {
         "state": "partial",
@@ -3997,6 +3997,67 @@
       "contract_digest": "sha256:2fe4f94556c77879e5535bf7c424741350d497456d025b68b0d92f2dc1e989b6"
     },
     {
+      "key": "signal.waveguide-junction",
+      "domain": "signal",
+      "summary": "Bounded two- to four-port acoustic waveguide scattering junction.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "none",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "Fixed-capacity port count and positive characteristic impedances.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "two to four finite incoming pressure waves and positive impedances",
+      "output_domain": "outgoing pressure waves from a lossless memoryless junction, or cleared output for invalid or unrepresentable input",
+      "units": [
+        "samples",
+        "ports",
+        "pressure amplitude",
+        "acoustic impedance"
+      ],
+      "latency": "zero",
+      "tail": "zero",
+      "scheduling": "sample-synchronous after control-side port and impedance configuration",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/waveguide_junction.hpp",
+          "qualified_name": "pulp::signal::WaveguideJunctionT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:175265c18e58bc038536727457c400b9770fb47c96c4894b65a40d5783f7ff4e"
+    },
+    {
       "key": "signal.window-functions",
       "domain": "signal",
       "summary": "Reusable analysis-window generation and allocation-free in-place application.",
@@ -4693,14 +4754,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 68,
+    "total": 69,
     "by_domain": {
       "audio": 7,
       "midi": 9,
       "music": 6,
       "offline": 0,
       "sequence": 1,
-      "signal": 36,
+      "signal": 37,
       "timebase": 9
     }
   },
@@ -8312,6 +8373,18 @@
               "carrier_source()",
               "set_internal_wave(InternalWave wave)",
               "set_internal_pulse_width(SampleType w01)"
+            ]
+          }
+        ],
+        "waveguide_junction.hpp": [
+          {
+            "class": "WaveguideJunctionT",
+            "methods": [
+              "set_port_count(std::size_t count)",
+              "port_count()",
+              "set_impedance(std::size_t port, SampleType impedance)",
+              "impedance(std::size_t port)",
+              "scatter(const SampleType* incoming, SampleType* outgoing, std::size_t n)"
             ]
           }
         ],

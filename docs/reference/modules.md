@@ -890,6 +890,7 @@ a working convolution and would hide the bug. Assert
 |-----------|--------|-------------|
 | Modal Bank | `modal_bank.hpp` | SIMD-friendly bank of coupled-form modes with contact-pulse excitation, independent strike/pickup weights, amplitude-preserving retuning, and up to eight pickup outputs |
 | Particle percussion | `particle_collision_exciter.hpp`, `particle_percussion_voice.hpp` | Deterministic, depletion-aware collision excitation with selectable shaker, maraca, rattle, and tambourine models; zero-latency prepared voice rendering |
+| Waveguide junction | `waveguide_junction.hpp` | Allocation-free, memoryless Kelly-Lochbaum scattering for two to four ports with bounded configuration and fault recovery |
 | Modal Specification | `modal_spec.hpp` | Versioned JSON interchange for modal frequencies, T60 values, amplitudes, and optional shapes, with bounded validation before allocation |
 | Bridged-T Resonator | `bridged_t_resonator.hpp` | Trapezoidally integrated two-state model of the published TR-808 bridged-T network, exposing physical component values and circuit nodes; it is a resonator primitive, not a complete drum voice |
 | Square Oscillator Bank | `square_osc_bank.hpp` | Allocation-free-after-prepare bank of independently tunable, weighted, band-limited square oscillators for inharmonic metallic excitation and other clustered sources |

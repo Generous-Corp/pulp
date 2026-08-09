@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 24,
+  "inventory_version": 25,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,12 +37,12 @@
     }
   ],
   "counts": {
-    "public_headers": 416,
-    "reviewed_headers": 116,
+    "public_headers": 417,
+    "reviewed_headers": 117,
     "legacy_unreviewed_headers": 300,
     "unsupported_headers": 1,
     "by_disposition": {
-      "capability_entrypoint": 73,
+      "capability_entrypoint": 74,
       "capability_support": 37,
       "infrastructure": 5,
       "legacy_unreviewed": 300,
@@ -74,8 +74,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 238,
-        "reviewed_headers": 77,
+        "public_headers": 239,
+        "reviewed_headers": 78,
         "legacy_unreviewed_headers": 161,
         "unsupported_headers": 1
       },
@@ -3457,7 +3457,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:d48c327673c568f6cd056dd4947d9eba31f3e6767cd60491ecd8af04dc531b18",
+      "fingerprint": "sha256:2401559bb68c5de9459c0d3290e87e6cd950cdb29f133e6390fa9183769dfb70",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3894,6 +3894,17 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/waveguide_junction.hpp",
+      "fingerprint": "sha256:110575300a78f2c8ce658d0197dbb4ca8fafdbc00d853515ef5dbcbc9bfa0dc1",
+      "include": "pulp/signal/waveguide_junction.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.waveguide-junction"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
