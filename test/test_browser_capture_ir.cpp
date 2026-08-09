@@ -1494,7 +1494,7 @@ TEST_CASE("a fader indicator is handed to the control sprite pass",
          "paint_bounds":{"left":50,"top":20,"width":20,"height":200},
          "indicator_bounds":{"left":52,"top":108,"width":16,"height":12},
          "indicator_color":"rgb(244, 231, 180)",
-         "data_pulp":{"param":"drive","value":"0.5"}}
+         "data_pulp":{"param":"drive","value":"0.5","static-track":""}}
       ]
     })JSON");
     temp.write("tokens.json", R"JSON({
@@ -1527,6 +1527,7 @@ TEST_CASE("a fader indicator is handed to the control sprite pass",
     CHECK(found->attributes.at("browser_sprite_crop_px") == "100,40,40,400");
     CHECK(found->attributes.at("browser_sprite_indicator_px") ==
           "104,216,32,24");
+    CHECK(found->attributes.at("browser_fader_static_track_declared") == "1");
     // Rotary geometry belongs only to knobs; stamping it on a linear control
     // would make an unrelated consumer appear wired while doing nothing.
     CHECK(found->attributes.count("knob_ind_r_in") == 0);
@@ -2072,4 +2073,231 @@ TEST_CASE("an unregistered comparison scores identical pixels as a near-miss",
     CHECK(registered.diff_pixels == 0);
     CHECK(registered.similarity == Catch::Approx(1.0));
     CHECK(registered.passes());
+}
+
+TEST_CASE("a bound switch lowers to a control rather than staying backdrop",
+          "[import][browser-capture][semantics][toggle]") {
+    // The semantics pass has always named a `pulp-switch` correctly; what it
+    // named was then dropped, because only knob/fader/meter produced a node.
+    // The panel still DREW the switch, so the failure was invisible: a shape
+    // that reads as something to flip, wired to nothing.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"toggle","binding_status":"bound","name":"sync",
+         "bounds":{"left":24,"top":40,"width":56,"height":28},
+         "data_pulp":{"param":"sync","value":"1"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    REQUIRE(result);
+
+    std::vector<const pulp::view::IRNode*> toggles;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            if (node.audio_widget == pulp::view::AudioWidgetType::toggle)
+                toggles.push_back(&node);
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+
+    REQUIRE(toggles.size() == 1);
+    const auto& sync = *toggles.front();
+    // Both spellings, for the same reason a knob carries both: the script
+    // emitter reads `binding` and the native binding metadata reads
+    // `pulpParamKey`, and a control carrying one is half-wired.
+    REQUIRE(sync.attributes.at("binding") == "sync");
+    REQUIRE(sync.attributes.at("pulpParamKey") == "sync");
+    REQUIRE(sync.attributes.count("pulpRouteId") == 1);
+    REQUIRE(sync.stable_anchor_id);
+    REQUIRE_FALSE(sync.stable_anchor_id->empty());
+    // The opening state is read as a boolean by the native materializer, so a
+    // switch the design drew lit has to arrive lit rather than snapping off
+    // the moment the panel loads.
+    REQUIRE(sync.attributes.at("checked") == "1");
+}
+
+TEST_CASE("a bound selector lowers with the segments its author declared",
+          "[import][browser-capture][semantics][selector]") {
+    // A choice between named alternatives is the control a synth panel needs
+    // most and could not have: the semantics pass named it `select`, and the
+    // lowering dropped it, so a designer's mode row was drawn and wired to
+    // nothing.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"select","binding_status":"bound","name":"direction",
+         "bounds":{"left":24,"top":40,"width":200,"height":28},
+         "data_pulp":{"param":"shape","choices":"Up|Down|Converge|Random"}},
+        {"kind":"select","binding_status":"bound","name":"unlabelled",
+         "bounds":{"left":24,"top":90,"width":200,"height":28},
+         "data_pulp":{"param":"nothing"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    REQUIRE(result);
+
+    std::vector<const pulp::view::IRNode*> selectors;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            if (node.audio_widget == pulp::view::AudioWidgetType::selector)
+                selectors.push_back(&node);
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+
+    // The second candidate declared no choices, so it has nothing to light and
+    // stays part of the backdrop rather than arriving as an empty track.
+    REQUIRE(selectors.size() == 1);
+    const auto& direction = *selectors.front();
+    REQUIRE(direction.attributes.at("pulpChoices") == "Up|Down|Converge|Random");
+    REQUIRE(direction.attributes.at("binding") == "shape");
+    REQUIRE(direction.attributes.at("pulpParamKey") == "shape");
+    REQUIRE(direction.stable_anchor_id);
+}
+
+TEST_CASE("a bound stepper lowers with a declared or normalized fallback grid",
+          "[import][browser-capture][semantics][stepper]") {
+    // A count is the control the original request asked for ("voice number
+    // parameter") and the one a knob reads worst. Its range is DECLARED
+    // because nothing about the element implies it: a voices control counting
+    // 1..8 and an octave control spanning -2..+2 are the same box.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"stepper","binding_status":"bound","name":"voices",
+         "bounds":{"left":24,"top":40,"width":80,"height":28},
+         "data_pulp":{"param":"voices","min":"1","max":"8","step":"1"}},
+        {"kind":"stepper","binding_status":"bound","name":"normalized",
+         "bounds":{"left":24,"top":90,"width":80,"height":28},
+         "data_pulp":{"param":"normalized"}},
+        {"kind":"stepper","binding_status":"bound","name":"partial",
+         "bounds":{"left":24,"top":140,"width":80,"height":28},
+         "data_pulp":{"param":"partial","min":"-2"}},
+        {"kind":"stepper","binding_status":"bound","name":"bipolar",
+         "bounds":{"left":24,"top":190,"width":80,"height":28},
+         "data_pulp":{"param":"bipolar","min":"-2","max":"2","step":"1"}},
+        {"kind":"stepper","binding_status":"bound","name":"frequency",
+         "bounds":{"left":24,"top":240,"width":80,"height":28},
+         "data_pulp":{"param":"frequency","min":"20","max":"20000","step":"10"}},
+        {"kind":"stepper","binding_status":"bound","name":"precision",
+         "bounds":{"left":24,"top":265,"width":80,"height":28},
+         "data_pulp":{"param":"precision","min":"0","max":"0.000001","step":"0.0000001"}},
+        {"kind":"stepper","binding_status":"bound","name":"junk",
+         "bounds":{"left":24,"top":290,"width":80,"height":28},
+         "data_pulp":{"param":"junk","min":"1junk","max":"8","step":"1"}},
+        {"kind":"stepper","binding_status":"bound","name":"reversed",
+         "bounds":{"left":24,"top":340,"width":80,"height":28},
+         "data_pulp":{"param":"reversed","min":"8","max":"1","step":"1"}},
+        {"kind":"stepper","binding_status":"bound","name":"nonfinite",
+         "bounds":{"left":24,"top":390,"width":80,"height":28},
+         "data_pulp":{"param":"nonfinite","min":"0","max":"nan","step":"1"}},
+        {"kind":"stepper","binding_status":"bound","name":"zero-step",
+         "bounds":{"left":24,"top":440,"width":80,"height":28},
+         "data_pulp":{"param":"zero-step","min":"0","max":"1","step":"0"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    REQUIRE(result);
+
+    std::vector<const pulp::view::IRNode*> steppers;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            if (node.audio_widget == pulp::view::AudioWidgetType::stepper)
+                steppers.push_back(&node);
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+
+    // No domain means a normalized host parameter. A partial domain is not
+    // merged with an invented endpoint and therefore does not lower.
+    REQUIRE(steppers.size() == 5);
+    const auto find_stepper = [&](std::string_view param) -> const pulp::view::IRNode& {
+        const auto it = std::find_if(steppers.begin(), steppers.end(),
+            [&](const auto* node) {
+                const auto found = node->attributes.find("pulpParamKey");
+                return found != node->attributes.end() && found->second == param;
+            });
+        REQUIRE(it != steppers.end());
+        return **it;
+    };
+    const auto& voices = find_stepper("voices");
+    REQUIRE(voices.audio_min == 1.0f);
+    REQUIRE(voices.audio_max == 8.0f);
+    REQUIRE(std::stof(voices.attributes.at("pulpStep")) == 1.0f);
+    REQUIRE(voices.attributes.at("pulpParamKey") == "voices");
+
+    const auto& normalized = find_stepper("normalized");
+    REQUIRE(normalized.audio_min == 0.0f);
+    REQUIRE(normalized.audio_max == 1.0f);
+    REQUIRE(std::stof(normalized.attributes.at("pulpStep")) == 0.01f);
+    REQUIRE(normalized.attributes.at("pulpParamKey") == "normalized");
+
+    const auto& bipolar = find_stepper("bipolar");
+    REQUIRE(bipolar.audio_min == -2.0f);
+    REQUIRE(bipolar.audio_max == 2.0f);
+    REQUIRE(std::stof(bipolar.attributes.at("pulpStep")) == 1.0f);
+
+    const auto& frequency = find_stepper("frequency");
+    REQUIRE(frequency.audio_min == 20.0f);
+    REQUIRE(frequency.audio_max == 20000.0f);
+    REQUIRE(std::stof(frequency.attributes.at("pulpStep")) == 10.0f);
+
+    const auto& precision = find_stepper("precision");
+    REQUIRE(precision.audio_min == 0.0f);
+    REQUIRE(precision.audio_max == Catch::Approx(0.000001f));
+    REQUIRE(precision.attributes.at("pulpStep") == "0.0000001");
+    REQUIRE(std::stof(precision.attributes.at("pulpStep")) ==
+            Catch::Approx(0.0000001f));
 }

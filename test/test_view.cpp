@@ -1,9 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/view/buttons.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/live_constant_editor.hpp>
 #include <pulp/view/plugin_view_host.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/widgets.hpp>
@@ -197,6 +199,132 @@ TEST_CASE("View hit testing", "[view]") {
     // Hidden child should not be hit
     c1_ptr->set_visible(false);
     REQUIRE(root.hit_test({50, 50}) == &root);
+}
+
+TEST_CASE("View hit testing follows a child's paint scale", "[view]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto fitted = std::make_unique<View>();
+    fitted->set_bounds({100, 50, 200, 100});
+    fitted->set_transform_origin(0.0f, 0.0f);
+    fitted->set_scale(0.5f);
+
+    auto control = std::make_unique<View>();
+    control->set_bounds({120, 20, 40, 40});
+    auto* control_ptr = control.get();
+    fitted->add_child(std::move(control));
+    root.add_child(std::move(fitted));
+
+    REQUIRE(root.hit_test({170, 70}) == control_ptr);
+    REQUIRE(root.hit_test({240, 90}) != control_ptr);
+}
+
+TEST_CASE("View pointer delivery follows a child's paint scale", "[view]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto fitted = std::make_unique<View>();
+    fitted->set_bounds({100, 50, 200, 100});
+    fitted->set_transform_origin(0.0f, 0.0f);
+    fitted->set_scale(0.5f);
+
+    auto fader = std::make_unique<Fader>();
+    fader->set_bounds({20, 20, 160, 40});
+    fader->set_orientation(Fader::Orientation::horizontal);
+    auto* fader_ptr = fader.get();
+    fitted->add_child(std::move(fader));
+    root.add_child(std::move(fitted));
+
+    REQUIRE(root.hit_test({170, 75}) == fader_ptr);
+    root.simulate_click({170, 75});
+    REQUIRE(fader_ptr->value() == Catch::Approx(0.75f));
+}
+
+TEST_CASE("View root hit testing inverts each nested paint scale once",
+          "[view][transform][hit_test]") {
+    View root;
+    root.set_bounds({0, 0, 240, 160});
+    root.set_transform_origin(0.0f, 0.0f);
+    root.set_scale(0.5f);
+
+    auto container = std::make_unique<View>();
+    container->set_bounds({40, 20, 120, 100});
+    container->set_transform_origin(0.0f, 0.0f);
+    container->set_scale(0.5f);
+
+    auto control = std::make_unique<View>();
+    auto* control_ptr = control.get();
+    control->set_bounds({40, 20, 20, 20});
+    container->add_child(std::move(control));
+    root.add_child(std::move(container));
+
+    REQUIRE(root.hit_test({32.5f, 17.5f}) == control_ptr);
+    REQUIRE(root.hit_test({65.0f, 35.0f}) != control_ptr);
+}
+
+TEST_CASE("A zero-scale child does not block lower siblings", "[view]") {
+    View root;
+    root.set_bounds({0, 0, 200, 120});
+
+    auto lower = std::make_unique<View>();
+    lower->set_bounds({20, 20, 100, 60});
+    auto* lower_ptr = lower.get();
+    root.add_child(std::move(lower));
+
+    auto collapsed = std::make_unique<View>();
+    collapsed->set_bounds({20, 20, 100, 60});
+    collapsed->set_scale(0.0f);
+    root.add_child(std::move(collapsed));
+
+    REQUIRE(root.hit_test({50, 50}) == lower_ptr);
+}
+
+TEST_CASE("Fitted editor input follows paint through a scrollable app shell",
+          "[view][events]") {
+    View root;
+    root.set_bounds({0, 0, 1280, 800});
+
+    bool navigated_back = false;
+    auto back = std::make_unique<TextButton>();
+    back->set_bounds({14, 7, 94, 24});
+    back->on_click = [&] { navigated_back = true; };
+    root.add_child(std::move(back));
+
+    auto viewport = std::make_unique<ScrollView>();
+    viewport->set_bounds({0, 38, 1280, 762});
+    viewport->set_content_size({1280, 762});
+
+    auto stage = std::make_unique<View>();
+    stage->set_bounds({0, 0, 1280, 762});
+
+    auto panel = std::make_unique<View>();
+    panel->set_bounds({100, 81, 1080, 600});
+
+    auto editor = std::make_unique<View>();
+    editor->set_bounds({130, 0, 820, 633});
+    editor->set_transform_origin(0.0f, 0.0f);
+    constexpr float kFitScale = 0.83f;
+    editor->set_scale(kFitScale);
+
+    auto fader = std::make_unique<Fader>();
+    fader->set_bounds({36, 206.75f, 490, 42});
+    fader->set_orientation(Fader::Orientation::horizontal);
+    fader->set_value(0.65f);
+    auto* fader_ptr = fader.get();
+    editor->add_child(std::move(fader));
+    panel->add_child(std::move(editor));
+    stage->add_child(std::move(panel));
+    viewport->add_child(std::move(stage));
+    root.add_child(std::move(viewport));
+
+    const Point painted_fader_point{
+        100.0f + 130.0f + kFitScale * (36.0f + 400.0f),
+        38.0f + 81.0f + kFitScale * (206.75f + 21.0f)};
+    REQUIRE(root.hit_test(painted_fader_point) == fader_ptr);
+    root.simulate_click(painted_fader_point);
+    REQUIRE(fader_ptr->value() > 0.8f);
+    REQUIRE_FALSE(navigated_back);
 }
 
 TEST_CASE("View hit testing honors disabled hit-testable and overflow states",

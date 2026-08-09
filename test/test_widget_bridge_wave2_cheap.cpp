@@ -872,6 +872,41 @@ TEST_CASE("setTextRuns builds a styled AttributedString on the Label",
     CHECK(lbl->attributed_span_count() == 2);  // "Hello" styled run + " world" gap
 }
 
+TEST_CASE("setTextRuns preserves inherited dominant typography",
+          "[view][widget-bridge][text][inheritance]") {
+    ScriptEngine engine;
+    View root;
+    root.set_inheritable_font_family("Courier");
+    root.set_inheritable_font_size(19.0f);
+    root.set_inheritable_font_weight(600);
+    root.set_inheritable_letter_spacing(1.5f);
+    root.set_inheritable_text_color(pulp::canvas::Color::rgba8(1, 2, 3));
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(
+        "createLabel('t', 'Hello world', '');\n"
+        "setTextRuns('t', [{ start: 0, end: 5, fontWeight: 700 }]);");
+    auto* label = dynamic_cast<Label*>(bridge.widget("t"));
+    REQUIRE(label != nullptr);
+    label->set_bounds({0, 0, 300, 40});
+    pulp::canvas::RecordingCanvas canvas;
+    label->paint(canvas);
+    std::vector<pulp::canvas::DrawCommand> fonts;
+    for (const auto& command : canvas.commands())
+        if (command.type == pulp::canvas::DrawCommand::Type::set_font_full)
+            fonts.push_back(command);
+    auto has_font = [&](float weight) {
+        return std::any_of(fonts.begin(), fonts.end(), [&](const auto& font) {
+            return font.text == "Courier" &&
+                   std::abs(font.f[0] - 19.0f) < 1e-4f &&
+                   std::abs(font.f[1] - weight) < 1e-4f &&
+                   std::abs(font.f[3] - 1.5f) < 1e-4f;
+        });
+    };
+    CHECK(has_font(700.0f));
+    CHECK(has_font(600.0f));
+}
+
 // pulp #3336: a plain set_text() must supersede prior per-range runs. The old
 // spans index into the OLD string, so leaving has_attributed_ set would paint
 // stale, mis-indexed runs over the new text.

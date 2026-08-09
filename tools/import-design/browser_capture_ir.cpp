@@ -7,6 +7,7 @@
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -30,6 +31,20 @@ std::string string_member(const choc::value::ValueView& object,
         !object[key].isString())
         return {};
     return object[key].toString();
+}
+
+std::optional<float> strict_finite_float(std::string_view text) {
+    if (text.empty()) return std::nullopt;
+    try {
+        std::size_t consumed = 0;
+        const auto owned = std::string(text);
+        const float parsed = std::stof(owned, &consumed);
+        if (consumed != owned.size() || !std::isfinite(parsed))
+            return std::nullopt;
+        return parsed;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
 }
 
 double number_member(const choc::value::ValueView& object,
@@ -455,6 +470,22 @@ int lower_semantic_controls(const fs::path& path,
         if (kind == "knob") widget = pulp::view::AudioWidgetType::knob;
         else if (kind == "fader") widget = pulp::view::AudioWidgetType::fader;
         else if (kind == "meter") widget = pulp::view::AudioWidgetType::meter;
+        // A switch, a checkbox, or anything the semantics pass called a
+        // toggle. The recognisers upstream have named these correctly all
+        // along; this branch is what turns that recognition into a control
+        // instead of leaving the element as part of the backdrop -- a shape
+        // that reads to a player as something to flip and moves nothing.
+        else if (kind == "toggle") widget = pulp::view::AudioWidgetType::toggle;
+        // A choice between named alternatives. `tab` is included because a
+        // segmented row and a tab strip are the same control wearing two
+        // costumes, and a designer reaches for whichever the panel's idiom
+        // suggests.
+        else if (kind == "select" || kind == "tab")
+            widget = pulp::view::AudioWidgetType::selector;
+        // A count the player reads as a number. A knob can carry one and reads
+        // badly doing it: the value that matters is the integer, and a dial
+        // asks the eye to infer it from an angle.
+        else if (kind == "stepper") widget = pulp::view::AudioWidgetType::stepper;
         else continue;  // buttons and unknowns stay part of the backdrop
 
         const auto data = object_member(candidate, "data_pulp");
@@ -487,6 +518,13 @@ int lower_semantic_controls(const fs::path& path,
         control.type = "frame";
         control.name = string_member(candidate, "name");
         control.audio_widget = widget;
+        // A single captured frame cannot prove that an apparently uniform
+        // fader track stays uniform at other values. Only the author can make
+        // that promise. The sprite pass still checks the pixels for
+        // contradictory value-dependent chrome before trusting it.
+        if (widget == pulp::view::AudioWidgetType::fader && data.isObject() &&
+            data.hasObjectMember("static-track"))
+            control.attributes["browser_fader_static_track_declared"] = "1";
         // design_codegen keys the host binding off attributes["binding"] —
         // IRNode::param_key does not exist; that field belongs to the
         // geometry-detected element struct, which is a different lane.
@@ -538,13 +576,77 @@ int lower_semantic_controls(const fs::path& path,
         // inferred: the value lives in a CSS custom property the stylesheet
         // reads, and which property that is differs per design system.
         const auto declared_value = string_member(data, "value");
-        if (!declared_value.empty()) {
-            try {
-                control.audio_default = std::stof(declared_value);
-            } catch (const std::exception&) {
-                // A malformed value must not take the control down with it;
-                // the default stands and the design still renders.
+        if (widget == pulp::view::AudioWidgetType::toggle) {
+            // Canonicalise one source value into BOTH representations consumed
+            // downstream. Native materialisation reads `checked`, while both
+            // JS emitters read audio_default. Keeping the author's raw spelling
+            // in only one made `true` and `0.75` open in opposite states.
+            float value = 0.0f;
+            if (!declared_value.empty()) {
+                auto lower = declared_value;
+                std::transform(lower.begin(), lower.end(), lower.begin(),
+                               [](unsigned char c) {
+                                   return static_cast<char>(std::tolower(c));
+                               });
+                if (lower == "true" || lower == "yes" || lower == "on") {
+                    value = 1.0f;
+                } else if (lower == "false" || lower == "no" || lower == "off") {
+                    value = 0.0f;
+                } else if (const auto parsed = strict_finite_float(declared_value)) {
+                    value = std::clamp(*parsed, 0.0f, 1.0f);
+                }
             }
+            control.audio_default = value;
+            control.attributes["checked"] =
+                pulp::view::toggle_on_from_normalized(value) ? "1" : "0";
+        } else if (!declared_value.empty()) {
+            if (const auto parsed = strict_finite_float(declared_value))
+                control.audio_default = *parsed;
+        }
+        // The segment labels, declared rather than scraped: only the author
+        // knows which children are segments, and scraping the element's text
+        // turns a caption or a badge inside the control into an extra choice.
+        // A selector with no declared choices has nothing to light, so it stays
+        // part of the backdrop rather than arriving as an empty track.
+        if (widget == pulp::view::AudioWidgetType::selector) {
+            const auto choices = string_member(data, "choices");
+            if (choices.empty()) continue;
+            control.attributes["pulpChoices"] = choices;
+        }
+        // Prefer a fully DECLARED stepper grid: nothing about the element's
+        // geometry distinguishes a voice count (1..8) from an octave offset
+        // (-2..2). With no domain at all, the only honest fallback is the host
+        // parameter's normalized 0..1 domain. A PARTIAL domain is rejected:
+        // merging an authored -2 minimum with an invented +1 maximum would be
+        // a plausible-looking but false product contract.
+        if (widget == pulp::view::AudioWidgetType::stepper) {
+            const auto min = string_member(data, "min");
+            const auto max = string_member(data, "max");
+            if (min.empty() != max.empty()) continue;
+            const bool has_declared_range = !min.empty();
+            const auto parsed_min = min.empty()
+                ? std::optional<float>{0.0f} : strict_finite_float(min);
+            const auto parsed_max = max.empty()
+                ? std::optional<float>{1.0f} : strict_finite_float(max);
+            if (!parsed_min || !parsed_max) continue;
+            control.audio_min = *parsed_min;
+            control.audio_max = *parsed_max;
+            if (
+                !(control.audio_max > control.audio_min)) continue;
+            control.has_audio_range = true;
+            const auto step = string_member(data, "step");
+            float parsed_step = has_declared_range ? 1.0f : 0.01f;
+            if (!step.empty()) {
+                const auto value = strict_finite_float(step);
+                if (!value) continue;
+                parsed_step = *value;
+            }
+            if (!std::isfinite(parsed_step) || parsed_step <= 0.0f) continue;
+            // Preserve validated author precision. std::to_string(float) fixes
+            // six decimals, which turns a valid 1e-7 grid into "0.000000" and
+            // makes the next semantic pass reject its own lowered output.
+            control.attributes["pulpStep"] =
+                step.empty() ? std::to_string(parsed_step) : step;
         }
         control.style.position = "absolute";
         control.style.left =

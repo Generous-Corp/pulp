@@ -1,4 +1,5 @@
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/gap_widgets.hpp>
 #include "bridge_dispatch.hpp"
 
 #include <pulp/view/ui_components.hpp>
@@ -53,9 +54,11 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
         wire_parameter_gestures(id, w);
         t->on_toggle = [this, alive, engine, id](bool v) {
             BridgeCallbackScope scope(alive);
+            if (!alive || !alive->load(std::memory_order_acquire)) return;
             begin_param_gesture(id);
             dispatch_event(alive, engine, id, "toggle", v ? "1" : "0");
-            end_param_gesture(id);
+            if (alive && alive->load(std::memory_order_acquire))
+                end_param_gesture(id);
         };
     } else if (auto* r = dynamic_cast<RangeSlider*>(w)) {
         wire_parameter_gestures(id, w);
@@ -65,6 +68,39 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
         r->on_change = [alive, engine, id](float v) {
             BridgeCallbackScope scope(alive);
             dispatch_event(alive, engine, id, "change", std::to_string(v));
+        };
+    } else if (auto* st = dynamic_cast<Stepper*>(w)) {
+        // Mirror createStepper's inline `change` wiring, and bracket the edit
+        // with a gesture: a stepper nudge is instantaneous, so without one the
+        // declarative binding re-asserts the store value over the click on the
+        // next frame. The payload is the PLAIN value the widget shows.
+        wire_parameter_gestures(id, w);
+        st->on_change = [this, alive, engine, id](double v) {
+            BridgeCallbackScope scope(alive);
+            if (!alive || !alive->load(std::memory_order_acquire)) return;
+            begin_param_gesture(id);
+            dispatch_event(alive, engine, id, "change", std::to_string(v));
+            if (alive && alive->load(std::memory_order_acquire))
+                end_param_gesture(id);
+        };
+    } else if (auto* seg = dynamic_cast<SegmentedControl*>(w)) {
+        // Mirror createSegmented's inline wiring so a `<segmented>` tag routed
+        // through __domAppend dispatches the same `select` event the factory
+        // path does. Without this the DOM path builds a real, clickable
+        // selector whose changes reach nothing — the factory path works and
+        // the tag path does not, which is invisible from the emitted script.
+        //
+        // A selector has no drag lifecycle, so bracket its instantaneous edit
+        // with a gesture the way a Toggle does, or the declarative binding
+        // re-asserts the store value over the click on the very next frame.
+        wire_parameter_gestures(id, w);
+        seg->on_change = [this, alive, engine, id](int index) {
+            BridgeCallbackScope scope(alive);
+            if (!alive || !alive->load(std::memory_order_acquire)) return;
+            begin_param_gesture(id);
+            dispatch_event(alive, engine, id, "select", std::to_string(index));
+            if (alive && alive->load(std::memory_order_acquire))
+                end_param_gesture(id);
         };
     } else if (auto* c = dynamic_cast<ComboBox*>(w)) {
         // Mirror createCombo's inline wiring so a `<combo>`/`<select>` tag

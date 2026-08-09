@@ -53,6 +53,24 @@ TEST_CASE("TextShaper prepare caches measurements", "[canvas][text_shaper]") {
         REQUIRE(p1.segments()[i].width == p2.segments()[i].width);
 }
 
+TEST_CASE("TextShaper wrap measurement includes CSS letter spacing",
+          "[canvas][text_shaper][typography]") {
+    TextShaper shaper;
+    constexpr std::string_view text = "alpha beta";
+    const auto plain = shaper.prepare(text, "Inter", 12.0f, 400, 0, 0.0f);
+    const auto tracked = shaper.prepare(text, "Inter", 12.0f, 400, 0, 4.0f);
+    REQUIRE(tracked.total_width() > plain.total_width());
+
+    const float width = (plain.total_width() + tracked.total_width()) * 0.5f;
+    CHECK(shaper.layout(plain, width).line_count == 1);
+    CHECK(shaper.layout(tracked, width).line_count == 2);
+
+    // Tracking is part of the segment-cache key: returning to the plain
+    // request must not reuse the wider tracked measurements.
+    const auto plain_again = shaper.prepare(text, "Inter", 12.0f, 400, 0, 0.0f);
+    CHECK(plain_again.total_width() == plain.total_width());
+}
+
 // ── Layout (the cheap path — just arithmetic) ───────────────────────────
 
 TEST_CASE("TextShaper layout single line", "[canvas][text_shaper]") {
@@ -79,6 +97,58 @@ TEST_CASE("TextShaper layout respects newlines", "[canvas][text_shaper]") {
 
     auto layout = shaper.layout(prepared, 1000.0f);
     REQUIRE(layout.line_count == 3);
+}
+
+TEST_CASE("TextShaper multiline metrics use one line rather than cumulative paragraph height",
+          "[canvas][text_shaper][metrics]") {
+    TextShaper shaper;
+    const auto single = shaper.prepare("Alpha", "Inter", 16.0f);
+    const auto three = shaper.prepare("Alpha\nBeta\nGamma", "Inter", 16.0f);
+    REQUIRE(single.line_height() > 0.0f);
+    CHECK(three.line_height() < single.line_height() * 1.5f);
+}
+
+TEST_CASE("TextShaper does not wrap at an attributed style boundary inside a word",
+          "[canvas][text_shaper][attributed]") {
+    TextShaper shaper;
+    AttributedString attributed;
+    TextSpan first;
+    first.text = "hel";
+    first.font_family = "Inter";
+    attributed.append(first);
+    TextSpan second = first;
+    second.text = "lo";
+    second.font_weight = 700;
+    attributed.append(second);
+
+    const auto prepared = shaper.prepare(attributed);
+    REQUIRE(prepared.segments().size() == 2);
+    REQUIRE(prepared.segments()[1].joins_previous_word);
+    const float between = prepared.segments()[0].width +
+                          prepared.segments()[1].width * 0.5f;
+    const auto layout = shaper.layout_with_lines(prepared, between);
+    REQUIRE(layout.line_count == 1);
+    CHECK(layout.lines[0].text == "hello");
+}
+
+TEST_CASE("TextShaper break-word carries a split remnant into following styled spans",
+          "[canvas][text_shaper][attributed][break-word]") {
+    TextShaper shaper;
+    AttributedString attributed;
+    for (const char* part : {"ab", "cd", "ef"}) {
+        TextSpan span;
+        span.text = part;
+        span.font_family = "Inter";
+        attributed.append(span);
+    }
+    const auto prepared = shaper.prepare(attributed);
+    REQUIRE(prepared.segments().size() == 3);
+    const float three_chars = prepared.segments()[0].width * 1.5f;
+    const auto layout = shaper.layout_with_lines(
+        prepared, three_chars, 0.0f, 0, BreakMode::break_word);
+    REQUIRE(layout.line_count == 2);
+    CHECK(layout.lines[0].text == "abc");
+    CHECK(layout.lines[1].text == "def");
 }
 
 TEST_CASE("TextShaper layout_with_lines materializes text", "[canvas][text_shaper]") {
@@ -217,6 +287,143 @@ TEST_CASE("TextShaper attributed string", "[canvas][text_shaper]") {
 
     auto layout = shaper.layout(prepared, 1000.0f);
     REQUIRE(layout.line_count >= 1);
+}
+
+TEST_CASE("TextShaper attributed reflow retains span identity in every line fragment",
+          "[canvas][text_shaper][attributed]") {
+    TextShaper shaper;
+    AttributedString text;
+    TextSpan first;
+    first.text = "alpha ";
+    first.font_size = 10.0f;
+    first.font_weight = 400;
+    text.append(first);
+    TextSpan second;
+    second.text = "beta gamma";
+    second.font_size = 14.0f;
+    second.font_weight = 700;
+    second.italic = true;
+    second.letter_spacing = 2.0f;
+    text.append(second);
+
+    const auto prepared = shaper.prepare(text);
+    const auto layout = shaper.layout_with_lines(prepared, 50.0f);
+
+    REQUIRE(layout.line_count >= 2);
+    bool saw_first = false;
+    bool saw_second = false;
+    std::string materialized;
+    for (const auto& line : layout.lines) {
+        for (const auto& fragment : line.fragments) {
+            materialized += fragment.text;
+            if (fragment.style_index == 0) saw_first = true;
+            if (fragment.style_index == 1) saw_second = true;
+        }
+    }
+    CHECK(saw_first);
+    CHECK(saw_second);
+    CHECK(materialized.find("alpha") != std::string::npos);
+    CHECK(materialized.find("beta") != std::string::npos);
+    CHECK(materialized.find("gamma") != std::string::npos);
+}
+
+TEST_CASE("TextShaper attributed metrics enclose every mixed-size span",
+          "[canvas][text_shaper][attributed][metrics]") {
+    TextShaper shaper;
+    const auto small = shaper.prepare("small", "Inter", 10.0f, 400);
+    const auto large = shaper.prepare("BIG", "Inter", 28.0f, 700, 1);
+
+    AttributedString text;
+    TextSpan small_span;
+    small_span.text = "small ";
+    small_span.font_family = "Inter";
+    small_span.font_size = 10.0f;
+    text.append(small_span);
+    TextSpan large_span;
+    large_span.text = "BIG";
+    large_span.font_family = "Inter";
+    large_span.font_size = 28.0f;
+    large_span.font_weight = 700;
+    large_span.italic = true;
+    text.append(large_span);
+
+    const auto mixed = shaper.prepare(text);
+    CHECK(std::isfinite(small.line_height()));
+    CHECK(std::isfinite(large.line_height()));
+    CHECK(std::isfinite(mixed.line_height()));
+    CHECK(small.line_height() < 100.0f);
+    CHECK(large.line_height() < 280.0f);
+    CHECK(mixed.line_height() < 280.0f);
+    CHECK(mixed.ascent() >= large.ascent());
+    CHECK(mixed.descent() >= large.descent());
+    CHECK(mixed.ascent() >= small.ascent());
+    CHECK(mixed.descent() >= small.descent());
+    CHECK_THAT(mixed.line_height(), WithinAbs(
+        mixed.ascent() + mixed.descent() + mixed.leading(), 1e-5f));
+    CHECK(mixed.line_height() >= large.line_height());
+}
+
+TEST_CASE("TextShaper automatic attributed line height follows each wrapped line",
+          "[canvas][text_shaper][attributed][metrics]") {
+    TextShaper shaper;
+    AttributedString text;
+    TextSpan large;
+    large.text = "BIG\n";
+    large.font_family = "Inter";
+    large.font_size = 28.0f;
+    text.append(large);
+    TextSpan small;
+    small.text = "small";
+    small.font_family = "Inter";
+    small.font_size = 10.0f;
+    text.append(small);
+
+    const auto prepared = shaper.prepare(text);
+    const auto layout = shaper.layout_with_lines(prepared, 200.0f);
+    REQUIRE(layout.lines.size() == 2);
+    CHECK(layout.lines[0].height > layout.lines[1].height);
+    CHECK_THAT(layout.total_height,
+               WithinAbs(layout.lines[0].height + layout.lines[1].height,
+                         1e-5f));
+    CHECK_THAT(layout.lines[1].y, WithinAbs(layout.lines[0].height, 1e-5f));
+}
+
+TEST_CASE("TextShaper applies paragraph font features to attributed spans",
+          "[canvas][text_shaper][attributed][font-features]") {
+    TextShaper shaper;
+    AttributedString ones;
+    TextSpan ones_span;
+    ones_span.text = "111111";
+    ones_span.font_family = "Inter";
+    ones_span.font_size = 24.0f;
+    ones.append(ones_span);
+    AttributedString nines;
+    TextSpan nines_span = ones_span;
+    nines_span.text = "999999";
+    nines.append(nines_span);
+
+    const std::vector<Canvas::FontFeature> tnum{
+        {Canvas::make_font_feature_tag("tnum"), 1}};
+    const auto prepared_ones = shaper.prepare(ones, tnum);
+    const auto prepared_nines = shaper.prepare(nines, tnum);
+    REQUIRE(prepared_ones.total_width() > 0.0f);
+    REQUIRE(prepared_nines.total_width() > 0.0f);
+    CHECK_THAT(prepared_ones.total_width(),
+               WithinAbs(prepared_nines.total_width(), 0.5f));
+}
+
+TEST_CASE("TextShaper fallback glyph metrics stay finite and enclose the primary face",
+          "[canvas][text_shaper][metrics][fallback]") {
+    TextShaper shaper;
+    const auto primary = shaper.prepare("Latin", "Inter", 18.0f, 400);
+    const auto fallback = shaper.prepare("Latin 😀 漢字", "Inter", 18.0f, 400);
+    CHECK(std::isfinite(fallback.ascent()));
+    CHECK(std::isfinite(fallback.descent()));
+    CHECK(std::isfinite(fallback.line_height()));
+    CHECK(fallback.line_height() > 0.0f);
+    CHECK(fallback.line_height() < 180.0f);
+    CHECK(fallback.ascent() >= primary.ascent());
+    CHECK(fallback.descent() >= primary.descent());
 }
 
 TEST_CASE("Global text shaper singleton", "[canvas][text_shaper]") {
@@ -570,6 +777,20 @@ TEST_CASE("TextShaper BreakMode preserves remnant when the over-wide segment is 
     bool ok = (reconstructed == canonical) || (reconstructed == with_space);
     INFO("reconstructed='" << reconstructed << "'");
     REQUIRE(ok);
+}
+
+TEST_CASE("TextShaper break-word preserves the whitespace break after a carried remnant",
+          "[canvas][text_shaper][issue-1737]") {
+    TextShaper shaper;
+    auto prepared = shaper.prepare(
+        "Antidisestablishmentarianism follows", "system", 14);
+    auto layout = shaper.layout_with_lines(
+        prepared, 48.0f, 0, 0, BreakMode::break_word);
+
+    bool intact_following_word = false;
+    for (const auto& line : layout.lines)
+        intact_following_word = intact_following_word || line.text == "follows";
+    REQUIRE(intact_following_word);
 }
 
 TEST_CASE("TextRunPlanner emits UTF-8 scalar offsets and line breaks",

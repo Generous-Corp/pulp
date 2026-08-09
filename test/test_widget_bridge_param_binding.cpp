@@ -13,6 +13,7 @@
 
 #include <pulp/state/store.hpp>
 #include <pulp/view/canvas_widget.hpp>
+#include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/ui_components.hpp>
@@ -67,6 +68,48 @@ TEST_CASE("bindWidgetToParam pushes the store value to a knob each frame",
     store.set_normalized(1, 0.80f);
     bridge.service_param_bindings();
     REQUIRE_THAT(knob->value(), WithinAbs(0.80f, 1e-5f));
+}
+
+TEST_CASE("bound Stepper host refresh is silent while user edits still notify",
+          "[view][bridge][state-binding][stepper][gesture]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    add_params(store);
+    int begins = 0;
+    int ends = 0;
+    store.set_gesture_callbacks(
+        [&](ParamID) { ++begins; },
+        [&](ParamID) { ++ends; });
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        globalThis.stepperEvents = 0;
+        createStepper('voices', '');
+        setMin('voices', 0);
+        setMax('voices', 10);
+        setStep('voices', 1);
+        on('voices', 'change', function() { ++globalThis.stepperEvents; });
+        bindWidgetToParam('voices', 'gain');
+    )");
+    auto* stepper = dynamic_cast<Stepper*>(bridge.widget("voices"));
+    REQUIRE(stepper != nullptr);
+
+    store.set_normalized(1, 0.7f);
+    bridge.service_param_bindings();
+    CHECK_THAT(stepper->value(), WithinAbs(7.0, 1e-9));
+    CHECK(engine.evaluate("globalThis.stepperEvents")
+              .getWithDefault<int32_t>(-1) == 0);
+    CHECK(begins == 0);
+    CHECK(ends == 0);
+    CHECK(store.open_gesture_count() == 0);
+
+    stepper->set_value(8.0);
+    CHECK(engine.evaluate("globalThis.stepperEvents")
+              .getWithDefault<int32_t>(-1) == 1);
+    CHECK(begins == 1);
+    CHECK(ends == 1);
+    CHECK(store.open_gesture_count() == 0);
 }
 
 TEST_CASE("service_frame_callbacks drives bindings with no rAF registered",

@@ -12,6 +12,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/animation.hpp>
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <string>
 
@@ -96,10 +97,51 @@ public:
     // ↕ resize cursor advertises the click-and-drag-vertically scrub gesture.
     Stepper() { set_focusable(true); set_cursor(CursorStyle::vertical_resize); }
     void set_value(double v);
+    // Host/preset refreshes write FROM the bound state and must not masquerade
+    // as a user edit by firing on_change (and, through WidgetBridge, opening an
+    // automation gesture and dispatching a JS event).
+    void set_value_silent(double v);
     double value() const { return value_; }
-    void set_range(double lo, double hi) { min_ = lo; max_ = hi; }
-    void set_step(double s) { step_ = s; }
+    void set_range(double lo, double hi) {
+        if (!std::isfinite(lo) || !std::isfinite(hi)) return;
+        if (lo > hi) std::swap(lo, hi);
+        min_ = lo;
+        max_ = hi;
+        set_value_silent(value_);
+        request_repaint();
+    }
+    void set_minimum(double lo) {
+        if (!std::isfinite(lo)) return;
+        min_ = lo;
+        if (max_ < min_) max_ = min_;
+        set_value_silent(value_);
+        request_repaint();
+    }
+    void set_maximum(double hi) {
+        if (!std::isfinite(hi)) return;
+        max_ = hi;
+        if (min_ > max_) min_ = max_;
+        set_value_silent(value_);
+        request_repaint();
+    }
+    void set_step(double s) {
+        if (std::isfinite(s) && s > 0.0) {
+            step_ = s;
+            set_value_silent(min_ + std::round((value_ - min_) / step_) * step_);
+            request_repaint();
+        }
+    }
+    // Readable because a binder has to convert between this widget's PLAIN
+    // value and the normalized parameter behind it, and the grid it was
+    // configured with is the only honest source for that conversion.
+    double minimum() const { return min_; }
+    double maximum() const { return max_; }
+    double step() const { return step_; }
     void set_suffix(std::string s) { suffix_ = std::move(s); }
+    /// Marks a browser-captured control as a live replacement. Paint remains
+    /// complete and opaque enough to erase the captured value beneath it.
+    void set_designed_overlay(bool enabled) { designed_overlay_ = enabled; request_repaint(); }
+    bool designed_overlay() const { return designed_overlay_; }
     bool is_editing() const { return editing_; }
     /// Which −/+ zone is currently hovered / pressed (0 = minus, 1 = plus,
     /// -1 = none). Exposed for interaction tests.
@@ -136,6 +178,7 @@ private:
     float press_y_ = 0.0f;      ///< y at mouse-down, for drag-scrub delta
     double drag_start_value_ = 0.0;
     bool scrubbing_ = false;    ///< true once a press turns into a vertical drag
+    bool designed_overlay_ = false;
 };
 
 // ── PanControl (1-D) ──────────────────────────────────────────────────────

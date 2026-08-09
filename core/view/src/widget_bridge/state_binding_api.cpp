@@ -10,6 +10,8 @@
 //     replacement for a requestAnimationFrame metering loop.
 
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/gap_widgets.hpp>
+#include <pulp/view/design_ir.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/value_channel_json.hpp>
@@ -343,7 +345,13 @@ bool WidgetBridge::apply_param_binding(ParamBinding& b, View* w,
         const float hi = r->max_value();
         r->set_value(lo + std::clamp(target, 0.0f, 1.0f) * (hi - lo));
     } else if (auto* t = dynamic_cast<Toggle*>(w)) {
-        t->set_on(target > 0.5f);
+        t->set_on(toggle_on_from_normalized(target));
+    } else if (auto* seg = dynamic_cast<SegmentedControl*>(w)) {
+        seg->set_selected_silent(selector_segment_index(
+            target, static_cast<int>(seg->segments().size())));
+    } else if (auto* st = dynamic_cast<Stepper*>(w)) {
+        st->set_value_silent(stepper_plain_value(
+            target, st->minimum(), st->maximum(), st->step()));
     } else if (auto* p = dynamic_cast<ProgressBar*>(w)) {
         // ProgressBar::set_progress does NOT self-repaint; the caller schedules
         // one when `changed`.
@@ -522,6 +530,8 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
                       dynamic_cast<Fader*>(view) != nullptr ||
                       dynamic_cast<RangeSlider*>(view) != nullptr ||
                       dynamic_cast<Toggle*>(view) != nullptr ||
+                      dynamic_cast<SegmentedControl*>(view) != nullptr ||
+                      dynamic_cast<Stepper*>(view) != nullptr ||
                       dynamic_cast<ProgressBar*>(view) != nullptr;
         if (!supported) return fail(BindingOutcome::incompatible_widget);
     }

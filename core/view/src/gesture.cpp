@@ -1,4 +1,5 @@
 #include <pulp/view/gesture.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/view.hpp>
 
 #include <algorithm>
@@ -80,12 +81,7 @@ Point root_position_for(const MouseEvent& event) {
 }
 
 Point root_to_local(Point root_position, View* view, View& root) {
-    Point local = root_position;
-    for (View* v = view; v && v != &root; v = v->parent()) {
-        local.x -= v->bounds().x;
-        local.y -= v->bounds().y;
-    }
-    return local;
+    return point_to_local(root_position, view, &root);
 }
 
 bool is_ancestor_or_self(const View* ancestor, const View* view) {

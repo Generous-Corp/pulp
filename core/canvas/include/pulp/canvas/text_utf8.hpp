@@ -141,4 +141,31 @@ inline std::size_t utf16_offset_for_utf8_offset(const std::string& text,
     return utf16_cursor;
 }
 
+/// True when a UTF-16 code-unit offset falls between Unicode scalars rather
+/// than between the two code units of a surrogate pair.
+inline bool is_utf16_scalar_boundary(const std::string& text,
+                                     std::size_t utf16_offset) noexcept {
+    const auto byte_offset = utf8_offset_for_utf16_offset(text, utf16_offset);
+    return utf16_offset_for_utf8_offset(text, byte_offset) == utf16_offset;
+}
+
+/// Validate one positive, non-overlapping UTF-16 range against UTF-8 text.
+/// `minimum_start` is the end of the preceding range (zero for the first), so
+/// producers and consumers share the same bounds, ordering, overlap, and
+/// surrogate-pair contract.
+inline bool is_valid_utf16_scalar_range(const std::string& text,
+                                        std::int64_t start,
+                                        std::int64_t length,
+                                        std::int64_t minimum_start = 0) noexcept {
+    if (start < minimum_start || start < 0 || length <= 0) return false;
+    const auto units = utf16_offset_for_utf8_offset(text, text.size());
+    const auto unsigned_start = static_cast<std::uint64_t>(start);
+    const auto unsigned_length = static_cast<std::uint64_t>(length);
+    if (unsigned_length > units || unsigned_start > units - unsigned_length)
+        return false;
+    return is_utf16_scalar_boundary(text, static_cast<std::size_t>(start)) &&
+           is_utf16_scalar_boundary(
+               text, static_cast<std::size_t>(start + length));
+}
+
 } // namespace pulp::canvas

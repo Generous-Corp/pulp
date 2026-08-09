@@ -18,6 +18,7 @@ namespace {
 
 using cpp_codegen::cpp_string_literal;
 using cpp_codegen::emit_line;
+using cpp_codegen::format_float;
 
 std::string json_string_escape(std::string_view input) {
     std::string out;
@@ -138,6 +139,10 @@ struct BindingHelperRoute {
     std::string payload_contract;
     std::string event_contract;
     std::string gesture_contract;
+    int segment_count = 0;
+    double stepper_min = 0.0;
+    double stepper_max = 1.0;
+    double stepper_step = 1.0;
 };
 
 struct ResolvedBindingRoute {
@@ -170,7 +175,9 @@ void collect_resolved_binding_plan(ResolvedBindingPlan& plan,
         (resolved.kind == NativeWidgetKind::knob ||
          resolved.kind == NativeWidgetKind::fader ||
          resolved.kind == NativeWidgetKind::checkbox ||
-         resolved.kind == NativeWidgetKind::toggle_button) &&
+         resolved.kind == NativeWidgetKind::toggle_button ||
+         resolved.kind == NativeWidgetKind::segmented ||
+         resolved.kind == NativeWidgetKind::stepper) &&
         has_single_param;
     const bool has_choice_param = resolved.kind == NativeWidgetKind::toggle_button &&
         has_single_param && md.choice_value && !md.choice_value->empty();
@@ -293,6 +300,7 @@ std::vector<BindingHelperRoute> build_binding_helper_routes(const ResolvedBindin
         if (!route.eligible_for_helper)
             continue;
         const NativeBindingMetadata& md = route.metadata;
+        const auto semantics = imported_widget_semantics(*route.ir_node, *route.resolved);
         routes.push_back(BindingHelperRoute{
             .kind = route.resolved->kind,
             .anchor_id = *route.ir_node->stable_anchor_id,
@@ -321,6 +329,10 @@ std::vector<BindingHelperRoute> build_binding_helper_routes(const ResolvedBindin
             .payload_contract = md.payload_contract.value_or(std::string{}),
             .event_contract = md.event_contract.value_or(std::string{}),
             .gesture_contract = md.gesture_contract.value_or(std::string{}),
+            .segment_count = static_cast<int>(semantics.segments.size()),
+            .stepper_min = route.ir_node->audio_min,
+            .stepper_max = route.ir_node->audio_max,
+            .stepper_step = semantics.stepper_step,
         });
     }
     return routes;
@@ -385,6 +397,31 @@ void emit_binding_context_helpers(std::ostringstream& out,
         emit_line(out, depth, opts.indent_spaces, "});");
     };
 
+    auto emit_segmented_descriptor = [&](const BindingHelperRoute& route, int depth) {
+        emit_line(out, depth, opts.indent_spaces, "pulp::view::NativeImportSegmentedBindingDescriptor{");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.route_id) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.param_key) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.binding_module) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.binding_param) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, std::to_string(route.segment_count));
+        emit_line(out, depth, opts.indent_spaces, "});");
+    };
+
+    auto emit_stepper_descriptor = [&](const BindingHelperRoute& route, int depth) {
+        emit_line(out, depth, opts.indent_spaces, "pulp::view::NativeImportStepperBindingDescriptor{");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.route_id) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.param_key) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.binding_module) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.binding_param) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces,
+                  format_float(static_cast<float>(route.stepper_min)) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces,
+                  format_float(static_cast<float>(route.stepper_max)) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces,
+                  format_float(static_cast<float>(route.stepper_step)));
+        emit_line(out, depth, opts.indent_spaces, "});");
+    };
+
     auto emit_meter_descriptor = [&](const BindingHelperRoute& route, int depth) {
         emit_line(out, depth, opts.indent_spaces, "pulp::view::NativeImportMeterBindingDescriptor{");
         emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.route_id) + ",");
@@ -433,6 +470,8 @@ void emit_binding_context_helpers(std::ostringstream& out,
             route.kind != NativeWidgetKind::meter &&
             route.kind != NativeWidgetKind::checkbox &&
             route.kind != NativeWidgetKind::toggle_button &&
+            route.kind != NativeWidgetKind::segmented &&
+            route.kind != NativeWidgetKind::stepper &&
             route.kind != NativeWidgetKind::xy_pad &&
             route.kind != NativeWidgetKind::waveform &&
             route.kind != NativeWidgetKind::text_editor &&
@@ -454,6 +493,24 @@ void emit_binding_context_helpers(std::ostringstream& out,
             emit_line(out, 3, opts.indent_spaces, "ctx.bind_knob(*knob,");
             emit_descriptor(route, 3);
         } else {
+            if (route.kind == NativeWidgetKind::segmented) {
+                emit_line(out, 2, opts.indent_spaces,
+                          "if (auto* segmented = dynamic_cast<pulp::view::SegmentedControl*>(view)) {");
+                emit_line(out, 3, opts.indent_spaces, "ctx.bind_segmented(*segmented,");
+                emit_segmented_descriptor(route, 3);
+                emit_line(out, 2, opts.indent_spaces, "}");
+                emit_line(out, 1, opts.indent_spaces, "}");
+                continue;
+            }
+            if (route.kind == NativeWidgetKind::stepper) {
+                emit_line(out, 2, opts.indent_spaces,
+                          "if (auto* stepper = dynamic_cast<pulp::view::Stepper*>(view)) {");
+                emit_line(out, 3, opts.indent_spaces, "ctx.bind_stepper(*stepper,");
+                emit_stepper_descriptor(route, 3);
+                emit_line(out, 2, opts.indent_spaces, "}");
+                emit_line(out, 1, opts.indent_spaces, "}");
+                continue;
+            }
             if (route.kind == NativeWidgetKind::checkbox) {
                 emit_line(out, 2, opts.indent_spaces,
                           "if (auto* checkbox = dynamic_cast<pulp::view::Checkbox*>(view)) {");

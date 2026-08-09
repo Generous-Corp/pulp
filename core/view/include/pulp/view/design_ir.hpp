@@ -7,6 +7,7 @@
 /// shared by every design-import source adapter.
 
 #include <pulp/view/theme.hpp>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -249,8 +250,75 @@ enum class AudioWidgetType {
     meter,
     xy_pad,
     waveform,
-    spectrum
+    spectrum,
+    // An on/off. It is a member of THIS enum rather than a node type because
+    // this enum is what both consumers of a lowered control key off: the native
+    // materializer reaches its widget kind through kind_from_audio(), and the
+    // script emitter reaches its factory and its parameter binding through
+    // widget_type_name(). A toggle expressed any other way binds on one path
+    // and renders inert on the other.
+    toggle,
+    // A choice between named alternatives, drawn as ONE control: a shared
+    // track with N labelled segments and exactly one lit. Not N adjacent
+    // toggles — a row of independent switches can show two lit at once and
+    // reads as several controls that happen to touch.
+    selector,
+    // A count the player reads as a number — voices, octaves, retrigger. A
+    // knob can carry one, and reads badly doing it: the value that matters is
+    // the integer, and a dial asks the eye to infer it from an angle.
+    stepper
 };
+
+/// The value a segmented selector writes for segment `index` of `count`, and
+/// the segment a parameter value selects. Stated once, here, because BOTH
+/// script emitters and every native host binder have to agree on it: a panel
+/// whose segments write one mapping while the host reads another lights the
+/// wrong segment for the value it just wrote, and looks like a rendering bug.
+///
+/// A single-segment selector is degenerate and pinned at 0 rather than
+/// dividing by zero.
+inline float selector_segment_value(int index, int count) {
+    if (count <= 1) return 0.0f;
+    const int clamped = index < 0 ? 0 : (index >= count ? count - 1 : index);
+    return static_cast<float>(clamped) / static_cast<float>(count - 1);
+}
+
+/// A stepper's plain value (voices, octaves) against the normalized parameter
+/// behind it. Stated here for the same reason the selector's mapping is: the
+/// script emitter, the bridge's host-to-widget push and every native host
+/// binder have to agree, and a stepper that reads one mapping while the store
+/// writes another shows a number nobody chose.
+inline float stepper_normalized_value(double plain, double min, double max) {
+    if (max <= min) return 0.0f;
+    const double span = max - min;
+    const double clamped = plain < min ? min : (plain > max ? max : plain);
+    return static_cast<float>((clamped - min) / span);
+}
+
+inline double stepper_plain_value(float normalized, double min, double max,
+                                  double step) {
+    if (max <= min) return min;
+    const double raw = min + static_cast<double>(normalized) * (max - min);
+    if (step <= 0.0) return raw;
+    // Snap to the step GRID measured from `min`, so a range that does not start
+    // at zero still lands on the values the author declared.
+    const double snapped = min + std::round((raw - min) / step) * step;
+    return snapped < min ? min : (snapped > max ? max : snapped);
+}
+
+inline int selector_segment_index(float value, int count) {
+    if (count <= 1) return 0;
+    if (!std::isfinite(value)) return 0;
+    const float scaled = value * static_cast<float>(count - 1);
+    const int nearest = static_cast<int>(scaled + 0.5f);
+    return nearest < 0 ? 0 : (nearest >= count ? count - 1 : nearest);
+}
+
+/// The single threshold used by every toggle import/binding path. Invalid
+/// host values fail closed instead of changing UI state unpredictably.
+inline bool toggle_on_from_normalized(double value) {
+    return std::isfinite(value) && value >= 0.5;
+}
 
 struct IRNode;
 
@@ -364,7 +432,8 @@ struct IRTextRun {
     int end = 0;
     std::optional<float> font_size;
     std::optional<int> font_weight;
-    std::optional<std::string> font_style;       // "italic" / "normal"
+    std::optional<std::string> font_family;
+    std::optional<std::string> font_style;       // "italic" / "oblique ..." / "normal"
     std::optional<std::string> color;
     std::optional<float> letter_spacing;
     std::optional<std::string> text_decoration;  // "underline" / "line-through"

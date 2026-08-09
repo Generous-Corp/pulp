@@ -2135,6 +2135,10 @@ TEST_CASE("WidgetBridge style and layout setters update native view state",
         setTextTransform('title', 'uppercase');
         setTextDecoration('title', 'underline');
         setText('title', 'Updated');
+        setCapturedLineBoxes('title', [
+            { left: 1, top: 2, width: 30, height: 10, start: 0, length: 3 },
+            { left: 1, top: 12, width: 40, height: 10, start: 3, length: 4 }
+        ], 80, 'Inter-Regular');
         setMultiLine('title', 1);
         setText('editor', 'typed');
         setPlaceholder('editor', 'Enter value');
@@ -2260,6 +2264,13 @@ TEST_CASE("WidgetBridge style and layout setters update native view state",
     REQUIRE_THAT(title->font_size(), WithinAbs(18.0f, 0.001f));
     REQUIRE(title->text_transform() == Label::TextTransform::uppercase);
     REQUIRE(title->theme().color("text.primary").has_value());
+    REQUIRE(title->cached_line_boxes().size() == 2);
+    CHECK_THAT(title->cached_line_boxes()[0].left, WithinAbs(1.0f, 0.001f));
+    CHECK(title->cached_line_boxes()[0].start == 0);
+    CHECK(title->cached_line_boxes()[0].length == 3);
+    CHECK_THAT(title->cached_line_boxes()[1].top, WithinAbs(12.0f, 0.001f));
+    CHECK(title->cached_line_boxes()[1].start == 3);
+    CHECK(title->cached_line_boxes()[1].length == 4);
 
     REQUIRE(editor->text() == "typed");
     REQUIRE(editor->placeholder == "Enter value");
@@ -2269,6 +2280,64 @@ TEST_CASE("WidgetBridge style and layout setters update native view state",
     REQUIRE(engine.evaluate("saved_ok").getWithDefault<bool>(false));
     REQUIRE(engine.evaluate("loaded_preset.nested.value").getWithDefault<int>(0) == 3);
     REQUIRE(engine.evaluate("missing_preset_type").toString() == "undefined");
+}
+
+TEST_CASE("WidgetBridge captured line boxes reject partial entries without mutation",
+          "[view][bridge][typography][captured-lines]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createLabel('copy', 'alpha beta', '');
+        setCapturedLineBoxes('copy', [
+            { left: 1, top: 2, width: 30, height: 10, start: 0, length: 5 }
+        ], 80, 'Inter-Regular', true);
+        setCapturedLineBoxes('copy', [
+            { left: 9, top: 9, width: 9, height: 9, start: 0 }
+        ], 80, 'Inter-Regular');
+        setCapturedLineBoxes('copy', [
+            { left: 9, top: 9, width: 9, height: 9,
+              start: 2147483647, length: 1 }
+        ], 80, 'Inter-Regular');
+        setCapturedLineBoxes('copy', [
+            { left: 9, top: 9, width: 9, height: 9, start: 8, length: 5 }
+        ], 80, 'Inter-Regular');
+    )");
+
+    auto* label = dynamic_cast<Label*>(bridge.widget("copy"));
+    REQUIRE(label != nullptr);
+    REQUIRE(label->cached_line_boxes().size() == 1);
+    CHECK(label->captured_wrap_fallback());
+    CHECK_THAT(label->cached_line_boxes()[0].left, WithinAbs(1.0f, 0.001f));
+    CHECK(label->cached_line_boxes()[0].length == 5);
+}
+
+TEST_CASE("WidgetBridge captured line boxes reject reordered and overlapping ranges",
+          "[view][bridge][typography][captured-lines]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createLabel('copy', 'alpha beta', '');
+        setCapturedLineBoxes('copy', [
+            { left: 1, top: 2, width: 30, height: 10, start: 0, length: 5 }
+        ], 80, 'Inter-Regular', true);
+        setCapturedLineBoxes('copy', [
+            { left: 0, top: 0, width: 20, height: 10, start: 6, length: 4 },
+            { left: 0, top: 10, width: 20, height: 10, start: 0, length: 5 }
+        ], 80, 'Inter-Regular');
+        setCapturedLineBoxes('copy', [
+            { left: 0, top: 0, width: 20, height: 10, start: 0, length: 7 },
+            { left: 0, top: 10, width: 20, height: 10, start: 6, length: 4 }
+        ], 80, 'Inter-Regular');
+    )");
+    auto* label = dynamic_cast<Label*>(bridge.widget("copy"));
+    REQUIRE(label != nullptr);
+    REQUIRE(label->cached_line_boxes().size() == 1);
+    CHECK(label->cached_line_boxes()[0].start == 0);
+    CHECK(label->cached_line_boxes()[0].length == 5);
 }
 
 // RN `mixBlendMode` maps W3C blend-mode keywords to the canvas BlendMode enum
@@ -3596,7 +3665,7 @@ TEST_CASE("View::paint_all emits save_backdrop_filter when backdrop_blur is set"
     root.set_bounds({0, 0, 200, 120});
     root.set_backdrop_blur(8.0f);
 
-    RecordingCanvas canvas;
+    pulp::canvas::RecordingCanvas canvas;
     root.paint_all(canvas);
 
     REQUIRE(canvas.count(DrawCommand::Type::save_backdrop_filter) == 1);
@@ -5311,8 +5380,211 @@ TEST_CASE("WidgetBridge creates Ink & Signal design-system widgets from JS",
     // setValue routes through the shared dynamic_cast chain to the gap widgets.
     bridge.load_script("setValue('voices', 8); setValue('balance', -1); setText('fmt', 'CLAP');");
     REQUIRE(stepper->value() == Catch::Approx(8.0));
+    REQUIRE(engine.evaluate("getValue('voices')").getWithDefault<double>(0.0) ==
+            Catch::Approx(8.0));
     REQUIRE(pan->value() == Catch::Approx(-1.0f));
     REQUIRE(badge->text() == "CLAP");
+}
+
+TEST_CASE("WidgetBridge discrete factories and DOM tags share gesture-safe callbacks",
+          "[view][bridge][design-system][discrete][gesture][lifetime]") {
+    struct Variant { const char* name; const char* create; bool segmented; };
+    for (const auto variant : {
+             Variant{"factory stepper", "createStepper('control', '');", false},
+             Variant{"DOM stepper", "__domAppend('', 'control', 'stepper');", false},
+             Variant{"factory segmented", "createSegmented('control', ''); setSegments('control', ['A','B','C']);", true},
+             Variant{"DOM segmented", "__domAppend('', 'control', 'segmented'); setSegments('control', ['A','B','C']);", true}}) {
+        DYNAMIC_SECTION(variant.name) {
+            ScriptEngine engine;
+            View root;
+            StateStore store;
+            store.add_parameter({
+                .id = 1,
+                .name = "choice",
+                .range = {0.0f, 1.0f, 0.0f, 0.0f},
+            });
+            int begins = 0;
+            int ends = 0;
+            store.set_gesture_callbacks(
+                [&](pulp::state::ParamID) { ++begins; },
+                [&](pulp::state::ParamID) { ++ends; });
+            WidgetBridge bridge(engine, root, store);
+            bridge.load_script(std::string(variant.create) +
+                               "bindWidgetToParam('control', 'choice');");
+
+            if (variant.segmented) {
+                auto* control = dynamic_cast<SegmentedControl*>(bridge.widget("control"));
+                REQUIRE(control != nullptr);
+                REQUIRE(control->on_change);
+                control->on_change(1);
+            } else {
+                auto* control = dynamic_cast<Stepper*>(bridge.widget("control"));
+                REQUIRE(control != nullptr);
+                REQUIRE(control->on_change);
+                control->on_change(0.5);
+            }
+            REQUIRE(begins == 1);
+            REQUIRE(ends == 1);
+            REQUIRE(store.open_gesture_count() == 0);
+        }
+    }
+
+    // A JS handler may tear down the bridge during dispatch. The callback must
+    // not touch its destroyed `this` while closing the instantaneous gesture.
+    for (const auto variant : {
+             Variant{"teardown factory stepper", "createStepper('control', '');", false},
+             Variant{"teardown DOM stepper", "__domAppend('', 'control', 'stepper');", false},
+             Variant{"teardown factory segmented", "createSegmented('control', '');", true},
+             Variant{"teardown DOM segmented", "__domAppend('', 'control', 'segmented');", true}}) {
+        DYNAMIC_SECTION(variant.name) {
+            ScriptEngine engine;
+            View root;
+            StateStore store;
+            std::unique_ptr<WidgetBridge> bridge;
+            engine.register_function("__destroyDiscreteBridge",
+                [&](const choc::value::Value*, size_t) {
+                    bridge.reset();
+                    return choc::value::createInt32(1);
+                });
+            bridge = std::make_unique<WidgetBridge>(engine, root, store);
+            bridge->load_script(std::string(variant.create) +
+                "on('control', '" + (variant.segmented ? "select" : "change") +
+                "', function() { __destroyDiscreteBridge(); });");
+
+            if (variant.segmented) {
+                auto callback = dynamic_cast<SegmentedControl*>(
+                    bridge->widget("control"))->on_change;
+                REQUIRE_NOTHROW(callback(1));
+            } else {
+                auto callback = dynamic_cast<Stepper*>(
+                    bridge->widget("control"))->on_change;
+                REQUIRE_NOTHROW(callback(0.5));
+            }
+            REQUIRE(bridge == nullptr);
+        }
+    }
+
+    // A scheduler or caller may retain a copied widget callback past bridge
+    // teardown. The alive token must be checked before the callback's first
+    // use of its captured raw `this`, not merely after JS dispatch returns.
+    SECTION("retained stepper callback invoked after bridge destruction") {
+        ScriptEngine engine;
+        View root;
+        StateStore store;
+        store.add_parameter({.id = 1, .name = "choice",
+                             .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+        int begins = 0;
+        int ends = 0;
+        store.set_gesture_callbacks([&](auto) { ++begins; },
+                                    [&](auto) { ++ends; });
+        auto bridge = std::make_unique<WidgetBridge>(engine, root, store);
+        bridge->load_script(
+            "globalThis.retainedEvents = 0;"
+            "createStepper('control', '');"
+            "on('control', 'change', function(){ ++globalThis.retainedEvents; });"
+            "bindWidgetToParam('control', 'choice');");
+        auto callback = dynamic_cast<Stepper*>(bridge->widget("control"))->on_change;
+        REQUIRE(callback);
+        bridge.reset();
+        REQUIRE_NOTHROW(callback(0.5));
+        CHECK(begins == 0);
+        CHECK(ends == 0);
+        CHECK(engine.evaluate("globalThis.retainedEvents")
+                  .getWithDefault<int32_t>(-1) == 0);
+    }
+
+    SECTION("retained segmented callback invoked after bridge destruction") {
+        ScriptEngine engine;
+        View root;
+        StateStore store;
+        store.add_parameter({.id = 1, .name = "choice",
+                             .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+        int begins = 0;
+        int ends = 0;
+        store.set_gesture_callbacks([&](auto) { ++begins; },
+                                    [&](auto) { ++ends; });
+        auto bridge = std::make_unique<WidgetBridge>(engine, root, store);
+        bridge->load_script(
+            "globalThis.retainedEvents = 0;"
+            "createSegmented('control', '');"
+            "setSegments('control', ['A', 'B']);"
+            "on('control', 'select', function(){ ++globalThis.retainedEvents; });"
+            "bindWidgetToParam('control', 'choice');");
+        auto callback =
+            dynamic_cast<SegmentedControl*>(bridge->widget("control"))->on_change;
+        REQUIRE(callback);
+        bridge.reset();
+        REQUIRE_NOTHROW(callback(1));
+        CHECK(begins == 0);
+        CHECK(ends == 0);
+        CHECK(engine.evaluate("globalThis.retainedEvents")
+                  .getWithDefault<int32_t>(-1) == 0);
+    }
+
+    SECTION("retained toggle callback invoked after bridge destruction") {
+        ScriptEngine engine;
+        View root;
+        StateStore store;
+        store.add_parameter({.id = 1, .name = "choice",
+                             .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+        int begins = 0;
+        int ends = 0;
+        store.set_gesture_callbacks([&](auto) { ++begins; },
+                                    [&](auto) { ++ends; });
+        auto bridge = std::make_unique<WidgetBridge>(engine, root, store);
+        bridge->load_script(
+            "globalThis.retainedEvents = 0;"
+            "createToggle('control', false);"
+            "on('control', 'toggle', function(){ ++globalThis.retainedEvents; });"
+            "bindWidgetToParam('control', 'choice');");
+        auto callback = dynamic_cast<Toggle*>(bridge->widget("control"))->on_toggle;
+        REQUIRE(callback);
+        bridge.reset();
+        REQUIRE_NOTHROW(callback(true));
+        CHECK(begins == 0);
+        CHECK(ends == 0);
+        CHECK(engine.evaluate("globalThis.retainedEvents")
+                  .getWithDefault<int32_t>(-1) == 0);
+    }
+}
+
+TEST_CASE("WidgetBridge exposes designed overlays for every scripted discrete control",
+          "[view][bridge][design-system][discrete][overlay]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(
+        "createToggle('toggle', ''); setDesignedOverlay('toggle', true);"
+        "createStepper('stepper', ''); setDesignedOverlay('stepper', true);"
+        "createSegmented('selector', ''); setDesignedOverlay('selector', true);");
+
+    auto* toggle = dynamic_cast<Toggle*>(bridge.widget("toggle"));
+    auto* stepper = dynamic_cast<Stepper*>(bridge.widget("stepper"));
+    auto* selector = dynamic_cast<SegmentedControl*>(bridge.widget("selector"));
+    REQUIRE(toggle != nullptr);
+    REQUIRE(stepper != nullptr);
+    REQUIRE(selector != nullptr);
+    CHECK(toggle->designed_overlay());
+    CHECK(stepper->designed_overlay());
+    CHECK(selector->designed_overlay());
+}
+
+TEST_CASE("WidgetBridge range updates silently clamp Stepper state",
+          "[view][bridge][design-system][stepper][range]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(
+        "createStepper('stepper', '');"
+        "setValue('stepper', 8);"
+        "setMax('stepper', 4);");
+
+    auto* stepper = dynamic_cast<Stepper*>(bridge.widget("stepper"));
+    REQUIRE(stepper != nullptr);
+    CHECK(stepper->maximum() == 4.0);
+    CHECK(stepper->value() == 4.0);
 }
 
 TEST_CASE("WidgetBridge design-system stepper/pan dispatch change events",
@@ -5476,16 +5748,16 @@ TEST_CASE("WidgetBridge snapshot/restore round-trips every scalar value widget",
     REQUIRE(checkbox_ptr->is_checked());
     REQUIRE(toggle_button_ptr->is_on());
 
-    // A restore value at/below the 0.5 threshold turns a boolean widget off —
-    // the set side of the ladder reads > 0.5 as on.
+    // The canonical boolean threshold is inclusive: exactly 0.5 is on in the
+    // importer, bridge APIs, host binding, and reload restore path.
     std::unordered_map<std::string, float> off;
     off["toggle"] = 0.5f;
     off["checkbox"] = 0.0f;
     off["toggle-button"] = 0.5f;
     bridge.restore_values(off);
-    REQUIRE_FALSE(toggle_ptr->is_on());
+    REQUIRE(toggle_ptr->is_on());
     REQUIRE_FALSE(checkbox_ptr->is_checked());
-    REQUIRE_FALSE(toggle_button_ptr->is_on());
+    REQUIRE(toggle_button_ptr->is_on());
 }
 
 // The reload snapshot layers selection controls and XYPad ON TOP of the shared
@@ -5615,6 +5887,12 @@ TEST_CASE("WidgetBridge resolves script-relative asset paths against the script 
            + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(base / "assets");
     { std::ofstream f(base / "assets" / "hero.png", std::ios::binary); f << "png"; }
+    const auto reviewed_root = base / "reviewed";
+    const auto scratch_root = base / "scratch";
+    fs::create_directories(reviewed_root / "assets");
+    fs::create_directories(scratch_root);
+    { std::ofstream f(reviewed_root / "assets" / "captured.png", std::ios::binary);
+      f << "captured"; }
 
     ScriptEngine engine;
     View root;
@@ -5642,6 +5920,60 @@ TEST_CASE("WidgetBridge resolves script-relative asset paths against the script 
         auto* image = dynamic_cast<ImageView*>(bridge.widget("img"));
         REQUIRE(image != nullptr);
         REQUIRE(image->image_path() == "file://assets/hero.png");
+    }
+
+    SECTION("a scratch script falls back to its reviewed artifact root") {
+        static constexpr unsigned char tiny_png[] = {
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+            0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+            0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+            0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41,
+            0x54, 0x78, 0x9c, 0x63, 0xf8, 0x0f, 0x04, 0x00,
+            0x09, 0xfb, 0x03, 0xfd, 0xa7, 0xe9, 0x81, 0x86,
+            0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44,
+            0xae, 0x42, 0x60, 0x82,
+        };
+        {
+            std::ofstream f(reviewed_root / "assets" / "body.png", std::ios::binary);
+            f.write(reinterpret_cast<const char*>(tiny_png), sizeof(tiny_png));
+        }
+        {
+            std::ofstream f(reviewed_root / "assets" / "indicator.png", std::ios::binary);
+            f.write(reinterpret_cast<const char*>(tiny_png), sizeof(tiny_png));
+        }
+        bridge.set_script_base_dir(scratch_root);
+        bridge.set_asset_roots({reviewed_root});
+        bridge.load_script(R"(
+            createImage('img', '');
+            setImageSource('img', 'assets/captured.png');
+            createFader('fader', 0, 0, 100, 20, 'horizontal');
+            setFaderCapturedArt('fader', 'assets/body.png', 1, 1,
+                               'assets/indicator.png', 1, 1, 0.5,
+                               0, 0, 100, 20);
+        )");
+        auto* image = dynamic_cast<ImageView*>(bridge.widget("img"));
+        REQUIRE(image != nullptr);
+        REQUIRE(image->image_path()
+                == "file://" + fs::canonical(
+                    reviewed_root / "assets" / "captured.png").generic_string());
+        auto* fader = dynamic_cast<Fader*>(bridge.widget("fader"));
+        REQUIRE(fader != nullptr);
+        REQUIRE(fader->has_captured_indicator_art());
+    }
+
+    SECTION("reviewed roots reject a symlink escape") {
+        const auto outside = base / "outside.png";
+        { std::ofstream f(outside, std::ios::binary); f << "outside"; }
+        std::error_code symlink_error;
+        fs::create_symlink(outside, reviewed_root / "assets" / "escape.png",
+                           symlink_error);
+        if (!symlink_error) {
+            bridge.set_script_base_dir(scratch_root);
+            bridge.set_asset_roots({reviewed_root});
+            REQUIRE(bridge.resolve_script_relative("assets/escape.png")
+                    == "assets/escape.png");
+        }
     }
 
     SECTION("absolute paths and misses pass through unchanged") {
@@ -5762,4 +6094,100 @@ TEST_CASE("an explicit label still reaches a bridge-made control",
     REQUIRE(knob != nullptr);
     CHECK(knob->label() == "RATE");
     CHECK(knob->access_label() == "RATE");
+}
+
+TEST_CASE("setFontStyle preserves CSS oblique as a distinct native slant",
+          "[view][widget-bridge][typography][oblique]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(
+        "createLabel('oblique', 'slanted', '');\n"
+        "setFontStyle('oblique', 'oblique 12deg');");
+
+    auto* label = dynamic_cast<Label*>(bridge.widget("oblique"));
+    REQUIRE(label != nullptr);
+    CHECK(label->font_style() == 2);
+}
+
+TEST_CASE("text runs inherit base tracking and normalize slant case",
+          "[view][widget-bridge][typography][text-runs]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createLabel('mixed', 'alpha beta', '');
+        setLetterSpacing('mixed', 3);
+        setFontStyle('mixed', 'Italic');
+        setTextDecoration('mixed', 'underline');
+        setTextRuns('mixed', [
+          { start: 6, end: 10, fontStyle: 'Oblique 12deg', textDecoration: 'none' }
+        ]);
+    )");
+
+    auto* label = dynamic_cast<Label*>(bridge.widget("mixed"));
+    REQUIRE(label != nullptr);
+    CHECK(label->font_style() == 1);
+    label->set_bounds({0, 0, 200, 30});
+    pulp::canvas::RecordingCanvas canvas;
+    label->paint(canvas);
+    bool saw_italic_tracking = false;
+    bool saw_oblique_tracking = false;
+    for (const auto& command : canvas.commands()) {
+        if (command.type != pulp::canvas::DrawCommand::Type::set_font_full)
+            continue;
+        if (command.f[2] == Catch::Approx(1.0f) &&
+            command.f[3] == Catch::Approx(3.0f))
+            saw_italic_tracking = true;
+        if (command.f[2] == Catch::Approx(2.0f) &&
+            command.f[3] == Catch::Approx(3.0f))
+            saw_oblique_tracking = true;
+    }
+    CHECK(saw_italic_tracking);
+    CHECK(saw_oblique_tracking);
+    CHECK(canvas.count(pulp::canvas::DrawCommand::Type::stroke_line) == 2);
+}
+
+TEST_CASE("setTextRuns snaps malformed byte offsets to UTF-8 boundaries",
+          "[view][widget-bridge][typography][text-runs][utf8]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createLabel('mixed', 'A\u00e9B', '');
+        setTextRuns('mixed', [{ start: 1, end: 2, fontWeight: 700 }]);
+    )");
+
+    auto* label = dynamic_cast<Label*>(bridge.widget("mixed"));
+    REQUIRE(label != nullptr);
+    REQUIRE(label->attributed_span_count() == 3);
+    label->set_bounds({0, 0, 100, 24});
+    pulp::canvas::RecordingCanvas canvas;
+    label->paint(canvas);
+    std::string painted;
+    for (const auto& command : canvas.commands())
+        if (command.type == pulp::canvas::DrawCommand::Type::fill_text)
+            painted += command.text;
+    CHECK(painted == std::string("A") + "\xc3\xa9" + "B");
+}
+
+TEST_CASE("setCapturedLineBoxes rejects UTF-16 surrogate-pair splits",
+          "[view][widget-bridge][typography][text-cache][utf16]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createLabel('emoji', 'A\ud83d\ude00B', '');
+        setCapturedLineBoxes('emoji', [
+          { left: 0, top: 0, width: 100, height: 18, start: 1, length: 1 }
+        ], 100, 'Inter');
+    )");
+
+    auto* label = dynamic_cast<Label*>(bridge.widget("emoji"));
+    REQUIRE(label != nullptr);
+    CHECK(label->cached_line_boxes().empty());
 }

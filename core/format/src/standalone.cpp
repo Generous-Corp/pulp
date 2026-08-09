@@ -736,6 +736,15 @@ bool StandaloneApp::start() {
     config_.sample_rate = audio_device_->sample_rate();
     config_.buffer_size = audio_device_->buffer_size();
 
+    if (auto test_signal =
+            detail::test_signal_config_from_environment(config_.sample_rate)) {
+        test_signal_.set_config(*test_signal);
+        if (test_signal->type != TestSignalType::none) {
+            runtime::log_info(
+                "Standalone: test signal armed from environment before audio start");
+        }
+    }
+
     prepare_render_state();
 
     // Set up MIDI input (optional)

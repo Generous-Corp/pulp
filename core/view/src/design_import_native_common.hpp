@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/view/design_import.hpp>
+#include <pulp/canvas/attributed_string.hpp>
 
 #include <filesystem>
 #include <optional>
@@ -17,6 +18,8 @@ enum class NativeWidgetKind {
     text_editor,
     checkbox,
     toggle_button,
+    segmented,
+    stepper,
     combo_box,
     knob,
     fader,
@@ -62,6 +65,17 @@ struct ImportedWidgetSemantics {
     std::optional<float> toggle_corner_radius;
     std::optional<float> toggle_font_size;
 
+    // A selector's segment labels, in order, as the author declared them.
+    // Read from an attribute rather than scraped from child text: only the
+    // author knows which children are segments, and a scrape turns a caption
+    // or a badge inside the control into a fifth choice.
+    std::vector<std::string> segments;
+
+    // A stepper's grid, declared by the author. 1 is the count case (voices,
+    // octaves) and the only sensible default; a fractional grid has to be
+    // stated because nothing about the range implies it.
+    double stepper_step = 1.0;
+
     float normalized_value = 0.5f;
     float normalized_default = 0.5f;
     float peak_value = 0.5f;
@@ -84,6 +98,21 @@ struct ImportedWidgetSemantics {
 
 ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
                                                   const ResolvedNativeNode& resolved);
+
+// Canonical IR text-run lowering shared by the live native materializer and
+// baked C++ exporter. Keeping segmentation here prevents output lanes from
+// disagreeing about UTF-8 boundaries, inherited base style, or explicit
+// decoration removal.
+canvas::AttributedString attributed_text_for_node(const IRNode& node);
+
+// A stepper grid must be finite and positive in every output lane. Invalid or
+// absent author data falls back to the documented count-grid default; capture
+// lowering writes 0.01 explicitly for its normalized no-range contract.
+double imported_stepper_step(const IRNode& node) noexcept;
+
+// Convert an IR control's declared plain default into the normalized parameter
+// domain consumed by native widgets and discrete value mappings.
+float normalized_audio_default(const IRNode& node);
 
 // On-screen box (and optional absolute offset) for an imported image node,
 // derived from the PNG's natural size, its art-core rect, or its bleed aspect.

@@ -154,7 +154,8 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
 
     // setFaderCapturedArt(id, bodyPath, bodyW, bodyH,
     //                     indicatorPath, indicatorW, indicatorH, cross,
-    //                     bodyOriginX, bodyOriginY, controlW, controlH)
+    //                     bodyOriginX, bodyOriginY, controlW, controlH,
+    //                     bodyIncludesStaticTrack?)
     // Hoists the browser-authored thumb into a value-driven overlay while the
     // cleaned body crop covers the frozen instance in the capture.
     register_bridge_function(api, "setFaderCapturedArt",
@@ -193,7 +194,8 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
                 static_cast<float>(args.get<double>(8, 0.0)),
                 static_cast<float>(args.get<double>(9, 0.0)),
                 static_cast<float>(args.get<double>(10, body_w)),
-                static_cast<float>(args.get<double>(11, body_h)));
+                static_cast<float>(args.get<double>(11, body_h)),
+                args.get<bool>(12, false));
             return choc::value::Value();
         });
 

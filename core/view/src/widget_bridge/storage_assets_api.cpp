@@ -195,6 +195,29 @@ std::string base64_encode_blob(const std::vector<uint8_t>& data) {
 
 } // namespace
 
+std::string WidgetBridge::resolve_script_relative(const std::string& path) const {
+    if (path.empty() || path.find("://") != std::string::npos) return path;
+    const std::filesystem::path relative(path);
+    if (relative.is_absolute()) return path;
+
+    if (!script_base_dir_.empty()) {
+        auto candidate = (script_base_dir_ / relative).lexically_normal();
+        std::error_code ec;
+        if (std::filesystem::exists(candidate, ec) && !ec)
+            return candidate.generic_string();
+    }
+
+    for (const auto& root : asset_roots_) {
+        const auto canonical_root = best_effort_canonical(root);
+        const auto candidate = best_effort_canonical(root / relative);
+        if (!path_within(candidate, canonical_root)) continue;
+        std::error_code ec;
+        if (std::filesystem::exists(candidate, ec) && !ec)
+            return candidate.generic_string();
+    }
+    return path;
+}
+
 void BridgeRegistrars::register_storage_key_value_api(WidgetBridge& self) {
     BridgeApiContext api{self.engine_};
 

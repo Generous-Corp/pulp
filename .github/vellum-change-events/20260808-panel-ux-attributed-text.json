@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20260808-panel-ux-attributed-text",
+  "kind": "change",
+  "created_at": "2026-08-08T22:43:45Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "Imported browser panels could describe mixed font families, weights, slants, colours and decorations, but Pulp flattened those runs into one Label style and then measured and painted them through paths that did not share the same resolved face. Browser-captured line boxes also could not be retained safely across text, width or face changes, so small metric differences restarted wrapping and changed authored panel geometry. This change carries attributed runs through shaping, code generation and paint, validates captured line-box bases before reuse, uses UTF-16-safe run offsets, and gives GPU-off builds coherent per-run fallback metrics. It is Pulp-only design-import fidelity and plug-in UI compatibility work: the browser-capture IR, generated plug-in bridges and GPU-off SDK configuration are Pulp product surfaces, and no named immutable Vellum framework commit is being backported.",
+  "tests": [
+    "pulp-test-design-import",
+    "pulp-test-text-shaper",
+    "pulp-test-widgets-label"
+  ],
+  "disposition": "pulp-only"
+}

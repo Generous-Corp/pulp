@@ -25,8 +25,13 @@ struct ShapedSegment {
     float width = 0;            // Measured width in pixels
     float ascent = 0;           // Distance above baseline
     float descent = 0;          // Distance below baseline
+    float leading = 0;          // Extra inter-line gap
     bool is_whitespace = false;  // Can break here
     bool is_newline = false;     // Hard line break
+    // This segment begins in the same logical word as its predecessor. Rich
+    // text style boundaries are not CSS line-break opportunities.
+    bool joins_previous_word = false;
+    int style_index = -1;        // AttributedString span; -1 for plain text
 };
 
 /// Prepared text — shaped once, can be reflowed at any width
@@ -85,8 +90,18 @@ private:
 /// Result of laying out prepared text at a specific width
 struct ShapedLayout {
     struct Line {
+        struct Fragment {
+            std::string text;
+            float width = 0;
+            int style_index = -1;
+        };
+
         float width = 0;
         float y = 0;
+        float ascent = 0;
+        float descent = 0;
+        float leading = 0;
+        float height = 0;
         /// Horizontal offset from the block's own left edge. Zero for text a
         /// shaper broke, because every such line starts at the edge. Non-zero
         /// only for a captured layout whose run resumes a line an earlier
@@ -96,6 +111,11 @@ struct ShapedLayout {
         int first_segment = 0;
         int segment_count = 0;
         std::string text;  // Materialized line text (optional)
+        // Exact styled pieces on this line. Populated by
+        // layout_with_lines(); empty for the allocation-free layout() path.
+        // Unlike first_segment/segment_count this also represents fragments
+        // created by break-word/anywhere inside one shaped segment.
+        std::vector<Fragment> fragments;
     };
 
     std::vector<Line> lines;
@@ -154,11 +174,18 @@ public:
     /// drawn, which shows up as text breaking a word or two late and
     /// overflowing its box — a wrap bug in appearance, a measurement bug in
     /// fact. A caller that omits it is stating the text is Regular.
-    PreparedText prepare(std::string_view text, std::string_view font_family,
-                         float font_size, int font_weight = 400);
+    PreparedText prepare(
+        std::string_view text, std::string_view font_family, float font_size,
+        int font_weight = 400, int font_slant = 0,
+        float letter_spacing = 0.0f,
+        const std::vector<Canvas::FontFeature>& font_features = {});
 
-    /// Prepare an attributed string (mixed styles)
-    PreparedText prepare(const AttributedString& text);
+    /// Prepare an attributed string (mixed styles). Paragraph-wide OpenType
+    /// features still affect every span's advances, just as they do when the
+    /// attributed string is painted by Label.
+    PreparedText prepare(
+        const AttributedString& text,
+        const std::vector<Canvas::FontFeature>& font_features = {});
 
     /// Layout prepared text at a specific width — this is the cheap call.
     /// Pure arithmetic over cached segment widths. Call on every resize.

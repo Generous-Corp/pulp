@@ -130,6 +130,28 @@ test("mixed segments become ordered runs with UTF-8 byte offsets and dominant ba
   );
 });
 
+test("mixed font families remain explicit per-range deltas", async () => {
+  const node = mixedTextNode() as unknown as {
+    getStyledTextSegments: (fields: string[]) => Array<Record<string, unknown>>;
+  };
+  const originalSegments = node.getStyledTextSegments;
+  node.getStyledTextSegments = (fields) =>
+    originalSegments(fields).map((segment, index) => index === 1
+      ? { ...segment, fontName: { family: "IBM Plex Mono", style: "Regular" } }
+      : segment);
+
+  const res = await extractScene([frameWith(node as unknown as SceneNode)],
+                                 { faithfulVector: false });
+  const text = res.roots[0].children[0];
+  assert.ok(text.runs);
+  assert.equal(text.runs.length, 1);
+  assert.equal(text.runs[0].fontFamily, "IBM Plex Mono");
+  assert.deepEqual(
+    res.font_family_assets.map((face) => face.family),
+    ["Inter", "IBM Plex Mono"],
+  );
+});
+
 test("distinct exact faces that collapse to one run tuple fail closed", async () => {
   const colliding = mixedTextNode() as unknown as {
     getStyledTextSegments: (fields: string[]) => Array<Record<string, unknown>>;
@@ -202,6 +224,35 @@ test("a run can explicitly reset inherited letter spacing to zero", async () => 
   const res = await extractScene([frameWith(spaced)], { faithfulVector: false });
   assert.equal(res.roots[0].children[0].style.letter_spacing, 4);
   assert.equal(res.roots[0].children[0].runs?.[0].letterSpacing, 0);
+});
+
+test("mixed text preserves oblique separately and can reset italic to normal", async () => {
+  const node = mixedTextNode() as unknown as {
+    getStyledTextSegments: (fields: string[]) => Array<Record<string, unknown>>;
+  };
+  node.getStyledTextSegments = () => [
+    {
+      characters: "Héllo ", start: 0, end: 6, fontSize: 12,
+      fontName: { family: "Inter", style: "Italic" }, fontWeight: 400,
+      fills: solidFill(1, 0, 0), letterSpacing: { value: 0, unit: "PIXELS" },
+      textDecoration: "NONE",
+    },
+    {
+      characters: "world", start: 6, end: 11, fontSize: 12,
+      fontName: { family: "Inter", style: "Oblique" }, fontWeight: 400,
+      fills: solidFill(1, 0, 0), letterSpacing: { value: 0, unit: "PIXELS" },
+      textDecoration: "NONE",
+    },
+  ];
+  const oblique = await extractScene([frameWith(node)], { faithfulVector: false });
+  assert.equal(oblique.roots[0].children[0].style.font_style, "italic");
+  assert.equal(oblique.roots[0].children[0].runs?.[0].fontStyle, "oblique");
+
+  const segments = node.getStyledTextSegments([]);
+  segments[1].fontName = { family: "Inter", style: "Regular" };
+  node.getStyledTextSegments = () => segments;
+  const normal = await extractScene([frameWith(node)], { faithfulVector: false });
+  assert.equal(normal.roots[0].children[0].runs?.[0].fontStyle, "normal");
 });
 
 test("empty text retains node typography and text metadata", async () => {

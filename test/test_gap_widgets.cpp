@@ -82,6 +82,34 @@ TEST_CASE("Stepper clamps to its range", "[view][gap][stepper]") {
     REQUIRE(s.value() == 0.0);
 }
 
+TEST_CASE("Stepper range changes silently clamp existing state",
+          "[view][gap][stepper][range]") {
+    Stepper s;
+    s.set_range(0, 10);
+    s.set_value_silent(8);
+    int changes = 0;
+    s.on_change = [&](double) { ++changes; };
+
+    s.set_range(0, 4);
+
+    CHECK(s.value() == 4.0);
+    CHECK(changes == 0);
+}
+
+TEST_CASE("Stepper scrub snaps relative to a non-zero minimum",
+          "[view][gap][stepper][scrub]") {
+    Stepper s;
+    s.set_range(1, 9);
+    s.set_step(2);
+    s.set_value(1);
+    s.set_bounds({0, 0, 140, 36});
+
+    s.on_mouse_down({70, 18});
+    s.on_mouse_drag({70, 12});
+
+    REQUIRE(s.value() == 3.0);
+}
+
 TEST_CASE("PanControl clamps and maps x to a bipolar value", "[view][gap][pan]") {
     PanControl p;
     p.set_bounds({0, 0, 200, 18});

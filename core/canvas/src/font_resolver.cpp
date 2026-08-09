@@ -596,10 +596,11 @@ bool ResolvedFont::color_font_active() const noexcept {
 }
 
 std::string resolved_face_identity(const std::string& css_font_family,
-                                   float weight) {
+                                   float weight, FontSlant slant) {
 #ifdef PULP_HAS_SKIA
     FontOptions options;
     options.weight = weight;
+    options.slant = slant;
     // Same comma walk the shaper uses: strip whitespace and one matching pair
     // of quotes per entry.
     size_t pos = 0;

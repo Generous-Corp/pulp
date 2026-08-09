@@ -57,7 +57,8 @@ export type Node = {
     end: number;
     fontSize?: number;
     fontWeight?: number;
-    fontStyle?: "normal" | "italic";
+    fontFamily?: string;
+    fontStyle?: "normal" | "italic" | "oblique";
     color?: string;
     letterSpacing?: number;
     textDecoration?: "none" | "underline" | "line-through";
@@ -478,7 +479,7 @@ export interface Style {
   font_family?: string;
   font_size?: number;
   font_weight?: number;
-  font_style?: "normal" | "italic";
+  font_style?: "normal" | "italic" | "oblique";
   text_align?: string;
   vertical_align?: "top" | "middle" | "bottom";
   letter_spacing?: number;

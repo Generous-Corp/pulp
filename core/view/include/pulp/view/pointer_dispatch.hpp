@@ -15,8 +15,9 @@
 namespace pulp::view {
 
 /// Convert `root_pos` (root-local, i.e. window space) into `target`'s
-/// local-pre-scale coordinates, peeling off each ancestor's bounds offset,
-/// `set_scale` transform, and ScrollView scroll offset along the way.
+/// local-pre-scale coordinates, peeling off the root's scale plus each
+/// descendant's bounds offset, `set_scale` transform, and ScrollView scroll
+/// offset along the way.
 /// `target` must be `root` or a descendant of it.
 Point point_to_local(Point root_pos, View* target, View* root);
 

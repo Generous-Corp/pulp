@@ -153,6 +153,60 @@ void erase_declared_pointer(ImportPngImage& image, const PixelRect& pointer) {
     }
 }
 
+/// Remove only the frozen indicator's declared visual footprint,
+/// reconstructing the authored static track
+/// through its old position from the pixels immediately before/after it. This
+/// keeps ticks, housing borders and exact track thickness intact everywhere
+/// else; the moving indicator covers the small inpainted interval at its live
+/// position.
+void erase_declared_fader_indicator(ImportPngImage& image, const PixelRect& crop_rect,
+                                    const PixelRect& indicator, bool horizontal) {
+    const int x0 = std::max(0, indicator.x - crop_rect.x);
+    const int y0 = std::max(0, indicator.y - crop_rect.y);
+    const int x1 = std::min(image.width, indicator.x + indicator.w - crop_rect.x);
+    const int y1 = std::min(image.height, indicator.y + indicator.h - crop_rect.y);
+    if (x0 >= x1 || y0 >= y1)
+        return;
+
+    const ImportPngImage source = image;
+    for (int y = y0; y < y1; ++y) {
+        for (int x = x0; x < x1; ++x) {
+            const int before_x = horizontal ? x0 - 1 : x;
+            const int before_y = horizontal ? y : y0 - 1;
+            const int after_x = horizontal ? x1 : x;
+            const int after_y = horizontal ? y : y1;
+            const bool have_before = before_x >= 0 && before_y >= 0 && before_x < source.width &&
+                                     before_y < source.height;
+            const bool have_after =
+                after_x >= 0 && after_y >= 0 && after_x < source.width && after_y < source.height;
+            if (!have_before && !have_after)
+                continue;
+            const auto* before =
+                have_before
+                    ? &source
+                           .rgba[(static_cast<std::size_t>(before_y) * source.width + before_x) * 4]
+                    : nullptr;
+            const auto* after =
+                have_after
+                    ? &source.rgba[(static_cast<std::size_t>(after_y) * source.width + after_x) * 4]
+                    : nullptr;
+            const float t = horizontal
+                                ? static_cast<float>(x - x0 + 1) / static_cast<float>(x1 - x0 + 1)
+                                : static_cast<float>(y - y0 + 1) / static_cast<float>(y1 - y0 + 1);
+            auto* dst = &image.rgba[(static_cast<std::size_t>(y) * image.width + x) * 4];
+            for (int c = 0; c < 4; ++c) {
+                if (before && after) {
+                    dst[c] = static_cast<std::uint8_t>(
+                        std::lround(static_cast<float>(before[c]) * (1.0f - t) +
+                                    static_cast<float>(after[c]) * t));
+                } else {
+                    dst[c] = (before ? before : after)[c];
+                }
+            }
+        }
+    }
+}
+
 /// Remove the value-dependent fader chrome from the static control crop.
 ///
 /// The declared thumb identifies the cross-axis band occupied by the live
@@ -354,8 +408,16 @@ int apply_browser_capture_control_sprites(
         if (is_knob) {
             erase_declared_pointer(body, local_indicator);
         } else {
-            erase_declared_fader_chrome(
-                body, panel, body_rect, *indicator_rect, horizontal);
+            const bool static_track_declared =
+                attribute(*node, "browser_fader_static_track_declared").has_value();
+            if (!static_track_declared) {
+                erase_declared_fader_chrome(
+                    body, panel, body_rect, *indicator_rect, horizontal);
+            } else {
+                erase_declared_fader_indicator(
+                    body, body_rect, *indicator_rect, horizontal);
+                node->attributes["fader_body_includes_static_track"] = "1";
+            }
         }
 
         const auto encoded = encode_png_rgba(body);
@@ -435,6 +497,7 @@ int apply_browser_capture_control_sprites(
         }
         node->attributes.erase("browser_sprite_crop_px");
         node->attributes.erase("browser_sprite_indicator_px");
+        node->attributes.erase("browser_fader_static_track_declared");
         ++skinned;
     }
     return skinned;

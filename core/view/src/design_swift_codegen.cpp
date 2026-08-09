@@ -53,6 +53,14 @@ void emit_line(std::ostringstream& out, int depth, int spaces, std::string_view 
     out << indent(depth, spaces) << text << "\n";
 }
 
+std::string lower_copy(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) {
+                       return static_cast<char>(std::tolower(c));
+                   });
+    return value;
+}
+
 std::string swift_string_escape(std::string_view input) {
     std::string out;
     out.reserve(input.size() + 8);
@@ -996,25 +1004,72 @@ std::size_t snap_utf8(const std::string& s, std::size_t i) {
     return i;
 }
 
+// SwiftUI Font.custom accepts one concrete PostScript/family name, not a CSS
+// fallback list. Select the first non-generic family while respecting quoted
+// commas; a generic-only stack falls back to SwiftUI's system font.
+std::string swift_concrete_font_family(std::string_view css_families) {
+    std::vector<std::string> families;
+    std::string current;
+    char quote = 0;
+    for (const char c : css_families) {
+        if ((c == '\'' || c == '"') && (quote == 0 || quote == c)) {
+            quote = quote == 0 ? c : 0;
+        } else if (c == ',' && quote == 0) {
+            families.push_back(current);
+            current.clear();
+        } else {
+            current.push_back(c);
+        }
+    }
+    families.push_back(current);
+    static const std::set<std::string> generic = {
+        "serif", "sans-serif", "monospace", "cursive", "fantasy",
+        "system-ui", "ui-serif", "ui-sans-serif", "ui-monospace",
+        "ui-rounded", "emoji", "math", "fangsong"
+    };
+    for (auto family : families) {
+        const auto first = family.find_first_not_of(" \t\r\n");
+        const auto last = family.find_last_not_of(" \t\r\n");
+        if (first == std::string::npos) continue;
+        family = family.substr(first, last - first + 1);
+        if (family.size() >= 2 &&
+            ((family.front() == '\'' && family.back() == '\'') ||
+             (family.front() == '"' && family.back() == '"')))
+            family = family.substr(1, family.size() - 2);
+        if (!family.empty() && !generic.contains(lower_copy(family))) return family;
+    }
+    return {};
+}
+
 // One Text(...) segment with its (possibly inherited) styling, as a Swift
 // expression. SwiftUI's Text-returning modifier overloads keep the whole
 // `Text(..).font(..) + Text(..)` chain typed as Text.
 std::string text_segment_expr(std::string_view slice,
                               std::optional<float> size,
                               std::optional<int> weight,
-                              bool italic,
+                              const std::string& family,
+                              const std::string& font_style,
                               const std::string& color_tok,
-                              const std::string& decoration) {
+                              const std::string& decoration,
+                              std::optional<float> letter_spacing) {
     std::string e = "Text(" + swift_string_literal(slice) + ")";
-    if (size)   e += ".font(.system(size: " + format_float(*size) + "))";
+    const auto concrete_family = swift_concrete_font_family(family);
+    if (!concrete_family.empty())
+        e += ".font(.custom(" + swift_string_literal(concrete_family) + ", size: " +
+             format_float(size.value_or(14.0f)) + "))";
+    else if (size)
+        e += ".font(.system(size: " + format_float(*size) + "))";
     if (weight) e += ".fontWeight(" + swift_font_weight(*weight) + ")";
-    if (italic) e += ".italic()";
+    const auto slant = lower_copy(font_style);
+    if (slant == "italic" || slant.rfind("oblique", 0) == 0)
+        e += ".italic()";
     if (!color_tok.empty()) {
         std::string c = swift_color_expr(color_tok);
         if (!c.empty()) e += ".foregroundColor(" + c + ")";
     }
     if (decoration == "underline")        e += ".underline()";
     else if (decoration == "line-through") e += ".strikethrough()";
+    if (letter_spacing) e += ".kerning(" + format_float(*letter_spacing) + ")";
     return e;
 }
 
@@ -1029,18 +1084,30 @@ void emit_text_node(std::ostringstream& out, const SwiftEmitCtx& ctx,
     if (node.text_runs.empty()) {
         std::string text = resolved.text ? *resolved.text : node.text_content;
         emit_line(out, depth, s, "Text(" + swift_string_literal(text) + ")");
-        if (base.font_size)
+        const auto concrete_family = base.font_family
+            ? swift_concrete_font_family(*base.font_family) : std::string{};
+        if (!concrete_family.empty())
+            emit_line(out, depth + 1, s,
+                      ".font(.custom(" + swift_string_literal(concrete_family) +
+                      ", size: " + format_float(base.font_size.value_or(14.0f)) + "))");
+        else if (base.font_size)
             emit_line(out, depth + 1, s,
                       ".font(.system(size: " + format_float(*base.font_size) + "))");
         if (base.font_weight)
             emit_line(out, depth + 1, s, ".fontWeight(" + swift_font_weight(*base.font_weight) + ")");
-        if (base.font_style && *base.font_style == "italic")
-            emit_line(out, depth + 1, s, ".italic()");
+        if (base.font_style) {
+            const auto slant = lower_copy(*base.font_style);
+            if (slant == "italic" || slant.rfind("oblique", 0) == 0)
+                emit_line(out, depth + 1, s, ".italic()");
+        }
         if (base.color) {
             std::string color = swift_color_expr(*base.color);
             if (!color.empty())
                 emit_line(out, depth + 1, s, ".foregroundColor(" + color + ")");
         }
+        if (base.letter_spacing)
+            emit_line(out, depth + 1, s,
+                      ".kerning(" + format_float(*base.letter_spacing) + ")");
         return;
     }
 
@@ -1052,14 +1119,17 @@ void emit_text_node(std::ostringstream& out, const SwiftEmitCtx& ctx,
               [](const IRTextRun& a, const IRTextRun& b) { return a.start < b.start; });
     const std::string base_deco = base.text_decoration.value_or("");
     const std::string base_color = base.color.value_or("");
-    const bool base_italic = base.font_style && *base.font_style == "italic";
+    const std::string base_family = base.font_family.value_or("");
+    const std::string base_style = base.font_style.value_or("");
 
     std::vector<std::string> segs;
     auto base_seg = [&](std::size_t a, std::size_t b) {
         if (b <= a) return;
         segs.push_back(text_segment_expr(std::string_view(full).substr(a, b - a),
-                                         base.font_size, base.font_weight, base_italic,
-                                         base_color, base_deco));
+                                         base.font_size, base.font_weight,
+                                         base_family, base_style,
+                                         base_color, base_deco,
+                                         base.letter_spacing));
     };
     std::size_t cursor = 0;
     for (const auto& r : runs) {
@@ -1074,9 +1144,11 @@ void emit_text_node(std::ostringstream& out, const SwiftEmitCtx& ctx,
             std::string_view(full).substr(a, b - a),
             r.font_size ? r.font_size : base.font_size,
             r.font_weight ? r.font_weight : base.font_weight,
-            r.font_style ? (*r.font_style == "italic") : base_italic,
+            r.font_family ? *r.font_family : base_family,
+            r.font_style ? *r.font_style : base_style,
             r.color ? *r.color : base_color,
-            r.text_decoration ? *r.text_decoration : base_deco));
+            r.text_decoration ? *r.text_decoration : base_deco,
+            r.letter_spacing ? r.letter_spacing : base.letter_spacing));
         cursor = b;
     }
     base_seg(cursor, full.size());

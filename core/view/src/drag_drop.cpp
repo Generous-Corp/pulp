@@ -14,6 +14,7 @@
 
 #include <pulp/view/drag_drop.hpp>
 
+#include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/view.hpp>
 
 #include <mutex>
@@ -117,14 +118,7 @@ namespace {
 // each ancestor's origin up to (but not including) `root`. Mirrors the local
 // conversion in View::simulate_click.
 Point to_local(View& root, View* target, Point root_pos) {
-    Point local = root_pos;
-    View* v = target;
-    while (v && v != &root) {
-        local.x -= v->bounds().x;
-        local.y -= v->bounds().y;
-        v = v->parent();
-    }
-    return local;
+    return point_to_local(root_pos, target, &root);
 }
 
 // Fire View::on_drop with the (type, data, x, y) string contract. A multi-file

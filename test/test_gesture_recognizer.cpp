@@ -76,6 +76,28 @@ TEST_CASE("PanRecognizer claims capture after movement crosses slop",
     REQUIRE_FALSE(child.has_pointer_capture(0));
 }
 
+TEST_CASE("gesture coordinates invert a scaled owner transform",
+          "[view][gesture][transform]") {
+    View root;
+    root.set_bounds({0, 0, 300, 200});
+    View& child = add_child(root, {20, 20, 100, 100});
+    child.set_transform_origin(0.0f, 0.0f);
+    child.set_scale(0.5f);
+
+    auto pan = std::make_unique<PanRecognizer>();
+    pan->set_min_distance(1.0f);
+    auto& ref = static_cast<PanRecognizer&>(
+        child.add_gesture_recognizer(std::move(pan)));
+
+    double t = 0.0;
+    auto down = pointer_event({25, 25}, MousePhase::press, &t);
+    REQUIRE(root.dispatch_gesture_pointer_event(down, t));
+    auto move = pointer_event({30, 27}, MousePhase::drag, &t);
+    REQUIRE(root.dispatch_gesture_pointer_event(move, t));
+    CHECK(ref.translation().x == 10.0f);
+    CHECK(ref.translation().y == 4.0f);
+}
+
 TEST_CASE("TapRecognizer recognizes single and double taps",
           "[view][gesture]") {
     View root;
