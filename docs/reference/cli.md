@@ -1373,6 +1373,9 @@ pulp control instances --json
 pulp control status --instance <id> --explain
 pulp control grant-request --instance <id> --profile inspect-readonly --json
 pulp control call --instance <id> dev.pulp.state/read@1 --params '{}'
+pulp control call --instance <id> dev.pulp.render/offline@1 \
+  --params '{"input_artifact_id":"<id>","max_frames":48000,"timeout_ms":5000}' \
+  --timeout-ms 10000
 pulp control artifact --id <artifact-id> --out result.wav --json
 pulp control revoke --grant <grant-id>
 pulp control audit path/to/MyProduct --json
@@ -1393,7 +1396,9 @@ that in-memory authority.
 `call` and `watch` request a connection-bound grant when `--grant` is omitted,
 so consent and invocation share one authenticated process session. They validate
 `--params` against the operation registry before dispatch and print the broker
-receipt. `artifact` reauthorizes every chunk against original
+receipt. `--timeout-ms` sets the same bounded broker deadline and client wait
+(1–300000 ms, default 3000); use a value longer than the operation's own
+schema-level timeout for offline work. `artifact` reauthorizes every chunk against original
 receipt/grant lineage. Human output and `--json` describe the same result;
 usage errors exit 2 and broker/policy/operation failures exit 1.
 

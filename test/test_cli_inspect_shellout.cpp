@@ -107,6 +107,36 @@ TEST_CASE("pulp inspect rejects retired authority and arbitrary commands",
           std::string::npos);
 }
 
+TEST_CASE("pulp control validates bounded operation deadlines before connecting",
+          "[cli][shellout][inspect][control][timeout]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    update_disabled.set("1");
+
+    for (const char* invalid : {"0", "300001", "1.5", "not-a-number"}) {
+        const auto result = run_pulp(
+            {"control", "call", "--instance", "exact", "dev.pulp.state/read@1",
+             "--timeout-ms", invalid},
+            30000);
+        INFO(invalid << ": " << result.stderr_output);
+        REQUIRE_FALSE(result.timed_out);
+        CHECK(result.exit_code == 2);
+        CHECK(result.stderr_output.find("--timeout-ms must be an integer from 1 to 300000") !=
+              std::string::npos);
+    }
+
+    const auto wrong_verb =
+        run_pulp({"control", "profiles", "--timeout-ms", "5000"}, 30000);
+    REQUIRE_FALSE(wrong_verb.timed_out);
+    CHECK(wrong_verb.exit_code == 2);
+    CHECK(wrong_verb.stderr_output.find("--timeout-ms is valid only for call or watch") !=
+          std::string::npos);
+}
+
 TEST_CASE("pulp inspect canonical Trace bridge is narrow and default denied",
           "[cli][shellout][inspect][trace][control]") {
     if (!binary_exists()) {

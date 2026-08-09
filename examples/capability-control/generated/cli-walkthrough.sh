@@ -17,7 +17,7 @@ case "${1:-inventory}" in
     : "${T0_INSTANCE_ID:?set T0_INSTANCE_ID before running t0-offline-render}"
     : "${T0_GRANT_ID:?set T0_GRANT_ID before running t0-offline-render}"
     : "${T0_INPUT_ARTIFACT_ID:?set T0_INPUT_ARTIFACT_ID before running t0-offline-render}"
-    pulp control call --instance "${T0_INSTANCE_ID}" dev.pulp.render/offline@1 --grant "${T0_GRANT_ID}" --params "{\"input_artifact_id\":\"${T0_INPUT_ARTIFACT_ID}\",\"max_frames\":48000,\"timeout_ms\":5000}" --json
+    pulp control call --instance "${T0_INSTANCE_ID}" dev.pulp.render/offline@1 --grant "${T0_GRANT_ID}" --params "{\"input_artifact_id\":\"${T0_INPUT_ARTIFACT_ID}\",\"max_frames\":48000,\"timeout_ms\":5000}" --timeout-ms 10000 --json
     ;;
   t1-state-read)
     # T1: Read the bounded visible parameter catalog from one exact standalone instance.

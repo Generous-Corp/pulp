@@ -12,6 +12,7 @@
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <filesystem>
 #include <iostream>
@@ -25,6 +26,9 @@
 
 namespace {
 using namespace pulp::inspect;
+
+constexpr std::int64_t kDefaultRequestTimeoutMs = 3'000;
+constexpr std::int64_t kMaximumRequestTimeoutMs = 300'000;
 
 struct Connection {
     std::unique_ptr<ControlClientConnection> transport;
@@ -62,7 +66,7 @@ int fail(std::string_view code, std::string_view explanation, bool json) {
     return code == "invalid-request" ? 2 : 1;
 }
 
-std::optional<Connection> connect(bool json) {
+std::optional<Connection> connect(bool json, std::chrono::milliseconds frame_read_timeout) {
     const auto broker = broker_executable();
     if (broker.empty()) {
         (void)fail("broker-unavailable", "the installed pulp-control-broker was not found", json);
@@ -71,6 +75,7 @@ std::optional<Connection> connect(bool json) {
     auto transport = std::make_unique<ControlClientConnection>(ControlClientConnectionConfig{
         .endpoint_path = default_control_endpoint_path(),
         .expected_broker_executable = broker,
+        .frame_read_timeout = frame_read_timeout,
     });
     if (!transport->connect()) {
         (void)fail(transport->last_error_code(), transport->last_error_explanation(), json);
@@ -150,9 +155,9 @@ void help() {
                  "       pulp control status --instance ID [--explain] [--json]\n"
                  "       pulp control grant-request --instance ID --profile PROFILE [--json]\n"
                  "       pulp control call --instance ID OPERATION [--grant ID] [--profile "
-                 "PROFILE] [--params JSON] [--json]\n"
+                 "PROFILE] [--params JSON] [--timeout-ms MS] [--json]\n"
                  "       pulp control watch --instance ID RESOURCE [--grant ID] [--profile "
-                 "PROFILE] [--params JSON] [--json]\n"
+                 "PROFILE] [--params JSON] [--timeout-ms MS] [--json]\n"
                  "       pulp control artifact --id ID --out FILE [--json]\n"
                  "       pulp control revoke --grant ID [--json]\n"
                  "       pulp control audit ARTIFACT [--baseline ARTIFACT] [--json]\n\n"
@@ -203,6 +208,7 @@ int cmd_control(const std::vector<std::string>& args) {
     const auto verb = args[0];
     bool json = false, explain = false, params_provided = false;
     std::string instance_id, grant_id, profile, params = "{}", output, artifact_id, baseline;
+    std::string timeout_text;
     std::string positional;
     for (std::size_t i = 1; i < args.size(); ++i) {
         const auto& arg = args[i];
@@ -232,6 +238,9 @@ int cmd_control(const std::vector<std::string>& args) {
         } else if (arg == "--baseline") {
             if (!take(args, i, baseline))
                 return fail("invalid-request", "--baseline requires ARTIFACT", json);
+        } else if (arg == "--timeout-ms") {
+            if (!take(args, i, timeout_text))
+                return fail("invalid-request", "--timeout-ms requires MS", json);
         } else if (arg == "--help" || arg == "-h") {
             help();
             return 0;
@@ -240,6 +249,9 @@ int cmd_control(const std::vector<std::string>& args) {
         else
             positional = arg;
     }
+
+    if (!timeout_text.empty() && verb != "call" && verb != "watch")
+        return fail("invalid-request", "--timeout-ms is valid only for call or watch", json);
 
     if (verb == "audit") {
         if (positional.empty())
@@ -336,7 +348,20 @@ int cmd_control(const std::vector<std::string>& args) {
     if (verb == "artifact" && (artifact_id.empty() || output.empty()))
         return fail("invalid-request", "artifact requires --id ID --out FILE", json);
 
-    auto connection = connect(json);
+    std::int64_t timeout_ms = kDefaultRequestTimeoutMs;
+    if (!timeout_text.empty()) {
+        const auto* begin = timeout_text.data();
+        const auto* end = begin + timeout_text.size();
+        const auto parsed = std::from_chars(begin, end, timeout_ms);
+        if (parsed.ec != std::errc{} || parsed.ptr != end || timeout_ms <= 0 ||
+            timeout_ms > kMaximumRequestTimeoutMs) {
+            return fail("invalid-request", "--timeout-ms must be an integer from 1 to 300000",
+                        json);
+        }
+    }
+    const auto request_timeout = std::chrono::milliseconds(timeout_ms);
+
+    auto connection = connect(json, request_timeout);
     if (!connection)
         return 1;
     if (verb == "instances") {
@@ -514,10 +539,10 @@ int cmd_control(const std::vector<std::string>& args) {
         .deadline_unix_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                 std::chrono::system_clock::now().time_since_epoch())
                                 .count() +
-                            3000,
+                            timeout_ms,
         .params_json = params};
     request.request_hash = control_request_hash(request).value_or("");
-    const auto result = client.request(request);
+    const auto result = client.request(request, request_timeout);
     if (!result.response)
         return fail(result.error_code, result.explanation, json);
     const auto& receipt = *result.response;

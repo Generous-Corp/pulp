@@ -21,7 +21,7 @@
       "tier": "T0",
       "description": "Render a launcher-trusted input through an exact offline-job registration.",
       "requires": ["T0_INSTANCE_ID", "T0_GRANT_ID", "T0_INPUT_ARTIFACT_ID"],
-      "cli": ["pulp", "control", "call", "--instance", "${T0_INSTANCE_ID}", "dev.pulp.render/offline@1", "--grant", "${T0_GRANT_ID}", "--params", "{\"input_artifact_id\":\"${T0_INPUT_ARTIFACT_ID}\",\"max_frames\":48000,\"timeout_ms\":5000}", "--json"],
+      "cli": ["pulp", "control", "call", "--instance", "${T0_INSTANCE_ID}", "dev.pulp.render/offline@1", "--grant", "${T0_GRANT_ID}", "--params", "{\"input_artifact_id\":\"${T0_INPUT_ARTIFACT_ID}\",\"max_frames\":48000,\"timeout_ms\":5000}", "--timeout-ms", "10000", "--json"],
       "mcp": {"tool": "pulp_control_render_offline", "arguments": {"instance_id": "${T0_INSTANCE_ID}", "grant_id": "${T0_GRANT_ID}", "input": {"input_artifact_id": "${T0_INPUT_ARTIFACT_ID}", "max_frames": 48000, "timeout_ms": 5000}}}
     },
     {
