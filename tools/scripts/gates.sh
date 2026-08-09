@@ -93,6 +93,7 @@ FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
 THREAD_ASSERT_GUARD="$ROOT/tools/scripts/thread_assert_check.py"
 UNBOUNDED_WAIT_LINT="$ROOT/tools/scripts/unbounded_wait_lint.py"
 FRAMEWORK_NEUTRALITY="$ROOT/tools/scripts/framework_neutrality_check.py"
+SHIPYARD_WATCHDOG_TEST="$ROOT/tools/scripts/test_shipyard_pr_watchdog.py"
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
     echo "gates.sh: gate scripts not found (expected at tools/scripts/)" >&2
@@ -121,6 +122,12 @@ fi
 fail=0
 
 echo "gates: base = $BASE" >&2
+
+echo "" >&2
+echo "▸ shipyard PR stall-watchdog self-tests" >&2
+if ! "$PYTHON" "$SHIPYARD_WATCHDOG_TEST"; then
+    fail=1
+fi
 
 # ── 0. host-vitals (ADVISORY) ──────────────────────────────────────────────
 # A pushing developer/agent on a self-hosted CI host is often the SAME machine
