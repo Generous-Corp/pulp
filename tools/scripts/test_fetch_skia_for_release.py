@@ -50,6 +50,12 @@ def _make_zip(zip_path: pathlib.Path, members: dict[str, bytes]) -> str:
     return h.hexdigest()
 
 
+class _EncodingCheckedStream(io.StringIO):
+    def write(self, value: str) -> int:
+        value.encode("cp1252")
+        return super().write(value)
+
+
 @contextlib.contextmanager
 def _in_tempdir():
     cwd = pathlib.Path.cwd()
@@ -364,7 +370,7 @@ class ArchSubdirLayoutFlattens(unittest.TestCase):
             self.assertTrue(expected.is_file())
             self.assertEqual(expected.read_bytes(), b"linux-skia")
 
-    def test_windows_x64_arch_subdir(self):
+    def test_windows_x64_arch_subdir_with_cp1252_stdout(self):
         with _in_tempdir() as td:
             zip_path = td / "skia-win.zip"
             payload = {
@@ -376,7 +382,10 @@ class ArchSubdirLayoutFlattens(unittest.TestCase):
                 td, f"file://{zip_path.as_posix()}", sha, "win-x64"
             )
 
-            rc = fetch_skia.main(["fetch_skia_for_release.py", "windows-x64"])
+            with contextlib.redirect_stdout(_EncodingCheckedStream()):
+                rc = fetch_skia.main(
+                    ["fetch_skia_for_release.py", "windows-x64"]
+                )
 
             self.assertEqual(rc, 0)
             release_dir = (

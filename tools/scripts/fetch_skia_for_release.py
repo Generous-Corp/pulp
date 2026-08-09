@@ -281,7 +281,7 @@ def main(argv: list[str]) -> int:
                 return 0
 
     zip_path = Path("skia-release-asset.zip")
-    print(f"Downloading → {zip_path}")
+    print(f"Downloading -> {zip_path}")
     with urllib.request.urlopen(url) as resp, zip_path.open("wb") as fp:
         # 1 MiB chunks; skia zips are ~250-500 MiB
         while True:
@@ -314,7 +314,7 @@ def main(argv: list[str]) -> int:
     build_entry = dest / "build"
     if build_entry.is_symlink() and not build_entry.exists():
         build_entry.unlink()
-    print(f"Unpacking → {dest}")
+    print(f"Unpacking -> {dest}")
     # Idempotent extract. A prior cache restore may already have populated the
     # destination tree; zipfile.extractall raises FileExistsError on a directory
     # member whose target already exists. Create directories with exist_ok and
@@ -375,7 +375,7 @@ def main(argv: list[str]) -> int:
                 if moved:
                     print(
                         f"Flattened skia-builder arch layout: moved "
-                        f"{moved} file(s) from {arch_dir} → {release_dir}"
+                        f"{moved} file(s) from {arch_dir} -> {release_dir}"
                     )
                 # rmdir succeeds only if empty; that's exactly what we want.
                 try:
