@@ -96,6 +96,17 @@ std::int64_t deadline_from(std::chrono::milliseconds timeout) {
     return now + timeout.count();
 }
 
+std::chrono::milliseconds remaining_until(
+    std::chrono::steady_clock::time_point deadline,
+    const detail::InspectorControlClock& clock = [] {
+        return std::chrono::steady_clock::now();
+    }) {
+    const auto now = clock();
+    if (now >= deadline)
+        return std::chrono::milliseconds::zero();
+    return std::chrono::ceil<std::chrono::milliseconds>(deadline - now);
+}
+
 std::optional<std::string> object_string(const choc::value::Value& object,
                                          std::string_view field) {
     const auto key = std::string(field);
@@ -158,23 +169,39 @@ class InstalledInspectorControlSessionOpener final : public InspectorControlSess
           profile_(std::move(profile)) {}
 
     std::optional<InspectorControlSession> open(std::chrono::milliseconds timeout) override {
+        if (timeout <= std::chrono::milliseconds::zero())
+            return std::nullopt;
+        return open_until(std::chrono::steady_clock::now() + timeout);
+    }
+
+    std::optional<InspectorControlSession>
+    open_until(std::chrono::steady_clock::time_point deadline) override {
         const auto broker = resolve_installed_broker(executable_);
         if (broker.empty())
+            return std::nullopt;
+        const auto connect_timeout = remaining_until(deadline);
+        if (connect_timeout <= std::chrono::milliseconds::zero())
             return std::nullopt;
         auto connection = std::make_unique<ControlClientConnection>(ControlClientConnectionConfig{
             .endpoint_path = default_control_endpoint_path(),
             .expected_broker_executable = broker,
-            .connect_timeout = timeout,
+            .connect_timeout = connect_timeout,
         });
         if (!connection->connect())
             return std::nullopt;
-        const auto enrolled = connection->manage("enroll");
+        const auto enroll_timeout = remaining_until(deadline);
+        if (enroll_timeout <= std::chrono::milliseconds::zero())
+            return std::nullopt;
+        const auto enrolled = connection->manage("enroll", "{}", enroll_timeout);
         const auto enrollment = parse_object(enrolled.data_json);
         const auto client_id = enrollment ? object_string(*enrollment, "client_id") : std::nullopt;
         if (enrolled.status_id != "accepted" || !client_id)
             return std::nullopt;
 
-        const auto inventory_result = connection->manage("instances");
+        const auto inventory_timeout = remaining_until(deadline);
+        if (inventory_timeout <= std::chrono::milliseconds::zero())
+            return std::nullopt;
+        const auto inventory_result = connection->manage("instances", "{}", inventory_timeout);
         const auto inventory = parse_object(inventory_result.data_json);
         if (inventory_result.status_id != "completed" || !inventory ||
             !inventory->hasObjectMember("instances") || !(*inventory)["instances"].isArray())
@@ -202,8 +229,11 @@ class InstalledInspectorControlSessionOpener final : public InspectorControlSess
         auto grant_params = choc::value::createObject("");
         grant_params.addMember("instance_id", choc::value::createString(*instance_id));
         grant_params.addMember("profile", choc::value::createString(profile_));
+        const auto grant_timeout = remaining_until(deadline);
+        if (grant_timeout <= std::chrono::milliseconds::zero())
+            return std::nullopt;
         const auto granted = connection->manage(
-            "grant-request", choc::json::toString(grant_params, false));
+            "grant-request", choc::json::toString(grant_params, false), grant_timeout);
         const auto grant = parse_object(granted.data_json);
         const auto grant_id = grant ? object_string(*grant, "grant_id") : std::nullopt;
         if (granted.status_id != "granted" || !grant_id)
@@ -256,9 +286,10 @@ InspectorClientResult request_control_inspector(std::string method, std::string 
     return request_control_inspector(opener, std::move(method), std::move(params_json), timeout);
 }
 
-InspectorClientResult request_control_inspector(InspectorControlSessionOpener& opener,
-                                                std::string method, std::string params_json,
-                                                std::chrono::milliseconds timeout) {
+InspectorClientResult detail::request_control_inspector_with_clock(
+    InspectorControlSessionOpener& opener, std::string method,
+    std::string params_json, std::chrono::milliseconds timeout,
+    InspectorControlClock clock) {
     InspectorClientResult result;
     if (method != methods::kTraceStartSession && method != methods::kTraceStopSession) {
         result.response = client_error(
@@ -270,14 +301,8 @@ InspectorClientResult request_control_inspector(InspectorControlSessionOpener& o
             client_error("canonical Inspector request deadline has expired", "request_timeout");
         return result;
     }
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
-    const auto remaining = [&] {
-        const auto now = std::chrono::steady_clock::now();
-        if (now >= deadline)
-            return std::chrono::milliseconds::zero();
-        return std::max(std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now),
-                        std::chrono::milliseconds(1));
-    };
+    const auto deadline = clock() + timeout;
+    const auto remaining = [&] { return remaining_until(deadline, clock); };
 
     const auto* descriptor = resolve_control_operation(kTraceOperationId, kTraceOperationVersion);
     const auto canonical_params = canonical_trace_params(method, params_json);
@@ -295,10 +320,13 @@ InspectorClientResult request_control_inspector(InspectorControlSessionOpener& o
         return result;
     }
 
-    auto session = opener.open(remaining());
+    auto session = opener.open_until(deadline);
     if (!session || !valid_session(*session)) {
-        result.response = client_error("canonical Inspector control session is unavailable",
-                                       "control_session_unavailable");
+        result.response = remaining() <= std::chrono::milliseconds::zero()
+                              ? client_error("canonical Inspector request deadline has expired",
+                                             "request_timeout")
+                              : client_error("canonical Inspector control session is unavailable",
+                                             "control_session_unavailable");
         return result;
     }
     result.target = session->target;
@@ -438,6 +466,14 @@ InspectorClientResult request_control_inspector(InspectorControlSessionOpener& o
                             : "invalid_control_response",
         may_have_applied);
     return result;
+}
+
+InspectorClientResult request_control_inspector(InspectorControlSessionOpener& opener,
+                                                std::string method, std::string params_json,
+                                                std::chrono::milliseconds timeout) {
+    return detail::request_control_inspector_with_clock(
+        opener, std::move(method), std::move(params_json), timeout,
+        [] { return std::chrono::steady_clock::now(); });
 }
 
 } // namespace pulp::inspect

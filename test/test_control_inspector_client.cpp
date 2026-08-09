@@ -18,6 +18,7 @@ namespace {
 
 struct FakeState {
     std::vector<ControlEnvelope> requests;
+    std::vector<std::chrono::milliseconds> timeouts;
     std::function<ControlTransportDispatchResult(const ControlEnvelope&)> dispatch;
 };
 
@@ -26,11 +27,12 @@ class FakeTransport final : public ControlClientTransport {
     explicit FakeTransport(std::shared_ptr<FakeState> state) : state_(std::move(state)) {}
 
     ControlTransportDispatchResult dispatch(std::string_view encoded,
-                                            std::chrono::milliseconds) override {
+                                            std::chrono::milliseconds timeout) override {
         const auto envelope = decode_control_envelope(encoded);
         if (!envelope)
             return {.error_code = "fake-invalid-request", .explanation = "decode failed"};
         state_->requests.push_back(*envelope);
+        state_->timeouts.push_back(timeout);
         return state_->dispatch(*envelope);
     }
 
@@ -96,8 +98,16 @@ class FakeOpener final : public InspectorControlSessionOpener {
   public:
     explicit FakeOpener(std::shared_ptr<FakeState> state) : state_(std::move(state)) {}
 
-    std::optional<InspectorControlSession> open(std::chrono::milliseconds) override {
+    std::optional<InspectorControlSession> open(std::chrono::milliseconds timeout) override {
+        return open_until(std::chrono::steady_clock::now() + timeout);
+    }
+
+    std::optional<InspectorControlSession>
+    open_until(std::chrono::steady_clock::time_point deadline) override {
         ++calls;
+        opened_deadline = deadline;
+        if (before_open)
+            before_open(deadline);
         if (!available)
             return std::nullopt;
         return InspectorControlSession{
@@ -113,6 +123,8 @@ class FakeOpener final : public InspectorControlSessionOpener {
 
     int calls = 0;
     bool available = true;
+    std::optional<std::chrono::steady_clock::time_point> opened_deadline;
+    std::function<void(std::chrono::steady_clock::time_point)> before_open;
 
   private:
     std::shared_ptr<FakeState> state_;
@@ -199,6 +211,49 @@ TEST_CASE("canonical Inspector client rejects invalid trace params before author
         CHECK(result.response.error_code == "invalid_params");
         CHECK(result.response.error_data_json == R"({"mayHaveApplied":false})");
         CHECK(opener.calls == 0);
+        CHECK(state->requests.empty());
+    }
+}
+
+TEST_CASE("canonical Inspector cold session shares one near-expiry deadline",
+          "[inspect][control][client][trace][deadline]") {
+    constexpr auto timeout = std::chrono::milliseconds(160);
+    constexpr auto request_budget = std::chrono::microseconds(1500);
+    SECTION("the request receives only the residual session budget") {
+        auto state = successful_state();
+        FakeOpener opener(state);
+        auto now = std::chrono::steady_clock::time_point{};
+        opener.before_open = [&](const auto deadline) {
+            now = deadline - request_budget;
+        };
+
+        const auto result = detail::request_control_inspector_with_clock(
+            opener, std::string(methods::kTraceStartSession), "{}", timeout,
+            [&] { return now; });
+
+        REQUIRE(result.succeeded());
+        REQUIRE(opener.opened_deadline);
+        CHECK(*opener.opened_deadline ==
+              std::chrono::steady_clock::time_point{} + timeout);
+        REQUIRE(state->timeouts.size() == 2);
+        CHECK(state->timeouts[0] == std::chrono::milliseconds(2));
+        CHECK(state->timeouts[1] <= state->timeouts[0]);
+        CHECK(state->timeouts[1] > std::chrono::milliseconds::zero());
+    }
+
+    SECTION("an exhausted session budget reports the canonical timeout") {
+        auto state = successful_state();
+        FakeOpener opener(state);
+        opener.available = false;
+        auto now = std::chrono::steady_clock::time_point{};
+        opener.before_open = [&](const auto deadline) { now = deadline; };
+
+        const auto result = detail::request_control_inspector_with_clock(
+            opener, std::string(methods::kTraceStartSession), "{}", timeout,
+            [&] { return now; });
+
+        CHECK_FALSE(result.succeeded());
+        CHECK(result.response.error_code == "request_timeout");
         CHECK(state->requests.empty());
     }
 }

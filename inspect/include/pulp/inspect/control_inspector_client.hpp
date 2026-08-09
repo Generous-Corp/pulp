@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -35,7 +36,18 @@ class InspectorControlSessionOpener {
   public:
     virtual ~InspectorControlSessionOpener() = default;
 
-    virtual std::optional<InspectorControlSession> open(std::chrono::milliseconds timeout) = 0;
+    virtual std::optional<InspectorControlSession>
+    open(std::chrono::milliseconds timeout) = 0;
+    /// Deadline-aware entry point. Existing integrations retain the timeout
+    /// contract; implementations with multiple blocking stages override this
+    /// method so every stage consumes one absolute budget.
+    virtual std::optional<InspectorControlSession>
+    open_until(std::chrono::steady_clock::time_point deadline) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline)
+            return std::nullopt;
+        return open(std::chrono::ceil<std::chrono::milliseconds>(deadline - now));
+    }
 };
 
 /// Resolve the peer-verification anchor for a broker installed beside a CLI or
@@ -69,5 +81,18 @@ request_control_inspector(InspectorControlSessionOpener& opener, std::string met
 InspectorClientResult
 request_control_inspector(std::string method, std::string params_json = "{}",
                           std::chrono::milliseconds timeout = std::chrono::seconds(3));
+
+namespace detail {
+
+using InspectorControlClock =
+    std::function<std::chrono::steady_clock::time_point()>;
+
+/// Internal deterministic-clock seam for deadline contract tests.
+InspectorClientResult request_control_inspector_with_clock(
+    InspectorControlSessionOpener& opener, std::string method,
+    std::string params_json, std::chrono::milliseconds timeout,
+    InspectorControlClock clock);
+
+} // namespace detail
 
 } // namespace pulp::inspect
