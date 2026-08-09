@@ -30,6 +30,12 @@ describe what an SDK can design or generate; it must never contain runtime
 operations, grants, policy, risk decisions, instances, activation, sessions,
 revocation, or receipts.
 
+The installed SDK also ships canonical runtime-control headers, CMake helpers,
+and control-authoring examples. Their presence in the same install tree does
+not make them agent-capability rows: keep runtime-control operations and policy
+out of `agent-capabilities.json`, and keep the capability surface ledger focused
+on the design-time public-header contract.
+
 ## Classify the change
 
 For a new public header or symbol:

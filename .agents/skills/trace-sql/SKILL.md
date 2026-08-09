@@ -35,10 +35,9 @@ depends on a specific agent, MCP server, or vendor.
 ## The tool: `trace_processor`
 
 Queries run through the `trace_processor` wrapper (a small Python launcher that
-lazy-loads the precompiled `trace_processor_shell` binary). The live path
-(`pulp trace query "<sql>"`) forwards to the inspector's `Trace.query`; once a
-session is flushed to a `.pftrace`, run SQL **offline against the file** with
-`--trace` and Pulp shells to `trace_processor` for you:
+resolves the precompiled `trace_processor_shell` binary). SQL is strictly
+offline: `pulp trace query` requires `--trace FILE.pftrace` and shells to
+`trace_processor`; it never forwards SQL to a live inspector:
 
 ```bash
 # Offline SQL against a saved capture (no live inspector needed):
@@ -68,15 +67,18 @@ drive `trace_processor` directly:
 
 **Before using it, check it exists** (skill-versioning rule): confirm the
 `trace_processor` wrapper is on `PATH` or in the project's tracing cache. If it
-is absent, `pulp trace query` degrades to returning the `.pftrace` path only
-(the D3 fallback) — say so rather than inventing rows.
+is absent, run the explicit `pulp trace fetch`; query does not silently download
+or degrade to returning a trace path.
 
-**Offline behavior:** the wrapper downloads the shell binary to a cache on
-first use. Air-gapped machines must pre-seed that cache; a first-run query on a
-sealed network will otherwise hang or fail on the download, not on the SQL.
+`pulp trace start|stop --instance ID` selects one exact broker-owned live
+instance for lifecycle control. The selector is transported outside lifecycle
+method parameters and is rejected by offline `query` and other non-lifecycle
+verbs; omission preserves the canonical safe no-selector behavior.
 
-**Output format.** `pulp trace query` emits **JSON by default** (agents parse
-it); `--format table` is for humans, `--format csv` optional.
+**Output format.** Offline query emits `trace_processor`'s native table by
+default; `--format table` is the only accepted explicit format. The global
+`--json` flag wraps that table as an escaped `output` string for agents;
+`--format json|csv` is rejected rather than mislabeling native output.
 
 ---
 

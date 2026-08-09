@@ -61,7 +61,9 @@ int main(int argc, char** argv) {
     });
     if (!daemon.start())
         return 1;
-    while (!stopping.load(std::memory_order_relaxed))
+    // The parent test owns the signal-and-process deadline; self-exit would
+    // invalidate the crash-recovery fixture.
+    while (!stopping.load(std::memory_order_relaxed)) // unbounded-wait: allow parent process deadline
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     daemon.stop();
     return 0;

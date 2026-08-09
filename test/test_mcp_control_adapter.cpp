@@ -2,6 +2,7 @@
 
 #include "mcp_control_tools.hpp"
 #include "mcp_server.hpp"
+#include "support/thread_progress.hpp"
 
 #include <pulp/inspect/control_inspector_client.hpp>
 #include <pulp/inspect/control_manifest.hpp>
@@ -69,7 +70,12 @@ class FakeTransport final : public ControlClientTransport {
                 std::unique_lock lock(state_->request_mutex);
                 state_->request_started = true;
                 state_->request_condition.notify_all();
-                state_->request_condition.wait(lock, [&] { return state_->cancellation_seen; });
+                if (!state_->request_condition.wait_for(
+                        lock, pulp::test::kProgressDeadline,
+                        [&] { return state_->cancellation_seen; })) {
+                    return {.error_code = "cancellation-timeout",
+                            .explanation = "test transport did not observe cancellation"};
+                }
             }
             if (state_->progress)
                 state_->progress({.request_id = request->request_id,
@@ -399,6 +405,7 @@ TEST_CASE("control MCP reports revocation during a call and supports cancellatio
     REQUIRE(state->offer.has_value());
     REQUIRE(state->offer->mandatory_features ==
             std::vector<std::string>{"cancellation", "receipts"});
+    REQUIRE(active.wait_for(pulp::test::kProgressDeadline) == std::future_status::ready);
     REQUIRE(active.get().find("\"isError\":true") == std::string::npos);
 }
 
