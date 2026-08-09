@@ -1,4 +1,4 @@
-#include <pulp/format/standalone.hpp>
+#include <pulp/format/headless.hpp>
 #include <pulp/inspect/control_standalone_host.hpp>
 
 #include <atomic>
@@ -45,29 +45,19 @@ std::unique_ptr<pulp::format::Processor> create_processor() {
     return std::make_unique<InstalledControlProcessor>();
 }
 
-const bool factory_installed = pulp::format::detail::install_standalone_control_host_factory(
-    &pulp::inspect::make_control_standalone_host);
-
 } // namespace
 
 int main() {
-    if (!factory_installed)
+    pulp::format::HeadlessHost app(&create_processor);
+    if (!app.valid() || app.processor() == nullptr)
         return 64;
     std::signal(SIGINT, request_stop);
     std::signal(SIGTERM, request_stop);
-
-    pulp::format::StandaloneApp app(&create_processor);
-    pulp::format::StandaloneConfig config;
-    config.persist_settings = false;
-    config.headless = true;
-    // The dedicated broker host has no hardware-audio product role. Reuse the
-    // established no-device Standalone startup mode without opening an editor.
-    config.screenshot_path = ".pulp-control-host-headless.png";
-    app.set_config(config);
-    if (!app.start())
+    auto control = pulp::inspect::make_control_standalone_host();
+    if (!control || !control->start(*app.processor(), app.state()))
         return 65;
     while (!stopping.load(std::memory_order_relaxed))
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    app.stop();
+    control->stop();
     return 0;
 }

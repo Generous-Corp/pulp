@@ -315,7 +315,12 @@ class InstalledStandaloneProcessor final : public pulp::format::Processor {
             .input_buses = {{"Input", 2}},
             .output_buses = {{"Output", 2}}};
   }
-  void define_parameters(pulp::state::StateStore&) override {}
+  void define_parameters(pulp::state::StateStore& store) override {
+    store.add_parameter({.id = 1,
+                         .name = "Author Level",
+                         .range = {.min = 0.0f, .max = 1.0f,
+                                   .default_value = 0.25f}});
+  }
   void prepare(const pulp::format::PrepareContext&) override {}
   void process(pulp::audio::BufferView<float>& output,
                const pulp::audio::BufferView<const float>& input,
@@ -409,21 +414,105 @@ if(NOT _build_result EQUAL 0)
         "${_build_output}\n${_build_error}")
 endif()
 
+set(_consumer_install_prefix "${_fixture_root}/author-product-prefix")
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" --install "${_consumer_build}"
+            --prefix "${_consumer_install_prefix}" --config "${_producer_config}"
+    RESULT_VARIABLE _consumer_install_result
+    OUTPUT_VARIABLE _consumer_install_output
+    ERROR_VARIABLE _consumer_install_error)
+if(NOT _consumer_install_result EQUAL 0)
+    message(FATAL_ERROR
+        "Control SDK author-host install failed (${_consumer_install_result})\n"
+        "${_consumer_install_output}\n${_consumer_install_error}")
+endif()
+if(APPLE)
+    set(_author_host_directory
+        "${_prefix}/libexec/pulp/control-hosts/dev-pulp-installed-control-standalone-18f9d0d67fc6aec8")
+    foreach(_author_file IN ITEMS host host.inspector-capabilities.json)
+        if(NOT EXISTS "${_author_host_directory}/${_author_file}")
+            message(FATAL_ERROR
+                "Installed author Standalone catalog entry is missing ${_author_file}")
+        endif()
+    endforeach()
+    execute_process(COMMAND /usr/bin/stat -f %Lp "${_author_host_directory}"
+        OUTPUT_VARIABLE _author_dir_mode OUTPUT_STRIP_TRAILING_WHITESPACE)
+    execute_process(COMMAND /usr/bin/stat -f %Lp "${_author_host_directory}/host"
+        OUTPUT_VARIABLE _author_host_mode OUTPUT_STRIP_TRAILING_WHITESPACE)
+    execute_process(COMMAND /usr/bin/stat -f %Lp
+        "${_author_host_directory}/host.inspector-capabilities.json"
+        OUTPUT_VARIABLE _author_manifest_mode OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(NOT _author_dir_mode STREQUAL "700" OR
+       NOT _author_host_mode STREQUAL "700" OR
+       NOT _author_manifest_mode STREQUAL "600")
+        message(FATAL_ERROR
+            "Installed author catalog entry is not owner-private: ${_author_dir_mode}/${_author_host_mode}/${_author_manifest_mode}")
+    endif()
+    set(_destdir "${_fixture_root}/package-stage")
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E env "DESTDIR=${_destdir}"
+            "${CMAKE_COMMAND}" --install "${_consumer_build}"
+            --prefix "${_consumer_install_prefix}" --config "${_producer_config}"
+        RESULT_VARIABLE _destdir_install_result
+        OUTPUT_VARIABLE _destdir_install_output
+        ERROR_VARIABLE _destdir_install_error)
+    if(NOT _destdir_install_result EQUAL 0 OR
+       NOT EXISTS "${_destdir}${_author_host_directory}/host" OR
+       NOT EXISTS "${_destdir}${_author_host_directory}/host.inspector-capabilities.json")
+        message(FATAL_ERROR
+            "DESTDIR author catalog staging failed (${_destdir_install_result})\n${_destdir_install_output}\n${_destdir_install_error}")
+    endif()
+    set(_daemon_test "${PULP_BUILD_DIR}/test/pulp-test-control-broker-daemon")
+    if(NOT EXISTS "${_daemon_test}")
+        message(FATAL_ERROR "Author catalog E2E test binary is missing: ${_daemon_test}")
+    endif()
+    # Production enrollment trusts only broker-owned installed CLI/MCP
+    # identities. Install this signed test client at the canonical CLI sibling
+    # path so the E2E exercises that policy instead of adding a test bypass.
+    file(COPY_FILE "${_daemon_test}" "${_prefix}/libexec/pulp/pulp")
+    file(CHMOD "${_prefix}/libexec/pulp/pulp"
+        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E env
+            "PULP_CONTROL_AUTHOR_BROKER=${_prefix}/libexec/pulp/pulp-control-broker"
+            "PULP_CONTROL_AUTHOR_HOST=${_author_host_directory}/host"
+            "${_daemon_test}" "[author-catalog-process]"
+        RESULT_VARIABLE _author_process_result
+        OUTPUT_VARIABLE _author_process_output
+        ERROR_VARIABLE _author_process_error)
+    if(NOT _author_process_result EQUAL 0)
+        message(FATAL_ERROR
+            "Installed production broker did not launch/register the author host (${_author_process_result})\n${_author_process_output}\n${_author_process_error}")
+    endif()
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E env
+            "PULP_CONTROL_AUTHOR_HOST=${_author_host_directory}/host"
+            "${_daemon_test}" "[author-catalog]~[author-catalog-process]"
+        RESULT_VARIABLE _author_state_result
+        OUTPUT_VARIABLE _author_state_output
+        ERROR_VARIABLE _author_state_error)
+    if(NOT _author_state_result EQUAL 0)
+        message(FATAL_ERROR
+            "Installed author host typed state-read E2E failed (${_author_state_result})\n${_author_state_output}\n${_author_state_error}")
+    endif()
+endif()
+
 file(GLOB_RECURSE _standalone_control_manifests
     "${_consumer_build}/*InstalledControlStandalone*.inspector-capabilities.json")
 list(LENGTH _standalone_control_manifests _standalone_manifest_count)
-if(NOT _standalone_manifest_count EQUAL 1)
+if(NOT _standalone_manifest_count EQUAL 2)
     message(FATAL_ERROR
-        "Installed ordinary Standalone did not emit one control manifest: ${_standalone_control_manifests}")
+        "Installed ordinary Standalone and its companion did not emit two control manifests: ${_standalone_control_manifests}")
 endif()
-list(GET _standalone_control_manifests 0 _standalone_control_manifest)
-file(READ "${_standalone_control_manifest}" _standalone_control_json)
-if(NOT _standalone_control_json MATCHES "\"endpoint_included\"[ \\t]*:[ \\t]*true" OR
-   NOT _standalone_control_json MATCHES "dev.pulp.instance/read@1" OR
-   NOT _standalone_control_json MATCHES "dev.pulp.state/read@1")
-    message(FATAL_ERROR
-        "Installed ordinary Standalone control manifest is not truthful: ${_standalone_control_json}")
-endif()
+foreach(_standalone_control_manifest IN LISTS _standalone_control_manifests)
+    file(READ "${_standalone_control_manifest}" _standalone_control_json)
+    if(NOT _standalone_control_json MATCHES "\"endpoint_included\"[ \\t]*:[ \\t]*true" OR
+       NOT _standalone_control_json MATCHES "dev.pulp.instance/read@1" OR
+       NOT _standalone_control_json MATCHES "dev.pulp.state/read@1")
+        message(FATAL_ERROR
+            "Installed ordinary Standalone control manifest is not truthful: ${_standalone_control_json}")
+    endif()
+endforeach()
 
 set(_executable_suffix "")
 if(WIN32)

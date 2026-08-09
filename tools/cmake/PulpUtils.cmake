@@ -854,7 +854,7 @@ function(pulp_add_plugin target)
 
     # ── Standalone ───────────────────────────────────────────────────────
     if("Standalone" IN_LIST PLUGIN_FORMATS)
-        _pulp_add_standalone(${target} "${PLUGIN_PLUGIN_NAME}" "${PLUGIN_BUNDLE_ID}" "${PLUGIN_VERSION}")
+        _pulp_add_standalone(${target} "${PLUGIN_PLUGIN_NAME}" "${PLUGIN_BUNDLE_ID}" "${PLUGIN_VERSION}" "${PLUGIN_PROCESSOR_FACTORY}")
     endif()
 
     # ── Install targets ────────────────────────────────────────────────

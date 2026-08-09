@@ -139,7 +139,7 @@ target_include_directories(pulp-inspect-standalone-runtime
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>)
 target_link_libraries(pulp-inspect-standalone-runtime
-    PUBLIC pulp::inspect-runtime pulp::standalone)
+    PUBLIC pulp::inspect-runtime pulp::format)
 
 # T0 offline integration is a separate headless adapter archive so the shared
 # control runtime does not acquire format/view dependencies merely by existing.

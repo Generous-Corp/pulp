@@ -215,6 +215,10 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
     if(NOT artifact_format)
         message(FATAL_ERROR "control shipping format is required for ${artifact_target}")
     endif()
+    set(_shipping_manifest_stem "${target}.${artifact_format}")
+    if(ARGC GREATER 3 AND NOT "${ARGV3}" STREQUAL "")
+        set(_shipping_manifest_stem "${ARGV3}")
+    endif()
 
     set(_profile "${PULP_${target}_CONTROL_PROFILE}")
     set(_artifact_capabilities "${PULP_${target}_CONTROL_CAPABILITIES}")
@@ -287,7 +291,7 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
     set(_scan_stamp
         "${_stamp_dir}/${artifact_target}.${_format_identifier}.$<CONFIG>.stamp")
     set(_shipping_manifest
-        "${_shipping_dir}/${target}.${artifact_format}.control-shipping.json")
+        "${_shipping_dir}/${_shipping_manifest_stem}.control-shipping.json")
     file(GENERATE OUTPUT "${_shipping_manifest}" CONTENT "${_shipping_manifest_content}")
 
     # This translation unit carries artifact identity only. Endpoint and
@@ -310,13 +314,13 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
             "$<TARGET_FILE_DIR:${artifact_target}>/${target}.inspector-capabilities.json"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${_shipping_manifest}"
-            "$<TARGET_FILE_DIR:${artifact_target}>/${target}.${artifact_format}.control-shipping.json"
+            "$<TARGET_FILE_DIR:${artifact_target}>/${_shipping_manifest_stem}.control-shipping.json"
         COMMAND "${CMAKE_COMMAND}"
             -DARTIFACT=$<TARGET_FILE:${artifact_target}>
             -DMANIFEST=${_control_manifest}
             -DSHIPPING_MANIFEST=${_shipping_manifest}
             -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
-            -DREPORT=$<TARGET_FILE_DIR:${artifact_target}>/${target}.${artifact_format}.control-shipping-report.json
+            -DREPORT=$<TARGET_FILE_DIR:${artifact_target}>/${_shipping_manifest_stem}.control-shipping-report.json
             -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/check_control_shipping_artifact.cmake"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_scan_stamp}"
         VERBATIM)
@@ -334,7 +338,7 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
             -DMANIFEST=${_control_manifest}
             -DSHIPPING_MANIFEST=${_shipping_manifest}
             -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
-            -DREPORT=$<TARGET_FILE_DIR:${artifact_target}>/${target}.${artifact_format}.control-shipping-report.json
+            -DREPORT=$<TARGET_FILE_DIR:${artifact_target}>/${_shipping_manifest_stem}.control-shipping-report.json
             -P "${_scanner}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_scan_stamp}"
         DEPENDS ${artifact_target} "${_control_manifest}"

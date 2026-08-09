@@ -491,6 +491,8 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS AND
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/inspect")
     target_link_libraries(pulp-control-standalone-host PRIVATE
         pulp::inspect-standalone-runtime)
+    target_link_options(pulp-control-standalone-host PRIVATE
+        "LINKER:-dead_strip_dylibs")
     _pulp_cache_control_declarations(pulp-control-standalone-host
         developer-local "dev.pulp.instance/read@1;dev.pulp.state/read@1" FALSE)
     _pulp_configure_control_shipping(pulp-control-standalone-host
@@ -519,6 +521,12 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS AND
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/pulp
         RENAME "pulp-control-standalone-host.inspector-capabilities.json"
         PERMISSIONS OWNER_READ OWNER_WRITE)
+    # CMake may rewrite install RPATHs after the build-time signature is
+    # applied. Re-sign the final installed bytes so the broker can pin the
+    # exact artifact it will execute; release signing may replace this ad-hoc
+    # signature later as part of the normal package transaction.
+    install(CODE
+        "execute_process(COMMAND /usr/bin/codesign --force --sign - \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/pulp/pulp-control-standalone-host\" RESULT_VARIABLE _pulp_control_host_sign_result)\nif(NOT _pulp_control_host_sign_result EQUAL 0)\n  message(FATAL_ERROR \"could not sign installed Standalone control host\")\nendif()")
     install(FILES
         "${CMAKE_BINARY_DIR}/pulp-control-shipping-manifests/pulp-control-standalone-host.Standalone.control-shipping.json"
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/pulp)

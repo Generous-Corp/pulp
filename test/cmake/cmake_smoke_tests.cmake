@@ -227,7 +227,16 @@ if(PULP_ENABLE_INSPECTOR)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_control_sdk_consumer.cmake)
     set_tests_properties(cmake-control-sdk-consumer PROPERTIES
         LABELS "cmake;sdk;inspect;control;headless"
-        TIMEOUT 180)
+        TIMEOUT 300)
+
+    add_test(NAME cmake-control-host-catalog-transaction
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_control_host_catalog_transaction.cmake)
+    set_tests_properties(cmake-control-host-catalog-transaction PROPERTIES
+        LABELS "cmake;control;installer;security"
+        TIMEOUT 30)
 
 endif()
 

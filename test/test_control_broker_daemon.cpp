@@ -14,6 +14,7 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -687,12 +688,24 @@ TEST_CASE("installed daemon process enforces host policy and recovers after cras
 }
 
 TEST_CASE("installed broker launches only its named ordinary Standalone host",
-          "[inspect][control][daemon][host][process][standalone][security]") {
+          "[inspect][control][daemon][host][process][standalone][security][author-catalog-process]") {
 #ifdef __APPLE__
     DaemonRoot root;
-    const std::filesystem::path installed_broker{PULP_CONTROL_BROKER_DAEMON};
-    const auto installed_host = installed_broker.parent_path() /
-                                "pulp-control-standalone-host";
+    const auto* author_broker_environment = std::getenv("PULP_CONTROL_AUTHOR_BROKER");
+    const auto* author_host_environment = std::getenv("PULP_CONTROL_AUTHOR_HOST");
+    const auto installed_broker = author_broker_environment
+                                      ? std::filesystem::path{author_broker_environment}
+                                      : std::filesystem::path{PULP_CONTROL_BROKER_DAEMON};
+    const auto installed_host = author_host_environment
+                                    ? std::filesystem::path{author_host_environment}
+                                    : installed_broker.parent_path() /
+                                          "pulp-control-standalone-host";
+    const auto host_id = author_host_environment
+                             ? std::string{"dev-pulp-installed-control-standalone-18f9d0d67fc6aec8"}
+                                                  : std::string{"ordinary-standalone"};
+    const auto expected_plugin = author_host_environment
+                                     ? std::string_view{"dev.pulp.installed-control-standalone"}
+                                     : std::string_view{"dev.pulp.control-standalone-host"};
     REQUIRE(std::filesystem::is_regular_file(installed_broker));
     REQUIRE(std::filesystem::is_regular_file(installed_host));
     REQUIRE(std::filesystem::is_regular_file(
@@ -739,7 +752,7 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
               .status_id == "invalid_request");
 
     auto named = choc::value::createObject("");
-    named.addMember("host_id", choc::value::createString("ordinary-standalone"));
+    named.addMember("host_id", choc::value::createString(host_id));
     const auto prepared = connection->manage(
         "host-prepare-installed", choc::json::toString(named, false));
     INFO(prepared.explanation);
@@ -766,8 +779,7 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
     }
     REQUIRE(instances.size() == 1);
     const auto instance = instances[0];
-    CHECK(instance["plugin_id"].getString() ==
-          std::string_view{"dev.pulp.control-standalone-host"});
+    CHECK(instance["plugin_id"].getString() == expected_plugin);
     REQUIRE(instance["capabilities"].size() == 2);
     CHECK(instance["capabilities"][0].getString() ==
           std::string_view{"dev.pulp.instance/read@1"});
@@ -786,13 +798,21 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
 }
 
 TEST_CASE("canonical ordinary Standalone host serves typed state reads",
-          "[inspect][control][daemon][host][standalone][state][e2e]") {
+          "[inspect][control][daemon][host][standalone][state][e2e][author-catalog]") {
 #ifdef __APPLE__
     DaemonRoot root;
     const auto broker_executable = current_executable();
     const std::filesystem::path installed_broker{PULP_CONTROL_BROKER_DAEMON};
-    const auto installed_host = installed_broker.parent_path() /
-                                "pulp-control-standalone-host";
+    const auto* author_host_environment = std::getenv("PULP_CONTROL_AUTHOR_HOST");
+    const auto installed_host = author_host_environment
+                                    ? std::filesystem::path{author_host_environment}
+                                    : installed_broker.parent_path() /
+                                          "pulp-control-standalone-host";
+    const auto host_id = author_host_environment
+                             ? std::string{"dev-pulp-installed-control-standalone-18f9d0d67fc6aec8"}
+                                                  : std::string{"ordinary-standalone"};
+    const auto expected_parameter = author_host_environment ? std::string_view{"Author Level"}
+                                                             : std::string_view{"Level"};
     REQUIRE_FALSE(broker_executable.empty());
     REQUIRE(std::filesystem::is_regular_file(installed_host));
 
@@ -803,7 +823,7 @@ TEST_CASE("canonical ordinary Standalone host serves typed state reads",
         .executable_path = broker_executable,
         .process_generation = 211,
         .installed_host_selections =
-            {{.host_id = "ordinary-standalone",
+            {{.host_id = host_id,
               .intent = {.executable = installed_host,
                          .arguments = {},
                          .working_directory = installed_host.parent_path(),
@@ -824,7 +844,7 @@ TEST_CASE("canonical ordinary Standalone host serves typed state reads",
         choc::json::parse(enrolled.data_json)["client_id"].getString());
 
     auto named = choc::value::createObject("");
-    named.addMember("host_id", choc::value::createString("ordinary-standalone"));
+    named.addMember("host_id", choc::value::createString(host_id));
     const auto prepared = connection.manage(
         "host-prepare-installed", choc::json::toString(named, false));
     INFO(prepared.explanation);
@@ -892,7 +912,7 @@ TEST_CASE("canonical ordinary Standalone host serves typed state reads",
     const auto detail = choc::json::parse(result.response->detail_json);
     INFO("decoded installed Standalone state read");
     REQUIRE(detail["parameters"].size() == 1);
-    CHECK(detail["parameters"][0]["name"].getString() == std::string_view{"Level"});
+    CHECK(detail["parameters"][0]["name"].getString() == expected_parameter);
 
     connection.disconnect();
     INFO("stopping installed Standalone daemon");

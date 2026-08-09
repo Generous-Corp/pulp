@@ -1,0 +1,77 @@
+cmake_minimum_required(VERSION 3.24)
+
+foreach(_required IN ITEMS PULP_CONTROL_HOST_ID PULP_CONTROL_HOST_SOURCE
+                           PULP_CONTROL_HOST_MANIFEST PULP_CONTROL_HOST_ROOT)
+    if(NOT DEFINED ${_required} OR "${${_required}}" STREQUAL "")
+        message(FATAL_ERROR "install_control_host.cmake requires ${_required}")
+    endif()
+endforeach()
+string(LENGTH "${PULP_CONTROL_HOST_ID}" _host_id_length)
+if(NOT PULP_CONTROL_HOST_ID MATCHES "^[a-z0-9][a-z0-9_-]*$" OR
+   _host_id_length GREATER 128)
+    message(FATAL_ERROR "invalid stable control host id: ${PULP_CONTROL_HOST_ID}")
+endif()
+if(NOT IS_ABSOLUTE "${PULP_CONTROL_HOST_ROOT}")
+    message(FATAL_ERROR "control host catalog root must be absolute")
+endif()
+if(NOT EXISTS "${PULP_CONTROL_HOST_SOURCE}" OR
+   NOT EXISTS "${PULP_CONTROL_HOST_MANIFEST}")
+    message(FATAL_ERROR "control host executable and manifest must exist together")
+endif()
+
+if(EXISTS "${PULP_CONTROL_HOST_ROOT}" AND
+   IS_SYMLINK "${PULP_CONTROL_HOST_ROOT}")
+    message(FATAL_ERROR "control host catalog root must not be a symlink")
+endif()
+file(MAKE_DIRECTORY "${PULP_CONTROL_HOST_ROOT}")
+file(CHMOD "${PULP_CONTROL_HOST_ROOT}"
+    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+string(RANDOM LENGTH 24 ALPHABET 0123456789abcdef _nonce)
+set(_destination "${PULP_CONTROL_HOST_ROOT}/${PULP_CONTROL_HOST_ID}")
+set(_temporary "${PULP_CONTROL_HOST_ROOT}/.${PULP_CONTROL_HOST_ID}.new-${_nonce}")
+set(_backup "${PULP_CONTROL_HOST_ROOT}/.${PULP_CONTROL_HOST_ID}.bak-${_nonce}")
+file(MAKE_DIRECTORY "${_temporary}")
+file(CHMOD "${_temporary}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+
+file(COPY_FILE "${PULP_CONTROL_HOST_SOURCE}" "${_temporary}/host"
+    ONLY_IF_DIFFERENT RESULT _host_copy_result)
+if(NOT _host_copy_result STREQUAL "0")
+    file(REMOVE_RECURSE "${_temporary}")
+    message(FATAL_ERROR "could not stage control host executable: ${_host_copy_result}")
+endif()
+file(COPY_FILE "${PULP_CONTROL_HOST_MANIFEST}"
+     "${_temporary}/host.inspector-capabilities.json" ONLY_IF_DIFFERENT
+     RESULT _manifest_copy_result)
+if(NOT _manifest_copy_result STREQUAL "0")
+    file(REMOVE_RECURSE "${_temporary}")
+    message(FATAL_ERROR "could not stage control host manifest: ${_manifest_copy_result}")
+endif()
+file(CHMOD "${_temporary}/host"
+    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+file(CHMOD "${_temporary}/host.inspector-capabilities.json"
+    PERMISSIONS OWNER_READ OWNER_WRITE)
+
+if(EXISTS "${_destination}")
+    if(IS_SYMLINK "${_destination}")
+        file(REMOVE_RECURSE "${_temporary}")
+        message(FATAL_ERROR "control host destination must not be a symlink")
+    endif()
+    file(RENAME "${_destination}" "${_backup}" RESULT _retain_result)
+    if(NOT _retain_result STREQUAL "0")
+        file(REMOVE_RECURSE "${_temporary}")
+        message(FATAL_ERROR "could not retain installed control host: ${_retain_result}")
+    endif()
+endif()
+if(PULP_CONTROL_HOST_TEST_FAIL_BEFORE_PUBLISH)
+    set(_publish_result "synthetic publish failure")
+else()
+    file(RENAME "${_temporary}" "${_destination}" RESULT _publish_result)
+endif()
+if(NOT _publish_result STREQUAL "0")
+    if(EXISTS "${_backup}")
+        file(RENAME "${_backup}" "${_destination}")
+    endif()
+    file(REMOVE_RECURSE "${_temporary}")
+    message(FATAL_ERROR "could not atomically publish control host: ${_publish_result}")
+endif()
+file(REMOVE_RECURSE "${_backup}")

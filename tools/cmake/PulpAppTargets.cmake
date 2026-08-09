@@ -4,7 +4,7 @@
 # Both `_pulp_add_standalone` (the standalone audio-host shell used by
 # `pulp_add_plugin(... FORMATS standalone)`) and `pulp_add_app`
 # (generic non-plugin Pulp apps) live here.
-function(_pulp_add_standalone target name bundle_id version)
+function(_pulp_add_standalone target name bundle_id version processor_factory)
     if(NOT _PULP_STANDALONE_TARGET)
         message(FATAL_ERROR "pulp_add_plugin(${target}): Standalone requested but Pulp::standalone is unavailable")
     endif()
@@ -40,6 +40,81 @@ function(_pulp_add_standalone target name bundle_id version)
         target_sources(${target}_Standalone PRIVATE "${_control_factory_source}")
         target_link_libraries(${target}_Standalone PRIVATE
             ${_PULP_CONTROL_STANDALONE_TARGET})
+
+        # The visible Standalone remains an ordinary application bundle. The
+        # broker launches a separate flat, host-only realization because the
+        # trusted inventory deliberately rejects bundle-internal executables.
+        if(NOT processor_factory)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): CONTROL_CAPABILITIES require PROCESSOR_FACTORY for the dedicated host")
+        endif()
+        set(_control_host_entry
+            "${CMAKE_CURRENT_BINARY_DIR}/${target}_control_host_entry.cpp")
+        file(GENERATE OUTPUT "${_control_host_entry}" CONTENT
+            "#include <pulp/format/headless.hpp>\n#include <pulp/inspect/control_standalone_host.hpp>\n#include <atomic>\n#include <chrono>\n#include <csignal>\n#include <memory>\n#include <thread>\nstd::unique_ptr<pulp::format::Processor> ${processor_factory}();\nnamespace { std::atomic<bool> stopping{false}; void stop(int) { stopping.store(true, std::memory_order_relaxed); } }\nint main() { pulp::format::HeadlessHost app(&${processor_factory}); if (!app.valid() || app.processor() == nullptr) return 64; std::signal(SIGINT, stop); std::signal(SIGTERM, stop); auto control = pulp::inspect::make_control_standalone_host(); if (!control || !control->start(*app.processor(), app.state())) return 65; while (!stopping.load(std::memory_order_relaxed)) std::this_thread::sleep_for(std::chrono::milliseconds(50)); control->stop(); return 0; }\n")
+        add_executable(${target}_ControlHost
+            ${PULP_${target}_CORE_OBJECTS}
+            "${_control_host_entry}")
+        target_link_libraries(${target}_ControlHost PRIVATE
+            ${target}_Core ${_PULP_CONTROL_STANDALONE_TARGET})
+        if(APPLE)
+            target_link_options(${target}_ControlHost PRIVATE
+                "LINKER:-dead_strip_dylibs")
+            add_custom_command(TARGET ${target}_ControlHost POST_BUILD
+                COMMAND "${CMAKE_COMMAND}"
+                    -DARTIFACT=$<TARGET_FILE:${target}_ControlHost>
+                    -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/check_control_host_runtime_closure.cmake"
+                VERBATIM)
+        endif()
+        target_include_directories(${target}_ControlHost PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+        _pulp_apply_ui_script_definition(${target}_ControlHost "${PULP_${target}_UI_SCRIPT}")
+        _pulp_apply_view_mac_objc_suffix(${target}_ControlHost)
+        set_target_properties(${target}_ControlHost PROPERTIES
+            OUTPUT_NAME host
+            RUNTIME_OUTPUT_DIRECTORY
+                "${CMAKE_CURRENT_BINARY_DIR}/${target}_control_host")
+        pulp_stage_runtime_dependencies(${target}_ControlHost)
+        pulp_assert_runtime_dependencies_staged(${target}_ControlHost)
+        include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpPortable.cmake")
+        pulp_assert_portable_bundle(${target}_ControlHost)
+        _pulp_attach_control_shipping(${target} ${target}_ControlHost Standalone
+            "${target}.ControlHost.Standalone")
+
+        # A bundle identifier is globally stable across target renames and
+        # avoids unrelated projects replacing one another's catalog entries.
+        string(TOLOWER "${bundle_id}" _pulp_control_host_id)
+        string(REGEX REPLACE "[^a-z0-9_-]" "-" _pulp_control_host_id
+            "${_pulp_control_host_id}")
+        string(LENGTH "${_pulp_control_host_id}" _pulp_control_host_id_length)
+        if(_pulp_control_host_id_length GREATER 111)
+            string(SUBSTRING "${_pulp_control_host_id}" 0 111
+                _pulp_control_host_id)
+        endif()
+        string(SHA256 _pulp_control_host_id_digest "${bundle_id}")
+        string(SUBSTRING "${_pulp_control_host_id_digest}" 0 16
+            _pulp_control_host_id_digest)
+        string(APPEND _pulp_control_host_id "-${_pulp_control_host_id_digest}")
+        if(NOT CMAKE_INSTALL_LIBEXECDIR)
+            set(CMAKE_INSTALL_LIBEXECDIR libexec)
+        endif()
+        if(PULP_CONTROL_BROKER_PREFIX)
+            set(_pulp_control_broker_prefix "${PULP_CONTROL_BROKER_PREFIX}")
+        else()
+            set(_pulp_control_broker_prefix "${CMAKE_INSTALL_PREFIX}")
+        endif()
+        set(_control_install_script
+            "${CMAKE_CURRENT_BINARY_DIR}/${target}_install_control_host_$<CONFIG>.cmake")
+        file(GENERATE OUTPUT "${_control_install_script}" CONTENT
+            "set(PULP_CONTROL_HOST_ID \"${_pulp_control_host_id}\")\nset(PULP_CONTROL_HOST_SOURCE \"$<TARGET_FILE:${target}_ControlHost>\")\nset(PULP_CONTROL_HOST_MANIFEST \"$<TARGET_FILE_DIR:${target}_ControlHost>/${target}.inspector-capabilities.json\")\nset(PULP_CONTROL_HOST_ROOT \"\$ENV{DESTDIR}${_pulp_control_broker_prefix}/${CMAKE_INSTALL_LIBEXECDIR}/pulp/control-hosts\")\ninclude(\"${CMAKE_CURRENT_FUNCTION_LIST_DIR}/install_control_host.cmake\")\n")
+        install(SCRIPT "${_control_install_script}" COMPONENT Runtime)
+        add_custom_target(${target}_RemoveControlHost
+            COMMAND "${CMAKE_COMMAND}"
+                -DPULP_CONTROL_HOST_ID=${_pulp_control_host_id}
+                -DPULP_CONTROL_HOST_ROOT=${_pulp_control_broker_prefix}/${CMAKE_INSTALL_LIBEXECDIR}/pulp/control-hosts
+                -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/remove_control_host.cmake"
+            VERBATIM)
+        set(PULP_${target}_CONTROL_HOST_ID "${_pulp_control_host_id}"
+            CACHE INTERNAL "" FORCE)
     endif()
     _pulp_apply_ui_script_definition(${target}_Standalone "${PULP_${target}_UI_SCRIPT}")
     _pulp_apply_view_mac_objc_suffix(${target}_Standalone)
