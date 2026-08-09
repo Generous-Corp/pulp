@@ -34,6 +34,13 @@ class ControlHostRouter {
                 ConnectionGeneration connection_generation) noexcept;
     bool connected(const ControlRegistrationId& registration_id) const;
 
+    /// Ends every opaque authority projection matching the supplied broker
+    /// identity filter and notifies the exact attached host. Empty filters are
+    /// wildcards. Raw client/grant IDs never cross the host carrier.
+    void end_authority(const ControlClientId& client_id,
+                       const ControlRegistrationId& registration_id,
+                       const ControlGrantId& grant_id, std::string_view reason) noexcept;
+
     /// Accepts only host-to-broker progress and completion frames for the exact
     /// attached registration generation. Other directions fail closed.
     bool receive(const ControlRegistrationId& registration_id,

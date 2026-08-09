@@ -384,6 +384,21 @@ bool ControlHostObservabilityBundle::ready() const {
     return state_->connected && state_->trace && state_->telemetry;
 }
 
+void ControlHostObservabilityBundle::end_authority(
+    std::string_view opaque_authority_id) noexcept {
+    if (opaque_authority_id.empty())
+        return;
+    std::lock_guard execution_lock(state_->execution_mutex);
+    std::lock_guard lock(state_->mutex);
+    if (state_->telemetry) {
+        (void)state_->telemetry->end_authority({.client_id = std::string(opaque_authority_id),
+                                               .registration_id =
+                                                   state_->binding.registration_id.value,
+                                               .instance_id = state_->binding.instance_id,
+                                               .grant_id = std::string(opaque_authority_id)});
+    }
+}
+
 void ControlHostObservabilityBundle::disconnect() noexcept {
     if (!state_)
         return;

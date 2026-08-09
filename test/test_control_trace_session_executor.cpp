@@ -251,3 +251,38 @@ TEST_CASE("trace ownership stays exclusive across control bindings",
     });
     REQUIRE(second);
 }
+
+TEST_CASE("projected authority end releases its process-global trace lease",
+          "[inspect][control][trace][authority][lifetime]") {
+    auto trace = std::make_shared<TraceInspector>();
+    auto first = ControlTraceSessionExecutor::create({
+        .main_thread_rpc = inline_rpc(),
+        .trace_inspector = trace,
+        .registration_id = ControlRegistrationId{"registration-a"},
+    });
+    REQUIRE(first);
+    auto authority_plan = plan();
+    authority_plan.client_id = ControlClientId{"authority-a"};
+    auto authority_request = request();
+    authority_request.client_id = "authority-a";
+    const auto started = invoke(first->executor(), authority_plan, authority_request);
+#if defined(PULP_TRACING_ENABLED) && PULP_TRACING_ENABLED
+    REQUIRE(started.terminal_state == ControlReceiptState::Completed);
+    first->end_authority("authority-b");
+    CHECK_FALSE(ControlTraceSessionExecutor::create({
+        .main_thread_rpc = inline_rpc(),
+        .trace_inspector = trace,
+        .registration_id = ControlRegistrationId{"registration-b"},
+    }));
+    first->end_authority("authority-a");
+#else
+    CHECK(started.terminal_state == ControlReceiptState::Failed);
+    first->disconnect();
+#endif
+    auto second = ControlTraceSessionExecutor::create({
+        .main_thread_rpc = inline_rpc(),
+        .trace_inspector = trace,
+        .registration_id = ControlRegistrationId{"registration-b"},
+    });
+    REQUIRE(second);
+}

@@ -19,7 +19,7 @@ const volatile char kStandalone[] = "PULP_STANDALONE_COMPONENT_V1";
 const volatile char kShipping[] = "PULP_INSPECT_SHIPPING_MANIFEST_V1";
 const volatile char kProfile[] = "PULP_CONTROL_PROFILE_DEVELOPER_LOCAL_V1";
 const volatile char kManifest[] =
-    "PULP_CONTROL_MANIFEST_SHA256_971c6799c570d0aeb8afaa6acdc10890414703a77138706b390a81496295a2dd_"
+    "PULP_CONTROL_MANIFEST_SHA256_f012cd3be299eb78501bb7609d5395359d3bcd384971be654a6311f61d76d54f_"
     "V1";
 const volatile char kCapability[] = "PULP_INSPECT_CAPABILITY_SESSION_DESCRIBE_V1";
 
@@ -108,7 +108,9 @@ int main() {
         if (!connection.connect())
             return;
         const auto result = connection.open_host_enrollment(enrollment_id);
-        if (result.accepted) {
+        const auto ready = result.accepted ? connection.mark_executor_ready()
+                                           : ControlHostReadyResult{};
+        if (result.accepted && ready.accepted) {
             accepted.fetch_add(1, std::memory_order_relaxed);
             std::lock_guard lock(registration_mutex);
             registration_id = result.registration_id;

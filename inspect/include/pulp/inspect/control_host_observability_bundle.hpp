@@ -49,6 +49,7 @@ class ControlHostObservabilityBundle {
 
     ControlOperationExecutor executor() const;
     bool heartbeat(const ControlHostObservabilityBinding& authenticated_binding);
+    void end_authority(std::string_view opaque_authority_id) noexcept;
     bool ready() const;
     void disconnect() noexcept;
 

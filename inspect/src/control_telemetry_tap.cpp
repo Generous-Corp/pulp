@@ -238,6 +238,15 @@ bool ControlTelemetryTap::unsubscribe(std::string_view subscription_id,
     return true;
 }
 
+std::size_t ControlTelemetryTap::end_authority(
+    const ControlTelemetryAuthority& authority) noexcept {
+    const auto before = impl_->subscriptions.size();
+    std::erase_if(impl_->subscriptions, [&](const auto& entry) {
+        return same_authority(entry.second.authority, authority);
+    });
+    return before - impl_->subscriptions.size();
+}
+
 void ControlTelemetryTap::poll() {
     if (!impl_->attachment.valid())
         return;

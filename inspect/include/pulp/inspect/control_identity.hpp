@@ -260,7 +260,10 @@ class ControlIdentityRegistry {
     std::optional<ControlClientIdentity> client(const ControlClientId& client_id) const;
 
     ControlRegistrationResult register_instance(const VerifiedControlPeerIdentity& peer,
-                                                ControlRegistrationRequest request);
+                                                 ControlRegistrationRequest request,
+                                                 bool publish = true);
+    bool publish_instance(const ControlRegistrationId& registration_id,
+                          const VerifiedControlPeerIdentity& peer);
     bool heartbeat(const ControlRegistrationId& registration_id,
                    const VerifiedControlPeerIdentity& peer);
     bool unregister_instance(const ControlRegistrationId& registration_id,

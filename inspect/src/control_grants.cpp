@@ -424,7 +424,7 @@ std::optional<ControlGrant> ControlGrantStore::grant(
     return found->second;
 }
 
-void ControlGrantStore::sweep_expired() {
+std::vector<ControlGrant> ControlGrantStore::sweep_expired() {
     const auto now = impl_->clock();
     std::vector<ControlGrant> candidates;
     {
@@ -473,6 +473,9 @@ void ControlGrantStore::sweep_expired() {
                      ControlSecurityOutcome::Revoked,
                      "identity-unavailable");
     }
+    expired.insert(expired.end(), std::make_move_iterator(removed.begin()),
+                   std::make_move_iterator(removed.end()));
+    return expired;
 }
 
 } // namespace pulp::inspect

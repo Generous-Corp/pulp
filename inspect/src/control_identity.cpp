@@ -259,6 +259,7 @@ class ControlIdentityRegistry::Impl {
             }
             exact_registrations.erase(exact_key(it->second.session_id, it->second.instance_id,
                                                 it->second.publication_id));
+            unpublished_registrations.erase(it->first);
             audit(ControlSecurityAuditEntry{
                 .action = "registration.expire",
                 .peer_fingerprint = it->second.peer_fingerprint,
@@ -283,6 +284,7 @@ class ControlIdentityRegistry::Impl {
     std::unordered_map<std::string, std::string> durable_clients;
     std::unordered_map<std::string, ProcessClientState> process_clients;
     std::unordered_map<std::string, ControlRegistration> registrations;
+    std::unordered_set<std::string> unpublished_registrations;
     std::unordered_map<std::string, std::string> exact_registrations;
 };
 
@@ -673,7 +675,7 @@ ControlIdentityRegistry::client(const ControlClientId& client_id) const {
 
 ControlRegistrationResult
 ControlIdentityRegistry::register_instance(const VerifiedControlPeerIdentity& peer,
-                                           ControlRegistrationRequest request) {
+                                           ControlRegistrationRequest request, bool publish) {
     ControlRegistrationResult result;
     const auto audit_denial = [&](ControlIdentityStatus status) {
         impl_->audit(ControlSecurityAuditEntry{
@@ -754,6 +756,8 @@ ControlIdentityRegistry::register_instance(const VerifiedControlPeerIdentity& pe
             return result;
         }
         impl_->registrations.emplace(registration.registration_id.value, registration);
+        if (!publish)
+            impl_->unpublished_registrations.emplace(registration.registration_id.value);
         impl_->exact_registrations.emplace(key, registration.registration_id.value);
     }
     result.status = ControlIdentityStatus::Accepted;
@@ -769,6 +773,19 @@ ControlIdentityRegistry::register_instance(const VerifiedControlPeerIdentity& pe
         .reason = "accepted",
     });
     return result;
+}
+
+bool ControlIdentityRegistry::publish_instance(const ControlRegistrationId& registration_id,
+                                               const VerifiedControlPeerIdentity& peer) {
+    std::lock_guard lock(impl_->mutex);
+    const auto found = impl_->registrations.find(registration_id.value);
+    if (found == impl_->registrations.end() ||
+        !impl_->unpublished_registrations.contains(registration_id.value) ||
+        found->second.peer_fingerprint != peer.fingerprint() ||
+        impl_->clock() >= found->second.expires_at)
+        return false;
+    impl_->unpublished_registrations.erase(registration_id.value);
+    return true;
 }
 
 bool ControlIdentityRegistry::heartbeat(const ControlRegistrationId& registration_id,
@@ -821,6 +838,7 @@ bool ControlIdentityRegistry::unregister_instance(const ControlRegistrationId& r
             removed = found->second;
             impl_->exact_registrations.erase(exact_key(
                 found->second.session_id, found->second.instance_id, found->second.publication_id));
+            impl_->unpublished_registrations.erase(found->first);
             impl_->registrations.erase(found);
         }
     }
@@ -849,7 +867,9 @@ ControlIdentityRegistry::registration(std::string_view session_id, std::string_v
     if (exact == impl_->exact_registrations.end())
         return std::nullopt;
     const auto found = impl_->registrations.find(exact->second);
-    if (found == impl_->registrations.end() || now >= found->second.expires_at) {
+    if (found == impl_->registrations.end() ||
+        impl_->unpublished_registrations.contains(found->first) ||
+        now >= found->second.expires_at) {
         return std::nullopt;
     }
     return found->second;
@@ -860,7 +880,9 @@ ControlIdentityRegistry::registration(const ControlRegistrationId& registration_
     const auto now = impl_->clock();
     std::lock_guard lock(impl_->mutex);
     const auto found = impl_->registrations.find(registration_id.value);
-    if (found == impl_->registrations.end() || now >= found->second.expires_at) {
+    if (found == impl_->registrations.end() ||
+        impl_->unpublished_registrations.contains(found->first) ||
+        now >= found->second.expires_at) {
         return std::nullopt;
     }
     return found->second;
@@ -872,7 +894,8 @@ std::vector<ControlRegistration> ControlIdentityRegistry::registrations() const 
     std::vector<ControlRegistration> result;
     result.reserve(impl_->registrations.size());
     for (const auto& [_, registration] : impl_->registrations) {
-        if (registration.expires_at > now)
+        if (!impl_->unpublished_registrations.contains(registration.registration_id.value) &&
+            registration.expires_at > now)
             result.push_back(registration);
     }
     std::ranges::sort(result, {}, [](const auto& value) { return value.registration_id.value; });

@@ -81,6 +81,12 @@ class ControlHostRouter::Impl {
         std::string instance_id;
         std::string instance_generation;
         Sender sender;
+        struct Projection {
+            std::string authority_id;
+            ControlClientId client_id;
+            ControlGrantId grant_id;
+        };
+        std::unordered_map<std::string, Projection> projections;
     };
 
     struct Pending {
@@ -114,8 +120,37 @@ class ControlHostRouter::Impl {
             return false;
         hosts.emplace(registration_id.value,
                       Host{generation, std::move(instance_id), std::move(instance_generation),
-                           std::move(sender)});
+                           std::move(sender), {}});
         return true;
+    }
+
+    void end_authority(const ControlClientId& client_id,
+                       const ControlRegistrationId& registration_id,
+                       const ControlGrantId& grant_id, std::string_view reason) {
+        if (reason.empty())
+            return;
+        std::vector<std::pair<Sender, std::string>> notifications;
+        {
+            std::lock_guard lock(mutex);
+            for (auto& [registration, host] : hosts) {
+                if (registration_id && registration != registration_id.value)
+                    continue;
+                for (auto it = host.projections.begin(); it != host.projections.end();) {
+                    const auto& projection = it->second;
+                    if ((!client_id || projection.client_id == client_id) &&
+                        (!grant_id || projection.grant_id == grant_id)) {
+                        notifications.emplace_back(host.sender, projection.authority_id);
+                        it = host.projections.erase(it);
+                    } else {
+                        ++it;
+                    }
+                }
+            }
+        }
+        for (auto& [sender, authority_id] : notifications)
+            (void)sender(ControlEnvelope{.payload = ControlHostAuthorityEndEnvelope{
+                                             .authority_id = std::move(authority_id),
+                                             .reason = std::string(reason)}});
     }
 
     void detach(const ControlRegistrationId& registration_id, ConnectionGeneration generation) {
@@ -219,6 +254,7 @@ class ControlHostRouter::Impl {
             return checkpoint_outcome(initial);
 
         Host host;
+        std::string authority_id;
         auto operation = std::make_shared<Pending>();
         operation->registration_id = plan.registration_id;
         operation->report_progress = context.report_progress;
@@ -239,6 +275,22 @@ class ControlHostRouter::Impl {
                                "admitted instance no longer identifies the attached host slot");
             }
             operation->generation = host.generation;
+            const auto projection_key = plan.client_id.value + "\n" + plan.grant_id.value;
+            auto projection = found->second.projections.find(projection_key);
+            if (projection == found->second.projections.end()) {
+                const auto bytes = runtime::secure_random_bytes(16);
+                if (!bytes)
+                    return failure(ControlResultCode::ResourceExhausted,
+                                   ControlRetryClassification::AfterBackoff,
+                                   "host authority projection is unavailable");
+                Host::Projection value{.authority_id =
+                                           "authority-" + runtime::hex_encode(*bytes),
+                                       .client_id = plan.client_id,
+                                       .grant_id = plan.grant_id};
+                projection = found->second.projections.emplace(projection_key,
+                                                               std::move(value)).first;
+            }
+            authority_id = projection->second.authority_id;
             operation->delivery_started = true;
             bool inserted = false;
             for (unsigned attempt = 0; attempt != 4; ++attempt) {
@@ -256,6 +308,16 @@ class ControlHostRouter::Impl {
         const ControlEnvelope frame{
             .payload = ControlHostExecuteEnvelope{.route_id = operation->route_id,
                                                   .receipt_id = plan.receipt_id.value,
+                                                  .authority_id = authority_id,
+                                                  .broker_id = plan.broker_id.value,
+                                                  .session_id = plan.session_id,
+                                                  .instance_id = plan.instance_id,
+                                                  .publication_id = plan.publication_id,
+                                                  .instance_generation = plan.instance_generation,
+                                                  .capability_id = std::string(capability_id(plan.capability)),
+                                                  .manifest_digest = plan.manifest_digest,
+                                                  .producer_artifact_digest =
+                                                      plan.producer_artifact_digest,
                                                   .operation_id = request.operation_id,
                                                   .operation_version = request.operation_version,
                                                   .deadline_unix_ms = plan.deadline_unix_ms,
@@ -305,6 +367,9 @@ class ControlHostRouter::Impl {
                     (void)host.sender(
                         ControlEnvelope{.payload = ControlHostCancelEnvelope{
                                             .route_id = operation->route_id, .reason = reason}});
+                    if (checkpoint == ControlExecutionCheckpoint::AuthorityRevoked)
+                        end_authority(plan.client_id, plan.registration_id, plan.grant_id,
+                                      "authority-revoked");
                 }
                 return unknown_after_delivery(
                     checkpoint == ControlExecutionCheckpoint::AuthorityRevoked
@@ -386,6 +451,13 @@ void ControlHostRouter::detach(const ControlRegistrationId& registration_id,
 
 bool ControlHostRouter::connected(const ControlRegistrationId& registration_id) const {
     return impl_->connected(registration_id);
+}
+
+void ControlHostRouter::end_authority(const ControlClientId& client_id,
+                                      const ControlRegistrationId& registration_id,
+                                      const ControlGrantId& grant_id,
+                                      std::string_view reason) noexcept {
+    impl_->end_authority(client_id, registration_id, grant_id, reason);
 }
 
 bool ControlHostRouter::receive(const ControlRegistrationId& registration_id,

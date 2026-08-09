@@ -4,6 +4,7 @@
 #include <pulp/inspect/trace_inspector.hpp>
 
 #include <memory>
+#include <string_view>
 
 namespace pulp::inspect {
 
@@ -24,6 +25,11 @@ class ControlTraceSessionExecutor {
     ControlTraceSessionExecutor& operator=(const ControlTraceSessionExecutor&) = delete;
 
     ControlOperationExecutor executor() const;
+    /// Ends process-global trace ownership only when it belongs to this
+    /// broker-projected authority. A later authority may bind a fresh lease.
+    void end_authority(std::string_view opaque_authority_id) noexcept;
+    /// Releases every retained trace lease during carrier teardown.
+    void disconnect() noexcept;
 
   private:
     struct State;

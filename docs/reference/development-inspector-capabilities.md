@@ -121,8 +121,8 @@ target.
 |---|---|---|
 | CLI | `pulp control profiles`; offline `pulp inspect audit ARTIFACT`; exact-instance `pulp control` management/call/watch/artifact/revoke; canonical trace start/stop; offline trace analysis. `pulp inspect profiles` is a compatibility alias through Pulp 0.800.0 on 2026-10-01. | Raw Inspector discovery/RPC, host/port selectors, newest-instance selection, and Motion wrappers |
 | MCP | In-process `pulp_control_profiles`; generated typed `pulp_control_*` operations and management tools; canonical `pulp_trace_start` and `pulp_trace_stop`. `pulp_inspect_profiles` is a compatibility alias through Pulp 0.800.0 on 2026-10-01. | Generic Inspector RPC, raw selectors, and Motion wrappers |
-| Build/link/install | Separate protocol, control, canonical client, runtime, telemetry, authoring, and high-risk eval components; ordinary targets do not gain authority merely because components are built. A clean-prefix consumer compiles and runs the installed protocol/control/client targets while rejecting direct GPU/render/format/host/CLI/MCP closure | Trusted product host composition, per-target shipped-product declarations, and cross-platform verified-peer parity |
-| Shipping | Canonical manifests, registry digest, artifact audit, stripped ordinary targets, marker checks, and the owner-only macOS health-service LaunchAgent | Final trusted-host composition and complete release negative-control proof |
+| Build/link/install | Separate protocol, control, canonical client, runtime, telemetry, authoring, and high-risk eval components; ordinary targets do not gain authority merely because components are built. `ControlInstalledHost` is the explicit T1 composition seam for the authenticated carrier, observability bundle, and Motion executor. A clean-prefix consumer compiles and runs the installed protocol/control/client targets while rejecting direct GPU/render/format/host/CLI/MCP closure | Per-target shipped-product declarations and cross-platform verified-peer parity |
+| Shipping | Canonical manifests, registry digest, artifact audit, stripped ordinary targets, marker checks, the owner-only macOS health-service LaunchAgent, and a Release process E2E for ready-gated exact-host dispatch and authority cleanup | Remaining product declarations and cross-platform release negative controls |
 
 ## Centralized replacement boundary
 
@@ -137,6 +137,14 @@ The deleted legacy TCP server/discovery path is not a compatibility fallback.
 There is one centralized authority path, and unavailable operations remain
 unavailable until that path owns them end to end rather than falling back to an
 Inspector selector.
+
+Enrolled installed hosts use a two-phase open/ready handshake. The broker holds
+the exact registration in a non-discoverable, non-grantable state until the
+host has installed its executor and acknowledges readiness. Once published,
+the host and broker exchange generation-checked heartbeats. A missed lease,
+disconnect, or restart unregisters the exact publication, detaches its router,
+and cancels retained opaque authority. No host opens a TCP listener, reads a
+discovery file, or becomes a second broker.
 
 ## Phase 4 read-only runtime slice
 

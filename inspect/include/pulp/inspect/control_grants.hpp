@@ -147,7 +147,7 @@ public:
                     const ControlRegistrationId& registration_id,
                     InspectorCapability capability);
     std::optional<ControlGrant> grant(const ControlGrantId& grant_id);
-    void sweep_expired();
+    std::vector<ControlGrant> sweep_expired();
 
 private:
     class Impl;

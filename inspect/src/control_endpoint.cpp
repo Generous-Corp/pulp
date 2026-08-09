@@ -189,6 +189,7 @@ struct ControlEndpoint::Impl {
         std::atomic<bool> finished{false};
         std::optional<ControlService::Session> session;
         std::optional<ControlRegistrationId> host_registration;
+        std::optional<ControlRegistration> pending_host_registration;
         std::optional<VerifiedControlPeerIdentity> enrolled_peer;
         std::thread worker;
     };
@@ -343,7 +344,8 @@ struct ControlEndpoint::Impl {
             (void)send(state, ControlEnvelope{.payload = std::move(response)});
             return;
         }
-        if (state.session || state.host_registration || !host_router ||
+        if (state.session || state.host_registration || state.pending_host_registration ||
+            !host_router ||
             plan->broker_generation() != config.process_generation ||
             plan->expires_at() <= std::chrono::steady_clock::now()) {
             response.error_code = "enrollment-denied";
@@ -360,8 +362,8 @@ struct ControlEndpoint::Impl {
             return;
         }
 
-        auto registered =
-            enrollment_context->broker.register_instance(*peer, plan->snapshot().registration());
+        auto registered = enrollment_context->broker.register_instance(
+            *peer, plan->snapshot().registration(), false);
         if (registered.status != ControlIdentityStatus::Accepted || !registered.registration) {
             response.error_code = "registration-denied";
             response.explanation = "the broker rejected the trusted host registration";
@@ -399,27 +401,91 @@ struct ControlEndpoint::Impl {
             return;
         }
 
+        state.pending_host_registration = *registered.registration;
+        state.enrolled_peer = std::move(*peer);
+        response.accepted = true;
+        response.registration_id = registration_id.value;
+        response.broker_id = registered.registration->broker_id.value;
+        response.session_id = registered.registration->session_id;
+        response.instance_id = registered.registration->instance_id;
+        response.publication_id = registered.registration->publication_id;
+        response.instance_generation = registered.registration->publication_id;
+        response.manifest_digest = registered.registration->manifest_digest;
+        response.producer_artifact_digest = registered.registration->artifact_digest;
+        if (!send(state, ControlEnvelope{.payload = std::move(response)}))
+            close(state);
+    }
+
+    void handle_host_ready(ConnectionState& state, const ControlHostReadyEnvelope& request,
+                           const std::shared_ptr<ConnectionState>& shared_state) {
+        ControlHostReadyResult response{.request_id = request.request_id};
+        if (!state.pending_host_registration || !state.enrolled_peer || state.host_registration ||
+            !host_router || !enrollment_context ||
+            state.pending_host_registration->registration_id.value != request.registration_id) {
+            response.error_code = "host-ready-denied";
+            response.explanation = "host readiness does not match a pending enrollment";
+            (void)send(state, ControlEnvelope{.payload = std::move(response)});
+            close(state);
+            return;
+        }
+        const auto registration = *state.pending_host_registration;
         std::weak_ptr<ConnectionState> weak_state = shared_state;
-        if (!host_router->attach(
-                registration_id, state.id, [weak_state](const ControlEnvelope& envelope) {
+        if (!host_router->attach_slot(
+                registration.registration_id, state.id, registration.instance_id,
+                registration.publication_id,
+                [weak_state](const ControlEnvelope& envelope) {
                     const auto locked = weak_state.lock();
                     if (!locked || !locked->connection->is_connected())
                         return false;
                     const auto encoded = encode_control_envelope(envelope);
                     return !encoded.empty() && locked->connection->send_message(encoded);
                 })) {
-            rollback_registration();
             response.error_code = "host-already-connected";
-            response.explanation = "the registration could not attach to the host router";
+            response.explanation = "the ready host could not attach to its exact route";
             (void)send(state, ControlEnvelope{.payload = std::move(response)});
+            close(state);
             return;
         }
-
-        state.host_registration = registration_id;
-        state.enrolled_peer = std::move(*peer);
+        if (!enrollment_context->broker.publish_instance(registration.registration_id,
+                                                         *state.enrolled_peer)) {
+            host_router->detach(registration.registration_id, state.id);
+            response.error_code = "host-publish-denied";
+            response.explanation = "the broker could not publish the ready host";
+            (void)send(state, ControlEnvelope{.payload = std::move(response)});
+            close(state);
+            return;
+        }
+        state.host_registration = registration.registration_id;
+        state.pending_host_registration.reset();
         response.accepted = true;
-        response.registration_id = registration_id.value;
+        response.liveness_generation = registration.liveness_generation;
         if (!send(state, ControlEnvelope{.payload = std::move(response)}))
+            close(state);
+    }
+
+    void handle_host_heartbeat(ConnectionState& state,
+                               const ControlHostHeartbeatEnvelope& request) {
+        ControlHostHeartbeatResult response{.request_id = request.request_id};
+        if (!state.host_registration || !state.enrolled_peer || !enrollment_context ||
+            *state.host_registration != ControlRegistrationId{request.registration_id}) {
+            response.error_code = "heartbeat-denied";
+            response.explanation = "heartbeat does not match the enrolled host";
+        } else {
+            const auto current = enrollment_context->broker.registration(*state.host_registration);
+            if (!current || current->liveness_generation != request.liveness_generation ||
+                !enrollment_context->broker.heartbeat(*state.host_registration,
+                                                      *state.enrolled_peer)) {
+                response.error_code = "heartbeat-denied";
+                response.explanation = "host heartbeat generation is stale";
+            } else {
+                const auto refreshed =
+                    enrollment_context->broker.registration(*state.host_registration);
+                response.accepted = static_cast<bool>(refreshed);
+                response.liveness_generation = refreshed ? refreshed->liveness_generation : 0;
+            }
+        }
+        const bool accepted = response.accepted;
+        if (!send(state, ControlEnvelope{.payload = std::move(response)}) || !accepted)
             close(state);
     }
 
@@ -481,6 +547,24 @@ struct ControlEndpoint::Impl {
         state.host_registration = principal->registration_id;
         response.accepted = true;
         response.registration_id = principal->registration_id.value;
+        const auto registration = management_broker
+                                      ? management_broker->registration(principal->registration_id)
+                                      : std::optional<ControlRegistration>{};
+        if (!registration) {
+            host_router->detach(principal->registration_id, state.id);
+            state.host_registration.reset();
+            response = {.request_id = request.request_id,
+                        .error_code = "registration-denied",
+                        .explanation = "the host registration is no longer published"};
+        } else {
+            response.broker_id = registration->broker_id.value;
+            response.session_id = registration->session_id;
+            response.instance_id = registration->instance_id;
+            response.publication_id = registration->publication_id;
+            response.instance_generation = registration->publication_id;
+            response.manifest_digest = registration->manifest_digest;
+            response.producer_artifact_digest = registration->artifact_digest;
+        }
         if (!send(state, ControlEnvelope{.payload = std::move(response)}))
             close(state);
     }
@@ -858,6 +942,11 @@ struct ControlEndpoint::Impl {
             handle_open(state, *open, shared_state);
         } else if (const auto* open = std::get_if<ControlHostOpenEnvelope>(&envelope->payload)) {
             handle_host_open(state, *open, shared_state);
+        } else if (const auto* ready = std::get_if<ControlHostReadyEnvelope>(&envelope->payload)) {
+            handle_host_ready(state, *ready, shared_state);
+        } else if (const auto* heartbeat =
+                       std::get_if<ControlHostHeartbeatEnvelope>(&envelope->payload)) {
+            handle_host_heartbeat(state, *heartbeat);
         } else if (const auto* management =
                        std::get_if<ControlManagementEnvelope>(&envelope->payload)) {
             handle_management(state, *management, shared_state);
@@ -906,7 +995,12 @@ struct ControlEndpoint::Impl {
             (void)enrollment_context->broker.unregister_instance(
                 *state->host_registration, *state->enrolled_peer,
                 "endpoint-enrolled-host-disconnected");
+        if (state->pending_host_registration && state->enrolled_peer && enrollment_context)
+            (void)enrollment_context->broker.unregister_instance(
+                state->pending_host_registration->registration_id, *state->enrolled_peer,
+                "endpoint-unready-host-disconnected");
         state->host_registration.reset();
+        state->pending_host_registration.reset();
         state->enrolled_peer.reset();
         state->session.reset();
         state->finished.store(true, std::memory_order_release);

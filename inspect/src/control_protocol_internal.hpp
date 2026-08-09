@@ -47,9 +47,14 @@ bool valid_progress(const ControlProgressEnvelope& progress);
 bool valid_receipt(const ControlReceiptEnvelope& receipt);
 bool valid_host_open(const ControlHostOpenEnvelope& message);
 bool valid_host_open_result(const ControlHostOpenResult& message);
+bool valid_host_ready(const ControlHostReadyEnvelope& message);
+bool valid_host_ready_result(const ControlHostReadyResult& message);
+bool valid_host_heartbeat(const ControlHostHeartbeatEnvelope& message);
+bool valid_host_heartbeat_result(const ControlHostHeartbeatResult& message);
 bool valid_host_execute(const ControlHostExecuteEnvelope& message);
 bool valid_host_progress(const ControlHostProgressEnvelope& message);
 bool valid_host_cancel(const ControlHostCancelEnvelope& message);
+bool valid_host_authority_end(const ControlHostAuthorityEndEnvelope& message);
 bool valid_host_complete(const ControlHostCompleteEnvelope& message);
 bool is_host_control_kind(std::string_view kind);
 std::optional<ControlEnvelopePayload>

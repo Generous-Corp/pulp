@@ -42,6 +42,22 @@ constexpr std::string_view kManifest = R"({
 }
 )";
 
+constexpr std::string_view kInstalledManifest = R"({
+  "schema": "dev.pulp.control/artifact-manifest@1",
+  "schema_version": 1,
+  "profile": "developer-local",
+  "target": "pulp-control-installed-host-e2e-fixture",
+  "product_name": "Pulp Installed Host E2E Fixture",
+  "bundle_id": "dev.pulp.test.installed-host-e2e-fixture",
+  "build_id": "build:1123456789abcdef0123456789abcdef",
+  "registry_digest": "621fb8889cfcf5b527a3e8977c571102503657fd009146deee5e1fd74b8a6776",
+  "endpoint_included": true,
+  "unsafe_runtime_eval_acknowledged": false,
+  "permission_terms": ["implemented", "built", "host_available", "activated", "policy_eligible", "client_granted", "session_live"],
+  "capabilities": ["dev.pulp.session/control@1", "dev.pulp.trace/control@1", "dev.pulp.trace/session-control@1"]
+}
+)";
+
 struct Directory {
     fs::path root;
     Directory() {
@@ -114,6 +130,12 @@ std::string wait_for_registration(const fs::path& path) {
     std::string registration;
     input >> registration;
     return registration;
+}
+
+bool wait_for_path(const fs::path& path) {
+    for (unsigned attempt = 0; attempt < 5'000 && !fs::exists(path); ++attempt)
+        std::this_thread::sleep_for(1ms);
+    return fs::exists(path);
 }
 #endif
 } // namespace
@@ -259,5 +281,205 @@ TEST_CASE("raw signed T1 host reaches a correlated trace receipt through canonic
     endpoint.stop();
 #else
     SUCCEED("raw signed T1 launch is currently macOS-only");
+#endif
+}
+
+TEST_CASE("Release installed host publishes only after ready and cleans revoked expired restart authority",
+          "[inspect][control][e2e][t1][release][authority]") {
+#ifdef __APPLE__
+    Directory directory;
+    const auto executable = directory.root / "source" / "installed-host";
+    fs::copy_file(PULP_CONTROL_INSTALLED_HOST_E2E_FIXTURE, executable);
+    ::chmod(executable.c_str(), 0700);
+    {
+        std::ofstream sidecar(executable.string() + ".inspector-capabilities.json");
+        sidecar << kInstalledManifest;
+    }
+    ::chmod((executable.string() + ".inspector-capabilities.json").c_str(), 0600);
+    ControlManifestDiagnostics installed_manifest_diagnostics;
+    const auto installed_manifest =
+        parse_control_manifest(kInstalledManifest, &installed_manifest_diagnostics);
+    INFO(installed_manifest_diagnostics.error);
+    REQUIRE(installed_manifest);
+    INFO("installed manifest digest: " << control_manifest_digest(*installed_manifest));
+    const auto broker_evidence = observe_current_process(directory.root / "broker-ready.sock",
+                                                         ControlPeerRole::TrustedHostBridge);
+    ControlHostRouter router;
+    ControlBrokerConfig broker_config;
+    broker_config.admission = allow_t1_trace();
+    broker_config.operation_store = ControlOperationStoreConfig{.directory =
+                                                                     directory.root / "receipts"};
+    broker_config.authority_ended =
+        [&](const ControlClientId& client_id, const ControlRegistrationId& registration_id,
+            const ControlGrantId& grant_id, std::string_view reason) {
+            router.end_authority(client_id, registration_id, grant_id, reason);
+        };
+    ControlBroker broker(std::move(broker_config));
+    ControlService service(broker, router.executor());
+    ControlHostEnrollmentStore enrollments;
+    ControlConnectionAdmissionStore admissions;
+    ControlEndpointEnrollmentContext enrollment_context{enrollments, broker, admissions};
+    ControlEndpoint endpoint(
+        service, [&](std::string_view id) { return admissions.consume(id); },
+        {.endpoint_path = directory.root / "broker.sock",
+         .sdk_version = "0.798.1-test",
+         .broker_id = broker.broker_id().value,
+         .process_generation = 29},
+        &router, &enrollment_context);
+    REQUIRE(endpoint.start());
+    ControlTrustedHostInventory inventory(
+        {.staging_root = directory.root / "stage", .broker_generation = 29, .ttl = 10s});
+    auto launch_host = [&](std::vector<std::string> arguments) {
+        const auto prepared = inventory.prepare({.executable = executable,
+                                                 .arguments = std::move(arguments),
+                                                 .working_directory = directory.root / "source",
+                                                 .host_tier = ControlHostTier::Standalone});
+        REQUIRE(prepared.ticket);
+        ControlTrustedHostLauncher launcher(inventory, enrollments,
+                                            {.endpoint_path = directory.root / "broker.sock",
+                                             .expected_broker = {.evidence = broker_evidence},
+                                             .broker_generation = 29,
+                                             .preflight_timeout = 10s});
+        pulp::platform::ProcessOptions options;
+        options.timeout_ms = 12'000;
+        auto launched = launcher.launch(prepared.ticket->inventory_id, options);
+        INFO(launched.explanation);
+        REQUIRE(launched.launched());
+        return std::move(launched.process);
+    };
+
+    const auto registration_path = directory.root / "installed-registration";
+    const auto stop_path = directory.root / "installed-stop";
+    const auto cleanup_path = directory.root / "installed-cleanup";
+    const auto observed_path = directory.root / "bootstrap-observed";
+    const auto ready_path = directory.root / "allow-ready";
+    const auto revoked_active_path = directory.root / "revoked-active";
+    const auto revoked_inactive_path = directory.root / "revoked-inactive";
+    const auto expired_active_path = directory.root / "expired-active";
+    const auto expired_inactive_path = directory.root / "expired-inactive";
+    auto process = launch_host({registration_path.string(), stop_path.string(),
+                                cleanup_path.string(), observed_path.string(),
+                                ready_path.string(), revoked_active_path.string(),
+                                revoked_inactive_path.string(), expired_active_path.string(),
+                                expired_inactive_path.string()});
+    REQUIRE(wait_for_path(observed_path));
+    CHECK(broker.registrations().empty());
+    CHECK_FALSE(fs::exists(registration_path));
+    std::ofstream(ready_path) << "ready\n";
+    const ControlRegistrationId registration_id{wait_for_registration(registration_path)};
+    REQUIRE(registration_id);
+    REQUIRE(router.connected(registration_id));
+    const auto registration = broker.registration(registration_id);
+    REQUIRE(registration);
+
+    const auto client_evidence =
+        observe_current_process(directory.root / "client-ready.sock", ControlPeerRole::Client);
+    auto client_peer = verify_for_broker(client_evidence);
+    const auto bootstrap = broker.issue_bootstrap(client_peer);
+    REQUIRE(bootstrap.ticket);
+    const auto redeemed = broker.redeem_bootstrap(bootstrap.ticket->ticket_id,
+                                                  bootstrap.ticket->secret.bytes(), client_peer);
+    REQUIRE(redeemed.client);
+    const auto admission = admissions.issue(
+        {.evidence = client_evidence},
+        ControlClientConnectionPrincipal{redeemed.client->client_id});
+    REQUIRE(admission.ticket);
+    ControlClientConnection connection({.endpoint_path = directory.root / "broker.sock",
+                                        .expected_broker = {.evidence = broker_evidence}});
+    REQUIRE(connection.connect());
+    REQUIRE(connection.open_session(admission.ticket->admission_id).accepted);
+    ControlClient client(connection);
+    REQUIRE(client.negotiate({.mandatory_features = {"receipts"}}).succeeded());
+
+    auto start_trace = [&](const ControlGrant& grant, std::string suffix) {
+        ControlRequestEnvelope request{
+            .request_id = "motion-" + suffix,
+            .client_id = redeemed.client->client_id.value,
+            .registration_id = registration_id.value,
+            .grant_id = grant.grant_id.value,
+            .instance_generation = registration->publication_id,
+            .operation_id = "dev.pulp.trace/control@1",
+            .operation_version = 1,
+            .idempotency_key = "motion-key-" + suffix,
+            .deadline_unix_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    (std::chrono::system_clock::now() + 5s).time_since_epoch())
+                                    .count(),
+            .params_json = R"({"action":"motion-start-trace","view_name":"release","fps":30,"metrics":[{"kind":"geometry","node_id":"root","properties":["width"]}]})",
+        };
+        request.request_hash = *control_request_hash(request);
+        const auto dispatched = client.request(request, 5s);
+        INFO("dispatch error: " << dispatched.error_code);
+        INFO("dispatch explanation: " << dispatched.explanation);
+        REQUIRE(dispatched.succeeded());
+        INFO("result code: "
+             << (dispatched.response->result_code
+                     ? control_result_code_id(*dispatched.response->result_code)
+                     : std::string_view{"none"}));
+        INFO("result explanation: " << dispatched.response->explanation);
+        REQUIRE(dispatched.response->state == ControlReceiptState::Completed);
+    };
+    auto grant = broker.issue_grant(
+        client_peer,
+        {.client_id = redeemed.client->client_id,
+         .registration_id = registration_id,
+         .capabilities = {InspectorCapability::TraceControl},
+         .ttl = 1min},
+        {.approved = true,
+         .authority = ControlConsentAuthority::TrustedPulpCli,
+         .decision_id = "installed-revoked"});
+    REQUIRE(grant.grant);
+    start_trace(*grant.grant, "revoked");
+    REQUIRE(wait_for_path(revoked_active_path));
+    REQUIRE(broker.revoke_grant(grant.grant->grant_id, "release-revoke") ==
+            ControlGrantStatus::Revoked);
+    REQUIRE(wait_for_path(revoked_inactive_path));
+
+    auto expiring = broker.issue_grant(
+        client_peer,
+        {.client_id = redeemed.client->client_id,
+         .registration_id = registration_id,
+         .capabilities = {InspectorCapability::TraceControl},
+         .ttl = 30ms},
+        {.approved = true,
+         .authority = ControlConsentAuthority::TrustedPulpCli,
+         .decision_id = "installed-expiring"});
+    REQUIRE(expiring.grant);
+    start_trace(*expiring.grant, "expired");
+    REQUIRE(wait_for_path(expired_active_path));
+    std::this_thread::sleep_for(50ms);
+    broker.sweep_expired();
+    REQUIRE(wait_for_path(expired_inactive_path));
+
+    std::ofstream(stop_path) << "stop\n";
+    connection.disconnect();
+    const auto first = process->wait();
+    INFO(first.stderr_output);
+    REQUIRE(first.exit_code == 0);
+    REQUIRE(wait_for_path(cleanup_path));
+    std::ifstream cleanup(cleanup_path);
+    std::size_t active_traces = 99;
+    cleanup >> active_traces;
+    CHECK(active_traces == 0);
+    for (unsigned attempt = 0; attempt < 5'000 && !broker.registrations().empty(); ++attempt)
+        std::this_thread::sleep_for(1ms);
+    REQUIRE(broker.registrations().empty());
+
+    const auto restarted_registration_path = directory.root / "restart-registration";
+    const auto restarted_stop_path = directory.root / "restart-stop";
+    const auto restarted_cleanup_path = directory.root / "restart-cleanup";
+    auto restarted = launch_host({restarted_registration_path.string(),
+                                  restarted_stop_path.string(),
+                                  restarted_cleanup_path.string()});
+    const ControlRegistrationId restarted_id{
+        wait_for_registration(restarted_registration_path)};
+    REQUIRE(restarted_id);
+    CHECK(restarted_id != registration_id);
+    std::ofstream(restarted_stop_path) << "stop\n";
+    const auto second = restarted->wait();
+    INFO(second.stderr_output);
+    CHECK(second.exit_code == 0);
+    endpoint.stop();
+#else
+    SUCCEED("installed host process E2E is currently macOS-only");
 #endif
 }

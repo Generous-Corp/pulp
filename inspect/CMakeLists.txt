@@ -178,8 +178,14 @@ target_link_libraries(pulp-inspect-telemetry
         pulp::inspect-protocol
         pulp::view-core)
 
-add_library(pulp-inspect-observability-runtime
+add_library(pulp-inspect-observability-objects OBJECT
     src/control_host_observability_bundle.cpp)
+target_include_directories(pulp-inspect-observability-objects PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(pulp-inspect-observability-objects PRIVATE
+    pulp::inspect-runtime pulp::inspect-telemetry)
+add_library(pulp-inspect-observability-runtime STATIC
+    $<TARGET_OBJECTS:pulp-inspect-observability-objects>)
 add_library(pulp::inspect-observability-runtime ALIAS pulp-inspect-observability-runtime)
 target_include_directories(pulp-inspect-observability-runtime
     PUBLIC
@@ -220,6 +226,8 @@ target_include_directories(pulp-inspect
 )
 
 target_sources(pulp-inspect PRIVATE
+    $<TARGET_OBJECTS:pulp-inspect-observability-objects>
+    src/control_installed_host.cpp
     src/inspector_overlay.cpp
     src/inspector_overlay_field_edit.cpp
     src/inspector_overlay_knobs.cpp

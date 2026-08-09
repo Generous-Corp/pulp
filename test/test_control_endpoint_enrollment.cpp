@@ -92,7 +92,7 @@ std::optional<ControlTrustedHostSnapshot> make_snapshot(Directory& directory) {
     const auto validation = validate_control_artifact_bytes(
         binary,
         {.profile_id = "developer-local",
-         .manifest_digest = "971c6799c570d0aeb8afaa6acdc10890414703a77138706b390a81496295a2dd",
+         .manifest_digest = "f012cd3be299eb78501bb7609d5395359d3bcd384971be654a6311f61d76d54f",
          .endpoint_included = true,
          .capability_ids = {"session.describe"}});
     CAPTURE(validation.error);

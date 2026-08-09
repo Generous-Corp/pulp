@@ -452,6 +452,12 @@ struct ControlBrokerDaemon::Impl {
         host_router = std::make_unique<ControlHostRouter>();
         auto* router = host_router.get();
         ControlBrokerConfig broker_config;
+        broker_config.authority_ended =
+            [router](const ControlClientId& client_id,
+                     const ControlRegistrationId& registration_id,
+                     const ControlGrantId& grant_id, std::string_view reason) {
+                router->end_authority(client_id, registration_id, grant_id, reason);
+            };
         broker_config.admission.host_available =
             [router](const ControlRegistration& registration, const auto&) {
                 return router->connected(registration.registration_id);

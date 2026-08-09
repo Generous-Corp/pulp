@@ -16,9 +16,20 @@ namespace {
 
 ControlAdmissionPlan plan(std::int64_t deadline) {
     ControlAdmissionPlan result;
+    result.broker_id = ControlBrokerId{"broker-1"};
+    result.client_principal = "peer-secret";
+    result.client_id = ControlClientId{"client-secret"};
     result.registration_id = ControlRegistrationId{"registration-1"};
+    result.grant_id = ControlGrantId{"grant-secret"};
+    result.session_id = "session-1";
     result.instance_id = "slot-1";
+    result.publication_id = "process-7/slot-3";
     result.instance_generation = "process-7/slot-3";
+    result.capability = InspectorCapability::SessionDescribe;
+    result.operation_id = "session.describe";
+    result.operation_version = 1;
+    result.manifest_digest = std::string(64, 'a');
+    result.producer_artifact_digest = std::string(64, 'b');
     result.receipt_id = ControlReceiptId{"receipt-1"};
     result.deadline_unix_ms = deadline;
     return result;
@@ -99,6 +110,33 @@ TEST_CASE("host router correlates completion to exact registration generation") 
     CHECK(router.receive(ControlRegistrationId{"registration-1"}, 7, completed));
     REQUIRE(outcome.wait_for(1s) == std::future_status::ready);
     CHECK(outcome.get().terminal_state == ControlReceiptState::Completed);
+}
+
+TEST_CASE("host router projects exact opaque authority without sensitive client or grant ids") {
+    ControlHostRouter router;
+    std::string encoded;
+    std::optional<ControlHostExecuteEnvelope> dispatched;
+    REQUIRE(router.attach_slot(
+        ControlRegistrationId{"registration-1"}, 11, "slot-1", "process-7/slot-3",
+        [&](const ControlEnvelope& envelope) {
+            if (const auto* execute = std::get_if<ControlHostExecuteEnvelope>(&envelope.payload)) {
+                dispatched = *execute;
+                encoded = encode_control_envelope(envelope);
+                return false;
+            }
+            return true;
+        }));
+    const auto outcome = router.executor()(plan(future_deadline()), request(), context());
+    REQUIRE(dispatched);
+    CHECK(dispatched->authority_id.starts_with("authority-"));
+    CHECK(dispatched->session_id == "session-1");
+    CHECK(dispatched->publication_id == "process-7/slot-3");
+    CHECK(dispatched->manifest_digest == std::string(64, 'a'));
+    CHECK_FALSE(encoded.empty());
+    CHECK(encoded.find("client-secret") == std::string::npos);
+    CHECK(encoded.find("grant-secret") == std::string::npos);
+    CHECK(encoded.find("peer-secret") == std::string::npos);
+    CHECK(outcome.result.result_code == ControlResultCode::HostUnavailable);
 }
 
 TEST_CASE("host router reports unavailable before delivery and uncertainty after disconnect") {

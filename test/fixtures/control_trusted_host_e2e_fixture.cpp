@@ -98,6 +98,9 @@ int main(int argc, char** argv) {
     }
     if (!slot.install(std::move(routed_executor)))
         return 68;
+    const auto ready = connection.mark_executor_ready();
+    if (!ready.accepted)
+        return 68;
 
     std::ofstream(argv[1]) << opened.registration_id << '\n'
 #ifdef __APPLE__

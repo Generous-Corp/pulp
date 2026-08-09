@@ -163,9 +163,49 @@ struct ControlHostOpenResult {
     std::string request_id;
     bool accepted = false;
     std::string registration_id;
+    std::string broker_id;
+    std::string session_id;
+    std::string instance_id;
+    std::string publication_id;
+    std::string instance_generation;
+    std::string manifest_digest;
+    std::string producer_artifact_digest;
     std::string error_code;
     std::string explanation;
     friend bool operator==(const ControlHostOpenResult&, const ControlHostOpenResult&) = default;
+};
+
+struct ControlHostReadyEnvelope {
+    std::string request_id;
+    std::string registration_id;
+    friend bool operator==(const ControlHostReadyEnvelope&, const ControlHostReadyEnvelope&) = default;
+};
+
+struct ControlHostReadyResult {
+    std::string request_id;
+    bool accepted = false;
+    std::uint64_t liveness_generation = 0;
+    std::string error_code;
+    std::string explanation;
+    friend bool operator==(const ControlHostReadyResult&, const ControlHostReadyResult&) = default;
+};
+
+struct ControlHostHeartbeatEnvelope {
+    std::string request_id;
+    std::string registration_id;
+    std::uint64_t liveness_generation = 0;
+    friend bool operator==(const ControlHostHeartbeatEnvelope&,
+                           const ControlHostHeartbeatEnvelope&) = default;
+};
+
+struct ControlHostHeartbeatResult {
+    std::string request_id;
+    bool accepted = false;
+    std::uint64_t liveness_generation = 0;
+    std::string error_code;
+    std::string explanation;
+    friend bool operator==(const ControlHostHeartbeatResult&,
+                           const ControlHostHeartbeatResult&) = default;
 };
 
 struct ControlHostPreflightChallengeEnvelope {
@@ -193,6 +233,18 @@ struct ControlHostPreflightBootstrapEnvelope {
 struct ControlHostExecuteEnvelope {
     std::string route_id;
     std::string receipt_id;
+    /// Broker-minted, connection-local projection of client+grant authority.
+    /// It is stable only for the lifetime of that authority on this host and
+    /// cannot be used on the client carrier.
+    std::string authority_id;
+    std::string broker_id;
+    std::string session_id;
+    std::string instance_id;
+    std::string publication_id;
+    std::string instance_generation;
+    std::string capability_id;
+    std::string manifest_digest;
+    std::string producer_artifact_digest;
     std::string operation_id;
     std::uint32_t operation_version = 1;
     std::int64_t deadline_unix_ms = 0;
@@ -200,6 +252,13 @@ struct ControlHostExecuteEnvelope {
     std::string params_json = "{}";
     friend bool operator==(const ControlHostExecuteEnvelope&,
                            const ControlHostExecuteEnvelope&) = default;
+};
+
+struct ControlHostAuthorityEndEnvelope {
+    std::string authority_id;
+    std::string reason;
+    friend bool operator==(const ControlHostAuthorityEndEnvelope&,
+                           const ControlHostAuthorityEndEnvelope&) = default;
 };
 
 struct ControlHostProgressEnvelope {
@@ -381,9 +440,12 @@ using ControlEnvelopePayload =
                  ControlManagementResult, ControlArtifactReadEnvelope,
                  ControlArtifactReadResponseEnvelope, ControlHealthEnvelope, ControlHealthResult,
                  ControlErrorEnvelope, ControlHostOpenEnvelope, ControlHostOpenResult,
+                 ControlHostReadyEnvelope, ControlHostReadyResult,
+                 ControlHostHeartbeatEnvelope, ControlHostHeartbeatResult,
                  ControlHostPreflightChallengeEnvelope, ControlHostPreflightResponseEnvelope,
                  ControlHostPreflightBootstrapEnvelope, ControlHostExecuteEnvelope,
                  ControlHostProgressEnvelope, ControlHostCancelEnvelope,
+                 ControlHostAuthorityEndEnvelope,
                  ControlHostCompleteEnvelope>;
 
 struct ControlEnvelope {

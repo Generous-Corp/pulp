@@ -819,6 +819,15 @@ TEST_CASE("host control frames round trip and enforce role direction",
     const ControlEnvelope execute{.payload = ControlHostExecuteEnvelope{
                                       .route_id = "route-1",
                                       .receipt_id = "receipt-1",
+                                      .authority_id = "authority-1",
+                                      .broker_id = "broker-1",
+                                      .session_id = "session-1",
+                                      .instance_id = "instance-1",
+                                      .publication_id = "publication-1",
+                                      .instance_generation = "publication-1",
+                                      .capability_id = "session.describe",
+                                      .manifest_digest = std::string(64, 'a'),
+                                      .producer_artifact_digest = std::string(64, 'b'),
                                       .operation_id = "session.describe",
                                       .operation_version = 1,
                                       .deadline_unix_ms = 1786000000000,
@@ -845,6 +854,11 @@ TEST_CASE("host control frames round trip and enforce role direction",
     REQUIRE(decode_control_envelope(encode_control_envelope(completed)) == completed);
     CHECK(control_envelope_allowed(completed, ControlEnvelopeDirection::HostToBroker));
     CHECK_FALSE(control_envelope_allowed(completed, ControlEnvelopeDirection::ClientToBroker));
+
+    const ControlEnvelope ended{.payload = ControlHostAuthorityEndEnvelope{
+                                    .authority_id = "authority-1", .reason = "grant-revoked"}};
+    CHECK(decode_control_envelope(encode_control_envelope(ended)) == ended);
+    CHECK(control_envelope_allowed(ended, ControlEnvelopeDirection::BrokerToHost));
 
     auto invalid = std::get<ControlHostCompleteEnvelope>(completed.payload);
     invalid.result_code = ControlResultCode::InternalError;

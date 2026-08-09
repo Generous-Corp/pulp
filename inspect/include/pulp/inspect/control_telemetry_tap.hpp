@@ -81,6 +81,7 @@ class ControlTelemetryTap {
     std::optional<std::string> subscribe(const ControlTelemetryAuthority& authority,
                                          ControlTelemetrySubscriptionRequest request);
     bool unsubscribe(std::string_view subscription_id, const ControlTelemetryAuthority& authority);
+    std::size_t end_authority(const ControlTelemetryAuthority& authority) noexcept;
     void poll();
     std::optional<ControlTelemetryFrame> try_pop(std::string_view subscription_id,
                                                  const ControlTelemetryAuthority& authority);

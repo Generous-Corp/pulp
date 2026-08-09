@@ -4,6 +4,7 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include <mutex>
 #include <utility>
 
 namespace pulp::inspect {
@@ -62,9 +63,11 @@ struct ControlTraceSessionExecutor::State {
     std::shared_ptr<TraceInspector> trace;
     std::unique_ptr<TraceOwnerLease> owner;
     ControlRegistrationId registration_id;
+    std::mutex mutex;
+    std::string active_authority;
 
     ControlExecutionOutcome execute(const ControlAdmissionPlan& plan,
-                                    const ControlRequestEnvelope& request) const {
+                                    const ControlRequestEnvelope& request) {
         if (plan.registration_id != registration_id ||
             request.registration_id != registration_id.value)
             return failure(ControlResultCode::SessionStale,
@@ -97,6 +100,17 @@ struct ControlTraceSessionExecutor::State {
         }
 
         const auto action = params["action"].getString();
+        std::lock_guard lock(mutex);
+        if (!active_authority.empty() && active_authority != plan.client_id.value)
+            return failure(ControlResultCode::LeaseConflict,
+                           ControlRetryClassification::AfterRefresh,
+                           "trace session belongs to another live authority");
+        if (!owner)
+            owner = trace->bind_control_registration(registration_id.value);
+        if (!owner)
+            return failure(ControlResultCode::LeaseConflict,
+                           ControlRetryClassification::AfterRefresh,
+                           "process-global trace ownership is unavailable");
         InspectorMessage response;
         if (action == "start") {
             auto legacy = choc::value::createObject("");
@@ -112,6 +126,10 @@ struct ControlTraceSessionExecutor::State {
         }
         if (response.is_error)
             return legacy_failure(response);
+        if (action == "start")
+            active_authority = plan.client_id.value;
+        else
+            active_authority.clear();
 
         if (!validate_control_output_json_schema(response.params_json,
                                                  descriptor->output_schema_json, &diagnostics)) {
@@ -124,6 +142,20 @@ struct ControlTraceSessionExecutor::State {
             .terminal_state = ControlReceiptState::Completed,
             .result = {.detail_json = std::move(response.params_json)},
         };
+    }
+
+    void end_authority(std::string_view authority) noexcept {
+        std::lock_guard lock(mutex);
+        if (active_authority != authority)
+            return;
+        active_authority.clear();
+        owner.reset();
+    }
+
+    void disconnect() noexcept {
+        std::lock_guard lock(mutex);
+        active_authority.clear();
+        owner.reset();
     }
 };
 
@@ -138,11 +170,10 @@ ControlTraceSessionExecutor::create(ControlTraceSessionExecutorConfig config) {
     auto owner = config.trace_inspector->bind_control_registration(config.registration_id.value);
     if (!owner)
         return nullptr;
-    auto state = std::make_shared<State>(State{
-        .trace = std::move(config.trace_inspector),
-        .owner = std::move(owner),
-        .registration_id = std::move(config.registration_id),
-    });
+    auto state = std::make_shared<State>();
+    state->trace = std::move(config.trace_inspector);
+    state->owner = std::move(owner);
+    state->registration_id = std::move(config.registration_id);
     ControlMainThreadExecutor main_thread{
         std::move(config.main_thread_rpc),
         [state](const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
@@ -154,6 +185,17 @@ ControlTraceSessionExecutor::create(ControlTraceSessionExecutorConfig config) {
 
 ControlOperationExecutor ControlTraceSessionExecutor::executor() const {
     return main_thread_.executor();
+}
+
+void ControlTraceSessionExecutor::end_authority(
+    std::string_view opaque_authority_id) noexcept {
+    if (state_ && !opaque_authority_id.empty())
+        state_->end_authority(opaque_authority_id);
+}
+
+void ControlTraceSessionExecutor::disconnect() noexcept {
+    if (state_)
+        state_->disconnect();
 }
 
 } // namespace pulp::inspect

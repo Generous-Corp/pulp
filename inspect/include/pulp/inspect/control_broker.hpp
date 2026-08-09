@@ -25,6 +25,10 @@ struct ControlBrokerConfig {
     /// process-scoped principals until their reconnect lease expires.
     std::function<ControlProcessLiveness(const ControlPeerEvidence&)> process_liveness =
         [](const ControlPeerEvidence&) { return ControlProcessLiveness::Unknown; };
+    /// Broker-to-carrier lifecycle projection. Invoked outside broker locks;
+    /// empty identity fields are wildcards for client/registration teardown.
+    std::function<void(const ControlClientId&, const ControlRegistrationId&,
+                       const ControlGrantId&, std::string_view)> authority_ended;
 };
 
 struct ControlBrokerLifecycleResult {
@@ -71,7 +75,10 @@ class ControlBroker {
                                                    std::string_view decision_id);
 
     ControlRegistrationResult register_instance(const VerifiedControlPeerIdentity& host_peer,
-                                                ControlRegistrationRequest request);
+                                                 ControlRegistrationRequest request,
+                                                 bool publish = true);
+    bool publish_instance(const ControlRegistrationId& registration_id,
+                          const VerifiedControlPeerIdentity& host_peer);
     bool heartbeat(const ControlRegistrationId& registration_id,
                    const VerifiedControlPeerIdentity& host_peer);
     ControlBrokerLifecycleResult unregister_instance(const ControlRegistrationId& registration_id,
@@ -169,6 +176,8 @@ class ControlBroker {
 
     std::shared_ptr<ControlSecurityAuditLog> audit_log_;
     std::function<ControlProcessLiveness(const ControlPeerEvidence&)> process_liveness_;
+    std::function<void(const ControlClientId&, const ControlRegistrationId&,
+                       const ControlGrantId&, std::string_view)> authority_ended_;
     mutable std::mutex coordination_mutex_;
     ControlIdentityRegistry identities_;
     ControlGrantStore grants_;

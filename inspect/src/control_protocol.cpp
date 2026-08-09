@@ -356,12 +356,17 @@ bool control_envelope_allowed(const ControlEnvelope& envelope, ControlEnvelopeDi
                 return direction == ControlEnvelopeDirection::BrokerToClient ||
                        direction == ControlEnvelopeDirection::BrokerToHost;
             } else if constexpr (std::is_same_v<T, ControlHostOpenEnvelope> ||
+                                 std::is_same_v<T, ControlHostReadyEnvelope> ||
+                                 std::is_same_v<T, ControlHostHeartbeatEnvelope> ||
                                  std::is_same_v<T, ControlHostProgressEnvelope> ||
                                  std::is_same_v<T, ControlHostCompleteEnvelope>) {
                 return direction == ControlEnvelopeDirection::HostToBroker;
             } else if constexpr (std::is_same_v<T, ControlHostOpenResult> ||
+                                 std::is_same_v<T, ControlHostReadyResult> ||
+                                 std::is_same_v<T, ControlHostHeartbeatResult> ||
                                  std::is_same_v<T, ControlHostExecuteEnvelope> ||
-                                 std::is_same_v<T, ControlHostCancelEnvelope>) {
+                                 std::is_same_v<T, ControlHostCancelEnvelope> ||
+                                 std::is_same_v<T, ControlHostAuthorityEndEnvelope>) {
                 return direction == ControlEnvelopeDirection::BrokerToHost;
             } else if constexpr (std::is_same_v<T, ControlHostPreflightResponseEnvelope>) {
                 return direction == ControlEnvelopeDirection::HostToLauncher;
