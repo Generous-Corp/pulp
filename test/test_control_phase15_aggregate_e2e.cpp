@@ -107,7 +107,8 @@ std::string wait_for_registration(const std::filesystem::path& path) {
 }
 
 void stage_signed_binary(const std::filesystem::path& source,
-                         const std::filesystem::path& destination, bool sign_copy = true) {
+                         const std::filesystem::path& destination, bool sign_copy = true,
+                         std::optional<std::string_view> identifier = std::nullopt) {
     std::error_code error;
     std::filesystem::copy_file(source, destination,
                                std::filesystem::copy_options::overwrite_existing, error);
@@ -122,8 +123,14 @@ void stage_signed_binary(const std::filesystem::path& source,
     pulp::platform::ProcessOptions options;
     options.capture_stdout = true;
     options.capture_stderr = true;
-    const auto signed_copy = pulp::platform::ChildProcess::run(
-        "/usr/bin/codesign", {"--force", "--sign", "-", destination.string()}, options);
+    std::vector<std::string> arguments{"--force", "--sign", "-"};
+    if (identifier) {
+        arguments.emplace_back("--identifier");
+        arguments.emplace_back(*identifier);
+    }
+    arguments.push_back(destination.string());
+    const auto signed_copy =
+        pulp::platform::ChildProcess::run("/usr/bin/codesign", arguments, options);
     INFO(signed_copy.stdout_output);
     INFO(signed_copy.stderr_output);
     REQUIRE(signed_copy.exit_code == 0);
@@ -285,7 +292,7 @@ TEST_CASE("Phase 15 aggregate exact-instance CLI MCP revocation and disconnect E
     REQUIRE_FALSE(executable.empty());
     const auto bin = executable.parent_path();
     const auto cli = bin / "pulp";
-    const auto mcp = bin / "pulp-cpp";
+    const auto mcp = bin / "pulp-mcp";
     const auto broker_identity = bin / "pulp-control-broker";
     stage_signed_binary(PULP_CONTROL_PHASE15_CLI, cli);
     stage_signed_binary(PULP_CONTROL_PHASE15_MCP, mcp);
@@ -368,6 +375,27 @@ TEST_CASE("Phase 15 aggregate exact-instance CLI MCP revocation and disconnect E
     REQUIRE(mcp_structured["operation_id"].getString() == cli_receipt["operation_id"].getString());
     CHECK(choc::json::toString(mcp_structured["result"], false) ==
           choc::json::toString(cli_receipt["detail"], false));
+
+    // A matching basename is not an authorization boundary. This functional
+    // MCP copy can still authenticate the broker, but its separately issued
+    // code identity was not captured from an authoritative install/build slot.
+    const auto untrusted_bin = root.path / "untrusted-bin";
+    REQUIRE(std::filesystem::create_directory(untrusted_bin));
+    ::chmod(untrusted_bin.c_str(), 0700);
+    const auto untrusted_mcp = untrusted_bin / "pulp-mcp";
+    const auto untrusted_broker = untrusted_bin / "pulp-control-broker";
+    stage_signed_binary(PULP_CONTROL_PHASE15_MCP, untrusted_mcp, true,
+                        "dev.pulp.test.untrusted-mcp");
+    stage_signed_binary(broker_identity, untrusted_broker, false);
+    const auto untrusted_read =
+        run_mcp(untrusted_mcp, root.runtime, rpc_call(99, "pulp_control_instances", "{}") + "\n");
+    INFO(untrusted_read.stdout_output);
+    INFO(untrusted_read.stderr_output);
+    REQUIRE(untrusted_read.exit_code == 0);
+    const auto untrusted_lines = parse_lines(untrusted_read.stdout_output);
+    REQUIRE(untrusted_lines.size() == 1);
+    CHECK(untrusted_lines[0]["result"]["isError"].getWithDefault<bool>(false));
+    CHECK(untrusted_read.stdout_output.find("enrollment-denied") != std::string::npos);
 
     const auto grant_args =
         "{\"instance_id\":" + quote(first.instance_id) + ",\"profile\":\"inspect-readonly\"}";

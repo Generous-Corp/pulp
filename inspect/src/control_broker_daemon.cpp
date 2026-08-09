@@ -423,10 +423,13 @@ struct ControlBrokerDaemon::Impl {
             const auto broker_directory = config.executable_path.parent_path();
             for (const auto& candidate :
                  {broker_directory / "pulp", broker_directory / "pulp-cpp",
+                  broker_directory / "pulp-mcp",
                   broker_directory.parent_path() / "pulp",
                   broker_directory.parent_path() / "tools" / "cli" / "pulp-cpp",
+                  broker_directory.parent_path() / "tools" / "mcp" / "pulp-mcp",
                   broker_directory.parent_path().parent_path() / "bin" / "pulp",
-                  broker_directory.parent_path().parent_path() / "bin" / "pulp-cpp"}) {
+                  broker_directory.parent_path().parent_path() / "bin" / "pulp-cpp",
+                  broker_directory.parent_path().parent_path() / "bin" / "pulp-mcp"}) {
                 if (const auto identity = detail::inspect_static_code_identity(candidate))
                     trusted_clients.push_back(*identity);
             }
