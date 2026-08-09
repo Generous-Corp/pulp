@@ -10,7 +10,7 @@ namespace pulp::cli::local_sdk {
 
 namespace fs = std::filesystem;
 
-inline constexpr int kForgeProfileRevision = 1;
+inline constexpr int kForgeProfileRevision = 2;
 inline constexpr const char* kForgeProfileName = "forge-dev";
 inline constexpr const char* kProvenanceSchema = "pulp.sdk-provenance.v1";
 

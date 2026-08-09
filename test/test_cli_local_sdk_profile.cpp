@@ -72,6 +72,7 @@ void plant_install(const fs::path& prefix, const fs::path& build,
                                          "PULP_ENABLE_GPU:BOOL=ON\n"
                                          "PULP_HAS_SKIA:INTERNAL=TRUE\n"
                                          "PULP_ENABLE_DESIGN_IMPORT:BOOL=ON\n"
+                                         "PULP_BUILD_WEBVIEW:BOOL=ON\n"
                                          "PULP_HAS_VST3:INTERNAL=TRUE\n"
                                          "PULP_HAS_AUSDK:INTERNAL=TRUE\n"
                                          "PULP_HAS_CLAP:INTERNAL=TRUE\n"
@@ -145,6 +146,7 @@ TEST_CASE("forge development SDK configure profile pins required capabilities",
     REQUIRE(contains("-DPULP_ENABLE_GPU=ON"));
     REQUIRE(contains("-DPULP_REQUIRE_GPU_FOR_SDK=ON"));
     REQUIRE(contains("-DPULP_ENABLE_DESIGN_IMPORT=ON"));
+    REQUIRE(contains("-DPULP_BUILD_WEBVIEW=ON"));
     REQUIRE(contains("-DPULP_ENABLE_AUDIO_PROBES=OFF"));
     REQUIRE(contains("-DPULP_ENABLE_INSPECTOR=OFF"));
     REQUIRE(contains("-DPULP_BUILD_TESTS=OFF"));
@@ -207,6 +209,7 @@ TEST_CASE("forge development SDK validation rejects environment-selected build i
                                          "PULP_ENABLE_GPU:BOOL=ON\n"
                                          "PULP_HAS_SKIA:INTERNAL=TRUE\n"
                                          "PULP_ENABLE_DESIGN_IMPORT:BOOL=ON\n"
+                                         "PULP_BUILD_WEBVIEW:BOOL=ON\n"
                                          "PULP_HAS_VST3:INTERNAL=TRUE\n"
                                          "PULP_HAS_AUSDK:INTERNAL=TRUE\n"
                                          "PULP_HAS_CLAP:INTERNAL=TRUE\n"
@@ -238,6 +241,7 @@ TEST_CASE("forge development SDK provenance is explicitly non-distributable",
     REQUIRE(json.find("\"distribution_eligible\": false") != std::string::npos);
     REQUIRE(json.find("\"source_git_dirty\": false") != std::string::npos);
     REQUIRE(json.find("\"architectures\": [\"arm64\"]") != std::string::npos);
+    REQUIRE(json.find("\"webview\": true") != std::string::npos);
     REQUIRE(json.find(tmp.path.string()) == std::string::npos);
 
     std::string error;
