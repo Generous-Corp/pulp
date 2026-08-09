@@ -82,6 +82,6 @@ keeps client and grant identities broker-private. The broker projects one
 random connection-local authority ID plus the exact broker, session,
 registration, instance, publication, manifest, artifact, operation, and
 generation binding. Explicit revocation, grant expiry, disconnect, or restart
-sends an authority-end event and destroys retained trace and telemetry
-ownership. The opaque ID is not accepted on the client carrier and cannot mint
-authority.
+sends an authority-end event and destroys retained trace, telemetry, and UI
+input ownership on the host's main-thread seam. The opaque ID is not accepted
+on the client carrier and cannot mint authority.

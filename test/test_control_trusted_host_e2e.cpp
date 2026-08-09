@@ -50,11 +50,11 @@ constexpr std::string_view kInstalledManifest = R"({
   "product_name": "Pulp Installed Host E2E Fixture",
   "bundle_id": "dev.pulp.test.installed-host-e2e-fixture",
   "build_id": "build:1123456789abcdef0123456789abcdef",
-  "registry_digest": "621fb8889cfcf5b527a3e8977c571102503657fd009146deee5e1fd74b8a6776",
+  "registry_digest": "1ef00512c588766b7ec414c2f4bf1b2572e115b2e9be83ea61cc35ee434ad086",
   "endpoint_included": true,
   "unsafe_runtime_eval_acknowledged": false,
   "permission_terms": ["implemented", "built", "host_available", "activated", "policy_eligible", "client_granted", "session_live"],
-  "capabilities": ["dev.pulp.session/control@1", "dev.pulp.trace/control@1", "dev.pulp.trace/session-control@1"]
+  "capabilities": ["dev.pulp.session/control@1", "dev.pulp.trace/control@1", "dev.pulp.trace/session-control@1", "dev.pulp.ui/input@1"]
 }
 )";
 
@@ -357,11 +357,15 @@ TEST_CASE("Release installed host publishes only after ready and cleans revoked 
     const auto revoked_inactive_path = directory.root / "revoked-inactive";
     const auto expired_active_path = directory.root / "expired-active";
     const auto expired_inactive_path = directory.root / "expired-inactive";
+    const auto disconnected_active_path = directory.root / "disconnected-active";
+    const auto disconnected_inactive_path = directory.root / "disconnected-inactive";
+    const auto teardown_active_path = directory.root / "teardown-active";
     auto process = launch_host({registration_path.string(), stop_path.string(),
                                 cleanup_path.string(), observed_path.string(),
                                 ready_path.string(), revoked_active_path.string(),
                                 revoked_inactive_path.string(), expired_active_path.string(),
-                                expired_inactive_path.string()});
+                                expired_inactive_path.string(), disconnected_active_path.string(),
+                                disconnected_inactive_path.string(), teardown_active_path.string()});
     REQUIRE(wait_for_path(observed_path));
     CHECK(broker.registrations().empty());
     CHECK_FALSE(fs::exists(registration_path));
@@ -391,10 +395,11 @@ TEST_CASE("Release installed host publishes only after ready and cleans revoked 
     ControlClient client(connection);
     REQUIRE(client.negotiate({.mandatory_features = {"receipts"}}).succeeded());
 
-    auto start_trace = [&](const ControlGrant& grant, std::string suffix) {
+    auto start_trace = [&](ControlClient& dispatch_client, const ControlGrant& grant,
+                           std::string suffix) {
         ControlRequestEnvelope request{
             .request_id = "motion-" + suffix,
-            .client_id = redeemed.client->client_id.value,
+            .client_id = grant.client_id.value,
             .registration_id = registration_id.value,
             .grant_id = grant.grant_id.value,
             .instance_generation = registration->publication_id,
@@ -407,7 +412,7 @@ TEST_CASE("Release installed host publishes only after ready and cleans revoked 
             .params_json = R"({"action":"motion-start-trace","view_name":"release","fps":30,"metrics":[{"kind":"geometry","node_id":"root","properties":["width"]}]})",
         };
         request.request_hash = *control_request_hash(request);
-        const auto dispatched = client.request(request, 5s);
+        const auto dispatched = dispatch_client.request(request, 5s);
         INFO("dispatch error: " << dispatched.error_code);
         INFO("dispatch explanation: " << dispatched.explanation);
         REQUIRE(dispatched.succeeded());
@@ -418,17 +423,48 @@ TEST_CASE("Release installed host publishes only after ready and cleans revoked 
         INFO("result explanation: " << dispatched.response->explanation);
         REQUIRE(dispatched.response->state == ControlReceiptState::Completed);
     };
+    auto retain_ui = [&](ControlClient& dispatch_client, const ControlGrant& grant,
+                         std::string suffix) {
+        auto apply = [&](std::string kind, std::string event) {
+            ControlRequestEnvelope request{
+                .request_id = "ui-" + kind + "-" + suffix,
+                .client_id = grant.client_id.value,
+                .registration_id = registration_id.value,
+                .grant_id = grant.grant_id.value,
+                .instance_generation = registration->publication_id,
+                .operation_id = "dev.pulp.ui/input@1",
+                .operation_version = 1,
+                .idempotency_key = "ui-key-" + kind + "-" + suffix,
+                .deadline_unix_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                        (std::chrono::system_clock::now() + 5s)
+                                            .time_since_epoch())
+                                        .count(),
+                .params_json = "{\"kind\":\"" + kind +
+                               "\",\"target_id\":\"root\",\"view_generation\":\"view-e2e\",\"event\":" +
+                               event + "}",
+            };
+            request.request_hash = *control_request_hash(request);
+            const auto dispatched = dispatch_client.request(request, 5s);
+            INFO(dispatched.explanation);
+            REQUIRE(dispatched.succeeded());
+            INFO(dispatched.response->explanation);
+            REQUIRE(dispatched.response->state == ControlReceiptState::Completed);
+        };
+        apply("focus", R"({"focused":true})");
+        apply("pointer", R"({"phase":"down","x":1,"y":1,"button":1})");
+    };
     auto grant = broker.issue_grant(
         client_peer,
         {.client_id = redeemed.client->client_id,
          .registration_id = registration_id,
-         .capabilities = {InspectorCapability::TraceControl},
+         .capabilities = {InspectorCapability::TraceControl, InspectorCapability::UiInput},
          .ttl = 1min},
         {.approved = true,
          .authority = ControlConsentAuthority::TrustedPulpCli,
          .decision_id = "installed-revoked"});
     REQUIRE(grant.grant);
-    start_trace(*grant.grant, "revoked");
+    start_trace(client, *grant.grant, "revoked");
+    retain_ui(client, *grant.grant, "revoked");
     REQUIRE(wait_for_path(revoked_active_path));
     REQUIRE(broker.revoke_grant(grant.grant->grant_id, "release-revoke") ==
             ControlGrantStatus::Revoked);
@@ -438,28 +474,81 @@ TEST_CASE("Release installed host publishes only after ready and cleans revoked 
         client_peer,
         {.client_id = redeemed.client->client_id,
          .registration_id = registration_id,
-         .capabilities = {InspectorCapability::TraceControl},
+         .capabilities = {InspectorCapability::TraceControl, InspectorCapability::UiInput},
          .ttl = 30ms},
         {.approved = true,
          .authority = ControlConsentAuthority::TrustedPulpCli,
          .decision_id = "installed-expiring"});
     REQUIRE(expiring.grant);
-    start_trace(*expiring.grant, "expired");
+    start_trace(client, *expiring.grant, "expired");
+    retain_ui(client, *expiring.grant, "expired");
     REQUIRE(wait_for_path(expired_active_path));
     std::this_thread::sleep_for(50ms);
     broker.sweep_expired();
     REQUIRE(wait_for_path(expired_inactive_path));
 
-    std::ofstream(stop_path) << "stop\n";
+    auto disconnecting = broker.issue_grant(
+        client_peer,
+        {.client_id = redeemed.client->client_id,
+         .registration_id = registration_id,
+         .capabilities = {InspectorCapability::TraceControl, InspectorCapability::UiInput},
+         .ttl = 1min},
+        {.approved = true,
+         .authority = ControlConsentAuthority::TrustedPulpCli,
+         .decision_id = "installed-disconnecting"});
+    REQUIRE(disconnecting.grant);
+    start_trace(client, *disconnecting.grant, "disconnect");
+    retain_ui(client, *disconnecting.grant, "disconnect");
+    REQUIRE(wait_for_path(disconnected_active_path));
     connection.disconnect();
+    REQUIRE(wait_for_path(disconnected_inactive_path));
+
+    const auto second_evidence =
+        observe_current_process(directory.root / "client-second.sock", ControlPeerRole::Client);
+    auto second_peer = verify_for_broker(second_evidence);
+    const auto second_bootstrap = broker.issue_bootstrap(second_peer);
+    REQUIRE(second_bootstrap.ticket);
+    const auto second_redeemed =
+        broker.redeem_bootstrap(second_bootstrap.ticket->ticket_id,
+                                second_bootstrap.ticket->secret.bytes(), second_peer);
+    REQUIRE(second_redeemed.client);
+    const auto second_admission = admissions.issue(
+        {.evidence = second_evidence},
+        ControlClientConnectionPrincipal{second_redeemed.client->client_id});
+    REQUIRE(second_admission.ticket);
+    ControlClientConnection second_connection(
+        {.endpoint_path = directory.root / "broker.sock",
+         .expected_broker = {.evidence = broker_evidence}});
+    REQUIRE(second_connection.connect());
+    REQUIRE(second_connection.open_session(second_admission.ticket->admission_id).accepted);
+    ControlClient second_client(second_connection);
+    REQUIRE(second_client.negotiate({.mandatory_features = {"receipts"}}).succeeded());
+    auto teardown = broker.issue_grant(
+        second_peer,
+        {.client_id = second_redeemed.client->client_id,
+         .registration_id = registration_id,
+         .capabilities = {InspectorCapability::TraceControl, InspectorCapability::UiInput},
+         .ttl = 1min},
+        {.approved = true,
+         .authority = ControlConsentAuthority::TrustedPulpCli,
+         .decision_id = "installed-teardown"});
+    REQUIRE(teardown.grant);
+    start_trace(second_client, *teardown.grant, "teardown");
+    retain_ui(second_client, *teardown.grant, "teardown");
+    REQUIRE(wait_for_path(teardown_active_path));
+
+    std::ofstream(stop_path) << "stop\n";
     const auto first = process->wait();
     INFO(first.stderr_output);
     REQUIRE(first.exit_code == 0);
     REQUIRE(wait_for_path(cleanup_path));
     std::ifstream cleanup(cleanup_path);
     std::size_t active_traces = 99;
-    cleanup >> active_traces;
+    std::size_t retained_ui = 99;
+    cleanup >> active_traces >> retained_ui;
     CHECK(active_traces == 0);
+    CHECK(retained_ui == 0);
+    second_connection.disconnect();
     for (unsigned attempt = 0; attempt < 5'000 && !broker.registrations().empty(); ++attempt)
         std::this_thread::sleep_for(1ms);
     REQUIRE(broker.registrations().empty());

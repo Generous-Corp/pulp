@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -16,6 +17,7 @@
 #include <mutex>
 #include <optional>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 
 namespace pulp::inspect {
@@ -58,7 +60,11 @@ bool exact_authority(const ControlAdmissionPlan& plan, const ControlRequestEnvel
            plan.instance_generation == registration.publication_id &&
            plan.manifest_digest == registration.manifest_digest &&
            plan.producer_artifact_digest == registration.artifact_digest && plan.client_id &&
-           plan.grant_id && !plan.consent_decision_id.empty() && !request.request_id.empty() &&
+           plan.grant_id &&
+           (!plan.consent_decision_id.empty() ||
+            (plan.client_id.value == plan.grant_id.value &&
+             plan.client_id.value == plan.client_principal)) &&
+           !request.request_id.empty() &&
            request.client_id == plan.client_id.value &&
            request.registration_id == plan.registration_id.value &&
            request.grant_id == plan.grant_id.value &&
@@ -227,12 +233,14 @@ ControlExecutionOutcome input_failure(ControlUiApplyStatus status) {
 
 } // namespace
 
-struct ControlHostUiExecutor::State {
+struct ControlHostUiExecutor::State : std::enable_shared_from_this<State> {
     mutable std::mutex mutex;
     ControlHostUiBinding binding;
     std::shared_ptr<InspectorMainThreadRpc> rpc;
     std::shared_ptr<InspectorCaptureSource> capture;
     std::shared_ptr<ControlHostUiTargetAdapter> target_adapter;
+    ControlUiAuthorityResolver resolve_authority;
+    std::unordered_map<std::string, std::shared_ptr<void>> authority_subscriptions;
     std::string view_generation;
     std::shared_ptr<RuntimeEvaluator> evaluator;
     ControlRuntimeEvalRedactor redact_eval;
@@ -242,12 +250,63 @@ struct ControlHostUiExecutor::State {
     ControlOperationExecutor main_thread;
     bool connected = true;
 
+    bool retain_authority(const ControlUiProjectedAuthority& authority) {
+        if (authority.owner.authority_id.empty() || !authority.authority_live ||
+            !authority.authority_live() || !authority.subscribe_authority_end)
+            return false;
+        {
+            std::lock_guard lock(mutex);
+            if (!connected)
+                return false;
+            if (authority_subscriptions.contains(authority.owner.authority_id))
+                return true;
+        }
+        const auto weak = weak_from_this();
+        auto subscription = authority.subscribe_authority_end([weak, owner = authority.owner] {
+            if (const auto state = weak.lock())
+                state->release_authority(owner);
+        });
+        if (!subscription || !authority.authority_live())
+            return false;
+        std::lock_guard lock(mutex);
+        if (!connected)
+            return false;
+        authority_subscriptions.try_emplace(authority.owner.authority_id,
+                                            std::move(subscription));
+        return true;
+    }
+
+    void release_authority(const ControlUiAuthorityOwner& owner) noexcept {
+        std::shared_ptr<ControlHostUiTargetAdapter> adapter;
+        std::shared_ptr<InspectorMainThreadRpc> dispatcher;
+        {
+            std::lock_guard lock(mutex);
+            adapter = target_adapter;
+            dispatcher = rpc;
+        }
+        if (adapter && dispatcher) {
+            static std::atomic<std::int64_t> next_release_request{
+                std::numeric_limits<std::int64_t>::min() + 1};
+            const auto request_id = next_release_request.fetch_add(1, std::memory_order_relaxed);
+            try {
+                (void)dispatcher->call(request_id, [adapter, owner, request_id] {
+                    adapter->release_controller(owner);
+                    return make_response(request_id, R"({"released":true})");
+                });
+            } catch (...) {
+            }
+        }
+        std::lock_guard lock(mutex);
+        authority_subscriptions.erase(owner.authority_id);
+    }
+
     ControlExecutionOutcome execute_main(const ControlAdmissionPlan& plan,
                                          const ControlRequestEnvelope& request,
                                          const ControlExecutionContext& context) {
         std::shared_ptr<InspectorCaptureSource> acquired_capture;
         std::shared_ptr<ControlHostUiTargetAdapter> acquired_target_adapter;
         std::shared_ptr<RuntimeEvaluator> acquired_evaluator;
+        ControlUiAuthorityResolver acquired_authority_resolver;
         ControlHostUiBinding acquired_binding;
         {
             std::lock_guard lock(mutex);
@@ -257,6 +316,7 @@ struct ControlHostUiExecutor::State {
             acquired_capture = capture;
             acquired_target_adapter = target_adapter;
             acquired_evaluator = evaluator;
+            acquired_authority_resolver = resolve_authority;
             acquired_binding = binding;
         }
         if (!exact_authority(plan, request, acquired_binding))
@@ -300,9 +360,14 @@ struct ControlHostUiExecutor::State {
                                               .instance_generation = plan.instance_generation,
                                               .view_generation = parsed->view_generation,
                                               .node_id = parsed->target_id};
-            const ControlUiAuthorityOwner owner{.client_id = plan.client_id.value,
-                                                .grant_id = plan.grant_id.value,
-                                                .client_principal = plan.client_principal};
+            if (!acquired_authority_resolver)
+                return failure(ControlResultCode::HostUnavailable,
+                               "opaque UI authority resolver is unavailable",
+                               ControlRetryClassification::AfterRefresh);
+            const auto authority = acquired_authority_resolver(plan);
+            if (!authority || !retain_authority(*authority))
+                return checkpoint_failure(ControlExecutionCheckpoint::AuthorityRevoked);
+            const auto& owner = authority->owner;
             const auto applied =
                 acquired_target_adapter->dispatch_input(target, owner, parsed->input);
             if (applied != ControlUiApplyStatus::Applied)
@@ -553,14 +618,14 @@ ControlHostUiExecutor::create(ControlHostUiExecutorConfig config) {
          config.runtime_evaluator->binary_marker() != kRuntimeEvalComponentMarker))
         return nullptr;
     if (config.target_adapter &&
-        (config.view_generation.empty() ||
+        (!config.resolve_authority || config.view_generation.empty() ||
          config.view_generation.size() > kControlUiMaximumViewGenerationBytes ||
          (std::ranges::find(registration.capabilities, InspectorCapability::CaptureImage) ==
               registration.capabilities.end() &&
           std::ranges::find(registration.capabilities, InspectorCapability::UiInput) ==
               registration.capabilities.end())))
         return nullptr;
-    if (!config.target_adapter && !config.view_generation.empty())
+    if (!config.target_adapter && (!config.view_generation.empty() || config.resolve_authority))
         return nullptr;
 
     auto state = std::make_shared<State>();
@@ -568,6 +633,7 @@ ControlHostUiExecutor::create(ControlHostUiExecutorConfig config) {
     state->rpc = std::move(config.main_thread_rpc);
     state->capture = std::move(config.capture_source);
     state->target_adapter = std::move(config.target_adapter);
+    state->resolve_authority = std::move(config.resolve_authority);
     state->view_generation = std::move(config.view_generation);
     state->evaluator = std::move(config.runtime_evaluator);
     state->redact_eval = std::move(config.redact_runtime_eval_result);
@@ -634,8 +700,11 @@ bool ControlHostUiExecutor::disconnect() noexcept {
         if (response.is_error)
             return false;
         std::lock_guard lock(state_->mutex);
-        if (state_->target_adapter == released_adapter)
+        if (state_->target_adapter == released_adapter) {
             state_->target_adapter.reset();
+            state_->resolve_authority = {};
+            state_->authority_subscriptions.clear();
+        }
     }
     return true;
 }

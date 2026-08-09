@@ -270,6 +270,27 @@ std::shared_ptr<InspectorMainThreadRpc> rpc(PostedQueue& queue) {
         [&](auto task) { return queue.post(std::move(task)); }, [] { return false; });
 }
 
+struct TestProjectedAuthority {
+    bool live = true;
+    std::function<void()> ended;
+};
+
+ControlUiAuthorityResolver authority_resolver(
+    const std::shared_ptr<TestProjectedAuthority>& authority) {
+    return [authority](const ControlAdmissionPlan&)
+        -> std::optional<ControlUiProjectedAuthority> {
+        if (!authority->live)
+            return std::nullopt;
+        return ControlUiProjectedAuthority{
+            .owner = {.authority_id = "opaque-authority-a"},
+            .authority_live = [authority] { return authority->live; },
+            .subscribe_authority_end = [authority](std::function<void()> callback) {
+                authority->ended = std::move(callback);
+                return std::static_pointer_cast<void>(std::make_shared<int>(1));
+            }};
+    };
+}
+
 } // namespace
 
 TEST_CASE("host UI capture publishes one exact-lineage sensitive PNG artifact",
@@ -322,11 +343,13 @@ TEST_CASE("host UI executor captures and drives one exact-generation node",
     PostedQueue queue;
     auto source = std::make_shared<CaptureSource>();
     auto target = std::make_shared<TargetAdapter>();
+    auto authority = std::make_shared<TestProjectedAuthority>();
     auto executor = ControlHostUiExecutor::create(
         {.binding = binding(),
          .main_thread_rpc = rpc(queue),
          .capture_source = source,
          .target_adapter = target,
+         .resolve_authority = authority_resolver(authority),
          .view_generation = "view-a"});
     REQUIRE(executor);
     auto admission = plan(InspectorCapability::CaptureImage, "dev.pulp.ui/capture@1");
@@ -371,8 +394,7 @@ TEST_CASE("host UI executor captures and drives one exact-generation node",
     REQUIRE(outcome.terminal_state == ControlReceiptState::Completed);
     REQUIRE(target->input_calls == 1);
     CHECK(std::get<ControlUiFocusInput>(target->last_input).focused);
-    CHECK(target->last_owner.client_id == "client-a");
-    CHECK(target->last_owner.grant_id == "grant-a");
+    CHECK(target->last_owner.authority_id == "opaque-authority-a");
     CHECK(control_ui_input_disposition() == "supported-exact-target-grant-controlled");
 
     outcome = run_on_worker(
@@ -383,6 +405,19 @@ TEST_CASE("host UI executor captures and drives one exact-generation node",
     CHECK(outcome.result.result_code == ControlResultCode::SessionStale);
     CHECK(target->input_calls == 1);
 
+    REQUIRE(authority->ended);
+    std::thread authority_end_thread([&] {
+        authority->live = false;
+        authority->ended();
+    });
+    auto authority_release_task = queue.take();
+    REQUIRE(authority_release_task);
+    authority_release_task();
+    authority_end_thread.join();
+    REQUIRE(target->released_owner);
+    CHECK(target->released_owner->authority_id == "opaque-authority-a");
+    CHECK(target->release_calls == 1);
+
     bool disconnected = false;
     std::thread disconnect_thread([&] { disconnected = executor->disconnect(); });
     auto release_task = queue.take();
@@ -390,7 +425,7 @@ TEST_CASE("host UI executor captures and drives one exact-generation node",
     release_task();
     disconnect_thread.join();
     CHECK(disconnected);
-    CHECK(target->release_calls == 1);
+    CHECK(target->release_calls == 2);
     CHECK_FALSE(target->released_owner);
 }
 
@@ -398,10 +433,12 @@ TEST_CASE("host UI input is bounded and releases controller state after revocati
           "[inspect][control][ui][input][bounds][cancellation][security]") {
     PostedQueue queue;
     auto target = std::make_shared<TargetAdapter>();
+    auto authority = std::make_shared<TestProjectedAuthority>();
     auto executor = ControlHostUiExecutor::create(
         {.binding = binding(),
          .main_thread_rpc = rpc(queue),
          .target_adapter = target,
+         .resolve_authority = authority_resolver(authority),
          .view_generation = "view-a"});
     REQUIRE(executor);
     const auto admission = plan(InspectorCapability::UiInput, "dev.pulp.ui/input@1");
@@ -419,7 +456,7 @@ TEST_CASE("host UI input is bounded and releases controller state after revocati
     CHECK(target->input_calls == 1);
     CHECK(target->release_calls == 1);
     REQUIRE(target->released_owner);
-    CHECK(target->released_owner->grant_id == "grant-a");
+    CHECK(target->released_owner->authority_id == "opaque-authority-a");
 
     outcome = run_on_worker(
         executor->executor(), admission,
@@ -445,10 +482,12 @@ TEST_CASE("host UI disconnect surfaces unfenced controller cleanup",
     auto target = std::make_shared<TargetAdapter>();
     auto unavailable_rpc = std::make_shared<InspectorMainThreadRpc>(
         InspectorMainThreadRpc::Config{10ms, 1}, [](auto) { return false; }, [] { return false; });
+    auto authority = std::make_shared<TestProjectedAuthority>();
     auto executor = ControlHostUiExecutor::create(
         {.binding = binding(),
          .main_thread_rpc = unavailable_rpc,
          .target_adapter = target,
+         .resolve_authority = authority_resolver(authority),
          .view_generation = "view-a"});
     REQUIRE(executor);
     CHECK_FALSE(executor->disconnect());
@@ -567,15 +606,13 @@ TEST_CASE("Standalone UI adapter retains exact node and releases controller inpu
                                       .instance_generation = "publication-a",
                                       .view_generation = "view-a",
                                       .node_id = "gain"};
-    const ControlUiAuthorityOwner owner{.client_id = "client-a",
-                                        .grant_id = "grant-a",
-                                        .client_principal = "principal-a"};
+    const ControlUiAuthorityOwner owner{.authority_id = "opaque-authority-a"};
 
     CHECK(adapter->dispatch_input(target, owner, ControlUiFocusInput{.focused = true}) ==
           ControlUiApplyStatus::Applied);
     CHECK(node->has_focus());
     auto other_owner = owner;
-    other_owner.grant_id = "grant-b";
+    other_owner.authority_id = "opaque-authority-b";
     CHECK(adapter->dispatch_input(target, other_owner, ControlUiTextInput{.text = "denied"}) ==
           ControlUiApplyStatus::InvalidEvent);
     CHECK(adapter->dispatch_input(target, owner, ControlUiTextInput{.text = "42"}) ==
@@ -640,9 +677,7 @@ TEST_CASE("Standalone UI adapter reports a self-unmounting pointer event as appl
                                       .instance_generation = "publication-a",
                                       .view_generation = "view-a",
                                       .node_id = "self-unmount"};
-    const ControlUiAuthorityOwner owner{.client_id = "client-a",
-                                        .grant_id = "grant-a",
-                                        .client_principal = "principal-a"};
+    const ControlUiAuthorityOwner owner{.authority_id = "opaque-authority-a"};
     CHECK(adapter->dispatch_input(
               target, owner,
               ControlUiPointerInput{.phase = ControlUiPointerInput::Phase::Down,

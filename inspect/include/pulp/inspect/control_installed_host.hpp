@@ -2,6 +2,7 @@
 
 #include <pulp/inspect/control_host_bootstrap.hpp>
 #include <pulp/inspect/control_host_observability_bundle.hpp>
+#include <pulp/inspect/control_host_ui_executor.hpp>
 #include <pulp/inspect/control_motion_executor.hpp>
 #include <pulp/inspect/control_trace_session_executor.hpp>
 
@@ -13,6 +14,24 @@ namespace pulp::inspect {
 class MotionInspector;
 class MotionScrubber;
 
+struct ControlInstalledHostUiTargets {
+    std::shared_ptr<InspectorCaptureSource> capture_source;
+    std::shared_ptr<ControlHostUiTargetAdapter> target_adapter;
+    std::string view_generation;
+};
+
+struct ControlInstalledHostUiConfig {
+    ControlManifest manifest;
+    /// Runs after the broker returns the exact binding and before executor
+    /// installation/ready publication, so adapters never self-bind or race the
+    /// first dispatch.
+    std::function<std::optional<ControlInstalledHostUiTargets>(
+        const ControlHostOpenResult&)>
+        make_targets;
+    std::shared_ptr<RuntimeEvaluator> runtime_evaluator;
+    ControlRuntimeEvalRedactor redact_runtime_eval_result;
+};
+
 struct ControlInstalledHostConfig {
     ControlHostBootstrapRecord bootstrap;
     std::shared_ptr<InspectorMainThreadRpc> main_thread_rpc;
@@ -20,6 +39,11 @@ struct ControlInstalledHostConfig {
     std::shared_ptr<ControlTelemetryTap> telemetry;
     MotionInspector* motion_inspector = nullptr;
     MotionScrubber* motion_scrubber = nullptr;
+    std::optional<ControlInstalledHostUiConfig> ui;
+    /// Additional typed host executor (for example canonical StateStore
+    /// read/write composition). It is reached only after exact binding and
+    /// opaque projected-authority validation, and is installed before ready.
+    ControlOperationExecutor host_executor;
     std::chrono::milliseconds heartbeat_interval = std::chrono::seconds(5);
     std::chrono::milliseconds heartbeat_ttl = std::chrono::seconds(30);
     std::chrono::milliseconds handshake_timeout = std::chrono::seconds(3);

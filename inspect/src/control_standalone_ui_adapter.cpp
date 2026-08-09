@@ -166,7 +166,7 @@ ControlUiApplyStatus
 ControlStandaloneUiAdapter::dispatch_input(const ControlUiExactTarget& target,
                                            const ControlUiAuthorityOwner& owner,
                                            const ControlUiInput& input) {
-    if (owner.client_id.empty() || owner.grant_id.empty() || owner.client_principal.empty())
+    if (owner.authority_id.empty())
         return ControlUiApplyStatus::InvalidEvent;
     if (!impl_->exact(target))
         return ControlUiApplyStatus::StaleGeneration;

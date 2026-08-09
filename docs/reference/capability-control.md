@@ -45,12 +45,11 @@ to the exact node named under that view generation. Pointer coordinates are
 finite root coordinates bounded to +/-1,000,000; buttons, phases, key names,
 target IDs, generation IDs, and UTF-8 text all have explicit bounds. The
 executor rechecks authority/cancellation/deadline before and after dispatch and
-binds retained pointer/focus state to the exact admitted client, grant, and
-principal. Owner-specific revocation and fenced teardown close only that
-owner's state; teardown reports failure if main-thread cleanup could not run.
-This adapter does not itself observe an authority ending between receipts. A
-product must connect the canonical authority-end subscription to the
-owner-specific release call before advertising full UI outcome parity.
+binds retained pointer/focus state to the broker's opaque projected authority.
+The installed-host composition retains the canonical authority-end
+subscription and posts exact-owner release through the registered main-thread
+RPC on revocation, expiry, client disconnect, or host teardown. Fenced teardown
+reports failure if main-thread cleanup could not run.
 Integrations must not substitute raw Inspector methods or generic host/port
 discovery.
 

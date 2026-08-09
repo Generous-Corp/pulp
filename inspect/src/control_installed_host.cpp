@@ -82,6 +82,8 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
     std::unique_ptr<ControlTraceSessionExecutor> trace;
     std::unique_ptr<ControlHostObservabilityBundle> observability;
     std::unique_ptr<ControlMotionExecutor> motion;
+    std::unique_ptr<ControlHostUiExecutor> ui;
+    ControlOperationExecutor host_executor;
     ControlHostOpenResult opened;
     ControlHostObservabilityBinding observability_binding;
     std::unordered_map<std::string, std::shared_ptr<ProjectedAuthority>> authorities;
@@ -138,6 +140,8 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
             trace->disconnect();
         if (observability)
             observability->disconnect();
+        if (ui)
+            (void)ui->disconnect();
     }
 
     bool exact_plan(const ControlAdmissionPlan& plan) const {
@@ -182,6 +186,13 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
                 return observability_executor(plan, request, context);
             if (request.operation_id == "dev.pulp.trace/control@1")
                 return motion_executor(plan, request, context);
+            if (state->ui &&
+                (request.operation_id == "dev.pulp.ui/capture@1" ||
+                 request.operation_id == "dev.pulp.ui/input@1" ||
+                 request.operation_id == "dev.pulp.runtime/evaluate@1"))
+                return state->ui->executor()(plan, request, context);
+            if (state->host_executor)
+                return state->host_executor(plan, request, context);
             return not_implemented();
         };
     }
@@ -227,6 +238,7 @@ ControlInstalledHost::start(ControlInstalledHostConfig config) {
     state->handshake_timeout = config.handshake_timeout;
     state->motion_inspector = config.motion_inspector;
     state->motion_scrubber = config.motion_scrubber;
+    state->host_executor = std::move(config.host_executor);
     std::weak_ptr<State> weak = state;
     state->connection = std::make_unique<ControlHostConnection>(
         ControlHostConnectionConfig{
@@ -274,7 +286,7 @@ ControlInstalledHost::start(ControlInstalledHostConfig config) {
         .heartbeat_ttl = config.heartbeat_ttl,
     });
     state->motion = ControlMotionExecutor::create({
-        .main_thread_rpc = std::move(config.main_thread_rpc),
+        .main_thread_rpc = config.main_thread_rpc,
         .resolve_target = [weak](const ControlAdmissionPlan& plan)
             -> std::optional<ControlMotionTarget> {
             const auto state = weak.lock();
@@ -299,7 +311,57 @@ ControlInstalledHost::start(ControlInstalledHostConfig config) {
             };
         },
     });
-    if (!state->observability || !state->motion ||
+    if (config.ui) {
+        std::optional<ControlInstalledHostUiTargets> ui_targets;
+        if (config.ui->make_targets) {
+            ui_targets = config.ui->make_targets(state->opened);
+            if (!ui_targets)
+                return nullptr;
+        }
+        ControlRegistration registration{
+            .registration_id = ControlRegistrationId{state->opened.registration_id},
+            .broker_id = ControlBrokerId{state->opened.broker_id},
+            .host_tier = ControlHostTier::Standalone,
+            .session_id = state->opened.session_id,
+            .instance_id = state->opened.instance_id,
+            .publication_id = state->opened.publication_id,
+            .plugin_id = config.ui->manifest.bundle_id,
+            .publisher_id = config.ui->manifest.product_name,
+            .manifest_digest = state->opened.manifest_digest,
+            .artifact_digest = state->opened.producer_artifact_digest,
+            .consent_identity = control_consent_identity(state->opened.manifest_digest,
+                                                         state->opened.producer_artifact_digest),
+            .profile = config.ui->manifest.profile,
+            .capabilities = config.ui->manifest.capabilities,
+            .build_id = config.ui->manifest.build_id,
+        };
+        state->ui = ControlHostUiExecutor::create({
+            .binding = {.registration = std::move(registration),
+                        .manifest = std::move(config.ui->manifest)},
+            .main_thread_rpc = config.main_thread_rpc,
+            .capture_source = ui_targets ? std::move(ui_targets->capture_source) : nullptr,
+            .target_adapter = ui_targets ? std::move(ui_targets->target_adapter) : nullptr,
+            .resolve_authority = [weak](const ControlAdmissionPlan& plan)
+                -> std::optional<ControlUiProjectedAuthority> {
+                const auto state = weak.lock();
+                if (!state || !state->exact_plan(plan))
+                    return std::nullopt;
+                const auto authority = state->authority(plan.client_id.value, false);
+                if (!authority)
+                    return std::nullopt;
+                return ControlUiProjectedAuthority{
+                    .owner = {.authority_id = plan.client_id.value},
+                    .authority_live = [authority] { return authority->is_live(); },
+                    .subscribe_authority_end = [authority](std::function<void()> callback) {
+                        return authority->subscribe(std::move(callback));
+                    }};
+            },
+            .view_generation = ui_targets ? std::move(ui_targets->view_generation) : std::string{},
+            .runtime_evaluator = std::move(config.ui->runtime_evaluator),
+            .redact_runtime_eval_result = std::move(config.ui->redact_runtime_eval_result),
+        });
+    }
+    if (!state->observability || !state->motion || (config.ui && !state->ui) ||
         !state->slot.install(state->composite_executor()))
         return nullptr;
     const auto ready = state->connection->mark_executor_ready(config.handshake_timeout);

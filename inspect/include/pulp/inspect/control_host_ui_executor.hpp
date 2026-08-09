@@ -37,17 +37,27 @@ struct ControlUiExactTarget {
     std::string node_id;
 };
 
-/// Exact broker authority owner for any UI state retained between receipts.
-/// The canonical control plane will replace this projection with its opaque
-/// controller-lease binding when that authority-end subscription lands.
+/// Broker-owned opaque authority owner for UI state retained between receipts.
+/// This value is projected by the broker for one enrolled host and is not a
+/// client, grant, or principal identifier.
 struct ControlUiAuthorityOwner {
-    std::string client_id;
-    std::string grant_id;
-    std::string client_principal;
+    std::string authority_id;
 
     friend bool operator==(const ControlUiAuthorityOwner&,
                            const ControlUiAuthorityOwner&) = default;
 };
+
+/// Live broker authority projected to the exact enrolled host. The executor
+/// retains the subscription while pointer/focus ownership may outlive a
+/// receipt and releases that ownership when the authority ends.
+struct ControlUiProjectedAuthority {
+    ControlUiAuthorityOwner owner;
+    std::function<bool()> authority_live;
+    std::function<std::shared_ptr<void>(std::function<void()>)> subscribe_authority_end;
+};
+
+using ControlUiAuthorityResolver =
+    std::function<std::optional<ControlUiProjectedAuthority>(const ControlAdmissionPlan&)>;
 
 struct ControlUiPointerInput {
     enum class Phase : std::uint8_t { Down, Move, Up };
@@ -115,6 +125,9 @@ struct ControlHostUiExecutorConfig {
     std::shared_ptr<InspectorMainThreadRpc> main_thread_rpc;
     std::shared_ptr<InspectorCaptureSource> capture_source;
     std::shared_ptr<ControlHostUiTargetAdapter> target_adapter;
+    /// Required with target_adapter. Resolves only the broker's opaque
+    /// authority projection for the exact admitted host binding.
+    ControlUiAuthorityResolver resolve_authority;
     /// Opaque generation minted whenever the Standalone attaches a replacement
     /// root view. Required with target_adapter and included in every node call.
     std::string view_generation;
