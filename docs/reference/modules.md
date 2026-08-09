@@ -1096,6 +1096,17 @@ grid and may canonicalize to a neighboring tick. On a sparser grid,
 error; for example, at 48 kHz and 1 BPM, ticks 0 and 1 map to samples 0 and 4, so
 sample 2 cannot have an exact integer-tick inverse.
 
+The installed design-time capability `timebase.tempo-map` exposes exactly the
+`CompiledTempoMap` type, its validating `compile()` factory,
+`ticks_to_samples()`, and `resolve_sample()`. Compilation is a control-thread
+operation that owns and validates the authored map. The two published lookup
+operations are allocation-free and may run on the audio thread while the
+immutable compiled value remains alive. Cursor and fractional interpolation
+APIs remain available C++ APIs but are intentionally outside this capability's
+v1.0 contract. `TempoCursor::tempo_at_tick()` is observational: inspecting a
+future tempo does not change the sample-streaming position used by the next
+`advance()` or `advance_fractional()` call.
+
 The module depends only on `pulp::runtime` for typed results. Tick and sample
 positions use their full signed 64-bit ranges; tick-position, duration, and `MonotonicBeat`
 arithmetic saturates at the nearest endpoint rather than overflowing.

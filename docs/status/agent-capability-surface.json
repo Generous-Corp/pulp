@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 13,
+  "inventory_version": 14,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -38,14 +38,14 @@
   ],
   "counts": {
     "public_headers": 401,
-    "reviewed_headers": 99,
-    "legacy_unreviewed_headers": 302,
+    "reviewed_headers": 100,
+    "legacy_unreviewed_headers": 301,
     "unsupported_headers": 1,
     "by_disposition": {
-      "capability_entrypoint": 57,
+      "capability_entrypoint": 58,
       "capability_support": 36,
       "infrastructure": 5,
-      "legacy_unreviewed": 302,
+      "legacy_unreviewed": 301,
       "unsupported_capability": 1
     },
     "by_domain": {
@@ -81,8 +81,8 @@
       },
       "timebase": {
         "public_headers": 12,
-        "reviewed_headers": 8,
-        "legacy_unreviewed_headers": 4,
+        "reviewed_headers": 9,
+        "legacy_unreviewed_headers": 3,
         "unsupported_headers": 0
       }
     }
@@ -3817,11 +3817,13 @@
     {
       "domain": "timebase",
       "source": "core/timebase/include/pulp/timebase/compiled_tempo_map.hpp",
-      "fingerprint": "sha256:806efe0ef4a166e80b8b584813a6d61f8fb497a0327162716679906acf7485de",
+      "fingerprint": "sha256:6891cd08d6e70c62ed6fdfbb03883a312a25aaf74ee4b2c365c31c71dc10a7b8",
       "include": "pulp/timebase/compiled_tempo_map.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "timebase.tempo-map"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "timebase",

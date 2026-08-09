@@ -49,8 +49,8 @@ from agent_capability_transaction import recover_transaction, write_transaction
 
 SCHEMA = "pulp.agent-capabilities.v1"
 SCHEMA_MINOR = 1
-MANIFEST_REVISION = 6
-SURFACE_INVENTORY_VERSION = 13
+MANIFEST_REVISION = 7
+SURFACE_INVENTORY_VERSION = 14
 WRITE_TRANSACTION_FILE = pathlib.Path(
     "tools/agent-capabilities/.capability-write-transaction.json"
 )
@@ -244,8 +244,11 @@ def compile_fixture() -> str:
                     and candidate["qualified_name"] == name
                 )
                 address = source_binding.get("_address_expression", f"&{name}")
+                # `auto *` cannot represent a pointer-to-member. Preserve the
+                # reference against optimization while allowing both ordinary
+                # function pointers and member-function pointers.
                 lines.append(
-                    f"        auto *volatile binding_{binding_index} = {address};"
+                    f"        auto volatile binding_{binding_index} = {address};"
                 )
                 lines.append(f"        (void)binding_{binding_index};")
             binding_index += 1
@@ -272,6 +275,9 @@ def _render_link_probe(probe: dict[str, Any], index: int) -> str:
         )
     if operation == "function_call":
         return f"(void){binding}({arguments});"
+    if operation == "member_function_call":
+        member = binding.rsplit("::", 1)[-1]
+        return f"(void)({probe['object']}).{member}({arguments});"
     raise ValueError(f"unsupported link probe operation: {operation!r}")
 
 
@@ -313,6 +319,8 @@ def _link_probe_problems(row: dict[str, Any]) -> list[str]:
         required = {"role", "binding", "operation", "arguments"}
         if operation == "member_call":
             required.add("member")
+        if operation == "member_function_call":
+            required.add("object")
         if set(probe) != required:
             problems.append(f"{where} fields are not exact for {operation!r}")
             continue
@@ -325,13 +333,29 @@ def _link_probe_problems(row: dict[str, Any]) -> list[str]:
             problems.append(f"{where} arguments must be a C++ argument string")
         if operation in {"construct", "member_call"} and bindings[binding] != "cpp_type":
             problems.append(f"{where} {operation} requires a cpp_type binding")
-        if operation == "function_call" and bindings[binding] != "cpp_function":
-            problems.append(f"{where} function_call requires a cpp_function binding")
+        if (
+            operation in {"function_call", "member_function_call"}
+            and bindings[binding] != "cpp_function"
+        ):
+            problems.append(f"{where} {operation} requires a cpp_function binding")
         if operation == "member_call" and not re.fullmatch(
             r"[A-Za-z_][A-Za-z0-9_]*", probe.get("member", "")
         ):
             problems.append(f"{where} member_call has an invalid member")
-        if operation not in {"construct", "member_call", "function_call"}:
+        if operation == "member_function_call":
+            if not isinstance(probe.get("object"), str) or not probe["object"]:
+                problems.append(f"{where} member_function_call requires an object expression")
+            if not re.fullmatch(
+                r"(?:::)?[A-Za-z_][A-Za-z0-9_:<>]*::[A-Za-z_][A-Za-z0-9_]*",
+                str(probe.get("binding", "")),
+            ):
+                problems.append(f"{where} member_function_call has an invalid binding")
+        if operation not in {
+            "construct",
+            "member_call",
+            "function_call",
+            "member_function_call",
+        }:
             problems.append(f"{where} operation is invalid")
         try:
             _render_link_probe(probe, index)
