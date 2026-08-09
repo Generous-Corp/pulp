@@ -13,6 +13,8 @@ set -euo pipefail
 # Shared with tools/ci/test_run_auval_component.py so the launchd-exec predicate
 # is tested as the code the script actually runs, not a copy of it.
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/auval-exec-check.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/auval-component-identity.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/auval-worker-timeout.sh"
 
 if [[ ${1:-} == "--gui-worker" ]]; then
   if [[ $# -ne 7 ]]; then
@@ -90,7 +92,6 @@ if [[ "$component_name" != *.component ]]; then
 fi
 
 components_dir="$HOME/Library/Audio/Plug-Ins/Components"
-test_component="$components_dir/${component_name%.component}.auvaltest.component"
 scratch_dir=$(mktemp -d -t pulp-auval-gui.XXXXXX)
 inventory_log="$scratch_dir/inventory.log"
 validation_log="$scratch_dir/validation.log"
@@ -99,9 +100,10 @@ stdout_log="$scratch_dir/launchd.stdout"
 stderr_log="$scratch_dir/launchd.stderr"
 agent_plist="$scratch_dir/agent.plist"
 uid=$(id -u)
-label_suffix=$(printf '%s-%s-%s' "$component_subtype" "$$" "$RANDOM" |
+run_token=$(printf '%s-%s-%s' "$component_subtype" "$$" "$RANDOM" |
   tr -cd '[:alnum:]-')
-agent_label="com.pulp.auval.${label_suffix}"
+test_component="$components_dir/${component_name%.component}.${run_token}.auvaltest.component"
+agent_label="com.pulp.auval.${run_token}"
 agent_loaded=0
 
 cleanup() {
@@ -114,8 +116,17 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "$components_dir"
-rm -rf -- "$test_component"
 ditto "$source_component" "$test_component"
+
+# A renamed path is insufficient isolation: AudioComponentRegistrar also
+# caches bundle metadata by CFBundleIdentifier. Give every validation copy a
+# fresh identity so the inventory and auval process must inspect this exact
+# bundle rather than a stale local registration of the product identity.
+source_bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
+  "$test_component/Contents/Info.plist")
+isolated_bundle_id=$(auval_isolated_bundle_id "$source_bundle_id" "$run_token")
+plutil -replace CFBundleIdentifier -string "$isolated_bundle_id" \
+  "$test_component/Contents/Info.plist"
 
 # Seal the complete copied bundle. A linker-only ad-hoc signature fails strict
 # verification once Info.plist and other resources are present.
@@ -158,12 +169,15 @@ agent_loaded=1
 # /Volumes needs Full Disk Access for launchd; the directory stats fine from the
 # shell, so this is invisible until the exec fails). That is not a validation
 # result, and waiting the full deadline for a status file that can never appear
-# turns it into a misleading "timed out" 55 seconds later.
+# turns it into a misleading timeout.
 #
 # Detect it precisely: bash reporting it could not execute THIS script. A plugin
 # that genuinely fails validation writes a status file and is reported below, so
 # this cannot swallow a real failure.
-deadline=$((SECONDS + 55))
+worker_timeout=$(auval_worker_timeout_seconds \
+  "${PULP_AU_WORKER_TIMEOUT_SECONDS:-}" \
+  "${PULP_AU_DISCOVERY_DEADLINE_SECONDS:-30}")
+deadline=$((SECONDS + worker_timeout))
 while [[ ! -f "$status_file" ]] && (( SECONDS < deadline )); do
   if auval_worker_exec_failed "$stderr_log" "$script_path"; then
     break

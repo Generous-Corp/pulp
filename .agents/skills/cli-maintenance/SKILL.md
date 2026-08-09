@@ -2416,6 +2416,13 @@ Gotchas:
   `project(Pulp VERSION ...)` is authoritative (`--version` is refused).
   `--print-path` keeps stdout to the final prefix
   and sends build progress to stderr so command substitution is reliable.
+  The installed prefix is an arm64 contract all the way down: after installation,
+  every static archive is inspected with `lipo`; an archive containing arm64 plus
+  other slices is atomically replaced by its arm64 slice, while an archive with no
+  arm64 slice fails the publish. The profile also enables and validates WebView,
+  and records `features.webview=true` in `sdk-provenance.json`, so imported
+  WebView-backed designs can be built by downstream forge consumers without
+  silently relying on the source checkout.
   Do not turn this into runtime DSP loading: the downstream plugin still
   recompiles against the exact printed `Pulp_DIR`, preserving header/library
   coherence. Profile policy lives in `local_sdk_profile.{hpp,cpp}`; build and

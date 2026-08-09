@@ -175,6 +175,20 @@ InstallRequest parse_install_arguments(const std::vector<std::string>& args,
     return out;
 }
 
+ArchiveSliceAction archive_slice_action(const std::string& lipo_architectures) {
+    std::istringstream input(lipo_architectures);
+    std::string architecture;
+    bool has_arm64 = false;
+    std::size_t count = 0;
+    while (input >> architecture) {
+        ++count;
+        has_arm64 = has_arm64 || architecture == "arm64";
+    }
+    if (!has_arm64)
+        return ArchiveSliceAction::Reject;
+    return count == 1 ? ArchiveSliceAction::Keep : ArchiveSliceAction::ThinToArm64;
+}
+
 std::string input_fingerprint(const Identity& identity) {
     return fnv1a_64_hex(normalized_identity(identity)).substr(0, 12);
 }
@@ -207,6 +221,7 @@ std::vector<std::string> configure_arguments(const fs::path& source, const fs::p
             "-DPULP_ENABLE_GPU=ON",
             "-DPULP_REQUIRE_GPU_FOR_SDK=ON",
             "-DPULP_ENABLE_DESIGN_IMPORT=ON",
+            "-DPULP_BUILD_WEBVIEW=ON",
             "-DPULP_ENABLE_AUDIO_PROBES=OFF",
             "-DPULP_ENABLE_INSPECTOR=OFF",
             "-DPULP_BUILD_TESTS=OFF",
@@ -249,6 +264,7 @@ Validation validate_staged_install(const fs::path& prefix, const fs::path& build
     require(cache_true(cache, "PULP_ENABLE_GPU"), "GPU support was not enabled", out);
     require(cache_true(cache, "PULP_HAS_SKIA"), "Skia was not resolved", out);
     require(cache_true(cache, "PULP_ENABLE_DESIGN_IMPORT"), "design import was not enabled", out);
+    require(cache_true(cache, "PULP_BUILD_WEBVIEW"), "WebView support was not enabled", out);
     require(cache_true(cache, "PULP_HAS_VST3"), "VST3 SDK was not resolved", out);
     require(cache_true(cache, "PULP_HAS_AUSDK"), "AudioUnitSDK was not resolved", out);
     require(cache_true(cache, "PULP_HAS_CLAP"), "CLAP was not resolved", out);
@@ -289,7 +305,7 @@ std::string serialize_provenance(const Identity& i, const std::string& fingerpri
         << "  \"compiler\": " << json_string(i.compiler) << ",\n"
         << "  \"macos_sdk\": " << json_string(i.macos_sdk) << ",\n"
         << "  \"deployment_target\": " << json_string(i.deployment_target) << ",\n"
-        << "  \"features\": {\"gpu\": true, \"design_import\": true, "
+        << "  \"features\": {\"gpu\": true, \"design_import\": true, \"webview\": true, "
            "\"audio_probes\": false, \"inspector\": false},\n"
         << "  \"formats\": {\"AU\": true, \"VST3\": true, \"CLAP\": true, "
            "\"Standalone\": true},\n"
