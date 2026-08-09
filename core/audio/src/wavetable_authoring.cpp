@@ -388,12 +388,16 @@ WavetableCompileResult compile_wavetable(BufferView<const float> source, double 
         for (float& sample : base)
             sample *= gain;
 
-        signal::FftT<float> fft(static_cast<int>(recipe.table_length));
+        // Authoring is offline and its materialized hash is part of the public
+        // content-addressing contract. Use the deterministic scalar backend on
+        // every platform instead of the float specialization, whose Apple vDSP
+        // path can produce different low-order samples across identical calls.
+        signal::FftT<double> fft(static_cast<int>(recipe.table_length));
         if (!fft.ready()) {
             result.status = WavetableCompileStatus::FftUnavailable;
             return result;
         }
-        std::vector<std::complex<float>> spectrum(recipe.table_length);
+        std::vector<std::complex<double>> spectrum(recipe.table_length);
         for (std::size_t i = 0; i < base.size(); ++i)
             spectrum[i] = {base[i], 0.0f};
         fft.forward(spectrum.data());
@@ -427,7 +431,7 @@ WavetableCompileResult compile_wavetable(BufferView<const float> source, double 
             band.max_frequency_hz = ceiling;
             band.samples.resize(recipe.table_length);
             for (std::size_t i = 0; i < band.samples.size(); ++i) {
-                band.samples[i] = band_spectrum[i].real();
+                band.samples[i] = static_cast<float>(band_spectrum[i].real());
                 if (!std::isfinite(band.samples[i])) {
                     result.bands.clear();
                     result.status = WavetableCompileStatus::NonFiniteResult;
