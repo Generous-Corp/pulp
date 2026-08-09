@@ -286,7 +286,7 @@ TEST_CASE("raw signed T1 host reaches a correlated trace receipt through canonic
 
 TEST_CASE("Release installed host publishes only after ready and cleans revoked expired restart authority",
           "[inspect][control][e2e][t1][release][authority]") {
-#ifdef __APPLE__
+#if defined(__APPLE__) && defined(PULP_CONTROL_INSTALLED_HOST_E2E_FIXTURE)
     Directory directory;
     const auto executable = directory.root / "source" / "installed-host";
     fs::copy_file(PULP_CONTROL_INSTALLED_HOST_E2E_FIXTURE, executable);
@@ -600,6 +600,6 @@ TEST_CASE("Release installed host publishes only after ready and cleans revoked 
     CHECK(second.exit_code == 0);
     endpoint.stop();
 #else
-    SUCCEED("installed host process E2E is currently macOS-only");
+    SUCCEED("the installed-host authority E2E requires the full inspector runtime");
 #endif
 }
