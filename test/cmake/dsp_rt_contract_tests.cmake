@@ -212,6 +212,11 @@ pulp_add_test_suite(pulp-test-dynamics-contract
     LIBRARIES pulp::signal
     TIMEOUT 900)
 
+pulp_add_test_suite(pulp-test-de-esser
+    SOURCES test_de_esser.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
 # The circuit-modelled clipper family. Distinct from the memoryless saturator:
 # a capacitor inside the clipping network makes the effective clip point a
 # function of recent history, which is why these are ODEs solved per sample
