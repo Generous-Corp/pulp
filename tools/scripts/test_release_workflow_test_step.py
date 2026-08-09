@@ -819,6 +819,10 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
             ),
             windows_stamp.index("$env:PULP_SDK_PROVENANCE_HELPER stamp"),
         )
+        self.assertLess(
+            unix_stamp.index("resign_macos_release_tree.py sdk-staging"),
+            unix_stamp.index('"$PULP_SDK_PROVENANCE_HELPER" stamp'),
+        )
 
     def test_official_sdk_stamp_cannot_silently_skip_a_missing_helper(self) -> None:
         unix_block = self._find_step_run("Build SDK tarball (Unix)")
