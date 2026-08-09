@@ -192,7 +192,10 @@ new support must extend the same centralized path.
 The frozen operation schemas are closed and bounded. Required input and output
 resource, receipt, lease, stream, plugin, build, node, and idempotency
 identifiers cannot be empty; strings and collection sizes have
-explicit ceilings; capture uses distinct window and node request shapes; state
+explicit ceilings; capture uses distinct window and node request shapes;
+node requests bind an opaque attached-view generation, and UI input accepts
+exactly one closed-schema event per receipt with bounded coordinates, button,
+key, target, generation, and UTF-8 text fields; state
 parameter IDs cover the full unsigned 32-bit domain; transport tempo is
 20–400 BPM; and telemetry accepts at most 32 unique, nonempty channel IDs.
 Trace sessions freeze the concrete 1–512 MiB ring and bounded category

@@ -356,6 +356,14 @@ TEST_CASE("control registry projects capability and operation metadata",
             CHECK(operation.input_schema_json.find("\"event\":{\"type\":\"object\"}") ==
                   std::string_view::npos);
         }
+        if (operation.capability == InspectorCapability::UiInput) {
+            CHECK(operation.input_schema_json.find("\"view_generation\"") !=
+                  std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"const\":\"text\"") !=
+                  std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"maxLength\":4096") !=
+                  std::string_view::npos);
+        }
         if (operation.capability == InspectorCapability::AuthoringTweaks) {
             CHECK(operation.input_schema_json.find("\"propertyNames\"") != std::string_view::npos);
             CHECK(operation.input_schema_json.find("\"anchor_id\"") != std::string_view::npos);

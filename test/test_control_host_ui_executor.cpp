@@ -2,8 +2,12 @@
 
 #include <pulp/inspect/capture_source.hpp>
 #include <pulp/inspect/control_host_ui_executor.hpp>
+#include <pulp/inspect/control_standalone_ui_adapter.hpp>
 #include <pulp/inspect/main_thread_rpc.hpp>
 #include <pulp/inspect/runtime_evaluator.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
+#include <pulp/view/view.hpp>
+#include <pulp/view/window_host.hpp>
 
 #include <choc/text/choc_JSON.h>
 
@@ -57,6 +61,92 @@ class CaptureSource final : public InspectorCaptureSource {
     int calls = 0;
 };
 
+class TargetAdapter final : public ControlHostUiTargetAdapter {
+  public:
+    InspectorCapture capture_node_png(const ControlUiExactTarget& target) override {
+        ++capture_calls;
+        last_target = target;
+        return {.png = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 4, 5, 6},
+                .width = 24,
+                .height = 12};
+    }
+
+    ControlUiApplyStatus dispatch_input(const ControlUiExactTarget& target,
+                                        const ControlUiAuthorityOwner& owner,
+                                        const ControlUiInput& input) override {
+        ++input_calls;
+        last_target = target;
+        last_owner = owner;
+        last_input = input;
+        return status;
+    }
+
+    void release_controller(const std::optional<ControlUiAuthorityOwner>& owner) noexcept override {
+        ++release_calls;
+        released_owner = owner;
+    }
+
+    ControlUiApplyStatus status = ControlUiApplyStatus::Applied;
+    ControlUiExactTarget last_target;
+    ControlUiAuthorityOwner last_owner;
+    std::optional<ControlUiAuthorityOwner> released_owner;
+    ControlUiInput last_input;
+    int capture_calls = 0;
+    int input_calls = 0;
+    int release_calls = 0;
+};
+
+class TestWindowHost final : public pulp::view::WindowHost {
+  public:
+    void show() override {}
+    void hide() override {}
+    bool is_visible() const override { return true; }
+    void repaint() override { ++repaint_calls; }
+    void set_close_callback(std::function<void()>) override {}
+    void run_event_loop() override {}
+
+    int repaint_calls = 0;
+};
+
+class InputNode final : public pulp::view::View {
+  public:
+    bool wants_mouse_input() const override { return true; }
+    bool accepts_text_input() const override { return true; }
+    void on_mouse_down(pulp::view::Point) override { ++down_calls; }
+    void on_mouse_up(pulp::view::Point) override { ++up_calls; }
+    void on_mouse_cancel(pulp::view::Point) override { ++cancel_calls; }
+    bool on_key_event(const pulp::view::KeyEvent&) override {
+        ++key_calls;
+        return true;
+    }
+    void on_text_input(const pulp::view::TextInputEvent& event) override {
+        text += event.text;
+    }
+
+    int down_calls = 0;
+    int up_calls = 0;
+    int cancel_calls = 0;
+    int key_calls = 0;
+    std::string text;
+};
+
+class SelfUnmountNode final : public pulp::view::View {
+  public:
+    SelfUnmountNode(pulp::view::View& root, std::unique_ptr<pulp::view::View>& detached)
+        : root_(root), detached_(detached) {}
+    bool wants_mouse_input() const override { return true; }
+    void on_mouse_event(const pulp::view::MouseEvent&) override {
+        ++modern_down_calls;
+        detached_ = root_.remove_child(this);
+    }
+
+    int modern_down_calls = 0;
+
+  private:
+    pulp::view::View& root_;
+    std::unique_ptr<pulp::view::View>& detached_;
+};
+
 class Evaluator final : public RuntimeEvaluator {
   public:
     RuntimeEvaluatorCapabilities capabilities() const override {
@@ -103,7 +193,8 @@ ControlHostUiBinding binding(ControlBuildProfile profile = ControlBuildProfile::
     manifest.capabilities =
         profile == ControlBuildProfile::ResearchUnsafe
             ? std::vector{InspectorCapability::SessionControl, InspectorCapability::RuntimeEval}
-            : std::vector{InspectorCapability::SessionControl, InspectorCapability::CaptureImage};
+            : std::vector{InspectorCapability::SessionControl, InspectorCapability::CaptureImage,
+                          InspectorCapability::UiInput};
     const auto manifest_digest = control_manifest_digest(manifest);
     const auto artifact_digest = std::string(64, 'c');
     ControlRegistration registration;
@@ -226,19 +317,42 @@ TEST_CASE("host UI capture publishes one exact-lineage sensitive PNG artifact",
     CHECK(source->calls == 1);
 }
 
-TEST_CASE("host UI executor refuses node capture and UI input without exact host seams",
-          "[inspect][control][ui][input][disposition]") {
+TEST_CASE("host UI executor captures and drives one exact-generation node",
+          "[inspect][control][ui][input][node][security]") {
     PostedQueue queue;
     auto source = std::make_shared<CaptureSource>();
+    auto target = std::make_shared<TargetAdapter>();
     auto executor = ControlHostUiExecutor::create(
-        {.binding = binding(), .main_thread_rpc = rpc(queue), .capture_source = source});
+        {.binding = binding(),
+         .main_thread_rpc = rpc(queue),
+         .capture_source = source,
+         .target_adapter = target,
+         .view_generation = "view-a"});
     REQUIRE(executor);
     auto admission = plan(InspectorCapability::CaptureImage, "dev.pulp.ui/capture@1");
-    auto outcome =
-        run_on_worker(executor->executor(), admission,
-                      request(admission, R"({"target":"node","format":"png","node_id":"gain"})"),
-                      {.checkpoint = [] { return ControlExecutionCheckpoint::Continue; }}, queue);
-    CHECK(outcome.result.result_code == ControlResultCode::NotImplemented);
+    auto outcome = run_on_worker(
+        executor->executor(), admission,
+        request(admission,
+                R"({"target":"node","format":"png","node_id":"gain","view_generation":"view-a"})"),
+        {.checkpoint = [] { return ControlExecutionCheckpoint::Continue; },
+         .maximum_artifact_bytes = 1024,
+         .publish_artifact =
+             [](std::span<const std::uint8_t> bytes, ControlArtifactPublication publication) {
+                 ControlArtifactMetadata metadata;
+                 metadata.artifact_id = "artifact-node-0123456789abcdef0123456789";
+                 metadata.sha256 = std::string(64, 'd');
+                 metadata.byte_size = bytes.size();
+                 metadata.content_type = publication.content_type;
+                 return ControlArtifactStoreResult{ControlArtifactStatus::Stored,
+                                                   std::move(metadata)};
+             }},
+        queue);
+    REQUIRE(outcome.terminal_state == ControlReceiptState::Completed);
+    CHECK(target->capture_calls == 1);
+    CHECK(target->last_target.instance_id == "instance-a");
+    CHECK(target->last_target.instance_generation == "publication-a");
+    CHECK(target->last_target.view_generation == "view-a");
+    CHECK(target->last_target.node_id == "gain");
     CHECK(source->calls == 0);
 
     outcome = run_on_worker(
@@ -251,10 +365,94 @@ TEST_CASE("host UI executor refuses node capture and UI input without exact host
     admission = plan(InspectorCapability::UiInput, "dev.pulp.ui/input@1");
     outcome = run_on_worker(
         executor->executor(), admission,
-        request(admission, R"({"kind":"focus","target_id":"gain","event":{"focused":true}})"),
+        request(admission,
+                R"({"kind":"focus","target_id":"gain","view_generation":"view-a","event":{"focused":true}})"),
         {.checkpoint = [] { return ControlExecutionCheckpoint::Continue; }}, queue);
-    CHECK(outcome.result.result_code == ControlResultCode::NotImplemented);
-    CHECK(control_ui_input_disposition() == "unsupported-no-exact-host-target-seam");
+    REQUIRE(outcome.terminal_state == ControlReceiptState::Completed);
+    REQUIRE(target->input_calls == 1);
+    CHECK(std::get<ControlUiFocusInput>(target->last_input).focused);
+    CHECK(target->last_owner.client_id == "client-a");
+    CHECK(target->last_owner.grant_id == "grant-a");
+    CHECK(control_ui_input_disposition() == "supported-exact-target-grant-controlled");
+
+    outcome = run_on_worker(
+        executor->executor(), admission,
+        request(admission,
+                R"({"kind":"text","target_id":"gain","view_generation":"stale","event":{"text":"safe"}})"),
+        {.checkpoint = [] { return ControlExecutionCheckpoint::Continue; }}, queue);
+    CHECK(outcome.result.result_code == ControlResultCode::SessionStale);
+    CHECK(target->input_calls == 1);
+
+    bool disconnected = false;
+    std::thread disconnect_thread([&] { disconnected = executor->disconnect(); });
+    auto release_task = queue.take();
+    REQUIRE(release_task);
+    release_task();
+    disconnect_thread.join();
+    CHECK(disconnected);
+    CHECK(target->release_calls == 1);
+    CHECK_FALSE(target->released_owner);
+}
+
+TEST_CASE("host UI input is bounded and releases controller state after revocation",
+          "[inspect][control][ui][input][bounds][cancellation][security]") {
+    PostedQueue queue;
+    auto target = std::make_shared<TargetAdapter>();
+    auto executor = ControlHostUiExecutor::create(
+        {.binding = binding(),
+         .main_thread_rpc = rpc(queue),
+         .target_adapter = target,
+         .view_generation = "view-a"});
+    REQUIRE(executor);
+    const auto admission = plan(InspectorCapability::UiInput, "dev.pulp.ui/input@1");
+    auto outcome = run_on_worker(
+        executor->executor(), admission,
+        request(admission,
+                R"({"kind":"pointer","target_id":"gain","view_generation":"view-a","event":{"phase":"down","x":10,"y":20,"button":1}})"),
+        {.checkpoint = [&] {
+             return target->input_calls > 0 ? ControlExecutionCheckpoint::AuthorityRevoked
+                                            : ControlExecutionCheckpoint::Continue;
+         }},
+        queue);
+    INFO(outcome.result.explanation);
+    CHECK(outcome.terminal_state == ControlReceiptState::Cancelled);
+    CHECK(target->input_calls == 1);
+    CHECK(target->release_calls == 1);
+    REQUIRE(target->released_owner);
+    CHECK(target->released_owner->grant_id == "grant-a");
+
+    outcome = run_on_worker(
+        executor->executor(), admission,
+        request(admission,
+                R"({"kind":"pointer","target_id":"gain","view_generation":"view-a","event":{"phase":"move","x":1000001,"y":20,"button":1}})"),
+        {.checkpoint = [] { return ControlExecutionCheckpoint::Continue; }}, queue);
+    CHECK(outcome.result.result_code == ControlResultCode::InvalidRequest);
+    CHECK(target->input_calls == 1);
+
+    const std::string oversized_text(kControlUiMaximumTextBytes + 1, 'x');
+    outcome = run_on_worker(
+        executor->executor(), admission,
+        request(admission,
+                "{\"kind\":\"text\",\"target_id\":\"gain\",\"view_generation\":\"view-a\",\"event\":{\"text\":\"" +
+                    oversized_text + "\"}}"),
+        {.checkpoint = [] { return ControlExecutionCheckpoint::Continue; }}, queue);
+    CHECK(outcome.result.result_code == ControlResultCode::InvalidRequest);
+    CHECK(target->input_calls == 1);
+}
+
+TEST_CASE("host UI disconnect surfaces unfenced controller cleanup",
+          "[inspect][control][ui][disconnect][main-thread][security]") {
+    auto target = std::make_shared<TargetAdapter>();
+    auto unavailable_rpc = std::make_shared<InspectorMainThreadRpc>(
+        InspectorMainThreadRpc::Config{10ms, 1}, [](auto) { return false; }, [] { return false; });
+    auto executor = ControlHostUiExecutor::create(
+        {.binding = binding(),
+         .main_thread_rpc = unavailable_rpc,
+         .target_adapter = target,
+         .view_generation = "view-a"});
+    REQUIRE(executor);
+    CHECK_FALSE(executor->disconnect());
+    CHECK(target->release_calls == 0);
 }
 
 TEST_CASE("runtime evaluation requires research acknowledgement and returns bounded JSON",
@@ -342,4 +540,116 @@ TEST_CASE("host UI work is cancelled before main-thread capture applies",
                       {.checkpoint = [] { return ControlExecutionCheckpoint::Cancelled; }}, queue);
     CHECK(outcome.terminal_state == ControlReceiptState::Cancelled);
     CHECK(source->calls == 0);
+}
+
+TEST_CASE("Standalone UI adapter retains exact node and releases controller input",
+          "[inspect][control][ui][standalone][security]") {
+    pulp::view::View root;
+    root.set_bounds({0, 0, 200, 100});
+    TestWindowHost window;
+    root.set_window_host(&window);
+
+    auto child = std::make_unique<InputNode>();
+    auto* node = child.get();
+    node->set_id("gain");
+    node->set_bounds({10, 10, 80, 40});
+    node->set_focusable(true);
+    root.add_child(std::move(child));
+
+    auto adapter = ControlStandaloneUiAdapter::create(
+        {.root = root,
+         .window = window,
+         .instance_id = "instance-a",
+         .instance_generation = "publication-a",
+         .view_generation = "view-a"});
+    REQUIRE(adapter);
+    const ControlUiExactTarget target{.instance_id = "instance-a",
+                                      .instance_generation = "publication-a",
+                                      .view_generation = "view-a",
+                                      .node_id = "gain"};
+    const ControlUiAuthorityOwner owner{.client_id = "client-a",
+                                        .grant_id = "grant-a",
+                                        .client_principal = "principal-a"};
+
+    CHECK(adapter->dispatch_input(target, owner, ControlUiFocusInput{.focused = true}) ==
+          ControlUiApplyStatus::Applied);
+    CHECK(node->has_focus());
+    auto other_owner = owner;
+    other_owner.grant_id = "grant-b";
+    CHECK(adapter->dispatch_input(target, other_owner, ControlUiTextInput{.text = "denied"}) ==
+          ControlUiApplyStatus::InvalidEvent);
+    CHECK(adapter->dispatch_input(target, owner, ControlUiTextInput{.text = "42"}) ==
+          ControlUiApplyStatus::Applied);
+    CHECK(node->text == "42");
+    CHECK(adapter->dispatch_input(
+              target, owner,
+              ControlUiKeyboardInput{.phase = ControlUiKeyboardInput::Phase::Down,
+                                     .key = "Enter"}) ==
+          ControlUiApplyStatus::Applied);
+    CHECK(node->key_calls == 1);
+    pulp::view::transfer_input_focus(root, nullptr);
+    CHECK(adapter->dispatch_input(target, owner, ControlUiTextInput{.text = "drift"}) ==
+          ControlUiApplyStatus::InvalidEvent);
+    CHECK(adapter->dispatch_input(target, owner, ControlUiFocusInput{.focused = true}) ==
+          ControlUiApplyStatus::Applied);
+    CHECK(adapter->dispatch_input(
+              target, owner,
+              ControlUiPointerInput{.phase = ControlUiPointerInput::Phase::Down,
+                                    .x = 20,
+                                    .y = 20,
+                                    .button = 1}) ==
+          ControlUiApplyStatus::Applied);
+    CHECK(node->down_calls == 1);
+
+    adapter->release_controller();
+    CHECK(node->cancel_calls == 1);
+    CHECK_FALSE(node->has_focus());
+    CHECK(window.repaint_calls >= 4);
+
+    node->set_bounds({0, 0, 10'000, 10'000});
+    const auto oversized_capture = adapter->capture_node_png(target);
+    CHECK(oversized_capture.error_code == "capture_too_large");
+    CHECK(oversized_capture.png.empty());
+
+    auto stale = target;
+    stale.view_generation = "view-b";
+    CHECK(adapter->dispatch_input(stale, owner, ControlUiFocusInput{.focused = true}) ==
+          ControlUiApplyStatus::StaleGeneration);
+}
+
+TEST_CASE("Standalone UI adapter reports a self-unmounting pointer event as applied",
+          "[inspect][control][ui][standalone][pointer][receipt]") {
+    pulp::view::View root;
+    root.set_bounds({0, 0, 100, 100});
+    TestWindowHost window;
+    root.set_window_host(&window);
+    std::unique_ptr<pulp::view::View> detached;
+    auto child = std::make_unique<SelfUnmountNode>(root, detached);
+    auto* node = child.get();
+    node->set_id("self-unmount");
+    node->set_bounds({0, 0, 50, 50});
+    root.add_child(std::move(child));
+    auto adapter = ControlStandaloneUiAdapter::create(
+        {.root = root,
+         .window = window,
+         .instance_id = "instance-a",
+         .instance_generation = "publication-a",
+         .view_generation = "view-a"});
+    REQUIRE(adapter);
+    const ControlUiExactTarget target{.instance_id = "instance-a",
+                                      .instance_generation = "publication-a",
+                                      .view_generation = "view-a",
+                                      .node_id = "self-unmount"};
+    const ControlUiAuthorityOwner owner{.client_id = "client-a",
+                                        .grant_id = "grant-a",
+                                        .client_principal = "principal-a"};
+    CHECK(adapter->dispatch_input(
+              target, owner,
+              ControlUiPointerInput{.phase = ControlUiPointerInput::Phase::Down,
+                                    .x = 10,
+                                    .y = 10,
+                                    .button = 1}) ==
+          ControlUiApplyStatus::Applied);
+    REQUIRE(detached);
+    CHECK(static_cast<SelfUnmountNode*>(detached.get())->modern_down_calls == 1);
 }

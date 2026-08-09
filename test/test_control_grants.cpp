@@ -266,7 +266,7 @@ TEST_CASE("grant issue rejects unavailable and non-grantable capabilities",
               GrantFixture::consent()).status ==
           ControlGrantStatus::CapabilityUnavailable);
     CHECK(fixture.grants.issue(
-              fixture.request({InspectorCapability::UiInput}),
+              fixture.request({InspectorCapability::RuntimeReload}),
               GrantFixture::consent()).status ==
           ControlGrantStatus::CapabilityUnavailable);
     CHECK(fixture.grants.issue(

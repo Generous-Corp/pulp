@@ -11,7 +11,7 @@ PULP_INSPECT_CAPABILITY(UiRead, "ui.read", "dev.pulp.ui/observe@1", Sensitive, N
 PULP_INSPECT_CAPABILITY(DiagnosticsRead, "diagnostics.read", "dev.pulp.diagnostics/read@1", Sensitive, None, Protocol, Response, 1, 1, 1, 0)
 PULP_INSPECT_CAPABILITY(LogsRead, "logs.read", "dev.pulp.logs/read@1", Sensitive, None, Protocol, Response, 1, 1, 1, 0)
 PULP_INSPECT_CAPABILITY(CaptureImage, "capture.image", "dev.pulp.ui/capture@1", Sensitive, Capture, HostMain, Artifact, 1, 1, 1, 0)
-PULP_INSPECT_CAPABILITY(UiInput, "ui.input", "dev.pulp.ui/input@1", HighRisk, Input, HostMain, Receipt, 0, 0, 0, 0)
+PULP_INSPECT_CAPABILITY(UiInput, "ui.input", "dev.pulp.ui/input@1", HighRisk, Input, HostMain, Receipt, 0, 1, 1, 0)
 PULP_INSPECT_CAPABILITY(TraceControl, "trace.control", "dev.pulp.trace/control@1", Control, Trace, HostMain, Receipt, 0, 1, 1, 0)
 PULP_INSPECT_CAPABILITY(TraceSessionControl, "trace.session.control", "dev.pulp.trace/session-control@1", Control, Trace, HostMain, Response, 0, 1, 1, 1)
 PULP_INSPECT_CAPABILITY(StateWrite, "state.write", "dev.pulp.state/parameter-gesture@1", Control, State, HostMain, Receipt, 0, 1, 1, 0)

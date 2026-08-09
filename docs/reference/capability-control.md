@@ -36,12 +36,23 @@ Mutation capabilities additionally require
 automatically grants it.
 
 The Pulp-owned host UI executor is a composition building block, not automatic
-activation. It binds one registration/session/instance/publication, uses the
-existing main-thread capture and evaluator seams, and publishes captured PNGs
-only through broker-owned artifact storage. Window capture is implemented.
-Node capture and UI input remain explicitly unavailable because Pulp has no
-host-owned exact-target seam for them; integrations must not substitute raw
-Inspector methods or generic synthetic input.
+activation. It binds one registration/session/instance/publication and an
+opaque view generation, uses the existing main-thread capture/input/evaluator
+seams, and publishes window or exact-node PNGs only through broker-owned
+artifact storage. `ui.input` is a develop-only, controller-lease mutation: one
+closed-schema pointer, keyboard, focus, or text event is dispatched per receipt
+to the exact node named under that view generation. Pointer coordinates are
+finite root coordinates bounded to +/-1,000,000; buttons, phases, key names,
+target IDs, generation IDs, and UTF-8 text all have explicit bounds. The
+executor rechecks authority/cancellation/deadline before and after dispatch and
+binds retained pointer/focus state to the exact admitted client, grant, and
+principal. Owner-specific revocation and fenced teardown close only that
+owner's state; teardown reports failure if main-thread cleanup could not run.
+This adapter does not itself observe an authority ending between receipts. A
+product must connect the canonical authority-end subscription to the
+owner-specific release call before advertising full UI outcome parity.
+Integrations must not substitute raw Inspector methods or generic host/port
+discovery.
 
 Runtime evaluation composition additionally requires the exact validated
 registration and its digest-matched manifest, an interrupt-capable evaluator,

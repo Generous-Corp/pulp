@@ -15,6 +15,7 @@ set(_PULP_INSPECTOR_SHIPPING_CAPABILITIES
     diagnostics.read
     logs.read
     capture.image
+    ui.input
     state.write
     test.input
     authoring.tweaks
@@ -29,6 +30,7 @@ set(_PULP_CONTROL_CAPABILITIES
     dev.pulp.diagnostics/read@1
     dev.pulp.logs/read@1
     dev.pulp.ui/capture@1
+    dev.pulp.ui/input@1
     dev.pulp.state/parameter-gesture@1
     dev.pulp.test/input@1
     dev.pulp.authoring/tweaks@1
@@ -38,7 +40,7 @@ set(_PULP_CONTROL_CAPABILITIES
 # Installed copies of this helper cannot reach back into the source tree. The
 # truth checker pins this value to control_registry_digest.inc.
 set(_PULP_CONTROL_REGISTRY_DIGEST_V1
-    "1a3bcf207e34b79c49e32038699f3738d1d814838766e4d3f7aebaf895770ace")
+    "1ef00512c588766b7ec414c2f4bf1b2572e115b2e9be83ea61cc35ee434ad086")
 
 function(_pulp_cache_control_declarations target profile capabilities eval_ack)
     # A target's declarations are configure-time truth, not sticky user
@@ -117,7 +119,7 @@ function(_pulp_configure_control_shipping target bundle_id product_name)
         CACHE INTERNAL "" FORCE)
 
     set(_controller_caps
-        state.write test.input authoring.tweaks runtime.eval)
+        ui.input state.write test.input authoring.tweaks runtime.eval)
     foreach(_control_cap IN LISTS _control_caps)
         list(FIND _PULP_CONTROL_CAPABILITIES "${_control_cap}" _cap_index)
         list(GET _PULP_INSPECTOR_SHIPPING_CAPABILITIES ${_cap_index} _cap)

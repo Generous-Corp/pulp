@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <mutex>
@@ -54,6 +55,7 @@ bool exact_authority(const ControlAdmissionPlan& plan, const ControlRequestEnvel
            plan.session_id == registration.session_id &&
            plan.instance_id == registration.instance_id &&
            plan.publication_id == registration.publication_id &&
+           plan.instance_generation == registration.publication_id &&
            plan.manifest_digest == registration.manifest_digest &&
            plan.producer_artifact_digest == registration.artifact_digest && plan.client_id &&
            plan.grant_id && !plan.consent_decision_id.empty() && !request.request_id.empty() &&
@@ -92,6 +94,137 @@ std::optional<std::int64_t> eval_timeout_ms(std::string_view params_json) {
     }
 }
 
+struct ParsedCaptureRequest {
+    bool node = false;
+    std::string node_id;
+    std::string view_generation;
+};
+
+std::optional<ParsedCaptureRequest> parse_capture_request(std::string_view params_json) {
+    try {
+        const auto params = choc::json::parse(params_json);
+        if (!params.isObject() || !params["target"].isString() ||
+            !params["format"].isString() || params["format"].getString() != "png")
+            return std::nullopt;
+        if (params["target"].getString() == "window")
+            return ParsedCaptureRequest{};
+        if (params["target"].getString() != "node" || !params["node_id"].isString() ||
+            !params["view_generation"].isString())
+            return std::nullopt;
+        ParsedCaptureRequest parsed{.node = true,
+                                    .node_id = std::string(params["node_id"].getString()),
+                                    .view_generation =
+                                        std::string(params["view_generation"].getString())};
+        if (parsed.node_id.empty() || parsed.node_id.size() > kControlUiMaximumTargetBytes ||
+            parsed.view_generation.empty() ||
+            parsed.view_generation.size() > kControlUiMaximumViewGenerationBytes)
+            return std::nullopt;
+        return parsed;
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+struct ParsedInputRequest {
+    std::string target_id;
+    std::string view_generation;
+    ControlUiInput input;
+};
+
+std::optional<ParsedInputRequest> parse_input_request(std::string_view params_json) {
+    try {
+        const auto params = choc::json::parse(params_json);
+        if (!params.isObject() || !params["kind"].isString() ||
+            !params["target_id"].isString() || !params["view_generation"].isString() ||
+            !params["event"].isObject())
+            return std::nullopt;
+        ParsedInputRequest parsed{.target_id = std::string(params["target_id"].getString()),
+                                  .view_generation =
+                                      std::string(params["view_generation"].getString())};
+        if (parsed.target_id.empty() || parsed.target_id.size() > kControlUiMaximumTargetBytes ||
+            parsed.view_generation.empty() ||
+            parsed.view_generation.size() > kControlUiMaximumViewGenerationBytes)
+            return std::nullopt;
+        const auto event = params["event"];
+        const std::string_view kind = params["kind"].getString();
+        if (kind == "pointer") {
+            if (!event["phase"].isString() ||
+                (!event["x"].isInt() && !event["x"].isFloat()) ||
+                (!event["y"].isInt() && !event["y"].isFloat()))
+                return std::nullopt;
+            const auto x = event["x"].getWithDefault<double>(
+                std::numeric_limits<double>::quiet_NaN());
+            const auto y = event["y"].getWithDefault<double>(
+                std::numeric_limits<double>::quiet_NaN());
+            const auto button = event.hasObjectMember("button") ? event["button"].getInt64() : 0;
+            if (!std::isfinite(x) || !std::isfinite(y) ||
+                std::abs(x) > kControlUiMaximumCoordinate ||
+                std::abs(y) > kControlUiMaximumCoordinate || button < 0 || button > 3)
+                return std::nullopt;
+            ControlUiPointerInput pointer{.x = x, .y = y,
+                                          .button = static_cast<std::uint8_t>(button)};
+            const std::string_view phase = event["phase"].getString();
+            if (phase == "down")
+                pointer.phase = ControlUiPointerInput::Phase::Down;
+            else if (phase == "move")
+                pointer.phase = ControlUiPointerInput::Phase::Move;
+            else if (phase == "up")
+                pointer.phase = ControlUiPointerInput::Phase::Up;
+            else
+                return std::nullopt;
+            parsed.input = std::move(pointer);
+        } else if (kind == "keyboard") {
+            if (!event["phase"].isString() || !event["key"].isString() ||
+                !event["repeat"].isBool())
+                return std::nullopt;
+            ControlUiKeyboardInput keyboard{.key = std::string(event["key"].getString()),
+                                            .repeat = event["repeat"].getBool()};
+            if (keyboard.key.empty() || keyboard.key.size() > kControlUiMaximumKeyBytes)
+                return std::nullopt;
+            const std::string_view phase = event["phase"].getString();
+            if (phase == "down")
+                keyboard.phase = ControlUiKeyboardInput::Phase::Down;
+            else if (phase == "up")
+                keyboard.phase = ControlUiKeyboardInput::Phase::Up;
+            else
+                return std::nullopt;
+            parsed.input = std::move(keyboard);
+        } else if (kind == "focus") {
+            if (!event["focused"].isBool())
+                return std::nullopt;
+            parsed.input = ControlUiFocusInput{event["focused"].getBool()};
+        } else if (kind == "text") {
+            if (!event["text"].isString())
+                return std::nullopt;
+            ControlUiTextInput text_input{std::string(event["text"].getString())};
+            if (text_input.text.empty() || text_input.text.size() > kControlUiMaximumTextBytes ||
+                text_input.text.find('\0') != std::string::npos)
+                return std::nullopt;
+            parsed.input = std::move(text_input);
+        } else {
+            return std::nullopt;
+        }
+        return parsed;
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+ControlExecutionOutcome input_failure(ControlUiApplyStatus status) {
+    switch (status) {
+    case ControlUiApplyStatus::TargetUnavailable:
+        return failure(ControlResultCode::InvalidRequest, "exact UI target is unavailable");
+    case ControlUiApplyStatus::StaleGeneration:
+        return failure(ControlResultCode::SessionStale, "UI view generation is stale",
+                       ControlRetryClassification::AfterRefresh);
+    case ControlUiApplyStatus::InvalidEvent:
+        return failure(ControlResultCode::InvalidRequest, "UI event was rejected by the host");
+    case ControlUiApplyStatus::Applied:
+        break;
+    }
+    return failure(ControlResultCode::InternalError, "UI input returned an invalid host status");
+}
+
 } // namespace
 
 struct ControlHostUiExecutor::State {
@@ -99,6 +232,8 @@ struct ControlHostUiExecutor::State {
     ControlHostUiBinding binding;
     std::shared_ptr<InspectorMainThreadRpc> rpc;
     std::shared_ptr<InspectorCaptureSource> capture;
+    std::shared_ptr<ControlHostUiTargetAdapter> target_adapter;
+    std::string view_generation;
     std::shared_ptr<RuntimeEvaluator> evaluator;
     ControlRuntimeEvalRedactor redact_eval;
     std::size_t maximum_capture_bytes = 0;
@@ -111,6 +246,7 @@ struct ControlHostUiExecutor::State {
                                          const ControlRequestEnvelope& request,
                                          const ControlExecutionContext& context) {
         std::shared_ptr<InspectorCaptureSource> acquired_capture;
+        std::shared_ptr<ControlHostUiTargetAdapter> acquired_target_adapter;
         std::shared_ptr<RuntimeEvaluator> acquired_evaluator;
         ControlHostUiBinding acquired_binding;
         {
@@ -119,6 +255,7 @@ struct ControlHostUiExecutor::State {
                 return failure(ControlResultCode::SessionStale, "host UI executor is disconnected",
                                ControlRetryClassification::AfterRefresh);
             acquired_capture = capture;
+            acquired_target_adapter = target_adapter;
             acquired_evaluator = evaluator;
             acquired_binding = binding;
         }
@@ -145,28 +282,48 @@ struct ControlHostUiExecutor::State {
         }
 
         if (request.operation_id == kUiInputOperation) {
-            return failure(ControlResultCode::NotImplemented,
-                           "UI input is unavailable without an exact host-owned target seam");
+            if (plan.capability != InspectorCapability::UiInput)
+                return failure(ControlResultCode::PolicyDenied,
+                               "UI input capability does not match the admitted plan");
+            if (!acquired_target_adapter)
+                return failure(ControlResultCode::HostUnavailable,
+                               "exact-target UI input is unavailable",
+                               ControlRetryClassification::AfterRefresh);
+            const auto parsed = parse_input_request(request.params_json);
+            if (!parsed)
+                return failure(ControlResultCode::InvalidRequest,
+                               "UI input request was not canonical");
+            if (parsed->view_generation != view_generation)
+                return failure(ControlResultCode::SessionStale, "UI view generation is stale",
+                               ControlRetryClassification::AfterRefresh);
+            const ControlUiExactTarget target{.instance_id = acquired_binding.registration.instance_id,
+                                              .instance_generation = plan.instance_generation,
+                                              .view_generation = parsed->view_generation,
+                                              .node_id = parsed->target_id};
+            const ControlUiAuthorityOwner owner{.client_id = plan.client_id.value,
+                                                .grant_id = plan.grant_id.value,
+                                                .client_principal = plan.client_principal};
+            const auto applied =
+                acquired_target_adapter->dispatch_input(target, owner, parsed->input);
+            if (applied != ControlUiApplyStatus::Applied)
+                return input_failure(applied);
+            const auto after_dispatch = context.checkpoint();
+            if (after_dispatch != ControlExecutionCheckpoint::Continue) {
+                acquired_target_adapter->release_controller(owner);
+                return checkpoint_failure(after_dispatch);
+            }
+            auto detail = choc::value::createObject("ControlUiInputResult");
+            detail.addMember("receipt_id", plan.receipt_id.value);
+            detail.addMember("applied", true);
+            return {.terminal_state = ControlReceiptState::Completed,
+                    .result = {.detail_json = choc::json::toString(detail, true)}};
         }
         if (request.operation_id == kCaptureOperation) {
             if (plan.capability != InspectorCapability::CaptureImage)
                 return failure(ControlResultCode::PolicyDenied,
                                "UI capture capability does not match the admitted plan");
-            if (!acquired_capture)
-                return failure(ControlResultCode::HostUnavailable,
-                               "exact-instance UI capture is unavailable",
-                               ControlRetryClassification::AfterRefresh);
-            try {
-                const auto params = choc::json::parse(request.params_json);
-                if (!params.isObject() || !params["target"].isString() ||
-                    !params["format"].isString() || params["format"].getString() != "png")
-                    return failure(ControlResultCode::InvalidRequest,
-                                   "UI capture request was not canonical");
-                if (params["target"].getString() != "window")
-                    return failure(
-                        ControlResultCode::NotImplemented,
-                        "node capture is unavailable without an exact node capture seam");
-            } catch (...) {
+            const auto parsed = parse_capture_request(request.params_json);
+            if (!parsed) {
                 return failure(ControlResultCode::InvalidRequest,
                                "UI capture request could not be decoded");
             }
@@ -174,9 +331,35 @@ struct ControlHostUiExecutor::State {
                 return failure(ControlResultCode::HostUnavailable,
                                "broker artifact publication is unavailable",
                                ControlRetryClassification::AfterRefresh);
-            auto captured = acquired_capture->capture_png();
-            if (!captured.error.empty())
+            InspectorCapture captured;
+            if (parsed->node) {
+                if (!acquired_target_adapter)
+                    return failure(ControlResultCode::HostUnavailable,
+                                   "exact-target node capture is unavailable",
+                                   ControlRetryClassification::AfterRefresh);
+                if (parsed->view_generation != view_generation)
+                    return failure(ControlResultCode::SessionStale, "UI view generation is stale",
+                                   ControlRetryClassification::AfterRefresh);
+                captured = acquired_target_adapter->capture_node_png(
+                    {.instance_id = acquired_binding.registration.instance_id,
+                     .instance_generation = plan.instance_generation,
+                     .view_generation = parsed->view_generation,
+                     .node_id = parsed->node_id});
+            } else {
+                if (!acquired_capture)
+                    return failure(ControlResultCode::HostUnavailable,
+                                   "exact-instance window capture is unavailable",
+                                   ControlRetryClassification::AfterRefresh);
+                captured = acquired_capture->capture_png();
+            }
+            if (!captured.error.empty()) {
+                if (captured.error_code == "session_stale")
+                    return failure(ControlResultCode::SessionStale, captured.error,
+                                   ControlRetryClassification::AfterRefresh);
+                if (captured.error_code == "target_unavailable")
+                    return failure(ControlResultCode::InvalidRequest, captured.error);
                 return failure(ControlResultCode::InternalError, "UI capture failed");
+            }
             const auto maximum = std::min(maximum_capture_bytes, context.maximum_artifact_bytes);
             if (maximum == 0 || captured.png.size() > maximum)
                 return failure(ControlResultCode::ResourceExhausted,
@@ -338,7 +521,7 @@ ControlHostUiExecutor::ControlHostUiExecutor(std::shared_ptr<State> state)
     : state_(std::move(state)) {}
 
 ControlHostUiExecutor::~ControlHostUiExecutor() {
-    disconnect();
+    (void)disconnect();
 }
 
 std::unique_ptr<ControlHostUiExecutor>
@@ -369,11 +552,23 @@ ControlHostUiExecutor::create(ControlHostUiExecutorConfig config) {
          !config.redact_runtime_eval_result ||
          config.runtime_evaluator->binary_marker() != kRuntimeEvalComponentMarker))
         return nullptr;
+    if (config.target_adapter &&
+        (config.view_generation.empty() ||
+         config.view_generation.size() > kControlUiMaximumViewGenerationBytes ||
+         (std::ranges::find(registration.capabilities, InspectorCapability::CaptureImage) ==
+              registration.capabilities.end() &&
+          std::ranges::find(registration.capabilities, InspectorCapability::UiInput) ==
+              registration.capabilities.end())))
+        return nullptr;
+    if (!config.target_adapter && !config.view_generation.empty())
+        return nullptr;
 
     auto state = std::make_shared<State>();
     state->binding = std::move(config.binding);
     state->rpc = std::move(config.main_thread_rpc);
     state->capture = std::move(config.capture_source);
+    state->target_adapter = std::move(config.target_adapter);
+    state->view_generation = std::move(config.view_generation);
     state->evaluator = std::move(config.runtime_evaluator);
     state->redact_eval = std::move(config.redact_runtime_eval_result);
     state->maximum_capture_bytes = config.maximum_capture_bytes;
@@ -404,22 +599,49 @@ ControlOperationExecutor ControlHostUiExecutor::executor() const {
 bool ControlHostUiExecutor::ready() const {
     std::lock_guard lock(state_->mutex);
     return state_->connected && static_cast<bool>(state_->main_thread) &&
-           (state_->capture || state_->evaluator);
+           (state_->capture || state_->target_adapter || state_->evaluator);
 }
 
-void ControlHostUiExecutor::disconnect() noexcept {
+bool ControlHostUiExecutor::disconnect() noexcept {
     if (!state_)
-        return;
-    std::lock_guard lock(state_->mutex);
-    if (!state_->connected)
-        return;
-    state_->connected = false;
-    state_->capture.reset();
-    state_->evaluator.reset();
+        return true;
+    std::shared_ptr<ControlHostUiTargetAdapter> released_adapter;
+    std::shared_ptr<InspectorMainThreadRpc> released_rpc;
+    {
+        std::lock_guard lock(state_->mutex);
+        if (!state_->connected && !state_->target_adapter)
+            return true;
+        state_->connected = false;
+        state_->capture.reset();
+        released_adapter = state_->target_adapter;
+        released_rpc = state_->rpc;
+        state_->evaluator.reset();
+    }
+    if (released_adapter && released_rpc) {
+        constexpr std::int64_t kControllerReleaseRequest =
+            std::numeric_limits<std::int64_t>::min();
+        InspectorMessage response;
+        try {
+            response = released_rpc->call(
+                kControllerReleaseRequest,
+                [released_adapter] {
+                    released_adapter->release_controller(std::nullopt);
+                    return make_response(kControllerReleaseRequest, R"({"released":true})");
+                });
+        } catch (...) {
+            return false;
+        }
+        if (response.is_error)
+            return false;
+        std::lock_guard lock(state_->mutex);
+        if (state_->target_adapter == released_adapter)
+            state_->target_adapter.reset();
+    }
+    return true;
 }
 
 std::string_view control_ui_input_disposition() noexcept {
-    return "unsupported-no-exact-host-target-seam";
+    return "supported-exact-target-grant-controlled";
 }
 
 } // namespace pulp::inspect

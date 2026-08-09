@@ -77,7 +77,8 @@ find_package(Pulp REQUIRED COMPONENTS
     inspect-control
     inspect-client
     inspect-runtime
-    inspect-standalone-runtime)
+    inspect-standalone-runtime
+    inspect-ui-runtime)
 
 if(NOT TARGET Pulp::inspect-standalone-runtime)
     message(FATAL_ERROR "Installed canonical Standalone adapter target is missing")
@@ -88,6 +89,9 @@ set(_control_targets
     Pulp::inspect-control
     Pulp::inspect-client
     Pulp::inspect-runtime)
+if(NOT TARGET Pulp::inspect-ui-runtime)
+    message(FATAL_ERROR "Installed control SDK target is missing: Pulp::inspect-ui-runtime")
+endif()
 set(_forbidden_direct_dependency
     "pulp::(render|view|format|host|canvas|gpu-audio)|pulp-(render|view|format|host|canvas|gpu-audio|cli|mcp)")
 foreach(_target IN LISTS _control_targets)
@@ -125,6 +129,7 @@ file(WRITE "${_consumer_source}/main.cpp" [=[
 #include <pulp/inspect/control_host_preflight.hpp>
 #include <pulp/inspect/control_host_router.hpp>
 #include <pulp/inspect/control_host_ui_executor.hpp>
+#include <pulp/inspect/control_standalone_ui_adapter.hpp>
 #include <pulp/inspect/control_main_thread_executor.hpp>
 #include <pulp/inspect/control_trace_session_executor.hpp>
 #include <pulp/inspect/control_operations.hpp>
@@ -217,6 +222,8 @@ int main() {
           pulp::inspect::ControlRegistrationId{"installed-registration"}};
   auto rpc = std::make_shared<pulp::inspect::InspectorMainThreadRpc>();
   auto* ui_executor_type = static_cast<pulp::inspect::ControlHostUiExecutor*>(nullptr);
+  auto* standalone_ui_adapter_type =
+      static_cast<pulp::inspect::ControlStandaloneUiAdapter*>(nullptr);
   pulp::inspect::ControlMainThreadExecutor main_thread_executor{rpc, {}};
   auto trace = std::make_shared<pulp::inspect::TraceInspector>();
   auto trace_executor = pulp::inspect::ControlTraceSessionExecutor::create({
@@ -274,6 +281,8 @@ int main() {
              && artifacts.maximum_blob_bytes > 0
              && inventory.maximum_entries > 0
              && launcher_type == nullptr
+             && ui_executor_type == nullptr
+             && standalone_ui_adapter_type == nullptr
              && !bootstrap_bytes.empty()
              && !enrollment_bootstrap_bytes.empty()
              && process_options.max_standard_input_provider_bytes == 4096

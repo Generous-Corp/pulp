@@ -106,6 +106,9 @@ endif()
 if(TARGET pulp-inspect-standalone-runtime)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-standalone-runtime)
 endif()
+if(TARGET pulp-inspect-ui-runtime)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-ui-runtime)
+endif()
 if(TARGET pulp-inspect-offline-runtime)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-offline-runtime)
 endif()
@@ -359,6 +362,7 @@ elseif(TARGET pulp-inspect-protocol)
     if(TARGET pulp-inspect-runtime)
         install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_host_ui_executor.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_standalone_ui_adapter.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_main_thread_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_state_read_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_state_write_executor.hpp"

@@ -401,10 +401,16 @@ TEST_CASE("control JSON Schema validator accepts representative registry contrac
 
     const auto& input = operation("dev.pulp.ui/input@1");
     CHECK(validate_control_json_schema(
-        R"({"kind":"pointer","target_id":"gain","event":{"phase":"down","x":12.5,"y":3,"button":0}})",
+        R"({"kind":"pointer","target_id":"gain","view_generation":"view-a","event":{"phase":"down","x":12.5,"y":3,"button":0}})",
         input.input_schema_json, &diagnostics));
     CHECK_FALSE(validate_control_json_schema(
-        R"({"kind":"pointer","target_id":"gain","event":{"phase":"down","x":12.5}})",
+        R"({"kind":"pointer","target_id":"gain","view_generation":"view-a","event":{"phase":"down","x":12.5}})",
+        input.input_schema_json, &diagnostics));
+    CHECK(validate_control_json_schema(
+        R"({"kind":"text","target_id":"editor","view_generation":"view-a","event":{"text":"bounded"}})",
+        input.input_schema_json, &diagnostics));
+    CHECK_FALSE(validate_control_json_schema(
+        R"({"kind":"pointer","target_id":"gain","view_generation":"view-a","event":{"phase":"down","x":12.5,"y":3,"button":4}})",
         input.input_schema_json, &diagnostics));
 
     const auto& state_write = operation("dev.pulp.state/parameter-gesture@1");
