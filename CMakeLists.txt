@@ -404,6 +404,7 @@ endif()
 
 set(_pulp_standalone_sources
     core/format/src/standalone.cpp
+    core/format/src/standalone_control_host.cpp
     core/format/src/standalone_musical_typing.cpp
     core/format/src/test_signal.cpp
     core/format/src/settings_panel.cpp)

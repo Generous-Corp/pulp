@@ -636,6 +636,22 @@ bool StandaloneApp::start() {
         processor_->define_parameters(store_);
     }
 
+    const auto start_control_host = [this] {
+        if (control_host_)
+            return true;
+        auto creation = detail::create_standalone_control_host();
+        if (!creation.factory_installed)
+            return true;
+        control_host_ = std::move(creation.host);
+        if (control_host_ && control_host_->start(*processor_, store_))
+            return true;
+        runtime::log_error("Standalone: canonical control host failed closed during startup");
+        if (control_host_)
+            control_host_->stop();
+        control_host_.reset();
+        return false;
+    };
+
     auto desc = processor_->descriptor();
     runtime::log_info("Standalone: starting '{}'", desc.name);
 
@@ -679,6 +695,10 @@ bool StandaloneApp::start() {
             "or started (set PULP_SCREENSHOT_KEEP_AUDIO=1 to keep audio live)");
         prepare_render_state();
         running_.store(true);
+        if (!start_control_host()) {
+            running_.store(false);
+            return false;
+        }
         return true;
     }
 
@@ -766,6 +786,11 @@ bool StandaloneApp::start() {
     if (!ok) {
         runtime::log_error("Standalone: failed to start audio");
         running_.store(false);
+        return false;
+    }
+
+    if (!start_control_host()) {
+        stop_audio_keep_processor();
         return false;
     }
 
@@ -1304,6 +1329,10 @@ void StandaloneApp::stop() {
     // because that window's global-key callback still references it.
     audio_inspector_.reset();
 #endif
+    if (control_host_) {
+        control_host_->stop();
+        control_host_.reset();
+    }
     if (processor_) {
         processor_->release();
         processor_.reset();

@@ -8,6 +8,7 @@
 #endif
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/standalone_control_host.hpp>
 #include <pulp/runtime/trace_session.hpp>
 #include <pulp/format/test_signal.hpp>
 #include <pulp/midi/device.hpp>
@@ -411,6 +412,9 @@ private:
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
     std::unique_ptr<Processor> processor_;
+    // Present in every StandaloneApp, but populated only by an executable that
+    // explicitly links and registers a canonical control host adapter.
+    std::unique_ptr<StandaloneControlHost> control_host_;
     StandaloneConfig config_;
     bool persisted_config_loaded_ = false;  // overlay persisted settings once, not on soft restarts
 
