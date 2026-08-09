@@ -38,6 +38,8 @@
 #include <pulp/signal/mid_side.hpp>
 #include <pulp/signal/mirrored_history_buffer.hpp>
 #include <pulp/signal/modal_bank.hpp>
+#include <pulp/signal/particle_collision_exciter.hpp>
+#include <pulp/signal/particle_percussion_voice.hpp>
 #include <pulp/signal/nway_crossfade.hpp>
 #include <pulp/signal/path_latency_aligner.hpp>
 #include <pulp/signal/path_switcher.hpp>

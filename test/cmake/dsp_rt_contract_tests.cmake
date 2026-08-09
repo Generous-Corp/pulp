@@ -244,3 +244,10 @@ pulp_add_test_suite(pulp-test-signal-fuzz-pair
 pulp_add_test_suite(pulp-test-nlms-adaptive-filter
     SOURCES test_nlms_adaptive_filter.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
+
+# Depletion-aware stochastic collision and prepared voice contracts use
+# independent statistical oracles plus the realtime allocation probe.
+pulp_add_test_suite(pulp-test-particle-percussion
+    SOURCES test_particle_percussion.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)

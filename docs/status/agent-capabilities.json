@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 12,
+  "manifest_revision": 13,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 35
+        "capabilities": 36
       },
       "timebase": {
         "state": "partial",
@@ -2631,6 +2631,82 @@
       "contract_digest": "sha256:f96ab0ee43fcf5bbfdea31592ddf9bb85873cba45d0b1fddfa3a749eee7c7a2a"
     },
     {
+      "key": "signal.particle-percussion",
+      "domain": "signal",
+      "summary": "Deterministic depleted-energy particle collisions and prepared resonant percussion voices.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control; voice preparation may allocate retained modal storage",
+        "process": "audio",
+        "reset": "audio",
+        "release": "destruction off audio"
+      },
+      "state_model": "Fixed seeded collision, jitter, and routing generators plus collision energy, resonator state, and prepared five-mode modal storage.",
+      "seed_model": "public uint64 seed with independently purpose-derived streams",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "normalized excitation and bounded collision, decay, and body-model controls",
+      "output_domain": "collision events or mono particle-percussion audio",
+      "units": [
+        "samples",
+        "hertz",
+        "milliseconds",
+        "normalized energy",
+        "linear amplitude"
+      ],
+      "latency": "zero",
+      "tail": "finite collision settling plus the longest configured resonator or modal decay when sustain_floor is positive; unbounded and reported as -1 when it is zero",
+      "scheduling": "sample-synchronous after control-side preparation and model configuration",
+      "bindings": [
+        {
+          "role": "collision_exciter",
+          "kind": "cpp_type",
+          "include": "pulp/signal/particle_collision_exciter.hpp",
+          "qualified_name": "pulp::signal::ParticleCollisionExciterT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "voice",
+          "kind": "cpp_type",
+          "include": "pulp/signal/particle_percussion_voice.hpp",
+          "qualified_name": "pulp::signal::ParticlePercussionVoiceT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:4e2f53d705ca4c8a987faae3918770456b9751767577bb69c7e5bc8965e20952"
+    },
+    {
       "key": "signal.routing-primitives",
       "domain": "signal",
       "summary": "Bounded matrix, mid-side, N-way crossfade, click-free switching, and path-latency alignment primitives.",
@@ -4555,14 +4631,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 66,
+    "total": 67,
     "by_domain": {
       "audio": 6,
       "midi": 9,
       "music": 6,
       "offline": 0,
       "sequence": 1,
-      "signal": 35,
+      "signal": 36,
       "timebase": 9
     }
   },
@@ -7087,6 +7163,34 @@
               "process(SampleType input)",
               "process(SampleType& left, SampleType& right)",
               "compute_gains(SampleType& l_gain, SampleType& r_gain)"
+            ]
+          }
+        ],
+        "particle_collision_exciter.hpp": [
+          {
+            "class": "ParticleCollisionExciterT",
+            "methods": [
+              "set_seed(std::uint64_t seed)",
+              "set_particle_count(int count)",
+              "set_event_rate(SampleType events_per_second)",
+              "set_energy_decay(SampleType milliseconds)",
+              "set_sustain_floor(SampleType floor)",
+              "set_collision_energy_loss(SampleType loss)",
+              "excite(SampleType amount01)"
+            ]
+          }
+        ],
+        "particle_percussion_voice.hpp": [
+          {
+            "class": "ParticlePercussionVoiceT",
+            "methods": [
+              "set_model(Model model)",
+              "set_seed(std::uint64_t seed)",
+              "set_particle_count(int count)",
+              "set_event_rate(SampleType rate)",
+              "set_energy_decay(SampleType milliseconds)",
+              "set_sustain_floor(SampleType floor)",
+              "set_collision_energy_loss(SampleType loss)"
             ]
           }
         ],
