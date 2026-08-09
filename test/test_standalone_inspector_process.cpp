@@ -104,21 +104,24 @@ TEST_CASE("Explicit standalone subprocess serves its deterministic back-buffer f
 
     const auto exit_png = scratch.path / "exit.png";
     pulp::platform::ProcessOptions options;
-    options.timeout_ms = 15'000;
+    options.timeout_ms = 30'000;
     // The child is polled before wait(), so captured GPU logs would not be
     // drained and can fill a pipe before the Inspector publishes discovery.
     options.capture_stdout = false;
     options.capture_stderr = false;
     pulp::platform::ChildProcess child;
+    // Keep the frame-delayed exit beyond the longest discovery plus capture
+    // handshake budget. The hidden host now advances deterministically at
+    // 60 Hz, so a small frame count would race the Inspector client itself.
     REQUIRE(child.start(
         PULP_STANDALONE_INSPECTOR_PROCESS_FIXTURE,
-        {"--exit-screenshot", exit_png.string(), "--frames", "180"}, options));
+        {"--exit-screenshot", exit_png.string(), "--frames", "600"}, options));
 
     const auto runtime_path = scratch.path / "runtime";
     pulp::inspect::InspectorDiscoveryReader reader(runtime_path);
     std::vector<pulp::inspect::InspectorDiscoveryRecord> records;
     const auto discovery_deadline =
-        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        std::chrono::steady_clock::now() + std::chrono::seconds(10);
     while (records.empty() && child.is_running()
            && std::chrono::steady_clock::now() < discovery_deadline) {
         records = reader.list();

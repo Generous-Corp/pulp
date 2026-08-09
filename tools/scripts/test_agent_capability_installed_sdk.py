@@ -82,6 +82,31 @@ def cache_value(cache: str, name: str) -> str | None:
     return None
 
 
+def find_build_tree_artifact(
+    build_dir: pathlib.Path,
+    archive_name: str,
+    configuration: str | None,
+) -> pathlib.Path:
+    """Find the canonical Pulp::audio artifact, excluding nested SDK fixtures."""
+    audio_build_dir = build_dir / "core" / "audio"
+    candidates = sorted(
+        path.resolve()
+        for path in audio_build_dir.rglob(archive_name)
+        if path.is_file()
+    )
+    if configuration:
+        configured_candidates = [
+            path for path in candidates if configuration in path.parts
+        ]
+        if configured_candidates:
+            candidates = configured_candidates
+    if len(candidates) != 1:
+        raise RuntimeError(
+            f"expected one canonical build-tree artifact for Pulp::audio, got {candidates}"
+        )
+    return candidates[0]
+
+
 def validate_target_ownership(document: dict, owners: dict[str, str]) -> None:
     for row in document.get("capabilities", []):
         for binding in row.get("bindings", []):
@@ -314,6 +339,8 @@ def configure_consumer(
         command.append(f"-DCMAKE_PREFIX_PATH={prefix}")
     if configuration:
         command.append(f"-DCMAKE_BUILD_TYPE={configuration}")
+        if configuration.casefold() == "debug":
+            command.append("-DPULP_ALLOW_DEBUG_SDK=ON")
     return run(command, cwd=project)
 
 
@@ -739,27 +766,9 @@ def main() -> int:
         if imported_match is None:
             raise RuntimeError("could not locate installed pulp-audio imported artifact")
         archive_name = pathlib.Path(imported_match.group(1)).name
-        # Search the owning target's build directory, not all of build_dir.
-        # Other ctests install SDK copies under build-local smoke prefixes in
-        # parallel; a tree-wide rglob can mistake those installed archives for
-        # a second build-tree artifact and make this isolation oracle flaky.
-        audio_build_dir = build_dir / "core" / "audio"
-        archive_candidates = [
-            path.resolve()
-            for path in audio_build_dir.rglob(archive_name)
-            if path.is_file()
-        ]
-        if configuration:
-            configured_candidates = [
-                path for path in archive_candidates if configuration in path.parts
-            ]
-            if configured_candidates:
-                archive_candidates = configured_candidates
-        if len(archive_candidates) != 1:
-            raise RuntimeError(
-                f"expected one build-tree artifact for Pulp::audio, got {archive_candidates}"
-            )
-        audio_archive = archive_candidates[0]
+        audio_archive = find_build_tree_artifact(
+            build_dir, archive_name, configuration
+        )
         export_config.write_text(
             original_export.replace(imported_match.group(1), audio_archive.as_posix())
         )
