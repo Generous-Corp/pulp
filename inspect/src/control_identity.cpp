@@ -74,9 +74,8 @@ bool valid_registration_request(const ControlRegistrationRequest& request) {
         if (!capability_is_grantable(capability)) {
             return false;
         }
-        // Phase 4's first runtime slice is deliberately T0-only. Merely
-        // declaring render.offline on a standalone or bridged host must not
-        // expand that process's authority before those tiers land.
+        // Offline render is admitted only for deterministic offline jobs;
+        // declaration alone cannot expand Standalone or bridged authority.
         if (capability == InspectorCapability::RenderOffline &&
             (request.host_tier != ControlHostTier::OfflineJob ||
              request.manifest.profile != ControlBuildProfile::TestDeterministic)) {

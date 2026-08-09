@@ -282,8 +282,13 @@ pulp_validate_bundle_relocatable(MyPlugin_CLAP)  # POST_BUILD: FAILS the build i
 ```
 
 `tools/cmake/scripts/check_bundle_relocatable.py <bundle> --strict` is the
-standalone validator (reads Mach-O rpaths + `@rpath` deps — stronger than the
-string-based `check_portable_binary.py`). Wire it into `pulp ship` / CI too.
+standalone validator (reads the Mach-O dependency graph — stronger than the
+string-based `check_portable_binary.py`). It rejects every non-system dependency
+outside the bundle closure, not only unresolved `@rpath` entries:
+`@loader_path` and `@executable_path` must normalize inside the bundle and name
+an existing file, while absolute external paths fail. Any copied runtime closure
+must also be signed, hash-pinned, and included in the immutable launch snapshot.
+Wire the validator into `pulp ship` / CI too.
 
 `pulp_add_plugin(... FORMATS AU)` now adds `@loader_path` to the AU target
 without replacing any engine-specific build rpaths, then runs the strict

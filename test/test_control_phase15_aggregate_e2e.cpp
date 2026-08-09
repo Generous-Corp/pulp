@@ -308,8 +308,8 @@ std::optional<choc::value::Value> read_receipt(const std::filesystem::path& dire
 
 } // namespace
 
-TEST_CASE("Phase 15 aggregate exact-instance CLI MCP revocation and disconnect E2E",
-          "[inspect][control][e2e][phase15][aggregate][cli][mcp][security]") {
+TEST_CASE("Installed aggregate exact-instance CLI MCP revocation and disconnect E2E",
+          "[inspect][control][e2e][parity][aggregate][cli][mcp][security]") {
 #ifdef __APPLE__
     AggregateRoot root;
     const auto executable = current_executable();

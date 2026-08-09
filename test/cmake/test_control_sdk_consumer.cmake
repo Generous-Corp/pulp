@@ -648,7 +648,7 @@ if(APPLE)
             "Installed production broker did not launch/register the author host (${_author_process_result})\n${_author_process_output}\n${_author_process_error}")
     endif()
     # The aggregate embeds the production daemon implementation so it can
-    # inject deterministic explicit consent. Mirror the Phase 15 process E2E:
+    # inject deterministic explicit consent. Mirror the installed process E2E:
     # retain its signed bytes at the exact broker slot that the installed
     # CLI/MCP independently resolve and authenticate.
     file(COPY_FILE "${_daemon_test}"
