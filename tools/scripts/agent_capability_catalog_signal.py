@@ -527,6 +527,85 @@ EXPORTS = [
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
     capability(
+        key="signal.spectral-band-mask", domain="signal",
+        summary=(
+            "Fixed-capacity zoomable band layouts compiled into allocation-free "
+            "complex-spectrum gain masks."
+        ),
+        rt_class="mixed",
+        lifecycle={
+            "construction": "control",
+            "prepare": "control-side immutable mask compilation",
+            "process": "audio spectral-frame owner",
+            "reset": "none",
+            "release": "none",
+        },
+        state_model=(
+            "Fixed 64-slot finite-gain and categorical-mute layout plus a fixed "
+            "8193-bin compiled gain table."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "tolerance_bounded", "block_partition": "not_applicable",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain=(
+            "finite linear or logarithmic band layouts, prepared FFT geometry, and "
+            "coherent channel groups of one-sided complex spectra"
+        ),
+        output_domain="immutable gain tables and in-place masked complex spectra",
+        units=["bins", "channels", "frames", "hertz", "decibels", "linear gain"],
+        latency="zero additional frame-domain latency",
+        tail="none",
+        scheduling="control-side table compilation then one supplied spectral frame per apply call",
+        bindings=[
+            binding(role="layout", kind="cpp_type",
+                    include="pulp/signal/spectral_band_mask.hpp",
+                    qualified_name="pulp::signal::SpectralBandLayoutT<float>",
+                    target="Pulp::signal",
+                    header_fingerprint="sha256:2c8d911425699a83465c1fd5adf554ab7218a5e1de584b63413629eb699ccb3d"),
+            binding(role="table", kind="cpp_type",
+                    include="pulp/signal/spectral_band_mask.hpp",
+                    qualified_name="pulp::signal::SpectralMaskTableT<float>",
+                    target="Pulp::signal",
+                    header_fingerprint="sha256:2c8d911425699a83465c1fd5adf554ab7218a5e1de584b63413629eb699ccb3d"),
+            binding(role="compile", kind="cpp_function",
+                    include="pulp/signal/spectral_band_mask.hpp",
+                    qualified_name="pulp::signal::build_spectral_mask<float>",
+                    target="Pulp::signal",
+                    header_fingerprint="sha256:2c8d911425699a83465c1fd5adf554ab7218a5e1de584b63413629eb699ccb3d",
+                    address_expression=(
+                        "static_cast<bool (*)(const pulp::signal::SpectralBandLayoutT<float>&, "
+                        "int, float, pulp::signal::SpectralMaskTableT<float>&) noexcept>("
+                        "&pulp::signal::build_spectral_mask<float>)"
+                    )),
+            binding(role="apply", kind="cpp_function",
+                    include="pulp/signal/spectral_band_mask.hpp",
+                    qualified_name="pulp::signal::apply_spectral_mask<float>",
+                    target="Pulp::signal",
+                    header_fingerprint="sha256:2c8d911425699a83465c1fd5adf554ab7218a5e1de584b63413629eb699ccb3d",
+                    address_expression=(
+                        "static_cast<bool (*)(std::complex<float>* const*, int, int, "
+                        "const pulp::signal::SpectralMaskTableT<float>&) noexcept>("
+                        "&pulp::signal::apply_spectral_mask<float>)"
+                    )),
+        ],
+        _link_probes=[
+            {"role": "layout", "binding": "pulp::signal::SpectralBandLayoutT<float>",
+             "operation": "construct", "arguments": ""},
+            {"role": "table", "binding": "pulp::signal::SpectralMaskTableT<float>",
+             "operation": "construct", "arguments": ""},
+            {"role": "compile", "binding": "pulp::signal::build_spectral_mask<float>",
+             "operation": "function_call", "arguments": (
+                 "pulp::signal::SpectralBandLayoutT<float>{}, 1024, 48000.0f, "
+                 "[]() -> pulp::signal::SpectralMaskTableT<float>& { "
+                 "static pulp::signal::SpectralMaskTableT<float> table; return table; }()"
+             )},
+            {"role": "apply", "binding": "pulp::signal::apply_spectral_mask<float>",
+             "operation": "function_call", "arguments": (
+                 "nullptr, 0, 0, pulp::signal::SpectralMaskTableT<float>{}"
+             )},
+        ],
+    ),
+    capability(
         key="signal.spectral-gate", domain="signal",
         summary="Allocation-free scalar or per-bin gating of caller-owned complex spectra.",
         rt_class="audio",

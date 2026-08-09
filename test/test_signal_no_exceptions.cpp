@@ -39,5 +39,10 @@ int main() {
     if (expander.prepare(48000.0f) != pulp::signal::ExpanderStatus::ready)
         return 11;
     const auto output = expander.process(0.25f, -0.5f);
-    return std::isfinite(output[0]) && std::isfinite(output[1]) ? 0 : 12;
+    if (!std::isfinite(output[0]) || !std::isfinite(output[1]))
+        return 12;
+    pulp::signal::SpectralBandLayout layout;
+    pulp::signal::SpectralMaskTable mask;
+    return pulp::signal::build_spectral_mask(layout, 1024, 48000.0f, mask)
+        ? 0 : 13;
 }
