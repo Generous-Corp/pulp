@@ -49,6 +49,9 @@ int main() {
     const auto exp2 = pulp::signal::FastMath::exp2(0.5f);
     if (!std::isfinite(exp2))
         return 13;
+    pulp::signal::TransferCurve transfer_curve;
+    if (transfer_curve.process(0.25f) != 0.25f)
+        return 19;
     pulp::signal::SpectralBandLayout layout;
     pulp::signal::SpectralMaskTable mask;
     if (!pulp::signal::build_spectral_mask(layout, 1024, 48000.0f, mask))
