@@ -185,7 +185,8 @@ void help() {
                  "Usage: pulp control profiles [--json]\n"
                  "       pulp control instances [--json]\n"
                  "       pulp control status --instance ID [--explain] [--json]\n"
-                 "       pulp control grant-request --instance ID --profile PROFILE [--json]\n"
+                 "       pulp control grant-request --instance ID (--profile PROFILE | "
+                 "--operation OPERATION) [--json]\n"
                  "       pulp control call --instance ID OPERATION [--grant ID] [--profile "
                  "PROFILE] [--params JSON] [--timeout-ms MS] [--json]\n"
                  "       pulp control watch --instance ID RESOURCE [--grant ID] [--profile "
@@ -239,7 +240,8 @@ int cmd_control(const std::vector<std::string>& args) {
     }
     const auto verb = args[0];
     bool json = false, explain = false, params_provided = false;
-    std::string instance_id, grant_id, profile, params = "{}", output, artifact_id, baseline;
+    std::string instance_id, grant_id, profile, grant_operation, params = "{}", output,
+        artifact_id, baseline;
     std::string timeout_text;
     std::string positional;
     for (std::size_t i = 1; i < args.size(); ++i) {
@@ -257,6 +259,9 @@ int cmd_control(const std::vector<std::string>& args) {
         } else if (arg == "--profile") {
             if (!take(args, i, profile))
                 return fail("invalid-request", "--profile requires PROFILE", json);
+        } else if (arg == "--operation") {
+            if (!take(args, i, grant_operation))
+                return fail("invalid-request", "--operation requires OPERATION", json);
         } else if (arg == "--params") {
             if (!take(args, i, params))
                 return fail("invalid-request", "--params requires JSON", json);
@@ -284,6 +289,8 @@ int cmd_control(const std::vector<std::string>& args) {
 
     if (!timeout_text.empty() && verb != "call" && verb != "watch")
         return fail("invalid-request", "--timeout-ms is valid only for call or watch", json);
+    if (!grant_operation.empty() && verb != "grant-request")
+        return fail("invalid-request", "--operation is valid only for grant-request", json);
 
     if (verb == "audit") {
         if (positional.empty())
@@ -373,8 +380,17 @@ int cmd_control(const std::vector<std::string>& args) {
     if ((verb == "status" || verb == "grant-request" || verb == "call" || verb == "watch") &&
         instance_id.empty())
         return fail("invalid-request", verb + " requires --instance ID", json);
-    if (verb == "grant-request" && profile.empty())
-        return fail("invalid-request", "grant-request requires --profile PROFILE", json);
+    if (verb == "grant-request" && (profile.empty() == grant_operation.empty()))
+        return fail("invalid-request",
+                    "grant-request requires exactly one of --profile PROFILE or --operation "
+                    "OPERATION",
+                    json);
+    if (verb == "grant-request" && !grant_operation.empty()) {
+        const auto* descriptor = resolve_control_operation(grant_operation, 1);
+        if (!descriptor || !capability_is_grantable(descriptor->capability))
+            return fail("invalid-request", "the grant operation is unknown or not grantable",
+                        json);
+    }
     if (verb == "revoke" && grant_id.empty())
         return fail("invalid-request", "revoke requires --grant ID", json);
     if (verb == "artifact" && (artifact_id.empty() || output.empty()))
@@ -443,7 +459,10 @@ int cmd_control(const std::vector<std::string>& args) {
         const auto command = verb;
         if (verb == "grant-request") {
             object.addMember("instance_id", choc::value::createString(instance_id));
-            object.addMember("profile", choc::value::createString(profile));
+            if (!grant_operation.empty())
+                object.addMember("operation_id", choc::value::createString(grant_operation));
+            else
+                object.addMember("profile", choc::value::createString(profile));
         } else
             object.addMember("grant_id", choc::value::createString(grant_id));
         const auto manage_timeout = remaining_timeout(deadline, request_timeout, json);
@@ -531,8 +550,10 @@ int cmd_control(const std::vector<std::string>& args) {
     if (grant_id.empty()) {
         auto grant_params = choc::value::createObject("");
         grant_params.addMember("instance_id", choc::value::createString(instance_id));
-        grant_params.addMember(
-            "profile", choc::value::createString(profile.empty() ? "inspect-readonly" : profile));
+        if (profile.empty())
+            grant_params.addMember("operation_id", choc::value::createString(operation));
+        else
+            grant_params.addMember("profile", choc::value::createString(profile));
         const auto grant_timeout = remaining_timeout(deadline, request_timeout, json);
         if (!grant_timeout)
             return 1;

@@ -1141,16 +1141,25 @@ commands:
       - name: status
         summary: Describe one exact registration and optionally explain authority terms without claiming operation-dependent gates were evaluated
       - name: grant-request
-        summary: Ask the broker for a scoped grant; the CLI never self-approves consent
+        summary: Ask the broker for a profile-scoped or single typed-operation grant; exactly one of --profile or --operation is required and the CLI never self-approves consent
+        args:
+          - name: --profile
+            kind: option
+            required: false
+            description: Request the declared capability set for one known profile; mutually exclusive with --operation
+          - name: --operation
+            kind: option
+            required: false
+            description: Request one grantable typed registry operation, including dev.pulp.runtime/evaluate@1; mutually exclusive with --profile
       - name: call
-        summary: Invoke one registry operation through ControlClient with typed JSON params
+        summary: Invoke one registry operation through ControlClient with typed JSON params; without --grant or --profile, implicit authority is scoped to that exact typed operation
         args:
           - name: --timeout-ms
             kind: option
             required: false
             description: One 1–300000 ms end-to-end deadline shared by connection, enrollment, inventory, grant, negotiation, and request stages
       - name: watch
-        summary: Start one bounded registry subscription operation
+        summary: Start one bounded registry subscription operation; without --grant or --profile, implicit authority is scoped to that exact typed operation
         args:
           - name: --timeout-ms
             kind: option

@@ -943,6 +943,7 @@ TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
     REQUIRE(std::filesystem::is_regular_file(installed_host));
 
     std::atomic<std::uint64_t> consent_sequence{0};
+    std::atomic<std::uint64_t> operation_consent_count{0};
     ControlBrokerDaemon daemon({
         .runtime_root = root.runtime,
         .state_root = root.state,
@@ -956,7 +957,10 @@ TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
                          .working_directory = installed_host.parent_path(),
                          .host_tier = ControlHostTier::Standalone}}},
         .decide_consent =
-            [&consent_sequence](const ControlGrantConsentRequest& consent_request) {
+            [&consent_sequence,
+             &operation_consent_count](const ControlGrantConsentRequest& consent_request) {
+                if (consent_request.selector_kind == ControlGrantSelectorKind::Operation)
+                    operation_consent_count.fetch_add(1, std::memory_order_relaxed);
                 if (std::ranges::find(consent_request.grant.capabilities,
                                       InspectorCapability::RuntimeEval) !=
                     consent_request.grant.capabilities.end()) {
@@ -1253,41 +1257,67 @@ TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
         CHECK(telemetry["samples"].size() <= 2);
         CHECK(telemetry["dropped"].getWithDefault<std::int64_t>(-1) > 0);
 
-        auto eval_grant_request = choc::value::createObject("");
-        eval_grant_request.addMember("instance_id", choc::value::createString(instance_id));
-        eval_grant_request.addMember(
-            "operation_id", choc::value::createString("dev.pulp.runtime/evaluate@1"));
-        const auto eval_granted = connection.manage(
-            "grant-request", choc::json::toString(eval_grant_request, false));
-        REQUIRE(eval_granted.status_id == "granted");
-        const auto eval_grant_id = std::string(
-            choc::json::parse(eval_granted.data_json)["grant_id"].getString());
-        const auto refreshed_controller =
-            invoke("dev.pulp.session/control@1", R"({"action":"acquire"})");
-        REQUIRE(refreshed_controller.succeeded());
-        REQUIRE(refreshed_controller.response->state == ControlReceiptState::Completed);
-        controller_lease_id = std::string(
-            choc::json::parse(refreshed_controller.response->detail_json)["lease_id"].getString());
-        const auto evaluated = invoke(
-            "dev.pulp.runtime/evaluate@1",
-            R"json({"source":"({ answer: 42 })","timeout_ms":1000,"idempotency_key":"installed-eval"})json",
-            std::nullopt, eval_grant_id);
-        INFO(evaluated.explanation);
-        REQUIRE(evaluated.succeeded());
-        INFO(evaluated.response->explanation);
-        INFO(evaluated.response->detail_json);
-        REQUIRE(evaluated.response->state == ControlReceiptState::Completed);
-        CHECK(choc::json::parse(evaluated.response->detail_json)["result_json"].getString() ==
-              std::string_view{R"({"redacted":true})"});
-        const auto replayed_eval_consent = connection.manage(
-            "grant-request", choc::json::toString(eval_grant_request, false));
-        CHECK(replayed_eval_consent.status_id == "consent-replay");
-
-        const auto released_controller =
+        const auto released_for_cli_eval =
             invoke("dev.pulp.session/control@1", R"({"action":"release"})");
-        REQUIRE(released_controller.succeeded());
-        CHECK(choc::json::parse(released_controller.response->detail_json)["lease_id"].getString() ==
-              controller_lease_id);
+        REQUIRE(released_for_cli_eval.succeeded());
+        CHECK(choc::json::parse(released_for_cli_eval.response->detail_json)["lease_id"]
+                  .getString() == controller_lease_id);
+
+        const auto cli_controller = run_installed_client(
+            cli_environment, root.runtime,
+            {"control", "call", "--instance", instance_id,
+             "dev.pulp.session/control@1", "--profile", "develop", "--params",
+             R"({"action":"acquire"})", "--json"});
+        INFO(cli_controller.stdout_output);
+        INFO(cli_controller.stderr_output);
+        REQUIRE(cli_controller.exit_code == 0);
+        REQUIRE(choc::json::parse(cli_controller.stdout_output)["state"].getString() ==
+                "completed");
+
+        const auto cli_eval_grant = run_installed_client(
+            cli_environment, root.runtime,
+            {"control", "grant-request", "--instance", instance_id, "--operation",
+             "dev.pulp.runtime/evaluate@1", "--json"});
+        INFO(cli_eval_grant.stdout_output);
+        INFO(cli_eval_grant.stderr_output);
+        REQUIRE(cli_eval_grant.exit_code == 0);
+        const auto cli_eval_grant_json = choc::json::parse(cli_eval_grant.stdout_output);
+        REQUIRE(cli_eval_grant_json["status"].getString() == "granted");
+        const auto eval_grant_id =
+            std::string(cli_eval_grant_json["data"]["grant_id"].getString());
+        REQUIRE_FALSE(eval_grant_id.empty());
+
+        const auto evaluated = run_installed_client(
+            cli_environment, root.runtime,
+            {"control", "call", "--instance", instance_id,
+             "dev.pulp.runtime/evaluate@1", "--grant", eval_grant_id, "--params",
+             R"json({"source":"({ answer: 42 })","timeout_ms":1000,"idempotency_key":"installed-eval"})json",
+             "--json"});
+        INFO(evaluated.stdout_output);
+        INFO(evaluated.stderr_output);
+        REQUIRE(evaluated.exit_code == 0);
+        const auto evaluated_json = choc::json::parse(evaluated.stdout_output);
+        REQUIRE(evaluated_json["state"].getString() == "completed");
+        CHECK(evaluated_json["detail"]["result_json"].getString() ==
+              std::string_view{R"({"redacted":true})"});
+
+        const auto replayed_eval_consent = run_installed_client(
+            cli_environment, root.runtime,
+            {"control", "grant-request", "--instance", instance_id, "--operation",
+             "dev.pulp.runtime/evaluate@1", "--json"});
+        REQUIRE(replayed_eval_consent.exit_code == 1);
+        CHECK(choc::json::parse(replayed_eval_consent.stdout_output)["status"].getString() ==
+              "consent-replay");
+
+        const auto cli_controller_release = run_installed_client(
+            cli_environment, root.runtime,
+            {"control", "call", "--instance", instance_id,
+             "dev.pulp.session/control@1", "--profile", "develop", "--params",
+             R"({"action":"release"})", "--json"});
+        INFO(cli_controller_release.stdout_output);
+        INFO(cli_controller_release.stderr_output);
+        REQUIRE(cli_controller_release.exit_code == 0);
+        CHECK(operation_consent_count.load(std::memory_order_relaxed) >= 2);
 
         auto revoke = choc::value::createObject("");
         revoke.addMember("grant_id", choc::value::createString(request.grant_id));

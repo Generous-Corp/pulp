@@ -1372,6 +1372,8 @@ pulp control profiles --json
 pulp control instances --json
 pulp control status --instance <id> --explain
 pulp control grant-request --instance <id> --profile inspect-readonly --json
+pulp control grant-request --instance <id> \
+  --operation dev.pulp.runtime/evaluate@1 --json
 pulp control call --instance <id> dev.pulp.state/read@1 --params '{}'
 pulp control call --instance <id> dev.pulp.render/offline@1 \
   --params '{"input_artifact_id":"<id>","max_frames":48000,"timeout_ms":5000}' \
@@ -1390,7 +1392,12 @@ operation. Consequently `implemented`, `built`, `host_available`, `activated`,
 and `session_live` are `not_evaluated`; operation-specific policy and grant
 terms are evaluated only by the corresponding call or watch request.
 
-`grant-request` never mints authority in the CLI. A trusted broker consent
+`grant-request` requires exactly one selector: `--profile PROFILE` for a
+declared capability set, or `--operation OPERATION` for one grantable typed
+registry operation. The operation form is how callers request critical
+operations such as `dev.pulp.runtime/evaluate@1`, which intentionally belongs
+to no reusable profile. Unknown, non-grantable, and arbitrary operation IDs are
+rejected. The command never mints authority in the CLI. A trusted broker consent
 source must approve it; otherwise the stable result is `consent-required`.
 The broker derives a reconnectable client principal only after each invocation
 passes kernel peer observation and installed-code identity policy. Grants remain
@@ -1399,9 +1406,13 @@ revoked by a later `pulp control revoke`; a broker restart intentionally drops
 that in-memory authority.
 
 `call` and `watch` request a connection-bound grant when `--grant` is omitted,
-so consent and invocation share one authenticated process session. They validate
-`--params` against the operation registry before dispatch and print the broker
-receipt. `--timeout-ms` is one end-to-end deadline for broker connection,
+so consent and invocation share one authenticated process session. Without
+`--profile`, that implicit grant is scoped to the exact typed operation; this
+keeps operations outside reusable profiles reachable without broadening the
+grant. An explicit `--profile` remains available when the caller intentionally
+needs that declared capability set. They validate `--params` against the
+operation registry before dispatch and print the broker receipt. `--timeout-ms`
+is one end-to-end deadline for broker connection,
 client enrollment, instance lookup, grant issuance, negotiation, and the final
 request (1–300000 ms, default 3000); each stage receives only the time remaining.
 Use a value longer than the operation's own schema-level timeout for offline work.

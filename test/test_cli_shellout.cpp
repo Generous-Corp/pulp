@@ -1614,6 +1614,48 @@ TEST_CASE("pulp overflow validates non-mutating operator arguments", "[cli][shel
 }
 
 #if PULP_TEST_INSPECTOR_ENABLED
+TEST_CASE("pulp control grant-request exposes only profile or typed-operation selectors",
+          "[cli][shellout][control][grant]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    update_disabled.set("1");
+
+    const auto help = run_pulp({"control", "--help"}, 10000);
+    REQUIRE_FALSE(help.timed_out);
+    REQUIRE(help.exit_code == 0);
+    CHECK(help.stdout_output.find("(--profile PROFILE | --operation OPERATION)") !=
+          std::string::npos);
+    CHECK(help.stdout_output.find("--host") == std::string::npos);
+    CHECK(help.stdout_output.find("--port") == std::string::npos);
+
+    const auto missing =
+        run_pulp({"control", "grant-request", "--instance", "instance-1"}, 10000);
+    REQUIRE_FALSE(missing.timed_out);
+    REQUIRE(missing.exit_code == 2);
+    CHECK(missing.stderr_output.find("requires exactly one of --profile") != std::string::npos);
+
+    const auto conflicting = run_pulp(
+        {"control", "grant-request", "--instance", "instance-1", "--profile",
+         "inspect-readonly", "--operation", "dev.pulp.runtime/evaluate@1"},
+        10000);
+    REQUIRE_FALSE(conflicting.timed_out);
+    REQUIRE(conflicting.exit_code == 2);
+    CHECK(conflicting.stderr_output.find("requires exactly one of --profile") !=
+          std::string::npos);
+
+    const auto arbitrary = run_pulp(
+        {"control", "grant-request", "--instance", "instance-1", "--operation",
+         "dev.pulp.raw/arbitrary@1"},
+        10000);
+    REQUIRE_FALSE(arbitrary.timed_out);
+    REQUIRE(arbitrary.exit_code == 2);
+    CHECK(arbitrary.stderr_output.find("unknown or not grantable") != std::string::npos);
+}
+
 TEST_CASE("pulp inspect help and no-discovery paths are deterministic",
           "[cli][shellout][inspect][orientation]") {
     if (!binary_exists()) {

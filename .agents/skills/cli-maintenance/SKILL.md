@@ -528,7 +528,15 @@ render examples require an exact job instance, broker-issued render grant, and
 opaque launcher-trusted input artifact ID; no read/develop profile implicitly
 grants render. Critical evaluation likewise requires an explicit broker-issued
 grant backed by single-use broker-owned consent—MCP annotations or UI approval
-are never authority.
+are never authority. `pulp control grant-request` therefore requires exactly one
+of `--profile PROFILE` or `--operation OPERATION`; use
+`--operation dev.pulp.runtime/evaluate@1` for RuntimeEval because it is
+intentionally absent from reusable profiles. The CLI accepts only grantable
+typed registry operations and forwards `operation_id`; it never accepts a raw
+method or generic capability token. Likewise, `control call` and `control watch`
+without `--grant` request the exact operation rather than silently falling back
+to a reusable read profile; an explicit `--profile` remains an intentional
+broader selector.
 
 After the v0.78.1 cutover, the user-facing CLI is Rust `pulp`. Release
 archives install `pulp` plus sibling `pulp-cpp`, and source builds stage the
