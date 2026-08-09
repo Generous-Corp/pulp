@@ -188,6 +188,11 @@ pulp_add_test_suite(pulp-test-signal-nonlinear-shaping
     LIBRARIES pulp::signal
     TIMEOUT 900)
 
+pulp_add_test_suite(pulp-test-signal-cross-feedback-multitap-delay
+    SOURCES test_signal_cross_feedback_multitap_delay.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
 pulp_add_test_suite(pulp-test-signal-headphone-crossfeed
     SOURCES test_signal_headphone_crossfeed.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal

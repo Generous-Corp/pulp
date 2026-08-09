@@ -29,5 +29,8 @@ int main() {
     if (!spectral_morph.prepare(1, 129))
         return 8;
     pulp::signal::PathLatencyAligner aligner;
-    return aligner.prepare(2u, 1u, 8u, 16u) ? 0 : 9;
+    if (!aligner.prepare(2u, 1u, 8u, 16u))
+        return 9;
+    pulp::signal::CrossFeedbackMultitapDelay multitap_delay;
+    return multitap_delay.prepare(48000.0, 100.0) ? 0 : 10;
 }
