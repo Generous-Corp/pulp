@@ -15,7 +15,11 @@
 
 #include "test_cli_shellout_util.hpp"
 
+#if defined(_WIN32)
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -27,6 +31,14 @@
 namespace fs = std::filesystem;
 
 namespace {
+
+long long current_process_id() {
+#if defined(_WIN32)
+    return static_cast<long long>(::_getpid());
+#else
+    return static_cast<long long>(::getpid());
+#endif
+}
 
 #if !defined(PULP_FIXTURE_RUNNER_BINARY)
 // Without the binary path every case below would early-SUCCEED and the whole
@@ -80,7 +92,7 @@ struct TempCorpus {
         // another's corpus mid-run — an unreproducible red. The pid separates
         // processes; the clock separates cases within one.
         root = fs::temp_directory_path() /
-               ("pulp-fixture-corpus-" + std::to_string(static_cast<long long>(::getpid())) + "-" +
+               ("pulp-fixture-corpus-" + std::to_string(current_process_id()) + "-" +
                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         std::error_code created;
         fs::create_directories(root / "v1", created);
