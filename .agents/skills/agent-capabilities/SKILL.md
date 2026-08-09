@@ -57,6 +57,14 @@ compile fixture proves the intended signature without leaking fixture syntax
 into the installed contract. Each overload still needs its own operational
 probe with arguments that select and invoke that overload.
 
+For a non-static member-function binding, keep the public `qualified_name` as
+the real class-qualified method, provide an exact pointer-to-member
+`address_expression`, and use an explicit-object `member_function_call` probe.
+The generator must retain address references with `auto volatile`; `auto *`
+cannot represent a pointer-to-member. The installed-SDK suite runs the matching
+operational probe independently for every binding, not only in the aggregate
+capability consumer.
+
 A new TSP algorithm is therefore detected automatically but not advertised by
 guesswork: the new/changed public header fails the ledger gate until its owner
 makes the explicit registration or non-capability classification.
