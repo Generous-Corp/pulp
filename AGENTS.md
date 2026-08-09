@@ -29,3 +29,15 @@ longer occur (Step Zero). The read surface and the SessionStart/PostToolUse
 hooks (`hooks/scripts/decisions-contract-*.sh`, wired for both Codex via
 `.codex/hooks.json` and Claude via the plugin) are advisory context only — the
 authoritative block is this CLI's `validate` gate plus CI required checks.
+
+## Vellum source-authority routing
+
+`.github/vellum-ownership.json` is the authoritative source-routing projection.
+For slices whose state is `framework-authoritative-transferred`, new generic
+framework/rendering/UI work originates in `Generous-Corp/vellum`; Pulp changes
+are limited to explicitly Pulp-owned integration, adaptation, or compatibility
+work and must carry the required immutable change-event declaration.
+
+Do not widen, narrow, or reverse an active slice in a routine Pulp change. Any
+such boundary change requires the separately reviewed cross-repository
+protocol and evidence plan described by the Vellum transition plan.
