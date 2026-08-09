@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 14,
+  "inventory_version": 15,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,12 +37,12 @@
     }
   ],
   "counts": {
-    "public_headers": 401,
-    "reviewed_headers": 100,
+    "public_headers": 403,
+    "reviewed_headers": 102,
     "legacy_unreviewed_headers": 301,
     "unsupported_headers": 1,
     "by_disposition": {
-      "capability_entrypoint": 58,
+      "capability_entrypoint": 60,
       "capability_support": 36,
       "infrastructure": 5,
       "legacy_unreviewed": 301,
@@ -74,8 +74,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 224,
-        "reviewed_headers": 62,
+        "public_headers": 226,
+        "reviewed_headers": 64,
         "legacy_unreviewed_headers": 162,
         "unsupported_headers": 1
       },
@@ -2299,6 +2299,17 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/explicit_q_resonator_bank.hpp",
+      "fingerprint": "sha256:1504f5c4bc3752754bc7591e6a6509a9aeb06df018417749bd149802463917da",
+      "include": "pulp/signal/explicit_q_resonator_bank.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.explicit-q-resonator-bank"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/fast_math.hpp",
       "fingerprint": "sha256:040569eb66723784d089120ecb679b78df4f206678a77a2f2881e0a874456de4",
       "include": "pulp/signal/fast_math.hpp",
@@ -3347,7 +3358,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:4f065844dfc4347b27fa302b922af2a99d74dae295be6958c11f51aa3394381a",
+      "fingerprint": "sha256:cdbddaedd2e47f7ed8eaf24a0824b643d279eb6b61a2e274ad4a81542434c491",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3448,6 +3459,17 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/spectral_delay_matrix.hpp",
+      "fingerprint": "sha256:53ed4a5125e74d86fc8e4f8980a6309cbf00796d85f8f5b7cb9f1a06acbe0034",
+      "include": "pulp/signal/spectral_delay_matrix.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.spectral-delay-matrix"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",

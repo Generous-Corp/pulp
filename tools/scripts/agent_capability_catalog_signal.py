@@ -480,4 +480,75 @@ EXPORTS = [
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::MultiChannelMeterT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
+    capability(
+        key="signal.explicit-q-resonator-bank", domain="signal",
+        summary=(
+            "Prepared fixed-capacity band-pass resonator bank with explicit frequency, Q, "
+            "gain, envelope, and transactional transition controls."
+        ),
+        rt_class="mixed",
+        lifecycle={"construction": "control",
+                   "prepare": "control; allocates bounded retained state and stages recipes",
+                   "process": "audio; control publishes through latest-value SPSC handoff",
+                   "reset": "audio", "release": "destruction off audio"},
+        state_model=(
+            "Prepared fixed-capacity double-precision SVF and envelope state plus a "
+            "three-slot recipe handoff and exact-duration transition state."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="finite mono audio and explicit per-band frequency, Q, gain, and ballistics",
+        output_domain="summed resonator audio plus per-band pre-gain output and envelope",
+        units=["samples", "frames", "hertz", "Q", "decibels", "milliseconds"],
+        latency="zero",
+        tail="recursive IIR decay bounded by the configured frequency and Q",
+        scheduling="sample-synchronous with recipe adoption at sample boundaries",
+        bindings=[binding(
+            role="entrypoint", kind="cpp_type",
+            include="pulp/signal/explicit_q_resonator_bank.hpp",
+            qualified_name="pulp::signal::ExplicitQResonatorBankT<float>",
+            target="Pulp::signal",
+            header_fingerprint="sha256:1504f5c4bc3752754bc7591e6a6509a9aeb06df018417749bd149802463917da",
+        )],
+        _link_probes=[{
+            "role": "entrypoint", "binding": "pulp::signal::ExplicitQResonatorBankT<float>",
+            "operation": "member_call", "member": "reset", "arguments": "",
+        }],
+    ),
+    capability(
+        key="signal.spectral-delay-matrix", domain="signal",
+        summary=(
+            "Prepared per-bin spectral delay and attenuation with bounded history and "
+            "race-free frame-boundary table publication."
+        ),
+        rt_class="mixed",
+        lifecycle={"construction": "control",
+                   "prepare": "control; allocates bounded frame history and compiles tables",
+                   "process": "audio; control publishes through latest-value SPSC handoff",
+                   "reset": "audio; reset or history-only purge",
+                   "release": "destruction off audio"},
+        state_model=(
+            "Prepared spectral frame engine, coherent per-channel complex-bin history, and "
+            "three-slot delay/attenuation table handoff."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "tolerance_bounded", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="finite planar audio and normalized-frequency delay/attenuation breakpoints",
+        output_domain="coherent planar audio with frame-quantized per-bin content delay",
+        units=["samples", "frames", "bins", "milliseconds", "decibels", "linear gain"],
+        latency="fixed spectral-frame engine latency; content delay is D times analysis hop",
+        tail="finite engine latency plus the prepared maximum content-delay history",
+        scheduling="streaming overlap-add with table adoption only at frame boundaries",
+        bindings=[binding(
+            role="entrypoint", kind="cpp_type", include="pulp/signal/spectral_delay_matrix.hpp",
+            qualified_name="pulp::signal::SpectralDelayMatrixT<float>", target="Pulp::signal",
+            header_fingerprint="sha256:53ed4a5125e74d86fc8e4f8980a6309cbf00796d85f8f5b7cb9f1a06acbe0034",
+        )],
+        _link_probes=[{
+            "role": "entrypoint", "binding": "pulp::signal::SpectralDelayMatrixT<float>",
+            "operation": "member_call", "member": "reset", "arguments": "",
+        }],
+    ),
 ]

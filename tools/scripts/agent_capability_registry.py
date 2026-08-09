@@ -36,6 +36,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/dither.hpp": "Pulp::signal",
     "pulp/signal/dust.hpp": "Pulp::signal",
     "pulp/signal/dynamics_contract.hpp": "Pulp::signal",
+    "pulp/signal/explicit_q_resonator_bank.hpp": "Pulp::signal",
     "pulp/signal/fm_operator_engine.hpp": "Pulp::signal",
     "pulp/signal/fractional_delay.hpp": "Pulp::signal",
     "pulp/signal/lfsr.hpp": "Pulp::signal",
@@ -53,6 +54,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/six_band_eq.hpp": "Pulp::signal",
     "pulp/signal/source_filter_analysis.hpp": "Pulp::signal",
     "pulp/signal/spectrum_trace.hpp": "Pulp::signal",
+    "pulp/signal/spectral_delay_matrix.hpp": "Pulp::signal",
     "pulp/signal/sos_cascade.hpp": "Pulp::signal",
     "pulp/signal/supersaw.hpp": "Pulp::signal",
     "pulp/signal/true_peak_limiter.hpp": "Pulp::signal",
@@ -449,7 +451,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:4f065844dfc4347b27fa302b922af2a99d74dae295be6958c11f51aa3394381a",
+        "fingerprint": "sha256:cdbddaedd2e47f7ed8eaf24a0824b643d279eb6b61a2e274ad4a81542434c491",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
