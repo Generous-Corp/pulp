@@ -1,6 +1,7 @@
 #include <pulp/inspect/control_standalone_host.hpp>
 
 #include <pulp/inspect/control_host_preflight.hpp>
+#include <pulp/inspect/console_capture.hpp>
 #include <pulp/inspect/control_installed_host.hpp>
 #include <pulp/inspect/control_main_thread_executor.hpp>
 #include <pulp/inspect/control_manifest.hpp>
@@ -11,8 +12,10 @@
 #include <pulp/inspect/motion_scrubber.hpp>
 #include <pulp/inspect/runtime_eval_component.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/standalone.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/view/inspector.hpp>
 #include <pulp/view/motion.hpp>
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/screenshot.hpp>
@@ -22,11 +25,14 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <ranges>
@@ -55,11 +61,16 @@ extern "C" PULP_CONTROL_COMPONENT_MARKER const volatile char
         "PULP_INSPECT_CAPABILITY_SESSION_DESCRIBE_V1\0"
         "PULP_INSPECT_CAPABILITY_SESSION_CONTROL_V1\0"
         "PULP_INSPECT_CAPABILITY_STATE_READ_V1\0"
+        "PULP_INSPECT_CAPABILITY_UI_READ_V1\0"
+        "PULP_INSPECT_CAPABILITY_DIAGNOSTICS_READ_V1\0"
+        "PULP_INSPECT_CAPABILITY_LOGS_READ_V1\0"
         "PULP_INSPECT_CAPABILITY_CAPTURE_IMAGE_V1\0"
         "PULP_INSPECT_CAPABILITY_UI_INPUT_V1\0"
         "PULP_INSPECT_CAPABILITY_TRACE_CONTROL_V1\0"
         "PULP_INSPECT_CAPABILITY_TRACE_SESSION_CONTROL_V1\0"
         "PULP_INSPECT_CAPABILITY_STATE_WRITE_V1\0"
+        "PULP_INSPECT_CAPABILITY_TEST_INPUT_V1\0"
+        "PULP_INSPECT_CAPABILITY_AUTHORING_TWEAKS_V1\0"
         "PULP_INSPECT_CAPABILITY_TELEMETRY_STREAM_V1";
 
 #undef PULP_CONTROL_COMPONENT_MARKER
@@ -174,6 +185,51 @@ class HeadlessViewWindow final : public view::WindowHost {
     bool visible_ = false;
 };
 
+view::View* find_unique_view(view::View& root, std::string_view id) {
+    view::View* found = nullptr;
+    bool duplicate = false;
+    const auto visit = [&](const auto& self, view::View& node) -> void {
+        if (node.id() == id) {
+            duplicate = found != nullptr;
+            found = &node;
+        }
+        for (std::size_t index = 0; index < node.child_count(); ++index)
+            self(self, *node.child_at(index));
+    };
+    visit(visit, root);
+    return duplicate ? nullptr : found;
+}
+
+choc::value::Value without_geometry(choc::value::ValueView value) {
+    if (value.isObject()) {
+        auto result = choc::value::createObject("");
+        value.visitObjectMembers([&](std::string_view name, choc::value::ValueView child) {
+            if (name != "bounds")
+                result.addMember(name, without_geometry(child));
+        });
+        return result;
+    }
+    if (value.isArray()) {
+        auto result = choc::value::createEmptyArray();
+        for (std::uint32_t index = 0; index < value.size(); ++index)
+            result.addArrayElement(without_geometry(value[index]));
+        return result;
+    }
+    return choc::value::Value(value);
+}
+
+TestInputApplyResult test_input_result(format::detail::StandaloneTestInputResult result) {
+    switch (result) {
+    case format::detail::StandaloneTestInputResult::Applied:
+        return TestInputApplyResult::success();
+    case format::detail::StandaloneTestInputResult::InvalidArgument:
+        return TestInputApplyResult::failure("invalid_argument", "test input was invalid");
+    case format::detail::StandaloneTestInputResult::QueueFull:
+        return TestInputApplyResult::failure("queue_full", "test input queue is full");
+    }
+    return TestInputApplyResult::failure("invalid_argument", "test input was rejected");
+}
+
 ControlExecutionOutcome unavailable_operation() {
     return {
         .terminal_state = ControlReceiptState::Failed,
@@ -185,7 +241,9 @@ ControlExecutionOutcome unavailable_operation() {
 
 class CanonicalStandaloneControlHost final : public format::StandaloneControlHost {
   public:
-    bool start(format::Processor& processor, state::StateStore& store) override {
+    bool start(format::Processor& processor, state::StateStore& store,
+               format::detail::StandaloneTestInputHost* test_input,
+               double sample_rate) override {
         const auto handle = inherited_control_host_bootstrap_handle();
 #ifdef _WIN32
         if (handle == nullptr)
@@ -203,6 +261,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
 
         processor_ = &processor;
         store_ = &store;
+        test_input_ = test_input;
+        sample_rate_ = sample_rate;
         main_thread_ = std::this_thread::get_id();
         queue_ = std::make_shared<MainThreadQueue>();
         rpc_ = std::make_shared<InspectorMainThreadRpc>(
@@ -252,6 +312,9 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
             };
 
         const bool needs_ui = has_capability(*manifest, InspectorCapability::CaptureImage) ||
+                              has_capability(*manifest, InspectorCapability::UiRead) ||
+                              has_capability(*manifest, InspectorCapability::LogsRead) ||
+                              has_capability(*manifest, InspectorCapability::AuthoringTweaks) ||
                               has_capability(*manifest, InspectorCapability::UiInput) ||
                               has_capability(*manifest, InspectorCapability::TraceControl) ||
                               has_capability(*manifest, InspectorCapability::RuntimeEval);
@@ -271,6 +334,12 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
         }
 
         author_hooks_ = detail::create_standalone_control_author_hooks(processor);
+        if (has_capability(*manifest, InspectorCapability::AuthoringTweaks) &&
+            !author_hooks_.apply_authoring)
+            return false;
+        if (has_capability(*manifest, InspectorCapability::TestInput) &&
+            (!test_input_ || !std::isfinite(sample_rate_) || sample_rate_ <= 0.0))
+            return false;
         std::optional<ControlInstalledHostUiConfig> ui;
         view::motion::Coordinator::instance().reset();
         view::motion::CostAttributor::instance().reset();
@@ -326,6 +395,128 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                     return std::optional<std::string>{R"({"redacted":true})"};
                 },
             };
+
+            console_ = std::make_shared<ConsoleCapture>();
+            view_bridge_->visit_scripted_ui([this](view::ScriptedUiSession* scripted) {
+                if (!scripted || !console_)
+                    return;
+                log_session_ = scripted;
+                log_subscription_ = scripted->add_log_callback(console_->callback());
+            });
+        }
+
+        const bool needs_development =
+            has_capability(*manifest, InspectorCapability::UiRead) ||
+            has_capability(*manifest, InspectorCapability::DiagnosticsRead) ||
+            has_capability(*manifest, InspectorCapability::LogsRead) ||
+            has_capability(*manifest, InspectorCapability::TestInput) ||
+            has_capability(*manifest, InspectorCapability::AuthoringTweaks);
+        std::optional<ControlInstalledHostDevelopmentConfig> development;
+        if (needs_development) {
+            development = ControlInstalledHostDevelopmentConfig{
+                .manifest = *manifest,
+                .observe_ui = [this](const ControlUiObservationRequest& request)
+                    -> std::optional<ControlUiObservation> {
+                    if (!root_)
+                        return std::nullopt;
+                    view::View* selected = root_.get();
+                    if (!request.selector.empty()) {
+                        auto selector = request.selector;
+                        if (selector.starts_with('#'))
+                            selector.erase(selector.begin());
+                        selected = find_unique_view(*root_, selector);
+                        if (!selected)
+                            return std::nullopt;
+                    }
+                    const auto count = view::ViewInspector::count_views(*selected);
+                    if (count > 10'000)
+                        return std::nullopt;
+                    auto json = view::ViewInspector::to_json(*selected);
+                    if (!request.include_geometry) {
+                        try {
+                            json = choc::json::toString(
+                                without_geometry(choc::json::parse(json)), false);
+                        } catch (...) {
+                            return std::nullopt;
+                        }
+                    }
+                    return ControlUiObservation{
+                        .tree_json = std::move(json),
+                        .generation = root_->root_structure_generation(),
+                        .node_count = count};
+                },
+                .read_diagnostics = [this] {
+                    std::vector<ControlDiagnosticItem> items;
+                    if (test_input_) {
+                        const auto transport = test_input_->transport_snapshot();
+                        items.push_back({
+                            .id = "standalone.test-input",
+                            .severity = ControlDiagnosticSeverity::Info,
+                            .message = "transport=" +
+                                       std::string(transport.playing ? "playing" : "stopped") +
+                                       ", midi_overflow_count=" +
+                                       std::to_string(test_input_->midi_overflow_count())});
+                    }
+                    if (author_hooks_.diagnostics) {
+                        auto author = author_hooks_.diagnostics();
+                        items.insert(items.end(), std::make_move_iterator(author.begin()),
+                                     std::make_move_iterator(author.end()));
+                    }
+                    return items;
+                },
+                .read_logs = [this](std::uint64_t after, std::size_t limit) {
+                    ControlLogPage page;
+                    if (!console_)
+                        return page;
+                    std::uint64_t next = 0;
+                    auto entries = console_->entries_since(after, next);
+                    if (entries.size() > limit) {
+                        entries.resize(limit);
+                        next = entries.back().seq;
+                    }
+                    page.next_sequence = next;
+                    for (const auto& entry : entries) {
+                        page.entries.push_back({
+                            .sequence = entry.seq,
+                            .level = entry.level.substr(0, 32),
+                            .message = entry.message.substr(
+                                0, kControlDevelopmentMaximumTextBytes)});
+                    }
+                    return page;
+                },
+                .apply_test_note = [this](const ControlTestNoteInput& input) {
+                    if (!test_input_)
+                        return TestInputApplyResult::failure(
+                            "test_input_unavailable", "standalone test input is unavailable");
+                    return test_input_result(test_input_->inject_note({
+                        .kind = input.note_on
+                                    ? format::detail::StandaloneTestMidiKind::NoteOn
+                                    : format::detail::StandaloneTestMidiKind::NoteOff,
+                        .channel = static_cast<std::uint8_t>(input.channel + 1),
+                        .note = input.note,
+                        .velocity = static_cast<std::uint8_t>(
+                            std::lround(std::clamp(input.velocity, 0.0, 1.0) * 127.0))}));
+                },
+                .apply_test_transport = [this](const ControlTestTransportInput& input) {
+                    if (!test_input_ || !std::isfinite(sample_rate_) || sample_rate_ <= 0.0)
+                        return TestInputApplyResult::failure(
+                            "test_input_unavailable", "standalone transport input is unavailable");
+                    const auto samples = input.position_beats * 60.0 / input.tempo_bpm * sample_rate_;
+                    if (!std::isfinite(samples) || samples < 0.0 ||
+                        samples > static_cast<double>(std::numeric_limits<std::int64_t>::max()))
+                        return TestInputApplyResult::failure(
+                            "invalid_argument", "transport position exceeds the host range");
+                    return test_input_result(test_input_->update_transport({
+                        .playing = input.playing,
+                        .position_samples = static_cast<std::int64_t>(std::llround(samples)),
+                        .tempo_bpm = input.tempo_bpm}));
+                },
+                .release_test_input = [this](TestInputReleaseReason) {
+                    if (test_input_)
+                        test_input_->release_test_input();
+                },
+                .apply_authoring = author_hooks_.apply_authoring,
+            };
         }
 
         telemetry_ = std::make_shared<ControlTelemetryTap>(
@@ -344,6 +535,7 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
             .motion_inspector = motion_.get(),
             .motion_scrubber = &scrubber_,
             .ui = std::move(ui),
+            .development = std::move(development),
             .host_executor = std::move(state_executor),
         });
         if (!installed_ || !installed_->ready()) {
@@ -361,6 +553,11 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
             rpc_->cancel_and_wait();
         if (queue_)
             queue_->close();
+        if (log_session_ && log_subscription_ != 0)
+            log_session_->remove_log_callback(log_subscription_);
+        log_session_ = nullptr;
+        log_subscription_ = 0;
+        console_.reset();
         ui_adapter_.reset();
         evaluator_.reset();
         motion_.reset();
@@ -380,6 +577,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
         last_frame_tick_.reset();
         processor_ = nullptr;
         store_ = nullptr;
+        test_input_ = nullptr;
+        sample_rate_ = 0.0;
     }
 
     void poll() noexcept override {
@@ -412,6 +611,9 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
     std::shared_ptr<ControlTelemetryTap> telemetry_;
     std::shared_ptr<ControlStandaloneUiAdapter> ui_adapter_;
     std::shared_ptr<RuntimeEvaluator> evaluator_;
+    std::shared_ptr<ConsoleCapture> console_;
+    view::ScriptedUiSession* log_session_ = nullptr;
+    std::uint64_t log_subscription_ = 0;
     std::unique_ptr<view::View> root_;
     std::unique_ptr<format::ViewBridge> view_bridge_;
     std::unique_ptr<HeadlessViewWindow> window_;
@@ -421,6 +623,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
     std::optional<std::chrono::steady_clock::time_point> last_frame_tick_;
     format::Processor* processor_ = nullptr;
     state::StateStore* store_ = nullptr;
+    format::detail::StandaloneTestInputHost* test_input_ = nullptr;
+    double sample_rate_ = 0.0;
     std::thread::id main_thread_;
     detail::StandaloneControlAuthorHooks author_hooks_;
 

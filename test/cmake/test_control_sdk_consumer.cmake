@@ -299,6 +299,7 @@ int main() {
 file(MAKE_DIRECTORY "${_consumer_source}/standalone-consumer")
 file(WRITE "${_consumer_source}/standalone-consumer/ui.js" [=[
 createLabel('author-label', 'Installed parity', '');
+setInterval(function () { console.log('installed-parity-live-log'); }, 50);
 ]=])
 file(WRITE "${_consumer_source}/standalone-consumer/CMakeLists.txt" [=[
 pulp_add_plugin(InstalledControlStandalone
@@ -313,11 +314,16 @@ pulp_add_plugin(InstalledControlStandalone
         dev.pulp.instance/read@1
         dev.pulp.session/control@1
         dev.pulp.state/read@1
+        dev.pulp.ui/observe@1
+        dev.pulp.diagnostics/read@1
+        dev.pulp.logs/read@1
         dev.pulp.ui/capture@1
         dev.pulp.ui/input@1
         dev.pulp.trace/control@1
         dev.pulp.trace/session-control@1
         dev.pulp.state/parameter-gesture@1
+        dev.pulp.test/input@1
+        dev.pulp.authoring/tweaks@1
         dev.pulp.telemetry/subscribe@1
         dev.pulp.runtime/evaluate@1)
 target_compile_definitions(InstalledControlStandalone_Core PRIVATE
@@ -337,9 +343,12 @@ file(WRITE "${_consumer_source}/standalone-consumer/standalone.cpp" [=[
 #include <pulp/view/view.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <thread>
 
@@ -440,8 +449,17 @@ class InstalledStandaloneProcessor final : public pulp::format::Processor {
   pulp::view::ValueChannelSet* value_channels() override { return &channels_; }
   void process(pulp::audio::BufferView<float>& output,
                const pulp::audio::BufferView<const float>& input,
-               pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
-               const pulp::format::ProcessContext&) override {
+               pulp::midi::MidiBuffer& midi_in, pulp::midi::MidiBuffer&,
+               const pulp::format::ProcessContext& context) override {
+    for (const auto& event : midi_in) {
+      if (event.is_note_on()) {
+        observed_note_.store(event.note(), std::memory_order_relaxed);
+        observed_channel_.store(event.channel(), std::memory_order_relaxed);
+        observed_velocity_.store(event.velocity(), std::memory_order_relaxed);
+      }
+    }
+    observed_playing_.store(context.is_playing, std::memory_order_relaxed);
+    observed_position_.store(context.position_samples, std::memory_order_relaxed);
     const auto channels = std::min(output.num_channels(), input.num_channels());
     const auto samples = std::min(output.num_samples(), input.num_samples());
     for (std::size_t channel = 0; channel < channels; ++channel)
@@ -451,15 +469,40 @@ class InstalledStandaloneProcessor final : public pulp::format::Processor {
       telemetry_level_->publish(0.25f);
   }
 
+  std::string test_input_diagnostics() const {
+    std::ostringstream message;
+    message << "note_on=" << observed_note_.load(std::memory_order_relaxed)
+            << ", channel=" << observed_channel_.load(std::memory_order_relaxed)
+            << ", velocity=" << observed_velocity_.load(std::memory_order_relaxed)
+            << ", transport_playing="
+            << (observed_playing_.load(std::memory_order_relaxed) ? "true" : "false")
+            << ", transport_at_or_after_eight_beats="
+            << (observed_position_.load(std::memory_order_relaxed) >= 192000 ? "true" : "false");
+    return message.str();
+  }
+
  private:
   pulp::view::ValueChannelSet channels_;
   pulp::view::ScalarSource* telemetry_level_ = nullptr;
   std::unique_ptr<pulp::view::ScriptedUiSession> scripted_session_;
   std::jthread telemetry_thread_;
+  std::atomic<int> observed_note_{-1};
+  std::atomic<int> observed_channel_{-1};
+  std::atomic<int> observed_velocity_{-1};
+  std::atomic<bool> observed_playing_{false};
+  std::atomic<std::int64_t> observed_position_{-1};
 };
 
 pulp::inspect::detail::StandaloneControlAuthorHooks installed_parity_control_hooks(
-    pulp::format::Processor&) {
+    pulp::format::Processor& processor) {
+  struct AuthoringState {
+    std::uint64_t generation = 0;
+    double gain = 0.0;
+    std::string highlight;
+    bool repaint_flash = false;
+  };
+  static AuthoringState authoring;
+  auto* installed = dynamic_cast<InstalledStandaloneProcessor*>(&processor);
   const auto fixture = std::filesystem::temp_directory_path() /
                        "pulp-installed-author-motion-fixture.jsonl";
   const auto sink = pulp::view::motion::make_fixture_sink(fixture);
@@ -479,6 +522,40 @@ pulp::inspect::detail::StandaloneControlAuthorHooks installed_parity_control_hoo
         return pulp::view::motion::RenderCostSnapshot{0.125, 1.0, 1};
       },
       .motion_fixture_path = fixture,
+      .diagnostics = [installed] {
+        std::ostringstream message;
+        message << "generation=" << authoring.generation
+                << ", gain=" << authoring.gain
+                << ", highlight=" << authoring.highlight
+                << ", repaint_flash=" << (authoring.repaint_flash ? "true" : "false");
+        std::vector<pulp::inspect::ControlDiagnosticItem> items{{
+            .id = "author.parity-state",
+            .severity = pulp::inspect::ControlDiagnosticSeverity::Info,
+            .message = message.str()}};
+        if (installed) {
+          items.push_back({
+              .id = "author.test-input-consumed",
+              .severity = pulp::inspect::ControlDiagnosticSeverity::Info,
+              .message = installed->test_input_diagnostics()});
+        }
+        return items;
+      },
+      .apply_authoring = [](const pulp::inspect::ControlAuthoringChanges& changes) {
+        const auto gain = std::ranges::find_if(changes.constants, [](const auto& value) {
+          return value.first == "gain";
+        });
+        if (gain == changes.constants.end() ||
+            changes.highlight_node_id != std::optional<std::string>{"author-input"} ||
+            changes.repaint_flash != std::optional<bool>{true}) {
+          return pulp::inspect::ControlAuthoringApplyResult{
+              .explanation = "fixture expected gain, author-input highlight, and repaint flash"};
+        }
+        authoring.gain = gain->second;
+        authoring.highlight = *changes.highlight_node_id;
+        authoring.repaint_flash = *changes.repaint_flash;
+        return pulp::inspect::ControlAuthoringApplyResult{
+            .applied = true, .generation = ++authoring.generation};
+      },
   };
 }
 
@@ -691,11 +768,16 @@ foreach(_standalone_control_manifest IN LISTS _standalone_control_manifests)
        NOT _standalone_control_json MATCHES "dev.pulp.instance/read@1" OR
        NOT _standalone_control_json MATCHES "dev.pulp.session/control@1" OR
        NOT _standalone_control_json MATCHES "dev.pulp.state/read@1" OR
+       NOT _standalone_control_json MATCHES "dev.pulp.ui/observe@1" OR
+       NOT _standalone_control_json MATCHES "dev.pulp.diagnostics/read@1" OR
+       NOT _standalone_control_json MATCHES "dev.pulp.logs/read@1" OR
        NOT _standalone_control_json MATCHES "dev.pulp.ui/capture@1" OR
        NOT _standalone_control_json MATCHES "dev.pulp.ui/input@1" OR
        NOT _standalone_control_json MATCHES "dev.pulp.trace/control@1" OR
        NOT _standalone_control_json MATCHES "dev.pulp.trace/session-control@1" OR
        NOT _standalone_control_json MATCHES "dev.pulp.state/parameter-gesture@1" OR
+       NOT _standalone_control_json MATCHES "dev.pulp.test/input@1" OR
+       NOT _standalone_control_json MATCHES "dev.pulp.authoring/tweaks@1" OR
        NOT _standalone_control_json MATCHES "dev.pulp.telemetry/subscribe@1" OR
        NOT _standalone_control_json MATCHES "dev.pulp.runtime/evaluate@1")
         message(FATAL_ERROR

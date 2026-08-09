@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/inspect/control_host_bootstrap.hpp>
+#include <pulp/inspect/control_host_development_executor.hpp>
 #include <pulp/inspect/control_host_observability_bundle.hpp>
 #include <pulp/inspect/control_host_ui_executor.hpp>
 #include <pulp/inspect/control_motion_executor.hpp>
@@ -32,6 +33,18 @@ struct ControlInstalledHostUiConfig {
     ControlRuntimeEvalRedactor redact_runtime_eval_result;
 };
 
+struct ControlInstalledHostDevelopmentConfig {
+    ControlManifest manifest;
+    std::function<std::optional<ControlUiObservation>(const ControlUiObservationRequest&)>
+        observe_ui;
+    std::function<std::vector<ControlDiagnosticItem>()> read_diagnostics;
+    std::function<ControlLogPage(std::uint64_t after_sequence, std::size_t limit)> read_logs;
+    std::function<TestInputApplyResult(const ControlTestNoteInput&)> apply_test_note;
+    std::function<TestInputApplyResult(const ControlTestTransportInput&)> apply_test_transport;
+    std::function<void(TestInputReleaseReason)> release_test_input;
+    std::function<ControlAuthoringApplyResult(const ControlAuthoringChanges&)> apply_authoring;
+};
+
 struct ControlInstalledHostConfig {
     ControlHostBootstrapRecord bootstrap;
     std::shared_ptr<InspectorMainThreadRpc> main_thread_rpc;
@@ -40,6 +53,7 @@ struct ControlInstalledHostConfig {
     MotionInspector* motion_inspector = nullptr;
     MotionScrubber* motion_scrubber = nullptr;
     std::optional<ControlInstalledHostUiConfig> ui;
+    std::optional<ControlInstalledHostDevelopmentConfig> development;
     /// Additional typed host executor (for example canonical StateStore
     /// read/write composition). It is reached only after exact binding and
     /// opaque projected-authority validation, and is installed before ready.

@@ -104,6 +104,7 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
     std::unique_ptr<ControlHostObservabilityBundle> observability;
     std::unique_ptr<ControlMotionExecutor> motion;
     std::unique_ptr<ControlHostUiExecutor> ui;
+    std::unique_ptr<ControlHostDevelopmentExecutor> development;
     ControlOperationExecutor host_executor;
     std::mutex controller_mutex;
     InspectorControllerLease controller_lease;
@@ -149,6 +150,8 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
             trace->end_authority(id);
         if (observability)
             observability->end_authority(id);
+        if (development)
+            development->end_authority(id, TestInputReleaseReason::ClientDisconnected);
         {
             std::lock_guard controller_lock(controller_mutex);
             if (controller_acquiring_authority_id == id) {
@@ -182,6 +185,8 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
             observability->disconnect();
         if (ui)
             (void)ui->disconnect();
+        if (development)
+            development->disconnect();
         std::lock_guard controller_lock(controller_mutex);
         if (controller_live)
             controller_live->live.store(false, std::memory_order_release);
@@ -258,6 +263,9 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
                 controller_live->live.store(false, std::memory_order_release);
                 release_ui = true;
             }
+            if (!controller_acquiring_authority_id.empty() && development)
+                development->end_authority(controller_acquiring_authority_id,
+                                           TestInputReleaseReason::ControllerReleased);
             const auto bytes = runtime::secure_random_bytes(16);
             if (!bytes) {
                 controller_lease.disconnect(owner);
@@ -291,6 +299,9 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
             controller_acquiring_authority_id.clear();
             controller_live.reset();
             release_ui = true;
+            if (development)
+                development->end_authority(plan.client_id.value,
+                                           TestInputReleaseReason::ControllerReleased);
         }
         const auto detail_json = choc::json::toString(detail, false);
         if (release_ui && ui && !ui->release_controller_scope()) {
@@ -306,7 +317,9 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
         const auto weak = weak_from_this();
         const auto observability_executor = observability->executor();
         const auto motion_executor = motion->executor();
-        return [weak, observability_executor, motion_executor](
+        const auto development_executor = development ? development->executor()
+                                                      : ControlOperationExecutor{};
+        return [weak, observability_executor, motion_executor, development_executor](
                    const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
                    const ControlExecutionContext& context) {
             const auto state = weak.lock();
@@ -326,6 +339,7 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
                 return state->session_control(plan, request, context);
             std::shared_ptr<ControllerExecutionToken> controller_live;
             bool controller_expired = false;
+            std::string ended_controller_authority;
             if (const auto* operation =
                     resolve_control_operation(request.operation_id, request.operation_version);
                 operation && capability_requires_controller_lease(operation->capability)) {
@@ -337,6 +351,7 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
                         controller_live->live.store(false, std::memory_order_release);
                     if (const auto owner = state->controller_lease.owner())
                         state->controller_lease.disconnect(*owner);
+                    ended_controller_authority = state->controller_acquiring_authority_id;
                     state->controller_lease_id.clear();
                     state->controller_acquiring_authority_id.clear();
                     state->controller_live.reset();
@@ -347,6 +362,9 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
                 }
             }
             if (controller_expired) {
+                if (state->development)
+                    state->development->end_authority(
+                        ended_controller_authority, TestInputReleaseReason::ControllerReleased);
                 return ControlExecutionOutcome{
                     .terminal_state = ControlReceiptState::Failed,
                     .result = {.result_code = ControlResultCode::LeaseConflict,
@@ -373,6 +391,13 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
                  request.operation_id == "dev.pulp.ui/input@1" ||
                  request.operation_id == "dev.pulp.runtime/evaluate@1"))
                 return state->ui->executor()(plan, request, effective_context);
+            if (development_executor &&
+                (request.operation_id == "dev.pulp.ui/observe@1" ||
+                 request.operation_id == "dev.pulp.diagnostics/read@1" ||
+                 request.operation_id == "dev.pulp.logs/read@1" ||
+                 request.operation_id == "dev.pulp.test/input@1" ||
+                 request.operation_id == "dev.pulp.authoring/tweaks@1"))
+                return development_executor(plan, request, effective_context);
             if (state->host_executor)
                 return state->host_executor(plan, request, effective_context);
             return not_implemented();
@@ -543,7 +568,39 @@ ControlInstalledHost::start(ControlInstalledHostConfig config) {
             .redact_runtime_eval_result = std::move(config.ui->redact_runtime_eval_result),
         });
     }
+    if (config.development) {
+        ControlRegistration registration{
+            .registration_id = ControlRegistrationId{state->opened.registration_id},
+            .broker_id = ControlBrokerId{state->opened.broker_id},
+            .host_tier = ControlHostTier::Standalone,
+            .session_id = state->opened.session_id,
+            .instance_id = state->opened.instance_id,
+            .publication_id = state->opened.publication_id,
+            .plugin_id = config.development->manifest.bundle_id,
+            .publisher_id = config.development->manifest.product_name,
+            .manifest_digest = state->opened.manifest_digest,
+            .artifact_digest = state->opened.producer_artifact_digest,
+            .consent_identity = control_consent_identity(state->opened.manifest_digest,
+                                                         state->opened.producer_artifact_digest),
+            .profile = config.development->manifest.profile,
+            .capabilities = config.development->manifest.capabilities,
+            .build_id = config.development->manifest.build_id,
+        };
+        state->development = ControlHostDevelopmentExecutor::create({
+            .binding = {.registration = std::move(registration),
+                        .manifest = std::move(config.development->manifest)},
+            .main_thread_rpc = config.main_thread_rpc,
+            .observe_ui = std::move(config.development->observe_ui),
+            .read_diagnostics = std::move(config.development->read_diagnostics),
+            .read_logs = std::move(config.development->read_logs),
+            .apply_test_note = std::move(config.development->apply_test_note),
+            .apply_test_transport = std::move(config.development->apply_test_transport),
+            .release_test_input = std::move(config.development->release_test_input),
+            .apply_authoring = std::move(config.development->apply_authoring),
+        });
+    }
     if (!state->observability || !state->motion || (config.ui && !state->ui) ||
+        (config.development && !state->development) ||
         !state->slot.install(state->composite_executor()))
         return nullptr;
     const auto ready = state->connection->mark_executor_ready(config.handshake_timeout);

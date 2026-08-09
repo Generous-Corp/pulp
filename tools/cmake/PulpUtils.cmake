@@ -700,11 +700,16 @@ function(pulp_add_plugin target)
                 dev.pulp.instance/read@1
                 dev.pulp.session/control@1
                 dev.pulp.state/read@1
+                dev.pulp.ui/observe@1
+                dev.pulp.diagnostics/read@1
+                dev.pulp.logs/read@1
                 dev.pulp.ui/capture@1
                 dev.pulp.ui/input@1
                 dev.pulp.trace/control@1
                 dev.pulp.trace/session-control@1
                 dev.pulp.state/parameter-gesture@1
+                dev.pulp.test/input@1
+                dev.pulp.authoring/tweaks@1
                 dev.pulp.telemetry/subscribe@1
                 dev.pulp.runtime/evaluate@1)
         else()

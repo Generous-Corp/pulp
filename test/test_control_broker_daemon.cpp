@@ -803,14 +803,17 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
     const auto instance = instances[0];
     CHECK(instance["plugin_id"].getString() == expected_plugin);
     if (author_host_environment) {
-        CHECK(instance["capabilities"].size() == 10);
+        CHECK(instance["capabilities"].size() == 15);
         const auto encoded = choc::json::toString(instance["capabilities"], false);
         for (const auto capability : {
                  "dev.pulp.instance/read@1", "dev.pulp.session/control@1",
-                 "dev.pulp.state/read@1", "dev.pulp.ui/capture@1",
+                 "dev.pulp.state/read@1", "dev.pulp.ui/observe@1",
+                 "dev.pulp.diagnostics/read@1", "dev.pulp.logs/read@1",
+                 "dev.pulp.ui/capture@1",
                  "dev.pulp.ui/input@1", "dev.pulp.trace/control@1",
                  "dev.pulp.trace/session-control@1",
                  "dev.pulp.state/parameter-gesture@1",
+                 "dev.pulp.test/input@1", "dev.pulp.authoring/tweaks@1",
                  "dev.pulp.telemetry/subscribe@1", "dev.pulp.runtime/evaluate@1"})
             CHECK(encoded.find(capability) != std::string::npos);
     } else {
@@ -1103,6 +1106,82 @@ TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
         CHECK(choc::json::parse(renewed_controller.response->detail_json)["lease_id"].getString() ==
               controller_lease_id);
 
+        const auto read_json_artifact = [&](const ControlClientReceiptResult& operation) {
+            REQUIRE(operation.succeeded());
+            REQUIRE(operation.response);
+            REQUIRE(operation.response->state == ControlReceiptState::Completed);
+            REQUIRE(operation.response->artifacts.size() == 1);
+            const auto artifact = client.read_artifact(
+                operation.response->artifacts[0].artifact_id, 0, 1024 * 1024, 5s);
+            REQUIRE(artifact.status == ControlArtifactStatus::Read);
+            REQUIRE(artifact.eof);
+            return std::string(reinterpret_cast<const char*>(artifact.bytes.data()),
+                               artifact.bytes.size());
+        };
+
+        const auto observed = invoke(
+            "dev.pulp.ui/observe@1",
+            R"({"selector":"#author-input","include_geometry":false})");
+        const auto observed_json = read_json_artifact(observed);
+        CHECK(observed_json.find("author-input") != std::string::npos);
+        CHECK(observed_json.find("\"bounds\"") == std::string::npos);
+        CHECK(choc::json::parse(observed.response->detail_json)["node_count"].getInt64() == 1);
+
+        const auto diagnostics_before = invoke("dev.pulp.diagnostics/read@1", "{}");
+        const auto diagnostics_before_json = read_json_artifact(diagnostics_before);
+        CHECK(diagnostics_before_json.find("standalone.test-input") != std::string::npos);
+        CHECK(diagnostics_before_json.find("author.parity-state") != std::string::npos);
+        CHECK(diagnostics_before_json.find("generation=0") != std::string::npos);
+
+        std::this_thread::sleep_for(150ms);
+        const auto logs = invoke("dev.pulp.logs/read@1", R"({"limit":20})");
+        const auto logs_json = read_json_artifact(logs);
+        CHECK(logs_json.find("installed-parity-live-log") != std::string::npos);
+
+        const auto note_on = invoke(
+            "dev.pulp.test/input@1",
+            R"({"sequence":1,"kind":"note-on","channel":0,"note":60,"velocity":0.75})");
+        REQUIRE(note_on.response);
+        REQUIRE(note_on.response->state == ControlReceiptState::Completed);
+        CHECK_FALSE(note_on.response->result_code);
+        CHECK(choc::json::parse(note_on.response->detail_json)["accepted_sequence"].getInt64() == 1);
+        const auto stale_note = invoke(
+            "dev.pulp.test/input@1",
+            R"({"sequence":1,"kind":"note-off","channel":0,"note":60,"velocity":0})");
+        REQUIRE(stale_note.response);
+        CHECK(stale_note.response->state == ControlReceiptState::Failed);
+        CHECK(stale_note.response->result_code == ControlResultCode::StateConflict);
+        const auto transport_input = invoke(
+            "dev.pulp.test/input@1",
+            R"({"sequence":2,"kind":"transport","playing":true,"position_beats":8,"tempo_bpm":120})");
+        REQUIRE(transport_input.response);
+        REQUIRE(transport_input.response->state == ControlReceiptState::Completed);
+        CHECK_FALSE(transport_input.response->result_code);
+        CHECK(choc::json::parse(transport_input.response->detail_json)["accepted_sequence"]
+                  .getInt64() == 2);
+        std::this_thread::sleep_for(20ms);
+        const auto consumed_input = invoke("dev.pulp.diagnostics/read@1", "{}");
+        const auto consumed_input_json = read_json_artifact(consumed_input);
+        CHECK(consumed_input_json.find("author.test-input-consumed") != std::string::npos);
+        CHECK(consumed_input_json.find("note_on=60") != std::string::npos);
+        CHECK(consumed_input_json.find("channel=0") != std::string::npos);
+        CHECK(consumed_input_json.find("velocity=95") != std::string::npos);
+        CHECK(consumed_input_json.find("transport_playing=true") != std::string::npos);
+        CHECK(consumed_input_json.find("transport_at_or_after_eight_beats=true") !=
+              std::string::npos);
+
+        const auto authoring = invoke(
+            "dev.pulp.authoring/tweaks@1",
+            R"({"idempotency_key":"installed-authoring","changes":{"constants":{"gain":0.625},"highlight_node_id":"author-input","repaint_flash":true}})");
+        REQUIRE(authoring.succeeded());
+        CHECK(choc::json::parse(authoring.response->detail_json)["generation"].getInt64() == 1);
+        const auto diagnostics_after = invoke("dev.pulp.diagnostics/read@1", "{}");
+        const auto diagnostics_after_json = read_json_artifact(diagnostics_after);
+        CHECK(diagnostics_after_json.find("generation=1") != std::string::npos);
+        CHECK(diagnostics_after_json.find("gain=0.625") != std::string::npos);
+        CHECK(diagnostics_after_json.find("highlight=author-input") != std::string::npos);
+        CHECK(diagnostics_after_json.find("repaint_flash=true") != std::string::npos);
+
         const auto gesture = invoke(
             "dev.pulp.state/parameter-gesture@1",
             R"({"idempotency_key":"installed-gesture","normalized_value":0.75,"parameter_id":1})",
@@ -1318,6 +1397,15 @@ TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
         INFO(cli_controller_release.stderr_output);
         REQUIRE(cli_controller_release.exit_code == 0);
         CHECK(operation_consent_count.load(std::memory_order_relaxed) >= 2);
+
+        const auto reacquired_controller =
+            invoke("dev.pulp.session/control@1", R"({"action":"acquire"})");
+        REQUIRE(reacquired_controller.succeeded());
+        const auto sequence_restarted = invoke(
+            "dev.pulp.test/input@1",
+            R"({"sequence":1,"kind":"note-off","channel":0,"note":60,"velocity":0})");
+        REQUIRE(sequence_restarted.succeeded());
+        CHECK(invoke("dev.pulp.session/control@1", R"({"action":"release"})").succeeded());
 
         auto revoke = choc::value::createObject("");
         revoke.addMember("grant_id", choc::value::createString(request.grant_id));

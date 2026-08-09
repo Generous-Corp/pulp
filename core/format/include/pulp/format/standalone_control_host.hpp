@@ -4,6 +4,9 @@
 
 namespace pulp::format {
 class Processor;
+namespace detail {
+class StandaloneTestInputHost;
+}
 }
 
 namespace pulp::state {
@@ -25,7 +28,9 @@ class StandaloneControlHost {
     /// Called after the processor has registered its complete parameter
     /// catalog and the Standalone app has otherwise started successfully. A
     /// direct user launch with no broker bootstrap remains an inert launch.
-    virtual bool start(Processor& processor, state::StateStore& store) = 0;
+    virtual bool start(Processor& processor, state::StateStore& store,
+                       detail::StandaloneTestInputHost* test_input = nullptr,
+                       double sample_rate = 0.0) = 0;
 
     /// Revoke host-side authority before the processor or StateStore retires.
     virtual void stop() noexcept = 0;

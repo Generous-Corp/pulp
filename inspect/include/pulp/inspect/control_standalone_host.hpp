@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/format/standalone_control_host.hpp>
+#include <pulp/inspect/control_host_development_executor.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -36,6 +37,9 @@ struct StandaloneControlAuthorHooks {
     std::function<ControlTelemetrySensitivity(std::string_view)> telemetry_classifier;
     std::function<view::motion::RenderCostSnapshot()> motion_cost_probe;
     std::filesystem::path motion_fixture_path;
+    std::function<std::vector<ControlDiagnosticItem>()> diagnostics;
+    std::function<ControlAuthoringApplyResult(const ControlAuthoringChanges&)>
+        apply_authoring;
 };
 
 using StandaloneControlAuthorHooksFactory =

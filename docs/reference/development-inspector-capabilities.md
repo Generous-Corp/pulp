@@ -48,16 +48,16 @@ availability.
 | `dev.pulp.session/control@1` (`session.control`) | no | yes | Broker lease/grant machinery exists; no general product host adapter |
 | `dev.pulp.state/read@1` (`state.read`) | yes | yes | T0/T1 runtime executor returns bounded parameter catalog/value snapshots against the shared `StateStore` mutation generation, with explicit sensitive-field redaction; CLI/MCP use the canonical typed client |
 | `dev.pulp.render/offline@1` (`render.offline`) | no | no | T0-only headless executor resolves authority-bound, launcher-trusted in-memory inputs, renders through `OfflineRenderHost`, and publishes broker-owned WAV artifacts; no profile enables it implicitly |
-| `dev.pulp.ui/observe@1` (`ui.read`) | yes | yes | Typed contract/components exist; no general product host adapter |
-| `dev.pulp.diagnostics/read@1` (`diagnostics.read`) | yes | yes | Typed contract/components exist; no general product host adapter |
-| `dev.pulp.logs/read@1` (`logs.read`) | yes | yes | Console component exists; no public live route |
+| `dev.pulp.ui/observe@1` (`ui.read`) | yes | yes | Ordinary Standalone composition snapshots the exact main-thread Pulp view tree, optionally selects one unique node ID and removes geometry, and publishes a bounded sensitive broker artifact |
+| `dev.pulp.diagnostics/read@1` (`diagnostics.read`) | yes | yes | Ordinary Standalone composition publishes bounded typed host and author-supplied diagnostic items as a sensitive broker artifact |
+| `dev.pulp.logs/read@1` (`logs.read`) | yes | yes | Ordinary scripted-UI Standalone composition pages the bounded live JS console ring by monotonic sequence and publishes a sensitive broker artifact |
 | `dev.pulp.ui/capture@1` (`capture.image`) | yes | yes | The exact-instance main-thread executor reuses `InspectorCaptureSource` for bounded window PNGs and the Pulp-owned exact-target adapter for node PNGs; both publish sensitive ACL-bound broker artifacts |
 | `dev.pulp.ui/input@1` (`ui.input`) | no | yes | Grant-controlled ordinary Standalone composition accepts one bounded pointer, keyboard, focus, or UTF-8 text event for an exact registration/view-generation/node target on the fenced main thread; the installed-host seam binds retained state to a broker-projected opaque authority and subscribes exact-owner cleanup to revoke, expiry, disconnect, and teardown |
 | `dev.pulp.trace/control@1` (`trace.control`) | no | yes | Injected exact-T1 main-thread Motion executor provides authority-bound geometry/scroll trace ownership, bounded preloaded-fixture scrub/play/pause, and finite redacted cost snapshots; no generic raw Inspector route |
 | `dev.pulp.trace/session-control@1` (`trace.session.control`) | no | yes | `pulp trace start/stop` and matching MCP tools use canonical control only; the reusable host observability bundle dispatches the exact admitted instance when an adapter publishes it |
 | `dev.pulp.state/parameter-gesture@1` (`state.write`) | no | yes | T1 main-thread exact-slot executor atomically claims the shared `StateStore` generation and rolls back failed brackets without overwriting newer writers; broker grant/consent remains mandatory |
-| `dev.pulp.test/input@1` (`test.input`) | no | yes | Typed executor building block exists; no public general-live route |
-| `dev.pulp.authoring/tweaks@1` (`authoring.tweaks`) | no | yes | In-process authoring components remain; remote wrapper was removed |
+| `dev.pulp.test/input@1` (`test.input`) | no | yes | Controller-gated ordinary Standalone composition maps monotonic typed note and transport requests onto its existing bounded test-input host and releases retained input on controller/authority/session end |
+| `dev.pulp.authoring/tweaks@1` (`authoring.tweaks`) | no | yes | Controller-gated ordinary Standalone composition decodes only the frozen bounded tweak object and requires an explicit typed author callback; successful receipts report the author-owned applied generation |
 | `dev.pulp.telemetry/subscribe@1` (`telemetry.stream`) | no | yes | The host observability bundle exposes typed `subscribe`, `poll`, and `unsubscribe` actions over the bounded/redacting tap; exact host publication still determines availability |
 | `dev.pulp.runtime/reload@1` (`runtime.reload`) | no | no | Frozen contract; no current executor or grant path |
 | `dev.pulp.runtime/evaluate@1` (`runtime.eval`) | no | no | Research-unsafe acknowledged manifests may inject the bounded exact-instance evaluator; grants require broker-owned single-use consent, and results/errors are size-bounded and redacted |
@@ -122,7 +122,7 @@ target.
 | CLI | `pulp control profiles`; offline `pulp inspect audit ARTIFACT`; exact-instance `pulp control` management/call/watch/artifact/revoke; canonical trace start/stop; offline trace analysis. `pulp inspect profiles` is a compatibility alias through Pulp 0.800.0 on 2026-10-01. | Raw Inspector discovery/RPC, host/port selectors, newest-instance selection, and Motion wrappers |
 | MCP | In-process `pulp_control_profiles`; generated typed `pulp_control_*` operations and management tools; canonical `pulp_trace_start` and `pulp_trace_stop`. `pulp_inspect_profiles` is a compatibility alias through Pulp 0.800.0 on 2026-10-01. | Generic Inspector RPC, raw selectors, and Motion wrappers |
 | Build/link/install | Separate protocol, control, canonical client, runtime, telemetry, authoring, and high-risk eval components; ordinary targets do not gain authority merely because components are built. `ControlInstalledHost` is the explicit T1 composition seam for the authenticated carrier, observability bundle, Motion, exact-target UI, and additional typed host executors, all installed before ready publication. A clean-prefix consumer compiles and runs the installed protocol/control/client targets while rejecting direct GPU/render/format/host/CLI/MCP closure | Per-target shipped-product declarations and cross-platform verified-peer parity |
-| Shipping | Canonical manifests, registry digest, artifact audit, stripped ordinary targets, marker checks, the owner-only macOS health-service LaunchAgent, and a Release process E2E for ready-gated exact-host dispatch and authority cleanup | Remaining product declarations and cross-platform release negative controls |
+| Shipping | Canonical manifests, registry digest, artifact audit, stripped ordinary targets, marker checks, the owner-only macOS health-service LaunchAgent, and a Release installed-author process E2E for all declared ordinary Standalone outcomes, ready-gated exact-host dispatch, artifacts, and authority cleanup | Remaining product declarations and cross-platform release negative controls |
 
 ## Centralized replacement boundary
 
@@ -132,6 +132,14 @@ artifact/telemetry systems. It is not a compatibility wrapper around the
 deleted Inspector authority. New host tiers or operations must join this
 composition; they may not add a second broker, discovery service, transport,
 session registry, client, generic RPC, or filesystem selector.
+
+Centralization is not itself a reason to reduce a supported outcome. Outcomes
+remain launch requirements unless a specific security or product rationale is
+recorded for their removal. The retained exclusions are transport or ambient
+authority surfaces rather than outcomes: raw TCP, host/port and discovery
+selectors, arbitrary method/command dispatch, and filesystem/editor-launch
+tweak load/save/autosave/jump. Their bounded typed outcomes use the centralized
+path instead.
 
 The deleted legacy TCP server/discovery path is not a compatibility fallback.
 There is one centralized authority path, and unavailable operations remain
@@ -180,8 +188,11 @@ is separately linked and must remain bounded, single-flight, interruptible, and
 denied for effectful scripted realms. It is never an implementation path for
 MIDI, transport, parameter gestures, authoring controls, or capture.
 
-Typed test input, state changes, telemetry, capture, and Motion components can
-still be exercised by focused in-process tests. Public clients must not reach
-them through a resurrected raw server or custom fixture wire. Their future
-availability depends on the canonical host adapter and its explicit effective
-grant.
+Typed test input, state changes, UI observation/capture/input, diagnostics,
+logs, authoring tweaks, telemetry, and Motion outcomes are composed only through
+the canonical host adapter and its explicit effective grant. Public clients do
+not reach them through a resurrected raw server, custom fixture wire, filesystem
+selector, or generic command. Product-specific diagnostics remain an optional
+typed extension to the built-in host diagnostics. Authoring effects remain an
+explicit typed hook: declaring that capability without a provider fails host
+startup instead of returning a false-success receipt.

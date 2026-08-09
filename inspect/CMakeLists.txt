@@ -107,6 +107,7 @@ target_link_libraries(pulp-inspect-client
     PUBLIC pulp::inspect-control)
 
 add_library(pulp-inspect-runtime
+    src/control_host_development_executor.cpp
     src/control_state_read_executor.cpp
     src/control_state_write_executor.cpp
     src/control_host_ui_executor.cpp

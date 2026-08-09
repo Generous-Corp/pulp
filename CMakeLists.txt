@@ -490,7 +490,7 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS AND
     set_target_properties(pulp-control-standalone-host PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/inspect")
     target_link_libraries(pulp-control-standalone-host PRIVATE
-        pulp::inspect-standalone-runtime)
+        pulp::inspect-standalone-runtime pulp::standalone)
     target_link_options(pulp-control-standalone-host PRIVATE
         "LINKER:-dead_strip_dylibs")
     _pulp_cache_control_declarations(pulp-control-standalone-host

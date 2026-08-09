@@ -643,7 +643,8 @@ bool StandaloneApp::start() {
         if (!creation.factory_installed)
             return true;
         control_host_ = std::move(creation.host);
-        if (control_host_ && control_host_->start(*processor_, store_))
+        if (control_host_ && control_host_->start(*processor_, store_, &test_input_host_,
+                                                 config_.sample_rate))
             return true;
         runtime::log_error("Standalone: canonical control host failed closed during startup");
         if (control_host_)
