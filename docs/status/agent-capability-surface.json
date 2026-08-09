@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 17,
+  "inventory_version": 18,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -2942,7 +2942,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/nlms_adaptive_filter.hpp",
-      "fingerprint": "sha256:143749ae3e334aa928bd68333902f3b9e827edacd40b3123c595e1e797711711",
+      "fingerprint": "sha256:ac5d8961a7dc69bd24a4ab8f6389e6e0f62eb5ac7dc433ebabe845e15366298b",
       "include": "pulp/signal/nlms_adaptive_filter.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [

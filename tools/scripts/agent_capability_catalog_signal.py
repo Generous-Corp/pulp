@@ -257,7 +257,7 @@ EXPORTS = [
             include="pulp/signal/nlms_adaptive_filter.hpp",
             qualified_name="pulp::signal::NlmsAdaptiveFilterT<float>",
             target="Pulp::signal",
-            header_fingerprint="sha256:143749ae3e334aa928bd68333902f3b9e827edacd40b3123c595e1e797711711",
+            header_fingerprint="sha256:ac5d8961a7dc69bd24a4ab8f6389e6e0f62eb5ac7dc433ebabe845e15366298b",
         )],
         _link_probes=[{
             "role": "entrypoint",
