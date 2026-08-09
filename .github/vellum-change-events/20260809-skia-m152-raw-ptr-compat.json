@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20260809-skia-m152-raw-ptr-compat",
+  "kind": "change",
+  "created_at": "2026-08-09T07:11:46Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "Pulp's standalone Linux and Windows Skia prebuilts can reference Chromium BackupRefPtr and PartitionAlloc support symbols even though the bundle does not ship PartitionAlloc. The existing Pulp compatibility translation unit supplies inert definitions because Pulp does not use Chromium PartitionAlloc; this change documents that the same compatibility requirement continues for the milestone-matched Skia M152 archive. This is Pulp-only dependency and build integration work, and no named immutable Vellum framework commit is being backported.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-skia-fetch"
+  ],
+  "disposition": "pulp-only"
+}

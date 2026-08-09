@@ -82,7 +82,7 @@ MATRIX_TO_MANIFEST = {
     "ios-simulator-arm64-x86_64": "ios-simulator-arm64-x86_64",
     # Emscripten/wasm slice. Ganesh + WebGL2 (no Dawn, no Graphite); libs ship
     # flat under build/wasm-gpu/lib/Release/, so the flatten step is a no-op.
-    "wasm": "wasm",
+    "wasm": "wasm-wasm32",
 }
 
 # iOS keeps its per-arch subdir under Release/ (device-arm64,

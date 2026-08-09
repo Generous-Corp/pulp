@@ -888,17 +888,13 @@ ai_shader_design:
     status: partial
     notes: >
       setWidgetLottie/seekWidgetLottie bridge, Lottie JSON storage, and scrub
-      state on Knob/Fader/Toggle work and are tested. Native Skottie rendering
-      does NOT currently run on any target: the bundled Skia (chrome/m151) ships
-      libskottie.a but not skottie's SkJSON dependency (modules/jsonreader), so
-      the link leaves skjson DOM symbols unresolved and the configure-time
-      try-link in core/canvas/CMakeLists.txt auto-disables PULP_LOTTIE
-      everywhere. LottieView degrades to a no-op. Note the coverage gap this
-      leaves: test_lottie_view.cpp's rendering/playback cases are guarded at
-      RUNTIME (`if (!LottieView::supported()) { SUCCEED(); return; }`), not
-      compiled out — so they run and pass VACUOUSLY, and no CI lane has ever
-      exercised the real skottie path. Fixing that needs a skia-builder re-cut
-      that includes jsonreader. See external/skia-build/VERSION.md.
+      state on Knob/Fader/Toggle work and are tested. Skia chrome/m152 restores
+      the jsonreader and skresources archives required by native skottie, and
+      the configure-time real link probe in core/canvas/CMakeLists.txt enables
+      PULP_LOTTIE only where the complete archive set links. LottieView still
+      degrades to a no-op on any slice that fails that probe. The wasm slice
+      omits jsonreader/skresources, so Lottie remains unavailable there. See
+      external/skia-build/VERSION.md.
   web_animations_api:
     status: usable
     notes: >
