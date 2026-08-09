@@ -864,6 +864,7 @@ a working convolution and would hide the bug. Assert
 |-----------|--------|-------------|
 | Envelope Follower | `dynamics_contract.hpp` | Exact peak/RMS envelope timing, stereo detector linking, and canonical gain-reduction telemetry; `BallisticsFilter` retains its legacy nominal timing for render compatibility |
 | Transient Designer | `transient_designer.hpp` | Zero-latency fast/slow-envelope shaper with independent attack and sustain gain; positive values enhance and negative values attenuate |
+| Dynamic EQ Band | `dynamic_eq.hpp` | Zero-latency internally keyed band with threshold activity, signed boost/cut range, detector telemetry, and fixed-state RT processing |
 | Compressor | `compressor.hpp` | Soft-knee downward compressor with threshold, ratio, attack, release |
 | True-peak limiter | `true_peak_limiter.hpp` | Stereo look-ahead limiter with 8x intersample detection, a fixed 64-sample gain-scheduling horizon plus optional user lookahead, explicit channel linking, latency, tail, and gain-reduction telemetry; larger channel capacities require an explicit template specialization |
 | DryWetMixer | `dry_wet_mixer.hpp` | Parallel mix with latency compensation — equal-power or linear crossfade |
