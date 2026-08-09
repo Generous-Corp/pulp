@@ -70,6 +70,14 @@ def _script_contains(fragment: str) -> bool:
     return fragment in SCRIPT.read_text()
 
 
+class ParallelismContractTests(unittest.TestCase):
+    def test_build_and_test_parallelism_can_be_tuned_independently(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn('TEST_JOBS="${PULP_COVERAGE_TEST_JOBS:-8}"', text)
+        self.assertIn('--test-jobs) TEST_JOBS="$2"', text)
+        self.assertIn('CTEST_JOBS="${TEST_JOBS}"', text)
+
+
 class IgnoreRegexTests(unittest.TestCase):
     """The regex excludes noisy paths and keeps our real source tree."""
 

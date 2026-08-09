@@ -396,19 +396,25 @@ receipt-aware upload watchdog is the alarm if coverage genuinely stops
 flowing. Report verification and Codecov transport are separate contracts:
 missing or structurally empty reports fail the producing leg, while the shared
 upload action records transport failure without making Codecov availability a
-merge prerequisite. Failed native/Python suites retain partial artifacts for
-diagnosis but cannot upload or mint freshness receipts; either lane can still
-upload a valid report when the other verifier fails.
+merge prerequisite. Report eligibility follows the semantic artifact contract,
+not the test runner's exit code: after a complete traversal, a nonzero test
+assertion may coexist with a parseable report and that report remains eligible.
+Configure/build failure or a budget interruption produces no eligible report.
+Native and Python verification remain independent, so either lane can upload a
+valid report when the other verifier fails.
 `coverage-upload-watchdog.yml` counts a main run as fresh
 only when the action emitted exact, non-expired Linux, macOS, and Python-tools
 receipts for that run's commit. Upload-axis Codecov flags do not carry forward,
 so a failed current lane cannot masquerade as fresh coverage from an older SHA.
 The native graph retains example-driven tests that exercise first-party core
 code; hosted macOS reclaims only inactive Xcodes and bounds linker parallelism
-to avoid ENOSPC without shrinking the measured test surface.
-The native suite's 90-minute internal budget reserves the final hour of the
-150-minute job for setup, report generation, side-language coverage, artifacts,
-and receipts, avoiding a hard job cancellation after a nominal budget hit.
+to avoid ENOSPC without shrinking the measured test surface. Build and CTest
+parallelism are separate in the shared script: low-memory consumers can bound
+link workers while the default eight test workers prevent suite growth from
+consuming the upload window on GitHub-hosted, local, and SSH coverage. The native
+suite's 120-minute internal budget reserves the final 30 minutes of the
+150-minute job for report generation, side-language coverage, artifacts, and
+receipts, avoiding a hard job cancellation after a nominal budget hit.
 
 ---
 

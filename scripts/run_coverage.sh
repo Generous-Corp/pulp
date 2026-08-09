@@ -2,7 +2,7 @@
 # run_coverage.sh — configure + build + test + HTML coverage report.
 #
 # Usage:
-#   scripts/run_coverage.sh [--jobs N] [--tests REGEX]
+#   scripts/run_coverage.sh [--jobs N] [--test-jobs N] [--tests REGEX]
 #
 # Produces:
 #   build-coverage/coverage/index.html          — per-file drilldown
@@ -24,6 +24,11 @@ BUILD_DIR="${REPO_ROOT}/build-coverage"
 PROFRAW_DIR="${BUILD_DIR}/profraw"
 REPORT_DIR="${BUILD_DIR}/coverage"
 JOBS=$(command -v nproc >/dev/null 2>&1 && nproc || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+# Test-process parallelism is intentionally independent from instrumented build
+# parallelism. Low-memory hosts may need --jobs 2 for linking, but serializing
+# nearly 20k small tests behind that same value makes every coverage consumer
+# (GitHub-hosted, local, or SSH) miss its upload window.
+TEST_JOBS="${PULP_COVERAGE_TEST_JOBS:-8}"
 TESTS_REGEX=""
 EXTRA_CMAKE_ARGS=()
 EXTRA_CTEST_ARGS=()
@@ -57,6 +62,7 @@ COVERAGE_IGNORE_REGEX='(^|/)(_deps|external|test|[Cc]atch2|build|build-coverage|
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --jobs) JOBS="$2"; shift 2 ;;
+        --test-jobs) TEST_JOBS="$2"; shift 2 ;;
         --tests) TESTS_REGEX="$2"; shift 2 ;;
         *) echo "unknown arg: $1"; exit 2 ;;
     esac
@@ -177,7 +183,7 @@ CTEST_RC=0
 # the whole budget; it is generous (instrumented Debug tests run slower than the
 # Release lanes' 120s), and a genuinely hung test failing here still emits a
 # partial report rather than getting SIGKILLed with the report dropped.
-CTEST_JOBS="${JOBS}"
+CTEST_JOBS="${TEST_JOBS}"
 if [[ "${CTEST_JOBS}" -gt 8 ]]; then CTEST_JOBS=8; fi
 CTEST_PER_TEST_TIMEOUT="${PULP_COVERAGE_CTEST_TIMEOUT:-600}"
 if [[ -n "${TESTS_REGEX}" ]]; then

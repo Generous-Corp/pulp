@@ -1481,6 +1481,15 @@ uses, or the golden warms a cache the real jobs never touch.
   failure still fails both attempts (no masking). This complements the per-lane
   `--exclude-regex` flake lists by catching not-yet-listed flakes generically —
   prefer it over growing the exclude list for transient timing flakes.
+- **Coverage upload eligibility follows the report, not the test exit code.**
+  `scripts/run_coverage.sh` and `run_python_coverage.py` finish report generation
+  after test assertion failures. The workflow uploads those reports only after
+  semantic verification (present, parseable, positive `lines-valid`); configure,
+  build, timeout, and report-generation failures still produce no eligible
+  upload. On hosted macOS, keep instrumented build parallelism at two workers
+  while the shared script defaults CTest to eight independently; this applies to
+  GitHub-hosted, local, and SSH coverage. Coupling both to `--jobs 2` made the
+  nearly-20k-test suite hit its budget and silently drop every native upload.
 
 ### `web-plugins.yml` — pin the wasm toolchain, and fetch Skia from the manifest
 

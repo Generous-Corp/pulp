@@ -9,6 +9,7 @@
 #include <pulp/tools/audio/model_store.hpp>
 #include <pulp/tools/audio/service.hpp>
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cmath>
