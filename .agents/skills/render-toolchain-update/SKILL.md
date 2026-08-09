@@ -66,6 +66,21 @@ Do not update Pulp's V8 pin until that matched release is published and every re
 platform asset is present. Never substitute the newest weekly V8 merely because it is
 newer.
 
+## Matched release collection
+
+Present the Skia/Dawn and V8 release URLs together as the milestone collection, then
+download only the assets the user needs:
+
+```bash
+ghapp release view chrome/m152 --repo danielraffel/skia-builder --json url
+ghapp release list --repo danielraffel/v8-builder --limit 100 --json tagName \
+  --jq '.[] | select(.tagName | startswith("v8-m152-")) |
+    "https://github.com/danielraffel/v8-builder/releases/tag/\(.tagName)"'
+```
+
+The collection is a provenance and compatibility convenience, not one combined archive:
+Skia/Dawn, V8, or both may be consumed independently.
+
 ## Pulp update checklist
 
 1. Work from current `origin/main` in a clean worktree. Read release notes from M+1

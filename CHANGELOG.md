@@ -8,6 +8,32 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v08000"></a>
+## [0.800.0] - 2026-08-09
+
+- release/version bump ([#7321](https://github.com/Generous-Corp/pulp/pull/7321))
+
+<a id="v07991"></a>
+## [0.799.1] - 2026-08-09
+
+- release/version bump ([#7319](https://github.com/Generous-Corp/pulp/pull/7319))
+- feature/m5 explicit q spectral delay 20260808 ([#7298](https://github.com/Generous-Corp/pulp/pull/7298))
+
+<a id="v07990"></a>
+## [0.799.0] - 2026-08-09
+
+- release/version bump ([#7317](https://github.com/Generous-Corp/pulp/pull/7317))
+- fix/text shape batch lifetime 20260809 ([#7313](https://github.com/Generous-Corp/pulp/pull/7313))
+- feature/spectral band mask layout 20260808 ([#7315](https://github.com/Generous-Corp/pulp/pull/7315))
+- release/version bump ([#7314](https://github.com/Generous-Corp/pulp/pull/7314))
+- feature/skia dawn m152 ([#7305](https://github.com/Generous-Corp/pulp/pull/7305))
+- integration/dsp material lowcpu land 20260808 ([#7309](https://github.com/Generous-Corp/pulp/pull/7309))
+- fix/windows mcp string literal 20260808 ([#7307](https://github.com/Generous-Corp/pulp/pull/7307))
+- release/version bump ([#7306](https://github.com/Generous-Corp/pulp/pull/7306))
+- release/post tag sync v0.798.1 01d6f10b6d96 ([#7304](https://github.com/Generous-Corp/pulp/pull/7304))
+- feature/dsp four capability stack 20260808 ([#7299](https://github.com/Generous-Corp/pulp/pull/7299))
+- fix/shipyard pr stall watchdog 20260808 ([#7300](https://github.com/Generous-Corp/pulp/pull/7300))
+
 <a id="v07981"></a>
 ## [0.798.1] - 2026-08-09
 
@@ -7613,6 +7639,9 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.800.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.800.0
+[0.799.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.799.1
+[0.799.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.799.0
 [0.798.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.798.1
 [0.798.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.798.0
 [0.797.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.797.0

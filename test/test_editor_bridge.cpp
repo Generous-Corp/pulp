@@ -15,6 +15,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "pulp/view/editor_bridge.hpp"
+#include "pulp/view/script_engine.hpp"
 #include "pulp/view/web_view.hpp"
 
 #include <choc/containers/choc_Value.h>
@@ -491,4 +492,30 @@ TEST_CASE("EditorBridge::attach_native_runtime is a no-op stub for #468",
 
     // Dispatch still works after the stub attach — no state mutated.
     CHECK(response_ok(bridge.dispatch_json(R"({"type":"ping"})")));
+}
+
+TEST_CASE("EditorBridge native ScriptEngine attachment dispatches JSON envelopes",
+          "[editor_bridge][native_runtime]")
+{
+    EditorBridge bridge;
+    float received = 0.0f;
+    bridge.add_handler("set_value", [&](const auto& payload) {
+        received = EditorBridge::get_float(payload, "value", -1.0f);
+        return EditorBridge::ok_response();
+    });
+
+    pulp::view::ScriptEngine engine;
+    CHECK_THROWS_AS(bridge.attach_native_runtime(engine, ""),
+                    std::invalid_argument);
+    bridge.attach_native_runtime(engine, "__testEditorDispatch");
+
+    const auto result = engine.evaluate(
+        "__testEditorDispatch(JSON.stringify({type:'set_value',payload:{value:0.625}}))");
+    REQUIRE(result.isString());
+    CHECK(response_ok(std::string(result.getString())));
+    CHECK(received == Approx(0.625f));
+
+    const auto bad = engine.evaluate("__testEditorDispatch(42)");
+    REQUIRE(bad.isString());
+    CHECK(response_has_error(std::string(bad.getString()), "expects one JSON string"));
 }

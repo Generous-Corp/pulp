@@ -840,8 +840,11 @@ private:
 Key invariants:
 
 - **Renderer-agnostic.** `attach_webview(WebViewPanel&)` today;
-  `attach_native_runtime(JsRuntime&, "<handler_name>")` for the
-  native-JS-runtime import lane. Same handler registrations.
+  `attach_native_runtime(JsRuntime&, "<handler_name>")` for the low-level
+  native runtime, or `attach_native_runtime(ScriptEngine&, "<handler_name>")`
+  when a product owns Pulp's public engine wrapper. Both native overloads
+  register one global function that accepts a JSON envelope string and returns
+  the JSON response string; same handler registrations and error vocabulary.
 - **Explicit WebView teardown.** `detach_webview(WebViewPanel&)`
   clears the callback installed by `attach_webview`. Use it when the
   bridge and `WebViewPanel` are side-by-side members and you want to
