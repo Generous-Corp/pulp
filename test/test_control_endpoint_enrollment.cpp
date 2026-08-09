@@ -185,11 +185,13 @@ struct SpawnedHost {
     std::tuple<unsigned, unsigned, std::string> wait_result(const std::filesystem::path& path) {
         for (unsigned attempt = 0; attempt < 3000 && !std::filesystem::exists(path); ++attempt)
             std::this_thread::sleep_for(1ms);
+        REQUIRE(std::filesystem::exists(path));
         std::ifstream input_file(path);
         unsigned accepted = 0;
         unsigned denied = 0;
         std::string registration;
-        input_file >> accepted >> denied >> registration;
+        REQUIRE(input_file >> accepted >> denied);
+        (void)(input_file >> registration);
         return {accepted, denied, registration};
     }
 
@@ -293,9 +295,13 @@ TEST_CASE("endpoint enrollment registers attaches and rolls back on disconnect",
 
     std::ofstream(stop_path) << "stop";
     CHECK(host.wait() == 0);
-    for (unsigned attempt = 0; attempt < 200 && fixture.router.connected(registration); ++attempt)
+    for (unsigned attempt = 0;
+         attempt < 200 && (fixture.router.connected(registration) ||
+                           fixture.broker.registration(registration).has_value());
+         ++attempt)
         std::this_thread::sleep_for(1ms);
     CHECK_FALSE(fixture.router.connected(registration));
+    CHECK_FALSE(fixture.broker.registration(registration).has_value());
 
     // Capacity one proves disconnect removed broker identity, not only routing.
     SpawnedHost replacement;

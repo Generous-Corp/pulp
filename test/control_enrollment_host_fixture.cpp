@@ -37,6 +37,24 @@ bool send_and_drop(std::string_view endpoint, std::string_view enrollment_id) {
     connection.disconnect();
     return sent;
 }
+
+bool publish_result(const std::filesystem::path& path, unsigned accepted, unsigned denied,
+                    std::string_view registration_id = {}) {
+    auto staging = path;
+    staging += ".tmp";
+    {
+        std::ofstream output(staging, std::ios::trunc);
+        if (!output)
+            return false;
+        output << accepted << ' ' << denied << ' ' << registration_id << '\n';
+        output.close();
+        if (!output)
+            return false;
+    }
+    std::error_code error;
+    std::filesystem::rename(staging, path, error);
+    return !error;
+}
 } // namespace
 
 int main() {
@@ -71,8 +89,8 @@ int main() {
     std::string registration_id;
     if (mode == "drop") {
         const bool sent = send_and_drop(endpoint, enrollment_id);
-        std::ofstream output(result_path);
-        output << "0 0\n";
+        if (!publish_result(result_path, 0, 0))
+            return 4;
         return sent ? 0 : 3;
     }
     const auto make_connection = [&] {
@@ -112,11 +130,9 @@ int main() {
                 denied.fetch_add(1, std::memory_order_relaxed);
         }
     }
-    {
-        std::ofstream output(result_path);
-        output << accepted.load(std::memory_order_relaxed) << ' '
-               << denied.load(std::memory_order_relaxed) << ' ' << registration_id << '\n';
-    }
+    if (!publish_result(result_path, accepted.load(std::memory_order_relaxed),
+                        denied.load(std::memory_order_relaxed), registration_id))
+        return 4;
     if (accepted.load(std::memory_order_relaxed) != 0 && !stop_path.empty()) {
         for (unsigned attempt = 0; attempt < 5000 && !std::filesystem::exists(stop_path); ++attempt)
             std::this_thread::sleep_for(1ms);
