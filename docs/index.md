@@ -45,6 +45,7 @@ MIT-licensed. No royalties. No copyleft.
 - [Testing](guides/testing.md) — running tests, validation, writing tests
 - [Hosting Plugins](guides/hosting.md) — embed CLAP, VST3, AU, and LV2 plugins in a Pulp application
 - [Plugin Interrogation](guides/plugin-interrogation.md) — inspect parameters and run automated A/B renders from the CLI or MCP
+- [Formant Filter Bank](guides/formant-filter-bank.md) — build fixed vowel and resonant-peak filters with bounded realtime retuning
 - [Sampler Playback Chooser](guides/sampler-playback.md) — choose the sampler
   ownership, traversal, conventional stretch, and optional Heritage-character
   model that matches the product

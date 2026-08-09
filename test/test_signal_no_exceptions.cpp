@@ -27,9 +27,9 @@ int main() {
         return 5;
     pulp::signal::CombFilter comb;
     if (!comb.prepare(8u) || !comb.configure({pulp::signal::CombFilterMode::feedback, 4u, 0.5}))
-        return 8;
+        return 20;
     if (!comb.process(1.0f))
-        return 9;
+        return 21;
     pulp::signal::AudioMatrixMixer matrix;
     if (!matrix.prepare(16u))
         return 6;

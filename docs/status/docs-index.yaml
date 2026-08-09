@@ -224,6 +224,11 @@ docs:
     kind: guide
     summary: Fixed-capacity LPC and cepstral source-filter analysis with explicit preparation and realtime contracts
 
+  - slug: formant-filter-bank
+    path: guides/formant-filter-bank.md
+    kind: guide
+    summary: Fixed-capacity vowel and formant filtering with bounded recipes, morphing, headroom, and realtime contracts
+
   - slug: analog-vcf
     path: guides/analog-vcf.md
     kind: guide
