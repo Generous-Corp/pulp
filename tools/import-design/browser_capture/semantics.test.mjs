@@ -34,6 +34,7 @@ test("the capture collects the properties a whole panel needs to be drawn",
       "text-decoration-style",
       "text-decoration-thickness",
       "text-underline-offset",
+      "text-overflow",
       "word-spacing",
       // ::before / ::after inject text that exists in no DOM text node.
       "content",
@@ -285,6 +286,10 @@ test("design-system component classes are admitted by the candidate gate", () =>
     "the recogniser must reach the injected page expression");
   assert.match(expression, /'pulp-knob', 'knob'/,
     "knobs are the controls this exists for");
+  assert.match(expression, /'pulp-combo', 'combo'/,
+    "combos remain recognized without masquerading as segmented selectors");
+  assert.match(expression, /'pulp-select', 'select'/,
+    "select components retain the selector lowering contract");
 
   // The gate itself, not merely the helper.
   const gate = expression.slice(expression.indexOf("const strong ="));

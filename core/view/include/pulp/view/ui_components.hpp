@@ -457,6 +457,10 @@ public:
     std::function<void(int index)> on_change;
 
     int hovered_segment() const { return hover_; }  ///< for tests; -1 = none
+    /// Marks a browser-captured control as a live replacement. The complete
+    /// state is repainted so a prior captured selection cannot leak through.
+    void set_designed_overlay(bool enabled) { designed_overlay_ = enabled; request_repaint(); }
+    bool designed_overlay() const { return designed_overlay_; }
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_event(const MouseEvent& event) override;
@@ -470,6 +474,7 @@ private:
     std::vector<std::string> segments_;
     int selected_ = 0;
     int hover_ = -1;
+    bool designed_overlay_ = false;
 };
 
 // ── ScrollView ───────────────────────────────────────────────────────────

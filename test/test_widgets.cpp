@@ -2,6 +2,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/gap_widgets.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/widget_skin_derive.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/motion_preferences.hpp>
@@ -1653,6 +1655,54 @@ TEST_CASE("Checkbox, toggle button, icons, and image placeholders cover widget p
     path_image.paint(path_image_canvas);
     REQUIRE(path_image_canvas.count(DrawCommand::Type::draw_image) == 1);
     REQUIRE(commands_of(path_image_canvas, DrawCommand::Type::draw_image).front().text == "/tmp/pulp-widget-preview.png");
+}
+
+TEST_CASE("designed discrete replacements repaint their complete live state",
+          "[view][widget][designed-overlay]") {
+    ToggleButton toggle;
+    toggle.set_bounds({0, 0, 96, 32});
+    toggle.set_designed_overlay(true);
+    RecordingCanvas toggle_off;
+    toggle.paint(toggle_off);
+    CHECK(toggle_off.count(DrawCommand::Type::fill_rounded_rect) == 1);
+    toggle.set_on(true);
+    RecordingCanvas toggle_on;
+    toggle.paint(toggle_on);
+    CHECK(toggle_on.count(DrawCommand::Type::fill_rounded_rect) == 1);
+    CHECK(toggle_on.count(DrawCommand::Type::fill_rounded_rect) == 1);
+
+    Toggle scripted_toggle;
+    scripted_toggle.set_bounds({0, 0, 48, 24});
+    scripted_toggle.set_designed_overlay(true);
+    RecordingCanvas scripted_off;
+    scripted_toggle.paint(scripted_off);
+    CHECK(scripted_off.count(DrawCommand::Type::fill_rounded_rect) == 1);
+    CHECK(scripted_off.count(DrawCommand::Type::fill_circle) == 1);
+    scripted_toggle.set_on(true, false);
+    RecordingCanvas scripted_on;
+    scripted_toggle.paint(scripted_on);
+    CHECK(scripted_on.count(DrawCommand::Type::fill_rounded_rect) == 1);
+    CHECK(scripted_on.count(DrawCommand::Type::fill_circle) == 1);
+
+    SegmentedControl segmented;
+    segmented.set_bounds({0, 0, 120, 28});
+    segmented.set_segments({"A", "B", "C"});
+    segmented.set_selected_silent(1);
+    segmented.set_designed_overlay(true);
+    RecordingCanvas segmented_canvas;
+    segmented.paint(segmented_canvas);
+    CHECK(segmented_canvas.count(DrawCommand::Type::fill_rounded_rect) == 2);
+    CHECK(segmented_canvas.count(DrawCommand::Type::fill_text) == 3);
+
+    Stepper stepper;
+    stepper.set_bounds({0, 0, 120, 28});
+    stepper.set_value_silent(7.0);
+    stepper.set_designed_overlay(true);
+    RecordingCanvas stepper_canvas;
+    stepper.paint(stepper_canvas);
+    CHECK(stepper_canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
+    CHECK(stepper_canvas.count(DrawCommand::Type::stroke_rounded_rect) == 1);
+    CHECK(stepper_canvas.count(DrawCommand::Type::fill_text) == 3);
 }
 
 TEST_CASE("Meter set_level", "[view][widget]") {

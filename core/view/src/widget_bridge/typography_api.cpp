@@ -4,11 +4,17 @@
 #include "api_registry.hpp"
 #include "css_color.hpp"
 
+#include <pulp/canvas/text_utf8.hpp>
 #include <pulp/view/text_editor.hpp>
 
+#include <algorithm>
+#include <cctype>
 #include <functional>
+#include <cmath>
+#include <limits>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace pulp::view {
 
@@ -57,7 +63,14 @@ void BridgeRegistrars::register_widget_typography_api(WidgetBridge& self) {
     register_bridge_function(api, "setFontStyle", [&self](choc::javascript::ArgumentList args) {
         auto* v = self.widget(args.get<std::string>(0, ""));
         auto s = args.get<std::string>(1, "normal");
-        if (auto* l = dynamic_cast<Label*>(v)) l->set_font_style(s == "italic" ? 1 : 0);
+        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        if (auto* l = dynamic_cast<Label*>(v)) {
+            if (s == "italic") l->set_font_style(1);
+            else if (s.rfind("oblique", 0) == 0) l->set_font_style(2);
+            else l->set_font_style(0);
+        }
         return choc::value::Value();
     });
 
@@ -112,6 +125,60 @@ void BridgeRegistrars::register_widget_typography_api(WidgetBridge& self) {
         auto ml = args.get<double>(1, 0) > 0.5;
         if (auto* l = dynamic_cast<Label*>(v)) l->set_multi_line(ml);
         else if (auto* e = dynamic_cast<TextEditor*>(v)) e->multi_line = ml;
+        return choc::value::Value();
+    });
+
+    register_bridge_function(api, "setCapturedLineBoxes", [&self](choc::javascript::ArgumentList args) {
+        auto* label = dynamic_cast<Label*>(self.widget(args.get<std::string>(0, "")));
+        if (!label || args.numArgs < 4 || !args[1] || !args[1]->isArray())
+            return choc::value::Value();
+
+        const auto basis_width = static_cast<float>(args.get<double>(2, 0.0));
+        const auto basis_face = args.get<std::string>(3, "");
+        const bool wrap_on_cache_miss =
+            args.numArgs >= 5 && args.get<double>(4, 0.0) > 0.5;
+        auto& entries = *args[1];
+        if (entries.size() == 0 || entries.size() > 4096 ||
+            !std::isfinite(basis_width) || basis_width <= 0.0f ||
+            basis_face.empty())
+            return choc::value::Value();
+
+        std::vector<Label::CachedLineBox> boxes;
+        boxes.reserve(entries.size());
+        int64_t previous_end = 0;
+        for (uint32_t i = 0; i < entries.size(); ++i) {
+            const auto entry = entries[static_cast<int>(i)];
+            if (!entry.isObject() || !entry.hasObjectMember("left") ||
+                !entry.hasObjectMember("top") ||
+                !entry.hasObjectMember("width") ||
+                !entry.hasObjectMember("height") ||
+                !entry.hasObjectMember("start") ||
+                !entry.hasObjectMember("length"))
+                return choc::value::Value();
+            Label::CachedLineBox box;
+            box.left = static_cast<float>(entry["left"].getWithDefault<double>(0.0));
+            box.top = static_cast<float>(entry["top"].getWithDefault<double>(0.0));
+            box.width = static_cast<float>(entry["width"].getWithDefault<double>(0.0));
+            box.height = static_cast<float>(entry["height"].getWithDefault<double>(0.0));
+            const auto start = entry["start"].getWithDefault<int64_t>(-1);
+            const auto length = entry["length"].getWithDefault<int64_t>(-1);
+            if (!std::isfinite(box.left) || !std::isfinite(box.top) ||
+                !std::isfinite(box.width) || !std::isfinite(box.height) ||
+                box.width < 0.0f || box.height <= 0.0f || start < 0 ||
+                length <= 0 || start > std::numeric_limits<int>::max() ||
+                length > std::numeric_limits<int>::max() ||
+                start > std::numeric_limits<int>::max() - length ||
+                !canvas::is_valid_utf16_scalar_range(
+                    label->text(), start, length, previous_end))
+                return choc::value::Value();
+            box.start = static_cast<int>(start);
+            box.length = static_cast<int>(length);
+            boxes.push_back(box);
+            previous_end = start + length;
+        }
+        label->set_cached_line_boxes(
+            std::move(boxes), basis_width, std::move(basis_face),
+            wrap_on_cache_miss);
         return choc::value::Value();
     });
 

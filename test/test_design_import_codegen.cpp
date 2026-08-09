@@ -1,4 +1,5 @@
 #include "test_design_import_shared.hpp"
+#include <pulp/canvas/font_resolver.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
 
 TEST_CASE("parse_v0_tsx normalizes JSON and unsupported-source fallback diagnostics",
@@ -2098,6 +2099,672 @@ TEST_CASE("native codegen wraps multi-line text at its design width (issue-3192)
     REQUIRE(js.find("'width', 284") == std::string::npos);
 }
 
+TEST_CASE("native codegen preserves the browser's captured line-breaking decision",
+          "[view][import][browser-capture][text]") {
+    if (pulp::canvas::resolved_face_identity("Inter", 400.0f).empty())
+        SKIP("captured line-breaking requires a text-shaping backend");
+    DesignIR ir;
+    ir.source = DesignSource::html;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+
+    IRNode single;
+    single.type = "text";
+    single.name = "Single";
+    single.text_content = "01  RATE";
+    single.style.width = 53.6719f;
+    single.style.height = 40.0f; // tall padding must not override captured one-line layout
+    single.style.font_size = 12.0f;
+    single.style.font_family = "Inter";
+    single.text_line_boxes.push_back({0.0f, 0.0f, 53.6719f, 15.0f, 0, 8});
+    single.text_layout_basis = IRTextLayoutBasis{
+        53.6719f, pulp::canvas::resolved_face_identity("Inter", 400.0f)};
+    ir.root.children.push_back(single);
+
+    IRNode wrapped;
+    wrapped.type = "text";
+    wrapped.name = "Wrapped";
+    wrapped.text_content = "alpha beta";
+    wrapped.style.width = 40.0f;
+    wrapped.style.height = 15.0f; // geometry alone would not infer wrapping
+    wrapped.style.font_size = 12.0f;
+    wrapped.style.font_family = "Inter";
+    wrapped.style.font_style = "italic";
+    wrapped.style.text_decoration = "underline";
+    wrapped.style.text_align = "center";
+    wrapped.style.line_height = 18.0f;
+    wrapped.text_line_boxes.push_back({5.0f, 0.0f, 30.0f, 15.0f, 0, 5});
+    wrapped.text_line_boxes.push_back({8.0f, 15.0f, 24.0f, 15.0f, 6, 4});
+    wrapped.text_layout_basis = IRTextLayoutBasis{
+        40.0f, pulp::canvas::resolved_face_identity(
+                   "Inter", 400.0f, pulp::canvas::FontSlant::Italic)};
+    IRTextRun wrapped_red;
+    wrapped_red.start = 0;
+    wrapped_red.end = 5;
+    wrapped_red.color = "#ff0000";
+    wrapped.text_runs.push_back(wrapped_red);
+    IRTextRun wrapped_green;
+    wrapped_green.start = 6;
+    wrapped_green.end = 10;
+    wrapped_green.color = "#00ff00";
+    wrapped_green.font_weight = 700;
+    wrapped_green.font_family = "Courier";
+    wrapped_green.font_style = "oblique 12deg";
+    wrapped_green.text_decoration = "none";
+    wrapped.text_runs.push_back(wrapped_green);
+    ir.root.children.push_back(wrapped);
+
+    IRNode stale;
+    stale.type = "text";
+    stale.name = "Stale";
+    stale.text_content = "stale basis";
+    stale.style.width = 80.0f;
+    stale.style.height = 15.0f;
+    stale.style.font_size = 12.0f;
+    stale.text_line_boxes.push_back({0.0f, 0.0f, 80.0f, 15.0f, 0, 11});
+    stale.text_layout_basis = IRTextLayoutBasis{80.0f, ""};
+    ir.root.children.push_back(stale);
+
+    IRNode deferred_face;
+    deferred_face.type = "text";
+    deferred_face.name = "DeferredFace";
+    deferred_face.text_content = "bundled face";
+    deferred_face.style.width = 72.0f;
+    deferred_face.style.height = 15.0f;
+    deferred_face.style.font_size = 12.0f;
+    deferred_face.style.font_family = "Not Registered Until Runtime";
+    deferred_face.text_line_boxes.push_back({0.0f, 0.0f, 72.0f, 15.0f, 0, 12});
+    deferred_face.text_layout_basis = IRTextLayoutBasis{
+        72.0f, "captured-face-id-not-known-to-generator"};
+    ir.root.children.push_back(deferred_face);
+
+    IRNode nowrap;
+    nowrap.type = "text";
+    nowrap.name = "NoWrap";
+    nowrap.text_content = "alpha beta";
+    nowrap.style.width = 40.0f;
+    nowrap.style.height = 40.0f;
+    nowrap.style.font_size = 12.0f;
+    nowrap.style.font_family = "Inter";
+    nowrap.style.white_space = "nowrap";
+    nowrap.text_line_boxes.push_back({0.0f, 0.0f, 40.0f, 15.0f, 0, 10});
+    nowrap.text_layout_basis = IRTextLayoutBasis{
+        40.0f, pulp::canvas::resolved_face_identity("Inter", 400.0f)};
+    ir.root.children.push_back(nowrap);
+
+    IRNode ellipsis;
+    ellipsis.type = "text";
+    ellipsis.name = "Ellipsis";
+    ellipsis.text_content = "long label";
+    ellipsis.style.width = 30.0f;
+    ellipsis.style.height = 20.0f;
+    ellipsis.style.font_size = 12.0f;
+    ellipsis.style.font_family = "Inter";
+    ellipsis.style.white_space = "nowrap";
+    ellipsis.style.text_overflow = "ellipsis";
+    ellipsis.text_line_boxes.push_back({0.0f, 0.0f, 30.0f, 15.0f, 0, 10});
+    ellipsis.text_layout_basis = IRTextLayoutBasis{
+        30.0f, pulp::canvas::resolved_face_identity("Inter", 400.0f)};
+    ir.root.children.push_back(ellipsis);
+
+    IRNode uncached_ellipsis = ellipsis;
+    uncached_ellipsis.name = "UncachedEllipsis";
+    uncached_ellipsis.text_content = "uncached label";
+    uncached_ellipsis.text_line_boxes.clear();
+    uncached_ellipsis.text_layout_basis.reset();
+    ir.root.children.push_back(uncached_ellipsis);
+
+    IRNode styled_single;
+    styled_single.type = "text";
+    styled_single.name = "StyledSingle";
+    styled_single.text_content = "abcd";
+    styled_single.style.width = 25.0f;
+    styled_single.style.height = 20.0f;
+    styled_single.style.font_size = 12.0f;
+    styled_single.style.font_family = "Inter";
+    styled_single.style.white_space = "nowrap";
+    styled_single.style.text_transform = "uppercase";
+    styled_single.style.text_overflow = "ellipsis";
+    styled_single.text_line_boxes.push_back({0.0f, 0.0f, 60.0f, 15.0f, 0, 4});
+    styled_single.text_layout_basis = IRTextLayoutBasis{
+        25.0f, pulp::canvas::resolved_face_identity("Inter", 400.0f)};
+    IRTextRun red_run;
+    red_run.start = 0;
+    red_run.end = 2;
+    red_run.color = "#ff0000";
+    styled_single.text_runs.push_back(red_run);
+    IRTextRun green_run;
+    green_run.start = 2;
+    green_run.end = 4;
+    green_run.color = "#00ff00";
+    styled_single.text_runs.push_back(green_run);
+    ir.root.children.push_back(styled_single);
+
+    IRNode oblique = single;
+    oblique.name = "Oblique";
+    oblique.text_content = "slanted";
+    oblique.style.width = 50.0f;
+    oblique.style.font_style = "oblique 12deg";
+    oblique.text_line_boxes = {{0.0f, 0.0f, 50.0f, 15.0f, 0, 7}};
+    oblique.text_layout_basis = IRTextLayoutBasis{
+        50.0f, pulp::canvas::resolved_face_identity(
+                   "Inter", 400.0f, pulp::canvas::FontSlant::Oblique)};
+    ir.root.children.push_back(oblique);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    const auto js = generate_pulp_js(ir, opts);
+
+    const auto single_ws = js.find("setWhiteSpace('Single");
+    CHECK(single_ws == std::string::npos);
+    CHECK(js.find("setCapturedLineBoxes('Single") != std::string::npos);
+    CHECK(js.find("setMultiLine('Single") == std::string::npos);
+    const auto wrapped_cache = js.find("setCapturedLineBoxes('Wrapped");
+    const auto wrapped_runs = js.find("setTextRuns('Wrapped");
+    REQUIRE(wrapped_cache != std::string::npos);
+    REQUIRE(wrapped_runs != std::string::npos);
+    CHECK(wrapped_runs < wrapped_cache);
+    const auto wrapped_style = js.find("setFontStyle('Wrapped");
+    const auto wrapped_line_height = js.find("setLineHeight('Wrapped");
+    REQUIRE(wrapped_style != std::string::npos);
+    REQUIRE(wrapped_line_height != std::string::npos);
+    CHECK(wrapped_style < wrapped_cache);
+    CHECK(wrapped_line_height < wrapped_cache);
+    CHECK(js.substr(wrapped_cache, 320).find("start: 6, length: 4") !=
+          std::string::npos);
+    CHECK(js.find("setMultiLine('Wrapped") != std::string::npos);
+    CHECK(js.find("setCapturedLineBoxes('Stale") == std::string::npos);
+    CHECK(js.find("setWhiteSpace('Stale") == std::string::npos);
+    CHECK(js.find("setMultiLine('Stale") != std::string::npos);
+    CHECK(js.find("setCapturedLineBoxes('DeferredFace") != std::string::npos);
+    CHECK(js.find("setCapturedLineBoxes('NoWrap") != std::string::npos);
+    CHECK(js.find("setWhiteSpace('NoWrap") != std::string::npos);
+    CHECK(js.find("setMultiLine('NoWrap") == std::string::npos);
+    CHECK(js.find("setCapturedLineBoxes('Ellipsis") != std::string::npos);
+    CHECK(js.find("setMultiLine('Ellipsis") == std::string::npos);
+    CHECK(js.find("setTextOverflow('Ellipsis") != std::string::npos);
+    const auto ellipsis_width = js.find("setFlex('Ellipsis");
+    REQUIRE(ellipsis_width != std::string::npos);
+    CHECK(js.find("'width', 30", ellipsis_width) != std::string::npos);
+    CHECK(js.find("setCapturedLineBoxes('UncachedEllipsis") == std::string::npos);
+    CHECK(js.find("setMultiLine('UncachedEllipsis") == std::string::npos);
+    const auto uncached_ellipsis_width = js.find("setFlex('UncachedEllipsis");
+    REQUIRE(uncached_ellipsis_width != std::string::npos);
+    CHECK(js.find("'width', 30", uncached_ellipsis_width) != std::string::npos);
+    CHECK(js.find("setCapturedLineBoxes('StyledSingle") != std::string::npos);
+    CHECK(js.find("setMultiLine('StyledSingle") == std::string::npos);
+    CHECK(js.find("setTextRuns('StyledSingle") != std::string::npos);
+    CHECK(js.find("setTextRuns('StyledSingle") <
+          js.find("setCapturedLineBoxes('StyledSingle"));
+    CHECK(js.find("setWhiteSpace('StyledSingle") != std::string::npos);
+    CHECK(js.find("setFontStyle('Oblique") != std::string::npos);
+
+    const auto cpp = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    CHECK(cpp.source.find("pulp::canvas::AttributedString") != std::string::npos);
+    CHECK(cpp.source.find("span.font_family = \"Courier\"") !=
+          std::string::npos);
+    CHECK(cpp.source.find("span.font_weight = 700") != std::string::npos);
+    CHECK(cpp.source.find("span.font_slant = 2") != std::string::npos);
+    CHECK(cpp.source.find("set_attributed_string(std::move(") !=
+          std::string::npos);
+    CHECK(cpp.source.find("set_cached_line_boxes(") != std::string::npos);
+
+    ScriptEngine engine;
+    View host;
+    host.set_bounds({0, 0, 320, 200});
+    pulp::state::StateStore store;
+    WidgetBridge bridge(engine, host, store);
+    bridge.load_script(js);
+
+    Label* live_single = nullptr;
+    Label* live_wrapped = nullptr;
+    Label* live_nowrap = nullptr;
+    Label* live_stale = nullptr;
+    Label* live_ellipsis = nullptr;
+    Label* live_styled_single = nullptr;
+    Label* live_oblique = nullptr;
+    const auto find_wrapped = [&](auto&& self, View& view) -> void {
+        if (auto* label = dynamic_cast<Label*>(&view)) {
+            if (label->text() == "01  RATE") live_single = label;
+            if (label->text() == "alpha beta" && label->multi_line())
+                live_wrapped = label;
+            if (label->text() == "alpha beta" && !label->multi_line())
+                live_nowrap = label;
+            if (label->text() == "stale basis") live_stale = label;
+            if (label->text() == "long label") live_ellipsis = label;
+            if (label->text() == "abcd") live_styled_single = label;
+            if (label->text() == "slanted") live_oblique = label;
+        }
+        for (size_t i = 0; i < view.child_count(); ++i)
+            if (auto* child = view.child_at(i)) self(self, *child);
+    };
+    find_wrapped(find_wrapped, host);
+    REQUIRE(live_single != nullptr);
+    REQUIRE_FALSE(live_single->multi_line());
+    REQUIRE(live_single->captured_wrap_fallback());
+    REQUIRE(live_single->cached_line_boxes().size() == 1);
+    REQUIRE(live_wrapped != nullptr);
+    CHECK(live_wrapped->font_style() == 1);
+    CHECK(live_wrapped->line_height() == Catch::Approx(18.0f));
+    REQUIRE(live_wrapped->cached_line_boxes().size() == 2);
+    CHECK(live_wrapped->cached_line_boxes()[0].start == 0);
+    CHECK(live_wrapped->cached_line_boxes()[0].length == 5);
+    CHECK(live_wrapped->cached_line_boxes()[1].start == 6);
+    CHECK(live_wrapped->cached_line_boxes()[1].length == 4);
+    live_wrapped->set_bounds({0, 0, 40.0f, 36.0f});
+    Label::reset_line_break_path_counts();
+    pulp::canvas::RecordingCanvas italic_cached_canvas;
+    live_wrapped->paint(italic_cached_canvas);
+    CHECK(Label::line_break_path_counts().reflowed == 1);
+    const auto wrapped_fills = [&] {
+        std::vector<pulp::canvas::DrawCommand> result;
+        for (const auto& command : italic_cached_canvas.commands())
+            if (command.type == pulp::canvas::DrawCommand::Type::fill_text)
+                result.push_back(command);
+        return result;
+    }();
+    REQUIRE(wrapped_fills.size() == 2);
+    CHECK(wrapped_fills[0].text == "alpha");
+    CHECK(wrapped_fills[1].text == "beta");
+    CHECK(wrapped_fills[0].f[0] >= 0.0f);
+    CHECK(wrapped_fills[1].f[0] >= 0.0f);
+    bool saw_courier = false;
+    bool saw_oblique_run = false;
+    for (const auto& command : italic_cached_canvas.commands())
+        if (command.type == pulp::canvas::DrawCommand::Type::set_font_full) {
+            if (command.text == "Courier") saw_courier = true;
+            if (command.text == "Courier" &&
+                command.f[2] == Catch::Approx(2.0f))
+                saw_oblique_run = true;
+        }
+    CHECK(saw_courier);
+    CHECK(saw_oblique_run);
+    CHECK(italic_cached_canvas.count(
+              pulp::canvas::DrawCommand::Type::stroke_line) == 1);
+    REQUIRE(live_stale != nullptr);
+    CHECK(live_stale->multi_line());
+
+    REQUIRE(live_ellipsis != nullptr);
+    REQUIRE_FALSE(live_ellipsis->multi_line());
+    REQUIRE(live_ellipsis->cached_line_boxes().size() == 1);
+    host.layout_children();
+    CHECK(live_ellipsis->bounds().width == Catch::Approx(30.0f));
+    live_ellipsis->set_bounds({0, 0, 30.0f, 20.0f});
+    pulp::canvas::RecordingCanvas ellipsis_canvas;
+    live_ellipsis->paint(ellipsis_canvas);
+    const auto ellipsis_text = std::find_if(
+        ellipsis_canvas.commands().begin(), ellipsis_canvas.commands().end(),
+        [](const auto& command) {
+            return command.type == pulp::canvas::DrawCommand::Type::fill_text;
+        });
+    REQUIRE(ellipsis_text != ellipsis_canvas.commands().end());
+    REQUIRE(ellipsis_text->text.size() >= 3);
+    CHECK(ellipsis_text->text.ends_with("\xe2\x80\xa6"));
+    CHECK(ellipsis_text->text != "long label");
+
+    REQUIRE(live_styled_single != nullptr);
+    REQUIRE_FALSE(live_styled_single->multi_line());
+    REQUIRE_FALSE(live_styled_single->captured_wrap_fallback());
+    live_styled_single->set_bounds({0, 0, 25.0f, 20.0f});
+    pulp::canvas::RecordingCanvas styled_single_canvas;
+    live_styled_single->paint(styled_single_canvas);
+    std::string styled_single_text;
+    for (const auto& command : styled_single_canvas.commands())
+        if (command.type == pulp::canvas::DrawCommand::Type::fill_text)
+            styled_single_text += command.text;
+    CHECK(styled_single_text.ends_with("\xe2\x80\xa6"));
+    CHECK(styled_single_text.find_first_of("abcd") == std::string::npos);
+
+    REQUIRE(live_oblique != nullptr);
+    CHECK(live_oblique->font_style() == 2);
+    live_oblique->set_bounds({0, 0, 50.0f, 20.0f});
+    Label::reset_line_break_path_counts();
+    pulp::canvas::RecordingCanvas oblique_canvas;
+    live_oblique->paint(oblique_canvas);
+    CHECK(Label::line_break_path_counts().cached == 1);
+
+    Label::reset_line_break_path_counts();
+    live_single->set_bounds({0, 0, 53.6719f, 40.0f});
+    pulp::canvas::RecordingCanvas cached_canvas;
+    live_single->paint(cached_canvas);
+    CHECK(Label::line_break_path_counts().cached == 1);
+    const auto cached_text = std::find_if(
+        cached_canvas.commands().begin(), cached_canvas.commands().end(),
+        [](const auto& command) {
+            return command.type == pulp::canvas::DrawCommand::Type::fill_text;
+        });
+    REQUIRE(cached_text != cached_canvas.commands().end());
+    CHECK(cached_text->f[1] == Catch::Approx(24.2f).margin(0.01f));
+
+    live_single->set_text("01  SLOW");
+    pulp::canvas::RecordingCanvas changed_text_canvas;
+    live_single->paint(changed_text_canvas);
+    CHECK(Label::line_break_path_counts().reflowed == 1);
+    live_single->set_text("01  RATE");
+    live_single->set_font_size(13.0f);
+    pulp::canvas::RecordingCanvas changed_size_canvas;
+    live_single->paint(changed_size_canvas);
+    CHECK(Label::line_break_path_counts().reflowed == 2);
+    live_single->set_font_size(12.0f);
+    live_single->set_letter_spacing(1.0f);
+    pulp::canvas::RecordingCanvas changed_tracking_canvas;
+    live_single->paint(changed_tracking_canvas);
+    CHECK(Label::line_break_path_counts().reflowed == 3);
+    live_single->set_letter_spacing(0.0f);
+    live_single->set_bounds({0, 0, 30.0f, 40.0f});
+    pulp::canvas::RecordingCanvas reflow_canvas;
+    live_single->paint(reflow_canvas);
+    CHECK(Label::line_break_path_counts().reflowed == 4);
+
+    // A stale browser cache must reflow with the typography that will be
+    // painted. Choose a width between the plain and tracked advances so the
+    // observable line count proves letter-spacing reached TextShaper rather
+    // than merely invalidating the captured cache.
+    constexpr std::string_view tracked_text = "alpha beta";
+    auto& shaper = pulp::canvas::global_text_shaper();
+    const auto plain_prepared = shaper.prepare(
+        tracked_text, "Inter", 12.0f, 400, 0, 0.0f);
+    const auto tracked_prepared = shaper.prepare(
+        tracked_text, "Inter", 12.0f, 400, 0, 4.0f);
+    REQUIRE(tracked_prepared.total_width() > plain_prepared.total_width());
+    const float tracked_wrap_width =
+        (plain_prepared.total_width() + tracked_prepared.total_width()) * 0.5f;
+    live_single->set_text(std::string(tracked_text));
+    live_single->set_letter_spacing(0.0f);
+    live_single->set_bounds({0, 0, tracked_wrap_width, 40.0f});
+    pulp::canvas::RecordingCanvas plain_wrap_canvas;
+    live_single->paint(plain_wrap_canvas);
+    CHECK(plain_wrap_canvas.count(
+              pulp::canvas::DrawCommand::Type::fill_text) == 1);
+    live_single->set_letter_spacing(4.0f);
+    pulp::canvas::RecordingCanvas tracked_wrap_canvas;
+    live_single->paint(tracked_wrap_canvas);
+    CHECK(tracked_wrap_canvas.count(
+              pulp::canvas::DrawCommand::Type::fill_text) == 2);
+
+    REQUIRE(live_nowrap != nullptr);
+    REQUIRE_FALSE(live_nowrap->multi_line());
+    live_nowrap->set_bounds({0, 0, 40.0f, 40.0f});
+    Label::reset_line_break_path_counts();
+    pulp::canvas::RecordingCanvas nowrap_cached_canvas;
+    live_nowrap->paint(nowrap_cached_canvas);
+    CHECK(Label::line_break_path_counts().cached == 1);
+    live_nowrap->set_text("gamma delta");
+    pulp::canvas::RecordingCanvas nowrap_stale_canvas;
+    live_nowrap->paint(nowrap_stale_canvas);
+    CHECK(nowrap_stale_canvas.count(
+              pulp::canvas::DrawCommand::Type::fill_text) == 1);
+
+    auto direct = build_native_view_tree(ir, {}, {});
+    REQUIRE(direct != nullptr);
+    Label* direct_nowrap = nullptr;
+    Label* direct_wrapped = nullptr;
+    Label* direct_ellipsis = nullptr;
+    Label* direct_styled = nullptr;
+    const auto find_direct_nowrap = [&](auto&& self, View& view) -> void {
+        if (auto* label = dynamic_cast<Label*>(&view)) {
+            if (label->text() == "alpha beta" && !label->multi_line())
+                direct_nowrap = label;
+            if (label->text() == "alpha beta" && label->multi_line())
+                direct_wrapped = label;
+            if (label->text() == "long label") direct_ellipsis = label;
+            if (label->text() == "abcd") direct_styled = label;
+        }
+        for (size_t i = 0; i < view.child_count(); ++i)
+            if (auto* child = view.child_at(i)) self(self, *child);
+    };
+    find_direct_nowrap(find_direct_nowrap, *direct);
+    REQUIRE(direct_nowrap != nullptr);
+    REQUIRE(direct_wrapped != nullptr);
+    direct_wrapped->set_bounds({0, 0, 40.0f, 36.0f});
+    pulp::canvas::RecordingCanvas direct_wrapped_canvas;
+    direct_wrapped->paint(direct_wrapped_canvas);
+    CHECK(direct_wrapped_canvas.count(
+              pulp::canvas::DrawCommand::Type::stroke_line) == 1);
+    direct_nowrap->set_bounds({0, 0, 40.0f, 40.0f});
+    Label::reset_line_break_path_counts();
+    pulp::canvas::RecordingCanvas direct_cached_canvas;
+    direct_nowrap->paint(direct_cached_canvas);
+    CHECK(Label::line_break_path_counts().cached == 1);
+    direct_nowrap->set_text("gamma delta");
+    pulp::canvas::RecordingCanvas direct_stale_canvas;
+    direct_nowrap->paint(direct_stale_canvas);
+    CHECK(direct_stale_canvas.count(
+              pulp::canvas::DrawCommand::Type::fill_text) == 1);
+
+    REQUIRE(direct_ellipsis != nullptr);
+    direct_ellipsis->set_bounds({0, 0, 30.0f, 20.0f});
+    pulp::canvas::RecordingCanvas direct_ellipsis_canvas;
+    direct_ellipsis->paint(direct_ellipsis_canvas);
+    const auto direct_ellipsis_text = std::find_if(
+        direct_ellipsis_canvas.commands().begin(),
+        direct_ellipsis_canvas.commands().end(), [](const auto& command) {
+            return command.type == pulp::canvas::DrawCommand::Type::fill_text;
+        });
+    REQUIRE(direct_ellipsis_text != direct_ellipsis_canvas.commands().end());
+    CHECK(direct_ellipsis_text->text.ends_with("\xe2\x80\xa6"));
+
+    REQUIRE(direct_styled != nullptr);
+    REQUIRE(direct_styled->has_attributed_string());
+    REQUIRE(direct_styled->cached_line_boxes().size() == 1);
+    direct_styled->set_bounds({0, 0, 25.0f, 20.0f});
+    pulp::canvas::RecordingCanvas direct_styled_canvas;
+    direct_styled->paint(direct_styled_canvas);
+    std::string direct_styled_text;
+    for (const auto& command : direct_styled_canvas.commands())
+        if (command.type == pulp::canvas::DrawCommand::Type::fill_text)
+            direct_styled_text += command.text;
+    CHECK(direct_styled_text.ends_with("\xe2\x80\xa6"));
+    CHECK(direct_styled_text.find_first_of("abcd") == std::string::npos);
+
+    CodeGenOptions web_opts;
+    web_opts.mode = CodeGenMode::web_compat;
+    const auto web_js = generate_pulp_js(ir, web_opts);
+    CHECK(web_js.find(".style.textDecoration = 'underline';") !=
+          std::string::npos);
+    CHECK(web_js.find("textDecoration: 'none'") !=
+          std::string::npos);
+    CHECK(count_occurrences(
+              web_js, ".style.textDecoration = 'underline';") == 1);
+
+}
+
+TEST_CASE("direct native text runs snap malformed byte offsets to UTF-8 boundaries",
+          "[view][import][text-runs][utf8]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    IRNode label_node;
+    label_node.type = "text";
+    label_node.name = "Mixed";
+    label_node.text_content = std::string("A") + "\xc3\xa9" + "B";
+    label_node.style.width = 100.0f;
+    label_node.style.height = 24.0f;
+    label_node.style.font_size = 14.0f;
+    IRTextRun malformed;
+    malformed.start = 1;
+    malformed.end = 2;
+    malformed.font_weight = 700;
+    label_node.text_runs.push_back(malformed);
+    ir.root.children.push_back(std::move(label_node));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    Label* label = nullptr;
+    const auto find_label = [&](auto&& self, View& view) -> void {
+        if (auto* candidate = dynamic_cast<Label*>(&view)) label = candidate;
+        for (size_t i = 0; i < view.child_count(); ++i)
+            if (auto* child = view.child_at(i)) self(self, *child);
+    };
+    find_label(find_label, *root);
+    REQUIRE(label != nullptr);
+    REQUIRE(label->attributed_span_count() == 3);
+    label->set_bounds({0, 0, 100, 24});
+    pulp::canvas::RecordingCanvas canvas;
+    label->paint(canvas);
+    std::string painted;
+    for (const auto& command : canvas.commands())
+        if (command.type == pulp::canvas::DrawCommand::Type::fill_text)
+            painted += command.text;
+    CHECK(painted == std::string("A") + "\xc3\xa9" + "B");
+}
+
+TEST_CASE("direct native text-run gaps retain inherited dominant typography",
+          "[view][import][text-runs][inheritance]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.style.font_family = "Courier";
+    ir.root.style.font_size = 18.0f;
+    ir.root.style.font_weight = 500;
+    ir.root.style.letter_spacing = 1.5f;
+    ir.root.style.color = "#223344";
+    IRNode label_node;
+    label_node.type = "text";
+    label_node.name = "Mixed";
+    label_node.text_content = "base bold tail";
+    label_node.style.width = 180.0f;
+    label_node.style.height = 30.0f;
+    IRTextRun run;
+    run.start = 5;
+    run.end = 9;
+    run.font_weight = 700;
+    label_node.text_runs.push_back(run);
+    ir.root.children.push_back(std::move(label_node));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    auto* label = dynamic_cast<Label*>(root->child_at(0));
+    REQUIRE(label != nullptr);
+    label->set_bounds({0, 0, 180, 30});
+    pulp::canvas::RecordingCanvas canvas;
+    label->paint(canvas);
+    bool saw_base = false;
+    bool saw_run = false;
+    for (const auto& command : canvas.commands()) {
+        if (command.type != pulp::canvas::DrawCommand::Type::set_font_full) continue;
+        if (command.text == "Courier" &&
+            command.f[0] == Catch::Approx(18.0f) &&
+            command.f[1] == Catch::Approx(500.0f) &&
+            command.f[3] == Catch::Approx(1.5f)) saw_base = true;
+        if (command.text == "Courier" &&
+            command.f[0] == Catch::Approx(18.0f) &&
+            command.f[1] == Catch::Approx(700.0f) &&
+            command.f[3] == Catch::Approx(1.5f)) saw_run = true;
+    }
+    CHECK(saw_base);
+    CHECK(saw_run);
+}
+
+TEST_CASE("web text-run gaps retain the node dominant typography",
+          "[view][import][text-runs][web]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    IRNode label;
+    label.type = "text";
+    label.name = "Mixed";
+    label.text_content = "base bold tail";
+    label.style.font_family = "Inter";
+    label.style.font_size = 18.0f;
+    label.style.font_weight = 500;
+    label.style.font_style = "italic";
+    label.style.color = "#223344";
+    label.style.letter_spacing = 1.5f;
+    IRTextRun run;
+    run.start = 5;
+    run.end = 9;
+    run.font_weight = 700;
+    label.text_runs.push_back(run);
+    ir.root.children.push_back(std::move(label));
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    const auto js = generate_pulp_js(ir, opts);
+    INFO(js);
+    CHECK(js.find("Mixed0.style.fontFamily = 'Inter';") != std::string::npos);
+    CHECK(js.find("Mixed0.style.fontSize = '18px';") != std::string::npos);
+    CHECK(js.find("Mixed0.style.fontWeight = '500';") != std::string::npos);
+    CHECK(js.find("Mixed0.style.color = '#223344';") != std::string::npos);
+    CHECK(js.find("setTextRuns(Mixed0._id, [{ start: 5, end: 9, fontWeight: 700 }])") != std::string::npos);
+    CHECK(js.find("Mixed0_r0") == std::string::npos);
+}
+
+TEST_CASE("direct native styled paragraphs use responsive multiline layout",
+          "[view][import][text-runs][multiline]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    IRNode paragraph;
+    paragraph.type = "text";
+    paragraph.name = "Paragraph";
+    paragraph.text_content = "alpha beta gamma delta";
+    paragraph.style.width = 40.0f;
+    paragraph.style.height = 60.0f;
+    paragraph.style.font_size = 12.0f;
+    IRTextRun run;
+    run.start = 6;
+    run.end = 10;
+    run.font_weight = 700;
+    paragraph.text_runs.push_back(run);
+    ir.root.children.push_back(std::move(paragraph));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    Label* label = nullptr;
+    const auto find_label = [&](auto&& self, View& view) -> void {
+        if (auto* candidate = dynamic_cast<Label*>(&view)) label = candidate;
+        for (size_t i = 0; i < view.child_count(); ++i)
+            if (auto* child = view.child_at(i)) self(self, *child);
+    };
+    find_label(find_label, *root);
+    REQUIRE(label != nullptr);
+    CHECK(label->multi_line());
+}
+
+TEST_CASE("captured line decisions reject UTF-16 surrogate-pair splits",
+          "[view][import][text-cache][utf16]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    IRNode label;
+    label.type = "text";
+    label.name = "Emoji";
+    label.text_content = std::string("A") + "\xf0\x9f\x98\x80" + "B";
+    label.style.width = 100.0f;
+    label.style.height = 24.0f;
+    label.style.font_size = 14.0f;
+    label.text_line_boxes.push_back({0, 0, 100, 18, 1, 1});
+    label.text_layout_basis = IRTextLayoutBasis{
+        100.0f, pulp::canvas::resolved_face_identity("Inter", 400.0f)};
+    ir.root.children.push_back(std::move(label));
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    const auto js = generate_pulp_js(ir, opts);
+    CHECK(js.find("setCapturedLineBoxes('Emoji") == std::string::npos);
+}
+
+TEST_CASE("captured line decisions reject reordered and overlapping ranges",
+          "[view][import][text-cache][ranges]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    IRNode label;
+    label.type = "text";
+    label.name = "Overlap";
+    label.text_content = "alpha beta";
+    label.style.width = 100.0f;
+    label.text_line_boxes = {
+        {0, 0, 50, 18, 0, 7},
+        {0, 18, 50, 18, 6, 4},
+    };
+    label.text_layout_basis = IRTextLayoutBasis{100.0f, "Inter-Regular"};
+    ir.root.children.push_back(std::move(label));
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    const auto js = generate_pulp_js(ir, opts);
+    CHECK(js.find("setCapturedLineBoxes('Overlap") == std::string::npos);
+}
+
 TEST_CASE("native codegen emits font weight and family for text (issue-3192)",
           "[view][import][issue-3192]") {
     DesignIR ir;
@@ -3946,6 +4613,60 @@ TEST_CASE("an overlay control keeps the capture visible beneath it",
     REQUIRE(js.find(".style.backgroundColor") == std::string::npos);
 }
 
+TEST_CASE("discrete control emitters configure choices, defaults, and designed overlays",
+          "[view][import][codegen][discrete-controls][overlay]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    IRNode selector;
+    selector.type = "frame";
+    selector.audio_widget = AudioWidgetType::selector;
+    selector.audio_min = 1.0f;
+    selector.audio_max = 5.0f;
+    selector.audio_default = 3.0f;
+    selector.attributes["pulpRouteId"] = "selector";
+    selector.attributes["pulpChoices"] = "Pulse|Saw|Noise";
+    selector.attributes["designed_body"] = "underlay";
+    ir.root.children.push_back(std::move(selector));
+
+    for (const auto mode : {CodeGenMode::web_compat,
+                            CodeGenMode::bridge_native_js}) {
+        CodeGenOptions opts;
+        opts.mode = mode;
+        opts.include_comments = false;
+        const auto js = generate_pulp_js(ir, opts);
+        INFO(js);
+        const auto segments_at = js.find("setSegments(");
+        const auto value_at = js.find("setValue(", segments_at);
+        REQUIRE(segments_at != std::string::npos);
+        REQUIRE(value_at != std::string::npos);
+        CHECK(segments_at < value_at);
+        CHECK(js.substr(value_at, 80).find("0.5") != std::string::npos);
+        CHECK(js.find("setDesignedOverlay(") != std::string::npos);
+    }
+}
+
+TEST_CASE("selector emitters keep a usable fallback segment",
+          "[view][import][codegen][discrete-controls][fallback]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    IRNode selector;
+    selector.type = "frame";
+    selector.audio_widget = AudioWidgetType::selector;
+    selector.text_content = "Only";
+    ir.root.children.push_back(std::move(selector));
+
+    for (const auto mode : {CodeGenMode::web_compat,
+                            CodeGenMode::bridge_native_js}) {
+        CodeGenOptions opts;
+        opts.mode = mode;
+        opts.include_comments = false;
+        const auto js = generate_pulp_js(ir, opts);
+        INFO(js);
+        CHECK(js.find("setSegments(") != std::string::npos);
+        CHECK(js.find("'Only'") != std::string::npos);
+    }
+}
+
 // A tiled background is a gradient PLUS a size, and the JS emitter wrote only
 // the gradient — so the tile collapsed to one stretched copy.
 //
@@ -3985,6 +4706,64 @@ TEST_CASE("the JS emitter carries background-size, after the shorthand",
     // The shorthand resets the size, so anything else here ships a tile that
     // never tiles.
     CHECK(gradient_at < size_at);
+}
+
+TEST_CASE("the web-compat JS emitter carries white-space nowrap",
+          "[view][import][codegen][white-space]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    IRNode label;
+    label.type = "text";
+    label.name = "single-line";
+    label.text_content = "never wrap this";
+    label.style.white_space = "nowrap";
+    ir.root.children.push_back(std::move(label));
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    const auto js = generate_pulp_js(ir, opts);
+
+    CHECK(js.find(".style.whiteSpace = 'nowrap'") != std::string::npos);
+
+    opts.mode = CodeGenMode::bridge_native_js;
+    const auto native_js = generate_pulp_js(ir, opts);
+    const auto native_white_space = native_js.find("setWhiteSpace(");
+    REQUIRE(native_white_space != std::string::npos);
+    CHECK(native_js.substr(native_white_space, 120).find("'nowrap'") !=
+          std::string::npos);
+}
+
+TEST_CASE("web-compat attributed text keeps responsive paragraph wrapping",
+          "[view][import][codegen][attributed][web-compat][wrapping]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    IRNode paragraph;
+    paragraph.type = "text";
+    paragraph.name = "paragraph";
+    paragraph.text_content = "mixed style paragraph";
+    IRTextRun emphasized;
+    emphasized.start = 0;
+    emphasized.end = 5;
+    emphasized.font_weight = 700;
+    paragraph.text_runs.push_back(std::move(emphasized));
+    ir.root.children.push_back(paragraph);
+
+    paragraph.name = "nowrap";
+    paragraph.style.white_space = "nowrap";
+    ir.root.children.push_back(std::move(paragraph));
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    const auto js = generate_pulp_js(ir, opts);
+
+    const auto paragraph_at = js.find("setTextRuns(paragraph0._id");
+    REQUIRE(paragraph_at != std::string::npos);
+    CHECK(js.find("setMultiLine(paragraph0._id, true)", paragraph_at) !=
+          std::string::npos);
+    const auto nowrap_at = js.find("setTextRuns(nowrap1._id");
+    REQUIRE(nowrap_at != std::string::npos);
+    CHECK(js.find("setMultiLine(nowrap1._id, true)", nowrap_at) ==
+          std::string::npos);
 }
 
 // The colour the DESIGN drew a control in. Without it the widget falls back to

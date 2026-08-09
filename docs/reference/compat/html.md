@@ -151,6 +151,8 @@ report are `SUPPORTED-NO-EVIDENCE` evidence-anchor refresh work.
 | `input` | `createTextEditor` (default), `createFader` (type=range), `createCheckbox` (type=checkbox) | |
 | `textarea` | `createTextEditor` + `setMultiLine(1)` | |
 | `select` | `createCombo` | |
+| `segmented` | `createSegmented` | Pulp custom element for one-of-many labelled choices. |
+| `stepper` | `createStepper` | Pulp custom element for a bounded plain-number control. |
 | `canvas` | `createCanvas` | Use `getContext('2d')` or `getContext('webgpu')`. |
 | `progress` | `createProgress` | |
 | `hr` | `createCol` + 1px height + grey background | Visual divider. |

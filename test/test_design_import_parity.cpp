@@ -10,7 +10,7 @@
 //
 // A typed `IRStyle`/`IRLayout` field can be lowered in one surface and
 // silently skipped in the others (real examples: `h_constraint`/`v_constraint`
-// lower only in the JS lane; `text_runs` skips cpp+native).
+// lower only in the JS lane).
 // This test makes that gap loud: every lowerable field must either be
 // referenced by ALL FOUR surfaces, or carry an explicit allowlist entry
 // below naming exactly which surfaces skip it and why. Adding a new IR field
@@ -133,28 +133,22 @@ const std::map<std::string, AllowlistEntry>& allowlist() {
          {{"cpp", "swift", "native"}, "js-only; setMaskImage bridge consumer, others deferred"}},
         {"mask_size",
          {{"cpp", "swift", "native"}, "js-only; setMaskSize bridge consumer, others deferred"}},
-        {"font_family",
-         {{"swift"}, "js+cpp+native lower it; SwiftUI uses system font stack"}},
         {"text_align",
          {{"swift"}, "js+cpp+native lower it; SwiftUI alignment mapping deferred"}},
         {"vertical_align",
          {{"cpp", "swift", "native"},
           "js-only; native-common derives vertical centering from a "
           "slot-vs-font heuristic instead of reading the IR field"}},
-        {"letter_spacing",
-         {{"swift"}, "js+cpp+native lower it; SwiftUI kerning deferred"}},
         {"line_height",
          {{"swift"}, "js+cpp+native lower it; SwiftUI line spacing deferred"}},
         {"text_transform",
          {{"swift"}, "js+cpp+native lower it; SwiftUI case transform deferred"}},
         {"white_space",
-         {{"js", "swift"},
-          "cpp+native lower it; the JS lane relies on web-compat CSS defaults "
-          "and SwiftUI wrapping is deferred"}},
+         {{"swift"},
+          "js+cpp+native lower it; SwiftUI wrapping is deferred"}},
         {"text_overflow",
-         {{"js", "cpp", "swift", "native"},
-          "parsed into the IR but no codegen lowers it yet (ellipsis clipping "
-          "deferred on every surface)"}},
+         {{"cpp", "swift"},
+          "js+native lower ellipsis clipping; C++ and SwiftUI emission is deferred"}},
         {"overflow",
          {{"swift"}, "js+cpp+native lower it; SwiftUI clipping/scroll deferred"}},
         {"cursor",
@@ -227,10 +221,6 @@ const std::map<std::string, AllowlistEntry>& allowlist() {
           "but not auto-flow yet"}},
 
         // ── IRNode extras (see checked_node_fields) ────────────────────────
-        {"text_runs",
-         {{"cpp", "native"},
-          "js+swift lower per-range mixed-text styling; cpp codegen and the "
-          "native materializer emit the plain text only"}},
     };
     return a;
 }

@@ -242,6 +242,20 @@ Facts worth knowing before touching any of it:
   `::before` with generated content is the everyday case. Take the **first**
   entry — the node's own box — so the choice is defined rather than
   last-write-wins.
+- **`textBoxes` are fragments, not guaranteed visual lines.** Chromium can
+  report whitespace-separated inline runs such as `"01 "` and `"RATE"` as
+  separate entries with the same top coordinate. Coalesce same-baseline
+  fragments before deciding whether text wrapped. One coalesced line remains a
+  cache-capable paragraph with one captured box; do not lower it to permanent
+  `white-space: nowrap`, because a stale width/face/text basis must reflow.
+  Two or more distinct line tops use the same cache path with multiple boxes.
+  A same-baseline offset gap may be normalized only when its
+  omitted source range is entirely CSS-collapsible whitespace; otherwise drop
+  the captured-line decision and reflow normally rather than inventing a new
+  line. Validated captured boxes must reach both direct native materialization
+  and generated-JS `setCapturedLineBoxes`; merely enabling multiline lets the
+  two routes choose different breaks. Treating the raw entry count as the line
+  count makes an ordinary single-line label wrap in the Skia result.
 - **Element index N in the page is not element index N in the snapshot.** The
   page walk is `document.querySelectorAll('*')`; the snapshot also emits
   pseudo-element boxes (`::before` / `::after`) and shadow-tree content as
@@ -606,7 +620,7 @@ frame defined by a component property reference), so only their name flows.
 **Mixed text runs are emitted by all three Figma lanes, on ONE offset unit:
 UTF-8 bytes.** A text node with per-range styling (a bold word, a colored
 span) carries an ordered `runs` array of style DELTAS against the dominant
-style — `{start, end, fontSize?, fontWeight?, fontStyle?, color?,
+style — `{start, end, fontSize?, fontWeight?, fontFamily?, fontStyle?, color?,
 letterSpacing?, textDecoration?}` (camelCase; the exact shape
 `design_ir_json.cpp::parse_ir_text_runs` reads). `start`/`end` are `[start,
 end)` **UTF-8 byte offsets into `content`** in every lane — Figma indexes text
@@ -624,8 +638,9 @@ numeric fontWeight, so run weights derive from the override `fontName.style`
 NAME ("Bold" → 700, "SemiBold" → 600, …); `.fig` styleOverrideTable rows are
 NodeChange structs keyed by `styleID`. Codegen coverage (compat
 `text-per-range-styles`): web-compat nested `<span>`s, JS-native
-`setTextRuns` → AttributedString (single-line), SwiftUI concatenated `Text`
-segments; baked C++ and live-native flatten — honest partial.
+`setTextRuns` → AttributedString with captured-line reuse or responsive
+multiline reflow, SwiftUI concatenated `Text` segments, and the direct native
+materializer. Baked C++ alone still flattens — honest partial.
 
 **`textAlignVertical` is design authority; the tall-slot heuristic is only a
 fallback.** All three producers emit `style.vertical_align`
@@ -1652,6 +1667,111 @@ promoting it paints Pulp's built-in silver knob over the design. The contract
   `explicit audio_widget 'none' suppresses name-based widget detection` case in
   `test_design_import_sources.cpp` (with a promoted control sibling).
 
+### `AudioWidgetType` is the vocabulary BOTH consumers key off
+
+A lowered control reaches a running plugin down two independent paths, and both
+of them dispatch on `AudioWidgetType` — not on the node type, not on a class
+name:
+
+- **native**: `kind_from_audio()` in `core/view/src/design_import_native_common.cpp`
+  → `NativeWidgetKind` → `make_widget()` → the `bind_*` callback
+- **script**: `audio_widget_web_tag()` / `audio_widget_type_name()` in
+  `core/view/src/design_codegen.cpp` → the bridge factory + the binding emission
+
+So a new bindable affordance is an `AudioWidgetType` member. Expressing one as a
+node type instead binds on the native path and renders inert in the emitted
+script — the control materializes, hit-tests and animates, and the parameter
+never moves. Adding the member makes every non-defaulted switch a compile error,
+which is how the sites that need it announce themselves.
+
+The producer end is one line in `lower_semantic_controls`
+(`tools/import-design/browser_capture_ir.cpp`): its `else continue` drops any
+capture kind it does not name, and a dropped control is still DRAWN by the
+painted-tree lowering. That is why an unsupported affordance looks like a
+working one — the shape a player reaches for is on screen, wired to nothing.
+`browser_capture/semantics.mjs` already classifies far more than the lowering
+admits (`pulp-switch`/`pulp-check` → `toggle`, `pulp-stepper` → `stepper`,
+`pulp-combo`/`pulp-select` → `select`, `pulp-radio`, `pulp-tab`, `pulp-numbox`);
+recognition has never been the ceiling.
+
+Three traps when adding one, each of which compiles and runs:
+
+- **The event name is per widget.** `Knob` and `Fader` dispatch `change` with a
+  position; `Toggle` dispatches `toggle` with 1/0; `Checkbox` dispatches
+  `change` with 1/0. Wiring the wrong one registers a listener that never fires.
+  The table is `core/view/src/widget_bridge/widget_callbacks.cpp`.
+- **Boolean state is read from an attribute, not the numeric default.**
+  `imported_widget_semantics` takes a toggle's opening state from `checked` /
+  `value` via `attr_bool`, so a lowering that writes only `audio_default` opens
+  every switch OFF — including the ones the design drew lit.
+- **A control over a designed body owns none of its own pixels.** Knob and
+  fader call `apply_designed_body_skin`; anything else must suppress its stock
+  body itself when `body_is_painted_beneath(node)` is true, or it paints an
+  opaque widget over the art the import exists to reveal.
+
+`generate_pulp_js()` has TWO arms and they are not interchangeable. The
+native-bridge arm (`CodeGenMode::bridge_native_js`, the DEFAULT, and what
+`pulp import-design --emit js` produces without `--web-compat`) emits through
+`emit_js_*`; the web-compat arm emits through `generate_node()`. For a long
+time only the second one bound anything: the native arm created the widget,
+sized it, and printed the control's binding name in its grey sub-stack, so a
+knob imported through the documented default rendered, turned under the mouse,
+and moved no parameter — with the parameter's own name captioned underneath it.
+
+Both arms now call one `emit_js_param_binding()`. The two address a widget
+differently (`el._id` versus a string-literal id), which is what made the
+emission get duplicated and then maintained on one side only, so the helper
+takes the id EXPRESSION. Add a binder there, not in an arm.
+
+A widget reached through the web-compat DOM has a SECOND wiring path inside the
+bridge, and it is easy to miss: `createX` wires its callbacks inline, while a
+lowercase tag routed through `__domAppend` goes to `make_widget_for_tag()` and
+gets its callbacks from `wire_callbacks()`. A new widget kind needs FOUR tables
+in step — the factory (`factory_api.cpp`), the tag map (`web-compat-element.js`
+`__widgetTagFactory__`), `make_widget_for_tag()` (`widget_bridge.cpp`), and
+`wire_callbacks()` (`widget_callbacks.cpp`) — plus a row in
+`widget_bridge_api_manifest.tsv`. Miss the last wiring one and the factory path
+works while the tag path builds a real, clickable control whose changes reach
+nothing; the emitted script is identical either way.
+
+The bindable vocabulary, and what is still NOT in it. Keep this list honest —
+the authoring brief is written against it, and a brief that promises more than
+this produces controls that render, drag, and move nothing:
+
+| Component | Binds | Notes |
+|---|---|---|
+| `pulp-knob` | ✅ | continuous |
+| `pulp-fader` | ✅ | continuous, drawn as a throw |
+| `pulp-switch` / `pulp-check` | ✅ | on/off; `data-pulp-value` sets the opening state |
+| `pulp-select` (segmented) | ✅ | `data-pulp-choices="A|B|C"`, pipe separated |
+| `pulp-stepper` | ✅ | a count; `data-pulp-min` / `-max` / `-step` are REQUIRED |
+| `pulp-meter` | display | shows a macro; drives nothing, and does not bind on the exported native path at all (needs `pulpMeterSource` + `pulpMeterChannel`, which nothing emits) |
+| `pulp-combo`, `pulp-tab`, `pulp-radio`, `pulp-numbox` | ❌ | recognised by the capture, dropped by the lowering — drawn faithfully, wired to nothing |
+
+Everything outside that table is DECORATION, and decoration is most of a good
+panel: a step grid, a transport readout, a patch list, LED pips, a routing
+diagram. Draw it — just never put `data-pulp-param` or `data-pulp-meter` on it.
+
+A SELECTOR is one control with a shared track, never N adjacent toggles: a row
+of independent switches can show two lit at once, and even when it does not it
+reads as several controls that happen to touch. The value a segment writes is a
+function of the segment COUNT, so both directions go through
+`selector_segment_value()` / `selector_segment_index()` (design_ir.hpp) rather
+than a restated formula — and a STEPPER does the same through
+`stepper_normalized_value()` / `stepper_plain_value()`, because it reports the
+PLAIN number it shows while the parameter behind it is normalized. Its declared
+range must reach the widget (`setMin`/`setMax`), or it keeps its own -24..24
+default and a voice count reads as an octave offset. Note the asymmetry that
+caught a regression: `setValue`/`getValue` on a Stepper have always meant the
+PLAIN number, and changing them to normalized breaks callers — only the
+parameter PUSH (`apply_param_binding`) converts — and the script emitter bakes those numbers at `%.9g`,
+because a truncated literal still selects the right segment and is no longer
+the value a native host would have written for it.
+
+Pinned by `test_design_import_toggle_binding.cpp`, which proves the same thing
+on both paths the only way that distinguishes a wired control from a convincing
+one: click it and assert the STORE moved.
+
 ### KEY-based recognition + the recognition-resolver merge module
 
 NAME-token recognition (above) is a *fallback*. The AUTHORITATIVE recognition
@@ -2622,7 +2742,7 @@ text (a bold word, a colored span, a different size mid-string) lost its
 per-range styling. Now:
 
 - **IR**: `IRNode.text_runs` — an ordered list of `IRTextRun{start,end +
-  optional font_size/font_weight/font_style/color/letter_spacing/
+  optional font_size/font_weight/font_family/font_style/color/letter_spacing/
   text_decoration}`. `[start,end)` are offsets into `text_content`. The dominant
   style stays the node default; runs override.
 - **Parse** (`design_ir_json.cpp`): reads a `runs`/`textRuns` array (start/end +
@@ -2637,14 +2757,16 @@ per-range styling. Now:
   styled `<span style=…>` children and the gaps as plain `createTextNode` (so
   gaps inherit the dominant style). Single-run text keeps the plain
   `.textContent` path (no regression).
-- **Codegen — native**: now wired. The native arm emits `setTextRuns(id,
-  [...])`; the bridge builds a `canvas::AttributedString` from the runs over the
-  Label's dominant style, and `Label::paint_attributed_` draws each span with
-  its own font/color (advancing x by `measure_text`) for a SINGLE-LINE label.
-  Multi-line mixed text still degrades to the dominant single-style path (the
-  span loop is single-line), so `compat.json features.text-per-range-styles`
-  stays **codegen partial**. `Label::set_attributed_string` + the `setTextRuns`
-  bridge fn are the wiring (offsets are UTF-8 byte offsets, same as the web arm).
+- **Codegen — native**: the JS-native arm emits `setTextRuns(id, [...])`; the
+  bridge builds a `canvas::AttributedString` over the Label's dominant style.
+  The direct native materializer constructs the same runs without JS. The
+  common shaped-fragment painter preserves family/size/weight/italic-or-
+  oblique/tracking/color/decoration across captured lines and responsive
+  multiline reflow, including transforms, clamp, and ellipsis. Captured line
+  boxes are reused only when the dominant and every run face can be validated;
+  otherwise the label reflows. `compat.json features.text-per-range-styles`
+  stays **codegen partial** only because baked C++ still flattens. Offsets are
+  UTF-8 byte offsets, the same as the web arm.
 - **Offsets are UTF-8 BYTE offsets** into `text_content`. The Figma exporter
   builds a UTF-16-code-unit → UTF-8-byte map (`characterStyleOverrides` is
   UTF-16-indexed: a BMP char is 1 unit, an astral char / emoji is a surrogate
@@ -3135,10 +3257,24 @@ So the browser lane declares it, exactly as it already declares the paint box:
   capture. A knob gets a per-knob PNG stamped through `asset_path` /
   `png_natural_*` / `sprite_strip_frame_count=1`. A fader gets a cleaned body
   crop plus the declared indicator as its own sprite; `Fader::paint` moves that
-  authored sprite with the value instead of drawing the stock white slab, while
-  retaining the live native track and fill. Undeclared faders are unchanged.
-  The cleaned crop is byte-identical to the capture everywhere except the
-  declared indicator.
+  authored sprite with the value instead of drawing the stock white slab.
+  A fader may retain captured track/ticks/border only when its control element
+  explicitly carries `data-pulp-static-track`; a single default screenshot can
+  never prove that a uniform track will stay uniform at another value, nor can
+  spatial variation distinguish a wide static tick from a value fill. The
+  declaration is therefore the positive semantic evidence: emit it only when
+  the track, ticks and border are invariant at every value AND no tick, marker,
+  label or gradient discontinuity is hidden beneath the thumb at the captured
+  value. `data-pulp-indicator` must bound the entire moving visual footprint,
+  including antialiasing, shadows and transforms. When the visible thumb's DOM
+  box is smaller than that footprint, mark a transparent wrapper around it;
+  pixels outside the declared rectangle remain static by contract. A single
+  capture cannot reconstruct occluded authored pixels. Omit `data-pulp-static-track`
+  for that case and for every low-contrast, alpha-only, edge-origin or bipolar
+  fill; the importer then retains the live native track/fill path. The
+  indicator erasure uses exactly the declared moving footprint. Undeclared
+  faders stay live. Apart from that declared footprint, a declared static
+  body's crop is byte-identical to the capture.
 - The baked pointer is **erased by rotational median**: a dial face is
   rotationally symmetric about its centre except for the pointer, so each erased
   pixel takes the median of the same radius under 8 rotations (samples landing

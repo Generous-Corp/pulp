@@ -52,6 +52,74 @@ CapturedStyleIndex load_wrap_fixture() {
     return std::move(*index);
 }
 
+TEST_CASE("same-baseline Chrome text fragments are one browser line",
+          "[browser-capture][text-metrics]") {
+    std::vector<CapturedTextBox> fragments{
+        {{36.0, 184.375, 21.328125, 15.0}, 0, 3},
+        {{57.3125, 184.375, 32.359375, 15.0}, 4, 4},
+        {{36.0, 204.375, 40.0, 15.0}, 9, 5},
+    };
+
+    std::string text = "01  RATE alpha";
+    const auto lines = coalesce_text_line_fragments(std::move(fragments), &text);
+    REQUIRE(lines.size() == 2);
+    CHECK(lines[0].start == 0);
+    CHECK(lines[0].length == 7);
+    CHECK_THAT(lines[0].bounds.left, WithinAbs(36.0, 0.001));
+    CHECK_THAT(lines[0].bounds.width, WithinAbs(53.671875, 0.001));
+    CHECK(lines[1].start == 8);
+    CHECK(lines[1].length == 5);
+    CHECK(text == "01 RATE alpha");
+}
+
+TEST_CASE("same-baseline non-whitespace gaps invalidate the captured line decision",
+          "[browser-capture][text-metrics]") {
+    std::vector<CapturedTextBox> fragments{
+        {{10.0, 20.0, 12.0, 15.0}, 0, 2},
+        {{24.0, 20.0, 12.0, 15.0}, 3, 2},
+    };
+    std::string text = "abXcd";
+
+    const auto lines = coalesce_text_line_fragments(std::move(fragments), &text);
+    CHECK(lines.empty());
+    CHECK(text == "abXcd");
+}
+
+TEST_CASE("preserved whitespace modes coalesce geometry without erasing authored gaps",
+          "[browser-capture][text-metrics][white-space]") {
+    std::vector<CapturedTextBox> fragments{
+        {{10.0, 20.0, 18.0, 15.0}, 0, 3},
+        {{30.0, 20.0, 24.0, 15.0}, 4, 4},
+    };
+    std::string text = "01  RATE";
+    const auto lines = coalesce_text_line_fragments(
+        std::move(fragments), &text, "pre-wrap");
+    REQUIRE(lines.size() == 1);
+    CHECK(lines[0].start == 0);
+    CHECK(lines[0].length == 8);
+    CHECK(text == "01  RATE");
+}
+
+TEST_CASE("mismatched DOMSnapshot layout arrays fail closed",
+          "[browser-capture][text-metrics][malformed]") {
+    const auto path = fs::temp_directory_path() /
+        ("pulp-mismatched-layout-" + std::to_string(std::rand()) + ".json");
+    {
+        std::ofstream out(path, std::ios::binary);
+        REQUIRE(out);
+        out << R"({"computedStyleNames":["display"],"strings":["DIV"],)"
+               R"("documents":[{"nodes":{"backendNodeId":[1],)"
+               R"("parentIndex":[-1],"nodeType":[1],"nodeName":[0],)"
+               R"("attributes":[[]]},"layout":{"nodeIndex":[0],)"
+               R"("styles":[[0],[0]],"bounds":[[0,0,10,10],[0,0,10,10]],)"
+               R"("text":[-1]}}]})";
+    }
+
+    const auto loaded = CapturedStyleIndex::load(path);
+    fs::remove(path);
+    CHECK_FALSE(loaded.has_value());
+}
+
 /// The layout index of the one painted node whose text begins with `prefix`.
 ///
 /// Addressing by text rather than by a hardcoded index means a re-capture that
@@ -330,6 +398,17 @@ TEST_CASE("a nowrap run lowers with white-space present and restrictive",
     REQUIRE(unwrapped != nullptr);
     REQUIRE(unwrapped->style.white_space.has_value());
     CHECK(*unwrapped->style.white_space == "nowrap");
+}
+
+TEST_CASE("captured text-overflow lowers into the IR",
+          "[browser-capture][text-metrics][ellipsis]") {
+    pulp::view::IRStyle style;
+    apply_computed_styles(
+        {{"white-space", "nowrap"}, {"text-overflow", "ellipsis"}},
+        CapturedBox{0, 0, 80, 18}, style,
+        ComputedStyleScope::text_only);
+    REQUIRE(style.text_overflow.has_value());
+    CHECK(*style.text_overflow == "ellipsis");
 }
 
 TEST_CASE("a line-resuming run is cached with a per-line horizontal origin",

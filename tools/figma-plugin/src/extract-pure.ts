@@ -1659,8 +1659,10 @@ export function collectFontFamilyAssets(roots: ExtractedFigmaNode[]): FontFamily
     const family = n.style.font_family;
     if (n.font_faces && n.font_faces.length > 0) {
       for (const face of n.font_faces) {
-        const italic = /italic|oblique/i.test(face.style);
-        const semanticTuple = `${face.family}|${face.weight ?? ""}|${italic}`;
+        const slant = /oblique/i.test(face.style) ? "oblique"
+          : /italic/i.test(face.style) ? "italic" : "normal";
+        const italic = slant !== "normal";
+        const semanticTuple = `${face.family}|${face.weight ?? ""}|${slant}`;
         const existing = exactFaceBySemanticTuple.get(semanticTuple);
         if (existing && existing !== face.style) {
           throw new Error(
@@ -1669,7 +1671,7 @@ export function collectFontFamilyAssets(roots: ExtractedFigmaNode[]): FontFamily
           );
         }
         exactFaceBySemanticTuple.set(semanticTuple, face.style);
-        const key = `${face.family}|${face.style}|${face.weight ?? ""}|${italic ? "i" : ""}`;
+        const key = `${face.family}|${face.style}|${face.weight ?? ""}|${slant}`;
         if (seen.has(key)) continue;
         const row: FontFamilyAsset = {
           family: face.family,

@@ -14,6 +14,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/designed_control_painter.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets/svg_line.hpp>
 #include <pulp/view/widgets/svg_rect.hpp>
@@ -22,6 +23,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
@@ -249,6 +251,30 @@ bool bind_imported_view(View& view,
         ctx.bind_checkbox(*checkbox, scalar_descriptor(md));
         return true;
     }
+    if (auto* stepper = dynamic_cast<Stepper*>(&view); stepper && has_text(md.param_key)) {
+        ctx.bind_stepper(*stepper,
+                         NativeImportStepperBindingDescriptor{
+                             .route_id = text_or_empty(md.route_id),
+                             .param_key = text_or_empty(md.param_key),
+                             .binding_module = text_or_empty(md.binding_module),
+                             .binding_param = text_or_empty(md.binding_param),
+                             .min = stepper->minimum(),
+                             .max = stepper->maximum(),
+                             .step = stepper->step()});
+        return true;
+    }
+    if (auto* segmented = dynamic_cast<SegmentedControl*>(&view);
+        segmented && has_text(md.param_key)) {
+        ctx.bind_segmented(*segmented,
+                           NativeImportSegmentedBindingDescriptor{
+                               .route_id = text_or_empty(md.route_id),
+                               .param_key = text_or_empty(md.param_key),
+                               .binding_module = text_or_empty(md.binding_module),
+                               .binding_param = text_or_empty(md.binding_param),
+                               .segment_count =
+                                   static_cast<int>(segmented->segments().size())});
+        return true;
+    }
     if (auto* pad = dynamic_cast<XYPad*>(&view);
         pad && has_text(md.x_param_key) && has_text(md.y_param_key)) {
         ctx.bind_xy_pad(*pad,
@@ -334,6 +360,10 @@ bool can_bind_imported_view(View& view, const NativeBindingMetadata& md) {
     if (dynamic_cast<Fader*>(&view) && has_text(md.param_key))
         return true;
     if (dynamic_cast<Checkbox*>(&view) && has_text(md.param_key))
+        return true;
+    if (dynamic_cast<SegmentedControl*>(&view) && has_text(md.param_key))
+        return true;
+    if (dynamic_cast<Stepper*>(&view) && has_text(md.param_key))
         return true;
     if (dynamic_cast<XYPad*>(&view) && has_text(md.x_param_key) && has_text(md.y_param_key))
         return true;
@@ -440,6 +470,9 @@ std::optional<NativeWidgetKind> kind_from_audio(AudioWidgetType audio_widget) {
         case AudioWidgetType::xy_pad: return NativeWidgetKind::xy_pad;
         case AudioWidgetType::waveform: return NativeWidgetKind::waveform;
         case AudioWidgetType::spectrum: return NativeWidgetKind::spectrum;
+        case AudioWidgetType::toggle: return NativeWidgetKind::toggle_button;
+        case AudioWidgetType::selector: return NativeWidgetKind::segmented;
+        case AudioWidgetType::stepper: return NativeWidgetKind::stepper;
         case AudioWidgetType::none: break;
     }
     return std::nullopt;
@@ -866,7 +899,7 @@ LabelAlign parse_label_align(std::string_view value) {
     return LabelAlign::left;
 }
 
-float normalized_audio_default(const IRNode& node) {
+float normalized_audio_default_impl(const IRNode& node) {
     if (node.audio_max > node.audio_min)
         return std::clamp((node.audio_default - node.audio_min) /
                               (node.audio_max - node.audio_min),
@@ -877,7 +910,7 @@ float normalized_audio_default(const IRNode& node) {
 
 float normalized_audio_value(const IRNode& node) {
     if (auto value = attr_float(node, "value")) return std::clamp(*value, 0.0f, 1.0f);
-    return normalized_audio_default(node);
+    return normalized_audio_default_impl(node);
 }
 
 void append_resolved_diagnostics(const ResolvedNativeNode& node,
@@ -1580,7 +1613,11 @@ void apply_label_style(Label& label, const IRStyle& style) {
     if (style.font_family) label.set_font_family(*style.font_family);
     if (style.font_size) label.set_font_size(*style.font_size);
     if (style.font_weight) label.set_font_weight(*style.font_weight);
-    if (style.font_style && lower_copy(*style.font_style) == "italic") label.set_font_style(1);
+    if (style.font_style) {
+        const auto slant = lower_copy(*style.font_style);
+        if (slant == "italic") label.set_font_style(1);
+        else if (slant.rfind("oblique", 0) == 0) label.set_font_style(2);
+    }
     if (style.letter_spacing) label.set_letter_spacing(*style.letter_spacing);
     if (style.line_height) label.set_line_height(*style.line_height);
     if (style.text_align) label.set_text_align(parse_label_align(*style.text_align));
@@ -1592,6 +1629,20 @@ void apply_label_style(Label& label, const IRStyle& style) {
         if (value == "uppercase") label.set_text_transform(Label::TextTransform::uppercase);
         else if (value == "lowercase") label.set_text_transform(Label::TextTransform::lowercase);
         else if (value == "capitalize") label.set_text_transform(Label::TextTransform::capitalize);
+    }
+    if (style.text_overflow)
+        label.set_text_overflow_ellipsis(lower_copy(*style.text_overflow) == "ellipsis");
+    if (style.white_space) {
+        const auto value = lower_copy(*style.white_space);
+        using Mode = View::WhiteSpaceMode;
+        Mode mode = Mode::normal;
+        if      (value == "nowrap")       mode = Mode::nowrap;
+        else if (value == "pre")          mode = Mode::pre;
+        else if (value == "pre-wrap")     mode = Mode::pre_wrap;
+        else if (value == "pre-line")     mode = Mode::pre_line;
+        else if (value == "break-spaces") mode = Mode::break_spaces;
+        label.set_white_space_mode(mode);
+        label.set_multi_line(mode != Mode::nowrap);
     }
     if (style.text_decoration) {
         const auto value = lower_copy(*style.text_decoration);
@@ -1614,6 +1665,117 @@ void apply_label_style(Label& label, const IRStyle& style) {
     if (style.height && style.font_size &&
         *style.height > *style.font_size * 1.15f)
         label.set_vertical_align(canvas::TextVerticalAlign::center);
+}
+
+canvas::AttributedString build_attributed_text(const IRNode& node) {
+    if (node.text_runs.empty() || node.text_content.empty()) return {};
+
+    canvas::TextSpan base;
+    base.inherit_font_family = !node.style.font_family.has_value();
+    base.inherit_font_size = !node.style.font_size.has_value();
+    base.inherit_font_weight = !node.style.font_weight.has_value();
+    base.inherit_font_slant = !node.style.font_style.has_value();
+    base.inherit_letter_spacing = !node.style.letter_spacing.has_value();
+    base.inherit_color = !node.style.color.has_value();
+    if (node.style.font_family) base.font_family = *node.style.font_family;
+    if (node.style.font_size) base.font_size = *node.style.font_size;
+    if (node.style.font_weight) base.font_weight = *node.style.font_weight;
+    if (node.style.font_style) {
+        const auto slant = lower_copy(*node.style.font_style);
+        base.font_slant = slant.rfind("oblique", 0) == 0 ? 2
+                         : slant == "italic" ? 1 : 0;
+        base.italic = base.font_slant != 0;
+    }
+    if (node.style.letter_spacing)
+        base.letter_spacing = *node.style.letter_spacing;
+    if (node.style.color) {
+        if (const auto color = parse_any_css_color(*node.style.color))
+            base.color = *color;
+    }
+
+    std::vector<const IRTextRun*> runs;
+    for (const auto& run : node.text_runs)
+        if (run.start < run.end && run.start <
+            static_cast<int>(node.text_content.size())) runs.push_back(&run);
+    std::sort(runs.begin(), runs.end(), [](const auto* a, const auto* b) {
+        return a->start < b->start;
+    });
+
+    canvas::AttributedString attributed;
+    const int text_size = static_cast<int>(node.text_content.size());
+    const auto snap_utf8 = [&](int offset) {
+        offset = std::clamp(offset, 0, text_size);
+        while (offset > 0 && offset < text_size &&
+               (static_cast<unsigned char>(node.text_content[
+                    static_cast<std::size_t>(offset)]) & 0xC0) == 0x80) {
+            ++offset;
+        }
+        return offset;
+    };
+    auto append = [&](int begin, int end, canvas::TextSpan style) {
+        if (end <= begin) return;
+        style.text = node.text_content.substr(
+            static_cast<std::size_t>(begin),
+            static_cast<std::size_t>(end - begin));
+        attributed.append(std::move(style));
+    };
+    int cursor = 0;
+    for (const auto* run : runs) {
+        int begin = std::max(cursor, snap_utf8(run->start));
+        int end = std::max(begin, snap_utf8(run->end));
+        if (end <= cursor) continue;
+        append(cursor, begin, base);
+        auto style = base;
+        if (run->font_size) {
+            style.font_size = *run->font_size;
+            style.inherit_font_size = false;
+        }
+        if (run->font_weight) {
+            style.font_weight = *run->font_weight;
+            style.inherit_font_weight = false;
+        }
+        if (run->font_family) {
+            style.font_family = *run->font_family;
+            style.inherit_font_family = false;
+        }
+        if (run->font_style) {
+            const auto slant = lower_copy(*run->font_style);
+            style.font_slant = slant.rfind("oblique", 0) == 0 ? 2
+                              : slant == "italic" ? 1 : 0;
+            style.italic = style.font_slant != 0;
+            style.inherit_font_slant = false;
+        }
+        if (run->letter_spacing) {
+            style.letter_spacing = *run->letter_spacing;
+            style.inherit_letter_spacing = false;
+        }
+        if (run->color) {
+            if (const auto color = parse_any_css_color(*run->color)) {
+                style.color = *color;
+                style.inherit_color = false;
+            }
+        }
+        if (run->text_decoration) {
+            style.decoration_override = true;
+            const auto decoration = lower_copy(*run->text_decoration);
+            if (decoration.find("underline") != std::string::npos)
+                style.decoration = canvas::TextDecoration::underline;
+            else if (decoration.find("line-through") != std::string::npos)
+                style.decoration = canvas::TextDecoration::strikethrough;
+            else if (decoration.find("overline") != std::string::npos)
+                style.decoration = canvas::TextDecoration::overline;
+        }
+        append(begin, end, std::move(style));
+        cursor = end;
+    }
+    append(cursor, text_size, base);
+    return attributed;
+}
+
+void apply_text_runs(Label& label, const IRNode& node) {
+    auto attributed = build_attributed_text(node);
+    if (!attributed.empty())
+        label.set_attributed_string(std::move(attributed));
 }
 
 void apply_svg_paint(SvgPathWidget& path, const IRNode& node) {
@@ -1876,7 +2038,8 @@ void apply_captured_art_fader_skin(Fader& fader, const IRNode& node) {
         attr_float(node, "fader_body_origin_x").value_or(0.0f),
         attr_float(node, "fader_body_origin_y").value_or(0.0f),
         attr_float(node, "fader_control_natural_w").value_or(body_w),
-        attr_float(node, "fader_control_natural_h").value_or(body_h));
+        attr_float(node, "fader_control_natural_h").value_or(body_h),
+        attr_bool(node, "fader_body_includes_static_track"));
 }
 
 std::unique_ptr<View> make_widget(const IRNode& node,
@@ -1891,6 +2054,7 @@ std::unique_ptr<View> make_widget(const IRNode& node,
         case NativeWidgetKind::label: {
             auto label = std::make_unique<Label>(text);
             apply_label_style(*label, node.style);
+            apply_text_runs(*label, node);
             // Adopt the browser's own line breaking when the capture carried
             // it. Label validates the basis before using it, so a stale cache
             // costs a reflow rather than a wrong layout.
@@ -1901,10 +2065,6 @@ std::unique_ptr<View> make_widget(const IRNode& node,
                     boxes.push_back({b.left, b.top, b.width, b.height,
                                      b.start, b.length});
                 }
-                const bool browser_wrapped = boxes.size() > 1;
-                label->set_cached_line_boxes(
-                    std::move(boxes), node.text_layout_basis->width,
-                    node.text_layout_basis->resolved_face);
                 // THE CAPTURE DECIDES WHETHER THIS RUN WRAPS, not our own
                 // measurement of it. If the browser put the text on one line
                 // then one line is the right answer, and re-deriving that from
@@ -1916,8 +2076,32 @@ std::unique_ptr<View> make_widget(const IRNode& node,
                 // kept whole.
                 //
                 // `white-space` still applies where the capture says nothing.
-                label->set_multi_line(browser_wrapped);
+                const bool explicit_nowrap =
+                    node.style.white_space &&
+                    lower_copy(*node.style.white_space) == "nowrap";
+                const bool wrap_on_cache_miss =
+                    !explicit_nowrap && node.text_line_boxes.size() == 1;
+                label->set_cached_line_boxes(
+                    std::move(boxes), node.text_layout_basis->width,
+                    node.text_layout_basis->resolved_face,
+                    wrap_on_cache_miss);
+                if (!explicit_nowrap && node.text_line_boxes.size() > 1)
+                    label->set_multi_line(true);
             }
+            const bool explicit_nowrap = node.style.white_space &&
+                lower_copy(*node.style.white_space) == "nowrap";
+            const bool captured_single_line =
+                node.text_layout_basis && node.text_line_boxes.size() == 1;
+            const bool captured_wrapped =
+                node.text_layout_basis && node.text_line_boxes.size() > 1;
+            const float font_height = node.style.font_size.value_or(14.0f);
+            const float line_height =
+                node.style.line_height.value_or(font_height * 1.2f);
+            const bool multiline_box = node.style.width && node.style.height &&
+                *node.style.height > line_height * 1.8f;
+            if (!explicit_nowrap &&
+                (captured_wrapped || (multiline_box && !captured_single_line)))
+                label->set_multi_line(true);
             return label;
         }
         case NativeWidgetKind::text_button:
@@ -1966,6 +2150,30 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             checkbox->set_checked(semantics.checked);
             return checkbox;
         }
+        case NativeWidgetKind::stepper: {
+            auto stepper = std::make_unique<Stepper>();
+            stepper->set_range(node.audio_min, node.audio_max);
+            stepper->set_step(semantics.stepper_step);
+            stepper->set_value(stepper_plain_value(semantics.normalized_value,
+                                                   node.audio_min, node.audio_max,
+                                                   semantics.stepper_step));
+            stepper->set_designed_overlay(body_is_painted_beneath(node));
+            return stepper;
+        }
+        case NativeWidgetKind::segmented: {
+            // ONE control with a shared track, not a row of adjacent toggles.
+            // A row of independent switches can show two lit at once, and even
+            // when it does not it reads as several controls that happen to
+            // touch rather than as one choice.
+            auto segmented = std::make_unique<SegmentedControl>();
+            auto labels = semantics.segments;
+            const auto count = static_cast<int>(labels.size());
+            segmented->set_segments(std::move(labels));
+            segmented->set_selected_silent(
+                selector_segment_index(semantics.normalized_value, count));
+            segmented->set_designed_overlay(body_is_painted_beneath(node));
+            return segmented;
+        }
         case NativeWidgetKind::toggle_button: {
             auto button = std::make_unique<ToggleButton>();
             if (!text.empty()) button->set_label(text);
@@ -1992,6 +2200,25 @@ std::unique_ptr<View> make_widget(const IRNode& node,
                 button->set_corner_radius(*semantics.toggle_corner_radius);
             if (semantics.toggle_font_size)
                 button->set_font_size(*semantics.toggle_font_size);
+            // Same contract the knob and fader take below: a switch whose body
+            // is drawn by the layer beneath it owns none of its own pixels, so
+            // the widget contributes only the ON state. Without this the stock
+            // pill — an opaque fill, a border and a centred label — paints over
+            // the switch the design drew and over the caption beside it, and it
+            // does so convincingly enough to read as the intended appearance.
+            //
+            // The ON wash is the design's own accent rather than a theme
+            // default, for the reason the value ring is: a panel that chose its
+            // palette should not light up in whatever colour the surrounding
+            // app happens to use.
+            if (body_is_painted_beneath(node)) {
+                button->set_label({});
+                auto lit = canvas::Color::rgba(1.0f, 1.0f, 1.0f, 1.0f);
+                if (const auto hex = attr(node, "design_accent"); hex && !hex->empty())
+                    lit = parse_css_color(*hex);
+                button->set_on_background_color(lit);
+                button->set_designed_overlay(true);
+            }
             return button;
         }
         case NativeWidgetKind::knob: {
@@ -2258,6 +2485,14 @@ std::unique_ptr<View> materialize_error_view(const char* message,
 
 } // namespace
 
+canvas::AttributedString attributed_text_for_node(const IRNode& node) {
+    return build_attributed_text(node);
+}
+
+float normalized_audio_default(const IRNode& node) {
+    return normalized_audio_default_impl(node);
+}
+
 // Exported (design_import_native_common.hpp). Defined in the named namespace so
 // both the runtime materializer and the C++ codegen size an imported image and
 // resolve hit ownership from one definition. Call the attr/lower helpers from
@@ -2323,6 +2558,8 @@ std::optional<ImportedImageSizing> imported_image_sizing_override(const IRNode& 
 
 bool is_interactive_native_kind(NativeWidgetKind kind) {
     switch (kind) {
+        case NativeWidgetKind::stepper:
+        case NativeWidgetKind::segmented:
         case NativeWidgetKind::text_button:
         case NativeWidgetKind::text_editor:
         case NativeWidgetKind::checkbox:
@@ -2349,6 +2586,8 @@ bool is_interactive_native_kind(NativeWidgetKind kind) {
 
 bool native_kind_owns_imported_child_hits(NativeWidgetKind kind) {
     switch (kind) {
+        case NativeWidgetKind::stepper:
+        case NativeWidgetKind::segmented:
         case NativeWidgetKind::text_button:
         case NativeWidgetKind::text_editor:
         case NativeWidgetKind::checkbox:
@@ -2431,6 +2670,8 @@ const char* native_widget_kind_name(NativeWidgetKind kind) {
         case NativeWidgetKind::text_editor: return "text_editor";
         case NativeWidgetKind::checkbox: return "checkbox";
         case NativeWidgetKind::toggle_button: return "toggle_button";
+        case NativeWidgetKind::segmented: return "segmented";
+        case NativeWidgetKind::stepper: return "stepper";
         case NativeWidgetKind::combo_box: return "combo_box";
         case NativeWidgetKind::knob: return "knob";
         case NativeWidgetKind::fader: return "fader";
@@ -2445,6 +2686,20 @@ const char* native_widget_kind_name(NativeWidgetKind kind) {
         case NativeWidgetKind::svg_line: return "svg_line";
     }
     return "view";
+}
+
+double imported_stepper_step(const IRNode& node) noexcept {
+    const auto found = node.attributes.find("pulpStep");
+    if (found == node.attributes.end() || found->second.empty()) return 1.0;
+    try {
+        std::size_t consumed = 0;
+        const double value = std::stod(found->second, &consumed);
+        if (consumed == found->second.size() && std::isfinite(value) &&
+            value > 0.0)
+            return value;
+    } catch (const std::exception&) {
+    }
+    return 1.0;
 }
 
 ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
@@ -2482,6 +2737,24 @@ ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
             out.text_value = out.text;
     }
 
+    // `pulpChoices` is a pipe-separated list, because a segment label may
+    // legitimately contain a comma ("1, 2 & 4") and a comma-separated list
+    // would silently split it into two segments.
+    if (const auto choices = attr(node, "pulpChoices"); choices && !choices->empty()) {
+        std::string current;
+        for (const char c : *choices) {
+            if (c == '|') { out.segments.push_back(current); current.clear(); }
+            else current.push_back(c);
+        }
+        out.segments.push_back(current);
+    }
+    // A selector is still one real segment when capture metadata has no
+    // explicit choice table. Keep this in the shared semantic model so runtime
+    // materialization and baked C++ agree on both the visible label and the
+    // binding descriptor's count.
+    if (resolved.kind == NativeWidgetKind::segmented && out.segments.empty())
+        out.segments.push_back(out.text.empty() ? std::string("1") : out.text);
+    out.stepper_step = imported_stepper_step(node);
     out.checked = attr_bool(node, "checked");
     out.toggle_on = out.checked || attr_bool(node, "value");
     out.toggle_on_background_color = non_empty(md.on_background_color);

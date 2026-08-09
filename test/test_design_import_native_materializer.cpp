@@ -7,6 +7,7 @@
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_sources.hpp>
+#include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/layout_snapshot.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
@@ -2498,6 +2499,48 @@ TEST_CASE("native materializer binding helper refuses duplicate materialized anc
     REQUIRE(diagnostics_count(diagnostics, "native-binding-anchor-not-found") == 0);
 }
 
+TEST_CASE("generated C++ attributed labels compile as standalone source",
+          "[view][import][native-materializer][cpp-codegen][text]") {
+    DesignIR ir;
+    ir.root = frame("root", 220.0f, 120.0f, LayoutDirection::column);
+    IRNode label;
+    label.type = "text";
+    label.name = "Mixed label";
+    label.text_content = "alpha beta";
+    label.style.font_family = "Inter";
+    label.style.font_size = 14.0f;
+    IRTextRun run;
+    run.start = 6;
+    run.end = 10;
+    run.font_family = "Courier";
+    run.font_weight = 700;
+    run.color = "#12ab34";
+    run.text_decoration = "none";
+    label.text_runs.push_back(std::move(run));
+    ir.root.children.push_back(std::move(label));
+
+    const auto generated = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    REQUIRE(generated.source.find("pulp::canvas::AttributedString") !=
+            std::string::npos);
+    REQUIRE(generated.source.find("set_attributed_string(std::move(") !=
+            std::string::npos);
+
+#if defined(_WIN32)
+    SKIP("freestanding generated-source compile is unsupported on the Windows CI toolchain");
+#else
+    TempDir tmp("pulp-native-materializer-attributed-codegen");
+    const auto header = tmp.path / "imported_ui.hpp";
+    const auto source = tmp.path / "imported_ui.cpp";
+    const auto object = tmp.path / "imported_ui.o";
+    write_text(header, generated.header);
+    write_text(source, generated.source);
+    std::string diagnostics;
+    const bool compiled = compile_generated_source(source, object, &diagnostics);
+    INFO(diagnostics);
+    REQUIRE(compiled);
+#endif
+}
+
 TEST_CASE("generated C++ binding helper requires a unique materialized anchor",
           "[view][import][native-materializer][binding][cpp-codegen]") {
     DesignIR ir;
@@ -2735,6 +2778,62 @@ TEST_CASE("generated C++ binding helper emits routed checkbox bindings",
     SKIP("freestanding generated-source compile is unsupported on the Windows CI toolchain");
 #else
     TempDir tmp("pulp-native-materializer-checkbox-codegen");
+    const auto header = tmp.path / "imported_ui.hpp";
+    const auto source = tmp.path / "imported_ui.cpp";
+    const auto object = tmp.path / "imported_ui.o";
+    write_text(header, result.header);
+    write_text(source, result.source);
+
+    std::string diagnostics;
+    const bool compiled = compile_generated_source(source, object, &diagnostics);
+    INFO(diagnostics);
+    REQUIRE(compiled);
+#endif
+}
+
+TEST_CASE("tiny Stepper grid matches baked widget and binding descriptor and compiles",
+          "[view][import][native-materializer][cpp-codegen][discrete-controls][stepper][compile]") {
+    DesignIR ir;
+    ir.source = DesignSource::html;
+    ir.root.type = "frame";
+    ir.root.name = "Tiny stepper";
+    ir.root.style.width = 160.0f;
+    ir.root.style.height = 80.0f;
+
+    IRNode stepper;
+    stepper.type = "frame";
+    stepper.audio_widget = AudioWidgetType::stepper;
+    stepper.audio_min = 0.0f;
+    stepper.audio_max = 0.000001f;
+    stepper.audio_default = 0.0000005f;
+    stepper.has_audio_range = true;
+    stepper.stable_anchor_id = "capture:tiny-stepper:0";
+    stepper.attributes["pulpRouteId"] = "capture:tiny-stepper:0";
+    stepper.attributes["pulpParamKey"] = "fine";
+    stepper.attributes["pulpBindingModule"] = "OSC";
+    stepper.attributes["pulpBindingParam"] = "fine";
+    stepper.attributes["pulpStep"] = "0.0000001";
+    ir.root.children.push_back(std::move(stepper));
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+
+    REQUIRE(result.source.find("->set_step(1e-07f);") != std::string::npos);
+    const auto descriptor_start = result.source.find(
+        "NativeImportStepperBindingDescriptor{");
+    REQUIRE(descriptor_start != std::string::npos);
+    const auto descriptor_end = result.source.find("});", descriptor_start);
+    REQUIRE(descriptor_end != std::string::npos);
+    const auto descriptor = result.source.substr(
+        descriptor_start, descriptor_end - descriptor_start);
+    REQUIRE(descriptor.find(
+        "\n                0.0f,\n"
+        "                1e-06f,\n"
+        "                1e-07f\n") != std::string::npos);
+
+#if defined(_WIN32)
+    SKIP("freestanding generated-source compile is unsupported on the Windows CI toolchain");
+#else
+    TempDir tmp("pulp-native-materializer-tiny-stepper-codegen");
     const auto header = tmp.path / "imported_ui.hpp";
     const auto source = tmp.path / "imported_ui.cpp";
     const auto object = tmp.path / "imported_ui.o";
@@ -3183,6 +3282,38 @@ TEST_CASE("a designed fader gets the value-only skin, like a designed knob",
     auto* fader = dynamic_cast<Fader*>(root->child_at(1));
     REQUIRE(fader != nullptr);
     REQUIRE(fader->painter() != nullptr);
+}
+
+TEST_CASE("designed discrete controls materialize as value-only overlays",
+          "[view][import][native-materializer][designed-control]") {
+    DesignIR ir;
+    ir.root = frame("root", 320.0f, 200.0f, LayoutDirection::row);
+
+    auto toggle = frame("toggle", 48.0f, 24.0f, LayoutDirection::row);
+    toggle.audio_widget = AudioWidgetType::toggle;
+    toggle.attributes["designed_body"] = "underlay";
+    auto selector = frame("selector", 120.0f, 28.0f, LayoutDirection::row);
+    selector.audio_widget = AudioWidgetType::selector;
+    selector.attributes["designed_body"] = "capture";
+    selector.attributes["pulpChoices"] = "A|B";
+    auto stepper = frame("stepper", 96.0f, 28.0f, LayoutDirection::row);
+    stepper.audio_widget = AudioWidgetType::stepper;
+    stepper.attributes["designed_body"] = "underlay";
+    ir.root.children.push_back(std::move(toggle));
+    ir.root.children.push_back(std::move(selector));
+    ir.root.children.push_back(std::move(stepper));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    auto* toggle_view = dynamic_cast<ToggleButton*>(root->child_at(0));
+    auto* selector_view = dynamic_cast<SegmentedControl*>(root->child_at(1));
+    auto* stepper_view = dynamic_cast<Stepper*>(root->child_at(2));
+    REQUIRE(toggle_view != nullptr);
+    REQUIRE(selector_view != nullptr);
+    REQUIRE(stepper_view != nullptr);
+    CHECK(toggle_view->designed_overlay());
+    CHECK(selector_view->designed_overlay());
+    CHECK(stepper_view->designed_overlay());
 }
 
 TEST_CASE("Fader::paint consults its paint delegate, as Knob::paint does",

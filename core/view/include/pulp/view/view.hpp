@@ -158,7 +158,9 @@ public:
 
     // ── Hit testing ──────────────────────────────────────────────────────
 
-    // Find the deepest child that contains the given point (in local coords)
+    // Find the deepest child containing the point. A detached root accepts
+    // painted root-local coordinates and peels its own scale; recursive calls
+    // receive the child's already-unscaled local coordinates.
     virtual View* hit_test(Point local_point);
 
     // ── Theme ────────────────────────────────────────────────────────────
@@ -2144,6 +2146,10 @@ public:
 private:
     friend class WidgetBridge;
     friend class ViewCapture;
+    friend class ScrollView;
+    friend Point point_to_local(Point root_pos, View* target, View* root);
+
+    bool inverse_scale_transform(Point& point) const noexcept;
 
     void begin_visibility_quarantine() noexcept {
         if (visibility_quarantine_count_++ == 0)

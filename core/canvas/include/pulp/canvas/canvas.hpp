@@ -1144,6 +1144,7 @@ public:
     struct FontFeature {
         uint32_t tag;    // 4-byte big-endian tag (use make_font_feature_tag).
         uint32_t value;  // 0 = disable, 1 = enable, higher = feature-specific.
+        bool operator==(const FontFeature&) const = default;
     };
     /// Builds a 4-byte big-endian OpenType tag from a 4-char string. Caller
     /// supplies exactly 4 ASCII chars (e.g. "tnum"); shorter strings are a

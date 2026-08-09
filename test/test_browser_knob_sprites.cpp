@@ -247,6 +247,156 @@ IRNode declared_fader() {
     return fader;
 }
 
+constexpr int kStaticFaderLeft = 20;
+constexpr int kStaticFaderTop = 30;
+constexpr int kStaticFaderWidth = 200;
+constexpr int kStaticFaderHeight = 40;
+constexpr int kStaticIndicatorLeft = 84;
+constexpr int kStaticIndicatorTop = 35;
+constexpr int kStaticIndicatorWidth = 18;
+constexpr int kStaticIndicatorHeight = 30;
+
+ImportPngImage static_horizontal_fader_panel() {
+    ImportPngImage panel;
+    panel.width = kPanelWidth;
+    panel.height = 100;
+    panel.rgba.assign(static_cast<std::size_t>(panel.width) * panel.height * 4, 255);
+    auto black = [&](int x, int y) {
+        auto* p = pixel_at(panel, x, y);
+        p[0] = p[1] = p[2] = 0;
+        p[3] = 255;
+    };
+    for (int x = kStaticFaderLeft; x < kStaticFaderLeft + kStaticFaderWidth; ++x) {
+        black(x, kStaticFaderTop);
+        black(x, kStaticFaderTop + kStaticFaderHeight - 1);
+        if (x >= kStaticFaderLeft + 10 &&
+            x < kStaticFaderLeft + kStaticFaderWidth - 10)
+            black(x, kStaticFaderTop + kStaticFaderHeight / 2);
+    }
+    for (int y = kStaticFaderTop; y < kStaticFaderTop + kStaticFaderHeight; ++y) {
+        black(kStaticFaderLeft, y);
+        black(kStaticFaderLeft + kStaticFaderWidth - 1, y);
+        // Wide authored end housings are static chrome, not localized fill.
+        for (int inset = 1; inset < 5; ++inset) {
+            black(kStaticFaderLeft + inset, y);
+            black(kStaticFaderLeft + kStaticFaderWidth - 1 - inset, y);
+        }
+    }
+    for (int tick : {kStaticFaderLeft + 20, kStaticFaderLeft + 100, kStaticFaderLeft + 180}) {
+        for (int x = tick; x < tick + 4; ++x)
+            for (int y = kStaticFaderTop + 8;
+                 y < kStaticFaderTop + kStaticFaderHeight - 8; ++y)
+                black(x, y);
+    }
+    for (int y = kStaticIndicatorTop; y < kStaticIndicatorTop + kStaticIndicatorHeight; ++y)
+        for (int x = kStaticIndicatorLeft; x < kStaticIndicatorLeft + kStaticIndicatorWidth; ++x)
+            black(x, y);
+    // Fractional CSS transforms leave an anti-aliased fringe just outside the
+    // integer DOM rectangle. It belongs to the old thumb too and must not
+    // survive as a grey ghost in the reusable body sprite.
+    for (int y = kStaticIndicatorTop; y < kStaticIndicatorTop + kStaticIndicatorHeight; ++y) {
+        for (const int x :
+             {kStaticIndicatorLeft - 1, kStaticIndicatorLeft + kStaticIndicatorWidth}) {
+            auto* p = pixel_at(panel, x, y);
+            p[0] = p[1] = p[2] = 128;
+        }
+    }
+    return panel;
+}
+
+IRNode declared_static_horizontal_fader() {
+    IRNode fader;
+    fader.type = "frame";
+    fader.stable_anchor_id = "capture:rate:0";
+    fader.audio_widget = AudioWidgetType::fader;
+    fader.style.position = "absolute";
+    fader.style.left = static_cast<float>(kStaticFaderLeft) * 0.5f;
+    fader.style.top = static_cast<float>(kStaticFaderTop) * 0.5f;
+    fader.style.width = static_cast<float>(kStaticFaderWidth) * 0.5f;
+    fader.style.height = static_cast<float>(kStaticFaderHeight) * 0.5f;
+    fader.attributes["binding"] = "rate";
+    fader.attributes["designed_body"] = "capture";
+    fader.attributes["browser_fader_static_track_declared"] = "1";
+    fader.attributes["browser_sprite_crop_px"] =
+        std::to_string(kStaticFaderLeft) + "," + std::to_string(kStaticFaderTop) + "," +
+        std::to_string(kStaticFaderWidth) + "," + std::to_string(kStaticFaderHeight);
+    fader.attributes["browser_sprite_indicator_px"] =
+        std::to_string(kStaticIndicatorLeft - 1) + "," +
+        std::to_string(kStaticIndicatorTop - 1) + "," +
+        std::to_string(kStaticIndicatorWidth + 2) + "," +
+        std::to_string(kStaticIndicatorHeight + 2);
+    return fader;
+}
+
+ImportPngImage off_centre_fill_fader_panel() {
+    auto panel = static_horizontal_fader_panel();
+    const int y = kStaticIndicatorTop + 2; // deliberately away from centre
+    const int before = kStaticFaderLeft + (kStaticIndicatorLeft - kStaticFaderLeft) / 2;
+    const int after =
+        kStaticIndicatorLeft + kStaticIndicatorWidth +
+        (kStaticFaderLeft + kStaticFaderWidth - (kStaticIndicatorLeft + kStaticIndicatorWidth)) / 2;
+    auto* left = pixel_at(panel, before, y);
+    left[0] = 85;
+    left[1] = 85;
+    left[2] = 85;
+    left[3] = 255;
+    auto* right = pixel_at(panel, after, y);
+    right[0] = 119;
+    right[1] = 119;
+    right[2] = 119;
+    right[3] = 255;
+    return panel;
+}
+
+ImportPngImage centre_origin_fill_fader_panel() {
+    auto panel = static_horizontal_fader_panel();
+    // Remove the original thumb and fringe, restoring the one-pixel track.
+    for (int y = kStaticIndicatorTop; y < kStaticIndicatorTop + kStaticIndicatorHeight; ++y)
+        for (int x = kStaticIndicatorLeft - 1;
+             x <= kStaticIndicatorLeft + kStaticIndicatorWidth; ++x) {
+            auto* p = pixel_at(panel, x, y);
+            p[0] = p[1] = p[2] = 255;
+            p[3] = 255;
+        }
+    for (int x = kStaticIndicatorLeft - 1;
+         x <= kStaticIndicatorLeft + kStaticIndicatorWidth; ++x) {
+        auto* p = pixel_at(panel, x, kStaticFaderTop + kStaticFaderHeight / 2);
+        p[0] = p[1] = p[2] = 0;
+    }
+
+    // A bipolar fill occupies only the centre-to-thumb interval. The old
+    // classifier's representative points (well left and right of this run)
+    // both see background and therefore cannot detect it.
+    for (int y = kStaticFaderTop + kStaticFaderHeight / 2 - 2;
+         y <= kStaticFaderTop + kStaticFaderHeight / 2 + 2; ++y)
+        for (int x = kStaticFaderLeft + kStaticFaderWidth / 2;
+             x < kStaticFaderLeft + 140; ++x) {
+            auto* p = pixel_at(panel, x, y);
+            p[0] = p[1] = p[2] = 96;
+            p[3] = 255;
+        }
+
+    constexpr int thumb_left = kStaticFaderLeft + 140;
+    for (int y = kStaticIndicatorTop; y < kStaticIndicatorTop + kStaticIndicatorHeight; ++y)
+        for (int x = thumb_left; x < thumb_left + kStaticIndicatorWidth; ++x) {
+            auto* p = pixel_at(panel, x, y);
+            p[0] = p[1] = p[2] = 0;
+            p[3] = 255;
+        }
+    return panel;
+}
+
+IRNode declared_centre_origin_fill_fader() {
+    auto fader = declared_static_horizontal_fader();
+    constexpr int thumb_left = kStaticFaderLeft + 140;
+    fader.attributes["browser_sprite_indicator_px"] =
+        std::to_string(thumb_left - 1) + "," +
+        std::to_string(kStaticIndicatorTop - 1) + "," +
+        std::to_string(kStaticIndicatorWidth + 2) + "," +
+        std::to_string(kStaticIndicatorHeight + 2);
+    return fader;
+}
+
 /// The bright pointer is the LAST stroke_line the knob emits: the captured
 /// pointer draws a dark backing stroke and then the design's colour over it.
 struct Segment {
@@ -438,8 +588,8 @@ TEST_CASE("a declared fader hoists its authored thumb and keeps live chrome",
     REQUIRE(indicator.height == kFaderIndicatorHeight);
     // The hoisted asset is the designer's pixels, not a sampled solid-color
     // substitute.
-    CHECK(pixel_at(indicator, kFaderIndicatorWidth / 2,
-                   kFaderIndicatorHeight / 2)[0] == 244);
+    CHECK(pixel_at(indicator, indicator.width / 2,
+                   indicator.height / 2)[0] == 244);
     // The authored rounded corners stay transparent instead of carrying a
     // rectangular patch of the captured track as the thumb moves.
     CHECK(pixel_at(indicator, 0, 0)[3] == 0);
@@ -553,6 +703,183 @@ TEST_CASE("a declared fader hoists its authored thumb and keeps live chrome",
     CHECK(web_js.find("setOrientation") != std::string::npos);
     CHECK(web_js.find("'horizontal'") != std::string::npos);
     CHECK(web_js.find("maliciousCall") == std::string::npos);
+}
+
+TEST_CASE("a static browser fader keeps authored track and ticks while its thumb moves",
+          "[import-design][browser-capture][fader][indicator][static-track]") {
+    TempDirectory temp;
+    const auto panel = static_horizontal_fader_panel();
+    const auto capture = temp.root / "browser.png";
+    write_png(capture, panel);
+
+    DesignIR ir;
+    ir.source = pulp::view::DesignSource::html;
+    ir.root.type = "frame";
+    ir.root.style.width = static_cast<float>(panel.width) * 0.5f;
+    ir.root.style.height = static_cast<float>(panel.height) * 0.5f;
+    ir.root.children.push_back(declared_static_horizontal_fader());
+
+    std::string error;
+    REQUIRE(pulp::import_design::apply_browser_capture_control_sprites(
+                ir, capture, temp.root / "sprites", &error) == 1);
+    CHECK(error.empty());
+    const auto& node = ir.root.children.front();
+    REQUIRE(node.attributes.at("fader_body_includes_static_track") == "1");
+
+    const auto body = read_png(node.attributes.at("fader_body_asset_path"));
+    REQUIRE(body.valid());
+    // The authored inset 1px track and a wide tick away from the old thumb survive the
+    // body crop exactly; only the declared indicator rectangle is inpainted.
+    CHECK(pixel_at(body, 10, kStaticFaderHeight / 2)[0] == 0);
+    CHECK(pixel_at(body, 20, 10)[0] == 0);
+    // The old thumb and its transform fringe are gone away from the track.
+    CHECK(pixel_at(body, kStaticIndicatorLeft - kStaticFaderLeft - 1,
+                   kStaticIndicatorTop - kStaticFaderTop + 2)[0] == 255);
+
+    const auto indicator = read_png(node.attributes.at("fader_indicator_asset_path"));
+    REQUIRE(indicator.valid());
+    CHECK(indicator.width == kStaticIndicatorWidth + 2);
+    CHECK(indicator.height == kStaticIndicatorHeight + 2);
+    // The explicitly declared moving footprint includes the transform fringe,
+    // so the same pixels removed from the body travel with the live thumb.
+    CHECK(pixel_at(indicator, 0, 2)[0] == 128);
+    CHECK(pixel_at(indicator, 0, 2)[3] == 255);
+    CHECK(pixel_at(indicator, indicator.width - 1, 2)[0] == 128);
+    CHECK(pixel_at(indicator, indicator.width - 1, 2)[3] == 255);
+
+    auto root = pulp::view::build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    auto* fader = dynamic_cast<pulp::view::Fader*>(root->child_at(0));
+    REQUIRE(fader != nullptr);
+    REQUIRE(fader->captured_body_includes_static_track());
+    fader->set_bounds({0.0f, 0.0f, static_cast<float>(kStaticFaderWidth) * 0.5f,
+                       static_cast<float>(kStaticFaderHeight) * 0.5f});
+
+    auto indicator_x = [&](float value) {
+        fader->set_value(value);
+        pulp::canvas::RecordingCanvas canvas;
+        fader->paint(canvas);
+        std::vector<pulp::canvas::DrawCommand> images;
+        for (const auto& command : canvas.commands())
+            if (command.type == pulp::canvas::DrawCommand::Type::draw_image)
+                images.push_back(command);
+        REQUIRE(images.size() == 2);
+        // No generic track/fill is painted over the captured track and ticks.
+        CHECK(canvas.count(pulp::canvas::DrawCommand::Type::fill_rounded_rect) == 0);
+        CHECK(images.back().f[2] == Catch::Approx(10.0f));
+        CHECK(images.back().f[3] == Catch::Approx(16.0f));
+        return images.back().f[0];
+    };
+    const float left = indicator_x(0.0f);
+    const float middle = indicator_x(0.5f);
+    const float right = indicator_x(1.0f);
+    CHECK(left < middle);
+    CHECK(middle < right);
+    CHECK(left == Catch::Approx(0.0f));
+    CHECK(middle == Catch::Approx(45.0f));
+    CHECK(right == Catch::Approx(90.0f));
+
+    pulp::view::CodeGenOptions options;
+    options.mode = pulp::view::CodeGenMode::bridge_native_js;
+    const auto js = pulp::view::generate_pulp_js(ir, options);
+    CHECK(js.find("setFaderCapturedArt") != std::string::npos);
+    CHECK(js.find(", true);") != std::string::npos);
+
+    // A stale/missing body asset must degrade to a working stock fader rather
+    // than trusting the metadata flag and painting only a floating thumb.
+    pulp::view::Fader missing_body;
+    missing_body.set_orientation(pulp::view::Fader::Orientation::horizontal);
+    missing_body.set_bounds({0.0f, 0.0f, 100.0f, 20.0f});
+    missing_body.set_captured_art({}, {}, 0.5f, 0.0f, 0.0f, 100.0f, 20.0f, true);
+    pulp::canvas::RecordingCanvas fallback_canvas;
+    missing_body.paint(fallback_canvas);
+    CHECK(fallback_canvas.count(pulp::canvas::DrawCommand::Type::fill_rounded_rect) > 0);
+
+    // A loaded static body is still incomplete without its moving indicator.
+    // Do not paint the authored track before falling back to stock chrome.
+    auto partial_body = std::make_shared<pulp::view::SpriteStrip>();
+    partial_body->load_from_file(
+        node.attributes.at("fader_body_asset_path"), body.width, body.height, 1,
+        pulp::view::SpriteStrip::Orientation::vertical);
+    pulp::view::Fader missing_indicator;
+    missing_indicator.set_orientation(pulp::view::Fader::Orientation::horizontal);
+    missing_indicator.set_bounds({0.0f, 0.0f, 100.0f, 20.0f});
+    missing_indicator.set_captured_art(
+        std::move(partial_body), {}, 0.5f, 0.0f, 0.0f, 100.0f, 20.0f, true);
+    pulp::canvas::RecordingCanvas partial_canvas;
+    missing_indicator.paint(partial_canvas);
+    CHECK(partial_canvas.count(pulp::canvas::DrawCommand::Type::draw_image) == 0);
+    CHECK(partial_canvas.count(
+              pulp::canvas::DrawCommand::Type::fill_rounded_rect) > 0);
+}
+
+TEST_CASE("an undeclared uniform fader keeps the live chrome path",
+          "[import-design][browser-capture][fader][indicator][static-track]") {
+    TempDirectory temp;
+    const auto panel = static_horizontal_fader_panel();
+    const auto capture = temp.root / "browser.png";
+    write_png(capture, panel);
+
+    DesignIR ir;
+    ir.source = pulp::view::DesignSource::html;
+    ir.root.type = "frame";
+    ir.root.style.width = static_cast<float>(panel.width) * 0.5f;
+    ir.root.style.height = static_cast<float>(panel.height) * 0.5f;
+    auto fader = declared_static_horizontal_fader();
+    fader.attributes.erase("browser_fader_static_track_declared");
+    ir.root.children.push_back(std::move(fader));
+
+    std::string error;
+    REQUIRE(pulp::import_design::apply_browser_capture_control_sprites(
+                ir, capture, temp.root / "sprites", &error) == 1);
+    CHECK(error.empty());
+    CHECK(ir.root.children.front().attributes.count("fader_body_includes_static_track") == 0);
+}
+
+TEST_CASE("a low-contrast off-centre fill keeps the live fader chrome path",
+          "[import-design][browser-capture][fader][indicator][dynamic-track]") {
+    TempDirectory temp;
+    const auto panel = off_centre_fill_fader_panel();
+    const auto capture = temp.root / "browser.png";
+    write_png(capture, panel);
+
+    DesignIR ir;
+    ir.source = pulp::view::DesignSource::html;
+    ir.root.type = "frame";
+    ir.root.style.width = static_cast<float>(panel.width) * 0.5f;
+    ir.root.style.height = static_cast<float>(panel.height) * 0.5f;
+    auto fader = declared_static_horizontal_fader();
+    fader.attributes.erase("browser_fader_static_track_declared");
+    ir.root.children.push_back(std::move(fader));
+
+    std::string error;
+    REQUIRE(pulp::import_design::apply_browser_capture_control_sprites(
+                ir, capture, temp.root / "sprites", &error) == 1);
+    CHECK(error.empty());
+    CHECK(ir.root.children.front().attributes.count("fader_body_includes_static_track") == 0);
+}
+
+TEST_CASE("a centre-origin fill keeps the live fader chrome path",
+          "[import-design][browser-capture][fader][indicator][dynamic-track]") {
+    TempDirectory temp;
+    const auto panel = centre_origin_fill_fader_panel();
+    const auto capture = temp.root / "browser.png";
+    write_png(capture, panel);
+
+    DesignIR ir;
+    ir.source = pulp::view::DesignSource::html;
+    ir.root.type = "frame";
+    ir.root.style.width = static_cast<float>(panel.width) * 0.5f;
+    ir.root.style.height = static_cast<float>(panel.height) * 0.5f;
+    auto fader = declared_centre_origin_fill_fader();
+    fader.attributes.erase("browser_fader_static_track_declared");
+    ir.root.children.push_back(std::move(fader));
+
+    std::string error;
+    REQUIRE(pulp::import_design::apply_browser_capture_control_sprites(
+                ir, capture, temp.root / "sprites", &error) == 1);
+    CHECK(error.empty());
+    CHECK(ir.root.children.front().attributes.count("fader_body_includes_static_track") == 0);
 }
 
 TEST_CASE("a declared indicator that cannot be honoured fails the import",
@@ -719,4 +1046,51 @@ TEST_CASE("a knob with no recovered pointer emits no pointer call",
     const auto js = pulp::view::generate_pulp_js(ir, options);
     REQUIRE(js.find("setKnobSpriteStrip('Plain") != std::string::npos);
     REQUIRE(js.find("setKnobCapturedIndicator") == std::string::npos);
+}
+
+TEST_CASE("browser control overlays do not invent stale companion labels",
+          "[import-design][browser-capture][fader][codegen]") {
+    DesignIR ir;
+    ir.source = pulp::view::DesignSource::html;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+
+    auto fader = declared_fader();
+    fader.name = "01 RATE 0.34";
+    fader.style.width = 240.0f;
+    fader.style.height = 32.0f;
+    fader.audio_label = "VALUE";
+    fader.audio_min = 0.0f;
+    fader.audio_max = 1.0f;
+    fader.audio_default = 0.34f;
+    fader.has_audio_range = true;
+    fader.attributes["pulpRouteId"] = "capture:param_1:0";
+    fader.attributes["binding"] = "param_1";
+    fader.attributes["fader_body_asset_path"] = "assets/body.png";
+    fader.attributes["fader_indicator_asset_path"] = "assets/thumb.png";
+    ir.root.children.push_back(std::move(fader));
+
+    pulp::view::CodeGenOptions options;
+    options.mode = pulp::view::CodeGenMode::bridge_native_js;
+    options.use_silver_knobs = true;
+    const auto js = pulp::view::generate_pulp_js(ir, options);
+
+    REQUIRE(js.find("createFader('_01_RATE_0_34") != std::string::npos);
+    REQUIRE(js.find("'horizontal'") != std::string::npos);
+    REQUIRE(js.find("'vertical'") == std::string::npos);
+    REQUIRE(js.find("setFaderCapturedArt('_01_RATE_0_34") != std::string::npos);
+    REQUIRE(js.find("bindWidgetToParam('_01_RATE_0_340', 'param_1')") !=
+            std::string::npos);
+    REQUIRE(js.find("_01_RATE_0_34_lbl") == std::string::npos);
+    REQUIRE(js.find("_01_RATE_0_34_val") == std::string::npos);
+    REQUIRE(js.find("_01_RATE_0_34_sub") == std::string::npos);
+    REQUIRE(js.find("setFlex('root', 'height', 52") == std::string::npos);
+    REQUIRE(js.find("setFlex('root', 'min_width', 240") == std::string::npos);
+
+    options.mode = pulp::view::CodeGenMode::web_compat;
+    const auto web_js = pulp::view::generate_pulp_js(ir, options);
+    REQUIRE(web_js.find("setLabel(_01_RATE_0_340._id, ' ')") !=
+            std::string::npos);
+    REQUIRE(web_js.find("setLabel(_01_RATE_0_340._id, 'VALUE')") ==
+            std::string::npos);
 }

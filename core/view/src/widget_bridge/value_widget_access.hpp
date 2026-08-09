@@ -16,6 +16,7 @@
 
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/design_ir.hpp>
 
 namespace pulp::view {
 
@@ -38,9 +39,9 @@ inline bool try_set_scalar_value(View* view, float value) {
     if (auto* k = dynamic_cast<Knob*>(view)) { k->set_value(value); return true; }
     else if (auto* f = dynamic_cast<Fader*>(view)) { f->set_value(value); return true; }
     else if (auto* r = dynamic_cast<RangeSlider*>(view)) { r->set_value(value); return true; }
-    else if (auto* t = dynamic_cast<Toggle*>(view)) { t->set_on(value > 0.5f); return true; }
-    else if (auto* cb = dynamic_cast<Checkbox*>(view)) { cb->set_checked(value > 0.5f); return true; }
-    else if (auto* tb = dynamic_cast<ToggleButton*>(view)) { tb->set_on(value > 0.5f); return true; }
+    else if (auto* t = dynamic_cast<Toggle*>(view)) { t->set_on(toggle_on_from_normalized(value)); return true; }
+    else if (auto* cb = dynamic_cast<Checkbox*>(view)) { cb->set_checked(toggle_on_from_normalized(value)); return true; }
+    else if (auto* tb = dynamic_cast<ToggleButton*>(view)) { tb->set_on(toggle_on_from_normalized(value)); return true; }
     return false;
 }
 

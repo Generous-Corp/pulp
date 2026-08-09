@@ -160,19 +160,21 @@ void EmptyState::on_mouse_down(Point) { if (!action_.empty() && on_action) on_ac
 
 // ── Stepper ───────────────────────────────────────────────────────────────
 void Stepper::set_value(double v) {
-    value_ = std::clamp(v, min_, max_);
+    set_value_silent(v);
     if (on_change) on_change(value_);
+}
+void Stepper::set_value_silent(double v) {
+    value_ = std::clamp(v, min_, max_);
 }
 void Stepper::paint(canvas::Canvas& canvas) {
     const float w = bounds().width, h = bounds().height, btn = h;
     canvas.set_fill_color(resolve_color("bg.elevated", Color::rgba8(30, 37, 48)));
     canvas.fill_rounded_rect(0, 0, w, h, 10.0f);
-    // Darker center value cell + segment dividers (matches the Figma stepper's
-    // segmented [-] value [+] look).
+    // Darker center value cell + segment dividers (matches the Figma
+    // stepper's segmented [-] value [+] look).
     canvas.set_fill_color(resolve_color("bg.surface", Color::rgba8(20, 25, 33)));
     canvas.fill_rect(btn, 1.0f, std::max(0.0f, w - 2.0f * btn), h - 2.0f);
-    // Hover / press affordance: a soft disc behind the −/+ glyph under the
-    // pointer, so the buttons feel pressable instead of static.
+    // Hover / press affordance: a soft disc behind the −/+ glyph.
     {
         Color accent = resolve_color("accent.primary", Color::rgba8(22, 218, 194));
         auto tint = [&](int zone, float cx) {
@@ -182,16 +184,15 @@ void Stepper::paint(canvas::Canvas& canvas) {
                                               press ? 0.24f : 0.12f));  // token-lint:allow (zone state tint)
             canvas.fill_circle(cx, h * 0.5f, h * 0.5f - 4.0f);
         };
-        tint(0, btn * 0.5f);          // minus
-        tint(1, w - btn * 0.5f);      // plus
+        tint(0, btn * 0.5f);
+        tint(1, w - btn * 0.5f);
     }
     canvas.set_stroke_color(resolve_color("control.border", Color::rgba8(80, 80, 100)));
     canvas.set_line_width(1.0f);
     canvas.stroke_rounded_rect(0, 0, w, h, 10.0f);
     canvas.stroke_line(btn, 4.0f, btn, h - 4.0f);
     canvas.stroke_line(w - btn, 4.0f, w - btn, h - 4.0f);
-    // −/+ glyphs, vertically centered in their h×h zones (GlyphCenter anchors
-    // on the glyph's optical center, not the baseline).
+    // −/+ glyphs, vertically centered in their h×h zones.
     canvas.set_font("system", 18.0f);
     canvas.set_fill_color(resolve_color("text.secondary", Color::rgba8(150, 150, 160)));
     canvas.set_text_align(canvas::TextAlign::center);
@@ -252,7 +253,7 @@ void Stepper::on_mouse_drag(Point pos) {
     if (editing_) { editing_ = false; edit_buffer_.clear(); }
     const double raw = drag_start_value_
         + static_cast<double>(press_y_ - pos.y) / kScrubPxPerStep * step_;
-    set_value(std::round(raw / step_) * step_);   // snap to the step grid
+    set_value(min_ + std::round((raw - min_) / step_) * step_);
     request_repaint();
 }
 void Stepper::on_mouse_up(Point) {

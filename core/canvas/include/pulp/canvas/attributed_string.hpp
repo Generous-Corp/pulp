@@ -19,10 +19,21 @@ struct TextSpan {
     float font_size = 14.0f;
     int font_weight = 400;        // 100-900
     bool italic = false;
+    int font_slant = 0;           // 0 normal, 1 italic, 2 oblique
     Color color = Color::rgba(255, 255, 255);
     TextDecoration decoration = TextDecoration::none;
+    // True when this span explicitly overrides the surrounding decoration.
+    // In particular, an explicit `none` must be distinguishable from an
+    // omitted property that inherits the Label-wide decoration.
+    bool decoration_override = false;
     Color decoration_color = Color::rgba(255, 255, 255);
     float letter_spacing = 0;
+    bool inherit_font_family = false;
+    bool inherit_font_size = false;
+    bool inherit_font_weight = false;
+    bool inherit_font_slant = false;
+    bool inherit_color = false;
+    bool inherit_letter_spacing = false;
 };
 
 /// Attributed string — a sequence of styled text spans

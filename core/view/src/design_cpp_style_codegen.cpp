@@ -325,6 +325,8 @@ void emit_label_style(std::ostringstream& out,
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_font_weight(" + std::to_string(*style.font_weight) + ");");
     if (style.font_style && *style.font_style == "italic")
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_font_style(1);");
+    else if (style.font_style && style.font_style->rfind("oblique", 0) == 0)
+        emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_font_style(2);");
     if (style.letter_spacing)
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_letter_spacing(" + float_expr(ctx, *style.letter_spacing) + ");");
     if (style.line_height)

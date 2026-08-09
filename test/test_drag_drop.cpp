@@ -197,6 +197,26 @@ TEST_CASE("drop bubbles to the nearest ancestor handler with local coords",
     CHECK(recs[0].y == 20.0f);
 }
 
+TEST_CASE("drop coordinates invert a scaled target transform",
+          "[view][dnd][transform]") {
+    View root;
+    root.set_bounds({0, 0, 300, 200});
+    auto child_owned = std::make_unique<View>();
+    View* child = child_owned.get();
+    child->set_bounds({20, 20, 100, 100});
+    child->set_transform_origin(0.0f, 0.0f);
+    child->set_scale(0.5f);
+    root.add_child(std::move(child_owned));
+
+    DispatchRec got;
+    child->on_drop = [&](const std::string& t, const std::string& d,
+                         float x, float y) { got = {t, d, x, y}; };
+    DragSession session;
+    REQUIRE(dispatch_drop(root, session, make_text("scaled"), {30, 27}));
+    CHECK(got.x == 20.0f);
+    CHECK(got.y == 14.0f);
+}
+
 TEST_CASE("drop outside the root bounds is not handled", "[view][dnd]") {
     View root;
     root.set_bounds({0, 0, 100, 100});

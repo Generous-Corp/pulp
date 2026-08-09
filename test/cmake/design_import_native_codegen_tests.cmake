@@ -68,6 +68,17 @@ target_compile_definitions(pulp-test-design-import-native-materializer PRIVATE
 catch_discover_tests(pulp-test-design-import-native-materializer
     PROPERTIES LABELS "parser-import")
 
+# A lowered on/off, proved on BOTH consumers of a control: the native
+# materializer's binder callbacks and the emitted script the widget bridge
+# runs. Links pulp::view (not view-core) because the script half boots a real
+# ScriptEngine + WidgetBridge.
+add_executable(pulp-test-design-import-toggle-binding
+    test_design_import_toggle_binding.cpp)
+target_link_libraries(pulp-test-design-import-toggle-binding
+    PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-design-import-toggle-binding
+    PROPERTIES LABELS "parser-import")
+
 add_executable(pulp-test-view-core-link test_view_core_link.cpp)
 target_link_libraries(pulp-test-view-core-link PRIVATE pulp::view-core Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-view-core-link

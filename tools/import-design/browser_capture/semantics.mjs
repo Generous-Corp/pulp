@@ -79,6 +79,7 @@ export const COMPUTED_STYLES = [
   "text-decoration-thickness",
   "text-underline-offset",
   "white-space",
+  "text-overflow",
   // Generated content. The snapshot reports ::before / ::after as their own
   // nodes with their own layout entries, so the text they inject is only
   // recoverable through this property -- there is no DOM text node to read.
@@ -751,7 +752,7 @@ export function semanticExpression(snapshotClickableIndexes = []) {
     ['pulp-barmeter', 'meter'], ['pulp-ledmeter', 'meter'],
     ['pulp-spectrum', 'meter'], ['pulp-scope', 'meter'],
     ['pulp-progress', 'meter'], ['pulp-tab', 'tab'],
-    ['pulp-combo', 'select'], ['pulp-select', 'select'],
+    ['pulp-combo', 'combo'], ['pulp-select', 'select'],
   ]);
   const componentKind = element => {
     try {

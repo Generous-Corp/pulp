@@ -147,7 +147,8 @@ struct SynthesisTrace {
 /// nothing resolves or the build has no Skia, and an empty answer must be read
 /// as "unknown", never as "matches".
 std::string resolved_face_identity(const std::string& css_font_family,
-                                   float weight);
+                                   float weight,
+                                   FontSlant slant = FontSlant::Normal);
 
 struct ResolvedFont {
 #ifdef PULP_HAS_SKIA

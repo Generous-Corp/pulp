@@ -1,6 +1,8 @@
 // widget_bridge/widget_value_controls_api.cpp - scalar control value registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/design_ir.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/gap_widgets.hpp>
 #include "api_registry.hpp"
 
@@ -29,15 +31,22 @@ void BridgeRegistrars::register_widget_value_controls_api(WidgetBridge& self) {
         else if (auto* range = dynamic_cast<RangeSlider*>(it->second.view))
             range->set_value(static_cast<float>(value));
         else if (auto* toggle = dynamic_cast<Toggle*>(it->second.view))
-            toggle->set_on(value > 0.5);
+            toggle->set_on(toggle_on_from_normalized(value));
         else if (auto* cb = dynamic_cast<Checkbox*>(it->second.view))
-            cb->set_checked(value > 0.5);
+            cb->set_checked(toggle_on_from_normalized(value));
         else if (auto* tb = dynamic_cast<ToggleButton*>(it->second.view))
-            tb->set_on(value > 0.5);
+            tb->set_on(toggle_on_from_normalized(value));
         else if (auto* stepper = dynamic_cast<Stepper*>(it->second.view))
             stepper->set_value(value);
         else if (auto* pan = dynamic_cast<PanControl*>(it->second.view))
             pan->set_value(static_cast<float>(value));
+        // A selector has segments, not a position: the normalized value picks
+        // which one is lit. Silent, because this is the host pushing state in
+        // — echoing it back as a user edit would fight the binding every frame.
+        else if (auto* seg = dynamic_cast<SegmentedControl*>(it->second.view))
+            seg->set_selected_silent(selector_segment_index(
+                static_cast<float>(value),
+                static_cast<int>(seg->segments().size())));
 
         return choc::value::Value();
     });
@@ -52,12 +61,17 @@ void BridgeRegistrars::register_widget_value_controls_api(WidgetBridge& self) {
 
         if (auto* knob = dynamic_cast<Knob*>(it->second.view))
             return choc::value::createFloat64(knob->value());
+        if (auto* seg = dynamic_cast<SegmentedControl*>(it->second.view))
+            return choc::value::createFloat64(selector_segment_value(
+                seg->selected(), static_cast<int>(seg->segments().size())));
         if (auto* fader = dynamic_cast<Fader*>(it->second.view))
             return choc::value::createFloat64(fader->value());
         if (auto* range = dynamic_cast<RangeSlider*>(it->second.view))
             return choc::value::createFloat64(range->value());
         if (auto* toggle = dynamic_cast<Toggle*>(it->second.view))
             return choc::value::createFloat64(toggle->is_on() ? 1.0 : 0.0);
+        if (auto* stepper = dynamic_cast<Stepper*>(it->second.view))
+            return choc::value::createFloat64(stepper->value());
 
         return choc::value::createFloat64(0);
     });
@@ -71,6 +85,12 @@ void BridgeRegistrars::register_widget_value_controls_api(WidgetBridge& self) {
         auto v = args.get<double>(1, 0);
         if (auto* range = dynamic_cast<RangeSlider*>(self.widget(id)))
             range->set_min(static_cast<float>(v));
+        // A stepper's range is the grid its plain value lives on, and both
+        // emitters already declare it through setMin/setMax; without this the
+        // widget keeps its -24..24 default and a voice count reads as an
+        // octave offset.
+        else if (auto* st = dynamic_cast<Stepper*>(self.widget(id)))
+            st->set_minimum(v);
         return choc::value::Value();
     });
 
@@ -79,6 +99,8 @@ void BridgeRegistrars::register_widget_value_controls_api(WidgetBridge& self) {
         auto v = args.get<double>(1, 1);
         if (auto* range = dynamic_cast<RangeSlider*>(self.widget(id)))
             range->set_max(static_cast<float>(v));
+        else if (auto* st = dynamic_cast<Stepper*>(self.widget(id)))
+            st->set_maximum(v);
         return choc::value::Value();
     });
 
@@ -87,6 +109,8 @@ void BridgeRegistrars::register_widget_value_controls_api(WidgetBridge& self) {
         auto v = args.get<double>(1, 0);
         if (auto* range = dynamic_cast<RangeSlider*>(self.widget(id)))
             range->set_step(static_cast<float>(v));
+        else if (auto* st = dynamic_cast<Stepper*>(self.widget(id)))
+            st->set_step(v);
         return choc::value::Value();
     });
 

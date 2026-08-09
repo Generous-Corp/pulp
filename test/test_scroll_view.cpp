@@ -7,6 +7,8 @@
 #include <pulp/view/theme.hpp>
 #include <pulp/canvas/canvas.hpp>
 
+#include <algorithm>
+
 using namespace pulp::view;
 
 TEST_CASE("ScrollView: scroll_by changes offset", "[scrollview]") {
@@ -145,6 +147,100 @@ TEST_CASE("ScrollView: paint_all renders without crash", "[scrollview]") {
 
     sv.paint(rc);
     REQUIRE(rc.commands().size() > 0);
+}
+
+TEST_CASE("ScrollView: paint and hit testing share its fitted scale",
+          "[scrollview][transform][hit_test]") {
+    pulp::canvas::RecordingCanvas rc;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto scroll = std::make_unique<ScrollView>();
+    auto* scroll_ptr = scroll.get();
+    scroll->set_bounds({100, 50, 200, 100});
+    scroll->set_content_size({200, 300});
+    scroll->set_transform_origin(0.0f, 0.0f);
+    scroll->set_scale(0.5f);
+
+    auto child = std::make_unique<View>();
+    auto* child_ptr = child.get();
+    child->set_bounds({0, 0, 100, 80});
+    scroll->add_child(std::move(child));
+    root.add_child(std::move(scroll));
+
+    root.paint_all(rc);
+    REQUIRE(rc.count(pulp::canvas::DrawCommand::Type::scale) == 1);
+    const auto scale = std::find_if(
+        rc.commands().begin(), rc.commands().end(), [](const auto& command) {
+            return command.type == pulp::canvas::DrawCommand::Type::scale;
+        });
+    REQUIRE(scale != rc.commands().end());
+    REQUIRE(scale->f[0] == Catch::Approx(0.5f));
+    REQUIRE(scale->f[1] == Catch::Approx(0.5f));
+
+    REQUIRE(root.hit_test({125.0f, 70.0f}) == child_ptr);
+    REQUIRE(root.hit_test({175.0f, 70.0f}) == scroll_ptr);
+    REQUIRE(root.hit_test({225.0f, 70.0f}) == &root);
+}
+
+TEST_CASE("ScrollView: paint_all limits its transform support to scale",
+          "[scrollview][transform]") {
+    pulp::canvas::RecordingCanvas rc;
+    ScrollView scroll;
+    scroll.set_bounds({10, 20, 200, 100});
+    scroll.set_transform_origin(0.25f, 0.75f);
+    scroll.set_scale(0.5f);
+    scroll.set_translate(12.0f, 13.0f);
+    scroll.set_rotation(30.0f);
+    scroll.set_transform_matrix(1.0f, 0.0f, 0.0f, 1.0f, 40.0f, 50.0f);
+
+    scroll.paint_all(rc);
+
+    using Type = pulp::canvas::DrawCommand::Type;
+    REQUIRE(rc.count(Type::scale) == 1);
+    REQUIRE(rc.count(Type::translate) == 4);
+    REQUIRE(rc.count(Type::rotate) == 0);
+    REQUIRE(rc.count(Type::concat_transform) == 0);
+}
+
+TEST_CASE("ScrollView: hit testing excludes a scaled child's authored-only area",
+          "[scrollview][transform][hit_test]") {
+    ScrollView scroll;
+    scroll.set_bounds({0, 0, 200, 100});
+    scroll.set_content_size({200, 100});
+
+    auto child = std::make_unique<View>();
+    auto* child_ptr = child.get();
+    child->set_bounds({100, 0, 100, 80});
+    child->set_transform_origin(0.0f, 0.0f);
+    child->set_scale(0.5f);
+    scroll.add_child(std::move(child));
+
+    REQUIRE(scroll.hit_test({125.0f, 20.0f}) == child_ptr);
+    REQUIRE(scroll.hit_test({175.0f, 20.0f}) == &scroll);
+}
+
+TEST_CASE("ScrollView: root hit testing inverts nested paint scales once",
+          "[scrollview][transform][hit_test]") {
+    ScrollView scroll;
+    scroll.set_bounds({0, 0, 200, 120});
+    scroll.set_content_size({200, 120});
+    scroll.set_transform_origin(0.0f, 0.0f);
+    scroll.set_scale(0.5f);
+
+    auto container = std::make_unique<View>();
+    container->set_bounds({100, 20, 100, 80});
+    container->set_transform_origin(0.0f, 0.0f);
+    container->set_scale(0.5f);
+
+    auto control = std::make_unique<View>();
+    auto* control_ptr = control.get();
+    control->set_bounds({20, 20, 40, 20});
+    container->add_child(std::move(control));
+    scroll.add_child(std::move(container));
+
+    REQUIRE(scroll.hit_test({57.5f, 17.5f}) == control_ptr);
+    REQUIRE(scroll.hit_test({110.0f, 30.0f}) == nullptr);
 }
 
 TEST_CASE("ScrollView: bar opacity starts at zero", "[scrollview]") {

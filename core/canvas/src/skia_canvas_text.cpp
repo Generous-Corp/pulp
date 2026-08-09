@@ -88,6 +88,12 @@ namespace pulp::canvas {
 // clusters routed to the emoji font.
 namespace {
 
+SkFontStyle::Slant skia_slant(int slant) {
+    if (slant == 2) return SkFontStyle::kOblique_Slant;
+    if (slant == 1) return SkFontStyle::kItalic_Slant;
+    return SkFontStyle::kUpright_Slant;
+}
+
 struct PreparedParagraph {
     std::unique_ptr<skia::textlayout::Paragraph> paragraph;
     float advance = 0;
@@ -153,10 +159,8 @@ PreparedParagraph make_paragraph(const std::string& text,
     if (families.empty()) families.emplace_back("");
     tstyle.setFontFamilies(families);
     tstyle.setFontSize(size > 0 ? size : 14.0f);
-    SkFontStyle sk_style{weight,
-                         SkFontStyle::kNormal_Width,
-                         slant ? SkFontStyle::kItalic_Slant
-                               : SkFontStyle::kUpright_Slant};
+    SkFontStyle sk_style{weight, SkFontStyle::kNormal_Width,
+                         skia_slant(slant)};
     tstyle.setFontStyle(sk_style);
     if (letter_spacing != 0.0f) tstyle.setLetterSpacing(letter_spacing);
     if (foreground_paint.has_value()) {
@@ -275,7 +279,7 @@ static void shape_with_glyph_fallback(SkCanvas* canvas,
     if (!base_tf) return;
 
     SkFontStyle style{font_weight, SkFontStyle::kNormal_Width,
-                      font_slant ? SkFontStyle::kItalic_Slant : SkFontStyle::kUpright_Slant};
+                      skia_slant(font_slant)};
 
     struct Run { std::string text; sk_sp<SkTypeface> tf; };
     std::vector<Run> runs;
@@ -579,7 +583,7 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     // the top of fill_text above.
     auto font_mgr_for_fallback = get_font_manager();
     SkFontStyle style{font_weight_, SkFontStyle::kNormal_Width,
-                      font_slant_ ? SkFontStyle::kItalic_Slant : SkFontStyle::kUpright_Slant};
+                      skia_slant(font_slant_)};
     std::unordered_map<SkUnichar, sk_sp<SkTypeface>> fallback_cache;
     auto* active_tf = font.getTypeface();
 

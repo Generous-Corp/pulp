@@ -157,7 +157,8 @@
               "end": { "type": "integer", "minimum": 0 },
               "fontSize": { "type": "number" },
               "fontWeight": { "type": "integer" },
-              "fontStyle": { "type": "string", "enum": ["normal", "italic"] },
+              "fontFamily": { "type": "string", "minLength": 1 },
+              "fontStyle": { "type": "string", "enum": ["normal", "italic", "oblique"] },
               "color": { "type": "string" },
               "letterSpacing": { "type": "number" },
               "textDecoration": { "type": "string", "enum": ["none", "underline", "line-through"] }
@@ -338,7 +339,7 @@
         "font_family": { "type": "string" },
         "font_size": { "type": "number" },
         "font_weight": { "type": "integer" },
-        "font_style": { "type": "string", "enum": ["normal", "italic"] },
+        "font_style": { "type": "string", "enum": ["normal", "italic", "oblique"] },
         "text_align": { "type": "string" },
         "vertical_align": { "type": "string", "enum": ["top", "middle", "bottom"] },
         "letter_spacing": { "type": "number" },

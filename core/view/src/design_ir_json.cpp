@@ -913,6 +913,7 @@ static void parse_ir_text_runs(IRNode& node, const choc::value::ValueView& obj) 
             if (r.hasObjectMember("fontSize"))   run.font_size = get_float(r, "fontSize");
             if (r.hasObjectMember("fontWeight"))
                 run.font_weight = static_cast<int>(get_float(r, "fontWeight"));
+            if (r.hasObjectMember("fontFamily")) run.font_family = get_string(r, "fontFamily");
             if (r.hasObjectMember("fontStyle"))  run.font_style = get_string(r, "fontStyle");
             else if (get_bool(r, "italic"))      run.font_style = "italic";
             if (r.hasObjectMember("color"))      run.color = get_string(r, "color");
@@ -1866,6 +1867,9 @@ static const char* audio_widget_id(AudioWidgetType type) {
         case AudioWidgetType::xy_pad:   return "xy_pad";
         case AudioWidgetType::waveform: return "waveform";
         case AudioWidgetType::spectrum: return "spectrum";
+        case AudioWidgetType::toggle:   return "toggle";
+        case AudioWidgetType::selector: return "selector";
+        case AudioWidgetType::stepper:  return "stepper";
     }
     return "none";
 }
@@ -2031,6 +2035,7 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
             write_int_member(out, rf, "end", r.end);
             write_float_member(out, rf, "fontSize", r.font_size);
             write_int_member(out, rf, "fontWeight", r.font_weight);
+            write_string_member(out, rf, "fontFamily", r.font_family);
             write_string_member(out, rf, "fontStyle", r.font_style);
             write_string_member(out, rf, "color", r.color);
             write_float_member(out, rf, "letterSpacing", r.letter_spacing);

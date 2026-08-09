@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20260808-panel-ux-transformed-pointer-routing",
+  "kind": "change",
+  "created_at": "2026-08-08T22:43:45Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "Forge's imported panels fit authored layouts by scaling a retained view hierarchy, but gesture delivery converted root coordinates by subtracting bounds and dividing one accumulated scale. That ignored the root transform, per-view transform origins and the ordering of nested scroll offsets, so a control could paint and hit-test at one position while a drag or drop was delivered in another coordinate system. Gesture routing now reuses the retained pointer dispatcher and inverts each root-to-target transform in paint order, including scroll offsets, before delivering local coordinates. This is Pulp-only plug-in editor and imported-panel integration work: it fixes Forge/Pulp interaction routing for scaled generated panels and does not claim or backport a named immutable Vellum framework change.",
+  "tests": [
+    "pulp-test-gesture-recognizer",
+    "pulp-test-pointer-coordinate-mapping",
+    "pulp-test-pointer-gestures"
+  ],
+  "disposition": "pulp-only"
+}

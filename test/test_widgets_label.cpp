@@ -13,6 +13,7 @@
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/text_shaper.hpp>
 #include <pulp/canvas/bundled_fonts.hpp>
+#include <pulp/canvas/font_resolver.hpp>
 
 #include <string>
 
@@ -628,7 +629,46 @@ TEST_CASE("Label paints explicit lines and decorations", "[view][widget]") {
     REQUIRE(text[0].text == "gain");
     REQUIRE(text[1].text == "trim");
     REQUIRE_THAT(text[1].f[1] - text[0].f[1], WithinAbs(18.0, 0.001));
-    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 2);
+}
+
+TEST_CASE("Label decoration follows every captured line without double alignment",
+          "[view][widget][label-cache][decoration]") {
+    Label label("alpha beta");
+    label.set_font_family("Inter");
+    label.set_font_size(12.0f);
+    label.set_text_align(LabelAlign::center);
+    label.set_text_decoration(Label::TextDecoration::underline);
+    label.set_multi_line(true);
+    label.set_bounds({0, 0, 100, 40});
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    label.set_cached_line_boxes(
+        {{5, 0, 30, 16, 0, 5}, {8, 16, 24, 16, 6, 4}}, 100.0f, face,
+        true);
+
+    // A GPU-off build has no resolvable face and must fail closed into normal
+    // responsive wrapping.  The captured-position assertions below apply only
+    // when the cache basis can actually be verified.
+    if (face.empty()) {
+        CHECK(label.cached_line_boxes().empty());
+        CHECK(label.captured_wrap_fallback());
+        RecordingCanvas fallback;
+        label.paint(fallback);
+        CHECK_FALSE(commands_of(fallback, DrawCommand::Type::fill_text).empty());
+        return;
+    }
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+    const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+    const auto strokes = commands_of(canvas, DrawCommand::Type::stroke_line);
+    REQUIRE(fills.size() == 2);
+    REQUIRE(strokes.size() == 2);
+    CHECK(fills[0].f[0] == Catch::Approx(5.0f));
+    CHECK(fills[1].f[0] == Catch::Approx(8.0f));
+    CHECK(strokes[0].f[0] == Catch::Approx(5.0f));
+    CHECK(strokes[1].f[0] == Catch::Approx(8.0f));
+    CHECK(strokes[0].f[1] != Catch::Approx(strokes[1].f[1]));
 }
 
 // pulp #1410 — verify that nowrap puts a Label into single-line paint
@@ -751,6 +791,435 @@ TEST_CASE("Label re-shapes when wrap width changes", "[view][widget][label-cache
     RecordingCanvas again;
     label->paint(again);
     REQUIRE(text_shaper_prepare_call_count() - after_resize == 0);
+}
+
+TEST_CASE("Label attributed cache distinguishes nowrap from multiline",
+          "[view][widget][label-cache][attributed]") {
+    Label label("alpha beta gamma delta");
+    AttributedString attributed;
+    TextSpan span;
+    span.text = "alpha beta gamma delta";
+    span.font_family = "Inter";
+    span.font_size = 12.0f;
+    attributed.append(span);
+    label.set_attributed_string(std::move(attributed));
+    label.set_bounds({0, 0, 45, 100});
+    label.set_multi_line(false);
+
+    RecordingCanvas one_line;
+    label.paint(one_line);
+    const auto after_one_line = text_shaper_prepare_call_count();
+    const auto one_line_fills = commands_of(one_line, DrawCommand::Type::fill_text);
+    REQUIRE_FALSE(one_line_fills.empty());
+    const float first_baseline = one_line_fills.front().f[1];
+    CHECK(std::all_of(one_line_fills.begin(), one_line_fills.end(),
+                      [&](const auto& command) {
+                          return command.f[1] == Catch::Approx(first_baseline);
+                      }));
+
+    label.set_multi_line(true);
+    RecordingCanvas multiline;
+    label.paint(multiline);
+    // The line-layout policy changed, so the layout cache is rebuilt, but the
+    // attributed glyph preparation remains valid and is reused.
+    CHECK(text_shaper_prepare_call_count() == after_one_line);
+    const auto multiline_fills = commands_of(multiline, DrawCommand::Type::fill_text);
+    REQUIRE(multiline_fills.size() > 1);
+    CHECK(std::any_of(multiline_fills.begin(), multiline_fills.end(),
+                      [&](const auto& command) {
+                          return command.f[1] != Catch::Approx(multiline_fills.front().f[1]);
+                      }));
+}
+
+TEST_CASE("Label reuses attributed preparation across identical paints",
+          "[view][widget][label-cache][attributed]") {
+    Label label("1111 9999");
+    label.set_bounds({0, 0, 48, 80});
+    label.set_multi_line(true);
+    label.set_font_variant("tabular-nums");
+    AttributedString attributed;
+    TextSpan first;
+    first.text = "1111 ";
+    first.font_family = "Inter";
+    first.font_size = 12.0f;
+    attributed.append(first);
+    TextSpan second = first;
+    second.text = "9999";
+    second.font_weight = 700;
+    attributed.append(second);
+    label.set_attributed_string(std::move(attributed));
+
+    RecordingCanvas first_paint;
+    label.paint(first_paint);
+    const auto after_first = text_shaper_prepare_call_count();
+    REQUIRE(commands_of(first_paint, DrawCommand::Type::fill_text).size() >= 2);
+
+    RecordingCanvas second_paint;
+    label.paint(second_paint);
+    CHECK(text_shaper_prepare_call_count() == after_first);
+    CHECK(fill_text_signature(first_paint) == fill_text_signature(second_paint));
+}
+
+TEST_CASE("Label attributed cache follows an inherited family change",
+          "[view][widget][label-cache][attributed][inheritance]") {
+    View parent;
+    parent.set_inheritable_font_family("Inter");
+    auto owned = std::make_unique<Label>("alpha beta gamma");
+    auto* label = owned.get();
+    AttributedString attributed;
+    TextSpan span;
+    span.text = "alpha beta gamma";
+    span.inherit_font_family = true;
+    attributed.append(span);
+    label->set_attributed_string(std::move(attributed));
+    label->set_bounds({0, 0, 80, 100});
+    label->set_multi_line(true);
+    parent.add_child(std::move(owned));
+
+    RecordingCanvas first;
+    label->paint(first);
+    parent.set_inheritable_font_family("Courier");
+    RecordingCanvas second;
+    label->paint(second);
+    const auto fonts = commands_of(second, DrawCommand::Type::set_font_full);
+    REQUIRE_FALSE(fonts.empty());
+    CHECK(std::any_of(fonts.begin(), fonts.end(), [](const auto& command) {
+        return command.text == "Courier";
+    }));
+}
+
+TEST_CASE("clearing attributed text invalidates Label layout",
+          "[view][widget][label-cache][attributed][layout]") {
+    Label label("wide");
+    AttributedString attributed;
+    TextSpan span;
+    span.text = "wide";
+    span.font_size = 48.0f;
+    attributed.append(span);
+    label.set_attributed_string(std::move(attributed));
+    label.clear_layout_dirty();
+    label.clear_attributed_string();
+    CHECK(label.layout_dirty());
+}
+
+TEST_CASE("Label captured single-line fallback reflows attributed spans without losing style",
+          "[view][widget][label-cache][attributed]") {
+    Label label("alpha beta gamma");
+    label.set_font_family("Inter");
+    label.set_font_size(12.0f);
+
+    AttributedString attributed;
+    TextSpan first;
+    first.text = "alpha ";
+    first.font_family = "Inter";
+    first.font_size = 10.0f;
+    first.font_weight = 400;
+    first.color = Color::rgba8(255, 0, 0);
+    attributed.append(first);
+    TextSpan second;
+    second.text = "beta gamma";
+    second.font_family = "Inter";
+    second.font_size = 14.0f;
+    second.font_weight = 700;
+    second.italic = true;
+    second.letter_spacing = 2.0f;
+    second.color = Color::rgba8(0, 255, 0);
+    attributed.append(second);
+    label.set_attributed_string(std::move(attributed));
+
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    label.set_bounds({0, 0, 200, 60});
+    label.set_cached_line_boxes({{0, 0, 100, 15, 0, 16}}, 200.0f,
+                                face, true);
+
+    // A narrower Yoga constraint invalidates the captured one-line decision.
+    // Height must grow with the same attributed reflow paint will use.
+    const float narrow_height = label.measured_height(50.0f);
+    CHECK(narrow_height > label.intrinsic_height());
+
+    label.set_bounds({0, 0, 50, narrow_height});
+    RecordingCanvas canvas;
+    label.paint(canvas);
+
+    const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(fills.size() >= 2);
+    bool saw_regular = false;
+    bool saw_bold_italic_tracked = false;
+    for (const auto& command : canvas.commands()) {
+        if (command.type != DrawCommand::Type::set_font_full) continue;
+        if (command.f[0] == Catch::Approx(10.0f) &&
+            command.f[1] == Catch::Approx(400.0f))
+            saw_regular = true;
+        if (command.f[0] == Catch::Approx(14.0f) &&
+            command.f[1] == Catch::Approx(700.0f) &&
+            command.f[2] == Catch::Approx(1.0f) &&
+            command.f[3] == Catch::Approx(2.0f))
+            saw_bold_italic_tracked = true;
+    }
+    CHECK(saw_regular);
+    CHECK(saw_bold_italic_tracked);
+}
+
+TEST_CASE("Label mixed-size attributed runs share measurement and paint metrics",
+          "[view][widget][label-cache][attributed][metrics]") {
+    Label small("small BIG");
+    small.set_font_family("Inter");
+    small.set_font_size(10.0f);
+
+    Label mixed("small BIG");
+    mixed.set_font_family("Inter");
+    mixed.set_font_size(10.0f);
+    AttributedString attributed;
+    TextSpan first;
+    first.text = "small ";
+    first.font_family = "Inter";
+    first.font_size = 10.0f;
+    attributed.append(first);
+    TextSpan second;
+    second.text = "BIG";
+    second.font_family = "Inter";
+    second.font_size = 28.0f;
+    second.font_weight = 700;
+    attributed.append(second);
+    mixed.set_attributed_string(std::move(attributed));
+
+    CHECK(mixed.intrinsic_height() > small.intrinsic_height() * 2.0f);
+    CHECK(mixed.baseline_y() > small.baseline_y() * 2.0f);
+    CHECK(mixed.intrinsic_width() > small.intrinsic_width());
+
+    mixed.set_bounds({0, 0, 500, mixed.intrinsic_height()});
+    RecordingCanvas canvas;
+    mixed.paint(canvas);
+    const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(fills.size() >= 2);
+    for (const auto& fill : fills)
+        CHECK(fill.f[1] == Catch::Approx(mixed.baseline_y()));
+}
+
+TEST_CASE("Label automatic attributed line boxes use per-line metrics",
+          "[view][widget][label-cache][attributed][metrics]") {
+    Label label("BIG\nsmall");
+    AttributedString attributed;
+    TextSpan large;
+    large.text = "BIG\n";
+    large.font_family = "Inter";
+    large.font_size = 28.0f;
+    attributed.append(large);
+    TextSpan small;
+    small.text = "small";
+    small.font_family = "Inter";
+    small.font_size = 10.0f;
+    attributed.append(small);
+    label.set_attributed_string(std::move(attributed));
+    label.set_multi_line(true);
+
+    const float measured = label.measured_height(200.0f);
+    TextShaper shaper;
+    AttributedString expected_text;
+    TextSpan expected_large;
+    expected_large.text = "BIG\n";
+    expected_large.font_family = "Inter";
+    expected_large.font_size = 28.0f;
+    expected_text.append(expected_large);
+    TextSpan expected_small;
+    expected_small.text = "small";
+    expected_small.font_family = "Inter";
+    expected_small.font_size = 10.0f;
+    expected_text.append(expected_small);
+    const auto prepared = shaper.prepare(expected_text);
+    const auto layout = shaper.layout_with_lines(prepared, 200.0f);
+    REQUIRE(layout.lines.size() == 2);
+    CHECK(measured == Catch::Approx(std::ceil(layout.total_height)));
+    CHECK(measured < std::ceil(prepared.line_height() * 2.0f));
+
+    label.set_bounds({0, 0, 200, measured});
+    label.set_vertical_align(TextVerticalAlign::top);
+    RecordingCanvas canvas;
+    label.paint(canvas);
+    const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(fills.size() == 2);
+    CHECK(fills[1].f[1] - fills[0].f[1] ==
+          Catch::Approx(layout.lines[0].height - layout.lines[0].ascent +
+                        layout.lines[1].ascent));
+}
+
+TEST_CASE("Label attributed mutation invalidates an older captured line basis",
+          "[view][widget][label-cache][attributed]") {
+    Label label("alpha beta");
+    label.set_font_family("Inter");
+    label.set_bounds({0, 0, 100, 40});
+    label.set_cached_line_boxes(
+        {{0, 0, 100, 16, 0, 10}}, 100.0f,
+        "captured-inter-regular", true);
+    REQUIRE(label.cached_line_boxes().size() == 1);
+
+    AttributedString replacement;
+    TextSpan span;
+    span.text = "alpha beta";
+    span.font_weight = 800;
+    replacement.append(span);
+    label.set_attributed_string(std::move(replacement));
+
+    CHECK(label.cached_line_boxes().empty());
+}
+
+TEST_CASE("Label styled clamp paints ellipsis on an empty visible line",
+          "[view][widget][label-cache][attributed][ellipsis]") {
+    Label label("alpha\n\nbeta");
+    label.set_multi_line(true);
+    label.set_line_clamp(2);
+    label.set_bounds({0, 0, 100, 60});
+    AttributedString attributed;
+    TextSpan span;
+    span.text = "alpha\n\nbeta";
+    span.color = Color::rgba8(12, 34, 56);
+    attributed.append(span);
+    label.set_attributed_string(std::move(attributed));
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+    const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(fills.size() == 2);
+    CHECK(fills[0].text == "alpha");
+    CHECK(fills[1].text == "\xe2\x80\xa6");
+}
+
+TEST_CASE("Label attributed ellipsis aligns the truncated width inside its bounds",
+          "[view][widget][attributed][ellipsis]") {
+    for (const auto align : {LabelAlign::center, LabelAlign::right}) {
+        Label label("alpha beta gamma delta");
+        label.set_bounds({0, 0, 60, 24});
+        label.set_text_align(align);
+        label.set_white_space_nowrap(true);
+        label.set_multi_line(false);
+        label.set_text_overflow_ellipsis(true);
+        AttributedString attributed;
+        TextSpan first;
+        first.text = "alpha beta ";
+        first.font_family = "Inter";
+        attributed.append(first);
+        TextSpan second = first;
+        second.text = "gamma delta";
+        second.font_weight = 700;
+        attributed.append(second);
+        label.set_attributed_string(std::move(attributed));
+
+        RecordingCanvas canvas;
+        label.paint(canvas);
+        const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+        REQUIRE_FALSE(fills.empty());
+        CHECK(fills.front().f[0] >= 0.0f);
+    }
+}
+
+TEST_CASE("Label attributed explicit none cancels a dominant decoration for that run",
+          "[view][widget][attributed][decoration]") {
+    Label label("underplain");
+    label.set_bounds({0, 0, 200, 24});
+    label.set_text_decoration(Label::TextDecoration::underline);
+    AttributedString attributed;
+    TextSpan under;
+    under.text = "under";
+    under.font_family = "Inter";
+    attributed.append(under);
+    TextSpan plain = under;
+    plain.text = "plain";
+    plain.decoration = TextDecoration::none;
+    plain.decoration_override = true;
+    attributed.append(plain);
+    label.set_attributed_string(std::move(attributed));
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+    REQUIRE(commands_of(canvas, DrawCommand::Type::fill_text).size() >= 2);
+    CHECK(canvas.count(DrawCommand::Type::stroke_line) == 1);
+}
+
+TEST_CASE("Label attributed ellipsis reserves space across the whole styled line",
+          "[view][widget][attributed][ellipsis]") {
+    RecordingCanvas metrics;
+    metrics.set_font_full("Inter", 14.0f, 400, 0, 0.0f);
+    const float first_width = metrics.measure_text("aaaa");
+
+    Label label("aaaabbbb");
+    label.set_bounds({0, 0, first_width, 24});
+    label.set_white_space_nowrap(true);
+    label.set_multi_line(false);
+    label.set_text_overflow_ellipsis(true);
+    AttributedString attributed;
+    TextSpan first;
+    first.text = "aaaa";
+    first.font_family = "Inter";
+    attributed.append(first);
+    TextSpan second = first;
+    second.text = "bbbb";
+    second.font_weight = 700;
+    attributed.append(second);
+    label.set_attributed_string(std::move(attributed));
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+    const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(fills.size() == 1);
+    CHECK(fills[0].text.ends_with("\xe2\x80\xa6"));
+}
+
+TEST_CASE("Label rejects a cached line that splits a UTF-16 surrogate pair",
+          "[view][widget][label-cache][utf16]") {
+    Label label(std::string("A") + "\xf0\x9f\x98\x80" + "B");
+    label.set_font_family("Inter");
+    label.set_font_size(14.0f);
+    label.set_bounds({0, 0, 100, 24});
+    label.set_cached_line_boxes(
+        {{0, 0, 100, 18, 1, 1}}, 100.0f,
+        resolved_face_identity("Inter", 400.0f), true);
+    REQUIRE(label.cached_line_boxes().empty());
+
+    Label::reset_line_break_path_counts();
+    RecordingCanvas canvas;
+    label.paint(canvas);
+    CHECK(Label::line_break_path_counts().cached == 0);
+}
+
+TEST_CASE("Label rejects invalid captured line geometry at its public boundary",
+          "[view][widget][label-cache][validation]") {
+    Label label("valid");
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    label.set_cached_line_boxes(
+        {{0, 0, -1, 18, 0, 5}}, 100.0f, face, true);
+    CHECK(label.cached_line_boxes().empty());
+    label.set_cached_line_boxes(
+        {{0, 0, 20, 18, 0, 5}}, 0.0f, face, true);
+    CHECK(label.cached_line_boxes().empty());
+    label.set_cached_line_boxes(
+        {{0, 0, 20, 18, 0, 5}}, 100.0f, "", true);
+    CHECK(label.cached_line_boxes().empty());
+    CHECK(label.captured_wrap_fallback());
+}
+
+TEST_CASE("Label ellipsis preserves a captured single-line horizontal offset",
+          "[view][widget][label-cache][ellipsis][alignment]") {
+    Label label("short");
+    label.set_font_family("Inter");
+    label.set_font_size(14.0f);
+    label.set_text_align(LabelAlign::center);
+    label.set_text_overflow_ellipsis(true);
+    label.set_bounds({0, 0, 100, 24});
+    const auto face = resolved_face_identity("Inter", 400.0f);
+    label.set_cached_line_boxes(
+        {{30, 0, 40, 18, 0, 5}}, 100.0f,
+        face, false);
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+    const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(fills.size() == 1);
+    if (face.empty()) {
+        CHECK(label.cached_line_boxes().empty());
+        CHECK(fills[0].f[0] == Catch::Approx(50.0f));
+        return;
+    }
+    CHECK(fills[0].f[0] == Catch::Approx(30.0f));
 }
 
 TEST_CASE("Label re-shapes when font size or line height changes",

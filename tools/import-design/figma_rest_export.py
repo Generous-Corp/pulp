@@ -859,6 +859,12 @@ def extract_style(n, ctx=None):
     if n.get("clipsContent") is True: s["overflow"] = "clip"
     return s
 
+def semantic_font_slant(style):
+    style = str(style or "").lower()
+    if "oblique" in style: return "oblique"
+    if "italic" in style: return "italic"
+    return "normal"
+
 def extract_text_runs(n):
     # Figma per-character style overrides -> ordered IR text runs. Group
     # consecutive characters that share a non-zero override id into [start,end)
@@ -905,15 +911,37 @@ def extract_text_runs(n):
             if "fontSize" in st:   run["fontSize"] = st["fontSize"]
             if "fontWeight" in st: run["fontWeight"] = st["fontWeight"]
             fn = st.get("fontName") or {}
-            if "italic" in str(fn.get("style", "")).lower():
-                run["fontStyle"] = "italic"
+            if not fn and (st.get("fontFamily") or
+                           st.get("fontPostScriptName") or
+                           st.get("fontStyle") or
+                           "italic" in st):
+                fn = {
+                    "family": st.get("fontFamily"),
+                    "style": st.get("fontStyle") or
+                             st.get("fontPostScriptName") or
+                             ("Italic" if st.get("italic") else "Regular"),
+                }
+            base_fn = n.get("fontName") or {}
+            node_style = n.get("style") or {}
+            base_family = base_fn.get("family") or node_style.get("fontFamily")
+            if fn.get("family") and fn.get("family") != base_family:
+                run["fontFamily"] = fn["family"]
+            run_style = str(fn.get("style", "")).lower()
+            base_style = str(base_fn.get("style") or
+                             node_style.get("fontPostScriptName") or
+                             node_style.get("fontStyle") or "").lower()
+            if fn and semantic_font_slant(run_style) != semantic_font_slant(base_style):
+                run["fontStyle"] = semantic_font_slant(run_style)
             ls = st.get("letterSpacing")
-            if isinstance(ls, dict) and "value" in ls:
+            if isinstance(ls, (int, float)):
+                run["letterSpacing"] = ls
+            elif isinstance(ls, dict) and "value" in ls:
                 run["letterSpacing"] = ls["value"]
             td = st.get("textDecoration")
-            if td and td != "NONE":
+            if td:
                 run["textDecoration"] = ("underline" if td == "UNDERLINE"
                                          else "line-through" if td == "STRIKETHROUGH"
+                                         else "none" if td == "NONE"
                                          else str(td).lower())
             fills = st.get("fills")
             if isinstance(fills, list) and fills and fills[0].get("type") == "SOLID":
@@ -947,13 +975,20 @@ def extract_text_style(n, s):
     if "fontSize" in st: s["font_size"] = st["fontSize"]
     if "fontFamily" in st:
         s["font_family"] = st["fontFamily"]
-        s["font_style"] = "italic" if "italic" in str(st.get("italic", "")).lower() or st.get("italic") else "normal"
+        face = st.get("fontPostScriptName") or st.get("fontStyle")
+        if face:
+            s["font_style"] = semantic_font_slant(face)
+        else:
+            s["font_style"] = "italic" if st.get("italic") else "normal"
     if "fontWeight" in st: s["font_weight"] = st["fontWeight"]
     ls = st.get("letterSpacing")
     if isinstance(ls, (int, float)): s["letter_spacing"] = ls
     lh = st.get("lineHeightPx")
     if isinstance(lh, (int, float)): s["line_height"] = lh
     if st.get("textAlignHorizontal"): s["text_align"] = st["textAlignHorizontal"].lower()
+    td = st.get("textDecoration")
+    if td == "UNDERLINE": s["text_decoration"] = "underline"
+    elif td == "STRIKETHROUGH": s["text_decoration"] = "line-through"
     # Vertical alignment within the design-reserved slot. Design authority:
     # codegen honors it over the tall-slot centering heuristic (an explicit
     # "top" suppresses derived centering).
@@ -1278,19 +1313,49 @@ def _record_font(n, ctx):
     omitted — the importer #43b path then keeps the family name (falls back to a
     system face) rather than registering a bundled file. Capturing the metadata
     still keeps the REST envelope conformant with the plugin's shape."""
+    def weight_from_name(name):
+        value = str(name or "").lower().replace(" ", "").replace("-", "").replace("_", "")
+        if "thin" in value: return 100
+        if "extralight" in value or "ultralight" in value: return 200
+        if "light" in value: return 300
+        if "medium" in value: return 500
+        if "semibold" in value or "demibold" in value: return 600
+        if "extrabold" in value or "ultrabold" in value: return 800
+        if "bold" in value: return 700
+        if "black" in value or "heavy" in value: return 900
+        return 400
+
+    def record(family, style_name, weight, italic=False):
+        if not family:
+            return
+        slant = semantic_font_slant(style_name)
+        italic = italic or slant in ("italic", "oblique")
+        style = str(style_name or ("Italic" if italic else "Regular"))
+        key = (family, style, weight)
+        if key not in ctx.fonts:
+            entry = {"family": family, "style": style, "weight": weight}
+            if italic:
+                entry["italic"] = True
+            ctx.fonts[key] = entry
+
     st = n.get("style") or {}
-    family = st.get("fontFamily")
-    if not family:
-        return
-    weight = st.get("fontWeight", 400)
-    italic = bool(st.get("italic"))
-    style = "Italic" if italic else "Regular"
-    key = (family, style, weight)
-    if key not in ctx.fonts:
-        entry = {"family": family, "style": style, "weight": weight}
-        if italic:
-            entry["italic"] = True
-        ctx.fonts[key] = entry
+    base_family = st.get("fontFamily") or (n.get("fontName") or {}).get("family")
+    base_style = (n.get("fontName") or {}).get("style") or st.get("fontStyle") or \
+                 st.get("fontPostScriptName") or ("Italic" if st.get("italic") else "Regular")
+    base_weight = st.get("fontWeight", weight_from_name(base_style))
+    record(base_family, base_style, base_weight, bool(st.get("italic")))
+
+    table = n.get("styleOverrideTable") or {}
+    used = {sid for sid in (n.get("characterStyleOverrides") or []) if sid}
+    for sid in used:
+        override = table.get(str(sid)) or table.get(sid) or {}
+        face = override.get("fontName") or {}
+        family = face.get("family") or override.get("fontFamily") or base_family
+        style_name = face.get("style") or override.get("fontStyle") or \
+                     override.get("fontPostScriptName") or \
+                     ("Italic" if override.get("italic") else "Regular")
+        weight = override.get("fontWeight", weight_from_name(style_name))
+        record(family, style_name, weight, bool(override.get("italic")))
 
 
 def node_tree_to_ir(root, components=None, component_sets=None, variable_names=None):

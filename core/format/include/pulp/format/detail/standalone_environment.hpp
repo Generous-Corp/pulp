@@ -1,11 +1,14 @@
 #pragma once
 
 #include <pulp/format/detail/editor_environment.hpp>
+#include <pulp/format/detail/locale_independent_float.hpp>
 #include <pulp/format/standalone.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/system.hpp>
 
 #include <charconv>
+#include <cmath>
+#include <optional>
 #include <string_view>
 #include <system_error>
 
@@ -41,6 +44,78 @@ inline bool parse_nonnegative_int(std::string_view value, int& out) {
 
     out = parsed;
     return true;
+}
+
+inline bool parse_test_signal_number(std::string_view value,
+                                     double minimum,
+                                     double maximum,
+                                     double& out) {
+    double parsed = 0.0;
+    const auto result = parse_double_c_locale(value, parsed);
+    if (value.empty() || result.range_error || result.consumed == 0 ||
+        result.consumed != value.size() ||
+        !std::isfinite(parsed) || parsed < minimum || parsed > maximum)
+        return false;
+    out = parsed;
+    return true;
+}
+
+/// Read the developer/automation-only standalone test-signal environment.
+/// nullopt means PULP_TEST_SIGNAL was absent. A present optional whose type is
+/// none means the request was malformed and must fail closed, disabling any
+/// previously configured source rather than leaving stale audio active.
+inline std::optional<TestSignalConfig> test_signal_config_from_environment(
+    double sample_rate) {
+    const auto signal = runtime::get_env("PULP_TEST_SIGNAL");
+    if (!signal) return std::nullopt;
+
+    TestSignalConfig config;
+    if (*signal == "sine") {
+        config.type = TestSignalType::sine;
+    } else if (*signal == "noise") {
+        config.type = TestSignalType::noise;
+    } else {
+        runtime::log_warn(
+            "Standalone: PULP_TEST_SIGNAL='{}' must be 'sine' or 'noise'; "
+            "test signal disabled",
+            *signal);
+        return config;
+    }
+
+    if (auto amplitude = runtime::get_env("PULP_TEST_SIGNAL_AMPLITUDE")) {
+        double parsed = 0.0;
+        if (!parse_test_signal_number(*amplitude, 0.0, 1.0, parsed)) {
+            runtime::log_warn(
+                "Standalone: PULP_TEST_SIGNAL_AMPLITUDE='{}' must be a "
+                "finite linear value from 0 to 1; test signal disabled",
+                *amplitude);
+            return TestSignalConfig{};
+        }
+        config.sine_amplitude = static_cast<float>(parsed);
+    }
+
+    if (auto frequency = runtime::get_env("PULP_TEST_SIGNAL_FREQUENCY_HZ")) {
+        if (config.type != TestSignalType::sine) {
+            runtime::log_warn(
+                "Standalone: PULP_TEST_SIGNAL_FREQUENCY_HZ only applies to "
+                "PULP_TEST_SIGNAL=sine; test signal disabled");
+            return TestSignalConfig{};
+        }
+        const double nyquist = sample_rate * 0.5;
+        double parsed = 0.0;
+        if (!std::isfinite(nyquist) || nyquist <= 0.0 ||
+            !parse_test_signal_number(*frequency, 0.0, nyquist, parsed) ||
+            parsed == 0.0 || parsed == nyquist) {
+            runtime::log_warn(
+                "Standalone: PULP_TEST_SIGNAL_FREQUENCY_HZ='{}' must be "
+                "finite, greater than 0, and below Nyquist; test signal disabled",
+                *frequency);
+            return TestSignalConfig{};
+        }
+        config.sine_frequency_hz = static_cast<float>(parsed);
+    }
+
+    return config;
 }
 
 inline StandaloneConfig standalone_config_from_environment(StandaloneConfig config) {
