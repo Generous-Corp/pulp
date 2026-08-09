@@ -917,9 +917,9 @@ TEST_CASE("canonical ordinary Standalone host serves typed state reads",
                          .working_directory = installed_host.parent_path(),
                          .host_tier = ControlHostTier::Standalone}}},
         .decide_consent =
-            [](const VerifiedControlPeerIdentity&, const ControlGrantRequest&) {
+            [](const ControlGrantConsentRequest&) {
                 return ControlConsentDecision{true, ControlConsentAuthority::TrustedHostUi,
-                                              "standalone-state-read-test-consent"};
+                                              "standalone-state-read-test-consent", {}};
             },
     });
     REQUIRE(daemon.start());

@@ -5,7 +5,6 @@
 #include <pulp/inspect/control_state_read_executor.hpp>
 
 #include <chrono>
-#include <limits>
 #include <optional>
 
 namespace pulp::inspect {
@@ -68,7 +67,6 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                     .store = store_,
                     .state_generation = *generation,
                     .catalog_generation = store_->parameter_display_revision() + 1,
-                    .current_state_generation = [this] { return current_generation(); },
                     .is_sensitive = [](state::ParamID) { return false; }};
             });
         connection_ = std::make_unique<ControlHostConnection>(
@@ -116,11 +114,7 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
         const auto state = store_->state_generation();
         if (!store_->state_snapshot_is_current(state))
             return std::nullopt;
-        return state + store_->parameter_display_revision() + 1;
-    }
-
-    std::uint64_t current_generation() const noexcept {
-        return stable_generation().value_or(std::numeric_limits<std::uint64_t>::max());
+        return state;
     }
 };
 
