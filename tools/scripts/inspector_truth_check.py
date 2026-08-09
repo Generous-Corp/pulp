@@ -332,7 +332,7 @@ def public_surface_errors(root: pathlib.Path) -> list[str]:
         (
             "if let Sub::Query(q)",
             "run_offline_query",
-            "matches!(sub, Sub::Start(_) | Sub::Stop)",
+            "matches!(sub, Sub::Start(_) | Sub::Stop(_))",
             "to_control_call(sub)",
         ),
     ):

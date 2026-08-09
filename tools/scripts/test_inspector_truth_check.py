@@ -76,7 +76,7 @@ class ReducedPublicSurfaceTests(unittest.TestCase):
         )
         (self.root / "experimental/pulp-rs/src/cmd/trace_dispatch.rs").write_text(
             "if let Sub::Query(q) { return run_offline_query(q); }\n"
-            "if matches!(sub, Sub::Start(_) | Sub::Stop) {\n"
+            "if matches!(sub, Sub::Start(_) | Sub::Stop(_)) {\n"
             "  let call = to_control_call(sub);\n"
             "}\n",
             encoding="utf-8",
