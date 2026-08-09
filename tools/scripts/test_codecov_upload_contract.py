@@ -50,10 +50,7 @@ class CoverageWorkflowTests(unittest.TestCase):
             "if: always() && steps.coverage-suite.outputs.budget_hit != 'true'",
             self.coverage,
         )
-        self.assertIn(
-            'if [ "${{ steps.coverage-suite.outcome }}" != "success" ]; then',
-            self.coverage,
-        )
+        self.assertNotIn("steps.coverage-suite.outcome", self.coverage)
         self.assertIn(
             "if: always() && steps.native_cobertura.outcome == 'success' && "
             "github.event.pull_request.head.repo.fork != true",
@@ -90,6 +87,7 @@ class CoverageWorkflowTests(unittest.TestCase):
         self.assertIn('[[ "${candidate_at}" > "${last_success_at}" ]]', self.watchdog)
         self.assertIn("scan_incomplete=1", self.watchdog)
         self.assertIn("leaving watchdog issue state unchanged", self.watchdog)
+        self.assertIn('if [ "${DRY_RUN}" != "true" ]; then\n              exit 1', self.watchdog)
 
     def test_receipt_checker_rejects_prefix_wrong_sha_and_expired(self) -> None:
         sha = "abc123"
@@ -148,8 +146,11 @@ class CoverageWorkflowTests(unittest.TestCase):
         self.assertIn("-DPULP_BUILD_EXAMPLES=ON", self.coverage)
         self.assertIn("matrix.os == 'linux' || matrix.os == 'macos'", self.coverage)
         self.assertIn("-DPULP_BUILD_PYTHON=ON -DPULP_BUILD_EXAMPLES=ON", self.coverage)
-        self.assertIn("budget=$(( 90 * 60 ))", self.coverage)
-        self.assertIn("leaves 60 min for setup + post-suite work", self.coverage)
+        self.assertIn("budget=$(( 120 * 60 ))", self.coverage)
+        self.assertIn("leaves 30 min for post-suite work", self.coverage)
+        self.assertNotIn("coverage_args+=(--test-jobs", self.coverage)
+        self.assertNotIn("steps.coverage-suite.outcome }} != \"success\"", self.coverage)
+        self.assertNotIn("steps.python_coverage.outcome }} != \"success\"", self.coverage)
         self.assertNotIn(
             "files=\"${files},build-coverage/python/coverage.python.xml\"",
             self.coverage,
@@ -157,10 +158,7 @@ class CoverageWorkflowTests(unittest.TestCase):
 
     def test_python_upload_is_independent_from_native_report(self) -> None:
         self.assertIn("id: python_coverage", self.coverage)
-        self.assertIn(
-            'if [ "${{ steps.python_coverage.outcome }}" != "success" ]; then',
-            self.coverage,
-        )
+        self.assertNotIn("steps.python_coverage.outcome", self.coverage)
         self.assertIn("name: Upload Python tools coverage to Codecov", self.coverage)
         self.assertIn(
             "if: always() && steps.python_cobertura.outcome == 'success'",

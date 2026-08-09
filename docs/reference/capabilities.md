@@ -600,6 +600,13 @@ and tests support:
 | `timebase.swing` | `bit_exact` | `not_applicable` | `cross_platform` | `irrelevant` | Pure rational/integer tick transform with tested bounded integer recovery |
 | `timebase.tick` | `bit_exact` | `not_applicable` | `cross_platform` | `irrelevant` | Fixed-width integer value type with saturating arithmetic |
 
+The inventory includes `timebase.tempo-map`, whose four-binding contract exposes
+the immutable compiled type, its validating control-thread factory, and the two
+allocation-free integer lookup operations needed by scheduling generators. Its
+same-build determinism claim is proved with independently compiled installed-SDK
+consumers for every binding; cursor and fractional helpers are deliberately not
+part of v1.0.
+
 The first inventory covers representative public signal processing, instrument
 voice allocation, MPE note ownership, exact tick/swing timebase types, and host
 transport projection. Swing projection uses an exact rational ratio; inverse

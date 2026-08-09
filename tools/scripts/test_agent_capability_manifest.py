@@ -354,6 +354,27 @@ def exercise_manifest_mutations(canonical: dict) -> int:
         swing["_link_probes"] = held_probes
     checks += 1
 
+    tempo_map = next(
+        row for row in manifest.EXPORTS if row["key"] == "timebase.tempo-map"
+    )
+    member_probe = next(
+        probe
+        for probe in tempo_map["_link_probes"]
+        if probe["operation"] == "member_function_call"
+    )
+    rendered_member_probe = manifest._render_link_probe(member_probe, 0)
+    assert ".ticks_to_samples(" in rendered_member_probe
+    assert member_probe["object"] in rendered_member_probe
+    checks += 1
+
+    malformed_member_probe = copy.deepcopy(tempo_map)
+    malformed_member_probe["_link_probes"][2].pop("object")
+    expect_problem(
+        manifest._link_probe_problems(malformed_member_probe),
+        "fields are not exact for 'member_function_call'",
+    )
+    checks += 1
+
     return checks
 
 

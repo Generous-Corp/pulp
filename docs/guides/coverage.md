@@ -171,6 +171,21 @@ source-based coverage, not gcov. See
 Xcode toolchain:
 `export PATH="$(xcrun -f llvm-cov | xargs dirname):$PATH"`.
 
+Build and test parallelism are independently tunable. This matters on
+memory-constrained coverage runners: instrumented links may need a low
+`--jobs` value while the thousands of small CTest processes can safely use a
+higher `--test-jobs` value. The shared script defaults CTest to eight workers
+independently of `--jobs`, so GitHub-hosted, local, and SSH coverage consumers
+all avoid serializing the suite when instrumented linking must be constrained.
+Override with `--test-jobs` or `PULP_COVERAGE_TEST_JOBS` for a measured host.
+
+Codecov upload eligibility is determined from the report itself: it must exist,
+parse, and contain a positive `lines-valid` count. A completed test traversal
+can still return nonzero because a test assertion failed; the generated report
+remains an accurate execution record and is uploaded while the test failure
+stays visible on the workflow. Configure, build, timeout, and report-generation
+failures produce no eligible report and therefore remain fail-closed.
+
 The Python tooling lane requires `coverage.py >= 7.10` because
 subprocess coverage support (`[run] patch = subprocess`) is what lets
 tests like `test_resolve_runs_on.py`, `test_audit.py`, and
@@ -212,6 +227,7 @@ Optional flags:
 
 ```bash
 scripts/run_coverage.sh --jobs 16                 # parallelism
+scripts/run_coverage.sh --jobs 2 --test-jobs 8    # low-link-memory runner
 scripts/run_coverage.sh --tests '^pulp-test-audio' # regex filter
 python3 tools/scripts/run_python_coverage.py --pattern 'tools/scripts/test_resolve_runs_on.py'
 python3 tools/scripts/run_python_coverage.py \

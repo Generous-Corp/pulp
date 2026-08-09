@@ -52,6 +52,142 @@ EXPORTS = [
         }],
     ),
     capability(
+        key="timebase.tempo-map",
+        domain="timebase",
+        summary=(
+            "Validated sample-rate-specific tempo compilation with deterministic, "
+            "allocation-free tick and sample lookup."
+        ),
+        rt_class="mixed",
+        lifecycle={
+            "construction": "control",
+            "prepare": "factory-validation-on-control",
+            "process": "audio",
+            "reset": "replace-immutable-value",
+            "release": "control-after-readers-quiesce",
+        },
+        state_model=(
+            "Immutable owned compiled segments produced by a validating control-thread "
+            "factory; published lookup values are allocation-free."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "same_build",
+            "transport_history": "irrelevant",
+        },
+        input_domain="authored tempo points, rational sample rate, ticks, and samples",
+        output_domain=(
+            "integer sample positions and nearest canonical ticks with explicit sample error"
+        ),
+        units=["ticks", "samples", "beats per minute", "rational sample rate"],
+        latency="zero",
+        tail="none",
+        scheduling="pure coordinate conversion after control-thread compilation",
+        bindings=[
+            binding(
+                role="entrypoint",
+                kind="cpp_type",
+                include="pulp/timebase/compiled_tempo_map.hpp",
+                qualified_name="pulp::timebase::CompiledTempoMap",
+                target="Pulp::timebase",
+                header_fingerprint=(
+                    "sha256:6891cd08d6e70c62ed6fdfbb03883a312a25aaf74ee4b2c365c31c71dc10a7b8"
+                ),
+            ),
+            binding(
+                role="validated-factory",
+                kind="cpp_function",
+                include="pulp/timebase/compiled_tempo_map.hpp",
+                qualified_name="pulp::timebase::CompiledTempoMap::compile",
+                target="Pulp::timebase",
+                header_fingerprint=(
+                    "sha256:6891cd08d6e70c62ed6fdfbb03883a312a25aaf74ee4b2c365c31c71dc10a7b8"
+                ),
+                address_expression=(
+                    "static_cast<pulp::runtime::Result<pulp::timebase::CompiledTempoMap, "
+                    "pulp::timebase::TempoMapError> (*)(std::span<const "
+                    "pulp::timebase::TempoPoint>, pulp::timebase::RationalRate) noexcept>("
+                    "&pulp::timebase::CompiledTempoMap::compile)"
+                ),
+            ),
+            binding(
+                role="ticks-to-samples",
+                kind="cpp_function",
+                include="pulp/timebase/compiled_tempo_map.hpp",
+                qualified_name="pulp::timebase::CompiledTempoMap::ticks_to_samples",
+                target="Pulp::timebase",
+                header_fingerprint=(
+                    "sha256:6891cd08d6e70c62ed6fdfbb03883a312a25aaf74ee4b2c365c31c71dc10a7b8"
+                ),
+                address_expression=(
+                    "static_cast<pulp::timebase::SamplePosition "
+                    "(pulp::timebase::CompiledTempoMap::*)(pulp::timebase::TickPosition) "
+                    "const noexcept>(&pulp::timebase::CompiledTempoMap::ticks_to_samples)"
+                ),
+            ),
+            binding(
+                role="resolve-sample",
+                kind="cpp_function",
+                include="pulp/timebase/compiled_tempo_map.hpp",
+                qualified_name="pulp::timebase::CompiledTempoMap::resolve_sample",
+                target="Pulp::timebase",
+                header_fingerprint=(
+                    "sha256:6891cd08d6e70c62ed6fdfbb03883a312a25aaf74ee4b2c365c31c71dc10a7b8"
+                ),
+                address_expression=(
+                    "static_cast<pulp::timebase::SampleToTickResult "
+                    "(pulp::timebase::CompiledTempoMap::*)(pulp::timebase::SamplePosition) "
+                    "const noexcept>(&pulp::timebase::CompiledTempoMap::resolve_sample)"
+                ),
+            ),
+        ],
+        _link_probes=[
+            {
+                "role": "entrypoint",
+                "binding": "pulp::timebase::CompiledTempoMap",
+                "operation": "construct",
+                "arguments": (
+                    "pulp::timebase::CompiledTempoMap::compile("
+                    "pulp::timebase::TempoMap{}, "
+                    "pulp::timebase::RationalRate{48000, 1}).value()"
+                ),
+            },
+            {
+                "role": "validated-factory",
+                "binding": "pulp::timebase::CompiledTempoMap::compile",
+                "operation": "function_call",
+                "arguments": (
+                    "pulp::timebase::TempoMap{}.points(), "
+                    "pulp::timebase::RationalRate{48000, 1}"
+                ),
+            },
+            {
+                "role": "ticks-to-samples",
+                "binding": "pulp::timebase::CompiledTempoMap::ticks_to_samples",
+                "operation": "member_function_call",
+                "object": (
+                    "pulp::timebase::CompiledTempoMap::compile("
+                    "pulp::timebase::TempoMap{}, "
+                    "pulp::timebase::RationalRate{48000, 1}).value()"
+                ),
+                "arguments": "pulp::timebase::TickPosition{705600}",
+            },
+            {
+                "role": "resolve-sample",
+                "binding": "pulp::timebase::CompiledTempoMap::resolve_sample",
+                "operation": "member_function_call",
+                "object": (
+                    "pulp::timebase::CompiledTempoMap::compile("
+                    "pulp::timebase::TempoMap{}, "
+                    "pulp::timebase::RationalRate{48000, 1}).value()"
+                ),
+                "arguments": "pulp::timebase::SamplePosition{24000}",
+            },
+        ],
+    ),
+    capability(
         key="timebase.swing",
         contract_version={"major": 1, "minor": 1},
         domain="timebase",

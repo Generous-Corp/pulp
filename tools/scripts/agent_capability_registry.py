@@ -71,6 +71,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/timebase/groove_kernel.hpp": "Pulp::timebase",
     "pulp/timebase/ratchet.hpp": "Pulp::timebase",
     "pulp/timebase/trigger_grid.hpp": "Pulp::timebase",
+    "pulp/timebase/compiled_tempo_map.hpp": "Pulp::timebase",
 }
 
 EXPORTS = [
