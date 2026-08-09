@@ -293,10 +293,12 @@ endif()
 if(TARGET Pulp::signal)
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/signal_cxx20_export_probe.cpp"
 "#include <pulp/signal/fft.hpp>\n"
+"#include <pulp/signal/explicit_q_resonator_bank.hpp>\n"
 "\n"
 "int main() {\n"
 "    pulp::signal::FftT<double> fft;\n"
-"    return fft.size();\n"
+"    pulp::signal::ExplicitQResonatorBank bank;\n"
+"    return fft.size() >= 0 && bank.prepare(48000.0, 1) ? 0 : 1;\n"
 "}\n")
     add_executable(PulpSDKSmokeSignalCxx20Probe
         "${CMAKE_CURRENT_BINARY_DIR}/signal_cxx20_export_probe.cpp")

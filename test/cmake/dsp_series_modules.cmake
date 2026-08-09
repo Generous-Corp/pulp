@@ -60,12 +60,15 @@ add_library(pulp-dsp-series-header-self-containment OBJECT
     header_compile/yin_tracker.cpp
     header_compile/tape_machine_components.cpp
     header_compile/nonlin_ambience_design.cpp
-    header_compile/zero_latency_convolver_support.cpp)
+    header_compile/zero_latency_convolver_support.cpp
+    header_compile/explicit_q_resonator_bank.cpp)
 target_link_libraries(pulp-dsp-series-header-self-containment PRIVATE pulp::signal)
 
 pulp_dsp_series_signal_suite(pulp-test-signal-fractional-delay
                              test_signal_fractional_delay.cpp)
 
+pulp_dsp_series_signal_suite(pulp-test-signal-explicit-q-resonator-bank
+                             test_explicit_q_resonator_bank.cpp)
 # ── The modules ───────────────────────────────────────────────────────────
 pulp_dsp_series_signal_suite(pulp-test-signal-tape-machine   test_signal_tape_machine_eq_nonlinearity_archetypes.cpp
     test_signal_tape_machine_latency_rt_faults.cpp)
