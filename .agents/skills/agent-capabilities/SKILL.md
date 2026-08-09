@@ -120,6 +120,17 @@ For removal:
 ## Regenerate and validate
 
 Do not use the bootstrap or unpublished-migration switches during normal work.
+Use Python 3.10 or newer: transactional generation uses modern standard-library
+APIs such as `zip(..., strict=True)`, so an older system `python3` can fail before
+validating the contract. Run installed-SDK capability tests from a Release build.
+A Debug/coverage build is an invalid positive control because the installed SDK
+guard intentionally refuses unacknowledged Debug SDK consumers. Also keep the
+build tree free of stale nested SDK install prefixes: archive-mutation checks
+require one owning build-tree library per target, and an old consumer-smoke
+`prefix/lib` can create a false duplicate-owner failure. Move such generated
+fixtures aside and rerun the same test before changing capability code or
+weakening the archive check.
+
 Run:
 
 ```bash

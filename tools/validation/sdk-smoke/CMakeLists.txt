@@ -41,6 +41,9 @@ set(PULP_SDK_SMOKE_REQUIRE_FORMATS ""
 
 find_package(Pulp REQUIRED CONFIG)
 
+add_executable(PulpSDKSmokeSpectralBandMaskProbe spectral_band_mask_probe.cpp)
+target_link_libraries(PulpSDKSmokeSpectralBandMaskProbe PRIVATE Pulp::signal)
+
 foreach(_pulp_alias_target
         audio dsl events format host playback signal signal-modal-spec state timebase timeline view standalone gpu-audio)
     if(TARGET "Pulp::${_pulp_alias_target}"
