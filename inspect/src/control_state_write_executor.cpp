@@ -40,7 +40,10 @@ make_control_state_write_executor(ControlStateWriteTargetResolver resolve_target
                const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
                const ControlExecutionContext& context) -> ControlExecutionOutcome {
         if (request.operation_id != "dev.pulp.state/parameter-gesture@1" ||
-            request.operation_version != 1 || !resolve_target || !context.checkpoint) {
+            request.operation_version != 1 ||
+            request.registration_id != plan.registration_id.value ||
+            request.expected_state_generation != plan.expected_state_generation ||
+            !resolve_target || !context.checkpoint) {
             return fail(ControlResultCode::InvalidRequest,
                         "parameter gesture executor is unavailable for this operation");
         }
@@ -83,8 +86,7 @@ make_control_state_write_executor(ControlStateWriteTargetResolver resolve_target
         }
 
         auto target = resolve_target(plan);
-        if (!target || !target->store || !target->current_state_generation ||
-            !target->apply_if_state_generation || target->registration_id != plan.registration_id ||
+        if (!target || !target->store || target->registration_id != plan.registration_id ||
             (target->host_tier != ControlHostTier::Standalone &&
              target->host_tier != ControlHostTier::SharedPluginHost)) {
             return fail(ControlResultCode::HostUnavailable, "exact parameter target is unavailable",
@@ -92,8 +94,8 @@ make_control_state_write_executor(ControlStateWriteTargetResolver resolve_target
         }
         if (!target->store->info(parameter_id))
             return fail(ControlResultCode::InvalidRequest, "parameter id is not registered");
-        const auto observed_generation = target->current_state_generation();
-        if (observed_generation != target->state_generation ||
+        const auto observed_generation = target->state_generation;
+        if (!target->store->state_snapshot_is_current(observed_generation) ||
             (plan.expected_state_generation != 0 &&
              plan.expected_state_generation != observed_generation)) {
             return fail(ControlResultCode::StateConflict,
@@ -113,41 +115,19 @@ make_control_state_write_executor(ControlStateWriteTargetResolver resolve_target
             return fail(ControlResultCode::DeadlineExceeded,
                         "parameter gesture deadline elapsed at apply");
 
-        std::optional<std::uint64_t> applied_generation;
-        try {
-            applied_generation = target->apply_if_state_generation(observed_generation, [&] {
-                bool gesture_acquired = false;
-                try {
-                    target->store->acquire_gesture(parameter_id);
-                    gesture_acquired = true;
-                    target->store->set_normalized(parameter_id, normalized);
-                    target->store->release_gesture(parameter_id);
-                } catch (...) {
-                    if (gesture_acquired) {
-                        try {
-                            target->store->release_gesture(parameter_id);
-                        } catch (...) {
-                        }
-                    }
-                    throw;
-                }
-            });
-        } catch (const std::exception& error) {
-            return unknown_after_apply(std::string("parameter gesture callback failed: ") +
-                                       error.what());
-        } catch (...) {
-            return unknown_after_apply("parameter gesture callback failed");
-        }
-        if (!applied_generation)
+        const auto applied = target->store->apply_normalized_gesture_if_generation(
+            observed_generation, parameter_id, normalized);
+        if (applied.status == state::ParameterGestureApplyStatus::GenerationConflict)
             return fail(ControlResultCode::StateConflict,
                         "state generation changed at parameter apply",
                         ControlRetryClassification::AfterRefresh);
-        if (*applied_generation != observed_generation + 1)
-            return unknown_after_apply("state generation authority returned an invalid commit");
+        if (applied.status != state::ParameterGestureApplyStatus::Applied)
+            return unknown_after_apply(
+                "parameter gesture did not commit without concurrent state changes");
         auto detail = choc::value::createObject("ControlStateGestureResult");
         detail.setMember("receipt_id", plan.receipt_id.value);
         detail.setMember("applied", true);
-        detail.setMember("state_generation", static_cast<std::int64_t>(*applied_generation));
+        detail.setMember("state_generation", static_cast<std::int64_t>(applied.generation));
         return {.terminal_state = ControlReceiptState::Completed,
                 .result = {.detail_json = choc::json::toString(detail, true)}};
     };

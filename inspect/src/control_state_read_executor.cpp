@@ -102,12 +102,16 @@ make_control_state_read_executor(ControlStateReadSourceResolver resolve_source) 
         if (checkpoint != ControlExecutionCheckpoint::Continue)
             return checkpoint_failure(checkpoint);
         const auto source = resolve_source(plan);
-        if (!source || !source->store || !source->current_state_generation ||
-            !source->is_sensitive ||
+        if (!source || !source->store || !source->is_sensitive ||
             source->registration_id != plan.registration_id ||
             source->host_tier == ControlHostTier::SharedPluginHost)
             return failure(ControlResultCode::HostUnavailable, "exact state source is unavailable",
                            ControlRetryClassification::AfterRefresh);
+        if (!source->store->state_snapshot_is_current(source->state_generation)) {
+            return failure(ControlResultCode::StateConflict,
+                           "state generation changed before the snapshot",
+                           ControlRetryClassification::AfterRefresh);
+        }
         if (source->state_generation > std::numeric_limits<std::int64_t>::max() ||
             source->catalog_generation > std::numeric_limits<std::int64_t>::max()) {
             return failure(ControlResultCode::ResourceExhausted,
@@ -149,7 +153,7 @@ make_control_state_read_executor(ControlStateReadSourceResolver resolve_source) 
         checkpoint = context.checkpoint();
         if (checkpoint != ControlExecutionCheckpoint::Continue)
             return checkpoint_failure(checkpoint);
-        if (source->current_state_generation() != source->state_generation) {
+        if (!source->store->state_snapshot_is_current(source->state_generation)) {
             return failure(ControlResultCode::StateConflict,
                            "state generation changed during the snapshot",
                            ControlRetryClassification::AfterRefresh);

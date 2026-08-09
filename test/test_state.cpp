@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -1235,6 +1236,81 @@ TEST_CASE("StateStore exposes registration spans and gesture callbacks", "[state
 
     REQUIRE(began == std::vector<ParamID>{2});
     REQUIRE(ended == std::vector<ParamID>{2});
+}
+
+TEST_CASE("StateStore publishes one generation truth across every live writer",
+          "[state][store][generation][rt]") {
+    StateStore store;
+    ParamInfo trigger = make_param_info(2, "Reset", "", {0.0f, 1.0f, 0.0f});
+    trigger.is_trigger = true;
+    store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
+    store.add_parameter(trigger);
+    REQUIRE(store.state_generation() == 0);
+
+    store.set_value(1, 0.25f);
+    CHECK(store.state_generation() == 1);
+    store.set_value_rt(1, 0.5f);
+    CHECK(store.state_generation() == 2);
+    store.set_mod_offset(1, 0.1f);
+    CHECK(store.state_generation() == 3);
+    store.add_mod_offset(1, 0.1f);
+    CHECK(store.state_generation() == 4);
+    store.reset_all_mod();
+    CHECK(store.state_generation() == 5);
+    store.set_value_rt(2, 1.0f);
+    CHECK(store.state_generation() == 6);
+    REQUIRE(store.reset_triggers_rt());
+    CHECK(store.state_generation() == 7);
+
+    StateStore restored;
+    restored.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
+    REQUIRE(restored.deserialize(store.serialize()));
+    CHECK(restored.state_generation() == 1);
+}
+
+TEST_CASE("generation-bound gesture rejects stale ownership before begin and rolls back end failure",
+          "[state][store][generation][gesture][rollback]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
+    int begins = 0;
+    int ends = 0;
+    store.set_gesture_callbacks([&](ParamID) { ++begins; },
+                                [&](ParamID) { ++ends; });
+    store.set_value(1, 0.25f);
+
+    const auto stale = store.apply_normalized_gesture_if_generation(0, 1, 0.75f);
+    CHECK(stale.status == ParameterGestureApplyStatus::GenerationConflict);
+    CHECK(begins == 0);
+    CHECK(ends == 0);
+    CHECK_THAT(store.get_value(1), WithinAbs(0.25f, 0.001f));
+
+    store.set_gesture_callbacks([&](ParamID) { ++begins; },
+                                [&](ParamID) {
+                                    ++ends;
+                                    throw std::runtime_error("host end failed");
+                                });
+    const auto before = store.state_generation();
+    const auto failed = store.apply_normalized_gesture_if_generation(before, 1, 0.75f);
+    CHECK(failed.status == ParameterGestureApplyStatus::CallbackFailureRolledBack);
+    CHECK(failed.generation == before + 2);
+    CHECK_THAT(store.get_value(1), WithinAbs(0.25f, 0.001f));
+    CHECK(store.open_gesture_count() == 0);
+}
+
+TEST_CASE("versioned parameter writes preserve newer reservations across delay and stamp wrap",
+          "[state][store][generation][race]") {
+    ParamValue value(0.0f);
+    REQUIRE(value.set_versioned_if_newer(0.25f, 1, 1));
+    REQUIRE(value.set_versioned_if_newer(0.75f, 2, 1));
+    CHECK_FALSE(value.set_versioned_if_newer(0.5f, 1, 2));
+    CHECK_THAT(value.get(), WithinAbs(0.75f, 0.001f));
+
+    ParamValue long_lived(0.0f);
+    constexpr auto wrap = std::uint64_t{std::numeric_limits<std::uint32_t>::max()};
+    REQUIRE(long_lived.set_versioned_if_newer(0.25f, wrap, 1));
+    REQUIRE(long_lived.set_versioned_if_newer(0.75f, wrap + 1, 1));
+    CHECK_THAT(long_lived.get(), WithinAbs(0.75f, 0.001f));
+    CHECK(long_lived.committed_generation() == wrap + 1);
 }
 
 TEST_CASE("StateStore preserves parameter display conversion callbacks",

@@ -18,11 +18,10 @@ struct ControlStateReadSource {
     ControlRegistrationId registration_id;
     ControlHostTier host_tier = ControlHostTier::SharedPluginHost;
     const state::StateStore* store = nullptr;
+    /// Resolver-observed generation for the exact admitted store. StateStore
+    /// remains the only live mutation-generation authority.
     std::uint64_t state_generation = 0;
     std::uint64_t catalog_generation = 0;
-    /// Must be lock-free or bounded and return a monotonically advancing
-    /// generation. It is sampled after serialization to reject torn reads.
-    std::function<std::uint64_t()> current_state_generation;
     std::function<bool(state::ParamID)> is_sensitive;
 };
 

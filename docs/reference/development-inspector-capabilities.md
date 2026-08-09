@@ -46,7 +46,7 @@ availability.
 |---|---:|---:|---|
 | `dev.pulp.instance/read@1` (`session.describe`) | yes | yes | Broker-owned T0/T1 executor returns the exact active registration, tier, publication generation, build/artifact identity, liveness generation, and declared capabilities after canonical admission |
 | `dev.pulp.session/control@1` (`session.control`) | no | yes | Broker lease/grant machinery exists; no general product host adapter |
-| `dev.pulp.state/read@1` (`state.read`) | yes | yes | T0/T1 runtime executor returns bounded parameter catalog/value snapshots through the shared `StateStore` serializer, with explicit sensitive-field redaction; CLI/MCP use the canonical typed client |
+| `dev.pulp.state/read@1` (`state.read`) | yes | yes | T0/T1 runtime executor returns bounded parameter catalog/value snapshots against the shared `StateStore` mutation generation, with explicit sensitive-field redaction; CLI/MCP use the canonical typed client |
 | `dev.pulp.render/offline@1` (`render.offline`) | no | no | T0-only headless executor resolves authority-bound, launcher-trusted in-memory inputs, renders through `OfflineRenderHost`, and publishes broker-owned WAV artifacts; no profile enables it implicitly |
 | `dev.pulp.ui/observe@1` (`ui.read`) | yes | yes | Typed contract/components exist; no general product host adapter |
 | `dev.pulp.diagnostics/read@1` (`diagnostics.read`) | yes | yes | Typed contract/components exist; no general product host adapter |
@@ -55,7 +55,7 @@ availability.
 | `dev.pulp.ui/input@1` (`ui.input`) | no | no | Frozen high-risk contract; no current executor or grant path |
 | `dev.pulp.trace/control@1` (`trace.control`) | no | yes | Component contract exists; no generic raw Inspector route |
 | `dev.pulp.trace/session-control@1` (`trace.session.control`) | no | yes | `pulp trace start/stop` and matching MCP tools use canonical control only |
-| `dev.pulp.state/parameter-gesture@1` (`state.write`) | no | yes | T1 main-thread exact-slot executor and typed clients exist; broker grant/consent remains mandatory |
+| `dev.pulp.state/parameter-gesture@1` (`state.write`) | no | yes | T1 main-thread exact-slot executor atomically claims the shared `StateStore` generation and rolls back failed brackets without overwriting newer writers; broker grant/consent remains mandatory |
 | `dev.pulp.test/input@1` (`test.input`) | no | yes | Typed executor building block exists; no public general-live route |
 | `dev.pulp.authoring/tweaks@1` (`authoring.tweaks`) | no | yes | In-process authoring components remain; remote wrapper was removed |
 | `dev.pulp.telemetry/subscribe@1` (`telemetry.stream`) | no | yes | Bounded telemetry tap and typed clients exist; exact host publication still determines availability |
@@ -155,6 +155,9 @@ worker, never the audio thread, performs no mutation or file I/O, and uses the
 shared parameter JSON serializer for catalog and values. Requests are bounded
 to 4096 unique parameter IDs. Sensitive parameters are omitted unless the
 request explicitly opts in, and the response reports the redacted count.
+The resolver snapshots `StateStore::state_generation()` and the executor
+rechecks that same store before and after serialization; it has no adapter-side
+generation counter.
 
 These adapters do not create a listener, discovery path, CLI command, MCP
 tool, capture/eval/reload surface, or legacy Inspector fallback. A

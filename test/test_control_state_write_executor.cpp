@@ -5,7 +5,6 @@
 
 #include <choc/text/choc_JSON.h>
 
-#include <atomic>
 #include <stdexcept>
 
 using namespace pulp::inspect;
@@ -34,50 +33,49 @@ ControlExecutionContext context() {
     return {.checkpoint = [] { return ControlExecutionCheckpoint::Continue; }};
 }
 
+void seed_generation(state::StateStore& store, std::uint64_t generation) {
+    while (store.state_generation() < generation)
+        store.set_value(7, store.get_value(7));
+}
+
+ControlStateWriteTarget target(state::StateStore& store,
+                               ControlRegistrationId registration =
+                                   ControlRegistrationId{"registration-1"}) {
+    return {
+        .registration_id = std::move(registration),
+        .host_tier = ControlHostTier::Standalone,
+        .store = &store,
+        .state_generation = store.state_generation(),
+    };
+}
+
 } // namespace
 
-TEST_CASE("canonical T1 gesture brackets apply and acknowledges the advanced generation",
+TEST_CASE("canonical T1 gesture uses StateStore generation and acknowledges the commit",
           "[inspect][control][mutation][t1][main-thread]") {
     state::StateStore store;
     store.add_parameter({.id = 7, .name = "Mix", .range = {0.0f, 1.0f, 0.0f, 0.0f}});
-    std::atomic<std::uint64_t> generation{4};
+    seed_generation(store, 4);
     int begins = 0;
     int ends = 0;
+    bool snapshot_current_during_begin = true;
     store.set_gesture_callbacks(
         [&](state::ParamID id) {
-            if (id == 7)
-                ++begins;
+            begins += id == 7 ? 1 : 0;
+            snapshot_current_during_begin = store.state_snapshot_is_current(5);
         },
-        [&](state::ParamID id) {
-            if (id == 7)
-                ++ends;
-        });
-    auto executor = make_control_state_write_executor([&](const ControlAdmissionPlan&) {
-        return std::optional{ControlStateWriteTarget{
-            .registration_id = ControlRegistrationId{"registration-1"},
-            .host_tier = ControlHostTier::Standalone,
-            .store = &store,
-            .state_generation = generation.load(),
-            .current_state_generation = [&] { return generation.load(); },
-            .apply_if_state_generation =
-                [&](std::uint64_t expected,
-                    const std::function<void()>& mutation) -> std::optional<std::uint64_t> {
-                if (generation.load() != expected)
-                    return std::nullopt;
-                mutation();
-                generation = expected + 1;
-                return expected + 1;
-            },
-        }};
-    });
+        [&](state::ParamID id) { ends += id == 7 ? 1 : 0; });
+    auto executor = make_control_state_write_executor(
+        [&](const ControlAdmissionPlan&) { return std::optional{target(store)}; });
 
     const auto outcome = executor(plan(), request(), context());
     REQUIRE(outcome.terminal_state == ControlReceiptState::Completed);
     CHECK(store.get_normalized(7) == Catch::Approx(0.75f));
     CHECK(begins == 1);
     CHECK(ends == 1);
+    CHECK_FALSE(snapshot_current_during_begin);
     CHECK(store.open_gesture_count() == 0);
-    CHECK(generation == 5);
+    CHECK(store.state_generation() == 5);
     const auto detail = choc::json::parse(outcome.result.detail_json);
     CHECK(detail["applied"].getWithDefault(false));
     CHECK(detail["receipt_id"].getString() == "receipt-1");
@@ -88,30 +86,16 @@ TEST_CASE("T1 gesture shares UI ownership and rolls back a throwing begin callba
           "[inspect][control][mutation][t1][gesture][race]") {
     state::StateStore store;
     store.add_parameter({.id = 7, .name = "Mix", .range = {0.0f, 1.0f, 0.0f, 0.0f}});
-    std::atomic<std::uint64_t> generation{4};
+    seed_generation(store, 4);
     int begins = 0;
     int ends = 0;
-    store.set_gesture_callbacks([&](state::ParamID) { ++begins; }, [&](state::ParamID) { ++ends; });
+    store.set_gesture_callbacks([&](state::ParamID) { ++begins; },
+                                [&](state::ParamID) { ++ends; });
     store.begin_gesture(7);
-    auto executor = make_control_state_write_executor([&](const ControlAdmissionPlan&) {
-        return std::optional{ControlStateWriteTarget{
-            .registration_id = ControlRegistrationId{"registration-1"},
-            .host_tier = ControlHostTier::Standalone,
-            .store = &store,
-            .state_generation = generation.load(),
-            .current_state_generation = [&] { return generation.load(); },
-            .apply_if_state_generation =
-                [&](std::uint64_t expected,
-                    const std::function<void()>& mutation) -> std::optional<std::uint64_t> {
-                if (generation.load() != expected)
-                    return std::nullopt;
-                mutation();
-                generation = expected + 1;
-                return expected + 1;
-            },
-        }};
-    });
-    CHECK(executor(plan(), request(), context()).terminal_state == ControlReceiptState::Completed);
+    auto executor = make_control_state_write_executor(
+        [&](const ControlAdmissionPlan&) { return std::optional{target(store)}; });
+    CHECK(executor(plan(), request(), context()).terminal_state ==
+          ControlReceiptState::Completed);
     CHECK(store.open_gesture_count() == 1);
     CHECK(begins == 1);
     CHECK(ends == 0);
@@ -120,103 +104,90 @@ TEST_CASE("T1 gesture shares UI ownership and rolls back a throwing begin callba
 
     state::StateStore throwing;
     throwing.add_parameter({.id = 7, .name = "Mix", .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+    seed_generation(throwing, 4);
     throwing.set_gesture_callbacks([](state::ParamID) { throw std::runtime_error("host"); },
                                    [](state::ParamID) {});
-    generation = 4;
-    auto throwing_executor = make_control_state_write_executor([&](const ControlAdmissionPlan&) {
-        return std::optional{ControlStateWriteTarget{
-            .registration_id = ControlRegistrationId{"registration-1"},
-            .host_tier = ControlHostTier::Standalone,
-            .store = &throwing,
-            .state_generation = generation.load(),
-            .current_state_generation = [&] { return generation.load(); },
-            .apply_if_state_generation =
-                [&](std::uint64_t expected,
-                    const std::function<void()>& mutation) -> std::optional<std::uint64_t> {
-                if (generation.load() != expected)
-                    return std::nullopt;
-                mutation();
-                generation = expected + 1;
-                return expected + 1;
-            },
-        }};
-    });
+    auto throwing_executor = make_control_state_write_executor(
+        [&](const ControlAdmissionPlan&) { return std::optional{target(throwing)}; });
     CHECK(throwing_executor(plan(), request(), context()).terminal_state ==
           ControlReceiptState::UnknownNeedsRefresh);
+    CHECK(throwing.get_normalized(7) == Catch::Approx(0.0f));
     CHECK(throwing.open_gesture_count() == 0);
 }
 
-TEST_CASE("host automation race and stale target fail before gesture side effects",
+TEST_CASE("host automation and stale exact targets fail before gesture side effects",
           "[inspect][control][mutation][t1][t2a][race]") {
     state::StateStore store;
     store.add_parameter({.id = 7, .name = "Mix", .range = {0.0f, 1.0f, 0.0f, 0.0f}});
-    std::atomic<std::uint64_t> generation{5}; // automation advanced after admission
+    seed_generation(store, 4);
     int begins = 0;
     store.set_gesture_callbacks([&](state::ParamID) { ++begins; }, [](state::ParamID) {});
-    auto executor = make_control_state_write_executor([&](const ControlAdmissionPlan&) {
-        return std::optional{ControlStateWriteTarget{
-            .registration_id = ControlRegistrationId{"registration-1"},
-            .host_tier = ControlHostTier::SharedPluginHost,
-            .store = &store,
-            .state_generation = generation.load(),
-            .current_state_generation = [&] { return generation.load(); },
-            .apply_if_state_generation =
-                [&](std::uint64_t expected,
-                    const std::function<void()>& mutation) -> std::optional<std::uint64_t> {
-                if (generation.load() != expected)
-                    return std::nullopt;
-                mutation();
-                generation = expected + 1;
-                return expected + 1;
-            },
-        }};
-    });
+
+    const auto resolved = target(store);
+    store.set_value_rt(7, 0.5f); // automation advances after exact resolution
+    auto executor = make_control_state_write_executor(
+        [&](const ControlAdmissionPlan&) { return std::optional{resolved}; });
     const auto outcome = executor(plan(), request(), context());
     CHECK(outcome.result.result_code == ControlResultCode::StateConflict);
     CHECK(begins == 0);
-    CHECK(store.get_normalized(7) == Catch::Approx(0.0f));
+    CHECK(store.get_normalized(7) == Catch::Approx(0.5f));
 
     auto wrong_registration = make_control_state_write_executor([&](const ControlAdmissionPlan&) {
-        return std::optional{ControlStateWriteTarget{
-            .registration_id = ControlRegistrationId{"other-slot"},
-            .host_tier = ControlHostTier::SharedPluginHost,
-            .store = &store,
-            .state_generation = generation.load(),
-            .current_state_generation = [&] { return generation.load(); },
-            .apply_if_state_generation =
-                [&](std::uint64_t expected,
-                    const std::function<void()>& mutation) -> std::optional<std::uint64_t> {
-                if (generation.load() != expected)
-                    return std::nullopt;
-                mutation();
-                generation = expected + 1;
-                return expected + 1;
-            },
-        }};
+        return std::optional{target(store, ControlRegistrationId{"other-slot"})};
     });
     CHECK(wrong_registration(plan(), request(), context()).result.result_code ==
           ControlResultCode::HostUnavailable);
+
+    auto wrong_request = request();
+    wrong_request.registration_id = "other-slot";
+    CHECK(executor(plan(), wrong_request, context()).result.result_code ==
+          ControlResultCode::InvalidRequest);
+
+    wrong_request = request();
+    wrong_request.expected_state_generation = 3;
+    CHECK(executor(plan(), wrong_request, context()).result.result_code ==
+          ControlResultCode::InvalidRequest);
 }
 
-TEST_CASE("generation reservation closes the race immediately before the gesture",
-          "[inspect][control][mutation][t1][automation][race]") {
+TEST_CASE("writer arriving inside the claimed gesture is preserved and requires refresh",
+          "[inspect][control][mutation][t1][automation][race][rollback]") {
     state::StateStore store;
     store.add_parameter({.id = 7, .name = "Mix", .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+    seed_generation(store, 4);
     int begins = 0;
-    store.set_gesture_callbacks([&](state::ParamID) { ++begins; }, [](state::ParamID) {});
-    auto executor = make_control_state_write_executor([&](const ControlAdmissionPlan&) {
-        return std::optional{ControlStateWriteTarget{
-            .registration_id = ControlRegistrationId{"registration-1"},
-            .host_tier = ControlHostTier::Standalone,
-            .store = &store,
-            .state_generation = 4,
-            .current_state_generation = [] { return std::uint64_t{4}; },
-            .apply_if_state_generation = [](std::uint64_t, const std::function<void()>&)
-                -> std::optional<std::uint64_t> { return std::nullopt; },
-        }};
-    });
+    int ends = 0;
+    store.set_gesture_callbacks(
+        [&](state::ParamID) {
+            ++begins;
+            store.set_value_rt(7, 0.5f); // deterministic automation race after reservation
+        },
+        [&](state::ParamID) { ++ends; });
+    auto executor = make_control_state_write_executor(
+        [&](const ControlAdmissionPlan&) { return std::optional{target(store)}; });
+
     const auto outcome = executor(plan(), request(), context());
-    CHECK(outcome.result.result_code == ControlResultCode::StateConflict);
-    CHECK(begins == 0);
-    CHECK(store.get_normalized(7) == Catch::Approx(0.0f));
+    CHECK(outcome.terminal_state == ControlReceiptState::UnknownNeedsRefresh);
+    CHECK(store.get_normalized(7) == Catch::Approx(0.5f));
+    CHECK(store.state_generation() == 6);
+    CHECK(begins == 1);
+    CHECK(ends == 1);
+    CHECK(store.open_gesture_count() == 0);
+
+    SECTION("an identical newer value is not mistaken for the control write") {
+        state::StateStore identical;
+        identical.add_parameter(
+            {.id = 7, .name = "Mix", .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+        seed_generation(identical, 4);
+        identical.set_gesture_callbacks(
+            [](state::ParamID) {},
+            [&](state::ParamID) { identical.set_value_rt(7, 0.75f); });
+        auto identical_executor = make_control_state_write_executor(
+            [&](const ControlAdmissionPlan&) { return std::optional{target(identical)}; });
+
+        const auto identical_outcome = identical_executor(plan(), request(), context());
+        CHECK(identical_outcome.terminal_state ==
+              ControlReceiptState::UnknownNeedsRefresh);
+        CHECK(identical.get_normalized(7) == Catch::Approx(0.75f));
+        CHECK(identical.state_generation() == 6);
+    }
 }

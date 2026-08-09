@@ -1008,6 +1008,15 @@ store.set_value(kGainId, -6.0f);
 store.end_gesture(kGainId);
 ```
 
+Every live parameter writer advances `StateStore::state_generation()`: normal
+and real-time base writes, modulation changes, trigger resets, restore, and
+generation-bound gestures share that one monotonic source. Control-style
+optimistic writers use `apply_normalized_gesture_if_generation()`; a stale
+generation fails before the host gesture begins, while callback failure rolls
+back only when doing so cannot overwrite a newer writer. The base float and its
+generation stamp share one lock-free atomic word; snapshot readers reject an
+overlapping writer rather than publishing two states under one generation.
+
 ### StateTree — reactive hierarchical state
 
 Like a JSON document that notifies you when anything changes. Use for complex plugin state beyond flat parameters.

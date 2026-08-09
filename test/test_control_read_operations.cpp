@@ -85,7 +85,6 @@ struct Fixture {
     ControlBroker broker;
     ControlClientIdentity client;
     std::unordered_map<std::string, std::unique_ptr<pulp::state::StateStore>> stores;
-    std::unordered_map<std::string, std::uint64_t> generations;
 
     Fixture()
         : broker([&] {
@@ -136,8 +135,9 @@ struct Fixture {
                               .value_labels = {"Off", "A", "B"}});
         store->set_value(1, -6.0f);
         store->set_value(2, 1.0f);
+        while (store->state_generation() < 42)
+            store->set_value(1, store->get_value(1));
         stores.emplace(registered.registration->registration_id.value, std::move(store));
-        generations.emplace(registered.registration->registration_id.value, 42);
         return *registered.registration;
     }
 
@@ -189,11 +189,8 @@ struct Fixture {
                         .registration_id = plan.registration_id,
                         .host_tier = registration->host_tier,
                         .store = found->second.get(),
-                        .state_generation = generations.at(plan.registration_id.value),
+                        .state_generation = found->second->state_generation(),
                         .catalog_generation = 3,
-                        .current_state_generation = [this, id = plan.registration_id.value] {
-                            return generations.at(id);
-                        },
                         .is_sensitive = [](pulp::state::ParamID id) { return id == 2; }};
                 })};
     }

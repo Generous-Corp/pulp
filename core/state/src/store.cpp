@@ -436,16 +436,46 @@ float StateStore::get_modulated(ParamID id) const {
 
 void StateStore::set_mod_offset(ParamID id, float offset) {
     auto it = id_to_index_.find(id);
-    if (it != id_to_index_.end()) values_[it->second].set_mod_offset(offset);
+    if (it != id_to_index_.end()) {
+        if (values_[it->second].get_mod_offset() != offset) {
+            const auto older_writers =
+                active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
+            const auto generation = advance_state_generation();
+            values_[it->second].set_mod_versioned_if_newer(
+                offset, generation, older_writers + 1);
+            active_state_writers_.fetch_sub(1, std::memory_order_release);
+        }
+    }
 }
 
 void StateStore::add_mod_offset(ParamID id, float delta) {
     auto it = id_to_index_.find(id);
-    if (it != id_to_index_.end()) values_[it->second].add_mod_offset(delta);
+    if (it != id_to_index_.end()) {
+        if (delta != 0.0f) {
+            const auto older_writers =
+                active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
+            const auto generation = advance_state_generation();
+            values_[it->second].set_mod_versioned_if_newer(
+                values_[it->second].get_mod_offset() + delta, generation,
+                older_writers + 1);
+            active_state_writers_.fetch_sub(1, std::memory_order_release);
+        }
+    }
 }
 
 void StateStore::reset_all_mod() {
-    for (auto& v : values_) v.reset_mod();
+    const bool changed = std::ranges::any_of(
+        values_, [](const ParamValue& value) { return value.get_mod_offset() != 0.0f; });
+    if (!changed) return;
+    active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
+    for (auto& value : values_) {
+        if (value.get_mod_offset() == 0.0f) continue;
+        const auto generation = advance_state_generation();
+        value.set_mod_versioned_if_newer(
+            0.0f, generation,
+            active_state_writers_.load(std::memory_order_acquire) + 1);
+    }
+    active_state_writers_.fetch_sub(1, std::memory_order_release);
 }
 
 void StateStore::set_value(ParamID id, float value) {
@@ -453,13 +483,18 @@ void StateStore::set_value(ParamID id, float value) {
     if (it == id_to_index_.end()) return;
     auto& param = params_[it->second];
     float clamped = constrain_stored_value(param, value);
-    values_[it->second].set(clamped);
+    const auto older_writers =
+        active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
+    const auto generation = advance_state_generation();
+    const bool applied = values_[it->second].set_versioned_if_newer(
+        clamped, generation, older_writers + 1);
+    active_state_writers_.fetch_sub(1, std::memory_order_release);
 
     // Wait-free fan-out: notify() does a single atomic pointer load and
     // iterates the const snapshot. Audio listeners run inline; Main
     // listeners route through the installed EventLoop (which allocates;
     // audio-thread callers must use set_value_rt() instead).
-    if (registry_) registry_->notify(id, clamped);
+    if (applied && registry_) registry_->notify(id, clamped);
 }
 
 void StateStore::set_value_rt(ParamID id, float value) {
@@ -467,8 +502,13 @@ void StateStore::set_value_rt(ParamID id, float value) {
     if (it == id_to_index_.end()) return;
     auto& param = params_[it->second];
     float clamped = constrain_stored_value(param, value);
-    values_[it->second].set(clamped);
-    if (registry_) registry_->notify_rt(id, clamped);
+    const auto older_writers =
+        active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
+    const auto generation = advance_state_generation();
+    const bool applied = values_[it->second].set_versioned_if_newer(
+        clamped, generation, older_writers + 1);
+    active_state_writers_.fetch_sub(1, std::memory_order_release);
+    if (applied && registry_) registry_->notify_rt(id, clamped);
 }
 
 void StateStore::set_normalized_rt(ParamID id, float normalized) {
@@ -520,6 +560,102 @@ void StateStore::set_normalized(ParamID id, float normalized) {
     set_value(id, value);
 }
 
+std::uint64_t StateStore::advance_state_generation() noexcept {
+    return state_generation_.fetch_add(1, std::memory_order_acq_rel) + 1;
+}
+
+ParameterGestureApplyResult StateStore::apply_normalized_gesture_if_generation(
+    std::uint64_t expected_generation, ParamID id, float normalized) {
+    const auto found = id_to_index_.find(id);
+    if (found == id_to_index_.end())
+        return {ParameterGestureApplyStatus::InvalidParameter, state_generation()};
+    if (expected_generation == std::numeric_limits<std::uint64_t>::max())
+        return {ParameterGestureApplyStatus::GenerationConflict, expected_generation};
+
+    const auto index = found->second;
+    auto expected_value = values_[index].versioned_value();
+    const auto expected_parameter_generation =
+        values_[index].committed_generation();
+    const float previous = ParamValue::value_from_versioned(expected_value);
+    const float desired = constrain_stored_value(
+        params_[index], params_[index].range.denormalize(normalized));
+    auto observed = expected_generation;
+    const auto reserved = expected_generation + 1;
+    active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
+    if (!state_generation_.compare_exchange_strong(
+            observed, reserved, std::memory_order_acq_rel,
+            std::memory_order_acquire)) {
+        active_state_writers_.fetch_sub(1, std::memory_order_release);
+        return {ParameterGestureApplyStatus::GenerationConflict, observed};
+    }
+
+    bool gesture_acquired = false;
+    bool value_written = false;
+    bool callback_failed = false;
+    try {
+        acquire_gesture(id);
+        gesture_acquired = true;
+        if (state_generation() == reserved) {
+            value_written = values_[index].compare_exchange_versioned(
+                expected_value, expected_parameter_generation, desired, reserved);
+            if (value_written && registry_) registry_->notify(id, desired);
+        }
+        release_gesture(id);
+        gesture_acquired = false;
+    } catch (...) {
+        callback_failed = true;
+        if (gesture_acquired) {
+            try {
+                release_gesture(id);
+            } catch (...) {
+            }
+        }
+    }
+
+    const bool concurrent = state_generation() != reserved;
+    const auto applied_value = ParamValue::make_versioned_value(desired, reserved);
+    const bool control_value_current =
+        values_[index].committed_generation() == reserved &&
+        values_[index].versioned_value() == applied_value;
+    const bool sole_writer =
+        active_state_writers_.load(std::memory_order_acquire) == 1;
+    if (!callback_failed && value_written && !concurrent &&
+        control_value_current && sole_writer) {
+        active_state_writers_.fetch_sub(1, std::memory_order_release);
+        return {ParameterGestureApplyStatus::Applied, reserved};
+    }
+
+    bool rolled_back = !value_written;
+    if (value_written && callback_failed && !concurrent && sole_writer &&
+        control_value_current) {
+        auto rollback_expected = applied_value;
+        auto rollback_observed = reserved;
+        const auto rollback_generation = reserved + 1;
+        const bool rollback_reserved = state_generation_.compare_exchange_strong(
+            rollback_observed, rollback_generation, std::memory_order_acq_rel,
+            std::memory_order_acquire);
+        if (rollback_reserved) {
+            rolled_back = values_[index].compare_exchange_versioned(
+                rollback_expected, reserved, previous, rollback_generation);
+        }
+        if (rolled_back) {
+            try {
+                if (registry_) registry_->notify(id, previous);
+            } catch (...) {
+                callback_failed = true;
+            }
+        }
+    }
+    const auto current = state_generation();
+    active_state_writers_.fetch_sub(1, std::memory_order_release);
+    if (callback_failed) {
+        return {rolled_back ? ParameterGestureApplyStatus::CallbackFailureRolledBack
+                            : ParameterGestureApplyStatus::CallbackFailureUnknown,
+                current};
+    }
+    return {ParameterGestureApplyStatus::ConcurrentMutation, current};
+}
+
 float StateStore::get_default(ParamID id) const {
     auto it = id_to_index_.find(id);
     if (it == id_to_index_.end()) return 0.0f;
@@ -549,9 +685,19 @@ bool StateStore::reset_triggers_rt() {
         // Write straight to the lock-free atomic: RT-safe, no allocation, no
         // listener dispatch. The host/UI already observed the raised value
         // during the block; this returns the control to its resting default.
-        values_[index].set(params_[index].range.default_value);
-        any = true;
+        const auto default_value = params_[index].range.default_value;
+        if (values_[index].get() != default_value) {
+            if (!any) {
+                active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
+            }
+            const auto generation = advance_state_generation();
+            values_[index].set_versioned_if_newer(
+                default_value, generation,
+                active_state_writers_.load(std::memory_order_acquire) + 1);
+            any = true;
+        }
     }
+    if (any) active_state_writers_.fetch_sub(1, std::memory_order_release);
     return any;
 }
 
@@ -951,7 +1097,12 @@ bool StateStore::deserialize(std::span<const uint8_t> data) {
         payload_size != header_size + static_cast<std::size_t>(count) * param_size)
         return false;
 
+    // Claim the restore generation before exposing any restored value so an
+    // optimistic control writer cannot commit against the pre-restore state.
+    active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
+
     // Read parameters
+    bool wrote_parameter = false;
     std::size_t offset = header_size;
     for (uint32_t i = 0; i < count; ++i) {
         ParamID id = choc::memory::readLittleEndian<uint32_t>(data.data() + offset);
@@ -962,11 +1113,18 @@ bool StateStore::deserialize(std::span<const uint8_t> data) {
         auto it = id_to_index_.find(id);
         if (it != id_to_index_.end()) {
             const auto index = it->second;
-            values_[index].set(constrain_stored_value(params_[index], value));
+            const auto restore_generation = advance_state_generation();
+            values_[index].set_versioned_if_newer(
+                constrain_stored_value(params_[index], value), restore_generation,
+                active_state_writers_.load(std::memory_order_acquire) + 1);
+            wrote_parameter = true;
         }
     }
 
+    if (!wrote_parameter) advance_state_generation();
+
     state_restore_revision_.fetch_add(1, std::memory_order_release);
+    active_state_writers_.fetch_sub(1, std::memory_order_release);
     return true;
 }
 

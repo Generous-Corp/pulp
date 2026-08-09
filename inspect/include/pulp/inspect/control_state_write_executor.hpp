@@ -18,15 +18,9 @@ struct ControlStateWriteTarget {
     ControlRegistrationId registration_id;
     ControlHostTier host_tier = ControlHostTier::SharedPluginHost;
     state::StateStore* store = nullptr;
+    /// Resolver-observed generation for the exact admitted store. The store is
+    /// the only live generation authority; adapters must not mirror a counter.
     std::uint64_t state_generation = 0;
-    std::function<std::uint64_t()> current_state_generation;
-    /// Runs @p mutation while holding the shared state-generation authority
-    /// exclusively. Every host automation/control writer must use this same
-    /// authority. It returns expected + 1 after a completed mutation, or
-    /// nullopt without invoking mutation when expected is stale.
-    std::function<std::optional<std::uint64_t>(std::uint64_t expected,
-                                               const std::function<void()>& mutation)>
-        apply_if_state_generation;
 };
 
 using ControlStateWriteTargetResolver =

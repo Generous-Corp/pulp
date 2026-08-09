@@ -35,6 +35,14 @@ on the host main thread. Completion is reported only after the host advances
 its state generation. Host automation winning the generation race returns
 `state_conflict` without starting a gesture.
 
+The generation belongs to `StateStore`, not the host adapter. Restore, base
+UI/audio writes, modulation, trigger reset, state reads, and canonical control
+all observe that same monotonic authority. The gesture claims its expected
+generation atomically; callback failure or a writer arriving inside the bracket
+uses a versioned value compare and compare-only rollback so newer parameter
+state is never overwritten. Reads also reject while any store writer is active,
+so a reserved generation cannot certify a pre-write value.
+
 For a Pulp-hosted T2a slot, the host router binds the registration to both the
 slot instance ID and its process/slot generation. Unload detaches the route;
 recreating a similarly named slot cannot inherit an old admission or grant.
