@@ -38,9 +38,11 @@ RELEASE_ASSET_SHA256 = {
     "linux-x64": (
         "b0114b0edd1e07d274fd37b8fb3508966590b9dda1fdd1f3ab24441c12dee4ed"
     ),
-    # macOS slices retain the 13.0 deployment-target stamp.
+    # The mac-arm64 key selects the verified universal archive: its arm64 Dawn
+    # slice retains the 13.0 deployment target, while the standalone M152
+    # mac-arm64 archive leaked a 15.0 stamp.
     "mac-arm64": (
-        "4bf7afda5dd2e20a41093255431a12bdb0df9eca56883ce0ba708cd471fb2a39"
+        "a066fd95d447fe00aa9890ae404fda1fb1db369006b1c705b401c8605f8ae244"
     ),
     "mac-universal": (
         "a066fd95d447fe00aa9890ae404fda1fb1db369006b1c705b401c8605f8ae244"
