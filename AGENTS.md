@@ -40,4 +40,7 @@ work and must carry the required immutable change-event declaration.
 
 Do not widen, narrow, or reverse an active slice in a routine Pulp change. Any
 such boundary change requires the separately reviewed cross-repository
-protocol and evidence plan described by the Vellum transition plan.
+protocol and evidence plan in the pinned planning artifact
+`/Volumes/Workshop/Code/agent-worktrees/planning-vellum-transition-analysis-20260808/2026-08-08-vellum-catch-up-convergence-and-adoption-plan.md`
+(planning commit `d7cd07b8f9a3fff0061bf3c1e84c3e9f719b3ea7`). If that artifact is
+unavailable, stop and request the plan rather than inferring a boundary change.
