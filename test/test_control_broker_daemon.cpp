@@ -428,7 +428,7 @@ TEST_CASE("installed daemon composes host enrollment routing execution and resta
                          {"--force", "--sign", "-", "--identifier",
                           "dev.pulp.test.untrusted-host", untrusted_executable.string()},
                          sign_options));
-    const auto signed_variant = signer.wait();
+    const auto signed_variant = signer.wait(); // unbounded-wait: allow codesign is capped by timeout_ms
     INFO(signed_variant.stderr_output);
     REQUIRE(signed_variant.exit_code == 0);
     auto untrusted_params = choc::value::Value(prepare_params);
