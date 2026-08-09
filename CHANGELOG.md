@@ -8,6 +8,23 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07980"></a>
+## [0.798.0] - 2026-08-09
+
+- proof/panel ux sdk integration 20260807 ([#7280](https://github.com/Generous-Corp/pulp/pull/7280))
+- release/version bump ([#7283](https://github.com/Generous-Corp/pulp/pull/7283))
+- integration/dsp wave1 capability audit 20260808 ([#7240](https://github.com/Generous-Corp/pulp/pull/7240))
+- fix/macos backing scale first frame ([#7282](https://github.com/Generous-Corp/pulp/pull/7282))
+- release/post tag sync v0.796.0 7a5f710024f9 ([#7279](https://github.com/Generous-Corp/pulp/pull/7279))
+
+<a id="v07970"></a>
+## [0.797.0] - 2026-08-08
+
+- release/version bump ([#7276](https://github.com/Generous-Corp/pulp/pull/7276))
+- fix/7181 refresh 20260808 ([#7272](https://github.com/Generous-Corp/pulp/pull/7272))
+- feature/routing correctness kernels 20260805 ([#7206](https://github.com/Generous-Corp/pulp/pull/7206))
+- feature/analysis frontends foundation 20260806 ([#7198](https://github.com/Generous-Corp/pulp/pull/7198))
+
 <a id="v07960"></a>
 ## [0.796.0] - 2026-08-08
 
@@ -7573,6 +7590,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.798.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.798.0
+[0.797.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.797.0
 [0.796.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.796.0
 [0.795.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.795.2
 [0.795.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.795.1
