@@ -180,6 +180,7 @@ PreparedParagraph make_paragraph(const std::string& text,
     }
     pstyle.setTextStyle(tstyle);
 
+    auto collection_use = ctx->lock_font_collection_use();
     auto pb = skia::textlayout::ParagraphBuilder::make(pstyle, fc, shared_sk_unicode());
     if (!pb) return result;
     pb->addText(text.c_str(), text.size());

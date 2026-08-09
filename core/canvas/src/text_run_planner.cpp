@@ -617,10 +617,10 @@ std::vector<ShapedText> TextRunPlanner::shape_batch(
         std::vector<std::future<ShapedText>> pending;
         pending.reserve(batch);
         for (std::size_t j = 0; j < batch; ++j) {
-            const auto& in = inputs[i + j];
+            const auto* input = &inputs[i + j];
             pending.push_back(std::async(std::launch::async,
-                [this, &in]() {
-                    return shape(in.first, in.second);
+                [this, input]() {
+                    return shape(input->first, input->second);
                 }));
         }
         for (std::size_t j = 0; j < batch; ++j) {
