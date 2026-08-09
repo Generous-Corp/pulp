@@ -88,7 +88,10 @@ newer.
 7. Run the manifest mirror/audit tests and both fetch-script suites. Fetch a real native
    Skia asset and matched V8 asset, configure with GPU + Lottie + V8, and run the
    provider-identity/ODR validation. A pixel-only test is insufficient.
-8. Re-bake CI goldens when either prebuilt pin changes, then ship only after required CI
+8. Measure every Apple slice actually selected by the manifest. A same-tag asset can
+   leak a higher deployment target than its universal sibling; use the verified
+   universal slice or rebuild rather than publishing a false minimum-OS claim.
+9. Re-bake CI goldens when either prebuilt pin changes, then ship only after required CI
    and cross-platform asset coverage are green.
 
 ## Common traps

@@ -24,13 +24,13 @@
           "measured": "13.0",
           "expected": "13.0",
           "always_linked": true,
-          "source": "skia-builder chrome/m152 mac-arm64 slice; measured with otool -l over libskia.a"
+          "source": "skia-builder chrome/m152 mac-universal arm64 slice; measured with otool -l over libskia.a (the standalone mac-arm64 archive is not consumed because its Dawn objects leaked a 15.0 floor)"
         },
         "dawn": {
           "measured": "13.0",
           "expected": "13.0",
           "always_linked": true,
-          "source": "skia-builder chrome/m152 mac-arm64 slice; measured with otool -l over libdawn_combined.a"
+          "source": "skia-builder chrome/m152 mac-universal arm64 slice; measured with otool -l over libdawn_combined.a (the standalone mac-arm64 archive is not consumed because its Dawn objects leaked a 15.0 floor)"
         },
         "libcxx": {
           "measured": "13.4",

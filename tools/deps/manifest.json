@@ -953,8 +953,8 @@
             "sha256": "b0114b0edd1e07d274fd37b8fb3508966590b9dda1fdd1f3ab24441c12dee4ed"
           },
           "mac-arm64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m152/skia-build-mac-arm64-gpu-release.zip",
-            "sha256": "4bf7afda5dd2e20a41093255431a12bdb0df9eca56883ce0ba708cd471fb2a39"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m152/skia-build-mac-universal-gpu-release.zip",
+            "sha256": "a066fd95d447fe00aa9890ae404fda1fb1db369006b1c705b401c8605f8ae244"
           },
           "mac-universal": {
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m152/skia-build-mac-universal-gpu-release.zip",

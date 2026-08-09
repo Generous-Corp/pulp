@@ -130,11 +130,16 @@ Or run: `./tools/build-skia.sh <platform>` to build from source.
 | `skia-build-ios-simulator-arm64-x86_64-gpu-release.zip` | `219b50662844797428f7c66920aa33eb8790b344e6626d35e252ed3c7b3bf6cf` |
 | `skia-build-linux-arm64-gpu-release.zip` | `12aa2ba8a43472461dd552f7ac28420137bd6a3175542563c3bbbf06124d7df6` |
 | `skia-build-linux-x64-gpu-release.zip` | `b0114b0edd1e07d274fd37b8fb3508966590b9dda1fdd1f3ab24441c12dee4ed` |
-| `skia-build-mac-arm64-gpu-release.zip` | `4bf7afda5dd2e20a41093255431a12bdb0df9eca56883ce0ba708cd471fb2a39` |
+| `skia-build-mac-arm64-gpu-release.zip` | `a066fd95d447fe00aa9890ae404fda1fb1db369006b1c705b401c8605f8ae244` |
 | `skia-build-mac-universal-gpu-release.zip` | `a066fd95d447fe00aa9890ae404fda1fb1db369006b1c705b401c8605f8ae244` |
 | `skia-build-mac-x86_64-gpu-release.zip` | `f008bb70143142b1b9feec122c864ca7a5a24c895a8fbdeb75c9c7b6c07f3a63` |
 | `skia-build-wasm-wasm32-gpu-release.zip` | `549e9aa6a6ede9c796be7866d244809c0a3f6c9d82367a6fa3f6e629e964decb` |
 | `skia-build-win-x64-gpu-release.zip` | `f96c726ac7fbc32b36334eaadcc463ac9c6c5411afb97576f334a203abb99bc6` |
+
+The `mac-arm64` manifest key intentionally selects the mac-universal archive
+(and therefore mirrors its digest above): its arm64 Skia/Dawn slices measure
+macOS 13.0, while the standalone M152 mac-arm64 archive's Dawn objects leaked a
+macOS 15.0 deployment target.
 
 ## Libraries Per Platform
 
