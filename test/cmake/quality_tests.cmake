@@ -28,6 +28,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME agent-capability-sdk-handoff-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_sdk_capability_handoff.py")
+    add_test(NAME agent-capability-installed-sdk-helper-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_installed_sdk_helpers.py")
     set(_pulp_agent_capability_installed_args
         --build-dir "${CMAKE_BINARY_DIR}"
         --cmake "${CMAKE_COMMAND}"

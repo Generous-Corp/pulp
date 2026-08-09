@@ -25,6 +25,11 @@ configured capability-handoff floor. The surface ledger, surface schema, legacy
 baseline, and contract history are maintenance artifacts and must not be
 installed.
 
+When adding an installed SDK library in `PulpInstallRules.cmake`, register its
+archive stem in `release_product_matrix.json` and classify every newly covered
+public header here in the same change. A successful CMake export alone does not
+prove the release archive or installed agent-capability contract is complete.
+
 Keep both separate from the unified runtime control platform. This contract may
 describe what an SDK can design or generate; it must never contain runtime
 operations, grants, policy, risk decisions, instances, activation, sessions,

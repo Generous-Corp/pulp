@@ -36,6 +36,7 @@
   ],
   "pulp_library_stems": [
     "pulp-audio",
+    "pulp-audio-analysis",
     "pulp-canvas",
     "pulp-dawproject-export",
     "pulp-dawproject-import",

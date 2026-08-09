@@ -53,6 +53,11 @@ pulp_add_test_suite(pulp-test-midi-voice-modulation-adapter
 # Wavetable oscillator
 pulp_add_test_suite(pulp-test-wavetable LIBRARIES pulp::signal)
 
+# Offline recorded-cycle authoring into immutable Wavetable band stacks.
+pulp_add_test_suite(pulp-test-wavetable-authoring
+    SOURCES test_wavetable_authoring.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio pulp::audio-analysis)
+
 # Resampler
 pulp_add_test_suite(pulp-test-resampler LIBRARIES pulp::signal)
 

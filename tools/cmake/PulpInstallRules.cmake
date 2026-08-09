@@ -40,6 +40,9 @@ list(APPEND PULP_SDK_TARGETS
     pulp-osc pulp-canvas pulp-view-core pulp-view
     pulp-standalone pulp-dsl pulp-native-components
 )
+if(TARGET pulp-audio-analysis)
+    list(APPEND PULP_SDK_TARGETS pulp-audio-analysis)
+endif()
 
 # pulp-view-script (the JS scripting + web-compat layer) is EXCLUDE_FROM_ALL
 # when PULP_ENABLE_JS=OFF (native-only build), so it is never built. Exporting
@@ -295,6 +298,12 @@ foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)
     endif()
 endforeach()
 unset(_pulp_sdk_header_subsystems)
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/audio/analysis/include/pulp")
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tools/audio/analysis/include/pulp/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+endif()
 
 # The inspector protocol/session foundation is deliberately separate from the
 # desktop GPU overlay and remains available to installed CPU-only clients.

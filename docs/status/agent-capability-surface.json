@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 18,
+  "inventory_version": 21,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,21 +37,21 @@
     }
   ],
   "counts": {
-    "public_headers": 412,
-    "reviewed_headers": 111,
-    "legacy_unreviewed_headers": 301,
+    "public_headers": 414,
+    "reviewed_headers": 114,
+    "legacy_unreviewed_headers": 300,
     "unsupported_headers": 1,
     "by_disposition": {
-      "capability_entrypoint": 69,
-      "capability_support": 36,
+      "capability_entrypoint": 71,
+      "capability_support": 37,
       "infrastructure": 5,
-      "legacy_unreviewed": 301,
+      "legacy_unreviewed": 300,
       "unsupported_capability": 1
     },
     "by_domain": {
       "audio": {
-        "public_headers": 111,
-        "reviewed_headers": 5,
+        "public_headers": 112,
+        "reviewed_headers": 6,
         "legacy_unreviewed_headers": 106,
         "unsupported_headers": 0
       },
@@ -74,9 +74,9 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 235,
-        "reviewed_headers": 73,
-        "legacy_unreviewed_headers": 162,
+        "public_headers": 236,
+        "reviewed_headers": 75,
+        "legacy_unreviewed_headers": 161,
         "unsupported_headers": 1
       },
       "timebase": {
@@ -1070,6 +1070,17 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "audio",
+      "source": "core/audio/include/pulp/audio/wavetable_authoring.hpp",
+      "fingerprint": "sha256:52df577e59972f830983062f5c69b9c2f3796597547eb6e6c4fdc011a1951905",
+      "include": "pulp/audio/wavetable_authoring.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "audio.wavetable-authoring"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "audio",
@@ -2952,6 +2963,17 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/nlms_adaptive_filter.hpp",
+      "fingerprint": "sha256:ac5d8961a7dc69bd24a4ab8f6389e6e0f62eb5ac7dc433ebabe845e15366298b",
+      "include": "pulp/signal/nlms_adaptive_filter.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.nlms-adaptive-filter"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/noise_gate.hpp",
       "fingerprint": "sha256:da905cabc0fd988ab957fbd5d7f55c95119d1883a1384ef6be854d12f6d4f6ce",
       "include": "pulp/signal/noise_gate.hpp",
@@ -3863,11 +3885,13 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/wavetable.hpp",
-      "fingerprint": "sha256:4d6724df9ccba9137090b0c911169b624d7dec481e9aa56eb5c6dc5c1503bab0",
+      "fingerprint": "sha256:94e86b5efcbc54989b76312ed5bd270d29bc6d5758e3a240ca3b8ffc4bbecaae",
       "include": "pulp/signal/wavetable.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "audio.wavetable-authoring"
+      ],
+      "rationale": "The existing realtime Wavetable consumer and its shared band-ceiling plan are the installed output boundary for the offline wavetable-authoring capability."
     },
     {
       "domain": "signal",

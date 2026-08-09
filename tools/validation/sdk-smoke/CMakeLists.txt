@@ -99,6 +99,35 @@ add_executable(PulpSDKSmokeWavDecoderProbe
     "${CMAKE_CURRENT_BINARY_DIR}/wav_decoder_export_probe.cpp")
 target_link_libraries(PulpSDKSmokeWavDecoderProbe PRIVATE Pulp::audio)
 
+# Offline wavetable-authoring export probe. This exercises the source-bearing
+# free function through the installed archive and consumes its result with the
+# existing realtime Wavetable type.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/wavetable_authoring_export_probe.cpp"
+"#include <pulp/audio/wavetable_authoring.hpp>\n"
+"#include <cmath>\n"
+"#include <utility>\n"
+"\n"
+"int main() {\n"
+"    constexpr std::size_t period = 64;\n"
+"    pulp::audio::Buffer<float> source(1, period * 4);\n"
+"    for (std::size_t i = 0; i < source.num_samples(); ++i)\n"
+"        source.channel(0)[i] = static_cast<float>(\n"
+"            std::sin(6.283185307179586 * (i % period) / period));\n"
+"    pulp::audio::WavetableAuthoringRecipe recipe;\n"
+"    recipe.explicit_cycle = pulp::audio::WavetableCycleSelection{0, period};\n"
+"    auto compiled = pulp::audio::compile_wavetable(\n"
+"        std::as_const(source).view(), 48000.0, recipe);\n"
+"    if (!compiled.valid()) return 1;\n"
+"    pulp::signal::Wavetable table(std::move(compiled.bands));\n"
+"    table.set_sample_rate(48000.0f);\n"
+"    table.set_frequency_immediate(440.0f);\n"
+"    return table.band_count() == recipe.num_bands && std::isfinite(table.next())\n"
+"        ? 0 : 1;\n"
+"}\n")
+add_executable(PulpSDKSmokeWavetableAuthoringProbe
+    "${CMAKE_CURRENT_BINARY_DIR}/wavetable_authoring_export_probe.cpp")
+target_link_libraries(PulpSDKSmokeWavetableAuthoringProbe PRIVATE Pulp::audio)
+
 # Public AudioDevice timing capability probe. The unsupported dummy forces the
 # installed Pulp::audio archive to resolve the non-inline free-function symbol
 # while also proving an unknown backend fails closed at runtime.

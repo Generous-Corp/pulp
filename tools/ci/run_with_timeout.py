@@ -27,10 +27,18 @@ def terminate_process_group(process: subprocess.Popen[bytes]) -> None:
 
     deadline = time.monotonic() + TERMINATION_GRACE_SECONDS
     while time.monotonic() < deadline:
-        process.poll()
+        leader_exited = process.poll() is not None
         try:
             os.killpg(process.pid, 0)
         except ProcessLookupError:
+            return
+        except PermissionError:
+            # Darwin can report EPERM for a dying group between delivery of
+            # SIGTERM and the leader becoming observable as reaped. Confirm
+            # that the leader exits before treating the original group as
+            # gone; never signal an inaccessible/reused numeric PGID.
+            if not leader_exited:
+                process.wait(timeout=TERMINATION_GRACE_SECONDS)
             return
         time.sleep(0.05)
 

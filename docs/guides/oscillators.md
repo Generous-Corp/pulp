@@ -190,6 +190,44 @@ domain, not the wavetable engine's. The very first frequency after
 construction or `reset()` **snaps** to its band rather than crossfading, so
 a fresh voice never plays an aliased fade-in from the default band.
 
+### Author a band-limited table from recorded audio
+
+`pulp/audio/wavetable_authoring.hpp` provides the offline side of the modern
+engine. `compile_wavetable()` accepts one finite mono buffer, reuses Pulp's
+sample-heritage cycle estimator, chooses an adjacent-period seam, periodically
+resamples the cycle, and emits the owned band stack accepted by
+`Wavetable`. Compilation allocates and may perform a bounded exhaustive search;
+run it on a control or worker thread, never in the audio callback.
+
+```cpp
+#include <pulp/audio/wavetable_authoring.hpp>
+#include <utility>
+
+pulp::audio::WavetableAuthoringRecipe recipe;
+recipe.automatic_cycle.minimum_cycle_samples = 40;
+recipe.automatic_cycle.maximum_cycle_samples = 2400;
+
+auto compiled = pulp::audio::compile_wavetable(
+    std::as_const(mono_recording).view(), source_sample_rate, recipe,
+    {{"take-17", "line-in", "session-42"}, "LicenseRef-17", "cleared"});
+if (!compiled.valid()) {
+    // Handle WavetableCompileStatus explicitly; no partial band stack is kept.
+    return;
+}
+
+pulp::signal::Wavetable table(std::move(compiled.bands)); // off audio thread
+table.set_sample_rate(static_cast<float>(host_sample_rate));
+table.set_frequency_immediate(440.0f);
+```
+
+The recipe requires a power-of-two table length and applies one normalization
+gain to every mip band, avoiding level pumping at band transitions. The result
+records the chosen source cycle, seam diagnostics, caller provenance, and
+compiler-owned content hashes. The table digest describes the returned band
+snapshot and becomes stale if a caller mutates it instead of moving it directly
+into `Wavetable`. This API deliberately does not define file I/O,
+stereo mixdown, a content-pack JSON format, multi-cycle morph authoring, or UI.
+
 ## WT (lo-fi tier) — a dedicated variable-clock ZOH engine
 
 `wt_lofi.hpp` is a **separate engine**, not a mode of `WtOscillator`. It

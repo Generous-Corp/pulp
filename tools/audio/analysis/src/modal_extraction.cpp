@@ -1,4 +1,4 @@
-#include "modal_analysis.hpp"
+#include <pulp/audio/analysis/modal_extraction.hpp>
 
 #include <pulp/audio/analysis/audio_spectrum.hpp>
 #include <pulp/audio/buffer.hpp>
@@ -15,6 +15,8 @@ namespace {
 constexpr double kPi = 3.14159265358979323846;
 /// Linear magnitude floor, so a log of a decayed-to-zero envelope stays finite.
 constexpr double kMagFloor = 1.0e-30;
+constexpr int kMaxCompilerInputSamples = 1 << 22;
+constexpr int kMaxCompilerFftLength = 1 << 20;
 
 int round_up_pow2(int v) {
     int n = 1;
@@ -38,6 +40,44 @@ double peak_abs(std::span<const float> x) {
     double p = 0.0;
     for (float v : x) p = std::max(p, std::abs(static_cast<double>(v)));
     return p;
+}
+
+bool valid_compiler_options(const ModalExtractionOptions& options,
+                            double sample_rate) {
+    const auto& a = options.analysis;
+    const bool fft_is_power_of_two = a.fft_length > 0 &&
+                                     (a.fft_length & (a.fft_length - 1)) == 0;
+    return options.max_modes >= 1 && options.max_modes <= 256 &&
+           options.max_input_samples >= 128 &&
+           options.max_input_samples <= kMaxCompilerInputSamples &&
+           std::isfinite(options.confidence_floor) &&
+           options.confidence_floor >= 0.0 && options.confidence_floor <= 1.0 &&
+           std::isfinite(options.min_separation_cents) &&
+           options.min_separation_cents >= 0.0 &&
+           options.min_separation_cents <= 1200.0 &&
+           std::isfinite(options.snr_floor_db) && options.snr_floor_db <= 0.0 &&
+           !options.recipe.empty() && options.recipe.size() <= 256 &&
+           fft_is_power_of_two && a.fft_length >= 256 &&
+           a.fft_length <= kMaxCompilerFftLength &&
+           std::isfinite(a.search_low_hz) && a.search_low_hz >= 0.0 &&
+           std::isfinite(a.search_high_hz) &&
+           a.search_high_hz > a.search_low_hz &&
+           a.search_high_hz <= sample_rate * 0.5 &&
+           std::isfinite(a.peak_floor_db) && a.peak_floor_db <= 0.0 &&
+           std::isfinite(a.min_separation_hz) && a.min_separation_hz >= 0.0 &&
+           std::isfinite(a.refine_span_cents) && a.refine_span_cents >= 0.0 &&
+           a.refine_span_cents <= 1200.0 &&
+           std::isfinite(a.refine_step_cents) && a.refine_step_cents > 0.0 &&
+           a.refine_window >= 64 &&
+           a.refine_window <= options.max_input_samples &&
+           std::isfinite(a.fit_start_db) && std::isfinite(a.fit_end_db) &&
+           a.fit_start_db <= 0.0 && a.fit_end_db < a.fit_start_db &&
+           std::isfinite(a.fit_offset_s) && a.fit_offset_s >= 0.0 &&
+           a.envelope_window >= 16 &&
+           a.envelope_window <= options.max_input_samples &&
+           a.envelope_hop >= 1 && a.envelope_hop <= options.max_input_samples &&
+           a.min_fit_points >= 2 && a.min_fit_points <= options.max_input_samples &&
+           a.channel >= 0;
 }
 
 /// Least-squares fit of y = slope * t + intercept. Returns false when t has
@@ -844,6 +884,124 @@ std::string summarize(const Ar2Track& track) {
              "  Q " + fmt("%7.2f", o.q) + "  resid " +
              fmt("%.2e", o.residual_ratio) + "\n";
     return s;
+}
+
+ModalExtractionResult compile_modal_spec(
+    std::span<const float> impulse, double sample_rate,
+    const ModalExtractionOptions& options) {
+    ModalExtractionResult result;
+    result.recipe = options.recipe;
+    if (impulse.empty()) {
+        result.error = ModalExtractionError::empty_input;
+        result.message = "impulse response is empty";
+        return result;
+    }
+    if (impulse.size() < 128) {
+        result.error = ModalExtractionError::input_too_short;
+        result.message = "impulse response is too short for a bounded modal fit";
+        return result;
+    }
+    if (impulse.size() > static_cast<std::size_t>(kMaxCompilerInputSamples) ||
+        impulse.size() > static_cast<std::size_t>(std::max(options.max_input_samples, 0))) {
+        result.error = ModalExtractionError::invalid_options;
+        result.message = "impulse response exceeds the configured input bound";
+        return result;
+    }
+    if (!all_finite(impulse)) {
+        result.error = ModalExtractionError::non_finite_input;
+        result.message = "impulse response contains NaN or Inf";
+        return result;
+    }
+    if (peak_abs(impulse) == 0.0) {
+        result.error = ModalExtractionError::silent_input;
+        result.message = "impulse response is silent";
+        return result;
+    }
+    if (!std::isfinite(sample_rate) || sample_rate <= 0.0) {
+        result.error = ModalExtractionError::invalid_sample_rate;
+        result.message = "sample rate must be finite and positive";
+        return result;
+    }
+    if (!valid_compiler_options(options, sample_rate)) {
+        result.error = ModalExtractionError::invalid_options;
+        result.message = "modal extraction options are outside their documented bounds";
+        return result;
+    }
+
+    ModeAnalysisOptions analysis_options = options.analysis;
+    analysis_options.max_modes = std::min(256, options.max_modes + 4);
+    analysis_options.peak_floor_db = std::max(analysis_options.peak_floor_db,
+                                              options.snr_floor_db);
+    const ModeAnalysis analysis = analyze_modes(impulse, sample_rate, analysis_options);
+    if (!analysis.ok || analysis.modes.empty()) {
+        result.error = ModalExtractionError::no_modes;
+        result.message = analysis.message.empty() ? "no usable modal candidates" : analysis.message;
+        return result;
+    }
+
+    result.candidates.reserve(analysis.modes.size());
+    for (const MeasuredMode& measured : analysis.modes) {
+        ModalExtractionCandidate candidate;
+        candidate.mode = pulp::signal::ModalMode{
+            static_cast<float>(measured.freq_hz), static_cast<float>(measured.t60_s),
+            static_cast<float>(measured.amplitude)};
+        candidate.confidence = measured.confidence;
+        candidate.prominence_db = measured.prominence_db;
+        candidate.ranking_score = measured.amplitude * measured.confidence;
+        result.candidates.push_back(candidate);
+    }
+    std::stable_sort(result.candidates.begin(), result.candidates.end(),
+                     [](const ModalExtractionCandidate& a,
+                        const ModalExtractionCandidate& b) {
+                         if (a.ranking_score != b.ranking_score)
+                             return a.ranking_score > b.ranking_score;
+                         return a.mode.freq_hz < b.mode.freq_hz;
+                     });
+    int kept = 0;
+    std::vector<float> merge_anchors;
+    merge_anchors.reserve(result.candidates.size());
+    for (auto& candidate : result.candidates) {
+        const bool qualified = candidate.confidence >= options.confidence_floor &&
+                               candidate.prominence_db >= options.snr_floor_db &&
+                               std::isfinite(candidate.mode.t60_s) &&
+                               candidate.mode.t60_s > 0.0f;
+        if (qualified) {
+            candidate.merged = std::any_of(
+                merge_anchors.begin(), merge_anchors.end(), [&](float anchor_hz) {
+                    const double cents = 1200.0 * std::abs(std::log2(
+                        static_cast<double>(candidate.mode.freq_hz) /
+                        static_cast<double>(anchor_hz)));
+                    return cents < options.min_separation_cents;
+                });
+            if (!candidate.merged) merge_anchors.push_back(candidate.mode.freq_hz);
+        }
+        candidate.kept = qualified && !candidate.merged && kept < options.max_modes;
+        if (candidate.kept) ++kept;
+    }
+    if (kept == 0) {
+        result.error = ModalExtractionError::no_modes;
+        result.message = "all modal candidates failed confidence, SNR, or decay checks";
+        return result;
+    }
+
+    result.spec.name = "extracted-modal-spec";
+    result.spec.description = "Deterministic impulse-response modal extraction";
+    result.spec.modes.reserve(static_cast<std::size_t>(kept));
+    for (const auto& candidate : result.candidates)
+        if (candidate.kept) result.spec.modes.push_back(candidate.mode);
+    std::sort(result.spec.modes.begin(), result.spec.modes.end(),
+              [](const pulp::signal::ModalMode& a, const pulp::signal::ModalMode& b) {
+                  return a.freq_hz < b.freq_hz;
+              });
+    result.spec.tolerances.freq_cents = 10.0;
+    result.spec.tolerances.t60_rel = 0.10;
+    result.spec.tolerances.gain_rel = 0.15;
+    result.spec.tolerances.verify_seconds =
+        std::min(10.0, static_cast<double>(impulse.size()) / sample_rate);
+    result.ok = true;
+    result.message = std::to_string(result.spec.modes.size()) + " modes compiled by " +
+                     result.recipe;
+    return result;
 }
 
 } // namespace pulp::test::audio
