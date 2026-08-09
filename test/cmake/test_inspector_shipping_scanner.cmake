@@ -12,6 +12,42 @@ if(NOT _escaped_metadata STREQUAL
 endif()
 file(MAKE_DIRECTORY "${FIXTURE_DIR}")
 
+# The public plugin helper must not let a declaration outrun the shipped
+# host-side implementation. A raw shipping-helper fixture below still proves
+# the manifest/scanner contract independently, while pulp_add_plugin fails
+# before it can emit endpoint_included=true for ordinary pulp::standalone.
+set(_public_control_source "${FIXTURE_DIR}/public-control-source")
+set(_public_control_build "${FIXTURE_DIR}/public-control-build")
+file(REMOVE_RECURSE "${_public_control_source}" "${_public_control_build}")
+file(MAKE_DIRECTORY "${_public_control_source}")
+file(WRITE "${_public_control_source}/CMakeLists.txt"
+    "cmake_minimum_required(VERSION 3.24)\n"
+    "project(PublicControlDeclaration NONE)\n"
+    "add_library(pulp-format INTERFACE)\n"
+    "add_library(pulp::format ALIAS pulp-format)\n"
+    "include(\"${PULP_SOURCE_DIR}/tools/cmake/PulpUtils.cmake\")\n"
+    "pulp_add_plugin(ControlTarget FORMATS Standalone BUNDLE_ID dev.pulp.control CONTROL_PROFILE developer-local CONTROL_CAPABILITIES dev.pulp.instance/read@1)\n")
+execute_process(COMMAND "${CMAKE_COMMAND}" -S "${_public_control_source}"
+    -B "${_public_control_build}"
+    RESULT_VARIABLE _public_control_result
+    OUTPUT_VARIABLE _public_control_output ERROR_VARIABLE _public_control_error)
+if(_public_control_result EQUAL 0)
+    message(FATAL_ERROR
+        "ordinary pulp_add_plugin accepted an unavailable control endpoint")
+endif()
+set(_public_control_combined
+    "${_public_control_output}${_public_control_error}")
+string(REGEX REPLACE "[ \t\r\n]+" " " _public_control_combined
+    "${_public_control_combined}")
+string(FIND "${_public_control_combined}"
+    "requires the dedicated canonical Standalone host adapter"
+    _public_control_diagnostic)
+if(_public_control_diagnostic LESS 0)
+    message(FATAL_ERROR
+        "ordinary control declaration did not fail with the canonical adapter diagnostic: "
+        "${_public_control_output}${_public_control_error}")
+endif()
+
 # Reconfigure the same build directory after withdrawing critical authority.
 # Cache-backed declarations must reflect the current CMakeLists on every run.
 set(_reconfigure_source "${FIXTURE_DIR}/control-reconfigure-source")

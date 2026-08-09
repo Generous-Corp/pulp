@@ -677,6 +677,17 @@ function(pulp_add_plugin target)
             "pulp_add_plugin(${target}): CONTROL_CAPABILITIES requires an explicit CONTROL_PROFILE")
     endif()
 
+    # A manifest may only claim capabilities that the final artifact actually
+    # implements. The canonical broker can launch trusted test/installed hosts,
+    # but the ordinary pulp::standalone archive does not yet compose the
+    # host-side enrollment connection and operation executors. Failing here is
+    # preferable to generating endpoint_included=true and letting the post-link
+    # scanner discover that the implementation marker is absent.
+    if(PLUGIN_CONTROL_CAPABILITIES)
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): CONTROL_CAPABILITIES requires the dedicated canonical Standalone host adapter, which is not yet available; ordinary Standalone targets remain production-stripped")
+    endif()
+
     if(PLUGIN_CONTROL_PROFILE)
         set(_control_profiles
             production-stripped developer-local test-deterministic
@@ -697,11 +708,6 @@ function(pulp_add_plugin target)
         "${_pulp_control_profile}"
         "${_pulp_control_capabilities}"
         "${_pulp_control_eval_ack}")
-    if(PLUGIN_CONTROL_CAPABILITIES AND
-       NOT "Standalone" IN_LIST PLUGIN_FORMATS)
-        message(FATAL_ERROR
-            "pulp_add_plugin(${target}): control endpoints are supported only for Standalone targets")
-    endif()
     _pulp_configure_control_shipping(
         ${target} "${PLUGIN_BUNDLE_ID}" "${PLUGIN_PLUGIN_NAME}")
 

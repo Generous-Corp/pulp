@@ -18,22 +18,16 @@ human-label, discovery-file, or raw protocol selector.
 
 ## Author a target manifest
 
-Control is stripped unless a target declares a profile and its exact stable
-capability IDs:
+Ordinary `pulp_add_plugin` targets are currently production-stripped. The
+canonical broker, protocol, manifests, grants, and trusted-host launch path are
+available, but the dedicated host-side adapter that binds a general
+`pulp::standalone` processor and state store is not yet shipped. Consequently,
+`pulp_add_plugin(... CONTROL_CAPABILITIES ...)` fails at configure time instead
+of producing an artifact that falsely claims an endpoint.
 
-```cmake
-pulp_add_plugin(MyDeveloperStandalone
-    FORMATS Standalone
-    BUNDLE_ID dev.example.my-developer-standalone
-    CONTROL_PROFILE developer-local
-    CONTROL_CAPABILITIES
-        dev.pulp.instance/read@1
-        dev.pulp.state/read@1)
-```
-
-The declaration is an upper bound. It creates a canonical artifact manifest and
-retained shipping markers, but it does not activate an endpoint or grant a
-client. Mutation capabilities additionally require
+The frozen declaration syntax will become an upper bound when that adapter is
+available; it will never activate an endpoint or grant a client by itself.
+Mutation capabilities additionally require
 `dev.pulp.session/control@1`. Runtime evaluation is accepted only under
 `research-unsafe` with `ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL`; no named grant profile
 automatically grants it.
@@ -96,8 +90,9 @@ Interpret common failures literally:
 
 ## Enable, disable, and revoke safely
 
-1. Add the narrowest build profile and exact capability list.
-2. Reconfigure and build the intended Standalone artifact.
+1. Use a trusted host integration that composes the canonical host-side adapter;
+   ordinary `pulp_add_plugin` Standalones remain stripped until that adapter ships.
+2. Select the narrowest build profile and exact capability list in that integration.
 3. Run the offline artifact audit and review every declared capability.
 4. Launch through the trusted Pulp integration; copy the exact `instance_id`
    from `pulp control instances --json`.

@@ -6,32 +6,18 @@ discovery publisher, server, registration, or runtime evaluator into an
 ordinary `pulp_add_plugin` target.
 
 The consolidated authoring and diagnostics reference is
-[Capability control](../reference/capability-control.md). Every
-`pulp_add_plugin` target emits one canonical
-`dev.pulp.control/artifact-manifest@1` sidecar. With no declaration, the target
-uses `production-stripped`: no endpoint and no capabilities. An intentionally
-inspectable developer edition declares one profile and its exact stable
-capability IDs:
+[Capability control](../reference/capability-control.md). Every ordinary
+`pulp_add_plugin` target emits a production-stripped canonical
+`dev.pulp.control/artifact-manifest@1` sidecar: no endpoint and no capabilities.
+The canonical broker and trusted-host fixtures prove the host protocol, but the
+dedicated adapter that binds a general `pulp::standalone` processor and state
+store is not yet shipped. Until it is, nonempty `CONTROL_CAPABILITIES` on
+`pulp_add_plugin` fails at configure time rather than emitting a manifest or
+binary that falsely claims live reachability.
 
-```cmake
-pulp_add_plugin(MyDeveloperEdition
-    FORMATS Standalone
-    CONTROL_PROFILE developer-local
-    CONTROL_CAPABILITIES
-        dev.pulp.instance/read@1
-        dev.pulp.state/read@1
-        dev.pulp.ui/observe@1
-        dev.pulp.diagnostics/read@1
-        dev.pulp.logs/read@1
-        dev.pulp.ui/capture@1
-        dev.pulp.telemetry/subscribe@1)
-```
-
-This declaration emits a retained capability marker plus
-`<target>.inspector-capabilities.json`. It does not link or activate a live
-standalone endpoint. The legacy server, raw client, discovery publisher, and
-standalone session owner were deleted in Phase 3; the manifest remains an upper
-bound for the canonical replacement, not evidence of current reachability.
+The legacy server, raw client, discovery publisher, and standalone session
+owner were deleted in Phase 3. Do not restore them as a shortcut around the
+missing canonical host adapter.
 
 The Phase 4 runtime archives now implement exact T0/T1 instance status and
 bounded state/parameter catalog reads. They are reachable only through a
@@ -55,18 +41,10 @@ ordinary plugin-format targets stay stripped and unsupported host tiers remain
 unavailable.
 
 `dev.pulp.runtime/evaluate@1` is arbitrary execution in the product process.
-No profile or acknowledgement implies it. A target that truly needs it must use
-the `research-unsafe` profile, declare the capability, and add the distinct
-acknowledgement keyword:
-
-```cmake
-    CONTROL_PROFILE research-unsafe
-    CONTROL_CAPABILITIES
-        dev.pulp.instance/read@1
-        dev.pulp.session/control@1
-        dev.pulp.runtime/evaluate@1
-    ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL
-```
+No profile or acknowledgement implies it. Once a dedicated host adapter exists,
+an integration that truly needs evaluation must use `research-unsafe`, declare
+both session control and runtime evaluation, and provide the distinct unsafe
+acknowledgement. Ordinary `pulp_add_plugin` targets cannot opt in today.
 
 The legacy `SHIP_INSPECTOR`, `SHIP_INSPECTOR_RUNTIME_EVAL`, and
 `INSPECTOR_CAPABILITIES` spellings have been removed. Use the canonical control
