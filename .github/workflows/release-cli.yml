@@ -501,13 +501,17 @@ jobs:
               tools/scripts/package_cli.py \
               tools/scripts/release_artifact_contents.py \
               tools/scripts/release_product_matrix.json \
+              tools/scripts/json_schema_lite.py \
               tools/scripts/resign_macos_release_tree.py \
+              tools/scripts/sdk_capability_handoff.py \
               tools/scripts/sdk_provenance.py \
               tools/cmake/PulpSdkProvenance.cmake \
               ; do
             if [ '${{ github.event_name }}' = 'workflow_dispatch' ] \
                 && { [ "$path" = tools/scripts/package_cli.py ] \
                   || [ "$path" = tools/scripts/release_artifact_contents.py ] \
+                  || [ "$path" = tools/scripts/json_schema_lite.py ] \
+                  || [ "$path" = tools/scripts/sdk_capability_handoff.py ] \
                   || [ "$path" = tools/scripts/sdk_provenance.py ] \
                   || [ "$path" = tools/cmake/PulpSdkProvenance.cmake ]; }; then
               url="https://raw.githubusercontent.com/${repo}/main/${path}"
@@ -547,6 +551,9 @@ jobs:
           selected = json.loads(selected_path.read_text(encoding="utf-8"))
           authoritative = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
           selected["inspector_sdk_floor"] = authoritative["inspector_sdk_floor"]
+          selected["capability_handoff_floor"] = authoritative[
+              "capability_handoff_floor"
+          ]
           selected["control_broker_floor"] = authoritative["control_broker_floor"]
           selected_path.write_text(json.dumps(selected, indent=2) + "\n", encoding="utf-8")
           PY
@@ -1715,8 +1722,9 @@ jobs:
           fi
           # The selected tag/source matrix remains authoritative for historical
           # artifact membership, but it must not choose whether its own SDKs need
-          # positive provenance. Import only that policy boundary from the trusted
-          # current default branch and fail hard if it is unavailable.
+          # positive provenance and capability identity. Import those policy
+          # boundaries from the trusted current default branch and fail hard if
+          # either is unavailable.
           authoritative_matrix="$RUNNER_TEMP/authoritative-release-product-matrix.json"
           gh api \
             -H "Accept: application/vnd.github.raw+json" \
@@ -1735,6 +1743,9 @@ jobs:
           )
           selected["sdk_provenance_floor"] = authoritative["sdk_provenance_floor"]
           selected["inspector_sdk_floor"] = authoritative["inspector_sdk_floor"]
+          selected["capability_handoff_floor"] = authoritative[
+              "capability_handoff_floor"
+          ]
           selected["control_broker_floor"] = authoritative["control_broker_floor"]
           output_path.write_text(
               json.dumps(selected, indent=2) + "\n",

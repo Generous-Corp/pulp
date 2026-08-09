@@ -9,7 +9,7 @@ modules:
     docs: reference/modules.md#playback
 
   - name: timebase
-    summary: Strong musical tick sample and bar positions editable tempo and meter maps compiled exact lookup and streaming transport cursors
+    summary: Strong musical tick sample and bar positions editable tempo and meter maps compiled exact lookup streaming transport cursors exact rational beat divisions transport-range grid projection order-preserving groove kernels coordinate-seeded randomness fixed-capacity authored trigger-grid projection and bounded clock-locked ratchet subdivision
     status: experimental
     dependencies: [runtime]
     docs: reference/modules.md#timebase
@@ -125,21 +125,21 @@ modules:
     docs: reference/modules.md#audio
 
   - name: music
-    summary: Dependency-light 12-TET pitch-class and scale values plus fixed-capacity chord formulas construction and inversion with stable Pulp and Forge compatibility identities
+    summary: Dependency-light 12-TET pitch-class and scale values, fixed-capacity chord construction, spelling, voicing, minimum-motion voice leading, diatonic harmony, ambiguity-preserving recognition, stable Pulp and Forge compatibility identities, and deterministic generative pattern kernels
     status: experimental
     dependencies: []
     docs: reference/modules.md#music
 
   - name: midi
-    summary: MIDI I/O (CoreMIDI, WinMIDI, ALSA; Web MIDI scaffold not build-wired), MIDI files, UMP/MIDI 2.0, MIDI-CI (device discovery, profiles, property exchange), provider-neutral microtuning with optional MTS-ESP and Scala SCL/KBM providers
+    summary: MIDI I/O (CoreMIDI, WinMIDI, ALSA; Web MIDI scaffold not build-wired), MIDI files, UMP/MIDI 2.0, MIDI-CI, provider-neutral microtuning, and fixed-capacity balanced routing filtering monophonic controller and scale-aware MPE utility kernels
     status: usable
-    dependencies: [runtime]
+    dependencies: [music, runtime, timebase]
     docs: reference/modules.md#midi
 
   - name: signal
-    summary: 30+ DSP processors — filters (IIR, FIR, SVF, ladder, measured analog VCF voicings, Linkwitz-Riley), oscillators (legacy signal::Oscillator plus the pulp::signal::osc VA/VCO/DCO/WT suite), convolution, compressor, limiter, reverb (including the multirate FDN reverb), chorus, delay, oversampling, FFT (vDSP), SIMD ops, dry/wet mixer, channel-based BS.1770 loudness metering, orthonormal mid/side, signed fixed-capacity audio matrices, constant-power N-way switching and path latency alignment, plus the modulation and utility toolkit (deterministic RNG, LFO, slew/sample-hold/quantizer control tools, trigger and gate kit, envelope family, VCA, low-pass gate, mod matrix, unit conversions)
+    summary: 30+ DSP processors — filters (biquad, fixed-capacity transactional SOS cascade, IIR design, FIR, SVF, ladder, measured analog VCF voicings, Linkwitz-Riley), oscillators (deterministic unison layout and PolyBLEP supersaw, legacy signal::Oscillator plus the pulp::signal::osc VA/VCO/DCO/WT suite and fixed-capacity minBLEP primitive), convolution, compressor, sample and true-peak limiters, reverb (including the multirate FDN reverb), chorus, delay, oversampling, FFT (vDSP), extended analysis windows, contiguous fixed-capacity DSP history, SIMD ops, dry/wet mixer, standard-semantics exp2 and explicitly labeled fast approximations, channel-based BS.1770 loudness metering, orthonormal mid/side, signed fixed-capacity audio matrices, constant-power N-way switching and path latency alignment, plus the modulation and utility toolkit (deterministic RNG, LFO, slew/sample-hold/quantizer control tools, trigger and gate kit, envelope family, VCA, low-pass gate, mod matrix, unit conversions)
     status: usable
-    dependencies: [music, runtime]
+    dependencies: [music, runtime, timebase]
     docs: reference/modules.md#signal
 
   - name: state

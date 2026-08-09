@@ -72,6 +72,35 @@ struct ScopedTempDir {
     }
 };
 
+struct ScopedEnvironmentUnset {
+    std::string name;
+    std::optional<std::string> previous;
+
+    explicit ScopedEnvironmentUnset(const char* variable) : name(variable) {
+        if (const char* value = std::getenv(variable)) previous = value;
+        ::unsetenv(variable);
+    }
+
+    ~ScopedEnvironmentUnset() {
+        if (previous) ::setenv(name.c_str(), previous->c_str(), 1);
+        else ::unsetenv(name.c_str());
+    }
+};
+
+std::pair<uint32_t, uint32_t> png_dimensions(const std::vector<uint8_t>& png) {
+    if (png.size() < 24 || png[0] != 0x89 || png[1] != 0x50 ||
+        png[2] != 0x4e || png[3] != 0x47) {
+        return {};
+    }
+    auto read_be32 = [&](size_t offset) {
+        return (static_cast<uint32_t>(png[offset]) << 24u) |
+               (static_cast<uint32_t>(png[offset + 1]) << 16u) |
+               (static_cast<uint32_t>(png[offset + 2]) << 8u) |
+               static_cast<uint32_t>(png[offset + 3]);
+    };
+    return {read_be32(16), read_be32(20)};
+}
+
 struct RoiSpec {
     const char* id;
     uint32_t x;
@@ -511,6 +540,34 @@ TEST_CASE("mac harness back-buffer capture returns non-empty PNG bytes",
     REQUIRE(png[3] == 0x47);  // 'G'
 
     require_content_floor("single-frame gpu capture", png);
+}
+
+TEST_CASE("standalone GPU host resyncs the first frame after a Retina backing change",
+          "[mac][gpu][platform-harness][backing-scale]") {
+    // The shipping default is full repaint. The original regression incorrectly
+    // gated backing-scale surface resync on PULP_PARTIAL_REPAINT=1, leaving a
+    // 1x Skia surface in the top-left of a 2x drawable until a manual resize.
+    ScopedEnvironmentUnset partial_repaint("PULP_PARTIAL_REPAINT");
+
+    constexpr uint32_t kWidth = 320;
+    constexpr uint32_t kHeight = 240;
+    View root;
+    configure_gpu_capture_fixture(root);
+    WindowOptions options;
+    options.width = kWidth;
+    options.height = kHeight;
+    auto host = pt::make_test_window(root, options);
+    REQUIRE(host != nullptr);
+
+    REQUIRE(pt::simulate_backing_scale_change(*host, 1.0f));
+    auto one_x = pt::capture_back_buffer_png(*host);
+    REQUIRE(png_dimensions(one_x) == std::pair{kWidth, kHeight});
+
+    REQUIRE(pt::simulate_backing_scale_change(*host, 2.0f));
+    auto first_two_x_frame = pt::capture_back_buffer_png(*host);
+    REQUIRE(png_dimensions(first_two_x_frame) ==
+            std::pair{kWidth * 2u, kHeight * 2u});
+    require_content_floor("first 2x backing-scale frame", first_two_x_frame);
 }
 
 TEST_CASE("mac harness settled GPU capture is stable and checks expected ROIs",

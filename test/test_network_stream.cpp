@@ -754,6 +754,28 @@ TEST_CASE("TcpStream rejects null buffers while connected",
 
 // ── Socket edge cases ───────────────────────────────────────────────────
 
+TEST_CASE("Socket timed accept handles the maximum duration without overflow",
+          "[network_stream][socket][timeout]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    const auto port = try_bind_loopback_ephemeral(listener);
+    REQUIRE(port);
+
+    std::atomic<bool> connected{false};
+    std::thread client_thread([&] {
+        std::this_thread::sleep_for(10ms);
+        Socket client;
+        connected.store(client.create(SocketType::TCP) &&
+                        client.connect("127.0.0.1", *port));
+    });
+    ThreadJoiner join_client{client_thread};
+
+    auto accepted = listener.accept(std::chrono::milliseconds::max());
+    join_client.join();
+    REQUIRE(connected.load());
+    REQUIRE(accepted.has_value());
+}
+
 TEST_CASE("Socket UDP loopback send_to receive_from reports peer address",
           "[network_stream][socket]") {
     Socket receiver;

@@ -15,7 +15,8 @@ checked — the schema either validates for real or the run errors out.
 Supported keywords:
     type, const, enum, required, properties, additionalProperties,
     propertyNames, minProperties, maxProperties, items, minItems,
-    maxItems, uniqueItems, minLength, maxLength, pattern
+    maxItems, uniqueItems, minLength, maxLength, pattern, minimum, maximum,
+    oneOf
 
 Ignored (annotation-only) keywords:
     $schema, $id, title, description, $comment, examples, default
@@ -51,6 +52,9 @@ _SUPPORTED = frozenset(
         "minLength",
         "maxLength",
         "pattern",
+        "minimum",
+        "maximum",
+        "oneOf",
     }
 )
 
@@ -105,6 +109,17 @@ def validate(document: Any, schema: Any, path: str = "$") -> list[str]:
 
     errors: list[str] = []
 
+    if "oneOf" in schema:
+        matches = [
+            branch
+            for branch in schema["oneOf"]
+            if not validate(document, branch, path)
+        ]
+        if len(matches) != 1:
+            errors.append(
+                f"{path}: expected exactly one oneOf branch to match, got {len(matches)}"
+            )
+
     if "type" in schema:
         names = schema["type"]
         names = [names] if isinstance(names, str) else list(names)
@@ -121,6 +136,12 @@ def validate(document: Any, schema: Any, path: str = "$") -> list[str]:
 
     if "enum" in schema and document not in schema["enum"]:
         errors.append(f"{path}: {document!r} is not one of {schema['enum']!r}")
+
+    if isinstance(document, (int, float)) and not isinstance(document, bool):
+        if "minimum" in schema and document < schema["minimum"]:
+            errors.append(f"{path}: {document!r} is less than minimum {schema['minimum']!r}")
+        if "maximum" in schema and document > schema["maximum"]:
+            errors.append(f"{path}: {document!r} is greater than maximum {schema['maximum']!r}")
 
     if isinstance(document, str):
         errors.extend(_validate_string(document, schema, path))
@@ -153,14 +174,35 @@ def _validate_array(document: list, schema: dict, path: str) -> list[str]:
         errors.append(f"{path}: fewer than minItems {schema['minItems']}")
     if "maxItems" in schema and len(document) > schema["maxItems"]:
         errors.append(f"{path}: more than maxItems {schema['maxItems']}")
-    if schema.get("uniqueItems") and len(
-        {repr(i) for i in document}
-    ) != len(document):
+    if schema.get("uniqueItems") and any(
+        _json_values_equal(document[first], document[second])
+        for first in range(len(document))
+        for second in range(first + 1, len(document))
+    ):
         errors.append(f"{path}: array items are not unique")
     if "items" in schema:
         for i, item in enumerate(document):
             errors.extend(validate(item, schema["items"], f"{path}[{i}]"))
     return errors
+
+
+def _json_values_equal(first: Any, second: Any) -> bool:
+    """JSON structural equality, independent of object member ordering."""
+    if isinstance(first, bool) or isinstance(second, bool):
+        return isinstance(first, bool) and isinstance(second, bool) and first == second
+    if isinstance(first, (int, float)) and isinstance(second, (int, float)):
+        return first == second
+    if type(first) is not type(second):
+        return False
+    if isinstance(first, dict):
+        return first.keys() == second.keys() and all(
+            _json_values_equal(first[key], second[key]) for key in first
+        )
+    if isinstance(first, list):
+        return len(first) == len(second) and all(
+            _json_values_equal(left, right) for left, right in zip(first, second)
+        )
+    return first == second
 
 
 def _validate_object(document: dict, schema: dict, path: str) -> list[str]:

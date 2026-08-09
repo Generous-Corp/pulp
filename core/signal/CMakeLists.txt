@@ -7,10 +7,10 @@ target_include_directories(pulp-signal
         $<INSTALL_INTERFACE:include>
 )
 
-# pulp/signal/convolver_messages.hpp transitively includes
-# pulp::runtime's SpscQueue (lock-free retired-IR ring). Propagate
-# the dependency so consumers of pulp::signal don't have to know.
-target_link_libraries(pulp-signal INTERFACE pulp::music pulp::runtime)
+# Public signal headers use music vocabulary, runtime queues, and timebase's
+# canonical persisted beat-division table. Propagate those dependencies so
+# consumers of pulp::signal do not have to know its header closure.
+target_link_libraries(pulp-signal INTERFACE pulp::music pulp::runtime pulp::timebase)
 
 # Link Accelerate framework on Apple for vDSP FFT optimization
 if(APPLE)

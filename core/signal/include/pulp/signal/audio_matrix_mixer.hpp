@@ -58,11 +58,15 @@ class AudioMatrixMixerT {
         if (scratch_samples > scratch_.max_size())
             return false;
         std::vector<SampleType, Allocator> replacement(scratch_.get_allocator());
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
         try {
+#endif
             replacement.assign(scratch_samples, SampleType{0});
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
         } catch (const std::bad_alloc&) {
             return false;
         }
+#endif
         scratch_.swap(replacement);
         max_block_size_ = max_block_size;
         settle_ramps();

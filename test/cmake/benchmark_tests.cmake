@@ -50,6 +50,11 @@ endif()
 # rather than linking a Pulp target that re-exports it, mirroring
 # test/cmake/design_import_tool_cli_tests.cmake's pulp-test-import-design-tool.
 if(PULP_BENCHMARK)
+    # Advisory Release-only evidence for FastMath::exp2. This is a standalone
+    # executable, not a ctest registration: timing never gates correctness CI.
+    add_executable(pulp-fast-exp2-benchmark test_fast_exp2_benchmark.cpp)
+    target_link_libraries(pulp-fast-exp2-benchmark PRIVATE pulp::signal)
+
     pulp_add_test_suite(pulp-test-osc-bench
         LIBRARIES pulp::signal
         INCLUDE_DIRS ${choc_SOURCE_DIR}
@@ -61,6 +66,14 @@ if(PULP_BENCHMARK)
     # correctness failure.
     pulp_add_test_suite(pulp-test-character-delay-adapter-bench
         LIBRARIES pulp::host pulp::signal
+        LABELS "bench"
+        TIMEOUT 120)
+
+    # Advisory prepare-time window and worst-case history-wrap measurements.
+    # No timing threshold: heterogeneous hosts report evidence without making
+    # scheduler noise a correctness failure.
+    pulp_add_test_suite(pulp-test-analysis-utilities-bench
+        LIBRARIES pulp::signal
         LABELS "bench"
         TIMEOUT 120)
 endif()

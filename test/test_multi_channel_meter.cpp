@@ -74,6 +74,20 @@ TEST_CASE("MultiChannelMeterData preserves legacy positional aggregate initializ
     REQUIRE(std::isinf(legacy.lufs_momentary));
 }
 
+TEST_CASE("MultiChannelMeter default construction remains safe before prepare",
+          "[signal][meter][compatibility]") {
+    MultiChannelMeter meter;
+    std::array<float, 17640> samples{};
+    samples.fill(0.5f);
+    const float* channels[] = {samples.data()};
+
+    meter.process(channels, 1, static_cast<int>(samples.size()));
+
+    REQUIRE(meter.snapshot().num_channels == 1);
+    REQUIRE(std::isfinite(meter.snapshot().channels[0].rms));
+    REQUIRE(std::isinf(meter.snapshot().lufs_integrated));
+}
+
 TEST_CASE("MultiChannelMeter process and ballistics are allocation-free after prepare",
           "[signal][meter][rt-safety]") {
     MultiChannelMeter meter;
@@ -488,6 +502,23 @@ TEST_CASE("MultiChannelMeter applies surround weighting and excludes LFE",
     rear_meter.prepare(sample_rate, 1, rear_role);
     rear_meter.process(rear_channel, 1, static_cast<int>(tone.num_samples()));
     REQUIRE_THAT(rear_meter.snapshot().lufs_momentary, WithinAbs(-3.01f, 0.015f));
+}
+
+TEST_CASE("MultiChannelMeter default quad layout uses left and right surrounds",
+          "[signal][meter][loudness]") {
+    constexpr int sample_rate = 48000;
+    auto tone = pulp::test::audio::make_sine(1, sample_rate * 2, 997.0f, sample_rate);
+    const float* channels[] = {tone.channel(0).data(), tone.channel(0).data(),
+                               tone.channel(0).data(), tone.channel(0).data()};
+
+    MultiChannelMeter meter;
+    meter.prepare(sample_rate, 4);
+    meter.process(channels, 4, static_cast<int>(tone.num_samples()));
+
+    const float expected = -3.01f + 10.0f * std::log10(2.0f + 2.0f * 1.41f);
+    REQUIRE_THAT(meter.snapshot().lufs_momentary, WithinAbs(expected, 0.02f));
+    const float center_lfe_layout = -3.01f + 10.0f * std::log10(3.0f);
+    REQUIRE(std::abs(meter.snapshot().lufs_momentary - center_lfe_layout) > 1.5f);
 }
 
 TEST_CASE("MultiChannelMeter loudness is invariant to process block partitioning",

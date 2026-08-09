@@ -6,11 +6,11 @@
 
 ## Summary
 
-A macro oscillator synthesizer with filter, full ADSR envelope, oscillator detune, and master gain. This is the most complex example and validates integration with the `pulp::signal` DSP library. Currently built only as a CLAP plugin.
+A macro oscillator synthesizer with filter, full ADSR envelope, oscillator detune, and master gain. This is the most complex example and validates integration with the `pulp::signal` DSP library. Its existing waveforms retain the legacy polyBLEP path, while waveform 4 explicitly opts into the fixed-capacity minBLEP saw. Currently built only as a CLAP plugin.
 
 ## What It Demonstrates
 
-- Integration with `pulp::signal` DSP processors: `Oscillator` (polyBLEP), `Svf` (TPT state-variable filter), `Adsr`, `SmoothedValue`, `Gain`
+- Integration with `pulp::signal` DSP processors: `Oscillator` (polyBLEP), `osc::MinBlepAccumulator` plus `osc::PhaseAccumulator` (opt-in minBLEP saw), `Svf` (TPT state-variable filter), `Adsr`, `SmoothedValue`, `Gain`
 - Dual-oscillator voice architecture with detuning for timbral richness
 - Filter envelope modulation (cutoff modulated by ADSR level)
 - Full ADSR envelope (attack, decay, sustain, release) rather than simple attack/release
@@ -40,6 +40,7 @@ A macro oscillator synthesizer with filter, full ADSR envelope, oscillator detun
 | File | Purpose |
 |------|---------|
 | `pulp_synth.hpp` | Processor using signal library DSP: Oscillator, Svf, Adsr, SmoothedValue |
+| `minblep_saw.hpp` | Opt-in saw voice composed entirely from the public phase and minBLEP primitives |
 | `clap_entry.cpp` | CLAP format entry point |
 | `test_pulp_synth.cpp` | Unit tests for synthesis and signal library integration |
 | `CMakeLists.txt` | Build configuration; links `pulp::signal` in addition to `pulp::format` |
@@ -48,7 +49,7 @@ A macro oscillator synthesizer with filter, full ADSR envelope, oscillator detun
 
 | ID | Name | Unit | Range | Default |
 |----|------|------|-------|---------|
-| 100 | Waveform | (stepped) | 0 to 3 | 1 (saw) |
+| 100 | Waveform | (stepped) | 0 to 4 | 1 (legacy saw); 4 selects minBLEP saw |
 | 101 | Detune | ct (cents) | -100 to 100 | 0 |
 | 102 | Cutoff | Hz | 20 to 20000 | 5000 |
 | 103 | Resonance | (Q) | 0.1 to 10 | 0.707 |

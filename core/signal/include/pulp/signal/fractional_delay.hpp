@@ -184,15 +184,20 @@ template <typename SampleType = float> class FractionalDelayHistoryT {
 
         const auto storage_size = maximum_delay_samples + additional_history;
         std::vector<SampleType> replacement;
-        if (storage_size > replacement.max_size())
+        if (storage_size > replacement.max_size()) {
             return false;
+        }
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
         try {
+#endif
             replacement.assign(storage_size, SampleType{});
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
         } catch (const std::bad_alloc&) {
             return false;
         } catch (const std::length_error&) {
             return false;
         }
+#endif
 
         buffer_.swap(replacement);
         maximum_delay_samples_ = maximum_delay_samples;
@@ -367,15 +372,20 @@ template <typename SampleType = float> class FractionalDelayLineT {
 
         const auto storage_size = maximum_delay_samples + older + 1u;
         std::vector<SampleType> replacement;
-        if (storage_size > replacement.max_size())
+        if (storage_size > replacement.max_size()) {
             return false;
+        }
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
         try {
+#endif
             replacement.assign(storage_size, SampleType{});
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
         } catch (const std::bad_alloc&) {
             return false;
         } catch (const std::length_error&) {
             return false;
         }
+#endif
 
         buffer_.swap(replacement);
         maximum_delay_samples_ = maximum_delay_samples;

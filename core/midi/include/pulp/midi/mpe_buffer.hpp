@@ -15,8 +15,10 @@
 
 #include <pulp/midi/mpe_voice_tracker.hpp>
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <limits>
+#include <span>
 #include <vector>
 
 namespace pulp::midi {
@@ -48,7 +50,7 @@ struct MpeExpressionEvent {
 /// happen on the audio thread in one producer/consumer pair.
 class MpeBuffer {
 public:
-    MpeBuffer() { events_.reserve(kInitialCapacity); }
+    MpeBuffer() { reserve(kInitialCapacity); }
 
     bool add(const MpeExpressionEvent& e) {
         if (!can_append()) {
@@ -67,6 +69,18 @@ public:
         return true;
     }
 
+    /// Append a group atomically. Under the realtime capacity limit, either
+    /// every event is appended in source order or none are. Rejected events are
+    /// all reflected in the saturating drop counter.
+    bool add_batch(std::span<const MpeExpressionEvent> events) {
+        if (!can_append(events.size())) {
+            record_drops(events.size());
+            return false;
+        }
+        events_.insert(events_.end(), events.begin(), events.end());
+        return true;
+    }
+
     void clear() {
         events_.clear();
         dropped_events_ = 0;
@@ -75,16 +89,36 @@ public:
     std::size_t size() const { return events_.size(); }
     std::size_t capacity() const { return events_.capacity(); }
     std::uint32_t dropped_event_count() const { return dropped_events_; }
-    void reserve(std::size_t capacity) { events_.reserve(capacity); }
+    void reserve(std::size_t capacity) {
+        events_.reserve(capacity);
+        sort_index_.reserve(capacity);
+        sort_reorder_.reserve(capacity);
+    }
     void set_realtime_capacity_limit(bool enabled = true) {
         limit_to_reserved_capacity_ = enabled;
     }
 
     void sort() {
-        std::sort(events_.begin(), events_.end(),
-            [](const MpeExpressionEvent& a, const MpeExpressionEvent& b) {
-                return a.sample_offset < b.sample_offset;
+        // Match MidiBuffer's allocation-free insertion-stable index sort.
+        // Producer order at equal offsets is semantic for retriggers:
+        // retirement must remain immediately before the replacement note-on.
+        const std::size_t count = events_.size();
+        if (count < 2) return;
+        sort_index_.resize(count);
+        for (std::size_t i = 0; i < count; ++i) sort_index_[i] = i;
+        const auto& source = events_;
+        std::sort(sort_index_.begin(), sort_index_.end(),
+            [&source](std::size_t a, std::size_t b) {
+                if (source[a].sample_offset != source[b].sample_offset) {
+                    return source[a].sample_offset < source[b].sample_offset;
+                }
+                return a < b;
             });
+        sort_reorder_.resize(count);
+        for (std::size_t i = 0; i < count; ++i) {
+            sort_reorder_[i] = std::move(events_[sort_index_[i]]);
+        }
+        events_.swap(sort_reorder_);
     }
 
     auto begin()       { return events_.begin(); }
@@ -95,41 +129,77 @@ public:
     const MpeExpressionEvent& operator[](std::size_t i) const { return events_[i]; }
 
 private:
-    bool can_append() const {
-        return !limit_to_reserved_capacity_ || events_.size() < events_.capacity();
+    bool can_append(std::size_t count = 1) const {
+        return !limit_to_reserved_capacity_
+            || count <= events_.capacity() - events_.size();
     }
     void record_drop() {
-        if (dropped_events_ < std::numeric_limits<std::uint32_t>::max()) {
-            ++dropped_events_;
-        }
+        record_drops(1);
+    }
+    void record_drops(std::size_t count) {
+        const auto max = std::numeric_limits<std::uint32_t>::max();
+        const auto available = static_cast<std::uint64_t>(max - dropped_events_);
+        const auto increment = std::min<std::uint64_t>(count, available);
+        dropped_events_ += static_cast<std::uint32_t>(increment);
     }
 
     static constexpr std::size_t kInitialCapacity = 128;
     std::vector<MpeExpressionEvent> events_;
+    std::vector<std::size_t> sort_index_;
+    std::vector<MpeExpressionEvent> sort_reorder_;
     bool limit_to_reserved_capacity_ = false;
     std::uint32_t dropped_events_ = 0;
 };
 
 /// Convenience: install tracker callbacks that forward events to `out` with
-/// the given sample offset. Call once on the host thread during setup.
+/// the given sample offset. When provided, `expression_event_dropped` is set
+/// if a bounded expression append fails so the owner can reconcile tracker and
+/// consumer state. Call once on the host thread during setup.
 inline void bind_tracker_to_buffer(MpeVoiceTracker& tracker,
                                    MpeBuffer& out,
-                                   int32_t& current_sample_offset) {
+                                   int32_t& current_sample_offset,
+                                   bool* expression_event_dropped = nullptr) {
     using K = MpeExpressionEvent::Kind;
-    tracker.on_note_on = [&out, &current_sample_offset](const MpeNoteState& s) {
-        out.add({current_sample_offset, K::NoteOn, s});
+    tracker.on_note_lifecycle = [&out, &current_sample_offset,
+                                 expression_event_dropped](
+        const MpeNoteState* note_off, const MpeNoteState* note_on) {
+        std::array<MpeExpressionEvent, 2> events{};
+        std::size_t count = 0;
+        if (note_off) {
+            events[count++] = {current_sample_offset, K::NoteOff, *note_off};
+        }
+        if (note_on) {
+            events[count++] = {current_sample_offset, K::NoteOn, *note_on};
+        }
+        const bool appended = out.add_batch(
+            std::span<const MpeExpressionEvent>{events.data(), count});
+        // A rejected start/retrigger would let raw MIDI advance without the
+        // matching MPE lifecycle. Pure releases instead use the tracker's
+        // bounded deferred-release queue and are flushed at the next block.
+        if (!appended && note_on && expression_event_dropped)
+            *expression_event_dropped = true;
+        return appended;
     };
-    tracker.on_note_off = [&out, &current_sample_offset](const MpeNoteState& s) {
-        out.add({current_sample_offset, K::NoteOff, s});
+    tracker.on_pitch_bend = [&out, &current_sample_offset,
+                             expression_event_dropped](const MpeNoteState& s) {
+        if (!out.add({current_sample_offset, K::PitchBend, s}) &&
+            expression_event_dropped) {
+            *expression_event_dropped = true;
+        }
     };
-    tracker.on_pitch_bend = [&out, &current_sample_offset](const MpeNoteState& s) {
-        out.add({current_sample_offset, K::PitchBend, s});
+    tracker.on_pressure = [&out, &current_sample_offset,
+                           expression_event_dropped](const MpeNoteState& s) {
+        if (!out.add({current_sample_offset, K::Pressure, s}) &&
+            expression_event_dropped) {
+            *expression_event_dropped = true;
+        }
     };
-    tracker.on_pressure = [&out, &current_sample_offset](const MpeNoteState& s) {
-        out.add({current_sample_offset, K::Pressure, s});
-    };
-    tracker.on_timbre = [&out, &current_sample_offset](const MpeNoteState& s) {
-        out.add({current_sample_offset, K::Timbre, s});
+    tracker.on_timbre = [&out, &current_sample_offset,
+                         expression_event_dropped](const MpeNoteState& s) {
+        if (!out.add({current_sample_offset, K::Timbre, s}) &&
+            expression_event_dropped) {
+            *expression_event_dropped = true;
+        }
     };
 }
 

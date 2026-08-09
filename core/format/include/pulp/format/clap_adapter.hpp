@@ -202,6 +202,15 @@ struct PulpClapPlugin {
     midi::MidiBuffer midi_in;
     midi::MidiBuffer midi_out;
 
+    // Host out_events may reject a suffix of a process block. Retain only
+    // ownership-releasing MIDI in fixed storage and retry it before later
+    // attacks. Saturated per-key/control counters collapse to one channel
+    // All Sound Off debt, so this path remains allocation-free and bounded.
+    std::array<std::uint8_t, 16 * 128> outbound_note_release_debt{};
+    std::array<std::uint8_t, 16 * 6> outbound_control_release_debt{};
+    std::array<bool, 16> outbound_panic_debt{};
+    std::size_t outbound_release_drain_cursor = 0;
+
     // MPE sidecar — populated from midi_in before each process() call when
     // the Processor declares MPE in its effective PluginDescriptor capabilities.
     // Reserved and capacity-limited during activate(); one MIDI event can fan
@@ -242,6 +251,15 @@ struct PulpClapPlugin {
     // Default-constructed (no previous block) so the first process() call after
     // activation reports no changes.
     detail::PlayheadSnapshot playhead_prev{};
+
+    // clap_reset() is delivered while processing is stopped. The Processor API
+    // exposes reset as a one-block ProcessContext signal rather than a virtual
+    // callback, so carry that request to exactly the next process block.
+    bool reset_requested = false;
+    // A bypassed or render-contended block may contain an unreplayable note
+    // lifecycle event. Reconcile adapter and processor ownership together on
+    // the next block that actually reaches Processor::process().
+    bool sidecar_reconcile_requested = false;
 
     // Process-wide MainThreadDispatcher backend token. Acquired in clap_init()
     // so adapter callsites (e.g. host-callback dispatches posted via

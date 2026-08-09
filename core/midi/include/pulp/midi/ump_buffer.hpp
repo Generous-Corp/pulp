@@ -79,6 +79,7 @@ public:
     void set_realtime_capacity_limit(bool enabled = true) {
         limit_to_reserved_capacity_ = enabled;
     }
+    bool realtime_capacity_limited() const { return limit_to_reserved_capacity_; }
 
     void sort() {
         std::sort(events_.begin(), events_.end(),
