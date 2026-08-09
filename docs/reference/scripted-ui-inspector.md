@@ -5,6 +5,10 @@ JavaScriptCore, and V8. Phase 3 deleted the legacy TCP server, raw client,
 discovery publisher, and standalone session owner. Those components are not a
 second live authority path: supported live operations use the canonical
 per-user broker, exact-instance control protocol, and generated typed clients.
+The deleted raw Inspector path is not currently reachable. The canonical capability-control replacement
+closes the earlier capability reduction for supported operations;
+runtime evaluation remains fail-closed unless an exact live host injects it and
+broker-owned consent authorizes it.
 
 ## Current public surface
 
