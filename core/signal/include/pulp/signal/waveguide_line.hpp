@@ -88,8 +88,15 @@ template <typename SampleType = float> class WaveguideLineT {
         return static_cast<SampleType>(target_length_samples_);
     }
 
+    /// Returns the delay head used by the next sample. During a retune this
+    /// converges from the previous length to `length_samples()`.
+    [[nodiscard]] SampleType current_length_samples() const noexcept {
+        return static_cast<SampleType>(prepared_ ? length_.current()
+                                                : target_length_samples_);
+    }
+
     [[nodiscard]] double round_trip_seconds() const noexcept {
-        return prepared_ ? 2.0 * target_length_samples_ / sample_rate_ : 0.0;
+        return prepared_ ? 2.0 * length_.current() / sample_rate_ : 0.0;
     }
 
     [[nodiscard]] bool prepared() const noexcept { return prepared_; }

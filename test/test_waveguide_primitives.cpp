@@ -139,6 +139,9 @@ TEST_CASE("WaveguideLine retuning glides rather than replacing a delay head",
     }
 
     line.set_length_samples(80.0);
+    CHECK(line.length_samples() == 80.0);
+    CHECK_THAT(line.current_length_samples(), WithinAbs(12.0, 1.0e-15));
+    CHECK_THAT(line.round_trip_seconds(), WithinAbs(24.0 / 48000.0, 1.0e-15));
     double first = 0.0;
     double ignored = 0.0;
     line.process(0.6, 0.0, ignored, first);
@@ -154,6 +157,8 @@ TEST_CASE("WaveguideLine retuning glides rather than replacing a delay head",
         previous = output;
     }
     CHECK(largest_step < 0.005);
+    CHECK_THAT(line.current_length_samples(), WithinAbs(80.0, 1.0e-12));
+    CHECK_THAT(line.round_trip_seconds(), WithinAbs(160.0 / 48000.0, 1.0e-15));
 }
 
 TEST_CASE("WaveguideLine reset is deterministic and RT paths allocate nothing",
