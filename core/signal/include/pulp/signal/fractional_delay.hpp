@@ -178,7 +178,7 @@ template <typename SampleType = float> class FractionalDelayHistoryT {
 
     [[nodiscard]] bool prepare(std::size_t maximum_delay_samples) {
         constexpr auto additional_history = 3u;
-        if (maximum_delay_samples < minimum_delay_samples(FractionalDelayMethod::lagrange5) ||
+        if (maximum_delay_samples < minimum_delay_samples(FractionalDelayMethod::lagrange3) ||
             maximum_delay_samples > std::numeric_limits<std::size_t>::max() - additional_history)
             return false;
 
@@ -209,6 +209,14 @@ template <typename SampleType = float> class FractionalDelayHistoryT {
 
     void reset() noexcept {
         std::fill(buffer_.begin(), buffer_.end(), SampleType{});
+        write_ = 0;
+        valid_ = 0;
+    }
+
+    /// Forgets all prior samples in constant time. Unlike reset(), this does
+    /// not eagerly clear storage; invalidated slots remain unreachable until
+    /// they have been overwritten by later pushes.
+    void discard_history() noexcept {
         write_ = 0;
         valid_ = 0;
     }

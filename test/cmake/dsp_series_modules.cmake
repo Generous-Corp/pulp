@@ -49,6 +49,7 @@ add_library(pulp-dsp-series-header-self-containment OBJECT
     header_compile/early_reflections.cpp
     header_compile/additive_spectral_envelope.cpp
     header_compile/auto_ducked_send.cpp
+    header_compile/comb_filter.cpp
     header_compile/cartesian_walk.cpp
     header_compile/dynamics_contract.cpp
     header_compile/dynamic_eq.cpp
@@ -79,6 +80,9 @@ pulp_dsp_series_signal_suite(pulp-test-signal-explicit-q-resonator-bank
                              test_explicit_q_resonator_bank.cpp)
 pulp_dsp_series_signal_suite(pulp-test-signal-spectral-delay-matrix
                              test_spectral_delay_matrix.cpp)
+pulp_dsp_series_signal_suite(pulp-test-signal-comb-filter
+                             test_signal_comb_filter.cpp)
+
 # ── The modules ───────────────────────────────────────────────────────────
 pulp_dsp_series_signal_suite(pulp-test-signal-tape-machine   test_signal_tape_machine_eq_nonlinearity_archetypes.cpp
     test_signal_tape_machine_latency_rt_faults.cpp)

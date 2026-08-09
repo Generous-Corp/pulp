@@ -173,6 +173,29 @@ belong off the audio callback because they use transcendental functions.
 - Configuration: `configure()`, `GraphicEqPrepareStatus`, `GraphicEqConfigureStatus`.
 - Processing: `process()`, `process_block()`.
 - Inspection: `band()`, `coefficients()`, `band_count()`, `capacity()`, `sample_rate()`, `supported_frequency_ceiling_hz()`, `transitioning()`, `healthy()`, `fault_count()`, `latency_samples()`, `tail_samples()`, `magnitude()`, `magnitude_db()`.
+### `CombFilterT<SampleType>`
+
+This prepared integer-delay family exposes three explicit topologies through
+`CombFilterMode`: feedforward (`y = x + g x[n-D]`), feedback
+(`y = x + g y[n-D]`), and the Schroeder allpass form. Feedforward gain is
+bounded to `[-1, 1]`; recursive gain is bounded to `[-0.999, 0.999]`. Delay is
+an exact integer in `[2, maximum_delay_samples]`. Fractional modulation is
+deliberately outside this fixed comb contract; use `FractionalDelayLineT` when
+that interpolation behavior is required.
+
+`prepare(maximum_delay_samples)` is the only allocating operation and is
+transactional. `configure(config)` validates the complete candidate, commits it
+without allocation, and clears old history so a topology or delay retune is
+deterministic. Exact in-place and arbitrary block partitioning are supported.
+Nonfinite input or arithmetic overflow emits zero, increments `fault_count()`,
+and discards history in constant time. All modes report zero fixed host latency.
+`tail_samples()` reports the exact finite feedforward/pure-delay tail and
+`nullopt` for a nonzero recursive tail. `comb_filter_response()` exposes the
+stationary complex response for plotting and independent verification.
+
+- Lifecycle: `prepare(maximum_delay_samples)`, `configure(config)`, `reset()`.
+- Processing: `process(sample)`, `process(input, output, frames)`.
+- Inspection: `prepared()`, `configured()`, `maximum_delay_samples()`, `config()`, `fault_count()`, `clear_fault_count()`, `processing_latency_samples()`, `tail_samples()`, `comb_filter_response()`.
 
 ## Routing and gain laws
 
