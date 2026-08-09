@@ -1396,9 +1396,11 @@ that in-memory authority.
 `call` and `watch` request a connection-bound grant when `--grant` is omitted,
 so consent and invocation share one authenticated process session. They validate
 `--params` against the operation registry before dispatch and print the broker
-receipt. `--timeout-ms` sets the same bounded broker deadline and client wait
-(1–300000 ms, default 3000); use a value longer than the operation's own
-schema-level timeout for offline work. `artifact` reauthorizes every chunk against original
+receipt. `--timeout-ms` is one end-to-end deadline for broker connection,
+client enrollment, instance lookup, grant issuance, negotiation, and the final
+request (1–300000 ms, default 3000); each stage receives only the time remaining.
+Use a value longer than the operation's own schema-level timeout for offline work.
+`artifact` reauthorizes every chunk against original
 receipt/grant lineage. Human output and `--json` describe the same result;
 usage errors exit 2 and broker/policy/operation failures exit 1.
 

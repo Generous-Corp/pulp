@@ -1144,8 +1144,18 @@ commands:
         summary: Ask the broker for a scoped grant; the CLI never self-approves consent
       - name: call
         summary: Invoke one registry operation through ControlClient with typed JSON params
+        args:
+          - name: --timeout-ms
+            kind: option
+            required: false
+            description: One 1–300000 ms end-to-end deadline shared by connection, enrollment, inventory, grant, negotiation, and request stages
       - name: watch
         summary: Start one bounded registry subscription operation
+        args:
+          - name: --timeout-ms
+            kind: option
+            required: false
+            description: One 1–300000 ms end-to-end deadline shared by connection, enrollment, inventory, grant, negotiation, and request stages
       - name: artifact
         summary: Retrieve a broker artifact by opaque ID into an explicit output file
       - name: revoke

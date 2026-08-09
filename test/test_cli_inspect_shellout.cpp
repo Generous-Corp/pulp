@@ -1,6 +1,7 @@
 // Focused shell-out coverage for the reduced `pulp inspect` surface.
 
 #include "test_cli_shellout_helpers.hpp"
+#include "../tools/cli/control_operation_deadline.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -11,6 +12,25 @@
 
 namespace fs = std::filesystem;
 using namespace pulp_test_cli;
+
+TEST_CASE("control operation deadline spends one deterministic wall-clock budget",
+          "[cli][inspect][control][timeout]") {
+    using Deadline = pulp::cli::control::OperationDeadline;
+    using namespace std::chrono_literals;
+
+    const Deadline::Clock::time_point started{10s};
+    const Deadline deadline(3s, started);
+    CHECK(deadline.remaining(started) == 3000ms);
+    CHECK(deadline.remaining(started + 400ms) == 2600ms);
+    CHECK(deadline.remaining(started + 1250ms) == 1750ms);
+    CHECK(deadline.remaining(started + 2999500us) == 1ms);
+    CHECK(deadline.remaining(started + 3s) == 0ms);
+    CHECK(deadline.remaining(started + 4s) == 0ms);
+
+    const std::chrono::system_clock::time_point system_started{20s};
+    CHECK(deadline.unix_deadline_ms(system_started, started) == 23000);
+    CHECK(deadline.unix_deadline_ms(system_started + 1250ms, started + 1250ms) == 23000);
+}
 
 TEST_CASE("pulp control profiles is canonical and inspect profiles is a dated alias",
           "[cli][shellout][inspect][control][profiles]") {

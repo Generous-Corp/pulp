@@ -1,4 +1,5 @@
 #include "cli_common.hpp"
+#include "control_operation_deadline.hpp"
 #include "inspector_shipping_report.hpp"
 
 #include <pulp/inspect/capabilities.hpp>
@@ -27,13 +28,15 @@
 namespace {
 using namespace pulp::inspect;
 
-constexpr std::int64_t kDefaultRequestTimeoutMs = 3'000;
-constexpr std::int64_t kMaximumRequestTimeoutMs = 300'000;
+constexpr std::int64_t kDefaultOperationTimeoutMs = 3'000;
+constexpr std::int64_t kMaximumOperationTimeoutMs = 300'000;
 
 struct Connection {
     std::unique_ptr<ControlClientConnection> transport;
     std::string client_id;
 };
+
+using OperationDeadline = pulp::cli::control::OperationDeadline;
 
 std::filesystem::path broker_executable() {
     const auto self = current_executable_path();
@@ -66,22 +69,43 @@ int fail(std::string_view code, std::string_view explanation, bool json) {
     return code == "invalid-request" ? 2 : 1;
 }
 
-std::optional<Connection> connect(bool json, std::chrono::milliseconds frame_read_timeout) {
+std::optional<std::chrono::milliseconds> remaining_timeout(const OperationDeadline* deadline,
+                                                           std::chrono::milliseconds fallback,
+                                                           bool json) {
+    if (!deadline)
+        return fallback;
+    const auto remaining = deadline->remaining();
+    if (remaining > std::chrono::milliseconds::zero())
+        return remaining;
+    (void)fail("timeout", "the control operation timed out", json);
+    return std::nullopt;
+}
+
+std::optional<Connection> connect(bool json, std::chrono::milliseconds fallback_timeout,
+                                  const OperationDeadline* deadline) {
     const auto broker = broker_executable();
     if (broker.empty()) {
         (void)fail("broker-unavailable", "the installed pulp-control-broker was not found", json);
         return std::nullopt;
     }
+    const auto connect_timeout = remaining_timeout(deadline, fallback_timeout, json);
+    if (!connect_timeout)
+        return std::nullopt;
     auto transport = std::make_unique<ControlClientConnection>(ControlClientConnectionConfig{
         .endpoint_path = default_control_endpoint_path(),
         .expected_broker_executable = broker,
-        .frame_read_timeout = frame_read_timeout,
+        .connect_timeout = *connect_timeout,
+        .write_timeout = *connect_timeout,
+        .frame_read_timeout = *connect_timeout,
     });
     if (!transport->connect()) {
         (void)fail(transport->last_error_code(), transport->last_error_explanation(), json);
         return std::nullopt;
     }
-    const auto enrolled = transport->manage("enroll");
+    const auto enrollment_timeout = remaining_timeout(deadline, fallback_timeout, json);
+    if (!enrollment_timeout)
+        return std::nullopt;
+    const auto enrolled = transport->manage("enroll", "{}", *enrollment_timeout);
     if (enrolled.status_id != "accepted") {
         (void)fail(enrolled.status_id, enrolled.explanation, json);
         return std::nullopt;
@@ -100,8 +124,13 @@ std::optional<Connection> connect(bool json, std::chrono::milliseconds frame_rea
     }
 }
 
-std::optional<choc::value::Value> instances(Connection& connection, bool json) {
-    const auto result = connection.transport->manage("instances");
+std::optional<choc::value::Value> instances(Connection& connection, bool json,
+                                            std::chrono::milliseconds fallback_timeout,
+                                            const OperationDeadline* deadline) {
+    const auto timeout = remaining_timeout(deadline, fallback_timeout, json);
+    if (!timeout)
+        return std::nullopt;
+    const auto result = connection.transport->manage("instances", "{}", *timeout);
     if (result.status_id != "completed") {
         (void)fail(result.status_id, result.explanation, json);
         return std::nullopt;
@@ -121,8 +150,10 @@ std::optional<choc::value::Value> instances(Connection& connection, bool json) {
 }
 
 std::optional<choc::value::Value> exact_instance(Connection& connection,
-                                                 std::string_view instance_id, bool json) {
-    auto data = instances(connection, json);
+                                                 std::string_view instance_id, bool json,
+                                                 std::chrono::milliseconds fallback_timeout,
+                                                 const OperationDeadline* deadline) {
+    auto data = instances(connection, json, fallback_timeout, deadline);
     if (!data)
         return std::nullopt;
     std::optional<choc::value::Value> match;
@@ -348,24 +379,29 @@ int cmd_control(const std::vector<std::string>& args) {
     if (verb == "artifact" && (artifact_id.empty() || output.empty()))
         return fail("invalid-request", "artifact requires --id ID --out FILE", json);
 
-    std::int64_t timeout_ms = kDefaultRequestTimeoutMs;
+    std::int64_t timeout_ms = kDefaultOperationTimeoutMs;
     if (!timeout_text.empty()) {
         const auto* begin = timeout_text.data();
         const auto* end = begin + timeout_text.size();
         const auto parsed = std::from_chars(begin, end, timeout_ms);
         if (parsed.ec != std::errc{} || parsed.ptr != end || timeout_ms <= 0 ||
-            timeout_ms > kMaximumRequestTimeoutMs) {
+            timeout_ms > kMaximumOperationTimeoutMs) {
             return fail("invalid-request", "--timeout-ms must be an integer from 1 to 300000",
                         json);
         }
     }
     const auto request_timeout = std::chrono::milliseconds(timeout_ms);
 
-    auto connection = connect(json, request_timeout);
+    std::optional<OperationDeadline> operation_deadline;
+    if (verb == "call" || verb == "watch")
+        operation_deadline.emplace(request_timeout);
+    const auto* deadline = operation_deadline ? &*operation_deadline : nullptr;
+
+    auto connection = connect(json, request_timeout, deadline);
     if (!connection)
         return 1;
     if (verb == "instances") {
-        auto data = instances(*connection, json);
+        auto data = instances(*connection, json, request_timeout, deadline);
         if (!data)
             return 1;
         if (json)
@@ -382,7 +418,7 @@ int cmd_control(const std::vector<std::string>& args) {
         return 0;
     }
     if (verb == "status") {
-        auto item = exact_instance(*connection, instance_id, json);
+        auto item = exact_instance(*connection, instance_id, json, request_timeout, deadline);
         if (!item)
             return 1;
         auto root = choc::value::createObject("");
@@ -417,8 +453,11 @@ int cmd_control(const std::vector<std::string>& args) {
             object.addMember("profile", choc::value::createString(profile));
         } else
             object.addMember("grant_id", choc::value::createString(grant_id));
-        const auto result =
-            connection->transport->manage(command, choc::json::toString(object, false));
+        const auto manage_timeout = remaining_timeout(deadline, request_timeout, json);
+        if (!manage_timeout)
+            return 1;
+        const auto result = connection->transport->manage(
+            command, choc::json::toString(object, false), *manage_timeout);
         if (json) {
             auto root = choc::value::createObject("");
             root.addMember("data", choc::json::parse(result.data_json));
@@ -481,7 +520,7 @@ int cmd_control(const std::vector<std::string>& args) {
         return 0;
     }
 
-    auto item = exact_instance(*connection, instance_id, json);
+    auto item = exact_instance(*connection, instance_id, json, request_timeout, deadline);
     if (!item)
         return 1;
     const auto operation =
@@ -501,8 +540,11 @@ int cmd_control(const std::vector<std::string>& args) {
         grant_params.addMember("instance_id", choc::value::createString(instance_id));
         grant_params.addMember(
             "profile", choc::value::createString(profile.empty() ? "inspect-readonly" : profile));
+        const auto grant_timeout = remaining_timeout(deadline, request_timeout, json);
+        if (!grant_timeout)
+            return 1;
         const auto issued = connection->transport->manage(
-            "grant-request", choc::json::toString(grant_params, false));
+            "grant-request", choc::json::toString(grant_params, false), *grant_timeout);
         if (issued.status_id != "granted")
             return fail(issued.status_id, issued.explanation, json);
         try {
@@ -516,10 +558,14 @@ int cmd_control(const std::vector<std::string>& args) {
         }
     }
     ControlClient client(*connection->transport);
+    const auto negotiation_timeout = remaining_timeout(deadline, request_timeout, json);
+    if (!negotiation_timeout)
+        return 1;
     const auto negotiation =
         client.negotiate({.versions = {kControlProtocolVersion, kControlProtocolVersion},
                           .mandatory_features = {"receipts"},
-                          .optional_features = {"artifacts", "progress"}});
+                          .optional_features = {"artifacts", "progress"}},
+                         *negotiation_timeout);
     if (!negotiation.response || negotiation.response->status != ControlNegotiationStatus::Accepted)
         return fail(negotiation.error_code.empty() ? "negotiation-failed" : negotiation.error_code,
                     negotiation.explanation, json);
@@ -527,6 +573,9 @@ int cmd_control(const std::vector<std::string>& args) {
     const auto idempotency = token("cli-idempotency-");
     if (!request_id || !idempotency)
         return fail("entropy-unavailable", "request entropy is unavailable", json);
+    const auto final_timeout = remaining_timeout(deadline, request_timeout, json);
+    if (!final_timeout)
+        return 1;
     ControlRequestEnvelope request{
         .request_id = *request_id,
         .client_id = connection->client_id,
@@ -536,13 +585,15 @@ int cmd_control(const std::vector<std::string>& args) {
         .operation_id = operation,
         .operation_version = 1,
         .idempotency_key = *idempotency,
-        .deadline_unix_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                std::chrono::system_clock::now().time_since_epoch())
-                                .count() +
-                            timeout_ms,
+        .deadline_unix_ms = deadline
+                                ? deadline->unix_deadline_ms(std::chrono::system_clock::now())
+                                : std::chrono::duration_cast<std::chrono::milliseconds>(
+                                      std::chrono::system_clock::now().time_since_epoch())
+                                          .count() +
+                                      timeout_ms,
         .params_json = params};
     request.request_hash = control_request_hash(request).value_or("");
-    const auto result = client.request(request, request_timeout);
+    const auto result = client.request(request, *final_timeout);
     if (!result.response)
         return fail(result.error_code, result.explanation, json);
     const auto& receipt = *result.response;
