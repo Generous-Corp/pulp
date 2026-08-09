@@ -126,6 +126,18 @@ std::optional<choc::value::Value> parse_object(std::string_view json) {
     return std::nullopt;
 }
 
+bool advertises_trace_control(const choc::value::Value& candidate) {
+    if (!candidate.isObject() || !candidate.hasObjectMember("capabilities") ||
+        !candidate["capabilities"].isArray())
+        return false;
+    const auto capabilities = candidate["capabilities"];
+    for (std::uint32_t index = 0; index < capabilities.size(); ++index)
+        if (capabilities[index].isString() &&
+            capabilities[index].getString() == kTraceOperationId)
+            return true;
+    return false;
+}
+
 std::filesystem::path resolve_installed_broker(const std::filesystem::path& executable) {
     auto resolved_executable = executable;
 #if defined(__APPLE__)
@@ -163,10 +175,8 @@ std::filesystem::path resolve_installed_broker(const std::filesystem::path& exec
 class InstalledInspectorControlSessionOpener final : public InspectorControlSessionOpener {
   public:
     InstalledInspectorControlSessionOpener(std::filesystem::path executable,
-                                           std::optional<std::string> instance_id,
-                                           std::string profile)
-        : executable_(std::move(executable)), instance_id_(std::move(instance_id)),
-          profile_(std::move(profile)) {}
+                                           std::optional<std::string> instance_id)
+        : executable_(std::move(executable)), instance_id_(std::move(instance_id)) {}
 
     std::optional<InspectorControlSession> open(std::chrono::milliseconds timeout) override {
         if (timeout <= std::chrono::milliseconds::zero())
@@ -202,38 +212,19 @@ class InstalledInspectorControlSessionOpener final : public InspectorControlSess
         if (inventory_timeout <= std::chrono::milliseconds::zero())
             return std::nullopt;
         const auto inventory_result = connection->manage("instances", "{}", inventory_timeout);
-        const auto inventory = parse_object(inventory_result.data_json);
-        if (inventory_result.status_id != "completed" || !inventory ||
-            !inventory->hasObjectMember("instances") || !(*inventory)["instances"].isArray())
+        if (inventory_result.status_id != "completed")
             return std::nullopt;
-        std::optional<choc::value::Value> selected;
-        const auto instances = (*inventory)["instances"];
-        for (std::uint32_t index = 0; index < instances.size(); ++index) {
-            const auto candidate = choc::value::Value(instances[index]);
-            const auto id = object_string(candidate, "instance_id");
-            if (!id || (instance_id_ && *id != *instance_id_))
-                continue;
-            if (selected)
-                return std::nullopt;
-            selected = candidate;
-        }
+        const auto selected = detail::select_trace_control_instance(
+            inventory_result.data_json,
+            instance_id_ ? std::optional<std::string_view>(*instance_id_) : std::nullopt);
         if (!selected)
             return std::nullopt;
-
-        const auto instance_id = object_string(*selected, "instance_id");
-        const auto registration_id = object_string(*selected, "registration_id");
-        const auto publication_id = object_string(*selected, "publication_id");
-        const auto session_id = object_string(*selected, "session_id");
-        if (!instance_id || !registration_id || !publication_id || !session_id)
-            return std::nullopt;
-        auto grant_params = choc::value::createObject("");
-        grant_params.addMember("instance_id", choc::value::createString(*instance_id));
-        grant_params.addMember("profile", choc::value::createString(profile_));
         const auto grant_timeout = remaining_until(deadline);
         if (grant_timeout <= std::chrono::milliseconds::zero())
             return std::nullopt;
         const auto granted = connection->manage(
-            "grant-request", choc::json::toString(grant_params, false), grant_timeout);
+            "grant-request", detail::trace_control_grant_request_json(selected->instance_id),
+            grant_timeout);
         const auto grant = parse_object(granted.data_json);
         const auto grant_id = grant ? object_string(*grant, "grant_id") : std::nullopt;
         if (granted.status_id != "granted" || !grant_id)
@@ -242,17 +233,17 @@ class InstalledInspectorControlSessionOpener final : public InspectorControlSess
         return InspectorControlSession{
             .transport = std::move(connection),
             .client_id = ControlClientId{*client_id},
-            .registration_id = ControlRegistrationId{*registration_id},
+            .registration_id = ControlRegistrationId{selected->registration_id},
             .grant_id = ControlGrantId{*grant_id},
-            .instance_generation = *publication_id,
-            .target = {*session_id, *instance_id, *publication_id},
+            .instance_generation = selected->publication_id,
+            .target = {selected->session_id, selected->instance_id,
+                       selected->publication_id},
         };
     }
 
   private:
     std::filesystem::path executable_;
     std::optional<std::string> instance_id_;
-    std::string profile_;
 };
 
 InspectorMessage invalid_response(std::string explanation, bool may_have_applied = true) {
@@ -260,6 +251,47 @@ InspectorMessage invalid_response(std::string explanation, bool may_have_applied
 }
 
 } // namespace
+
+std::optional<detail::TraceControlInventorySelection>
+detail::select_trace_control_instance(
+    std::string_view inventory_json,
+    std::optional<std::string_view> exact_instance_id) {
+    const auto inventory = parse_object(inventory_json);
+    if (!inventory || !inventory->hasObjectMember("instances") ||
+        !(*inventory)["instances"].isArray())
+        return std::nullopt;
+
+    std::optional<choc::value::Value> selected;
+    const auto instances = (*inventory)["instances"];
+    for (std::uint32_t index = 0; index < instances.size(); ++index) {
+        const auto candidate = choc::value::Value(instances[index]);
+        const auto id = object_string(candidate, "instance_id");
+        if (!id || (exact_instance_id && *id != *exact_instance_id) ||
+            (!exact_instance_id && !advertises_trace_control(candidate)))
+            continue;
+        if (selected)
+            return std::nullopt;
+        selected = candidate;
+    }
+    if (!selected)
+        return std::nullopt;
+
+    const auto instance_id = object_string(*selected, "instance_id");
+    const auto registration_id = object_string(*selected, "registration_id");
+    const auto publication_id = object_string(*selected, "publication_id");
+    const auto session_id = object_string(*selected, "session_id");
+    if (!instance_id || !registration_id || !publication_id || !session_id)
+        return std::nullopt;
+    return detail::TraceControlInventorySelection{
+        *instance_id, *registration_id, *publication_id, *session_id};
+}
+
+std::string detail::trace_control_grant_request_json(std::string_view instance_id) {
+    auto params = choc::value::createObject("");
+    params.addMember("instance_id", choc::value::createString(instance_id));
+    params.addMember("operation_id", choc::value::createString(kTraceOperationId));
+    return choc::json::toString(params, false);
+}
 
 std::filesystem::path
 installed_control_broker_executable(const std::filesystem::path& client_executable) {
@@ -270,9 +302,9 @@ std::unique_ptr<InspectorControlSessionOpener>
 make_installed_inspector_control_session_opener(
     std::filesystem::path client_executable,
     std::optional<std::string> exact_instance_id,
-    std::string profile) {
+    std::string) {
     return std::make_unique<InstalledInspectorControlSessionOpener>(
-        std::move(client_executable), std::move(exact_instance_id), std::move(profile));
+        std::move(client_executable), std::move(exact_instance_id));
 }
 
 InspectorClientResult request_control_inspector(std::string method, std::string params_json,

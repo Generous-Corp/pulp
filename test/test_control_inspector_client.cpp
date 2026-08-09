@@ -154,6 +154,78 @@ ControlReceiptEnvelope failed(const ControlRequestEnvelope& request,
 
 } // namespace
 
+TEST_CASE("installed Inspector trace grant requests only the required operation",
+          "[inspect][control][client][trace][authority]") {
+    const auto params = choc::json::parse(
+        detail::trace_control_grant_request_json("instance-trace"));
+    REQUIRE(params.isObject());
+    CHECK(params["instance_id"].getString() == "instance-trace");
+    CHECK(params["operation_id"].getString() ==
+          "dev.pulp.trace/session-control@1");
+    CHECK_FALSE(params.hasObjectMember("profile"));
+
+    std::size_t member_count = 0;
+    params.getView().visitObjectMembers(
+        [&](std::string_view, const choc::value::ValueView&) { ++member_count; });
+    CHECK(member_count == 2);
+}
+
+TEST_CASE("implicit trace discovery ignores registrations without trace authority",
+          "[inspect][control][client][trace][discovery]") {
+    constexpr std::string_view inventory = R"({
+        "instances": [
+            {
+                "instance_id": "unrelated",
+                "registration_id": "registration-unrelated",
+                "publication_id": "publication-unrelated",
+                "session_id": "session-unrelated",
+                "capabilities": ["dev.pulp.instance/read@1"]
+            },
+            {
+                "instance_id": "trace",
+                "registration_id": "registration-trace",
+                "publication_id": "publication-trace",
+                "session_id": "session-trace",
+                "capabilities": ["dev.pulp.trace/session-control@1"]
+            }
+        ]
+    })";
+
+    const auto selected = detail::select_trace_control_instance(inventory);
+    REQUIRE(selected);
+    CHECK(selected->instance_id == "trace");
+    CHECK(selected->registration_id == "registration-trace");
+
+    const auto exact_unrelated =
+        detail::select_trace_control_instance(inventory, "unrelated");
+    REQUIRE(exact_unrelated);
+    CHECK(exact_unrelated->instance_id == "unrelated");
+}
+
+TEST_CASE("implicit trace discovery rejects multiple trace-capable registrations",
+          "[inspect][control][client][trace][discovery]") {
+    constexpr std::string_view inventory = R"({
+        "instances": [
+            {
+                "instance_id": "trace-a",
+                "registration_id": "registration-a",
+                "publication_id": "publication-a",
+                "session_id": "session-a",
+                "capabilities": ["dev.pulp.trace/session-control@1"]
+            },
+            {
+                "instance_id": "trace-b",
+                "registration_id": "registration-b",
+                "publication_id": "publication-b",
+                "session_id": "session-b",
+                "capabilities": ["dev.pulp.trace/session-control@1"]
+            }
+        ]
+    })";
+
+    CHECK_FALSE(detail::select_trace_control_instance(inventory));
+}
+
 TEST_CASE("canonical Inspector client translates only trace session methods",
           "[inspect][control][client][trace]") {
     auto state = successful_state();

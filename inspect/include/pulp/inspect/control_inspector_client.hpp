@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace pulp::inspect {
 
@@ -58,14 +59,15 @@ installed_control_broker_executable(const std::filesystem::path& client_executab
 
 /// Build the installed-process opener used by CLI and MCP compatibility
 /// adapters. The opener authenticates the sibling broker, enrolls a client,
-/// requires one unambiguous live instance unless an exact instance is given,
-/// and asks the broker for the named profile. Broker consent remains the only
-/// authority source.
+/// requires one unambiguous trace-capable live instance unless an exact
+/// instance is given, and asks the broker only for trace session control.
+/// The legacy profile argument is retained for source compatibility and is
+/// ignored. Broker consent remains the only authority source.
 std::unique_ptr<InspectorControlSessionOpener>
 make_installed_inspector_control_session_opener(
     std::filesystem::path client_executable,
     std::optional<std::string> exact_instance_id = std::nullopt,
-    std::string profile = "develop");
+    std::string legacy_profile = "develop");
 
 /// Execute one already-supported trace Inspector method through the canonical
 /// capability-control carrier. Only Trace.startSession and Trace.stopSession
@@ -83,6 +85,20 @@ request_control_inspector(std::string method, std::string params_json = "{}",
                           std::chrono::milliseconds timeout = std::chrono::seconds(3));
 
 namespace detail {
+
+struct TraceControlInventorySelection {
+    std::string instance_id;
+    std::string registration_id;
+    std::string publication_id;
+    std::string session_id;
+};
+
+/// Internal pure seams for testing least-authority discovery and grant
+/// construction without a live installed broker.
+std::optional<TraceControlInventorySelection> select_trace_control_instance(
+    std::string_view inventory_json,
+    std::optional<std::string_view> exact_instance_id = std::nullopt);
+std::string trace_control_grant_request_json(std::string_view instance_id);
 
 using InspectorControlClock =
     std::function<std::chrono::steady_clock::time_point()>;
