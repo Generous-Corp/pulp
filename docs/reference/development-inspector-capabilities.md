@@ -51,8 +51,8 @@ availability.
 | `dev.pulp.ui/observe@1` (`ui.read`) | yes | yes | Typed contract/components exist; no general product host adapter |
 | `dev.pulp.diagnostics/read@1` (`diagnostics.read`) | yes | yes | Typed contract/components exist; no general product host adapter |
 | `dev.pulp.logs/read@1` (`logs.read`) | yes | yes | Console component exists; no public live route |
-| `dev.pulp.ui/capture@1` (`capture.image`) | yes | yes | Typed contract and client binding exist; availability still requires an injected exact-instance host executor |
-| `dev.pulp.ui/input@1` (`ui.input`) | no | no | Frozen high-risk contract; no current executor or grant path |
+| `dev.pulp.ui/capture@1` (`capture.image`) | yes | yes | The exact-instance main-thread executor reuses `InspectorCaptureSource` for bounded window PNGs and publishes sensitive ACL-bound broker artifacts; node capture remains unavailable without an exact node-capture seam |
+| `dev.pulp.ui/input@1` (`ui.input`) | no | no | Frozen high-risk contract deliberately remains ungrantable; the host executor returns `unsupported-no-exact-host-target-seam` rather than inventing generic input primitives |
 | `dev.pulp.trace/control@1` (`trace.control`) | no | yes | Injected exact-T1 main-thread Motion executor provides authority-bound geometry/scroll trace ownership, bounded preloaded-fixture scrub/play/pause, and finite redacted cost snapshots; no generic raw Inspector route |
 | `dev.pulp.trace/session-control@1` (`trace.session.control`) | no | yes | `pulp trace start/stop` and matching MCP tools use canonical control only; the reusable host observability bundle dispatches the exact admitted instance when an adapter publishes it |
 | `dev.pulp.state/parameter-gesture@1` (`state.write`) | no | yes | T1 main-thread exact-slot executor atomically claims the shared `StateStore` generation and rolls back failed brackets without overwriting newer writers; broker grant/consent remains mandatory |
@@ -60,7 +60,7 @@ availability.
 | `dev.pulp.authoring/tweaks@1` (`authoring.tweaks`) | no | yes | In-process authoring components remain; remote wrapper was removed |
 | `dev.pulp.telemetry/subscribe@1` (`telemetry.stream`) | no | yes | The host observability bundle exposes typed `subscribe`, `poll`, and `unsubscribe` actions over the bounded/redacting tap; exact host publication still determines availability |
 | `dev.pulp.runtime/reload@1` (`runtime.reload`) | no | no | Frozen contract; no current executor or grant path |
-| `dev.pulp.runtime/evaluate@1` (`runtime.eval`) | no | no | Critical typed client exists but refuses automatic grants; separate broker-owned single-use consent and an injected evaluator are required |
+| `dev.pulp.runtime/evaluate@1` (`runtime.eval`) | no | no | Research-unsafe acknowledged manifests may inject the bounded exact-instance evaluator; grants require broker-owned single-use consent, and results/errors are size-bounded and redacted |
 | `dev.pulp.artifact/read@1` (`artifact.read`) | no | no | Publication-bound typed client rechecks exact original lineage and broker ACL for every chunk |
 | `dev.pulp.unavailable/operation@1` (`unavailable`) | no | no | Filesystem/editor-launch operations remain unavailable by policy |
 

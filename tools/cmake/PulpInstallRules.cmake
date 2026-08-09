@@ -355,6 +355,7 @@ elseif(TARGET pulp-inspect-protocol)
     endif()
     if(TARGET pulp-inspect-runtime)
         install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_host_ui_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_main_thread_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_state_read_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_state_write_executor.hpp"

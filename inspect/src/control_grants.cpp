@@ -225,6 +225,13 @@ ControlGrantResult ControlGrantStore::issue(
         consent.authority == ControlConsentAuthority::TrustedPulpCli ||
         consent.authority == ControlConsentAuthority::TrustedHostUi ||
         consent.authority == ControlConsentAuthority::BrokerUserPrompt;
+    if (std::ranges::find(request.capabilities, InspectorCapability::RuntimeEval) !=
+            request.capabilities.end() &&
+        !one_shot_consent) {
+        result.status = ControlGrantStatus::ConsentRequired;
+        impl_->audit_denial(request, control_grant_status_id(result.status));
+        return result;
+    }
     ControlGrant grant{
         ControlGrantId{*grant_id},
         impl_->identities.broker_id(),

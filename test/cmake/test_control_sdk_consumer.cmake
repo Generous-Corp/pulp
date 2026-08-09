@@ -91,6 +91,7 @@ file(WRITE "${_consumer_source}/main.cpp" [=[
 #include <pulp/inspect/control_host_bootstrap.hpp>
 #include <pulp/inspect/control_host_preflight.hpp>
 #include <pulp/inspect/control_host_router.hpp>
+#include <pulp/inspect/control_host_ui_executor.hpp>
 #include <pulp/inspect/control_main_thread_executor.hpp>
 #include <pulp/inspect/control_trace_session_executor.hpp>
 #include <pulp/inspect/control_operations.hpp>
@@ -181,6 +182,7 @@ int main() {
       pulp::inspect::ControlHostConnectionPrincipal{
           pulp::inspect::ControlRegistrationId{"installed-registration"}};
   auto rpc = std::make_shared<pulp::inspect::InspectorMainThreadRpc>();
+  auto* ui_executor_type = static_cast<pulp::inspect::ControlHostUiExecutor*>(nullptr);
   pulp::inspect::ControlMainThreadExecutor main_thread_executor{rpc, {}};
   auto trace = std::make_shared<pulp::inspect::TraceInspector>();
   auto trace_executor = pulp::inspect::ControlTraceSessionExecutor::create({

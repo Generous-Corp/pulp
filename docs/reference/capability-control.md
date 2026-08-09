@@ -35,6 +35,20 @@ Mutation capabilities additionally require
 `research-unsafe` with `ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL`; no named grant profile
 automatically grants it.
 
+The Pulp-owned host UI executor is a composition building block, not automatic
+activation. It binds one registration/session/instance/publication, uses the
+existing main-thread capture and evaluator seams, and publishes captured PNGs
+only through broker-owned artifact storage. Window capture is implemented.
+Node capture and UI input remain explicitly unavailable because Pulp has no
+host-owned exact-target seam for them; integrations must not substitute raw
+Inspector methods or generic synthetic input.
+
+Runtime evaluation composition additionally requires the exact validated
+registration and its digest-matched manifest, an interrupt-capable evaluator,
+and an explicit host redactor. The request deadline is passed into the
+evaluator, while broker cancellation or revocation interrupts in-flight work;
+unredacted or oversized results fail closed.
+
 Build profiles are artifact policy, not client grants:
 
 | Build profile | Authoring rule |

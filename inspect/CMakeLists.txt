@@ -109,6 +109,7 @@ target_link_libraries(pulp-inspect-client
 add_library(pulp-inspect-runtime
     src/control_state_read_executor.cpp
     src/control_state_write_executor.cpp
+    src/control_host_ui_executor.cpp
     src/control_main_thread_executor.cpp
     src/control_trace_session_executor.cpp
     src/main_thread_rpc.cpp

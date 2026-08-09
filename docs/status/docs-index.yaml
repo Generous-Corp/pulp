@@ -450,7 +450,7 @@ docs:
   - slug: capability-control
     path: reference/capability-control.md
     kind: reference
-    summary: Canonical profiles, exact-instance authority, safe grant and revoke workflow, diagnostics, and installed T0/T1 examples
+    summary: Canonical profiles, exact-instance authority, broker-published UI capture, research-only evaluation, safe grants and revocation, diagnostics, and installed T0/T1 examples
 
   - slug: fractional-delay
     path: reference/fractional-delay.md

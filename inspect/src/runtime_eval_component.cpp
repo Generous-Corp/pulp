@@ -43,7 +43,8 @@ public:
         return out;
     }
 
-    RuntimeEvaluationResult evaluate(std::string_view code) override {
+    RuntimeEvaluationResult evaluate(std::string_view code, std::chrono::milliseconds timeout,
+                                     std::size_t maximum_result_bytes) override {
         RuntimeEvaluationResult out;
         if (code.size() > kRuntimeEvalMaxCodeBytes) {
             out.error = "Runtime.evaluate code exceeds the 65536-byte limit";
@@ -58,15 +59,14 @@ public:
             out.error = "no scripted-UI engine attached";
             return out;
         }
-        const auto result = bridge_->evaluate(
-            std::string(code), kRuntimeEvalDeadline, kRuntimeEvalMaxResultBytes);
+        const auto result = bridge_->evaluate(std::string(code), timeout, maximum_result_bytes);
         out.ok = result.ok;
         out.timed_out = result.timed_out;
         out.busy = result.busy;
         out.detached = result.detached;
         out.json = result.json;
         out.error = result.error;
-        if (out.ok && out.json.size() > kRuntimeEvalMaxResultBytes) {
+        if (out.ok && out.json.size() > maximum_result_bytes) {
             out = RuntimeEvaluationResult{};
             out.error = "Runtime.evaluate result exceeds the 1048576-byte limit";
         }

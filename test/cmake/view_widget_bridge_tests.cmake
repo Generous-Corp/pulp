@@ -512,6 +512,13 @@ target_link_libraries(pulp-test-control-host-observability-bundle PRIVATE
 catch_discover_tests(pulp-test-control-host-observability-bundle
     PROPERTIES LABELS "inspect;control;observability;trace;telemetry")
 
+add_executable(pulp-test-control-host-ui-executor
+    test_control_host_ui_executor.cpp)
+target_link_libraries(pulp-test-control-host-ui-executor PRIVATE
+    pulp::inspect-runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-host-ui-executor
+    PROPERTIES LABELS "inspect;control;ui;capture;runtime-eval")
+
 # Inspector tests — only when GPU is enabled (pulp-inspect requires GPU stack).
 if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     add_executable(pulp-test-inspector test_inspector.cpp)

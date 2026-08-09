@@ -367,6 +367,10 @@ TEST_CASE("control registry projects capability and operation metadata",
         if (operation.capability == InspectorCapability::CaptureImage) {
             CHECK(operation.input_schema_json.find("\"oneOf\"") != std::string_view::npos);
             CHECK(operation.input_schema_json.find("\"const\":\"node\"") != std::string_view::npos);
+            CHECK(operation.output_schema_json.find("\"redaction_state\":{\"const\":\"original\"}") !=
+                  std::string_view::npos);
+            CHECK(operation.output_schema_json.find("\"width\":{\"maximum\":1048576") !=
+                  std::string_view::npos);
         }
         if (operation.capability == InspectorCapability::TestInput) {
             CHECK(operation.input_schema_json.find("\"maximum\":400") != std::string_view::npos);

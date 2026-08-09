@@ -41,10 +41,13 @@ ordinary plugin-format targets stay stripped and unsupported host tiers remain
 unavailable.
 
 `dev.pulp.runtime/evaluate@1` is arbitrary execution in the product process.
-No profile or acknowledgement implies it. Once a dedicated host adapter exists,
-an integration that truly needs evaluation must use `research-unsafe`, declare
-both session control and runtime evaluation, and provide the distinct unsafe
-acknowledgement. Ordinary `pulp_add_plugin` targets cannot opt in today.
+No profile or acknowledgement implies it. The reusable host executor accepts it
+only for an exact `research-unsafe` registration with the distinct unsafe
+acknowledgement, an injected high-risk evaluator component, and broker-owned
+single-use consent. The adapter also requires an interrupt-capable evaluator
+and an explicit result redactor; cancellation, deadline, or unsafe result
+handling fails closed. Ordinary `pulp_add_plugin` targets still cannot opt in
+because they do not compose that host adapter.
 
 The legacy `SHIP_INSPECTOR`, `SHIP_INSPECTOR_RUNTIME_EVAL`, and
 `INSPECTOR_CAPABILITIES` spellings have been removed. Use the canonical control
@@ -209,6 +212,9 @@ require a nonempty anchor of at most 256 Unicode codepoints, while highlight
 requires an exact node with a 256-byte UTF-8
 ceiling. Runtime evaluation
 rejects NUL and carries both a character ceiling and the executor's
-65,536-byte UTF-8 ceiling.
+65,536-byte UTF-8 ceiling. Window capture additionally reports bounded positive
+dimensions, validates the PNG signature, and records `redaction_state=original`
+on a sensitive broker-owned artifact. Node capture and UI input remain explicit
+unsupported dispositions until host-owned exact-target seams exist.
 Changing any of these limits changes the registry digest and therefore the
 artifact and consent identity reviewed above.

@@ -202,6 +202,32 @@ TEST_CASE("interactive consent decisions are single-use while policy is reusable
           ControlGrantStatus::Granted);
 }
 
+TEST_CASE("runtime evaluation rejects reusable policy and consumes interactive consent",
+          "[inspect][control][grants][runtime-eval][consent]") {
+    GrantFixture fixture;
+    const auto eval_request = [&] {
+        return fixture.request({InspectorCapability::SessionControl,
+                                InspectorCapability::RuntimeEval});
+    };
+    CHECK(fixture.grants.issue(
+              eval_request(),
+              GrantFixture::consent(ControlConsentAuthority::ExistingUserPolicy,
+                                    "eval-policy")).status ==
+          ControlGrantStatus::ConsentRequired);
+    REQUIRE(fixture.grants.issue(
+                eval_request(),
+                GrantFixture::consent(ControlConsentAuthority::BrokerUserPrompt,
+                                      "eval-prompt")).status ==
+            ControlGrantStatus::ConsentRequired);
+    auto prompt = GrantFixture::consent(ControlConsentAuthority::BrokerUserPrompt,
+                                        "eval-prompt-live");
+    prompt.expires_at = fixture.now + 5s;
+    REQUIRE(fixture.grants.issue(eval_request(), prompt).status ==
+            ControlGrantStatus::Granted);
+    CHECK(fixture.grants.issue(eval_request(), prompt).status ==
+          ControlGrantStatus::ConsentReplay);
+}
+
 TEST_CASE("broker prompt consent must remain unexpired when the grant is issued",
           "[inspect][control][grants][consent]") {
     GrantFixture fixture;

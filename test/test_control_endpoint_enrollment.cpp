@@ -36,7 +36,7 @@ constexpr std::string_view kManifest = R"({
   "product_name": "Pulp Trusted Host Fixture",
   "bundle_id": "dev.pulp.test.trusted-host-fixture",
   "build_id": "build:0123456789abcdef0123456789abcdef",
-  "registry_digest": "621fb8889cfcf5b527a3e8977c571102503657fd009146deee5e1fd74b8a6776",
+  "registry_digest": "1a3bcf207e34b79c49e32038699f3738d1d814838766e4d3f7aebaf895770ace",
   "endpoint_included": true,
   "unsafe_runtime_eval_acknowledged": false,
   "permission_terms": ["implemented", "built", "host_available", "activated", "policy_eligible", "client_granted", "session_live"],
