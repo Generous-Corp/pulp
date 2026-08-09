@@ -177,6 +177,9 @@ jobs:
                 -f 'labels[]=coverage' -f 'labels[]=ci' -f 'labels[]=P1-important' >/dev/null
             fi
             echo "::error::Coverage uploads stalled: no successful main Coverage run in ~${age_h}h (threshold ${MAX_AGE_HOURS}h)."
+            if [ "${DRY_RUN}" != "true" ]; then
+              exit 1
+            fi
           else
             echo "Coverage uploads healthy (last success ~${age_h}h ago)."
             if [ -n "${issue_num}" ] && [ "${DRY_RUN}" != "true" ]; then
