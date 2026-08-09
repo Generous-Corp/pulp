@@ -452,6 +452,17 @@
         "tools/scripts/build_combined_installer.sh"
       ]
     },
+    "render-toolchain-update": {
+      "paths": [
+        "tools/deps/manifest.json",
+        "tools/deps/min_os.json",
+        "tools/scripts/fetch_skia_for_release.py",
+        "tools/scripts/fetch_v8_for_release.py",
+        "external/skia-build/VERSION.md",
+        "ci/visual-harness.Dockerfile",
+        "tools/harness/visual/pins.py"
+      ]
+    },
     "skia-gpu-build": {
       "paths": [
         "tools/cmake/FindSkia.cmake",

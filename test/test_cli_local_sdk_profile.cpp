@@ -45,7 +45,7 @@ local_sdk::Identity identity(std::string sha = std::string(40, 'a')) {
         .compiler = "Apple clang version 17.0.0",
         .macos_sdk = "26.0",
         .deployment_target = "13.4",
-        .skia_identity = "chrome/m151",
+        .skia_identity = "chrome/m152",
         .vst3_git_sha = std::string(40, 'b'),
         .ausdk_git_sha = std::string(40, 'c'),
     };

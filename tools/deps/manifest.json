@@ -137,13 +137,13 @@
       "name": "Dawn",
       "category": "render",
       "license": "BSD-3-Clause",
-      "version": "chrome/m151 deps (bundled in Skia toolchain)",
+      "version": "chrome/m152 deps (bundled in Skia toolchain)",
       "source_kind": "prebuilt-toolchain",
       "repository": "https://dawn.googlesource.com/dawn",
       "upstream": { "kind": "none" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
-      "notes": "Bundled through the Skia chrome/m151 prebuilt toolchain (danielraffel/skia-builder fork). Exact Dawn revision tracks Skia's DEPS file on chrome/m151; the bundled build reports Dawn SHA1 7807dcbdca245e462617c04d544706394db245ba (include/dawn/dawn_version.h).",
+      "notes": "Bundled through the Skia chrome/m152 prebuilt toolchain (danielraffel/skia-builder fork). Exact Dawn revision tracks Skia's DEPS file on chrome/m152; the bundled build reports Dawn SHA1 1e897275172a23f27b0022fa6beae3084ed54a9b (include/dawn/dawn_version.h).",
       "source_files": [
         "CMakeLists.txt",
         "tools/build-skia.sh",
@@ -924,49 +924,53 @@
       "name": "Skia",
       "category": "canvas",
       "license": "BSD-3-Clause",
-      "version": "chrome/m151",
+      "version": "chrome/m152",
       "source_kind": "prebuilt-toolchain",
       "repository": "https://skia.googlesource.com/skia.git",
       "upstream": { "kind": "none" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
-      "notes": "Prebuilt via skia-builder (danielraffel fork: https://github.com/danielraffel/skia-builder) for Pulp rendering. The fork tracks olilarkin/skia-builder's tag pattern and adds iOS device/simulator, visionOS, mac-x86_64, and Skia.xcframework slices the upstream does not ship. The chrome/m151 release ships all platform slices including linux-arm64. Visual harness determinism locks Skia plus its bundled HarfBuzz and ICU DEPS revisions; regenerate raster goldens only when any pinned Skia asset, bundled text dependency, font file, or sampler/render configuration changes.",
+      "notes": "Prebuilt via skia-builder (danielraffel fork: https://github.com/danielraffel/skia-builder) for Pulp rendering. The fork tracks olilarkin/skia-builder's tag pattern and adds iOS device/simulator, visionOS, mac-x86_64, and Skia.xcframework slices the upstream does not ship. The chrome/m152 release ships all required platform slices including linux-arm64 and restores native jsonreader/skresources archives. Visual harness determinism locks Skia plus its bundled HarfBuzz and ICU DEPS revisions; regenerate raster goldens only when any pinned Skia asset, bundled text dependency, font file, or sampler/render configuration changes.",
       "determinism": {
-        "skia_branch": "chrome/m151",
+        "skia_branch": "chrome/m152",
         "skia_builder_fork": "https://github.com/danielraffel/skia-builder",
         "skia_python_smoke_version": "144.0.post2",
         "release_assets": {
           "ios-device-arm64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m151/skia-build-ios-device-arm64-gpu-release.zip",
-            "sha256": "d82341a075cf63ce70c659828017a928b3b5cc41bed74795dde61edce9c8f29b"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m152/skia-build-ios-device-arm64-gpu-release.zip",
+            "sha256": "e67923bbce6d9a7d15b640633a300e22991815e4dfa7f9e5d4198261b87e16d9"
           },
           "ios-simulator-arm64-x86_64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m151/skia-build-ios-simulator-arm64-x86_64-gpu-release.zip",
-            "sha256": "2c98b79b4f4c20282ce665ba79bb040124ee6424f16b087c2c6c01c1acb177a2"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m152/skia-build-ios-simulator-arm64-x86_64-gpu-release.zip",
+            "sha256": "219b50662844797428f7c66920aa33eb8790b344e6626d35e252ed3c7b3bf6cf"
           },
           "linux-arm64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m151/skia-build-linux-arm64-gpu-release.zip",
-            "sha256": "2420eed074e041384973338f9d8a41364b9ff444ffa0eb1857cb1ebdbd8781e9"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m152/skia-build-linux-arm64-gpu-release.zip",
+            "sha256": "12aa2ba8a43472461dd552f7ac28420137bd6a3175542563c3bbbf06124d7df6"
           },
           "linux-x64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m151-glibc234/skia-build-linux-x64-gpu-release.zip",
-            "sha256": "518b74ee7f0b245c209349023e58a2891a83a7ab776504d7d8a23d1e76fbf4de"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m152/skia-build-linux-x64-gpu-release.zip",
+            "sha256": "b0114b0edd1e07d274fd37b8fb3508966590b9dda1fdd1f3ab24441c12dee4ed"
           },
           "mac-arm64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m151-minos13/skia-build-mac-arm64-gpu-release.zip",
-            "sha256": "648250f9ee625f0c6c73c521b5a2de7cf46812b06aa2300e4bec8b2bb6d4081b"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m152/skia-build-mac-arm64-gpu-release.zip",
+            "sha256": "4bf7afda5dd2e20a41093255431a12bdb0df9eca56883ce0ba708cd471fb2a39"
           },
           "mac-universal": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m151-minos13/skia-build-mac-universal-gpu-release.zip",
-            "sha256": "284964fda380a2cc5ff4f885ae557ef04dab5987ebd94fc01354b95878ad85cf"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m152/skia-build-mac-universal-gpu-release.zip",
+            "sha256": "a066fd95d447fe00aa9890ae404fda1fb1db369006b1c705b401c8605f8ae244"
           },
           "mac-x86_64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m151-minos13/skia-build-mac-x86_64-gpu-release.zip",
-            "sha256": "f1734e9f41c0d01700d446282550725a7b6b42ebc906ba295f1f563112831f17"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m152/skia-build-mac-x86_64-gpu-release.zip",
+            "sha256": "f008bb70143142b1b9feec122c864ca7a5a24c895a8fbdeb75c9c7b6c07f3a63"
           },
           "wasm-wasm32": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m151/skia-build-wasm-wasm32-gpu-release.zip",
-            "sha256": "8a5a24368866d210fe47bac2ea03b67e63c429d1c9ea5ee11dc06d9db831def9"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m152/skia-build-wasm-wasm32-gpu-release.zip",
+            "sha256": "549e9aa6a6ede9c796be7866d244809c0a3f6c9d82367a6fa3f6e629e964decb"
+          },
+          "win-x64": {
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m152/skia-build-win-x64-gpu-release.zip",
+            "sha256": "f96c726ac7fbc32b36334eaadcc463ac9c6c5411afb97576f334a203abb99bc6"
           }
         },
         "web_toolchain": {
@@ -1087,7 +1091,7 @@
         "tools/cmake/PulpV8Windows.cmake",
         "tools/scripts/fetch_v8_for_release.py"
       ],
-      "notes": "Optional JS engine backend, selected with PULP_JS_ENGINE=v8 (default is QuickJS; JSC on Apple). Sealed, embeddable, shared V8 prebuilt via the danielraffel/v8-builder fork — exports only v8::/cppgc::, keeps ICU/zlib/Abseil internal so it coexists with Skia's bundled ICU without ODR clashes; Intl on. iOS is JSC-only (V8 needs JIT, forbidden in iOS apps/AUv3 extensions) — the ios-simulator asset ships headers only, no library. Each release records the Skia/Dawn revision it was seal+ODR validated against in paired_skia/paired_dawn; because the seal exports only v8::/cppgc:: and keeps ICU/zlib/Abseil internal, V8 coexists with a different pinned Skia without ODR clashes. v8-15.2.24 was validated against Skia chrome/m150 (paired_skia c0e2b966.../paired_dawn 3f761495...); Pulp pins Skia chrome/m151, one milestone ahead — the provider-identity/ODR gate (examples/threejs-native-demo/provider_identity_test.cmake) proves coexistence at the pinned Skia. Re-bake CI goldens when the pin moves. Consumed by tools/scripts/fetch_v8_for_release.py + tools/cmake/FindV8.cmake (unpacks to external/v8-build/<platform>/).",
+      "notes": "Optional JS engine backend, selected with PULP_JS_ENGINE=v8 (default is QuickJS; JSC on Apple). Sealed, embeddable, shared V8 prebuilt via the danielraffel/v8-builder fork — exports only v8::/cppgc::, keeps ICU/zlib/Abseil internal so it coexists with Skia's bundled ICU without ODR clashes; Intl on. iOS is JSC-only (V8 needs JIT, forbidden in iOS apps/AUv3 extensions) — the ios-simulator asset ships headers only, no library. Each release records the Skia/Dawn revision it was seal+ODR validated against in paired_skia/paired_dawn; because the seal exports only v8::/cppgc:: and keeps ICU/zlib/Abseil internal, V8 coexists with a different pinned Skia without ODR clashes. v8-15.2.24 was validated against Skia chrome/m150 (paired_skia c0e2b966.../paired_dawn 3f761495...); Pulp pins Skia chrome/m152, two milestones ahead — the provider-identity/ODR gate (examples/threejs-native-demo/provider_identity_test.cmake) proves coexistence at the pinned Skia. Re-bake CI goldens when the pin moves. Consumed by tools/scripts/fetch_v8_for_release.py + tools/cmake/FindV8.cmake (unpacks to external/v8-build/<platform>/).",
       "determinism": {
         "v8_builder_fork": "https://github.com/danielraffel/v8-builder",
         "built_revision": "97440bd4f523ca4d2af200556160023b466658a1",
