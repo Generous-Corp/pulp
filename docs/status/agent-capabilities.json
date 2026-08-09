@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 10,
+  "manifest_revision": 11,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 32
+        "capabilities": 34
       },
       "timebase": {
         "state": "partial",
@@ -1948,6 +1948,69 @@
       "contract_digest": "sha256:88f06843b0d66f01280a15d37bfdfea25ea2a50989e23c19e22132293862f7da"
     },
     {
+      "key": "signal.explicit-q-resonator-bank",
+      "domain": "signal",
+      "summary": "Prepared fixed-capacity band-pass resonator bank with explicit frequency, Q, gain, envelope, and transactional transition controls.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control; allocates bounded retained state and stages recipes",
+        "process": "audio; control publishes through latest-value SPSC handoff",
+        "reset": "audio",
+        "release": "destruction off audio"
+      },
+      "state_model": "Prepared fixed-capacity double-precision SVF and envelope state plus a three-slot recipe handoff and exact-duration transition state.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "finite mono audio and explicit per-band frequency, Q, gain, and ballistics",
+      "output_domain": "summed resonator audio plus per-band pre-gain output and envelope",
+      "units": [
+        "samples",
+        "frames",
+        "hertz",
+        "Q",
+        "decibels",
+        "milliseconds"
+      ],
+      "latency": "zero",
+      "tail": "recursive IIR decay bounded by the configured frequency and Q",
+      "scheduling": "sample-synchronous with recipe adoption at sample boundaries",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/explicit_q_resonator_bank.hpp",
+          "qualified_name": "pulp::signal::ExplicitQResonatorBankT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:d08e93be0e8366bcb238fec115b4fc62cabd641615ca6d1c6f96f4fc8d8a2050"
+    },
+    {
       "key": "signal.fm-operator-engine",
       "domain": "signal",
       "summary": "Fixed-capacity eight-operator FM and phase-modulation synthesis engine.",
@@ -3047,6 +3110,69 @@
         }
       },
       "contract_digest": "sha256:c8b893644e5b4350108cb149b8b2727816e4aeaad13faa3a33b999985ba2ab79"
+    },
+    {
+      "key": "signal.spectral-delay-matrix",
+      "domain": "signal",
+      "summary": "Prepared per-bin spectral delay and attenuation with bounded history and race-free frame-boundary table publication.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control; allocates bounded frame history and compiles tables",
+        "process": "audio; control publishes through latest-value SPSC handoff",
+        "reset": "audio; reset or history-only purge",
+        "release": "destruction off audio"
+      },
+      "state_model": "Prepared spectral frame engine, coherent per-channel complex-bin history, and three-slot delay/attenuation table handoff.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "tolerance_bounded",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "finite planar audio and normalized-frequency delay/attenuation breakpoints",
+      "output_domain": "coherent planar audio with frame-quantized per-bin content delay",
+      "units": [
+        "samples",
+        "frames",
+        "bins",
+        "milliseconds",
+        "decibels",
+        "linear gain"
+      ],
+      "latency": "fixed spectral-frame engine latency; content delay is D times analysis hop",
+      "tail": "finite engine latency plus the prepared maximum content-delay history",
+      "scheduling": "streaming overlap-add with table adoption only at frame boundaries",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/spectral_delay_matrix.hpp",
+          "qualified_name": "pulp::signal::SpectralDelayMatrixT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:7e5a490e4adc22e564e28d5acb59ff2f8ae176e1db1fdde21484fe88ae27dbd3"
     },
     {
       "key": "signal.spectral-frame-blur",
@@ -4367,14 +4493,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 63,
+    "total": 65,
     "by_domain": {
       "audio": 6,
       "midi": 9,
       "music": 6,
       "offline": 0,
       "sequence": 1,
-      "signal": 32,
+      "signal": 34,
       "timebase": 9
     }
   },
@@ -5581,6 +5707,20 @@
               "set_bypassed(bool bypassed)",
               "bypassed()",
               "config()"
+            ]
+          }
+        ],
+        "explicit_q_resonator_bank.hpp": [
+          {
+            "class": "ExplicitQResonatorBankT",
+            "methods": [
+              "static_assert(std::is_floating_point_v<SampleType>)",
+              "stage_band(int index, const BandRecipe& recipe)",
+              "set_coefficient_transition_ms(double transition_ms)",
+              "publish(int active_count)",
+              "publish(active_count, transition_ms_)",
+              "publish(int active_count, double transition_ms)",
+              "process(SampleType input)"
             ]
           }
         ],
@@ -7380,6 +7520,20 @@
               "set_box_volume_l(double litres)",
               "set_resonance_trim_semitones(double semitones)",
               "set_q_resonance(double q)"
+            ]
+          }
+        ],
+        "spectral_delay_matrix.hpp": [
+          {
+            "class": "SpectralDelayMatrixT",
+            "methods": [
+              "static_assert(std::is_floating_point_v<SampleType>)",
+              "compile_table(const SpectralDelayMatrixRecipe& recipe, int num_bins, int analysis_hop, double sample_rate, int maximum_delay_frames, SpectralDelayMatrixTable& out_table)",
+              "compile_spectral_delay_matrix_table(recipe, num_bins, analysis_hop, sample_rate, maximum_delay_frames, out_table)",
+              "publish_table(const SpectralDelayMatrixTable& table)",
+              "process(const SampleType* const* input, SampleType* const* output, int num_samples)",
+              "purge()",
+              "latency_samples()"
             ]
           }
         ],
