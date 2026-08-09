@@ -190,6 +190,76 @@ TEST_CASE("trusted host inventory fails closed with invalid configuration",
     CHECK(inventory.size() == 0);
 }
 
+TEST_CASE("trusted host inventory reaps only safe startup debris",
+          "[inspect][control][inventory][restart][security]") {
+#if defined(__APPLE__) && TARGET_OS_OSX && !TARGET_OS_IPHONE
+    SECTION("prior generations and incomplete current snapshots are reaped") {
+        Fixture fixture;
+        const auto stale_generation = fixture.root / "stage" / "generation-16";
+        const auto stale_snapshot = stale_generation / "snapshot-crashed";
+        const auto current_generation = fixture.root / "stage" / "generation-17";
+        const auto incomplete = current_generation /
+                                "snapshot-0123456789abcdef0123456789abcdef.new";
+        const auto live = current_generation /
+                          "snapshot-fedcba9876543210fedcba9876543210";
+        fs::create_directories(stale_snapshot);
+        fs::create_directories(incomplete);
+        fs::create_directories(live);
+        std::ofstream(stale_snapshot / "host") << "stale";
+        std::ofstream(incomplete / "host") << "partial";
+        std::ofstream(live / "host") << "live";
+        ::chmod(stale_generation.c_str(), 0700);
+        ::chmod(stale_snapshot.c_str(), 0700);
+        ::chmod((stale_snapshot / "host").c_str(), 0600);
+        ::chmod(current_generation.c_str(), 0700);
+        ::chmod(incomplete.c_str(), 0700);
+        ::chmod((incomplete / "host").c_str(), 0600);
+        ::chmod(live.c_str(), 0700);
+        ::chmod((live / "host").c_str(), 0600);
+
+        ControlTrustedHostInventory inventory(fixture.config());
+        CHECK_FALSE(fs::exists(stale_generation));
+        CHECK_FALSE(fs::exists(incomplete));
+        CHECK(fs::exists(live / "host"));
+        CHECK(inventory.prepare(fixture.intent()).status ==
+              ControlTrustedHostInventoryStatus::Prepared);
+    }
+
+    SECTION("unsafe stale generation is preserved and startup fails closed") {
+        Fixture fixture;
+        const auto outside = fixture.root / "outside";
+        fs::create_directory(outside);
+        std::ofstream(outside / "sentinel") << "preserve";
+        ::chmod(outside.c_str(), 0700);
+        ::chmod((outside / "sentinel").c_str(), 0600);
+        const auto unsafe = fixture.root / "stage" / "generation-16";
+        fs::create_directory_symlink(outside, unsafe);
+
+        ControlTrustedHostInventory inventory(fixture.config());
+        CHECK(fs::is_symlink(unsafe));
+        CHECK(read_file(outside / "sentinel") == "preserve");
+        CHECK(inventory.prepare(fixture.intent()).status ==
+              ControlTrustedHostInventoryStatus::InvalidRequest);
+    }
+
+    SECTION("directory-shaped cleanup name on a regular file is preserved") {
+        Fixture fixture;
+        const auto current = fixture.root / "stage" / "generation-17";
+        fs::create_directory(current);
+        ::chmod(current.c_str(), 0700);
+        const auto unsafe = current /
+                            "snapshot-0123456789abcdef0123456789abcdef.new";
+        std::ofstream(unsafe) << "not-a-directory";
+        ::chmod(unsafe.c_str(), 0600);
+
+        ControlTrustedHostInventory inventory(fixture.config());
+        CHECK(read_file(unsafe) == "not-a-directory");
+        CHECK(inventory.prepare(fixture.intent()).status ==
+              ControlTrustedHostInventoryStatus::InvalidRequest);
+    }
+#endif
+}
+
 TEST_CASE("trusted host inventory snapshots and consumes an exact raw executable once",
           "[inspect][control][inventory][security]") {
 #if defined(__APPLE__) && TARGET_OS_OSX && !TARGET_OS_IPHONE

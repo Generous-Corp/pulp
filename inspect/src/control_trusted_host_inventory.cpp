@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <charconv>
 #include <map>
 #include <mutex>
 #include <system_error>
@@ -17,9 +18,15 @@
 #endif
 
 #ifndef _WIN32
+#include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+#include <sys/acl.h>
+#elif defined(__linux__)
+#include <sys/xattr.h>
+#endif
 #endif
 
 namespace pulp::inspect {
@@ -118,6 +125,193 @@ bool private_snapshot_file(const fs::path& path, bool executable) {
     return !executable || (status.st_mode & 0100) != 0;
 #endif
 }
+
+bool generation_directory_name(std::string_view name) {
+    constexpr std::string_view prefix = "generation-";
+    if (!name.starts_with(prefix) || name.size() == prefix.size())
+        return false;
+    const auto generation = name.substr(prefix.size());
+    if (generation.front() < '1' || generation.front() > '9')
+        return false;
+    std::uint64_t parsed = 0;
+    const auto result =
+        std::from_chars(generation.data(), generation.data() + generation.size(), parsed);
+    return result.ec == std::errc{} && result.ptr == generation.data() + generation.size();
+}
+
+bool incomplete_snapshot_name(std::string_view name) {
+    constexpr std::string_view prefix = "snapshot-";
+    constexpr std::string_view suffix = ".new";
+    constexpr std::size_t digest_size = 32;
+    if (!name.starts_with(prefix) || !name.ends_with(suffix) ||
+        name.size() != prefix.size() + digest_size + suffix.size())
+        return false;
+    const auto digest = name.substr(prefix.size(), digest_size);
+    return std::all_of(digest.begin(), digest.end(), [](const char value) {
+        return (value >= '0' && value <= '9') || (value >= 'a' && value <= 'f');
+    });
+}
+
+#ifdef _WIN32
+bool reap_startup_debris(const fs::path& staging_root,
+                         std::string_view current_generation_name) {
+    (void)staging_root;
+    (void)current_generation_name;
+    return false;
+}
+#else
+int open_directory_without_symlinks(const fs::path& path);
+
+class DescriptorOwner {
+  public:
+    explicit DescriptorOwner(int descriptor) : descriptor_(descriptor) {}
+    ~DescriptorOwner() {
+        if (descriptor_ >= 0)
+            ::close(descriptor_);
+    }
+    DescriptorOwner(const DescriptorOwner&) = delete;
+    DescriptorOwner& operator=(const DescriptorOwner&) = delete;
+    int get() const { return descriptor_; }
+
+  private:
+    int descriptor_ = -1;
+};
+
+bool has_no_extended_acl(int descriptor) {
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+    errno = 0;
+    acl_t acl = ::acl_get_fd_np(descriptor, ACL_TYPE_EXTENDED);
+    const int error = errno;
+    if (acl != nullptr) {
+        ::acl_free(acl);
+        return false;
+    }
+    return error == ENOENT || error == ENOATTR;
+#elif defined(__linux__)
+    const auto absent = [descriptor](const char* name) {
+        errno = 0;
+        const auto size = ::fgetxattr(descriptor, name, nullptr, 0);
+        return size < 0 &&
+               (errno == ENODATA || errno == ENOTSUP || errno == EOPNOTSUPP);
+    };
+    return absent("system.posix_acl_access") && absent("system.posix_acl_default");
+#else
+    (void)descriptor;
+    return false;
+#endif
+}
+
+bool private_directory_descriptor(int descriptor) {
+    struct stat status{};
+    return ::fstat(descriptor, &status) == 0 && S_ISDIR(status.st_mode) &&
+           status.st_uid == ::geteuid() && (status.st_mode & 07777) == 0700 &&
+           has_no_extended_acl(descriptor);
+}
+
+bool private_file_descriptor(int descriptor) {
+    struct stat status{};
+    return ::fstat(descriptor, &status) == 0 && S_ISREG(status.st_mode) &&
+           status.st_uid == ::geteuid() && status.st_nlink == 1 &&
+           (status.st_mode & 077) == 0 && has_no_extended_acl(descriptor);
+}
+
+int open_entry_at(int parent, std::string_view name) {
+    if (name.empty() || name == "." || name == ".." || name.find('\0') != std::string_view::npos)
+        return -1;
+    int flags = O_RDONLY | O_CLOEXEC | O_NOFOLLOW;
+#ifdef O_NONBLOCK
+    flags |= O_NONBLOCK;
+#endif
+    return ::openat(parent, std::string(name).c_str(), flags);
+}
+
+std::optional<std::vector<std::string>> directory_entries(int descriptor) {
+    const int duplicate = ::dup(descriptor);
+    if (duplicate < 0)
+        return std::nullopt;
+    DIR* directory = ::fdopendir(duplicate);
+    if (directory == nullptr) {
+        ::close(duplicate);
+        return std::nullopt;
+    }
+    std::vector<std::string> entries;
+    errno = 0;
+    while (const auto* entry = ::readdir(directory)) {
+        const std::string_view name(entry->d_name);
+        if (name != "." && name != "..")
+            entries.emplace_back(name);
+        errno = 0;
+    }
+    const int read_error = errno;
+    const bool closed = ::closedir(directory) == 0;
+    if (read_error != 0 || !closed)
+        return std::nullopt;
+    return entries;
+}
+
+bool same_entry_at(int parent, std::string_view name, int descriptor) {
+    struct stat opened{};
+    struct stat named{};
+    return ::fstat(descriptor, &opened) == 0 &&
+           ::fstatat(parent, std::string(name).c_str(), &named, AT_SYMLINK_NOFOLLOW) == 0 &&
+           opened.st_dev == named.st_dev && opened.st_ino == named.st_ino &&
+           (opened.st_mode & S_IFMT) == (named.st_mode & S_IFMT);
+}
+
+bool remove_owner_private_tree_at(int parent, std::string_view name,
+                                  bool require_directory = false) {
+    DescriptorOwner entry(open_entry_at(parent, name));
+    if (entry.get() < 0)
+        return false;
+    struct stat status{};
+    if (::fstat(entry.get(), &status) != 0)
+        return false;
+    if (require_directory && !S_ISDIR(status.st_mode))
+        return false;
+    if (S_ISREG(status.st_mode)) {
+        return private_file_descriptor(entry.get()) && same_entry_at(parent, name, entry.get()) &&
+               ::unlinkat(parent, std::string(name).c_str(), 0) == 0;
+    }
+    if (!S_ISDIR(status.st_mode) || !private_directory_descriptor(entry.get()))
+        return false;
+    const auto children = directory_entries(entry.get());
+    if (!children)
+        return false;
+    for (const auto& child : *children)
+        if (!remove_owner_private_tree_at(entry.get(), child))
+            return false;
+    return private_directory_descriptor(entry.get()) && same_entry_at(parent, name, entry.get()) &&
+           ::unlinkat(parent, std::string(name).c_str(), AT_REMOVEDIR) == 0;
+}
+
+bool reap_startup_debris(const fs::path& staging_root,
+                         std::string_view current_generation_name) {
+    DescriptorOwner root(open_directory_without_symlinks(staging_root));
+    if (root.get() < 0 || !private_directory_descriptor(root.get()))
+        return false;
+    const auto generations = directory_entries(root.get());
+    if (!generations)
+        return false;
+    for (const auto& name : *generations) {
+        if (name == current_generation_name) {
+            DescriptorOwner current(open_entry_at(root.get(), name));
+            if (current.get() < 0 || !private_directory_descriptor(current.get()))
+                return false;
+            const auto snapshots = directory_entries(current.get());
+            if (!snapshots)
+                return false;
+            for (const auto& snapshot : *snapshots)
+                if (incomplete_snapshot_name(snapshot) &&
+                    !remove_owner_private_tree_at(current.get(), snapshot, true))
+                    return false;
+        } else if (generation_directory_name(name) &&
+                   !remove_owner_private_tree_at(root.get(), name, true)) {
+            return false;
+        }
+    }
+    return true;
+}
+#endif
 
 struct SourcePair {
     std::vector<std::uint8_t> executable;
@@ -324,9 +518,11 @@ struct ControlTrustedHostInventory::Impl {
             config.broker_generation != 0 && config.maximum_entries != 0 &&
             config.maximum_executable_bytes != 0 && config.maximum_manifest_bytes != 0 &&
             config.ttl.count() > 0 && clock && prepare_private_directory(config.staging_root)) {
-            generation_root =
-                config.staging_root / ("generation-" + std::to_string(config.broker_generation));
-            ready = prepare_private_directory(generation_root);
+            const auto generation_name =
+                "generation-" + std::to_string(config.broker_generation);
+            generation_root = config.staging_root / generation_name;
+            ready = reap_startup_debris(config.staging_root, generation_name) &&
+                    prepare_private_directory(generation_root);
         }
     }
 
