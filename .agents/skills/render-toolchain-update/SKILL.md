@@ -81,7 +81,8 @@ newer.
    `pair.pair_kind=chromium-milestone`, `pair.milestone`, `pair.skia`, `pair.v8`,
    `pair.built_dawn`, and `pair.validated_skia_release`.
 5. Update the V8 entry, all asset URLs/hashes, `DEPENDENCIES.md`, V8 provider comments,
-   test fixtures, and `tools/deps/min_os.json` only from measured release facts.
+   `tools/cmake/FindV8.cmake`, `tools/cmake/PulpV8Windows.cmake`, test fixtures, and
+   `tools/deps/min_os.json` only from measured release facts.
 6. Update the Skia/Dawn mirrors: `external/skia-build/VERSION.md`, visual-harness pins,
    build-script defaults, docs/support matrix, and manifest fixtures.
 7. Run the manifest mirror/audit tests and both fetch-script suites. Fetch a real native

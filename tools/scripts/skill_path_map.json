@@ -456,8 +456,12 @@
       "paths": [
         "tools/deps/manifest.json",
         "tools/deps/min_os.json",
+        "tools/cmake/FindV8.cmake",
+        "tools/cmake/PulpV8Windows.cmake",
         "tools/scripts/fetch_skia_for_release.py",
         "tools/scripts/fetch_v8_for_release.py",
+        "tools/scripts/test_fetch_v8_for_release.py",
+        "examples/threejs-native-demo/provider_identity_test.cmake",
         "external/skia-build/VERSION.md",
         "ci/visual-harness.Dockerfile",
         "tools/harness/visual/pins.py"

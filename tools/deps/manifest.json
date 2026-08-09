@@ -1079,7 +1079,7 @@
       "name": "V8",
       "category": "view",
       "license": "BSD-3-Clause",
-      "version": "v8-15.2.24-lkgr-97440bd4f523",
+      "version": "v8-m152-15.2.124.7-cdec2b8282a8",
       "external_names": ["v8-build"],
       "source_kind": "prebuilt-toolchain",
       "repository": "https://chromium.googlesource.com/v8/v8.git",
@@ -1091,44 +1091,49 @@
         "tools/cmake/PulpV8Windows.cmake",
         "tools/scripts/fetch_v8_for_release.py"
       ],
-      "notes": "Optional JS engine backend, selected with PULP_JS_ENGINE=v8 (default is QuickJS; JSC on Apple). Sealed, embeddable, shared V8 prebuilt via the danielraffel/v8-builder fork — exports only v8::/cppgc::, keeps ICU/zlib/Abseil internal so it coexists with Skia's bundled ICU without ODR clashes; Intl on. iOS is JSC-only (V8 needs JIT, forbidden in iOS apps/AUv3 extensions) — the ios-simulator asset ships headers only, no library. Each release records the Skia/Dawn revision it was seal+ODR validated against in paired_skia/paired_dawn; because the seal exports only v8::/cppgc:: and keeps ICU/zlib/Abseil internal, V8 coexists with a different pinned Skia without ODR clashes. v8-15.2.24 was validated against Skia chrome/m150 (paired_skia c0e2b966.../paired_dawn 3f761495...); Pulp pins Skia chrome/m152, two milestones ahead — the provider-identity/ODR gate (examples/threejs-native-demo/provider_identity_test.cmake) proves coexistence at the pinned Skia. Re-bake CI goldens when the pin moves. Consumed by tools/scripts/fetch_v8_for_release.py + tools/cmake/FindV8.cmake (unpacks to external/v8-build/<platform>/).",
+      "notes": "Optional JS engine backend, selected with PULP_JS_ENGINE=v8 (default is QuickJS; JSC on Apple). Sealed, embeddable, shared V8 prebuilt via the danielraffel/v8-builder fork — exports only v8::/cppgc::, keeps ICU/zlib/Abseil internal so it coexists with Skia's bundled ICU without ODR clashes; Intl on. iOS is JSC-only (V8 needs JIT, forbidden in iOS apps/AUv3 extensions) — the ios-simulator asset ships headers only, no library. This milestone-matched release uses the V8 revision from Chromium M152's DEPS alongside the exact Skia chrome/m152 release pin. paired_dawn is the Dawn commit actually built into that Skia release; chromium_dawn records Chromium M152's separate Dawn DEPS pin, and dawn_matches_chromium states whether they coincide. The provider-identity/ODR gate (examples/threejs-native-demo/provider_identity_test.cmake) proves the sealed V8 and pinned Skia coexist. Re-bake CI goldens when the pin moves. Consumed by tools/scripts/fetch_v8_for_release.py + tools/cmake/FindV8.cmake (unpacks to external/v8-build/<platform>/).",
       "determinism": {
         "v8_builder_fork": "https://github.com/danielraffel/v8-builder",
-        "built_revision": "97440bd4f523ca4d2af200556160023b466658a1",
-        "paired_skia": "c0e2b9667d91d8e5d76ce2ac2fca922edf2821bb",
-        "paired_dawn": "3f7614958732bcbddb339b639aa521e0c40ee645",
+        "pair_kind": "chromium-milestone",
+        "milestone": 152,
+        "skia_release_tag": "chrome/m152",
+        "built_revision": "cdec2b8282a8d34d2fae5ec8bba6a8c182d176d3",
+        "paired_skia": "2a9b593bab4b2fd019fa494c8d401ff1fab0b883",
+        "paired_dawn": "1e897275172a23f27b0022fa6beae3084ed54a9b",
+        "chromium_dawn": "4ad5700c273f6b8e36058699df7eb30be22ce935",
+        "dawn_matches_chromium": false,
         "release_assets": {
           "mac-arm64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.2.24-lkgr-97440bd4f523/v8-mac-arm64-15.2.24-lkgr-97440bd4f523.zip",
-            "sha256": "2d8ba8f41c57628c8b11822433433cf521abd03af1f125c40164872d07fb0247"
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m152-15.2.124.7-cdec2b8282a8/v8-mac-arm64-m152-15.2.124.7-cdec2b8282a8.zip",
+            "sha256": "33edf2cf4562f710f2ab3be3fd66ac2631f22bf123f490f242d59dbbe4153c4b"
           },
           "mac-x86_64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.2.24-lkgr-97440bd4f523/v8-mac-x86_64-15.2.24-lkgr-97440bd4f523.zip",
-            "sha256": "49d87422b0e8b12ea501613484ea9b683b8af7c0af8019a452e085f02728ce64"
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m152-15.2.124.7-cdec2b8282a8/v8-mac-x86_64-m152-15.2.124.7-cdec2b8282a8.zip",
+            "sha256": "76d430561d8f8c0f53d6abf2036451eaa13ec2c84e5cbaa597709b995d102f43"
           },
           "linux-x64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.2.24-lkgr-97440bd4f523-glibc234/v8-linux-x64-15.2.24-lkgr-97440bd4f523.zip",
-            "sha256": "48a6d6877fbd5684b6e013a6cf1c66930917fbd541b9acec9a1b8e05d80549cb"
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m152-15.2.124.7-cdec2b8282a8/v8-linux-x64-m152-15.2.124.7-cdec2b8282a8.zip",
+            "sha256": "89445bd6868ecc360522ce67b2701490a8fa62736c7881218a3cc0ef27668597"
           },
           "linux-arm64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.2.24-lkgr-97440bd4f523/v8-linux-arm64-15.2.24-lkgr-97440bd4f523.zip",
-            "sha256": "c62a7efec0e27437b3bbe4031c4e8f54b02ab92f7c37cc29a8376d6b4acfa8b0"
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m152-15.2.124.7-cdec2b8282a8/v8-linux-arm64-m152-15.2.124.7-cdec2b8282a8.zip",
+            "sha256": "2dbf99cde3bb146d742a9f75b33c3cbbf6e5db20373e9f37b6d5d02298451bcb"
           },
           "win-x64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.2.24-lkgr-97440bd4f523/v8-win-x64-15.2.24-lkgr-97440bd4f523.zip",
-            "sha256": "aca2383443170d63f6613ca616c7f21eb93867eba20aae7672dfcd58fa2cb47d"
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m152-15.2.124.7-cdec2b8282a8/v8-win-x64-m152-15.2.124.7-cdec2b8282a8.zip",
+            "sha256": "ee9871051b4ecb18541bdf2481b2871fbca9868ab9635a3bd5527cf50a3fdffb"
           },
           "win-arm64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.2.24-lkgr-97440bd4f523/v8-win-arm64-15.2.24-lkgr-97440bd4f523.zip",
-            "sha256": "dad674d9a446c2f7850521ec0e8064a9e3bce68b671f95b9596e6ce1fca1d5a1"
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m152-15.2.124.7-cdec2b8282a8/v8-win-arm64-m152-15.2.124.7-cdec2b8282a8.zip",
+            "sha256": "bc3fb75ccc1c61fa493d9be6a403d0d64885bf053cb914ded110665d583de294"
           },
           "android-arm64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.2.24-lkgr-97440bd4f523/v8-android-arm64-15.2.24-lkgr-97440bd4f523.zip",
-            "sha256": "b9f2676af946b964aedbfa31bf434b9e4f50544c982eba9f4b821c7f336aa3fa"
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m152-15.2.124.7-cdec2b8282a8/v8-android-arm64-m152-15.2.124.7-cdec2b8282a8.zip",
+            "sha256": "3c1306b89df90a2beb54503e8d67b06f70a408d799fa39ce85e2b550b654c645"
           },
           "ios-simulator-arm64": {
-            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-15.2.24-lkgr-97440bd4f523/v8-ios-simulator-arm64-15.2.24-lkgr-97440bd4f523.zip",
-            "sha256": "f9f653022712680339df33a8438c200ba30cfceb2699ee12e276fc440a1818d4",
+            "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m152-15.2.124.7-cdec2b8282a8/v8-ios-simulator-arm64-m152-15.2.124.7-cdec2b8282a8.zip",
+            "sha256": "d488cb89af57d93e05481431960d380b2e0a311a158429484be8ae83a1707e57",
             "library": false
           }
         }
