@@ -1,4 +1,5 @@
 #include <pulp/signal/signal.hpp>
+#include <pulp/signal/headphone_crossfeed.hpp>
 
 #include <limits>
 
