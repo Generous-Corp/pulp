@@ -60,6 +60,7 @@ add_library(pulp-dsp-series-header-self-containment OBJECT
     header_compile/yin_tracker.cpp
     header_compile/tape_machine_components.cpp
     header_compile/nonlin_ambience_design.cpp
+    header_compile/transient_designer.cpp
     header_compile/zero_latency_convolver_support.cpp)
 target_link_libraries(pulp-dsp-series-header-self-containment PRIVATE pulp::signal)
 
@@ -72,6 +73,8 @@ pulp_dsp_series_signal_suite(pulp-test-signal-tape-machine   test_signal_tape_ma
 pulp_dsp_series_catalog_suite(pulp-test-forge-tape-catalog   test_forge_tape_catalog.cpp)
 
 pulp_dsp_series_signal_suite(pulp-test-signal-vca-compressor test_signal_vca_compressor.cpp)
+pulp_dsp_series_signal_suite(pulp-test-signal-transient-designer
+                             test_signal_transient_designer.cpp)
 pulp_dsp_series_signal_suite(pulp-test-signal-fet-compressor test_signal_fet_compressor_curve_ballistics_colour.cpp
     test_signal_fet_compressor_controls_rt.cpp)
 pulp_dsp_series_signal_suite(pulp-test-signal-diode-bridge-compressor
