@@ -406,7 +406,8 @@ catch_discover_tests(pulp-test-control-artifacts
 
 add_executable(pulp-test-control-service test_control_service.cpp)
 target_link_libraries(pulp-test-control-service PRIVATE
-    pulp::inspect-control pulp::inspect-client Catch2::Catch2WithMain)
+    pulp::inspect-control pulp::inspect-client pulp::inspect-observability-runtime
+    Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-control-service
     PROPERTIES LABELS "inspect;control;service;client")
 
@@ -503,6 +504,13 @@ target_link_libraries(pulp-test-control-telemetry-tap PRIVATE
     pulp::inspect-telemetry Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-control-telemetry-tap
     PROPERTIES LABELS "inspect;control;telemetry;t1;t2a")
+
+add_executable(pulp-test-control-host-observability-bundle
+    test_control_host_observability_bundle.cpp)
+target_link_libraries(pulp-test-control-host-observability-bundle PRIVATE
+    pulp::inspect-observability-runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-host-observability-bundle
+    PROPERTIES LABELS "inspect;control;observability;trace;telemetry")
 
 # Inspector tests — only when GPU is enabled (pulp-inspect requires GPU stack).
 if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)

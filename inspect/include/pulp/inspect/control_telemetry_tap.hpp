@@ -84,6 +84,7 @@ class ControlTelemetryTap {
     void poll();
     std::optional<ControlTelemetryFrame> try_pop(std::string_view subscription_id,
                                                  const ControlTelemetryAuthority& authority);
+    double effective_rate_hz(double requested_rate_hz) const noexcept;
     std::size_t subscription_count() const noexcept;
 
   private:

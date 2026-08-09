@@ -54,11 +54,11 @@ availability.
 | `dev.pulp.ui/capture@1` (`capture.image`) | yes | yes | Typed contract and client binding exist; availability still requires an injected exact-instance host executor |
 | `dev.pulp.ui/input@1` (`ui.input`) | no | no | Frozen high-risk contract; no current executor or grant path |
 | `dev.pulp.trace/control@1` (`trace.control`) | no | yes | Component contract exists; no generic raw Inspector route |
-| `dev.pulp.trace/session-control@1` (`trace.session.control`) | no | yes | `pulp trace start/stop` and matching MCP tools use canonical control only |
+| `dev.pulp.trace/session-control@1` (`trace.session.control`) | no | yes | `pulp trace start/stop` and matching MCP tools use canonical control only; the reusable host observability bundle dispatches the exact admitted instance when an adapter publishes it |
 | `dev.pulp.state/parameter-gesture@1` (`state.write`) | no | yes | T1 main-thread exact-slot executor atomically claims the shared `StateStore` generation and rolls back failed brackets without overwriting newer writers; broker grant/consent remains mandatory |
 | `dev.pulp.test/input@1` (`test.input`) | no | yes | Typed executor building block exists; no public general-live route |
 | `dev.pulp.authoring/tweaks@1` (`authoring.tweaks`) | no | yes | In-process authoring components remain; remote wrapper was removed |
-| `dev.pulp.telemetry/subscribe@1` (`telemetry.stream`) | no | yes | Bounded telemetry tap and typed clients exist; exact host publication still determines availability |
+| `dev.pulp.telemetry/subscribe@1` (`telemetry.stream`) | no | yes | The host observability bundle exposes typed `subscribe`, `poll`, and `unsubscribe` actions over the bounded/redacting tap; exact host publication still determines availability |
 | `dev.pulp.runtime/reload@1` (`runtime.reload`) | no | no | Frozen contract; no current executor or grant path |
 | `dev.pulp.runtime/evaluate@1` (`runtime.eval`) | no | no | Critical typed client exists but refuses automatic grants; separate broker-owned single-use consent and an injected evaluator are required |
 | `dev.pulp.artifact/read@1` (`artifact.read`) | no | no | Publication-bound typed client rechecks exact original lineage and broker ACL for every chunk |

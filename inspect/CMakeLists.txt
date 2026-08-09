@@ -150,6 +150,18 @@ target_link_libraries(pulp-inspect-telemetry
         pulp::inspect-protocol
         pulp::view-core)
 
+add_library(pulp-inspect-observability-runtime
+    src/control_host_observability_bundle.cpp)
+add_library(pulp::inspect-observability-runtime ALIAS pulp-inspect-observability-runtime)
+target_include_directories(pulp-inspect-observability-runtime
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
+target_link_libraries(pulp-inspect-observability-runtime
+    PUBLIC
+        pulp::inspect-runtime
+        pulp::inspect-telemetry)
+
 add_library(pulp-inspect-authoring src/tweak_store.cpp)
 add_library(pulp::inspect-authoring ALIAS pulp-inspect-authoring)
 target_include_directories(pulp-inspect-authoring

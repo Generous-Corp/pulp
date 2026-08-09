@@ -62,3 +62,23 @@ blocks a producer, render thread, or audio callback. Subscription reads require
 the same client, registration, instance, and grant authority used at creation.
 Sensitive channel names and values are redacted unless that authority permits
 them.
+
+`ControlHostObservabilityBundle` composes that tap with the canonical trace
+session executor at the registration ownership boundary. The adapter installs
+the bundle executor before publishing its registration. Dispatch rechecks the
+broker-minted client, grant, registration, session, instance, publication,
+generation, operation, version, and deadline binding; none of those values can
+be replaced by request parameters. An opaque host-connection authentication
+token refreshes a monotonic bounded lease. A missed heartbeat, explicit
+disconnect, or process restart drops trace ownership and detaches the tap,
+which destroys all subscriptions.
+
+The telemetry operation uses one versioned action union. `subscribe` returns a
+stream ID, `poll` returns either no frame or one bounded typed frame with loss
+accounting and redaction fields, and `unsubscribe` closes that exact stream.
+Every poll and unsubscribe must present the same admitted client,
+registration, instance, and grant that created it. The remote host carrier
+continues to keep client and grant identities broker-private; an out-of-process
+adapter therefore needs a broker-owned opaque projection of the full authority
+binding before it can install this in-process bundle without weakening that
+privacy boundary.

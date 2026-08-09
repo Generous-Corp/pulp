@@ -307,6 +307,12 @@ ControlTelemetryTap::try_pop(std::string_view subscription_id,
     return frame;
 }
 
+double ControlTelemetryTap::effective_rate_hz(double requested_rate_hz) const noexcept {
+    if (!std::isfinite(requested_rate_hz))
+        return 0.0;
+    return std::min(requested_rate_hz, impl_->config.maximum_rate_hz);
+}
+
 std::size_t ControlTelemetryTap::subscription_count() const noexcept {
     return impl_->subscriptions.size();
 }
