@@ -472,6 +472,11 @@ docs:
     kind: reference
     summary: Oversampled wavefolding, harmonic shaping, and ring-modulation primitives
 
+  - slug: headphone-crossfeed
+    path: reference/headphone-crossfeed.md
+    kind: reference
+    summary: Stable delayed and filtered stereo crossfeed for headphone playback
+
   - slug: cli
     path: reference/cli.md
     kind: reference

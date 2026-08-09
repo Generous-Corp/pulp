@@ -2669,8 +2669,8 @@ static void emit_js_container(const NativeEmit& e, int& var_counter,
         if (cap_nudge > 0.0f && is_img_child) {
             float cw = child.style.width.value_or(0.0f);
             float ch = child.style.height.value_or(0.0f);
-            float small = (cw > 0.0f && ch > 0.0f) ? std::min(cw, ch) : 0.0f;
-            if (small > 0.0f && small <= upper_font_size) {
+            float shorter_side = (cw > 0.0f && ch > 0.0f) ? std::min(cw, ch) : 0.0f;
+            if (shorter_side > 0.0f && shorter_side <= upper_font_size) {
                 child_var_id_pre = sanitize_var(child.name.empty() ? child.type : child.name);
                 child_var_id_pre += std::to_string(var_counter);
                 nudge_this_child = true;

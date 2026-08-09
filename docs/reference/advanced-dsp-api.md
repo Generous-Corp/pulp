@@ -88,6 +88,25 @@ coefficient design retains the rounded Q used by existing renders, while
 - Processing: `process(input)` returns `Frame{bands, count, healthy}`.
 - Inspection: `supports_configuration()`, `minimum_transition_samples()`, `maximum_downward_log_slew_nepers_per_second()`, `band_count()`, `cutoff_count()`, `cutoff()`, `sample_rate()`, `transitioning()`, `healthy()`, `fault_count()`, `latency_samples()`, `band_response()`, `reconstruction_response()`.
 
+### `SpectralGate` and `SpectralFrameBlur`
+
+These frame-domain processors compose with `SpectralFrameEngine`; neither owns
+an FFT or adds host latency. `SpectralGate::process()` hard-gates each complex
+bin independently by linear magnitude. Its optional caller-owned threshold
+curve contains one finite, non-negative threshold per bin and overrides the
+scalar threshold for that frame. `SpectralFrameBlur::prepare(channels, bins,
+frames)` fixes a causal box-blur window of 1–128 analysis frames. Processing
+averages magnitudes across only the history observed so far, preserves current
+non-zero phase, and holds the last finite phase while a vanished bin decays.
+The blur reaches exactly zero after its finite history expires; it is not an
+unbounded exponential tail. Non-finite bins become silence and cannot poison
+later frames. Finite complex components whose mathematical magnitude exceeds
+the sample type retain their phase and saturate to its maximum finite magnitude.
+
+- Gate controls and processing: `set_threshold_magnitude()`/`threshold_magnitude()`, `process(frames, channels, bins, optional_threshold_curve)`.
+- Blur lifecycle and processing: `supports_configuration()`, `checked_retained_bytes()`, `prepare()`, `reset()`, `process()`.
+- Blur inspection: `channels()`, `num_bins()`, `blur_frames()`, `filled_frames()`, `retained_bytes()`.
+
 ## Routing and gain laws
 
 ### Orthonormal mid/side and stereo width
