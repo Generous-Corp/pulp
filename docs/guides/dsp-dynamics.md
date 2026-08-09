@@ -1,6 +1,7 @@
 # Dynamics Processors
 
-Pulp provides four complementary compressor designs. They share an explicit
+Pulp provides complementary compressor designs and reusable dynamics
+utilities. They share an explicit
 `prepare()`/`reset()` lifecycle, expose their gain computer for meters and curve
 editors, and report latency without requiring an audio probe. Use the float
 aliases shown below; every class also has a `64` double-precision alias.
@@ -28,6 +29,7 @@ those intentionally different processors:
 | `VcaCompressor` | `<pulp/signal/vca_compressor.hpp>` | Program-dependent RMS behavior, OverEasy-style knee, and infinity-plus curves |
 | `DiodeBridgeCompressor` | `<pulp/signal/diode_bridge_compressor.hpp>` | Feedback dynamics with diode-bridge and transformer character |
 | `FetCompressor` | `<pulp/signal/fet_compressor.hpp>` | Fixed-threshold input-drive workflow, ratio buttons, fast attack, and transformer output |
+| `Expander` | `<pulp/signal/expander.hpp>` | Downward or upward expansion with a bounded soft-knee curve and prepared peak/RMS detection |
 
 ## Minimal insert
 
@@ -53,6 +55,15 @@ const int latency = compressor.latency_samples(); // Return from your Processor.
 The setters and processing calls are allocation-free after preparation. Call
 `reset()` on transport discontinuities; do not call `prepare()` merely to clear
 history.
+
+`Expander` processes stereo sample pairs and makes its detector policy explicit
+with `DynamicsStereoLink::{independent,peak_linked}`. Its `configure()` call
+validates the complete configuration transactionally, while
+`gain_computer_db()` exposes the exact bounded knee/range law used after the
+detector. Attack and release use the shared envelope follower's exact
+10-to-90-percent convention. `set_bypassed(true)` returns each finite input
+sample exactly while detector history continues advancing, so leaving bypass
+does not resume from stale state.
 
 ## Choosing a topology
 

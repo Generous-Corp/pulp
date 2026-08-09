@@ -1,6 +1,7 @@
 #include <pulp/signal/signal.hpp>
 #include <pulp/signal/headphone_crossfeed.hpp>
 
+#include <cmath>
 #include <limits>
 
 int main() {
@@ -25,6 +26,18 @@ int main() {
     pulp::signal::SpectralFrameBlur spectral_blur;
     if (!spectral_blur.prepare(1, 8, 2))
         return 7;
+    pulp::signal::SpectralMorph spectral_morph;
+    if (!spectral_morph.prepare(1, 129))
+        return 8;
     pulp::signal::PathLatencyAligner aligner;
-    return aligner.prepare(2u, 1u, 8u, 16u) ? 0 : 8;
+    if (!aligner.prepare(2u, 1u, 8u, 16u))
+        return 9;
+    pulp::signal::CrossFeedbackMultitapDelay multitap_delay;
+    if (!multitap_delay.prepare(48000.0, 100.0))
+        return 10;
+    pulp::signal::Expander expander;
+    if (expander.prepare(48000.0f) != pulp::signal::ExpanderStatus::ready)
+        return 11;
+    const auto output = expander.process(0.25f, -0.5f);
+    return std::isfinite(output[0]) && std::isfinite(output[1]) ? 0 : 12;
 }

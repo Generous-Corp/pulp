@@ -8,10 +8,13 @@
 #include <pulp/signal/sos_cascade.hpp>
 #include <pulp/signal/oscillator.hpp>
 #include <pulp/signal/delay_line.hpp>
+#include <pulp/signal/cross_feedback_multitap_delay.hpp>
 #include <pulp/signal/fractional_delay.hpp>
 #include <pulp/signal/dry_wet_mixer.hpp>
 #include <pulp/signal/gain.hpp>
 #include <pulp/signal/compressor.hpp>
+#include <pulp/signal/de_esser.hpp>
+#include <pulp/signal/expander.hpp>
 #include <pulp/signal/svf.hpp>
 #include <pulp/signal/waveshaper.hpp>
 #include <pulp/signal/oversampling.hpp>
@@ -52,6 +55,7 @@
 #include <pulp/signal/stft.hpp>
 #include <pulp/signal/spectral_frame_engine.hpp>
 #include <pulp/signal/spectral_gate_blur.hpp>
+#include <pulp/signal/spectral_morph.hpp>
 #include <pulp/signal/multichannel_phase_coordinator.hpp>
 #include <pulp/signal/source_filter_analysis.hpp>
 #include <pulp/signal/spectral_envelope_shifter.hpp>

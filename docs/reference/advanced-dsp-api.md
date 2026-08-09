@@ -107,6 +107,32 @@ the sample type retain their phase and saturate to its maximum finite magnitude.
 - Blur lifecycle and processing: `supports_configuration()`, `checked_retained_bytes()`, `prepare()`, `reset()`, `process()`.
 - Blur inspection: `channels()`, `num_bins()`, `blur_frames()`, `filled_frames()`, `retained_bytes()`.
 
+### `SpectralMorph`
+
+This frame-domain processor combines coherent complex frames from two live
+`SpectralFrameEngine` inputs. It owns no FFT or captured audio and adds no host
+latency. `prepare(channels, bins)` fixes bounded geometry without allocation;
+the bin count must describe a one-sided power-of-two FFT from 256 through
+16384 samples (129 through 8193 bins).
+Magnitude and phase use independent normalized amounts. Magnitude policy is
+linear amplitude or equal power; phase policy is shortest-arc angle or
+normalized unit-vector interpolation. Both phase policies are wrap-safe at the
+negative/positive pi seam. A zero-magnitude endpoint borrows the other
+endpoint's phase instead of rotating through an arbitrary zero phase.
+DC and Nyquist remain real-valued: when their endpoint signs differ, phase
+amount selects A below 0.5 and B at or above 0.5 because no continuous
+constant-magnitude path exists inside the real-only self-conjugate domain.
+
+Whole-frame `process()` and `process_partition()` are bit-identical for the
+same disjoint bins, and output may alias either input exactly. Non-finite input
+falls back to the other endpoint, or silence when both are non-finite. Finite
+complex components whose mathematical magnitude exceeds the sample type are
+phase-preservingly saturated.
+
+- Lifecycle/configuration: `supports_configuration()`, `prepare()`, `reset()`, `set_config()`/`config()`.
+- Processing: `process(a, b, out, channels, bins, magnitude_amount, phase_amount)`, `process_partition(a, b, out, channels, first_bin, bin_count, magnitude_amount, phase_amount)`.
+- Inspection: `prepared()`, `channels()`, `num_bins()`.
+
 ## Routing and gain laws
 
 ### Orthonormal mid/side and stereo width
@@ -202,6 +228,31 @@ infinity represents a complete mute and has zero linear gain.
 lineage exposes `gain_reduction()` using this convention without changing the
 sign or behavior of its existing `gain_reduction_db()` method. `Compressor`,
 `Limiter`, and `NoiseGate` expose the same telemetry contract.
+
+### `Expander`
+
+`Expander` and `Expander64` provide fixed-state stereo downward or upward
+expansion. `ExpansionMode::{downward,upward}` selects the active side of the
+threshold. Ratio, range, and knee define a continuous bounded curve;
+`gain_computer_db()` is the pure memoryless form of that same curve. A prepared
+peak/RMS detector supplies exact 10-to-90-percent attack and release ballistics,
+with `DynamicsStereoLink::{independent,peak_linked}` as the channel policy.
+
+`prepare(sample_rate)` and `configure(Config)` return `ExpanderStatus`; rejected
+calls leave the live configuration and history unchanged. Processing, bypass,
+reset, and inspection are allocation-free and `noexcept` after preparation.
+Bypass emits finite input samples exactly while advancing detector state.
+Non-finite input clears detector history and emits finite silence.
+
+- Lifecycle: `prepare(sample_rate)`, `reset()`.
+- Controls: `configure(config)`, `set_bypassed(bool)`.
+- Processing: `process(left, right)`, `process(left_buffer, right_buffer, frames)`.
+- Inspection: `config()`, `prepared()`, `sample_rate()`, `bypassed()`,
+  `current_gain_db()`, `gain_reduction()`, `latency_samples()`, `tail_samples()`.
+- Domains: threshold `[-160, 24]` dB, ratio `[1, 20]`, range `[0, 96]` dB,
+  knee `[0, 48]` dB, attack `[0.01, 2000]` ms, release `[0.01, 10000]` ms,
+  sample rate `(0, 1536000]` Hz.
+
 ### `TruePeakLimiter`
 
 `prepare(sample_rate, channels, params)` fixes the explicit channel count and
