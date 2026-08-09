@@ -20,6 +20,7 @@
 #include <pulp/signal/dry_wet_mixer.hpp>
 #include <pulp/signal/gain.hpp>
 #include <pulp/signal/compressor.hpp>
+#include <pulp/signal/auto_ducked_send.hpp>
 #include <pulp/signal/de_esser.hpp>
 #include <pulp/signal/expander.hpp>
 #include <pulp/signal/svf.hpp>

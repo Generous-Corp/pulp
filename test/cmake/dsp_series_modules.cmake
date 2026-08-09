@@ -48,6 +48,7 @@ pulp_dsp_series_signal_suite(pulp-test-signal-analysis-frontends
 add_library(pulp-dsp-series-header-self-containment OBJECT
     header_compile/early_reflections.cpp
     header_compile/additive_spectral_envelope.cpp
+    header_compile/auto_ducked_send.cpp
     header_compile/cartesian_walk.cpp
     header_compile/dynamics_contract.cpp
     header_compile/dynamic_eq.cpp

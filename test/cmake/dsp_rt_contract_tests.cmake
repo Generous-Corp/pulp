@@ -38,6 +38,11 @@ pulp_add_test_suite(pulp-test-expander
     LIBRARIES pulp::signal
     TIMEOUT 300)
 
+pulp_add_test_suite(pulp-test-auto-ducked-send
+    SOURCES test_auto_ducked_send.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
 pulp_add_test_suite(pulp-test-source-filter-analysis
     SOURCES test_source_filter_analysis.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)

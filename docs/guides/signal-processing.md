@@ -755,6 +755,44 @@ bypass/listen, telemetry, and reset paths are allocation-free.
 
 ---
 
+### AutoDuckedSend
+
+`AutoDuckedSend` applies source- or sidechain-driven attenuation to an already
+created wet/send signal. It is deliberately not a delay, reverb, dry/wet mixer,
+or graph-routing policy: the dry path is never passed to this object.
+
+```cpp
+signal::AutoDuckedSend send_ducker;
+send_ducker.configure({
+    .threshold_db = -24.0f,
+    .range_db     = 12.0f,
+    .attack_ms    = 10.0f,
+    .release_ms   = 250.0f,
+    .send_gain_db = -3.0f,
+});
+send_ducker.prepare(sample_rate);
+
+// `wet_*` came from an effect; `source_*` is only the detector input.
+auto ducked = send_ducker.process(wet_left, wet_right, source_left, source_right);
+output_left  = dry_left  + ducked[0];
+output_right = dry_right + ducked[1];
+```
+
+Above threshold, detector level maps to 1:1 send attenuation up to the
+non-negative `range_db`; `send_gain_db` is an independent base gain. Peak-linked
+stereo detection is the default and uses `max(abs(L), abs(R))`, so opposite
+polarity cannot cancel or move the stereo image. Independent detection is
+available through `DynamicsStereoLink::independent`.
+
+`configure()` is transactional: malformed values reject the whole update and
+preserve detector history. `range_db = 0` with `send_gain_db = 0`, and explicit
+bypass, return finite send samples exactly while detection remains current.
+Prepared sample and block processing (including in-place send buffers) allocate
+no memory. The processor has zero latency and zero tail because it stores only
+detector/control history, never audio history.
+
+---
+
 ## 7. Effects
 
 ### Reverb
