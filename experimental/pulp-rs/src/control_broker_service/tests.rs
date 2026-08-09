@@ -286,6 +286,8 @@ fn successful_activation_is_not_rolled_back_when_marker_publication_fails() {
     let config = config();
     let fs = populated_fs(&config);
     let paths = paths_for(&config);
+    let failed = ScriptedRunner::new(vec![identity_output(), output(1, "", "invalid signature")]);
+    assert!(reconcile_with(&config, &fs, &failed, AttemptMode::Lazy).is_err());
     *fs.fail_rename_to.borrow_mut() = Some(paths.marker.clone());
     let runner = ScriptedRunner::new(successful_script());
     let rollback_called = Cell::new(false);
@@ -300,7 +302,8 @@ fn successful_activation_is_not_rolled_back_when_marker_publication_fails() {
 
     assert_eq!(outcome, ControlBrokerServiceOutcome::Reconciled);
     assert!(!rollback_called.get());
-    assert!(!fs.is_file(&paths.marker));
+    assert!(fs.is_file(&paths.marker));
+    assert!(fs.is_file(&paths.marker.with_extension("marker.new")));
     assert_eq!(
         runner
             .calls
@@ -310,6 +313,49 @@ fn successful_activation_is_not_rolled_back_when_marker_publication_fails() {
             .count(),
         1
     );
+    let subsequent = ScriptedRunner::new(vec![identity_output()]);
+    assert_eq!(
+        reconcile_with(&config, &fs, &subsequent, AttemptMode::Lazy).unwrap(),
+        ControlBrokerServiceOutcome::AlreadyAttempted { succeeded: true }
+    );
+}
+
+#[test]
+fn lazy_committed_activation_surfaces_marker_failure_without_rollback_or_retry() {
+    let config = config();
+    let fs = populated_fs(&config);
+    let paths = paths_for(&config);
+    *fs.fail_rename_to.borrow_mut() = Some(paths.marker.clone());
+    let first = ScriptedRunner::new(successful_script());
+    let rollback_called = Cell::new(false);
+    let callback: RollbackCallback<'_> = Box::new(|| {
+        rollback_called.set(true);
+        Ok(())
+    });
+
+    let error = reconcile_with_callback(&config, &fs, &first, AttemptMode::Lazy, Some(callback))
+        .unwrap_err();
+
+    assert_eq!(error.code(), "attempt-marker-failed");
+    assert!(!rollback_called.get());
+    assert!(!fs.is_file(&paths.marker));
+    assert!(fs.is_file(&paths.marker.with_extension("marker.new")));
+    assert_eq!(
+        first
+            .calls
+            .borrow()
+            .iter()
+            .filter(|call| call.args.first().map(String::as_str) == Some("bootstrap"))
+            .count(),
+        1
+    );
+
+    let second = ScriptedRunner::new(vec![identity_output()]);
+    assert_eq!(
+        reconcile_with(&config, &fs, &second, AttemptMode::Lazy).unwrap(),
+        ControlBrokerServiceOutcome::AlreadyAttempted { succeeded: true }
+    );
+    assert_eq!(second.calls.borrow().len(), 1);
 }
 
 fn paths_for(config: &ControlBrokerServiceConfig) -> ServicePaths {

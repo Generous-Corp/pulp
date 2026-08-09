@@ -521,15 +521,26 @@ fn reconcile_with_callback<F: FileSystem, R: CommandRunner>(
     };
     // The marker only suppresses a repeated lazy attempt. Once launchd has
     // accepted the service and its health probe succeeds, that activation is
-    // committed: reporting a marker-publication failure as an activation
-    // failure would invite an installer to restore only the old binary while
-    // launchd remains configured for (and may still be running) the new one.
+    // committed: an explicit installer reconciliation still reports success so
+    // it cannot mistake marker publication for an activation failure and
+    // restore only the old binary. A lazy caller instead receives the marker
+    // error, without rollback, while the owner-private staging marker bounds
+    // later attempts.
     // A failed activation remains authoritative too; preserve its original
     // error even if recording the attempt also fails.
     if transactional && result.is_err() {
         let _ = restore_marker(file_system, &paths.marker, previous_marker.as_deref());
-    } else {
-        let _ = write_marker(file_system, &paths.marker, &identity, succeeded, error_code);
+    } else if let Err(marker_error) =
+        write_marker(file_system, &paths.marker, &identity, succeeded, error_code)
+    {
+        if mode == AttemptMode::Lazy && result.is_ok() {
+            return Err(ControlBrokerServiceError::coded(
+                "attempt-marker-failed",
+                format!(
+                    "control broker activation committed, but its lazy-attempt marker could not be published: {marker_error}"
+                ),
+            ));
+        }
     }
     result.map(|()| ControlBrokerServiceOutcome::Reconciled)
 }
@@ -792,25 +803,29 @@ fn matching_marker<F: FileSystem>(
     marker: &Path,
     identity: &BrokerIdentity,
 ) -> Result<Option<bool>, ControlBrokerServiceError> {
-    if !file_system.is_file(marker) {
-        return Ok(None);
-    }
-    let contents = String::from_utf8_lossy(&read_file(file_system, marker)?).into_owned();
-    if !contents.starts_with(&identity.marker_key()) {
-        return Ok(None);
-    }
-    if !contents.contains("attempt_count=1\n") || !contents.contains("error_code=") {
-        return Ok(None);
-    }
-    Ok(
+    // A failed atomic rename leaves the fully written, owner-private staging
+    // marker in place. Treat it as the durable attempt record so a committed
+    // lazy activation cannot be repeated merely because final publication
+    // failed.
+    for candidate in [marker.with_extension("marker.new"), marker.to_owned()] {
+        if !file_system.is_file(&candidate) {
+            continue;
+        }
+        let contents = String::from_utf8_lossy(&read_file(file_system, &candidate)?).into_owned();
+        if !contents.starts_with(&identity.marker_key())
+            || !contents.contains("attempt_count=1\n")
+            || !contents.contains("error_code=")
+        {
+            continue;
+        }
         if contents.contains("outcome=success\n") && contents.contains("error_code=none\n") {
-            Some(true)
-        } else if contents.contains("outcome=failure\n") {
-            Some(false)
-        } else {
-            None
-        },
-    )
+            return Ok(Some(true));
+        }
+        if contents.contains("outcome=failure\n") {
+            return Ok(Some(false));
+        }
+    }
+    Ok(None)
 }
 
 fn write_marker<F: FileSystem>(
