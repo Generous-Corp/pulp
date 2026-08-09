@@ -113,5 +113,13 @@ int main() {
     const std::array<pulp::signal::FormantFilterBank::FormantSpec, 1> recipe{{
         {800.0, 80.0, 0.0},
     }};
-    return formants.configure(recipe) == pulp::signal::FormantConfigureStatus::configured ? 0 : 29;
+    if (!(formants.configure(recipe) == pulp::signal::FormantConfigureStatus::configured))
+        return 29;
+
+    pulp::signal::SpectralCrossSynthesis cross_synthesis;
+    pulp::signal::SpectralCrossSynthesisPrepareConfig cross_config;
+    cross_config.fft_size = 256;
+    if (!cross_synthesis.prepare(cross_config))
+        return 32;
+    return 0;
 }

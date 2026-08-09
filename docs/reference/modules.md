@@ -752,6 +752,41 @@ dB/octave with exact neutral bypass, transactional retuning, and no audio-thread
 allocation. Its full lifecycle and response-inspection surface is listed in the
 [advanced DSP API](advanced-dsp-api.md#tilteqtsampletype-channels).
 
+### Spectral cross-synthesis
+
+`SpectralCrossSynthesisT` is a prepared, frame-domain source-filter
+cross-synthesizer. It estimates the carrier and modulator log-magnitude
+envelopes with the shared `CepstralEnvelopeAnalyzerT`, then preserves the
+carrier residual and phase while transferring the modulator envelope:
+
+`log |wet[k]| = log |carrier[k]| + amount * (E_mod[k] - E_carrier[k])`.
+
+This differs from `SpectralMorphT`, which interpolates raw magnitudes and
+phases. `lifter_order` bounds envelope detail, true-envelope refinement is
+bounded at prepare time, and `envelope_smoothing_frames` applies a deterministic
+frame-rate EMA to both envelopes. `mix` blends dry and wet linear magnitudes.
+Optional `match_carrier_rms` normalization matches per-channel RMS over the
+one-sided bins after envelope transfer and before mixing.
+
+Call `prepare()` off the audio thread; processing allocates nothing afterward.
+`set_config()` and rejected re-prepare calls are transactional. `reset()` clears
+only temporal envelope history. Non-finite magnitudes enter analysis at the
+configured floor, non-finite carrier bins render silence, carrier phase is
+preserved, and DC/Nyquist are always real. The processor itself adds no latency
+or tail: analysis/synthesis buffering and its latency belong to the surrounding
+`SpectralFrameEngineT` instances used to produce the two coherent input frames
+and synthesize the result.
+
+```cpp
+#include <pulp/signal/spectral_cross_synthesis.hpp>
+
+SpectralCrossSynthesis cross;
+cross.prepare({.channels = 2, .fft_size = 2048, .lifter_order = 128});
+cross.set_config({.amount = 1.0f, .mix = 0.75f,
+                  .envelope_smoothing_frames = 4});
+cross.process(carrier_frames, modulator_frames, output_frames, 2, 1025);
+```
+
 For synthesized percussion, including the complete voice API, recipes,
 provenance, and Forge bake-layer controls, see
 [Percussion synthesis](percussion-synthesis.md).
