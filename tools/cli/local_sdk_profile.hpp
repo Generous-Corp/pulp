@@ -51,8 +51,15 @@ struct InstallRequest {
     std::string error;
 };
 
+enum class ArchiveSliceAction {
+    Keep,
+    ThinToArm64,
+    Reject,
+};
+
 InstallRequest parse_install_arguments(const std::vector<std::string>& args,
                                        const std::string& default_version);
+ArchiveSliceAction archive_slice_action(const std::string& lipo_architectures);
 std::string input_fingerprint(const Identity& identity);
 Paths profile_paths(const fs::path& pulp_home, const Identity& identity);
 std::vector<std::string> configure_arguments(const fs::path& source, const fs::path& build,

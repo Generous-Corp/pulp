@@ -120,6 +120,16 @@ TEST_CASE("forge development SDK install arguments fail closed", "[cli][sdk][for
                       .ok);
 }
 
+TEST_CASE("forge development SDK normalizes only archives containing arm64",
+          "[cli][sdk][forge-dev]") {
+    using Action = local_sdk::ArchiveSliceAction;
+    REQUIRE(local_sdk::archive_slice_action("arm64") == Action::Keep);
+    REQUIRE(local_sdk::archive_slice_action("x86_64 arm64") == Action::ThinToArm64);
+    REQUIRE(local_sdk::archive_slice_action("arm64 x86_64") == Action::ThinToArm64);
+    REQUIRE(local_sdk::archive_slice_action("x86_64") == Action::Reject);
+    REQUIRE(local_sdk::archive_slice_action("") == Action::Reject);
+}
+
 TEST_CASE("forge development SDK configure profile pins required capabilities",
           "[cli][sdk][forge-dev]") {
     const auto args = local_sdk::configure_arguments("/source with spaces", "/build with spaces",

@@ -210,7 +210,7 @@ void print_validation_errors(const local_sdk::Validation& validation, const char
         std::cerr << "  - " << error << "\n";
 }
 
-bool installed_archives_are_arm64(const fs::path& prefix, std::string& error) {
+bool normalize_installed_archives_for_arm64(const fs::path& prefix, std::string& error) {
     std::size_t checked = 0;
     for (const auto& entry : fs::recursive_directory_iterator(prefix)) {
         if (!entry.is_regular_file() || entry.path().extension() != ".a")
@@ -218,10 +218,39 @@ bool installed_archives_are_arm64(const fs::path& prefix, std::string& error) {
         ++checked;
         const auto archs =
             capture_command_text("xcrun lipo -archs " + shell_quote(entry.path()) + " 2>/dev/null");
-        if (archs != "arm64") {
-            error = entry.path().filename().string() + " has architectures `" +
-                    (archs.empty() ? "unknown" : archs) + "` instead of exactly `arm64`";
-            return false;
+        switch (local_sdk::archive_slice_action(archs)) {
+            case local_sdk::ArchiveSliceAction::Keep:
+                break;
+            case local_sdk::ArchiveSliceAction::Reject:
+                error = entry.path().filename().string() + " has architectures `" +
+                        (archs.empty() ? "unknown" : archs) + "` with no arm64 slice";
+                return false;
+            case local_sdk::ArchiveSliceAction::ThinToArm64: {
+                auto thin = entry.path();
+                thin += ".pulp-arm64-thin";
+                std::error_code ec;
+                fs::remove(thin, ec);
+                const auto command = "xcrun lipo " + shell_quote(entry.path()) +
+                                     " -thin arm64 -output " + shell_quote(thin);
+                if (capture_command_text(command + " && printf arm64") != "arm64" ||
+                    capture_command_text("xcrun lipo -archs " + shell_quote(thin) +
+                                         " 2>/dev/null") != "arm64") {
+                    fs::remove(thin, ec);
+                    error = "could not thin " + entry.path().filename().string() +
+                            " to arm64";
+                    return false;
+                }
+                std::error_code copy_error;
+                fs::copy_file(thin, entry.path(), fs::copy_options::overwrite_existing,
+                              copy_error);
+                fs::remove(thin, ec);
+                if (copy_error) {
+                    error = "could not publish thinned " + entry.path().filename().string() +
+                            ": " + copy_error.message();
+                    return false;
+                }
+                break;
+            }
         }
     }
     if (checked == 0) {
@@ -380,8 +409,9 @@ fs::path ensure_forge_dev_sdk(const fs::path& repo_root) {
         return {};
     }
     std::string architecture_error;
-    if (!installed_archives_are_arm64(staging_prefix, architecture_error)) {
-        std::cerr << "Error: staged forge-dev SDK is not arm64-only: " << architecture_error
+    if (!normalize_installed_archives_for_arm64(staging_prefix, architecture_error)) {
+        std::cerr << "Error: staged forge-dev SDK could not be normalized to arm64: "
+                  << architecture_error
                   << "\n";
         remove_staging(staging_prefix, active_build_dir);
         return {};

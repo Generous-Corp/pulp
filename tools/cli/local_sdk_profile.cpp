@@ -175,6 +175,20 @@ InstallRequest parse_install_arguments(const std::vector<std::string>& args,
     return out;
 }
 
+ArchiveSliceAction archive_slice_action(const std::string& lipo_architectures) {
+    std::istringstream input(lipo_architectures);
+    std::string architecture;
+    bool has_arm64 = false;
+    std::size_t count = 0;
+    while (input >> architecture) {
+        ++count;
+        has_arm64 = has_arm64 || architecture == "arm64";
+    }
+    if (!has_arm64)
+        return ArchiveSliceAction::Reject;
+    return count == 1 ? ArchiveSliceAction::Keep : ArchiveSliceAction::ThinToArm64;
+}
+
 std::string input_fingerprint(const Identity& identity) {
     return fnv1a_64_hex(normalized_identity(identity)).substr(0, 12);
 }
