@@ -35,6 +35,7 @@ struct FakeState {
     bool artifact_chunked = false;
     bool inventory_session_error_once = false;
     int grant_requests = 0;
+    std::vector<std::string> grant_authorities;
     int session_opens = 0;
     std::chrono::milliseconds timeout_step_advance{};
     std::chrono::steady_clock::time_point timeout_clock{};
@@ -178,6 +179,12 @@ class FakeSession final : public ControlMcpSession {
             ++state_->grant_requests;
             const auto params = choc::json::parse(params_json);
             REQUIRE(params["instance_id"].getString() == "instance-1");
+            if (params.hasObjectMember("operation_id"))
+                state_->grant_authorities.push_back(
+                    "operation:" + std::string(params["operation_id"].getString()));
+            else if (params.hasObjectMember("profile"))
+                state_->grant_authorities.push_back(
+                    "profile:" + std::string(params["profile"].getString()));
             if (params.hasObjectMember("operation_id") &&
                 params["operation_id"].getString() == "dev.pulp.runtime/evaluate@1")
                 return {.status_id = "consent-required",
@@ -296,6 +303,36 @@ TEST_CASE("control MCP and CLI semantics produce the same canonical service requ
         const auto rejected = adapter.call_tool("pulp_control_state_read", malformed);
         REQUIRE(rejected.find("invalid-arguments") != std::string::npos);
     }
+}
+
+TEST_CASE("control MCP automatic grants map every explicit profile to canonical authority",
+          "[mcp][control][grant][profile]") {
+    const auto ui_input = [](std::string_view profile) {
+        return std::string(R"({"instance_id":"instance-1","profile":")") +
+               std::string(profile) +
+               R"(","input":{"kind":"focus","target_id":"root","view_generation":"view-1","event":{"focused":true}}})";
+    };
+
+    for (const auto profile : {"inspect-readonly", "observe"}) {
+        auto state = std::make_shared<FakeState>();
+        ControlMcpAdapter adapter(factory(state));
+        adapter.call_tool("pulp_control_ui_input", ui_input(profile));
+        INFO(profile);
+        REQUIRE(state->grant_authorities ==
+                std::vector<std::string>{"operation:dev.pulp.ui/input@1"});
+    }
+
+    auto state = std::make_shared<FakeState>();
+    ControlMcpAdapter adapter(factory(state));
+    adapter.call_tool("pulp_control_ui_input", ui_input("develop"));
+    REQUIRE(state->grant_authorities == std::vector<std::string>{"profile:develop"});
+
+    auto invalid_state = std::make_shared<FakeState>();
+    ControlMcpAdapter invalid_adapter(factory(invalid_state));
+    const auto invalid = invalid_adapter.call_tool(
+        "pulp_control_ui_input", ui_input("unknown"));
+    REQUIRE(invalid.find("invalid-arguments") != std::string::npos);
+    REQUIRE(invalid_state->grant_authorities.empty());
 }
 
 TEST_CASE("control MCP timeout is one deadline across the complete operation",

@@ -99,7 +99,9 @@ endif()
 
 if(TARGET pulp::inspect-client)
     if(APPLE AND NOT IOS AND NOT PULP_IOS)
-        target_sources(pulp-mcp-core PRIVATE mcp_control_tools.cpp)
+        target_sources(pulp-mcp-core PRIVATE
+            mcp_control_tool_catalog.cpp
+            mcp_control_tools.cpp)
         target_link_libraries(pulp-mcp-core PRIVATE pulp::inspect-client)
         target_compile_definitions(pulp-mcp-core PUBLIC
             PULP_MCP_ENABLE_INSPECTOR_CLIENT=1)
