@@ -866,6 +866,7 @@ a working convolution and would hide the bug. Assert
 | Biquad | `biquad.hpp` | Second-order IIR filter — low/high/band-pass, notch, shelf, peaking EQ |
 | Six-band EQ | `six_band_eq.hpp` | Allocation-free low-shelf/four-peak/high-shelf cascade with optional stable cascade crossfades and endpoint response inspection |
 | SOS Cascade | `sos_cascade.hpp` | Fixed-capacity transactional runtime executor for stable normalized biquad cascades |
+| Graphic EQ | `graphic_eq.hpp` | Fixed-capacity configurable peaking-band cascade with transactional retune and exact endpoint response |
 | Filter Design | `filter_design.hpp` | Generate Butterworth and Chebyshev coefficient sets for arbitrary order |
 | FIR | `fir_filter.hpp` | Finite impulse response filter with arbitrary tap count for linear-phase EQ |
 | [FIR Design](fir-design.md) | `fir_design.hpp` | Bounded weighted sampled-target Type I-IV linear-phase FIR design with rank, conditioning, and measured-error reporting, plus causal minimum-phase reconstruction |

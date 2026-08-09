@@ -132,6 +132,47 @@ phase-preservingly saturated.
 - Lifecycle/configuration: `supports_configuration()`, `prepare()`, `reset()`, `set_config()`/`config()`.
 - Processing: `process(a, b, out, channels, bins, magnitude_amount, phase_amount)`, `process_partition(a, b, out, channels, first_bin, bin_count, magnitude_amount, phase_amount)`.
 - Inspection: `prepared()`, `channels()`, `num_bins()`.
+### `GraphicEqT<SampleType, MaxBands>`
+
+`GraphicEqT` is the variable-band graphic-EQ container. It is distinct from
+the fixed-role `SixBandEqT` compatibility surface and from constant-Q analysis:
+the caller supplies zero or more strictly increasing peaking-band centers and
+the container runs them as one fixed-capacity SOS cascade. Instantiate one
+object per independently processed channel.
+
+`prepare(sample_rate, band_capacity)` accepts sample rates from 8 kHz through
+384 kHz and a non-zero capacity no larger than `MaxBands`. `configure()` accepts
+frequencies from 20 Hz through `min(20 kHz, 0.49 * sample_rate)`, gains from
+-24 through +24 dB, and Q from 0.1 through 12. Every value must be finite.
+An empty layout is bypass. Invalid, unordered, or over-capacity requests leave
+the complete live cascade, recursive history, and transition state unchanged.
+The object is not a concurrent publication primitive: call `configure()` while
+stopped or from the processing thread at a block boundary.
+
+A zero-sample configuration selects the validated endpoint immediately. A
+non-zero transition linearly crossfades two complete stable cascades without
+interpolating recursive coefficients. Requests made while that transition is
+active fail with `transition_in_progress`; this keeps rendering independent of
+caller block partitioning. `reset()` clears both recursive histories and selects
+the requested endpoint if a transition was active. `process_block()` is in-place;
+a null pointer is accepted only for an empty block.
+
+Zero-gain bands are exact identity sections, so an all-neutral layout is a
+bit-exact flat bypass. `magnitude()` and `magnitude_db()` expose the stationary
+requested endpoint and reject non-finite or out-of-Nyquist queries with NaN.
+A bad audio sample clears both bounded histories, emits zero, increments
+`fault_count()`, and the next finite sample resumes from cleared state.
+
+The cascade has zero host latency. A bypass or all-zero-gain layout has zero
+tail; any non-neutral recursive band reports Pulp's infinite-tail sentinel `-1`.
+Preparation, whole-layout replacement, processing, reset, and response
+inspection allocate no memory, although coefficient design and response queries
+belong off the audio callback because they use transcendental functions.
+
+- Lifecycle: `prepare()`, `reset()`.
+- Configuration: `configure()`, `GraphicEqPrepareStatus`, `GraphicEqConfigureStatus`.
+- Processing: `process()`, `process_block()`.
+- Inspection: `band()`, `coefficients()`, `band_count()`, `capacity()`, `sample_rate()`, `supported_frequency_ceiling_hz()`, `transitioning()`, `healthy()`, `fault_count()`, `latency_samples()`, `tail_samples()`, `magnitude()`, `magnitude_db()`.
 
 ## Routing and gain laws
 

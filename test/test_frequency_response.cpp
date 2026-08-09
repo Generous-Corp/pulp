@@ -43,6 +43,12 @@ TEST_CASE("peaking EQ with negative gain cuts", "[signal][frequency-response]") 
     REQUIRE_THAT(db_at(cut, 1000.0f), Catch::Matchers::WithinAbs(-9.0, 0.1));
 }
 
+TEST_CASE("concrete aggregate section response remains source compatible",
+          "[signal][frequency-response]") {
+    REQUIRE(section_magnitude({1.0f, 0.0f, 0.0f, 0.0f, 0.0f}, 0.7) == 1.0);
+    REQUIRE(section_magnitude_db({1.0f, 0.0f, 0.0f, 0.0f, 0.0f}, 1000.0, sr) == 0.0f);
+}
+
 // ── The shape assertions the Gaussian-bell fake would have failed ──────────
 
 TEST_CASE("lowpass passes low frequencies and rolls off above cutoff",

@@ -227,6 +227,11 @@ pulp_add_test_suite(pulp-test-signal-filters LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-nway-linkwitz-riley
     SOURCES test_nway_linkwitz_riley.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
+# Configurable fixed-capacity peaking-band cascade: transactional replacement,
+# independent response/runtime oracles, partition determinism, and RT proof.
+pulp_add_test_suite(pulp-test-graphic-eq
+    SOURCES test_graphic_eq.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
 # Filter analysis: coefficients -> magnitude response -> sampled curve. Asserts
 # the SHAPE of each filter type (a lowpass rolls off, a notch nulls, a shelf
 # plateaus), which is what distinguishes a real response from an approximation.
