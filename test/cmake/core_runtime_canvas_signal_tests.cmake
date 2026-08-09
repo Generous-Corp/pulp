@@ -243,6 +243,12 @@ pulp_add_test_suite(pulp-test-spectral-primitives
             test_transient_freeze_delay.cpp test_spectral_matrix.cpp test_stn_stretch.cpp
             test_sinc_pitch.cpp
     LIBRARIES pulp::signal)
+# Frame-domain spectral gate and bounded causal magnitude blur. The test owns
+# hand-computed oracles and an allocation probe rather than reusing production
+# FFT or smoothing code as its reference.
+pulp_add_test_suite(pulp-test-spectral-gate-blur
+    SOURCES test_spectral_gate_blur.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-stn-decomposer LIBRARIES pulp::signal)
 # Offline time-stretch/pitch engine (orchestrates the spectral primitives).
 pulp_add_test_suite(pulp-test-offline-stretch LIBRARIES pulp::signal)

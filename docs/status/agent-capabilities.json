@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 7,
+  "manifest_revision": 8,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 22
+        "capabilities": 27
       },
       "timebase": {
         "state": "partial",
@@ -1624,6 +1624,69 @@
       "contract_digest": "sha256:fee52792ad753f30822e0e2f7173b42ef27036b17308565abcac52d35799e2f7"
     },
     {
+      "key": "signal.dynamic-eq",
+      "domain": "signal",
+      "summary": "Fixed-state threshold-driven single-band dynamic equalization.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control coefficient design",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "Fixed band-pass biquad, peak envelope, parameters, and gain telemetry.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "finite mono audio plus frequency, Q, threshold, range, and timing controls",
+      "output_domain": "dynamically equalized mono audio plus detector and gain telemetry",
+      "units": [
+        "samples",
+        "hertz",
+        "Q",
+        "decibels",
+        "milliseconds",
+        "normalized activity"
+      ],
+      "latency": "zero",
+      "tail": "recursive biquad and envelope decay until reset",
+      "scheduling": "sample-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/dynamic_eq.hpp",
+          "qualified_name": "pulp::signal::DynamicEqBandT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:06cf8e1bc52370a2bf801f239867cdca0ec0b7c9cdc2a6ddb8a6b9f2dba15d51"
+    },
+    {
       "key": "signal.dynamics-envelope-contract",
       "domain": "signal",
       "summary": "Canonical mono/stereo peak or RMS envelope followers and gain-reduction vocabulary.",
@@ -1832,6 +1895,68 @@
         }
       },
       "contract_digest": "sha256:2a00db5a77cf8b3c5f9580a7a9b4652516fa0309c1a1db4b79f9ac78ef377713"
+    },
+    {
+      "key": "signal.headphone-crossfeed",
+      "domain": "signal",
+      "summary": "Bounded delayed and low-pass-filtered stereo headphone crossfeed.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "Fixed stereo delay arrays, one-pole filter state, and derived mix controls.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "finite stereo audio plus amount, delay, cutoff, and enable controls",
+      "output_domain": "speaker-like crossfed stereo audio",
+      "units": [
+        "samples",
+        "milliseconds",
+        "hertz",
+        "linear gain",
+        "normalized amount"
+      ],
+      "latency": "zero direct-path algorithmic latency",
+      "tail": "asymptotic one-pole decay while crossfeed is active",
+      "scheduling": "sample-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/headphone_crossfeed.hpp",
+          "qualified_name": "pulp::signal::HeadphoneCrossfeedT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:2859db7c2ee37896943a957dedbabe9e1757a36640056142a5e3f83263f51b9f"
     },
     {
       "key": "signal.linkwitz-riley-crossover",
@@ -2633,6 +2758,128 @@
       "contract_digest": "sha256:c7d9780be2101ca162433e61a5d59e5376b7005ab97ea4856b1ff5f55184c97a"
     },
     {
+      "key": "signal.spectral-frame-blur",
+      "domain": "signal",
+      "summary": "Prepared causal finite moving-average blur of complex spectral-frame magnitudes.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control; allocates bounded history",
+        "process": "audio frame owner",
+        "reset": "audio frame owner",
+        "release": "destruction off audio"
+      },
+      "state_model": "Prepared bounded magnitude history, running means, counts, and retained phases.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "tolerance_bounded",
+        "block_partition": "not_applicable",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "prepared coherent channel groups of one-sided complex spectra",
+      "output_domain": "in-place temporally blurred complex spectra",
+      "units": [
+        "bins",
+        "channels",
+        "frames",
+        "linear magnitude",
+        "bytes"
+      ],
+      "latency": "zero additional frame-domain latency",
+      "tail": "at most blur_frames retained analysis frames",
+      "scheduling": "one supplied spectral frame per process call",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/spectral_gate_blur.hpp",
+          "qualified_name": "pulp::signal::SpectralFrameBlurT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:be0fa0d19700aa7fe9637d1280f126c25c5550183d0ffd7f384c6ada92ad2ae4"
+    },
+    {
+      "key": "signal.spectral-gate",
+      "domain": "signal",
+      "summary": "Allocation-free scalar or per-bin gating of caller-owned complex spectra.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "none",
+        "process": "audio",
+        "reset": "none",
+        "release": "none"
+      },
+      "state_model": "Fixed scalar threshold only; spectral frames and optional curves are caller-owned.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "not_applicable",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "finite coherent channel groups of one-sided complex spectra and thresholds",
+      "output_domain": "in-place gated complex spectra",
+      "units": [
+        "bins",
+        "channels",
+        "linear magnitude"
+      ],
+      "latency": "zero frame-domain latency",
+      "tail": "none",
+      "scheduling": "one supplied spectral frame",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/spectral_gate_blur.hpp",
+          "qualified_name": "pulp::signal::SpectralGateT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:749f2be59d77927be1199753134bc28cb4b602e3748b3e301e4374f030d6c5f7"
+    },
+    {
       "key": "signal.spectrum-trace",
       "domain": "signal",
       "summary": "Fixed-capacity FFT-bin aggregation, smoothing, weighting, and peak-hold trace.",
@@ -2870,6 +3117,67 @@
         }
       },
       "contract_digest": "sha256:26c1dee5d8d61731db112932e558664d08d15d5a58c69373a762dbdd53af6246"
+    },
+    {
+      "key": "signal.transient-designer",
+      "domain": "signal",
+      "summary": "Zero-latency attack and sustain shaping from independent peak envelopes.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "Fixed fast and slow peak-envelope state plus contrast and gain telemetry.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "finite mono audio and attack, sustain, fast, and slow envelope controls",
+      "output_domain": "transient-shaped mono audio plus contrast and gain telemetry",
+      "units": [
+        "samples",
+        "milliseconds",
+        "decibels",
+        "normalized contrast"
+      ],
+      "latency": "zero",
+      "tail": "detector history until reset",
+      "scheduling": "sample-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/transient_designer.hpp",
+          "qualified_name": "pulp::signal::TransientDesignerT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:5c42f2fd148fc9f5f03e85a2ccc7674b38031be13219e84a03c922a2c43eafa7"
     },
     {
       "key": "signal.true-peak-limiter",
@@ -3706,14 +4014,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 53,
+    "total": 58,
     "by_domain": {
       "audio": 6,
       "midi": 9,
       "music": 6,
       "offline": 0,
       "sequence": 1,
-      "signal": 22,
+      "signal": 27,
       "timebase": 9
     }
   },
@@ -4759,6 +5067,20 @@
             ]
           }
         ],
+        "dynamic_eq.hpp": [
+          {
+            "class": "DynamicEqBandT",
+            "methods": [
+              "set_parameters(Parameters requested)",
+              "parameters()",
+              "process(SampleType input)",
+              "process_block(SampleType* samples, std::size_t frames)",
+              "detector_level()",
+              "activity()",
+              "dynamic_gain_db()"
+            ]
+          }
+        ],
         "dynamics_contract.hpp": [
           {
             "class": "GainReduction",
@@ -5416,6 +5738,20 @@
               "set_voice_interval(int voice, int steps)",
               "voice_interval(int voice)",
               "set_voice_detune_cents(int voice, double cents)"
+            ]
+          }
+        ],
+        "headphone_crossfeed.hpp": [
+          {
+            "class": "HeadphoneCrossfeedT",
+            "methods": [
+              "static_assert(std::is_floating_point_v<SampleType>)",
+              "sample_rate()",
+              "set_enabled(bool enabled)",
+              "enabled()",
+              "set_amount(double amount01)",
+              "amount()",
+              "crossfeed_gain()"
             ]
           }
         ],
@@ -6680,6 +7016,29 @@
             ]
           }
         ],
+        "spectral_gate_blur.hpp": [
+          {
+            "class": "SpectralGateT",
+            "methods": [
+              "static_assert(std::is_floating_point_v<SampleType>)",
+              "set_threshold_magnitude(SampleType threshold)",
+              "threshold_magnitude()",
+              "process(std::complex<SampleType>* const* frames, int channels, int num_bins, const SampleType* thresholds = nullptr)"
+            ]
+          },
+          {
+            "class": "SpectralFrameBlurT",
+            "methods": [
+              "static_assert(std::is_floating_point_v<SampleType>)",
+              "checked_retained_bytes(int channels, int num_bins, int blur_frames, std::uint64_t target_max_bytes, std::uint64_t& bytes)",
+              "charge(target_max_bytes)",
+              "supports_configuration(int channels, int num_bins, int blur_frames)",
+              "checked_retained_bytes(channels, num_bins, blur_frames, kTargetAddressMaximumBytes, ignored)",
+              "new_history(frame_elements * static_cast<std::size_t>(blur_frames)",
+              "new_means(frame_elements, SampleType{0})"
+            ]
+          }
+        ],
         "spectrogram.hpp": [
           {
             "class": "ColorMapper",
@@ -6859,6 +7218,20 @@
               "process_lowpass(SampleType input)",
               "process_highpass(SampleType input)",
               "process_allpass(SampleType input)",
+              "process(SampleType input)"
+            ]
+          }
+        ],
+        "transient_designer.hpp": [
+          {
+            "class": "TransientDesignerT",
+            "methods": [
+              "set_attack_db(SampleType db)",
+              "set_sustain_db(SampleType db)",
+              "set_fast_attack_ms(SampleType ms)",
+              "set_fast_release_ms(SampleType ms)",
+              "set_slow_attack_ms(SampleType ms)",
+              "set_slow_release_ms(SampleType ms)",
               "process(SampleType input)"
             ]
           }

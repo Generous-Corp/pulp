@@ -1,4 +1,5 @@
 #include <pulp/signal/signal.hpp>
+#include <pulp/signal/headphone_crossfeed.hpp>
 
 #include <limits>
 
@@ -21,6 +22,9 @@ int main() {
     pulp::signal::AudioMatrixMixer matrix;
     if (!matrix.prepare(16u))
         return 6;
+    pulp::signal::SpectralFrameBlur spectral_blur;
+    if (!spectral_blur.prepare(1, 8, 2))
+        return 7;
     pulp::signal::PathLatencyAligner aligner;
-    return aligner.prepare(2u, 1u, 8u, 16u) ? 0 : 7;
+    return aligner.prepare(2u, 1u, 8u, 16u) ? 0 : 8;
 }
