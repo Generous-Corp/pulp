@@ -505,6 +505,8 @@ TEST_CASE("EditorBridge native ScriptEngine attachment dispatches JSON envelopes
     });
 
     pulp::view::ScriptEngine engine;
+    CHECK_THROWS_AS(bridge.attach_native_runtime(engine, ""),
+                    std::invalid_argument);
     bridge.attach_native_runtime(engine, "__testEditorDispatch");
 
     const auto result = engine.evaluate(
