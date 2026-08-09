@@ -60,6 +60,16 @@ bool endpoint_accepts_connections(const std::filesystem::path& endpoint) {
     return true;
 }
 
+bool valid_runtime_dependency_filename(std::string_view filename) {
+    return !filename.empty() && filename.size() <= 255 &&
+           std::ranges::all_of(filename, [](unsigned char value) {
+               return (value >= 'A' && value <= 'Z') ||
+                      (value >= 'a' && value <= 'z') ||
+                      (value >= '0' && value <= '9') || value == '.' ||
+                      value == '_' || value == '-';
+           });
+}
+
 bool stale_observer_name(std::string_view name) {
     constexpr std::string_view prefix = "bo-";
     constexpr std::string_view suffix = ".sock";
@@ -294,11 +304,37 @@ pin_trusted_host_policy(const ControlTrustedHostLaunchIntent& intent) {
         !S_ISDIR(working_directory.st_mode) || S_ISLNK(working_directory.st_mode)) {
         return std::nullopt;
     }
+    std::vector<ControlTrustedHostRuntimeDependencyPolicy> runtime_dependencies;
+    std::error_code dependency_error;
+    for (std::filesystem::directory_iterator iterator(intent.working_directory,
+                                                       dependency_error),
+         end;
+         !dependency_error && iterator != end; iterator.increment(dependency_error)) {
+        const auto filename = iterator->path().filename().string();
+        if (iterator->path().extension() != ".dylib" &&
+            iterator->path().extension() != ".so")
+            continue;
+        const bool valid_filename = valid_runtime_dependency_filename(filename);
+        const auto bytes = detail::read_owner_private_file(iterator->path(),
+                                                           maximum_executable_bytes);
+        const auto identity = detail::inspect_static_code_identity(iterator->path());
+        if (!valid_filename || !bytes || !identity || runtime_dependencies.size() >= 16)
+            return std::nullopt;
+        runtime_dependencies.push_back(
+            {.filename = filename,
+             .digest = runtime::sha256_hex(bytes->data(), bytes->size()),
+             .static_expectation = *identity});
+    }
+    if (dependency_error)
+        return std::nullopt;
+    std::ranges::sort(runtime_dependencies, {},
+                      &ControlTrustedHostRuntimeDependencyPolicy::filename);
     return ControlTrustedHostPreparationPolicy{
         .executable_digest =
             runtime::sha256_hex(executable->data(), executable->size()),
         .manifest_digest = runtime::sha256_hex(manifest->data(), manifest->size()),
         .static_expectation = *static_expectation,
+        .runtime_dependencies = std::move(runtime_dependencies),
         .working_directory_device = static_cast<std::uint64_t>(working_directory.st_dev),
         .working_directory_inode = static_cast<std::uint64_t>(working_directory.st_ino),
     };

@@ -786,6 +786,94 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
     CHECK(instance["capabilities"][1].getString() ==
           std::string_view{"dev.pulp.state/read@1"});
 
+    if (author_host_environment) {
+        const auto version_directory = installed_host.parent_path();
+        const auto catalog_entry = version_directory.parent_path();
+        const auto active = catalog_entry / "active";
+        const auto inactive = catalog_entry / ".active.test-removed";
+        std::error_code rename_error;
+        std::filesystem::rename(active, inactive, rename_error);
+        INFO(rename_error.message());
+        REQUIRE_FALSE(rename_error);
+
+        bool disconnected_for_reload = false;
+        for (unsigned attempt = 0; attempt < 5'000; ++attempt) {
+            const auto result = connection->manage("instances");
+            if (result.status_id != "completed") {
+                disconnected_for_reload = true;
+                break;
+            }
+            std::this_thread::sleep_for(1ms);
+        }
+        CHECK(disconnected_for_reload);
+        connection->disconnect();
+        connection.reset();
+        for (unsigned attempt = 0; attempt < 10'000 && !connection; ++attempt) {
+            auto candidate = std::make_unique<ControlClientConnection>(
+                ControlClientConnectionConfig{.endpoint_path = endpoint,
+                                              .expected_broker_executable = installed_broker});
+            if (candidate->connect() &&
+                candidate->manage("enroll").status_id == "accepted")
+                connection = std::move(candidate);
+            else
+                std::this_thread::sleep_for(1ms);
+        }
+        REQUIRE(connection);
+        CHECK(connection
+                  ->manage("host-prepare-installed", choc::json::toString(named, false))
+                  .status_id == "invalid_request");
+
+        std::filesystem::rename(inactive, active, rename_error);
+        INFO(rename_error.message());
+        REQUIRE_FALSE(rename_error);
+        bool disconnected_for_restore = false;
+        for (unsigned attempt = 0; attempt < 5'000; ++attempt) {
+            const auto result = connection->manage("instances");
+            if (result.status_id != "completed") {
+                disconnected_for_restore = true;
+                break;
+            }
+            std::this_thread::sleep_for(1ms);
+        }
+        CHECK(disconnected_for_restore);
+        connection->disconnect();
+        connection.reset();
+        for (unsigned attempt = 0; attempt < 10'000 && !connection; ++attempt) {
+            auto candidate = std::make_unique<ControlClientConnection>(
+                ControlClientConnectionConfig{.endpoint_path = endpoint,
+                                              .expected_broker_executable = installed_broker});
+            if (candidate->connect() &&
+                candidate->manage("enroll").status_id == "accepted")
+                connection = std::move(candidate);
+            else
+                std::this_thread::sleep_for(1ms);
+        }
+        REQUIRE(connection);
+        const auto restored_prepared = connection->manage(
+            "host-prepare-installed", choc::json::toString(named, false));
+        INFO(restored_prepared.explanation);
+        REQUIRE(restored_prepared.status_id == "prepared");
+        auto restored_launch = choc::value::createObject("");
+        restored_launch.addMember(
+            "inventory_id",
+            choc::value::createString(std::string(
+                choc::json::parse(restored_prepared.data_json)["inventory_id"].getString())));
+        REQUIRE(connection
+                    ->manage("host-launch", choc::json::toString(restored_launch, false))
+                    .status_id == "launched");
+        choc::value::Value restored_instances;
+        for (unsigned attempt = 0; attempt < 10'000; ++attempt) {
+            const auto result = connection->manage("instances");
+            REQUIRE(result.status_id == "completed");
+            restored_instances = choc::json::parse(result.data_json)["instances"];
+            if (restored_instances.size() == 1)
+                break;
+            std::this_thread::sleep_for(1ms);
+        }
+        REQUIRE(restored_instances.size() == 1);
+        CHECK(restored_instances[0]["plugin_id"].getString() == expected_plugin);
+    }
+
     connection->disconnect();
     daemon_process.cancel();
     const auto stopped = wait_for_process_exit(daemon_process);

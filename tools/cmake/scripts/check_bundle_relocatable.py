@@ -95,6 +95,34 @@ def unresolved_rpath_deps(deps, rpaths, binary_dir, exe_dir, bundle_root, exists
     return unresolved
 
 
+def unsafe_dependency_paths(deps, rpaths, binary_dir, exe_dir, bundle_root, exists):
+    """Dependencies that dyld could load from outside the shipped closure."""
+    unsafe = unresolved_rpath_deps(
+        deps, rpaths, binary_dir, exe_dir, bundle_root, exists
+    )
+    for dep in deps:
+        if dep.startswith("@rpath/"):
+            continue
+        if dep.startswith("@loader_path/"):
+            candidate = os.path.normpath(
+                dep.replace("@loader_path", binary_dir, 1)
+            )
+        elif dep.startswith("@executable_path/"):
+            candidate = os.path.normpath(
+                dep.replace("@executable_path", exe_dir, 1)
+            )
+        elif dep.startswith("/usr/lib/") or dep.startswith("/System/"):
+            continue
+        else:
+            unsafe.append(dep)
+            continue
+        if not (candidate == bundle_root or candidate.startswith(bundle_root + os.sep)):
+            unsafe.append(dep)
+        elif not exists(candidate):
+            unsafe.append(dep)
+    return sorted(set(unsafe))
+
+
 # ── otool front-end (macOS) ──────────────────────────────────────────────────
 
 def _otool_rpaths(binary):
@@ -148,7 +176,7 @@ def check_binary(binary, bundle_root, allow_toolchain_runtime=False):
     binary_dir = os.path.dirname(os.path.abspath(binary))
     exe_dir = binary_dir  # for a single binary, loader == executable dir
     ext = [rp for rp in rpaths if is_external_rpath(rp)]
-    unresolved = unresolved_rpath_deps(
+    unresolved = unsafe_dependency_paths(
         deps, rpaths, binary_dir, exe_dir, bundle_root, os.path.exists
     )
     toolchain = [

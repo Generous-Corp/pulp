@@ -74,6 +74,16 @@ bool path_has_nul(const fs::path& path) {
     return path.string().find('\0') != std::string::npos;
 }
 
+bool valid_runtime_dependency_filename(std::string_view filename) {
+    return !filename.empty() && filename.size() <= 255 &&
+           std::ranges::all_of(filename, [](unsigned char value) {
+               return (value >= 'A' && value <= 'Z') ||
+                      (value >= 'a' && value <= 'z') ||
+                      (value >= '0' && value <= '9') || value == '.' ||
+                      value == '_' || value == '-';
+           });
+}
+
 bool no_symlink_components(const fs::path& path) {
     if (!path.is_absolute())
         return false;
@@ -458,8 +468,13 @@ ControlArtifactExpectation artifact_expectation(const ControlManifest& manifest)
 }
 
 void remove_snapshot_pair(const fs::path& directory, const fs::path& executable,
-                          const fs::path& manifest) {
+                          const fs::path& manifest,
+                          const std::vector<fs::path>& runtime_dependencies = {}) {
     std::error_code error;
+    for (const auto& dependency : runtime_dependencies) {
+        fs::remove(dependency, error);
+        error.clear();
+    }
     fs::remove(executable, error);
     error.clear();
     fs::remove(manifest, error);
@@ -473,6 +488,7 @@ struct ControlTrustedHostSnapshot::Impl {
     fs::path directory;
     fs::path executable;
     fs::path manifest;
+    std::vector<fs::path> runtime_dependencies;
     std::vector<std::string> arguments;
     fs::path working_directory;
     int working_directory_descriptor = -1;
@@ -488,7 +504,7 @@ struct ControlTrustedHostSnapshot::Impl {
         if (working_directory_descriptor >= 0)
             ::close(working_directory_descriptor);
 #endif
-        remove_snapshot_pair(directory, executable, manifest);
+        remove_snapshot_pair(directory, executable, manifest, runtime_dependencies);
     }
 };
 
@@ -627,6 +643,50 @@ ControlTrustedHostInventory::prepare(
     if (!source)
         return {ControlTrustedHostInventoryStatus::UnsafePath, std::nullopt};
     const auto& sidecar = source->sidecar;
+    struct RuntimeDependencySource {
+        ControlTrustedHostRuntimeDependencyPolicy policy;
+        std::vector<std::uint8_t> bytes;
+    };
+    std::vector<RuntimeDependencySource> runtime_dependencies;
+    if (policy) {
+        if (policy->runtime_dependencies.size() > 16)
+            return {ControlTrustedHostInventoryStatus::InvalidRequest, std::nullopt};
+        std::vector<std::string> discovered_names;
+        std::error_code dependency_error;
+        for (fs::directory_iterator iterator(intent.working_directory, dependency_error), end;
+             !dependency_error && iterator != end; iterator.increment(dependency_error)) {
+            if (iterator->path().extension() == ".dylib" ||
+                iterator->path().extension() == ".so")
+                discovered_names.push_back(iterator->path().filename().string());
+        }
+        if (dependency_error)
+            return {ControlTrustedHostInventoryStatus::UnsafePath, std::nullopt};
+        std::ranges::sort(discovered_names);
+        std::vector<std::string> policy_names;
+        for (const auto& dependency : policy->runtime_dependencies)
+            policy_names.push_back(dependency.filename);
+        std::ranges::sort(policy_names);
+        if (discovered_names != policy_names)
+            return {ControlTrustedHostInventoryStatus::InvalidRequest, std::nullopt};
+        runtime_dependencies.reserve(policy->runtime_dependencies.size());
+        for (const auto& dependency : policy->runtime_dependencies) {
+            const bool valid_filename =
+                valid_runtime_dependency_filename(dependency.filename) &&
+                fs::path(dependency.filename).filename() == fs::path(dependency.filename);
+            const auto path = intent.working_directory / dependency.filename;
+            const auto bytes = detail::read_owner_private_file(
+                path, impl_->config.maximum_executable_bytes);
+            const auto identity = detail::inspect_static_code_identity(path);
+            if (!valid_filename || !bytes || !identity ||
+                runtime::sha256_hex(bytes->data(), bytes->size()) != dependency.digest ||
+                identity->executable_identity !=
+                    dependency.static_expectation.executable_identity ||
+                identity->publisher_id != dependency.static_expectation.publisher_id) {
+                return {ControlTrustedHostInventoryStatus::InvalidRequest, std::nullopt};
+            }
+            runtime_dependencies.push_back({dependency, *bytes});
+        }
+    }
 
     const auto inventory_id = random_id("inventory-");
     const auto storage_id = random_id("snapshot-");
@@ -648,15 +708,35 @@ ControlTrustedHostInventory::prepare(
         return {ControlTrustedHostInventoryStatus::SnapshotFailed, std::nullopt};
     const auto staged_executable = staging / intent.executable.filename();
     const auto staged_manifest = staging / sidecar.filename();
+    std::vector<fs::path> staged_runtime_dependencies;
+    std::vector<fs::path> final_runtime_dependencies;
+    for (const auto& dependency : runtime_dependencies) {
+        staged_runtime_dependencies.push_back(staging / dependency.policy.filename);
+        final_runtime_dependencies.push_back(final / dependency.policy.filename);
+    }
     auto cleanup = [&] {
-        remove_snapshot_pair(staging, staged_executable, staged_manifest);
+        remove_snapshot_pair(staging, staged_executable, staged_manifest,
+                             staged_runtime_dependencies);
         remove_snapshot_pair(final, final / intent.executable.filename(),
-                             final / sidecar.filename());
+                             final / sidecar.filename(), final_runtime_dependencies);
     };
     if (!detail::write_owner_private_file_atomic(staged_executable, source->executable) ||
         !detail::write_owner_private_file_atomic(staged_manifest, source->manifest)) {
         cleanup();
         return {ControlTrustedHostInventoryStatus::SnapshotFailed, std::nullopt};
+    }
+    for (std::size_t index = 0; index < runtime_dependencies.size(); ++index) {
+        if (!detail::write_owner_private_file_atomic(staged_runtime_dependencies[index],
+                                                     runtime_dependencies[index].bytes)) {
+            cleanup();
+            return {ControlTrustedHostInventoryStatus::SnapshotFailed, std::nullopt};
+        }
+#ifndef _WIN32
+        if (::chmod(staged_runtime_dependencies[index].c_str(), 0500) != 0) {
+            cleanup();
+            return {ControlTrustedHostInventoryStatus::SnapshotFailed, std::nullopt};
+        }
+#endif
     }
 #ifndef _WIN32
     if (::chmod(staged_executable.c_str(), 0500) != 0) {
@@ -676,6 +756,12 @@ ControlTrustedHostInventory::prepare(
         !private_snapshot_file(final_manifest, false)) {
         cleanup();
         return {ControlTrustedHostInventoryStatus::SnapshotFailed, std::nullopt};
+    }
+    for (const auto& dependency : final_runtime_dependencies) {
+        if (!private_snapshot_file(dependency, true)) {
+            cleanup();
+            return {ControlTrustedHostInventoryStatus::SnapshotFailed, std::nullopt};
+        }
     }
     const auto snap_executable =
         detail::read_owner_private_file(final_executable, impl_->config.maximum_executable_bytes);
@@ -732,12 +818,28 @@ ControlTrustedHostInventory::prepare(
         cleanup();
         return {ControlTrustedHostInventoryStatus::SignatureInvalid, std::nullopt};
     }
+    for (std::size_t index = 0; index < runtime_dependencies.size(); ++index) {
+        const auto bytes = detail::read_owner_private_file(
+            final_runtime_dependencies[index], impl_->config.maximum_executable_bytes);
+        const auto identity =
+            detail::inspect_static_code_identity(final_runtime_dependencies[index]);
+        if (!bytes || !identity || bytes->size() != runtime_dependencies[index].bytes.size() ||
+            *bytes != runtime_dependencies[index].bytes ||
+            identity->executable_identity !=
+                runtime_dependencies[index].policy.static_expectation.executable_identity ||
+            identity->publisher_id !=
+                runtime_dependencies[index].policy.static_expectation.publisher_id) {
+            cleanup();
+            return {ControlTrustedHostInventoryStatus::SignatureInvalid, std::nullopt};
+        }
+    }
 
     const auto now = impl_->clock();
     auto snapshot = std::make_unique<ControlTrustedHostSnapshot::Impl>();
     snapshot->directory = final;
     snapshot->executable = final_executable;
     snapshot->manifest = final_manifest;
+    snapshot->runtime_dependencies = std::move(final_runtime_dependencies);
     snapshot->arguments = intent.arguments;
     snapshot->working_directory = intent.working_directory;
 #ifdef _WIN32

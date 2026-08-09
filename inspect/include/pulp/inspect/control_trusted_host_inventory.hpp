@@ -67,10 +67,17 @@ struct ControlTrustedHostStaticExpectation {
     std::string publisher_id;
 };
 
+struct ControlTrustedHostRuntimeDependencyPolicy {
+    std::string filename;
+    std::string digest;
+    ControlTrustedHostStaticExpectation static_expectation;
+};
+
 struct ControlTrustedHostPreparationPolicy {
     std::string executable_digest;
     std::string manifest_digest;
     ControlTrustedHostStaticExpectation static_expectation;
+    std::vector<ControlTrustedHostRuntimeDependencyPolicy> runtime_dependencies;
     std::uint64_t working_directory_device = 0;
     std::uint64_t working_directory_inode = 0;
 };

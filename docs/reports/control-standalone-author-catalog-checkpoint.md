@@ -1,28 +1,33 @@
-# Standalone author-host catalog checkpoint
+# Standalone author-host catalog status
 
-Status: tested foundation, not ordinary Standalone capability parity and not
-launch-ready.
+Status: author-host catalog launch blockers closed; ordinary Standalone
+capability parity remains incomplete.
 
-This checkpoint lets an installed production broker select a DSP-only author
+The catalog lets an installed production broker select an ordinary author
 companion by a broker-owned, collision-resistant bundle-ID key. The companion
-is installed with its exact capability sidecar using owner-private atomic
-transactions; clients never provide an executable, arguments, working
-directory, or tier. The installed-SDK proof launches the companion through the
-production broker and verifies exact registration plus typed state read.
+links the author's processor and Standalone/UI closure and is installed with
+its exact capability sidecar and runtime dylibs using owner-private immutable
+versions plus one atomic `active` selection. Clients never provide an
+executable, arguments, working directory, or tier.
 
-The checkpoint deliberately fails the companion build when a non-system
-dynamic dependency remains. It does not copy an unpinned dylib into the trusted
-launch path.
+The production broker continuously reconciles install, removal, and update
+selection changes. Before launch it derives and pins the executable, sidecar,
+each runtime dependency digest, and each static signing identity, then copies
+that entire closure into its immutable trusted-host snapshot. Catalog version
+names are the SHA-256 of the closure manifest and are checked before selection.
+An interrupted update leaves the prior `active` selection visible; removal is
+an atomic marker rename and retains immutable versions for safe rollback.
 
-Launch blockers that remain required work:
+Focused release proof covers:
 
-1. Reconcile catalog install, update, and removal with an already-running
-   broker so its broker-owned selection and pinned digests refresh safely.
-2. Snapshot, sign, hash-pin, launch, update, and roll back the exact runtime
-   dependency closure needed by ordinary UI-bearing author processors.
-3. Remove the crash/concurrency visibility gap between retaining the old
-   catalog entry and publishing its replacement.
+- successful and synthetically interrupted install/update plus atomic removal;
+- installed author product and `DESTDIR` layouts, including the staged GPU
+  runtime dylib and closure manifest;
+- production broker launch, registration, catalog removal/re-add reconciliation,
+  and relaunch without accepting a client path; and
+- typed author-host state read through the installed SDK.
 
 Capability parity remains blocked beyond this catalog slice by typed writes,
 trace, telemetry, UI inspection, Motion, and runtime-evaluation policy. None of
-those outcomes are deprecated by this checkpoint.
+those outcomes are deprecated by this work, and this status does not claim
+parity.

@@ -429,7 +429,11 @@ endif()
 if(APPLE)
     set(_author_host_directory
         "${_prefix}/libexec/pulp/control-hosts/dev-pulp-installed-control-standalone-18f9d0d67fc6aec8")
-    foreach(_author_file IN ITEMS host host.inspector-capabilities.json)
+    file(READ "${_author_host_directory}/active" _author_host_version)
+    string(STRIP "${_author_host_version}" _author_host_version)
+    set(_author_host_directory "${_author_host_directory}/${_author_host_version}")
+    foreach(_author_file IN ITEMS host host.inspector-capabilities.json
+                                  libwgpu_native.dylib runtime-closure.sha256)
         if(NOT EXISTS "${_author_host_directory}/${_author_file}")
             message(FATAL_ERROR
                 "Installed author Standalone catalog entry is missing ${_author_file}")
@@ -442,11 +446,15 @@ if(APPLE)
     execute_process(COMMAND /usr/bin/stat -f %Lp
         "${_author_host_directory}/host.inspector-capabilities.json"
         OUTPUT_VARIABLE _author_manifest_mode OUTPUT_STRIP_TRAILING_WHITESPACE)
+    execute_process(COMMAND /usr/bin/stat -f %Lp
+        "${_author_host_directory}/libwgpu_native.dylib"
+        OUTPUT_VARIABLE _author_runtime_mode OUTPUT_STRIP_TRAILING_WHITESPACE)
     if(NOT _author_dir_mode STREQUAL "700" OR
        NOT _author_host_mode STREQUAL "700" OR
-       NOT _author_manifest_mode STREQUAL "600")
+       NOT _author_manifest_mode STREQUAL "600" OR
+       NOT _author_runtime_mode STREQUAL "700")
         message(FATAL_ERROR
-            "Installed author catalog entry is not owner-private: ${_author_dir_mode}/${_author_host_mode}/${_author_manifest_mode}")
+            "Installed author catalog entry is not owner-private: ${_author_dir_mode}/${_author_host_mode}/${_author_manifest_mode}/${_author_runtime_mode}")
     endif()
     set(_destdir "${_fixture_root}/package-stage")
     execute_process(
@@ -458,7 +466,9 @@ if(APPLE)
         ERROR_VARIABLE _destdir_install_error)
     if(NOT _destdir_install_result EQUAL 0 OR
        NOT EXISTS "${_destdir}${_author_host_directory}/host" OR
-       NOT EXISTS "${_destdir}${_author_host_directory}/host.inspector-capabilities.json")
+       NOT EXISTS "${_destdir}${_author_host_directory}/host.inspector-capabilities.json" OR
+       NOT EXISTS "${_destdir}${_author_host_directory}/libwgpu_native.dylib" OR
+       NOT EXISTS "${_destdir}${_author_host_directory}/runtime-closure.sha256")
         message(FATAL_ERROR
             "DESTDIR author catalog staging failed (${_destdir_install_result})\n${_destdir_install_output}\n${_destdir_install_error}")
     endif()

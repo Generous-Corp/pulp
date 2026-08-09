@@ -56,15 +56,10 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
             ${PULP_${target}_CORE_OBJECTS}
             "${_control_host_entry}")
         target_link_libraries(${target}_ControlHost PRIVATE
-            ${target}_Core ${_PULP_CONTROL_STANDALONE_TARGET})
+            ${target}_Core ${_standalone_target} ${_PULP_CONTROL_STANDALONE_TARGET})
         if(APPLE)
             target_link_options(${target}_ControlHost PRIVATE
                 "LINKER:-dead_strip_dylibs")
-            add_custom_command(TARGET ${target}_ControlHost POST_BUILD
-                COMMAND "${CMAKE_COMMAND}"
-                    -DARTIFACT=$<TARGET_FILE:${target}_ControlHost>
-                    -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/check_control_host_runtime_closure.cmake"
-                VERBATIM)
         endif()
         target_include_directories(${target}_ControlHost PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
         _pulp_apply_ui_script_definition(${target}_ControlHost "${PULP_${target}_UI_SCRIPT}")
@@ -105,7 +100,7 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
         set(_control_install_script
             "${CMAKE_CURRENT_BINARY_DIR}/${target}_install_control_host_$<CONFIG>.cmake")
         file(GENERATE OUTPUT "${_control_install_script}" CONTENT
-            "set(PULP_CONTROL_HOST_ID \"${_pulp_control_host_id}\")\nset(PULP_CONTROL_HOST_SOURCE \"$<TARGET_FILE:${target}_ControlHost>\")\nset(PULP_CONTROL_HOST_MANIFEST \"$<TARGET_FILE_DIR:${target}_ControlHost>/${target}.inspector-capabilities.json\")\nset(PULP_CONTROL_HOST_ROOT \"\$ENV{DESTDIR}${_pulp_control_broker_prefix}/${CMAKE_INSTALL_LIBEXECDIR}/pulp/control-hosts\")\ninclude(\"${CMAKE_CURRENT_FUNCTION_LIST_DIR}/install_control_host.cmake\")\n")
+            "set(PULP_CONTROL_HOST_ID \"${_pulp_control_host_id}\")\nset(PULP_CONTROL_HOST_SOURCE \"$<TARGET_FILE:${target}_ControlHost>\")\nset(PULP_CONTROL_HOST_MANIFEST \"$<TARGET_FILE_DIR:${target}_ControlHost>/${target}.inspector-capabilities.json\")\nset(PULP_CONTROL_HOST_RUNTIME_DIR \"$<TARGET_FILE_DIR:${target}_ControlHost>\")\nset(PULP_CONTROL_HOST_ROOT \"\$ENV{DESTDIR}${_pulp_control_broker_prefix}/${CMAKE_INSTALL_LIBEXECDIR}/pulp/control-hosts\")\ninclude(\"${CMAKE_CURRENT_FUNCTION_LIST_DIR}/install_control_host.cmake\")\n")
         install(SCRIPT "${_control_install_script}" COMPONENT Runtime)
         add_custom_target(${target}_RemoveControlHost
             COMMAND "${CMAKE_COMMAND}"

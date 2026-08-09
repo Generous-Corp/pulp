@@ -14,6 +14,8 @@ namespace pulp::inspect {
 struct ControlInstalledHostSelection {
     std::string host_id;
     ControlTrustedHostLaunchIntent intent;
+    friend bool operator==(const ControlInstalledHostSelection&,
+                           const ControlInstalledHostSelection&) = default;
 };
 
 struct ControlBrokerDaemonConfig {

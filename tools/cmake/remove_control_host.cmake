@@ -4,22 +4,23 @@ if(DEFINED PULP_CONTROL_HOST_ID)
 endif()
 if(NOT DEFINED PULP_CONTROL_HOST_ID OR
    NOT PULP_CONTROL_HOST_ID MATCHES "^[a-z0-9][a-z0-9_-]*$" OR
-   _host_id_length GREATER 128 OR
-   NOT DEFINED PULP_CONTROL_HOST_ROOT OR
+   _host_id_length GREATER 128 OR NOT DEFINED PULP_CONTROL_HOST_ROOT OR
    NOT IS_ABSOLUTE "${PULP_CONTROL_HOST_ROOT}")
     message(FATAL_ERROR "remove_control_host.cmake requires a valid id and absolute root")
 endif()
-set(_destination "${PULP_CONTROL_HOST_ROOT}/${PULP_CONTROL_HOST_ID}")
-if(IS_SYMLINK "${PULP_CONTROL_HOST_ROOT}" OR IS_SYMLINK "${_destination}")
+set(_entry "${PULP_CONTROL_HOST_ROOT}/${PULP_CONTROL_HOST_ID}")
+set(_active "${_entry}/active")
+if(IS_SYMLINK "${PULP_CONTROL_HOST_ROOT}" OR IS_SYMLINK "${_entry}" OR
+   IS_SYMLINK "${_active}")
     message(FATAL_ERROR "control host catalog paths must not be symlinks")
 endif()
-if(NOT EXISTS "${_destination}")
+if(NOT EXISTS "${_active}")
     return()
 endif()
 string(RANDOM LENGTH 24 ALPHABET 0123456789abcdef _nonce)
-set(_removed "${PULP_CONTROL_HOST_ROOT}/.${PULP_CONTROL_HOST_ID}.removed-${_nonce}")
-file(RENAME "${_destination}" "${_removed}" RESULT _remove_result)
+file(RENAME "${_active}" "${_entry}/.active.removed-${_nonce}"
+    RESULT _remove_result)
 if(NOT _remove_result STREQUAL "0")
-    message(FATAL_ERROR "could not atomically remove control host: ${_remove_result}")
+    message(FATAL_ERROR "could not atomically remove control host selection: ${_remove_result}")
 endif()
-file(REMOVE_RECURSE "${_removed}")
+file(REMOVE "${_entry}/.active.removed-${_nonce}")
