@@ -178,20 +178,22 @@ def binding_source(
     row: dict,
     binding: dict,
     addresses: dict[tuple[str, str, str], str],
+    operational_probe: str | None = None,
 ) -> str:
     name = binding["qualified_name"]
     reference = (
         f"static_assert(sizeof({name}) > 0);"
         if binding["kind"] == "cpp_type"
         else (
-            "auto *volatile binding = "
+            "auto volatile binding = "
             f"{addresses[binding_identity(row, binding)]}; (void)binding;"
         )
     )
+    probe = f"\n    {operational_probe}" if operational_probe else ""
     return (
         f"#include <{binding['include']}>\n\n"
         f"int main() {{\n    // {row['key']} / {binding['role']}\n"
-        f"    {reference}\n    return 0;\n}}\n"
+        f"    {reference}{probe}\n    return 0;\n}}\n"
     )
 
 
@@ -199,6 +201,7 @@ def load_source_contract(
     source_root: pathlib.Path,
 ) -> tuple[
     dict[str, str],
+    dict[tuple[str, str, str], str],
     dict[str, str],
     dict[tuple[str, str, str], str],
 ]:
@@ -219,6 +222,13 @@ def load_source_contract(
         row["key"]: module.render_link_probe(row)
         for row in module.EXPORTS
     }
+    binding_probes = {
+        (row["key"], probe["role"], probe["binding"]): module._render_link_probe(
+            probe, index
+        )
+        for row in module.EXPORTS
+        for index, probe in enumerate(row["_link_probes"])
+    }
     addresses = {
         binding_identity(row, binding): binding.get(
             "_address_expression", f"&{binding['qualified_name']}"
@@ -226,7 +236,7 @@ def load_source_contract(
         for row in module.EXPORTS
         for binding in row["bindings"]
     }
-    return probes, dict(module.REVIEWED_MINIMAL_TARGETS), addresses
+    return probes, binding_probes, dict(module.REVIEWED_MINIMAL_TARGETS), addresses
 
 
 def capability_source(
@@ -243,7 +253,7 @@ def capability_source(
         else:
             address = addresses[binding_identity(row, binding)]
             lines.append(
-                f"    auto *binding_{index} = {address}; (void)binding_{index};"
+                f"    auto volatile binding_{index} = {address}; (void)binding_{index};"
             )
     lines.append(f"    {probe}")
     lines.extend(["    return 0;", "}", ""])
@@ -515,7 +525,7 @@ def main() -> int:
     if source_line is None:
         raise RuntimeError("build CMakeCache.txt does not identify its source checkout")
     source_root = pathlib.Path(source_line.split("=", 1)[1]).resolve()
-    probes, owners, addresses = load_source_contract(source_root)
+    probes, binding_probes, owners, addresses = load_source_contract(source_root)
     generator = args.generator or ("Ninja" if shutil.which("ninja") else None)
     generator_options: list[str] = []
     forwarded_definitions: set[str] = set()
@@ -955,7 +965,12 @@ def main() -> int:
                     args.cmake,
                     prefix,
                     root / f"binding-{row_index}-{binding_index}",
-                    binding_source(row, binding, addresses),
+                    binding_source(
+                        row,
+                        binding,
+                        addresses,
+                        binding_probes[binding_identity(row, binding)],
+                    ),
                     binding["target"],
                     generator,
                     generator_options,

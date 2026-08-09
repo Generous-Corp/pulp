@@ -67,7 +67,13 @@ struct SampleToTickResult {
     bool exact = true;
 };
 
-// Immutable, sample-rate-specific tempo lookup. Tempo ramps are linear in
+// Immutable, sample-rate-specific tempo lookup. compile() validates and owns a
+// copy of the authored points and may allocate, so it belongs on the control
+// thread. After the resulting value is published with a lifetime covering all
+// readers, ticks_to_samples() and resolve_sample() are const, allocation-free
+// lookups suitable for the audio thread.
+//
+// Tempo ramps are linear in
 // musical tick position; their tick-to-sample integral and inverse are
 // analytic. Integer sample anchors at every tempo point prevent cumulative
 // floating-point drift across segments. When the integer tick grid is at least
