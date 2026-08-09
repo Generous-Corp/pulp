@@ -244,3 +244,9 @@ pulp_add_test_suite(pulp-test-signal-fuzz-pair
 pulp_add_test_suite(pulp-test-nlms-adaptive-filter
     SOURCES test_nlms_adaptive_filter.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
+
+# Bounded digital-waveguide primitives: bidirectional prepared rails, passive
+# reflection boundaries, and lossless fixed-capacity scattering junctions.
+pulp_add_test_suite(pulp-test-waveguide-primitives
+    SOURCES test_waveguide_primitives.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
