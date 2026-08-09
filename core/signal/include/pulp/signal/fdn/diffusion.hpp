@@ -14,6 +14,7 @@
 // RT contract: prepare() allocates; process/reset allocate nothing.
 
 #include <pulp/signal/denormal.hpp>
+#include <pulp/signal/detail/schroeder_allpass.hpp>
 #include <pulp/signal/fdn/config.hpp>
 #include <pulp/signal/fdn/frac_delay.hpp>
 #include <pulp/signal/fdn/modulation.hpp>
@@ -41,10 +42,10 @@ public:
     SampleType process(SampleType x, SampleType g) {
         x = finite_or_zero(x);
         const SampleType delayed = finite_or_zero(line_.read(delay_));
-        const SampleType w =
-            finite_or_zero(snap_to_zero(static_cast<SampleType>(x + g * delayed)));
-        line_.push(w);
-        return finite_or_zero(static_cast<SampleType>(delayed - g * w));
+        const SampleType write = finite_or_zero(
+            snap_to_zero(detail::schroeder_allpass_write(x, delayed, g)));
+        line_.push(write);
+        return finite_or_zero(detail::schroeder_allpass_output(delayed, write, g));
     }
 
     // Fractional-delay path, used only when flutter is engaged. Kept separate
@@ -52,10 +53,10 @@ public:
     SampleType process(SampleType x, SampleType g, double fractional_delay) {
         x = finite_or_zero(x);
         const SampleType delayed = finite_or_zero(line_.read(fractional_delay));
-        const SampleType w =
-            finite_or_zero(snap_to_zero(static_cast<SampleType>(x + g * delayed)));
-        line_.push(w);
-        return finite_or_zero(static_cast<SampleType>(delayed - g * w));
+        const SampleType write = finite_or_zero(
+            snap_to_zero(detail::schroeder_allpass_write(x, delayed, g)));
+        line_.push(write);
+        return finite_or_zero(detail::schroeder_allpass_output(delayed, write, g));
     }
 
 private:

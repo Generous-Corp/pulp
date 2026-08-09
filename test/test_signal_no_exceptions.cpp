@@ -1,3 +1,4 @@
+#include <pulp/signal/diffusion_network.hpp>
 #include <pulp/signal/early_reflections.hpp>
 #include <pulp/signal/graphic_eq.hpp>
 #include <pulp/signal/headphone_crossfeed.hpp>
@@ -127,5 +128,15 @@ int main() {
     if (tempo_delay.set_tempo(pulp::timebase::BeatDivision::QuarterDotted, 120.0) !=
         pulp::signal::TempoDelayError::none)
         return 33;
-    return std::isfinite(tempo_delay.next()) ? 0 : 34;
+    if (!(std::isfinite(tempo_delay.next())))
+        return 34;    pulp::signal::DiffusionNetwork diffusion;
+    if (!diffusion.prepare(48000.0, 50.0))
+        return 36;
+    float diffusion_left = 0.0f;
+    float diffusion_right = 0.0f;
+    diffusion.process_sample(1.0f, 0.0f, diffusion_left, diffusion_right);
+    if (!std::isfinite(diffusion_left) || !std::isfinite(diffusion_right))
+        return 37;
+
+    return 0;
 }
