@@ -385,6 +385,7 @@ struct ControlClientConnection::Impl {
                             bool require_session, ResponseKind response_kind,
                             std::string request_id) {
         std::unique_lock request_lock(request_mutex);
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
         {
             std::lock_guard lock(state_mutex);
             if (!carrier_connected || !broker_verified || !connection.is_connected()) {
@@ -413,16 +414,23 @@ struct ControlClientConnection::Impl {
             expected_request_id = std::move(request_id);
         }
 
+        connection.set_write_timeout(timeout);
+        connection.set_frame_read_timeout(timeout);
         if (!connection.send_message(encoded_envelope)) {
             fail_pending("send-failed", "the control request could not be sent");
             connection.disconnect();
         }
 
         std::unique_lock state_lock(state_mutex);
-        const bool completed = response_ready.wait_for(state_lock, timeout, [&] {
-            return pending_response.has_value() || !awaiting_response;
-        });
-        if (!completed) {
+        const auto now = std::chrono::steady_clock::now();
+        const auto response_timeout = now < deadline
+                                          ? std::chrono::ceil<std::chrono::milliseconds>(deadline - now)
+                                          : std::chrono::milliseconds::zero();
+        const bool completed = response_timeout > std::chrono::milliseconds::zero() &&
+                               response_ready.wait_for(state_lock, response_timeout, [&] {
+                                   return pending_response.has_value() || !awaiting_response;
+                               });
+        if (!completed || std::chrono::steady_clock::now() >= deadline) {
             awaiting_response = false;
             pending_error_code = "timeout";
             pending_explanation = "the control request timed out";

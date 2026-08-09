@@ -4,6 +4,7 @@
 
 #include <pulp/inspect/control_client.hpp>
 
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -22,7 +23,8 @@ class ControlMcpSession {
     virtual ~ControlMcpSession() = default;
     virtual pulp::inspect::ControlClientTransport& transport() = 0;
     virtual pulp::inspect::ControlManagementResult
-    manage(std::string_view command, std::string_view params_json = "{}") = 0;
+    manage(std::string_view command, std::string_view params_json,
+           std::chrono::milliseconds timeout) = 0;
     virtual std::string_view client_id() const = 0;
     virtual void set_progress_sink(ProgressSink sink) = 0;
 };
@@ -33,8 +35,11 @@ struct ControlMcpOpenResult {
     std::string explanation;
 };
 
-using ControlMcpSessionFactory = std::function<ControlMcpOpenResult()>;
+using ControlMcpSessionFactory =
+    std::function<ControlMcpOpenResult(std::chrono::milliseconds timeout)>;
 using ControlMcpNotificationSink = std::function<void(std::string)>;
+using ControlMcpSteadyNow =
+    std::function<std::chrono::steady_clock::time_point()>;
 
 /// Adapter instance used directly by focused conformance tests and by the
 /// process-wide stdio server. It deliberately contains projection logic only;
@@ -43,7 +48,8 @@ using ControlMcpNotificationSink = std::function<void(std::string)>;
 class ControlMcpAdapter {
   public:
     explicit ControlMcpAdapter(ControlMcpSessionFactory factory,
-                               ControlMcpNotificationSink notifications = {});
+                               ControlMcpNotificationSink notifications = {},
+                               ControlMcpSteadyNow steady_now = {});
     ~ControlMcpAdapter();
     ControlMcpAdapter(const ControlMcpAdapter&) = delete;
     ControlMcpAdapter& operator=(const ControlMcpAdapter&) = delete;

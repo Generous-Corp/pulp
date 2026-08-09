@@ -27,6 +27,11 @@ Each operation takes:
 - optional `grant_id`, `profile`, `expected_state_generation`, and bounded
   `timeout_ms` adapter fields.
 
+`timeout_ms` is one end-to-end operation deadline. Session connection and
+enrollment, exact-instance inventory, implicit grant issuance, negotiation,
+and the final request each receive only the time remaining from that single
+monotonic budget.
+
 The tool's `inputSchema` and `outputSchema` are generated from the same frozen
 registry used by the CLI and service. Results contain typed structured content,
 the correlated request and receipt IDs, terminal state, artifacts, and bounded

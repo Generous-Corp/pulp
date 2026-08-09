@@ -499,11 +499,12 @@ remain connection-bound through `ControlClient`. The installed broker may
 rebind its client ID and bounded grants across separate CLI processes only after
 every new connection independently passes kernel and static-code authentication;
 never persist a bearer token or accept a client-supplied durable principal.
-For `control call` and `control watch`, `--timeout-ms` is one absolute operation
-deadline, not a fresh budget per transport step. Connect, enroll, exact-instance
-inventory, implicit grant issuance, negotiation, and request dispatch must each
-receive only the remaining duration; derive the broker request deadline from
-that same monotonic budget.
+For `control call` and `control watch`, `--timeout-ms`, and for their typed MCP
+operation counterparts, `timeout_ms`, are each one absolute operation deadline,
+not a fresh budget per transport step. Connect, enroll, exact-instance inventory,
+implicit grant issuance, negotiation, and request dispatch must each receive only
+the remaining duration; derive the broker request deadline from that same
+monotonic budget.
 
 Phase 11's copyable CLI and MCP recipes have one source:
 `examples/capability-control/control-examples.json`. Regenerate

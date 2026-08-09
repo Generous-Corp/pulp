@@ -20,7 +20,6 @@
 #include <chrono>
 #include <cctype>
 #include <cstdint>
-#include <limits>
 #include <map>
 #include <mutex>
 #include <sstream>
@@ -122,13 +121,38 @@ std::string random_token(std::string_view prefix) {
     return bytes ? std::string(prefix) + pulp::runtime::hex_encode(*bytes) : std::string{};
 }
 
-std::int64_t deadline_from(std::chrono::milliseconds timeout) {
-    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
-                         std::chrono::system_clock::now().time_since_epoch())
-                         .count();
-    return timeout.count() > std::numeric_limits<std::int64_t>::max() - now
-               ? std::numeric_limits<std::int64_t>::max()
-               : now + timeout.count();
+class OperationDeadline {
+  public:
+    OperationDeadline(std::chrono::milliseconds budget, ControlMcpSteadyNow steady_now)
+        : steady_now_(steady_now ? std::move(steady_now)
+                                 : ControlMcpSteadyNow([] { return std::chrono::steady_clock::now(); })),
+          deadline_(steady_now_() + budget) {}
+
+    std::chrono::milliseconds remaining() const {
+        const auto now = steady_now_();
+        if (now >= deadline_)
+            return std::chrono::milliseconds::zero();
+        return std::max(std::chrono::ceil<std::chrono::milliseconds>(deadline_ - now),
+                        std::chrono::milliseconds{1});
+    }
+
+    std::int64_t unix_deadline_ms() const {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::system_clock::now().time_since_epoch())
+                   .count() +
+               remaining().count();
+    }
+
+  private:
+    ControlMcpSteadyNow steady_now_;
+    std::chrono::steady_clock::time_point deadline_;
+};
+
+bool is_terminal_session_status(std::string_view status) {
+    return status == "session-required" || status == "session-superseded" ||
+           status == "client-unavailable" || status == "unavailable" ||
+           status == "not-connected" || status == "connection-lost" ||
+           status == "send-failed" || status == "timeout";
 }
 
 std::string percent_encode(std::string_view value) {
@@ -181,8 +205,9 @@ class InstalledControlMcpSession final : public ControlMcpSession {
 
     ControlClientTransport& transport() override { return *connection_; }
     ControlManagementResult manage(std::string_view command,
-                                   std::string_view params_json) override {
-        return connection_->manage(command, params_json);
+                                   std::string_view params_json,
+                                   std::chrono::milliseconds timeout) override {
+        return connection_->manage(command, params_json, timeout);
     }
     std::string_view client_id() const override { return client_id_; }
     void set_progress_sink(ProgressSink sink) override {
@@ -201,7 +226,8 @@ ControlMcpSessionFactory g_test_factory;
 ControlMcpNotificationSink g_notification_sink;
 std::shared_ptr<ControlMcpAdapter> g_adapter;
 
-ControlMcpOpenResult open_installed_session() {
+ControlMcpOpenResult open_installed_session(std::chrono::milliseconds timeout) {
+    OperationDeadline deadline(timeout, {});
     if (g_executable_path.empty())
         return {.error_code = "broker-unavailable",
                 .explanation = "pulp-mcp executable identity is unavailable"};
@@ -210,14 +236,26 @@ ControlMcpOpenResult open_installed_session() {
         return {.error_code = "broker-unavailable",
                 .explanation = "the installed pulp-control-broker was not found"};
 
+    const auto connect_timeout = deadline.remaining();
+    if (connect_timeout <= std::chrono::milliseconds::zero())
+        return {.error_code = "timeout", .explanation = "the control operation timed out"};
     auto connection = std::make_unique<ControlClientConnection>(ControlClientConnectionConfig{
         .endpoint_path = default_control_endpoint_path(),
         .expected_broker_executable = broker,
+        .connect_timeout = connect_timeout,
+        .write_timeout = connect_timeout,
+        .frame_read_timeout = connect_timeout,
     });
-    if (!connection->connect())
+    if (!connection->connect()) {
+        if (deadline.remaining() <= std::chrono::milliseconds::zero())
+            return {.error_code = "timeout", .explanation = "the control operation timed out"};
         return {.error_code = connection->last_error_code(),
                 .explanation = connection->last_error_explanation()};
-    const auto enrolled = connection->manage("enroll");
+    }
+    const auto enrollment_timeout = deadline.remaining();
+    if (enrollment_timeout <= std::chrono::milliseconds::zero())
+        return {.error_code = "timeout", .explanation = "the control operation timed out"};
+    const auto enrolled = connection->manage("enroll", "{}", enrollment_timeout);
     if (enrolled.status_id != "accepted")
         return {.error_code = enrolled.status_id, .explanation = enrolled.explanation};
     const auto data = parse_object(enrolled.data_json);
@@ -257,17 +295,21 @@ std::string operation_output_schema(const ControlOperationDescriptor& operation)
 
 class ControlMcpAdapter::Impl {
   public:
-    Impl(ControlMcpSessionFactory factory_in, ControlMcpNotificationSink notifications_in)
-        : factory(std::move(factory_in)), notifications(std::move(notifications_in)) {}
+    Impl(ControlMcpSessionFactory factory_in, ControlMcpNotificationSink notifications_in,
+         ControlMcpSteadyNow steady_now_in)
+        : factory(std::move(factory_in)), notifications(std::move(notifications_in)),
+          steady_now(steady_now_in ? std::move(steady_now_in)
+                                   : ControlMcpSteadyNow([] { return std::chrono::steady_clock::now(); })) {}
 
-    std::optional<std::string> ensure_session() {
-        const auto now = std::chrono::steady_clock::now();
+    std::optional<std::string> ensure_session(std::chrono::milliseconds timeout =
+                                                 std::chrono::seconds(3)) {
+        const auto now = steady_now();
         const auto refresh_requested = session_refresh_requested.exchange(false);
         if (session && !refresh_requested &&
             now - session_opened_at < std::chrono::minutes(4))
             return std::nullopt;
         session.reset();
-        auto opened = factory ? factory() : ControlMcpOpenResult{};
+        auto opened = factory ? factory(timeout) : ControlMcpOpenResult{};
         if (!opened.session) {
             last_error_code = opened.error_code.empty() ? "control-session-unavailable"
                                                         : std::move(opened.error_code);
@@ -291,16 +333,15 @@ class ControlMcpAdapter::Impl {
         return std::nullopt;
     }
 
-    std::optional<Value> inventory(std::string& error) {
-        if (auto unavailable = ensure_session()) {
+    std::optional<Value> inventory(std::string& error,
+                                   std::chrono::milliseconds timeout = std::chrono::seconds(3)) {
+        if (auto unavailable = ensure_session(timeout)) {
             error = *unavailable;
             return std::nullopt;
         }
-        const auto managed = session->manage("instances");
+        const auto managed = session->manage("instances", "{}", timeout);
         if (managed.status_id != "completed") {
-            if (managed.status_id == "session-required" ||
-                managed.status_id == "session-superseded" ||
-                managed.status_id == "client-unavailable" || managed.status_id == "unavailable")
+            if (is_terminal_session_status(managed.status_id))
                 mark_session_unhealthy();
             error = error_payload(managed.status_id, managed.explanation);
             return std::nullopt;
@@ -313,8 +354,10 @@ class ControlMcpAdapter::Impl {
         return data;
     }
 
-    std::optional<Value> exact_instance(std::string_view instance_id, std::string& error) {
-        auto data = inventory(error);
+    std::optional<Value> exact_instance(std::string_view instance_id, std::string& error,
+                                        std::chrono::milliseconds timeout =
+                                            std::chrono::seconds(3)) {
+        auto data = inventory(error, timeout);
         if (!data)
             return std::nullopt;
         std::optional<Value> match;
@@ -338,7 +381,7 @@ class ControlMcpAdapter::Impl {
 
     std::string grant(std::string_view instance_id, std::string_view instance_generation,
                       std::string_view authority, bool operation_specific,
-                      std::string& grant_id) {
+                      std::string& grant_id, std::chrono::milliseconds timeout) {
         const auto cache_key = std::string(instance_id) + "\n" +
                                std::string(instance_generation) + "\n" + std::string(authority);
         if (const auto found = automatic_grants.find(cache_key); found != automatic_grants.end()) {
@@ -352,11 +395,10 @@ class ControlMcpAdapter::Impl {
         params.addMember("instance_id", choc::value::createString(instance_id));
         params.addMember(operation_specific ? "operation_id" : "profile",
                          choc::value::createString(authority));
-        const auto managed = session->manage("grant-request", choc::json::toString(params, false));
+        const auto managed = session->manage("grant-request", choc::json::toString(params, false),
+                                             timeout);
         if (managed.status_id != "granted") {
-            if (managed.status_id == "session-required" ||
-                managed.status_id == "session-superseded" ||
-                managed.status_id == "client-unavailable" || managed.status_id == "unavailable")
+            if (is_terminal_session_status(managed.status_id))
                 mark_session_unhealthy();
             auto data = "{\"broker_owned\":true,\"single_use\":true,\"status\":" +
                         quote(managed.status_id) + "}";
@@ -467,6 +509,7 @@ class ControlMcpAdapter::Impl {
 
     ControlMcpSessionFactory factory;
     ControlMcpNotificationSink notifications;
+    ControlMcpSteadyNow steady_now;
     std::unique_ptr<ControlMcpSession> session;
     std::chrono::steady_clock::time_point session_opened_at{};
     std::atomic_bool session_refresh_requested{false};
@@ -481,8 +524,10 @@ class ControlMcpAdapter::Impl {
 };
 
 ControlMcpAdapter::ControlMcpAdapter(ControlMcpSessionFactory factory,
-                                     ControlMcpNotificationSink notifications)
-    : impl_(std::make_unique<Impl>(std::move(factory), std::move(notifications))) {}
+                                     ControlMcpNotificationSink notifications,
+                                     ControlMcpSteadyNow steady_now)
+    : impl_(std::make_unique<Impl>(std::move(factory), std::move(notifications),
+                                   std::move(steady_now))) {}
 ControlMcpAdapter::~ControlMcpAdapter() = default;
 
 std::string ControlMcpAdapter::tools_json_fragment() const {
@@ -535,7 +580,8 @@ std::string ControlMcpAdapter::call_tool(std::string_view name, std::string_view
         if (!active_publication)
             return error_payload("request-instance-mismatch",
                                  "request_id is not active on the exact instance");
-        auto opened = impl_->factory ? impl_->factory() : ControlMcpOpenResult{};
+        auto opened = impl_->factory ? impl_->factory(std::chrono::seconds(3))
+                                     : ControlMcpOpenResult{};
         if (!opened.session)
             return error_payload(opened.error_code.empty() ? "control-session-unavailable"
                                                             : opened.error_code,
@@ -543,7 +589,8 @@ std::string ControlMcpAdapter::call_tool(std::string_view name, std::string_view
         // The installed factory resumes the durable broker identity on this
         // connection, superseding the primary transport even on later errors.
         impl_->request_session_refresh();
-        const auto inventory = opened.session->manage("instances");
+        const auto inventory =
+            opened.session->manage("instances", "{}", std::chrono::seconds(3));
         const auto inventory_data = parse_object(inventory.data_json);
         std::optional<std::string> exact_publication;
         if (inventory.status_id == "completed" && inventory_data &&
@@ -592,7 +639,48 @@ std::string ControlMcpAdapter::call_tool(std::string_view name, std::string_view
         acknowledgement.addMember("cancellation_accepted", choc::value::createBool(true));
         return success_payload(choc::json::toString(acknowledgement, false));
     }
-    if (auto unavailable = impl_->ensure_session())
+    const auto* operation = operation_for_tool(name);
+    std::optional<OperationDeadline> operation_deadline;
+    if (operation) {
+        static constexpr std::array<std::string_view, 7> allowed_fields{
+            "instance_id", "request_id", "grant_id", "profile",
+            "expected_state_generation", "timeout_ms", "input"};
+        for (std::uint32_t index = 0; index < arguments->size(); ++index) {
+            const auto member = arguments->getObjectMemberAt(index);
+            if (std::ranges::find(allowed_fields, member.name) == allowed_fields.end())
+                return error_payload("invalid-arguments",
+                                     "unexpected control argument: " + std::string(member.name));
+        }
+        for (const auto field : {"request_id", "grant_id", "profile"}) {
+            if (arguments->hasObjectMember(field) &&
+                (!(*arguments)[field].isString() || (*arguments)[field].getString().empty()))
+                return error_payload("invalid-arguments", std::string(field) +
+                                                              " must be a non-empty string");
+        }
+        for (const auto field : {"timeout_ms", "expected_state_generation"}) {
+            if (arguments->hasObjectMember(field) &&
+                !((*arguments)[field].isInt32() || (*arguments)[field].isInt64()))
+                return error_payload("invalid-arguments", std::string(field) + " must be an integer");
+        }
+        if (!arguments->hasObjectMember("input") || !(*arguments)["input"].isObject())
+            return error_payload("invalid-arguments", "input is required and must be an object");
+        const auto input_json = choc::json::toString((*arguments)["input"], false);
+        ControlJsonSchemaDiagnostics diagnostics;
+        if (!validate_control_json_schema(input_json, operation->input_schema_json, &diagnostics))
+            return error_payload("invalid-arguments", diagnostics.explanation);
+        const auto timeout_value = arguments->hasObjectMember("timeout_ms")
+                                       ? (*arguments)["timeout_ms"].getInt64()
+                                       : 3000;
+        if (timeout_value < 1 || timeout_value > 300000)
+            return error_payload("invalid-arguments", "timeout_ms must be between 1 and 300000");
+        operation_deadline.emplace(std::chrono::milliseconds(timeout_value), impl_->steady_now);
+    }
+    const auto remaining = [&]() {
+        return operation_deadline ? operation_deadline->remaining() : std::chrono::seconds(3);
+    };
+    if (operation_deadline && remaining() <= std::chrono::milliseconds::zero())
+        return error_payload("timeout", "the control operation timed out");
+    if (auto unavailable = impl_->ensure_session(remaining()))
         return *unavailable;
 
     if (name == kInstancesTool) {
@@ -636,7 +724,8 @@ std::string ControlMcpAdapter::call_tool(std::string_view name, std::string_view
                 return error_payload("invalid-arguments", "grant_id is required");
             params.addMember("grant_id", choc::value::createString(*grant_id));
         }
-        const auto managed = impl_->session->manage(command, choc::json::toString(params, false));
+        const auto managed = impl_->session->manage(
+            command, choc::json::toString(params, false), std::chrono::seconds(3));
         auto root = choc::value::createObject("");
         root.addMember("ok", choc::value::createBool(managed.status_id == "granted" ||
                                                managed.status_id == "revoked"));
@@ -647,8 +736,7 @@ std::string ControlMcpAdapter::call_tool(std::string_view name, std::string_view
         const auto json = choc::json::toString(root, false);
         if (name == kRevokeTool && managed.status_id == "revoked")
             impl_->forget_grant(std::string(params["grant_id"].getString()));
-        if (managed.status_id == "session-required" || managed.status_id == "session-superseded" ||
-            managed.status_id == "client-unavailable" || managed.status_id == "unavailable")
+        if (is_terminal_session_status(managed.status_id))
             impl_->mark_session_unhealthy();
         return (managed.status_id == "granted" || managed.status_id == "revoked")
                    ? success_payload(json)
@@ -659,66 +747,49 @@ std::string ControlMcpAdapter::call_tool(std::string_view name, std::string_view
     if (!instance_id)
         return error_payload("invalid-arguments", "instance_id is required");
     std::string error;
-    auto item = impl_->exact_instance(*instance_id, error);
+    if (operation_deadline && remaining() <= std::chrono::milliseconds::zero())
+        return error_payload("timeout", "the control operation timed out");
+    auto item = impl_->exact_instance(*instance_id, error, remaining());
     if (!item)
         return error;
 
     ControlClient client(impl_->session->transport());
-    const auto* operation = operation_for_tool(name);
     if (!operation)
         return error_payload("unknown-tool", "unknown control tool");
-    static constexpr std::array<std::string_view, 7> allowed_fields{
-        "instance_id", "request_id", "grant_id", "profile",
-        "expected_state_generation", "timeout_ms", "input"};
-    for (std::uint32_t index = 0; index < arguments->size(); ++index) {
-        const auto member = arguments->getObjectMemberAt(index);
-        if (std::ranges::find(allowed_fields, member.name) == allowed_fields.end())
-            return error_payload("invalid-arguments",
-                                 "unexpected control argument: " + std::string(member.name));
-    }
-    for (const auto field : {"request_id", "grant_id", "profile"}) {
-        if (arguments->hasObjectMember(field) &&
-            (!(*arguments)[field].isString() || (*arguments)[field].getString().empty()))
-            return error_payload("invalid-arguments", std::string(field) +
-                                                          " must be a non-empty string");
-    }
-    for (const auto field : {"timeout_ms", "expected_state_generation"}) {
-        if (arguments->hasObjectMember(field) &&
-            !((*arguments)[field].isInt32() || (*arguments)[field].isInt64()))
-            return error_payload("invalid-arguments", std::string(field) + " must be an integer");
-    }
-    if (!arguments->hasObjectMember("input") || !(*arguments)["input"].isObject())
-        return error_payload("invalid-arguments", "input is required and must be an object");
     const auto input_json = choc::json::toString((*arguments)["input"], false);
-    ControlJsonSchemaDiagnostics diagnostics;
-    if (!validate_control_json_schema(input_json, operation->input_schema_json, &diagnostics))
-        return error_payload("invalid-arguments", diagnostics.explanation);
-    const auto timeout_value = arguments->hasObjectMember("timeout_ms")
-                                   ? (*arguments)["timeout_ms"].getInt64()
-                                   : 3000;
-    if (timeout_value < 1 || timeout_value > 300000)
-        return error_payload("invalid-arguments", "timeout_ms must be between 1 and 300000");
-    const auto timeout = std::chrono::milliseconds(timeout_value);
 
     if (operation->capability == InspectorCapability::ArtifactRead) {
+        if (remaining() <= std::chrono::milliseconds::zero())
+            return error_payload("timeout", "the control operation timed out");
         const auto negotiation = client.negotiate({
             .versions = {kControlProtocolVersion, kControlProtocolVersion},
             .mandatory_features = {"artifacts", "receipts"},
-        }, timeout);
+        }, remaining());
         if (!negotiation.response ||
-            negotiation.response->status != ControlNegotiationStatus::Accepted)
+            negotiation.response->status != ControlNegotiationStatus::Accepted) {
+            if (!negotiation.response)
+                impl_->mark_session_unhealthy();
             return error_payload(negotiation.error_code.empty() ? "negotiation-failed"
                                                                 : negotiation.error_code,
                                  negotiation.explanation);
+        }
         const auto input = Value((*arguments)["input"]);
         const auto artifact_id = required_string(input, "artifact_id");
         if (!artifact_id || !input["offset"].isInt64() || !input["max_bytes"].isInt64())
             return error_payload("invalid-arguments", "artifact read input is incomplete");
         const auto offset = static_cast<std::uint64_t>(input["offset"].getInt64());
         const auto max_bytes = static_cast<std::size_t>(input["max_bytes"].getInt64());
-        const auto result = client.read_artifact(*artifact_id, offset, max_bytes, timeout);
-        if (result.status != ControlArtifactStatus::Read)
+        if (remaining() <= std::chrono::milliseconds::zero())
+            return error_payload("timeout", "the control operation timed out");
+        const auto result = client.read_artifact(*artifact_id, offset, max_bytes, remaining());
+        if (result.status != ControlArtifactStatus::Read) {
+            if (result.status == ControlArtifactStatus::IoError ||
+                result.status == ControlArtifactStatus::Corrupt)
+                impl_->mark_session_unhealthy();
+            if (remaining() <= std::chrono::milliseconds::zero())
+                return error_payload("timeout", "the control operation timed out");
             return error_payload(control_artifact_status_id(result.status), result.explanation);
+        }
         if (!result.metadata ||
             result.metadata->lineage.producer_registration_id !=
                 (*item)["registration_id"].getString() ||
@@ -749,17 +820,21 @@ std::string ControlMcpAdapter::call_tool(std::string_view name, std::string_view
                                          ? InspectorProfile::Observe
                                          : InspectorProfile::Develop).end();
         const auto authority = operation_specific ? operation->id : std::string_view(profile);
+        if (remaining() <= std::chrono::milliseconds::zero())
+            return error_payload("timeout", "the control operation timed out");
         if (auto grant_error = impl_->grant(*instance_id,
                                             (*item)["publication_id"].getString(),
-                                            authority, operation_specific, grant_id);
+                                            authority, operation_specific, grant_id, remaining());
             !grant_error.empty())
             return grant_error;
     }
+    if (remaining() <= std::chrono::milliseconds::zero())
+        return error_payload("timeout", "the control operation timed out");
     const auto negotiation = client.negotiate({
         .versions = {kControlProtocolVersion, kControlProtocolVersion},
         .mandatory_features = {"receipts"},
         .optional_features = {"artifacts", "cancellation", "progress"},
-    });
+    }, remaining());
     if (!negotiation.response || negotiation.response->status != ControlNegotiationStatus::Accepted)
     {
         if (!negotiation.response)
@@ -795,7 +870,7 @@ std::string ControlMcpAdapter::call_tool(std::string_view name, std::string_view
         .operation_id = std::string(operation->id),
         .operation_version = operation->version,
         .idempotency_key = idempotency,
-        .deadline_unix_ms = deadline_from(timeout),
+        .deadline_unix_ms = operation_deadline->unix_deadline_ms(),
         .expected_state_generation = expected_generation,
         .params_json = input_json,
     };
@@ -807,7 +882,12 @@ std::string ControlMcpAdapter::call_tool(std::string_view name, std::string_view
     impl_->active_progress_token = std::string(progress_token);
     impl_->register_active_request(request_id, *instance_id,
                                    std::string((*item)["publication_id"].getString()));
-    const auto result = client.request(request, timeout);
+    if (remaining() <= std::chrono::milliseconds::zero()) {
+        impl_->finish_active_request(request_id);
+        impl_->active_progress_token.clear();
+        return error_payload("timeout", "the control operation timed out");
+    }
+    const auto result = client.request(request, remaining());
     impl_->finish_active_request(request_id);
     impl_->active_progress_token.clear();
     if (!result.response)

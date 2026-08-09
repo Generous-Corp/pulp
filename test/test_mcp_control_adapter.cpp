@@ -35,6 +35,9 @@ struct FakeState {
     bool inventory_session_error_once = false;
     int grant_requests = 0;
     int session_opens = 0;
+    std::chrono::milliseconds timeout_step_advance{};
+    std::chrono::steady_clock::time_point timeout_clock{};
+    std::vector<std::pair<std::string, std::chrono::milliseconds>> timeout_steps;
     std::mutex request_mutex;
     std::condition_variable request_condition;
     bool block_request = false;
@@ -47,11 +50,12 @@ class FakeTransport final : public ControlClientTransport {
     explicit FakeTransport(std::shared_ptr<FakeState> state) : state_(std::move(state)) {}
 
     ControlTransportDispatchResult dispatch(std::string_view encoded,
-                                            std::chrono::milliseconds) override {
+                                            std::chrono::milliseconds timeout) override {
         auto envelope = decode_control_envelope(encoded);
         if (!envelope)
             return {.error_code = "decode", .explanation = "invalid request"};
         if (const auto* offer = std::get_if<ControlNegotiationOffer>(&envelope->payload)) {
+            record_timeout("negotiate", timeout);
             state_->offer = *offer;
             return encoded_response(ControlEnvelope{.payload = ControlNegotiationResult{
                                                         .status = ControlNegotiationStatus::Accepted,
@@ -59,6 +63,7 @@ class FakeTransport final : public ControlClientTransport {
                                                         .features = {"artifacts", "cancellation", "progress", "receipts"}}});
         }
         if (const auto* request = std::get_if<ControlRequestEnvelope>(&envelope->payload)) {
+            record_timeout("request", timeout);
             state_->request = *request;
             if (state_->block_request) {
                 std::unique_lock lock(state_->request_mutex);
@@ -128,6 +133,13 @@ class FakeTransport final : public ControlClientTransport {
     }
 
   private:
+    void record_timeout(std::string label, std::chrono::milliseconds timeout) {
+        if (state_->timeout_step_advance <= std::chrono::milliseconds::zero())
+            return;
+        state_->timeout_steps.emplace_back(std::move(label), timeout);
+        state_->timeout_clock += state_->timeout_step_advance;
+    }
+
     static ControlTransportDispatchResult encoded_response(ControlEnvelope envelope) {
         return {.encoded_response = encode_control_envelope(envelope)};
     }
@@ -141,7 +153,12 @@ class FakeSession final : public ControlMcpSession {
 
     ControlClientTransport& transport() override { return transport_; }
     ControlManagementResult manage(std::string_view command,
-                                   std::string_view params_json) override {
+                                   std::string_view params_json,
+                                   std::chrono::milliseconds timeout) override {
+        if (state_->timeout_step_advance > std::chrono::milliseconds::zero()) {
+            state_->timeout_steps.emplace_back(std::string(command), timeout);
+            state_->timeout_clock += state_->timeout_step_advance;
+        }
         if (command == "instances") {
             if (state_->inventory_session_error_once) {
                 state_->inventory_session_error_once = false;
@@ -195,8 +212,12 @@ class FakeTraceOpener final : public InspectorControlSessionOpener {
 };
 
 ControlMcpSessionFactory factory(std::shared_ptr<FakeState> state) {
-    return [state = std::move(state)] {
+    return [state = std::move(state)](std::chrono::milliseconds timeout) {
         ++state->session_opens;
+        if (state->timeout_step_advance > std::chrono::milliseconds::zero()) {
+            state->timeout_steps.emplace_back("session", timeout);
+            state->timeout_clock += state->timeout_step_advance;
+        }
         return ControlMcpOpenResult{.session = std::make_unique<FakeSession>(state)};
     };
 }
@@ -269,6 +290,46 @@ TEST_CASE("control MCP and CLI semantics produce the same canonical service requ
         const auto rejected = adapter.call_tool("pulp_control_state_read", malformed);
         REQUIRE(rejected.find("invalid-arguments") != std::string::npos);
     }
+}
+
+TEST_CASE("control MCP timeout is one deadline across the complete operation",
+          "[mcp][control][timeout]") {
+    auto state = std::make_shared<FakeState>();
+    state->timeout_step_advance = std::chrono::milliseconds(10);
+    ControlMcpAdapter adapter(factory(state), {}, [state] { return state->timeout_clock; });
+
+    const auto result = adapter.call_tool(
+        "pulp_control_state_read",
+        R"({"instance_id":"instance-1","timeout_ms":100,"input":{"include_catalog":false,"include_sensitive":false}})");
+
+    REQUIRE(result.find("\"isError\":true") == std::string::npos);
+    const std::vector<std::pair<std::string, std::chrono::milliseconds>> expected{
+        {"session", std::chrono::milliseconds(100)},
+        {"instances", std::chrono::milliseconds(90)},
+        {"grant-request", std::chrono::milliseconds(80)},
+        {"negotiate", std::chrono::milliseconds(70)},
+        {"request", std::chrono::milliseconds(60)}};
+    REQUIRE(state->timeout_steps == expected);
+}
+
+TEST_CASE("control MCP stops when the shared operation deadline is exhausted",
+          "[mcp][control][timeout]") {
+    auto state = std::make_shared<FakeState>();
+    state->timeout_step_advance = std::chrono::milliseconds(30);
+    ControlMcpAdapter adapter(factory(state), {}, [state] { return state->timeout_clock; });
+
+    const auto result = adapter.call_tool(
+        "pulp_control_state_read",
+        R"({"instance_id":"instance-1","timeout_ms":100,"input":{"include_catalog":false,"include_sensitive":false}})");
+
+    REQUIRE(result.find("\"code\":\"timeout\"") != std::string::npos);
+    const std::vector<std::pair<std::string, std::chrono::milliseconds>> expected{
+        {"session", std::chrono::milliseconds(100)},
+        {"instances", std::chrono::milliseconds(70)},
+        {"grant-request", std::chrono::milliseconds(40)},
+        {"negotiate", std::chrono::milliseconds(10)}};
+    REQUIRE(state->timeout_steps == expected);
+    REQUIRE_FALSE(state->request.has_value());
 }
 
 TEST_CASE("critical MCP operations require broker-owned single-use consent",
