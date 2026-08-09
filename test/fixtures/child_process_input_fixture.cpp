@@ -76,6 +76,12 @@ int main(int argc, char** argv) {
         return read_standard_input() == std::to_string(pid) ? 0 : 65;
     }
 
+    if (argc == 2 && std::string_view(argv[1]) == "--pid-bound-current-directory") {
+        const auto pid = current_process_id();
+        std::cout << std::filesystem::current_path().string() << '\n' << std::flush;
+        return read_standard_input() == std::to_string(pid) ? 0 : 65;
+    }
+
     if (argc == 3 && std::string_view(argv[1]) == "--pid-bound-no-inherit") {
         if (inherited_handle_is_open(argv[2]))
             return 71;

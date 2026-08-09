@@ -314,3 +314,39 @@ TEST_CASE("post-spawn input stays off argv environment and filesystem",
           std::filesystem::directory_iterator{});
     std::filesystem::remove(working_directory);
 }
+
+#ifndef _WIN32
+TEST_CASE("post-spawn input honors a pinned working-directory descriptor",
+          "[child_process][standard-input][working-directory]") {
+    const auto working_directory =
+        std::filesystem::temp_directory_path() /
+        ("pulp-child-input-descriptor-" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(working_directory);
+
+    const auto descriptor = ::open(working_directory.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    REQUIRE(descriptor >= 0);
+
+    ChildProcess child;
+    ProcessOptions options;
+    options.timeout_ms = 5000;
+    options.max_output_bytes = 4u * 1024u * 1024u;
+    options.working_directory_descriptor = descriptor;
+    REQUIRE(child.start_with_standard_input(
+        PULP_CHILD_PROCESS_INPUT_FIXTURE, {"--pid-bound-current-directory"},
+        [](int process_id) -> std::optional<std::vector<std::uint8_t>> {
+            return bytes_of(std::to_string(process_id));
+        },
+        options));
+    const auto result = child.wait();
+    CHECK(result.exit_code == 0);
+    REQUIRE_FALSE(result.stdout_output.empty());
+    REQUIRE(result.stdout_output.back() == '\n');
+    const auto observed_directory =
+        std::filesystem::path(result.stdout_output.substr(0, result.stdout_output.size() - 1));
+    CHECK(std::filesystem::equivalent(observed_directory, working_directory));
+
+    ::close(descriptor);
+    std::filesystem::remove_all(working_directory);
+}
+#endif
