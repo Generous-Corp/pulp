@@ -423,6 +423,29 @@ TEST_CASE("Release installed host publishes only after ready and cleans revoked 
         INFO("result explanation: " << dispatched.response->explanation);
         REQUIRE(dispatched.response->state == ControlReceiptState::Completed);
     };
+    auto acquire_controller = [&](ControlClient& dispatch_client, const ControlGrant& grant,
+                                  std::string suffix) {
+        ControlRequestEnvelope request{
+            .request_id = "controller-" + suffix,
+            .client_id = grant.client_id.value,
+            .registration_id = registration_id.value,
+            .grant_id = grant.grant_id.value,
+            .instance_generation = registration->publication_id,
+            .operation_id = "dev.pulp.session/control@1",
+            .operation_version = 1,
+            .idempotency_key = "controller-key-" + suffix,
+            .deadline_unix_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    (std::chrono::system_clock::now() + 5s).time_since_epoch())
+                                    .count(),
+            .params_json = R"({"action":"acquire"})",
+        };
+        request.request_hash = *control_request_hash(request);
+        const auto dispatched = dispatch_client.request(request, 5s);
+        INFO(dispatched.explanation);
+        REQUIRE(dispatched.succeeded());
+        INFO(dispatched.response->explanation);
+        REQUIRE(dispatched.response->state == ControlReceiptState::Completed);
+    };
     auto retain_ui = [&](ControlClient& dispatch_client, const ControlGrant& grant,
                          std::string suffix) {
         auto apply = [&](std::string kind, std::string event) {
@@ -457,12 +480,14 @@ TEST_CASE("Release installed host publishes only after ready and cleans revoked 
         client_peer,
         {.client_id = redeemed.client->client_id,
          .registration_id = registration_id,
-         .capabilities = {InspectorCapability::TraceControl, InspectorCapability::UiInput},
+         .capabilities = {InspectorCapability::SessionControl, InspectorCapability::TraceControl,
+                          InspectorCapability::UiInput},
          .ttl = 1min},
         {.approved = true,
          .authority = ControlConsentAuthority::TrustedPulpCli,
          .decision_id = "installed-revoked"});
     REQUIRE(grant.grant);
+    acquire_controller(client, *grant.grant, "revoked");
     start_trace(client, *grant.grant, "revoked");
     retain_ui(client, *grant.grant, "revoked");
     REQUIRE(wait_for_path(revoked_active_path));
@@ -474,12 +499,14 @@ TEST_CASE("Release installed host publishes only after ready and cleans revoked 
         client_peer,
         {.client_id = redeemed.client->client_id,
          .registration_id = registration_id,
-         .capabilities = {InspectorCapability::TraceControl, InspectorCapability::UiInput},
+         .capabilities = {InspectorCapability::SessionControl, InspectorCapability::TraceControl,
+                          InspectorCapability::UiInput},
          .ttl = 30ms},
         {.approved = true,
          .authority = ControlConsentAuthority::TrustedPulpCli,
          .decision_id = "installed-expiring"});
     REQUIRE(expiring.grant);
+    acquire_controller(client, *expiring.grant, "expired");
     start_trace(client, *expiring.grant, "expired");
     retain_ui(client, *expiring.grant, "expired");
     REQUIRE(wait_for_path(expired_active_path));
@@ -491,12 +518,14 @@ TEST_CASE("Release installed host publishes only after ready and cleans revoked 
         client_peer,
         {.client_id = redeemed.client->client_id,
          .registration_id = registration_id,
-         .capabilities = {InspectorCapability::TraceControl, InspectorCapability::UiInput},
+         .capabilities = {InspectorCapability::SessionControl, InspectorCapability::TraceControl,
+                          InspectorCapability::UiInput},
          .ttl = 1min},
         {.approved = true,
          .authority = ControlConsentAuthority::TrustedPulpCli,
          .decision_id = "installed-disconnecting"});
     REQUIRE(disconnecting.grant);
+    acquire_controller(client, *disconnecting.grant, "disconnect");
     start_trace(client, *disconnecting.grant, "disconnect");
     retain_ui(client, *disconnecting.grant, "disconnect");
     REQUIRE(wait_for_path(disconnected_active_path));
@@ -527,12 +556,14 @@ TEST_CASE("Release installed host publishes only after ready and cleans revoked 
         second_peer,
         {.client_id = second_redeemed.client->client_id,
          .registration_id = registration_id,
-         .capabilities = {InspectorCapability::TraceControl, InspectorCapability::UiInput},
+         .capabilities = {InspectorCapability::SessionControl, InspectorCapability::TraceControl,
+                          InspectorCapability::UiInput},
          .ttl = 1min},
         {.approved = true,
          .authority = ControlConsentAuthority::TrustedPulpCli,
          .decision_id = "installed-teardown"});
     REQUIRE(teardown.grant);
+    acquire_controller(second_client, *teardown.grant, "teardown");
     start_trace(second_client, *teardown.grant, "teardown");
     retain_ui(second_client, *teardown.grant, "teardown");
     REQUIRE(wait_for_path(teardown_active_path));

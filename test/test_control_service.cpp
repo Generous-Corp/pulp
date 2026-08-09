@@ -473,7 +473,9 @@ TEST_CASE("control service gates artifact operations and reads on negotiated sup
                         .detail_json = "{\"artifact_id\":\"" + metadata.artifact_id +
                                        "\",\"byte_count\":" + std::to_string(metadata.byte_size) +
                                        ",\"mime_type\":\"image/png\",\"sha256\":\"" +
-                                       metadata.sha256 + "\"}",
+                                       metadata.sha256 +
+                                       "\",\"width\":1,\"height\":1,"
+                                       "\"redaction_state\":\"original\"}",
                         .artifacts = {{metadata.artifact_id, metadata.content_type,
                                        metadata.byte_size}},
                     },

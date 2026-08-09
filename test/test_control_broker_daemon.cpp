@@ -508,7 +508,7 @@ TEST_CASE("installed daemon composes host enrollment routing execution and resta
     REQUIRE(std::filesystem::create_directory(source));
     ::chmod(source.c_str(), 0700);
     const auto launched =
-        connection.manage("host-launch", choc::json::toString(launch_params, false));
+        connection.manage("host-launch", choc::json::toString(launch_params, false), 15s);
     INFO(launched.explanation);
     REQUIRE(launched.status_id == "launched");
     const ControlRegistrationId registration_id{wait_for_registration(registration_path)};
@@ -786,7 +786,7 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
     auto launch = choc::value::createObject("");
     launch.addMember("inventory_id", choc::value::createString(inventory_id));
     const auto launched =
-        connection->manage("host-launch", choc::json::toString(launch, false));
+        connection->manage("host-launch", choc::json::toString(launch, false), 15s);
     INFO(launched.explanation);
     REQUIRE(launched.status_id == "launched");
 
@@ -889,8 +889,8 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
             "inventory_id",
             choc::value::createString(std::string(
                 choc::json::parse(restored_prepared.data_json)["inventory_id"].getString())));
-        REQUIRE(connection
-                    ->manage("host-launch", choc::json::toString(restored_launch, false))
+            REQUIRE(connection
+                    ->manage("host-launch", choc::json::toString(restored_launch, false), 15s)
                     .status_id == "launched");
         choc::value::Value restored_instances;
         for (unsigned attempt = 0; attempt < 10'000; ++attempt) {
@@ -991,8 +991,8 @@ TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
         "inventory_id",
         choc::value::createString(std::string(
             choc::json::parse(prepared.data_json)["inventory_id"].getString())));
-    REQUIRE(connection.manage("host-launch", choc::json::toString(launch, false)).status_id ==
-            "launched");
+    REQUIRE(connection.manage("host-launch", choc::json::toString(launch, false), 15s)
+                .status_id == "launched");
 
     std::string instance_id;
     std::string registration_id;
@@ -1428,7 +1428,7 @@ TEST_CASE("broker and host SIGKILL fail closed during a deferred operation",
     auto launch_params = choc::value::createObject("");
     launch_params.addMember("inventory_id", choc::value::createString(inventory_id));
     const auto launched =
-        connection->manage("host-launch", choc::json::toString(launch_params, false));
+        connection->manage("host-launch", choc::json::toString(launch_params, false), 15s);
     INFO(launched.explanation);
     REQUIRE(launched.status_id == "launched");
     const ControlRegistrationId registration_id{wait_for_registration(registration_path)};
