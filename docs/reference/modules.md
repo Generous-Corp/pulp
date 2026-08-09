@@ -889,6 +889,7 @@ a working convolution and would hide the bug. Assert
 | Processor | Header | Description |
 |-----------|--------|-------------|
 | Modal Bank | `modal_bank.hpp` | SIMD-friendly bank of coupled-form modes with contact-pulse excitation, independent strike/pickup weights, amplitude-preserving retuning, and up to eight pickup outputs |
+| Particle percussion | `particle_collision_exciter.hpp`, `particle_percussion_voice.hpp` | Deterministic, depletion-aware collision excitation with selectable shaker, maraca, rattle, and tambourine models; zero-latency prepared voice rendering |
 | Modal Specification | `modal_spec.hpp` | Versioned JSON interchange for modal frequencies, T60 values, amplitudes, and optional shapes, with bounded validation before allocation |
 | Bridged-T Resonator | `bridged_t_resonator.hpp` | Trapezoidally integrated two-state model of the published TR-808 bridged-T network, exposing physical component values and circuit nodes; it is a resonator primitive, not a complete drum voice |
 | Square Oscillator Bank | `square_osc_bank.hpp` | Allocation-free-after-prepare bank of independently tunable, weighted, band-limited square oscillators for inharmonic metallic excitation and other clustered sources |
@@ -920,6 +921,24 @@ validate modal-spec JSON away from the audio callback, then pass the resulting
 mode span into a prepared bank. Link `pulp::signal-modal-spec` in addition to
 `pulp::signal` when calling `parse_modal_spec()` or `to_json()`.
 `BridgedTResonator::prepare()` and `process()` allocate nothing.
+
+`ParticleCollisionExciterT` models collisions with deterministic white-noise
+draws and explicit depletion of stored energy. Each sample decays the energy,
+draws a collision using the energy- and particle-count-dependent probability,
+then applies an absolute normalized `collision_energy_loss` on a hit; the loss
+is not a multiplicative fraction. `reset()` rewinds the purpose-derived random
+streams, so repeated preparation/reset and rendering are deterministic. The
+exciter is paired by `ParticlePercussionVoiceT` with `TwoPoleResonatorT` bands
+for shaker, maraca, and rattle models, or one shared impulse into a prepared
+`ModalBankT` for the five-mode tambourine model. `prepare()` and model or
+coefficient setters are setup/control-thread operations and may allocate where
+the selected modal bank requires it. `excite()`, `next()`, `process()`, and
+`reset()` are allocation-free, lock-free realtime methods after preparation.
+The voice reports zero latency. Its tail is finite when `sustain_floor > 0`
+and includes exciter settling plus the longest configured resonator or modal
+decay; a zero sustain floor is unbounded and `tail_samples()` reports `-1`.
+Retained memory is the prepared state and selected model storage, with no
+hidden graph ownership or Forge integration claim.
 
 #### Spectral processing
 

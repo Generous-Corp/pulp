@@ -56,6 +56,8 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/nway_crossfade.hpp": "Pulp::signal",
     "pulp/signal/path_latency_aligner.hpp": "Pulp::signal",
     "pulp/signal/path_switcher.hpp": "Pulp::signal",
+    "pulp/signal/particle_collision_exciter.hpp": "Pulp::signal",
+    "pulp/signal/particle_percussion_voice.hpp": "Pulp::signal",
     "pulp/signal/rise_fall_generator.hpp": "Pulp::signal",
     "pulp/signal/scope_capture.hpp": "Pulp::signal",
     "pulp/signal/six_band_eq.hpp": "Pulp::signal",
@@ -473,7 +475,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:b84aa35d755aff4c0c258be267891dc37b5a7ab0b7705be0f587957ee48d14e6",
+        "fingerprint": "sha256:d48c327673c568f6cd056dd4947d9eba31f3e6767cd60491ecd8af04dc531b18",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

@@ -268,6 +268,55 @@ EXPORTS = [
         }],
     ),
     capability(
+        key="signal.particle-percussion", domain="signal",
+        summary=(
+            "Deterministic depleted-energy particle collisions and prepared resonant "
+            "percussion voices."
+        ),
+        rt_class="mixed",
+        lifecycle={"construction": "control",
+                   "prepare": "control; voice preparation may allocate retained modal storage",
+                   "process": "audio", "reset": "audio",
+                   "release": "destruction off audio"},
+        state_model=(
+            "Fixed seeded collision, jitter, and routing generators plus collision energy, "
+            "resonator state, and prepared five-mode modal storage."
+        ),
+        seed_model="public uint64 seed with independently purpose-derived streams",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="normalized excitation and bounded collision, decay, and body-model controls",
+        output_domain="collision events or mono particle-percussion audio",
+        units=["samples", "hertz", "milliseconds", "normalized energy", "linear amplitude"],
+        latency="zero",
+        tail=("finite collision settling plus the longest configured resonator or modal decay "
+              "when sustain_floor is positive; unbounded and reported as -1 when it is zero"),
+        scheduling="sample-synchronous after control-side preparation and model configuration",
+        bindings=[
+            binding(
+                role="collision_exciter", kind="cpp_type",
+                include="pulp/signal/particle_collision_exciter.hpp",
+                qualified_name="pulp::signal::ParticleCollisionExciterT<float>",
+                target="Pulp::signal",
+                header_fingerprint="sha256:bfacb7a8890939910c7614e354646a6c9bdfe14d506848a69aa93c93b458d66e",
+            ),
+            binding(
+                role="voice", kind="cpp_type",
+                include="pulp/signal/particle_percussion_voice.hpp",
+                qualified_name="pulp::signal::ParticlePercussionVoiceT<float>",
+                target="Pulp::signal",
+                header_fingerprint="sha256:a9fbfb370bbb6d2b47f880d6a2687075b943ae6f4ba69213abb2a7279e5027a4",
+            ),
+        ],
+        _link_probes=[
+            {"role": "collision_exciter",
+             "binding": "pulp::signal::ParticleCollisionExciterT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+            {"role": "voice", "binding": "pulp::signal::ParticlePercussionVoiceT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+        ],
+    ),
+    capability(
         key="signal.nonlinear-shaping", domain="signal",
         summary="Antialiased multistage wavefolding, Chebyshev harmonic shaping, and ring modulation.",
         rt_class="mixed",
