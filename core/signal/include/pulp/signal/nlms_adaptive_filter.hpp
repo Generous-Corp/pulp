@@ -133,22 +133,27 @@ public:
                                    int& active_taps_out) const noexcept {
         if (dest == nullptr || capacity < 0) return false;
         for (int attempt = 0; attempt < kSnapshotAttempts; ++attempt) {
-            const int index = publish_index_.load(std::memory_order_acquire);
+            const int index = publish_index_.load(std::memory_order_seq_cst);
             if (index < 0 || index >= kPublishBuffers) continue;
-            reader_index_.store(index, std::memory_order_release);
-            if (publish_index_.load(std::memory_order_acquire) != index) {
-                reader_index_.store(-1, std::memory_order_release);
+            // The reservation and validation participate in one global order
+            // with the writer's slot selection. Acquire/release is not enough:
+            // the writer may legally miss a new reservation while the reader
+            // still validates a stale publication index, then revisit and
+            // overwrite that slot during the copy.
+            reader_index_.store(index, std::memory_order_seq_cst);
+            if (publish_index_.load(std::memory_order_seq_cst) != index) {
+                reader_index_.store(-1, std::memory_order_seq_cst);
                 continue;
             }
             const int count = published_taps_[static_cast<std::size_t>(index)].load(
                 std::memory_order_acquire);
             if (count < 0 || count > capacity) {
-                reader_index_.store(-1, std::memory_order_release);
+                reader_index_.store(-1, std::memory_order_seq_cst);
                 return false;
             }
             const double* source = published_.data() + static_cast<std::size_t>(index * max_taps_);
             for (int i = 0; i < count; ++i) dest[i] = static_cast<SampleType>(source[i]);
-            reader_index_.store(-1, std::memory_order_release);
+            reader_index_.store(-1, std::memory_order_seq_cst);
             active_taps_out = count;
             return true;
         }
@@ -190,8 +195,8 @@ private:
 
     void publish_current() noexcept {
         if (max_taps_ == 0) return;
-        const int current = publish_index_.load(std::memory_order_relaxed);
-        const int reader = reader_index_.load(std::memory_order_acquire);
+        const int current = publish_index_.load(std::memory_order_seq_cst);
+        const int reader = reader_index_.load(std::memory_order_seq_cst);
         int target = (current + 1) % kPublishBuffers;
         if (target == reader) target = (target + 1) % kPublishBuffers;
         double* destination = published_.data() + static_cast<std::size_t>(target * max_taps_);
@@ -201,7 +206,7 @@ private:
             std::fill(destination + active_taps_, destination + max_taps_, 0.0);
         published_taps_[static_cast<std::size_t>(target)].store(
             active_taps_, std::memory_order_release);
-        publish_index_.store(target, std::memory_order_release);
+        publish_index_.store(target, std::memory_order_seq_cst);
     }
 
     double sample_rate_ = 0.0;

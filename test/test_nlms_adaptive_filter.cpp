@@ -187,7 +187,8 @@ TEST_CASE("NLMS legal boundary parameters remain finite and energy bounded",
 TEST_CASE("NLMS snapshot publication keeps coefficients and tap count coherent",
           "[signal][nlms][concurrency]") {
     pulp::signal::NlmsAdaptiveFilter filter;
-    filter.prepare(48000.0, 8);
+    filter.prepare(48000.0, 512);
+    REQUIRE(filter.set_active_taps(8));
     filter.set_step_size(0.8f);
     constexpr std::array<double, 8> plant{0.8, -0.4, 0.3, -0.2,
                                           0.15, -0.12, 0.09, -0.07};
@@ -206,28 +207,28 @@ TEST_CASE("NLMS snapshot publication keeps coefficients and tap count coherent",
     }
     // Prime every publication slot with the now-static coefficients.
     for (int i = 0; i < 3; ++i) {
-        REQUIRE(filter.set_active_taps(5));
-        REQUIRE(filter.set_active_taps(8));
+        REQUIRE(filter.set_active_taps(256));
+        REQUIRE(filter.set_active_taps(512));
     }
-    std::array<float, 8> expected{};
+    std::array<float, 512> expected{};
     int expected_count = 0;
-    REQUIRE(filter.try_snapshot_coefficients(expected.data(), 8, expected_count));
-    REQUIRE(expected_count == 8);
+    REQUIRE(filter.try_snapshot_coefficients(expected.data(), 512, expected_count));
+    REQUIRE(expected_count == 512);
     REQUIRE(std::abs(expected[7]) > 0.05f);
 
     std::atomic<bool> done{false};
     std::atomic<bool> mismatch{false};
     std::thread writer([&] {
         for (int i = 0; i < 100000; ++i)
-            filter.set_active_taps((i & 1) == 0 ? 5 : 8);
+            filter.set_active_taps((i & 1) == 0 ? 256 : 512);
         done.store(true, std::memory_order_release);
     });
     std::thread reader([&] {
-        std::array<float, 8> snapshot{};
+        std::array<float, 512> snapshot{};
         while (!done.load(std::memory_order_acquire)) {
             int count = 0;
-            if (!filter.try_snapshot_coefficients(snapshot.data(), 8, count)) continue;
-            if (count != 5 && count != 8) {
+            if (!filter.try_snapshot_coefficients(snapshot.data(), 512, count)) continue;
+            if (count != 256 && count != 512) {
                 mismatch.store(true, std::memory_order_relaxed);
                 break;
             }
