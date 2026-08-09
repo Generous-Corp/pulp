@@ -66,6 +66,21 @@ Do not update Pulp's V8 pin until that matched release is published and every re
 platform asset is present. Never substitute the newest weekly V8 merely because it is
 newer.
 
+## Matched release collection
+
+Present the Skia/Dawn and V8 release URLs together as the milestone collection, then
+download only the assets the user needs:
+
+```bash
+ghapp release view chrome/m152 --repo danielraffel/skia-builder --json url
+ghapp release list --repo danielraffel/v8-builder --limit 100 --json tagName \
+  --jq '.[] | select(.tagName | startswith("v8-m152-")) |
+    "https://github.com/danielraffel/v8-builder/releases/tag/\(.tagName)"'
+```
+
+The collection is a provenance and compatibility convenience, not one combined archive:
+Skia/Dawn, V8, or both may be consumed independently.
+
 ## Pulp update checklist
 
 1. Work from current `origin/main` in a clean worktree. Read release notes from M+1
@@ -104,3 +119,6 @@ newer.
   their portable releases with a normal ubuntu-latest artifact.
 - `fetch_skia_for_release.py` platform keys must match the manifest exactly (notably
   `wasm-wasm32`).
+- Keep release-fetch progress output ASCII-safe. Windows release runners can use a
+  cp1252 console, where decorative Unicode arrows raise `UnicodeEncodeError` before
+  an asset download starts; exercise the full Windows fetch path with cp1252 stdout.

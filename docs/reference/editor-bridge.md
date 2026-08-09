@@ -139,10 +139,23 @@ the caller's perspective.
 
 ### `attach_native_runtime`
 
-Stub interface for the Claude Design import lane. The full wiring lands when
-`JsRuntime` exposes a `postMessage`-equivalent primitive that calls back into
-C++. Defining the interface here keeps native-runtime editors on the same
-dispatch model as WebView editors.
+The `ScriptEngine` overload registers a named native function that accepts one
+JSON envelope string and returns the bridge's JSON response string:
+
+```cpp
+bridge.attach_native_runtime(engine, "__editorDispatch");
+```
+
+```js
+const response = JSON.parse(__editorDispatch(JSON.stringify({
+  type: "set_value",
+  payload: { value: 0.5 }
+})));
+```
+
+The bridge must outlive calls through the registered function. The older
+`JsRuntime` overload remains a no-op compatibility seam until that separate
+runtime type has a concrete callback surface.
 
 ## Usage example
 

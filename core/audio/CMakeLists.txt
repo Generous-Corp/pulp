@@ -86,6 +86,7 @@ target_sources(pulp-audio PRIVATE
     src/waveform_overview_cache.cpp
     src/waveform_overview_serialization.cpp
     src/wav_metadata.cpp
+    src/wavetable_authoring.cpp
     src/audio_device_manager.cpp
     src/audio_io_timing.cpp
     src/audio_probe.cpp
