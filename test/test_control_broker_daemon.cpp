@@ -1353,6 +1353,18 @@ TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
         REQUIRE(choc::json::parse(cli_controller.stdout_output)["state"].getString() ==
                 "completed");
 
+        const auto cli_test_input = run_installed_client(
+            cli_environment, root.runtime,
+            {"control", "call", "--instance", instance_id,
+             "dev.pulp.test/input@1", "--params",
+             R"({"sequence":1,"kind":"transport","playing":false,"position_beats":2,"tempo_bpm":100})",
+             "--json"});
+        INFO(cli_test_input.stdout_output);
+        INFO(cli_test_input.stderr_output);
+        REQUIRE(cli_test_input.exit_code == 0);
+        REQUIRE(choc::json::parse(cli_test_input.stdout_output)["state"].getString() ==
+                "completed");
+
         const auto cli_eval_grant = run_installed_client(
             cli_environment, root.runtime,
             {"control", "grant-request", "--instance", instance_id, "--operation",
@@ -1397,6 +1409,30 @@ TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
         INFO(cli_controller_release.stderr_output);
         REQUIRE(cli_controller_release.exit_code == 0);
         CHECK(operation_consent_count.load(std::memory_order_relaxed) >= 2);
+
+        const auto cli_controller_reacquire = run_installed_client(
+            cli_environment, root.runtime,
+            {"control", "call", "--instance", instance_id,
+             "dev.pulp.session/control@1", "--profile", "develop", "--params",
+             R"({"action":"acquire"})", "--json"});
+        REQUIRE(cli_controller_reacquire.exit_code == 0);
+        const auto cli_sequence_restarted = run_installed_client(
+            cli_environment, root.runtime,
+            {"control", "call", "--instance", instance_id,
+             "dev.pulp.test/input@1", "--params",
+             R"({"sequence":1,"kind":"transport","playing":false,"position_beats":3,"tempo_bpm":100})",
+             "--json"});
+        INFO(cli_sequence_restarted.stdout_output);
+        INFO(cli_sequence_restarted.stderr_output);
+        REQUIRE(cli_sequence_restarted.exit_code == 0);
+        REQUIRE(choc::json::parse(cli_sequence_restarted.stdout_output)["state"].getString() ==
+                "completed");
+        const auto cli_controller_release_again = run_installed_client(
+            cli_environment, root.runtime,
+            {"control", "call", "--instance", instance_id,
+             "dev.pulp.session/control@1", "--profile", "develop", "--params",
+             R"({"action":"release"})", "--json"});
+        REQUIRE(cli_controller_release_again.exit_code == 0);
 
         const auto reacquired_controller =
             invoke("dev.pulp.session/control@1", R"({"action":"acquire"})");

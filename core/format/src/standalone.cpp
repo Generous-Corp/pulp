@@ -78,6 +78,16 @@ detail::StandaloneTestInputResult detail::StandaloneTestInputHost::update_transp
         return StandaloneTestInputResult::InvalidArgument;
     }
 
+    std::lock_guard lock(control_transport_mutex_);
+    if (!transport_before_control_) {
+        const auto observed = observed_transport_.read();
+        transport_before_control_ = TransportCommand{
+            .playing = observed.playing,
+            .tempo_bpm = observed.tempo_bpm,
+            .position_samples = observed.position_samples,
+            .position_revision = control_transport_.position_revision,
+        };
+    }
     if (update.playing)
         control_transport_.playing = *update.playing;
     if (update.tempo_bpm)
@@ -92,6 +102,14 @@ detail::StandaloneTestInputResult detail::StandaloneTestInputHost::update_transp
 
 void detail::StandaloneTestInputHost::release_test_input() noexcept {
     midi_generation_.fetch_add(1, std::memory_order_acq_rel);
+    std::lock_guard lock(control_transport_mutex_);
+    if (transport_before_control_) {
+        auto restored = *transport_before_control_;
+        restored.position_revision = control_transport_.position_revision + 1;
+        control_transport_ = restored;
+        transport_before_control_.reset();
+        transport_commands_.write(control_transport_);
+    }
 }
 
 detail::StandaloneTestTransportState
@@ -106,6 +124,7 @@ detail::StandaloneTestInputHost::midi_overflow_count() const noexcept {
 
 void detail::StandaloneTestInputHost::prepare(bool playing,
                                                double tempo_bpm) noexcept {
+    std::lock_guard lock(control_transport_mutex_);
     while (midi_queue_.try_pop()) {}
     midi_queue_.reset_overflow_count();
     const auto generation =
@@ -128,6 +147,7 @@ void detail::StandaloneTestInputHost::prepare(bool playing,
     };
     audio_position_revision_ = control_transport_.position_revision;
     observed_transport_.write(audio_transport_);
+    transport_before_control_.reset();
     prepared_ = true;
 }
 

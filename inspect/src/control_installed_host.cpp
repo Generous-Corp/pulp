@@ -109,6 +109,7 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
     std::mutex controller_mutex;
     InspectorControllerLease controller_lease;
     std::string controller_lease_id;
+    std::string controller_principal;
     std::string controller_acquiring_authority_id;
     std::shared_ptr<ControllerExecutionToken> controller_live;
     ControlHostOpenResult opened;
@@ -152,20 +153,27 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
             observability->end_authority(id);
         if (development)
             development->end_authority(id, TestInputReleaseReason::ClientDisconnected);
+        std::string ended_controller_principal;
         {
             std::lock_guard controller_lock(controller_mutex);
             if (controller_acquiring_authority_id == id) {
                 if (controller_live)
                     controller_live->live.store(false, std::memory_order_release);
-                if (const auto owner = controller_lease.owner())
-                    controller_lease.disconnect(*owner);
+                if (!controller_principal.empty()) {
+                    ended_controller_principal = controller_principal;
+                    controller_lease.disconnect(controller_principal);
+                }
                 controller_lease_id.clear();
+                controller_principal.clear();
                 controller_acquiring_authority_id.clear();
                 controller_live.reset();
                 if (ui)
                     (void)ui->release_controller_scope();
             }
         }
+        if (!ended_controller_principal.empty() && development)
+            development->end_controller_scope(
+                ended_controller_principal, TestInputReleaseReason::ControllerReleased);
     }
 
     void end_all() noexcept {
@@ -190,9 +198,10 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
         std::lock_guard controller_lock(controller_mutex);
         if (controller_live)
             controller_live->live.store(false, std::memory_order_release);
-        if (const auto owner = controller_lease.owner())
-            controller_lease.disconnect(*owner);
+        if (!controller_principal.empty())
+            controller_lease.disconnect(controller_principal);
         controller_lease_id.clear();
+        controller_principal.clear();
         controller_acquiring_authority_id.clear();
         controller_live.reset();
     }
@@ -238,6 +247,7 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
 
         std::unique_lock lock(controller_mutex);
         const std::string_view owner = plan.client_principal;
+        const auto previous_owner = controller_principal;
         ControllerLeaseResult result = ControllerLeaseResult::InvalidOwner;
         if (action == "acquire")
             result = controller_lease.acquire(owner);
@@ -247,6 +257,23 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
             result = controller_lease.release(owner)
                          ? ControllerLeaseResult::Renewed
                          : ControllerLeaseResult::HeldByOther;
+        if (result == ControllerLeaseResult::HeldByOther && previous_owner == owner) {
+            if (controller_live)
+                controller_live->live.store(false, std::memory_order_release);
+            controller_lease.disconnect(owner);
+            controller_lease_id.clear();
+            controller_principal.clear();
+            controller_acquiring_authority_id.clear();
+            controller_live.reset();
+            if (development)
+                development->end_controller_scope(
+                    previous_owner, TestInputReleaseReason::ControllerExpired);
+            if (ui)
+                (void)ui->release_controller_scope();
+            return {.terminal_state = ControlReceiptState::Failed,
+                    .result = {.result_code = ControlResultCode::LeaseConflict,
+                               .explanation = "controller lease has expired"}};
+        }
         if (result == ControllerLeaseResult::HeldByOther) {
             return {.terminal_state = ControlReceiptState::Failed,
                     .result = {.result_code = ControlResultCode::LeaseConflict,
@@ -263,9 +290,9 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
                 controller_live->live.store(false, std::memory_order_release);
                 release_ui = true;
             }
-            if (!controller_acquiring_authority_id.empty() && development)
-                development->end_authority(controller_acquiring_authority_id,
-                                           TestInputReleaseReason::ControllerReleased);
+            if (!previous_owner.empty() && development)
+                development->end_controller_scope(
+                    previous_owner, TestInputReleaseReason::ControllerReleased);
             const auto bytes = runtime::secure_random_bytes(16);
             if (!bytes) {
                 controller_lease.disconnect(owner);
@@ -274,6 +301,7 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
                                    .explanation = "controller lease identity is unavailable"}};
             }
             controller_lease_id = "lease-" + runtime::hex_encode(*bytes);
+            controller_principal = plan.client_principal;
             controller_acquiring_authority_id = plan.client_id.value;
             controller_live = std::make_shared<ControllerExecutionToken>();
         }
@@ -296,12 +324,13 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
             if (controller_live)
                 controller_live->live.store(false, std::memory_order_release);
             controller_lease_id.clear();
+            controller_principal.clear();
             controller_acquiring_authority_id.clear();
             controller_live.reset();
             release_ui = true;
             if (development)
-                development->end_authority(plan.client_id.value,
-                                           TestInputReleaseReason::ControllerReleased);
+                development->end_controller_scope(
+                    plan.client_principal, TestInputReleaseReason::ControllerReleased);
         }
         const auto detail_json = choc::json::toString(detail, false);
         if (release_ui && ui && !ui->release_controller_scope()) {
@@ -339,20 +368,21 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
                 return state->session_control(plan, request, context);
             std::shared_ptr<ControllerExecutionToken> controller_live;
             bool controller_expired = false;
-            std::string ended_controller_authority;
+            std::string ended_controller_principal;
             if (const auto* operation =
                     resolve_control_operation(request.operation_id, request.operation_version);
                 operation && capability_requires_controller_lease(operation->capability)) {
                 std::lock_guard controller_lock(state->controller_mutex);
                 controller_live = state->controller_live;
+                ended_controller_principal = state->controller_principal;
                 if (!state->controller_lease.owns(plan.client_principal) ||
                     !controller_live || !controller_live->is_live()) {
                     if (controller_live)
                         controller_live->live.store(false, std::memory_order_release);
-                    if (const auto owner = state->controller_lease.owner())
-                        state->controller_lease.disconnect(*owner);
-                    ended_controller_authority = state->controller_acquiring_authority_id;
+                    if (!state->controller_principal.empty())
+                        state->controller_lease.disconnect(state->controller_principal);
                     state->controller_lease_id.clear();
+                    state->controller_principal.clear();
                     state->controller_acquiring_authority_id.clear();
                     state->controller_live.reset();
                     controller_live.reset();
@@ -363,8 +393,8 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
             }
             if (controller_expired) {
                 if (state->development)
-                    state->development->end_authority(
-                        ended_controller_authority, TestInputReleaseReason::ControllerReleased);
+                    state->development->end_controller_scope(
+                        ended_controller_principal, TestInputReleaseReason::ControllerReleased);
                 return ControlExecutionOutcome{
                     .terminal_state = ControlReceiptState::Failed,
                     .result = {.result_code = ControlResultCode::LeaseConflict,

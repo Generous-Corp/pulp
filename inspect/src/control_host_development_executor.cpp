@@ -324,9 +324,9 @@ struct ControlHostDevelopmentExecutor::State {
                            ControlRetryClassification::AfterRefresh);
         const auto params = choc::json::parse(request.params_json);
         const auto sequence = static_cast<std::uint64_t>(params["sequence"].getInt64());
-        const auto owner = plan.client_id.value;
+        const auto owner = plan.client_principal;
         if (const auto found = test_input_sequences.find(owner);
-            found != test_input_sequences.end() && sequence <= found->second)
+            found != test_input_sequences.end() && sequence <= found->second.sequence)
             return failure(ControlResultCode::StateConflict,
                            "test input sequence must increase for this authority");
 
@@ -373,7 +373,10 @@ struct ControlHostDevelopmentExecutor::State {
             release_input(TestInputReleaseReason::ControllerReleased);
             return checkpoint_failure(after_apply);
         }
-        test_input_sequences[owner] = sequence;
+        test_input_sequences[owner] = {
+            .opaque_authority_id = plan.client_id.value,
+            .sequence = sequence,
+        };
         auto detail = choc::value::createObject("ControlTestInputResult");
         detail.addMember("receipt_id", plan.receipt_id.value);
         detail.addMember("accepted_sequence", static_cast<std::int64_t>(sequence));
@@ -438,7 +441,17 @@ struct ControlHostDevelopmentExecutor::State {
 
     void end_authority(std::string_view authority, TestInputReleaseReason reason) noexcept {
         std::lock_guard lock(execution_mutex);
-        if (test_input_sequences.erase(std::string(authority)) != 0)
+        const auto erased = std::erase_if(test_input_sequences, [&](const auto& entry) {
+            return entry.second.opaque_authority_id == authority;
+        });
+        if (erased != 0)
+            release_input(reason);
+    }
+
+    void end_controller_scope(std::string_view principal,
+                              TestInputReleaseReason reason) noexcept {
+        std::lock_guard lock(execution_mutex);
+        if (test_input_sequences.erase(std::string(principal)) != 0)
             release_input(reason);
     }
 
@@ -463,7 +476,11 @@ struct ControlHostDevelopmentExecutor::State {
 
     ControlHostDevelopmentExecutorConfig config;
     mutable std::mutex execution_mutex;
-    std::unordered_map<std::string, std::uint64_t> test_input_sequences;
+    struct TestInputSequence {
+        std::string opaque_authority_id;
+        std::uint64_t sequence = 0;
+    };
+    std::unordered_map<std::string, TestInputSequence> test_input_sequences;
     bool connected = true;
 };
 
@@ -502,6 +519,12 @@ ControlOperationExecutor ControlHostDevelopmentExecutor::executor() const {
 void ControlHostDevelopmentExecutor::end_authority(std::string_view opaque_authority_id,
                                                    TestInputReleaseReason reason) noexcept {
     state_->end_authority(opaque_authority_id, reason);
+}
+
+void ControlHostDevelopmentExecutor::end_controller_scope(
+    std::string_view controller_principal,
+    TestInputReleaseReason reason) noexcept {
+    state_->end_controller_scope(controller_principal, reason);
 }
 
 void ControlHostDevelopmentExecutor::disconnect() noexcept {

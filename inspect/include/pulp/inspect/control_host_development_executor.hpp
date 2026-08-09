@@ -113,6 +113,8 @@ class ControlHostDevelopmentExecutor {
     ControlOperationExecutor executor() const;
     void end_authority(std::string_view opaque_authority_id,
                        TestInputReleaseReason reason) noexcept;
+    void end_controller_scope(std::string_view controller_principal,
+                              TestInputReleaseReason reason) noexcept;
     void disconnect() noexcept;
     bool ready() const;
 

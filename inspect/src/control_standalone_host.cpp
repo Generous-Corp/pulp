@@ -413,6 +413,29 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
             has_capability(*manifest, InspectorCapability::AuthoringTweaks);
         std::optional<ControlInstalledHostDevelopmentConfig> development;
         if (needs_development) {
+            std::function<ControlLogPage(std::uint64_t, std::size_t)> read_logs;
+            if (log_session_) {
+                read_logs = [this](std::uint64_t after, std::size_t limit) {
+                    ControlLogPage page;
+                    if (!console_ || !log_session_)
+                        return page;
+                    std::uint64_t next = 0;
+                    auto entries = console_->entries_since(after, next);
+                    if (entries.size() > limit) {
+                        entries.resize(limit);
+                        next = entries.back().seq;
+                    }
+                    page.next_sequence = next;
+                    for (const auto& entry : entries) {
+                        page.entries.push_back({
+                            .sequence = entry.seq,
+                            .level = entry.level.substr(0, 32),
+                            .message = entry.message.substr(
+                                0, kControlDevelopmentMaximumTextBytes)});
+                    }
+                    return page;
+                };
+            }
             development = ControlInstalledHostDevelopmentConfig{
                 .manifest = *manifest,
                 .observe_ui = [this](const ControlUiObservationRequest& request)
@@ -464,26 +487,7 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                     }
                     return items;
                 },
-                .read_logs = [this](std::uint64_t after, std::size_t limit) {
-                    ControlLogPage page;
-                    if (!console_)
-                        return page;
-                    std::uint64_t next = 0;
-                    auto entries = console_->entries_since(after, next);
-                    if (entries.size() > limit) {
-                        entries.resize(limit);
-                        next = entries.back().seq;
-                    }
-                    page.next_sequence = next;
-                    for (const auto& entry : entries) {
-                        page.entries.push_back({
-                            .sequence = entry.seq,
-                            .level = entry.level.substr(0, 32),
-                            .message = entry.message.substr(
-                                0, kControlDevelopmentMaximumTextBytes)});
-                    }
-                    return page;
-                },
+                .read_logs = std::move(read_logs),
                 .apply_test_note = [this](const ControlTestNoteInput& input) {
                     if (!test_input_)
                         return TestInputApplyResult::failure(
