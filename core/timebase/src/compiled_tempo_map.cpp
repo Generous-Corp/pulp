@@ -431,21 +431,10 @@ long double TempoCursor::advance_fractional(long double sample) noexcept {
 double TempoCursor::tempo_at_tick(TickPosition tick) noexcept {
     if (map_ == nullptr)
         return 120.0;
-    while (segment_index_ + 1 < map_->segments_.size() &&
-           tick >= map_->segments_[segment_index_ + 1].start_tick)
-        ++segment_index_;
-    while (segment_index_ > 0 && tick < map_->segments_[segment_index_].start_tick)
-        --segment_index_;
-    const auto& segment = map_->segments_[segment_index_];
-    if (tick < segment.start_tick || segment.curve == TempoCurve::Constant ||
-        segment.start_bpm == segment.end_bpm || segment.end_tick == segment.start_tick)
-        return segment.start_bpm;
-    const auto offset = static_cast<long double>(tick.value - segment.start_tick.value);
-    const auto length = static_cast<long double>(segment.end_tick.value - segment.start_tick.value);
-    const auto fraction = std::clamp(offset / length, 0.0L, 1.0L);
-    return static_cast<double>(static_cast<long double>(segment.start_bpm) +
-                               fraction * (static_cast<long double>(segment.end_bpm) -
-                                           static_cast<long double>(segment.start_bpm)));
+    // Tempo queries may inspect a future scheduling range. Keep them
+    // observational so they cannot move the sample-streaming segment while
+    // sample_ still anchors an earlier forward position.
+    return map_->tempo_at_tick(tick);
 }
 
 long double TempoTickCursor::advance_fractional(long double tick) noexcept {

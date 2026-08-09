@@ -74,6 +74,42 @@ TEST_CASE("fractional tempo cursors consume forward segment crossings once") {
     REQUIRE(previous_segment == segment_count - 1);
 }
 
+TEST_CASE("TempoCursor future tempo queries preserve forward sample advancement") {
+    constexpr auto rate = RationalRate{48'000, 1};
+    constexpr std::array points{
+        TempoPoint{{0}, 60.0, TempoCurve::Constant},
+        TempoPoint{{2 * kTicksPerQuarter}, 120.0, TempoCurve::Constant},
+        TempoPoint{{4 * kTicksPerQuarter}, 240.0, TempoCurve::Constant},
+    };
+    const auto map = compile(points, rate);
+
+    // Independent exact oracle for the first 60 BPM section at 48 kHz:
+    // one quarter note is 48,000 samples.
+    constexpr TickPosition first_tick{kTicksPerQuarter / 2};
+    constexpr SamplePosition first_sample{24'000};
+    constexpr TickPosition next_tick{kTicksPerQuarter};
+    constexpr SamplePosition next_sample{48'000};
+    constexpr TickPosition future_tick{5 * kTicksPerQuarter};
+
+    TempoCursor integer_cursor(map);
+    const auto first_integer_result = integer_cursor.advance(first_sample);
+    REQUIRE(first_integer_result.exact);
+    REQUIRE(first_integer_result.represented_sample == first_sample);
+    REQUIRE(integer_cursor.tempo_at_tick(future_tick) == 240.0);
+    REQUIRE(integer_cursor.segment_index() == 0);
+    const auto integer_result = integer_cursor.advance(next_sample);
+    REQUIRE(integer_result.exact);
+    REQUIRE(integer_result.represented_sample == next_sample);
+
+    TempoCursor fractional_cursor(map);
+    REQUIRE(fractional_cursor.advance_fractional(first_sample.value) ==
+            static_cast<long double>(first_tick.value));
+    REQUIRE(fractional_cursor.tempo_at_tick(future_tick) == 240.0);
+    REQUIRE(fractional_cursor.segment_index() == 0);
+    REQUIRE(fractional_cursor.advance_fractional(next_sample.value) ==
+            static_cast<long double>(next_tick.value));
+}
+
 TEST_CASE("compiled tempo map reports interior ramp tempo extrema") {
     const std::array points{
         TempoPoint{{0}, 120.0, TempoCurve::LinearInTicks},
