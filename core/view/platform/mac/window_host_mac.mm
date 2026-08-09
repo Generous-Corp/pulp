@@ -1876,6 +1876,10 @@ public:
         // window but never repaints the new frame. Start a per-window display
         // link here, guarded so the primary (which already started its link in
         // run_event_loop()) is untouched.
+        if (hidden_frame_timer_) {
+            [hidden_frame_timer_ invalidate];
+            hidden_frame_timer_ = nil;
+        }
         if (!display_link_.is_open()) start_display_link();
         // Make the Metal view the first responder so the window receives key
         // events on its FIRST show. Only run_event_loop() (the PRIMARY window)
@@ -2108,10 +2112,10 @@ public:
                     make_cocoa_main_thread_backend(dispatcher_alive));
             // When initially_hidden is set,
             // skip Dock icon, focus stealing, and the show() call. Window
-            // is created and the run loop drives the bridge per-vsync as
-            // usual; just don't put glass on the user's screen. Used by
-            // live-host smoke tests that need to exercise the per-vsync
-            // pump without flashing a window during CI / local validation.
+            // is created and the run loop still drives the bridge; it just
+            // doesn't put glass on the user's screen. Used by
+            // live-host smoke tests that need to exercise the frame pump
+            // without flashing a window during CI / local validation.
             if (options_initially_hidden_) {
                 [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
             } else {
@@ -2120,8 +2124,15 @@ public:
                     menu_commands_, [] { request_cocoa_app_stop(); });
             }
 
-            // Start display-linked render loop
-            start_display_link();
+            // A hidden CAMetalLayer may receive no display-link ticks in an
+            // unattended/CI WindowServer session. Drive the exact same gated
+            // frame callback from the common run loop in that mode so idle
+            // work, Inspector publication, and frame-delayed capture remain
+            // deterministic. Visible windows stay paced by real vsync.
+            if (options_initially_hidden_)
+                start_hidden_frame_timer();
+            else
+                start_display_link();
 
             if (!options_initially_hidden_) {
                 show();
@@ -2260,6 +2271,7 @@ private:
     std::unique_ptr<render::GpuSurface> gpu_surface_;
     std::unique_ptr<render::SkiaSurface> skia_surface_;
     pulp::view::mac_frame_timing::MacDisplayLinkDriver display_link_;
+    NSTimer* hidden_frame_timer_ = nil;
     std::atomic<bool> needs_repaint_{true};
     std::atomic<bool> continuous_frames_{false};
     std::atomic<bool> render_dispatch_queued_{false};
@@ -2669,6 +2681,17 @@ private:
         return kCVReturnSuccess;
     }
 
+    void start_hidden_frame_timer() {
+        if (hidden_frame_timer_) return;
+        frame_pump_.suspend();
+        hidden_frame_timer_ = [NSTimer timerWithTimeInterval:1.0 / 60.0
+            repeats:YES block:^(NSTimer*) {
+                display_link_callback(nullptr, nullptr, nullptr, 0, nullptr, this);
+            }];
+        [[NSRunLoop currentRunLoop] addTimer:hidden_frame_timer_
+                                     forMode:NSRunLoopCommonModes];
+    }
+
     void start_display_link() {
         display_link_.open(display_link_callback, this);
 
@@ -2690,6 +2713,10 @@ private:
     }
 
     void stop_display_link() {
+        if (hidden_frame_timer_) {
+            [hidden_frame_timer_ invalidate];
+            hidden_frame_timer_ = nil;
+        }
         display_link_.stop();
         frame_pump_.suspend();
     }

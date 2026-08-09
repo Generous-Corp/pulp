@@ -253,30 +253,31 @@ size from `scene.pulp.json` `root.style.width/height` (or the generated
 `setSize('root', …)`), and render at that. When in doubt, render at the root
 size — the result fills the canvas and matches the design's own proportions.
 
-## Headless GPU capture: use the offscreen `gpu` backend, NOT a live window
+## Headless GPU capture: prefer offscreen; Standalone live-host capture is hardened
 
-The live-host path (`WindowHost::capture_png()`, and the standalone
-`--screenshot=PATH` flag it backs) is driven per-vsync by the macOS GPU host's
-`CVDisplayLink`. That clock only ticks for an **on-screen window in an
-interactive WindowServer session**. In a headless / SSH / CI / agent context —
-or for an `initially_hidden` accessory app — no vsync is vended, so the idle
-pump never fires, the one-shot capture never runs, and `run_event_loop()`
-blocks forever (the process sits in `[NSApplication run] →
-nextEventMatchingMask`). Showing the window does NOT help when there's no
-interactive session.
+The macOS GPU host normally drives visible windows per-vsync with
+`CVDisplayLink`. An `initially_hidden` window may receive no display-link ticks
+in an unattended WindowServer session, so Pulp switches that host to a 60 Hz
+common-run-loop timer which invokes the same gated frame callback. This keeps
+Standalone Inspector publication, frame-delayed `--screenshot=PATH` capture,
+and teardown deterministic without showing the window. `show()` moves the host
+back to its real display link. Keep the Standalone subprocess lifecycle tests
+green when changing either path; they prove discovery, compositor capture,
+application/window close drainage, off-mode behavior, and scripted UI state.
 
-So for a **headless** capture of a GPU-rendered view, use the offscreen surface
-— `render_to_file(root, w, h, path, scale, ScreenshotBackend::gpu)` /
+For a **headless render-only** capture of a GPU-rendered view, still prefer the
+offscreen surface —
+`render_to_file(root, w, h, path, scale, ScreenshotBackend::gpu)` /
 `render_to_png_gpu` (Dawn+Skia `HeadlessSurface`, no window, no display link).
 It renders the same tree through the real GPU stack and tears down cleanly, so
-it neither hangs nor wedges the GPU. Reserve the live `--screenshot` path for a
-real desktop session where you actually want to prove the on-screen window.
+it has fewer lifecycle dependencies. Use the live Standalone `--screenshot`
+path when the proof must include the actual host, Inspector, native overlays,
+or compositor/back-buffer capture.
 
 `examples/PulpTempoSampler` is the worked example of all three:
 `pulp-tempo-sampler-shot OUT.png` (CPU raster, default), `… OUT.png --gpu`
 (offscreen GPU, headless), and the standalone
-`PulpTempoSampler … --screenshot=OUT.png` (live host window, interactive
-session only).
+`PulpTempoSampler … --screenshot=OUT.png` (live host lifecycle and capture).
 
 ## Gotchas
 
