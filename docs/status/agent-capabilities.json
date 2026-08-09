@@ -25,7 +25,7 @@
       },
       "music": {
         "state": "partial",
-        "capabilities": 6
+        "capabilities": 7
       },
       "offline": {
         "state": "not_inventoried",
@@ -1324,6 +1324,264 @@
         }
       },
       "contract_digest": "sha256:00f53240aa84b6c211c26b55b794b4cd425e0acfd0b2d8ac49cbf7739400a375"
+    },
+    {
+      "key": "music.pattern-development",
+      "domain": "music",
+      "summary": "Fixed-capacity exact-tick event-set development with stable IDs, nested density, regional fills, and deterministic integer A/B morphing.",
+      "rt_class": "any",
+      "lifecycle": {
+        "construction": "any",
+        "prepare": "none",
+        "process": "any",
+        "reset": "value-initialization",
+        "release": "none"
+      },
+      "state_model": "Pure operations over trivially copyable fixed-capacity event records; no hidden state, allocation, scheduler, clock, or note ownership.",
+      "seed_model": "explicit seed plus exact tick, lane, cycle, stream, and stable event ID coordinates",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "not_applicable",
+        "platform_scope": "cross_platform",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "up to 64 canonical exact-tick event records per input, onset-set operation, target count, half-open tick region, seed coordinates, and integer morph amount",
+      "output_domain": "up to 64 canonical exact-tick event records or an explicit error",
+      "units": [
+        "ticks",
+        "event count",
+        "integer accent",
+        "integer morph amount",
+        "seed"
+      ],
+      "latency": "zero",
+      "tail": "none",
+      "scheduling": "pure caller-clocked whole-pattern development",
+      "bindings": [
+        {
+          "role": "event-id",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::PatternEventId",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "event-role",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::PatternEventRole",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "event-record",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::PatternEvent",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "error",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::PatternDevelopmentError",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "pattern",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::DevelopmentPattern<>",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "result",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::PatternDevelopmentResult<>",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "set-operation",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::PatternSetOperation",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "density-selection",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::DensitySelection",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "regional-fill-selection",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::RegionalFillSelection",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "morph-selection",
+          "kind": "cpp_type",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::PatternMorphSelection",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "make-event-id",
+          "kind": "cpp_function",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::make_pattern_event_id",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "set-algebra",
+          "kind": "cpp_function",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::pattern_set<64>",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "density",
+          "kind": "cpp_function",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::select_pattern_density<64>",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "regional-fill",
+          "kind": "cpp_function",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::apply_regional_fill<64>",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "morph",
+          "kind": "cpp_function",
+          "include": "pulp/music/pattern_development.hpp",
+          "qualified_name": "pulp::music::morph_patterns<64>",
+          "target": "Pulp::music",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:d355402017022afb0573ac04dbbb920f126a24405312274c38d4a2847d648aa7"
     },
     {
       "key": "music.pattern-generation",
@@ -5039,11 +5297,11 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 72,
+    "total": 73,
     "by_domain": {
       "audio": 7,
       "midi": 9,
-      "music": 6,
+      "music": 7,
       "offline": 0,
       "sequence": 1,
       "signal": 40,

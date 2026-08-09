@@ -80,6 +80,13 @@ A new TSP algorithm is therefore detected automatically but not advertised by
 guesswork: the new/changed public header fails the ledger gate until its owner
 makes the explicit registration or non-capability classification.
 
+For a fixed-capacity record algebra such as `music.pattern-development`, bind
+the stable record, error, configuration, and result types as well as every
+advertised free function. Each free function needs its own operational probe;
+a type-only row or one aggregate probe cannot establish that installed
+consumers can execute density, fill, set-algebra, ID, and morph operations.
+Keep scheduling, clocks, note ownership, and publication outside this manifest.
+
 For an existing capability change:
 
 - Update the reviewed header fingerprint for every public-header byte change,
