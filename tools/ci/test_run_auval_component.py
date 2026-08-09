@@ -209,5 +209,44 @@ class AuvalComponentIdentityTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.stdout, "")
 
+
+class AuvalWorkerTimeoutTests(unittest.TestCase):
+    LIB = Path(__file__).parent / "lib" / "auval-worker-timeout.sh"
+
+    def timeout(self, configured, discovery):
+        return subprocess.run(
+            [
+                "bash",
+                "-c",
+                'source "$1"; auval_worker_timeout_seconds "$2" "$3"',
+                "bash",
+                str(self.LIB),
+                configured,
+                discovery,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+
+    def test_default_covers_discovery_plus_validation(self):
+        result = self.timeout("", "30")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "120")
+
+    def test_explicit_timeout_wins(self):
+        result = self.timeout("180", "30")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "180")
+
+    def test_rejects_invalid_timeout(self):
+        result = self.timeout("soon", "30")
+        self.assertEqual(result.returncode, 2)
+
+    def test_rejects_invalid_discovery_budget(self):
+        result = self.timeout("", "later")
+        self.assertEqual(result.returncode, 2)
+
 if __name__ == "__main__":
     unittest.main()

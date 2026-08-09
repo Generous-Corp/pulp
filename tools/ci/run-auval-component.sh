@@ -14,6 +14,7 @@ set -euo pipefail
 # is tested as the code the script actually runs, not a copy of it.
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/auval-exec-check.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/auval-component-identity.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/auval-worker-timeout.sh"
 
 if [[ ${1:-} == "--gui-worker" ]]; then
   if [[ $# -ne 7 ]]; then
@@ -168,12 +169,15 @@ agent_loaded=1
 # /Volumes needs Full Disk Access for launchd; the directory stats fine from the
 # shell, so this is invisible until the exec fails). That is not a validation
 # result, and waiting the full deadline for a status file that can never appear
-# turns it into a misleading "timed out" 55 seconds later.
+# turns it into a misleading timeout.
 #
 # Detect it precisely: bash reporting it could not execute THIS script. A plugin
 # that genuinely fails validation writes a status file and is reported below, so
 # this cannot swallow a real failure.
-deadline=$((SECONDS + 55))
+worker_timeout=$(auval_worker_timeout_seconds \
+  "${PULP_AU_WORKER_TIMEOUT_SECONDS:-}" \
+  "${PULP_AU_DISCOVERY_DEADLINE_SECONDS:-30}")
+deadline=$((SECONDS + worker_timeout))
 while [[ ! -f "$status_file" ]] && (( SECONDS < deadline )); do
   if auval_worker_exec_failed "$stderr_log" "$script_path"; then
     break
