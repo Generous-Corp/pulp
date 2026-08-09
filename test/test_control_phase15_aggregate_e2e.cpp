@@ -280,6 +280,20 @@ find_receipt(const std::filesystem::path& directory, std::string_view request_id
     }
     return std::nullopt;
 }
+
+std::optional<choc::value::Value> read_receipt(const std::filesystem::path& directory,
+                                               std::string_view receipt_id) {
+    std::ifstream input(directory / (std::string(receipt_id) + ".json"));
+    const std::string contents((std::istreambuf_iterator<char>(input)),
+                               std::istreambuf_iterator<char>());
+    try {
+        auto value = choc::json::parse(contents);
+        if (value.isObject())
+            return value;
+    } catch (...) {
+    }
+    return std::nullopt;
+}
 #endif
 
 } // namespace
@@ -419,13 +433,36 @@ TEST_CASE("Phase 15 aggregate exact-instance CLI MCP revocation and disconnect E
         run_mcp(mcp, root.runtime,
                 rpc_call(3, "pulp_control_revoke", "{\"grant_id\":" + quote(grant_id) + "}") +
                     "\n" + rpc_call(4, "pulp_control_instance_read", revoked_read_args) + "\n");
+    INFO(revoke_rpc.stdout_output);
     INFO(revoke_rpc.stderr_output);
     REQUIRE(revoke_rpc.exit_code == 0);
     const auto revoke_lines = parse_lines(revoke_rpc.stdout_output);
     REQUIRE(revoke_lines.size() == 2);
-    CHECK(revoke_lines[0]["result"]["structuredContent"]["status"].getString() == "revoked");
+    // A grant belongs to the MCP server process that requested it. A later
+    // server process cannot mutate or spend that process's authority.
+    CHECK(revoke_lines[0]["result"]["isError"].getWithDefault<bool>(false));
+    CHECK(revoke_rpc.stdout_output.find("grant is unavailable to this client") !=
+          std::string::npos);
     CHECK(revoke_lines[1]["result"]["isError"].getWithDefault<bool>(false));
     CHECK(revoke_rpc.stdout_output.find("admission-denied") != std::string::npos);
+
+    const auto cli_grant = run_staged(
+        cli, root.runtime,
+        {"control", "grant-request", "--instance", first.instance_id, "--profile",
+         "inspect-readonly", "--json"});
+    INFO(cli_grant.stdout_output);
+    INFO(cli_grant.stderr_output);
+    REQUIRE(cli_grant.exit_code == 0);
+    const auto cli_grant_json = choc::json::parse(cli_grant.stdout_output);
+    const auto cli_grant_id =
+        std::string(cli_grant_json["data"]["grant_id"].getString());
+    REQUIRE_FALSE(cli_grant_id.empty());
+    const auto cli_revoke = run_staged(
+        cli, root.runtime, {"control", "revoke", "--grant", cli_grant_id, "--json"});
+    INFO(cli_revoke.stdout_output);
+    INFO(cli_revoke.stderr_output);
+    REQUIRE(cli_revoke.exit_code == 0);
+    CHECK(choc::json::parse(cli_revoke.stdout_output)["status"].getString() == "revoked");
 
     const auto active_args = "{\"instance_id\":" + quote(second.instance_id) +
                              ",\"request_id\":\"phase15-mcp-disconnect-active\","
@@ -448,6 +485,39 @@ TEST_CASE("Phase 15 aggregate exact-instance CLI MCP revocation and disconnect E
     REQUIRE(wait_for_path(second.deferred_path));
     REQUIRE(active_mcp.is_running());
 
+    const auto parallel_mcp_args =
+        "{\"instance_id\":" + quote(first.instance_id) +
+        ",\"request_id\":\"phase15-concurrent-mcp-read\",\"input\":{}}";
+    const auto parallel_mcp_read =
+        run_mcp(mcp, root.runtime,
+                rpc_call(6, "pulp_control_instance_read", parallel_mcp_args) + "\n");
+    INFO(parallel_mcp_read.stdout_output);
+    INFO(parallel_mcp_read.stderr_output);
+    REQUIRE(parallel_mcp_read.exit_code == 0);
+    const auto parallel_mcp_lines = parse_lines(parallel_mcp_read.stdout_output);
+    REQUIRE(parallel_mcp_lines.size() == 1);
+    REQUIRE_FALSE(
+        parallel_mcp_lines[0]["result"]["isError"].getWithDefault<bool>(false));
+
+    std::optional<std::pair<ControlReceiptId, choc::value::Value>> running_receipt;
+    std::optional<std::pair<ControlReceiptId, choc::value::Value>> parallel_mcp_receipt;
+    for (unsigned attempt = 0;
+         attempt < 1'000 && (!running_receipt || !parallel_mcp_receipt); ++attempt) {
+        running_receipt =
+            find_receipt(root.state / "operations", "phase15-mcp-disconnect-active");
+        parallel_mcp_receipt =
+            find_receipt(root.state / "operations", "phase15-concurrent-mcp-read");
+        if (!running_receipt || !parallel_mcp_receipt)
+            std::this_thread::sleep_for(2ms);
+    }
+    REQUIRE(running_receipt);
+    REQUIRE(parallel_mcp_receipt);
+    REQUIRE(running_receipt->second["client_id"].isString());
+    REQUIRE(parallel_mcp_receipt->second["client_id"].isString());
+    CHECK(running_receipt->second["client_id"].getString() !=
+          parallel_mcp_receipt->second["client_id"].getString());
+    REQUIRE(active_mcp.is_running());
+
     auto simultaneous_cli = std::async(std::launch::async, [&] {
         return run_staged(cli, root.runtime,
                           {"control", "call", "--instance", first.instance_id,
@@ -457,17 +527,24 @@ TEST_CASE("Phase 15 aggregate exact-instance CLI MCP revocation and disconnect E
     INFO(concurrent_read.stderr_output);
     REQUIRE(concurrent_read.exit_code == 0);
     REQUIRE(active_mcp.is_running());
+
+    const auto concurrent_cli_receipt = choc::json::parse(concurrent_read.stdout_output);
+    const auto first_cli_durable = read_receipt(
+        root.state / "operations", std::string(cli_receipt["receipt_id"].getString()));
+    const auto concurrent_cli_durable = read_receipt(
+        root.state / "operations",
+        std::string(concurrent_cli_receipt["receipt_id"].getString()));
+    REQUIRE(first_cli_durable);
+    REQUIRE(concurrent_cli_durable);
+    REQUIRE((*first_cli_durable)["client_id"].isString());
+    REQUIRE((*concurrent_cli_durable)["client_id"].isString());
+    CHECK((*first_cli_durable)["client_id"].getString() ==
+          (*concurrent_cli_durable)["client_id"].getString());
+
     active_mcp.cancel();
     const auto disconnected_mcp = active_mcp.wait();
     CHECK((disconnected_mcp.was_cancelled || disconnected_mcp.exit_code != 0));
 
-    std::optional<std::pair<ControlReceiptId, choc::value::Value>> running_receipt;
-    for (unsigned attempt = 0; attempt < 1'000 && !running_receipt; ++attempt) {
-        running_receipt = find_receipt(root.state / "operations", "phase15-mcp-disconnect-active");
-        if (!running_receipt)
-            std::this_thread::sleep_for(2ms);
-    }
-    REQUIRE(running_receipt);
     CHECK(running_receipt->second["operation_id"].getString() ==
           "dev.pulp.trace/session-control@1");
     CHECK(running_receipt->second["instance_id"].getString() == second.instance_id);

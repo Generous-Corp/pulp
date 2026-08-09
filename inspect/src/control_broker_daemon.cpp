@@ -419,6 +419,7 @@ struct ControlBrokerDaemon::Impl {
                                          ? std::optional<ControlTrustedHostStaticExpectation>{}
                                          : broker_static_identity;
         std::vector<ControlTrustedHostStaticExpectation> trusted_clients;
+        std::vector<ControlTrustedHostStaticExpectation> trusted_mcp_clients;
         if (daemon_identity) {
             const auto broker_directory = config.executable_path.parent_path();
             for (const auto& candidate :
@@ -430,8 +431,11 @@ struct ControlBrokerDaemon::Impl {
                   broker_directory.parent_path().parent_path() / "bin" / "pulp",
                   broker_directory.parent_path().parent_path() / "bin" / "pulp-cpp",
                   broker_directory.parent_path().parent_path() / "bin" / "pulp-mcp"}) {
-                if (const auto identity = detail::inspect_static_code_identity(candidate))
+                if (const auto identity = detail::inspect_static_code_identity(candidate)) {
                     trusted_clients.push_back(*identity);
+                    if (candidate.filename() == "pulp-mcp")
+                        trusted_mcp_clients.push_back(*identity);
+                }
             }
         }
 
@@ -503,18 +507,39 @@ struct ControlBrokerDaemon::Impl {
                 .durable_client_principal =
                     daemon_identity
                         ? std::function<std::optional<std::string>(
-                              const ControlPeerEvidence&)>{[](const ControlPeerEvidence& peer) {
+                              const ControlPeerEvidence&)>{[trusted_mcp_clients](
+                                                               const ControlPeerEvidence& peer) {
+                              const bool process_scoped = std::ranges::any_of(
+                                  trusted_mcp_clients, [&](const auto& expected) {
+                                      return peer.executable_identity ==
+                                                 expected.executable_identity &&
+                                             peer.publisher_id == expected.publisher_id;
+                                  });
                               std::string canonical;
                               canonical.reserve(peer.user_id.size() +
                                                 peer.executable_identity.size() +
-                                                peer.publisher_id.size() + 3);
+                                                peer.publisher_id.size() +
+                                                peer.process_start_id.size() + 32);
                               canonical.append(peer.user_id);
                               canonical.push_back('\0');
                               canonical.append(peer.executable_identity);
                               canonical.push_back('\0');
                               canonical.append(peer.publisher_id);
+                              if (process_scoped) {
+                                  // An MCP server is a long-lived client process. Reconnects
+                                  // opened by that process must retain its grants/receipts,
+                                  // while a separate server using the same signed executable
+                                  // must not supersede it. PID plus the kernel process
+                                  // generation supplies that distinction without accepting
+                                  // any caller-provided identity material.
+                                  canonical.push_back('\0');
+                                  canonical.append(std::to_string(peer.process_id));
+                                  canonical.push_back('\0');
+                                  canonical.append(peer.process_start_id);
+                              }
                               return std::optional<std::string>{
-                                  "installed-cli-" + runtime::hex_encode(runtime::sha256(canonical))};
+                                  std::string(process_scoped ? "installed-mcp-" : "installed-cli-") +
+                                  runtime::hex_encode(runtime::sha256(canonical))};
                           }}
                         : std::function<std::optional<std::string>(
                               const ControlPeerEvidence&)>{},
