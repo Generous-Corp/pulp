@@ -135,6 +135,50 @@ phase-preservingly saturated.
 
 ## Routing and gain laws
 
+### `SpectralBandLayout` and spectral masks
+
+`SpectralBandLayout` is the fixed-capacity authoring contract for zoomable
+frequency masks. It always owns 64 stable slots and activates 1–64 of them over
+a linear or logarithmic `[min_hz, max_hz]` viewport. Each slot has finite dB gain
+plus a separate mute bit; mute compiles to exact linear `0.0` instead of a large
+negative dB approximation. `SpectralBandEdgePolicy` selects silence outside the
+viewport or extension of the first/last band. In the latter mode, muting the
+first and last bands creates low/high cuts around the focused viewport. Boundaries may be hard or use a
+raised-cosine transition whose width is expressed as a fraction of one band.
+
+`build_spectral_mask()` runs on the control thread. It clamps the effective
+viewport to Nyquist, derives DC-through-Nyquist ownership and band-edge Hz, and
+fills a fixed-capacity `SpectralMaskTable` for one prepared FFT geometry. Invalid
+geometry or controls leave the destination table unchanged. The table carries a
+caller version and requested frame transition duration so a streaming publisher
+can adopt and interpolate it at spectral-frame boundaries.
+
+`apply_spectral_mask()` is the allocation-free frame operation. It applies the
+same real-valued gain table to every channel's one-sided complex spectrum,
+preserving ordinary finite phase and stereo relationships. It validates complete
+geometry before mutation, silences non-finite bins, and saturates finite overflow.
+It adds no latency beyond the `SpectralFrameEngine` that owns analysis/synthesis.
+
+```cpp
+pulp::signal::SpectralBandLayout layout;
+layout.active_bands = 32;
+layout.min_hz = 250.0f;
+layout.max_hz = 2000.0f;
+layout.bands[3].muted = true;
+
+pulp::signal::SpectralMaskTable mask;
+if (!pulp::signal::build_spectral_mask(layout, 2048, 48000.0f, mask))
+    return; // reject invalid control state off the audio thread
+
+frame_engine.process(input, output, samples,
+    [&](std::complex<float>* const* frames, int bins) {
+        (void)pulp::signal::apply_spectral_mask(frames, channels, bins, mask);
+    });
+```
+
+The runnable mathematical, fault, RT, and WOLA composition examples live in
+`test/test_spectral_band_mask.cpp`.
+
 ### Orthonormal mid/side and stereo width
 
 `mid_side_encode()` and `mid_side_decode()` use the self-inverse
