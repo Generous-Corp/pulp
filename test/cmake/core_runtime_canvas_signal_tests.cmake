@@ -240,7 +240,8 @@ add_test(NAME signal-public-headers-no-exceptions
     COMMAND pulp-test-signal-no-exceptions)
 # Spectral primitives: STFT/WOLA engine, pitch/time, formant, smoothing.
 pulp_add_test_suite(pulp-test-spectral-primitives
-    SOURCES test_spectral_frame_engine.cpp test_realtime_pitch_time.cpp
+    SOURCES test_spectral_frame_engine.cpp test_spectral_band_mask.cpp
+            test_realtime_pitch_time.cpp
             test_realtime_pitch_time_stream_contract.cpp test_finite_stretch_builder.cpp
             test_transient_freeze_delay.cpp test_spectral_matrix.cpp test_stn_stretch.cpp
             test_sinc_pitch.cpp

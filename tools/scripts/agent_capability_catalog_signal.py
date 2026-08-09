@@ -562,6 +562,85 @@ EXPORTS = [
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
     capability(
+        key="signal.spectral-band-mask", domain="signal",
+        summary=(
+            "Fixed-capacity zoomable band layouts compiled into allocation-free "
+            "complex-spectrum gain masks."
+        ),
+        rt_class="mixed",
+        lifecycle={
+            "construction": "control",
+            "prepare": "control-side immutable mask compilation",
+            "process": "audio spectral-frame owner",
+            "reset": "none",
+            "release": "none",
+        },
+        state_model=(
+            "Fixed 64-slot finite-gain and categorical-mute layout plus a fixed "
+            "8193-bin compiled gain table."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "tolerance_bounded", "block_partition": "not_applicable",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain=(
+            "finite linear or logarithmic band layouts, prepared FFT geometry, and "
+            "coherent channel groups of one-sided complex spectra"
+        ),
+        output_domain="immutable gain tables and in-place masked complex spectra",
+        units=["bins", "channels", "frames", "hertz", "decibels", "linear gain"],
+        latency="zero additional frame-domain latency",
+        tail="none",
+        scheduling="control-side table compilation then one supplied spectral frame per apply call",
+        bindings=[
+            binding(role="layout", kind="cpp_type",
+                    include="pulp/signal/spectral_band_mask.hpp",
+                    qualified_name="pulp::signal::SpectralBandLayoutT<float>",
+                    target="Pulp::signal",
+                    header_fingerprint="sha256:2c8d911425699a83465c1fd5adf554ab7218a5e1de584b63413629eb699ccb3d"),
+            binding(role="table", kind="cpp_type",
+                    include="pulp/signal/spectral_band_mask.hpp",
+                    qualified_name="pulp::signal::SpectralMaskTableT<float>",
+                    target="Pulp::signal",
+                    header_fingerprint="sha256:2c8d911425699a83465c1fd5adf554ab7218a5e1de584b63413629eb699ccb3d"),
+            binding(role="compile", kind="cpp_function",
+                    include="pulp/signal/spectral_band_mask.hpp",
+                    qualified_name="pulp::signal::build_spectral_mask<float>",
+                    target="Pulp::signal",
+                    header_fingerprint="sha256:2c8d911425699a83465c1fd5adf554ab7218a5e1de584b63413629eb699ccb3d",
+                    address_expression=(
+                        "static_cast<bool (*)(const pulp::signal::SpectralBandLayoutT<float>&, "
+                        "int, float, pulp::signal::SpectralMaskTableT<float>&) noexcept>("
+                        "&pulp::signal::build_spectral_mask<float>)"
+                    )),
+            binding(role="apply", kind="cpp_function",
+                    include="pulp/signal/spectral_band_mask.hpp",
+                    qualified_name="pulp::signal::apply_spectral_mask<float>",
+                    target="Pulp::signal",
+                    header_fingerprint="sha256:2c8d911425699a83465c1fd5adf554ab7218a5e1de584b63413629eb699ccb3d",
+                    address_expression=(
+                        "static_cast<bool (*)(std::complex<float>* const*, int, int, "
+                        "const pulp::signal::SpectralMaskTableT<float>&) noexcept>("
+                        "&pulp::signal::apply_spectral_mask<float>)"
+                    )),
+        ],
+        _link_probes=[
+            {"role": "layout", "binding": "pulp::signal::SpectralBandLayoutT<float>",
+             "operation": "construct", "arguments": ""},
+            {"role": "table", "binding": "pulp::signal::SpectralMaskTableT<float>",
+             "operation": "construct", "arguments": ""},
+            {"role": "compile", "binding": "pulp::signal::build_spectral_mask<float>",
+             "operation": "function_call", "arguments": (
+                 "pulp::signal::SpectralBandLayoutT<float>{}, 1024, 48000.0f, "
+                 "[]() -> pulp::signal::SpectralMaskTableT<float>& { "
+                 "static pulp::signal::SpectralMaskTableT<float> table; return table; }()"
+             )},
+            {"role": "apply", "binding": "pulp::signal::apply_spectral_mask<float>",
+             "operation": "function_call", "arguments": (
+                 "nullptr, 0, 0, pulp::signal::SpectralMaskTableT<float>{}"
+             )},
+        ],
+    ),
+    capability(
         key="signal.spectral-gate", domain="signal",
         summary="Allocation-free scalar or per-bin gating of caller-owned complex spectra.",
         rt_class="audio",
@@ -725,5 +804,76 @@ EXPORTS = [
                          header_fingerprint="sha256:bf318bbe864c1ea706eed101e63f6469602a7c7c639ce86bffb650c13ef08741")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::ExpanderT<float>",
                        "operation": "member_call", "member": "prepare", "arguments": "48000.0f"}],
+    ),
+    capability(
+        key="signal.explicit-q-resonator-bank", domain="signal",
+        summary=(
+            "Prepared fixed-capacity band-pass resonator bank with explicit frequency, Q, "
+            "gain, envelope, and transactional transition controls."
+        ),
+        rt_class="mixed",
+        lifecycle={"construction": "control",
+                   "prepare": "control; allocates bounded retained state and stages recipes",
+                   "process": "audio; control publishes through latest-value SPSC handoff",
+                   "reset": "audio", "release": "destruction off audio"},
+        state_model=(
+            "Prepared fixed-capacity double-precision SVF and envelope state plus a "
+            "three-slot recipe handoff and exact-duration transition state."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="finite mono audio and explicit per-band frequency, Q, gain, and ballistics",
+        output_domain="summed resonator audio plus per-band pre-gain output and envelope",
+        units=["samples", "frames", "hertz", "Q", "decibels", "milliseconds"],
+        latency="zero",
+        tail="recursive IIR decay bounded by the configured frequency and Q",
+        scheduling="sample-synchronous with recipe adoption at sample boundaries",
+        bindings=[binding(
+            role="entrypoint", kind="cpp_type",
+            include="pulp/signal/explicit_q_resonator_bank.hpp",
+            qualified_name="pulp::signal::ExplicitQResonatorBankT<float>",
+            target="Pulp::signal",
+            header_fingerprint="sha256:1504f5c4bc3752754bc7591e6a6509a9aeb06df018417749bd149802463917da",
+        )],
+        _link_probes=[{
+            "role": "entrypoint", "binding": "pulp::signal::ExplicitQResonatorBankT<float>",
+            "operation": "member_call", "member": "reset", "arguments": "",
+        }],
+    ),
+    capability(
+        key="signal.spectral-delay-matrix", domain="signal",
+        summary=(
+            "Prepared per-bin spectral delay and attenuation with bounded history and "
+            "race-free frame-boundary table publication."
+        ),
+        rt_class="mixed",
+        lifecycle={"construction": "control",
+                   "prepare": "control; allocates bounded frame history and compiles tables",
+                   "process": "audio; control publishes through latest-value SPSC handoff",
+                   "reset": "audio; reset or history-only purge",
+                   "release": "destruction off audio"},
+        state_model=(
+            "Prepared spectral frame engine, coherent per-channel complex-bin history, and "
+            "three-slot delay/attenuation table handoff."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "tolerance_bounded", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="finite planar audio and normalized-frequency delay/attenuation breakpoints",
+        output_domain="coherent planar audio with frame-quantized per-bin content delay",
+        units=["samples", "frames", "bins", "milliseconds", "decibels", "linear gain"],
+        latency="fixed spectral-frame engine latency; content delay is D times analysis hop",
+        tail="finite engine latency plus the prepared maximum content-delay history",
+        scheduling="streaming overlap-add with table adoption only at frame boundaries",
+        bindings=[binding(
+            role="entrypoint", kind="cpp_type", include="pulp/signal/spectral_delay_matrix.hpp",
+            qualified_name="pulp::signal::SpectralDelayMatrixT<float>", target="Pulp::signal",
+            header_fingerprint="sha256:53ed4a5125e74d86fc8e4f8980a6309cbf00796d85f8f5b7cb9f1a06acbe0034",
+        )],
+        _link_probes=[{
+            "role": "entrypoint", "binding": "pulp::signal::SpectralDelayMatrixT<float>",
+            "operation": "member_call", "member": "reset", "arguments": "",
+        }],
     ),
 ]

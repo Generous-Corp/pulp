@@ -16,6 +16,7 @@
 #include <pulp/signal/de_esser.hpp>
 #include <pulp/signal/expander.hpp>
 #include <pulp/signal/svf.hpp>
+#include <pulp/signal/explicit_q_resonator_bank.hpp>
 #include <pulp/signal/waveshaper.hpp>
 #include <pulp/signal/oversampling.hpp>
 #include <pulp/signal/noise_gate.hpp>
@@ -54,8 +55,10 @@
 #include <pulp/signal/poly_math.hpp>
 #include <pulp/signal/stft.hpp>
 #include <pulp/signal/spectral_frame_engine.hpp>
+#include <pulp/signal/spectral_delay_matrix.hpp>
 #include <pulp/signal/spectral_gate_blur.hpp>
 #include <pulp/signal/spectral_morph.hpp>
+#include <pulp/signal/spectral_band_mask.hpp>
 #include <pulp/signal/multichannel_phase_coordinator.hpp>
 #include <pulp/signal/source_filter_analysis.hpp>
 #include <pulp/signal/spectral_envelope_shifter.hpp>

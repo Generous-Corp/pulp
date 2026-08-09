@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <type_traits>
+#include <utility>
 
 namespace pulp::runtime {
 
@@ -51,20 +52,31 @@ public:
     /// Publish a new value from the writer thread.
     /// Writes into the back buffer, then atomically swaps it to middle.
     void write(const T& value) noexcept(std::is_nothrow_copy_assignable_v<T>) {
-        auto idx = flags_.load(std::memory_order_acquire);
-        int back = back_index(idx);
-        buffers_[back] = value;
+        write_with(
+            [&value](T& back) noexcept(std::is_nothrow_copy_assignable_v<T>) { back = value; });
+    }
+
+    /// Fill and publish the writer-owned back buffer in place.
+    ///
+    /// This is useful for prepared payloads whose assignment through a
+    /// temporary could allocate. The callback runs only on the writer thread
+    /// and must not retain the reference. If it throws, no value is published.
+    template <typename Fill>
+    void write_with(Fill&& fill) noexcept(noexcept(std::declval<Fill>()(std::declval<T&>()))) {
+        const auto idx = flags_.load(std::memory_order_acquire);
+        const int back = back_index(idx);
+        std::forward<Fill>(fill)(buffers_[back]);
         std::atomic_thread_fence(std::memory_order_release);
         // Swap back and middle, keep the current front, and mark as new.
         uint8_t new_flags;
         uint8_t old_flags;
         do {
             old_flags = flags_.load(std::memory_order_acquire);
-            back = back_index(old_flags);
-            int mid = mid_index(old_flags);
+            const int current_back = back_index(old_flags);
+            const int mid = mid_index(old_flags);
             // Swap: new back = old mid, new mid = old back (which has new data).
             // Front stays unchanged until the reader consumes the new value.
-            new_flags = make_flags(mid, back, front_index(old_flags)) | kDirtyBit;
+            new_flags = make_flags(mid, current_back, front_index(old_flags)) | kDirtyBit;
         } while (!flags_.compare_exchange_weak(old_flags, new_flags,
                  std::memory_order_acq_rel, std::memory_order_acquire));
     }
