@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 15,
+  "inventory_version": 16,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,12 +37,12 @@
     }
   ],
   "counts": {
-    "public_headers": 405,
-    "reviewed_headers": 104,
+    "public_headers": 409,
+    "reviewed_headers": 108,
     "legacy_unreviewed_headers": 301,
     "unsupported_headers": 1,
     "by_disposition": {
-      "capability_entrypoint": 62,
+      "capability_entrypoint": 66,
       "capability_support": 36,
       "infrastructure": 5,
       "legacy_unreviewed": 301,
@@ -74,8 +74,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 228,
-        "reviewed_headers": 66,
+        "public_headers": 232,
+        "reviewed_headers": 70,
         "legacy_unreviewed_headers": 162,
         "unsupported_headers": 1
       },
@@ -1952,6 +1952,17 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/cross_feedback_multitap_delay.hpp",
+      "fingerprint": "sha256:14184a88f394c3da92e4d39d7c8c5f9b481f5729acfafd7a0a7e5d773ee68e98",
+      "include": "pulp/signal/cross_feedback_multitap_delay.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.cross-feedback-multitap-delay"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/crossfade.hpp",
       "fingerprint": "sha256:f342c0c90361767a4572ca8cf8575160574121575e059a89694f546ed4160d71",
       "include": "pulp/signal/crossfade.hpp",
@@ -1976,6 +1987,17 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/de_esser.hpp",
+      "fingerprint": "sha256:fd61c1c4680c790d8617ec55164367d535cc079878e2bcb9780077c59bbf040d",
+      "include": "pulp/signal/de_esser.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.de-esser"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
@@ -2282,7 +2304,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/dynamics_contract.hpp",
-      "fingerprint": "sha256:968978abf54ee71ee7789cfc79fe21347b97708b9f068812908a5b855d35a406",
+      "fingerprint": "sha256:576ed92bd47a0cce545d9eb5df9a5e83732829944550fff7416c552de2506a2f",
       "include": "pulp/signal/dynamics_contract.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -2307,6 +2329,17 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/expander.hpp",
+      "fingerprint": "sha256:bf318bbe864c1ea706eed101e63f6469602a7c7c639ce86bffb650c13ef08741",
+      "include": "pulp/signal/expander.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.expander"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
@@ -3369,7 +3402,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:e6786cdc5c77d8bb5018265e02af8e17260ce328372994ffc5fa9b7f33fa3132",
+      "fingerprint": "sha256:9ea073f7cc0459465cde184adaa0e5acf324568f4a7869a149c0f4f487168fc3",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3500,6 +3533,17 @@
       "capability_keys": [
         "signal.spectral-frame-blur",
         "signal.spectral-gate"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/spectral_morph.hpp",
+      "fingerprint": "sha256:0991d2973294306182824a6d8b579007946dff976407511ce064774677c1adb3",
+      "include": "pulp/signal/spectral_morph.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.spectral-morph"
       ],
       "rationale": "Public binding for a curated consumer capability."
     },

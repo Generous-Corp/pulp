@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 8,
+  "manifest_revision": 9,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 27
+        "capabilities": 31
       },
       "timebase": {
         "state": "partial",
@@ -1564,6 +1564,130 @@
       "contract_digest": "sha256:77d813b2f803243154a3e30607e0578377130ab87aeef45ae68f12b05b1f5427"
     },
     {
+      "key": "signal.cross-feedback-multitap-delay",
+      "domain": "signal",
+      "summary": "Prepared wet-only stereo multitap delay with bounded normalized cross-feedback.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control; allocates bounded stereo delay storage",
+        "process": "audio",
+        "reset": "audio",
+        "release": "destruction off audio"
+      },
+      "state_model": "Prepared stereo delay histories, up to eight tap definitions, derived pan weights, and a bounded feedback matrix.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "finite stereo audio plus bounded tap, feedback, cross-feedback, pan, and width controls",
+      "output_domain": "wet-only delayed stereo audio",
+      "units": [
+        "samples",
+        "milliseconds",
+        "linear gain",
+        "normalized amount",
+        "tap index"
+      ],
+      "latency": "zero direct-path algorithmic latency",
+      "tail": "latest tap delay without feedback; unbounded decay while a nonzero feedback route is active",
+      "scheduling": "sample-continuous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/cross_feedback_multitap_delay.hpp",
+          "qualified_name": "pulp::signal::CrossFeedbackMultitapDelayT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:8adf2e4a511e2b0e5307a793659bf8347c89c1ea92a8250690c84c7fa18b7d67"
+    },
+    {
+      "key": "signal.de-esser",
+      "domain": "signal",
+      "summary": "Prepared split-band de-essing with an independent frequency-selective detector.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control coefficient design",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "Fixed detector biquad, peak envelope, Linkwitz-Riley split, configuration, modes, and gain telemetry.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "finite mono audio plus detector, split, threshold, range, timing, bypass, and listen controls",
+      "output_domain": "de-essed mono or detector-listen audio plus detector and gain-reduction telemetry",
+      "units": [
+        "samples",
+        "hertz",
+        "Q",
+        "decibels",
+        "milliseconds"
+      ],
+      "latency": "zero",
+      "tail": "recursive detector, envelope, and crossover decay until reset",
+      "scheduling": "sample-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/de_esser.hpp",
+          "qualified_name": "pulp::signal::DeEsserT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:90abeb2e448f9dd9d234513eb26de9c675f8a1bb67a18fbfbacf27d301f7cded"
+    },
+    {
       "key": "signal.dither-quantizer",
       "domain": "signal",
       "summary": "Seeded quantization with selectable TPDF dither and first- or second-order shaping.",
@@ -1760,6 +1884,68 @@
         }
       },
       "contract_digest": "sha256:b198f11304f11bb40dfb310e73e301a7f669996c388a50672c48bebbafd413e9"
+    },
+    {
+      "key": "signal.expander",
+      "domain": "signal",
+      "summary": "Prepared bounded stereo upward or downward expansion with shared dynamics telemetry.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control detector setup",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "Fixed two-channel envelope state, bounded curve configuration, bypass state, and signed gain telemetry.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "finite stereo audio plus expansion mode, threshold, ratio, range, knee, timing, detector, and link controls",
+      "output_domain": "expanded stereo audio plus signed gain and gain-reduction telemetry",
+      "units": [
+        "samples",
+        "decibels",
+        "ratio",
+        "milliseconds",
+        "normalized link"
+      ],
+      "latency": "zero",
+      "tail": "none",
+      "scheduling": "sample-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/expander.hpp",
+          "qualified_name": "pulp::signal::ExpanderT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:88f06843b0d66f01280a15d37bfdfea25ea2a50989e23c19e22132293862f7da"
     },
     {
       "key": "signal.fm-operator-engine",
@@ -2878,6 +3064,68 @@
         }
       },
       "contract_digest": "sha256:749f2be59d77927be1199753134bc28cb4b602e3748b3e301e4374f030d6c5f7"
+    },
+    {
+      "key": "signal.spectral-morph",
+      "domain": "signal",
+      "summary": "Allocation-free magnitude and phase morphing between coherent complex spectra.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control; allocation-free geometry setup",
+        "process": "audio frame owner",
+        "reset": "audio frame owner",
+        "release": "none"
+      },
+      "state_model": "Fixed interpolation policy and prepared channel/bin geometry; spectral frames are caller-owned.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "two prepared coherent channel groups of one-sided complex spectra and normalized morph amounts",
+      "output_domain": "caller-owned magnitude- and phase-morphed complex spectra",
+      "units": [
+        "bins",
+        "channels",
+        "linear magnitude",
+        "radians",
+        "normalized amount"
+      ],
+      "latency": "zero additional frame-domain latency",
+      "tail": "none",
+      "scheduling": "one supplied paired spectral frame or disjoint bin partitions",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/spectral_morph.hpp",
+          "qualified_name": "pulp::signal::SpectralMorphT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:63360a773fdcaf97b023d8d0e0832e4d885371c0c1034c23c285ecad9bc989bc"
     },
     {
       "key": "signal.spectrum-trace",
@@ -4014,14 +4262,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 58,
+    "total": 62,
     "by_domain": {
       "audio": 6,
       "midi": 9,
       "music": 6,
       "offline": 0,
       "sequence": 1,
-      "signal": 27,
+      "signal": 31,
       "timebase": 9
     }
   },
@@ -4613,6 +4861,20 @@
             ]
           }
         ],
+        "cross_feedback_multitap_delay.hpp": [
+          {
+            "class": "CrossFeedbackMultitapDelayT",
+            "methods": [
+              "static_assert(std::is_floating_point_v<SampleType>)",
+              "prepared()",
+              "sample_rate()",
+              "maximum_delay_ms()",
+              "retained_bytes()",
+              "sizeof(SampleType)",
+              "set_active_tap_count(std::size_t count)"
+            ]
+          }
+        ],
         "dc_blocker.hpp": [
           {
             "class": "DcBlocker",
@@ -4620,6 +4882,20 @@
               "set_pole(T pole)",
               "process(T x)",
               "process(T* samples, int n)"
+            ]
+          }
+        ],
+        "de_esser.hpp": [
+          {
+            "class": "DeEsserT",
+            "methods": [
+              "set_params(const Params& params)",
+              "params()",
+              "sample_rate()",
+              "prepared()",
+              "healthy()",
+              "fault_count()",
+              "set_bypassed(bool bypassed)"
             ]
           }
         ],
@@ -5186,6 +5462,20 @@
               "set_fast_ms(SampleType ms)",
               "set_slow_ms(SampleType ms)",
               "process(SampleType input)"
+            ]
+          }
+        ],
+        "expander.hpp": [
+          {
+            "class": "ExpanderT",
+            "methods": [
+              "configure(const Config& next)",
+              "gain_computer_db(SampleType level_db, const Config& config)",
+              "process(SampleType left, SampleType right)",
+              "process(SampleType* left, SampleType* right, int num_samples)",
+              "set_bypassed(bool bypassed)",
+              "bypassed()",
+              "config()"
             ]
           }
         ],
@@ -7036,6 +7326,20 @@
               "checked_retained_bytes(channels, num_bins, blur_frames, kTargetAddressMaximumBytes, ignored)",
               "new_history(frame_elements * static_cast<std::size_t>(blur_frames)",
               "new_means(frame_elements, SampleType{0})"
+            ]
+          }
+        ],
+        "spectral_morph.hpp": [
+          {
+            "class": "SpectralMorphT",
+            "methods": [
+              "static_assert(std::is_floating_point_v<SampleType>)",
+              "supports_configuration(int channels, int num_bins)",
+              "set_config(Config config)",
+              "config()",
+              "prepared()",
+              "channels()",
+              "num_bins()"
             ]
           }
         ],
