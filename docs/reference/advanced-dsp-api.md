@@ -228,6 +228,31 @@ infinity represents a complete mute and has zero linear gain.
 lineage exposes `gain_reduction()` using this convention without changing the
 sign or behavior of its existing `gain_reduction_db()` method. `Compressor`,
 `Limiter`, and `NoiseGate` expose the same telemetry contract.
+
+### `Expander`
+
+`Expander` and `Expander64` provide fixed-state stereo downward or upward
+expansion. `ExpansionMode::{downward,upward}` selects the active side of the
+threshold. Ratio, range, and knee define a continuous bounded curve;
+`gain_computer_db()` is the pure memoryless form of that same curve. A prepared
+peak/RMS detector supplies exact 10-to-90-percent attack and release ballistics,
+with `DynamicsStereoLink::{independent,peak_linked}` as the channel policy.
+
+`prepare(sample_rate)` and `configure(Config)` return `ExpanderStatus`; rejected
+calls leave the live configuration and history unchanged. Processing, bypass,
+reset, and inspection are allocation-free and `noexcept` after preparation.
+Bypass emits finite input samples exactly while advancing detector state.
+Non-finite input clears detector history and emits finite silence.
+
+- Lifecycle: `prepare(sample_rate)`, `reset()`.
+- Controls: `configure(config)`, `set_bypassed(bool)`.
+- Processing: `process(left, right)`, `process(left_buffer, right_buffer, frames)`.
+- Inspection: `config()`, `prepared()`, `sample_rate()`, `bypassed()`,
+  `current_gain_db()`, `gain_reduction()`, `latency_samples()`, `tail_samples()`.
+- Domains: threshold `[-160, 24]` dB, ratio `[1, 20]`, range `[0, 96]` dB,
+  knee `[0, 48]` dB, attack `[0.01, 2000]` ms, release `[0.01, 10000]` ms,
+  sample rate `(0, 1536000]` Hz.
+
 ### `TruePeakLimiter`
 
 `prepare(sample_rate, channels, params)` fixes the explicit channel count and

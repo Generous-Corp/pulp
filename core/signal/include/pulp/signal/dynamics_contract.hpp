@@ -11,6 +11,9 @@
 
 namespace pulp::signal {
 
+/// Shared policy for dynamics processors with two detector channels.
+enum class DynamicsStereoLink { independent, peak_linked };
+
 /// Canonical gain-reduction meter value.
 ///
 /// `db()` is always a non-negative magnitude: zero means unity gain and a larger

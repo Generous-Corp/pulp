@@ -14,6 +14,7 @@
 #include <pulp/signal/gain.hpp>
 #include <pulp/signal/compressor.hpp>
 #include <pulp/signal/de_esser.hpp>
+#include <pulp/signal/expander.hpp>
 #include <pulp/signal/svf.hpp>
 #include <pulp/signal/waveshaper.hpp>
 #include <pulp/signal/oversampling.hpp>
