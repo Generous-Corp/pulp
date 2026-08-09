@@ -170,5 +170,44 @@ class AuvalExecFailedPredicateTests(unittest.TestCase):
             )
         )
 
+
+class AuvalComponentIdentityTests(unittest.TestCase):
+    LIB = Path(__file__).parent / "lib" / "auval-component-identity.sh"
+
+    def isolated_id(self, source_id, run_token):
+        return subprocess.run(
+            [
+                "bash",
+                "-c",
+                'source "$1"; auval_isolated_bundle_id "$2" "$3"',
+                "bash",
+                str(self.LIB),
+                source_id,
+                run_token,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+
+    def test_appends_invocation_specific_identity(self):
+        result = self.isolated_id("com.pulp.spectr.au", "Spec-123-456")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.strip(),
+            "com.pulp.spectr.au.pulp-auvaltest.Spec-123-456",
+        )
+
+    def test_rejects_empty_source_identity(self):
+        result = self.isolated_id("", "Spec-123-456")
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, "")
+
+    def test_rejects_unsafe_run_token(self):
+        result = self.isolated_id("com.pulp.spectr.au", "Spec/123")
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, "")
+
 if __name__ == "__main__":
     unittest.main()
