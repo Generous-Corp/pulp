@@ -303,7 +303,8 @@ if(_profile STREQUAL "production-stripped")
     endforeach()
     foreach(_forbidden_dependency IN ITEMS
             pulp-inspect-control pulp-inspect-client pulp-inspect-runtime
-            pulp-inspect-runtime-eval pulp-control-broker)
+            pulp-inspect-runtime-eval pulp-inspect-standalone-runtime
+            pulp-control-broker)
         string(FIND "${_dependency_output}" "${_forbidden_dependency}" _dependency_position)
         if(_dependency_position GREATER_EQUAL 0)
             message(FATAL_ERROR

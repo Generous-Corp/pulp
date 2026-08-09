@@ -46,6 +46,24 @@ std::filesystem::path environment_path(const char* name) {
     return value != nullptr ? std::filesystem::path{value} : std::filesystem::path{};
 }
 
+std::vector<pulp::inspect::ControlInstalledHostSelection>
+installed_host_selections(const std::filesystem::path& broker) {
+    if (broker.empty())
+        return {};
+    const auto host = broker.parent_path() / "pulp-control-standalone-host";
+    const auto manifest = std::filesystem::path{
+        host.string() + ".inspector-capabilities.json"};
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(host, error) || error ||
+        !std::filesystem::is_regular_file(manifest, error) || error)
+        return {};
+    return {{.host_id = "ordinary-standalone",
+             .intent = {.executable = host,
+                        .arguments = {},
+                        .working_directory = host.parent_path(),
+                        .host_tier = pulp::inspect::ControlHostTier::Standalone}}};
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -60,11 +78,13 @@ int main(int argc, char** argv) {
     std::signal(SIGTERM, request_stop);
 
     auto consent_authority = std::make_shared<pulp::inspect::ControlBrokerConsentAuthority>();
+    const auto broker = executable_path();
     pulp::inspect::ControlBrokerDaemon daemon({
         .runtime_root = environment_path("PULP_CONTROL_BROKER_RUNTIME_ROOT"),
         .state_root = environment_path("PULP_CONTROL_BROKER_STATE_ROOT"),
         .sdk_version = PULP_CONTROL_SDK_VERSION,
-        .executable_path = executable_path(),
+        .executable_path = broker,
+        .installed_host_selections = installed_host_selections(broker),
         .decide_consent = [consent_authority](const auto& request) {
             return consent_authority->decide(request);
         },

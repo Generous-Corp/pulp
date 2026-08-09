@@ -479,6 +479,51 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
 include(PulpUtils)
 
+# One fixed, installed control host gives the production broker a usable
+# broker-owned selection without accepting executable paths, arguments, or a
+# working directory from clients. Ordinary plugin artifacts remain stripped;
+# author opt-in links the same dedicated adapter only into their Standalone.
+if(APPLE AND NOT IOS AND NOT PULP_IOS AND
+   TARGET pulp-inspect-standalone-runtime)
+    add_executable(pulp-control-standalone-host
+        inspect/src/control_standalone_host_main.cpp)
+    set_target_properties(pulp-control-standalone-host PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/inspect")
+    target_link_libraries(pulp-control-standalone-host PRIVATE
+        pulp::inspect-standalone-runtime)
+    _pulp_cache_control_declarations(pulp-control-standalone-host
+        developer-local "dev.pulp.instance/read@1;dev.pulp.state/read@1" FALSE)
+    _pulp_configure_control_shipping(pulp-control-standalone-host
+        "dev.pulp.control-standalone-host" "Pulp Control Standalone Host")
+    _pulp_attach_control_shipping(pulp-control-standalone-host
+        pulp-control-standalone-host Standalone)
+    if(PULP_BUILD_TESTS)
+        find_program(_pulp_control_host_codesign codesign REQUIRED)
+        add_custom_command(TARGET pulp-control-standalone-host POST_BUILD
+            COMMAND "${_pulp_control_host_codesign}" --force --sign -
+                    "$<TARGET_FILE:pulp-control-standalone-host>"
+            COMMAND /bin/chmod 0700 "$<TARGET_FILE:pulp-control-standalone-host>"
+            COMMAND /bin/chmod 0600
+                    "$<TARGET_FILE:pulp-control-standalone-host>.inspector-capabilities.json"
+            COMMENT "Ad-hoc signing installed Standalone control host"
+            VERBATIM)
+    endif()
+    if(TARGET pulp-control-broker)
+        add_dependencies(pulp-control-broker pulp-control-standalone-host)
+    endif()
+    install(TARGETS pulp-control-standalone-host
+        RUNTIME DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/pulp
+        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+    install(FILES
+        "${PULP_pulp-control-standalone-host_INSPECTOR_MANIFEST}"
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/pulp
+        RENAME "pulp-control-standalone-host.inspector-capabilities.json"
+        PERMISSIONS OWNER_READ OWNER_WRITE)
+    install(FILES
+        "${CMAKE_BINARY_DIR}/pulp-control-shipping-manifests/pulp-control-standalone-host.Standalone.control-shipping.json"
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/pulp)
+endif()
+
 # Inbound link-floor check. Reads the resolved link graph, so it has to be
 # included after the module targets exist and before the consumers that assert
 # a bound over them (examples/, tools/).

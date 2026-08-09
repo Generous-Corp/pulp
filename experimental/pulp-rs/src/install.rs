@@ -117,6 +117,18 @@ pub const fn control_broker_basename() -> &'static str {
     "pulp-control-broker"
 }
 
+/// Broker-owned ordinary Standalone host executable basename.
+#[must_use]
+pub const fn control_standalone_host_basename() -> &'static str {
+    "pulp-control-standalone-host"
+}
+
+/// Signed capability sidecar consumed by the broker before host launch.
+#[must_use]
+pub const fn control_standalone_manifest_basename() -> &'static str {
+    "pulp-control-standalone-host.inspector-capabilities.json"
+}
+
 /// Resolve the running binary's filesystem path (i.e. the file we
 /// will overwrite). Wraps `std::env::current_exe` with a friendlier
 /// error.
@@ -238,6 +250,10 @@ pub struct ExtractedArchive {
     pub new_mcp: Option<PathBuf>,
     /// Health-only local broker service shipped by Darwin release archives.
     pub new_control_broker: Option<PathBuf>,
+    /// Dedicated broker-owned ordinary Standalone control host.
+    pub new_control_standalone_host: Option<PathBuf>,
+    /// Capability sidecar for the dedicated Standalone control host.
+    pub new_control_standalone_manifest: Option<PathBuf>,
     /// Browser-solved design import helper and its required JS runtime.
     pub new_import_design: Option<PathBuf>,
     /// Extracted `browser_capture/` runtime directory, when shipped.
@@ -278,6 +294,16 @@ pub fn locate_binaries_in_archive(root: &Path) -> Result<ExtractedArchive> {
     } else {
         None
     };
+    let standalone_host_path = root.join(control_standalone_host_basename());
+    let standalone_manifest_path = root.join(control_standalone_manifest_basename());
+    if standalone_host_path.exists() != standalone_manifest_path.exists()
+        || (standalone_host_path.exists() && new_control_broker.is_none())
+    {
+        return Err(CliError::Other(
+            "control broker release payload must contain Standalone host and capability manifest together"
+                .to_owned(),
+        ));
+    }
     let import_design = install_import_design::locate_payload(root)?;
     Ok(ExtractedArchive {
         root: root.to_owned(),
@@ -285,6 +311,12 @@ pub fn locate_binaries_in_archive(root: &Path) -> Result<ExtractedArchive> {
         new_cpp,
         new_mcp,
         new_control_broker,
+        new_control_standalone_host: standalone_host_path
+            .exists()
+            .then_some(standalone_host_path),
+        new_control_standalone_manifest: standalone_manifest_path
+            .exists()
+            .then_some(standalone_manifest_path),
         new_import_design: import_design.helper,
         browser_capture_runtime: import_design.runtime,
     })
@@ -624,7 +656,11 @@ pub fn install_control_broker_with(
     let Some(src) = archive.new_control_broker.as_deref() else {
         return Ok(ControlBrokerInstall::NotPresent);
     };
-    install_control_broker_path_with(plan, src, reconcile)
+    let companions = archive
+        .new_control_standalone_host
+        .as_deref()
+        .zip(archive.new_control_standalone_manifest.as_deref());
+    install_control_broker_path_with_optional_companions(plan, src, companions, reconcile)
 }
 
 /// Path-based form used by the fresh installer after it stages the broker
@@ -636,11 +672,28 @@ pub fn install_control_broker_with(
 pub fn install_control_broker_path_with(
     plan: &InstallPlan,
     src: &Path,
+    standalone_host: &Path,
+    standalone_manifest: &Path,
+    reconcile: impl FnOnce(&Path, &mut dyn FnMut() -> Result<()>) -> Result<()>,
+) -> Result<ControlBrokerInstall> {
+    install_control_broker_path_with_optional_companions(
+        plan,
+        src,
+        Some((standalone_host, standalone_manifest)),
+        reconcile,
+    )
+}
+
+fn install_control_broker_path_with_optional_companions(
+    plan: &InstallPlan,
+    src: &Path,
+    companions: Option<(&Path, &Path)>,
     reconcile: impl FnOnce(&Path, &mut dyn FnMut() -> Result<()>) -> Result<()>,
 ) -> Result<ControlBrokerInstall> {
     install_control_broker_path_with_version_probe(
         plan,
         src,
+        companions,
         reconcile,
         |candidate| {
             crate::control_broker_service::control_broker_payload_release_version(
@@ -672,6 +725,7 @@ pub fn install_control_broker_path_with(
 fn install_control_broker_path_with_version_probe(
     plan: &InstallPlan,
     src: &Path,
+    companions: Option<(&Path, &Path)>,
     reconcile: impl FnOnce(&Path, &mut dyn FnMut() -> Result<()>) -> Result<()>,
     inspect_candidate_version: impl FnOnce(&Path) -> Result<Option<String>>,
     inspect_installed_version: impl FnOnce(&Path) -> Result<Option<String>>,
@@ -680,6 +734,27 @@ fn install_control_broker_path_with_version_probe(
         return Ok(ControlBrokerInstall::NotPresent);
     }
     let (dst, existed, backup) = control_broker_install_paths(plan, src)?;
+    let install_dir = dst.parent().expect("broker destination has parent");
+    let companion_paths = companions
+        .map(|(host_src, manifest_src)| {
+            let host_dst = install_dir.join(control_standalone_host_basename());
+            let manifest_dst = install_dir.join(control_standalone_manifest_basename());
+            validate_regular_install_file(host_src, "Standalone host")?;
+            validate_regular_install_file(manifest_src, "Standalone capability manifest")?;
+            validate_nonsymlink_destination(&host_dst, "Standalone host")?;
+            validate_nonsymlink_destination(&manifest_dst, "Standalone capability manifest")?;
+            Ok::<_, CliError>((
+                host_src.to_owned(),
+                host_dst.clone(),
+                host_dst.exists(),
+                backup_path(&host_dst),
+                manifest_src.to_owned(),
+                manifest_dst.clone(),
+                manifest_dst.exists(),
+                backup_path(&manifest_dst),
+            ))
+        })
+        .transpose()?;
     let _install_lock = ControlBrokerInstallerLock::acquire(&dst)?;
     let candidate_version = inspect_candidate_version(src)?.ok_or_else(|| {
         CliError::Other("staged control broker did not report a release version".to_owned())
@@ -704,6 +779,18 @@ fn install_control_broker_path_with_version_probe(
             ))
         })?;
     }
+    if let Some((_, _, _, host_backup, _, _, _, manifest_backup)) = &companion_paths {
+        for stale in [host_backup, manifest_backup] {
+            if stale.exists() {
+                fs::remove_file(stale).map_err(|e| {
+                    CliError::Other(format!(
+                        "could not remove stale control companion backup {}: {e}",
+                        stale.display()
+                    ))
+                })?;
+            }
+        }
+    }
     if existed {
         fs::rename(&dst, &backup).map_err(|e| {
             CliError::Other(format!(
@@ -712,11 +799,61 @@ fn install_control_broker_path_with_version_probe(
             ))
         })?;
     }
+    if let Some((
+        _,
+        host_dst,
+        host_existed,
+        host_backup,
+        _,
+        manifest_dst,
+        manifest_existed,
+        manifest_backup,
+    )) = &companion_paths
+    {
+        if *host_existed {
+            if let Err(e) = fs::rename(host_dst, host_backup) {
+                if existed {
+                    let _ = fs::rename(&backup, &dst);
+                }
+                return Err(CliError::Other(format!(
+                    "could not retain control companion {}: {e}",
+                    host_dst.display()
+                )));
+            }
+        }
+        if *manifest_existed {
+            if let Err(e) = fs::rename(manifest_dst, manifest_backup) {
+                if *host_existed {
+                    let _ = fs::rename(host_backup, host_dst);
+                }
+                if existed {
+                    let _ = fs::rename(&backup, &dst);
+                }
+                return Err(CliError::Other(format!(
+                    "could not retain control companion {}: {e}",
+                    manifest_dst.display()
+                )));
+            }
+        }
+    }
     if let Err(error) = copy_with_exec(src, &dst) {
         if existed {
             let _ = fs::rename(&backup, &dst);
         }
+        restore_companions(&companion_paths);
         return Err(error);
+    }
+    if let Some((host_src, host_dst, _, _, manifest_src, manifest_dst, _, _)) = &companion_paths {
+        if let Err(error) = copy_with_mode(host_src, host_dst, 0o700)
+            .and_then(|()| copy_with_mode(manifest_src, manifest_dst, 0o600))
+        {
+            let _ = fs::remove_file(&dst);
+            if existed {
+                let _ = fs::rename(&backup, &dst);
+            }
+            restore_companions(&companion_paths);
+            return Err(error);
+        }
     }
 
     let rolled_back = std::cell::Cell::new(false);
@@ -740,6 +877,7 @@ fn install_control_broker_path_with_version_probe(
                 ))
             })?;
         }
+        restore_companions(&companion_paths);
         rolled_back.set(true);
         Ok(())
     };
@@ -767,10 +905,110 @@ fn install_control_broker_path_with_version_probe(
                 backup.display()
             ))
         })?;
+        cleanup_companion_backups(&companion_paths)?;
         Ok(ControlBrokerInstall::Replaced)
     } else {
+        cleanup_companion_backups(&companion_paths)?;
         Ok(ControlBrokerInstall::Created)
     }
+}
+
+type CompanionPaths = Option<(
+    PathBuf,
+    PathBuf,
+    bool,
+    PathBuf,
+    PathBuf,
+    PathBuf,
+    bool,
+    PathBuf,
+)>;
+
+fn restore_companions(paths: &CompanionPaths) {
+    if let Some((
+        _,
+        host_dst,
+        host_existed,
+        host_backup,
+        _,
+        manifest_dst,
+        manifest_existed,
+        manifest_backup,
+    )) = paths
+    {
+        for (target, did_exist, retained) in [
+            (host_dst, host_existed, host_backup),
+            (manifest_dst, manifest_existed, manifest_backup),
+        ] {
+            let _ = fs::remove_file(target);
+            if *did_exist {
+                let _ = fs::rename(retained, target);
+            }
+        }
+    }
+}
+
+fn cleanup_companion_backups(paths: &CompanionPaths) -> Result<()> {
+    if let Some((_, _, host_existed, host_backup, _, _, manifest_existed, manifest_backup)) = paths
+    {
+        for (did_exist, retained) in [
+            (host_existed, host_backup),
+            (manifest_existed, manifest_backup),
+        ] {
+            if *did_exist {
+                fs::remove_file(retained).map_err(|e| {
+                    CliError::Other(format!(
+                        "control companion activated but backup cleanup failed at {}: {e}",
+                        retained.display()
+                    ))
+                })?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_regular_install_file(path: &Path, label: &str) -> Result<()> {
+    let metadata = fs::symlink_metadata(path).map_err(|e| {
+        CliError::Other(format!(
+            "could not inspect staged {label} {}: {e}",
+            path.display()
+        ))
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(CliError::Other(format!(
+            "staged {label} must be a regular file: {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn validate_nonsymlink_destination(path: &Path, label: &str) -> Result<()> {
+    if fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return Err(CliError::Other(format!(
+            "refusing to replace symlinked {label} destination {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn copy_with_mode(src: &Path, dst: &Path, mode: u32) -> Result<()> {
+    fs::copy(src, dst).map_err(|e| {
+        CliError::Other(format!(
+            "could not copy {} to {}: {e}",
+            src.display(),
+            dst.display()
+        ))
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(dst, fs::Permissions::from_mode(mode))
+            .map_err(|e| CliError::Other(format!("could not chmod {}: {e}", dst.display())))?;
+    }
+    Ok(())
 }
 
 fn control_broker_install_paths(

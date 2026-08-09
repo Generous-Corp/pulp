@@ -11,6 +11,11 @@
 
 namespace pulp::inspect {
 
+struct ControlInstalledHostSelection {
+    std::string host_id;
+    ControlTrustedHostLaunchIntent intent;
+};
+
 struct ControlBrokerDaemonConfig {
     std::filesystem::path runtime_root;
     std::filesystem::path state_root;
@@ -21,6 +26,9 @@ struct ControlBrokerDaemonConfig {
     /// Empty disables remote host preparation. Executable, arguments, working
     /// directory, and tier must all match one entry.
     std::vector<ControlTrustedHostLaunchIntent> trusted_host_allowlist;
+    /// Broker-owned names for installed artifacts. Production clients select
+    /// only host_id; the corresponding launch intent never crosses IPC.
+    std::vector<ControlInstalledHostSelection> installed_host_selections;
     std::function<ControlConsentDecision(const ControlGrantConsentRequest&)> decide_consent;
 };
 

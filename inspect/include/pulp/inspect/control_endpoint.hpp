@@ -41,6 +41,9 @@ struct ControlTrustedHostManagementLaunchResult {
 struct ControlTrustedHostManagement {
     std::function<ControlTrustedHostInventoryPrepareResult(const ControlTrustedHostLaunchIntent&)>
         prepare;
+    /// Production path: the client supplies only a bounded broker-owned name;
+    /// executable, arguments, working directory, and tier never cross IPC.
+    std::function<ControlTrustedHostInventoryPrepareResult(std::string_view)> prepare_installed;
     std::function<ControlTrustedHostManagementLaunchResult(std::string_view)> launch;
 };
 

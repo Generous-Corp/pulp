@@ -647,7 +647,7 @@ TEST_CASE("installed daemon process enforces host policy and recovers after cras
     const auto prepared =
         connection->manage("host-prepare", choc::json::toString(prepare_params, false));
     INFO(prepared.explanation);
-    REQUIRE(prepared.status_id == "invalid_request");
+    REQUIRE(prepared.status_id == "unavailable");
     connection->disconnect();
 
     REQUIRE(::kill(daemon_process.process_id(), SIGKILL) == 0);
@@ -683,6 +683,223 @@ TEST_CASE("installed daemon process enforces host policy and recovers after cras
     INFO(stopped->stderr_output);
 #else
     SUCCEED("installed daemon process hosting is currently macOS-only");
+#endif
+}
+
+TEST_CASE("installed broker launches only its named ordinary Standalone host",
+          "[inspect][control][daemon][host][process][standalone][security]") {
+#ifdef __APPLE__
+    DaemonRoot root;
+    const std::filesystem::path installed_broker{PULP_CONTROL_BROKER_DAEMON};
+    const auto installed_host = installed_broker.parent_path() /
+                                "pulp-control-standalone-host";
+    REQUIRE(std::filesystem::is_regular_file(installed_broker));
+    REQUIRE(std::filesystem::is_regular_file(installed_host));
+    REQUIRE(std::filesystem::is_regular_file(
+        installed_host.string() + ".inspector-capabilities.json"));
+
+    const std::vector<std::string> daemon_arguments{
+        "PULP_CONTROL_BROKER_RUNTIME_ROOT=" + root.runtime.string(),
+        "PULP_CONTROL_BROKER_STATE_ROOT=" + root.state.string(),
+        installed_broker.string(),
+    };
+    pulp::platform::ProcessOptions daemon_options;
+    daemon_options.capture_stdout = true;
+    daemon_options.capture_stderr = true;
+    pulp::platform::ChildProcess daemon_process;
+    REQUIRE(daemon_process.start("/usr/bin/env", daemon_arguments, daemon_options));
+
+    const auto endpoint = default_control_endpoint_path(root.runtime);
+    std::unique_ptr<ControlClientConnection> connection;
+    for (unsigned attempt = 0; attempt < 10'000 && !connection; ++attempt) {
+        auto candidate = std::make_unique<ControlClientConnection>(
+            ControlClientConnectionConfig{.endpoint_path = endpoint,
+                                          .expected_broker_executable = installed_broker});
+        if (candidate->connect())
+            connection = std::move(candidate);
+        else
+            std::this_thread::sleep_for(1ms);
+    }
+    REQUIRE(connection);
+    REQUIRE(connection->manage("enroll").status_id == "accepted");
+
+    auto client_chosen = choc::value::createObject("");
+    client_chosen.addMember("executable", choc::value::createString("/tmp/untrusted"));
+    client_chosen.addMember("arguments", choc::value::createEmptyArray());
+    client_chosen.addMember("working_directory", choc::value::createString("/tmp"));
+    client_chosen.addMember("host_tier", choc::value::createString("standalone"));
+    CHECK(connection
+              ->manage("host-prepare", choc::json::toString(client_chosen, false))
+              .status_id == "unavailable");
+
+    auto unknown = choc::value::createObject("");
+    unknown.addMember("host_id", choc::value::createString("client-selected"));
+    CHECK(connection
+              ->manage("host-prepare-installed", choc::json::toString(unknown, false))
+              .status_id == "invalid_request");
+
+    auto named = choc::value::createObject("");
+    named.addMember("host_id", choc::value::createString("ordinary-standalone"));
+    const auto prepared = connection->manage(
+        "host-prepare-installed", choc::json::toString(named, false));
+    INFO(prepared.explanation);
+    REQUIRE(prepared.status_id == "prepared");
+    const auto inventory_id = std::string(
+        choc::json::parse(prepared.data_json)["inventory_id"].getString());
+    REQUIRE_FALSE(inventory_id.empty());
+
+    auto launch = choc::value::createObject("");
+    launch.addMember("inventory_id", choc::value::createString(inventory_id));
+    const auto launched =
+        connection->manage("host-launch", choc::json::toString(launch, false));
+    INFO(launched.explanation);
+    REQUIRE(launched.status_id == "launched");
+
+    choc::value::Value instances;
+    for (unsigned attempt = 0; attempt < 10'000; ++attempt) {
+        const auto result = connection->manage("instances");
+        REQUIRE(result.status_id == "completed");
+        instances = choc::json::parse(result.data_json)["instances"];
+        if (instances.size() == 1)
+            break;
+        std::this_thread::sleep_for(1ms);
+    }
+    REQUIRE(instances.size() == 1);
+    const auto instance = instances[0];
+    CHECK(instance["plugin_id"].getString() ==
+          std::string_view{"dev.pulp.control-standalone-host"});
+    REQUIRE(instance["capabilities"].size() == 2);
+    CHECK(instance["capabilities"][0].getString() ==
+          std::string_view{"dev.pulp.instance/read@1"});
+    CHECK(instance["capabilities"][1].getString() ==
+          std::string_view{"dev.pulp.state/read@1"});
+
+    connection->disconnect();
+    daemon_process.cancel();
+    const auto stopped = wait_for_process_exit(daemon_process);
+    INFO("cancelled installed broker must exit within the progress deadline");
+    REQUIRE(stopped);
+    INFO(stopped->stderr_output);
+#else
+    SUCCEED("installed ordinary Standalone hosting is currently macOS-only");
+#endif
+}
+
+TEST_CASE("canonical ordinary Standalone host serves typed state reads",
+          "[inspect][control][daemon][host][standalone][state][e2e]") {
+#ifdef __APPLE__
+    DaemonRoot root;
+    const auto broker_executable = current_executable();
+    const std::filesystem::path installed_broker{PULP_CONTROL_BROKER_DAEMON};
+    const auto installed_host = installed_broker.parent_path() /
+                                "pulp-control-standalone-host";
+    REQUIRE_FALSE(broker_executable.empty());
+    REQUIRE(std::filesystem::is_regular_file(installed_host));
+
+    ControlBrokerDaemon daemon({
+        .runtime_root = root.runtime,
+        .state_root = root.state,
+        .sdk_version = "0.798.0-test",
+        .executable_path = broker_executable,
+        .process_generation = 211,
+        .installed_host_selections =
+            {{.host_id = "ordinary-standalone",
+              .intent = {.executable = installed_host,
+                         .arguments = {},
+                         .working_directory = installed_host.parent_path(),
+                         .host_tier = ControlHostTier::Standalone}}},
+        .decide_consent =
+            [](const VerifiedControlPeerIdentity&, const ControlGrantRequest&) {
+                return ControlConsentDecision{true, ControlConsentAuthority::TrustedHostUi,
+                                              "standalone-state-read-test-consent"};
+            },
+    });
+    REQUIRE(daemon.start());
+    ControlClientConnection connection({.endpoint_path = daemon.endpoint_path(),
+                                        .expected_broker_executable = broker_executable});
+    REQUIRE(connection.connect());
+    const auto enrolled = connection.manage("enroll");
+    REQUIRE(enrolled.status_id == "accepted");
+    const auto client_id = std::string(
+        choc::json::parse(enrolled.data_json)["client_id"].getString());
+
+    auto named = choc::value::createObject("");
+    named.addMember("host_id", choc::value::createString("ordinary-standalone"));
+    const auto prepared = connection.manage(
+        "host-prepare-installed", choc::json::toString(named, false));
+    INFO(prepared.explanation);
+    REQUIRE(prepared.status_id == "prepared");
+    auto launch = choc::value::createObject("");
+    launch.addMember(
+        "inventory_id",
+        choc::value::createString(std::string(
+            choc::json::parse(prepared.data_json)["inventory_id"].getString())));
+    REQUIRE(connection.manage("host-launch", choc::json::toString(launch, false)).status_id ==
+            "launched");
+
+    std::string instance_id;
+    std::string registration_id;
+    std::string publication_id;
+    for (unsigned attempt = 0; attempt < 10'000; ++attempt) {
+        const auto inventory = connection.manage("instances");
+        REQUIRE(inventory.status_id == "completed");
+        const auto inventory_data = choc::json::parse(inventory.data_json);
+        const auto instances = inventory_data["instances"];
+        if (instances.size() == 1) {
+            instance_id = std::string(instances[0]["instance_id"].getString());
+            registration_id =
+                std::string(instances[0]["registration_id"].getString());
+            publication_id =
+                std::string(instances[0]["publication_id"].getString());
+            break;
+        }
+        std::this_thread::sleep_for(1ms);
+    }
+    REQUIRE_FALSE(instance_id.empty());
+    auto grant = choc::value::createObject("");
+    grant.addMember("instance_id", choc::value::createString(instance_id));
+    grant.addMember("profile", choc::value::createString("develop"));
+    const auto granted =
+        connection.manage("grant-request", choc::json::toString(grant, false));
+    INFO(granted.explanation);
+    REQUIRE(granted.status_id == "granted");
+
+    ControlClient client(connection);
+    REQUIRE(client.negotiate({.mandatory_features = {"receipts"}}).succeeded());
+    ControlRequestEnvelope request{
+        .request_id = "ordinary-standalone-state-read",
+        .client_id = client_id,
+        .registration_id = registration_id,
+        .grant_id = std::string(
+            choc::json::parse(granted.data_json)["grant_id"].getString()),
+        .instance_generation = publication_id,
+        .operation_id = "dev.pulp.state/read@1",
+        .operation_version = 1,
+        .idempotency_key = "ordinary-standalone-state-read-key",
+        .deadline_unix_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                (std::chrono::system_clock::now() + 5s).time_since_epoch())
+                                .count(),
+        .params_json = R"({"include_catalog":true})",
+    };
+    request.request_hash = *control_request_hash(request);
+    INFO("dispatching installed Standalone state read");
+    const auto result = client.request(request, 5s);
+    INFO(result.error_code);
+    INFO(result.explanation);
+    REQUIRE(result.succeeded());
+    REQUIRE(result.response);
+    REQUIRE(result.response->state == ControlReceiptState::Completed);
+    const auto detail = choc::json::parse(result.response->detail_json);
+    INFO("decoded installed Standalone state read");
+    REQUIRE(detail["parameters"].size() == 1);
+    CHECK(detail["parameters"][0]["name"].getString() == std::string_view{"Level"});
+
+    connection.disconnect();
+    INFO("stopping installed Standalone daemon");
+    daemon.stop();
+    INFO("stopped installed Standalone daemon");
+#else
+    SUCCEED("ordinary Standalone state-read E2E is currently macOS-only");
 #endif
 }
 

@@ -32,6 +32,15 @@ function(_pulp_add_standalone target name bundle_id version)
             "pulp_add_plugin(${target}): declared inspector shipping component is unavailable; configure/install Pulp with Inspector support")
     endif()
     target_link_libraries(${target}_Standalone PRIVATE ${target}_Core ${_standalone_target})
+    if(PULP_${target}_CONTROL_CAPABILITIES)
+        set(_control_factory_source
+            "${CMAKE_CURRENT_BINARY_DIR}/${target}_standalone_control_factory.cpp")
+        file(GENERATE OUTPUT "${_control_factory_source}" CONTENT
+            "#include <pulp/format/standalone_control_host.hpp>\n#include <pulp/inspect/control_standalone_host.hpp>\nnamespace { [[maybe_unused]] const bool pulp_control_factory_installed = pulp::format::detail::install_standalone_control_host_factory(&pulp::inspect::make_control_standalone_host); }\n")
+        target_sources(${target}_Standalone PRIVATE "${_control_factory_source}")
+        target_link_libraries(${target}_Standalone PRIVATE
+            ${_PULP_CONTROL_STANDALONE_TARGET})
+    endif()
     _pulp_apply_ui_script_definition(${target}_Standalone "${PULP_${target}_UI_SCRIPT}")
     _pulp_apply_view_mac_objc_suffix(${target}_Standalone)
     target_include_directories(${target}_Standalone PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -520,6 +520,17 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         self.assertIn('test -x "$BROKER"', dry_run)
         self.assertIn('lipo -archs "$BROKER"', dry_run)
         self.assertIn('codesign --verify --strict "$BROKER"', dry_run)
+        self.assertRegex(
+            dry_run,
+            r"--control-standalone-host-binary\s+build/inspect/pulp-control-standalone-host",
+        )
+        self.assertRegex(
+            dry_run,
+            r"--control-standalone-manifest\s+build/inspect/"
+            r"pulp-control-standalone-host\.inspector-capabilities\.json",
+        )
+        self.assertIn('test -x "$CONTROL_HOST"', dry_run)
+        self.assertIn('test -s "$CONTROL_MANIFEST"', dry_run)
 
     def test_unix_preswap_backfills_alias_cpp_cli_to_primary_binary(self) -> None:
         run_block = self._find_step_run("Normalize CLI binary layout (Unix)")

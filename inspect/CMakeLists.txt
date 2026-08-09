@@ -126,6 +126,21 @@ target_link_libraries(pulp-inspect-runtime
         pulp::events
         pulp::state)
 
+# The canonical ordinary-Standalone host bridge is isolated from both the base
+# Standalone archive and every production-stripped plugin artifact. Only an
+# explicitly control-enabled executable links this archive and installs its
+# lifecycle factory.
+add_library(pulp-inspect-standalone-runtime
+    src/control_standalone_host.cpp)
+add_library(pulp::inspect-standalone-runtime ALIAS
+    pulp-inspect-standalone-runtime)
+target_include_directories(pulp-inspect-standalone-runtime
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
+target_link_libraries(pulp-inspect-standalone-runtime
+    PUBLIC pulp::inspect-runtime pulp::standalone)
+
 # T0 offline integration is a separate headless adapter archive so the shared
 # control runtime does not acquire format/view dependencies merely by existing.
 add_library(pulp-inspect-offline-runtime

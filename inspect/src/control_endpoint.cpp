@@ -644,6 +644,32 @@ struct ControlEndpoint::Impl {
                         choc::json::toString(data, false));
             return;
         }
+        if (request.command == "host-prepare-installed") {
+            if (!config.trusted_hosts.prepare_installed ||
+                !has_only_members(params, {"host_id"}) ||
+                !params.hasObjectMember("host_id") || !params["host_id"].isString()) {
+                (void)reply("invalid-request", "{}",
+                            "host-prepare-installed requires one broker-owned host_id");
+                return;
+            }
+            const auto host_id = std::string(params["host_id"].getString());
+            if (host_id.empty() || host_id.size() > 128) {
+                (void)reply("invalid-request", "{}", "the installed host id is invalid");
+                return;
+            }
+            const auto prepared = config.trusted_hosts.prepare_installed(host_id);
+            auto data = choc::value::createObject("");
+            data.addMember("host_id", choc::value::createString(host_id));
+            if (prepared.ticket)
+                data.addMember("inventory_id",
+                               choc::value::createString(prepared.ticket->inventory_id));
+            data.addMember("schema",
+                           choc::value::createString(
+                               "pulp.control.host-prepare-installed.v1"));
+            (void)reply(std::string(control_trusted_host_inventory_status_id(prepared.status)),
+                        choc::json::toString(data, false));
+            return;
+        }
         if (request.command == "host-launch") {
             if (!config.trusted_hosts.launch || !has_only_members(params, {"inventory_id"}) ||
                 !params.hasObjectMember("inventory_id") ||

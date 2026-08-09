@@ -29,6 +29,33 @@ if(NOT _install_result EQUAL 0)
         "${_install_output}\n${_install_error}")
 endif()
 
+if(APPLE)
+    set(_installed_control_libexec "${_prefix}/libexec/pulp")
+    foreach(_installed_control_file IN ITEMS
+            pulp-control-broker
+            pulp-control-standalone-host
+            pulp-control-standalone-host.inspector-capabilities.json
+            pulp-control-standalone-host.Standalone.control-shipping.json)
+        if(NOT EXISTS "${_installed_control_libexec}/${_installed_control_file}")
+            message(FATAL_ERROR
+                "Installed broker/Standalone composition is missing: ${_installed_control_file}")
+        endif()
+    endforeach()
+    execute_process(
+        COMMAND /usr/bin/stat -f %Lp
+                "${_installed_control_libexec}/pulp-control-standalone-host"
+        OUTPUT_VARIABLE _installed_host_mode OUTPUT_STRIP_TRAILING_WHITESPACE)
+    execute_process(
+        COMMAND /usr/bin/stat -f %Lp
+                "${_installed_control_libexec}/pulp-control-standalone-host.inspector-capabilities.json"
+        OUTPUT_VARIABLE _installed_host_manifest_mode OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(NOT _installed_host_mode STREQUAL "700" OR
+       NOT _installed_host_manifest_mode STREQUAL "600")
+        message(FATAL_ERROR
+            "Installed Standalone authority is not owner-private: executable=${_installed_host_mode}, manifest=${_installed_host_manifest_mode}")
+    endif()
+endif()
+
 set(_installed_examples "${_prefix}/share/pulp/capability-control")
 foreach(_example IN ITEMS control-examples.json README.md cli-walkthrough.sh mcp-tools.jsonl)
     if(NOT EXISTS "${_installed_examples}/${_example}")
@@ -49,7 +76,12 @@ find_package(Pulp REQUIRED COMPONENTS
     inspect-protocol
     inspect-control
     inspect-client
-    inspect-runtime)
+    inspect-runtime
+    inspect-standalone-runtime)
+
+if(NOT TARGET Pulp::inspect-standalone-runtime)
+    message(FATAL_ERROR "Installed canonical Standalone adapter target is missing")
+endif()
 
 set(_control_targets
     Pulp::inspect-protocol
@@ -75,6 +107,7 @@ endforeach()
 add_executable(pulp-control-sdk-consumer main.cpp)
 target_compile_features(pulp-control-sdk-consumer PRIVATE cxx_std_20)
 target_link_libraries(pulp-control-sdk-consumer PRIVATE ${_control_targets})
+add_subdirectory(standalone-consumer)
 ]=])
 
 file(WRITE "${_consumer_source}/main.cpp" [=[
@@ -99,6 +132,7 @@ file(WRITE "${_consumer_source}/main.cpp" [=[
 #include <pulp/inspect/control_service.hpp>
 #include <pulp/inspect/control_trusted_host_inventory.hpp>
 #include <pulp/inspect/control_trusted_host_launcher.hpp>
+#include <pulp/inspect/control_standalone_host.hpp>
 #include <pulp/platform/child_process.hpp>
 
 #include <chrono>
@@ -253,6 +287,66 @@ int main() {
 }
 ]=])
 
+file(MAKE_DIRECTORY "${_consumer_source}/standalone-consumer")
+file(WRITE "${_consumer_source}/standalone-consumer/CMakeLists.txt" [=[
+pulp_add_plugin(InstalledControlStandalone
+    PLUGIN_NAME "Installed Control Standalone"
+    BUNDLE_ID dev.pulp.installed-control-standalone
+    FORMATS Standalone
+    SOURCES standalone.cpp
+    PROCESSOR_FACTORY create_processor
+    CONTROL_PROFILE developer-local
+    CONTROL_CAPABILITIES dev.pulp.instance/read@1 dev.pulp.state/read@1)
+]=])
+
+file(WRITE "${_consumer_source}/standalone-consumer/standalone.cpp" [=[
+#include <pulp/format/processor.hpp>
+
+#include <algorithm>
+#include <memory>
+
+class InstalledStandaloneProcessor final : public pulp::format::Processor {
+ public:
+  pulp::format::PluginDescriptor descriptor() const override {
+    return {.name = "Installed Control Standalone",
+            .manufacturer = "Pulp",
+            .bundle_id = "dev.pulp.installed-control-standalone",
+            .version = "1.0.0",
+            .input_buses = {{"Input", 2}},
+            .output_buses = {{"Output", 2}}};
+  }
+  void define_parameters(pulp::state::StateStore&) override {}
+  void prepare(const pulp::format::PrepareContext&) override {}
+  void process(pulp::audio::BufferView<float>& output,
+               const pulp::audio::BufferView<const float>& input,
+               pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+               const pulp::format::ProcessContext&) override {
+    const auto channels = std::min(output.num_channels(), input.num_channels());
+    const auto samples = std::min(output.num_samples(), input.num_samples());
+    for (std::size_t channel = 0; channel < channels; ++channel)
+      std::copy_n(input.channel(channel).data(), samples,
+                  output.channel(channel).data());
+  }
+};
+
+std::unique_ptr<pulp::format::Processor> create_processor() {
+  return std::make_unique<InstalledStandaloneProcessor>();
+}
+]=])
+
+file(WRITE "${_consumer_source}/standalone-consumer/main.cpp" [=[
+#include <pulp/format/standalone.hpp>
+
+#include <memory>
+
+std::unique_ptr<pulp::format::Processor> create_processor();
+
+int main() {
+  pulp::format::StandaloneApp app(&create_processor);
+  return app.start() ? 0 : 1;
+}
+]=])
+
 set(_consumer_configure_args
     -S "${_consumer_source}"
     -B "${_consumer_build}"
@@ -313,6 +407,22 @@ if(NOT _build_result EQUAL 0)
     message(FATAL_ERROR
         "Control SDK consumer build failed (${_build_result})\n"
         "${_build_output}\n${_build_error}")
+endif()
+
+file(GLOB_RECURSE _standalone_control_manifests
+    "${_consumer_build}/*InstalledControlStandalone*.inspector-capabilities.json")
+list(LENGTH _standalone_control_manifests _standalone_manifest_count)
+if(NOT _standalone_manifest_count EQUAL 1)
+    message(FATAL_ERROR
+        "Installed ordinary Standalone did not emit one control manifest: ${_standalone_control_manifests}")
+endif()
+list(GET _standalone_control_manifests 0 _standalone_control_manifest)
+file(READ "${_standalone_control_manifest}" _standalone_control_json)
+if(NOT _standalone_control_json MATCHES "\"endpoint_included\"[ \\t]*:[ \\t]*true" OR
+   NOT _standalone_control_json MATCHES "dev.pulp.instance/read@1" OR
+   NOT _standalone_control_json MATCHES "dev.pulp.state/read@1")
+    message(FATAL_ERROR
+        "Installed ordinary Standalone control manifest is not truthful: ${_standalone_control_json}")
 endif()
 
 set(_executable_suffix "")

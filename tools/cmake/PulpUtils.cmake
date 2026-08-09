@@ -24,6 +24,8 @@ _pulp_pick_target(_PULP_VIEW_TARGET Pulp::view pulp::view)
 _pulp_pick_target(_PULP_AUDIO_TARGET Pulp::audio pulp::audio)
 _pulp_pick_target(_PULP_MIDI_TARGET Pulp::midi pulp::midi)
 _pulp_pick_target(_PULP_STANDALONE_TARGET Pulp::standalone pulp::standalone)
+_pulp_pick_target(_PULP_CONTROL_STANDALONE_TARGET
+    Pulp::inspect-standalone-runtime pulp::inspect-standalone-runtime)
 include("${CMAKE_CURRENT_LIST_DIR}/PulpControlShipping.cmake")
 _pulp_pick_target(_PULP_VST3_SDK_TARGET Pulp::vst3-sdk vst3-sdk)
 _pulp_pick_target(_PULP_CLAP_TARGET Pulp::clap clap)
@@ -677,15 +679,24 @@ function(pulp_add_plugin target)
             "pulp_add_plugin(${target}): CONTROL_CAPABILITIES requires an explicit CONTROL_PROFILE")
     endif()
 
-    # A manifest may only claim capabilities that the final artifact actually
-    # implements. The canonical broker can launch trusted test/installed hosts,
-    # but the ordinary pulp::standalone archive does not yet compose the
-    # host-side enrollment connection and operation executors. Failing here is
-    # preferable to generating endpoint_included=true and letting the post-link
-    # scanner discover that the implementation marker is absent.
     if(PLUGIN_CONTROL_CAPABILITIES)
-        message(FATAL_ERROR
-            "pulp_add_plugin(${target}): CONTROL_CAPABILITIES requires the dedicated canonical Standalone host adapter, which is not yet available; ordinary Standalone targets remain production-stripped")
+        list(LENGTH PLUGIN_FORMATS _pulp_control_format_count)
+        if(NOT _pulp_control_format_count EQUAL 1 OR
+           NOT "Standalone" IN_LIST PLUGIN_FORMATS)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): CONTROL_CAPABILITIES currently require an exclusively Standalone artifact; mixed-format siblings remain production-stripped")
+        endif()
+        if(NOT _PULP_CONTROL_STANDALONE_TARGET)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): CONTROL_CAPABILITIES require the installed canonical Standalone host adapter")
+        endif()
+        foreach(_pulp_control_capability IN LISTS PLUGIN_CONTROL_CAPABILITIES)
+            if(NOT _pulp_control_capability STREQUAL "dev.pulp.instance/read@1" AND
+               NOT _pulp_control_capability STREQUAL "dev.pulp.state/read@1")
+                message(FATAL_ERROR
+                    "pulp_add_plugin(${target}): '${_pulp_control_capability}' is not yet implemented by the canonical Standalone adapter")
+            endif()
+        endforeach()
     endif()
 
     if(PLUGIN_CONTROL_PROFILE)

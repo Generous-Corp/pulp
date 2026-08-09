@@ -327,6 +327,12 @@ struct ControlBrokerDaemon::Impl {
         ControlTrustedHostPreparationPolicy policy;
     };
     std::vector<TrustedHostPolicyEntry> trusted_host_policies;
+    struct InstalledHostPolicyEntry {
+        std::string host_id;
+        ControlTrustedHostLaunchIntent intent;
+        ControlTrustedHostPreparationPolicy policy;
+    };
+    std::vector<InstalledHostPolicyEntry> installed_host_policies;
     std::mutex launched_hosts_mutex;
     std::vector<std::unique_ptr<platform::ChildProcess>> launched_hosts;
     std::unique_ptr<ControlService> service;
@@ -350,6 +356,7 @@ struct ControlBrokerDaemon::Impl {
         enrollments.reset();
         trusted_inventory.reset();
         trusted_host_policies.clear();
+        installed_host_policies.clear();
         broker.reset();
         if (singleton)
             singleton->unlock();
@@ -441,6 +448,27 @@ struct ControlBrokerDaemon::Impl {
                 return false;
             }
             trusted_host_policies.push_back({intent, *policy});
+        }
+        installed_host_policies.clear();
+        installed_host_policies.reserve(config.installed_host_selections.size());
+        for (const auto& selection : config.installed_host_selections) {
+            const bool valid_id = !selection.host_id.empty() && selection.host_id.size() <= 128 &&
+                                  std::ranges::all_of(selection.host_id, [](unsigned char value) {
+                                      return (value >= 'a' && value <= 'z') ||
+                                             (value >= 'A' && value <= 'Z') ||
+                                             (value >= '0' && value <= '9') || value == '-' ||
+                                             value == '_';
+                                  });
+            const bool duplicate = std::ranges::any_of(
+                installed_host_policies,
+                [&](const auto& entry) { return entry.host_id == selection.host_id; });
+            const auto policy = pin_trusted_host_policy(selection.intent);
+            if (!valid_id || duplicate || !policy) {
+                reset();
+                return false;
+            }
+            installed_host_policies.push_back(
+                {selection.host_id, selection.intent, *policy});
         }
         const auto actual_executable = current_process_executable();
         const auto broker_static_identity =
@@ -595,13 +623,31 @@ struct ControlBrokerDaemon::Impl {
                 .decide_consent = config.decide_consent,
                 .trusted_hosts =
                     {
-                        .prepare = [this](const ControlTrustedHostLaunchIntent& intent) {
-                            const auto allowed = std::ranges::find_if(
-                                trusted_host_policies,
-                                [&](const auto& entry) { return entry.intent == intent; });
-                            if (!trusted_inventory || allowed == trusted_host_policies.end())
+                        .prepare = trusted_host_policies.empty()
+                                       ? std::function<ControlTrustedHostInventoryPrepareResult(
+                                             const ControlTrustedHostLaunchIntent&)>{}
+                                       : std::function<ControlTrustedHostInventoryPrepareResult(
+                                             const ControlTrustedHostLaunchIntent&)>{
+                                             [this](const auto& intent) {
+                                                 const auto allowed = std::ranges::find_if(
+                                                     trusted_host_policies,
+                                                     [&](const auto& entry) {
+                                                         return entry.intent == intent;
+                                                     });
+                                                 if (!trusted_inventory ||
+                                                     allowed == trusted_host_policies.end())
+                                                     return ControlTrustedHostInventoryPrepareResult{};
+                                                 return trusted_inventory->prepare(intent,
+                                                                                   allowed->policy);
+                                             }},
+                        .prepare_installed = [this](std::string_view host_id) {
+                            const auto selected = std::ranges::find_if(
+                                installed_host_policies,
+                                [&](const auto& entry) { return entry.host_id == host_id; });
+                            if (!trusted_inventory || selected == installed_host_policies.end())
                                 return ControlTrustedHostInventoryPrepareResult{};
-                            return trusted_inventory->prepare(intent, allowed->policy);
+                            return trusted_inventory->prepare(selected->intent,
+                                                              selected->policy);
                         },
                         .launch = [this](std::string_view inventory_id) {
                             if (!trusted_launcher)

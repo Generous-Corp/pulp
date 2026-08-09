@@ -172,6 +172,12 @@ struct ControlBrokerReconcileArgs {
     /// Separately staged broker payload from the verified release archive.
     #[arg(long)]
     broker: std::path::PathBuf,
+    /// Separately staged broker-owned ordinary Standalone host.
+    #[arg(long)]
+    standalone_host: std::path::PathBuf,
+    /// Signed capability sidecar for the staged Standalone host.
+    #[arg(long)]
+    standalone_manifest: std::path::PathBuf,
     /// Explicitly accept a persistent service rooted outside `~/.pulp`.
     #[arg(long)]
     accept_custom_root: bool,
@@ -426,6 +432,8 @@ fn reconcile_installer_control_broker(args: ControlBrokerReconcileArgs) -> Resul
     let result = pulp_rs::install::install_control_broker_path_with(
         &plan,
         &args.broker,
+        &args.standalone_host,
+        &args.standalone_manifest,
         |_, rollback_binary| {
             pulp_rs::control_broker_service::reconcile_control_broker_service_transactional(
                 &config,
@@ -966,10 +974,18 @@ mod control_broker_startup_tests {
             "__control-broker-reconcile",
             "--broker",
             "/tmp/staged-broker",
+            "--standalone-host",
+            "/tmp/staged-host",
+            "--standalone-manifest",
+            "/tmp/staged-manifest",
             "--accept-custom-root",
         ])
         .expect("valid installer arguments");
         assert_eq!(parsed.broker, std::path::Path::new("/tmp/staged-broker"));
+        assert_eq!(
+            parsed.standalone_host,
+            std::path::Path::new("/tmp/staged-host")
+        );
         assert!(parsed.accept_custom_root);
         assert!(
             super::ControlBrokerReconcileArgs::try_parse_from(["__control-broker-reconcile"])

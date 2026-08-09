@@ -56,14 +56,23 @@ make_fixture_archive() {
 case "${1:-}" in
     __control-broker-reconcile)
         broker_contents=missing
+        host_contents=missing
+        manifest_contents=missing
         if [ "${2:-}" = "--broker" ] && [ -f "${3:-}" ]; then
             broker_contents=$(cat "$3")
         fi
-        printf 'reconcile|argc=%s|arg2=%s|broker=%s|arg4=%s|contents=%s\n' \
-            "$#" "${2:-}" "${3:-}" "${4:-}" "$broker_contents" \
+        if [ "${4:-}" = "--standalone-host" ] && [ -f "${5:-}" ]; then
+            host_contents=$(cat "$5")
+        fi
+        if [ "${6:-}" = "--standalone-manifest" ] && [ -f "${7:-}" ]; then
+            manifest_contents=$(cat "$7")
+        fi
+        printf 'reconcile|argc=%s|arg2=%s|broker=%s|arg4=%s|arg5=%s|arg6=%s|arg7=%s|arg8=%s|contents=%s|host=%s|manifest=%s\n' \
+            "$#" "${2:-}" "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}" \
+            "${8:-}" "$broker_contents" "$host_contents" "$manifest_contents" \
             >> "$MOCK_PULP_LOG"
         if [ "${MOCK_REJECT_UNACCEPTED_CUSTOM:-0}" = "1" ] && \
-           [ "${4:-}" != "--accept-custom-root" ]; then
+           [ "${8:-}" != "--accept-custom-root" ]; then
             exit 66
         fi
         ;;
@@ -75,8 +84,11 @@ esac
 EOF
     chmod +x "$payload/pulp"
     printf 'broker-fixture\n' > "$payload/pulp-control-broker"
+    printf 'host-fixture\n' > "$payload/pulp-control-standalone-host"
+    printf '{"schema_version":1}\n' > "$payload/pulp-control-standalone-host.inspector-capabilities.json"
     tar -czf "$TEST_ROOT/pulp.tar.gz" -C "$payload" \
-        pulp pulp-control-broker
+        pulp pulp-control-broker pulp-control-standalone-host \
+        pulp-control-standalone-host.inspector-capabilities.json
 }
 
 make_command_shims() {
@@ -144,10 +156,22 @@ assert_common_contract() {
         "$install_dir/pulp" '__control-broker-reconcile'
     assert_absent "$label keeps the broker out of the install root" \
         "$install_dir/pulp-control-broker"
+    assert_absent "$label keeps the host out of the install root before reconciliation" \
+        "$install_dir/pulp-control-standalone-host"
+    assert_absent "$label keeps the manifest out of the install root before reconciliation" \
+        "$install_dir/pulp-control-standalone-host.inspector-capabilities.json"
     assert_file_contains "$label reconciles the extracted broker bytes" \
         "$log" 'contents=broker-fixture'
     assert_file_contains "$label passes the hidden broker option" \
         "$log" 'arg2=--broker'
+    assert_file_contains "$label passes the hidden host option" \
+        "$log" 'arg4=--standalone-host'
+    assert_file_contains "$label passes the hidden manifest option" \
+        "$log" 'arg6=--standalone-manifest'
+    assert_file_contains "$label reconciles the extracted host bytes" \
+        "$log" 'host=host-fixture'
+    assert_file_contains "$label reconciles the extracted manifest bytes" \
+        "$log" 'manifest={"schema_version":1}'
     assert_file_excludes "$label never passes the install-root broker path" \
         "$log" "broker=$install_dir/pulp-control-broker"
 
@@ -195,9 +219,9 @@ canonical_install="$canonical_root/home/.pulp/bin"
 run_installer "$canonical_root" ""
 assert_common_contract "canonical install" "$canonical_root" "$canonical_install"
 assert_file_contains "canonical install passes only --broker and its value" \
-    "$canonical_root/pulp.log" 'reconcile|argc=3|'
+    "$canonical_root/pulp.log" 'reconcile|argc=7|'
 assert_file_contains "canonical install does not opt into a custom root" \
-    "$canonical_root/pulp.log" '|arg4=|'
+    "$canonical_root/pulp.log" '|arg8=|'
 
 echo "Scenario: custom install root without opt-in"
 unaccepted_root="$TEST_ROOT/unaccepted-custom"
@@ -209,7 +233,7 @@ else
     pass "custom install without opt-in surfaces reconciliation refusal"
 fi
 assert_file_contains "unaccepted custom install does not invent the opt-in" \
-    "$unaccepted_root/pulp.log" '|arg4=|'
+    "$unaccepted_root/pulp.log" '|arg8=|'
 assert_file_contains "unaccepted custom install reports activation failure" \
     "$unaccepted_root/output.log" 'control broker activation failed'
 
@@ -220,9 +244,22 @@ run_installer "$custom_root" "$custom_install" \
     PULP_ACCEPT_CONTROL_BROKER_CUSTOM_INSTALL_ROOT=1
 assert_common_contract "custom install" "$custom_root" "$custom_install"
 assert_file_contains "custom install passes broker value plus opt-in" \
-    "$custom_root/pulp.log" 'reconcile|argc=4|'
+    "$custom_root/pulp.log" 'reconcile|argc=8|'
 assert_file_contains "custom install passes the hidden custom-root opt-in" \
-    "$custom_root/pulp.log" '|arg4=--accept-custom-root|'
+    "$custom_root/pulp.log" '|arg8=--accept-custom-root|'
+
+echo "Scenario: pinned historical broker-only release"
+tar -czf "$TEST_ROOT/pulp.tar.gz" -C "$TEST_ROOT/payload" \
+    pulp pulp-control-broker
+historical_root="$TEST_ROOT/historical"
+historical_install="$historical_root/home/.pulp/bin"
+run_installer "$historical_root" ""
+assert_file_contains "historical release uses its broker-only reconciler contract" \
+    "$historical_root/pulp.log" 'reconcile|argc=3|'
+assert_file_contains "historical release receives the staged broker" \
+    "$historical_root/pulp.log" 'contents=broker-fixture'
+assert_absent "historical release does not invent a companion host" \
+    "$historical_install/pulp-control-standalone-host"
 
 echo ""
 echo "Result: $PASS pass, $FAIL fail"

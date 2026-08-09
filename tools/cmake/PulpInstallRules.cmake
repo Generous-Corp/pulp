@@ -103,6 +103,9 @@ endif()
 if(TARGET pulp-inspect-runtime)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-runtime)
 endif()
+if(TARGET pulp-inspect-standalone-runtime)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-standalone-runtime)
+endif()
 if(TARGET pulp-inspect-offline-runtime)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-offline-runtime)
 endif()
@@ -362,6 +365,11 @@ elseif(TARGET pulp-inspect-protocol)
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_trace_session_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/main_thread_rpc.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/trace_inspector.hpp"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
+    endif()
+    if(TARGET pulp-inspect-standalone-runtime)
+        install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_standalone_host.hpp"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
     endif()
     if(TARGET pulp-inspect-authoring)

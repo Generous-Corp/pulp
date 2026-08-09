@@ -79,6 +79,8 @@ jobs:
             --cpp-binary build/tools/cli/pulp-cpp \
             --mcp-binary build/tools/mcp/pulp-mcp \
             --control-broker-binary build/inspect/pulp-control-broker \
+            --control-standalone-host-binary build/inspect/pulp-control-standalone-host \
+            --control-standalone-manifest build/inspect/pulp-control-standalone-host.inspector-capabilities.json \
             --import-design-binary build/tools/import-design/pulp-import-design \
             --import-design-runtime-dir build/tools/import-design/browser_capture-v1 \
             --build-dir build \
@@ -103,6 +105,12 @@ jobs:
           test -x "$BIN" || { echo "::error::packaged pulp binary missing"; exit 1; }
           BROKER="$(dirname "$BIN")/pulp-control-broker"
           test -x "$BROKER" || { echo "::error::packaged control broker missing"; exit 1; }
+          CONTROL_HOST="$(dirname "$BIN")/pulp-control-standalone-host"
+          test -x "$CONTROL_HOST" || { echo "::error::packaged Standalone control host missing"; exit 1; }
+          CONTROL_MANIFEST="$(dirname "$BIN")/pulp-control-standalone-host.inspector-capabilities.json"
+          test -s "$CONTROL_MANIFEST" || { echo "::error::packaged Standalone capability manifest missing"; exit 1; }
+          test "$(stat -f '%Lp' "$CONTROL_HOST")" = 700 || { echo "::error::Standalone control host mode is not 700"; exit 1; }
+          test "$(stat -f '%Lp' "$CONTROL_MANIFEST")" = 600 || { echo "::error::Standalone capability manifest mode is not 600"; exit 1; }
           HELPER="$(dirname "$BIN")/pulp-import-design"
           test -x "$HELPER" || { echo "::error::packaged pulp-import-design helper missing"; exit 1; }
           test -s "$(dirname "$BIN")/browser_capture/capture.mjs" || {
@@ -120,6 +128,12 @@ jobs:
             exit 1
           fi
           codesign --verify --strict "$BROKER"
+          CONTROL_HOST_ARCHS="$(lipo -archs "$CONTROL_HOST" 2>/dev/null || true)"
+          if [ "$CONTROL_HOST_ARCHS" != "$EXPECT_ARCH" ]; then
+            echo "::error::packaged Standalone control host arch is '$CONTROL_HOST_ARCHS', expected exactly '$EXPECT_ARCH' — $(file "$CONTROL_HOST")"
+            exit 1
+          fi
+          codesign --verify --strict "$CONTROL_HOST"
           echo "OK: packaged pulp is thin $EXPECT_ARCH — running it:"
           "$BIN" help >/dev/null
           echo "OK: '$BIN help' ran on native ${{ matrix.platform }}."
