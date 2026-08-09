@@ -169,15 +169,21 @@ struct ChildProcess::Impl {
     ProcessResult result;
 };
 
-ChildProcessInputChannel::~ChildProcessInputChannel() = default;
+ChildProcessInputChannel::~ChildProcessInputChannel() {
+    if (handle_ >= 0)
+        CloseHandle(reinterpret_cast<HANDLE>(handle_));
+}
 
 ChildProcessInputChannel::ChildProcessInputChannel(ChildProcessInputChannel&& other) noexcept
     : handle_(std::exchange(other.handle_, -1)) {}
 
 ChildProcessInputChannel&
 ChildProcessInputChannel::operator=(ChildProcessInputChannel&& other) noexcept {
-    if (this != &other)
+    if (this != &other) {
+        if (handle_ >= 0)
+            CloseHandle(reinterpret_cast<HANDLE>(handle_));
         handle_ = std::exchange(other.handle_, -1);
+    }
     return *this;
 }
 
