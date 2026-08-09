@@ -2126,6 +2126,21 @@ Never run `gh pr create` + `shipyard ship` separately for a normal ship
 cycle. Never invoke the two version/skill scripts by hand — `shipyard pr`
 wires them together with the right flags.
 
+For an agent-driven or unattended local ship, run the repository watchdog
+instead of invoking the binary naked:
+
+```bash
+python3 tools/scripts/shipyard_pr_watchdog.py -- shipyard pr <args>
+```
+
+It passes output and exit status through unchanged. It only declares a stall
+after five minutes without output, followed by a one-minute confirmation in
+which the Shipyard process has no descendants and remains below 0.5% CPU. On
+macOS it writes one `sample` diagnostic under `/tmp`, stops only Shipyard's
+dedicated process group, and retries once so cached builds are reused. Missing
+process telemetry fails open; a live quiet compiler or SSH child prevents a
+restart. A second stall exits 124 instead of consuming another agent session.
+
 **After opening/merging a material PR, sweep its review comments.** `merge on
 green` fires before the automated reviewers (Codex, and cubic on Shipyard)
 finish, so a PR can land with unaddressed P1s. For any logic-bearing or
@@ -2665,7 +2680,7 @@ authenticating as the same user. Operational rules:
 ```bash
 # Primary: Shipyard
 shipyard run                              # validate current branch
-shipyard pr                               # create, track, validate, and merge on green
+python3 tools/scripts/shipyard_pr_watchdog.py  # create, track, validate, and merge on green; one safe stall restart
 shipyard ship --resume                    # pick up an interrupted ship (v0.3.0+)
 shipyard ship --no-resume                 # discard stale state, start fresh
 shipyard ship-state list                  # in-flight ships (title, url, sha)

@@ -11,8 +11,8 @@
     "Regenerate with tools/scripts/measure_min_os.py after any Skia/Dawn/V8 pin bump.",
     "CMake reads this before project() via tools/cmake/PulpMinOs.cmake to pin the deployment target."
   ],
-  "skia_milestone": "chrome/m151",
-  "measured_on": "2026-07-08",
+  "skia_milestone": "chrome/m152",
+  "measured_on": "2026-08-08",
   "platforms": {
     "macos-arm64": {
       "unit": "macos_version",
@@ -24,13 +24,13 @@
           "measured": "13.0",
           "expected": "13.0",
           "always_linked": true,
-          "source": "Chromium mac_deployment_target @ m151 (build/config/mac/mac_sdk.gni)"
+          "source": "skia-builder chrome/m152 mac-universal arm64 slice; measured with otool -l over libskia.a (the standalone mac-arm64 archive is not consumed because its Dawn objects leaked a 15.0 floor)"
         },
         "dawn": {
           "measured": "13.0",
           "expected": "13.0",
           "always_linked": true,
-          "source": "Chromium mac_deployment_target @ m151"
+          "source": "skia-builder chrome/m152 mac-universal arm64 slice; measured with otool -l over libdawn_combined.a (the standalone mac-arm64 archive is not consumed because its Dawn objects leaked a 15.0 floor)"
         },
         "libcxx": {
           "measured": "13.4",
@@ -51,19 +51,19 @@
       "unit": "macos_version",
       "floor": "13.4",
       "binding": "skia,dawn,libcxx",
-      "note": "Intel (x86_64) macOS target. Floor is arch-independent and set by Apple's libc++, not Skia/Dawn: std::to_chars(float/double/long double) — reached via std::format in core/runtime/log.hpp — is marked unavailable before macOS 13.4 in the macOS 15.4 SDK, exactly as on macos-arm64. The x86_64 Skia + Dawn prebuilt slices (danielraffel/skia-builder chrome/m151-minos13, skia-build-mac-x86_64-gpu-release.zip) both stamp minos 13.0 (measured via measure_min_os.py --measure over the unpacked libskia.a / libdawn_combined.a on 2026-07-10), below the 13.4 toolchain floor. A universal (arm64;x86_64) build's floor is max(macos-arm64, macos-x64) = 13.4.",
+      "note": "Intel (x86_64) macOS target. Floor is arch-independent and set by Apple's libc++, not Skia/Dawn: std::to_chars(float/double/long double) — reached via std::format in core/runtime/log.hpp — is marked unavailable before macOS 13.4 in the macOS 15.4 SDK, exactly as on macos-arm64. The x86_64 Skia + Dawn prebuilt slices (danielraffel/skia-builder chrome/m152, skia-build-mac-x86_64-gpu-release.zip) both stamp minos 13.0, below the 13.4 toolchain floor. A universal (arm64;x86_64) build's floor is max(macos-arm64, macos-x64) = 13.4.",
       "deps": {
         "skia": {
           "measured": "13.0",
           "expected": "13.0",
           "always_linked": true,
-          "source": "skia-builder chrome/m151-minos13 mac-x86_64 slice; measure_min_os.py --measure over build/mac-gpu/lib/Release/x86_64/libskia.a"
+          "source": "skia-builder chrome/m152 mac-x86_64 slice; measure_min_os.py --measure over build/mac-gpu/lib/Release/x86_64/libskia.a"
         },
         "dawn": {
           "measured": "13.0",
           "expected": "13.0",
           "always_linked": true,
-          "source": "skia-builder chrome/m151-minos13 mac-x86_64 slice; measure_min_os.py --measure over build/mac-gpu/lib/Release/x86_64/libdawn_combined.a (bundled in the Skia toolchain)"
+          "source": "skia-builder chrome/m152 mac-x86_64 slice; measure_min_os.py --measure over build/mac-gpu/lib/Release/x86_64/libdawn_combined.a (bundled in the Skia toolchain)"
         },
         "libcxx": {
           "measured": "13.4",

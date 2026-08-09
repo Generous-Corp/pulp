@@ -88,7 +88,98 @@ coefficient design retains the rounded Q used by existing renders, while
 - Processing: `process(input)` returns `Frame{bands, count, healthy}`.
 - Inspection: `supports_configuration()`, `minimum_transition_samples()`, `maximum_downward_log_slew_nepers_per_second()`, `band_count()`, `cutoff_count()`, `cutoff()`, `sample_rate()`, `transitioning()`, `healthy()`, `fault_count()`, `latency_samples()`, `band_response()`, `reconstruction_response()`.
 
+### `SpectralGate` and `SpectralFrameBlur`
+
+These frame-domain processors compose with `SpectralFrameEngine`; neither owns
+an FFT or adds host latency. `SpectralGate::process()` hard-gates each complex
+bin independently by linear magnitude. Its optional caller-owned threshold
+curve contains one finite, non-negative threshold per bin and overrides the
+scalar threshold for that frame. `SpectralFrameBlur::prepare(channels, bins,
+frames)` fixes a causal box-blur window of 1–128 analysis frames. Processing
+averages magnitudes across only the history observed so far, preserves current
+non-zero phase, and holds the last finite phase while a vanished bin decays.
+The blur reaches exactly zero after its finite history expires; it is not an
+unbounded exponential tail. Non-finite bins become silence and cannot poison
+later frames. Finite complex components whose mathematical magnitude exceeds
+the sample type retain their phase and saturate to its maximum finite magnitude.
+
+- Gate controls and processing: `set_threshold_magnitude()`/`threshold_magnitude()`, `process(frames, channels, bins, optional_threshold_curve)`.
+- Blur lifecycle and processing: `supports_configuration()`, `checked_retained_bytes()`, `prepare()`, `reset()`, `process()`.
+- Blur inspection: `channels()`, `num_bins()`, `blur_frames()`, `filled_frames()`, `retained_bytes()`.
+
+### `SpectralMorph`
+
+This frame-domain processor combines coherent complex frames from two live
+`SpectralFrameEngine` inputs. It owns no FFT or captured audio and adds no host
+latency. `prepare(channels, bins)` fixes bounded geometry without allocation;
+the bin count must describe a one-sided power-of-two FFT from 256 through
+16384 samples (129 through 8193 bins).
+Magnitude and phase use independent normalized amounts. Magnitude policy is
+linear amplitude or equal power; phase policy is shortest-arc angle or
+normalized unit-vector interpolation. Both phase policies are wrap-safe at the
+negative/positive pi seam. A zero-magnitude endpoint borrows the other
+endpoint's phase instead of rotating through an arbitrary zero phase.
+DC and Nyquist remain real-valued: when their endpoint signs differ, phase
+amount selects A below 0.5 and B at or above 0.5 because no continuous
+constant-magnitude path exists inside the real-only self-conjugate domain.
+
+Whole-frame `process()` and `process_partition()` are bit-identical for the
+same disjoint bins, and output may alias either input exactly. Non-finite input
+falls back to the other endpoint, or silence when both are non-finite. Finite
+complex components whose mathematical magnitude exceeds the sample type are
+phase-preservingly saturated.
+
+- Lifecycle/configuration: `supports_configuration()`, `prepare()`, `reset()`, `set_config()`/`config()`.
+- Processing: `process(a, b, out, channels, bins, magnitude_amount, phase_amount)`, `process_partition(a, b, out, channels, first_bin, bin_count, magnitude_amount, phase_amount)`.
+- Inspection: `prepared()`, `channels()`, `num_bins()`.
+
 ## Routing and gain laws
+
+### `SpectralBandLayout` and spectral masks
+
+`SpectralBandLayout` is the fixed-capacity authoring contract for zoomable
+frequency masks. It always owns 64 stable slots and activates 1–64 of them over
+a linear or logarithmic `[min_hz, max_hz]` viewport. Each slot has finite dB gain
+plus a separate mute bit; its authored gain compiles to exact linear `0.0`
+instead of a large negative dB approximation. `SpectralBandEdgePolicy` selects
+silence outside the viewport or extension of the first/last band. In the latter
+mode, muting the first and last bands creates low/high cuts around the focused
+viewport. Hard boundaries preserve exact zero for every bin owned by a muted
+band. A raised-cosine boundary intentionally blends transition bins with the
+neighboring band; its width is expressed as a fraction of one band.
+
+`build_spectral_mask()` runs on the control thread. It clamps the effective
+viewport to Nyquist, derives DC-through-Nyquist ownership and band-edge Hz, and
+fills a fixed-capacity `SpectralMaskTable` for one prepared FFT geometry. Invalid
+geometry or controls leave the destination table unchanged. The table carries a
+caller version and requested frame transition duration so a streaming publisher
+can adopt and interpolate it at spectral-frame boundaries.
+
+`apply_spectral_mask()` is the allocation-free frame operation. It applies the
+same real-valued gain table to every channel's one-sided complex spectrum,
+preserving ordinary finite phase and stereo relationships. It validates complete
+geometry before mutation, silences non-finite bins, and saturates finite overflow.
+It adds no latency beyond the `SpectralFrameEngine` that owns analysis/synthesis.
+
+```cpp
+pulp::signal::SpectralBandLayout layout;
+layout.active_bands = 32;
+layout.min_hz = 250.0f;
+layout.max_hz = 2000.0f;
+layout.bands[3].muted = true;
+
+pulp::signal::SpectralMaskTable mask;
+if (!pulp::signal::build_spectral_mask(layout, 2048, 48000.0f, mask))
+    return; // reject invalid control state off the audio thread
+
+frame_engine.process(input, output, samples,
+    [&](std::complex<float>* const* frames, int bins) {
+        (void)pulp::signal::apply_spectral_mask(frames, channels, bins, mask);
+    });
+```
+
+The runnable mathematical, fault, RT, and WOLA composition examples live in
+`test/test_spectral_band_mask.cpp`.
 
 ### Orthonormal mid/side and stereo width
 
@@ -183,6 +274,31 @@ infinity represents a complete mute and has zero linear gain.
 lineage exposes `gain_reduction()` using this convention without changing the
 sign or behavior of its existing `gain_reduction_db()` method. `Compressor`,
 `Limiter`, and `NoiseGate` expose the same telemetry contract.
+
+### `Expander`
+
+`Expander` and `Expander64` provide fixed-state stereo downward or upward
+expansion. `ExpansionMode::{downward,upward}` selects the active side of the
+threshold. Ratio, range, and knee define a continuous bounded curve;
+`gain_computer_db()` is the pure memoryless form of that same curve. A prepared
+peak/RMS detector supplies exact 10-to-90-percent attack and release ballistics,
+with `DynamicsStereoLink::{independent,peak_linked}` as the channel policy.
+
+`prepare(sample_rate)` and `configure(Config)` return `ExpanderStatus`; rejected
+calls leave the live configuration and history unchanged. Processing, bypass,
+reset, and inspection are allocation-free and `noexcept` after preparation.
+Bypass emits finite input samples exactly while advancing detector state.
+Non-finite input clears detector history and emits finite silence.
+
+- Lifecycle: `prepare(sample_rate)`, `reset()`.
+- Controls: `configure(config)`, `set_bypassed(bool)`.
+- Processing: `process(left, right)`, `process(left_buffer, right_buffer, frames)`.
+- Inspection: `config()`, `prepared()`, `sample_rate()`, `bypassed()`,
+  `current_gain_db()`, `gain_reduction()`, `latency_samples()`, `tail_samples()`.
+- Domains: threshold `[-160, 24]` dB, ratio `[1, 20]`, range `[0, 96]` dB,
+  knee `[0, 48]` dB, attack `[0.01, 2000]` ms, release `[0.01, 10000]` ms,
+  sample rate `(0, 1536000]` Hz.
+
 ### `TruePeakLimiter`
 
 `prepare(sample_rate, channels, params)` fixes the explicit channel count and

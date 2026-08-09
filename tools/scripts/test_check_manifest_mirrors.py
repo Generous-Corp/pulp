@@ -32,7 +32,7 @@ _SHAS = {
     "linux-arm64": "a" * 64,
     "ios-simulator-arm64-x86_64": "b" * 64,  # underscore-bearing platform token
 }
-_VERSIONS = {"Skia": "chrome/m151", "Dawn": "chrome/m151 deps",
+_VERSIONS = {"Skia": "chrome/m152", "Dawn": "chrome/m152 deps",
              "V8": "v8-15.2.24-lkgr-97440bd4f523"}
 
 
@@ -75,12 +75,12 @@ class ManifestMirrorTests(unittest.TestCase):
         dep = self.root / "DEPENDENCIES.md"
         dep.write_text(
             "| Name | Version | License |\n|--|--|--|\n"
-            "| Skia | chrome/m151 | BSD-3-Clause |\n"
+            "| Skia | chrome/m152 | BSD-3-Clause |\n"
             "| V8 | v8-15.2.24-lkgr-97440bd4f523 | BSD-3-Clause |\n",
             encoding="utf-8",
         )
         got = cmm.dependencies_md_versions(dep)
-        self.assertEqual(got["Skia"], "chrome/m151")
+        self.assertEqual(got["Skia"], "chrome/m152")
         self.assertEqual(got["V8"], "v8-15.2.24-lkgr-97440bd4f523")
 
     # --- compare(): in-sync and each drift class ---------------------------

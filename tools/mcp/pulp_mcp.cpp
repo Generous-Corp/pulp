@@ -449,7 +449,11 @@ std::string pulp_mcp::server::tools_list_json() {
     out.reserve(32 * 1024);
     out += R"JSON({"tools":[)JSON";
 #if PULP_MCP_ENABLE_TIMELINE_TOOLS
-    out += pulp_mcp::kTimelineMcpToolsArray;
+    for (std::size_t i = 0; i < pulp_mcp::kTimelineMcpTools.size(); ++i) {
+        if (i != 0)
+            out += ',';
+        out += pulp_mcp::kTimelineMcpTools[i];
+    }
     out += ",";
 #endif
     const auto control_tools = pulp_mcp::control_mcp_tools_json_fragment();
