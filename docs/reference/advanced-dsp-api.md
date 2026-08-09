@@ -140,11 +140,13 @@ phase-preservingly saturated.
 `SpectralBandLayout` is the fixed-capacity authoring contract for zoomable
 frequency masks. It always owns 64 stable slots and activates 1–64 of them over
 a linear or logarithmic `[min_hz, max_hz]` viewport. Each slot has finite dB gain
-plus a separate mute bit; mute compiles to exact linear `0.0` instead of a large
-negative dB approximation. `SpectralBandEdgePolicy` selects silence outside the
-viewport or extension of the first/last band. In the latter mode, muting the
-first and last bands creates low/high cuts around the focused viewport. Boundaries may be hard or use a
-raised-cosine transition whose width is expressed as a fraction of one band.
+plus a separate mute bit; its authored gain compiles to exact linear `0.0`
+instead of a large negative dB approximation. `SpectralBandEdgePolicy` selects
+silence outside the viewport or extension of the first/last band. In the latter
+mode, muting the first and last bands creates low/high cuts around the focused
+viewport. Hard boundaries preserve exact zero for every bin owned by a muted
+band. A raised-cosine boundary intentionally blends transition bins with the
+neighboring band; its width is expressed as a fraction of one band.
 
 `build_spectral_mask()` runs on the control thread. It clamps the effective
 viewport to Nyquist, derives DC-through-Nyquist ownership and band-edge Hz, and

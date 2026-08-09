@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 9,
+  "manifest_revision": 10,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 31
+        "capabilities": 32
       },
       "timebase": {
         "state": "partial",
@@ -2944,6 +2944,111 @@
       "contract_digest": "sha256:c7d9780be2101ca162433e61a5d59e5376b7005ab97ea4856b1ff5f55184c97a"
     },
     {
+      "key": "signal.spectral-band-mask",
+      "domain": "signal",
+      "summary": "Fixed-capacity zoomable band layouts compiled into allocation-free complex-spectrum gain masks.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control-side immutable mask compilation",
+        "process": "audio spectral-frame owner",
+        "reset": "none",
+        "release": "none"
+      },
+      "state_model": "Fixed 64-slot finite-gain and categorical-mute layout plus a fixed 8193-bin compiled gain table.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "tolerance_bounded",
+        "block_partition": "not_applicable",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "finite linear or logarithmic band layouts, prepared FFT geometry, and coherent channel groups of one-sided complex spectra",
+      "output_domain": "immutable gain tables and in-place masked complex spectra",
+      "units": [
+        "bins",
+        "channels",
+        "frames",
+        "hertz",
+        "decibels",
+        "linear gain"
+      ],
+      "latency": "zero additional frame-domain latency",
+      "tail": "none",
+      "scheduling": "control-side table compilation then one supplied spectral frame per apply call",
+      "bindings": [
+        {
+          "role": "layout",
+          "kind": "cpp_type",
+          "include": "pulp/signal/spectral_band_mask.hpp",
+          "qualified_name": "pulp::signal::SpectralBandLayoutT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "table",
+          "kind": "cpp_type",
+          "include": "pulp/signal/spectral_band_mask.hpp",
+          "qualified_name": "pulp::signal::SpectralMaskTableT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "compile",
+          "kind": "cpp_function",
+          "include": "pulp/signal/spectral_band_mask.hpp",
+          "qualified_name": "pulp::signal::build_spectral_mask<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "apply",
+          "kind": "cpp_function",
+          "include": "pulp/signal/spectral_band_mask.hpp",
+          "qualified_name": "pulp::signal::apply_spectral_mask<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:c8b893644e5b4350108cb149b8b2727816e4aeaad13faa3a33b999985ba2ab79"
+    },
+    {
       "key": "signal.spectral-frame-blur",
       "domain": "signal",
       "summary": "Prepared causal finite moving-average blur of complex spectral-frame magnitudes.",
@@ -4262,14 +4367,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 62,
+    "total": 63,
     "by_domain": {
       "audio": 6,
       "midi": 9,
       "music": 6,
       "offline": 0,
       "sequence": 1,
-      "signal": 31,
+      "signal": 32,
       "timebase": 9
     }
   },
