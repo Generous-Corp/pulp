@@ -15,6 +15,9 @@ implemented ∩ built ∩ host_available ∩ activated
 Use `pulp control status --instance ID --explain` to inspect these terms for one
 exact broker-issued instance ID. There is no host, port, newest-instance,
 human-label, discovery-file, or raw protocol selector.
+Status observes registration only: without an operation to evaluate,
+`implemented`, `built`, `host_available`, `activated`, and `session_live` are
+reported as `not_evaluated`, never inferred as satisfied from registration.
 
 ## Author a target manifest
 

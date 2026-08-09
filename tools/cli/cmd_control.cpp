@@ -1,5 +1,6 @@
 #include "cli_common.hpp"
 #include "control_operation_deadline.hpp"
+#include "control_status_explain.hpp"
 #include "inspector_shipping_report.hpp"
 
 #include <pulp/inspect/capabilities.hpp>
@@ -424,15 +425,8 @@ int cmd_control(const std::vector<std::string>& args) {
         auto root = choc::value::createObject("");
         root.addMember("instance", *item);
         root.addMember("schema", choc::value::createString("pulp.control.status.v1"));
-        if (explain) {
-            auto terms = choc::value::createObject("");
-            for (const auto term :
-                 {"implemented", "built", "host_available", "activated", "session_live"})
-                terms.addMember(term, choc::value::createString("satisfied"));
-            terms.addMember("policy_eligible", choc::value::createString("evaluated_at_call_time"));
-            terms.addMember("client_granted", choc::value::createString("grant_required"));
-            root.addMember("permission_terms", terms);
-        }
+        if (explain)
+            root.addMember("permission_terms", pulp::cli::control::status_permission_terms());
         if (json)
             std::cout << choc::json::toString(root, false) << '\n';
         else {
@@ -440,8 +434,7 @@ int cmd_control(const std::vector<std::string>& args) {
                       << "Plugin: " << (*item)["plugin_id"].getString() << '\n'
                       << "Publication: " << (*item)["publication_id"].getString() << '\n';
             if (explain)
-                std::cout << "Authority: live and built; policy is evaluated per call; a matching "
-                             "grant is required.\n";
+                std::cout << pulp::cli::control::status_authority_explanation << '\n';
         }
         return 0;
     }

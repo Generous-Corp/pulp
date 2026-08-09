@@ -2,6 +2,7 @@
 
 #include "test_cli_shellout_helpers.hpp"
 #include "../tools/cli/control_operation_deadline.hpp"
+#include "../tools/cli/control_status_explain.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -12,6 +13,24 @@
 
 namespace fs = std::filesystem;
 using namespace pulp_test_cli;
+
+TEST_CASE("control status explanation does not infer operation gates from registration",
+          "[cli][inspect][control][status]") {
+    const auto terms = pulp::cli::control::status_permission_terms();
+    const auto json = choc::json::toString(terms, false);
+    for (const char* term :
+         {"implemented", "built", "host_available", "activated", "session_live"}) {
+        CHECK(terms[term].getString() == "not_evaluated");
+        CHECK(json.find(std::string{"\""} + term + "\": \"satisfied\"") ==
+              std::string::npos);
+    }
+    CHECK(terms["policy_eligible"].getString() == "evaluated_at_call_time");
+    CHECK(terms["client_granted"].getString() == "grant_required");
+
+    const auto text = pulp::cli::control::status_authority_explanation;
+    CHECK(text.find("operation-dependent terms were not evaluated") != std::string_view::npos);
+    CHECK(text.find("live and built") == std::string_view::npos);
+}
 
 TEST_CASE("control operation deadline spends one deterministic wall-clock budget",
           "[cli][inspect][control][timeout]") {

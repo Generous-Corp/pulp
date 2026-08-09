@@ -1139,7 +1139,7 @@ commands:
       - name: instances
         summary: List broker-owned exact live instance registrations
       - name: status
-        summary: Describe one exact instance and optionally explain authority terms
+        summary: Describe one exact registration and optionally explain authority terms without claiming operation-dependent gates were evaluated
       - name: grant-request
         summary: Ask the broker for a scoped grant; the CLI never self-approves consent
       - name: call

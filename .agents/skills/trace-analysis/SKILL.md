@@ -83,7 +83,9 @@ is currently available only through in-process fixture APIs.
 
 Live `start`/`stop` use the canonical capability-control client and have no
 legacy Inspector fallback. If the broker cannot authorize a target, capture
-fails closed.
+fails closed. When selecting an exact broker-owned live instance, pass the same
+`--instance ID` to both `start` and `stop`; omission retains fail-closed
+unambiguous selection.
 
 **Before trusting the capture**, confirm it is not silently empty/truncated
 (ring overflow → empty trace): `SELECT DISTINCT category FROM slice`. No rows,

@@ -22,10 +22,11 @@ Tracing is a dev-only tool. Never ship a plugin with `PULP_TRACING` enabled.
 ```bash
 # The broker must authorize a trusted control session.
 
-# 2. Start a session, reproduce the slow thing, then stop.
-pulp trace start --categories dsp,render
+# 2. Start a session, reproduce the slow thing, then stop. Use the same exact
+# broker-owned instance ID for both lifecycle calls when selecting explicitly.
+pulp trace start --instance INSTANCE_ID --categories dsp,render
 # ... trigger the suspect interaction / open the editor ...
-pulp trace stop
+pulp trace stop --instance INSTANCE_ID
 # → /tmp/pulp-<ts>.pftrace
 
 # 3. Query the flushed file. For a narrated answer, load trace-analysis and
@@ -39,12 +40,14 @@ pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20" \
 
 | `pulp trace <verb>` | Inspector method |
 |---|---|
-| `start` | canonical `dev.pulp.trace/session-control@1` |
-| `stop` | canonical `dev.pulp.trace/session-control@1` |
+| `start [--instance ID]` | canonical `dev.pulp.trace/session-control@1` |
+| `stop [--instance ID]` | canonical `dev.pulp.trace/session-control@1` |
 
 `start` and `stop` use the canonical capability-control client. The broker owns
-trusted target selection, consent, grants, and receipts; legacy
-`--session/--instance/--publication` and raw `--port` selectors are rejected.
+trusted target selection, consent, grants, and receipts. `--instance ID`
+selects one exact broker-owned live instance; omitting it preserves fail-closed
+unambiguous selection. Legacy `--session` / `--publication` and raw `--port`
+selectors are rejected.
 `--json` emits the canonical response. With no authorized control session the
 operation fails closed and never falls back to Inspector discovery.
 

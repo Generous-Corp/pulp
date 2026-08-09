@@ -1385,6 +1385,11 @@ pulp control audit path/to/MyProduct --json
 without connecting to the broker. `pulp inspect profiles` is its deprecated
 compatibility alias and will be removed in Pulp 0.800.0 on 2026-10-01.
 
+`status --explain` reports the exact live registration but does not execute an
+operation. Consequently `implemented`, `built`, `host_available`, `activated`,
+and `session_live` are `not_evaluated`; operation-specific policy and grant
+terms are evaluated only by the corresponding call or watch request.
+
 `grant-request` never mints authority in the CLI. A trusted broker consent
 source must approve it; otherwise the stable result is `consent-required`.
 The broker derives a reconnectable client principal only after each invocation
