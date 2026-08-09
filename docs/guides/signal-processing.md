@@ -712,6 +712,49 @@ for (int i = 0; i < num_samples; ++i)
 
 ---
 
+### DeEsser
+
+Split-band sibilance control with an independent band-pass detector. The LR4
+audio split recombines at flat magnitude when no reduction is active; only the
+high band is attenuated when detector level exceeds the threshold.
+
+```cpp
+signal::DeEsser de_esser;
+de_esser.prepare(sample_rate, {
+    .threshold_db          = -24.0f,
+    .range_db              = 12.0f,
+    .attack_ms             = 1.0f,
+    .release_ms            = 80.0f,
+    .detector_frequency_hz = 6500.0f,
+    .detector_q            = 1.5f,
+    .split_frequency_hz    = 4500.0f,
+});
+
+de_esser.process(buffer, num_samples);
+```
+
+| Method | Description |
+|---|---|
+| `prepare(sample_rate, params)` | Validate configuration and establish coefficients. |
+| `set_params(params)` | Adopt one complete valid configuration; invalid input leaves the current configuration unchanged. |
+| `process(sample)` / `process(buffer, count)` | Process mono samples with fixed state and no allocation. |
+| `set_bypassed(bool)` | Select sample-exact dry output while keeping detector and split state current. |
+| `set_output_mode(OutputMode::detector_listen)` | Audition the exact band driving gain reduction. |
+| `gain_reduction()` | Read the shared non-negative dynamics telemetry value. |
+| `reset()` | Clear detector and split history without changing configuration. |
+
+`range_db` is a non-negative maximum attenuation magnitude. Use one instance
+per mono channel. A stereo plugin should choose its channel-link policy
+explicitly rather than assuming independent or max-linked detection.
+Attack and release use the shared envelope follower's exact 10-to-90-percent
+time convention.
+
+**Sample rate dependency:** `prepare()` is required. Coefficient-changing
+configuration calls belong outside the audio callback; the prepared process,
+bypass/listen, telemetry, and reset paths are allocation-free.
+
+---
+
 ## 7. Effects
 
 ### Reverb

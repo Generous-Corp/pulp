@@ -1705,6 +1705,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `pr-review-sweep` | Sweep a PR's automated + human review comments and act on them — especially material/large PRs; pre-/post-merge, cross-repo (Pulp + Shipyard) |
 | `pr-batching` | Ship 2+ finished branches as ONE PR when they're related — cuts CI runs; heuristics for when NOT to |
 | `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`): focus marker + normal watch/rebuild, AOT analyzer guidance, deferred ar-swap / PR monitor |
+| `render-toolchain-update` | Update milestone-matched Skia, built-Dawn, and V8 releases together while preserving the separate weekly V8 lane |
 | `screenshot` | Faithful headless PNG capture: render_to_png Skia-vs-CoreGraphics backends, image-compositing trap, `--screenshot-backend`, capture_png |
 | `sdf-text` | SDF / MSDF / PSDF glyph atlases: building, sampling via SkSL, shared text-layout helpers |
 | `ship` | Sign / notarize / package / distribute Pulp plugins and apps across macOS / Windows / Android |

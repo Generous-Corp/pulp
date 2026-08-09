@@ -33,6 +33,11 @@ pulp_add_test_suite(pulp-test-signal-rt-safety
     SOURCES test_signal_rt_safety.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal pulp::signal-fft-backend)
 
+pulp_add_test_suite(pulp-test-expander
+    SOURCES test_expander.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
 pulp_add_test_suite(pulp-test-source-filter-analysis
     SOURCES test_source_filter_analysis.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
@@ -188,6 +193,11 @@ pulp_add_test_suite(pulp-test-signal-nonlinear-shaping
     LIBRARIES pulp::signal
     TIMEOUT 900)
 
+pulp_add_test_suite(pulp-test-signal-cross-feedback-multitap-delay
+    SOURCES test_signal_cross_feedback_multitap_delay.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
 pulp_add_test_suite(pulp-test-signal-headphone-crossfeed
     SOURCES test_signal_headphone_crossfeed.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
@@ -206,6 +216,11 @@ pulp_add_test_suite(pulp-test-dynamics-contract
     SOURCES test_dynamics_contract.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
     TIMEOUT 900)
+
+pulp_add_test_suite(pulp-test-de-esser
+    SOURCES test_de_esser.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
 
 # The circuit-modelled clipper family. Distinct from the memoryless saturator:
 # a capacitor inside the clipping network makes the effective clip point a

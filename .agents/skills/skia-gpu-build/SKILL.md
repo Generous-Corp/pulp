@@ -55,9 +55,9 @@ consistent. Don't mix this worktree's headers with another's libs.
 
 ## Building from source (only when no cached libs anywhere)
 
-`tools/build-skia.sh` builds the chrome/m151 Skia+Dawn from source — slow
+`tools/build-skia.sh` builds the currently pinned chrome/m152 Skia+Dawn from source — slow
 (tens of minutes). Prefer the release zip from
-`danielraffel/skia-builder` (chrome/m151, see `external/skia-build/VERSION.md`)
+`danielraffel/skia-builder` (chrome/m152, see `external/skia-build/VERSION.md`)
 or reusing a sibling checkout's `build/`.
 
 ## Verify it's REALLY a GPU build (necessary AND sufficient)
@@ -133,7 +133,7 @@ without opening a window.
   that touches a member (`fillType`, `setIsVolatile`, `isEmpty`) as unreliable
   until the bundle's headers and libraries are re-cut from one revision.
   `external/skia-build/VERSION.md` notes the macOS slices come from a separate
-  `chrome/m151-minos13` re-cut while `include/` is the shared drop, which is the
+  a milestone-specific min-OS re-cut while `include/` is the shared drop, which is the
   likely origin. To re-measure after a Skia bump: construct at one fixed address
   via placement new (two `SkPathBuilder`s at different addresses differ at byte
   0 because `STArray` holds a pointer into its own inline buffer, which
@@ -162,7 +162,7 @@ without opening a window.
   but subsequent incremental builds are fast.
 - **Linux release-path `RawPtrBackupRefImpl` / `PartitionAddressSpace::setup_`
   link failures mean the Skia bundle omitted Chromium PartitionAlloc support.**
-  The chrome/m151 Linux archive can reference Chromium BackupRefPtr /
+  Current milestone Linux archives can reference Chromium BackupRefPtr /
   PartitionAlloc symbols from `libskia.a(libskia.SkSLParser.o)` even though the
   standalone `skia-builder` bundle does not ship a `partition_alloc` archive.
   `FindSkia.cmake` inspects `libskia.a` with `CMAKE_NM`; when those symbols are

@@ -8,8 +8,18 @@ namespace pulp_mcp {
 inline constexpr std::string_view kTimelineMcpToolsDocument =
     R"PULPTL(@PULP_TIMELINE_MCP_TOOLS_JSON@)PULPTL";
 
-inline constexpr std::string_view kTimelineMcpToolsArray =
-    R"PULPTL(@PULP_TIMELINE_MCP_TOOLS_ARRAY@)PULPTL";
+inline constexpr std::array<std::string_view, 10> kTimelineMcpTools{
+    R"PULPTL(@PULP_TIMELINE_MCP_TOOL_JSON_0@)PULPTL",
+    R"PULPTL(@PULP_TIMELINE_MCP_TOOL_JSON_1@)PULPTL",
+    R"PULPTL(@PULP_TIMELINE_MCP_TOOL_JSON_2@)PULPTL",
+    R"PULPTL(@PULP_TIMELINE_MCP_TOOL_JSON_3@)PULPTL",
+    R"PULPTL(@PULP_TIMELINE_MCP_TOOL_JSON_4@)PULPTL",
+    R"PULPTL(@PULP_TIMELINE_MCP_TOOL_JSON_5@)PULPTL",
+    R"PULPTL(@PULP_TIMELINE_MCP_TOOL_JSON_6@)PULPTL",
+    R"PULPTL(@PULP_TIMELINE_MCP_TOOL_JSON_7@)PULPTL",
+    R"PULPTL(@PULP_TIMELINE_MCP_TOOL_JSON_8@)PULPTL",
+    R"PULPTL(@PULP_TIMELINE_MCP_TOOL_JSON_9@)PULPTL",
+};
 
 inline constexpr std::array<std::string_view, 10> kTimelineMcpToolNames{
     "@PULP_TIMELINE_MCP_TOOL_NAME_0@",

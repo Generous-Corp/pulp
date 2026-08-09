@@ -8,6 +8,17 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07981"></a>
+## [0.798.1] - 2026-08-09
+
+- release/version bump ([#7302](https://github.com/Generous-Corp/pulp/pull/7302))
+- fix/msvc design codegen small 20260808 ([#7294](https://github.com/Generous-Corp/pulp/pull/7294))
+- phase/vellum freeze pulp 20260808 ([#7296](https://github.com/Generous-Corp/pulp/pull/7296))
+- feat/timebase tempo map post7240 20260808 ([#7292](https://github.com/Generous-Corp/pulp/pull/7292))
+- fix/codecov native root causes 20260808 ([#7293](https://github.com/Generous-Corp/pulp/pull/7293))
+- release/post tag sync v0.798.0 b2cffbe72631 ([#7290](https://github.com/Generous-Corp/pulp/pull/7290))
+- release/version bump ([#7288](https://github.com/Generous-Corp/pulp/pull/7288))
+
 <a id="v07980"></a>
 ## [0.798.0] - 2026-08-09
 
@@ -7590,6 +7601,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.798.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.798.1
 [0.798.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.798.0
 [0.797.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.797.0
 [0.796.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.796.0

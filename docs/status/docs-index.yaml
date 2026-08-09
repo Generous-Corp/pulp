@@ -472,6 +472,11 @@ docs:
     kind: reference
     summary: Oversampled wavefolding, harmonic shaping, and ring-modulation primitives
 
+  - slug: cross-feedback-multitap-delay
+    path: reference/cross-feedback-multitap-delay.md
+    kind: reference
+    summary: Bounded time-domain multitap delay with normalized stereo cross-feedback
+
   - slug: headphone-crossfeed
     path: reference/headphone-crossfeed.md
     kind: reference
