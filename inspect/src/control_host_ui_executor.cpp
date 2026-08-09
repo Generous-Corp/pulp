@@ -4,6 +4,7 @@
 #include <pulp/inspect/control_main_thread_executor.hpp>
 #include <pulp/inspect/control_manifest.hpp>
 #include <pulp/inspect/runtime_evaluator.hpp>
+#include <pulp/runtime/crypto.hpp>
 
 #include <choc/text/choc_JSON.h>
 
@@ -26,8 +27,13 @@ namespace {
 constexpr std::string_view kCaptureOperation = "dev.pulp.ui/capture@1";
 constexpr std::string_view kUiInputOperation = "dev.pulp.ui/input@1";
 constexpr std::string_view kRuntimeEvalOperation = "dev.pulp.runtime/evaluate@1";
-constexpr std::string_view kRuntimeEvalComponentMarker =
-    "PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1";
+constexpr std::string_view kRuntimeEvalComponentMarkerDigest =
+    "08cf24197eb22433641d33d4a3445f685dcfe024de53d7bbd2b533c607db7832";
+
+bool exact_runtime_eval_component(const std::shared_ptr<RuntimeEvaluator>& evaluator) {
+    return evaluator &&
+           runtime::sha256_hex(evaluator->binary_marker()) == kRuntimeEvalComponentMarkerDigest;
+}
 
 ControlExecutionOutcome
 failure(ControlResultCode code, std::string explanation,
@@ -470,8 +476,8 @@ struct ControlHostUiExecutor::State : std::enable_shared_from_this<State> {
         if (request.operation_id != kRuntimeEvalOperation ||
             plan.capability != InspectorCapability::RuntimeEval ||
             acquired_binding.registration.profile != ControlBuildProfile::ResearchUnsafe ||
-            !acquired_binding.manifest.unsafe_runtime_eval_acknowledged || !acquired_evaluator ||
-            acquired_evaluator->binary_marker() != kRuntimeEvalComponentMarker) {
+            !acquired_binding.manifest.unsafe_runtime_eval_acknowledged ||
+            !exact_runtime_eval_component(acquired_evaluator)) {
             return failure(ControlResultCode::NotImplemented,
                            "host does not implement the requested UI operation");
         }
@@ -615,7 +621,7 @@ ControlHostUiExecutor::create(ControlHostUiExecutorConfig config) {
          std::ranges::find(registration.capabilities, InspectorCapability::RuntimeEval) ==
              registration.capabilities.end() ||
          !config.redact_runtime_eval_result ||
-         config.runtime_evaluator->binary_marker() != kRuntimeEvalComponentMarker))
+         !exact_runtime_eval_component(config.runtime_evaluator)))
         return nullptr;
     if (config.target_adapter &&
         (!config.resolve_authority || config.view_generation.empty() ||

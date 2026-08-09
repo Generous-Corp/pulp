@@ -94,6 +94,12 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
             connection_.reset();
             return false;
         }
+        const auto ready = connection_->mark_executor_ready(3s);
+        if (!ready.accepted) {
+            connection_->disconnect();
+            connection_.reset();
+            return false;
+        }
         return true;
     }
 

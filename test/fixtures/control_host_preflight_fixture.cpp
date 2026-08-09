@@ -27,7 +27,7 @@ const volatile char kProfile[] = "PULP_CONTROL_PROFILE_DEVELOPER_LOCAL_V1";
 const volatile char kManifest[] =
     "PULP_CONTROL_MANIFEST_SHA256_1fa8468f587e2205f95933744a12b73d14d69f0aa298c6897911cebbca73a6c2_"
     "V1";
-const volatile char kCapability[] = "PULP_INSPECT_CAPABILITY_DEV_PULP_INSTANCE_READ_1_V1";
+const volatile char kCapability[] = "PULP_INSPECT_CAPABILITY_SESSION_DESCRIBE_V1";
 
 bool contains_authority_material(std::string_view value) {
     return value.find("admission-1") != std::string_view::npos ||
