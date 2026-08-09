@@ -198,6 +198,13 @@ pulp_add_test_suite(pulp-test-signal-cross-feedback-multitap-delay
     LIBRARIES pulp::signal
     TIMEOUT 300)
 
+# Fixed-capacity caller-authored early-reflection taps: independent sparse
+# impulse oracle, true-stereo routing, headroom, partitioning, and RT proof.
+pulp_add_test_suite(pulp-test-signal-early-reflections
+    SOURCES test_signal_early_reflections.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
 pulp_add_test_suite(pulp-test-signal-headphone-crossfeed
     SOURCES test_signal_headphone_crossfeed.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
