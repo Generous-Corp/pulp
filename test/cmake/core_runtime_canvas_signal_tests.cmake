@@ -222,6 +222,26 @@ pulp_add_test_suite(pulp-test-routing-primitives
 # Biquad / SVF / LadderFilter / LinkwitzRiley TEST_CASE clusters moved
 # verbatim into a sibling TU to keep test_signal.cpp under ~1,200 lines.
 pulp_add_test_suite(pulp-test-signal-filters LIBRARIES pulp::signal)
+# Fixed-state, pivot-normalized tilt EQ with independent response and
+# time-domain oracles, deterministic block processing, and RT proof.
+pulp_add_test_suite(pulp-test-tilt-eq
+    SOURCES test_tilt_eq.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
+
+add_library(pulp-tilt-eq-header-self-containment OBJECT
+    header_compile/tilt_eq.cpp)
+target_link_libraries(pulp-tilt-eq-header-self-containment PRIVATE pulp::signal)
+
+add_executable(pulp-test-tilt-eq-no-exceptions test_tilt_eq_no_exceptions.cpp)
+target_link_libraries(pulp-test-tilt-eq-no-exceptions PRIVATE pulp::signal)
+if(MSVC)
+    target_compile_options(pulp-test-tilt-eq-no-exceptions PRIVATE /EHs-c- /GR-)
+else()
+    target_compile_options(pulp-test-tilt-eq-no-exceptions PRIVATE
+        -fno-exceptions -fno-rtti)
+endif()
+add_test(NAME tilt-eq-public-header-no-exceptions
+    COMMAND pulp-test-tilt-eq-no-exceptions)
 # Fixed-capacity N-way LR4 crossover: independent complex-response and
 # time-domain reconstruction oracles, automation, fault recovery, and RT proof.
 pulp_add_test_suite(pulp-test-nway-linkwitz-riley

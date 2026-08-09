@@ -35,6 +35,28 @@ processing call.
 
 ## Filters and crossovers
 
+### `TiltEqT<SampleType, Channels>`
+
+`TiltEqT` is a fixed-state reusable tonal-slope filter. Its signed
+`tilt_db_per_octave` range is `[-6, +6]`: positive values raise high
+frequencies relative to low frequencies, while negative values lower them. The
+slope is realized across `[31.25 Hz, min(16 kHz, 0.4 * sample_rate)]` by nine
+stable SOS shelves. `pivot_hz` must lie inside that band and is normalized to
+unity gain, so moving the pivot changes the response's gain reference without
+changing its slope. Zero tilt is an exact finite-input bypass.
+
+`set_config()` validates and designs the complete request before changing live
+coefficients; rejection preserves configuration and recursive history. An
+accepted non-no-op retune clears every channel's history. Non-finite audio
+clears only the affected channel, returns zero, and increments `fault_count()`.
+The filter has zero algorithmic latency. Active recursive shelves have an
+asymptotic tail (`tail_samples() == -1`); neutral bypass has no tail.
+
+- Lifecycle: `prepare(sample_rate)`, `reset()`, `reset(channel)`.
+- Configuration: `set_config(Config{pivot_hz, tilt_db_per_octave})`, `config()`.
+- Processing: `process(input, channel)`, in-place and separate-buffer `process_block()` overloads.
+- Inspection: `sample_rate()`, `design_high_hz()`, `normalization_gain()`, `coefficients()`, `magnitude()`, `magnitude_db()`, `fault_count()`, `latency_samples()`, `tail_samples()`.
+
 ### `LinkwitzRileyCrossoverT<SampleType, MaxBands>`
 
 This fixed-capacity LR4 crossover creates between two and `MaxBands` ordered

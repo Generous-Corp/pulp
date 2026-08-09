@@ -747,6 +747,11 @@ storage must run off the audio thread.
 
 **Link:** `pulp::signal` · **Include prefix:** `<pulp/signal/...>`
 
+`TiltEqT` provides fixed-state, pivot-normalized tonal slope in signed
+dB/octave with exact neutral bypass, transactional retuning, and no audio-thread
+allocation. Its full lifecycle and response-inspection surface is listed in the
+[advanced DSP API](advanced-dsp-api.md#tilteqtsampletype-channels).
+
 For synthesized percussion, including the complete voice API, recipes,
 provenance, and Forge bake-layer controls, see
 [Percussion synthesis](percussion-synthesis.md).

@@ -6,6 +6,7 @@
 #include <pulp/signal/bias.hpp>
 #include <pulp/signal/biquad.hpp>
 #include <pulp/signal/sos_cascade.hpp>
+#include <pulp/signal/tilt_eq.hpp>
 #include <pulp/signal/oscillator.hpp>
 #include <pulp/signal/delay_line.hpp>
 #include <pulp/signal/cross_feedback_multitap_delay.hpp>
