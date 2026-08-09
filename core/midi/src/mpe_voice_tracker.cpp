@@ -4,6 +4,7 @@
 #include <pulp/midi/ump.hpp>
 
 #include <cstdint>
+#include <limits>
 
 namespace pulp::midi {
 
@@ -184,13 +185,22 @@ std::size_t MpeVoiceTracker::active_count() const {
 
 const MpeNoteState* MpeVoiceTracker::find(uint8_t channel, uint8_t note) const {
     const MpeNoteState* best = nullptr;
-    uint32_t best_id = 0;
+    MpeNoteGeneration best_id = 0;
     for (const auto& s : notes_) {
         if (!s.active) continue;
         if (s.channel != channel || s.note != note) continue;
         if (s.note_id > best_id) { best = &s; best_id = s.note_id; }
     }
     return best;
+}
+
+bool MpeVoiceTracker::advance_note_generation(MpeNoteGeneration next) noexcept {
+    if (next == 0 || note_generation_exhausted() || active_count() != 0
+        || next < next_note_generation_) {
+        return false;
+    }
+    next_note_generation_ = next;
+    return true;
 }
 
 std::size_t MpeVoiceTracker::snapshot(MpeNoteState* out, std::size_t max) const {
@@ -205,70 +215,146 @@ std::size_t MpeVoiceTracker::snapshot(MpeNoteState* out, std::size_t max) const 
 
 // ── Lifecycle ──────────────────────────────────────────────────────────────
 
-void MpeVoiceTracker::reset() {
+void MpeVoiceTracker::reset() noexcept {
     for (auto& s : notes_) s = {};
     channel_pitch_bend_.fill(0.0f);
     channel_pressure_.fill(0.0f);
     channel_timbre_.fill(0.0f);
     lower_zone_state_ = {};
     upper_zone_state_ = {};
-    next_note_id_ = 1;
+    pending_note_offs_.fill(MpeNoteState{});
+    pending_note_off_head_ = 0;
+    pending_note_off_count_ = 0;
 }
 
 // ── Private helpers ────────────────────────────────────────────────────────
 
 void MpeVoiceTracker::add_note(uint8_t ch, uint8_t note, uint8_t velocity, bool upper) {
-    // Reuse existing slot if one matches (retrigger). Re-attach the
-    // slot so channel-level controllers resume affecting it.
+    // Exhaustion takes precedence over the ordinary table-full policy so the
+    // terminal refusal counter remains reliable even when every slot is live.
+    if (note_generation_exhausted()) {
+        record_generation_refusal();
+        return;
+    }
+    // A rejected physical release is retained in the fixed pending queue.
+    // Refuse starts until the owner flushes that queue: active + pending can
+    // then never exceed kMaxNotes, which proves defer_note_off() cannot run out
+    // of storage while draining the current block's remaining releases.
+    if (pending_note_off_count_ != 0) return;
+
+    // Reuse an existing slot if one matches (retrigger). The old generation
+    // must retire before the replacement starts. Prepare both snapshots first
+    // so a bounded sink can accept or reject the pair as one transaction.
     for (auto& s : notes_) {
         if (s.active && s.channel == ch && s.note == note) {
-            s.velocity = velocity;
-            s.note_id = next_note_id_++;
-            s.is_upper_zone = upper;
-            s.detached = false;
+            const MpeNoteState retiring = s;
+            MpeNoteState replacement = s;
+            replacement.velocity = velocity;
+            replacement.note_id = next_note_generation_;
+            replacement.is_upper_zone = upper;
+            replacement.detached = false;
             // Re-seed expression from the per-channel caches, mirroring the
             // fresh-slot branch below. A note that detached (and then saw
             // channel-level controller changes that were withheld while
             // detached) must resume at the *current* channel value on
             // retrigger, not the stale value frozen at detach time.
-            s.pitch_bend_semitones = channel_pitch_bend_[ch];
-            s.pressure = channel_pressure_[ch];
-            s.timbre = channel_timbre_[ch];
+            replacement.pitch_bend_semitones = channel_pitch_bend_[ch];
+            replacement.pressure = channel_pressure_[ch];
+            replacement.timbre = channel_timbre_[ch];
+
+            if (!accept_note_lifecycle(&retiring, &replacement)) return;
+            const auto generation = take_note_generation();
+            if (!generation) return; // guarded by the exhaustion check above
+            replacement.note_id = *generation;
+            s = replacement;
+            if (on_note_off) on_note_off(retiring);
             if (on_note_on) on_note_on(s);
             return;
         }
     }
     for (auto& s : notes_) {
         if (s.active) continue;
-        s = MpeNoteState{};
-        s.active = true;
-        s.channel = ch;
-        s.note = note;
-        s.velocity = velocity;
-        s.note_id = next_note_id_++;
-        s.is_upper_zone = upper;
+        MpeNoteState added{};
+        added.active = true;
+        added.channel = ch;
+        added.note = note;
+        added.velocity = velocity;
+        added.note_id = next_note_generation_;
+        added.is_upper_zone = upper;
         // Seed with current per-channel expression so freshly-added
         // notes inherit any running MPE state.
-        s.pitch_bend_semitones = channel_pitch_bend_[ch];
-        s.pressure = channel_pressure_[ch];
-        s.timbre = channel_timbre_[ch];
+        added.pitch_bend_semitones = channel_pitch_bend_[ch];
+        added.pressure = channel_pressure_[ch];
+        added.timbre = channel_timbre_[ch];
+
+        if (!accept_note_lifecycle(nullptr, &added)) return;
+        const auto generation = take_note_generation();
+        if (!generation) return; // guarded by the exhaustion check above
+        added.note_id = *generation;
+        s = added;
         if (on_note_on) on_note_on(s);
         return;
     }
     // Table full — drop silently (audio-thread policy).
 }
 
+bool MpeVoiceTracker::accept_note_lifecycle(const MpeNoteState* note_off,
+                                            const MpeNoteState* note_on) const {
+    return !on_note_lifecycle || on_note_lifecycle(note_off, note_on);
+}
+
+bool MpeVoiceTracker::defer_note_off(const MpeNoteState& note_off) noexcept {
+    if (pending_note_off_count_ >= pending_note_offs_.size()) return false;
+    const auto tail = (pending_note_off_head_ + pending_note_off_count_)
+        % pending_note_offs_.size();
+    pending_note_offs_[tail] = note_off;
+    ++pending_note_off_count_;
+    return true;
+}
+
+bool MpeVoiceTracker::flush_pending_note_offs() {
+    while (pending_note_off_count_ != 0) {
+        const MpeNoteState& deferred = pending_note_offs_[pending_note_off_head_];
+        if (!accept_note_lifecycle(&deferred, nullptr)) return false;
+        if (on_note_off) on_note_off(deferred);
+        pending_note_offs_[pending_note_off_head_] = {};
+        pending_note_off_head_ = (pending_note_off_head_ + 1) % pending_note_offs_.size();
+        --pending_note_off_count_;
+    }
+    pending_note_off_head_ = 0;
+    return true;
+}
+
+std::optional<MpeNoteGeneration> MpeVoiceTracker::take_note_generation() noexcept {
+    if (next_note_generation_ == 0) return std::nullopt;
+    const auto generation = next_note_generation_;
+    next_note_generation_ = generation == std::numeric_limits<MpeNoteGeneration>::max()
+        ? 0
+        : generation + 1;
+    return generation;
+}
+
+void MpeVoiceTracker::record_generation_refusal() noexcept {
+    if (refused_note_on_count_ != std::numeric_limits<std::uint64_t>::max()) {
+        ++refused_note_on_count_;
+    }
+}
+
 void MpeVoiceTracker::remove_note(uint8_t ch, uint8_t note) {
     // Oldest matching note wins (FIFO), matching typical MPE hardware
     // which retriggers with the newest and releases oldest-first.
     MpeNoteState* oldest = nullptr;
-    uint32_t oldest_id = UINT32_MAX;
+    MpeNoteGeneration oldest_id = std::numeric_limits<MpeNoteGeneration>::max();
     for (auto& s : notes_) {
         if (!s.active || s.channel != ch || s.note != note) continue;
-        if (s.note_id < oldest_id) { oldest = &s; oldest_id = s.note_id; }
+        if (!oldest || s.note_id < oldest_id) { oldest = &s; oldest_id = s.note_id; }
     }
     if (!oldest) return;
     MpeNoteState copy = *oldest;
+    if (!accept_note_lifecycle(&copy, nullptr)) {
+        if (defer_note_off(copy)) oldest->active = false;
+        return;
+    }
     oldest->active = false;
     if (on_note_off) on_note_off(copy);
 }

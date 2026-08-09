@@ -30,6 +30,26 @@ pulp_add_test_suite(pulp-test-buffer-ops LIBRARIES pulp::audio pulp::runtime)
 # MpeVoiceTracker per-note management + assignable PNC consumption
 pulp_add_test_suite(pulp-test-mpe-tracker-per-note-management LIBRARIES pulp::midi)
 
+# Bounded MIDI utility kernels + their existing-audio-contract bridge
+pulp_add_test_suite(pulp-test-midi-utility-kernels
+    SOURCES test_midi_utility_routing.cpp
+    LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-midi-utility-note-length
+    SOURCES test_midi_utility_note_length.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-midi-utility-monophonic
+    SOURCES test_midi_utility_monophonic.cpp
+    LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-midi-utility-controller
+    SOURCES test_midi_utility_controller.cpp
+    LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-midi-arpeggiator
+    SOURCES test_midi_arpeggiator.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-midi-voice-modulation-adapter
+    SOURCES test_midi_voice_modulation_adapter.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio)
+
 # Wavetable oscillator
 pulp_add_test_suite(pulp-test-wavetable LIBRARIES pulp::signal)
 

@@ -464,6 +464,8 @@ struct MpeSidecar {
     std::int32_t current_sample_offset = 0;
     /// Mirrors `PluginDescriptor::effective_capabilities().supports_mpe`.
     bool enabled = false;
+    /// Set by the bound expression callbacks when fixed storage is exhausted.
+    bool expression_event_dropped = false;
 
     MpeSidecar() = default;
     MpeSidecar(const MpeSidecar&) = delete;
@@ -478,7 +480,8 @@ struct MpeSidecar {
     void configure(bool supports_mpe) {
         enabled = supports_mpe;
         if (enabled) {
-            midi::bind_tracker_to_buffer(tracker, buffer, current_sample_offset);
+            midi::bind_tracker_to_buffer(
+                tracker, buffer, current_sample_offset, &expression_event_dropped);
         }
     }
 
@@ -491,10 +494,19 @@ struct MpeSidecar {
         buffer.set_realtime_capacity_limit(true);
     }
 
-    /// Drop all per-note tracker state so a re-activation / transport reset does
-    /// not route a stale noteId to a voice that no longer exists. Off the audio
-    /// thread.
-    void reset() { tracker.reset(); }
+    /// Drop adapter-owned per-note state so a re-activation / processor reset
+    /// cannot route a stale noteId. This deliberately cannot reset downstream
+    /// voices: the generic sidecar has no knowledge of the processor's allocator.
+    /// Deactivation adapters therefore call `Processor::release()` first, and a
+    /// live reset is paired with `ProcessContext::reset_requested` so the
+    /// processor clears its own DSP/voice state. Fixed-storage and audio-thread
+    /// safe; performs no allocation and invokes no callbacks.
+    void reset() noexcept {
+        tracker.reset();
+        buffer.clear();
+        current_sample_offset = 0;
+        expression_event_dropped = false;
+    }
 
     /// Per-block: when enabled, clear the buffer, run @p midi_in through the
     /// tracker (stamping each emitted expression event with its source event's
@@ -503,19 +515,49 @@ struct MpeSidecar {
     ///
     /// @p midi_in must already be in the order the adapter wants the tracker to
     /// see (VST3 sorts its buffer first; CLAP and AU use host delivery order).
-    /// RT-safe provided `reserve()` ran off the audio thread.
+    /// Returns false after reconciling when the source stream or expression
+    /// output could not be represented completely. Source incompleteness is
+    /// rejected even when MPE is disabled. RT-safe provided `reserve()` ran off
+    /// the audio thread.
     template <typename MidiRange>
-    void run(Processor& processor, const MidiRange& midi_in) {
+    [[nodiscard]] bool run(Processor& processor, const MidiRange& midi_in) {
+        if constexpr (requires { midi_in.dropped_event_count(); }) {
+            if (midi_in.dropped_event_count() != 0) {
+                // Source-stream completeness is required even when the
+                // processor did not opt into MPE: a retained attack followed
+                // by a dropped release can stick an ordinary MIDI voice too.
+                reset();
+                processor.set_mpe_input(enabled ? &buffer : nullptr);
+                return false;
+            }
+        }
         if (enabled) {
             buffer.clear();
+            expression_event_dropped = false;
+            // Releases that could not fit at the end of the previous block
+            // must lead this block before any new starts. The tracker blocks
+            // note-ons while this fixed queue is nonempty, so no voice can be
+            // orphaned and the queue remains bounded by tracker polyphony.
+            current_sample_offset = 0;
+            tracker.flush_pending_note_offs();
             for (const auto& ev : midi_in) {
                 current_sample_offset = ev.sample_offset;
                 tracker.process(ev);
+            }
+            if (expression_event_dropped) {
+                // Expression callbacks observe tracker state after mutation. If
+                // any fixed-capacity append fails, discard the partial stream
+                // and tracker state together; the adapter requests a processor
+                // reset so neither side retains a newer voice snapshot.
+                reset();
+                processor.set_mpe_input(&buffer);
+                return false;
             }
             processor.set_mpe_input(&buffer);
         } else {
             processor.set_mpe_input(nullptr);
         }
+        return true;
     }
 };
 

@@ -510,6 +510,14 @@ TEST_CASE("IPC server initial state", "[events][ipc]") {
     REQUIRE_FALSE(server.is_running());
 }
 
+TEST_CASE("IPC server stops after binding an ephemeral TCP port", "[events][ipc]") {
+    InterprocessConnectionServer server;
+    REQUIRE(server.start("127.0.0.1:0", IpcTransport::Socket));
+    REQUIRE(server.bound_port() != 0);
+    server.stop();
+    REQUIRE_FALSE(server.is_running());
+}
+
 TEST_CASE("IPC local server authenticates the kernel-observed peer",
           "[events][ipc][local][security]") {
 #ifdef _WIN32

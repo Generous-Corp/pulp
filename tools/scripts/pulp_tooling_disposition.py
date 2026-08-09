@@ -114,7 +114,7 @@ INITIAL_POLICY: dict[str, dict[str, set[str]]] = {
             "trace-sql", "web-plugins", "webview-ui",
         },
         "pulp-owned": {
-            "ci", "cli-maintenance", "code-comments", "content",
+            "agent-capabilities", "ci", "cli-maintenance", "code-comments", "content",
             "friction-report", "handoff", "installable-tools", "intel-canary",
             "kits", "packages", "pr-batching", "pr-review-sweep",
             "prototype-loop", "pulp-web-demo", "tart-ci", "update-demos",

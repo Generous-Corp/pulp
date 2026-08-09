@@ -57,8 +57,8 @@
     },
     {
       "path": "test/test_signal_mod_tools.cpp",
-      "max_loc": 275,
-      "note": "modulation toolkit control-tool and unit-conversion behavior"
+      "max_loc": 249,
+      "note": "modulation toolkit control-tool and general unit-conversion behavior"
     },
     {
       "path": "test/test_signal_mod_events.cpp",

@@ -27,6 +27,10 @@ class ReleaseContentWiring(unittest.TestCase):
             RELEASE,
         )
         self.assertIn(
+            'selected["capability_handoff_floor"] = authoritative[',
+            RELEASE,
+        )
+        self.assertIn(
             '"repos/${REPO}/contents/tools/scripts/'
             'release_product_matrix.json?ref=${DEFAULT_BRANCH}"',
             RELEASE,

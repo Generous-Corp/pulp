@@ -35,15 +35,11 @@ inline bool midi_block_has_drops(const MidiBuffer& block) noexcept {
     return ump != nullptr && ump->dropped_event_count() > 0;
 }
 
-// Append every event / sysex / UMP message from `src` to `dst`. Returns false
-// if `src` already carried a drop or an add() dropped here (the incompleteness
-// propagated downstream). RT-safe when both buffers are reserved (add() respects
-// the realtime capacity limit).
-inline bool copy_midi_block(const MidiBuffer& src, MidiBuffer& dst) noexcept {
+// Append only SysEx and UMP sidecars after a caller has transformed the short
+// messages. This keeps sidecar capacity and missing-destination behavior shared
+// with whole-block copies.
+inline bool copy_midi_sidecars(const MidiBuffer& src, MidiBuffer& dst) noexcept {
     bool copied_all = !midi_block_has_drops(src);
-    for (const auto& ev : src) {
-        if (!dst.add(ev)) copied_all = false;
-    }
     for (const auto& sx : src.sysex()) {
         if (sx.data.empty()) {
             if (!dst.add_sysex({}, sx.sample_offset, sx.timestamp)) {
@@ -64,6 +60,18 @@ inline bool copy_midi_block(const MidiBuffer& src, MidiBuffer& dst) noexcept {
         copied_all = false;
     }
     return copied_all;
+}
+
+// Append every event / sysex / UMP message from `src` to `dst`. Returns false
+// if `src` already carried a drop or an add() dropped here (the incompleteness
+// propagated downstream). RT-safe when both buffers are reserved (add() respects
+// the realtime capacity limit).
+inline bool copy_midi_block(const MidiBuffer& src, MidiBuffer& dst) noexcept {
+    bool copied_all = !midi_block_has_drops(src);
+    for (const auto& ev : src) {
+        if (!dst.add(ev)) copied_all = false;
+    }
+    return copy_midi_sidecars(src, dst) && copied_all;
 }
 
 }  // namespace pulp::midi

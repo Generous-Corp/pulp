@@ -19,7 +19,6 @@ bool has_fault(const std::vector<ForgeAuditFinding>& findings, ForgeAuditFault f
     return std::any_of(findings.begin(), findings.end(),
                        [fault](const auto& f) { return f.fault == fault; });
 }
-
 std::string render(const std::vector<ForgeAuditFinding>& findings) {
     std::string out;
     for (const auto& f : findings)
@@ -291,7 +290,7 @@ TEST_CASE("the export joins semantic descriptors to baked numeric ranges", "[for
     const auto findings = audit_forge_catalog_export(nodes);
     INFO(render(findings));
     REQUIRE(findings.empty());
-    REQUIRE(nodes.size() == 77);
+    REQUIRE(nodes.size() == 78);
 
     for (const auto& node : nodes) {
         INFO("node " << node.descriptor.key);
@@ -359,6 +358,8 @@ TEST_CASE("dynamic Forge families export every supported finite realization", "[
 
     REQUIRE(realization_modes(require_node(nodes, "feedforward_compressor")) ==
             std::set<std::string>{"lookahead_10ms", "lookahead_3ms", "zero_lookahead"});
+    REQUIRE(realization_modes(require_node(nodes, "true_peak_limiter")) ==
+            std::set<std::string>{"independent_5ms", "linked_0ms", "linked_10ms", "linked_5ms"});
     REQUIRE(realization_modes(require_node(nodes, "vca_compressor")) ==
             std::set<std::string>{"default", "lookahead_10ms_k4", "lookahead_3ms_k4",
                                   "zero_latency_k2", "zero_latency_k8"});

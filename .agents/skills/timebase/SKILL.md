@@ -1,6 +1,6 @@
 ---
 name: timebase
-description: Pulp musical/media time primitives, editable tempo and meter maps, immutable compiled lookup, streaming cursors, exact sample anchors, and shared transport quantization arithmetic.
+description: Pulp musical/media time primitives, exact beat divisions, tempo and meter maps, transport-range grid projection, order-preserving groove kernels, coordinate randomness, streaming cursors, and quantization arithmetic.
 ---
 
 # Timebase
@@ -45,6 +45,55 @@ quantizer's beat/frame arithmetic.
 - Keep `TransportQuantizer`'s public behavior stable. Generic beat/frame/grid
   arithmetic belongs in `<pulp/timebase/quantize.hpp>` and the format wrapper
   delegates to it.
+- `BeatDivision` is an append-only persisted ordinal vocabulary. Append new
+  values immediately before `Count`, assign every ordinal explicitly, and keep
+  `beat_fraction()` reduced. `division_ticks()` must fail if a future fraction
+  is not exactly representable on the 705,600-tick quarter-note lattice.
+- `BeatDivision` owns the canonical fraction table. The older
+  `signal::units::Division` vocabulary is a compatibility adapter: preserve its
+  lowercase public spellings and persisted ordinals, map it to `BeatDivision`,
+  and derive its beat values from `beat_fraction_or()`. Append both enums in the
+  same change and keep exhaustive compile-time and runtime parity coverage in
+  `test_signal_units.cpp`; never add a second division formula in signal.
+- Grid projection consumes explicit document and monotonic anchors in
+  `GridProjectionRange`; it does not infer transport state from an unwrapped
+  sample clock. This matches `playback::MasterTransport`: pre-loop material uses
+  its ordinary document interval, loop passes repeat the loop's document sample
+  interval and tempo image, and seeks change the document anchor without
+  resetting `MonotonicBeat`. Ranges and callbacks are half-open, so splitting a
+  callback cannot duplicate a boundary. Keep capacity and signed-domain failure
+  explicit and leave caller output untouched on insufficient capacity. Bound
+  candidate opportunities before entering either timeline- or bar-grid loops;
+  counting only emitted points leaves incoherent remote-sample ranges able to
+  burn unbounded callback time.
+- For document-clock projection, enumerate the rounded end tick as a candidate
+  and let `[timeline_sample_start, timeline_sample_start + frame_count)` decide
+  ownership. Sparse maps can give a valid one-frame transport range equal
+  rounded tick endpoints (at 1 BPM/48 kHz, tick 0 maps to sample 0 and tick 1 to
+  sample 4). Returning early drops tick 0 from a `1 + 3` split even though a
+  four-frame block emits it; excluding the end candidate merely moves the bug.
+  The next range's sample filter prevents duplication.
+- A host-beat-mapped transport range carries fractional host tick endpoints and
+  maps an exact document tick proportionally into output frames. Preserve that
+  metadata in the dependency-lower grid range and match playback's half-open,
+  floor-to-frame rule. Range-local proportions are not callback invariant when
+  a loop boundary's output count was rounded. Retain one `HostGridAnchor`
+  (normalized source tick, absolute frame, ticks per frame) across the continuous
+  session interval, give each range its absolute first frame and loop-pass
+  document-to-source offset, and floor on that stable clock before clamping to
+  the owning half-open range. Initialize the source tick from the first resolved
+  range in a normalization epoch, not from an absolute host beat that the
+  transport has already wrapped into document coordinates; reset the anchor on
+  an epoch or slope discontinuity. Never feed such a range through
+  `CompiledTempoMap::ticks_to_samples()`: session tempo is independent of the
+  document tempo, including on split loop ranges.
+- `project_ratchet_interval()` treats the hit count as including the onset and
+  excludes the later clock boundary. It distributes integer-tick remainders
+  from the original interval coordinates on every projection; do not advance a
+  floating-point phase or carry remainder state between callbacks. Half-open
+  windows must concatenate to the same schedule as one whole-window call. Reject
+  a hit count greater than the integer-tick span rather than emitting duplicate
+  positions.
 - `LoopRegion` (`<pulp/timebase/loop_region.hpp>`) is two document positions plus
   whether they are in force, and it lives here rather than beside a consumer
   because that is the whole of it. `playback::LoopRegion` is an alias of it and
@@ -90,11 +139,39 @@ pair boundary and erase half the warp while still reporting a valid setting.
 An invalid grid or ratio makes both functions the identity: the caller
 validates, and a bad setting must not silently move music.
 
+## Groove projection and coordinate randomness
+
+The canonical authored groove remains `timeline::GrooveTemplate`: it owns the
+name, persistence, independent swing/table grids, strengths, and 0..4x accent
+domain. `timebase::OrderPreservingGrooveKernel` is deliberately narrower: a
+fixed-capacity, allocation-free projection of the non-reordering subset. Keep
+its numeric domains aligned with timeline (strength 0..1000, velocity 0..4000,
+at most 1024 steps), but do not call it a template or add a second persistence
+model. Timing strength scales both swing and table displacement; zero must be
+exact identity, including swing. Validate the joint swing/table period
+within the documented bound and reject either reorder or an unbounded period.
+
+`coordinate_random()` is a pure hash of seed plus stable musical coordinates
+(tick, lane, loop pass/cycle, stream). Never replace it with callback-local RNG
+state. Golden vectors pin the hash, callback-partition tests pin coordinate
+selection, and `coordinate_chance()` multiply-high reduction is checked against
+an independent wide/shift-add oracle in tests.
+
 ## Validation
 
-Build and run `pulp-test-timebase` and the existing
-`pulp-test-transport-quantizer` oracle. Keep at least 1,000,000 deterministic
-randomized constant/ramp cases, plus tempo-point boundary cases.
+Build and run `pulp-test-timebase`, `pulp-test-timebase-groove-kernels`, and the
+existing `pulp-test-transport-quantizer` oracle. Keep at least 1,000,000
+deterministic randomized constant/ramp cases, plus tempo-point boundary cases.
+Grid tests must adapt real `MasterTransport` ranges and cover pre-loop playback,
+variable-tempo repeated passes, callback partitions, and a seek whose monotonic
+anchor is intentionally independent. Also adapt `begin_tempo_synced_block()`
+ranges with fractional host endpoints, a session/document tempo mismatch, and a
+loop split. Pin the 180 BPM/48 kHz regression at source beat 0.93748125: tick
+29400 stays on absolute frame 1666 for one 4800-frame callback and a 1500 + 3300
+split. Exercise signed ceiling at `INT64_MIN` and prove huge incoherent
+tick ranges fail the candidate preflight before enumeration. Include a real
+MasterTransport sparse-map whole-vs-partitioned oracle (`4` frames versus
+`1 + 3` and finer splits at 1 BPM/48 kHz).
 
 `MonotonicBeat` is the strong type for the transport's non-looping musical
 clock; the transport owns how it advances while timeline positions seek or
@@ -130,3 +207,13 @@ oracle *in the test* (guarded by `#if defined(__SIZEOF_INT128__)`). The test is
 not shipped to MSVC, so it may use the wide type that the header may not — that
 verifies the portable path against the maths it replaced rather than against
 itself. `test_timebase.cpp` does this over an exhaustive small grid.
+
+## Authored trigger grids
+
+`TriggerGrid` is fixed-capacity authored track×step data, not another clock or
+transform chain. Its caller supplies the cycle origin, half-open projection
+window, and one stable random word per configured coordinate. Keep projection
+allocation-free, step-major then track-major, and block-partition invariant.
+Microtiming must remain within the per-step bounds that prevent adjacent steps
+from reversing. Groove/swing, coordinate RNG generation, generative pattern
+algorithms, transport advancement, and note lifetime remain separate owners.

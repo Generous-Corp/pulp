@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import io
 import json
 import re
@@ -147,6 +148,21 @@ def interface_library_targets() -> set[str]:
 
 
 SOURCE_SHA = "a" * 40
+FIXTURE_IMPORTER = b"fixture importer executable"
+FIXTURE_CAPABILITIES = b'{"schema":"fixture.agent-capabilities.v1"}\n'
+FIXTURE_CAPABILITIES_SCHEMA = json.dumps(
+    {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["schema"],
+        "properties": {
+            "schema": {"const": "fixture.agent-capabilities.v1"}
+        },
+    }
+).encode()
+FIXTURE_HANDOFF_SCHEMA = (
+    ROOT / "docs/status/agent-capability-handoff.schema.json"
+).read_bytes()
 
 
 def member_payload(name: str, platform: str = "linux-x64") -> bytes:
@@ -173,6 +189,46 @@ def member_payload(name: str, platform: str = "linux-x64") -> bytes:
             )
             + "\n"
         ).encode()
+    importer = (
+        "pulp-sdk/bin/pulp-import-design.exe"
+        if platform.startswith("windows-")
+        else "pulp-sdk/bin/pulp-import-design"
+    )
+    if name == importer:
+        return FIXTURE_IMPORTER
+    if name == "pulp-sdk/share/pulp/agent-capabilities.json":
+        return FIXTURE_CAPABILITIES
+    if name == "pulp-sdk/share/pulp/agent-capabilities.schema.json":
+        return FIXTURE_CAPABILITIES_SCHEMA
+    if name == "pulp-sdk/share/pulp/agent-capability-handoff.schema.json":
+        return FIXTURE_HANDOFF_SCHEMA
+    if name == "pulp-sdk/share/pulp/agent-capability-handoff.json":
+        document = {
+            "$schema": "agent-capability-handoff.schema.json",
+            "schema": "pulp.agent-capability-handoff.v1",
+            "sdk_source_sha": SOURCE_SHA,
+            "platform": platform,
+            "schemas": {
+                "handoff": {
+                    "path": "share/pulp/agent-capability-handoff.schema.json",
+                    "sha256": hashlib.sha256(FIXTURE_HANDOFF_SCHEMA).hexdigest(),
+                },
+                "agent_capabilities": {
+                    "path": "share/pulp/agent-capabilities.schema.json",
+                    "sha256": hashlib.sha256(FIXTURE_CAPABILITIES_SCHEMA).hexdigest(),
+                },
+            },
+            "importer": {
+                "path": importer.removeprefix("pulp-sdk/"),
+                "sha256": hashlib.sha256(FIXTURE_IMPORTER).hexdigest(),
+            },
+            "agent_capabilities": {
+                "path": "share/pulp/agent-capabilities.json",
+                "sha256": hashlib.sha256(FIXTURE_CAPABILITIES).hexdigest(),
+                "content": json.loads(FIXTURE_CAPABILITIES),
+            },
+        }
+        return (json.dumps(document) + "\n").encode()
     return b"fixture"
 
 
@@ -564,6 +620,20 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                     root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
                 )
 
+    def test_negative_control_missing_capability_handoff_fires_at_new_floor(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            sdk.remove("pulp-sdk/share/pulp/agent-capability-handoff.json")
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(root / rac.sdk_asset_name("linux-x64"), sdk, as_zip=False)
+            with self.assertRaisesRegex(
+                rac.ContentError, "agent-capability-handoff.json"
+            ):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
     def test_negative_control_unsafe_provenance_fires(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -594,6 +664,93 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             with self.assertRaisesRegex(rac.ContentError, "source_git_sha"):
                 rac.verify_platform(
                     root, "linux-x64", VERSION, "b" * 40, native_signatures=False
+                )
+
+    def test_negative_control_wrong_handoff_sdk_sha_fires(self) -> None:
+        self._assert_mutated_handoff_rejected(
+            lambda document: document.__setitem__("sdk_source_sha", "b" * 40),
+            "sdk_source_sha",
+        )
+
+    def test_negative_control_wrong_handoff_importer_hash_fires(self) -> None:
+        self._assert_mutated_handoff_rejected(
+            lambda document: document["importer"].__setitem__("sha256", "b" * 64),
+            "importer sha256",
+        )
+
+    def test_negative_control_wrong_handoff_capability_hash_fires(self) -> None:
+        self._assert_mutated_handoff_rejected(
+            lambda document: document["agent_capabilities"].__setitem__(
+                "sha256", "b" * 64
+            ),
+            "capability sha256",
+        )
+
+    def test_negative_control_substituted_capability_schema_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            make_platform(root, "linux-x64")
+            sdk_path = root / rac.sdk_asset_name("linux-x64")
+            with rac.Archive(sdk_path) as archive:
+                members = set(archive.members)
+            original_payload = member_payload
+            changed_capabilities = b'{"unexpected":true}'
+
+            def substituted_payload(
+                name: str, platform: str = "linux-x64"
+            ) -> bytes:
+                if name == "pulp-sdk/share/pulp/agent-capabilities.json":
+                    return changed_capabilities
+                if name == "pulp-sdk/share/pulp/agent-capabilities.schema.json":
+                    return b'{"type":"object"}'
+                payload = original_payload(name, platform)
+                if name == "pulp-sdk/share/pulp/agent-capability-handoff.json":
+                    document = json.loads(payload)
+                    document["agent_capabilities"]["sha256"] = hashlib.sha256(
+                        changed_capabilities
+                    ).hexdigest()
+                    document["agent_capabilities"]["content"] = json.loads(
+                        changed_capabilities
+                    )
+                    return json.dumps(document).encode()
+                return payload
+
+            with mock.patch(
+                __name__ + ".member_payload", side_effect=substituted_payload
+            ):
+                write_archive(sdk_path, members, as_zip=False)
+            with self.assertRaisesRegex(
+                rac.ContentError, "agent_capabilities schema sha256"
+            ):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA,
+                    native_signatures=False,
+                )
+
+    def _assert_mutated_handoff_rejected(self, mutate, message: str) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            make_platform(root, "linux-x64")
+            sdk_path = root / rac.sdk_asset_name("linux-x64")
+            with rac.Archive(sdk_path) as archive:
+                members = set(archive.members)
+            original_payload = member_payload
+
+            def mutated_payload(name: str, platform: str = "linux-x64") -> bytes:
+                payload = original_payload(name, platform)
+                if name == "pulp-sdk/share/pulp/agent-capability-handoff.json":
+                    document = json.loads(payload)
+                    mutate(document)
+                    return json.dumps(document).encode()
+                return payload
+
+            with mock.patch(
+                __name__ + ".member_payload", side_effect=mutated_payload
+            ):
+                write_archive(sdk_path, members, as_zip=False)
+            with self.assertRaisesRegex(rac.ContentError, message):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
                 )
 
     def test_negative_control_wrong_provenance_platform_fires(self) -> None:
@@ -660,11 +817,13 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             path = Path(td) / "historical-matrix.json"
             document = json.loads(rac.DEFAULT_MATRIX_PATH.read_text(encoding="utf-8"))
             del document["sdk_provenance_floor"]
+            del document["capability_handoff_floor"]
             del document["inspector_sdk_floor"]
             del document["control_broker_floor"]
             path.write_text(json.dumps(document), encoding="utf-8")
             historical = rac.ProductMatrix.load(path)
             self.assertEqual(historical.sdk_provenance_floor, "999999.0.0")
+            self.assertEqual(historical.capability_handoff_floor, "999999.0.0")
             self.assertEqual(historical.inspector_sdk_floor, "999999.0.0")
             self.assertEqual(historical.control_broker_floor, "999999.0.0")
             self.assertNotIn(

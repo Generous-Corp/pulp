@@ -6,7 +6,9 @@
 
 #include <pulp/host/forge_dynamics_catalog.hpp>
 
+#include <array>
 #include <cmath>
+#include <numbers>
 #include <vector>
 
 using namespace pulp::host;
@@ -30,7 +32,6 @@ Fixture make_fixture(const CustomNodeType& type) { return Fixture(type, kSr, kFr
 std::vector<float> sine(float amp) {
     return pulp::test::sine_block(kFrames, kToneHz, kSr, amp);
 }
-
 std::vector<float> silence() {
     return std::vector<float>(static_cast<std::size_t>(kFrames), 0.0f);
 }
@@ -44,6 +45,37 @@ float peak(const std::vector<float>& b) {
     for (float v : b) m = std::max(m, std::fabs(v));
     return m;
 }
+
+double sine_amplitude(const std::vector<float>& signal, double cycles_per_sample) {
+    double ss = 0.0, cc = 0.0, sc = 0.0, sy = 0.0, cy = 0.0;
+    for (std::size_t i = 0; i < signal.size(); ++i) {
+        const double angle = 2.0 * std::numbers::pi * cycles_per_sample * static_cast<double>(i);
+        const double s = std::sin(angle);
+        const double c = std::cos(angle);
+        ss += s * s;
+        cc += c * c;
+        sc += s * c;
+        sy += s * signal[i];
+        cy += c * signal[i];
+    }
+    const double determinant = ss * cc - sc * sc;
+    const double a = (sy * cc - cy * sc) / determinant;
+    const double b = (cy * ss - sy * sc) / determinant;
+    return std::hypot(a, b);
+}
+
+class TruePeakDefaultParams final : public BakedParamView {
+public:
+    float value_at(pulp::state::ParamID id, std::int32_t) const override {
+        return value(id);
+    }
+    float value(pulp::state::ParamID id) const override {
+        if (id == dyn::true_peak::kCeilingDbtp)
+            return -1.0f;
+        REQUIRE(id == dyn::true_peak::kReleaseMs);
+        return 100.0f;
+    }
+};
 
 /// Gain, in dB, of a settled block relative to its input amplitude.
 double gain_db(const std::vector<float>& out, float in_amp) {
@@ -60,6 +92,91 @@ TEST_CASE("Forge dynamics: the compressor bakes and runs",
     for (int ch = 0; ch < 2; ++ch)
         for (float v : out[static_cast<std::size_t>(ch)]) REQUIRE(std::isfinite(v));
     REQUIRE(peak(out[0]) > 0.0f);
+}
+
+TEST_CASE("Forge dynamics: true-peak limiting is a registered stereo realization",
+          "[host][baked][forge][forge-dynamics][latency]") {
+    constexpr std::array<double, 6> rates{8000.0, 44100.0, 48000.0,
+                                          96000.0, 192000.0, 384000.0};
+    constexpr std::array<float, 3> lookaheads{0.0f, 5.0f, 10.0f};
+    std::vector<float> loud(kFrames);
+    for (int frame = 0; frame < kFrames; ++frame)
+        loud[static_cast<std::size_t>(frame)] =
+            1.5f * std::sin(2.0 * std::numbers::pi * 0.4 * static_cast<double>(frame));
+
+    for (const double rate : rates) {
+        for (const float lookahead : lookaheads) {
+            for (const bool linked_policy : {true, false}) {
+                // The catalog intentionally exposes independent limiting only
+                // at its 5 ms realization; exercise every registered product.
+                if (!linked_policy && lookahead != 5.0f)
+                    continue;
+                const auto node = dyn::true_peak::make_node(lookahead, linked_policy);
+                REQUIRE(node.type_id.starts_with("dynamics.true_peak_limiter.la_"));
+                REQUIRE(node.type_id.ends_with(linked_policy ? ".linked" : ".independent"));
+                REQUIRE(node.num_input_ports == 2);
+                REQUIRE(node.num_output_ports == 2);
+                REQUIRE(node.latency_samples(rate) ==
+                        128 + static_cast<int>(std::ceil(lookahead * 0.001 * rate)));
+
+                Fixture fx(node, rate, kFrames);
+                ParamInjector injector = fx.claim_injector();
+                REQUIRE(injector.inject(immediate(dyn::true_peak::kCeilingDbtp, -6.0f)) ==
+                        InjectStatus::Ok);
+                REQUIRE(injector.inject(immediate(dyn::true_peak::kReleaseMs, 50.0f)) ==
+                        InjectStatus::Ok);
+                const auto output = fx.settle({loud, loud}, 40);
+                const double ceiling = std::pow(10.0, -6.0 / 20.0);
+                REQUIRE(peak(output[0]) > 0.0f);
+                REQUIRE(sine_amplitude(output[0], 0.4) <= ceiling);
+                REQUIRE(output[0] == output[1]);
+            }
+        }
+    }
+
+    const auto independent = dyn::true_peak::make_node(5.0f, false);
+    REQUIRE(independent.type_id != dyn::true_peak::make_node(5.0f, true).type_id);
+
+    const auto descriptor = dyn::true_peak::descriptor();
+    REQUIRE(descriptor.key == "true_peak_limiter");
+    REQUIRE(descriptor.realizations.size() == 4);
+    REQUIRE(descriptor.params.size() == 2);
+}
+
+TEST_CASE("Forge dynamics: unsupported true-peak rates fail safe to passthrough",
+          "[host][baked][forge][forge-dynamics][latency]") {
+    const auto node = dyn::true_peak::make_node(5.0f, true);
+    const std::vector<float> left(static_cast<std::size_t>(kFrames), 0.25f);
+    const std::vector<float> right(static_cast<std::size_t>(kFrames), -0.5f);
+
+    for (const double rate : {7999.0, 384001.0}) {
+        REQUIRE(node.latency_samples(rate) == 0);
+        Fixture fx(node, rate, kFrames);
+        const auto output = fx.render({left, right});
+        REQUIRE(output[0] == left);
+        REQUIRE(output[1] == right);
+
+        dyn::true_peak::Instance instance;
+        node.prepare(&instance, kSr, kFrames);
+        REQUIRE(instance.prepared);
+        node.prepare(&instance, rate, kFrames);
+        REQUIRE_FALSE(instance.prepared);
+
+        std::array<const float*, 2> input_ptrs{left.data(), right.data()};
+        std::array<std::vector<float>, 2> reprepare_output{
+            std::vector<float>(static_cast<std::size_t>(kFrames)),
+            std::vector<float>(static_cast<std::size_t>(kFrames))};
+        std::array<float*, 2> output_ptrs{reprepare_output[0].data(),
+                                          reprepare_output[1].data()};
+        pulp::audio::BufferView<const float> input_view(
+            input_ptrs.data(), 2, kFrames);
+        pulp::audio::BufferView<float> output_view(output_ptrs.data(), 2, kFrames);
+        TruePeakDefaultParams params;
+        node.process_instance_baked_param(
+            &instance, output_view, input_view, kFrames, params);
+        REQUIRE(reprepare_output[0] == left);
+        REQUIRE(reprepare_output[1] == right);
+    }
 }
 
 TEST_CASE("Forge dynamics: injecting threshold deepens gain reduction",

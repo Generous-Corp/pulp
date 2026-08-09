@@ -76,6 +76,11 @@ pulp_add_test_suite(pulp-test-filter-design LIBRARIES pulp::signal)
 # IIR design tests (Chebyshev I/II, Elliptic)
 pulp_add_test_suite(pulp-test-iir-design LIBRARIES pulp::signal)
 
+# Fixed-capacity runtime executor for designed second-order-section cascades.
+pulp_add_test_suite(pulp-test-sos-cascade
+    SOURCES test_sos_cascade.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
+
 # TreeView tests
 pulp_add_test_suite(pulp-test-tree-view LIBRARIES pulp::view)
 

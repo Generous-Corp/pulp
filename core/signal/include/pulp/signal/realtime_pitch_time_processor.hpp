@@ -91,6 +91,13 @@ public:
         if (geometry_status != PitchTimePrepareStatus::prepared) return geometry_status;
         const bool quality = config.quality == PitchTimeQuality::quality;
 
+        SpectralEnvelopeShifterConfig env_config;
+        env_config.fft_size = geometry.fft_size;
+        env_config.true_envelope_iterations = config.true_envelope_iterations;
+        SpectralEnvelopeShifterT<SampleType> prepared_envelope;
+        if (prepared_envelope.prepare(env_config) != SourceFilterAnalysisStatus::Ok)
+            return PitchTimePrepareStatus::unrepresentable_capacity;
+
         config_ = config;
         sample_rate_ = sample_rate;
         fft_size_ = geometry.fft_size;
@@ -112,11 +119,7 @@ public:
         freeze_config.analysis_hop = analysis_hop_;
         freeze_.prepare(freeze_config);
 
-        SpectralEnvelopeShifterConfig env_config;
-        env_config.fft_size = fft_size_;
-        env_config.true_envelope_iterations = config.true_envelope_iterations;
-        if (envelope_.prepare(env_config) != SourceFilterAnalysisStatus::Ok)
-            return PitchTimePrepareStatus::unrepresentable_capacity;
+        envelope_ = std::move(prepared_envelope);
 
         LatencyAwareControlSmoother::Config smoother_config;
         smoother_config.domain = LatencyAwareControlSmoother::Domain::semitone;

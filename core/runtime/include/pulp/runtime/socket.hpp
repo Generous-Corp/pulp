@@ -44,7 +44,8 @@ public:
     /// Listen for incoming TCP or OS-local stream connections.
     bool listen(int backlog = 5);
 
-    /// Accept an incoming TCP or OS-local connection. Returns a new Socket.
+    /// Accept an incoming TCP or OS-local connection, blocking until one is
+    /// available.
     std::optional<Socket> accept();
 
     /// Wait up to `timeout` for and accept an incoming connection. A

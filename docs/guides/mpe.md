@@ -54,6 +54,50 @@ flags with the node ABI capability field.
 | `pulp/midi/mpe_synth_voice.hpp` | `MpeVoiceAllocator<Voice>` | Routes `MpeBuffer` events to a voice pool; configurable steal mode |
 | `pulp/midi/mpe_synth_voice.hpp` | `MpeGlideDetector` | Flags legato/glide gestures (overlap on same MPE member channel) |
 
+Each accepted note-on receives a nonzero 64-bit `MpeNoteGeneration` in
+`MpeNoteState::note_id`. Generations are never recycled by `reset()` or a
+configuration change, so a delayed release cannot collide with a later note.
+After the final representable generation, the tracker enters permanent
+exhaustion and consumes subsequent MPE note-ons without creating or retriggering
+a note or invoking `on_note_on`. Applications that need to report this terminal
+condition can query `note_generation_exhausted()` and
+`refused_note_on_count()`; constructing a new tracker requires clearing every
+downstream owner that could still hold a generation from the old instance.
+
+A same-channel, same-pitch retrigger is an identity rotation, not an in-place
+voice mutation. `MpeVoiceTracker` emits `NoteOff(old generation)` immediately
+before `NoteOn(new generation)` at the same sample offset. The bound
+`MpeBuffer` appends that pair atomically: if its prepared realtime capacity
+cannot hold both events, it records both drops and the tracker preserves the old
+slot and generation cursor. `MpeBuffer::sort()` preserves producer order at
+equal offsets. This lets an allocator release the old voice (including its
+tail) while giving the replacement a distinct identity; the later physical
+note-off can then release the replacement without orphaning the old voice.
+Because the retirement is observed before the replacement, a same-note
+retrigger is an explicit **reattack**, not a legato overlap:
+`MpeVoiceAllocator::last_was_glide()` is false. Glide remains reserved for a
+second held note that overlaps on the same member channel.
+
+A physical note-off cannot simply be rejected because controllers do not replay
+it. If the buffer is full, the tracker deactivates the slot and retains the
+release in a fixed FIFO. `MpeSidecar` flushes that FIFO at sample offset zero
+before the next block's input. Until it is empty, the tracker refuses new starts
+without consuming a generation; this keeps active plus pending lifecycles within
+the tracker's fixed 128-slot bound. Direct tracker/buffer integrations must call
+`flush_pending_note_offs()` after clearing their output buffer and before
+ingesting more input.
+
+`MpeVoiceTracker::reset()` remains an identity-free local clear and emits no
+lifecycle callbacks. `MpeSidecar` cannot own or discover a processor's voice
+allocator, so reset ownership is deliberately paired rather than coupled. On
+deactivation, the adapter calls `Processor::release()` first and then resets
+its sidecar; an MPE processor must clear its allocator in `release()`. For a
+live host reset, the adapter clears its sidecar and raises
+`ProcessContext::reset_requested` on the next block; the processor must clear
+its allocator before dispatching that block's MPE input. A transport jump alone
+does not reset tracker identity and must not clear the allocator. The MPE synth
+example implements both paired paths with `MpeVoiceAllocator::reset_all()`.
+
 ## Zone configuration
 
 `MpeConfig` (from `pulp/midi/ump.hpp`) describes which channels belong to
@@ -105,10 +149,12 @@ lowpass.
 
 ## Adapter status
 
-The CLAP adapter populates `mpe_input()` and `ump_input()` when the descriptor
-opts in. Other adapters still deliver the standard `MidiBuffer` path only, so
-MPE-aware processors should continue to handle ordinary MIDI input as their
-fallback.
+The CLAP, VST3, and AUv3 adapters populate `mpe_input()` when the descriptor
+opts in; CLAP also populates `ump_input()` for native or synthesized UMP. Each
+of those formats owns and resets its tracker at lifecycle boundaries. AUv2 and
+other formats without this sidecar wiring still deliver the standard
+`MidiBuffer` path only, so MPE-aware processors should continue to handle
+ordinary MIDI input as their fallback.
 
 ## SignalGraph routing
 

@@ -4,6 +4,8 @@
 // Validates: pulp-signal DSP library, parameter system, state serialization
 // Uses: Oscillator (polyBLEP), Svf (TPT filter), Adsr, SmoothedValue, Gain
 
+#include "minblep_saw.hpp"
+
 #include <pulp/format/processor.hpp>
 #include <pulp/signal/oscillator.hpp>
 #include <pulp/signal/svf.hpp>
@@ -16,7 +18,7 @@
 namespace pulp::examples {
 
 enum SynthParams : state::ParamID {
-    kOscWaveform = 100,   // 0=sine, 1=saw, 2=square, 3=triangle
+    kOscWaveform = 100,   // 0=sine, 1=saw, 2=square, 3=triangle, 4=minBLEP saw
     kOscDetune   = 101,   // cents (-100 to +100)
     kFilterCutoff = 102,  // Hz (20 to 20000)
     kFilterReso  = 103,   // 0.1 to 10
@@ -48,7 +50,7 @@ public:
     }
 
     void define_parameters(state::StateStore& store) override {
-        store.add_parameter({kOscWaveform, "Waveform", "", {0, 3, 1, 1}});
+        store.add_parameter({kOscWaveform, "Waveform", "", {0, 4, 1, 1}});
         store.add_parameter({kOscDetune, "Detune", "ct", {-100, 100, 0, 0.1f}});
         store.add_parameter({kFilterCutoff, "Cutoff", "Hz", {20, 20000, 5000, 1}});
         store.add_parameter({kFilterReso, "Resonance", "", {0.1f, 10, 0.707f, 0.01f}});
@@ -96,8 +98,7 @@ public:
         gain_smooth_.set_target(signal::db_to_linear(gain_db));
         cutoff_smooth_.set_target(cutoff_hz);
 
-        auto wave = static_cast<signal::Oscillator::Waveform>(
-            std::clamp(waveform, 0, 3));
+        waveform = std::clamp(waveform, 0, 4);
 
         midi_in.sort();
         std::size_t midi_idx = 0;
@@ -107,7 +108,8 @@ public:
             while (midi_idx < midi_in.size() &&
                    midi_in[midi_idx].sample_offset <= static_cast<int32_t>(i)) {
                 auto& evt = midi_in[midi_idx];
-                if (evt.is_note_on()) note_on(evt.note(), evt.velocity() / 127.0f, wave, env_params);
+                if (evt.is_note_on())
+                    note_on(evt.note(), evt.velocity() / 127.0f, waveform, env_params);
                 else if (evt.is_note_off()) note_off(evt.note());
                 ++midi_idx;
             }
@@ -124,7 +126,13 @@ public:
                 if (env_level < 0.0001f && !v.active) continue;
 
                 // Oscillator (two slightly detuned for thickness)
-                float osc_out = v.osc.next() * 0.5f + v.osc2.next() * 0.5f;
+                float osc_out = 0.0f;
+                if (v.use_minblep_saw) {
+                    osc_out = static_cast<float>(v.minblep.next(v.increment) * 0.5 +
+                                                 v.minblep2.next(v.increment2) * 0.5);
+                } else {
+                    osc_out = v.osc.next() * 0.5f + v.osc2.next() * 0.5f;
+                }
 
                 // Filter with envelope modulation
                 float mod_cutoff = cut + filter_env * env_level * (20000.0f - cut);
@@ -145,7 +153,8 @@ public:
         // Remaining MIDI
         while (midi_idx < midi_in.size()) {
             auto& evt = midi_in[midi_idx];
-            if (evt.is_note_on()) note_on(evt.note(), evt.velocity() / 127.0f, wave, env_params);
+            if (evt.is_note_on())
+                note_on(evt.note(), evt.velocity() / 127.0f, waveform, env_params);
             else if (evt.is_note_off()) note_off(evt.note());
             ++midi_idx;
         }
@@ -157,6 +166,10 @@ private:
         uint8_t note = 0;
         float velocity = 0;
         signal::Oscillator osc, osc2;
+        MinBlepSaw minblep, minblep2;
+        double increment = 0.0;
+        double increment2 = 0.0;
+        bool use_minblep_saw = false;
         signal::Svf filter;
         signal::Adsr env;
     };
@@ -166,7 +179,7 @@ private:
     signal::SmoothedValue<float> gain_smooth_{1.0f};
     signal::SmoothedValue<float> cutoff_smooth_{5000.0f};
 
-    void note_on(uint8_t note, float vel, signal::Oscillator::Waveform wave,
+    void note_on(uint8_t note, float vel, int waveform,
                  const signal::Adsr::Params& env_params) {
         Voice* target = nullptr;
         for (auto& v : voices_)
@@ -180,6 +193,17 @@ private:
         target->active = true;
         target->note = note;
         target->velocity = vel;
+        target->increment = static_cast<double>(freq) / sample_rate_;
+        target->increment2 = static_cast<double>(freq2) / sample_rate_;
+        target->use_minblep_saw = waveform == 4 &&
+                                  MinBlepSaw::supports_increment(target->increment) &&
+                                  MinBlepSaw::supports_increment(target->increment2);
+        target->minblep.reset();
+        target->minblep2.reset();
+        const auto wave = waveform == 4
+                              ? signal::Oscillator::Waveform::saw
+                              : static_cast<signal::Oscillator::Waveform>(
+                                    std::clamp(waveform, 0, 3));
         target->osc.set_frequency(freq);
         target->osc.set_waveform(wave);
         target->osc.reset();

@@ -6,12 +6,75 @@ add_executable(pulp-test-build-check test_build_check.cpp)
 target_link_libraries(pulp-test-build-check PRIVATE pulp::platform pulp::runtime)
 add_test(NAME build-check COMMAND pulp-test-build-check)
 
+# Installed agent capability manifest: curated snapshot, negative validation,
+# and compile proof for every advertised include/symbol pair.
+add_executable(pulp-test-agent-capability-compile test_agent_capability_compile.cpp)
+target_link_libraries(pulp-test-agent-capability-compile PRIVATE
+    pulp::audio
+    pulp::midi
+    pulp::music
+    pulp::sequence
+    pulp::signal
+    pulp::timebase)
+add_test(NAME agent-capability-symbols-compile COMMAND pulp-test-agent-capability-compile)
+
 if(Python3_Interpreter_FOUND)
+    add_test(NAME agent-capability-manifest-check
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/agent_capability_manifest.py" --check)
+    add_test(NAME agent-capability-manifest-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_manifest.py")
+    add_test(NAME agent-capability-sdk-handoff-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_sdk_capability_handoff.py")
+    set(_pulp_agent_capability_installed_args
+        --build-dir "${CMAKE_BINARY_DIR}"
+        --cmake "${CMAKE_COMMAND}"
+        --generator "${CMAKE_GENERATOR}"
+        "--config=$<CONFIG>")
+    if(CMAKE_GENERATOR_PLATFORM)
+        list(APPEND _pulp_agent_capability_installed_args
+            --generator-platform "${CMAKE_GENERATOR_PLATFORM}")
+    endif()
+    if(CMAKE_GENERATOR_TOOLSET)
+        list(APPEND _pulp_agent_capability_installed_args
+            --generator-toolset "${CMAKE_GENERATOR_TOOLSET}")
+    endif()
+    if(CMAKE_TOOLCHAIN_FILE)
+        list(APPEND _pulp_agent_capability_installed_args
+            --toolchain-file "${CMAKE_TOOLCHAIN_FILE}")
+    endif()
+    if(CMAKE_OSX_ARCHITECTURES)
+        string(REPLACE ";" "\\;" _pulp_agent_capability_architectures
+            "${CMAKE_OSX_ARCHITECTURES}")
+        list(APPEND _pulp_agent_capability_installed_args
+            --osx-architectures "${_pulp_agent_capability_architectures}")
+        unset(_pulp_agent_capability_architectures)
+    endif()
+    if(CMAKE_OSX_SYSROOT)
+        list(APPEND _pulp_agent_capability_installed_args
+            --osx-sysroot "${CMAKE_OSX_SYSROOT}")
+    endif()
+    if(CMAKE_OSX_DEPLOYMENT_TARGET)
+        list(APPEND _pulp_agent_capability_installed_args
+            --osx-deployment-target "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    endif()
+    add_test(NAME agent-capability-installed-sdk
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_installed_sdk.py"
+            ${_pulp_agent_capability_installed_args})
+    unset(_pulp_agent_capability_installed_args)
+    # This installs the SDK, then configures, builds, and runs an independent
+    # consumer for every capability row and typed binding.
+    set_tests_properties(agent-capability-installed-sdk PROPERTIES TIMEOUT 600)
+
     add_test(NAME control-authoring-examples
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/test/test_control_authoring_examples.py")
     set_tests_properties(control-authoring-examples PROPERTIES
         LABELS "inspect;control;docs;examples")
+
     add_test(NAME ci-python-selector-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_find_python311.py")
     add_test(NAME inspector-protocol-registry-complete

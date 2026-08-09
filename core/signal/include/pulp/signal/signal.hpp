@@ -5,6 +5,7 @@
 #include <pulp/signal/adsr.hpp>
 #include <pulp/signal/bias.hpp>
 #include <pulp/signal/biquad.hpp>
+#include <pulp/signal/sos_cascade.hpp>
 #include <pulp/signal/oscillator.hpp>
 #include <pulp/signal/delay_line.hpp>
 #include <pulp/signal/fractional_delay.hpp>
@@ -31,6 +32,7 @@
 #include <pulp/signal/matrix.hpp>
 #include <pulp/signal/audio_matrix_mixer.hpp>
 #include <pulp/signal/mid_side.hpp>
+#include <pulp/signal/mirrored_history_buffer.hpp>
 #include <pulp/signal/modal_bank.hpp>
 #include <pulp/signal/nway_crossfade.hpp>
 #include <pulp/signal/path_latency_aligner.hpp>

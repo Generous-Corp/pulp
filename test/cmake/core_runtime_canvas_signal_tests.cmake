@@ -177,6 +177,9 @@ pulp_add_test_suite(pulp-test-canvas-image-fit LIBRARIES pulp::canvas)
 
 # Signal/DSP tests
 pulp_add_test_suite(pulp-test-signal LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-signal-unison
+    SOURCES test_signal_unison.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal pulp::audio-analysis)
 # Modulation and utility toolkit. Contracts, sources, control tools, events,
 # and voice-level compositions have separate owners so the alias inventory and
 # behavioral suites can evolve without recreating a mixed test hotspot.
@@ -191,12 +194,20 @@ pulp_add_test_suite(pulp-test-analysis-frontends
 pulp_add_test_suite(pulp-test-modulation-language
     SOURCES test_modulation_language.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-signal-units LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-mod-events LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-mod-voice LIBRARIES pulp::signal)
 # Alias/passband claims here are measured with the shared tone-projection
 # analyzers, hence the analysis lib alongside the DSP under test.
 pulp_add_test_suite(pulp-test-oversampling-quality
     LIBRARIES pulp::signal pulp::audio-analysis)
+# True-peak look-ahead limiting: independent higher-rate reconstruction oracle,
+# latency, channel-link, deterministic partitioning, and realtime storage.
+pulp_add_test_suite(pulp-test-true-peak-limiter
+    SOURCES test_true_peak_limiter.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
+target_compile_definitions(pulp-test-true-peak-limiter
+    PRIVATE PULP_TRUE_PEAK_LIMITER_TEST_SEAMS=1)
 # Fundamental-frequency estimator for harmonically-dense oscillator output plus
 # the f0(t) trajectory extractor — proven accurate to well under a cent, and
 # proven to beat the shipped zero-crossing detector on dense material.
@@ -221,6 +232,28 @@ pulp_add_test_suite(pulp-test-frequency-response LIBRARIES pulp::signal)
 # Signal spectral tests extracted from test_signal.cpp.
 # WindowFunction / FFT / Convolver TEST_CASE clusters moved verbatim.
 pulp_add_test_suite(pulp-test-signal-spectral LIBRARIES pulp::signal)
+# Window coefficient, spectral-shape, STFT-consumer, and RT apply contracts.
+pulp_add_test_suite(pulp-test-windowing
+    SOURCES test_windowing.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
+# Fixed-capacity single-thread history and its STFT consumer contract.
+pulp_add_test_suite(pulp-test-mirrored-history-buffer
+    SOURCES test_mirrored_history_buffer.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
+
+# Public signal headers are consumed by WAM/WebCLAP translation units compiled
+# without an exception runtime. This small executable instantiates allocating
+# prepare paths so exception-only syntax in template bodies fails natively too.
+add_executable(pulp-test-signal-no-exceptions test_signal_no_exceptions.cpp)
+target_link_libraries(pulp-test-signal-no-exceptions PRIVATE pulp::signal)
+if(MSVC)
+    target_compile_options(pulp-test-signal-no-exceptions PRIVATE /EHs-c- /GR-)
+else()
+    target_compile_options(pulp-test-signal-no-exceptions PRIVATE
+        -fno-exceptions -fno-rtti)
+endif()
+add_test(NAME signal-public-headers-no-exceptions
+    COMMAND pulp-test-signal-no-exceptions)
 # Spectral primitives: STFT/WOLA engine, pitch/time, formant, smoothing.
 pulp_add_test_suite(pulp-test-spectral-primitives
     SOURCES test_spectral_frame_engine.cpp test_realtime_pitch_time.cpp
@@ -249,6 +282,18 @@ pulp_add_test_suite(pulp-test-osc-phase LIBRARIES pulp::signal)
 # The BLEP/BLAMP kernels are gated on measured alias rejection, so this suite
 # links the analysis lib for the shared tone-projection analyzers.
 pulp_add_test_suite(pulp-test-osc-blep LIBRARIES pulp::signal pulp::audio-analysis)
+# The causal minBLEP accumulator is gated on deterministic RT behavior and
+# measured alias residuals against the current polyBLEP path.
+pulp_add_test_suite(pulp-test-osc-minblep
+    SOURCES test_osc_minblep.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal pulp::audio-analysis)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME minblep-table-reproducible
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/generate_minblep_table.py
+            --check
+            --output ${CMAKE_SOURCE_DIR}/core/signal/include/pulp/signal/osc/detail/minblep_table.hpp)
+endif()
 # The VA shapes are gated on measured alias rejection, hence the analysis lib.
 pulp_add_test_suite(pulp-test-osc-va LIBRARIES pulp::signal pulp::audio-analysis)
 # Sync and through-zero FM are gated on measured alias rejection too.

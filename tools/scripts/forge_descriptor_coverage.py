@@ -47,7 +47,7 @@ CATALOG = (
       "drum_tom_simmons", "drum_cymbal", "drum_membrane", "drum_string",
       "drum_zap", "drum_fm2", "drum_fm6", "drum_fm8")),
     ("forge_dynamics_catalog.hpp", "forge_dynamics_catalog.hpp",
-     ("feedforward_compressor", "vca_compressor", "fet_compressor",
+     ("feedforward_compressor", "true_peak_limiter", "vca_compressor", "fet_compressor",
       "diode_bridge_compressor")),
     ("forge_effect_modulation_catalog.hpp",
      "detail/forge_effect_modulation_catalog_descriptor.hpp",

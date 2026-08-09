@@ -7,7 +7,7 @@ target_include_directories(pulp-midi
         $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(pulp-midi PUBLIC pulp::runtime)
+target_link_libraries(pulp-midi PUBLIC pulp::runtime pulp::music pulp::timebase)
 
 # CHOC headers (used by MidiEvent via choc::midi)
 target_include_directories(pulp-midi PUBLIC

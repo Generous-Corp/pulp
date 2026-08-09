@@ -402,6 +402,11 @@ AAC/ALAC readers. Permissive (libflac, ALAC) packages install freely; copyleft
 
 Reusable low-level pieces for building samplers, generated-audio freeze/loop workflows, waveform displays, and offline/background sample analysis. These are primitives, not a full sampler UI. Callback-safe operations are documented in `rt_safety_contract.hpp`; import/export, analysis, waveform thumbnail build, publication writes, and materialization stay off the audio callback.
 
+`unison_voice_stack.hpp` adds the logical-note ownership layer above
+`InstrumentVoiceAllocator`. It exclusively owns the allocator, preflights a
+complete child stack, steals only complete oldest stacks, and requires exact
+voice IDs when renderer tails finish recycled slots.
+
 For a runnable integration of the asset, streaming, interpolation, starvation,
 and synthetic-heritage primitives, see the
 [PulpSampler example](../examples/pulp-sampler.md).
@@ -483,29 +488,124 @@ codec delegate through these compatibility maps. Their public enum ordinals and
 stored names remain unchanged while the interval and identity data has one
 owner.
 
-`ChordFormula` accepts fixed-capacity ascending semitone formulas, including
-extensions and alterations. `kPulpTimelineChordQualities` and
+`ChordFormula` accepts fixed-capacity ascending semitone formulas. Its
+`with_extension()`, `with_suspension()`, and `with_alteration()` transforms add
+the common ninth/eleventh/thirteenth vocabulary without allocating or changing
+the stored identities of named formulas. `kPulpTimelineChordQualities` and
 `kForgeChordQualities` map the two existing stored identities onto the shared
 named qualities. `Chord::construct()` builds bounded MIDI pitches and
 deterministic inversions, failing when a root, inversion, formula, or resulting
 pitch is outside its legal domain.
+
+Pitch spelling is policy-driven: callers select `prefer_sharps`,
+`prefer_flats`, or deterministic `minimize_accidentals`. `spell_chord()` keeps
+the formula's diatonic letter roles, so a C-sharp major third is E-sharp while
+the same pitch-class root under the flat policy is spelled D-flat/F/A-flat.
+`minimize_accidentals` chooses a natural spelling when one exists and resolves
+equal-cost single-accidental ties toward sharps; it is deterministic rather
+than key-signature contextual.
+
+`voice_chord()` applies closed, open, drop-2, drop-3, or spread constraints and
+fits the result into an explicit MIDI range. It returns no value when the
+spacing or range is impossible. `minimum_motion_voice_leading()` searches the
+bounded MIDI domain across every assignment of the formula's fixed tone multiset,
+including compound and duplicated pitch classes, for the global minimum summed
+motion without voice crossing. Equal-cost answers use ascending pitch order as
+the stable tie-break.
+
+`diatonic_chord()` constructs scale-degree third stacks directly from an
+arbitrary `Scale`. `recognize_chord()` ranks every stable named quality and root
+by missing and extra pitch classes. `best_equivalent_count()` and `ambiguous()`
+make symmetric or otherwise tied analyses explicit instead of selecting one
+silently; MIDI-note input additionally reports a recognized inversion when the
+bass identifies exactly one formula degree. `inversion_match_count` and
+`inversion_match_mask` expose duplicate-degree matches; `inversion` remains
+empty when a pitch-class bass cannot distinguish them. This inversion evidence
+participates in ranking and best-equivalence grouping. The candidate catalog is
+deliberately the 12 stable named qualities. Extended or altered input is ranked
+against that catalog by its missing and extra tones; recognition does not invent
+an extension identity.
+
+The music APIs are pure and deterministic and own no mutable processing state,
+so they have no `prepare()` or `reset()` lifecycle. Pitch-class and scale
+operations, formula transforms, chord construction and spelling, and diatonic
+construction are fixed-capacity, allocation-free, bounded value operations that
+may be used on a real-time path. `voice_chord()`,
+`minimum_motion_voice_leading()`, and `recognize_chord()` are control/offline
+algorithms, not audio-callback operations: they perform bounded searches or
+candidate ranking and use comparatively large temporary result/work tables.
 
 ```cpp
 #include <pulp/music/music.hpp>
 
 using namespace pulp::music;
 const auto scale = Scale::named(PitchClass::d, NamedScale::dorian);
-const auto formula = ChordFormula::for_quality(ChordQuality::minor7);
+const auto base = ChordFormula::for_quality(ChordQuality::minor7);
+const auto formula = base->with_extension(ChordExtension::ninth);
 const auto first_inversion = Chord::construct(62, *formula, 1);
+const auto spelling = spell_chord(*first_inversion, AccidentalPolicy::prefer_flats);
+
+VoicingConstraints constraints;
+constraints.mode = VoicingMode::drop2;
+constraints.range = {48, 84};
+const auto voiced = voice_chord(62, *formula, constraints);
+const auto analyses = recognize_chord(first_inversion->pitch_classes());
 ```
 
 The named collection is a 12-TET compatibility vocabulary, not a claim of
 microtonal support. More tuning systems belong in the provider-neutral MIDI
 tuning APIs rather than in this representation.
 
-This module is the shared-theory foundation sub-slice. It does not yet provide
-pitch spelling, chord recognition, voicing constraints, or minimum-motion
-voice leading; those remain separate later additions rather than implied
+### Generative pattern kernels
+
+`BinaryPattern<MaxSteps>` defaults to a 64-step capacity and reports overflow
+instead of truncating. The following operations are bounded, `constexpr`, and
+allocation-free during evaluation:
+
+- `euclidean_pattern()` returns a deterministic onset-first canonical rotation,
+  accepts a signed rotation, and rejects zero steps, excess pulses, and capacity
+  overflow. Positive rotation delays onsets and negative rotation advances them;
+  for example, E(3,8) changes from `10010010` to `01001001` at rotation `+1`
+  and `00100101` at rotation `-1`. A silent zero-pulse pattern is valid.
+  `EuclideanPatternRecipe` gives integrations a versioned named-field contract
+  for steps, pulses, and rotation without treating the C++ object bytes as a
+  wire format. Conventional E-notation orders arguments `(pulses, steps)`.
+- `PatternWalker` supports forward, reverse, ping-pong, and random
+  traversal. `reset()` restores index zero for forward/ping-pong and the final
+  index for reverse. Random traversal consumes a caller-supplied deterministic
+  random word and has no internal stream to rewind; calling `next()` without a
+  word in random mode fails explicitly.
+- `PreparedMarkovModel<MaxStates>` defaults to 16 states. `prepare()` consumes a
+  row-major table of unsigned integer weights on the control thread and rejects
+  empty, oversized, malformed, or zero-total rows. Its fixed state capacity and
+  32-bit weights make the 64-bit cumulative row total non-overflowing. `next()`
+  is a const bounded lookup from a caller-supplied random word, with no
+  allocation or failure except an invalid state.
+- `cellular_evolve()` applies an elementary 8-bit cellular rule with explicit
+  wrapping or fixed-off edges.
+- `looping_shift_register()` rotates the last bit to the first and optionally
+  flips the copied bit using an integer numerator/denominator mutation chance.
+  Mutation consumes a caller-supplied random word. Empty input and invalid
+  probabilities fail without changing the input.
+- `derive_rhythm_relationship()` creates one lane from another using
+  coincident, complementary, or independent candidates. Wrap and proportional
+  length mapping, signed target-grid phase, source-collision filtering, and
+  exact-onset density are explicit policies. Exact-density selection is a pure
+  coordinate-keyed decision over seed, cycle, lane, and step, so evaluation
+  order cannot change the result.
+
+Random words are mapped to bounded choices with full-domain multiply-high
+reduction rather than remainder reduction.
+
+Construction and transformation results carry explicit errors rather than
+silently truncating or repairing invalid input. None of these APIs owns
+mutable randomness, transport, event ordering, a transform chain, or a callback
+accumulator. APIs that consume random words take them from the caller;
+relationship density instead names its complete stateless draw coordinate, so
+callback partition never enters these kernels.
+
+The theory surface does not provide pitch spelling, chord recognition, voicing
+constraints, or minimum-motion voice leading; those are not implied
 capabilities of `ChordFormula`.
 
 ---
@@ -555,10 +655,51 @@ send_sysex(inquiry);  // Send over MIDI port
 | Tuning | `tuning.hpp`, `mts_esp_tuning.hpp`, `scala_tuning.hpp` | Provider-neutral note-to-frequency API with 12-TET default, optional MTS-ESP session/SysEx provider, and optional Scala SCL/KBM local-file provider |
 | UMP | `ump.hpp` | MIDI 2.0 Universal MIDI Packets, MPE zones |
 | MPE | `mpe_voice_tracker.hpp`, `mpe_buffer.hpp`, `mpe_synth_voice.hpp` | Per-note pitch bend / pressure / timbre tracking, opt-in sidecar buffer, and voice/allocator helpers. See [docs/guides/mpe.md](../guides/mpe.md) |
+| Utility kernels | `utility_kernels.hpp` umbrella; `routing_utility_kernels.hpp`, `note_utility_kernels.hpp`, `controller_utility_kernels.hpp` | Fixed-capacity channel routing, note-range filtering, keyboard splitting, balanced note-length shaping, low/high/last monophonic priority with legato/glide state, CC mapping/smoothing, and scale-aware MPE bend/glide |
+
+Every utility kernel publishes a `MidiUtilityContract` describing maximum event
+amplification, fixed state capacity, overflow behavior, same-sample ordering,
+and transport requirements. Stateful note kernels retain release debt when an
+output buffer fills: stop, seek, loop, reset, and spec replacement call
+`flush()`/`reset()` until `complete` is true, so capacity pressure cannot strand
+a downstream note. Routing-kernel `flush()` and output-bearing `replace_spec()`
+close downstream notes while retaining enough input ownership to consume their
+later physical releases; `reset()` closes the notes and then discards that input
+ownership for a lifecycle boundary that also resets the source stream. Scheduling
+accepts `timebase::SamplePosition`; the kernels do not own or advance another
+clock. Realtime calls require output buffers that
+were reserved for the contract's worst case and pinned with
+`set_realtime_capacity_limit(true)`; an unpinned output is rejected instead of
+silently allocating in `add()` or stable `sort()`. Inputs and outputs must be
+distinct buffers (as must both split outputs), including their attached UMP
+storage; aliased calls are rejected before any block is cleared.
+Channel routing, note-range filtering, and keyboard splitting apply the same
+channel/note decisions to native MIDI 1.0 and MIDI 2.0 UMP channel-voice
+packets. Note-addressed expression (poly pressure plus MIDI 2 per-note
+controllers, bend, and management) follows the addressed note through a range
+or split. A split duplicates channel-wide voice messages onto both configured
+output channels. Other UMP message types and SysEx retain their exact payloads.
+
+`audio/midi_voice_modulation_adapter.hpp` projects a caller-selected voice slot's
+note/MPE state into the existing `VoiceModulationBuffer`. Voice ownership stays
+with the instrument's allocator, preserving the MIDI-to-audio dependency
+direction and avoiding a second voice-allocation policy. Expression and release
+updates must carry a nonzero `note_id`: event releases match channel, note, and
+generation, while index-based releases match the generation explicitly. A stale
+generation therefore cannot mutate or release a reused voice slot. The tracker
+uses the 64-bit `MpeNoteGeneration` type, never recycles a generation across
+`reset()`, and fails closed after issuing its final nonzero value: further
+note-ons are consumed but create no voice or callback. Check
+`note_generation_exhausted()` and `refused_note_on_count()` to surface that
+terminal condition. `flush()` and
+`reset()` are the deliberate identity-free lifecycle clears. Destinations are
+preflighted for four lanes and the complete frame capacity before any lane is
+written.
 
 ### MIDI effects
 
-Pulp's format layer hosts MIDI-only processors, and Forge supplies a bounded,
+Pulp's format layer hosts MIDI-only processors. The SDK supplies the bounded
+utility kernels above, while Forge supplies a bounded,
 hot-swappable ordered transform chain with 20 transforms, fixed host macros,
 pattern/chord data, note-balance enforcement, and realtime-safe publication.
 See the [MIDI FX guide](../guides/midi-fx.md) for the complete transform
@@ -695,6 +836,7 @@ a working convolution and would hide the bug. Assert
 |-----------|--------|-------------|
 | Biquad | `biquad.hpp` | Second-order IIR filter — low/high/band-pass, notch, shelf, peaking EQ |
 | Six-band EQ | `six_band_eq.hpp` | Allocation-free low-shelf/four-peak/high-shelf cascade with optional stable cascade crossfades and endpoint response inspection |
+| SOS Cascade | `sos_cascade.hpp` | Fixed-capacity transactional runtime executor for stable normalized biquad cascades |
 | Filter Design | `filter_design.hpp` | Generate Butterworth and Chebyshev coefficient sets for arbitrary order |
 | FIR | `fir_filter.hpp` | Finite impulse response filter with arbitrary tap count for linear-phase EQ |
 | [Analog VCF](../guides/analog-vcf.md) | `analog_vcf.hpp` / `ota_cascade_filter.hpp` | Four measured Juno, Jupiter-8, Prophet-5, and Minimoog panel voicings over a shared zero-delay nonlinear four-pole cascade |
@@ -725,6 +867,7 @@ a working convolution and would hide the bug. Assert
 |-----------|--------|-------------|
 | Envelope Follower | `dynamics_contract.hpp` | Exact peak/RMS envelope timing, stereo detector linking, and canonical gain-reduction telemetry; `BallisticsFilter` retains its legacy nominal timing for render compatibility |
 | Compressor | `compressor.hpp` | Soft-knee downward compressor with threshold, ratio, attack, release |
+| True-peak limiter | `true_peak_limiter.hpp` | Stereo look-ahead limiter with 8x intersample detection, a fixed 64-sample gain-scheduling horizon plus optional user lookahead, explicit channel linking, latency, tail, and gain-reduction telemetry; larger channel capacities require an explicit template specialization |
 | DryWetMixer | `dry_wet_mixer.hpp` | Parallel mix with latency compensation — equal-power or linear crossfade |
 | Gain | `gain.hpp` | Scalar gain stage; pair with `smoothed_value.hpp`, `log_ramped_value.hpp`, or audio `apply_gain_ramp()` when transitions need de-clicking |
 | Noise Gate | `noise_gate.hpp` | Silence signals below threshold with hysteresis to avoid chatter |
@@ -737,7 +880,7 @@ a working convolution and would hide the bug. Assert
 | FFT | `fft.hpp` | Fast Fourier Transform — uses vDSP on Apple, fallback on other platforms |
 | Multi-Channel Meter | `multi_channel_meter.hpp` | Sample peak, RMS, stereo correlation, and channel-based BS.1770-5 K-weighted momentary plus gated integrated loudness; not true-peak, short-term, LRA, or a complete EBU Mode meter |
 | Oscillator | `oscillator.hpp` | Legacy polyBLEP oscillator with sine, saw, square, triangle waveforms (float phase, integrated triangle) |
-| Oscillator suite (`osc/`) | `osc/va.hpp`, `osc/vco.hpp`, `osc/dco.hpp`, `osc/wt.hpp`, `osc/wt_lofi.hpp` | Newer VA/VCO/DCO/wavetable family sharing a phase accumulator and BLEP/BLAMP kernels — see the [oscillators guide](../guides/oscillators.md) |
+| Oscillator suite (`osc/`) | `osc/va.hpp`, `osc/vco.hpp`, `osc/dco.hpp`, `osc/wt.hpp`, `osc/wt_lofi.hpp`, `osc/minblep.hpp` | Newer VA/VCO/DCO/wavetable family plus shared phase, polynomial BLEP/BLAMP, and fixed-capacity causal minBLEP primitives — see the [oscillators guide](../guides/oscillators.md) |
 | Velvet Noise Grid | `velvet_noise.hpp` | Coordinate-keyed jitter/sign draws for sparse velvet-noise tap grids; full and incremental builders produce identical draws |
 | Spectrogram | `spectrogram.hpp` | Rolling time-frequency analysis for visual display of spectral content |
 | STFT | `stft.hpp` | Short-time Fourier Transform for visualization (analysis-only; for processing use `spectral_frame_engine.hpp`) |
@@ -767,7 +910,7 @@ worked patches: the [modulation toolkit](modulation-toolkit.md).
 | VCA | `vca.hpp` | Control-driven gain with linear or ~40 dB exponential response and a built-in de-clicking control lag; exactly unity at full |
 | Low-pass gate | `lpg.hpp` | Vactrol-modelled Buchla gate — loudness and brightness move together, and a re-strike mid-decay accumulates the way a real roll does |
 | Mod matrix | `mod_matrix.hpp` | Fixed-capacity source-to-destination routing with depth and a `via` slot; trivially copyable, so it hot-swaps through a `TripleBuffer` |
-| Unit conversions | `units.hpp` | dB, MIDI pitch, cents, one-pole and T60 coefficients, tapers, and the one shared musical-division table (straight, dotted, triplet) |
+| Unit conversions | `units.hpp` | dB, MIDI pitch, cents, one-pole and T60 coefficients, tapers, and compatibility spellings for the canonical timebase musical divisions (straight, dotted, triplet) |
 | Chaos | `chaos.hpp` | `LogisticMapT` — one control-rate source that runs from periodic to chaotic on a single knob |
 
 `ModalBank::prepare()` allocates its fixed-capacity storage and therefore runs
@@ -792,14 +935,14 @@ mode span into a prepared bank. Link `pulp::signal-modal-spec` in addition to
 | Freeze Hold | `freeze_hold.hpp` | Spectral freeze / infinite hold with de-looped phase evolution, click-free engage/release, and a no-mute latch policy |
 | Pitched Feedback Delay | `pitched_feedback_delay.hpp` | Delay with a latency-bearing processor inside the feedback loop, tempo sync, freeze-aware feedback gating, and a computed minimum delay |
 | Control Smoother | `latency_aware_control_smoother.hpp` | Closed-form one-pole smoothing with attack/release asymmetry, semitone/ratio domains, block-size-independent trajectories |
-| Windowing | `windowing.hpp` | Hann, Hamming, Blackman, Kaiser window functions for FFT analysis |
+| Windowing | `windowing.hpp` | Hann, Hamming, Blackman, Blackman-Harris, Blackman-Nuttall, flat-top, and Kaiser windows for FFT analysis |
 
 #### Math and utilities
 
 | Processor | Header | Description |
 |-----------|--------|-------------|
 | Bias | `bias.hpp` | Shift a signal's DC offset — useful for asymmetric waveshaping |
-| Fast Math | `fast_math.hpp` | Approximations of sin, cos, tanh, exp for inner loops where precision is traded for speed |
+| Fast Math | `fast_math.hpp` | Scalar DSP math helpers; approximations are explicitly labeled, while `exp2` follows standard float edge semantics and exact representable integer powers under the ambient FP mode (audio-callback FTZ/FZ may flush subnormals) |
 | Interpolator | `interpolator.hpp` | Lagrange and Hermite interpolation for fractional-sample delay and resampling |
 | Log Ramped Value | `log_ramped_value.hpp` | Logarithmic smoothing for perceptually linear parameter transitions |
 | Lookup Table | `lookup_table.hpp` | Pre-computed function table for fast repeated evaluation of expensive functions |
@@ -807,6 +950,7 @@ mode span into a prepared bank. Link `pulp::signal-modal-spec` in addition to
 | Routing matrix | `audio_matrix_mixer.hpp` | Fixed-capacity signed audio routing with continuous gain automation and explicit headroom policy |
 | Mid/side | `mid_side.hpp` | Orthonormal stereo encode/decode and mono-safe width |
 | N-way routing | `nway_crossfade.hpp`, `path_switcher.hpp`, `path_latency_aligner.hpp` | Constant-power path morphing, click-free selection, and exact latency alignment |
+| Mirrored History Buffer | `mirrored_history_buffer.hpp` | Fixed-capacity single-thread sample history with a contiguous oldest-to-newest view and deterministic wrap cost |
 | Panner | `panner.hpp` | Stereo and surround panning with equal-power or linear law |
 | Polynomial Math | `poly_math.hpp` | Polynomial evaluation and Horner's method for waveshaper transfer functions |
 | Processor Chain | `processor_chain.hpp` | Connect multiple processors in series — automatic prepare/process forwarding |
@@ -963,6 +1107,14 @@ sample domain. When a requested sample lies outside the image of the tick
 domain, `resolve_sample()` reports `exact == false`, a nearest canonical edge
 representation, and the actual sample error.
 
+`project_ratchet_interval()` subdivides two adjacent clock boundaries into a
+bounded number of exact integer-tick hits. Its hit count includes the onset and
+the later boundary is excluded, so adjacent intervals neither duplicate nor
+orphan a clock-edge event. A count that would collapse multiple hits onto one
+integer tick is rejected. Projection into half-open windows is allocation-free
+and callback-partition invariant, including across non-divisible spans and the
+full signed tick domain.
+
 **Link:** `pulp::timebase` · **Include prefix:** `<pulp/timebase/...>`
 
 ```cpp
@@ -984,6 +1136,59 @@ const auto sample = tempo.ticks_to_samples({4 * kTicksPerQuarter});
 clock; the transport owns advancement while timeline positions may seek or
 wrap. `CompiledMeterMap` provides the corresponding validated meter lookup.
 
+`BeatDivision` is an append-only persisted vocabulary for straight, dotted, and
+triplet values from whole notes through sixty-fourth notes. `beat_fraction()`
+returns the reduced rational quarter-note value and `division_ticks()` converts
+it to the exact document lattice, failing explicitly if a future division is
+invalid, out of range, or not exactly representable. The older
+`signal::units::Division` spellings retain their public names and persisted
+ordinals, but convert to `BeatDivision` and derive beat values from this table;
+new divisions must be appended to both vocabularies with exhaustive parity
+coverage.
+
+`project_grid()` projects those divisions through explicit
+`GridProjectionRange` values. Each range carries its document sample/tick
+anchors and its independent monotonic anchors, matching the clock domains a
+transport publishes without introducing a dependency on playback. A pre-loop
+range uses its ordinary document interval; every loop pass reuses the loop's
+document sample interval and advances only the monotonic anchor; a seek may
+replace the document anchor without resetting the monotonic clock.
+Timeline-anchored grids retain global phase and bar-anchored grids restart at
+exact bar boundaries. A stopped request emits no points. Callers provide output
+storage; insufficient capacity reports the required count without modifying it,
+and malformed ranges or sample/tick overflow fail explicitly. A block is bounded
+to 65,536 candidate and projected points, with an overflow-safe preflight before
+enumeration. Host-beat-mapped ranges retain their precise fractional tick
+endpoints and project ticks proportionally into output frames, so session tempo
+may differ from the document tempo without silently falling back to the document
+sample map. Their `HostGridAnchor` names one normalized source tick at one
+absolute output frame plus the source-ticks-per-frame slope; loop ranges add
+their document-to-source pass offset. Callers initialize that coordinate from
+the first resolved range in a normalization epoch, not from an absolute host
+beat that the transport has already wrapped, and reset it when the epoch or
+slope changes. Reusing that anchor across callbacks keeps a rounded loop split
+from moving a grid tick by one frame when callback partitioning changes. For
+document-clock ranges the rounded tick end is
+inclusive only as a candidate search bound; the half-open document sample
+interval is authoritative. This preserves a grid point in a one-frame range
+even when a sparse tick map rounds both range endpoints to the same tick,
+without duplicating it in the next range.
+
+`OrderPreservingGrooveKernel` is not the canonical, named, sequence-owned
+`timeline::GrooveTemplate`. It is a fixed-capacity realtime projection kernel
+for the stricter non-reordering subset of that model. Its independent swing and
+table grids, 0..1000 strengths, 0..4000 velocity accents, and 1024-step ceiling
+match the timeline value domains so callers can adapt existing authored values
+without inventing another format. Timing strength scales both swing and table,
+making zero a complete identity. Construction checks the combined
+configured transform over a bounded joint period and rejects reorder or a
+period too large to validate. Application reports range failure rather than
+saturating a document-visible tick.
+
+`coordinate_random()` and `coordinate_chance()` derive deterministic values
+from seed, tick, lane, loop cycle, and stream, rather than callback-local mutable
+RNG state.
+
 `LoopRegion` is the loop bounds a transport honours, in document ticks. It lives
 here rather than beside either consumer because that is all it is — two document
 positions and whether they are in force — so the rung that runs the transport
@@ -992,6 +1197,31 @@ positions and whether they are in force — so the rung that runs the transport
 identical ones. A disabled loop keeps its bounds, so turning looping off and back
 on returns the user to the region they set up and a view keeps drawing it
 meanwhile.
+
+`TriggerGrid` is the allocation-free authored rhythm counterpart: fixed-capacity
+track×step cells carry velocity, exact rational probability, and bounded
+microtiming. Projection is a pure mapping of one caller-supplied cycle into a
+half-open tick window. The caller also supplies one stable random word per grid
+coordinate, so probability decisions do not depend on audio callback partition.
+The grid deliberately does not own transport advancement, groove or swing,
+mutable RNG state, generative pattern algorithms, or note lifetime.
+
+```cpp
+#include <pulp/timebase/trigger_grid.hpp>
+
+#include <array>
+#include <cstdint>
+
+pulp::timebase::TriggerGrid<8, 16> grid;
+grid.configure(2, 16, {pulp::timebase::kTicksPerQuarter / 4});
+grid.set_cell(0, 0, {.enabled = true, .velocity = 112});
+
+std::array<std::uint64_t, 32> coordinate_draws{};
+std::array<pulp::timebase::TriggerEvent, 32> events{};
+const auto projected = grid.project_window({0}, {0},
+                                            {pulp::timebase::kTicksPerQuarter},
+                                            coordinate_draws, events);
+```
 
 ## timeline
 

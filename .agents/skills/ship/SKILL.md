@@ -980,6 +980,19 @@ re-verifies the exact tag SHA/platform before publication. Marker-era manual
 backfills must build the tag itself; `source_ref` substitution is reserved for
 pre-marker history.
 
+Starting at `capability_handoff_floor`, official SDK tarballs additionally
+require `share/pulp/agent-capability-handoff.json` and its installed schema.
+The provenance stamper emits the handoff only after `cmake --install`, binding
+the exact release source SHA and platform to the SHA-256 of the installed
+platform-specific `bin/pulp-import-design` executable and to both the exact
+installed `agent-capabilities.json` content and its byte hash. The native
+archive check and downloaded-draft finalizer revalidate the handoff, both
+installed schemas, the importer bytes, and the capability bytes before
+publication. Keep `sdk_capability_handoff.py`, `json_schema_lite.py`, and the
+authoritative capability floor in the manual-backfill helper overlay; otherwise
+current releases fail closed or historical releases are incorrectly forced to
+synthesize a contract they predate.
+
 ### Shipyard pin drift between local tooling and tag sync
 
 Pulp's release automation depends on the pinned Shipyard CLI in two places:
