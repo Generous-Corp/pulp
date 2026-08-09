@@ -122,6 +122,23 @@ For removal:
 - Coverage is currently `partial`, so an absent key means unknown, not
   unsupported.
 
+## Reuse the spectral-mask processor
+
+`signal.spectral-mask-processor` is the shared streaming STFT/WOLA layer for
+products that apply authored spectral gain tables. Installed-SDK consumers
+include `<pulp/signal/spectral_mask_processor.hpp>` and link `Pulp::signal`.
+Prepare it off the audio thread, publish layouts or compiled tables from a
+control thread, and call `process()` or `process_frame()` on the audio thread.
+The processor owns frame-boundary table adoption, gain interpolation,
+overlap-add reconstruction, latency reporting, and latency-aligned dry/wet.
+
+Use categorical mask entries for true mute: a muted bin is multiplied by exact
+zero, not represented by a finite decibel floor. Reuse this processor for
+zoomable filter banks, spectral gates, freezes, morphing, and related products
+instead of rebuilding an application-local STFT lifecycle or publication
+protocol. Analyzer snapshots and captured-frame storage are separate layers;
+do not infer them from this capability or duplicate them inside the processor.
+
 ## Regenerate and validate
 
 Do not use the bootstrap or unpublished-migration switches during normal work.
