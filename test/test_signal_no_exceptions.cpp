@@ -25,6 +25,9 @@ int main() {
     pulp::signal::SpectralFrameBlur spectral_blur;
     if (!spectral_blur.prepare(1, 8, 2))
         return 7;
+    pulp::signal::SpectralMorph spectral_morph;
+    if (!spectral_morph.prepare(1, 129))
+        return 8;
     pulp::signal::PathLatencyAligner aligner;
-    return aligner.prepare(2u, 1u, 8u, 16u) ? 0 : 8;
+    return aligner.prepare(2u, 1u, 8u, 16u) ? 0 : 9;
 }

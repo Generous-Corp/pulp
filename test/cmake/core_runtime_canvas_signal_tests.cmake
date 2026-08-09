@@ -249,6 +249,11 @@ pulp_add_test_suite(pulp-test-spectral-primitives
 pulp_add_test_suite(pulp-test-spectral-gate-blur
     SOURCES test_spectral_gate_blur.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
+# Live two-input frame-domain magnitude/phase morph with independent arithmetic
+# oracles, wrap-seam negative controls, partition equivalence, and RT proof.
+pulp_add_test_suite(pulp-test-spectral-morph
+    SOURCES test_spectral_morph.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-stn-decomposer LIBRARIES pulp::signal)
 # Offline time-stretch/pitch engine (orchestrates the spectral primitives).
 pulp_add_test_suite(pulp-test-offline-stretch LIBRARIES pulp::signal)
