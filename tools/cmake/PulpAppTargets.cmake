@@ -41,6 +41,26 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
         target_link_libraries(${target}_Standalone PRIVATE
             ${_PULP_CONTROL_STANDALONE_TARGET})
 
+        if("dev.pulp.ui/capture@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES OR
+           "dev.pulp.ui/input@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES)
+            target_link_libraries(${target}_Standalone PRIVATE ${_PULP_CONTROL_UI_TARGET})
+        endif()
+        if("dev.pulp.trace/control@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES OR
+           "dev.pulp.trace/session-control@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES OR
+           "dev.pulp.telemetry/subscribe@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES)
+            target_link_libraries(${target}_Standalone PRIVATE ${_PULP_CONTROL_INSPECT_TARGET})
+        endif()
+        if("dev.pulp.runtime/evaluate@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES)
+            set(_control_runtime_eval_factory_source
+                "${CMAKE_CURRENT_BINARY_DIR}/${target}_standalone_runtime_eval_factory.cpp")
+            file(GENERATE OUTPUT "${_control_runtime_eval_factory_source}" CONTENT
+                "#include <pulp/format/processor.hpp>\n#include <pulp/format/view_bridge.hpp>\n#include <pulp/inspect/control_standalone_host.hpp>\n#include <pulp/inspect/runtime_eval_component.hpp>\n#include <memory>\nnamespace { std::shared_ptr<pulp::inspect::RuntimeEvaluator> pulp_make_control_runtime_evaluator(pulp::format::Processor&, pulp::format::ViewBridge& bridge) { return std::shared_ptr<pulp::inspect::RuntimeEvaluator>(pulp::inspect::make_script_runtime_evaluator([&bridge](const auto& visitor) { bridge.visit_scripted_ui(visitor); })); } [[maybe_unused]] const bool pulp_control_runtime_eval_factory_installed = pulp::inspect::detail::install_standalone_runtime_evaluator_factory(&pulp_make_control_runtime_evaluator); }\n")
+            target_sources(${target}_Standalone PRIVATE
+                "${_control_runtime_eval_factory_source}")
+            target_link_libraries(${target}_Standalone PRIVATE
+                ${_PULP_CONTROL_RUNTIME_EVAL_TARGET})
+        endif()
+
         # The visible Standalone remains an ordinary application bundle. The
         # broker launches a separate flat, host-only realization because the
         # trusted inventory deliberately rejects bundle-internal executables.
@@ -51,12 +71,27 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
         set(_control_host_entry
             "${CMAKE_CURRENT_BINARY_DIR}/${target}_control_host_entry.cpp")
         file(GENERATE OUTPUT "${_control_host_entry}" CONTENT
-            "#include <pulp/format/headless.hpp>\n#include <pulp/inspect/control_standalone_host.hpp>\n#include <atomic>\n#include <chrono>\n#include <csignal>\n#include <memory>\n#include <thread>\nstd::unique_ptr<pulp::format::Processor> ${processor_factory}();\nnamespace { std::atomic<bool> stopping{false}; void stop(int) { stopping.store(true, std::memory_order_relaxed); } }\nint main() { pulp::format::HeadlessHost app(&${processor_factory}); if (!app.valid() || app.processor() == nullptr) return 64; std::signal(SIGINT, stop); std::signal(SIGTERM, stop); auto control = pulp::inspect::make_control_standalone_host(); if (!control || !control->start(*app.processor(), app.state())) return 65; while (!stopping.load(std::memory_order_relaxed)) std::this_thread::sleep_for(std::chrono::milliseconds(50)); control->stop(); return 0; }\n")
+            "#include <pulp/format/headless.hpp>\n#include <pulp/inspect/control_standalone_host.hpp>\n#include <atomic>\n#include <chrono>\n#include <csignal>\n#include <memory>\n#include <thread>\nstd::unique_ptr<pulp::format::Processor> ${processor_factory}();\nnamespace { std::atomic<bool> stopping{false}; void stop(int) { stopping.store(true, std::memory_order_relaxed); } }\nint main() { pulp::format::HeadlessHost app(&${processor_factory}); if (!app.valid() || app.processor() == nullptr) return 64; std::signal(SIGINT, stop); std::signal(SIGTERM, stop); auto control = pulp::inspect::make_control_standalone_host(); if (!control || !control->start(*app.processor(), app.state())) return 65; while (!stopping.load(std::memory_order_relaxed)) { control->poll(); std::this_thread::sleep_for(std::chrono::milliseconds(1)); } control->stop(); return 0; }\n")
         add_executable(${target}_ControlHost
             ${PULP_${target}_CORE_OBJECTS}
             "${_control_host_entry}")
         target_link_libraries(${target}_ControlHost PRIVATE
             ${target}_Core ${_standalone_target} ${_PULP_CONTROL_STANDALONE_TARGET})
+        if("dev.pulp.ui/capture@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES OR
+           "dev.pulp.ui/input@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES)
+            target_link_libraries(${target}_ControlHost PRIVATE ${_PULP_CONTROL_UI_TARGET})
+        endif()
+        if("dev.pulp.trace/control@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES OR
+           "dev.pulp.trace/session-control@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES OR
+           "dev.pulp.telemetry/subscribe@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES)
+            target_link_libraries(${target}_ControlHost PRIVATE ${_PULP_CONTROL_INSPECT_TARGET})
+        endif()
+        if("dev.pulp.runtime/evaluate@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES)
+            target_sources(${target}_ControlHost PRIVATE
+                "${_control_runtime_eval_factory_source}")
+            target_link_libraries(${target}_ControlHost PRIVATE
+                ${_PULP_CONTROL_RUNTIME_EVAL_TARGET})
+        endif()
         if(APPLE)
             target_link_options(${target}_ControlHost PRIVATE
                 "LINKER:-dead_strip_dylibs")

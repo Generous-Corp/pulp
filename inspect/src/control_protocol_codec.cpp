@@ -510,6 +510,8 @@ std::string encode_control_envelope(const ControlEnvelope& envelope) {
                 valid = valid_host_execute(message);
                 kind = "host-execute";
                 payload.addMember("authority_id", choc::value::createString(message.authority_id));
+                payload.addMember("controller_authority_id",
+                                  choc::value::createString(message.controller_authority_id));
                 payload.addMember("broker_id", choc::value::createString(message.broker_id));
                 payload.addMember("capability_id", choc::value::createString(message.capability_id));
                 payload.addMember("deadline_unix_ms",
@@ -563,6 +565,27 @@ std::string encode_control_envelope(const ControlEnvelope& envelope) {
             } else if constexpr (std::is_same_v<T, ControlHostCompleteEnvelope>) {
                 valid = valid_host_complete(message);
                 kind = "host-complete";
+                auto publications = choc::value::createEmptyArray();
+                for (const auto& publication : message.artifact_publications) {
+                    auto value = choc::value::createObject("");
+                    value.addMember("bytes_base64",
+                                    choc::value::createString(publication.bytes_base64));
+                    value.addMember("content_type",
+                                    choc::value::createString(publication.content_type));
+                    value.addMember("lifetime_ms",
+                                    choc::value::createInt64(publication.lifetime_ms));
+                    value.addMember("redaction_state", choc::value::createInt64(
+                                                           static_cast<std::int64_t>(
+                                                               publication.redaction_state)));
+                    value.addMember("reference_id",
+                                    choc::value::createString(publication.reference_id));
+                    value.addMember("sensitivity", choc::value::createInt64(
+                                                        static_cast<std::int64_t>(
+                                                            publication.sensitivity)));
+                    publications.addArrayElement(std::move(value));
+                }
+                if (!message.artifact_publications.empty())
+                    payload.addMember("artifact_publications", std::move(publications));
                 payload.addMember("cancellation_reason",
                                   choc::value::createString(message.cancellation_reason));
                 if (const auto detail = parse_bounded_control_json(message.detail_json,

@@ -820,6 +820,7 @@ TEST_CASE("host control frames round trip and enforce role direction",
                                       .route_id = "route-1",
                                       .receipt_id = "receipt-1",
                                       .authority_id = "authority-1",
+                                      .controller_authority_id = "controller-1",
                                       .broker_id = "broker-1",
                                       .session_id = "session-1",
                                       .instance_id = "instance-1",
@@ -842,10 +843,17 @@ TEST_CASE("host control frames round trip and enforce role direction",
     REQUIRE(decoded_execute != nullptr);
     CHECK(decoded_execute->route_id == "route-1");
     CHECK(decoded_execute->receipt_id == "receipt-1");
+    CHECK(decoded_execute->controller_authority_id == "controller-1");
     CHECK(decoded_execute->operation_id == "session.describe");
     CHECK(decoded_execute->expected_state_generation == 9);
     CHECK(control_envelope_allowed(execute, ControlEnvelopeDirection::BrokerToHost));
     CHECK_FALSE(control_envelope_allowed(execute, ControlEnvelopeDirection::BrokerToClient));
+
+    auto missing_controller = *decoded_execute;
+    missing_controller.controller_authority_id.clear();
+    CHECK(encode_control_envelope(
+              ControlEnvelope{.payload = std::move(missing_controller)})
+              .empty());
 
     const ControlEnvelope completed{.payload = ControlHostCompleteEnvelope{
                                         .route_id = "route-1",
@@ -863,6 +871,44 @@ TEST_CASE("host control frames round trip and enforce role direction",
     auto invalid = std::get<ControlHostCompleteEnvelope>(completed.payload);
     invalid.result_code = ControlResultCode::InternalError;
     CHECK(encode_control_envelope(ControlEnvelope{.payload = invalid}).empty());
+
+    auto artifact_complete = std::get<ControlHostCompleteEnvelope>(completed.payload);
+    artifact_complete.detail_json = R"({"artifact_id": "host-publication-1"})";
+    artifact_complete.artifact_publications.push_back({
+        .reference_id = "host-publication-1",
+        .bytes_base64 = "AQ==",
+        .content_type = "application/octet-stream",
+        .sensitivity = ControlArtifactSensitivity::Sensitive,
+        .redaction_state = ControlArtifactRedactionState::Original,
+        .lifetime_ms = 1000,
+    });
+    const auto artifact_encoded =
+        encode_control_envelope(ControlEnvelope{.payload = artifact_complete});
+    REQUIRE_FALSE(artifact_encoded.empty());
+    const ControlEnvelope expected_artifact_complete{.payload = artifact_complete};
+    ControlProtocolDiagnostics artifact_error;
+    const auto artifact_decoded = decode_control_envelope(artifact_encoded, &artifact_error);
+    INFO(artifact_error.explanation);
+    REQUIRE(artifact_decoded);
+    const auto* decoded_artifact_complete =
+        std::get_if<ControlHostCompleteEnvelope>(&artifact_decoded->payload);
+    REQUIRE(decoded_artifact_complete);
+    REQUIRE(decoded_artifact_complete->artifact_publications.size() == 1);
+    CHECK(decoded_artifact_complete->artifact_publications ==
+          artifact_complete.artifact_publications);
+    CHECK(decoded_artifact_complete->detail_json == artifact_complete.detail_json);
+
+    const auto malformed = replace_once(artifact_encoded, "AQ==", "A===");
+    ControlProtocolDiagnostics malformed_error;
+    CHECK_FALSE(decode_control_envelope(malformed, &malformed_error));
+    CHECK(malformed_error.code == ControlProtocolError::InvalidValue);
+
+    artifact_complete.artifact_publications[0].bytes_base64 =
+        std::string(4 * ((kControlHostMaximumArtifactPublicationBytes + 2) / 3) + 1, 'A');
+    CHECK(encode_control_envelope(ControlEnvelope{.payload = artifact_complete}).empty());
+
+    artifact_complete.artifact_publications.resize(2);
+    CHECK(encode_control_envelope(ControlEnvelope{.payload = artifact_complete}).empty());
 }
 
 TEST_CASE("host open canonically selects exactly one admission mechanism",

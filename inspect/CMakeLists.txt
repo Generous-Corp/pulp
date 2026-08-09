@@ -130,8 +130,13 @@ target_link_libraries(pulp-inspect-runtime
 # Standalone archive and every production-stripped plugin artifact. Only an
 # explicitly control-enabled executable links this archive and installs its
 # lifecycle factory.
+if(APPLE AND PULP_ENABLE_GPU AND NOT IOS AND NOT PULP_IOS)
+    set(_pulp_inspect_standalone_runtime_source src/control_standalone_host.cpp)
+else()
+    set(_pulp_inspect_standalone_runtime_source src/control_standalone_host_minimal.cpp)
+endif()
 add_library(pulp-inspect-standalone-runtime
-    src/control_standalone_host.cpp)
+    ${_pulp_inspect_standalone_runtime_source})
 add_library(pulp::inspect-standalone-runtime ALIAS
     pulp-inspect-standalone-runtime)
 target_include_directories(pulp-inspect-standalone-runtime
@@ -152,6 +157,11 @@ target_include_directories(pulp-inspect-ui-runtime
         $<INSTALL_INTERFACE:include>)
 target_link_libraries(pulp-inspect-ui-runtime
     PUBLIC pulp::inspect-runtime pulp::view)
+
+if(APPLE AND PULP_ENABLE_GPU AND NOT IOS AND NOT PULP_IOS)
+    target_link_libraries(pulp-inspect-standalone-runtime
+        PUBLIC pulp-inspect pulp-inspect-ui-runtime)
+endif()
 
 # T0 offline integration is a separate headless adapter archive so the shared
 # control runtime does not acquire format/view dependencies merely by existing.

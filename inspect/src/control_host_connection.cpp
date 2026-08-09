@@ -1,6 +1,8 @@
 #include <pulp/inspect/control_host_connection.hpp>
 
 #include <pulp/events/interprocess_connection.hpp>
+#include <pulp/runtime/base64.hpp>
+#include <pulp/runtime/crypto.hpp>
 
 #include <atomic>
 #include <condition_variable>
@@ -16,9 +18,12 @@ namespace {
 using events::InterprocessConnection;
 using events::IpcTransport;
 
-ControlExecutionOutcome normalize_host_completion(ControlExecutionOutcome outcome) {
+ControlExecutionOutcome normalize_host_completion(
+    ControlExecutionOutcome outcome,
+    const std::vector<ControlHostArtifactPublication>& publications) {
     const bool unsupported_outputs =
-        !outcome.result.artifacts.empty() || !outcome.result.evidence_ids.empty();
+        !outcome.result.evidence_ids.empty() ||
+        outcome.result.artifacts.size() != publications.size();
     const bool completed = outcome.terminal_state == ControlReceiptState::Completed &&
                            !outcome.result.result_code &&
                            outcome.result.cancellation_reason.empty();
@@ -42,8 +47,12 @@ ControlExecutionOutcome normalize_host_completion(ControlExecutionOutcome outcom
     };
 }
 
-ControlHostCompleteEnvelope completion(std::string route_id, ControlExecutionOutcome outcome) {
-    outcome = normalize_host_completion(std::move(outcome));
+ControlHostCompleteEnvelope completion(
+    std::string route_id, ControlExecutionOutcome outcome,
+    std::vector<ControlHostArtifactPublication> publications) {
+    outcome = normalize_host_completion(std::move(outcome), publications);
+    if (outcome.terminal_state != ControlReceiptState::Completed)
+        publications.clear();
     return {
         .route_id = std::move(route_id),
         .terminal_state = outcome.terminal_state,
@@ -52,6 +61,7 @@ ControlHostCompleteEnvelope completion(std::string route_id, ControlExecutionOut
         .explanation = std::move(outcome.result.explanation),
         .detail_json = std::move(outcome.result.detail_json),
         .cancellation_reason = std::move(outcome.result.cancellation_reason),
+        .artifact_publications = std::move(publications),
     };
 }
 
@@ -61,6 +71,9 @@ struct ControlHostConnection::Impl : std::enable_shared_from_this<Impl> {
     struct Job {
         ControlHostExecuteEnvelope execute;
         std::atomic<ControlExecutionCheckpoint> checkpoint{ControlExecutionCheckpoint::Continue};
+        std::mutex artifacts_mutex;
+        std::vector<ControlHostArtifactPublication> artifact_publications;
+        std::size_t artifact_bytes = 0;
     };
 
     ControlHostConnectionConfig config;
@@ -110,8 +123,10 @@ struct ControlHostConnection::Impl : std::enable_shared_from_this<Impl> {
         return !encoded.empty() && connection.send_message(encoded);
     }
 
-    bool send_completion(std::string_view route, ControlExecutionOutcome outcome) {
-        if (send(ControlEnvelope{.payload = completion(std::string(route), std::move(outcome))}))
+    bool send_completion(std::string_view route, ControlExecutionOutcome outcome,
+                         std::vector<ControlHostArtifactPublication> publications = {}) {
+        if (send(ControlEnvelope{.payload = completion(std::string(route), std::move(outcome),
+                                            std::move(publications))}))
             return true;
         fail("host-completion-send-failed",
              "the final host completion could not be encoded or delivered");
@@ -336,7 +351,7 @@ struct ControlHostConnection::Impl : std::enable_shared_from_this<Impl> {
         }
         plan.receipt_id = ControlReceiptId{wire.receipt_id};
         plan.broker_id = ControlBrokerId{wire.broker_id};
-        plan.client_principal = wire.authority_id;
+        plan.client_principal = wire.controller_authority_id;
         plan.client_id = ControlClientId{wire.authority_id};
         plan.grant_id = ControlGrantId{wire.authority_id};
         plan.session_id = wire.session_id;
@@ -390,16 +405,68 @@ struct ControlHostConnection::Impl : std::enable_shared_from_this<Impl> {
                 },
             .complete_deferred =
                 [impl = shared_from_this(),
-                 route = wire.route_id](ControlExecutionOutcome outcome) {
-                    if (impl->send_completion(route, std::move(outcome))) {
+                 route = wire.route_id, job](ControlExecutionOutcome outcome) {
+                    std::vector<ControlHostArtifactPublication> publications;
+                    {
+                        std::lock_guard lock(job->artifacts_mutex);
+                        publications = std::move(job->artifact_publications);
+                    }
+                    if (impl->send_completion(route, std::move(outcome),
+                                              std::move(publications))) {
                         std::lock_guard lock(impl->mutex);
                         impl->active.erase(route);
                     }
                 },
+            .maximum_artifact_bytes = kControlHostMaximumArtifactPublicationBytes,
+            .publish_artifact =
+                [job](std::span<const std::uint8_t> bytes,
+                      ControlArtifactPublication publication) {
+                    if (job->checkpoint.load(std::memory_order_acquire) !=
+                            ControlExecutionCheckpoint::Continue ||
+                        bytes.empty() ||
+                        bytes.size() > kControlHostMaximumArtifactPublicationBytes ||
+                        publication.content_type.empty() || publication.content_type.size() > 256 ||
+                        publication.lifetime <= std::chrono::milliseconds::zero() ||
+                        publication.lifetime > std::chrono::hours{24})
+                        return ControlArtifactStoreResult{.status =
+                                                              ControlArtifactStatus::InvalidRequest};
+                    std::lock_guard lock(job->artifacts_mutex);
+                    if (job->artifact_publications.size() >=
+                            kControlHostMaximumArtifactPublications ||
+                        bytes.size() > kControlHostMaximumArtifactPublicationBytes -
+                                           job->artifact_bytes)
+                        return ControlArtifactStoreResult{.status =
+                                                              ControlArtifactStatus::ResourceExhausted};
+                    const auto reference = "host-publication-" +
+                                           std::to_string(job->artifact_publications.size());
+                    job->artifact_publications.push_back(
+                        {.reference_id = reference,
+                         .bytes_base64 = runtime::base64_encode(bytes.data(), bytes.size()),
+                         .content_type = publication.content_type,
+                         .sensitivity = publication.sensitivity,
+                         .redaction_state = publication.redaction_state,
+                         .lifetime_ms = publication.lifetime.count()});
+                    job->artifact_bytes += bytes.size();
+                    return ControlArtifactStoreResult{
+                        .status = ControlArtifactStatus::Stored,
+                        .metadata = ControlArtifactMetadata{
+                            .artifact_id = reference,
+                            .sha256 = runtime::sha256_hex(bytes.data(), bytes.size()),
+                            .byte_size = bytes.size(),
+                            .content_type = publication.content_type,
+                            .sensitivity = publication.sensitivity,
+                            .redaction_state = publication.redaction_state}};
+                },
         };
         auto outcome = executor(plan, request, context);
         if (!outcome.deferred) {
-            if (send_completion(wire.route_id, std::move(outcome))) {
+            std::vector<ControlHostArtifactPublication> publications;
+            {
+                std::lock_guard lock(job->artifacts_mutex);
+                publications = std::move(job->artifact_publications);
+            }
+            if (send_completion(wire.route_id, std::move(outcome),
+                                std::move(publications))) {
                 std::lock_guard lock(mutex);
                 active.erase(wire.route_id);
             }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <pulp/inspect/control_artifacts.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -15,6 +17,8 @@ inline constexpr std::string_view kControlEnvelopeSchema = "dev.pulp.control/env
 inline constexpr std::string_view kControlLegacyInspectorJsonEncoding = "legacy-inspector-json-v1";
 inline constexpr std::size_t kControlMaximumRequestPayloadBytes = 512u * 1024u;
 inline constexpr std::size_t kControlMaximumEnvelopeBytes = 2u * 1024u * 1024u;
+inline constexpr std::size_t kControlHostMaximumArtifactPublications = 1;
+inline constexpr std::size_t kControlHostMaximumArtifactPublicationBytes = 1u * 1024u * 1024u;
 inline constexpr std::size_t kControlMaximumResultDetailBytes = 1600u * 1024u;
 /// Receipt normalization and wire encoding use these same field boundaries.
 inline constexpr std::size_t kControlReceiptMaximumRequestIdBytes = 128;
@@ -237,6 +241,10 @@ struct ControlHostExecuteEnvelope {
     /// It is stable only for the lifetime of that authority on this host and
     /// cannot be used on the client carrier.
     std::string authority_id;
+    /// Broker-minted, host-local projection of the authenticated client scope.
+    /// It correlates that client's separately granted operations only inside
+    /// this exact broker/host lifetime and never authorizes by itself.
+    std::string controller_authority_id;
     std::string broker_id;
     std::string session_id;
     std::string instance_id;
@@ -388,6 +396,19 @@ enum class ControlRetryClassification : std::uint8_t {
 
 /// Host-authored execution outcome. CompletedAfterRevocation is intentionally
 /// unavailable here; only the broker may derive that durable receipt state.
+struct ControlHostArtifactPublication {
+    /// Host-local correlation token only. The broker never accepts it as an
+    /// artifact identity and replaces it with broker-owned ACL metadata.
+    std::string reference_id;
+    std::string bytes_base64;
+    std::string content_type;
+    ControlArtifactSensitivity sensitivity = ControlArtifactSensitivity::Sensitive;
+    ControlArtifactRedactionState redaction_state = ControlArtifactRedactionState::Original;
+    std::int64_t lifetime_ms = 0;
+    friend bool operator==(const ControlHostArtifactPublication&,
+                           const ControlHostArtifactPublication&) = default;
+};
+
 struct ControlHostCompleteEnvelope {
     std::string route_id;
     ControlReceiptState terminal_state = ControlReceiptState::Failed;
@@ -396,6 +417,7 @@ struct ControlHostCompleteEnvelope {
     std::string explanation;
     std::string detail_json = "{}";
     std::string cancellation_reason;
+    std::vector<ControlHostArtifactPublication> artifact_publications;
     friend bool operator==(const ControlHostCompleteEnvelope&,
                            const ControlHostCompleteEnvelope&) = default;
 };

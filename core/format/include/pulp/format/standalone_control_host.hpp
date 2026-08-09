@@ -29,6 +29,11 @@ class StandaloneControlHost {
 
     /// Revoke host-side authority before the processor or StateStore retires.
     virtual void stop() noexcept = 0;
+
+    /// Run bounded host-main work admitted by the broker. The Standalone event
+    /// loop and the dedicated companion both call this on their owning main
+    /// thread; an inert direct launch has no queued work.
+    virtual void poll() noexcept {}
 };
 
 using StandaloneControlHostFactory = std::unique_ptr<StandaloneControlHost> (*)();

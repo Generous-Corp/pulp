@@ -2,12 +2,17 @@
 
 #include <pulp/inspect/control_executor_slot.hpp>
 #include <pulp/inspect/control_host_connection.hpp>
+#include <pulp/inspect/control_manifest.hpp>
 #include <pulp/inspect/motion_inspector.hpp>
 #include <pulp/inspect/motion_scrubber.hpp>
+#include <pulp/inspect/session.hpp>
 #include <pulp/runtime/crypto.hpp>
+
+#include <choc/text/choc_JSON.h>
 
 #include <atomic>
 #include <condition_variable>
+#include <stdexcept>
 #include <mutex>
 #include <unordered_map>
 #include <utility>
@@ -72,6 +77,22 @@ struct ProjectedAuthority : std::enable_shared_from_this<ProjectedAuthority> {
     std::unordered_map<std::uint64_t, std::function<void()>> callbacks;
 };
 
+std::int64_t steady_nanoseconds() noexcept {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
+struct ControllerExecutionToken {
+    std::atomic<bool> live{true};
+    std::atomic<std::int64_t> expires_at_ns{0};
+
+    bool is_live() const noexcept {
+        return live.load(std::memory_order_acquire) &&
+               steady_nanoseconds() < expires_at_ns.load(std::memory_order_acquire);
+    }
+};
+
 } // namespace
 
 struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
@@ -84,6 +105,11 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
     std::unique_ptr<ControlMotionExecutor> motion;
     std::unique_ptr<ControlHostUiExecutor> ui;
     ControlOperationExecutor host_executor;
+    std::mutex controller_mutex;
+    InspectorControllerLease controller_lease;
+    std::string controller_lease_id;
+    std::string controller_acquiring_authority_id;
+    std::shared_ptr<ControllerExecutionToken> controller_live;
     ControlHostOpenResult opened;
     ControlHostObservabilityBinding observability_binding;
     std::unordered_map<std::string, std::shared_ptr<ProjectedAuthority>> authorities;
@@ -123,6 +149,20 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
             trace->end_authority(id);
         if (observability)
             observability->end_authority(id);
+        {
+            std::lock_guard controller_lock(controller_mutex);
+            if (controller_acquiring_authority_id == id) {
+                if (controller_live)
+                    controller_live->live.store(false, std::memory_order_release);
+                if (const auto owner = controller_lease.owner())
+                    controller_lease.disconnect(*owner);
+                controller_lease_id.clear();
+                controller_acquiring_authority_id.clear();
+                controller_live.reset();
+                if (ui)
+                    (void)ui->release_controller_scope();
+            }
+        }
     }
 
     void end_all() noexcept {
@@ -142,6 +182,14 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
             observability->disconnect();
         if (ui)
             (void)ui->disconnect();
+        std::lock_guard controller_lock(controller_mutex);
+        if (controller_live)
+            controller_live->live.store(false, std::memory_order_release);
+        if (const auto owner = controller_lease.owner())
+            controller_lease.disconnect(*owner);
+        controller_lease_id.clear();
+        controller_acquiring_authority_id.clear();
+        controller_live.reset();
     }
 
     bool exact_plan(const ControlAdmissionPlan& plan) const {
@@ -153,12 +201,105 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
                plan.manifest_digest == opened.manifest_digest &&
                plan.producer_artifact_digest == opened.producer_artifact_digest &&
                plan.client_id.value == plan.grant_id.value &&
-               plan.client_id.value == plan.client_principal;
+               !plan.client_principal.empty();
     }
 
     bool accepts(const ControlAdmissionPlan& plan) const {
         std::lock_guard lock(mutex);
         return active && !stopping && exact_plan(plan);
+    }
+
+    ControlExecutionOutcome session_control(
+        const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
+        const ControlExecutionContext& context) {
+        if (!context.checkpoint ||
+            context.checkpoint() != ControlExecutionCheckpoint::Continue) {
+            return {.terminal_state = ControlReceiptState::Cancelled,
+                    .result = {.result_code = ControlResultCode::Cancelled,
+                               .explanation = "controller authority is no longer live",
+                               .cancellation_reason = "controller-authority-ended"}};
+        }
+        std::string action;
+        try {
+            const auto params = choc::json::parse(request.params_json);
+            if (!params.isObject() || !params["action"].isString())
+                throw std::runtime_error("invalid session control parameters");
+            action = params["action"].getString();
+        } catch (...) {
+            return {.terminal_state = ControlReceiptState::Failed,
+                    .result = {.result_code = ControlResultCode::InvalidRequest,
+                               .explanation = "session control parameters are invalid"}};
+        }
+
+        std::unique_lock lock(controller_mutex);
+        const std::string_view owner = plan.client_principal;
+        ControllerLeaseResult result = ControllerLeaseResult::InvalidOwner;
+        if (action == "acquire")
+            result = controller_lease.acquire(owner);
+        else if (action == "renew")
+            result = controller_lease.renew(owner);
+        else if (action == "release")
+            result = controller_lease.release(owner)
+                         ? ControllerLeaseResult::Renewed
+                         : ControllerLeaseResult::HeldByOther;
+        if (result == ControllerLeaseResult::HeldByOther) {
+            return {.terminal_state = ControlReceiptState::Failed,
+                    .result = {.result_code = ControlResultCode::LeaseConflict,
+                               .explanation = "controller lease is not owned by this authority"}};
+        }
+        if (result == ControllerLeaseResult::InvalidOwner) {
+            return {.terminal_state = ControlReceiptState::Failed,
+                    .result = {.result_code = ControlResultCode::InvalidRequest,
+                               .explanation = "session control action is invalid"}};
+        }
+        bool release_ui = false;
+        if (result == ControllerLeaseResult::Acquired || controller_lease_id.empty()) {
+            if (controller_live) {
+                controller_live->live.store(false, std::memory_order_release);
+                release_ui = true;
+            }
+            const auto bytes = runtime::secure_random_bytes(16);
+            if (!bytes) {
+                controller_lease.disconnect(owner);
+                return {.terminal_state = ControlReceiptState::Failed,
+                        .result = {.result_code = ControlResultCode::ResourceExhausted,
+                                   .explanation = "controller lease identity is unavailable"}};
+            }
+            controller_lease_id = "lease-" + runtime::hex_encode(*bytes);
+            controller_acquiring_authority_id = plan.client_id.value;
+            controller_live = std::make_shared<ControllerExecutionToken>();
+        }
+        const auto lease_id = controller_lease_id;
+        const auto remaining = action == "release" ? std::chrono::milliseconds{0}
+                                                    : controller_lease.remaining();
+        if (controller_live)
+            controller_live->expires_at_ns.store(
+                steady_nanoseconds() +
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(remaining).count(),
+                std::memory_order_release);
+        const auto expires_at = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    std::chrono::system_clock::now().time_since_epoch()) +
+                                remaining;
+        auto detail = choc::value::createObject("");
+        detail.addMember("receipt_id", plan.receipt_id.value);
+        detail.addMember("lease_id", lease_id);
+        detail.addMember("expires_at_ms", static_cast<std::int64_t>(expires_at.count()));
+        if (action == "release") {
+            if (controller_live)
+                controller_live->live.store(false, std::memory_order_release);
+            controller_lease_id.clear();
+            controller_acquiring_authority_id.clear();
+            controller_live.reset();
+            release_ui = true;
+        }
+        const auto detail_json = choc::json::toString(detail, false);
+        if (release_ui && ui && !ui->release_controller_scope()) {
+            return {.terminal_state = ControlReceiptState::Failed,
+                    .result = {.result_code = ControlResultCode::InternalError,
+                               .explanation = "controller UI ownership release failed"}};
+        }
+        return {.terminal_state = ControlReceiptState::Completed,
+                .result = {.detail_json = detail_json}};
     }
 
     ControlOperationExecutor composite_executor() {
@@ -181,18 +322,59 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
                     .result = {.result_code = ControlResultCode::Cancelled,
                                .explanation = "projected host authority has ended",
                                .cancellation_reason = "authority-ended"}};
+            if (request.operation_id == "dev.pulp.session/control@1")
+                return state->session_control(plan, request, context);
+            std::shared_ptr<ControllerExecutionToken> controller_live;
+            bool controller_expired = false;
+            if (const auto* operation =
+                    resolve_control_operation(request.operation_id, request.operation_version);
+                operation && capability_requires_controller_lease(operation->capability)) {
+                std::lock_guard controller_lock(state->controller_mutex);
+                controller_live = state->controller_live;
+                if (!state->controller_lease.owns(plan.client_principal) ||
+                    !controller_live || !controller_live->is_live()) {
+                    if (controller_live)
+                        controller_live->live.store(false, std::memory_order_release);
+                    if (const auto owner = state->controller_lease.owner())
+                        state->controller_lease.disconnect(*owner);
+                    state->controller_lease_id.clear();
+                    state->controller_acquiring_authority_id.clear();
+                    state->controller_live.reset();
+                    controller_live.reset();
+                    if (state->ui)
+                        (void)state->ui->release_controller_scope();
+                    controller_expired = true;
+                }
+            }
+            if (controller_expired) {
+                return ControlExecutionOutcome{
+                    .terminal_state = ControlReceiptState::Failed,
+                    .result = {.result_code = ControlResultCode::LeaseConflict,
+                               .explanation =
+                                   "controller lease is required for this operation"}};
+            }
+            auto effective_context = context;
+            if (controller_live) {
+                const auto operation_checkpoint = context.checkpoint;
+                effective_context.checkpoint = [controller_live, operation_checkpoint] {
+                    if (!controller_live->is_live())
+                        return ControlExecutionCheckpoint::AuthorityRevoked;
+                    return operation_checkpoint ? operation_checkpoint()
+                                                : ControlExecutionCheckpoint::AuthorityRevoked;
+                };
+            }
             if (request.operation_id == "dev.pulp.trace/session-control@1" ||
                 request.operation_id == "dev.pulp.telemetry/subscribe@1")
-                return observability_executor(plan, request, context);
+                return observability_executor(plan, request, effective_context);
             if (request.operation_id == "dev.pulp.trace/control@1")
-                return motion_executor(plan, request, context);
+                return motion_executor(plan, request, effective_context);
             if (state->ui &&
                 (request.operation_id == "dev.pulp.ui/capture@1" ||
                  request.operation_id == "dev.pulp.ui/input@1" ||
                  request.operation_id == "dev.pulp.runtime/evaluate@1"))
-                return state->ui->executor()(plan, request, context);
+                return state->ui->executor()(plan, request, effective_context);
             if (state->host_executor)
-                return state->host_executor(plan, request, context);
+                return state->host_executor(plan, request, effective_context);
             return not_implemented();
         };
     }

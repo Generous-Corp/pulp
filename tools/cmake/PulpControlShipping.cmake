@@ -11,31 +11,43 @@ set(_PULP_INSPECTOR_SHIPPING_CAPABILITIES
     session.describe
     session.control
     state.read
+    render.offline
     ui.read
     diagnostics.read
     logs.read
     capture.image
     ui.input
+    trace.control
+    trace.session.control
     state.write
     test.input
     authoring.tweaks
     telemetry.stream
-    runtime.eval)
+    runtime.reload
+    runtime.eval
+    artifact.read
+    unavailable)
 
 set(_PULP_CONTROL_CAPABILITIES
     dev.pulp.instance/read@1
     dev.pulp.session/control@1
     dev.pulp.state/read@1
+    dev.pulp.render/offline@1
     dev.pulp.ui/observe@1
     dev.pulp.diagnostics/read@1
     dev.pulp.logs/read@1
     dev.pulp.ui/capture@1
     dev.pulp.ui/input@1
+    dev.pulp.trace/control@1
+    dev.pulp.trace/session-control@1
     dev.pulp.state/parameter-gesture@1
     dev.pulp.test/input@1
     dev.pulp.authoring/tweaks@1
     dev.pulp.telemetry/subscribe@1
-    dev.pulp.runtime/evaluate@1)
+    dev.pulp.runtime/reload@1
+    dev.pulp.runtime/evaluate@1
+    dev.pulp.artifact/read@1
+    dev.pulp.unavailable/operation@1)
 
 # Installed copies of this helper cannot reach back into the source tree. The
 # truth checker pins this value to control_registry_digest.inc.
@@ -119,7 +131,8 @@ function(_pulp_configure_control_shipping target bundle_id product_name)
         CACHE INTERNAL "" FORCE)
 
     set(_controller_caps
-        ui.input state.write test.input authoring.tweaks runtime.eval)
+        ui.input trace.control trace.session.control state.write test.input
+        authoring.tweaks runtime.reload runtime.eval)
     foreach(_control_cap IN LISTS _control_caps)
         list(FIND _PULP_CONTROL_CAPABILITIES "${_control_cap}" _cap_index)
         list(GET _PULP_INSPECTOR_SHIPPING_CAPABILITIES ${_cap_index} _cap)

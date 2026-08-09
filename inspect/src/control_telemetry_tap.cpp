@@ -6,6 +6,7 @@
 #include <cmath>
 #include <deque>
 #include <map>
+#include <mutex>
 #include <set>
 #include <type_traits>
 #include <unordered_map>
@@ -61,6 +62,7 @@ struct ControlTelemetryTap::Impl {
     std::vector<Channel> channels;
     std::unordered_map<std::string, std::size_t> channel_index;
     std::map<std::string, Subscription, std::less<>> subscriptions;
+    mutable std::mutex mutex;
 
     std::chrono::steady_clock::time_point now() const {
         return clock ? clock() : std::chrono::steady_clock::now();
@@ -152,7 +154,12 @@ ControlTelemetryTap& ControlTelemetryTap::operator=(ControlTelemetryTap&&) noexc
 
 bool ControlTelemetryTap::attach(view::ValueChannelTelemetryAttachment attachment,
                                  Classifier classifier) {
-    detach();
+    std::lock_guard lock(impl_->mutex);
+    impl_->subscriptions.clear();
+    impl_->channel_index.clear();
+    impl_->channels.clear();
+    impl_->classifier = {};
+    impl_->attachment = {};
     if (!impl_->config.enabled || !attachment.valid() ||
         !std::isfinite(impl_->config.minimum_rate_hz) ||
         !std::isfinite(impl_->config.maximum_rate_hz) || impl_->config.minimum_rate_hz <= 0.0 ||
@@ -166,7 +173,11 @@ bool ControlTelemetryTap::attach(view::ValueChannelTelemetryAttachment attachmen
     impl_->classifier = std::move(classifier);
     for (const auto& descriptor : impl_->attachment.channels()) {
         if (!impl_->channel_index.emplace(descriptor.info.name, impl_->channels.size()).second) {
-            detach();
+            impl_->subscriptions.clear();
+            impl_->channel_index.clear();
+            impl_->channels.clear();
+            impl_->classifier = {};
+            impl_->attachment = {};
             return false;
         }
         impl_->channels.push_back({.index = descriptor.index, .descriptor = descriptor});
@@ -175,6 +186,7 @@ bool ControlTelemetryTap::attach(view::ValueChannelTelemetryAttachment attachmen
 }
 
 void ControlTelemetryTap::detach() noexcept {
+    std::lock_guard lock(impl_->mutex);
     impl_->subscriptions.clear();
     impl_->channel_index.clear();
     impl_->channels.clear();
@@ -185,6 +197,7 @@ void ControlTelemetryTap::detach() noexcept {
 std::optional<std::string>
 ControlTelemetryTap::subscribe(const ControlTelemetryAuthority& authority,
                                ControlTelemetrySubscriptionRequest request) {
+    std::lock_guard lock(impl_->mutex);
     if (!impl_->attachment.valid() || authority.client_id.empty() ||
         authority.registration_id.empty() || authority.instance_id.empty() ||
         authority.grant_id.empty() || request.channels.empty() ||
@@ -231,6 +244,7 @@ ControlTelemetryTap::subscribe(const ControlTelemetryAuthority& authority,
 
 bool ControlTelemetryTap::unsubscribe(std::string_view subscription_id,
                                       const ControlTelemetryAuthority& authority) {
+    std::lock_guard lock(impl_->mutex);
     const auto found = impl_->subscriptions.find(subscription_id);
     if (found == impl_->subscriptions.end() || !same_authority(found->second.authority, authority))
         return false;
@@ -240,6 +254,7 @@ bool ControlTelemetryTap::unsubscribe(std::string_view subscription_id,
 
 std::size_t ControlTelemetryTap::end_authority(
     const ControlTelemetryAuthority& authority) noexcept {
+    std::lock_guard lock(impl_->mutex);
     const auto before = impl_->subscriptions.size();
     std::erase_if(impl_->subscriptions, [&](const auto& entry) {
         return same_authority(entry.second.authority, authority);
@@ -248,6 +263,7 @@ std::size_t ControlTelemetryTap::end_authority(
 }
 
 void ControlTelemetryTap::poll() {
+    std::lock_guard lock(impl_->mutex);
     if (!impl_->attachment.valid())
         return;
     impl_->refresh();
@@ -304,6 +320,7 @@ void ControlTelemetryTap::poll() {
 std::optional<ControlTelemetryFrame>
 ControlTelemetryTap::try_pop(std::string_view subscription_id,
                              const ControlTelemetryAuthority& authority) {
+    std::lock_guard lock(impl_->mutex);
     const auto found = impl_->subscriptions.find(subscription_id);
     if (found == impl_->subscriptions.end() ||
         !same_authority(found->second.authority, authority) || found->second.queued.empty())
@@ -323,6 +340,7 @@ double ControlTelemetryTap::effective_rate_hz(double requested_rate_hz) const no
 }
 
 std::size_t ControlTelemetryTap::subscription_count() const noexcept {
+    std::lock_guard lock(impl_->mutex);
     return impl_->subscriptions.size();
 }
 

@@ -13,11 +13,13 @@
 #include <pulp/runtime/crypto.hpp>
 
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -163,6 +165,26 @@ std::optional<ControlEnvelope> request_health(const std::filesystem::path& endpo
     }
     client.disconnect();
     return response;
+}
+
+pulp::platform::ProcessResult run_installed_client(
+    const std::filesystem::path& executable, const std::filesystem::path& runtime,
+    std::vector<std::string> arguments,
+    std::optional<std::string> standard_input = std::nullopt) {
+    std::vector<std::string> command{"TMPDIR=" + runtime.string(), executable.string()};
+    command.insert(command.end(), std::make_move_iterator(arguments.begin()),
+                   std::make_move_iterator(arguments.end()));
+    pulp::platform::ProcessOptions options;
+    options.timeout_ms = 15'000;
+    options.capture_stdout = true;
+    options.capture_stderr = true;
+    if (!standard_input)
+        return pulp::platform::ChildProcess::run("/usr/bin/env", command, options);
+    pulp::platform::ChildProcess process;
+    const std::vector<std::uint8_t> bytes(standard_input->begin(), standard_input->end());
+    if (!process.start_with_standard_input("/usr/bin/env", command, bytes, options))
+        return {};
+    return process.wait();
 }
 
 #ifdef __APPLE__
@@ -780,11 +802,20 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
     REQUIRE(instances.size() == 1);
     const auto instance = instances[0];
     CHECK(instance["plugin_id"].getString() == expected_plugin);
-    REQUIRE(instance["capabilities"].size() == 2);
-    CHECK(instance["capabilities"][0].getString() ==
-          std::string_view{"dev.pulp.instance/read@1"});
-    CHECK(instance["capabilities"][1].getString() ==
-          std::string_view{"dev.pulp.state/read@1"});
+    if (author_host_environment) {
+        CHECK(instance["capabilities"].size() == 10);
+        const auto encoded = choc::json::toString(instance["capabilities"], false);
+        for (const auto capability : {
+                 "dev.pulp.instance/read@1", "dev.pulp.session/control@1",
+                 "dev.pulp.state/read@1", "dev.pulp.ui/capture@1",
+                 "dev.pulp.ui/input@1", "dev.pulp.trace/control@1",
+                 "dev.pulp.trace/session-control@1",
+                 "dev.pulp.state/parameter-gesture@1",
+                 "dev.pulp.telemetry/subscribe@1", "dev.pulp.runtime/evaluate@1"})
+            CHECK(encoded.find(capability) != std::string::npos);
+    } else {
+        REQUIRE(instance["capabilities"].size() == 2);
+    }
 
     if (author_host_environment) {
         const auto version_directory = installed_host.parent_path();
@@ -870,6 +901,13 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
                 break;
             std::this_thread::sleep_for(1ms);
         }
+        if (restored_instances.size() != 1) {
+            daemon_process.cancel();
+            const auto failed_daemon = wait_for_process_exit(daemon_process);
+            REQUIRE(failed_daemon);
+            INFO(failed_daemon->stdout_output);
+            INFO(failed_daemon->stderr_output);
+        }
         REQUIRE(restored_instances.size() == 1);
         CHECK(restored_instances[0]["plugin_id"].getString() == expected_plugin);
     }
@@ -885,8 +923,8 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
 #endif
 }
 
-TEST_CASE("canonical ordinary Standalone host serves typed state reads",
-          "[inspect][control][daemon][host][standalone][state][e2e][author-catalog]") {
+TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
+          "[inspect][control][daemon][host][standalone][e2e][aggregate][installed-author-full-parity][author-catalog]") {
 #ifdef __APPLE__
     DaemonRoot root;
     const auto broker_executable = current_executable();
@@ -904,6 +942,7 @@ TEST_CASE("canonical ordinary Standalone host serves typed state reads",
     REQUIRE_FALSE(broker_executable.empty());
     REQUIRE(std::filesystem::is_regular_file(installed_host));
 
+    std::atomic<std::uint64_t> consent_sequence{0};
     ControlBrokerDaemon daemon({
         .runtime_root = root.runtime,
         .state_root = root.state,
@@ -917,9 +956,19 @@ TEST_CASE("canonical ordinary Standalone host serves typed state reads",
                          .working_directory = installed_host.parent_path(),
                          .host_tier = ControlHostTier::Standalone}}},
         .decide_consent =
-            [](const ControlGrantConsentRequest&) {
+            [&consent_sequence](const ControlGrantConsentRequest& consent_request) {
+                if (std::ranges::find(consent_request.grant.capabilities,
+                                      InspectorCapability::RuntimeEval) !=
+                    consent_request.grant.capabilities.end()) {
+                    return ControlConsentDecision{
+                        true, ControlConsentAuthority::TrustedHostUi,
+                        "standalone-runtime-eval-single-use-consent", {}};
+                }
                 return ControlConsentDecision{true, ControlConsentAuthority::TrustedHostUi,
-                                              "standalone-state-read-test-consent", {}};
+                                              "standalone-state-read-test-consent-" +
+                                                  std::to_string(consent_sequence.fetch_add(
+                                                      1, std::memory_order_relaxed)),
+                                              {}};
             },
     });
     REQUIRE(daemon.start());
@@ -973,7 +1022,8 @@ TEST_CASE("canonical ordinary Standalone host serves typed state reads",
     REQUIRE(granted.status_id == "granted");
 
     ControlClient client(connection);
-    REQUIRE(client.negotiate({.mandatory_features = {"receipts"}}).succeeded());
+    REQUIRE(client.negotiate({.mandatory_features = {"receipts"},
+                              .optional_features = {"artifacts"}}).succeeded());
     ControlRequestEnvelope request{
         .request_id = "ordinary-standalone-state-read",
         .client_id = client_id,
@@ -1002,10 +1052,303 @@ TEST_CASE("canonical ordinary Standalone host serves typed state reads",
     REQUIRE(detail["parameters"].size() == 1);
     CHECK(detail["parameters"][0]["name"].getString() == expected_parameter);
 
+    if (author_host_environment) {
+        std::uint64_t sequence = 0;
+        const auto invoke = [&](std::string operation, std::string params,
+                                std::optional<std::uint64_t> expected_generation = std::nullopt,
+                                std::optional<std::string> selected_grant = std::nullopt) {
+            ControlRequestEnvelope next{
+                .request_id = "installed-parity-" + std::to_string(++sequence),
+                .client_id = client_id,
+                .registration_id = registration_id,
+                .grant_id = selected_grant.value_or(request.grant_id),
+                .instance_generation = publication_id,
+                .operation_id = std::move(operation),
+                .operation_version = 1,
+                .idempotency_key = "installed-parity-key-" + std::to_string(sequence),
+                .deadline_unix_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                        (std::chrono::system_clock::now() + 5s)
+                                            .time_since_epoch())
+                                        .count(),
+                .params_json = std::move(params),
+            };
+            next.expected_state_generation = expected_generation.value_or(0);
+            next.request_hash = *control_request_hash(next);
+            return client.request(next, 5s);
+        };
+
+        const auto initial_generation =
+            static_cast<std::uint64_t>(detail["state_generation"].getInt64());
+        const auto denied_without_controller = invoke(
+            "dev.pulp.state/parameter-gesture@1",
+            R"({"idempotency_key":"missing-controller","normalized_value":0.5,"parameter_id":1})",
+            initial_generation);
+        REQUIRE(denied_without_controller.response);
+        CHECK(denied_without_controller.response->result_code ==
+              ControlResultCode::LeaseConflict);
+
+        const auto acquired_controller =
+            invoke("dev.pulp.session/control@1", R"({"action":"acquire"})");
+        REQUIRE(acquired_controller.succeeded());
+        auto controller_lease_id = std::string(
+            choc::json::parse(acquired_controller.response->detail_json)["lease_id"].getString());
+        REQUIRE_FALSE(controller_lease_id.empty());
+        const auto renewed_controller =
+            invoke("dev.pulp.session/control@1", R"({"action":"renew"})");
+        REQUIRE(renewed_controller.succeeded());
+        CHECK(choc::json::parse(renewed_controller.response->detail_json)["lease_id"].getString() ==
+              controller_lease_id);
+
+        const auto gesture = invoke(
+            "dev.pulp.state/parameter-gesture@1",
+            R"({"idempotency_key":"installed-gesture","normalized_value":0.75,"parameter_id":1})",
+            initial_generation);
+        INFO(gesture.explanation);
+        REQUIRE(gesture.succeeded());
+        REQUIRE(gesture.response->state == ControlReceiptState::Completed);
+        CHECK(choc::json::parse(gesture.response->detail_json)["applied"].getBool());
+        const auto after_gesture = invoke("dev.pulp.state/read@1", R"({"include_catalog":true})");
+        REQUIRE(after_gesture.succeeded());
+        CHECK(choc::json::parse(after_gesture.response->detail_json)["parameters"][0]["normalized"]
+                  .getFloat64() == 0.75);
+
+        const auto* cli_environment = std::getenv("PULP_CONTROL_AUTHOR_CLI");
+        const auto* mcp_environment = std::getenv("PULP_CONTROL_AUTHOR_MCP");
+        REQUIRE(cli_environment);
+        REQUIRE(mcp_environment);
+        const auto cli_read = run_installed_client(
+            cli_environment, root.runtime,
+            {"control", "call", "--instance", instance_id, "dev.pulp.state/read@1",
+             "--params", "{}", "--json"});
+        INFO(cli_read.stdout_output);
+        INFO(cli_read.stderr_output);
+        REQUIRE(cli_read.exit_code == 0);
+        const auto cli_receipt = choc::json::parse(cli_read.stdout_output);
+        const auto cli_detail = cli_receipt["detail"];
+        const auto mcp_arguments =
+            std::string{"{\"instance_id\":"} +
+            choc::json::getEscapedQuotedString(instance_id) +
+            R"(,"request_id":"installed-parity-mcp-read","input":{}})";
+        const auto mcp_read = run_installed_client(
+            mcp_environment, root.runtime, {},
+            std::string{"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\","
+                        "\"params\":{\"name\":\"pulp_control_state_read\",\"arguments\":"} +
+                mcp_arguments + "}}\n");
+        INFO(mcp_read.stdout_output);
+        INFO(mcp_read.stderr_output);
+        REQUIRE(mcp_read.exit_code == 0);
+        const auto mcp_line = choc::json::parse(
+            std::string_view{mcp_read.stdout_output}.substr(
+                0, mcp_read.stdout_output.find('\n')));
+        REQUIRE_FALSE(mcp_line["result"]["isError"].getWithDefault<bool>(false));
+        const auto mcp_detail = mcp_line["result"]["structuredContent"]["result"];
+        CHECK(choc::json::toString(cli_detail, false) ==
+              choc::json::toString(mcp_detail, false));
+
+        const auto window_capture =
+            invoke("dev.pulp.ui/capture@1", R"({"target":"window","format":"png"})");
+        INFO(window_capture.explanation);
+        REQUIRE(window_capture.succeeded());
+        const auto& window_receipt = *window_capture.response;
+        INFO("window capture state: " << control_receipt_state_id(window_receipt.state));
+        if (window_receipt.result_code)
+            INFO("window capture code: " << control_result_code_id(*window_receipt.result_code));
+        INFO("window capture explanation: " << window_receipt.explanation);
+        INFO("window capture detail: " << window_receipt.detail_json);
+        REQUIRE(window_receipt.state == ControlReceiptState::Completed);
+        REQUIRE(window_receipt.artifacts.size() == 1);
+        const auto artifact = client.read_artifact(
+            window_receipt.artifacts[0].artifact_id, 0, 1024 * 1024, 5s);
+        CHECK(artifact.status == ControlArtifactStatus::Read);
+        CHECK_FALSE(artifact.bytes.empty());
+        const auto node_capture = invoke(
+            "dev.pulp.ui/capture@1",
+            "{\"target\":\"node\",\"format\":\"png\",\"node_id\":\"author-input\","
+            "\"view_generation\":" + choc::json::getEscapedQuotedString(publication_id) + "}");
+        REQUIRE(node_capture.succeeded());
+        const auto& node_receipt = *node_capture.response;
+        INFO("node capture state: " << control_receipt_state_id(node_receipt.state));
+        INFO("node capture explanation: " << node_receipt.explanation);
+        INFO("node capture detail: " << node_receipt.detail_json);
+        REQUIRE(node_receipt.state == ControlReceiptState::Completed);
+        REQUIRE(node_receipt.artifacts.size() == 1);
+
+        const auto input = [&](std::string body) {
+            const auto result = invoke("dev.pulp.ui/input@1", std::move(body));
+            INFO(result.explanation);
+            REQUIRE(result.succeeded());
+            REQUIRE(result.response->state == ControlReceiptState::Completed);
+        };
+        const auto target_prefix =
+            "{\"target_id\":\"author-input\",\"view_generation\":" +
+            choc::json::getEscapedQuotedString(publication_id);
+        input(target_prefix +
+              R"(,"kind":"pointer","event":{"phase":"down","x":30,"y":30,"button":0}})");
+        input(target_prefix + R"(,"kind":"focus","event":{"focused":true}})");
+        input(target_prefix +
+              R"(,"kind":"keyboard","event":{"phase":"down","key":"a","repeat":false}})");
+        input(target_prefix + R"(,"kind":"text","event":{"text":"bounded"}})");
+        input(target_prefix +
+              R"(,"kind":"pointer","event":{"phase":"up","x":30,"y":30,"button":0}})");
+
+        const auto motion_start = invoke(
+            "dev.pulp.trace/control@1",
+            R"({"action":"motion-start-trace","metrics":[{"kind":"geometry","node_id":"author-input"},{"kind":"scroll-geometry","node_id":"author-scroll","properties":["contentOffsetY"]}]})");
+        REQUIRE(motion_start.succeeded());
+        const auto motion_trace_id =
+            choc::json::parse(motion_start.response->detail_json)["trace_id"].getInt64();
+        CHECK(motion_trace_id > 0);
+        for (const auto action : {R"({"action":"motion-play","maximum_events":2})",
+                                  R"({"action":"motion-pause"})",
+                                  R"({"action":"motion-scrub-to","frame":1})",
+                                  R"({"action":"motion-enable-cost"})"}) {
+            const auto outcome = invoke("dev.pulp.trace/control@1", action);
+            INFO(action);
+            INFO(outcome.explanation);
+            REQUIRE(outcome.succeeded());
+        }
+        input(target_prefix +
+              R"(,"kind":"pointer","event":{"phase":"down","x":30,"y":30,"button":0}})");
+        input(target_prefix +
+              R"(,"kind":"pointer","event":{"phase":"up","x":30,"y":30,"button":0}})");
+        const auto sampled_cost = invoke(
+            "dev.pulp.trace/control@1",
+            R"({"action":"motion-sample-cost","maximum_samples":1})");
+        REQUIRE(sampled_cost.succeeded());
+        const auto cost_detail = choc::json::parse(sampled_cost.response->detail_json);
+        REQUIRE(cost_detail["samples"].size() == 1);
+        CHECK(std::isfinite(
+            cost_detail["samples"][0]["render_pass_duration_ms"].getWithDefault<double>(
+                std::numeric_limits<double>::quiet_NaN())));
+        CHECK(std::isfinite(
+            cost_detail["samples"][0]["dirty_rect_area_px"].getWithDefault<double>(
+                std::numeric_limits<double>::quiet_NaN())));
+        const auto motion_stop = invoke(
+            "dev.pulp.trace/control@1",
+            "{\"action\":\"motion-stop-trace\",\"trace_id\":" +
+                std::to_string(motion_trace_id) + "}");
+        REQUIRE(motion_stop.succeeded());
+
+        const auto trace_start = invoke("dev.pulp.trace/session-control@1",
+                                        R"({"action":"start","ring_mb":9})");
+        REQUIRE(trace_start.succeeded());
+        const auto trace_stop = invoke("dev.pulp.trace/session-control@1",
+                                       R"({"action":"stop"})");
+        REQUIRE(trace_stop.succeeded());
+
+        const auto subscribed = invoke(
+            "dev.pulp.telemetry/subscribe@1",
+            R"({"action":"subscribe","channel_ids":["author-level"],"max_hz":15,"buffer_samples":2})");
+        REQUIRE(subscribed.succeeded());
+        const auto stream_id = std::string(
+            choc::json::parse(subscribed.response->detail_json)["stream_id"].getString());
+        std::this_thread::sleep_for(400ms);
+        const auto polled = invoke(
+            "dev.pulp.telemetry/subscribe@1",
+            "{\"action\":\"poll\",\"stream_id\":" +
+                choc::json::getEscapedQuotedString(stream_id) + "}");
+        REQUIRE(polled.succeeded());
+        const auto telemetry = choc::json::parse(polled.response->detail_json);
+        CHECK(telemetry["available"].getBool());
+        CHECK(telemetry["samples"].size() <= 2);
+        CHECK(telemetry["dropped"].getWithDefault<std::int64_t>(-1) > 0);
+
+        auto eval_grant_request = choc::value::createObject("");
+        eval_grant_request.addMember("instance_id", choc::value::createString(instance_id));
+        eval_grant_request.addMember(
+            "operation_id", choc::value::createString("dev.pulp.runtime/evaluate@1"));
+        const auto eval_granted = connection.manage(
+            "grant-request", choc::json::toString(eval_grant_request, false));
+        REQUIRE(eval_granted.status_id == "granted");
+        const auto eval_grant_id = std::string(
+            choc::json::parse(eval_granted.data_json)["grant_id"].getString());
+        const auto refreshed_controller =
+            invoke("dev.pulp.session/control@1", R"({"action":"acquire"})");
+        REQUIRE(refreshed_controller.succeeded());
+        REQUIRE(refreshed_controller.response->state == ControlReceiptState::Completed);
+        controller_lease_id = std::string(
+            choc::json::parse(refreshed_controller.response->detail_json)["lease_id"].getString());
+        const auto evaluated = invoke(
+            "dev.pulp.runtime/evaluate@1",
+            R"json({"source":"({ answer: 42 })","timeout_ms":1000,"idempotency_key":"installed-eval"})json",
+            std::nullopt, eval_grant_id);
+        INFO(evaluated.explanation);
+        REQUIRE(evaluated.succeeded());
+        INFO(evaluated.response->explanation);
+        INFO(evaluated.response->detail_json);
+        REQUIRE(evaluated.response->state == ControlReceiptState::Completed);
+        CHECK(choc::json::parse(evaluated.response->detail_json)["result_json"].getString() ==
+              std::string_view{R"({"redacted":true})"});
+        const auto replayed_eval_consent = connection.manage(
+            "grant-request", choc::json::toString(eval_grant_request, false));
+        CHECK(replayed_eval_consent.status_id == "consent-replay");
+
+        const auto released_controller =
+            invoke("dev.pulp.session/control@1", R"({"action":"release"})");
+        REQUIRE(released_controller.succeeded());
+        CHECK(choc::json::parse(released_controller.response->detail_json)["lease_id"].getString() ==
+              controller_lease_id);
+
+        auto revoke = choc::value::createObject("");
+        revoke.addMember("grant_id", choc::value::createString(request.grant_id));
+        REQUIRE(connection.manage("revoke", choc::json::toString(revoke, false)).status_id ==
+                "revoked");
+        const auto denied_after_revoke =
+            invoke("dev.pulp.state/read@1", "{}", std::nullopt, request.grant_id);
+        CHECK_FALSE(denied_after_revoke.succeeded());
+
+        const auto visible_after_revoke = run_installed_client(
+            mcp_environment, root.runtime, {},
+            R"({"jsonrpc":"2.0","id":2,"method":"tools/list"}
+)");
+        REQUIRE(visible_after_revoke.exit_code == 0);
+        CHECK(visible_after_revoke.stdout_output.find("pulp_control_state_read") !=
+              std::string::npos);
+    }
+
     connection.disconnect();
     INFO("stopping installed Standalone daemon");
     daemon.stop();
     INFO("stopped installed Standalone daemon");
+    if (author_host_environment) {
+        ControlBrokerDaemon restarted({
+            .runtime_root = root.runtime,
+            .state_root = root.state,
+            .sdk_version = "0.798.0-installed-parity-restarted",
+            .executable_path = broker_executable,
+            .process_generation = 212,
+            .installed_host_selections =
+                {{.host_id = host_id,
+                  .intent = {.executable = installed_host,
+                             .arguments = {},
+                             .working_directory = installed_host.parent_path(),
+                             .host_tier = ControlHostTier::Standalone}}},
+            .decide_consent =
+                [](const ControlGrantConsentRequest&) {
+                    return ControlConsentDecision{
+                        true, ControlConsentAuthority::TrustedHostUi,
+                        "standalone-restarted-consent", {}};
+                },
+        });
+        REQUIRE(restarted.start());
+        ControlClientConnection restarted_connection(
+            {.endpoint_path = restarted.endpoint_path(),
+             .expected_broker_executable = broker_executable});
+        REQUIRE(restarted_connection.connect());
+        REQUIRE(restarted_connection.manage("enroll").status_id == "accepted");
+        const auto inventory = restarted_connection.manage("instances");
+        REQUIRE(inventory.status_id == "completed");
+        CHECK(choc::json::parse(inventory.data_json)["instances"].size() == 0);
+        ControlClient restarted_client(restarted_connection);
+        REQUIRE(restarted_client.negotiate({.mandatory_features = {"receipts"}}).succeeded());
+        request.request_id = "installed-parity-stale-after-restart";
+        request.idempotency_key = "installed-parity-stale-after-restart-key";
+        request.request_hash = *control_request_hash(request);
+        const auto stale = restarted_client.request(request, 5s);
+        CHECK_FALSE(stale.succeeded());
+        restarted_connection.disconnect();
+        restarted.stop();
+    }
 #else
     SUCCEED("ordinary Standalone state-read E2E is currently macOS-only");
 #endif

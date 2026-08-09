@@ -392,19 +392,27 @@ else()
         dev.pulp.instance/read@1
         dev.pulp.session/control@1
         dev.pulp.state/read@1
+        dev.pulp.render/offline@1
         dev.pulp.ui/observe@1
         dev.pulp.diagnostics/read@1
         dev.pulp.logs/read@1
         dev.pulp.ui/capture@1
+        dev.pulp.ui/input@1
+        dev.pulp.trace/control@1
+        dev.pulp.trace/session-control@1
         dev.pulp.state/parameter-gesture@1
         dev.pulp.test/input@1
         dev.pulp.authoring/tweaks@1
         dev.pulp.telemetry/subscribe@1
-        dev.pulp.runtime/evaluate@1)
+        dev.pulp.runtime/reload@1
+        dev.pulp.runtime/evaluate@1
+        dev.pulp.artifact/read@1
+        dev.pulp.unavailable/operation@1)
     set(_capability_markers
-        SESSION_DESCRIBE SESSION_CONTROL STATE_READ UI_READ DIAGNOSTICS_READ
-        LOGS_READ CAPTURE_IMAGE STATE_WRITE TEST_INPUT AUTHORING_TWEAKS
-        TELEMETRY_STREAM RUNTIME_EVAL)
+        SESSION_DESCRIBE SESSION_CONTROL STATE_READ RENDER_OFFLINE UI_READ
+        DIAGNOSTICS_READ LOGS_READ CAPTURE_IMAGE UI_INPUT TRACE_CONTROL
+        TRACE_SESSION_CONTROL STATE_WRITE TEST_INPUT AUTHORING_TWEAKS
+        TELEMETRY_STREAM RUNTIME_RELOAD RUNTIME_EVAL ARTIFACT_READ UNAVAILABLE)
     set(_declared_marker_count 0)
     list(LENGTH _capability_contracts _capability_contract_count)
     math(EXPR _capability_contract_last "${_capability_contract_count} - 1")

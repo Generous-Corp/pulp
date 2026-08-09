@@ -26,6 +26,11 @@ _pulp_pick_target(_PULP_MIDI_TARGET Pulp::midi pulp::midi)
 _pulp_pick_target(_PULP_STANDALONE_TARGET Pulp::standalone pulp::standalone)
 _pulp_pick_target(_PULP_CONTROL_STANDALONE_TARGET
     Pulp::inspect-standalone-runtime pulp::inspect-standalone-runtime)
+_pulp_pick_target(_PULP_CONTROL_UI_TARGET
+    Pulp::inspect-ui-runtime pulp::inspect-ui-runtime)
+_pulp_pick_target(_PULP_CONTROL_INSPECT_TARGET Pulp::inspect pulp::inspect)
+_pulp_pick_target(_PULP_CONTROL_RUNTIME_EVAL_TARGET
+    Pulp::inspect-runtime-eval pulp::inspect-runtime-eval)
 include("${CMAKE_CURRENT_LIST_DIR}/PulpControlShipping.cmake")
 _pulp_pick_target(_PULP_VST3_SDK_TARGET Pulp::vst3-sdk vst3-sdk)
 _pulp_pick_target(_PULP_CLAP_TARGET Pulp::clap clap)
@@ -690,13 +695,47 @@ function(pulp_add_plugin target)
             message(FATAL_ERROR
                 "pulp_add_plugin(${target}): CONTROL_CAPABILITIES require the installed canonical Standalone host adapter")
         endif()
+        if(APPLE AND PULP_ENABLE_GPU AND NOT IOS AND NOT PULP_IOS)
+            set(_pulp_standalone_control_capabilities
+                dev.pulp.instance/read@1
+                dev.pulp.session/control@1
+                dev.pulp.state/read@1
+                dev.pulp.ui/capture@1
+                dev.pulp.ui/input@1
+                dev.pulp.trace/control@1
+                dev.pulp.trace/session-control@1
+                dev.pulp.state/parameter-gesture@1
+                dev.pulp.telemetry/subscribe@1
+                dev.pulp.runtime/evaluate@1)
+        else()
+            set(_pulp_standalone_control_capabilities
+                dev.pulp.instance/read@1
+                dev.pulp.state/read@1)
+        endif()
         foreach(_pulp_control_capability IN LISTS PLUGIN_CONTROL_CAPABILITIES)
-            if(NOT _pulp_control_capability STREQUAL "dev.pulp.instance/read@1" AND
-               NOT _pulp_control_capability STREQUAL "dev.pulp.state/read@1")
+            if(NOT _pulp_control_capability IN_LIST _pulp_standalone_control_capabilities)
                 message(FATAL_ERROR
                     "pulp_add_plugin(${target}): '${_pulp_control_capability}' is not yet implemented by the canonical Standalone adapter")
             endif()
         endforeach()
+        if(("dev.pulp.ui/capture@1" IN_LIST PLUGIN_CONTROL_CAPABILITIES OR
+            "dev.pulp.ui/input@1" IN_LIST PLUGIN_CONTROL_CAPABILITIES) AND
+           NOT _PULP_CONTROL_UI_TARGET)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): UI control capabilities require the installed exact-target UI adapter")
+        endif()
+        if(("dev.pulp.trace/control@1" IN_LIST PLUGIN_CONTROL_CAPABILITIES OR
+            "dev.pulp.trace/session-control@1" IN_LIST PLUGIN_CONTROL_CAPABILITIES OR
+            "dev.pulp.telemetry/subscribe@1" IN_LIST PLUGIN_CONTROL_CAPABILITIES) AND
+           NOT _PULP_CONTROL_INSPECT_TARGET)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): trace and telemetry capabilities require the installed host observability runtime")
+        endif()
+        if("dev.pulp.runtime/evaluate@1" IN_LIST PLUGIN_CONTROL_CAPABILITIES AND
+           NOT _PULP_CONTROL_RUNTIME_EVAL_TARGET)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): runtime evaluation requires the separately installed high-risk evaluator")
+        endif()
     endif()
 
     if(PLUGIN_CONTROL_PROFILE)

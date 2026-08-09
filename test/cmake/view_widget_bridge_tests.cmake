@@ -384,6 +384,8 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS)
         VERBATIM)
     catch_discover_tests(pulp-test-control-broker-daemon
         PROPERTIES LABELS "inspect;control;carrier;daemon")
+    add_custom_target(pulp-test-control-installed-author-full-parity-e2e
+        DEPENDS pulp-test-control-broker-daemon)
 
 endif()
 

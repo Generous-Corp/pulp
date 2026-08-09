@@ -1,6 +1,9 @@
 #include <pulp/inspect/control_host_router.hpp>
 
+#include <pulp/runtime/base64.hpp>
 #include <pulp/runtime/crypto.hpp>
+
+#include <choc/text/choc_JSON.h>
 
 #include <algorithm>
 #include <chrono>
@@ -87,6 +90,7 @@ class ControlHostRouter::Impl {
             ControlGrantId grant_id;
         };
         std::unordered_map<std::string, Projection> projections;
+        std::unordered_map<std::string, std::string> controller_authorities;
     };
 
     struct Pending {
@@ -97,6 +101,9 @@ class ControlHostRouter::Impl {
         ConnectionGeneration generation = 0;
         ControlProgressReporter report_progress;
         ControlDeferredCompletion complete_deferred;
+        ControlExecutionGuard checkpoint;
+        ControlArtifactPublisher publish_artifact;
+        std::size_t maximum_artifact_bytes = 0;
         std::optional<ControlExecutionOutcome> outcome;
         bool delivery_started = false;
         bool returned_deferred = false;
@@ -120,7 +127,7 @@ class ControlHostRouter::Impl {
             return false;
         hosts.emplace(registration_id.value,
                       Host{generation, std::move(instance_id), std::move(instance_generation),
-                           std::move(sender), {}});
+                           std::move(sender), {}, {}});
         return true;
     }
 
@@ -145,6 +152,8 @@ class ControlHostRouter::Impl {
                         ++it;
                     }
                 }
+                if (client_id && !grant_id)
+                    host.controller_authorities.erase(client_id.value);
             }
         }
         for (auto& [sender, authority_id] : notifications)
@@ -233,12 +242,80 @@ class ControlHostRouter::Impl {
             return true;
         }
         const auto& completed = std::get<ControlHostCompleteEnvelope>(envelope.payload);
-        finish(operation, {.terminal_state = completed.terminal_state,
-                           .result = {.result_code = completed.result_code,
-                                      .retry = completed.retry,
-                                      .explanation = completed.explanation,
-                                      .detail_json = completed.detail_json,
-                                      .cancellation_reason = completed.cancellation_reason}});
+        ControlExecutionOutcome outcome{
+            .terminal_state = completed.terminal_state,
+            .result = {.result_code = completed.result_code,
+                       .retry = completed.retry,
+                       .explanation = completed.explanation,
+                       .detail_json = completed.detail_json,
+                       .cancellation_reason = completed.cancellation_reason}};
+        if (!completed.artifact_publications.empty()) {
+            std::size_t aggregate = 0;
+            for (const auto& publication : completed.artifact_publications) {
+                const auto checkpoint = operation->checkpoint
+                                            ? operation->checkpoint()
+                                            : ControlExecutionCheckpoint::AuthorityRevoked;
+                const auto padding = publication.bytes_base64.ends_with("==")
+                                         ? 2u
+                                     : publication.bytes_base64.ends_with("=") ? 1u : 0u;
+                const auto decoded_upper_bound =
+                    publication.bytes_base64.size() / 4 * 3 - padding;
+                if (checkpoint != ControlExecutionCheckpoint::Continue ||
+                    decoded_upper_bound > operation->maximum_artifact_bytes ||
+                    decoded_upper_bound >
+                        kControlHostMaximumArtifactPublicationBytes - aggregate) {
+                    outcome = checkpoint == ControlExecutionCheckpoint::Continue
+                                  ? failure(ControlResultCode::ResourceExhausted,
+                                            ControlRetryClassification::Never,
+                                            "host artifact publication exceeded its broker bound")
+                                  : checkpoint_outcome(checkpoint);
+                    break;
+                }
+                const auto bytes = runtime::base64_decode(publication.bytes_base64);
+                if (!bytes || bytes->empty() ||
+                    bytes->size() > kControlHostMaximumArtifactPublicationBytes - aggregate ||
+                    !operation->publish_artifact ||
+                    publication.reference_id.rfind("host-publication-", 0) != 0) {
+                    outcome = checkpoint == ControlExecutionCheckpoint::Continue
+                                  ? failure(ControlResultCode::InvalidRequest,
+                                            ControlRetryClassification::Never,
+                                            "host artifact publication was malformed or forged")
+                                  : checkpoint_outcome(checkpoint);
+                    break;
+                }
+                aggregate += bytes->size();
+                const auto reference = choc::json::getEscapedQuotedString(
+                    publication.reference_id);
+                const auto offset = outcome.result.detail_json.find(reference);
+                if (offset == std::string::npos) {
+                    outcome = failure(ControlResultCode::InvalidRequest,
+                                      ControlRetryClassification::Never,
+                                      "host artifact reference was not bound to its result");
+                    break;
+                }
+                const auto stored = operation->publish_artifact(
+                    *bytes, {.content_type = publication.content_type,
+                             .sensitivity = publication.sensitivity,
+                             .redaction_state = publication.redaction_state,
+                             .lifetime = std::chrono::milliseconds{publication.lifetime_ms}});
+                if (stored.status != ControlArtifactStatus::Stored || !stored.metadata) {
+                    outcome = failure(stored.status == ControlArtifactStatus::ResourceExhausted
+                                          ? ControlResultCode::ResourceExhausted
+                                          : ControlResultCode::InternalError,
+                                      ControlRetryClassification::Never,
+                                      "broker rejected host artifact publication");
+                    break;
+                }
+                const auto broker_id = choc::json::getEscapedQuotedString(
+                    stored.metadata->artifact_id);
+                outcome.result.detail_json.replace(offset, reference.size(), broker_id);
+                outcome.result.artifacts.push_back(
+                    {.artifact_id = stored.metadata->artifact_id,
+                     .media_type = stored.metadata->content_type,
+                     .byte_size = stored.metadata->byte_size});
+            }
+        }
+        finish(operation, std::move(outcome));
         return true;
     }
 
@@ -255,10 +332,16 @@ class ControlHostRouter::Impl {
 
         Host host;
         std::string authority_id;
+        std::string controller_authority_id;
         auto operation = std::make_shared<Pending>();
         operation->registration_id = plan.registration_id;
         operation->report_progress = context.report_progress;
         operation->complete_deferred = context.complete_deferred;
+        operation->checkpoint = context.checkpoint;
+        operation->publish_artifact = context.publish_artifact;
+        operation->maximum_artifact_bytes =
+            std::min(context.maximum_artifact_bytes,
+                     kControlHostMaximumArtifactPublicationBytes);
         {
             std::lock_guard lock(mutex);
             const auto found = hosts.find(plan.registration_id.value);
@@ -291,6 +374,19 @@ class ControlHostRouter::Impl {
                                                                std::move(value)).first;
             }
             authority_id = projection->second.authority_id;
+            auto controller = found->second.controller_authorities.find(plan.client_id.value);
+            if (controller == found->second.controller_authorities.end()) {
+                const auto bytes = runtime::secure_random_bytes(16);
+                if (!bytes)
+                    return failure(ControlResultCode::ResourceExhausted,
+                                   ControlRetryClassification::AfterBackoff,
+                                   "controller authority projection is unavailable");
+                controller = found->second.controller_authorities
+                                 .emplace(plan.client_id.value,
+                                          "controller-" + runtime::hex_encode(*bytes))
+                                 .first;
+            }
+            controller_authority_id = controller->second;
             operation->delivery_started = true;
             bool inserted = false;
             for (unsigned attempt = 0; attempt != 4; ++attempt) {
@@ -309,6 +405,8 @@ class ControlHostRouter::Impl {
             .payload = ControlHostExecuteEnvelope{.route_id = operation->route_id,
                                                   .receipt_id = plan.receipt_id.value,
                                                   .authority_id = authority_id,
+                                                  .controller_authority_id =
+                                                      controller_authority_id,
                                                   .broker_id = plan.broker_id.value,
                                                   .session_id = plan.session_id,
                                                   .instance_id = plan.instance_id,

@@ -1061,6 +1061,17 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     window->set_idle_callback(pre_screenshot_idle);
 #endif
 
+    if (control_host_) {
+        auto previous_idle = pre_screenshot_idle;
+        auto* control_host = control_host_.get();
+        pre_screenshot_idle = [previous_idle, control_host] {
+            if (previous_idle)
+                previous_idle();
+            control_host->poll();
+        };
+        window->set_idle_callback(pre_screenshot_idle);
+    }
+
     // Run the same automation, restore/reload, and scripted work as embedded
     // plugin editors. Compose it over settings/inspector work so standalone
     // state restores reconcile bound controls on the UI thread too.

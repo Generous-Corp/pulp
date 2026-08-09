@@ -297,6 +297,9 @@ int main() {
 ]=])
 
 file(MAKE_DIRECTORY "${_consumer_source}/standalone-consumer")
+file(WRITE "${_consumer_source}/standalone-consumer/ui.js" [=[
+createLabel('author-label', 'Installed parity', '');
+]=])
 file(WRITE "${_consumer_source}/standalone-consumer/CMakeLists.txt" [=[
 pulp_add_plugin(InstalledControlStandalone
     PLUGIN_NAME "Installed Control Standalone"
@@ -304,18 +307,93 @@ pulp_add_plugin(InstalledControlStandalone
     FORMATS Standalone
     SOURCES standalone.cpp
     PROCESSOR_FACTORY create_processor
-    CONTROL_PROFILE developer-local
-    CONTROL_CAPABILITIES dev.pulp.instance/read@1 dev.pulp.state/read@1)
+    CONTROL_PROFILE research-unsafe
+    ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL
+    CONTROL_CAPABILITIES
+        dev.pulp.instance/read@1
+        dev.pulp.session/control@1
+        dev.pulp.state/read@1
+        dev.pulp.ui/capture@1
+        dev.pulp.ui/input@1
+        dev.pulp.trace/control@1
+        dev.pulp.trace/session-control@1
+        dev.pulp.state/parameter-gesture@1
+        dev.pulp.telemetry/subscribe@1
+        dev.pulp.runtime/evaluate@1)
+target_compile_definitions(InstalledControlStandalone_Core PRIVATE
+    INSTALLED_PARITY_UI_SCRIPT="${CMAKE_CURRENT_SOURCE_DIR}/ui.js")
 ]=])
 
 file(WRITE "${_consumer_source}/standalone-consumer/standalone.cpp" [=[
 #include <pulp/format/processor.hpp>
+#include <pulp/canvas/canvas.hpp>
+#include <pulp/inspect/control_standalone_host.hpp>
+#include <pulp/inspect/control_telemetry_tap.hpp>
+#include <pulp/view/scripted_ui.hpp>
+#include <pulp/view/motion.hpp>
+#include <pulp/view/motion_cost.hpp>
+#include <pulp/view/ui_components.hpp>
+#include <pulp/view/value_channel_set.hpp>
+#include <pulp/view/view.hpp>
 
 #include <algorithm>
+#include <chrono>
+#include <filesystem>
 #include <memory>
+#include <string>
+#include <thread>
+
+class InstalledParityInputNode final : public pulp::view::View {
+ public:
+  void paint(pulp::canvas::Canvas& canvas) override {
+    canvas.set_fill_color(pulp::canvas::Color::rgba8(32, 96, 180));
+    canvas.fill_rect(0, 0, bounds().width, bounds().height);
+    canvas.set_fill_color(pulp::canvas::Color::rgba8(240, 180, 40));
+    canvas.fill_rect(8, 8, bounds().width - 16, bounds().height - 16);
+  }
+  bool wants_mouse_input() const override { return true; }
+  bool accepts_text_input() const override { return true; }
+  void on_mouse_down(pulp::view::Point) override {
+    ++pointer_down_count;
+    const auto current = bounds();
+    set_bounds({current.x, current.y,
+                current.width == 120.0f ? 124.0f : 120.0f, current.height});
+  }
+  void on_mouse_up(pulp::view::Point) override { ++pointer_up_count; }
+  bool on_key_event(const pulp::view::KeyEvent&) override {
+    ++key_count;
+    return true;
+  }
+  void on_text_input(const pulp::view::TextInputEvent& event) override {
+    text += event.text;
+  }
+
+  unsigned pointer_down_count = 0;
+  unsigned pointer_up_count = 0;
+  unsigned key_count = 0;
+  std::string text;
+};
+
+class InstalledParityRoot final : public pulp::view::View {
+ public:
+  void layout_children() override {}
+};
 
 class InstalledStandaloneProcessor final : public pulp::format::Processor {
  public:
+  InstalledStandaloneProcessor() {
+    telemetry_level_ = channels_.declare_scalar("author-level", "normalized", 0.25f);
+    telemetry_thread_ = std::jthread([this](std::stop_token stop) {
+      float value = 0.0f;
+      while (!stop.stop_requested()) {
+        if (telemetry_level_)
+          telemetry_level_->publish(value);
+        value = value >= 1.0f ? 0.0f : value + 0.01f;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+    });
+  }
+
   pulp::format::PluginDescriptor descriptor() const override {
     return {.name = "Installed Control Standalone",
             .manufacturer = "Pulp",
@@ -331,6 +409,35 @@ class InstalledStandaloneProcessor final : public pulp::format::Processor {
                                    .default_value = 0.25f}});
   }
   void prepare(const pulp::format::PrepareContext&) override {}
+  pulp::view::ScriptedUiSession* active_scripted_ui() override {
+    return scripted_session_.get();
+  }
+  const pulp::view::ScriptedUiSession* active_scripted_ui() const override {
+    return scripted_session_.get();
+  }
+  std::unique_ptr<pulp::view::View> create_view() override {
+    auto root = std::make_unique<InstalledParityRoot>();
+    root->set_id("author-window");
+    root->set_bounds({0, 0, 320, 180});
+    scripted_session_ = std::make_unique<pulp::view::ScriptedUiSession>(
+        *root, state(), pulp::view::ScriptedUiOptions{
+            .script_path = INSTALLED_PARITY_UI_SCRIPT});
+    std::string script_error;
+    if (!scripted_session_->load(&script_error))
+      return nullptr;
+    auto input = std::make_unique<InstalledParityInputNode>();
+    input->set_id("author-input");
+    input->set_bounds({20, 20, 120, 48});
+    input->set_focusable(true);
+    root->add_child(std::move(input));
+    auto scroll = std::make_unique<pulp::view::ScrollView>();
+    scroll->set_id("author-scroll");
+    scroll->set_bounds({20, 84, 280, 76});
+    root->add_child(std::move(scroll));
+    return root;
+  }
+  void on_view_closed(pulp::view::View&) override { scripted_session_.reset(); }
+  pulp::view::ValueChannelSet* value_channels() override { return &channels_; }
   void process(pulp::audio::BufferView<float>& output,
                const pulp::audio::BufferView<const float>& input,
                pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
@@ -340,10 +447,47 @@ class InstalledStandaloneProcessor final : public pulp::format::Processor {
     for (std::size_t channel = 0; channel < channels; ++channel)
       std::copy_n(input.channel(channel).data(), samples,
                   output.channel(channel).data());
+    if (telemetry_level_)
+      telemetry_level_->publish(0.25f);
   }
+
+ private:
+  pulp::view::ValueChannelSet channels_;
+  pulp::view::ScalarSource* telemetry_level_ = nullptr;
+  std::unique_ptr<pulp::view::ScriptedUiSession> scripted_session_;
+  std::jthread telemetry_thread_;
 };
 
+pulp::inspect::detail::StandaloneControlAuthorHooks installed_parity_control_hooks(
+    pulp::format::Processor&) {
+  const auto fixture = std::filesystem::temp_directory_path() /
+                       "pulp-installed-author-motion-fixture.jsonl";
+  const auto sink = pulp::view::motion::make_fixture_sink(fixture);
+  sink({.kind = pulp::view::motion::SampleEvent::Kind::Baseline,
+        .view_name = "author-input", .metric_name = "geometry", .frame = 0});
+  sink({.kind = pulp::view::motion::SampleEvent::Kind::Sample,
+        .view_name = "author-input", .metric_name = "geometry", .frame = 1});
+  sink({.kind = pulp::view::motion::SampleEvent::Kind::End,
+        .view_name = "author-input", .metric_name = "geometry", .frame = 2});
+  return {
+      .telemetry_classifier = [](std::string_view channel) {
+        return channel == "author-level"
+                   ? pulp::inspect::ControlTelemetrySensitivity::Observable
+                   : pulp::inspect::ControlTelemetrySensitivity::Sensitive;
+      },
+      .motion_cost_probe = [] {
+        return pulp::view::motion::RenderCostSnapshot{0.125, 1.0, 1};
+      },
+      .motion_fixture_path = fixture,
+  };
+}
+
 std::unique_ptr<pulp::format::Processor> create_processor() {
+  static const bool hooks_registered =
+      pulp::inspect::detail::install_standalone_control_author_hooks_factory(
+          &installed_parity_control_hooks);
+  if (!hooks_registered)
+    return {};
   return std::make_unique<InstalledStandaloneProcessor>();
 }
 ]=])
@@ -503,10 +647,26 @@ if(APPLE)
         message(FATAL_ERROR
             "Installed production broker did not launch/register the author host (${_author_process_result})\n${_author_process_output}\n${_author_process_error}")
     endif()
+    # The aggregate embeds the production daemon implementation so it can
+    # inject deterministic explicit consent. Mirror the Phase 15 process E2E:
+    # retain its signed bytes at the exact broker slot that the installed
+    # CLI/MCP independently resolve and authenticate.
+    file(COPY_FILE "${_daemon_test}"
+        "${_prefix}/libexec/pulp/pulp-control-broker")
+    file(CHMOD "${_prefix}/libexec/pulp/pulp-control-broker"
+        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+    foreach(_installed_client IN ITEMS pulp-cpp pulp-mcp)
+        file(COPY_FILE "${_prefix}/bin/${_installed_client}"
+            "${PULP_BUILD_DIR}/test/${_installed_client}")
+        file(CHMOD "${PULP_BUILD_DIR}/test/${_installed_client}"
+            PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+    endforeach()
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -E env
             "PULP_CONTROL_AUTHOR_HOST=${_author_host_directory}/host"
-            "${_daemon_test}" "[author-catalog]~[author-catalog-process]"
+            "PULP_CONTROL_AUTHOR_CLI=${_prefix}/bin/pulp-cpp"
+            "PULP_CONTROL_AUTHOR_MCP=${_prefix}/bin/pulp-mcp"
+            "${_daemon_test}" "[installed-author-full-parity]"
         RESULT_VARIABLE _author_state_result
         OUTPUT_VARIABLE _author_state_output
         ERROR_VARIABLE _author_state_error)
@@ -526,8 +686,18 @@ endif()
 foreach(_standalone_control_manifest IN LISTS _standalone_control_manifests)
     file(READ "${_standalone_control_manifest}" _standalone_control_json)
     if(NOT _standalone_control_json MATCHES "\"endpoint_included\"[ \\t]*:[ \\t]*true" OR
+       NOT _standalone_control_json MATCHES "\"profile\"[ \\t]*:[ \\t]*\"research-unsafe\"" OR
+       NOT _standalone_control_json MATCHES "\"unsafe_runtime_eval_acknowledged\"[ \\t]*:[ \\t]*true" OR
        NOT _standalone_control_json MATCHES "dev.pulp.instance/read@1" OR
-       NOT _standalone_control_json MATCHES "dev.pulp.state/read@1")
+       NOT _standalone_control_json MATCHES "dev.pulp.session/control@1" OR
+       NOT _standalone_control_json MATCHES "dev.pulp.state/read@1" OR
+       NOT _standalone_control_json MATCHES "dev.pulp.ui/capture@1" OR
+       NOT _standalone_control_json MATCHES "dev.pulp.ui/input@1" OR
+       NOT _standalone_control_json MATCHES "dev.pulp.trace/control@1" OR
+       NOT _standalone_control_json MATCHES "dev.pulp.trace/session-control@1" OR
+       NOT _standalone_control_json MATCHES "dev.pulp.state/parameter-gesture@1" OR
+       NOT _standalone_control_json MATCHES "dev.pulp.telemetry/subscribe@1" OR
+       NOT _standalone_control_json MATCHES "dev.pulp.runtime/evaluate@1")
         message(FATAL_ERROR
             "Installed ordinary Standalone control manifest is not truthful: ${_standalone_control_json}")
     endif()

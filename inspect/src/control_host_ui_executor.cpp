@@ -69,7 +69,7 @@ bool exact_authority(const ControlAdmissionPlan& plan, const ControlRequestEnvel
            plan.grant_id &&
            (!plan.consent_decision_id.empty() ||
             (plan.client_id.value == plan.grant_id.value &&
-             plan.client_id.value == plan.client_principal)) &&
+             !plan.client_principal.empty())) &&
            !request.request_id.empty() &&
            request.client_id == plan.client_id.value &&
            request.registration_id == plan.registration_id.value &&
@@ -672,6 +672,32 @@ bool ControlHostUiExecutor::ready() const {
     std::lock_guard lock(state_->mutex);
     return state_->connected && static_cast<bool>(state_->main_thread) &&
            (state_->capture || state_->target_adapter || state_->evaluator);
+}
+
+bool ControlHostUiExecutor::release_controller_scope() noexcept {
+    if (!state_)
+        return true;
+    std::shared_ptr<ControlHostUiTargetAdapter> adapter;
+    std::shared_ptr<InspectorMainThreadRpc> rpc;
+    {
+        std::lock_guard lock(state_->mutex);
+        adapter = state_->target_adapter;
+        rpc = state_->rpc;
+    }
+    if (!adapter || !rpc)
+        return true;
+    static std::atomic<std::int64_t> next_request{
+        std::numeric_limits<std::int64_t>::min() + 1024};
+    const auto request_id = next_request.fetch_add(1, std::memory_order_relaxed);
+    try {
+        const auto response = rpc->call(request_id, [adapter, request_id] {
+            adapter->release_controller(std::nullopt);
+            return make_response(request_id, R"({"released":true})");
+        });
+        return !response.is_error;
+    } catch (...) {
+        return false;
+    }
 }
 
 bool ControlHostUiExecutor::disconnect() noexcept {

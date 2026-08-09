@@ -152,6 +152,9 @@ class ControlHostUiExecutor {
 
     ControlOperationExecutor executor() const;
     bool ready() const;
+    /// Fence retained pointer/focus state at controller-lease end while
+    /// keeping this exact-instance executor ready for the next lease.
+    bool release_controller_scope() noexcept;
     /// Fence controller cleanup on the registered main thread. False means the
     /// host must keep the borrowed UI alive and retry before teardown.
     bool disconnect() noexcept;
