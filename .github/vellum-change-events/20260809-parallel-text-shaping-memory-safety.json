@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "event_id": "20260809-parallel-text-shaping-memory-safety",
+  "kind": "change",
+  "created_at": "2026-08-09T09:12:41Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "The final Pulp SDK release path reproduced a native crash in the transferred text-shaping kernel. TextRunPlanner's asynchronous batch path captured a loop-local reference binding after its lifetime ended, and AddressSanitizer then proved concurrent SkParagraph shaping double-freed entries in the shared FontCollection face cache. Pulp must carry the minimal memory-safety repair immediately so panel and plug-in UI text shaping is safe while Vellum issue #14 ports the same repair to the authoritative framework. The exception changes no public API and expires within fourteen days.",
+  "tests": [
+    "Vellum freeze",
+    "pulp-test-text-run-planner-parallel",
+    "pulp-test-text-run-planner-parallel ASan stress"
+  ],
+  "disposition": "emergency-exception",
+  "owner": "@danielraffel",
+  "expiry": "2026-08-23",
+  "follow_up": "https://github.com/Generous-Corp/vellum/issues/14"
+}
