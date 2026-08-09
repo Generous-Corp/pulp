@@ -14,6 +14,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/audio/onset_detector.hpp": "Pulp::audio",
     "pulp/audio/unison_voice_stack.hpp": "Pulp::audio",
     "pulp/audio/voice_runtime_facade.hpp": "Pulp::audio",
+    "pulp/audio/wavetable_authoring.hpp": "Pulp::audio",
     "pulp/midi/arpeggiator.hpp": "Pulp::midi",
     "pulp/midi/controller_utility_kernels.hpp": "Pulp::midi",
     "pulp/midi/mpe_voice_tracker.hpp": "Pulp::midi",
@@ -72,6 +73,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/transient_designer.hpp": "Pulp::signal",
     "pulp/signal/unison.hpp": "Pulp::signal",
     "pulp/signal/velvet_noise.hpp": "Pulp::signal",
+    "pulp/signal/wavetable.hpp": "Pulp::signal",
     "pulp/signal/fft_backend.hpp": "Pulp::signal-fft-backend",
     "pulp/signal/modal_spec.hpp": "Pulp::signal-modal-spec",
     "pulp/signal/mirrored_history_buffer.hpp": "Pulp::signal",
@@ -98,6 +100,16 @@ EXPORTS = [
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {
+        "include": "pulp/signal/wavetable.hpp",
+        "fingerprint": "sha256:94e86b5efcbc54989b76312ed5bd270d29bc6d5758e3a240ca3b8ffc4bbecaae",
+        "disposition": "capability_support",
+        "capability_keys": ["audio.wavetable-authoring"],
+        "rationale": (
+            "The existing realtime Wavetable consumer and its shared band-ceiling plan are "
+            "the installed output boundary for the offline wavetable-authoring capability."
+        ),
+    },
     {
         "include": "pulp/signal/detail/audio_range.hpp",
         "fingerprint": "sha256:de70fcaa00f30b7a20c1f8632619635fa774e239f81ae7d6c09cf03ded64ba0b",

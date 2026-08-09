@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 13,
+  "manifest_revision": 14,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -17,7 +17,7 @@
     "domains": {
       "audio": {
         "state": "partial",
-        "capabilities": 6
+        "capabilities": 7
       },
       "midi": {
         "state": "partial",
@@ -409,6 +409,68 @@
         }
       },
       "contract_digest": "sha256:d8f12e0c196329c34cf8e1cae4a4c2efc35ef337333fc69d5a472ac0856c2653"
+    },
+    {
+      "key": "audio.wavetable-authoring",
+      "domain": "audio",
+      "summary": "Bounded offline compilation of one recorded mono cycle into an owned band-limited stack for the existing Wavetable oscillator.",
+      "rt_class": "control",
+      "lifecycle": {
+        "construction": "none",
+        "prepare": "control or worker; allocates bounded analysis and table storage",
+        "process": "not applicable; returns materialized bands",
+        "reset": "none",
+        "release": "result destruction off audio"
+      },
+      "state_model": "Pure compilation result carrying an owned ordered band stack, resolved cycle, seam diagnostics, recipe, provenance, and canonical source/table digests.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "not_applicable",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "finite bounded mono PCM, source sample rate, explicit or automatic cycle policy, mip recipe, and caller provenance",
+      "output_domain": "owned WavetableEntry band stack or explicit fail-closed compile status",
+      "units": [
+        "samples",
+        "frames",
+        "hertz",
+        "decibels",
+        "linear amplitude"
+      ],
+      "latency": "not applicable; offline compiler",
+      "tail": "none",
+      "scheduling": "one bounded control-thread compilation transaction",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_function",
+          "include": "pulp/audio/wavetable_authoring.hpp",
+          "qualified_name": "pulp::audio::compile_wavetable",
+          "target": "Pulp::audio",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:4414eccaae5ed53e3a875d4cda1b682dafd5e716c5f1b42c570fc295b2185717"
     },
     {
       "key": "midi.arpeggiator",
@@ -4631,9 +4693,9 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 67,
+    "total": 68,
     "by_domain": {
-      "audio": 6,
+      "audio": 7,
       "midi": 9,
       "music": 6,
       "offline": 0,

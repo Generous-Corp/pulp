@@ -316,6 +316,28 @@ template <typename SampleType>
 constexpr SampleType kWavetableTwoPi =
     static_cast<SampleType>(6.283185307179586476925286766559L);
 
+/// Shared ceiling plan for synthesized and authored wavetable stacks. Keeping
+/// the geometric ladder in one helper prevents offline-authored tables from
+/// drifting away from WavetableT's band-selection contract.
+template <typename SampleType>
+inline std::vector<SampleType> build_wavetable_band_ceilings(
+        std::size_t num_bands, SampleType reference_sample_rate) {
+    if (num_bands == 0 || !(reference_sample_rate > SampleType{0.0f})) return {};
+    const SampleType nyquist = reference_sample_rate * SampleType{0.5f};
+    constexpr SampleType kBaseFreq = SampleType{20.0f};
+    std::vector<SampleType> ceilings;
+    ceilings.reserve(num_bands);
+    const SampleType ratio =
+        std::pow(nyquist / kBaseFreq,
+                 SampleType{1.0f} / static_cast<SampleType>(num_bands));
+    SampleType ceiling = kBaseFreq;
+    for (std::size_t b = 0; b < num_bands; ++b) {
+        ceiling *= ratio;
+        ceilings.push_back(std::min(ceiling, nyquist));
+    }
+    return ceilings;
+}
+
 template <typename SampleType, typename HarmonicAmp>
 inline std::vector<SampleType> generate_wavetable(std::size_t length,
                                                   std::size_t max_harmonic,
@@ -355,16 +377,11 @@ inline std::vector<WavetableEntryT<SampleType>> build_wavetable_band_stack(
     // accept arbitrary inputs, so short-circuit on invalid sample rates here.
     if (!(reference_sample_rate > SampleType{0.0f})) return {};
     const SampleType nyquist = reference_sample_rate * SampleType{0.5f};
-    constexpr SampleType kBaseFreq = SampleType{20.0f};
     std::vector<WavetableEntryT<SampleType>> bands;
     bands.reserve(num_bands);
-    const SampleType ratio =
-        std::pow(nyquist / kBaseFreq,
-                 SampleType{1.0f} / static_cast<SampleType>(num_bands));
-    SampleType ceiling = kBaseFreq;
-    for (std::size_t b = 0; b < num_bands; ++b) {
-        ceiling *= ratio;
-        const SampleType clamped_ceiling = std::min(ceiling, nyquist);
+    const auto ceilings =
+        build_wavetable_band_ceilings(num_bands, reference_sample_rate);
+    for (const SampleType clamped_ceiling : ceilings) {
         std::size_t max_harmonic = static_cast<std::size_t>(
             std::floor(nyquist / clamped_ceiling));
         if (max_harmonic < 1) max_harmonic = 1;

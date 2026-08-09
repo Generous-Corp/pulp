@@ -3,6 +3,58 @@ from agent_capability_registry_types import binding, capability
 
 EXPORTS = [
     capability(
+        key="audio.wavetable-authoring",
+        domain="audio",
+        summary=(
+            "Bounded offline compilation of one recorded mono cycle into an owned "
+            "band-limited stack for the existing Wavetable oscillator."
+        ),
+        rt_class="control",
+        lifecycle={
+            "construction": "none",
+            "prepare": "control or worker; allocates bounded analysis and table storage",
+            "process": "not applicable; returns materialized bands",
+            "reset": "none",
+            "release": "result destruction off audio",
+        },
+        state_model=(
+            "Pure compilation result carrying an owned ordered band stack, resolved cycle, "
+            "seam diagnostics, recipe, provenance, and canonical source/table digests."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "not_applicable",
+            "platform_scope": "same_build",
+            "transport_history": "irrelevant",
+        },
+        input_domain=(
+            "finite bounded mono PCM, source sample rate, explicit or automatic cycle policy, "
+            "mip recipe, and caller provenance"
+        ),
+        output_domain=(
+            "owned WavetableEntry band stack or explicit fail-closed compile status"
+        ),
+        units=["samples", "frames", "hertz", "decibels", "linear amplitude"],
+        latency="not applicable; offline compiler",
+        tail="none",
+        scheduling="one bounded control-thread compilation transaction",
+        bindings=[binding(
+            role="entrypoint",
+            kind="cpp_function",
+            include="pulp/audio/wavetable_authoring.hpp",
+            qualified_name="pulp::audio::compile_wavetable",
+            target="Pulp::audio",
+            header_fingerprint="sha256:52df577e59972f830983062f5c69b9c2f3796597547eb6e6c4fdc011a1951905",
+        )],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::audio::compile_wavetable",
+            "operation": "function_call",
+            "arguments": "pulp::audio::BufferView<const float>{}, 48000.0",
+        }],
+    ),
+    capability(
         key="audio.midi-voice-modulation-adapter",
         domain="audio",
         summary=(
