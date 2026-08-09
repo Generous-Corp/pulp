@@ -739,11 +739,15 @@ def main() -> int:
         if imported_match is None:
             raise RuntimeError("could not locate installed pulp-audio imported artifact")
         archive_name = pathlib.Path(imported_match.group(1)).name
-        prefix_root = prefix.resolve()
+        # Search the owning target's build directory, not all of build_dir.
+        # Other ctests install SDK copies under build-local smoke prefixes in
+        # parallel; a tree-wide rglob can mistake those installed archives for
+        # a second build-tree artifact and make this isolation oracle flaky.
+        audio_build_dir = build_dir / "core" / "audio"
         archive_candidates = [
             path.resolve()
-            for path in build_dir.rglob(archive_name)
-            if path.is_file() and not path.resolve().is_relative_to(prefix_root)
+            for path in audio_build_dir.rglob(archive_name)
+            if path.is_file()
         ]
         if configuration:
             configured_candidates = [

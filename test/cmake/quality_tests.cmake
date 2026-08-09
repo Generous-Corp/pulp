@@ -67,7 +67,11 @@ if(Python3_Interpreter_FOUND)
     unset(_pulp_agent_capability_installed_args)
     # This installs the SDK, then configures, builds, and runs an independent
     # consumer for every capability row and typed binding.
-    set_tests_properties(agent-capability-installed-sdk PROPERTIES TIMEOUT 600)
+    # A cold Linux runner configures, builds, and runs hundreds of isolated
+    # capability/binding consumers. Ten minutes is below the observed clean
+    # runtime and turns ctest's retry into cross-test pollution; keep the work
+    # bounded while allowing the complete proof to finish once.
+    set_tests_properties(agent-capability-installed-sdk PROPERTIES TIMEOUT 1200)
 
     add_test(NAME control-authoring-examples
         COMMAND ${Python3_EXECUTABLE}

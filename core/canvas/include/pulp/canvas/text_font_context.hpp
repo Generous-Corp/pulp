@@ -65,6 +65,13 @@ public:
     /// rebuild themselves when the typeface registry has advanced.
     sk_sp<skia::textlayout::FontCollection> font_collection() const;
 
+    /// Serialize ParagraphBuilder/layout use of the shared FontCollection.
+    /// SkParagraph mutates an internal face cache during shaping, so callers
+    /// must hold this lock while building and laying out a paragraph.
+    std::unique_lock<std::mutex> lock_font_collection_use() const {
+        return std::unique_lock<std::mutex>(font_collection_use_mutex_);
+    }
+
     /// The family name used in `TextStyle::setFontFamilies({primary,
     /// emoji_family_name()})` so SkParagraph routes emoji clusters to
     /// the registered emoji typeface. Empty string if no emoji typeface
@@ -96,6 +103,7 @@ private:
     std::string emoji_family_name_;
 
     mutable std::mutex mutex_;
+    mutable std::mutex font_collection_use_mutex_;
     mutable sk_sp<skia::textlayout::FontCollection> font_collection_;
     mutable sk_sp<skia::textlayout::TypefaceFontProvider> typeface_provider_;
     mutable std::uint64_t collection_generation_ = 0;
