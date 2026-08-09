@@ -41,6 +41,13 @@ if(TARGET pulp::inspect)
     target_link_libraries(pulp-test-motion-scrubber PRIVATE
         pulp::view pulp::inspect Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-motion-scrubber)
+
+    add_executable(pulp-test-control-motion-executor
+        test_control_motion_executor.cpp)
+    target_link_libraries(pulp-test-control-motion-executor PRIVATE
+        pulp::view pulp::inspect Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-control-motion-executor
+        PROPERTIES LABELS "inspect;control;motion;t1;main-thread")
 endif()
 
 # Motion end-to-end animation smoke — mirrors what a plugin author

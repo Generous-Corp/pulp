@@ -53,7 +53,7 @@ availability.
 | `dev.pulp.logs/read@1` (`logs.read`) | yes | yes | Console component exists; no public live route |
 | `dev.pulp.ui/capture@1` (`capture.image`) | yes | yes | Typed contract and client binding exist; availability still requires an injected exact-instance host executor |
 | `dev.pulp.ui/input@1` (`ui.input`) | no | no | Frozen high-risk contract; no current executor or grant path |
-| `dev.pulp.trace/control@1` (`trace.control`) | no | yes | Component contract exists; no generic raw Inspector route |
+| `dev.pulp.trace/control@1` (`trace.control`) | no | yes | Injected exact-T1 main-thread Motion executor provides authority-bound geometry/scroll trace ownership, bounded preloaded-fixture scrub/play/pause, and finite redacted cost snapshots; no generic raw Inspector route |
 | `dev.pulp.trace/session-control@1` (`trace.session.control`) | no | yes | `pulp trace start/stop` and matching MCP tools use canonical control only; the reusable host observability bundle dispatches the exact admitted instance when an adapter publishes it |
 | `dev.pulp.state/parameter-gesture@1` (`state.write`) | no | yes | T1 main-thread exact-slot executor atomically claims the shared `StateStore` generation and rolls back failed brackets without overwriting newer writers; broker grant/consent remains mandatory |
 | `dev.pulp.test/input@1` (`test.input`) | no | yes | Typed executor building block exists; no public general-live route |

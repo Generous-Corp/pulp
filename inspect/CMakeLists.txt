@@ -208,6 +208,7 @@ target_sources(pulp-inspect PRIVATE
     src/domain_runtime.cpp
     src/editor_url.cpp
     src/source_jump.cpp
+    src/control_motion_executor.cpp
     src/motion_inspector.cpp
     src/motion_scrubber.cpp
     src/agent_request_queue.cpp

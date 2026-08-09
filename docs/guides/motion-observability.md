@@ -275,6 +275,20 @@ Coordinator::instance().add_sink([](const SampleEvent& e) {
 
 ## Retained protocol components
 
+Canonical live-host outcome parity is provided by the typed
+`dev.pulp.trace/control@1` operation when an exact T1 host injects
+`ControlMotionExecutor`. It attaches geometry/scroll traces and returns a
+receipt-bound trace ID; stops that owned trace; scrubs, plays, or pauses an
+already-loaded fixture with a caller-selected bound of at most 4,096 emitted
+events; and returns up to 64 finite cost samples with provenance text removed.
+The executor runs through the bounded main-thread adapter and revalidates the
+registration, Standalone tier, session, instance/publication generations,
+client grant, deadline, and cancellation before side effects. Retained traces
+and cost samples carry the same live-authority predicate, so revocation or
+session loss prunes frame work and the next ownership epoch starts empty. This
+is a typed control operation, not a restoration of the `Motion.*` wire methods
+or their retired CLI/MCP wrappers.
+
 The `Motion.*` domain definitions remain as implementation components, but no
 public client or product host currently routes to them. The table records the
 typed contract for the canonical replacement; it is not a callable wire API.

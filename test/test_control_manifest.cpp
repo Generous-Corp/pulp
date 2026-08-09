@@ -381,7 +381,19 @@ TEST_CASE("control registry projects capability and operation metadata",
             CHECK(operation.input_schema_json.find("\"const\":\"motion-start-trace\"") !=
                   std::string_view::npos);
             CHECK(operation.input_schema_json.find("\"maxItems\":32") != std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"const\":\"motion-sample-cost\"") !=
+                  std::string_view::npos);
+            CHECK(operation.input_schema_json.find("performance-enable-tracking") !=
+                  std::string_view::npos);
+            CHECK(operation.output_schema_json.find("audio-enable-metering") !=
+                  std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"maximum\":4096") !=
+                  std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"maximum\":64") !=
+                  std::string_view::npos);
             CHECK(operation.output_schema_json.find("\"trace_id\"") != std::string_view::npos);
+            CHECK(operation.output_schema_json.find("\"redacted\":{\"const\":true}") !=
+                  std::string_view::npos);
             CHECK(operation.output_schema_json.find(
                       "\"required\":[\"action\",\"receipt_id\",\"applied\",\"trace_id\"]") !=
                   std::string_view::npos);

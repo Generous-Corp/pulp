@@ -66,9 +66,19 @@ public:
     /// supported — each call re-emits from the start.
     std::size_t scrub_to(std::uint64_t frame);
 
+    /// Canonical control variant: emits at most `maximum_events` from the
+    /// selected prefix and reports whether more matching events existed.
+    std::size_t scrub_to_bounded(std::uint64_t frame, std::size_t maximum_events,
+                                 bool& truncated, std::function<bool()> continue_emission = {},
+                                 bool* interrupted = nullptr);
+
     /// Set playing flag, advance to the last loaded frame, emit
     /// everything. Passive: no real-time pacing.
     std::size_t play();
+
+    std::size_t play_bounded(std::size_t maximum_events, bool& truncated,
+                             std::function<bool()> continue_emission = {},
+                             bool* interrupted = nullptr);
 
     /// Clear the playing flag. No event emission. Playhead unchanged.
     void pause();
@@ -114,10 +124,11 @@ private:
     // Dispatch a snapshot of events to the given sinks + callback WITHOUT
     // holding mtx_. Callers must collect the snapshot under the lock and
     // then call this. Sinks are free to re-enter MotionScrubber methods.
-    static void dispatch_snapshot(
+    static std::size_t dispatch_snapshot(
         const std::vector<view::motion::SampleEvent>& events,
         const std::vector<SinkSlot>& sinks,
-        const InspectorEventSink& event_sink);
+        const InspectorEventSink& event_sink,
+        const std::function<bool()>& continue_emission = {}, bool* interrupted = nullptr);
 };
 
 } // namespace pulp::inspect

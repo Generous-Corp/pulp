@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -241,13 +242,190 @@ MotionInspector::~MotionInspector() {
         CostAttributor::instance().remove_sink(cost_sink_id_);
         cost_sink_id_ = 0;
     }
-    std::lock_guard<std::mutex> lock(mtx_);
-    traces_.clear();
+    bool restore_cost = false;
+    bool cost_enabled = false;
+    {
+        std::lock_guard<std::mutex> lock(mtx_);
+        restore_cost = !cost_owner_.empty();
+        cost_enabled = cost_was_enabled_;
+        cost_owner_.clear();
+        cost_authority_live_ = {};
+        recent_cost_samples_.clear();
+        cost_trace_owners_.clear();
+        traces_.clear();
+        canonical_traces_.clear();
+        restore_tracing_if_unused_locked();
+    }
+    if (restore_cost)
+        CostAttributor::instance().set_enabled(cost_enabled);
 }
 
 std::size_t MotionInspector::active_trace_count() const {
     std::lock_guard<std::mutex> lock(mtx_);
-    return traces_.size();
+    return traces_.size() + canonical_traces_.size();
+}
+
+MotionTraceAttachResult MotionInspector::attach_trace(const MotionTraceSpec& spec,
+                                                      std::string owner,
+                                                      std::function<bool()> authority_live,
+                                                      std::function<std::shared_ptr<void>(
+                                                          std::function<void()>)>
+                                                          subscribe_authority_end) {
+    if (!root_)
+        return {.error = "motion observation has no root view"};
+    if (spec.view_name.empty() || spec.view_name.size() > 128 || spec.fps < 1 ||
+        spec.fps > 240 || spec.geometry.size() + spec.scroll_geometry.size() < 1 ||
+        spec.geometry.size() + spec.scroll_geometry.size() > 32)
+        return {.error = "motion observation exceeded its bounded trace contract"};
+
+    TraceBuilder builder = Coordinator::instance().trace(spec.view_name, {spec.fps});
+    for (const auto& metric : spec.geometry) {
+        auto* target = pulp::view::ViewInspector::find_by_id(*root_, metric.node_id);
+        if (!target)
+            return {.error = "geometry observation node is unavailable"};
+        auto properties = metric.properties;
+        if (properties.empty()) {
+            properties = {GeometryProperty::MinX, GeometryProperty::MinY,
+                          GeometryProperty::Width, GeometryProperty::Height};
+        }
+        builder.geometry(metric.name, *target, std::move(properties), metric.space,
+                         metric.source);
+    }
+    for (const auto& metric : spec.scroll_geometry) {
+        auto* target = pulp::view::ViewInspector::find_by_id(*root_, metric.node_id);
+        auto* scroll = dynamic_cast<pulp::view::ScrollView*>(target);
+        if (!scroll)
+            return {.error = "scroll observation node is unavailable"};
+        auto properties = metric.properties;
+        if (properties.empty())
+            builder.scroll_geometry(metric.name, *scroll);
+        else
+            builder.scroll_geometry(metric.name, *scroll, std::move(properties));
+    }
+
+    prune_inactive_traces();
+    {
+        std::lock_guard lock(mtx_);
+        constexpr std::size_t kMaximumCanonicalTraces = 32;
+        if (canonical_traces_.size() == kMaximumCanonicalTraces)
+            return {.error = "motion observation trace quota is exhausted",
+                    .resource_exhausted = true};
+    }
+    auto handle = builder.attach();
+    if (!handle.is_attached())
+        return {.error = "motion observation trace could not attach"};
+    const auto trace_id = static_cast<std::int64_t>(handle.id());
+    {
+        std::lock_guard lock(mtx_);
+        if (canonical_traces_.empty()) {
+            tracing_was_enabled_ = Coordinator::instance().tracing_enabled();
+            canonical_tracing_epoch_active_ = true;
+        }
+        Coordinator::instance().set_tracing_enabled(true);
+        canonical_traces_.emplace(
+            trace_id,
+            CanonicalTrace{std::move(handle), owner, std::move(authority_live), {}});
+        if (cost_owner_ == owner)
+            cost_trace_owners_[trace_id] = owner;
+    }
+    auto subscription = subscribe_authority_end(
+        [this, trace_id, owner = std::move(owner)] { (void)detach_trace(trace_id, owner); });
+    std::lock_guard subscription_lock(mtx_);
+    const auto found = canonical_traces_.find(trace_id);
+    if (!subscription) {
+        if (found != canonical_traces_.end())
+            canonical_traces_.erase(found);
+        restore_tracing_if_unused_locked();
+        return {.error = "motion authority-end subscription is unavailable"};
+    }
+    if (found == canonical_traces_.end())
+        return {.error = "motion authority ended during trace attachment"};
+    found->second.authority_end_subscription = std::move(subscription);
+    return {.trace_id = trace_id};
+}
+
+bool MotionInspector::begin_cost_observation(std::string owner,
+                                             std::function<bool()> authority_live) {
+    std::lock_guard lock(mtx_);
+    if (!cost_owner_.empty() && cost_owner_ != owner && cost_authority_live_ &&
+        cost_authority_live_())
+        return false;
+    if (cost_owner_.empty())
+        cost_was_enabled_ = CostAttributor::instance().enabled();
+    cost_owner_ = std::move(owner);
+    cost_authority_live_ = std::move(authority_live);
+    recent_cost_samples_.clear();
+    cost_trace_owners_.clear();
+    for (const auto& [trace_id, trace] : canonical_traces_) {
+        if (trace.owner == cost_owner_)
+            cost_trace_owners_[trace_id] = trace.owner;
+    }
+    return true;
+}
+
+bool MotionInspector::end_cost_observation(std::string_view owner) {
+    bool restore_enabled = false;
+    {
+        std::lock_guard lock(mtx_);
+        if (cost_owner_ != owner)
+            return false;
+        cost_owner_.clear();
+        cost_authority_live_ = {};
+        recent_cost_samples_.clear();
+        cost_trace_owners_.clear();
+        restore_enabled = cost_was_enabled_;
+    }
+    CostAttributor::instance().set_enabled(restore_enabled);
+    return true;
+}
+
+bool MotionInspector::detach_trace(std::int64_t trace_id, std::string_view owner) {
+    std::lock_guard lock(mtx_);
+    const auto found = canonical_traces_.find(trace_id);
+    if (found == canonical_traces_.end() || found->second.owner != owner)
+        return false;
+    canonical_traces_.erase(found);
+    restore_tracing_if_unused_locked();
+    return true;
+}
+
+void MotionInspector::prune_inactive_traces() {
+    std::lock_guard lock(mtx_);
+    std::erase_if(canonical_traces_, [](const auto& entry) {
+        return !entry.second.authority_live || !entry.second.authority_live();
+    });
+    restore_tracing_if_unused_locked();
+}
+
+void MotionInspector::restore_tracing_if_unused_locked() {
+    if (!canonical_traces_.empty() || !canonical_tracing_epoch_active_)
+        return;
+    if (!traces_.empty()) {
+        canonical_tracing_epoch_active_ = false;
+        return;
+    }
+    Coordinator::instance().set_tracing_enabled(tracing_was_enabled_);
+    canonical_tracing_epoch_active_ = false;
+}
+
+std::vector<CostSample>
+MotionInspector::recent_cost_samples(std::size_t maximum_samples,
+                                     std::string_view owner) const {
+    std::lock_guard lock(mtx_);
+    if (cost_owner_ != owner)
+        return {};
+    maximum_samples = std::min(maximum_samples, recent_cost_samples_.size());
+    std::vector<CostSample> samples{
+        recent_cost_samples_.end() - static_cast<std::ptrdiff_t>(maximum_samples),
+        recent_cost_samples_.end()};
+    for (auto& sample : samples) {
+        std::erase_if(sample.active_trace_ids, [&](int trace_id) {
+            const auto found = cost_trace_owners_.find(trace_id);
+            return found == cost_trace_owners_.end() || found->second != owner;
+        });
+        sample.active_provenance.clear();
+    }
+    return samples;
 }
 
 InspectorMessage MotionInspector::handle(const InspectorMessage& req) {
@@ -525,6 +703,7 @@ InspectorMessage MotionInspector::list_traces(const InspectorMessage& req) {
 }
 
 void MotionInspector::broadcast_event(const SampleEvent& e) {
+    prune_inactive_traces();
     if (!event_sink_) return;
 
     auto params = choc::value::createObject("");
@@ -565,6 +744,26 @@ void MotionInspector::broadcast_event(const SampleEvent& e) {
 }
 
 void MotionInspector::broadcast_cost(const CostSample& s) {
+    prune_inactive_traces();
+    std::optional<bool> restore_cost_enabled;
+    {
+        std::lock_guard lock(mtx_);
+        if (!cost_owner_.empty() &&
+            (!cost_authority_live_ || !cost_authority_live_())) {
+            restore_cost_enabled = cost_was_enabled_;
+            cost_owner_.clear();
+            cost_authority_live_ = {};
+            recent_cost_samples_.clear();
+            cost_trace_owners_.clear();
+        } else if (!cost_owner_.empty()) {
+            constexpr std::size_t kMaximumRetainedCostSamples = 64;
+            if (recent_cost_samples_.size() == kMaximumRetainedCostSamples)
+                recent_cost_samples_.pop_front();
+            recent_cost_samples_.push_back(s);
+        }
+    }
+    if (restore_cost_enabled)
+        CostAttributor::instance().set_enabled(*restore_cost_enabled);
     if (!event_sink_) return;
     auto params = choc::value::createObject("");
     params.addMember("frame",

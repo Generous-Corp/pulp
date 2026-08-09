@@ -12,6 +12,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -182,6 +184,16 @@ bool MotionScrubber::load_fixture(const std::string& path) {
 }
 
 std::size_t MotionScrubber::scrub_to(std::uint64_t frame) {
+    bool truncated = false;
+    return scrub_to_bounded(frame, std::numeric_limits<std::size_t>::max(), truncated);
+}
+
+std::size_t MotionScrubber::scrub_to_bounded(std::uint64_t frame,
+                                             std::size_t maximum_events,
+                                             bool& truncated,
+                                             std::function<bool()> continue_emission,
+                                             bool* interrupted) {
+    truncated = false;
     std::vector<view::motion::SampleEvent> snapshot;
     std::vector<SinkSlot> sinks_snapshot;
     InspectorEventSink event_sink_snapshot;
@@ -189,18 +201,31 @@ std::size_t MotionScrubber::scrub_to(std::uint64_t frame) {
         std::lock_guard<std::mutex> lock(mtx_);
         if (!loaded_) return 0;
         playhead_frame_ = frame;
-        snapshot.reserve(events_.size());
+        snapshot.reserve(std::min(events_.size(), maximum_events));
         for (const auto& e : events_) {
-            if (e.frame <= frame) snapshot.push_back(e);
+            if (e.frame <= frame) {
+                if (snapshot.size() == maximum_events) {
+                    truncated = true;
+                    break;
+                }
+                snapshot.push_back(e);
+            }
         }
         sinks_snapshot = sinks_;
         event_sink_snapshot = event_sink_;
     }
-    dispatch_snapshot(snapshot, sinks_snapshot, event_sink_snapshot);
-    return snapshot.size();
+    return dispatch_snapshot(snapshot, sinks_snapshot, event_sink_snapshot,
+                             continue_emission, interrupted);
 }
 
 std::size_t MotionScrubber::play() {
+    bool truncated = false;
+    return play_bounded(std::numeric_limits<std::size_t>::max(), truncated);
+}
+
+std::size_t MotionScrubber::play_bounded(std::size_t maximum_events, bool& truncated,
+                                         std::function<bool()> continue_emission,
+                                         bool* interrupted) {
     std::vector<view::motion::SampleEvent> snapshot;
     std::vector<SinkSlot> sinks_snapshot;
     InspectorEventSink event_sink_snapshot;
@@ -209,12 +234,14 @@ std::size_t MotionScrubber::play() {
         if (!loaded_) return 0;
         playing_ = true;
         playhead_frame_ = max_frame_;
-        snapshot = events_;
+        truncated = events_.size() > maximum_events;
+        const auto count = std::min(events_.size(), maximum_events);
+        snapshot.assign(events_.begin(), events_.begin() + static_cast<std::ptrdiff_t>(count));
         sinks_snapshot = sinks_;
         event_sink_snapshot = event_sink_;
     }
-    dispatch_snapshot(snapshot, sinks_snapshot, event_sink_snapshot);
-    return snapshot.size();
+    return dispatch_snapshot(snapshot, sinks_snapshot, event_sink_snapshot,
+                             continue_emission, interrupted);
 }
 
 void MotionScrubber::pause() {
@@ -270,12 +297,20 @@ view::motion::FixtureHeader MotionScrubber::header() const {
 // holding mtx_. A sink that re-enters add_sink/remove_sink/scrub_to
 // (or any other MotionScrubber method) used to self-deadlock under
 // the old emit_prefix_locked design.
-void MotionScrubber::dispatch_snapshot(
+std::size_t MotionScrubber::dispatch_snapshot(
     const std::vector<view::motion::SampleEvent>& events,
     const std::vector<SinkSlot>& sinks,
-    const InspectorEventSink& event_sink
+    const InspectorEventSink& event_sink,
+    const std::function<bool()>& continue_emission,
+    bool* interrupted
 ) {
+    if (interrupted) *interrupted = false;
+    std::size_t emitted = 0;
     for (const auto& e : events) {
+        if (continue_emission && !continue_emission()) {
+            if (interrupted) *interrupted = true;
+            break;
+        }
         for (const auto& slot : sinks) {
             if (slot.sink) slot.sink(e);
         }
@@ -285,7 +320,9 @@ void MotionScrubber::dispatch_snapshot(
                                              choc::json::toString(params, false));
             event_sink(ev);
         }
+        ++emitted;
     }
+    return emitted;
 }
 
 // ── protocol handlers ───────────────────────────────────────────────

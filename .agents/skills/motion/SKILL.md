@@ -37,13 +37,13 @@ provenance work identically across surfaces.
 
 | You have | Path | Tool |
 |---|---|---|
-| C++ fixture code + a node id + a scalar / geometry of interest | **A — In-process trace** | `motion::Coordinator` / `MotionInspector` fixture APIs |
+| C++ fixture code + a node id + a scalar / geometry of interest | **A — In-process trace** | `motion::Coordinator` / `MotionInspector` fixture APIs; an admitted exact T1 host may inject `ControlMotionExecutor` |
 | A `ScrollView` whose offset / visible rect / content size you need to observe | **A — Runtime trace (scroll)** | `Trace.scroll_geometry(name, scroll_view, props)` — emits `contentOffsetX/Y`, `visibleRect*`, `contentSize*`, `scrollableMax*`, `inset*` |
 | A captured frame sequence (no app instrumentation available) | **B — Visual analysis** | `tools/motion/visual/analyze_sequence.py` |
 | A previously recorded `.motion.jsonl` fixture | **C — Replay + assert** | `motion::replay_fixture` + `motion::assert_matches` |
 | An interaction that drives the suspect motion | **D — Input record + replay** | `motion::make_input_recorder` + `motion::replay_inputs` |
-| A fixture available to C++ host/test code (design review / CI triage) | **E — Timeline scrubber** | Direct `MotionScrubber` fixture load, then authenticated `Motion.scrubTo` |
-| "Which animation is expensive and why?" | **F — Cost attribution** | `Motion.enableCost` + `CostAttributor` + `make_render_cost_probe` |
+| A fixture available to C++ host/test code (design review / CI triage) | **E — Timeline scrubber** | Direct `MotionScrubber` fixture load; canonical T1 scrub/play/pause is capped at 4,096 emitted events |
+| "Which animation is expensive and why?" | **F — Cost attribution** | `CostAttributor` + `make_render_cost_probe`; canonical T1 returns at most 64 redacted finite samples |
 | SwiftUI / UIKit / AppKit / iOS / macOS / AUv3 host code path | **G — Swift native** | `View.pulpMotionTrace { Trace.* }` / `PulpMotionGeometryProbe` |
 | Jetpack Compose or Android `View` code path | **H — Android native** | `Modifier.pulpMotionGeometry { +Trace.* }` / `View.pulpMotionTrace` |
 | Imported design + intent doc (e.g. "fade in 350 ms ease-out") | **Both A + C** | Record a fixture from the import, assert timing / monotonicity |
@@ -53,8 +53,8 @@ provenance work identically across surfaces.
 The runtime path is currently an in-process fixture API. The shipped `pulp
 motion` command, Motion MCP wrappers, and legacy remote transport are
 intentionally unavailable after Phase 3 authority deletion. Remote Motion work
-waits for a typed canonical broker/control replacement; do not rebuild the old
-wire path in a custom fixture.
+uses `dev.pulp.trace/control@1` only when the exact T1 host injects
+`ControlMotionExecutor`; do not rebuild the old wire path in a custom fixture.
 
 ### 1. Confirm the complaint as a measurable property
 
@@ -76,7 +76,8 @@ host.
 The shipped `pulp motion` command and `pulp_motion_*` MCP wrappers were retired
 with the raw inspector authority path. Use the in-process fixture APIs for
 tests. Live remote operations require a canonical broker/control capability
-with a frozen schema and receipt.
+with a frozen schema and receipt. `ControlMotionExecutor` is the canonical broker/control replacement
+for exact T1 Motion outcomes.
 
 ### 4. Trigger the interaction
 
