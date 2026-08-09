@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 14,
+  "inventory_version": 15,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,12 +37,12 @@
     }
   ],
   "counts": {
-    "public_headers": 401,
-    "reviewed_headers": 100,
+    "public_headers": 405,
+    "reviewed_headers": 104,
     "legacy_unreviewed_headers": 301,
     "unsupported_headers": 1,
     "by_disposition": {
-      "capability_entrypoint": 58,
+      "capability_entrypoint": 62,
       "capability_support": 36,
       "infrastructure": 5,
       "legacy_unreviewed": 301,
@@ -74,8 +74,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 224,
-        "reviewed_headers": 62,
+        "public_headers": 228,
+        "reviewed_headers": 66,
         "legacy_unreviewed_headers": 162,
         "unsupported_headers": 1
       },
@@ -2270,6 +2270,17 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/dynamic_eq.hpp",
+      "fingerprint": "sha256:eb6ed3b73030b8046706e6dfb8bfe9a143134b7dea59c289ce142fdcbb12254b",
+      "include": "pulp/signal/dynamic_eq.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.dynamic-eq"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/dynamics_contract.hpp",
       "fingerprint": "sha256:968978abf54ee71ee7789cfc79fe21347b97708b9f068812908a5b855d35a406",
       "include": "pulp/signal/dynamics_contract.hpp",
@@ -2622,6 +2633,17 @@
       "disposition": "unsupported_capability",
       "capability_keys": [],
       "rationale": "The harmonizer is a public DSP API, but it does not yet have the typed bindings, lifecycle contract, parameter semantics, and link probe required for a generator-facing capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/headphone_crossfeed.hpp",
+      "fingerprint": "sha256:ed91124815b320271a1246f87fa35655cc02ef989a9caa6cab734af0a363268c",
+      "include": "pulp/signal/headphone_crossfeed.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.headphone-crossfeed"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
@@ -3347,7 +3369,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:4f065844dfc4347b27fa302b922af2a99d74dae295be6958c11f51aa3394381a",
+      "fingerprint": "sha256:e6786cdc5c77d8bb5018265e02af8e17260ce328372994ffc5fa9b7f33fa3132",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3471,6 +3493,18 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/spectral_gate_blur.hpp",
+      "fingerprint": "sha256:75cf322be3a308259d63737d67320b94a926c9b9fb290c6a751dd07ee781d845",
+      "include": "pulp/signal/spectral_gate_blur.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.spectral-frame-blur",
+        "signal.spectral-gate"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/spectrogram.hpp",
       "fingerprint": "sha256:592fcb82978e0186489600456ab44b71be9a416715b88ea3921265de739a538b",
       "include": "pulp/signal/spectrogram.hpp",
@@ -3583,6 +3617,17 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/transient_designer.hpp",
+      "fingerprint": "sha256:f82fbba753fd01410ff7117cf86f9f8868d071a3979c36d87f677f99cbc34ae2",
+      "include": "pulp/signal/transient_designer.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.transient-designer"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
