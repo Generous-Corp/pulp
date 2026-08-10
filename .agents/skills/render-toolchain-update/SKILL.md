@@ -119,3 +119,6 @@ Skia/Dawn, V8, or both may be consumed independently.
   their portable releases with a normal ubuntu-latest artifact.
 - `fetch_skia_for_release.py` platform keys must match the manifest exactly (notably
   `wasm-wasm32`).
+- Keep release-fetch progress output ASCII-safe. Windows release runners can use a
+  cp1252 console, where decorative Unicode arrows raise `UnicodeEncodeError` before
+  an asset download starts; exercise the full Windows fetch path with cp1252 stdout.

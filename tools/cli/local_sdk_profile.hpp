@@ -10,7 +10,7 @@ namespace pulp::cli::local_sdk {
 
 namespace fs = std::filesystem;
 
-inline constexpr int kForgeProfileRevision = 1;
+inline constexpr int kForgeProfileRevision = 2;
 inline constexpr const char* kForgeProfileName = "forge-dev";
 inline constexpr const char* kProvenanceSchema = "pulp.sdk-provenance.v1";
 
@@ -51,8 +51,15 @@ struct InstallRequest {
     std::string error;
 };
 
+enum class ArchiveSliceAction {
+    Keep,
+    ThinToArm64,
+    Reject,
+};
+
 InstallRequest parse_install_arguments(const std::vector<std::string>& args,
                                        const std::string& default_version);
+ArchiveSliceAction archive_slice_action(const std::string& lipo_architectures);
 std::string input_fingerprint(const Identity& identity);
 Paths profile_paths(const fs::path& pulp_home, const Identity& identity);
 std::vector<std::string> configure_arguments(const fs::path& source, const fs::path& build,

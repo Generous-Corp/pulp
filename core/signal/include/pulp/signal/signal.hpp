@@ -10,6 +10,9 @@
 #include <pulp/signal/delay_line.hpp>
 #include <pulp/signal/cross_feedback_multitap_delay.hpp>
 #include <pulp/signal/fractional_delay.hpp>
+#include <pulp/signal/waveguide_junction.hpp>
+#include <pulp/signal/waveguide_line.hpp>
+#include <pulp/signal/waveguide_reflection_filter.hpp>
 #include <pulp/signal/dry_wet_mixer.hpp>
 #include <pulp/signal/gain.hpp>
 #include <pulp/signal/compressor.hpp>
@@ -38,6 +41,8 @@
 #include <pulp/signal/mid_side.hpp>
 #include <pulp/signal/mirrored_history_buffer.hpp>
 #include <pulp/signal/modal_bank.hpp>
+#include <pulp/signal/particle_collision_exciter.hpp>
+#include <pulp/signal/particle_percussion_voice.hpp>
 #include <pulp/signal/nway_crossfade.hpp>
 #include <pulp/signal/path_latency_aligner.hpp>
 #include <pulp/signal/path_switcher.hpp>

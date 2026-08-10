@@ -55,41 +55,67 @@ GROUPS = [
     ("Analysis", ["yin_tracker", "envelope_follower"]),
 ]
 
-# Methods every template has; listing them per class is noise.
-BORING = {"reset", "prepare", "set_sample_rate", "clear"}
+def code_only(text: str) -> str:
+    """Blank comments and literals while preserving offsets and newlines."""
+    pattern = re.compile(
+        r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'',
+        re.DOTALL,
+    )
+    return pattern.sub(lambda match: re.sub(r"[^\n]", " ", match.group(0)), text)
 
 
-def public_methods(text: str, cls: str):
-    """Public methods of `cls`, in declaration order, as `name(args)`."""
-    m = re.search(rf"(?:class|struct)\s+{re.escape(cls)}\b", text)
-    if not m:
-        return []
-    body, depth, i, started = [], 0, m.end(), False
-    while i < len(text):
-        c = text[i]
-        if c == "{":
+def matching_brace(text: str, opening: int) -> int:
+    depth = 0
+    for pos in range(opening, len(text)):
+        if text[pos] == "{":
             depth += 1
-            started = True
-        elif c == "}":
+        elif text[pos] == "}":
             depth -= 1
-            if started and depth == 0:
-                break
-        if started:
-            body.append(c)
+            if depth == 0:
+                return pos
+    raise ValueError("unclosed class body")
+
+
+def public_declarations(text: str, cls: str, *, source_is_code: bool = False) -> str:
+    """Return only top-level public class text, with method bodies blanked."""
+    source = text if source_is_code else code_only(text)
+    declaration = re.search(rf"\b(class|struct)\s+{re.escape(cls)}\b[^{{]*{{", source)
+    if declaration is None:
+        return ""
+    opening = source.find("{", declaration.start())
+    body = source[opening + 1:matching_brace(source, opening)]
+    public = declaration.group(1) == "struct"
+    depth = 0
+    out = list(" " * len(body))
+    i = 0
+    while i < len(body):
+        if depth == 0:
+            access = re.match(r"(public|private|protected)\s*:", body[i:])
+            if access:
+                public = access.group(1) == "public"
+                i += access.end()
+                continue
+        char = body[i]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+        elif public and depth == 0:
+            out[i] = char
         i += 1
-    src = "".join(body)
-    # Only the public section: templates here are public-first, and a private:
-    # marker ends what a caller may touch.
-    cut = re.search(r"\bprivate\s*:", src)
-    if cut:
-        src = src[:cut.start()]
+    return "".join(out)
+
+
+def public_methods(text: str, cls: str, *, source_is_code: bool = False):
+    """Public methods of `cls`, in declaration order, as `name(args)`."""
+    src = public_declarations(text, cls, source_is_code=source_is_code)
     out = []
     for mm in re.finditer(
             r"^\s*(?:\[\[[^\]]*\]\]\s*)?(?:inline\s+|static\s+|constexpr\s+|virtual\s+)*"
             r"([A-Za-z_][\w:<>,\s\*&]*?)\s+([a-z_]\w*)\s*\(([^);]*)\)",
             src, re.M):
         ret, name, args = mm.group(1).strip(), mm.group(2), mm.group(3).strip()
-        if name in BORING or name.startswith("operator"):
+        if name.startswith("operator"):
             continue
         args = re.sub(r"\s+", " ", args)
         out.append(f"{name}({args})" if args else f"{name}()")
@@ -98,7 +124,7 @@ def public_methods(text: str, cls: str):
         if s not in seen:
             seen.add(s)
             uniq.append(s)
-    return uniq[:7]
+    return uniq
 
 
 def scan_headers():
@@ -110,14 +136,14 @@ def scan_headers():
                 continue
             path = os.path.join(root, fn)
             rel = os.path.relpath(path, SIGNAL)
-            text = open(path, errors="ignore").read()
+            text = code_only(open(path, errors="ignore").read())
             classes = []
             for m in re.finditer(r"^(?:template\s*<[^\n]*>\s*)?(?:class|struct)\s+(\w+T?)\b(?!\s*;)",
                                  text, re.M):
                 cls = m.group(1)
                 if cls.endswith("Params") or cls.startswith("_"):
                     continue
-                meth = public_methods(text, cls)
+                meth = public_methods(text, cls, source_is_code=True)
                 if meth:
                     classes.append({"class": cls, "methods": meth})
             if classes:

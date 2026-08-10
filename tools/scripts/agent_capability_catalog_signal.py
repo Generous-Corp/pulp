@@ -268,6 +268,123 @@ EXPORTS = [
         }],
     ),
     capability(
+        key="signal.particle-percussion", domain="signal",
+        summary=(
+            "Deterministic depleted-energy particle collisions and prepared resonant "
+            "percussion voices."
+        ),
+        rt_class="mixed",
+        lifecycle={"construction": "control",
+                   "prepare": "control; voice preparation may allocate retained modal storage",
+                   "process": "audio", "reset": "audio",
+                   "release": "destruction off audio"},
+        state_model=(
+            "Fixed seeded collision, jitter, and routing generators plus collision energy, "
+            "resonator state, and prepared five-mode modal storage."
+        ),
+        seed_model="public uint64 seed with independently purpose-derived streams",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="normalized excitation and bounded collision, decay, and body-model controls",
+        output_domain="collision events or mono particle-percussion audio",
+        units=["samples", "hertz", "milliseconds", "normalized energy", "linear amplitude"],
+        latency="zero",
+        tail=("finite collision settling plus the longest configured resonator or modal decay "
+              "when sustain_floor is positive; unbounded and reported as -1 when it is zero"),
+        scheduling="sample-synchronous after control-side preparation and model configuration",
+        bindings=[
+            binding(
+                role="collision_exciter", kind="cpp_type",
+                include="pulp/signal/particle_collision_exciter.hpp",
+                qualified_name="pulp::signal::ParticleCollisionExciterT<float>",
+                target="Pulp::signal",
+                header_fingerprint="sha256:bfacb7a8890939910c7614e354646a6c9bdfe14d506848a69aa93c93b458d66e",
+            ),
+            binding(
+                role="voice", kind="cpp_type",
+                include="pulp/signal/particle_percussion_voice.hpp",
+                qualified_name="pulp::signal::ParticlePercussionVoiceT<float>",
+                target="Pulp::signal",
+                header_fingerprint="sha256:a9fbfb370bbb6d2b47f880d6a2687075b943ae6f4ba69213abb2a7279e5027a4",
+            ),
+        ],
+        _link_probes=[
+            {"role": "collision_exciter",
+             "binding": "pulp::signal::ParticleCollisionExciterT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+            {"role": "voice", "binding": "pulp::signal::ParticlePercussionVoiceT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+        ],
+    ),
+    capability(
+        key="signal.waveguide-primitives", domain="signal",
+        summary=(
+            "Prepared bidirectional waveguide rails, passive reflection boundaries, and "
+            "fixed-capacity pressure-wave scattering junctions."
+        ),
+        rt_class="mixed",
+        lifecycle={"construction": "control",
+                   "prepare": "control; line preparation allocates bounded retained history",
+                   "process": "audio", "reset": "audio",
+                   "release": "destruction off audio"},
+        state_model=(
+            "Two prepared double-precision traveling-wave histories and a smoothed length, "
+            "one-pole boundary state, and fixed-capacity impedance plus prior-output state."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain=(
+            "finite traveling pressure waves, bounded fractional line lengths, passive "
+            "reflection controls, and two to four positive impedance ratios"
+        ),
+        output_domain="delayed, reflected, or losslessly scattered traveling pressure waves",
+        units=["samples", "seconds", "linear reflection gain", "dimensionless impedance"],
+        latency=(
+            "current smoothed one-way line length (target reported separately); reflection "
+            "and junction operations add zero samples, and two-phase boundary composition "
+            "adds no hidden sample"
+        ),
+        tail="prepared line history plus passive one-pole boundary decay until reset",
+        scheduling=(
+            "sample-synchronous; feedback networks read every line output, compute all "
+            "boundaries, then push every line input in the same frame"
+        ),
+        bindings=[
+            binding(
+                role="line", kind="cpp_type",
+                include="pulp/signal/waveguide_line.hpp",
+                qualified_name="pulp::signal::WaveguideLineT<float>",
+                target="Pulp::signal",
+                header_fingerprint="sha256:fbedd57acbc69cf0b827c3a17dcc93a90f43bb14af20bd57ce6d10bb4910d995",
+            ),
+            binding(
+                role="reflection", kind="cpp_type",
+                include="pulp/signal/waveguide_reflection_filter.hpp",
+                qualified_name="pulp::signal::WaveguideReflectionFilterT<float>",
+                target="Pulp::signal",
+                header_fingerprint="sha256:ebb6beafb7b315ce54115de61e54cd2f603fa147919e8e11ce5b8038b935ab44",
+            ),
+            binding(
+                role="junction", kind="cpp_type",
+                include="pulp/signal/waveguide_junction.hpp",
+                qualified_name="pulp::signal::WaveguideJunctionT<float, 4>",
+                target="Pulp::signal",
+                header_fingerprint="sha256:3b2bfa32d07f91fc6bdbde2e1544df94b1d0646aca287bb88db58257902cf70d",
+            ),
+        ],
+        _link_probes=[
+            {"role": "line", "binding": "pulp::signal::WaveguideLineT<float>",
+             "operation": "member_call", "member": "prepare",
+             "arguments": "48000.0, 0.05"},
+            {"role": "reflection",
+             "binding": "pulp::signal::WaveguideReflectionFilterT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+            {"role": "junction", "binding": "pulp::signal::WaveguideJunctionT<float, 4>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+        ],
+    ),
+    capability(
         key="signal.nonlinear-shaping", domain="signal",
         summary="Antialiased multistage wavefolding, Chebyshev harmonic shaping, and ring modulation.",
         rt_class="mixed",

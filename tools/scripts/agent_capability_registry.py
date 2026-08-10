@@ -56,6 +56,8 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/nway_crossfade.hpp": "Pulp::signal",
     "pulp/signal/path_latency_aligner.hpp": "Pulp::signal",
     "pulp/signal/path_switcher.hpp": "Pulp::signal",
+    "pulp/signal/particle_collision_exciter.hpp": "Pulp::signal",
+    "pulp/signal/particle_percussion_voice.hpp": "Pulp::signal",
     "pulp/signal/rise_fall_generator.hpp": "Pulp::signal",
     "pulp/signal/scope_capture.hpp": "Pulp::signal",
     "pulp/signal/six_band_eq.hpp": "Pulp::signal",
@@ -72,6 +74,9 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/unison.hpp": "Pulp::signal",
     "pulp/signal/velvet_noise.hpp": "Pulp::signal",
     "pulp/signal/wavetable.hpp": "Pulp::signal",
+    "pulp/signal/waveguide_junction.hpp": "Pulp::signal",
+    "pulp/signal/waveguide_line.hpp": "Pulp::signal",
+    "pulp/signal/waveguide_reflection_filter.hpp": "Pulp::signal",
     "pulp/signal/fft_backend.hpp": "Pulp::signal-fft-backend",
     "pulp/signal/modal_spec.hpp": "Pulp::signal-modal-spec",
     "pulp/signal/mirrored_history_buffer.hpp": "Pulp::signal",
@@ -473,7 +478,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:b84aa35d755aff4c0c258be267891dc37b5a7ab0b7705be0f587957ee48d14e6",
+        "fingerprint": "sha256:4c1b620bf6a1ba6a3c78317e18e7500e46dcdc4ac7d312a22d4f4ca8b9ee61e5",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

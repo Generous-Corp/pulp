@@ -388,18 +388,18 @@ WavetableCompileResult compile_wavetable(BufferView<const float> source, double 
         for (float& sample : base)
             sample *= gain;
 
-        signal::FftT<float> fft(static_cast<int>(recipe.table_length));
+        signal::FftT<double> fft(static_cast<int>(recipe.table_length));
         if (!fft.ready()) {
             result.status = WavetableCompileStatus::FftUnavailable;
             return result;
         }
-        std::vector<std::complex<float>> spectrum(recipe.table_length);
+        std::vector<std::complex<double>> spectrum(recipe.table_length);
         for (std::size_t i = 0; i < base.size(); ++i)
-            spectrum[i] = {base[i], 0.0f};
+            spectrum[i] = {static_cast<double>(base[i]), 0.0};
         fft.forward(spectrum.data());
         // DC removal is an output invariant even if finite sinc arithmetic left
         // a tiny residual after the source-cycle mean subtraction.
-        spectrum[0] = {0.0f, 0.0f};
+        spectrum[0] = {0.0, 0.0};
 
         const auto ceilings = signal::detail::build_wavetable_band_ceilings<float>(
             recipe.num_bands, static_cast<float>(recipe.reference_sample_rate));
@@ -421,13 +421,13 @@ WavetableCompileResult compile_wavetable(BufferView<const float> source, double 
             auto band_spectrum = spectrum;
             for (std::size_t k = maximum_harmonic + 1; k < band_spectrum.size() - maximum_harmonic;
                  ++k)
-                band_spectrum[k] = {0.0f, 0.0f};
+                band_spectrum[k] = {0.0, 0.0};
             fft.inverse(band_spectrum.data());
             signal::WavetableEntry band;
             band.max_frequency_hz = ceiling;
             band.samples.resize(recipe.table_length);
             for (std::size_t i = 0; i < band.samples.size(); ++i) {
-                band.samples[i] = band_spectrum[i].real();
+                band.samples[i] = static_cast<float>(band_spectrum[i].real());
                 if (!std::isfinite(band.samples[i])) {
                     result.bands.clear();
                     result.status = WavetableCompileStatus::NonFiniteResult;

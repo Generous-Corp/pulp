@@ -18,6 +18,7 @@ mysteriously stopped using the SDK.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -51,7 +52,33 @@ MIN_CLASSES = 180
 MIN_HEADERS = 120
 
 
+def extractor_module():
+    spec = importlib.util.spec_from_file_location("pulp_dsp_vocabulary_test", EXTRACTOR)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def main():
+    module = extractor_module()
+    synthetic = """
+class Probe {
+  public:
+    void prepare() { helper(private_state_); }
+    void reset() noexcept { private_state_ = 0; }
+    int retained_bytes() const noexcept { return private_state_; }
+  private:
+    int helper(int value) { return value; }
+    int private_state_{};
+};
+"""
+    methods = module.public_methods(synthetic, "Probe")
+    expected = ["prepare()", "reset()", "retained_bytes()"]
+    if methods != expected:
+        print(f"FAIL: public/private scanner returned {methods!r}, expected {expected!r}")
+        return 1
+
     r = subprocess.run([sys.executable, EXTRACTOR, "--json"],
                        capture_output=True, text=True)
     if r.returncode != 0:
