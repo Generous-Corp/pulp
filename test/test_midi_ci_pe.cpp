@@ -225,6 +225,46 @@ TEST_CASE("PeReassembler cancels in-flight transfers",
     REQUIRE(ra.pending_transfers() == 0);
 }
 
+TEST_CASE("PeReassembler cancellation is scoped to one in-flight transfer",
+          "[midi][ci][pe][issue-84]") {
+    PeReassembler ra;
+
+    PeChunk cancelled_first{};
+    cancelled_first.request_id = 11;
+    cancelled_first.total_chunks = 2;
+    cancelled_first.chunk_number = 1;
+    cancelled_first.header_json = R"({"resource":"/Patch/Cancel"})";
+    cancelled_first.payload = {0xA1};
+
+    PeChunk survivor_first{};
+    survivor_first.request_id = 12;
+    survivor_first.total_chunks = 2;
+    survivor_first.chunk_number = 1;
+    survivor_first.header_json = R"({"resource":"/Patch/Keep"})";
+    survivor_first.payload = {0xB1, 0xB2};
+
+    PeChunk survivor_second = survivor_first;
+    survivor_second.chunk_number = 2;
+    survivor_second.header_json.clear();
+    survivor_second.payload = {0xB3};
+
+    REQUIRE_FALSE(ra.push(cancelled_first).has_value());
+    REQUIRE_FALSE(ra.push(survivor_first).has_value());
+    REQUIRE(ra.pending_transfers() == 2);
+
+    ra.cancel(11);
+
+    REQUIRE(ra.pending_transfers() == 1);
+    auto completed = ra.push(survivor_second);
+    REQUIRE(completed.has_value());
+    REQUIRE(completed->request_id == 12);
+    REQUIRE(completed->total_chunks == 2);
+    REQUIRE(completed->chunk_number == 2);
+    REQUIRE(completed->header_json == survivor_first.header_json);
+    REQUIRE(completed->payload == std::vector<uint8_t>{0xB1, 0xB2, 0xB3});
+    REQUIRE(ra.pending_transfers() == 0);
+}
+
 TEST_CASE("PeReassembler rejects mismatched total_chunks mid-transfer",
           "[midi][ci][pe][issue-84]") {
     PeReassembler ra;
