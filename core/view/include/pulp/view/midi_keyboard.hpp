@@ -28,12 +28,23 @@ public:
     std::function<void(int note, float velocity)> on_note_on;
     std::function<void(int note)> on_note_off;
 
-    // Orientation
-    enum class Orientation { horizontal, vertical };
-    void set_orientation(Orientation o) { orientation_ = o; }
+    /// Keyboard geometry.
+    enum class Orientation {
+        horizontal,
+        vertical,                 ///< Physical piano-key proportions.
+        vertical_chromatic_rows,  ///< Equal semitone rows, with last_note() at the top.
+    };
+
+    /// Select geometry. Chromatic rows are an explicitly vertical mode.
+    void set_orientation(Orientation o) {
+        if (orientation_ == o) return;
+        orientation_ = o;
+        request_repaint();
+    }
     Orientation orientation() const { return orientation_; }
 
     // Display options
+    /// Show C octave labels using the MIDI convention where note 60 is C4.
     void set_show_note_names(bool show) { show_names_ = show; }
     bool show_note_names() const { return show_names_; }
 
