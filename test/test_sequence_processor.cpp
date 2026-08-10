@@ -673,6 +673,88 @@ TEST_CASE("embedded sequence processor atomically adopts prepared same-topology 
             }) == 1);
 }
 
+TEST_CASE("embedded sequence processor adoption flushes an active old-generation note") {
+    const auto map = tempo_map();
+    const auto assets = take(DecodedAudioAssetPool::create({}));
+    ProgramHarness programs;
+    programs.publish(single_note_project(60), map, assets, 1);
+
+    sequence::SequenceProcessorConfig processor_config;
+    processor_config.output_channels = 1;
+    sequence::SequenceProcessor embedded(programs.store, processor_config);
+    embedded.prepare({
+        .sample_rate = 48'000.0,
+        .max_buffer_size = 32,
+        .input_channels = 0,
+        .output_channels = 1,
+    });
+    REQUIRE(embedded.ready());
+
+    Buffer silence(1, 32);
+    Buffer audio_output(1, 32);
+    auto audio_view = audio_output.view();
+    midi::MidiBuffer midi_in;
+    midi::MidiBuffer midi_out;
+    midi_out.reserve(16);
+    midi_out.set_realtime_capacity_limit(true);
+    UmpOutputAttachment ump_out(midi_out, 16);
+
+    format::ProcessContext context;
+    context.sample_rate = 48'000.0;
+    context.num_samples = 32;
+    context.is_playing = true;
+    context.position_samples = 0;
+    context.transport_jump = true;
+    embedded.process(audio_view, silence.const_view(), midi_in, midi_out, context);
+    REQUIRE(embedded.status() == sequence::SequenceProcessorStatus::Ready);
+    REQUIRE(midi_out.size() == 1);
+    REQUIRE(midi_out[0].is_note_on());
+    REQUIRE(midi_out[0].note() == 60);
+    REQUIRE(midi_out[0].sample_offset == 0);
+    REQUIRE(ump_out.ump().size() == 1);
+    REQUIRE((ump_out.ump()[0].packet.status() & 0xf0u) == 0x90u);
+    REQUIRE(ump_out.ump()[0].packet.note_number() == 60);
+    REQUIRE(ump_out.ump()[0].sample_offset == 0);
+    REQUIRE(embedded.last_observation().emitted_midi_events == 1);
+
+    programs.publish(single_note_project(61), map, assets, 2);
+    REQUIRE(embedded.adopt_latest_program());
+    context.position_samples = 32;
+    context.transport_jump = false;
+    embedded.process(audio_view, silence.const_view(), midi_in, midi_out, context);
+    REQUIRE(embedded.status() == sequence::SequenceProcessorStatus::Ready);
+    REQUIRE(midi_out.size() == 1);
+    REQUIRE(midi_out[0].is_note_off());
+    REQUIRE(midi_out[0].note() == 60);
+    REQUIRE(midi_out[0].sample_offset == 0);
+    REQUIRE(ump_out.ump().size() == 1);
+    REQUIRE((ump_out.ump()[0].packet.status() & 0xf0u) == 0x80u);
+    REQUIRE(ump_out.ump()[0].packet.note_number() == 60);
+    REQUIRE(ump_out.ump()[0].sample_offset == 0);
+    REQUIRE(embedded.last_observation().emitted_midi_events == 1);
+
+    context.position_samples = 64;
+    embedded.process(audio_view, silence.const_view(), midi_in, midi_out, context);
+    REQUIRE(embedded.status() == sequence::SequenceProcessorStatus::Ready);
+    REQUIRE(midi_out.empty());
+    REQUIRE(ump_out.ump().empty());
+    REQUIRE(embedded.last_observation().emitted_midi_events == 0);
+
+    context.position_samples = 0;
+    context.transport_jump = true;
+    embedded.process(audio_view, silence.const_view(), midi_in, midi_out, context);
+    REQUIRE(embedded.status() == sequence::SequenceProcessorStatus::Ready);
+    REQUIRE(midi_out.size() == 1);
+    REQUIRE(midi_out[0].is_note_on());
+    REQUIRE(midi_out[0].note() == 61);
+    REQUIRE(midi_out[0].sample_offset == 0);
+    REQUIRE(ump_out.ump().size() == 1);
+    REQUIRE((ump_out.ump()[0].packet.status() & 0xf0u) == 0x90u);
+    REQUIRE(ump_out.ump()[0].packet.note_number() == 61);
+    REQUIRE(ump_out.ump()[0].sample_offset == 0);
+    REQUIRE(embedded.last_observation().emitted_midi_events == 1);
+}
+
 
 TEST_CASE("embedded sequence processor treats zero-frame callbacks as recoverable no-ops") {
     const auto map = tempo_map();
