@@ -278,6 +278,20 @@ def matching_brace(text: str, opening: int) -> int:
     raise ValueError("unclosed class body")
 
 
+def opens_lambda_body(text: str, opening: int) -> bool:
+    """Whether a parameter-list brace starts a lambda rather than an initializer."""
+    prefix = text[max(0, opening - 512):opening]
+    return re.search(
+        r"\[[^\[\]]*\]"
+        r"(?:\s*<[^{};]*>)?"
+        r"\s*(?:\([^{};]*\))?"
+        r"\s*(?:(?:mutable|constexpr|consteval)\s+)*"
+        r"(?:noexcept(?:\s*\([^{};]*\))?\s*)?"
+        r"(?:->\s*[^{};]+)?\s*$",
+        prefix,
+    ) is not None
+
+
 def public_declarations(text: str, cls: str, *, source_is_code: bool = False) -> str:
     """Return only top-level public class text, with method bodies blanked."""
     source = text if source_is_code else code_only(text)
@@ -288,6 +302,9 @@ def public_declarations(text: str, cls: str, *, source_is_code: bool = False) ->
     body = source[opening + 1:matching_brace(source, opening)]
     public = declaration.group(1) == "struct"
     depth = 0
+    parameter_depth = 0
+    parameter_brace_depth = 0
+    parameter_lambda_depth = 0
     out = list(" " * len(body))
     i = 0
     while i < len(body):
@@ -298,11 +315,33 @@ def public_declarations(text: str, cls: str, *, source_is_code: bool = False) ->
                 i += access.end()
                 continue
         char = body[i]
-        if char == "{":
+        if parameter_lambda_depth > 0:
+            if char == "{":
+                parameter_lambda_depth += 1
+            elif char == "}":
+                parameter_lambda_depth -= 1
+                if public and parameter_lambda_depth == 0:
+                    out[i] = char
+            i += 1
+            continue
+        depth_before = depth
+        method_body_open = char == "{" and parameter_depth == 0
+        if depth == 0 and char == "(":
+            parameter_depth += 1
+        elif depth == 0 and char == ")":
+            parameter_depth = max(0, parameter_depth - 1)
+        elif depth == 0 and char == "{" and parameter_depth > 0:
+            if opens_lambda_body(body, i):
+                parameter_lambda_depth = 1
+            else:
+                parameter_brace_depth += 1
+        elif depth == 0 and char == "}" and parameter_brace_depth > 0:
+            parameter_brace_depth -= 1
+        elif char == "{":
             depth += 1
         elif char == "}":
             depth -= 1
-        elif public and depth == 0:
+        if public and depth_before == 0 and not method_body_open:
             out[i] = char
         i += 1
     return "".join(out)
