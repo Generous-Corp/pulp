@@ -332,6 +332,11 @@ bool TimelineStepSequencerProcessor::compile_pattern(const state::Snapshot& snap
         return false;
     auto map = std::make_shared<const timebase::CompiledTempoMap>(
         std::move(compiled_map).value());
+    const auto pattern_end =
+        map->ticks_to_samples({pattern_duration_ticks(snapshot)}).value;
+    if (pattern_end <= 0 ||
+        pattern_end < static_cast<std::int64_t>(maximum_block_size_))
+        return false;
     auto assets = playback::DecodedAudioAssetPool::create({});
     if (!assets)
         return false;
@@ -351,8 +356,6 @@ bool TimelineStepSequencerProcessor::compile_pattern(const state::Snapshot& snap
         if (!engine_.prepare(std::move(request), sample_rate_, maximum_block_size_, true))
             return false;
     }
-    const auto pattern_end = engine_.last_transport().tempo_map
-                                 ->ticks_to_samples({pattern_duration_ticks(snapshot)}).value;
     if (engine_.set_loop_samples(true, 0, pattern_end) != playback::TransportError::None)
         return false;
     persistent_project_ = std::move(persistent);
