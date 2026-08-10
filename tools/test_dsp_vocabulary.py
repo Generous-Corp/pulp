@@ -44,6 +44,9 @@ MUST_HAVE = [
     ("trigger.hpp", None, None),
     ("dc_blocker.hpp", None, None),
     ("smoothed_value.hpp", None, None),
+    ("beat_repeat_kernel.hpp", "BeatRepeatKernelT", "trigger"),
+    ("character_delay.hpp", "CharacterDelayT", "process"),
+    ("additive_bank.hpp", "AdditiveBankT", "process"),
 ]
 
 # Measured at the time of writing: 246 classes across 161 headers. A floor
@@ -123,6 +126,31 @@ class Probe {
     expected = ["prepare()", "reset()", "retained_bytes()"]
     if methods != expected:
         print(f"FAIL: public/private scanner returned {methods!r}, expected {expected!r}")
+        return 1
+
+    separator_fixture = """
+class DigitSeparated {
+  public:
+    static constexpr int capacity = 192'000;
+    static constexpr double gain = 0x1.A'Bp2;
+    void process();
+};
+"""
+    methods = extractor.public_methods(separator_fixture, "DigitSeparated")
+    if methods != ["process()"]:
+        print(f"FAIL: C++ digit separator corrupted the class body: {methods!r}")
+        return 1
+
+    adjacent_character_fixture = """
+class CharacterAdjacent {
+  public:
+    int select(char value) { switch (value) { case'a': return 1; } return 0; }
+    void after();
+};
+"""
+    methods = extractor.public_methods(adjacent_character_fixture, "CharacterAdjacent")
+    if methods != ["select(char value)", "after()"]:
+        print(f"FAIL: adjacent character literal corrupted the class body: {methods!r}")
         return 1
 
     r = subprocess.run([sys.executable, EXTRACTOR, "--json"],
