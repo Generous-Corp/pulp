@@ -52,7 +52,7 @@ PARTS=(
   # The pack compiles against Pulp headers. Without these the generator gets
   # all the way to a validated panel and then fails at the compiler, which is
   # the most expensive place to discover a missing file: the model has already
-  # been called. Kept to the six trees the pack's CMakeLists names, not the
+  # been called. Kept to the trees the pack's CMakeLists names, not the
   # whole repo.
   "core/signal/include"
   "core/format/include"
@@ -60,6 +60,7 @@ PARTS=(
   "core/state/include"
   "core/platform/include"
   "core/runtime/include"
+  "core/timebase/include"
 )
 
 # A PREVIOUS install may have left an unwritable copy behind. This is not
@@ -247,6 +248,16 @@ else
   echo "         Build it first:  tools/rack/build_shape_text.sh" >&2
   echo "         Without it the installed toolchain cannot letter a panel," >&2
   echo "         which surfaces as a failed generation after a model call." >&2
+  exit 1
+fi
+
+# Preflight the installed copy itself, including the transitive public-header
+# closure reachable from every curated DSP primitive and module-pack source.
+# Directory-existence checks alone cannot prove that public includes resolve,
+# and provider work must not begin until the copied header graph is complete.
+if ! (cd "$DEST/tools/rack" && python3 -c \
+    'import generate; generate.preflight(generate.ROOT)'); then
+  echo "  FAILED: installed generator preflight rejected the copied toolchain" >&2
   exit 1
 fi
 

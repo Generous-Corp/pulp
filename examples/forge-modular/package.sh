@@ -132,7 +132,8 @@ print(manifest["slug"], manifest["version"], len(manifest["modules"]))
         tools/dsp_vocabulary.py docs/status/agent-capabilities.json \
         external/fonts/Inter-Regular.ttf \
         core/signal/include core/format/include core/audio/include \
-        core/state/include core/platform/include core/runtime/include | \
+        core/state/include core/platform/include core/runtime/include \
+        core/timebase/include | \
         grep -Ev '^(!!|\?\?) .*/(\.corpus|\.sweeps|__pycache__|\.pytest_cache)(/|$)' || true)"
     if [[ -n "$consumed_status" ]]; then
         echo "package inputs contain tracked changes or untracked/ignored files:" >&2
@@ -460,7 +461,7 @@ ditto "$REPO/external/fonts/Inter-Regular.ttf" \
       "$APP/Contents/Resources/external/fonts/Inter-Regular.ttf"
 mkdir -p "$APP/Contents/Resources/build"
 ditto "$REPO/build/shape_text" "$APP/Contents/Resources/build/shape_text"
-for mod in signal format audio state platform runtime; do
+for mod in signal format audio state platform runtime timebase; do
     ditto "$REPO/core/$mod/include" "$APP/Contents/Resources/core/$mod/include"
 done
 

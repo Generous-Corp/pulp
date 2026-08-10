@@ -327,7 +327,7 @@ need_file "Contents/Resources/docs/status/agent-capabilities.json" "the DSP capa
 need_file "Contents/Resources/external/fonts/Inter-Regular.ttf" "the panel font ships"
 need_file "Contents/Resources/build/shape_text"               "the panel shaper ships"
 need_file "Contents/Resources/examples/forge-modular/plugin.json" "the module pack manifest ships"
-for mod in signal format audio state platform runtime; do
+for mod in signal format audio state platform runtime timebase; do
     if [[ -d "$ROOT/Contents/Resources/core/$mod/include" ]]; then
         say_ok "Pulp's $mod headers ship"
     else
