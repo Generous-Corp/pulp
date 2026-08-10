@@ -34,6 +34,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/analysis_frontends.hpp": "Pulp::signal",
     "pulp/signal/audio_matrix_mixer.hpp": "Pulp::signal",
     "pulp/signal/breakpoint_envelope.hpp": "Pulp::signal",
+    "pulp/signal/beat_repeat_kernel.hpp": "Pulp::signal",
     "pulp/signal/cross_feedback_multitap_delay.hpp": "Pulp::signal",
     "pulp/signal/de_esser.hpp": "Pulp::signal",
     "pulp/signal/dither.hpp": "Pulp::signal",
@@ -106,6 +107,16 @@ EXPORTS = [
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {
+        "include": "pulp/signal/freeze_loop_sampler.hpp",
+        "fingerprint": "sha256:771ad66588052eb6e8772ef6f1d6bd871701807667973b3ebd01887d56587a44",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.beat-repeat-kernel"],
+        "rationale": (
+            "Single rolling dry-history and immutable exact-capture owner reused by the "
+            "beat-repeat kernel; legacy freeze and snapshot behavior remains source compatible."
+        ),
+    },
     {
         "include": "pulp/signal/wavetable.hpp",
         "fingerprint": "sha256:94e86b5efcbc54989b76312ed5bd270d29bc6d5758e3a240ca3b8ffc4bbecaae",
@@ -481,7 +492,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:dfda31f739af5bd6141564cbe5592176e6b2c581b1b2b62f9bbc6714dd289dc8",
+        "fingerprint": "sha256:cf36559168b3f108277cd9106604ec16670b9cbae863813d468f4ab0363d3aff",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

@@ -48,6 +48,8 @@ struct MeterFrame {
     int channels = 0;
 };
 
+static_assert(std::is_trivially_copyable_v<MeterFrame>);
+
 /// Monotonic publish counter, shared by every value source.
 ///
 /// Staleness is "the writer stopped publishing", NOT "the value stopped
@@ -110,6 +112,8 @@ struct VectorFrame {
     /// from anywhere else is not guaranteed to have.
     int count = 0;
 };
+
+static_assert(std::is_trivially_copyable_v<VectorFrame>);
 
 /// One occurrence inside an audio block.
 ///

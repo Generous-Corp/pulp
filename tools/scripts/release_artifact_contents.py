@@ -371,6 +371,7 @@ def platform_family(platform: str) -> str:
 def expected_pulp_libraries(platform: str, matrix: ProductMatrix) -> frozenset[str]:
     expected = set(matrix.pulp_library_stems)
     expected.update(matrix.platform_library_stems.get(platform_family(platform), ()))
+    expected.update(matrix.platform_library_stems.get(platform, ()))
     return frozenset(expected)
 
 

@@ -81,7 +81,8 @@
   "platform_library_stems": {
     "darwin": ["pulp-bundled-fonts"],
     "linux": ["pulp-bundled-fonts", "pulp-bundled-noto-color-emoji"],
-    "windows": []
+    "windows": [],
+    "windows-x64": ["pulp-bundled-fonts"]
   },
   "common_sdk_members": [
     "pulp-sdk/LICENSE.md",

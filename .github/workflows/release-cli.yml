@@ -555,6 +555,10 @@ jobs:
               "capability_handoff_floor"
           ]
           selected["control_broker_floor"] = authoritative["control_broker_floor"]
+          selected_platforms = set(selected["platforms"])
+          for key, value in authoritative["platform_library_stems"].items():
+              if key in selected_platforms:
+                  selected["platform_library_stems"].setdefault(key, value)
           selected_path.write_text(json.dumps(selected, indent=2) + "\n", encoding="utf-8")
           PY
             release_contract_matrix="$compat_dir/release_product_matrix.json"
@@ -1750,6 +1754,10 @@ jobs:
               "capability_handoff_floor"
           ]
           selected["control_broker_floor"] = authoritative["control_broker_floor"]
+          selected_platforms = set(selected["platforms"])
+          for key, value in authoritative["platform_library_stems"].items():
+              if key in selected_platforms:
+                  selected["platform_library_stems"].setdefault(key, value)
           output_path.write_text(
               json.dumps(selected, indent=2) + "\n",
               encoding="utf-8",
