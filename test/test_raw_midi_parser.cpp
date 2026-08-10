@@ -73,6 +73,81 @@ Captured parse(std::initializer_list<uint8_t> bytes) {
     return c;
 }
 
+TEST_CASE("raw_midi_parser keeps interleaved port state isolated",
+          "[midi][raw_midi_parser][state-isolation]") {
+    RawMidiParserState first_state;
+    RawMidiParserState second_state;
+    Captured first;
+    Captured second;
+    const auto first_short = [&first](uint8_t status, uint8_t d1, uint8_t d2) {
+        first.shorts.push_back({status, d1, d2});
+    };
+    const auto second_short = [&second](uint8_t status, uint8_t d1, uint8_t d2) {
+        second.shorts.push_back({status, d1, d2});
+    };
+    const auto first_sysex = [&first](const std::vector<uint8_t>& payload) {
+        first.sysex.push_back(payload);
+    };
+    const auto second_sysex = [&second](const std::vector<uint8_t>& payload) {
+        second.sysex.push_back(payload);
+    };
+
+    const uint8_t first_note_head[] = {0x90, 0x3C};
+    const uint8_t second_note_head[] = {0x91, 0x40};
+    parse_raw_midi_bytes(first_note_head, sizeof(first_note_head), first_state,
+                         first_short, first_sysex);
+    parse_raw_midi_bytes(second_note_head, sizeof(second_note_head), second_state,
+                         second_short, second_sysex);
+    REQUIRE(first_state.pending_status == 0x90);
+    REQUIRE(first_state.pending_count == 1);
+    REQUIRE(second_state.pending_status == 0x91);
+    REQUIRE(second_state.pending_count == 1);
+
+    const uint8_t first_velocity[] = {0x64};
+    const uint8_t second_velocity[] = {0x50};
+    parse_raw_midi_bytes(first_velocity, sizeof(first_velocity), first_state,
+                         first_short, first_sysex);
+    parse_raw_midi_bytes(second_velocity, sizeof(second_velocity), second_state,
+                         second_short, second_sysex);
+    REQUIRE(first.shorts.size() == 1);
+    REQUIRE(first.shorts[0].status == 0x90);
+    REQUIRE(first.shorts[0].d1 == 0x3C);
+    REQUIRE(first.shorts[0].d2 == 0x64);
+    REQUIRE(second.shorts.size() == 1);
+    REQUIRE(second.shorts[0].status == 0x91);
+    REQUIRE(second.shorts[0].d1 == 0x40);
+    REQUIRE(second.shorts[0].d2 == 0x50);
+
+    const uint8_t first_sysex_head[] = {0xF0, 0x7D, 0x01};
+    const uint8_t second_sysex_head[] = {0xF0, 0x41, 0x10};
+    parse_raw_midi_bytes(first_sysex_head, sizeof(first_sysex_head), first_state,
+                         first_short, first_sysex);
+    parse_raw_midi_bytes(second_sysex_head, sizeof(second_sysex_head), second_state,
+                         second_short, second_sysex);
+    REQUIRE(first_state.sysex_in_progress);
+    REQUIRE(second_state.sysex_in_progress);
+    REQUIRE(first_state.sysex_buffer.size() == 3);
+    REQUIRE(second_state.sysex_buffer.size() == 3);
+
+    const uint8_t second_sysex_tail[] = {0x11, 0xF7};
+    parse_raw_midi_bytes(second_sysex_tail, sizeof(second_sysex_tail), second_state,
+                         second_short, second_sysex);
+    REQUIRE_FALSE(second_state.sysex_in_progress);
+    REQUIRE(first_state.sysex_in_progress);
+    REQUIRE(first_state.sysex_buffer.size() == 3);
+    REQUIRE((second.sysex == std::vector<std::vector<uint8_t>>{
+        {0xF0, 0x41, 0x10, 0x11, 0xF7},
+    }));
+
+    const uint8_t first_sysex_tail[] = {0x02, 0xF7};
+    parse_raw_midi_bytes(first_sysex_tail, sizeof(first_sysex_tail), first_state,
+                         first_short, first_sysex);
+    REQUIRE_FALSE(first_state.sysex_in_progress);
+    REQUIRE((first.sysex == std::vector<std::vector<uint8_t>>{
+        {0xF0, 0x7D, 0x01, 0x02, 0xF7},
+    }));
+}
+
 } // namespace
 
 TEST_CASE("raw_midi_parser reserved feed path is allocation-free",
