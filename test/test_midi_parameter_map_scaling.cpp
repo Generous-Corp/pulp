@@ -162,6 +162,39 @@ TEST_CASE("MidiParameterMap scaled mappings honor unmapped/channel/remove edges"
     CHECK_THAT(store.get_normalized(1), WithinAbs(0.75f, 1e-3f)); // unchanged
 }
 
+TEST_CASE("MidiParameterMap clear removes every controller targeting one parameter",
+          "[state][midi-map][scaling][lifecycle]") {
+    StateStore store;
+    populate(store);
+    MidiParameterMap map;
+
+    map.set_mapping(1, 10, 1, MidiMapScale{0.1f, 0.4f});
+    map.set_mapping(2, 11, 1, MidiMapScale{0.6f, 0.9f});
+    map.set_mapping(3, 12, 2, MidiMapScale{0.25f, 0.75f});
+    map.pump();
+
+    map.handle_cc(store, 1, 10, 127);
+    CHECK_THAT(store.get_normalized(1), WithinAbs(0.4f, 1e-3f));
+    map.handle_cc(store, 2, 11, 0);
+    CHECK_THAT(store.get_normalized(1), WithinAbs(0.6f, 1e-3f));
+    map.handle_cc(store, 3, 12, 0);
+    CHECK_THAT(store.get_normalized(2), WithinAbs(0.25f, 1e-3f));
+
+    map.clear(1);
+    map.pump();
+
+    // Both mappings that targeted parameter 1 are gone, regardless of their
+    // channel, controller, or scale. Neither can disturb its last value.
+    map.handle_cc(store, 1, 10, 0);
+    CHECK_THAT(store.get_normalized(1), WithinAbs(0.6f, 1e-3f));
+    map.handle_cc(store, 2, 11, 127);
+    CHECK_THAT(store.get_normalized(1), WithinAbs(0.6f, 1e-3f));
+
+    // Compaction retains the disjoint mapping and its scale exactly.
+    map.handle_cc(store, 3, 12, 127);
+    CHECK_THAT(store.get_normalized(2), WithinAbs(0.75f, 1e-3f));
+}
+
 TEST_CASE("A hardware CC maps to any engine parameter with zero driver code",
           "[state][midi-map][scaling][timeline]") {
     // The Creative Timeline Engine's only automatable parameter surface is a
