@@ -137,11 +137,16 @@ struct SampleEvent {
     // `input_kind` is one of `"click"`, `"drag"`, `"hover"`. `view_id`
     // is the recorded target's `View::id()` (empty when the recorder
     // captured an event that didn't land on an id-bearing view). The
-    // root-space coordinates ride on `components`:
-    //   - click/hover: `{ "x": ..., "y": ... }`
-    //   - drag       : `{ "start_x": ..., "start_y": ...,
-    //                     "end_x":   ..., "end_y":   ...,
-    //                     "steps":   ... }`
+    // Root-space coordinates ride on `components`. Click and drag also
+    // carry `button`, `modifiers`, `pointer_id`, `pointer_type`, and
+    // `pressure`; hover remains coordinate-only:
+    //   - click: `{ "button": ..., "modifiers": ..., "pointer_id": ...,
+    //               "pointer_type": ..., "pressure": ..., "x": ..., "y": ... }`
+    //   - drag : `{ "button": ..., "end_x": ..., "end_y": ...,
+    //               "modifiers": ..., "pointer_id": ..., "pointer_type": ...,
+    //               "pressure": ..., "start_x": ..., "start_y": ...,
+    //               "steps": ... }`
+    //   - hover: `{ "x": ..., "y": ... }`
     // (Sorted by name, same as every other event.) The optional name
     // ride along with `view_name` set to "input" by convention so
     // `format_line` and existing groupers don't trip on an empty view.
@@ -450,12 +455,15 @@ private:
 /// recorders; each gets its own sink id.
 InputRecorder make_input_recorder(std::string path);
 
-/// Read a fixture file, find each `Input` event, locate a target by
-/// `view_id` walking from `root_view` (depth-first), and re-dispatch
-/// the matching `View::simulate_*` against it. Between inputs the
+/// Read a fixture file, find each `Input` event, resolve `view_id` from
+/// `root_view` for diagnostics, and re-dispatch the matching
+/// `View::simulate_*` through `root_view`. Between inputs the
 /// frame_clock is advanced by the delta between recorded
-/// `t_seconds`. Returns the number of inputs replayed, or `-1` on
-/// parse error.
+/// `t_seconds`. Click and drag events also restore the optional pointer
+/// metadata components (`pointer_type`, `pressure`, `modifiers`, `button`,
+/// `pointer_id`). Coordinate-only v2 fixtures retain the historical synthetic
+/// mouse defaults. Invalid metadata fields fall back independently to those
+/// defaults. Returns the number of inputs replayed, or `-1` on parse error.
 int replay_inputs(const std::string& path,
                   View& root_view,
                   FrameClock& frame_clock);
