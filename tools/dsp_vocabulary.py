@@ -259,11 +259,89 @@ def public_enums(text: str, cls: str):
 
 def code_only(text: str) -> str:
     """Blank comments and literals while preserving offsets and newlines."""
-    pattern = re.compile(
-        r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'',
-        re.DOTALL,
-    )
-    return pattern.sub(lambda match: re.sub(r"[^\n]", " ", match.group(0)), text)
+    def is_digit_separator(position: int) -> bool:
+        following = text[position + 1] if position + 1 < len(text) else ""
+        previous = text[position - 1] if position > 0 else ""
+        if previous.isdigit() and following.isdigit():
+            return True
+        start = position - 1
+        while start >= 0 and (text[start].isalnum() or text[start] in "_.'"):
+            start -= 1
+        prefix = text[start + 1:position].replace("'", "")
+        if re.fullmatch(
+            r"0[xX](?:[0-9A-Fa-f]+(?:\.[0-9A-Fa-f]*)?|\.[0-9A-Fa-f]+)", prefix
+        ):
+            return following in "0123456789abcdefABCDEF"
+        if re.fullmatch(r"0[bB][01]+", prefix):
+            return following in "01"
+        return False
+
+    out = list(text)
+    index = 0
+    state = None
+    while index < len(text):
+        char = text[index]
+        following = text[index + 1] if index + 1 < len(text) else ""
+        if state is None:
+            if char == "/" and following == "/":
+                state = "line"
+                out[index] = out[index + 1] = " "
+                index += 2
+                continue
+            if char == "/" and following == "*":
+                state = "block"
+                out[index] = out[index + 1] = " "
+                index += 2
+                continue
+            if char == '"':
+                state = "string"
+                out[index] = " "
+                index += 1
+                continue
+            if char == "'":
+                if is_digit_separator(index):
+                    index += 1
+                    continue
+                state = "character"
+                out[index] = " "
+                index += 1
+                continue
+            index += 1
+            continue
+        if state == "line":
+            if char == "\n":
+                state = None
+            else:
+                out[index] = " "
+            index += 1
+            continue
+        if state == "block":
+            if char == "*" and following == "/":
+                out[index] = out[index + 1] = " "
+                index += 2
+                state = None
+                continue
+            if char != "\n":
+                out[index] = " "
+            index += 1
+            continue
+        if char == "\\":
+            out[index] = " "
+            if index + 1 < len(text) and text[index + 1] != "\n":
+                out[index + 1] = " "
+                index += 2
+            else:
+                index += 1
+            continue
+        if (state == "string" and char == '"') or (state == "character" and char == "'"):
+            out[index] = " "
+            state = None
+            index += 1
+            continue
+        if char != "\n":
+            out[index] = " "
+        index += 1
+    return "".join(out)
 
 
 def matching_brace(text: str, opening: int) -> int:
@@ -331,18 +409,25 @@ def public_methods(text: str, cls: str, *, source_is_code: bool = False):
         if s not in seen:
             seen.add(s)
             uniq.append(s)
-    # The lifecycle methods FIRST, then the rest. A truncated list that drops
-    # prepare/reset/process is worse than a short one: the model cannot see the
-    # method it needs, so it invents a plausible name -- `discard_history` for
-    # what is actually `reset` -- and the run dies at the compiler after the
-    # model has been paid for. These four are the ones every per-sample class
-    # has and every generated module calls.
+    # Core lifecycle always comes first. BeatRepeatKernelT additionally needs
+    # its direct gesture controls promoted because they replace the old event
+    # API; retain declaration order for every unrelated type so this targeted
+    # contract repair does not crowd established accessors out of the cap.
     lifecycle = ("prepare(", "reset(", "process(", "set_immediate(")
-    first = [m for m in uniq if m.startswith(lifecycle)]
-    rest = [m for m in uniq if not m.startswith(lifecycle)]
+    first = [method for method in uniq if method.startswith(lifecycle)]
+    if cls == "BeatRepeatKernelT":
+        gestures = ("trigger(", "stop(", "seek(", "snapshot(", "restore(")
+        direct = [method for method in uniq if method.startswith(gestures)]
+        setters = [method for method in uniq
+                   if method.startswith("set_") and method not in first]
+        rest = [method for method in uniq
+                if method not in first and method not in direct and method not in setters]
+        prioritized = first + direct + setters + rest
+    else:
+        prioritized = first + [method for method in uniq if method not in first]
     # 14 rather than 7: the cap exists to keep the prompt readable, and half of
     # these classes have more than seven methods worth knowing about.
-    return (first + rest)[:14]
+    return prioritized[:14]
 
 
 def _namespace_at(text: str, position: int) -> str:

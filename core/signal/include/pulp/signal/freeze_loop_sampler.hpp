@@ -25,7 +25,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <span>
 #include <type_traits>
 #include <vector>
 
@@ -35,12 +34,17 @@ template <typename SampleType = float> class FreezeLoopSamplerT {
     static_assert(std::is_floating_point_v<SampleType>);
 
   public:
+    enum class CaptureResult {
+        Success,
+        InvalidLength,
+        InsufficientHistory,
+        ExceedsCapacity,
+    };
+
     /// @param channels    channel count
     /// @param capacity    max samples per channel the record ring holds
     ///                    (must exceed the largest loop + crossfade + a block)
     /// @param crossfade   loop-boundary crossfade length in samples
-    /// Invalid or unrepresentable bounds fail closed: channels() and
-    /// capacity() become zero and processing calls are no-ops.
     /// RT contract: prepare(), snapshot(), and restore() allocate or copy
     /// variable-size storage and are not audio-thread safe. After prepare(),
     /// write(), freeze(), release(), read(), reset(), and accessors are
@@ -73,15 +77,18 @@ template <typename SampleType = float> class FreezeLoopSamplerT {
             return;
         }
 
+        std::vector<SampleType> replacement_ring(elements, SampleType{});
+        std::vector<SampleType> replacement_loop(elements, SampleType{});
+        ring_.swap(replacement_ring);
+        loop_.swap(replacement_loop);
         channels_ = channels;
         capacity_ = bounded_capacity;
         crossfade_ = crossfade;
-        ring_.assign(elements, SampleType{0});
-        loop_.assign(elements, SampleType{0});
         write_pos_ = 0;
         written_ = 0;
         frozen_ = false;
         loop_len_ = 0;
+        loop_start_ = 0;
         play_pos_ = 0;
     }
 
@@ -92,8 +99,7 @@ template <typename SampleType = float> class FreezeLoopSamplerT {
         return capacity_;
     }
     int available_history() const noexcept {
-        return static_cast<int>(
-            std::min<std::uint64_t>(written_, static_cast<std::uint64_t>(capacity_)));
+        return static_cast<int>(std::min<long long>(written_, capacity_));
     }
     bool frozen() const noexcept {
         return frozen_;
@@ -110,79 +116,66 @@ template <typename SampleType = float> class FreezeLoopSamplerT {
         if (n <= 0 || channels_ <= 0 || capacity_ <= 0 || in == nullptr)
             return;
         for (int ch = 0; ch < channels_; ++ch) {
+            if (in[ch] == nullptr)
+                return;
+        }
+        for (int ch = 0; ch < channels_; ++ch) {
             SampleType* r = ring_.data() + static_cast<size_t>(ch) * capacity_;
             const SampleType* src = in[ch];
             int wp = write_pos_;
             for (int i = 0; i < n; ++i) {
-                r[wp] = src[i];
+                r[wp] = std::isfinite(static_cast<double>(src[i])) ? src[i] : SampleType{};
                 if (++wp >= capacity_)
                     wp = 0;
             }
         }
-        write_pos_ = static_cast<int>(
-            (static_cast<std::uint64_t>(write_pos_) + static_cast<std::uint64_t>(n)) %
-            static_cast<std::uint64_t>(capacity_));
-        const auto frames = static_cast<std::uint64_t>(n);
-        written_ = frames > std::numeric_limits<std::uint64_t>::max() - written_
-                       ? std::numeric_limits<std::uint64_t>::max()
-                       : written_ + frames;
+        write_pos_ = static_cast<int>((static_cast<std::int64_t>(write_pos_) + n) % capacity_);
+        written_ = std::min<long long>(capacity_, written_ + std::min(n, capacity_));
     }
 
-    /// Record one planar frame without constructing temporary channel arrays.
-    /// `frame[ch]` is copied into channel `ch`; invalid input is ignored.
-    void write_frame(const SampleType* frame) noexcept {
-        if (frame == nullptr || channels_ <= 0 || capacity_ <= 0)
-            return;
-        for (int ch = 0; ch < channels_; ++ch)
-            ring_[static_cast<std::size_t>(ch) * static_cast<std::size_t>(capacity_) +
-                  static_cast<std::size_t>(write_pos_)] = frame[ch];
-        if (++write_pos_ >= capacity_)
-            write_pos_ = 0;
-        if (written_ != std::numeric_limits<std::uint64_t>::max())
-            ++written_;
-    }
+    /// Capture exactly the most recent `loop_samples` frames. Unlike freeze(),
+    /// this never clamps or pads: callers that own musical timing can reject a
+    /// gesture without changing the current loop. The prepared ring and loop
+    /// buffers exchange roles in constant time; the captured region remains
+    /// circular and the former loop storage becomes an empty rolling history.
+    /// No transition is baked into the captured region.
+    CaptureResult try_freeze_recent(int loop_samples) noexcept {
+        if (loop_samples <= 0)
+            return CaptureResult::InvalidLength;
+        if (loop_samples > capacity_)
+            return CaptureResult::ExceedsCapacity;
+        if (loop_samples > available_history())
+            return CaptureResult::InsufficientHistory;
 
-    /// Copy exactly the most recent `frames` into the immutable capture.
-    /// Unlike legacy freeze(), this never clamps or bakes a boundary crossfade:
-    /// callers that own rhythmic playback need the unmodified half-open source
-    /// interval [now - frames, now). A failed request preserves an existing
-    /// capture, which makes active retrigger rejection atomic.
-    [[nodiscard]] bool capture_recent_exact(int frames) noexcept {
-        if (frames <= 0 || frames > capacity_ || frames > available_history())
-            return false;
-        const auto capacity = static_cast<std::size_t>(capacity_);
-        const auto start =
-            (static_cast<std::size_t>(write_pos_) + capacity - static_cast<std::size_t>(frames)) %
-            capacity;
-        for (int ch = 0; ch < channels_; ++ch) {
-            const SampleType* source =
-                ring_.data() + static_cast<std::size_t>(ch) * static_cast<std::size_t>(capacity_);
-            SampleType* destination =
-                loop_.data() + static_cast<std::size_t>(ch) * static_cast<std::size_t>(capacity_);
-            for (int i = 0; i < frames; ++i)
-                destination[i] = source[(start + static_cast<std::size_t>(i)) % capacity];
-        }
-        loop_len_ = frames;
+        const int start = static_cast<int>(
+            (static_cast<std::int64_t>(write_pos_) - loop_samples + capacity_) % capacity_);
+        ring_.swap(loop_);
+        loop_len_ = loop_samples;
+        loop_start_ = start;
         play_pos_ = 0;
         frozen_ = true;
-        return true;
+        clear_history();
+        return CaptureResult::Success;
     }
 
-    /// Immutable contiguous access to the current exact/frozen capture.
-    [[nodiscard]] std::span<const SampleType> captured_channel(int channel) const noexcept {
-        if (!frozen_ || channel < 0 || channel >= channels_ || loop_len_ <= 0)
-            return {};
-        return {loop_.data() +
-                    static_cast<std::size_t>(channel) * static_cast<std::size_t>(capacity_),
-                static_cast<std::size_t>(loop_len_)};
+    SampleType loop_sample(int channel, int frame) const noexcept {
+        if (!frozen_ || channel < 0 || channel >= channels_ || frame < 0 || frame >= loop_len_)
+            return SampleType{};
+        auto loop_index = static_cast<std::size_t>(loop_start_) + static_cast<std::size_t>(frame);
+        if (loop_index >= static_cast<std::size_t>(capacity_))
+            loop_index -= static_cast<std::size_t>(capacity_);
+        return loop_[static_cast<std::size_t>(channel) * capacity_ + loop_index];
     }
 
     /// Freeze the most recent `loop_samples` of recorded audio into a
     /// seamless loop. Clamped to what the ring can supply.
     void freeze(int loop_samples) {
-        const int avail = available_history();
-        if (channels_ <= 0 || capacity_ <= 0 || avail <= 0) {
+        const int avail = static_cast<int>(std::min<long long>(written_, capacity_));
+        if (avail <= 0) {
             frozen_ = false;
+            loop_len_ = 0;
+            loop_start_ = 0;
+            play_pos_ = 0;
             return;
         }
         const int xf = std::min(crossfade_, std::max(0, avail - 1));
@@ -217,6 +210,7 @@ template <typename SampleType = float> class FreezeLoopSamplerT {
                 lp[i] = head * g_head + tail * g_tail;
             }
         }
+        loop_start_ = 0;
         play_pos_ = 0;
         frozen_ = true;
     }
@@ -231,11 +225,14 @@ template <typename SampleType = float> class FreezeLoopSamplerT {
         if (!frozen_ || loop_len_ <= 0 || n <= 0 || out == nullptr)
             return;
         for (int ch = 0; ch < channels_; ++ch) {
-            const SampleType* lp = loop_.data() + static_cast<size_t>(ch) * capacity_;
+            if (out[ch] == nullptr)
+                return;
+        }
+        for (int ch = 0; ch < channels_; ++ch) {
             SampleType* dst = out[ch];
             int p = play_pos_;
             for (int i = 0; i < n; ++i) {
-                dst[i] = lp[p];
+                dst[i] = loop_sample(ch, p);
                 if (++p >= loop_len_)
                     p = 0;
             }
@@ -246,18 +243,17 @@ template <typename SampleType = float> class FreezeLoopSamplerT {
     }
 
     void reset() {
-        std::fill(ring_.begin(), ring_.end(), SampleType{0});
-        write_pos_ = 0;
-        written_ = 0;
+        clear_history();
         frozen_ = false;
         loop_len_ = 0;
+        loop_start_ = 0;
         play_pos_ = 0;
     }
 
-    /// Start a new dry-history epoch without touching an immutable capture.
-    /// Old ring bytes become unreachable immediately and are overwritten by
-    /// subsequent writes; this is O(1) and safe on the audio thread.
-    void invalidate_history() noexcept {
+    /// Invalidate rolling input continuity without changing a captured loop.
+    /// State recall uses this after restoring the persistent loop because the
+    /// pre-recall ring belongs to a different transport history.
+    void clear_history() noexcept {
         write_pos_ = 0;
         written_ = 0;
     }
@@ -271,69 +267,50 @@ template <typename SampleType = float> class FreezeLoopSamplerT {
             return out;
         const auto payload =
             static_cast<std::size_t>(loop_len_) * static_cast<std::size_t>(channels_);
-        out.reserve(static_cast<std::size_t>(4) + payload);
+        if (payload > out.max_size() - 4)
+            return {};
+        out.reserve(4 + payload);
         out.push_back(static_cast<SampleType>(channels_));
         out.push_back(static_cast<SampleType>(loop_len_));
         out.push_back(static_cast<SampleType>(crossfade_));
         out.push_back(static_cast<SampleType>(play_pos_));
         for (int ch = 0; ch < channels_; ++ch) {
-            const SampleType* lp = loop_.data() + static_cast<size_t>(ch) * capacity_;
             for (int i = 0; i < loop_len_; ++i)
-                out.push_back(lp[i]);
+                out.push_back(loop_sample(ch, i));
         }
         return out;
     }
 
-    /// Restore a loop produced by snapshot(). Returns false on a malformed
-    /// or channel-mismatched blob (leaves the sampler unfrozen). Not RT-safe.
+    /// Restore a loop produced by snapshot(). Returns false on a malformed or
+    /// channel-mismatched blob without changing the current loop. Not RT-safe.
     bool restore(const std::vector<SampleType>& blob) {
-        if (blob.size() < 4) {
-            frozen_ = false;
+        if (blob.size() < 4)
             return false;
-        }
-        for (std::size_t i = 0; i < 4; ++i) {
-            if (!std::isfinite(blob[i])) {
-                frozen_ = false;
+        for (const auto value : blob) {
+            if (!std::isfinite(static_cast<double>(value)))
                 return false;
-            }
         }
-        const auto maximum_int = static_cast<long double>(std::numeric_limits<int>::max());
-        const auto minimum_int = static_cast<long double>(std::numeric_limits<int>::min());
-        for (std::size_t i = 0; i < 4; ++i) {
-            const auto value = static_cast<long double>(blob[i]);
-            if (value < minimum_int || value > maximum_int || std::trunc(value) != value) {
-                frozen_ = false;
-                return false;
-            }
-        }
+        const auto valid_integer = [](SampleType value, SampleType minimum,
+                                      SampleType maximum) noexcept {
+            return value >= minimum && value <= maximum && std::trunc(value) == value;
+        };
+        if (!valid_integer(blob[0], SampleType{1}, static_cast<SampleType>(channels_)) ||
+            !valid_integer(blob[1], SampleType{1}, static_cast<SampleType>(capacity_)) ||
+            !valid_integer(blob[2], SampleType{}, static_cast<SampleType>(capacity_)))
+            return false;
         const int ch = static_cast<int>(blob[0]);
         const int len = static_cast<int>(blob[1]);
-        const int xf = static_cast<int>(blob[2]);
+        if (ch != channels_ ||
+            !valid_integer(blob[3], SampleType{}, static_cast<SampleType>(len - 1)))
+            return false;
+        const auto expected_size = static_cast<std::size_t>(4) +
+                                   static_cast<std::size_t>(len) * static_cast<std::size_t>(ch);
+        if (blob.size() != expected_size)
+            return false;
         const int pp = static_cast<int>(blob[3]);
-        if (ch != channels_ || len <= 0 || len > capacity_ || xf < 0 || xf > capacity_ || pp < 0 ||
-            pp >= len) {
-            frozen_ = false;
-            return false;
-        }
-        const auto channels = static_cast<std::size_t>(ch);
-        const auto length = static_cast<std::size_t>(len);
-        if (channels != 0 && length > (std::numeric_limits<std::size_t>::max() - 4u) / channels) {
-            frozen_ = false;
-            return false;
-        }
-        const auto required = 4u + length * channels;
-        if (blob.size() != required) {
-            frozen_ = false;
-            return false;
-        }
-        for (std::size_t i = 4; i < required; ++i) {
-            if (!std::isfinite(blob[i])) {
-                frozen_ = false;
-                return false;
-            }
-        }
         loop_len_ = len;
-        play_pos_ = (len > 0) ? (pp % len) : 0;
+        loop_start_ = 0;
+        play_pos_ = pp;
         size_t idx = 4;
         for (int c = 0; c < channels_; ++c) {
             SampleType* lp = loop_.data() + static_cast<size_t>(c) * capacity_;
@@ -355,6 +332,7 @@ template <typename SampleType = float> class FreezeLoopSamplerT {
         written_ = 0;
         frozen_ = false;
         loop_len_ = 0;
+        loop_start_ = 0;
         play_pos_ = 0;
     }
 
@@ -364,9 +342,10 @@ template <typename SampleType = float> class FreezeLoopSamplerT {
     std::vector<SampleType> ring_; // channels * capacity record ring
     std::vector<SampleType> loop_; // channels * capacity baked loop
     int write_pos_ = 0;
-    std::uint64_t written_ = 0;
+    long long written_ = 0;
     bool frozen_ = false;
     int loop_len_ = 0;
+    int loop_start_ = 0;
     int play_pos_ = 0;
 };
 
