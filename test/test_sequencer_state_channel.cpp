@@ -1,7 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/state/sequencer_state_channel.hpp>
+#include <pulp/state/step_edit_reducer.hpp>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -299,6 +301,67 @@ TEST_CASE("SequencerStateChannel applied-edit overflow forces snapshot resync an
     for (std::uint8_t s = 0; s < kStepCount; ++s)
         REQUIRE(cells_equal(ui.copy.patterns[0].lanes[0][s],
                             engine.snapshot().patterns[0].lanes[0][s]));
+}
+
+TEST_CASE("SequencerStateChannel drain helper publishes authoritative overflow recovery",
+          "[state][sequencer]") {
+    SequencerStateChannel channel;
+    Snapshot authoritative;
+    Epoch epoch = 0;
+    EngineSequence engine_sequence = 0;
+    constexpr std::size_t kBurstSize = 768;
+    std::array<StepCell, kStepCount> expected{};
+    bool all_commands_submitted = true;
+
+    const auto submit_burst = [&](std::size_t first) {
+        for (std::size_t i = 0; i < kBurstSize; ++i) {
+            const auto sequence = first + i + 1;
+            auto command = make_set_cell(
+                0, 0, static_cast<std::uint8_t>(sequence % kStepCount),
+                static_cast<std::uint8_t>(1 + (sequence % 120)),
+                static_cast<ClientSequence>(sequence));
+            expected[command.payload.set_cell.step] = command.payload.set_cell.cell;
+            all_commands_submitted &= channel.ui_try_submit(command);
+        }
+        drain_and_apply(channel, authoritative, epoch, engine_sequence);
+    };
+
+    submit_burst(0);
+    submit_burst(kBurstSize);
+
+    REQUIRE(all_commands_submitted);
+    REQUIRE(engine_sequence == 2 * kBurstSize);
+    REQUIRE(authoritative.engine_sequence == engine_sequence);
+    REQUIRE(authoritative.epoch == epoch);
+    REQUIRE(channel.ui_applied_telemetry().overflow_count > 0);
+    REQUIRE(epoch > 0);
+    REQUIRE(channel.ui_resync_required_epoch() == epoch);
+    const auto published = channel.ui_read_latest_snapshot();
+    REQUIRE(published.epoch == epoch);
+    REQUIRE(published.engine_sequence == engine_sequence);
+    for (std::uint8_t step = 0; step < kStepCount; ++step) {
+        REQUIRE(cells_equal(published.patterns[0].lanes[0][step],
+                            expected[step]));
+        REQUIRE(cells_equal(authoritative.patterns[0].lanes[0][step],
+                            expected[step]));
+    }
+
+    UiModel ui;
+    ui.resync_from(published);
+    bool all_surviving_echoes_stale = true;
+    while (auto echo = channel.ui_try_pop_applied()) {
+        const auto sequence_before = ui.last_engine_seq;
+        ui.replay(*echo);
+        all_surviving_echoes_stale &= ui.last_engine_seq == sequence_before;
+    }
+    REQUIRE(all_surviving_echoes_stale);
+    for (std::uint8_t step = 0; step < kStepCount; ++step) {
+        REQUIRE(cells_equal(ui.copy.patterns[0].lanes[0][step],
+                            expected[step]));
+    }
+
+    channel.audio_mark_resync_required(1);
+    REQUIRE(channel.ui_resync_required_epoch() == epoch);
 }
 
 TEST_CASE("SequencerStateChannel rejects UI commands when command queue is full",
