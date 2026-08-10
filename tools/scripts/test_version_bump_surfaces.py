@@ -357,6 +357,31 @@ class VersionBumpSurfacesTests(GateFixtureTestCase):
             cfg["surfaces"]["sdk"]["trigger_paths"],
         )
 
+    def test_rack_toolchain_is_an_sdk_release_surface(self) -> None:
+        # Forge packages these tools from the source commit recorded by its
+        # exact official Pulp SDK. A toolchain fix therefore needs a new SDK
+        # source identity even though the scripts are not installed in the
+        # binary SDK prefix itself.
+        vbc = self._import_gate_module("version_bump_check")
+        cfg_path = VBC.parents[2] / "tools/scripts/versioning.json"
+        cfg = json.loads(cfg_path.read_text())
+
+        self.assertIn(
+            "tools/rack/**",
+            cfg["surfaces"]["sdk"]["trigger_paths"],
+        )
+        surface = next(s for s in vbc.load_config(cfg_path).surfaces
+                       if s.name == "sdk")
+        with mock.patch.object(
+            vbc, "git_diff_ignore_whitespace_nonempty", return_value=True
+        ):
+            self.assertEqual(
+                vbc.heuristic_for_surface(
+                    surface, ["tools/rack/install_toolchain.sh"], "base", "head"
+                ),
+                "patch",
+            )
+
     def test_version_bump_missing_config_returns_usage_error(self) -> None:
         code, out = _run(
             [
