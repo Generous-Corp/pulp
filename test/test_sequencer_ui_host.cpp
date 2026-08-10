@@ -152,13 +152,25 @@ TEST_CASE("Track header drop resolves a non-self MoveTrack neighbor",
     REQUIRE(across_own_row);
     REQUIRE(across_own_row.value() == TrackHeaderProjection::DropTarget{timeline::ItemId{7}});
 
-    const auto before_last = projection.before_track_for_drop(160.0f, timeline::ItemId{3});
-    REQUIRE(before_last);
-    REQUIRE(before_last.value() == TrackHeaderProjection::DropTarget{timeline::ItemId{5}});
-
     const auto at_bottom = projection.before_track_for_drop(1000.0f, timeline::ItemId{3});
     REQUIRE(at_bottom);
     REQUIRE_FALSE(at_bottom.value());
+}
+
+TEST_CASE("Track header drop uses compressed candidate-row geometry",
+          "[timeline-editor][track-header]") {
+    const timeline::ItemId authored[] = {{1}, {2}, {3}};
+    const auto made = TrackHeaderProjection::create(authored, 100.0f, 20.0f);
+    REQUIRE(made);
+    const auto& projection = made.value();
+
+    const auto before_last = projection.before_track_for_drop(129.99f, timeline::ItemId{2});
+    REQUIRE(before_last);
+    REQUIRE(before_last.value() == TrackHeaderProjection::DropTarget{timeline::ItemId{3}});
+
+    const auto after_last = projection.before_track_for_drop(130.0f, timeline::ItemId{2});
+    REQUIRE(after_last);
+    REQUIRE_FALSE(after_last.value());
 }
 
 TEST_CASE("Track header projection rejects ambiguous inputs", "[timeline-editor][track-header]") {

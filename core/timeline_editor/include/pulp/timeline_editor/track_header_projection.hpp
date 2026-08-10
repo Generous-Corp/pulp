@@ -85,15 +85,17 @@ class TrackHeaderProjection {
             return runtime::Err(TrackHeaderProjectionError::MissingMovingTrack);
         }
 
-        for (std::size_t index = 0; index < order_.size(); ++index) {
-            const auto candidate = order_[index];
+        std::size_t candidate_index = 0;
+        for (const auto candidate : order_) {
             if (candidate == moving_track) {
                 continue;
             }
-            const auto center = origin_y_ + (static_cast<float>(index) + 0.5f) * row_height_;
+            const auto center =
+                origin_y_ + (static_cast<float>(candidate_index) + 0.5f) * row_height_;
             if (y < center) {
                 return runtime::Ok(DropTarget{candidate});
             }
+            ++candidate_index;
         }
         return runtime::Ok(DropTarget{});
     }
