@@ -33,6 +33,7 @@ from sdk_capability_handoff import (
     importer_path,
     verify_payload as verify_capability_handoff_payload,
 )
+from sdk_provenance import ProvenanceError, verify_build_info_text
 
 
 DEFAULT_MATRIX_PATH = Path(__file__).with_name("release_product_matrix.json")
@@ -472,7 +473,12 @@ def required_sdk_members(
         version is not None
         and version_tuple(version) >= version_tuple(matrix.sdk_provenance_floor)
     ):
-        required.add("pulp-sdk/sdk-provenance.json")
+        required.update(
+            {
+                "pulp-sdk/sdk-provenance.json",
+                "pulp-sdk/include/pulp/runtime/build_info.hpp",
+            }
+        )
     if (
         version is not None
         and version_tuple(version) >= version_tuple(matrix.capability_handoff_floor)
@@ -773,6 +779,17 @@ def verify_sdk_archive(
                 raise ContentError(
                     f"{path.name}: unsafe SDK provenance contract: {mismatches}"
                 )
+            build_info_member = "pulp-sdk/include/pulp/runtime/build_info.hpp"
+            try:
+                verify_build_info_text(
+                    archive.read(build_info_member).decode("utf-8"),
+                    expected_version=version,
+                    expected_source_sha=source_sha,
+                )
+            except (ProvenanceError, UnicodeDecodeError) as exc:
+                raise ContentError(
+                    f"{path.name}: unsafe installed build_info.hpp: {exc}"
+                ) from exc
         if version_tuple(version) >= version_tuple(matrix.capability_handoff_floor):
             prefix = "pulp-sdk/"
             expected_runtime = sdk_import_design_runtime_members(matrix, version)
