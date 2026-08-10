@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 15,
+  "manifest_revision": 16,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 37
+        "capabilities": 38
       },
       "timebase": {
         "state": "partial",
@@ -2769,6 +2769,81 @@
       "contract_digest": "sha256:4e2f53d705ca4c8a987faae3918770456b9751767577bb69c7e5bc8965e20952"
     },
     {
+      "key": "signal.reed-waveguide-loop",
+      "domain": "signal",
+      "summary": "Bounded explicit single-reed excitation and a fixed-topology bore owner with whole-loop 1x/2x/4x oversampling.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control; allocates bounded line and oversampler storage",
+        "process": "audio",
+        "reset": "control; clears prepared line history",
+        "release": "destruction off audio"
+      },
+      "state_model": "Memoryless normalized reed valve plus owned linear-phase oversampler, bidirectional bore histories, retuning glide, and passive bell boundary state.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "normalized finite mouth pressure, physical one-way seconds, bounded reed controls, base-rate bell controls, and oversampling factor 1, 2, or 4",
+      "output_domain": "finite pressure wave arriving at the bell before reflection",
+      "units": [
+        "samples",
+        "seconds",
+        "normalized pressure",
+        "oversampling factor"
+      ],
+      "latency": "linear-phase oversampler base-rate delay; bore length is resonator state",
+      "tail": "unbounded while the driven feedback loop sustains; reported as -1",
+      "scheduling": "sample-synchronous; every reed boundary, bell boundary, and bidirectional line advance executes once per oversampled callback",
+      "bindings": [
+        {
+          "role": "reed_exciter",
+          "kind": "cpp_type",
+          "include": "pulp/signal/waveguide_reed_exciter.hpp",
+          "qualified_name": "pulp::signal::ReedExciterT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "whole_loop",
+          "kind": "cpp_type",
+          "include": "pulp/signal/reed_waveguide_loop.hpp",
+          "qualified_name": "pulp::signal::ReedWaveguideLoopT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:c2967d9cd86ef1907c16046d23d85bd47513757f7bb81debad373987ccb201b8"
+    },
+    {
       "key": "signal.routing-primitives",
       "domain": "signal",
       "summary": "Bounded matrix, mid-side, N-way crossfade, click-free switching, and path-latency alignment primitives.",
@@ -4782,14 +4857,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 69,
+    "total": 70,
     "by_domain": {
       "audio": 7,
       "midi": 9,
       "music": 6,
       "offline": 0,
       "sequence": 1,
-      "signal": 37,
+      "signal": 38,
       "timebase": 9
     }
   },
@@ -8954,6 +9029,31 @@
             ]
           }
         ],
+        "reed_waveguide_loop.hpp": [
+          {
+            "class": "ReedWaveguideLoopT",
+            "methods": [
+              "prepare(double base_sample_rate, double max_one_way_seconds, int oversampling_factor = 2)",
+              "set_one_way_seconds(double seconds)",
+              "target_one_way_seconds()",
+              "current_one_way_seconds()",
+              "round_trip_seconds()",
+              "set_closing_pressure(SampleType value)",
+              "set_flow_gain(SampleType value)",
+              "set_bore_impedance(SampleType value)",
+              "set_bell_reflection_gain(SampleType value)",
+              "set_bell_loss_pole(SampleType value)",
+              "bell_loss_pole()",
+              "internal_bell_loss_pole()",
+              "process(SampleType mouth_pressure)",
+              "oversampling_factor()",
+              "latency_samples()",
+              "tail_samples()",
+              "prepared()",
+              "reset()"
+            ]
+          }
+        ],
         "resampler.hpp": [
           {
             "class": "ResamplerT",
@@ -10184,6 +10284,21 @@
               "process(SampleType left_in, SampleType right_in, SampleType& left_out, SampleType& right_out)",
               "reset()",
               "retained_bytes()"
+            ]
+          }
+        ],
+        "waveguide_reed_exciter.hpp": [
+          {
+            "class": "ReedExciterT",
+            "methods": [
+              "set_closing_pressure(SampleType value)",
+              "set_flow_gain(SampleType value)",
+              "set_bore_impedance(SampleType value)",
+              "closing_pressure()",
+              "flow_gain()",
+              "bore_impedance()",
+              "process(SampleType mouth_pressure, SampleType bore_incident)",
+              "reset()"
             ]
           }
         ],
