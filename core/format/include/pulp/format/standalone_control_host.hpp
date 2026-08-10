@@ -35,6 +35,11 @@ class StandaloneControlHost {
     /// Revoke host-side authority before the processor or StateStore retires.
     virtual void stop() noexcept = 0;
 
+    /// Whether the host can still serve the broker connection. Inert direct
+    /// launches remain ready; a broker-launched companion becomes unready as
+    /// soon as its authenticated carrier closes.
+    virtual bool ready() const noexcept { return true; }
+
     /// Run bounded host-main work admitted by the broker. The Standalone event
     /// loop and the dedicated companion both call this on their owning main
     /// thread; an inert direct launch has no queued work.

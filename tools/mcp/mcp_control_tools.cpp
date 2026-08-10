@@ -289,9 +289,14 @@ class ControlMcpAdapter::Impl {
         session = std::move(opened.session);
         session_opened_at = now;
         session->set_progress_sink([this](const ControlProgressEnvelope& progress) {
-            progress_events.push_back(progress);
-            if (notifications && !active_progress_token.empty()) {
-                auto params = "{\"progressToken\":" + progress_token_json(active_progress_token) +
+            std::string progress_token;
+            {
+                std::lock_guard lock(progress_mutex);
+                progress_events.push_back(progress);
+                progress_token = active_progress_token;
+            }
+            if (notifications && !progress_token.empty()) {
+                auto params = "{\"progressToken\":" + progress_token_json(progress_token) +
                               ",\"progress\":" + std::to_string(progress.current) +
                               ",\"total\":" + std::to_string(progress.total) +
                               ",\"message\":" + quote(progress.detail_json) + "}";
@@ -427,6 +432,22 @@ class ControlMcpAdapter::Impl {
                       [&](const auto& entry) { return entry.second.first == grant_id; });
     }
 
+    void begin_progress(std::string_view progress_token) {
+        std::lock_guard lock(progress_mutex);
+        progress_events.clear();
+        active_progress_token = progress_token;
+    }
+
+    void end_progress() {
+        std::lock_guard lock(progress_mutex);
+        active_progress_token.clear();
+    }
+
+    std::vector<ControlProgressEnvelope> progress_snapshot() const {
+        std::lock_guard lock(progress_mutex);
+        return progress_events;
+    }
+
     std::string receipt_payload(const ControlReceiptEnvelope& receipt,
                                 const ControlOperationDescriptor* operation = nullptr,
                                 bool include_progress = true) {
@@ -455,7 +476,7 @@ class ControlMcpAdapter::Impl {
         root.addMember("artifacts", artifacts);
         auto progress = choc::value::createEmptyArray();
         if (include_progress) {
-            for (const auto& event : progress_events) {
+            for (const auto& event : progress_snapshot()) {
                 auto item = choc::value::createObject("");
                 item.addMember("sequence", choc::value::createInt64(static_cast<std::int64_t>(event.sequence)));
                 item.addMember("current", choc::value::createInt64(static_cast<std::int64_t>(event.current)));
@@ -491,6 +512,7 @@ class ControlMcpAdapter::Impl {
     std::atomic_bool session_refresh_requested{false};
     std::string last_error_code;
     std::string last_explanation;
+    mutable std::mutex progress_mutex;
     std::string active_progress_token;
     std::vector<ControlProgressEnvelope> progress_events;
     std::map<std::string,
@@ -822,18 +844,17 @@ std::string ControlMcpAdapter::call_tool(std::string_view name, std::string_view
     if (request.request_hash.empty())
         return error_payload("invalid-control-request", "canonical control request is invalid");
 
-    impl_->progress_events.clear();
-    impl_->active_progress_token = std::string(progress_token);
+    impl_->begin_progress(progress_token);
     impl_->register_active_request(request_id, *instance_id,
                                    std::string((*item)["publication_id"].getString()));
     if (remaining() <= std::chrono::milliseconds::zero()) {
         impl_->finish_active_request(request_id);
-        impl_->active_progress_token.clear();
+        impl_->end_progress();
         return error_payload("timeout", "the control operation timed out");
     }
     const auto result = client.request(request, remaining());
     impl_->finish_active_request(request_id);
-    impl_->active_progress_token.clear();
+    impl_->end_progress();
     if (!result.response)
     {
         impl_->forget_grant(grant_id);

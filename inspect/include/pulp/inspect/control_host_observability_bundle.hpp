@@ -26,6 +26,7 @@ struct ControlHostObservabilityBinding {
 struct ControlHostObservabilityBundleConfig {
     ControlHostObservabilityBinding binding;
     ControlOperationExecutor trace_executor;
+    /// Optional unless the host manifest declares telemetry/subscribe.
     std::shared_ptr<ControlTelemetryTap> telemetry;
     std::chrono::milliseconds heartbeat_ttl = std::chrono::seconds(30);
     std::function<std::chrono::steady_clock::time_point()> clock;

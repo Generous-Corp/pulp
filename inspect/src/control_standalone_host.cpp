@@ -523,13 +523,15 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
             };
         }
 
-        telemetry_ = std::make_shared<ControlTelemetryTap>(
-            ControlTelemetryTapConfig{.enabled = true, .maximum_queued_frames = 2});
-        processor.visit_value_channels([this](view::ValueChannelSet* channels) {
-            if (channels)
-                (void)telemetry_->attach(channels->attach_telemetry(),
-                                         author_hooks_.telemetry_classifier);
-        });
+        if (has_capability(*manifest, InspectorCapability::TelemetryStream)) {
+            telemetry_ = std::make_shared<ControlTelemetryTap>(
+                ControlTelemetryTapConfig{.enabled = true, .maximum_queued_frames = 2});
+            processor.visit_value_channels([this](view::ValueChannelSet* channels) {
+                if (channels)
+                    (void)telemetry_->attach(channels->attach_telemetry(),
+                                             author_hooks_.telemetry_classifier);
+            });
+        }
 
         installed_ = ControlInstalledHost::start({
             .bootstrap = std::move(*bootstrap),
@@ -583,6 +585,10 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
         store_ = nullptr;
         test_input_ = nullptr;
         sample_rate_ = 0.0;
+    }
+
+    bool ready() const noexcept override {
+        return !installed_ || installed_->ready();
     }
 
     void poll() noexcept override {

@@ -223,9 +223,9 @@ bool state_path_ancestors_are_safe(std::filesystem::path cursor, bool leaf_is_st
         struct stat status{};
         if (!safe_directory(cursor, require_private) || ::lstat(cursor.c_str(), &status) != 0)
             return false;
-        if (!require_private && (status.st_mode & 0022) != 0) {
-            return (status.st_mode & S_ISVTX) != 0;
-        }
+        if (!require_private && (status.st_mode & 0022) != 0 &&
+            ((status.st_mode & S_ISVTX) == 0 || status.st_uid != 0))
+            return false;
         if (cursor == cursor.root_path())
             return true;
         require_private = false;

@@ -466,7 +466,7 @@ ControlInstalledHost::~ControlInstalledHost() {
 std::unique_ptr<ControlInstalledHost>
 ControlInstalledHost::start(ControlInstalledHostConfig config) {
     if (config.bootstrap.enrollment_id.empty() || !config.main_thread_rpc ||
-        !config.trace_inspector || !config.telemetry || !config.motion_inspector ||
+        !config.trace_inspector || !config.motion_inspector ||
         config.heartbeat_interval.count() <= 0 || config.heartbeat_ttl.count() <= 0 ||
         config.heartbeat_interval >= config.heartbeat_ttl || config.handshake_timeout.count() <= 0)
         return nullptr;

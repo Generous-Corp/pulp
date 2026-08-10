@@ -184,6 +184,29 @@ TEST_CASE("observability bundle exposes typed bounded telemetry lifecycle",
     CHECK(telemetry->subscription_count() == 0);
 }
 
+TEST_CASE("trace-only observability does not require or expose a telemetry source",
+          "[inspect][control][observability][telemetry][capability]") {
+    auto bundle = ControlHostObservabilityBundle::create({
+        .binding = binding(),
+        .trace_executor = [](const ControlAdmissionPlan&, const ControlRequestEnvelope&,
+                             const ControlExecutionContext&) {
+            return ControlExecutionOutcome{.result = {.detail_json = R"({"ok":true})"}};
+        },
+        .heartbeat_ttl = 30s,
+    });
+    REQUIRE(bundle);
+    REQUIRE(bundle->ready());
+
+    const auto admission =
+        plan(InspectorCapability::TelemetryStream, "dev.pulp.telemetry/subscribe@1");
+    const auto unavailable = bundle->executor()(
+        admission,
+        request(admission,
+                R"({"action":"subscribe","channel_ids":["gain"],"max_hz":15,"buffer_samples":32})"),
+        context());
+    CHECK(unavailable.result.result_code == ControlResultCode::NotImplemented);
+}
+
 TEST_CASE("observability bundle autonomously releases ownership after missed heartbeat",
           "[inspect][control][observability][heartbeat][expiry]") {
     auto telemetry = std::make_shared<ControlTelemetryTap>(ControlTelemetryTapConfig{});

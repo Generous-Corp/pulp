@@ -109,6 +109,10 @@ class MinimalStandaloneControlHost final : public format::StandaloneControlHost 
         store_ = nullptr;
     }
 
+    bool ready() const noexcept override {
+        return !connection_ || connection_->is_host_open();
+    }
+
   private:
     std::unique_ptr<ControlHostConnection> connection_;
     state::StateStore* store_ = nullptr;

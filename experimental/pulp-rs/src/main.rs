@@ -178,6 +178,9 @@ struct ControlBrokerReconcileArgs {
     /// Signed capability sidecar for the staged Standalone host.
     #[arg(long)]
     standalone_manifest: std::path::PathBuf,
+    /// Runtime library pinned beside the staged Standalone host.
+    #[arg(long)]
+    standalone_runtime: std::path::PathBuf,
     /// Explicitly accept a persistent service rooted outside `~/.pulp`.
     #[arg(long)]
     accept_custom_root: bool,
@@ -434,6 +437,7 @@ fn reconcile_installer_control_broker(args: ControlBrokerReconcileArgs) -> Resul
         &args.broker,
         &args.standalone_host,
         &args.standalone_manifest,
+        &args.standalone_runtime,
         |_, rollback_binary| {
             pulp_rs::control_broker_service::reconcile_control_broker_service_transactional(
                 &config,
@@ -978,6 +982,8 @@ mod control_broker_startup_tests {
             "/tmp/staged-host",
             "--standalone-manifest",
             "/tmp/staged-manifest",
+            "--standalone-runtime",
+            "/tmp/staged-runtime",
             "--accept-custom-root",
         ])
         .expect("valid installer arguments");
@@ -985,6 +991,10 @@ mod control_broker_startup_tests {
         assert_eq!(
             parsed.standalone_host,
             std::path::Path::new("/tmp/staged-host")
+        );
+        assert_eq!(
+            parsed.standalone_runtime,
+            std::path::Path::new("/tmp/staged-runtime")
         );
         assert!(parsed.accept_custom_root);
         assert!(

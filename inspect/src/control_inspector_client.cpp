@@ -413,6 +413,13 @@ InspectorClientResult detail::request_control_inspector_with_clock(
         .expected_state_generation = session->expected_state_generation,
         .params_json = *canonical_params,
     };
+    const auto request_timeout = remaining();
+    if (request_timeout <= std::chrono::milliseconds::zero()) {
+        result.response =
+            client_error("canonical Inspector request deadline has expired", "request_timeout");
+        return result;
+    }
+    request.deadline_unix_ms = deadline_from(request_timeout);
     const auto request_hash = control_request_hash(request);
     if (!request_hash) {
         result.response =
@@ -427,13 +434,6 @@ InspectorClientResult detail::request_control_inspector_with_clock(
         return result;
     }
 
-    const auto request_timeout = remaining();
-    if (request_timeout <= std::chrono::milliseconds::zero()) {
-        result.response =
-            client_error("canonical Inspector request deadline has expired", "request_timeout");
-        return result;
-    }
-    request.deadline_unix_ms = deadline_from(request_timeout);
     auto dispatched = client.request(request, request_timeout);
     if (!dispatched.response) {
         result.response =

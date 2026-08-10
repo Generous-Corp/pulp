@@ -13,6 +13,7 @@
 #include <pulp/runtime/crypto.hpp>
 
 #include <chrono>
+#include <array>
 #include <cmath>
 #include <condition_variable>
 #include <cstdlib>
@@ -28,6 +29,7 @@
 #include <choc/text/choc_JSON.h>
 
 #ifdef __APPLE__
+#include <libproc.h>
 #include <mach-o/dyld.h>
 #include <signal.h>
 #include <sys/socket.h>
@@ -217,6 +219,18 @@ int wait_for_host_pid(const std::filesystem::path& path) {
         int process_id = -1;
         if (input >> registration >> process_id)
             return process_id;
+        std::this_thread::sleep_for(1ms);
+    }
+    return -1;
+}
+
+int wait_for_only_child_process(int parent_process_id) {
+    for (unsigned attempt = 0; attempt < 10'000; ++attempt) {
+        std::array<pid_t, 8> children{};
+        const auto count = ::proc_listchildpids(parent_process_id, children.data(),
+                                                static_cast<int>(sizeof(children)));
+        if (count == 1)
+            return children.front();
         std::this_thread::sleep_for(1ms);
     }
     return -1;
@@ -819,6 +833,10 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
     } else {
         REQUIRE(instance["capabilities"].size() == 2);
     }
+    const int installed_host_process_id =
+        author_host_environment ? -1 : wait_for_only_child_process(daemon_process.process_id());
+    if (!author_host_environment)
+        REQUIRE(installed_host_process_id > 0);
 
     if (author_host_environment) {
         const auto version_directory = installed_host.parent_path();
@@ -916,9 +934,17 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
     }
 
     connection->disconnect();
-    daemon_process.cancel();
+    if (!author_host_environment) {
+        REQUIRE(::kill(daemon_process.process_id(), SIGKILL) == 0);
+        for (unsigned attempt = 0;
+             attempt < 10'000 && ::kill(installed_host_process_id, 0) == 0; ++attempt)
+            std::this_thread::sleep_for(1ms);
+        CHECK(::kill(installed_host_process_id, 0) != 0);
+    } else {
+        daemon_process.cancel();
+    }
     const auto stopped = wait_for_process_exit(daemon_process);
-    INFO("cancelled installed broker must exit within the progress deadline");
+    INFO("installed broker must exit within the progress deadline");
     REQUIRE(stopped);
     INFO(stopped->stderr_output);
 #else
@@ -1742,6 +1768,19 @@ TEST_CASE("control broker daemon rejects insecure symlinked or overlapping state
     ControlBrokerDaemon insecure{
         {.runtime_root = root.runtime, .state_root = root.state, .sdk_version = "0.795.0-test"}};
     CHECK_FALSE(insecure.start());
+
+    const auto untrusted_sticky_parent = root.path / "untrusted-sticky";
+    REQUIRE(std::filesystem::create_directory(untrusted_sticky_parent));
+    REQUIRE(::chmod(untrusted_sticky_parent.c_str(), 01777) == 0);
+    const auto sticky_state = untrusted_sticky_parent / "state";
+    REQUIRE(std::filesystem::create_directory(sticky_state));
+    std::filesystem::permissions(sticky_state, std::filesystem::perms::owner_all,
+                                 std::filesystem::perm_options::replace);
+    ControlBrokerDaemon untrusted_sticky{
+        {.runtime_root = root.runtime,
+         .state_root = sticky_state,
+         .sdk_version = "0.795.0-test"}};
+    CHECK_FALSE(untrusted_sticky.start());
 
     std::filesystem::permissions(root.state, std::filesystem::perms::owner_all,
                                  std::filesystem::perm_options::replace);

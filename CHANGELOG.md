@@ -8,6 +8,22 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v08010"></a>
+## [0.801.0] - Unreleased
+
+- Added generated typed `pulp_control_*` tools over the shared authenticated
+  control client, with exact `instance_id`, structured receipts, progress,
+  cancellation, subscriptions/resources, and ACL-checked artifact retrieval.
+- Removed `pulp_inspect_set_param`, `pulp_inspect_evaluate`, and
+  `pulp_inspect_screenshot` without a silently reduced alias. Use
+  `pulp_control_state_parameter_gesture`, `pulp_control_runtime_evaluate`, and
+  `pulp_control_ui_capture`; critical evaluation requires a broker-issued grant
+  backed by single-use broker-owned consent. `pulp_screenshot` remains a
+  fixture renderer, not live capture.
+- `pulp_create` and fixture-only screenshot/Motion tools remain outside the
+  live-instance capability model; their local workspace/fixture side effects
+  are documented in the MCP control guide.
+
 <a id="v08000"></a>
 ## [0.800.0] - 2026-08-09
 
@@ -64,19 +80,6 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 
 <a id="v07960"></a>
 ## [0.796.0] - 2026-08-08
-
-- Added generated typed `pulp_control_*` tools over the shared authenticated
-  control client, with exact `instance_id`, structured receipts, progress,
-  cancellation, subscriptions/resources, and ACL-checked artifact retrieval.
-- Removed `pulp_inspect_set_param`, `pulp_inspect_evaluate`, and
-  `pulp_inspect_screenshot` without a silently reduced alias. Use
-  `pulp_control_state_parameter_gesture`, `pulp_control_runtime_evaluate`, and
-  `pulp_control_ui_capture`; critical evaluation requires a broker-issued grant
-  backed by single-use broker-owned consent. `pulp_screenshot` remains a
-  fixture renderer, not live capture.
-- `pulp_create` and fixture-only screenshot/Motion tools remain outside the
-  live-instance capability model; their local workspace/fixture side effects
-  are documented in the MCP control guide.
 - release/version bump ([#7274](https://github.com/Generous-Corp/pulp/pull/7274))
 - fix/7004 refresh 20260808 ([#7273](https://github.com/Generous-Corp/pulp/pull/7273))
 - feature/remove remote view 20260808 ([#7248](https://github.com/Generous-Corp/pulp/pull/7248))
@@ -7639,6 +7642,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.801.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.801.0
 [0.800.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.800.0
 [0.799.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.799.1
 [0.799.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.799.0

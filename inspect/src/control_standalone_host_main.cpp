@@ -56,7 +56,7 @@ int main() {
     auto control = pulp::inspect::make_control_standalone_host();
     if (!control || !control->start(*app.processor(), app.state()))
         return 65;
-    while (!stopping.load(std::memory_order_relaxed))
+    while (!stopping.load(std::memory_order_relaxed) && control->ready())
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     control->stop();
     return 0;

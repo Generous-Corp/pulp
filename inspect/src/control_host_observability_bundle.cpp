@@ -332,7 +332,7 @@ ControlHostObservabilityBundle::create(ControlHostObservabilityBundleConfig conf
     if (!config.binding.registration_id || config.binding.session_id.empty() ||
         config.binding.instance_id.empty() || config.binding.publication_id.empty() ||
         config.binding.authentication_token.size() < 32 || !config.trace_executor ||
-        !config.telemetry || config.heartbeat_ttl.count() <= 0)
+        config.heartbeat_ttl.count() <= 0)
         return nullptr;
     auto state = std::make_shared<State>();
     state->binding = std::move(config.binding);
@@ -381,7 +381,7 @@ bool ControlHostObservabilityBundle::ready() const {
         if (state_->telemetry)
             state_->telemetry->detach();
     }
-    return state_->connected && state_->trace && state_->telemetry;
+    return state_->connected && static_cast<bool>(state_->trace);
 }
 
 void ControlHostObservabilityBundle::end_authority(

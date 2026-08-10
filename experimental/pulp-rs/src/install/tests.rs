@@ -11,6 +11,11 @@ fn stage_control_companions(root: &Path) {
         b"{\"schema_version\":1}",
     )
     .unwrap();
+    fs::write(
+        root.join(control_standalone_runtime_basename()),
+        b"standalone-runtime",
+    )
+    .unwrap();
 }
 
 #[test]
@@ -25,7 +30,7 @@ fn control_release_payload_is_all_or_none() {
     let error = locate_binaries_in_archive(archive.path()).unwrap_err();
     assert!(error
         .to_string()
-        .contains("must contain Standalone host and capability manifest"));
+        .contains("must contain Standalone host, capability manifest, and runtime library"));
 }
 
 #[test]
@@ -148,6 +153,7 @@ fn locate_binaries_finds_pulp_cpp_mcp_and_control_broker() {
     );
     assert!(arch.new_control_standalone_host.is_some());
     assert!(arch.new_control_standalone_manifest.is_some());
+    assert!(arch.new_control_standalone_runtime.is_some());
 }
 
 #[test]
@@ -386,10 +392,12 @@ fn control_broker_install_commits_only_after_reconcile() {
     let broker_dst = bin_dir.path().join(control_broker_basename());
     let host_dst = bin_dir.path().join(control_standalone_host_basename());
     let manifest_dst = bin_dir.path().join(control_standalone_manifest_basename());
+    let runtime_dst = bin_dir.path().join(control_standalone_runtime_basename());
     fs::write(&pulp_dst, b"pulp").unwrap();
     fs::write(&broker_dst, b"old-broker").unwrap();
     fs::write(&host_dst, b"old-host").unwrap();
     fs::write(&manifest_dst, b"old-manifest").unwrap();
+    fs::write(&runtime_dst, b"old-runtime").unwrap();
     fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
     fs::write(
         arch_dir.path().join(control_broker_basename()),
@@ -413,6 +421,7 @@ fn control_broker_install_commits_only_after_reconcile() {
         Some((
             archive.new_control_standalone_host.as_deref().unwrap(),
             archive.new_control_standalone_manifest.as_deref().unwrap(),
+            archive.new_control_standalone_runtime.as_deref().unwrap(),
         )),
         |installed, _| {
             assert_eq!(fs::read(installed).unwrap(), b"new-broker");
@@ -428,6 +437,7 @@ fn control_broker_install_commits_only_after_reconcile() {
         assert_eq!(fs::read(&broker_dst).unwrap(), b"new-broker");
         assert_eq!(fs::read(&host_dst).unwrap(), b"standalone-host");
         assert_eq!(fs::read(&manifest_dst).unwrap(), b"{\"schema_version\":1}");
+        assert_eq!(fs::read(&runtime_dst).unwrap(), b"standalone-runtime");
         assert!(!backup_path(&broker_dst).exists());
     } else {
         assert_eq!(result, ControlBrokerInstall::NotPresent);
@@ -443,10 +453,12 @@ fn control_broker_install_restores_previous_binary_on_reconcile_failure() {
     let broker_dst = bin_dir.path().join(control_broker_basename());
     let host_dst = bin_dir.path().join(control_standalone_host_basename());
     let manifest_dst = bin_dir.path().join(control_standalone_manifest_basename());
+    let runtime_dst = bin_dir.path().join(control_standalone_runtime_basename());
     fs::write(&pulp_dst, b"pulp").unwrap();
     fs::write(&broker_dst, b"old-broker").unwrap();
     fs::write(&host_dst, b"old-host").unwrap();
     fs::write(&manifest_dst, b"old-manifest").unwrap();
+    fs::write(&runtime_dst, b"old-runtime").unwrap();
     fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
     fs::write(
         arch_dir.path().join(control_broker_basename()),
@@ -470,6 +482,7 @@ fn control_broker_install_restores_previous_binary_on_reconcile_failure() {
         Some((
             archive.new_control_standalone_host.as_deref().unwrap(),
             archive.new_control_standalone_manifest.as_deref().unwrap(),
+            archive.new_control_standalone_runtime.as_deref().unwrap(),
         )),
         |_, _| Err(CliError::Other("synthetic activation failure".into())),
         |_| Ok(Some("0.795.0".to_owned())),
@@ -485,6 +498,7 @@ fn control_broker_install_restores_previous_binary_on_reconcile_failure() {
     assert_eq!(fs::read(&broker_dst).unwrap(), b"old-broker");
     assert_eq!(fs::read(&host_dst).unwrap(), b"old-host");
     assert_eq!(fs::read(&manifest_dst).unwrap(), b"old-manifest");
+    assert_eq!(fs::read(&runtime_dst).unwrap(), b"old-runtime");
     assert!(!backup_path(&broker_dst).exists());
 }
 

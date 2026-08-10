@@ -129,6 +129,12 @@ pub const fn control_standalone_manifest_basename() -> &'static str {
     "pulp-control-standalone-host.inspector-capabilities.json"
 }
 
+/// Runtime library shipped beside the broker-owned Standalone host on macOS.
+#[must_use]
+pub const fn control_standalone_runtime_basename() -> &'static str {
+    "libwgpu_native.dylib"
+}
+
 /// Resolve the running binary's filesystem path (i.e. the file we
 /// will overwrite). Wraps `std::env::current_exe` with a friendlier
 /// error.
@@ -254,6 +260,8 @@ pub struct ExtractedArchive {
     pub new_control_standalone_host: Option<PathBuf>,
     /// Capability sidecar for the dedicated Standalone control host.
     pub new_control_standalone_manifest: Option<PathBuf>,
+    /// GPU/view runtime pinned as part of the Standalone host closure.
+    pub new_control_standalone_runtime: Option<PathBuf>,
     /// Browser-solved design import helper and its required JS runtime.
     pub new_import_design: Option<PathBuf>,
     /// Extracted `browser_capture/` runtime directory, when shipped.
@@ -296,11 +304,20 @@ pub fn locate_binaries_in_archive(root: &Path) -> Result<ExtractedArchive> {
     };
     let standalone_host_path = root.join(control_standalone_host_basename());
     let standalone_manifest_path = root.join(control_standalone_manifest_basename());
-    if standalone_host_path.exists() != standalone_manifest_path.exists()
-        || (standalone_host_path.exists() && new_control_broker.is_none())
+    let standalone_runtime_path = root.join(control_standalone_runtime_basename());
+    let standalone_payload_count = [
+        standalone_host_path.exists(),
+        standalone_manifest_path.exists(),
+        standalone_runtime_path.exists(),
+    ]
+    .into_iter()
+    .filter(|present| *present)
+    .count();
+    if (standalone_payload_count != 0 && standalone_payload_count != 3)
+        || (standalone_payload_count == 3 && new_control_broker.is_none())
     {
         return Err(CliError::Other(
-            "control broker release payload must contain Standalone host and capability manifest together"
+            "control broker release payload must contain Standalone host, capability manifest, and runtime library together"
                 .to_owned(),
         ));
     }
@@ -317,6 +334,9 @@ pub fn locate_binaries_in_archive(root: &Path) -> Result<ExtractedArchive> {
         new_control_standalone_manifest: standalone_manifest_path
             .exists()
             .then_some(standalone_manifest_path),
+        new_control_standalone_runtime: standalone_runtime_path
+            .exists()
+            .then_some(standalone_runtime_path),
         new_import_design: import_design.helper,
         browser_capture_runtime: import_design.runtime,
     })
@@ -656,10 +676,20 @@ pub fn install_control_broker_with(
     let Some(src) = archive.new_control_broker.as_deref() else {
         return Ok(ControlBrokerInstall::NotPresent);
     };
-    let companions = archive
-        .new_control_standalone_host
-        .as_deref()
-        .zip(archive.new_control_standalone_manifest.as_deref());
+    let companions = match (
+        archive.new_control_standalone_host.as_deref(),
+        archive.new_control_standalone_manifest.as_deref(),
+        archive.new_control_standalone_runtime.as_deref(),
+    ) {
+        (Some(host), Some(manifest), Some(runtime)) => Some((host, manifest, runtime)),
+        (None, None, None) => None,
+        _ => {
+            return Err(CliError::Other(
+                "control broker install requires the complete Standalone runtime closure"
+                    .to_owned(),
+            ));
+        }
+    };
     install_control_broker_path_with_optional_companions(plan, src, companions, reconcile)
 }
 
@@ -674,12 +704,13 @@ pub fn install_control_broker_path_with(
     src: &Path,
     standalone_host: &Path,
     standalone_manifest: &Path,
+    standalone_runtime: &Path,
     reconcile: impl FnOnce(&Path, &mut dyn FnMut() -> Result<()>) -> Result<()>,
 ) -> Result<ControlBrokerInstall> {
     install_control_broker_path_with_optional_companions(
         plan,
         src,
-        Some((standalone_host, standalone_manifest)),
+        Some((standalone_host, standalone_manifest, standalone_runtime)),
         reconcile,
     )
 }
@@ -687,7 +718,7 @@ pub fn install_control_broker_path_with(
 fn install_control_broker_path_with_optional_companions(
     plan: &InstallPlan,
     src: &Path,
-    companions: Option<(&Path, &Path)>,
+    companions: Option<(&Path, &Path, &Path)>,
     reconcile: impl FnOnce(&Path, &mut dyn FnMut() -> Result<()>) -> Result<()>,
 ) -> Result<ControlBrokerInstall> {
     install_control_broker_path_with_version_probe(
@@ -725,7 +756,7 @@ fn install_control_broker_path_with_optional_companions(
 fn install_control_broker_path_with_version_probe(
     plan: &InstallPlan,
     src: &Path,
-    companions: Option<(&Path, &Path)>,
+    companions: Option<(&Path, &Path, &Path)>,
     reconcile: impl FnOnce(&Path, &mut dyn FnMut() -> Result<()>) -> Result<()>,
     inspect_candidate_version: impl FnOnce(&Path) -> Result<Option<String>>,
     inspect_installed_version: impl FnOnce(&Path) -> Result<Option<String>>,
@@ -736,23 +767,40 @@ fn install_control_broker_path_with_version_probe(
     let (dst, existed, backup) = control_broker_install_paths(plan, src)?;
     let install_dir = dst.parent().expect("broker destination has parent");
     let companion_paths = companions
-        .map(|(host_src, manifest_src)| {
-            let host_dst = install_dir.join(control_standalone_host_basename());
-            let manifest_dst = install_dir.join(control_standalone_manifest_basename());
-            validate_regular_install_file(host_src, "Standalone host")?;
-            validate_regular_install_file(manifest_src, "Standalone capability manifest")?;
-            validate_nonsymlink_destination(&host_dst, "Standalone host")?;
-            validate_nonsymlink_destination(&manifest_dst, "Standalone capability manifest")?;
-            Ok::<_, CliError>((
-                host_src.to_owned(),
-                host_dst.clone(),
-                host_dst.exists(),
-                backup_path(&host_dst),
-                manifest_src.to_owned(),
-                manifest_dst.clone(),
-                manifest_dst.exists(),
-                backup_path(&manifest_dst),
-            ))
+        .map(|(host_src, manifest_src, runtime_src)| {
+            let mut paths = Vec::new();
+            for (source, basename, label, mode) in [
+                (
+                    host_src,
+                    control_standalone_host_basename(),
+                    "Standalone host",
+                    0o700,
+                ),
+                (
+                    manifest_src,
+                    control_standalone_manifest_basename(),
+                    "Standalone capability manifest",
+                    0o600,
+                ),
+                (
+                    runtime_src,
+                    control_standalone_runtime_basename(),
+                    "Standalone runtime library",
+                    0o700,
+                ),
+            ] {
+                let destination = install_dir.join(basename);
+                validate_regular_install_file(source, label)?;
+                validate_nonsymlink_destination(&destination, label)?;
+                paths.push(CompanionPath {
+                    source: source.to_owned(),
+                    existed: destination.exists(),
+                    backup: backup_path(&destination),
+                    destination,
+                    mode,
+                });
+            }
+            Ok::<_, CliError>(paths)
         })
         .transpose()?;
     let _install_lock = ControlBrokerInstallerLock::acquire(&dst)?;
@@ -779,13 +827,13 @@ fn install_control_broker_path_with_version_probe(
             ))
         })?;
     }
-    if let Some((_, _, _, host_backup, _, _, _, manifest_backup)) = &companion_paths {
-        for stale in [host_backup, manifest_backup] {
-            if stale.exists() {
-                fs::remove_file(stale).map_err(|e| {
+    if let Some(paths) = &companion_paths {
+        for path in paths {
+            if path.backup.exists() {
+                fs::remove_file(&path.backup).map_err(|e| {
                     CliError::Other(format!(
                         "could not remove stale control companion backup {}: {e}",
-                        stale.display()
+                        path.backup.display()
                     ))
                 })?;
             }
@@ -799,40 +847,23 @@ fn install_control_broker_path_with_version_probe(
             ))
         })?;
     }
-    if let Some((
-        _,
-        host_dst,
-        host_existed,
-        host_backup,
-        _,
-        manifest_dst,
-        manifest_existed,
-        manifest_backup,
-    )) = &companion_paths
-    {
-        if *host_existed {
-            if let Err(e) = fs::rename(host_dst, host_backup) {
-                if existed {
-                    let _ = fs::rename(&backup, &dst);
+    if let Some(paths) = &companion_paths {
+        for (index, path) in paths.iter().enumerate() {
+            if path.existed {
+                if let Err(e) = fs::rename(&path.destination, &path.backup) {
+                    for retained in paths[..index].iter().rev() {
+                        if retained.existed {
+                            let _ = fs::rename(&retained.backup, &retained.destination);
+                        }
+                    }
+                    if existed {
+                        let _ = fs::rename(&backup, &dst);
+                    }
+                    return Err(CliError::Other(format!(
+                        "could not retain control companion {}: {e}",
+                        path.destination.display()
+                    )));
                 }
-                return Err(CliError::Other(format!(
-                    "could not retain control companion {}: {e}",
-                    host_dst.display()
-                )));
-            }
-        }
-        if *manifest_existed {
-            if let Err(e) = fs::rename(manifest_dst, manifest_backup) {
-                if *host_existed {
-                    let _ = fs::rename(host_backup, host_dst);
-                }
-                if existed {
-                    let _ = fs::rename(&backup, &dst);
-                }
-                return Err(CliError::Other(format!(
-                    "could not retain control companion {}: {e}",
-                    manifest_dst.display()
-                )));
             }
         }
     }
@@ -843,16 +874,16 @@ fn install_control_broker_path_with_version_probe(
         restore_companions(&companion_paths);
         return Err(error);
     }
-    if let Some((host_src, host_dst, _, _, manifest_src, manifest_dst, _, _)) = &companion_paths {
-        if let Err(error) = copy_with_mode(host_src, host_dst, 0o700)
-            .and_then(|()| copy_with_mode(manifest_src, manifest_dst, 0o600))
-        {
-            let _ = fs::remove_file(&dst);
-            if existed {
-                let _ = fs::rename(&backup, &dst);
+    if let Some(paths) = &companion_paths {
+        for path in paths {
+            if let Err(error) = copy_with_mode(&path.source, &path.destination, path.mode) {
+                let _ = fs::remove_file(&dst);
+                if existed {
+                    let _ = fs::rename(&backup, &dst);
+                }
+                restore_companions(&companion_paths);
+                return Err(error);
             }
-            restore_companions(&companion_paths);
-            return Err(error);
         }
     }
 
@@ -913,53 +944,35 @@ fn install_control_broker_path_with_version_probe(
     }
 }
 
-type CompanionPaths = Option<(
-    PathBuf,
-    PathBuf,
-    bool,
-    PathBuf,
-    PathBuf,
-    PathBuf,
-    bool,
-    PathBuf,
-)>;
+struct CompanionPath {
+    source: PathBuf,
+    destination: PathBuf,
+    existed: bool,
+    backup: PathBuf,
+    mode: u32,
+}
+
+type CompanionPaths = Option<Vec<CompanionPath>>;
 
 fn restore_companions(paths: &CompanionPaths) {
-    if let Some((
-        _,
-        host_dst,
-        host_existed,
-        host_backup,
-        _,
-        manifest_dst,
-        manifest_existed,
-        manifest_backup,
-    )) = paths
-    {
-        for (target, did_exist, retained) in [
-            (host_dst, host_existed, host_backup),
-            (manifest_dst, manifest_existed, manifest_backup),
-        ] {
-            let _ = fs::remove_file(target);
-            if *did_exist {
-                let _ = fs::rename(retained, target);
+    if let Some(paths) = paths {
+        for path in paths.iter().rev() {
+            let _ = fs::remove_file(&path.destination);
+            if path.existed {
+                let _ = fs::rename(&path.backup, &path.destination);
             }
         }
     }
 }
 
 fn cleanup_companion_backups(paths: &CompanionPaths) -> Result<()> {
-    if let Some((_, _, host_existed, host_backup, _, _, manifest_existed, manifest_backup)) = paths
-    {
-        for (did_exist, retained) in [
-            (host_existed, host_backup),
-            (manifest_existed, manifest_backup),
-        ] {
-            if *did_exist {
-                fs::remove_file(retained).map_err(|e| {
+    if let Some(paths) = paths {
+        for path in paths {
+            if path.existed {
+                fs::remove_file(&path.backup).map_err(|e| {
                     CliError::Other(format!(
                         "control companion activated but backup cleanup failed at {}: {e}",
-                        retained.display()
+                        path.backup.display()
                     ))
                 })?;
             }

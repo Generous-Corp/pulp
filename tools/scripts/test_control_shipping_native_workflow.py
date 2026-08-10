@@ -36,6 +36,19 @@ class ControlShippingNativeWorkflowTest(unittest.TestCase):
         self.assertNotIn("cmake --build build-sdk --config Release --parallel", self.workflow)
         self.assertNotIn("cmake --build smoke/build --config Release --parallel", self.workflow)
 
+    def test_linked_control_implementation_paths_trigger_the_matrix(self) -> None:
+        for path in (
+            "core/events/**",
+            "core/format/**",
+            "core/platform/**",
+            "core/runtime/**",
+            "core/state/**",
+            "inspect/**",
+            "tools/cli/**",
+            "tools/mcp/**",
+        ):
+            self.assertEqual(self.workflow.count(f"- '{path}'"), 2)
+
     def test_aax_skip_cannot_be_mistaken_for_proof(self) -> None:
         self.assertIn("PULP_AAX_SDK_ZIP_URL", self.workflow)
         self.assertIn("PULP_AAX_SDK_ZIP_SHA256", self.workflow)
