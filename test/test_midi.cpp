@@ -437,6 +437,50 @@ TEST_CASE("MidiKeyboardState channel release preserves other held notes",
     }));
 }
 
+TEST_CASE("MidiKeyboardState callbacks observe committed key ownership",
+          "[midi][keyboard][callback-state]") {
+    MidiKeyboardState keys;
+    std::vector<int> note_on_totals;
+    std::vector<int> note_off_totals;
+
+    keys.on_note_on = [&](uint8_t channel, uint8_t note, uint8_t velocity) {
+        REQUIRE(keys.is_note_on(channel, note));
+        REQUIRE(keys.velocity(channel, note) == velocity);
+        REQUIRE(keys.any_notes_held());
+        note_on_totals.push_back(keys.total_notes_held());
+    };
+    keys.on_note_off = [&](uint8_t channel, uint8_t note) {
+        REQUIRE_FALSE(keys.is_note_on(channel, note));
+        REQUIRE(keys.velocity(channel, note) == 0);
+        note_off_totals.push_back(keys.total_notes_held());
+    };
+
+    keys.process(MidiEvent::note_on(0, 60, 100));
+    keys.process(MidiEvent::note_on(1, 67, 90));
+    REQUIRE(note_on_totals == std::vector<int>{1, 2});
+    REQUIRE(keys.lowest_note(0) == 60);
+    REQUIRE(keys.highest_note(1) == 67);
+
+    // MIDI Note On with velocity zero follows the same committed-before-
+    // callback contract as an explicit Note Off.
+    keys.process(MidiEvent::note_on(0, 60, 0));
+    REQUIRE(note_off_totals == std::vector<int>{1});
+    REQUIRE(keys.is_note_on(1, 67));
+
+    keys.process(MidiEvent::note_on(0, 64, 80));
+    keys.process(MidiEvent::note_on(0, 65, 70));
+    REQUIRE(note_on_totals == std::vector<int>{1, 2, 2, 3});
+
+    keys.all_notes_off(0);
+    REQUIRE(note_off_totals == std::vector<int>{1, 2, 1});
+    REQUIRE(keys.is_note_on(1, 67));
+    REQUIRE(keys.total_notes_held() == 1);
+
+    keys.all_notes_off();
+    REQUIRE(note_off_totals == std::vector<int>{1, 2, 1, 0});
+    REQUIRE_FALSE(keys.any_notes_held());
+}
+
 TEST_CASE("RpnParser emits RPN NRPN and increment callbacks",
           "[midi][rpn]") {
     RpnParser parser;
