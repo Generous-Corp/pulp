@@ -435,6 +435,76 @@ TEST_CASE("MpeVoiceTracker callbacks fire on lifecycle events", "[midi][mpe]") {
     REQUIRE(timbre_count == 1);
 }
 
+TEST_CASE("MpeVoiceTracker callbacks observe committed lifecycle state",
+          "[midi][mpe][callback-state]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    tracker.set_member_bend_range(12.0f);
+
+    uint32_t released_id = 0;
+    uint32_t peer_id = 0;
+    int note_on_callbacks = 0;
+    int expression_callbacks = 0;
+    int note_off_callbacks = 0;
+
+    tracker.on_note_on = [&](const MpeNoteState& state) {
+        const auto* committed = tracker.find(state.channel, state.note);
+        REQUIRE(committed != nullptr);
+        REQUIRE(committed->note_id == state.note_id);
+        REQUIRE(committed->velocity == state.velocity);
+        REQUIRE(tracker.active_count() == static_cast<std::size_t>(note_on_callbacks + 1));
+        if (state.channel == 1) released_id = state.note_id;
+        if (state.channel == 2) peer_id = state.note_id;
+        ++note_on_callbacks;
+    };
+    tracker.on_pitch_bend = [&](const MpeNoteState& state) {
+        const auto* committed = tracker.find(state.channel, state.note);
+        REQUIRE(committed != nullptr);
+        REQUIRE(committed->pitch_bend_semitones == state.pitch_bend_semitones);
+        REQUIRE(committed->pitch_bend_semitones == Approx(12.0f).margin(0.01f));
+        ++expression_callbacks;
+    };
+    tracker.on_pressure = [&](const MpeNoteState& state) {
+        const auto* committed = tracker.find(state.channel, state.note);
+        REQUIRE(committed != nullptr);
+        REQUIRE(committed->pressure == state.pressure);
+        REQUIRE(committed->pressure == Approx(1.0f).margin(1e-6f));
+        ++expression_callbacks;
+    };
+    tracker.on_timbre = [&](const MpeNoteState& state) {
+        const auto* committed = tracker.find(state.channel, state.note);
+        REQUIRE(committed != nullptr);
+        REQUIRE(committed->timbre == state.timbre);
+        REQUIRE(committed->timbre == Approx(1.0f).margin(1e-6f));
+        ++expression_callbacks;
+    };
+    tracker.on_note_off = [&](const MpeNoteState& state) {
+        REQUIRE(state.note_id == released_id);
+        REQUIRE(tracker.find(state.channel, state.note) == nullptr);
+        REQUIRE(tracker.active_count() == 1);
+        const auto* peer = tracker.find(2, 60);
+        REQUIRE(peer != nullptr);
+        REQUIRE(peer->note_id == peer_id);
+        ++note_off_callbacks;
+    };
+
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 100)));
+    REQUIRE(tracker.process(MidiEvent::note_on(2, 60, 90)));
+    REQUIRE(note_on_callbacks == 2);
+    REQUIRE(released_id != 0);
+    REQUIRE(peer_id != 0);
+    REQUIRE(released_id != peer_id);
+
+    REQUIRE(tracker.process(MidiEvent::pitch_bend(1, 16383)));
+    REQUIRE(tracker.process(channel_pressure(1, 127)));
+    REQUIRE(tracker.process(MidiEvent::cc(1, 74, 127)));
+    REQUIRE(expression_callbacks == 3);
+
+    REQUIRE(tracker.process(MidiEvent::note_off(1, 60)));
+    REQUIRE(note_off_callbacks == 1);
+    REQUIRE(tracker.active_count() == 1);
+    REQUIRE(tracker.find(2, 60) != nullptr);
+}
+
 TEST_CASE("MpeVoiceTracker multiple channels track independently", "[midi][mpe]") {
     MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
 
