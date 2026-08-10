@@ -8,6 +8,24 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v08010"></a>
+## [0.801.0] - 2026-08-10
+
+- release/version bump ([#7323](https://github.com/Generous-Corp/pulp/pull/7323))
+- integration/forge modular 20260805 ([#7217](https://github.com/Generous-Corp/pulp/pull/7217))
+- feature/m5 reed waveguide loop 20260810 ([#7342](https://github.com/Generous-Corp/pulp/pull/7342))
+- feature/m5 waveguide primitives 20260809 ([#7338](https://github.com/Generous-Corp/pulp/pull/7338))
+- chore/spectr format validation 20260809 ([#7336](https://github.com/Generous-Corp/pulp/pull/7336))
+- feature/m5 particle percussion 20260809 ([#7332](https://github.com/Generous-Corp/pulp/pull/7332))
+- fix/windows release output 20260809 ([#7333](https://github.com/Generous-Corp/pulp/pull/7333))
+- release/post tag sync v0.799.1 a39287ce8e6d ([#7325](https://github.com/Generous-Corp/pulp/pull/7325))
+- docs/render toolchain collection ([#7331](https://github.com/Generous-Corp/pulp/pull/7331))
+- release/post tag sync v0.800.0 b7d0c45d45cc ([#7326](https://github.com/Generous-Corp/pulp/pull/7326))
+- feat/editor bridge script engine 20260809 ([#7329](https://github.com/Generous-Corp/pulp/pull/7329))
+- feature/m5 wavetable authoring 20260809 ([#7327](https://github.com/Generous-Corp/pulp/pull/7327))
+- fix/spectr validation harness 20260809 ([#7324](https://github.com/Generous-Corp/pulp/pull/7324))
+- feature/m5 nlms modal delivery 20260808 ([#7287](https://github.com/Generous-Corp/pulp/pull/7287))
+
 <a id="v08000"></a>
 ## [0.800.0] - 2026-08-09
 
@@ -7627,6 +7645,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.801.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.801.0
 [0.800.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.800.0
 [0.799.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.799.1
 [0.799.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.799.0
