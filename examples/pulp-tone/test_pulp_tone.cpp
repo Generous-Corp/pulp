@@ -81,6 +81,43 @@ TEST_CASE("PulpTone produces sound on note-on", "[pulptone]") {
     REQUIRE(max_val > 0.01f);
 }
 
+TEST_CASE("PulpTone prepare resets active voices before retrigger",
+          "[pulptone][midi][lifecycle]") {
+    ToneFixture fx;
+    fx.store.set_value(kWaveform, 1.0f); // Saw
+    fx.store.set_value(kVolume, 0.0f);   // 0 dB
+    fx.store.set_value(kAttack, 1.0f);   // 1ms attack (fast)
+
+    auto peak = [](const audio::Buffer<float>& buffer) {
+        float result = 0.0f;
+        for (std::size_t ch = 0; ch < buffer.num_channels(); ++ch) {
+            for (std::size_t i = 0; i < buffer.num_samples(); ++i) {
+                result = std::max(result, std::abs(buffer.channel(ch)[i]));
+            }
+        }
+        return result;
+    };
+
+    midi::MidiBuffer initial_note;
+    initial_note.add(midi::MidiEvent::note_on(0, 69, 127));
+    const auto sounding = fx.render(initial_note);
+    REQUIRE(peak(sounding) > 0.01f);
+
+    fx.processor->prepare({48000.0, 512, 0, 2});
+
+    midi::MidiBuffer empty_midi;
+    const auto after_prepare = fx.render(empty_midi);
+    for (std::size_t i = 0; i < after_prepare.num_samples(); ++i) {
+        REQUIRE(after_prepare.channel(0)[i] == 0.0f);
+        REQUIRE(after_prepare.channel(1)[i] == 0.0f);
+    }
+
+    midi::MidiBuffer retrigger;
+    retrigger.add(midi::MidiEvent::note_on(0, 69, 127));
+    const auto after_retrigger = fx.render(retrigger);
+    REQUIRE(peak(after_retrigger) > 0.01f);
+}
+
 TEST_CASE("PulpTone A4 produces ~440 Hz sine", "[pulptone]") {
     ToneFixture fx;
     fx.store.set_value(kWaveform, 0.0f); // Sine
