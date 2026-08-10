@@ -155,6 +155,44 @@ TEST_CASE("Synthesiser note_off marks the matching voice as releasing",
     REQUIRE(synth.voice(0).note().releasing);
 }
 
+TEST_CASE("Synthesiser note-off is scoped to same-pitch channel ownership",
+          "[midi][synth][lifecycle][ownership]") {
+    Synthesiser<TestVoice> synth(2);
+    synth.note_on(0, 60, 100);
+    synth.note_on(1, 60, 110);
+
+    const auto channel_zero_id = synth.voice(0).note().note_id;
+    const auto channel_one_id = synth.voice(1).note().note_id;
+    REQUIRE(synth.voice(0).note().channel == 0);
+    REQUIRE(synth.voice(0).note().note == 60);
+    REQUIRE(synth.voice(1).note().channel == 1);
+    REQUIRE(synth.voice(1).note().note == 60);
+    REQUIRE(channel_zero_id < channel_one_id);
+    REQUIRE(synth.active_count() == 2);
+
+    synth.note_off(0, 60);
+    REQUIRE(synth.voice(0).active());
+    REQUIRE(synth.voice(0).releasing());
+    REQUIRE(synth.voice(0).note().note_id == channel_zero_id);
+    REQUIRE(synth.voice(0).note_off_calls == 1);
+    REQUIRE(synth.voice(1).active());
+    REQUIRE_FALSE(synth.voice(1).releasing());
+    REQUIRE(synth.voice(1).note().note_id == channel_one_id);
+    REQUIRE(synth.voice(1).note_off_calls == 0);
+    REQUIRE(synth.active_count() == 2);
+    REQUIRE(synth.releasing_count() == 1);
+
+    synth.note_off(1, 60);
+    REQUIRE(synth.voice(0).note().note_id == channel_zero_id);
+    REQUIRE(synth.voice(0).note_off_calls == 1);
+    REQUIRE(synth.voice(1).active());
+    REQUIRE(synth.voice(1).releasing());
+    REQUIRE(synth.voice(1).note().note_id == channel_one_id);
+    REQUIRE(synth.voice(1).note_off_calls == 1);
+    REQUIRE(synth.active_count() == 2);
+    REQUIRE(synth.releasing_count() == 2);
+}
+
 TEST_CASE("Synthesiser note_on velocity 0 is a note-off", "[midi][synth]") {
     Synthesiser<TestVoice> synth(4);
     synth.note_on(0, 60, 100);
