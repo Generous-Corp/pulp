@@ -269,3 +269,11 @@ pulp_add_test_suite(pulp-test-particle-percussion
     SOURCES test_particle_percussion.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
     TIMEOUT 300)
+
+# Offline FIR design from sampled targets. The suite covers all four real
+# linear-phase symmetry forms, independent dense response/weighted-residual
+# oracles, and planted weight/normalization mutations. It is not realtime DSP.
+pulp_add_test_suite(pulp-test-signal-fir-design
+    SOURCES test_signal_fir_design.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)

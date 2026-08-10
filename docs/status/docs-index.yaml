@@ -577,6 +577,11 @@ docs:
     kind: reference
     summary: All subsystems with status and key headers
 
+  - slug: fir-design
+    path: reference/fir-design.md
+    kind: reference
+    summary: Bounded weighted least-squares design for real linear-phase FIR filters
+
   - slug: modulation-toolkit
     path: reference/modulation-toolkit.md
     kind: reference
