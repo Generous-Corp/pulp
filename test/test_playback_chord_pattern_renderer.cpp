@@ -363,6 +363,7 @@ TEST_CASE("ProgramCompiler realizes registered harmony and leaves authored MIDI 
     changed.project = after;
     changed.sequence_id = {2};
     changed.tempo_map = tempo;
+    changed.sample_rate = tempo->sample_rate();
     changed.document_revision = 2;
     changed.invalidation = CompileInvalidationInput{registry, committed};
     REQUIRE(compiler.submit(std::move(changed)));
@@ -507,6 +508,7 @@ TEST_CASE("a count-changing fragment rekeys every downstream generated range",
     changed.project = after;
     changed.sequence_id = {2};
     changed.tempo_map = test_tempo_map();
+    changed.sample_rate = changed.tempo_map->sample_rate();
     changed.document_revision = 2;
     changed.invalidation = CompileInvalidationInput{registry, committed};
     REQUIRE(compiler.submit(std::move(changed)));
@@ -544,7 +546,7 @@ TEST_CASE("ProgramCompiler refuses unresolved and quota-violating registered con
         ProgramCompileRequest request;
         request.project = project;
         request.sequence_id = {2};
-    request.tempo_map = tempo;
+        request.tempo_map = tempo;
         request.sample_rate = tempo->sample_rate();
         request.document_revision = 1;
         request.dirty.all = true;
