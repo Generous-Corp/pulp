@@ -4,7 +4,10 @@
 #include <cstdint>
 #include <limits>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
+#include <pulp/timeline_editor/spatial_index.hpp>
 #include <pulp/timeline_editor/viewport_projection.hpp>
 
 using namespace pulp;
@@ -122,4 +125,59 @@ TEST_CASE("Pitch projection rejects invalid MIDI and pixel ranges",
 
     static_assert(noexcept(std::declval<const PitchProjection&>().pitch_at(0.0f)));
     static_assert(noexcept(std::declval<const TickProjection&>().tick_at(0.0f)));
+}
+
+TEST_CASE("Time-pitch queries use half-open time and inclusive pitch bounds",
+          "[timeline-editor][spatial-index]") {
+    std::vector<timeline::NoteEvent> notes{
+        {{4}, {-1'000}, {2'000}, 48'000, 60, 0},
+        {{2}, {50}, {10}, 48'000, 61, 0},
+        {{1}, {0}, {100}, 48'000, 60, 0},
+        {{3}, {100}, {10}, 48'000, 60, 0},
+    };
+    auto content = timeline::MidiContent::create(std::move(notes));
+    REQUIRE(content);
+    const TimePitchIndex index{content.value()};
+
+    const auto before_boundary = index.query({60}, {100}, 60, 60);
+    REQUIRE(before_boundary.notes.size() == 2);
+    CHECK(before_boundary.notes[0].id == timeline::ItemId{4});
+    CHECK(before_boundary.notes[1].id == timeline::ItemId{1});
+
+    const auto at_boundary = index.query({100}, {101}, 60, 60);
+    REQUIRE(at_boundary.notes.size() == 2);
+    CHECK(at_boundary.notes[0].id == timeline::ItemId{4});
+    CHECK(at_boundary.notes[1].id == timeline::ItemId{3});
+
+    const auto exact_pitch = index.query({50}, {60}, 61, 61);
+    REQUIRE(exact_pitch.notes.size() == 1);
+    CHECK(exact_pitch.notes[0].id == timeline::ItemId{2});
+    CHECK(index.query({0}, {0}, 0, 127).notes.empty());
+    CHECK(index.query({0}, {1}, 80, 70).notes.empty());
+}
+
+TEST_CASE("Time-pitch index bounds candidate visits at ten-thousand-note scale",
+          "[timeline-editor][spatial-index]") {
+    constexpr std::int64_t count = 10'000;
+    constexpr std::int64_t stride = 10;
+    std::vector<timeline::NoteEvent> notes;
+    notes.reserve(count + 1);
+    notes.push_back({{20'001}, {0}, {count * stride}, 48'000, 64, 0});
+    for (std::int64_t index = 0; index < count; ++index) {
+        notes.push_back({{static_cast<std::uint64_t>(index + 1)},
+                         {index * stride},
+                         {4},
+                         48'000,
+                         static_cast<std::uint8_t>(index % 128),
+                         0});
+    }
+    auto content = timeline::MidiContent::create(std::move(notes));
+    REQUIRE(content);
+    const TimePitchIndex index{content.value()};
+
+    const auto result = index.query({9'000 * stride}, {9'000 * stride + 1}, 0, 127);
+    REQUIRE(result.notes.size() == 2);
+    CHECK(result.notes[0].id == timeline::ItemId{20'001});
+    CHECK(result.notes[1].id == timeline::ItemId{9'001});
+    CHECK(result.visited_candidates <= 16);
 }
