@@ -3426,7 +3426,7 @@ def check_shipped_generator() -> tuple:
     """What an incomplete copy of the generator does, and when it says so.
 
     The generator is not one directory: it reads a DSP vocabulary, a panel
-    shaper, a font, the module pack and six trees of Pulp headers, none of
+    shaper, a font, the module pack and Pulp header trees, none of
     which live in tools/rack. A copy carrying only tools/rack ran, called the
     model, downloaded a 40 MB SDK and THEN died on an unhandled
     FileNotFoundError -- the most expensive moment available to discover that
@@ -3455,7 +3455,7 @@ def check_shipped_generator() -> tuple:
         wanted = ["dsp_vocabulary.py", "agent-capabilities.json",
                   "shape_text", "Inter-Regular.ttf",
                   "forge-modular/src", "forge-modular/modules",
-                  "core/signal/include"]
+                  "core/signal/include", "core/timebase/include"]
         missing = [w for w in wanted if w not in said]
         if r.returncode == 0:
             bad += 1

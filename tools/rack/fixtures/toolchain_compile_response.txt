@@ -1,0 +1,153 @@
+```json manifest
+{
+  "slug": "TOOLCHAINPROBE",
+  "name": "Probe",
+  "description": "Installed-toolchain clock and phase compile probe.",
+  "tags": ["Clock generator"],
+  "hp": 6,
+  "params": [
+    {
+      "id": 0,
+      "ident": "RATE_PARAM",
+      "name": "Rate",
+      "label": "RATE",
+      "unit": " Hz",
+      "min_value": -3.0,
+      "max_value": 3.0,
+      "default_value": 0.0,
+      "kind": "Knob",
+      "x_mm": 8.8,
+      "y_mm": 31.0,
+      "display_base": 2.0,
+      "display_multiplier": 2.0
+    },
+    {
+      "id": 1,
+      "ident": "WIDTH_PARAM",
+      "name": "Pulse width",
+      "label": "WIDTH",
+      "unit": "%",
+      "min_value": 0.05,
+      "max_value": 0.95,
+      "default_value": 0.5,
+      "kind": "Knob",
+      "x_mm": 21.7,
+      "y_mm": 31.0,
+      "display_multiplier": 100.0
+    }
+  ],
+  "inputs": [
+    {
+      "id": 0,
+      "ident": "RATE_CV_INPUT",
+      "name": "Rate CV",
+      "label": "RATE CV",
+      "role": "Pitch",
+      "normal_volts": 0.0,
+      "x_mm": 8.8,
+      "y_mm": 72.0
+    },
+    {
+      "id": 1,
+      "ident": "RESET_INPUT",
+      "name": "Reset",
+      "label": "RESET",
+      "role": "Trigger",
+      "x_mm": 21.7,
+      "y_mm": 72.0
+    }
+  ],
+  "outputs": [
+    {
+      "id": 0,
+      "ident": "CLOCK_OUTPUT",
+      "name": "Clock",
+      "label": "CLOCK",
+      "role": "Clock",
+      "x_mm": 8.8,
+      "y_mm": 109.0
+    },
+    {
+      "id": 1,
+      "ident": "PHASE_OUTPUT",
+      "name": "Phase",
+      "label": "PHASE",
+      "role": "Cv",
+      "x_mm": 21.7,
+      "y_mm": 109.0
+    }
+  ],
+  "lights": []
+}
+```
+
+```cpp dsp
+#include "plugin.hpp"
+
+#include <pulp/format/rack/module_descriptor.hpp>
+#include <pulp/signal/osc/phase.hpp>
+#include <pulp/signal/trigger.hpp>
+
+#include <algorithm>
+
+namespace {
+
+namespace V = pulp::format::rack::volts;
+
+struct TOOLCHAINPROBEModule : rack::engine::Module {
+    using L = forge_modular::TOOLCHAINPROBELayout;
+
+    pulp::signal::osc::PhaseAccumulator phase_;
+    pulp::signal::HystereticTriggerDetectT<float> reset_edge_;
+
+    TOOLCHAINPROBEModule() {
+        forge_modular::config_TOOLCHAINPROBE(this);
+        reset_edge_.set_thresholds(V::kSchmittHigh, V::kSchmittLow);
+    }
+
+    void onSampleRateChange(const SampleRateChangeEvent&) override {
+        phase_.reset();
+        reset_edge_.reset();
+        reset_edge_.set_thresholds(V::kSchmittHigh, V::kSchmittLow);
+    }
+
+    void process(const ProcessArgs& args) override {
+        const float rate = params[L::RATE_PARAM].getValue();
+        const float width = params[L::WIDTH_PARAM].getValue();
+        const float rate_cv =
+            forge_modular::read_TOOLCHAINPROBE_RATE_CV_INPUT(this, 0);
+        const float reset = inputs[L::RESET_INPUT].getVoltage();
+        const float hz = std::clamp(
+            V::voct_to_hz(rate + rate_cv, V::kLfoRefHz),
+            0.01f,
+            args.sampleRate * 0.45f);
+
+        if (reset_edge_.process(reset)) {
+            phase_.reset();
+        } else {
+            phase_.advance(static_cast<double>(hz * args.sampleTime));
+        }
+
+        const float phase = static_cast<float>(phase_.phase());
+        outputs[L::CLOCK_OUTPUT].setVoltage(
+            phase < width ? V::kGateHigh : 0.0f);
+        outputs[L::PHASE_OUTPUT].setVoltage(phase * V::kCvUnipolar);
+    }
+};
+
+struct TOOLCHAINPROBEWidget : rack::app::ModuleWidget {
+    explicit TOOLCHAINPROBEWidget(TOOLCHAINPROBEModule* module) {
+        setModule(module);
+        setPanel(rack::createPanel(
+            rack::asset::plugin(pluginInstance, "res/TOOLCHAINPROBE.svg"),
+            rack::asset::plugin(pluginInstance, "res/TOOLCHAINPROBE-dark.svg")));
+        forge_modular::place_TOOLCHAINPROBE(this, module);
+    }
+};
+
+}  // namespace
+
+rack::plugin::Model* modelTOOLCHAINPROBE =
+    rack::createModel<TOOLCHAINPROBEModule, TOOLCHAINPROBEWidget>(
+        "TOOLCHAINPROBE");
+```

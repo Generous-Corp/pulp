@@ -61,6 +61,34 @@ if [ -f "$FRESH/examples/forge-modular/modules/_plugin.json" ]; then
 else
     bad "a fresh home is seeded with the module manifests"
 fi
+if [ -f "$FRESH/core/timebase/include/pulp/timebase/beat_division.hpp" ]; then
+    ok "a fresh home includes signal's public timebase dependency"
+else
+    bad "a fresh home omits signal's public timebase dependency"
+fi
+
+# Replay a retained, deterministic response through the installed generator.
+# This compiles every shipped source plus a newly emitted module, drives its
+# real process() gate, and packages it without resolving or invoking a model.
+REPLAY="$FRESH/tools/rack/fixtures/toolchain_compile_response.txt"
+PROMPT="Create a new 6HP clock module named TOOLCHAINPROBE. RATE -3..3 default 0; WIDTH 0.05..0.95 default 0.5; normalled RATE CV input; RESET input; CLOCK 10V output; PHASE 0..10V output."
+replay_out="$(FORGE_MODEL_PROVIDER=not-a-provider \
+    FORGE_ATTEMPT_DIR="$FRESH/attempts" \
+    python3 "$FRESH/tools/rack/generate.py" "$PROMPT" \
+    --retries 9 --response-file "$REPLAY" \
+    --install-dir "$FRESH/replay-install" 2>&1)"
+replay_code=$?
+if [ "$replay_code" -eq 0 ] \
+        && printf '%s\n' "$replay_out" | grep -q '^[[:space:]]*compiled$' \
+        && printf '%s\n' "$replay_out" | grep -q '^[[:space:]]*behaviour verified$' \
+        && [ -f "$FRESH/examples/forge-modular/src/TOOLCHAINPROBE.cpp" ] \
+        && find "$FRESH/replay-install" -maxdepth 1 -name '*.vcvplugin' \
+             -type f -print -quit | grep -q .; then
+    ok "the clean installed pack and a retained-response module compile without a provider"
+else
+    bad "the clean installed pack and retained-response module compile (exit $replay_code)"
+    printf '%s\n' "$replay_out" | tail -12 | sed 's/^/         /'
+fi
 
 # A checkout has no release stamp. Refreshing from one must leave whichever
 # installed stamp it found alone; release-vs-working-copy selection must not be
@@ -126,7 +154,7 @@ ln -s "$HERE/../../docs/status/agent-capabilities.json" \
 ln -s "$HERE/../../external/fonts" "$STAGED/external/fonts"
 ln -s "$HERE/../../examples/forge-modular" \
     "$STAGED/examples/forge-modular"
-for component in signal format audio state platform runtime; do
+for component in signal format audio state platform runtime timebase; do
     mkdir -p "$STAGED/core/$component"
     ln -s "$HERE/../../core/$component/include" \
         "$STAGED/core/$component/include"

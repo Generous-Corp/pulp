@@ -90,7 +90,8 @@ if(PULP_BUILD_TESTS)
         "${CMAKE_SOURCE_DIR}/core/audio/include"
         "${CMAKE_SOURCE_DIR}/core/state/include"
         "${CMAKE_SOURCE_DIR}/core/platform/include"
-        "${CMAKE_SOURCE_DIR}/core/runtime/include")
+        "${CMAKE_SOURCE_DIR}/core/runtime/include"
+        "${CMAKE_SOURCE_DIR}/core/timebase/include")
 
     if(APPLE)
         target_compile_definitions(forge-modular-test-voice-sequence PRIVATE
@@ -140,7 +141,8 @@ target_include_directories(forge-modular PRIVATE
     "${CMAKE_SOURCE_DIR}/core/audio/include"
     "${CMAKE_SOURCE_DIR}/core/state/include"
     "${CMAKE_SOURCE_DIR}/core/platform/include"
-    "${CMAKE_SOURCE_DIR}/core/runtime/include")
+    "${CMAKE_SOURCE_DIR}/core/runtime/include"
+    "${CMAKE_SOURCE_DIR}/core/timebase/include")
 
 # ── The app and the loadable plugins ─────────────────────────────────────────
 #

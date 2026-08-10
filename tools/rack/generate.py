@@ -104,6 +104,7 @@ EMITTER = os.path.join(HERE, "forge_modular.py")
 # the user's machine fetches it, which is why resolve_sdk() may download.
 import fetch_sdk
 import attempt_artifacts
+import toolchain_headers
 
 SDK = fetch_sdk.installed_at() or fetch_sdk.DEST
 
@@ -158,7 +159,7 @@ def plugin_dir() -> str:
         f"~/Library/Application Support/Rack2/plugins-{rack_arch()}")
 
 INCLUDES = ["core/signal", "core/format", "core/audio", "core/state",
-            "core/platform", "core/runtime"]
+            "core/platform", "core/runtime", "core/timebase"]
 
 # Where an installed toolchain lives. Nothing under Application Support is
 # gated by macOS's removable-volume consent modal, and unlike the app bundle it
@@ -209,12 +210,21 @@ def _required_inputs(root: str) -> list:
     return out
 
 
+def missing_public_header_dependencies(root: str) -> list[str]:
+    return toolchain_headers.missing_public_header_dependencies(root, INCLUDES)
+
+
 def missing_inputs(root: str) -> list:
     """Everything the generator reads and this tree does not have."""
     gone = []
     for path, what, fix in _required_inputs(root):
         if not os.path.exists(path):
             gone.append(f"  {what}\n      expected: {path}\n      {fix}")
+    for dependency in missing_public_header_dependencies(root):
+        gone.append(
+            "  a transitive public Pulp header used by generated modules\n"
+            f"      missing: {dependency}\n"
+            "      package its owning core include tree, then reinstall the toolchain")
     return gone
 
 

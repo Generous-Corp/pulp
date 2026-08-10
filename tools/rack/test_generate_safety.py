@@ -20,6 +20,35 @@ import patch  # noqa: E402
 import rack_open  # noqa: E402
 
 
+class ToolchainHeaderClosureSafety(unittest.TestCase):
+    def test_curated_dsp_transitive_headers_must_ship_before_provider_use(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            signal = root / "core/signal/include/pulp/signal"
+            signal.mkdir(parents=True)
+            (signal / "primitive.hpp").write_text(
+                "#include <pulp/timebase/beat_division.hpp>\n")
+            registry = root / "tools/rack/knowledge/module/dsp-primitives.json"
+            registry.parent.mkdir(parents=True)
+            registry.write_text(json.dumps({
+                "capabilities": [{"include": "primitive.hpp"}],
+            }))
+
+            with mock.patch.object(generate, "INCLUDES", ["core/signal"]):
+                self.assertEqual(
+                    [f"pulp/timebase/beat_division.hpp (required by "
+                     f"{signal / 'primitive.hpp'})"],
+                    generate.missing_public_header_dependencies(str(root)))
+
+            timebase = root / "core/timebase/include/pulp/timebase"
+            timebase.mkdir(parents=True)
+            (timebase / "beat_division.hpp").write_text("#pragma once\n")
+            with mock.patch.object(
+                    generate, "INCLUDES", ["core/signal", "core/timebase"]):
+                self.assertEqual(
+                    [], generate.missing_public_header_dependencies(str(root)))
+
+
 class RackLaunchSafety(unittest.TestCase):
     def launch_fixture(self, artifact_name="demo.vcv", module_count=1):
         temp = tempfile.TemporaryDirectory()
