@@ -425,6 +425,51 @@ TEST_CASE("RpnParser reset clears selected parameters on every channel",
     REQUIRE(calls == 0);
 }
 
+TEST_CASE("RpnParser reset clears per-channel Data Entry MSB",
+          "[midi][rpn][reset]") {
+    RpnParser rpn;
+
+    rpn.process(MidiEvent::cc(0, 101, 7));
+    rpn.process(MidiEvent::cc(0, 100, 8));
+    rpn.process(MidiEvent::cc(0, 6, 91));
+    rpn.process(MidiEvent::cc(15, 99, 9));
+    rpn.process(MidiEvent::cc(15, 98, 10));
+    rpn.process(MidiEvent::cc(15, 6, 73));
+
+    rpn.reset();
+
+    struct Observation {
+        uint8_t channel;
+        uint16_t parameter;
+        uint16_t value;
+        bool is_rpn;
+    };
+    std::vector<Observation> observed;
+    rpn.on_rpn = [&](uint8_t channel, uint16_t parameter, uint16_t value) {
+        observed.push_back({channel, parameter, value, true});
+    };
+    rpn.on_nrpn = [&](uint8_t channel, uint16_t parameter, uint16_t value) {
+        observed.push_back({channel, parameter, value, false});
+    };
+
+    rpn.process(MidiEvent::cc(0, 101, 1));
+    rpn.process(MidiEvent::cc(0, 100, 2));
+    rpn.process(MidiEvent::cc(0, 38, 3));
+    rpn.process(MidiEvent::cc(15, 99, 4));
+    rpn.process(MidiEvent::cc(15, 98, 5));
+    rpn.process(MidiEvent::cc(15, 38, 6));
+
+    REQUIRE(observed.size() == 2);
+    REQUIRE(observed[0].channel == 0);
+    REQUIRE(observed[0].parameter == ((1 << 7) | 2));
+    REQUIRE(observed[0].value == 3);
+    REQUIRE(observed[0].is_rpn);
+    REQUIRE(observed[1].channel == 15);
+    REQUIRE(observed[1].parameter == ((4 << 7) | 5));
+    REQUIRE(observed[1].value == 6);
+    REQUIRE_FALSE(observed[1].is_rpn);
+}
+
 TEST_CASE("RpnParser combines data LSB with default zero MSB",
           "[midi][rpn]") {
     RpnParser rpn;
