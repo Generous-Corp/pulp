@@ -283,6 +283,27 @@ TEST_CASE("system common messages use their status-specific data lengths",
     REQUIRE(v[2].d1 == 0x07);
 }
 
+TEST_CASE("defined system common cancels channel running status",
+          "[midi][running-status]") {
+    auto v = parse({
+        0x90, 0x3C, 0x64,  // establish channel-0 Note On running status
+        0xF6,              // Tune Request cancels channel running status
+        0x3D, 0x65,        // bare data must not create a phantom Note On
+        0x90, 0x3E, 0x66,  // an explicit status starts a fresh note normally
+    });
+
+    REQUIRE(v.size() == 3);
+    REQUIRE(v[0].status == 0x90);
+    REQUIRE(v[0].d1 == 0x3C);
+    REQUIRE(v[0].d2 == 0x64);
+    REQUIRE(v[1].status == 0xF6);
+    REQUIRE(v[1].d1 == 0x00);
+    REQUIRE(v[1].d2 == 0x00);
+    REQUIRE(v[2].status == 0x90);
+    REQUIRE(v[2].d1 == 0x3E);
+    REQUIRE(v[2].d2 == 0x66);
+}
+
 TEST_CASE("system common messages complete across feed boundaries without running",
           "[midi][running-status]") {
     RunningStatusParser p;
