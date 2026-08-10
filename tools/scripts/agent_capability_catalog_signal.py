@@ -318,9 +318,10 @@ EXPORTS = [
     ),
     capability(
         key="signal.waveguide-primitives", domain="signal",
+        contract_version={"major": 2, "minor": 0},
         summary=(
             "Prepared bidirectional waveguide rails, passive reflection boundaries, and "
-            "fixed-capacity pressure-wave scattering junctions."
+            "fixed-capacity pressure-wave scattering junctions plus a nonlinear reed valve."
         ),
         rt_class="mixed",
         lifecycle={"construction": "control",
@@ -329,23 +330,32 @@ EXPORTS = [
                    "release": "destruction off audio"},
         state_model=(
             "Two prepared double-precision traveling-wave histories and a smoothed length, "
-            "one-pole boundary state, and fixed-capacity impedance plus prior-output state."
+            "one-pole reflection state, fixed-capacity junction impedance, and the reed's "
+            "normalized controls plus prior finite output."
         ),
         seed_model="none",
         determinism={"repeatability": "bit_exact", "block_partition": "invariant",
                      "platform_scope": "same_build", "transport_history": "irrelevant"},
         input_domain=(
             "finite traveling pressure waves, bounded fractional line lengths, passive "
-            "reflection controls, and two to four positive impedance ratios"
+            "reflection controls, two to four positive junction impedance ratios, and "
+            "normalized reed mouth pressure, closing pressure, flow gain, and bore impedance"
         ),
-        output_domain="delayed, reflected, or losslessly scattered traveling pressure waves",
-        units=["samples", "seconds", "linear reflection gain", "dimensionless impedance"],
+        output_domain=(
+            "delayed, passively reflected, losslessly scattered, or nonlinearly "
+            "reed-reflected traveling pressure waves"
+        ),
+        units=["samples", "seconds", "linear reflection gain", "normalized pressure",
+               "normalized flow", "dimensionless impedance"],
         latency=(
             "current smoothed one-way line length (target reported separately); reflection "
             "and junction operations add zero samples, and two-phase boundary composition "
             "adds no hidden sample"
         ),
-        tail="prepared line history plus passive one-pole boundary decay until reset",
+        tail=(
+            "prepared line history plus passive one-pole boundary decay until reset; a "
+            "nonzero pressure-driven reed in a feedback composition may sustain indefinitely"
+        ),
         scheduling=(
             "sample-synchronous; feedback networks read every line output, compute all "
             "boundaries, then push every line input in the same frame"
@@ -372,6 +382,13 @@ EXPORTS = [
                 target="Pulp::signal",
                 header_fingerprint="sha256:3b2bfa32d07f91fc6bdbde2e1544df94b1d0646aca287bb88db58257902cf70d",
             ),
+            binding(
+                role="reed", kind="cpp_type",
+                include="pulp/signal/waveguide_reed_exciter.hpp",
+                qualified_name="pulp::signal::ReedExciterT<float>",
+                target="Pulp::signal",
+                header_fingerprint="sha256:3ec0a9c04d02f585b615221e17e0a33b327fbd99d592f6727a5e4f0f121b3241",
+            ),
         ],
         _link_probes=[
             {"role": "line", "binding": "pulp::signal::WaveguideLineT<float>",
@@ -382,6 +399,8 @@ EXPORTS = [
              "operation": "member_call", "member": "reset", "arguments": ""},
             {"role": "junction", "binding": "pulp::signal::WaveguideJunctionT<float, 4>",
              "operation": "member_call", "member": "reset", "arguments": ""},
+            {"role": "reed", "binding": "pulp::signal::ReedExciterT<float>",
+             "operation": "member_call", "member": "process", "arguments": "0.0f"},
         ],
     ),
     capability(

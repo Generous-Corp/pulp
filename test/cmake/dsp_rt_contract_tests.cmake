@@ -251,6 +251,13 @@ pulp_add_test_suite(pulp-test-waveguide-primitives
     SOURCES test_waveguide_primitives.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
 
+# The nonlinear single-reed boundary and the test-only cylindrical-bore
+# composition prove that oversampling encloses the complete feedback loop.
+pulp_add_test_suite(pulp-test-waveguide-reed-composition
+    SOURCES test_waveguide_reed_composition.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal pulp::audio-analysis
+    TIMEOUT 300)
+
 # Depletion-aware stochastic collision and prepared voice contracts use
 # independent statistical oracles plus the realtime allocation probe.
 pulp_add_test_suite(pulp-test-particle-percussion

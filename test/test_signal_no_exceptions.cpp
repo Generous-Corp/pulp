@@ -1,5 +1,5 @@
-#include <pulp/signal/signal.hpp>
 #include <pulp/signal/headphone_crossfeed.hpp>
+#include <pulp/signal/signal.hpp>
 
 #include <cmath>
 #include <limits>
@@ -43,6 +43,9 @@ int main() {
         return 12;
     pulp::signal::SpectralBandLayout layout;
     pulp::signal::SpectralMaskTable mask;
-    return pulp::signal::build_spectral_mask(layout, 1024, 48000.0f, mask)
-        ? 0 : 13;
+    if (!pulp::signal::build_spectral_mask(layout, 1024, 48000.0f, mask))
+        return 13;
+    pulp::signal::ReedExciter reed;
+    reed.set_mouth_pressure(0.5f);
+    return std::isfinite(reed.process(0.1f)) ? 0 : 14;
 }

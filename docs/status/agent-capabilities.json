@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 15,
+  "manifest_revision": 16,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -3999,7 +3999,11 @@
     {
       "key": "signal.waveguide-primitives",
       "domain": "signal",
-      "summary": "Prepared bidirectional waveguide rails, passive reflection boundaries, and fixed-capacity pressure-wave scattering junctions.",
+      "contract_version": {
+        "major": 2,
+        "minor": 0
+      },
+      "summary": "Prepared bidirectional waveguide rails, passive reflection boundaries, and fixed-capacity pressure-wave scattering junctions plus a nonlinear reed valve.",
       "rt_class": "mixed",
       "lifecycle": {
         "construction": "control",
@@ -4008,7 +4012,7 @@
         "reset": "audio",
         "release": "destruction off audio"
       },
-      "state_model": "Two prepared double-precision traveling-wave histories and a smoothed length, one-pole boundary state, and fixed-capacity impedance plus prior-output state.",
+      "state_model": "Two prepared double-precision traveling-wave histories and a smoothed length, one-pole reflection state, fixed-capacity junction impedance, and the reed's normalized controls plus prior finite output.",
       "seed_model": "none",
       "determinism": {
         "repeatability": "bit_exact",
@@ -4016,16 +4020,18 @@
         "platform_scope": "same_build",
         "transport_history": "irrelevant"
       },
-      "input_domain": "finite traveling pressure waves, bounded fractional line lengths, passive reflection controls, and two to four positive impedance ratios",
-      "output_domain": "delayed, reflected, or losslessly scattered traveling pressure waves",
+      "input_domain": "finite traveling pressure waves, bounded fractional line lengths, passive reflection controls, two to four positive junction impedance ratios, and normalized reed mouth pressure, closing pressure, flow gain, and bore impedance",
+      "output_domain": "delayed, passively reflected, losslessly scattered, or nonlinearly reed-reflected traveling pressure waves",
       "units": [
         "samples",
         "seconds",
         "linear reflection gain",
+        "normalized pressure",
+        "normalized flow",
         "dimensionless impedance"
       ],
       "latency": "current smoothed one-way line length (target reported separately); reflection and junction operations add zero samples, and two-phase boundary composition adds no hidden sample",
-      "tail": "prepared line history plus passive one-pole boundary decay until reset",
+      "tail": "prepared line history plus passive one-pole boundary decay until reset; a nonzero pressure-driven reed in a feedback composition may sustain indefinitely",
       "scheduling": "sample-synchronous; feedback networks read every line output, compute all boundaries, then push every line input in the same frame",
       "bindings": [
         {
@@ -4069,12 +4075,22 @@
             ],
             "required_features": []
           }
+        },
+        {
+          "role": "reed",
+          "kind": "cpp_type",
+          "include": "pulp/signal/waveguide_reed_exciter.hpp",
+          "qualified_name": "pulp::signal::ReedExciterT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
         }
       ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
       "status": "usable",
       "evolution": {
         "state": "active",
@@ -4083,7 +4099,7 @@
           "minor": 0
         }
       },
-      "contract_digest": "sha256:b9eebdb2ea2e824e2ce398f0215dea3579ce56c591116db25eca9a399043ad01"
+      "contract_digest": "sha256:3aa662ba3cd443298cdf1778dce56aff95f1432e259008e0c609d9e181362caf"
     },
     {
       "key": "signal.window-functions",
@@ -10184,6 +10200,24 @@
               "process(SampleType left_in, SampleType right_in, SampleType& left_out, SampleType& right_out)",
               "reset()",
               "retained_bytes()"
+            ]
+          }
+        ],
+        "waveguide_reed_exciter.hpp": [
+          {
+            "class": "ReedExciterT",
+            "methods": [
+              "set_mouth_pressure(SampleType pressure)",
+              "set_closing_pressure(SampleType pressure)",
+              "set_flow_gain(SampleType gain)",
+              "set_bore_impedance(SampleType impedance)",
+              "mouth_pressure()",
+              "closing_pressure()",
+              "flow_gain()",
+              "bore_impedance()",
+              "evaluate(SampleType bore_incident, SampleType mouth_pressure, SampleType closing_pressure, SampleType flow_gain, SampleType bore_impedance)",
+              "process(SampleType bore_incident)",
+              "reset()"
             ]
           }
         ],
