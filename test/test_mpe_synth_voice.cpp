@@ -179,6 +179,35 @@ TEST_CASE("MpeVoiceAllocator routes events to voices by note_id", "[midi][mpe]")
     REQUIRE(releasing);
 }
 
+TEST_CASE("MpeVoiceAllocator preserves pressure through release tails",
+          "[midi][mpe][expression][lifecycle]") {
+    MpeVoiceAllocator<TestVoice> alloc{1};
+    alloc.dispatch(note_on_event(1, 60, 100, 1));
+
+    auto* voice = find_voice_by_note_id(alloc, 1);
+    REQUIRE(voice != nullptr);
+    voice->set_smoothing(0.5f);
+    alloc.dispatch(pressure_event(1, 1.0f));
+
+    float held[1]{};
+    voice->render(held, 1);
+    REQUIRE(held[0] == Approx(0.5f));
+
+    alloc.dispatch(note_off_event(1, 1));
+    REQUIRE(find_voice_by_note_id(alloc, 1) == voice);
+    REQUIRE(voice->active());
+    REQUIRE(voice->releasing());
+    REQUIRE(voice->off_count == 1);
+    REQUIRE(alloc.active_count() == 1);
+    REQUIRE(alloc.releasing_count() == 1);
+
+    float tail[2]{};
+    voice->render(tail, 2);
+    REQUIRE(tail[0] == Approx(0.75f));
+    REQUIRE(tail[1] == Approx(0.875f));
+    REQUIRE(voice->pressure() == Approx(0.875f));
+}
+
 TEST_CASE("MPE retrigger pipeline retires every generation without orphaning a voice",
           "[midi][mpe][lifecycle][integration]") {
     MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
