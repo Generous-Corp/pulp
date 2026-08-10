@@ -136,6 +136,31 @@ TEST_CASE("BleMidiPacketDecoder reset() clears running status", "[ble-midi]") {
     REQUIRE(received.empty());
 }
 
+TEST_CASE("BleMidiPacketDecoder reset() discards an in-flight SysEx",
+          "[ble-midi][sysex]") {
+    BleMidiPacketDecoder dec;
+    std::vector<DecodedMsg> received;
+    dec.set_message_callback([&](const std::vector<uint8_t>& bytes, uint32_t ts) {
+        received.push_back({bytes, ts});
+    });
+
+    const uint8_t partial[] = { 0x80, 0x80, 0xF0, 0x7D, 0x01 };
+    REQUIRE(dec.decode(partial, sizeof(partial)));
+    REQUIRE(received.empty());
+
+    dec.reset();
+
+    const uint8_t abandoned_continuation[] = { 0x80, 0x02, 0xF7 };
+    REQUIRE(dec.decode(abandoned_continuation, sizeof(abandoned_continuation)));
+    REQUIRE(received.empty());
+
+    const uint8_t fresh[] = { 0x85, 0xC2, 0xF0, 0x7D, 0x03, 0xF7 };
+    REQUIRE(dec.decode(fresh, sizeof(fresh)));
+    REQUIRE(received.size() == 1);
+    REQUIRE(received[0].bytes == std::vector<uint8_t>{0xF0, 0x7D, 0x03, 0xF7});
+    REQUIRE(received[0].timestamp_ms == 706);
+}
+
 TEST_CASE("encode_ble_midi_packet round-trips through the decoder", "[ble-midi]") {
     const uint8_t msg[] = { 0xB0, 1, 64 };  // CC Mod Wheel ch1 = 64.
     auto packet = encode_ble_midi_packet(msg, sizeof(msg), /*timestamp_ms=*/512);
