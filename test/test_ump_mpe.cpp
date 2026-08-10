@@ -104,3 +104,42 @@ TEST_CASE("MPE zone configuration", "[midi][mpe]") {
         REQUIRE(cfg.zone_for_channel(15) == nullptr); // manager, not member
     }
 }
+
+TEST_CASE("MPE asymmetric dual zones honor their configured boundary",
+          "[midi][mpe][zone-boundary]") {
+    const auto require_partition = [](uint8_t lower_members,
+                                      uint8_t upper_members) {
+        const auto cfg = MpeConfig::dual(lower_members, upper_members);
+        REQUIRE(static_cast<int>(lower_members) +
+                    static_cast<int>(upper_members) == 14);
+
+        for (uint8_t channel = 0; channel < 16; ++channel) {
+            const bool expected_lower =
+                channel >= 1 && channel <= lower_members;
+            const bool expected_upper =
+                channel >= static_cast<uint8_t>(15 - upper_members) &&
+                channel <= 14;
+
+            REQUIRE(cfg.lower_zone.contains_channel(channel) == expected_lower);
+            REQUIRE(cfg.upper_zone.contains_channel(channel) == expected_upper);
+            REQUIRE_FALSE((expected_lower && expected_upper));
+
+            const auto* zone = cfg.zone_for_channel(channel);
+            if (expected_lower) {
+                REQUIRE(zone == &cfg.lower_zone);
+            } else if (expected_upper) {
+                REQUIRE(zone == &cfg.upper_zone);
+            } else {
+                REQUIRE(zone == nullptr);
+            }
+        }
+
+        REQUIRE(cfg.is_manager_channel(0));
+        REQUIRE(cfg.is_manager_channel(15));
+        REQUIRE(cfg.zone_for_channel(0) == nullptr);
+        REQUIRE(cfg.zone_for_channel(15) == nullptr);
+    };
+
+    require_partition(/*lower_members=*/3, /*upper_members=*/11);
+    require_partition(/*lower_members=*/11, /*upper_members=*/3);
+}
