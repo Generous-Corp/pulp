@@ -14,12 +14,14 @@
 using Catch::Matchers::WithinAbs;
 using pulp::signal::SpectralBandEdgePolicy;
 using pulp::signal::SpectralBandLayout;
+using pulp::signal::SpectralBandResolution;
 using pulp::signal::SpectralBandSpacing;
 using pulp::signal::SpectralFrameEngine;
 using pulp::signal::SpectralFrameEngineConfig;
 using pulp::signal::SpectralMaskBoundaryKernel;
 using pulp::signal::SpectralMaskTable;
 using pulp::signal::apply_spectral_mask;
+using pulp::signal::analyze_spectral_band_resolution;
 using pulp::signal::build_spectral_mask;
 
 extern std::atomic<long> g_alloc_count;
@@ -153,6 +155,88 @@ TEST_CASE("logarithmic layout derives stable octave boundaries and clamps Nyquis
     REQUIRE_THAT(table.band_edges_hz[4], WithinAbs(2048.0f, 1.0e-3f));
     for (std::uint32_t i = 1; i <= 4; ++i)
         REQUIRE(table.band_edges_hz[i] > table.band_edges_hz[i - 1]);
+}
+
+TEST_CASE("spectral band resolution reports directly owned viewport bins",
+          "[signal][spectral-band-mask][resolution]") {
+    auto layout = linear_layout(4);
+    SpectralBandResolution resolution;
+    REQUIRE(analyze_spectral_band_resolution(
+        layout, kFftSize, kSampleRate, resolution));
+
+    REQUIRE(resolution.fft_size == 256);
+    REQUIRE(resolution.num_bins == 129);
+    REQUIRE_THAT(resolution.bin_width_hz, WithinAbs(4.0f, 1.0e-6f));
+    REQUIRE(resolution.active_bands == 4);
+    REQUIRE(resolution.represented_bands == 4);
+    REQUIRE(resolution.viewport_bins == 129);
+    REQUIRE(resolution.fully_represented());
+    REQUIRE(resolution.owned_bins[0] == 32);
+    REQUIRE(resolution.owned_bins[1] == 32);
+    REQUIRE(resolution.owned_bins[2] == 32);
+    REQUIRE(resolution.owned_bins[3] == 33);
+}
+
+TEST_CASE("spectral band resolution exposes under-resolved logarithmic layouts",
+          "[signal][spectral-band-mask][resolution]") {
+    SpectralBandLayout layout;
+    layout.active_bands = 32;
+    layout.min_hz = 20.0f;
+    layout.max_hz = 20000.0f;
+    layout.spacing = SpectralBandSpacing::logarithmic;
+
+    SpectralBandResolution live;
+    REQUIRE(analyze_spectral_band_resolution(layout, 1024, 48000.0f, live));
+    REQUIRE(live.represented_bands == 25);
+    REQUIRE_FALSE(live.fully_represented());
+
+    SpectralBandResolution balanced;
+    REQUIRE(analyze_spectral_band_resolution(layout, 8192, 48000.0f, balanced));
+    REQUIRE(balanced.represented_bands == 32);
+    REQUIRE(balanced.fully_represented());
+
+    layout.min_hz = 280.0f;
+    layout.max_hz = 340.0f;
+    SpectralBandResolution narrow;
+    REQUIRE(analyze_spectral_band_resolution(layout, 16384, 48000.0f, narrow));
+    REQUIRE(narrow.represented_bands == 21);
+    REQUIRE_FALSE(narrow.fully_represented());
+}
+
+TEST_CASE("spectral band resolution excludes extended exterior ownership",
+          "[signal][spectral-band-mask][resolution][edge]") {
+    auto layout = linear_layout(4);
+    layout.min_hz = 128.0f;
+    layout.max_hz = 384.0f;
+    layout.edge_policy = SpectralBandEdgePolicy::extend_edge_band;
+
+    SpectralBandResolution resolution;
+    REQUIRE(analyze_spectral_band_resolution(
+        layout, kFftSize, kSampleRate, resolution));
+    REQUIRE(resolution.viewport_bins == 65);
+    REQUIRE(resolution.represented_bands == 4);
+    REQUIRE(resolution.owned_bins[0] == 16);
+    REQUIRE(resolution.owned_bins[1] == 16);
+    REQUIRE(resolution.owned_bins[2] == 16);
+    REQUIRE(resolution.owned_bins[3] == 17);
+}
+
+TEST_CASE("spectral band resolution rejects invalid input without mutation",
+          "[signal][spectral-band-mask][resolution][fault]") {
+    auto layout = linear_layout();
+    SpectralBandResolution resolution;
+    resolution.fft_size = 777;
+    resolution.represented_bands = 3;
+
+    REQUIRE_FALSE(analyze_spectral_band_resolution(
+        layout, 32768, kSampleRate, resolution));
+    REQUIRE(resolution.fft_size == 777);
+    REQUIRE(resolution.represented_bands == 3);
+
+    layout.active_bands = 65;
+    REQUIRE_FALSE(analyze_spectral_band_resolution(
+        layout, kFftSize, kSampleRate, resolution));
+    REQUIRE(resolution.fft_size == 777);
 }
 
 TEST_CASE("spectral mask builder rejects hostile controls without changing output",

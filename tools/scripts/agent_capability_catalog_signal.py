@@ -782,9 +782,10 @@ EXPORTS = [
     ),
     capability(
         key="signal.spectral-band-mask", domain="signal",
+        contract_version={"major": 1, "minor": 1},
         summary=(
             "Fixed-capacity zoomable band layouts compiled into allocation-free "
-            "complex-spectrum gain masks."
+            "complex-spectrum gain masks with discrete-bin resolution reports."
         ),
         rt_class="mixed",
         lifecycle={
@@ -815,17 +816,32 @@ EXPORTS = [
                     include="pulp/signal/spectral_band_mask.hpp",
                     qualified_name="pulp::signal::SpectralBandLayoutT<float>",
                     target="Pulp::signal",
-                    header_fingerprint="sha256:2c8d911425699a83465c1fd5adf554ab7218a5e1de584b63413629eb699ccb3d"),
+                    header_fingerprint="sha256:4875ea02702d6720a84c14103dd45ba7bc2f157ba43c163772e7c40011bf79d5"),
             binding(role="table", kind="cpp_type",
                     include="pulp/signal/spectral_band_mask.hpp",
                     qualified_name="pulp::signal::SpectralMaskTableT<float>",
                     target="Pulp::signal",
-                    header_fingerprint="sha256:2c8d911425699a83465c1fd5adf554ab7218a5e1de584b63413629eb699ccb3d"),
+                    header_fingerprint="sha256:4875ea02702d6720a84c14103dd45ba7bc2f157ba43c163772e7c40011bf79d5"),
+            binding(role="resolution", kind="cpp_type",
+                    include="pulp/signal/spectral_band_mask.hpp",
+                    qualified_name="pulp::signal::SpectralBandResolutionT<float>",
+                    target="Pulp::signal",
+                    header_fingerprint="sha256:4875ea02702d6720a84c14103dd45ba7bc2f157ba43c163772e7c40011bf79d5"),
+            binding(role="analyze_resolution", kind="cpp_function",
+                    include="pulp/signal/spectral_band_mask.hpp",
+                    qualified_name="pulp::signal::analyze_spectral_band_resolution<float>",
+                    target="Pulp::signal",
+                    header_fingerprint="sha256:4875ea02702d6720a84c14103dd45ba7bc2f157ba43c163772e7c40011bf79d5",
+                    address_expression=(
+                        "static_cast<bool (*)(const pulp::signal::SpectralBandLayoutT<float>&, "
+                        "int, float, pulp::signal::SpectralBandResolutionT<float>&) noexcept>("
+                        "&pulp::signal::analyze_spectral_band_resolution<float>)"
+                    )),
             binding(role="compile", kind="cpp_function",
                     include="pulp/signal/spectral_band_mask.hpp",
                     qualified_name="pulp::signal::build_spectral_mask<float>",
                     target="Pulp::signal",
-                    header_fingerprint="sha256:2c8d911425699a83465c1fd5adf554ab7218a5e1de584b63413629eb699ccb3d",
+                    header_fingerprint="sha256:4875ea02702d6720a84c14103dd45ba7bc2f157ba43c163772e7c40011bf79d5",
                     address_expression=(
                         "static_cast<bool (*)(const pulp::signal::SpectralBandLayoutT<float>&, "
                         "int, float, pulp::signal::SpectralMaskTableT<float>&) noexcept>("
@@ -835,7 +851,7 @@ EXPORTS = [
                     include="pulp/signal/spectral_band_mask.hpp",
                     qualified_name="pulp::signal::apply_spectral_mask<float>",
                     target="Pulp::signal",
-                    header_fingerprint="sha256:2c8d911425699a83465c1fd5adf554ab7218a5e1de584b63413629eb699ccb3d",
+                    header_fingerprint="sha256:4875ea02702d6720a84c14103dd45ba7bc2f157ba43c163772e7c40011bf79d5",
                     address_expression=(
                         "static_cast<bool (*)(std::complex<float>* const*, int, int, "
                         "const pulp::signal::SpectralMaskTableT<float>&) noexcept>("
@@ -847,6 +863,17 @@ EXPORTS = [
              "operation": "construct", "arguments": ""},
             {"role": "table", "binding": "pulp::signal::SpectralMaskTableT<float>",
              "operation": "construct", "arguments": ""},
+            {"role": "resolution",
+             "binding": "pulp::signal::SpectralBandResolutionT<float>",
+             "operation": "construct", "arguments": ""},
+            {"role": "analyze_resolution",
+             "binding": "pulp::signal::analyze_spectral_band_resolution<float>",
+             "operation": "function_call", "arguments": (
+                 "pulp::signal::SpectralBandLayoutT<float>{}, 1024, 48000.0f, "
+                 "[]() -> pulp::signal::SpectralBandResolutionT<float>& { "
+                 "static pulp::signal::SpectralBandResolutionT<float> report; "
+                 "return report; }()"
+             )},
             {"role": "compile", "binding": "pulp::signal::build_spectral_mask<float>",
              "operation": "function_call", "arguments": (
                  "pulp::signal::SpectralBandLayoutT<float>{}, 1024, 48000.0f, "

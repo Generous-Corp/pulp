@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 21,
+  "manifest_revision": 22,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -3345,7 +3345,11 @@
     {
       "key": "signal.spectral-band-mask",
       "domain": "signal",
-      "summary": "Fixed-capacity zoomable band layouts compiled into allocation-free complex-spectrum gain masks.",
+      "contract_version": {
+        "major": 1,
+        "minor": 1
+      },
+      "summary": "Fixed-capacity zoomable band layouts compiled into allocation-free complex-spectrum gain masks with discrete-bin resolution reports.",
       "rt_class": "mixed",
       "lifecycle": {
         "construction": "control",
@@ -3405,6 +3409,34 @@
           }
         },
         {
+          "role": "resolution",
+          "kind": "cpp_type",
+          "include": "pulp/signal/spectral_band_mask.hpp",
+          "qualified_name": "pulp::signal::SpectralBandResolutionT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "analyze_resolution",
+          "kind": "cpp_function",
+          "include": "pulp/signal/spectral_band_mask.hpp",
+          "qualified_name": "pulp::signal::analyze_spectral_band_resolution<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
           "role": "compile",
           "kind": "cpp_function",
           "include": "pulp/signal/spectral_band_mask.hpp",
@@ -3433,10 +3465,6 @@
           }
         }
       ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
       "status": "usable",
       "evolution": {
         "state": "active",
@@ -3445,7 +3473,7 @@
           "minor": 0
         }
       },
-      "contract_digest": "sha256:c8b893644e5b4350108cb149b8b2727816e4aeaad13faa3a33b999985ba2ab79"
+      "contract_digest": "sha256:78f2687898c22099885e4815358233d7bf8c4c467709b7ca74bdd4500dd42841"
     },
     {
       "key": "signal.spectral-delay-matrix",
@@ -10399,6 +10427,17 @@
               "set_cone_breakup_amount(double percent)",
               "set_treble_rolloff_hz(double hz)",
               "set_drive_db(double db)"
+            ],
+            "enums": []
+          }
+        ],
+        "spectral_band_mask.hpp": [
+          {
+            "class": "SpectralBandResolutionT",
+            "qualified_name": "pulp::signal::SpectralBandResolutionT",
+            "template": "typename SampleType",
+            "methods": [
+              "fully_represented()"
             ],
             "enums": []
           }

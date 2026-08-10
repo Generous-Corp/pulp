@@ -75,6 +75,31 @@ struct SpectralBandLayoutT {
     std::array<SpectralBandT<SampleType>, kSpectralBandMaskMaximumBands> bands{};
 };
 
+/// Control-side report of how discrete FFT bin centers represent an authored
+/// viewport. `owned_bins` counts only bins inside the viewport; exterior bins
+/// assigned through `extend_edge_band` do not inflate the first or last band.
+/// A zero count means that changing the corresponding hard-boundary band cannot
+/// directly select a distinct bin at this FFT geometry.
+template <typename SampleType>
+struct SpectralBandResolutionT {
+    static_assert(std::is_floating_point_v<SampleType>);
+
+    int fft_size = 0;
+    int num_bins = 0;
+    SampleType sample_rate = SampleType{0};
+    SampleType bin_width_hz = SampleType{0};
+    SampleType effective_min_hz = SampleType{0};
+    SampleType effective_max_hz = SampleType{0};
+    std::uint32_t active_bands = 0;
+    std::uint32_t represented_bands = 0;
+    std::uint32_t viewport_bins = 0;
+    std::array<std::uint32_t, kSpectralBandMaskMaximumBands> owned_bins{};
+
+    [[nodiscard]] bool fully_represented() const noexcept {
+        return active_bands > 0 && represented_bands == active_bands;
+    }
+};
+
 template <typename SampleType>
 struct SpectralMaskTableT {
     static_assert(std::is_floating_point_v<SampleType>);
@@ -177,7 +202,75 @@ inline SampleType band_gain(const SpectralBandLayoutT<SampleType>& layout,
         : std::pow(SampleType{10}, band.gain_db * SampleType{0.05});
 }
 
+template <typename SampleType>
+inline std::uint32_t band_index_at_frequency(
+    SampleType hz,
+    SampleType min_hz,
+    SampleType max_hz,
+    SpectralBandSpacing spacing,
+    std::uint32_t band_count) noexcept {
+    const SampleType coordinate = std::clamp(
+        band_coordinate(hz, min_hz, max_hz, spacing),
+        SampleType{0}, SampleType{1});
+    const SampleType scaled = coordinate * static_cast<SampleType>(band_count);
+    return std::min<std::uint32_t>(static_cast<std::uint32_t>(scaled),
+                                   band_count - 1);
+}
+
 } // namespace detail
+
+/// Report the number of discrete FFT bin centers directly owned by each band.
+/// This is a failure-atomic control-thread operation with no dynamic allocation.
+/// It intentionally ignores boundary-kernel influence: the report answers
+/// whether every authored control has at least one distinct hard-boundary bin,
+/// not whether a smoothed transition can influence a neighboring bin.
+template <typename SampleType>
+bool analyze_spectral_band_resolution(
+    const SpectralBandLayoutT<SampleType>& layout,
+    int fft_size,
+    SampleType sample_rate,
+    SpectralBandResolutionT<SampleType>& out_resolution) noexcept {
+    static_assert(std::is_floating_point_v<SampleType>);
+    if (!is_valid_spectral_frame_geometry(fft_size, fft_size / 4)
+        || !std::isfinite(sample_rate)
+        || sample_rate <= SampleType{0})
+        return false;
+
+    const int num_bins = fft_size / 2 + 1;
+    if (num_bins <= 1
+        || static_cast<std::size_t>(num_bins) > kSpectralBandMaskMaximumBins)
+        return false;
+
+    const SampleType nyquist = sample_rate * SampleType{0.5};
+    SampleType min_hz = SampleType{0};
+    SampleType max_hz = SampleType{0};
+    if (!detail::valid_spectral_band_layout(layout, nyquist, min_hz, max_hz))
+        return false;
+
+    SpectralBandResolutionT<SampleType> candidate{};
+    candidate.fft_size = fft_size;
+    candidate.num_bins = num_bins;
+    candidate.sample_rate = sample_rate;
+    candidate.bin_width_hz = sample_rate / static_cast<SampleType>(fft_size);
+    candidate.effective_min_hz = min_hz;
+    candidate.effective_max_hz = max_hz;
+    candidate.active_bands = layout.active_bands;
+
+    for (int bin = 0; bin < num_bins; ++bin) {
+        const SampleType hz = static_cast<SampleType>(bin)
+                            * candidate.bin_width_hz;
+        if (hz < min_hz || hz > max_hz) continue;
+        const auto band = detail::band_index_at_frequency(
+            hz, min_hz, max_hz, layout.spacing, layout.active_bands);
+        ++candidate.owned_bins[band];
+        ++candidate.viewport_bins;
+    }
+    for (std::uint32_t band = 0; band < layout.active_bands; ++band)
+        if (candidate.owned_bins[band] > 0) ++candidate.represented_bands;
+
+    out_resolution = candidate;
+    return true;
+}
 
 /// Compile a complete positive-frequency gain table. The operation is
 /// failure-atomic: `out_table` is unchanged if geometry or controls are bad.
@@ -246,8 +339,8 @@ bool build_spectral_mask(const SpectralBandLayoutT<SampleType>& layout,
                 detail::band_coordinate(hz, min_hz, max_hz, layout.spacing),
                 SampleType{0}, SampleType{1});
             const SampleType scaled = coordinate * static_cast<SampleType>(band_count);
-            const auto band = std::min<std::uint32_t>(
-                static_cast<std::uint32_t>(scaled), band_count - 1);
+            const auto band = detail::band_index_at_frequency(
+                hz, min_hz, max_hz, layout.spacing, band_count);
             gain = detail::band_gain(layout, band);
 
             if (smooth) {
@@ -341,6 +434,8 @@ using SpectralBand = SpectralBandT<float>;
 using SpectralBand64 = SpectralBandT<double>;
 using SpectralBandLayout = SpectralBandLayoutT<float>;
 using SpectralBandLayout64 = SpectralBandLayoutT<double>;
+using SpectralBandResolution = SpectralBandResolutionT<float>;
+using SpectralBandResolution64 = SpectralBandResolutionT<double>;
 using SpectralMaskTable = SpectralMaskTableT<float>;
 using SpectralMaskTable64 = SpectralMaskTableT<double>;
 
