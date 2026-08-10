@@ -285,6 +285,15 @@ TEST_CASE("Phase 4 state reads return bounded canonical catalog snapshots",
     auto standalone = fixture.register_host(fixture.standalone_a_peer, ControlHostTier::Standalone,
                                             "session", "instance", "publication", 'd',
                                             "build:dddddddddddddddddddddddddddddddd");
+    auto& standalone_store = *fixture.stores.at(standalone.registration_id.value);
+    standalone_store.add_parameter({.id = 1,
+                                    .name = "Replacement Gain",
+                                    .unit = "dB",
+                                    .range = {-60.0f, 12.0f, -6.0f, 0.5f},
+                                    .group_id = 7,
+                                    .rate = pulp::state::ParamRate::ControlRate,
+                                    .kind = pulp::state::ParamKind::Continuous});
+    REQUIRE(standalone_store.set_parameter_display_name(1, "Live Gain"));
     auto offline_authority = fixture.grant(offline);
     auto authority = fixture.grant(standalone);
     auto service = fixture.service();
@@ -308,7 +317,7 @@ TEST_CASE("Phase 4 state reads return bounded canonical catalog snapshots",
     REQUIRE(visible["parameters"].size() == 1);
     const auto gain = visible["parameters"][0];
     CHECK(gain["id"].getInt64() == 1);
-    CHECK(gain["name"].getString() == "Gain");
+    CHECK(gain["name"].getString() == "Live Gain");
     CHECK(gain["unit"].getString() == "dB");
     CHECK(gain["value"].getWithDefault<double>(0.0) == -6.0);
     CHECK(gain["normalized"].getWithDefault<double>(0.0) == 0.75);

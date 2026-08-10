@@ -123,7 +123,11 @@ make_control_state_read_executor(ControlStateReadSourceResolver resolve_source) 
                            "state generation changed before the snapshot",
                            ControlRetryClassification::AfterRefresh);
         }
-        if (!parameter_filter_present && source->store->all_params().size() > 4096) {
+        const auto live_parameter_count = static_cast<std::size_t>(std::ranges::count_if(
+            source->store->all_params(), [&](const state::ParamInfo& info) {
+                return source->store->info(info.id) == &info;
+            }));
+        if (!parameter_filter_present && live_parameter_count > 4096) {
             return failure(ControlResultCode::ResourceExhausted,
                            "parameter catalog exceeded the snapshot bound");
         }
@@ -135,6 +139,8 @@ make_control_state_read_executor(ControlStateReadSourceResolver resolve_source) 
         auto parameters = choc::value::createEmptyArray();
         std::uint64_t redacted = 0;
         for (const auto& info : source->store->all_params()) {
+            if (source->store->info(info.id) != &info)
+                continue;
             if (!selected(info.id))
                 continue;
             const bool sensitive = source->is_sensitive(info.id);

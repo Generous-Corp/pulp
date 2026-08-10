@@ -153,6 +153,7 @@ choc::value::Value param_snapshot_to_value(const StateStore& store, const ParamI
 
 choc::value::Value param_catalog_snapshot_to_value(const StateStore& store, const ParamInfo& info) {
     auto value = param_metadata_to_value(info);
+    value.setMember("name", choc::value::createString(store.parameter_display_name(info.id)));
     const auto snapshot = param_snapshot_to_value(store, info);
     value.addMember("value", snapshot["value"]);
     value.addMember("normalized", snapshot["normalized"]);
