@@ -4,6 +4,7 @@
 /// Pointer-neutral editing intents and their lowering to ordinary transactions.
 
 #include <pulp/timeline/command.hpp>
+#include <pulp/timeline/document_session.hpp>
 #include <pulp/timeline_editor/sequencer_ui_host.hpp>
 
 #include <optional>
@@ -147,6 +148,235 @@ struct EditIntentIdentity {
     timeline::DocumentRevision expected_revision;
     timeline::CommandId command_id;
     std::optional<timeline::UndoGroupId> undo_group;
+};
+
+/// Confirmed lifecycle state of one continuous edit gesture.
+enum class EditGestureIdentityState : std::uint8_t {
+    AwaitingBegin,
+    Open,
+    Closed,
+    Exhausted,
+};
+
+/// Why an edit-gesture identity operation was refused.
+enum class EditGestureIdentityError : std::uint8_t {
+    InvalidWriter,
+    WriterMismatch,
+    InvalidPhase,
+    GestureClosed,
+    IdentityExhausted,
+    IdentityPending,
+    ForeignOrStaleIssue,
+};
+
+/// Whether the transaction built from an issued identity committed.
+enum class EditGestureSubmission : std::uint8_t {
+    Rejected,
+    Committed,
+};
+
+class EditGestureIdentityAllocator;
+
+/// One opaque, single-owner identity issue awaiting a submission outcome.
+class EditGestureIdentityIssue {
+  public:
+    EditGestureIdentityIssue(const EditGestureIdentityIssue&) = delete;
+    EditGestureIdentityIssue& operator=(const EditGestureIdentityIssue&) = delete;
+    EditGestureIdentityIssue(EditGestureIdentityIssue&& other) noexcept
+        : identity_(std::exchange(other.identity_, {})),
+          phase_(std::exchange(other.phase_, timeline::GesturePhase::Single)) {}
+    EditGestureIdentityIssue& operator=(EditGestureIdentityIssue&&) = delete;
+
+    /// Returns the identity to pass unchanged to lower_edit_intent.
+    const EditIntentIdentity& identity() const noexcept {
+        return identity_;
+    }
+
+    /// Returns the phase the matching intent must carry.
+    timeline::GesturePhase phase() const noexcept {
+        return phase_;
+    }
+
+  private:
+    friend class EditGestureIdentityAllocator;
+    EditGestureIdentityIssue(EditIntentIdentity identity, timeline::GesturePhase phase) noexcept
+        : identity_(std::move(identity)), phase_(phase) {}
+
+    EditIntentIdentity identity_;
+    timeline::GesturePhase phase_ = timeline::GesturePhase::Single;
+};
+
+/// Allocates one undo group and a submission-safe stream of gesture identities.
+///
+/// Identity issuance and lifecycle advancement are deliberately separate. A
+/// transaction can be rejected after its IDs are allocated, so only a matching
+/// `Committed` acknowledgement advances Begin, End, or Cancel. A `Rejected`
+/// acknowledgement keeps the last confirmed state and permits a fresh-ID retry
+/// with the same undo group. Exactly one issue may await acknowledgement.
+///
+/// This is control-thread state, not a concurrent reservation in
+/// DocumentSession. The session still owns the one-open-gesture rule and is the
+/// authority for writer provenance: separate sessions can assign equal numeric
+/// writer and group IDs, which this value-only helper cannot distinguish.
+/// Cancel closes the group after a successful submission; reverting its applied
+/// edits remains the caller's subsequent `DocumentSession::undo()` operation.
+class EditGestureIdentityAllocator {
+  public:
+    /// Allocates the gesture's sole undo group at pointer-down.
+    static runtime::Result<EditGestureIdentityAllocator, EditGestureIdentityError>
+    create(timeline::WriterToken& writer) noexcept {
+        if (!writer.id().valid())
+            return runtime::Result<EditGestureIdentityAllocator, EditGestureIdentityError>(
+                runtime::Err(EditGestureIdentityError::InvalidWriter));
+
+        const auto undo_group = writer.allocate_undo_group_id();
+        if (!undo_group.valid())
+            return runtime::Result<EditGestureIdentityAllocator, EditGestureIdentityError>(
+                runtime::Err(EditGestureIdentityError::IdentityExhausted));
+
+        return runtime::Result<EditGestureIdentityAllocator, EditGestureIdentityError>(runtime::Ok(
+            EditGestureIdentityAllocator(writer.id(), undo_group)));
+    }
+
+    EditGestureIdentityAllocator(const EditGestureIdentityAllocator&) = delete;
+    EditGestureIdentityAllocator& operator=(const EditGestureIdentityAllocator&) = delete;
+    EditGestureIdentityAllocator(EditGestureIdentityAllocator&& other) noexcept
+        : writer_id_(std::exchange(other.writer_id_, {})),
+          undo_group_(std::exchange(other.undo_group_, {})),
+          state_(std::exchange(other.state_, EditGestureIdentityState::Closed)),
+          pending_(std::exchange(other.pending_, false)),
+          pending_transaction_(std::exchange(other.pending_transaction_, {})),
+          pending_revision_(std::exchange(other.pending_revision_, {})),
+          pending_command_(std::exchange(other.pending_command_, {})),
+          pending_phase_(std::exchange(other.pending_phase_, timeline::GesturePhase::Single)) {}
+    EditGestureIdentityAllocator& operator=(EditGestureIdentityAllocator&&) = delete;
+
+    /// Issues fresh transaction and command IDs for one legal lifecycle step.
+    ///
+    /// Invalid writers and phases are rejected before either ID stream advances.
+    /// If transaction allocation succeeds but command allocation is exhausted,
+    /// that transaction ID remains consumed; writer-local IDs are never reused.
+    runtime::Result<EditGestureIdentityIssue, EditGestureIdentityError>
+    issue(timeline::WriterToken& writer, timeline::DocumentRevision expected_revision,
+          timeline::GesturePhase phase) noexcept {
+        if (state_ == EditGestureIdentityState::Closed)
+            return issue_error(EditGestureIdentityError::GestureClosed);
+        if (state_ == EditGestureIdentityState::Exhausted)
+            return issue_error(EditGestureIdentityError::IdentityExhausted);
+        if (pending_)
+            return issue_error(EditGestureIdentityError::IdentityPending);
+        if (!writer.id().valid())
+            return issue_error(EditGestureIdentityError::InvalidWriter);
+        if (writer.id() != writer_id_)
+            return issue_error(EditGestureIdentityError::WriterMismatch);
+        if (!phase_permitted(phase))
+            return issue_error(EditGestureIdentityError::InvalidPhase);
+
+        const auto transaction_id = writer.allocate_transaction_id();
+        if (!transaction_id.valid()) {
+            state_ = EditGestureIdentityState::Exhausted;
+            return issue_error(EditGestureIdentityError::IdentityExhausted);
+        }
+
+        const auto command_id = writer.allocate_command_id();
+        if (!command_id.valid()) {
+            state_ = EditGestureIdentityState::Exhausted;
+            return issue_error(EditGestureIdentityError::IdentityExhausted);
+        }
+
+        EditIntentIdentity identity{transaction_id, expected_revision, command_id, undo_group_};
+        pending_ = true;
+        pending_transaction_ = transaction_id;
+        pending_revision_ = expected_revision;
+        pending_command_ = command_id;
+        pending_phase_ = phase;
+        return runtime::Result<EditGestureIdentityIssue, EditGestureIdentityError>(
+            runtime::Ok(EditGestureIdentityIssue(std::move(identity), phase)));
+    }
+
+    /// Records the authoritative submission outcome for exactly one issue.
+    ///
+    /// A foreign, moved-from, already-acknowledged, or superseded issue is stale
+    /// and cannot change either the pending issue or the confirmed lifecycle.
+    runtime::Result<EditGestureIdentityState, EditGestureIdentityError>
+    acknowledge(const EditGestureIdentityIssue& issue,
+                EditGestureSubmission submission) noexcept {
+        if (!matches_pending(issue))
+            return runtime::Result<EditGestureIdentityState, EditGestureIdentityError>(
+                runtime::Err(EditGestureIdentityError::ForeignOrStaleIssue));
+
+        const auto phase = pending_phase_;
+        clear_pending();
+        if (submission == EditGestureSubmission::Committed)
+            state_ = committed_state_after(phase);
+        return runtime::Result<EditGestureIdentityState, EditGestureIdentityError>(
+            runtime::Ok(state_));
+    }
+
+    /// Returns the one undo group shared by every issue from this allocator.
+    timeline::UndoGroupId undo_group() const noexcept {
+        return undo_group_;
+    }
+
+    /// Returns the last submission-confirmed lifecycle state.
+    EditGestureIdentityState state() const noexcept {
+        return state_;
+    }
+
+    /// Returns whether one issued identity still needs acknowledgement.
+    bool has_pending_identity() const noexcept {
+        return pending_;
+    }
+
+  private:
+    EditGestureIdentityAllocator(timeline::WriterId writer_id,
+                                 timeline::UndoGroupId undo_group) noexcept
+        : writer_id_(writer_id), undo_group_(undo_group) {}
+
+    bool phase_permitted(timeline::GesturePhase phase) const noexcept {
+        if (state_ == EditGestureIdentityState::AwaitingBegin)
+            return phase == timeline::GesturePhase::Begin;
+        return phase == timeline::GesturePhase::Update || phase == timeline::GesturePhase::End ||
+               phase == timeline::GesturePhase::Cancel;
+    }
+
+    bool matches_pending(const EditGestureIdentityIssue& issue) const noexcept {
+        const auto& identity = issue.identity_;
+        return pending_ && issue.phase_ == pending_phase_ &&
+               identity.transaction_id == pending_transaction_ &&
+               identity.expected_revision == pending_revision_ &&
+               identity.command_id == pending_command_ && identity.undo_group == undo_group_;
+    }
+
+    static EditGestureIdentityState
+    committed_state_after(timeline::GesturePhase phase) noexcept {
+        if (phase == timeline::GesturePhase::Begin || phase == timeline::GesturePhase::Update)
+            return EditGestureIdentityState::Open;
+        return EditGestureIdentityState::Closed;
+    }
+
+    void clear_pending() noexcept {
+        pending_ = false;
+        pending_transaction_ = {};
+        pending_revision_ = {};
+        pending_command_ = {};
+        pending_phase_ = timeline::GesturePhase::Single;
+    }
+
+    static runtime::Result<EditGestureIdentityIssue, EditGestureIdentityError>
+    issue_error(EditGestureIdentityError error) noexcept {
+        return runtime::Result<EditGestureIdentityIssue, EditGestureIdentityError>(
+            runtime::Err(error));
+    }
+
+    timeline::WriterId writer_id_;
+    timeline::UndoGroupId undo_group_;
+    EditGestureIdentityState state_ = EditGestureIdentityState::AwaitingBegin;
+    bool pending_ = false;
+    timeline::TransactionId pending_transaction_;
+    timeline::DocumentRevision pending_revision_;
+    timeline::CommandId pending_command_;
+    timeline::GesturePhase pending_phase_ = timeline::GesturePhase::Single;
 };
 
 /// The host an editor submits its intents to.
