@@ -286,59 +286,7 @@ bool roots_overlap(const std::filesystem::path& first, const std::filesystem::pa
 
 std::optional<ControlTrustedHostPreparationPolicy>
 pin_trusted_host_policy(const ControlTrustedHostLaunchIntent& intent) {
-#ifdef _WIN32
-    (void)intent;
-    return std::nullopt;
-#else
-    constexpr std::size_t maximum_executable_bytes = 512u * 1024u * 1024u;
-    constexpr std::size_t maximum_manifest_bytes = 1024u * 1024u;
-    const auto executable =
-        detail::read_owner_private_file(intent.executable, maximum_executable_bytes);
-    const auto manifest_path = std::filesystem::path{
-        intent.executable.string() + ".inspector-capabilities.json"};
-    const auto manifest = detail::read_owner_private_file(manifest_path, maximum_manifest_bytes);
-    const auto static_expectation = detail::inspect_static_code_identity(intent.executable);
-    struct stat working_directory{};
-    if (!executable || !manifest || !static_expectation ||
-        ::lstat(intent.working_directory.c_str(), &working_directory) != 0 ||
-        !S_ISDIR(working_directory.st_mode) || S_ISLNK(working_directory.st_mode)) {
-        return std::nullopt;
-    }
-    std::vector<ControlTrustedHostRuntimeDependencyPolicy> runtime_dependencies;
-    std::error_code dependency_error;
-    for (std::filesystem::directory_iterator iterator(intent.working_directory,
-                                                       dependency_error),
-         end;
-         !dependency_error && iterator != end; iterator.increment(dependency_error)) {
-        const auto filename = iterator->path().filename().string();
-        if (iterator->path().extension() != ".dylib" &&
-            iterator->path().extension() != ".so")
-            continue;
-        const bool valid_filename = valid_runtime_dependency_filename(filename);
-        const auto bytes = detail::read_owner_private_file(iterator->path(),
-                                                           maximum_executable_bytes);
-        const auto identity = detail::inspect_static_code_identity(iterator->path());
-        if (!valid_filename || !bytes || !identity || runtime_dependencies.size() >= 16)
-            return std::nullopt;
-        runtime_dependencies.push_back(
-            {.filename = filename,
-             .digest = runtime::sha256_hex(bytes->data(), bytes->size()),
-             .static_expectation = *identity});
-    }
-    if (dependency_error)
-        return std::nullopt;
-    std::ranges::sort(runtime_dependencies, {},
-                      &ControlTrustedHostRuntimeDependencyPolicy::filename);
-    return ControlTrustedHostPreparationPolicy{
-        .executable_digest =
-            runtime::sha256_hex(executable->data(), executable->size()),
-        .manifest_digest = runtime::sha256_hex(manifest->data(), manifest->size()),
-        .static_expectation = *static_expectation,
-        .runtime_dependencies = std::move(runtime_dependencies),
-        .working_directory_device = static_cast<std::uint64_t>(working_directory.st_dev),
-        .working_directory_inode = static_cast<std::uint64_t>(working_directory.st_ino),
-    };
-#endif
+    return pin_control_trusted_host_preparation_policy(intent);
 }
 
 } // namespace

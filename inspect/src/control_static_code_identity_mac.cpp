@@ -57,6 +57,24 @@ std::string cf_data_hex(CFTypeRef value) {
     return result;
 }
 
+std::uint32_t cf_number_u32(CFTypeRef value) {
+    if (!value || CFGetTypeID(value) != CFNumberGetTypeID())
+        return 0;
+    std::uint32_t result = 0;
+    return CFNumberGetValue(static_cast<CFNumberRef>(value), kCFNumberSInt32Type, &result)
+               ? result
+               : 0;
+}
+
+bool entitlement_enabled(CFDictionaryRef information, CFStringRef entitlement) {
+    const auto value = CFDictionaryGetValue(information, kSecCodeInfoEntitlementsDict);
+    if (!value || CFGetTypeID(value) != CFDictionaryGetTypeID())
+        return false;
+    const auto enabled = CFDictionaryGetValue(static_cast<CFDictionaryRef>(value), entitlement);
+    return enabled && CFGetTypeID(enabled) == CFBooleanGetTypeID() &&
+           CFBooleanGetValue(static_cast<CFBooleanRef>(enabled));
+}
+
 } // namespace
 
 std::optional<ControlTrustedHostStaticExpectation>
@@ -85,10 +103,45 @@ inspect_static_code_identity(const std::filesystem::path& executable) {
     const auto team =
         cf_string(CFDictionaryGetValue(information.get(), kSecCodeInfoTeamIdentifier));
     const auto cdhash = cf_data_hex(CFDictionaryGetValue(information.get(), kSecCodeInfoUnique));
+    const auto flags =
+        cf_number_u32(CFDictionaryGetValue(information.get(), kSecCodeInfoFlags));
+    const bool library_validation =
+        (flags & kSecCodeSignatureLibraryValidation) != 0 ||
+        ((flags & kSecCodeSignatureRuntime) != 0 &&
+         !entitlement_enabled(information.get(),
+                              CFSTR("com.apple.security.cs.disable-library-validation")));
     if (identifier.empty() || cdhash.empty())
         return std::nullopt;
-    return ControlTrustedHostStaticExpectation{"signed:" + identifier + ":" + cdhash,
-                                               team.empty() ? "adhoc:" + cdhash : "team:" + team};
+    return ControlTrustedHostStaticExpectation{
+        "signed:" + identifier + ":" + cdhash,
+        team.empty() ? "adhoc:" + cdhash : "team:" + team,
+        library_validation};
+}
+
+bool is_apple_platform_code(const std::filesystem::path& executable) {
+    const auto executable_bytes = executable.string();
+    CfOwner<CFURLRef> url(CFURLCreateFromFileSystemRepresentation(
+        kCFAllocatorDefault, reinterpret_cast<const UInt8*>(executable_bytes.data()),
+        static_cast<CFIndex>(executable_bytes.size()), false));
+    if (!url.get())
+        return false;
+    SecStaticCodeRef raw_code = nullptr;
+    if (SecStaticCodeCreateWithPath(url.get(), kSecCSDefaultFlags, &raw_code) != errSecSuccess ||
+        !raw_code)
+        return false;
+    CfOwner<SecStaticCodeRef> code(raw_code);
+    CfOwner<CFStringRef> requirement_text(
+        CFStringCreateWithCString(kCFAllocatorDefault, "anchor apple", kCFStringEncodingUTF8));
+    if (!requirement_text.get())
+        return false;
+    SecRequirementRef raw_requirement = nullptr;
+    if (SecRequirementCreateWithString(requirement_text.get(), kSecCSDefaultFlags,
+                                       &raw_requirement) != errSecSuccess ||
+        !raw_requirement)
+        return false;
+    CfOwner<SecRequirementRef> requirement(raw_requirement);
+    return SecStaticCodeCheckValidity(code.get(), kSecCSStrictValidate, requirement.get()) ==
+           errSecSuccess;
 }
 
 } // namespace pulp::inspect::detail

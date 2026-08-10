@@ -502,7 +502,7 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS AND
     if(PULP_BUILD_TESTS)
         find_program(_pulp_control_host_codesign codesign REQUIRED)
         add_custom_command(TARGET pulp-control-standalone-host POST_BUILD
-            COMMAND "${_pulp_control_host_codesign}" --force --sign -
+            COMMAND "${_pulp_control_host_codesign}" --force --sign - --options library
                     "$<TARGET_FILE:pulp-control-standalone-host>"
             COMMAND /bin/chmod 0700 "$<TARGET_FILE:pulp-control-standalone-host>"
             COMMAND /bin/chmod 0600
@@ -526,7 +526,7 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS AND
     # exact artifact it will execute; release signing may replace this ad-hoc
     # signature later as part of the normal package transaction.
     install(CODE
-        "execute_process(COMMAND /usr/bin/codesign --force --sign - \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/pulp/pulp-control-standalone-host\" RESULT_VARIABLE _pulp_control_host_sign_result)\nif(NOT _pulp_control_host_sign_result EQUAL 0)\n  message(FATAL_ERROR \"could not sign installed Standalone control host\")\nendif()")
+        "execute_process(COMMAND /usr/bin/codesign --force --sign - --options library \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/pulp/pulp-control-standalone-host\" RESULT_VARIABLE _pulp_control_host_sign_result)\nif(NOT _pulp_control_host_sign_result EQUAL 0)\n  message(FATAL_ERROR \"could not sign installed Standalone control host\")\nendif()")
     install(FILES
         "${CMAKE_BINARY_DIR}/pulp-control-shipping-manifests/pulp-control-standalone-host.Standalone.control-shipping.json"
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/pulp)

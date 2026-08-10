@@ -1,4 +1,5 @@
 #include <pulp/inspect/control_trusted_host_inventory.hpp>
+#include <pulp/inspect/control_peer.hpp>
 
 #include "control_private_store.hpp"
 #include "control_static_code_identity.hpp"
@@ -9,12 +10,18 @@
 #include <cctype>
 #include <cerrno>
 #include <charconv>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <system_error>
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
+#if TARGET_OS_OSX && !TARGET_OS_IPHONE
+#include <libproc.h>
+#include <mach/vm_prot.h>
+#include <sys/proc_info.h>
+#endif
 #endif
 
 #ifndef _WIN32
@@ -148,6 +155,40 @@ std::optional<std::pair<std::uint64_t, std::uint64_t>> directory_identity(
         return std::nullopt;
     return std::pair{static_cast<std::uint64_t>(status.st_dev),
                      static_cast<std::uint64_t>(status.st_ino)};
+#endif
+}
+
+struct SnapshotFileIdentity {
+    std::uint64_t device = 0;
+    std::uint64_t inode = 0;
+    std::uint64_t size = 0;
+    std::int64_t change_seconds = 0;
+    std::int64_t change_nanoseconds = 0;
+    std::uint64_t generation = 0;
+    friend bool operator==(const SnapshotFileIdentity&, const SnapshotFileIdentity&) = default;
+};
+
+std::optional<SnapshotFileIdentity> regular_file_identity(const fs::path& path) {
+#ifdef _WIN32
+    (void)path;
+    return std::nullopt;
+#else
+    struct stat status{};
+    if (::lstat(path.c_str(), &status) != 0 || !S_ISREG(status.st_mode) ||
+        S_ISLNK(status.st_mode))
+        return std::nullopt;
+#if defined(__APPLE__)
+    return SnapshotFileIdentity{static_cast<std::uint64_t>(status.st_dev),
+                                static_cast<std::uint64_t>(status.st_ino),
+                                static_cast<std::uint64_t>(status.st_size),
+                                status.st_ctimespec.tv_sec, status.st_ctimespec.tv_nsec,
+                                static_cast<std::uint64_t>(status.st_gen)};
+#else
+    return SnapshotFileIdentity{static_cast<std::uint64_t>(status.st_dev),
+                                static_cast<std::uint64_t>(status.st_ino),
+                                static_cast<std::uint64_t>(status.st_size), status.st_ctim.tv_sec,
+                                status.st_ctim.tv_nsec, 0};
+#endif
 #endif
 }
 
@@ -489,6 +530,14 @@ struct ControlTrustedHostSnapshot::Impl {
     fs::path executable;
     fs::path manifest;
     std::vector<fs::path> runtime_dependencies;
+    std::string executable_digest;
+    std::size_t executable_size = 0;
+    std::string manifest_digest;
+    std::size_t manifest_size = 0;
+    std::vector<ControlTrustedHostRuntimeDependencyPolicy> runtime_dependency_policies;
+    std::vector<std::size_t> runtime_dependency_sizes;
+    SnapshotFileIdentity executable_file_id;
+    std::vector<SnapshotFileIdentity> runtime_dependency_file_ids;
     std::vector<std::string> arguments;
     fs::path working_directory;
     int working_directory_descriptor = -1;
@@ -534,6 +583,126 @@ bool ControlTrustedHostSnapshot::working_directory_matches_policy() const {
            S_ISDIR(status.st_mode) &&
            static_cast<std::uint64_t>(status.st_dev) == impl_->working_directory_device &&
            static_cast<std::uint64_t>(status.st_ino) == impl_->working_directory_inode;
+#endif
+}
+bool ControlTrustedHostSnapshot::launch_material_matches_policy() const {
+#ifdef _WIN32
+    return false;
+#else
+    if (!no_symlink_components(impl_->directory) || !private_directory(impl_->directory))
+        return false;
+
+    DescriptorOwner directory(open_directory_without_symlinks(impl_->directory));
+    const auto entries = directory.get() >= 0 ? directory_entries(directory.get()) : std::nullopt;
+    if (!entries)
+        return false;
+    std::vector<std::string> expected_entries = {impl_->executable.filename().string(),
+                                                  impl_->manifest.filename().string()};
+    for (const auto& dependency : impl_->runtime_dependencies)
+        expected_entries.push_back(dependency.filename().string());
+    auto actual_entries = *entries;
+    std::ranges::sort(expected_entries);
+    std::ranges::sort(actual_entries);
+    if (actual_entries != expected_entries)
+        return false;
+
+    const auto exact_file = [](const fs::path& path, std::size_t size,
+                               std::string_view digest, bool executable,
+                               const ControlTrustedHostStaticExpectation* expectation) {
+        const auto first = detail::read_owner_private_file(path, size);
+        const auto identity = expectation ? detail::inspect_static_code_identity(path)
+                                          : std::optional<ControlTrustedHostStaticExpectation>{};
+        const auto second = detail::read_owner_private_file(path, size);
+        if (!first || !second || first->size() != size || *first != *second ||
+            !private_snapshot_file(path, executable) ||
+            runtime::sha256_hex(first->data(), first->size()) != digest)
+            return false;
+        return !expectation ||
+               (identity && identity->executable_identity == expectation->executable_identity &&
+                identity->publisher_id == expectation->publisher_id);
+    };
+
+    if (!exact_file(impl_->executable, impl_->executable_size, impl_->executable_digest, true,
+                    &impl_->static_expectation) ||
+        !exact_file(impl_->manifest, impl_->manifest_size, impl_->manifest_digest, false, nullptr) ||
+        impl_->runtime_dependencies.size() != impl_->runtime_dependency_policies.size() ||
+        impl_->runtime_dependencies.size() != impl_->runtime_dependency_sizes.size())
+        return false;
+    for (std::size_t index = 0; index < impl_->runtime_dependencies.size(); ++index) {
+        const auto& policy = impl_->runtime_dependency_policies[index];
+        if (!exact_file(impl_->runtime_dependencies[index], impl_->runtime_dependency_sizes[index],
+                        policy.digest, true, &policy.static_expectation))
+            return false;
+    }
+    return true;
+#endif
+}
+bool ControlTrustedHostSnapshot::loaded_runtime_closure_matches_policy(
+    const ControlPeerEvidence& process) const {
+#if defined(__APPLE__) && TARGET_OS_OSX && !TARGET_OS_IPHONE
+    const auto process_id = process.process_id;
+    if (process_id <= 0 || process_id > std::numeric_limits<pid_t>::max())
+        return false;
+    std::vector<SnapshotFileIdentity> expected_files = impl_->runtime_dependency_file_ids;
+    expected_files.push_back(impl_->executable_file_id);
+    std::vector<SnapshotFileIdentity> loaded_files;
+    std::vector<SnapshotFileIdentity> verified_rosetta_files;
+    std::uint64_t address = 0;
+    bool complete_scan = false;
+    for (std::size_t count = 0; count < 65'536; ++count) {
+        proc_regionwithpathinfo region{};
+        errno = 0;
+        const auto size = ::proc_pidinfo(static_cast<pid_t>(process_id),
+                                         PROC_PIDREGIONPATHINFO, address, &region,
+                                         sizeof(region));
+        if (size <= 0) {
+            // The kernel reports the genuine end of this flavor's address
+            // walk as EINVAL. Any other failure, or a process-generation
+            // change while walking, leaves the scan incomplete.
+            complete_scan = size == 0 && errno == EINVAL &&
+                            control_peer_process_liveness(process) ==
+                                ControlProcessLiveness::Alive;
+            break;
+        }
+        if (size != sizeof(region) || region.prp_prinfo.pri_size == 0)
+            return false;
+        const auto next = region.prp_prinfo.pri_address + region.prp_prinfo.pri_size;
+        if (next <= address)
+            return false;
+        address = next;
+        if ((region.prp_prinfo.pri_protection & VM_PROT_EXECUTE) == 0)
+            continue;
+        const auto& stat = region.prp_vip.vip_vi.vi_stat;
+        if (stat.vst_dev == 0 || stat.vst_ino == 0)
+            continue;
+        const SnapshotFileIdentity loaded{
+            stat.vst_dev, stat.vst_ino, static_cast<std::uint64_t>(stat.vst_size),
+            stat.vst_ctime, stat.vst_ctimensec, stat.vst_gen};
+        const std::string_view path(region.prp_vip.vip_path);
+        const bool rosetta_image =
+            path.starts_with("/Library/Apple/usr/libexec/oah/") &&
+            (std::ranges::find(verified_rosetta_files, loaded) !=
+                 verified_rosetta_files.end() ||
+             detail::is_apple_platform_code(fs::path(std::string(path))));
+        if (rosetta_image &&
+            std::ranges::find(verified_rosetta_files, loaded) == verified_rosetta_files.end())
+            verified_rosetta_files.push_back(loaded);
+        const bool platform_image = path.starts_with("/System/Library/") ||
+                                    path.starts_with("/usr/lib/") || rosetta_image;
+        if (!platform_image && std::ranges::find(expected_files, loaded) == expected_files.end())
+            return false;
+        loaded_files.push_back(loaded);
+    }
+    if (!complete_scan)
+        return false;
+    for (const auto& expected : expected_files) {
+        if (std::ranges::find(loaded_files, expected) == loaded_files.end())
+            return false;
+    }
+    return true;
+#else
+    (void)process;
+    return impl_->runtime_dependency_file_ids.empty();
 #endif
 }
 int ControlTrustedHostSnapshot::working_directory_descriptor() const {
@@ -607,6 +776,61 @@ ControlTrustedHostInventory::ControlTrustedHostInventory(ControlTrustedHostInven
                                                          Clock clock)
     : impl_(std::make_unique<Impl>(std::move(config), std::move(clock))) {}
 ControlTrustedHostInventory::~ControlTrustedHostInventory() = default;
+
+std::optional<ControlTrustedHostPreparationPolicy>
+pin_control_trusted_host_preparation_policy(const ControlTrustedHostLaunchIntent& intent) {
+#ifdef _WIN32
+    (void)intent;
+    return std::nullopt;
+#else
+    constexpr std::size_t maximum_executable_bytes = 512u * 1024u * 1024u;
+    constexpr std::size_t maximum_manifest_bytes = 1024u * 1024u;
+    if (!valid_launch_intent(intent))
+        return std::nullopt;
+    const auto executable =
+        detail::read_owner_private_file(intent.executable, maximum_executable_bytes);
+    const fs::path manifest_path{intent.executable.string() +
+                                 ".inspector-capabilities.json"};
+    const auto manifest =
+        detail::read_owner_private_file(manifest_path, maximum_manifest_bytes);
+    const auto static_expectation = detail::inspect_static_code_identity(intent.executable);
+    const auto working_directory = directory_identity(intent.working_directory);
+    if (!executable || !manifest || !static_expectation || !working_directory)
+        return std::nullopt;
+
+    std::vector<ControlTrustedHostRuntimeDependencyPolicy> runtime_dependencies;
+    std::error_code dependency_error;
+    for (fs::directory_iterator iterator(intent.working_directory, dependency_error), end;
+         !dependency_error && iterator != end; iterator.increment(dependency_error)) {
+        const auto filename = iterator->path().filename().string();
+        if (iterator->path().extension() != ".dylib" &&
+            iterator->path().extension() != ".so")
+            continue;
+        const auto bytes =
+            detail::read_owner_private_file(iterator->path(), maximum_executable_bytes);
+        const auto identity = detail::inspect_static_code_identity(iterator->path());
+        if (!valid_runtime_dependency_filename(filename) || !bytes || !identity ||
+            runtime_dependencies.size() >= 16)
+            return std::nullopt;
+        runtime_dependencies.push_back(
+            {.filename = filename,
+             .digest = runtime::sha256_hex(bytes->data(), bytes->size()),
+             .static_expectation = *identity});
+    }
+    if (dependency_error)
+        return std::nullopt;
+    std::ranges::sort(runtime_dependencies, {},
+                      &ControlTrustedHostRuntimeDependencyPolicy::filename);
+    return ControlTrustedHostPreparationPolicy{
+        .executable_digest =
+            runtime::sha256_hex(executable->data(), executable->size()),
+        .manifest_digest = runtime::sha256_hex(manifest->data(), manifest->size()),
+        .static_expectation = *static_expectation,
+        .runtime_dependencies = std::move(runtime_dependencies),
+        .working_directory_device = working_directory->first,
+        .working_directory_inode = working_directory->second};
+#endif
+}
 
 ControlTrustedHostInventoryPrepareResult
 ControlTrustedHostInventory::prepare(
@@ -725,6 +949,7 @@ ControlTrustedHostInventory::prepare(
         cleanup();
         return {ControlTrustedHostInventoryStatus::SnapshotFailed, std::nullopt};
     }
+    std::vector<SnapshotFileIdentity> runtime_dependency_file_ids;
     for (std::size_t index = 0; index < runtime_dependencies.size(); ++index) {
         if (!detail::write_owner_private_file_atomic(staged_runtime_dependencies[index],
                                                      runtime_dependencies[index].bytes)) {
@@ -823,14 +1048,37 @@ ControlTrustedHostInventory::prepare(
             final_runtime_dependencies[index], impl_->config.maximum_executable_bytes);
         const auto identity =
             detail::inspect_static_code_identity(final_runtime_dependencies[index]);
+        const auto file_id = regular_file_identity(final_runtime_dependencies[index]);
         if (!bytes || !identity || bytes->size() != runtime_dependencies[index].bytes.size() ||
             *bytes != runtime_dependencies[index].bytes ||
+            !file_id ||
             identity->executable_identity !=
                 runtime_dependencies[index].policy.static_expectation.executable_identity ||
             identity->publisher_id !=
                 runtime_dependencies[index].policy.static_expectation.publisher_id) {
             cleanup();
             return {ControlTrustedHostInventoryStatus::SignatureInvalid, std::nullopt};
+        }
+        runtime_dependency_file_ids.push_back(*file_id);
+    }
+    // A Team-signed production host must keep enforcing the publisher boundary
+    // after bootstrap, including for libraries loaded later at runtime.
+    if (static_identity->publisher_id.starts_with("team:") &&
+        !static_identity->library_validation) {
+        cleanup();
+        return {ControlTrustedHostInventoryStatus::SignatureInvalid, std::nullopt};
+    }
+    if (!runtime_dependencies.empty() &&
+        static_identity->publisher_id.starts_with("team:")) {
+        // Developer-local ad-hoc artifacts have no shared Team ID; they remain
+        // bounded by the exact-byte snapshot and live mapped-image check before
+        // the broker releases any capability authority.
+        for (const auto& dependency : runtime_dependencies) {
+            if (dependency.policy.static_expectation.publisher_id !=
+                static_identity->publisher_id) {
+                cleanup();
+                return {ControlTrustedHostInventoryStatus::SignatureInvalid, std::nullopt};
+            }
         }
     }
 
@@ -840,6 +1088,23 @@ ControlTrustedHostInventory::prepare(
     snapshot->executable = final_executable;
     snapshot->manifest = final_manifest;
     snapshot->runtime_dependencies = std::move(final_runtime_dependencies);
+    const auto executable_file_id = regular_file_identity(final_executable);
+    if (!executable_file_id) {
+        cleanup();
+        return {ControlTrustedHostInventoryStatus::SnapshotFailed, std::nullopt};
+    }
+    snapshot->executable_file_id = *executable_file_id;
+    snapshot->runtime_dependency_file_ids = std::move(runtime_dependency_file_ids);
+    snapshot->executable_digest =
+        runtime::sha256_hex(snap_executable->data(), snap_executable->size());
+    snapshot->executable_size = snap_executable->size();
+    snapshot->manifest_digest =
+        runtime::sha256_hex(snap_manifest->data(), snap_manifest->size());
+    snapshot->manifest_size = snap_manifest->size();
+    for (const auto& dependency : runtime_dependencies) {
+        snapshot->runtime_dependency_policies.push_back(dependency.policy);
+        snapshot->runtime_dependency_sizes.push_back(dependency.bytes.size());
+    }
     snapshot->arguments = intent.arguments;
     snapshot->working_directory = intent.working_directory;
 #ifdef _WIN32

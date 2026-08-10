@@ -124,16 +124,18 @@ ControlAdmissionPolicy allow_t1_trace() {
 }
 
 std::string wait_for_registration(const fs::path& path) {
-    for (unsigned attempt = 0; attempt < 5'000 && !fs::exists(path); ++attempt)
+    for (unsigned attempt = 0; attempt < 15'000; ++attempt) {
+        std::ifstream input(path);
+        std::string registration;
+        if (input >> registration)
+            return registration;
         std::this_thread::sleep_for(1ms);
-    std::ifstream input(path);
-    std::string registration;
-    input >> registration;
-    return registration;
+    }
+    return {};
 }
 
 bool wait_for_path(const fs::path& path) {
-    for (unsigned attempt = 0; attempt < 5'000 && !fs::exists(path); ++attempt)
+    for (unsigned attempt = 0; attempt < 15'000 && !fs::exists(path); ++attempt)
         std::this_thread::sleep_for(1ms);
     return fs::exists(path);
 }
@@ -200,9 +202,9 @@ TEST_CASE("raw signed T1 host reaches a correlated trace receipt through canonic
                                          // A freshly copied signed fixture can spend several
                                          // seconds in dyld/code-signature validation on a busy
                                          // macOS host before it reaches the inherited channel.
-                                         .preflight_timeout = 10s});
+                                         .preflight_timeout = 15s});
     pulp::platform::ProcessOptions process_options;
-    process_options.timeout_ms = 12'000;
+    process_options.timeout_ms = 20'000;
     auto launched = launcher.launch(prepared.ticket->inventory_id, process_options);
     INFO(launched.explanation);
     INFO(static_cast<unsigned>(launched.preflight.status));
@@ -288,9 +290,13 @@ TEST_CASE("Release installed host publishes only after ready and cleans revoked 
           "[inspect][control][e2e][t1][release][authority]") {
 #if defined(__APPLE__) && defined(PULP_CONTROL_INSTALLED_HOST_E2E_FIXTURE)
     Directory directory;
+    const fs::path fixture = PULP_CONTROL_INSTALLED_HOST_E2E_FIXTURE;
     const auto executable = directory.root / "source" / "installed-host";
-    fs::copy_file(PULP_CONTROL_INSTALLED_HOST_E2E_FIXTURE, executable);
+    fs::copy_file(fixture, executable);
+    const auto runtime_dependency = directory.root / "source" / "libwgpu_native.dylib";
+    fs::copy_file(fixture.parent_path() / "libwgpu_native.dylib", runtime_dependency);
     ::chmod(executable.c_str(), 0700);
+    ::chmod(runtime_dependency.c_str(), 0700);
     {
         std::ofstream sidecar(executable.string() + ".inspector-capabilities.json");
         sidecar << kInstalledManifest;
@@ -330,18 +336,23 @@ TEST_CASE("Release installed host publishes only after ready and cleans revoked 
     ControlTrustedHostInventory inventory(
         {.staging_root = directory.root / "stage", .broker_generation = 29, .ttl = 10s});
     auto launch_host = [&](std::vector<std::string> arguments) {
-        const auto prepared = inventory.prepare({.executable = executable,
-                                                 .arguments = std::move(arguments),
-                                                 .working_directory = directory.root / "source",
-                                                 .host_tier = ControlHostTier::Standalone});
+        ControlTrustedHostLaunchIntent intent{.executable = executable,
+                                              .arguments = std::move(arguments),
+                                              .working_directory = directory.root / "source",
+                                              .host_tier = ControlHostTier::Standalone};
+        const auto policy = pin_control_trusted_host_preparation_policy(intent);
+        REQUIRE(policy);
+        REQUIRE(policy->runtime_dependencies.size() == 1);
+        CHECK(policy->runtime_dependencies.front().filename == "libwgpu_native.dylib");
+        const auto prepared = inventory.prepare(intent, *policy);
         REQUIRE(prepared.ticket);
         ControlTrustedHostLauncher launcher(inventory, enrollments,
                                             {.endpoint_path = directory.root / "broker.sock",
                                              .expected_broker = {.evidence = broker_evidence},
                                              .broker_generation = 29,
-                                             .preflight_timeout = 10s});
+                                             .preflight_timeout = 15s});
         pulp::platform::ProcessOptions options;
-        options.timeout_ms = 12'000;
+        options.timeout_ms = 20'000;
         auto launched = launcher.launch(prepared.ticket->inventory_id, options);
         INFO(launched.explanation);
         REQUIRE(launched.launched());
@@ -580,7 +591,7 @@ TEST_CASE("Release installed host publishes only after ready and cleans revoked 
     CHECK(active_traces == 0);
     CHECK(retained_ui == 0);
     second_connection.disconnect();
-    for (unsigned attempt = 0; attempt < 5'000 && !broker.registrations().empty(); ++attempt)
+    for (unsigned attempt = 0; attempt < 15'000 && !broker.registrations().empty(); ++attempt)
         std::this_thread::sleep_for(1ms);
     REQUIRE(broker.registrations().empty());
 

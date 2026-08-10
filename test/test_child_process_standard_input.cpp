@@ -156,6 +156,49 @@ TEST_CASE("post-spawn input provider binds bytes to the actual blocked child",
     CHECK(readiness.find("ready:" + std::to_string(provided_process_id)) != std::string::npos);
 }
 
+TEST_CASE("suspended spawn validation runs before child code and controls resume",
+          "[child_process][standard-input][security][spawn]") {
+#if defined(__APPLE__)
+    SECTION("accepted exact process resumes") {
+        ChildProcess child;
+        ProcessOptions options;
+        int validated_process_id = -1;
+        options.suspended_process_validator = [&](int process_id) {
+            validated_process_id = process_id;
+            return true;
+        };
+        REQUIRE(child.start_with_standard_input(
+            PULP_CHILD_PROCESS_INPUT_FIXTURE, {"--pid-bound"},
+            [](int process_id) -> std::optional<std::vector<std::uint8_t>> {
+                return bytes_of(std::to_string(process_id));
+            },
+            options));
+        CHECK(child.wait().exit_code == 0);
+        CHECK(validated_process_id == child.process_id());
+    }
+
+    SECTION("rejected process is joined without executing") {
+        ChildProcess child;
+        ProcessOptions options;
+        int validated_process_id = -1;
+        options.suspended_process_validator = [&](int process_id) {
+            validated_process_id = process_id;
+            return false;
+        };
+        CHECK_FALSE(child.start_with_standard_input(
+            PULP_CHILD_PROCESS_INPUT_FIXTURE, {"--pid-bound"},
+            [](int process_id) -> std::optional<std::vector<std::uint8_t>> {
+                return bytes_of(std::to_string(process_id));
+            },
+            options));
+        require_failed_child_was_joined(child, validated_process_id);
+        CHECK(child.read_available_output().empty());
+    }
+#else
+    SUCCEED("suspended spawn validation is macOS-only");
+#endif
+}
+
 TEST_CASE("post-spawn input bytes cannot be replayed to a sibling child",
           "[child_process][standard-input][process-id][security]") {
     int bound_process_id = -1;

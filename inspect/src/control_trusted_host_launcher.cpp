@@ -1,4 +1,5 @@
 #include <pulp/inspect/control_trusted_host_launcher.hpp>
+#include <pulp/inspect/control_peer.hpp>
 
 #include <algorithm>
 #include <exception>
@@ -57,6 +58,7 @@ ControlTrustedHostLauncher::launch(std::string_view inventory_id,
 
     auto snapshot = inventory_->consume(inventory_id);
     if (!snapshot || !snapshot->working_directory_matches_policy() ||
+        !snapshot->launch_material_matches_policy() ||
         snapshot->broker_generation() != config_.broker_generation ||
         snapshot->expires_at() <= std::chrono::steady_clock::now()) {
         result.status = ControlTrustedHostLaunchStatus::InventoryUnavailable;
@@ -77,6 +79,14 @@ ControlTrustedHostLauncher::launch(std::string_view inventory_id,
                                 ? ControlPeerRole::OfflineHost
                                 : ControlPeerRole::StandaloneHost;
     const auto expected_user = config_.expected_broker.evidence.user_id;
+    options.suspended_process_validator =
+        [static_expectation, expected_user, child_role](int process_id) {
+            const auto observed = observe_suspended_control_process(process_id, child_role);
+            return observed && observed->role == child_role &&
+                   observed->user_id == expected_user &&
+                   observed->executable_identity == static_expectation.executable_identity &&
+                   observed->publisher_id == static_expectation.publisher_id;
+        };
     const ControlPeerVerifier verifier(
         [static_expectation, expected_user, child_role](const ControlPeerEvidence& peer) {
             return peer.role == child_role && peer.user_id == expected_user &&
@@ -103,6 +113,13 @@ ControlTrustedHostLauncher::launch(std::string_view inventory_id,
             auto verified = preflight_control_host(
                 std::move(channel), child_process_id, child_role, verifier,
                 [&](const VerifiedControlPeerIdentity& child) {
+                    if (!snapshot_for_session.launch_material_matches_policy() ||
+                        !snapshot_for_session.loaded_runtime_closure_matches_policy(
+                            child.evidence())) {
+                        provider_explanation =
+                            "the live child runtime closure did not match its pinned inventory";
+                        return ControlHostBootstrapBytes{};
+                    }
                     const auto now = std::chrono::steady_clock::now();
                     const auto expires_at =
                         std::min(snapshot_for_session.expires_at(), now + bounded_timeout);

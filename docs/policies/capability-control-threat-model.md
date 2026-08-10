@@ -128,6 +128,20 @@ path. The lineage and grant checks above are guarantees of the broker API, not
 encryption or a same-UID filesystem sandbox. The security audit remains bounded
 to metadata and reason codes rather than operation or artifact contents.
 
+The trusted raw-host launcher likewise treats capability authority, rather than
+same-UID native-code execution, as its security boundary. It snapshots the exact
+main executable, manifest, and adjacent native runtime closure into broker-owned
+storage. On macOS it starts the main executable suspended and verifies that exact
+live code object before child code runs. After resume, dyld may run initializers,
+but the child still has no enrollment or bootstrap authority. The preflight
+provider revalidates every staged byte and signature, enumerates the child's
+file-backed executable mappings, requires the pinned main executable and every
+pinned dependency to be present with the same vnode identity, and rejects every
+unexpected non-system executable image before releasing bootstrap material.
+Team-signed production closures additionally require library validation and one
+Team ID. Ad-hoc developer-local closures have no shared Team ID and rely on the
+exact snapshot plus the same live-closure gate.
+
 The first broker-carrier slice extends the existing length-prefixed IPC stack
 with an OS-local stream; it does not introduce a second framing protocol. Its
 filesystem endpoint is confined to an absolute owner-owned private directory,
@@ -167,6 +181,7 @@ environment-delivered bootstrap credentials remain rejected.
 | Schema downgrade or scope smuggling | Namespaced versioned IDs, canonical serialization and digest, unknown-field rejection, no permissive downgrade, explicit manifest changes for new fields/directions/rates |
 | Removed build authority survives reconfiguration | Per-target profile, capability, and unsafe-evaluation declarations force-refresh on every configure; a two-configure regression proves critical authority is withdrawn without deleting the build tree |
 | Artifact changes between discovery and verification | One cached byte snapshot per candidate drives selection, surface detection, marker verification, hashing, and consent identity; sidecar-derived names must remain safe basenames beside the sidecar; artifact and sidecar symlinks are rejected rather than followed |
+| Raw host or runtime dependency changes between selection and launch | Broker-owned exact-byte closure snapshot; suspended exact-main verification; no authority before preflight; staged-byte/signature revalidation; exact live main/dependency vnode closure; unexpected non-system executable mappings rejected; Team-signed closures require library validation and one Team ID |
 | Empty identity, malformed UTF-8/JSON, or oversized typed payload bypasses policy accounting | Required identity and idempotency strings are nonempty; every schema string and collection is bounded; the decoder validates UTF-8 and complete string tokens before the JSON parser; discriminated operations use closed request variants; executor-specific limits are frozen in the registry, including byte-based UTF-8 limits that JSON Schema character counts cannot express |
 | Update installs a second or untrusted broker | One active Pulp-owned per-user service, one signed update/bootstrap path, version negotiation, old service drain and credential invalidation |
 
@@ -181,6 +196,10 @@ store no broker credential or durable grant.
 
 - Product A does not prevent arbitrary native plugin code from accessing files,
   the network, or other process resources allowed by its host and OS sandbox.
+- Product A is not a same-UID native-code sandbox. A malicious process already
+  running as the host user can execute or deny service outside the broker, and a
+  selected raw host's initializers may run before preflight; neither receives
+  capability authority until the exact live runtime closure passes verification.
 - OSC UDP is a separate opt-in network control product and is reported, not
   silently claimed as protected by Product A.
 - Loopback does not make an unauthenticated endpoint safe.
@@ -204,6 +223,10 @@ rejects direct AUv3 access, self-attested shared-host slots, plugin-rendered
 consent, and environment bootstrap credentials. Any later host tier must close
 its own reachability, trusted-consent ownership, legal completion,
 bootstrap-delivery, and missing-attestation gates before gaining authority.
+Raw-host changes additionally require suspended-main acceptance and rejection,
+launch-material tamper rejection, a positive pinned native-dependency closure,
+and rejection of missing, changed, or unexpected non-system executable images
+before bootstrap authority is released.
 
 Security reviews and host feasibility decisions are durable planning records.
 User-facing artifact checks use `pulp inspect audit ARTIFACT`; that command is

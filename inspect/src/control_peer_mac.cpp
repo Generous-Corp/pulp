@@ -5,6 +5,7 @@
 #include <libproc.h>
 #include <signal.h>
 #include <sys/proc.h>
+#include <unistd.h>
 
 #include <cerrno>
 #include <cstdint>
@@ -160,6 +161,18 @@ std::optional<ControlPeerEvidence> observe_signed_process(
 std::optional<ControlPeerEvidence> observe_platform_control_peer(
     const runtime::LocalPeerCredentials& credentials,
     ControlPeerRole role) {
+    return observe_signed_process(credentials, role);
+}
+
+std::optional<ControlPeerEvidence> observe_platform_suspended_control_process(
+    std::int64_t process_id, ControlPeerRole role) {
+    if (process_id <= 0 || process_id > std::numeric_limits<pid_t>::max())
+        return std::nullopt;
+    runtime::LocalPeerCredentials credentials;
+    credentials.user_id = ::geteuid();
+    credentials.group_id = ::getegid();
+    credentials.process_id = process_id;
+    credentials.process_generation_id = 1;
     return observe_signed_process(credentials, role);
 }
 

@@ -20,6 +20,12 @@ std::optional<ControlPeerEvidence> observe_control_peer(
     const events::InterprocessConnection& connection,
     ControlPeerRole role);
 
+/// Observe a newly spawned macOS process while it is still kernel-suspended.
+/// Unsupported platforms and processes that cannot be bound to a live kernel
+/// generation and valid dynamic code object fail closed.
+std::optional<ControlPeerEvidence> observe_suspended_control_process(
+    std::int64_t process_id, ControlPeerRole role);
+
 /// Mint a verified identity only when the live carrier evidence exactly
 /// matches the broker-owned expectation.
 std::optional<VerifiedControlPeerIdentity> verify_control_peer(

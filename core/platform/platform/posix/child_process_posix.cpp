@@ -306,6 +306,16 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     impl_->cached_exit_status = -1;
     impl_->result = {};
 
+#ifdef __ANDROID__
+    // Android's fork/exec path cannot provide the suspended-before-first-code
+    // contract. Reject the option before creating a child rather than silently
+    // executing an unvalidated process.
+    if (options.suspended_process_validator) {
+        impl_->result.exit_code = -1;
+        return false;
+    }
+#endif
+
     if ((has_standard_input && (options.standard_input_timeout_ms <= 0 ||
                                 !impl_->standard_input.create())) ||
         (options.capture_stdout && !impl_->stdout_pipe.create()) ||
@@ -385,15 +395,23 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     };
     posix_spawnattr_t attributes;
     posix_spawnattr_t* attributes_pointer = nullptr;
-    if (has_standard_input) {
+    if (has_standard_input || options.suspended_process_validator) {
 #if defined(__APPLE__)
         const auto attribute_error = posix_spawnattr_init(&attributes);
         if (attribute_error == 0) {
             attributes_pointer = &attributes;
-            add_action(posix_spawnattr_setflags(&attributes, POSIX_SPAWN_CLOEXEC_DEFAULT));
+            short flags = 0;
+            if (has_standard_input)
+                flags |= POSIX_SPAWN_CLOEXEC_DEFAULT;
+            if (options.suspended_process_validator)
+                flags |= POSIX_SPAWN_START_SUSPENDED;
+            add_action(posix_spawnattr_setflags(&attributes, flags));
         } else {
             setup_error = attribute_error;
         }
+#else
+        if (options.suspended_process_validator)
+            setup_error = ENOTSUP;
 #endif
     }
     if (has_standard_input) {
@@ -481,6 +499,28 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
         impl_->pid = -1;
         impl_->result.exit_code = -1;
         return false;
+    }
+
+    if (options.suspended_process_validator) {
+#if defined(__APPLE__)
+        bool accepted = false;
+        try {
+            accepted = options.suspended_process_validator(impl_->pid);
+        } catch (...) {
+            accepted = false;
+        }
+        if (!accepted || ::kill(impl_->pid, SIGCONT) != 0) {
+            (void)::kill(impl_->pid, SIGKILL);
+            int status = 0;
+            while (::waitpid(impl_->pid, &status, 0) < 0 && errno == EINTR) {}
+            impl_->stdout_pipe.close_all();
+            impl_->stderr_pipe.close_all();
+            impl_->standard_input.close_all();
+            impl_->pid = -1;
+            impl_->result.exit_code = -1;
+            return false;
+        }
+#endif
     }
 
     impl_->started = true;

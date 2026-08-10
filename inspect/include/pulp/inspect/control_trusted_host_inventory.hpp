@@ -65,6 +65,7 @@ struct ControlTrustedHostInventoryPrepareResult {
 struct ControlTrustedHostStaticExpectation {
     std::string executable_identity;
     std::string publisher_id;
+    bool library_validation = false;
 };
 
 struct ControlTrustedHostRuntimeDependencyPolicy {
@@ -82,6 +83,11 @@ struct ControlTrustedHostPreparationPolicy {
     std::uint64_t working_directory_inode = 0;
 };
 
+/// Pins the exact raw-host bytes, manifest, working directory, and adjacent
+/// native runtime closure selected by trusted broker policy.
+std::optional<ControlTrustedHostPreparationPolicy>
+pin_control_trusted_host_preparation_policy(const ControlTrustedHostLaunchIntent& intent);
+
 /// Immutable broker-owned launch material. The backing directory is removed
 /// when the last snapshot owner releases it; no admission credential is stored
 /// in that directory or encoded in its path.
@@ -97,6 +103,8 @@ class ControlTrustedHostSnapshot {
     const std::vector<std::string>& arguments() const;
     const std::filesystem::path& working_directory() const;
     bool working_directory_matches_policy() const;
+    bool launch_material_matches_policy() const;
+    bool loaded_runtime_closure_matches_policy(const ControlPeerEvidence& process) const;
     int working_directory_descriptor() const;
     const ControlRegistrationRequest& registration() const;
     const ControlTrustedHostStaticExpectation& static_expectation() const;

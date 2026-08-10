@@ -163,6 +163,8 @@ add_executable(pulp-test-control-trusted-host-inventory
     test_control_trusted_host_inventory.cpp)
 target_link_libraries(pulp-test-control-trusted-host-inventory PRIVATE
     pulp::inspect-control Catch2::Catch2WithMain)
+target_include_directories(pulp-test-control-trusted-host-inventory PRIVATE
+    ${CMAKE_SOURCE_DIR}/inspect/src)
 target_compile_definitions(pulp-test-control-trusted-host-inventory PRIVATE
     PULP_CONTROL_TRUSTED_HOST_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-fixture>"
     PULP_CONTROL_HOST_PREFLIGHT_FIXTURE="$<TARGET_FILE:pulp-control-host-preflight-fixture>")
@@ -214,9 +216,9 @@ catch_discover_tests(pulp-test-control-endpoint-enrollment
 if(APPLE)
     find_program(_pulp_inventory_test_codesign codesign REQUIRED)
     add_custom_command(TARGET pulp-control-trusted-host-fixture POST_BUILD
-        COMMAND "${_pulp_inventory_test_codesign}" --force --sign -
+        COMMAND "${_pulp_inventory_test_codesign}" --force --sign - --options runtime
                 "$<TARGET_FILE:pulp-control-trusted-host-fixture>"
-        COMMENT "Ad-hoc signing trusted host inventory fixture"
+        COMMENT "Ad-hoc hardened-runtime signing trusted host inventory fixture"
         VERBATIM)
 endif()
 catch_discover_tests(pulp-test-control-trusted-host-inventory
@@ -238,7 +240,7 @@ if(APPLE)
     target_link_options(pulp-control-trusted-host-e2e-fixture PRIVATE LINKER:-dead_strip)
     find_program(_pulp_trusted_host_e2e_codesign codesign REQUIRED)
     add_custom_command(TARGET pulp-control-trusted-host-e2e-fixture POST_BUILD
-        COMMAND "${_pulp_trusted_host_e2e_codesign}" --force --sign -
+        COMMAND "${_pulp_trusted_host_e2e_codesign}" --force --sign - --options library
                 "$<TARGET_FILE:pulp-control-trusted-host-e2e-fixture>"
         COMMENT "Ad-hoc signing raw trusted host E2E fixture"
         VERBATIM)
@@ -255,6 +257,7 @@ if(TARGET pulp::inspect)
     add_executable(pulp-control-installed-host-e2e-fixture
         fixtures/control_installed_host_e2e_fixture.cpp)
     target_link_libraries(pulp-control-installed-host-e2e-fixture PRIVATE pulp::inspect)
+    pulp_stage_runtime_dependencies(pulp-control-installed-host-e2e-fixture)
     target_compile_definitions(pulp-test-control-trusted-host-e2e PRIVATE
         PULP_CONTROL_INSTALLED_HOST_E2E_FIXTURE="$<TARGET_FILE:pulp-control-installed-host-e2e-fixture>")
     add_dependencies(pulp-test-control-trusted-host-e2e pulp-control-installed-host-e2e-fixture)
@@ -263,7 +266,7 @@ if(TARGET pulp::inspect)
         add_custom_command(TARGET pulp-control-installed-host-e2e-fixture POST_BUILD
             COMMAND "${_pulp_trusted_host_e2e_codesign}" --force --sign -
                     "$<TARGET_FILE:pulp-control-installed-host-e2e-fixture>"
-            COMMENT "Ad-hoc signing installed host E2E fixture"
+            COMMENT "Ad-hoc signing installed host closure E2E fixture"
             VERBATIM)
     endif()
 endif()
@@ -326,12 +329,12 @@ add_dependencies(pulp-test-control-host-preflight pulp-control-host-preflight-fi
 if(APPLE)
     find_program(_pulp_preflight_test_codesign codesign REQUIRED)
     add_custom_command(TARGET pulp-test-control-host-preflight POST_BUILD
-        COMMAND "${_pulp_preflight_test_codesign}" --force --sign -
+        COMMAND "${_pulp_preflight_test_codesign}" --force --sign - --options library
                 "$<TARGET_FILE:pulp-test-control-host-preflight>"
         COMMENT "Ad-hoc signing control host preflight test fixture"
         VERBATIM)
     add_custom_command(TARGET pulp-control-host-preflight-fixture POST_BUILD
-        COMMAND "${_pulp_preflight_test_codesign}" --force --sign -
+        COMMAND "${_pulp_preflight_test_codesign}" --force --sign - --options library
                 "$<TARGET_FILE:pulp-control-host-preflight-fixture>"
         COMMENT "Ad-hoc signing control host preflight child fixture"
         VERBATIM)

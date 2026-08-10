@@ -2,6 +2,8 @@
 #include <pulp/inspect/control_trusted_host_launcher.hpp>
 #include <pulp/runtime/crypto.hpp>
 
+#include "control_static_code_identity.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -33,6 +35,28 @@ using pulp::inspect::ControlTrustedHostLauncher;
 using pulp::inspect::ControlTrustedHostLauncherConfig;
 using pulp::inspect::ControlTrustedHostLaunchIntent;
 using pulp::inspect::ControlTrustedHostLaunchStatus;
+
+#if defined(__APPLE__) && TARGET_OS_OSX && !TARGET_OS_IPHONE
+TEST_CASE("trusted host static identity recognizes effective hardened-runtime library validation",
+          "[inspect][control][inventory][security][codesign]") {
+    const auto identity = pulp::inspect::detail::inspect_static_code_identity(
+        fs::path(PULP_CONTROL_TRUSTED_HOST_FIXTURE));
+    REQUIRE(identity);
+    CHECK(identity->library_validation);
+}
+
+TEST_CASE("trusted host platform identity recognizes only Apple-signed Rosetta runtime code",
+          "[inspect][control][inventory][security][rosetta]") {
+    const fs::path runtime = "/Library/Apple/usr/libexec/oah/libRosettaRuntime";
+    if (!fs::exists(runtime)) {
+        SUCCEED("Rosetta is not installed");
+        return;
+    }
+    CHECK(pulp::inspect::detail::is_apple_platform_code(runtime));
+    CHECK_FALSE(pulp::inspect::detail::is_apple_platform_code(
+        fs::path(PULP_CONTROL_TRUSTED_HOST_FIXTURE)));
+}
+#endif
 
 constexpr std::string_view kManifest = R"({
   "schema": "dev.pulp.control/artifact-manifest@1",
@@ -175,6 +199,54 @@ TEST_CASE("trusted host launcher releases enrollment only after exact child pref
     REQUIRE(offline_launched.launched());
     CHECK(enrollments.size() >= 1);
     CHECK(offline_launched.process->wait().exit_code == 0);
+#endif
+}
+
+TEST_CASE("trusted host launcher revalidates staged launch material at spawn",
+          "[inspect][control][inventory][launcher][security][toctou]") {
+#if defined(__APPLE__) && TARGET_OS_OSX && !TARGET_OS_IPHONE
+    Fixture fixture;
+    fs::copy_file(PULP_CONTROL_HOST_PREFLIGHT_FIXTURE, fixture.executable,
+                  fs::copy_options::overwrite_existing);
+    ::chmod(fixture.executable.c_str(), 0700);
+
+    ControlTrustedHostInventory inventory(fixture.config());
+    auto intent = fixture.intent();
+    intent.arguments = {"--normal"};
+    const auto prepared = inventory.prepare(intent);
+    REQUIRE(prepared.ticket);
+
+    const auto generation = fixture.root / "stage" / "generation-17";
+    const auto snapshot_directory = fs::directory_iterator(generation)->path();
+    const auto staged_executable = snapshot_directory / fixture.executable.filename();
+    ::chmod(staged_executable.c_str(), 0700);
+    {
+        std::ofstream output(staged_executable, std::ios::binary | std::ios::app);
+        output << "replaced-after-inventory";
+    }
+    ::chmod(staged_executable.c_str(), 0500);
+
+    pulp::inspect::ControlHostEnrollmentStore enrollments;
+    ControlTrustedHostLauncher launcher(
+        inventory, enrollments,
+        ControlTrustedHostLauncherConfig{
+            .endpoint_path = fixture.root / "broker.sock",
+            .expected_broker = {.evidence =
+                                    {
+                                        .role = pulp::inspect::ControlPeerRole::TrustedHostBridge,
+                                        .user_id = "uid:" + std::to_string(::getuid()),
+                                        .process_id = static_cast<std::int64_t>(::getpid()),
+                                        .process_start_id = "pidversion:test",
+                                        .executable_identity = "signed:test-broker",
+                                        .publisher_id = "publisher:test-broker",
+                                    }},
+            .broker_generation = 17,
+            .preflight_timeout = 5s,
+        });
+    auto launched = launcher.launch(prepared.ticket->inventory_id);
+    CHECK(launched.status == ControlTrustedHostLaunchStatus::InventoryUnavailable);
+    CHECK_FALSE(launched.process);
+    CHECK(enrollments.size() == 0);
 #endif
 }
 
