@@ -1,5 +1,8 @@
 #include "midi_utility_test_support.hpp"
 
+#include <algorithm>
+#include <vector>
+
 TEST_CASE("Note length shaping orders retrigger releases before attacks",
           "[midi][utility][ordering]") {
     auto input = prepared_buffer();
@@ -20,6 +23,88 @@ TEST_CASE("Note length shaping orders retrigger releases before attacks",
     CHECK(output[1].sample_offset == 12);
     CHECK(output[2].sample_offset == 12);
 }
+
+TEST_CASE("Note length scheduling is invariant to callback partitions",
+          "[midi][utility][ordering][partition]") {
+    struct ScheduledAttack {
+        std::int64_t sample;
+        std::uint8_t note;
+        std::uint8_t velocity;
+    };
+    struct AbsoluteEvent {
+        std::int64_t sample;
+        bool attack;
+        std::uint8_t channel;
+        std::uint8_t note;
+        std::uint8_t velocity;
+
+        bool operator==(const AbsoluteEvent&) const = default;
+    };
+
+    constexpr std::array attacks{
+        ScheduledAttack{5, 60, 100},
+        ScheduledAttack{60, 64, 90},
+        ScheduledAttack{78, 60, 110},
+    };
+    constexpr std::int64_t total_samples = 192;
+
+    const auto render = [&](const auto& partitions) {
+        midi::NoteLengthShaper<4> shaper({73});
+        auto input = prepared_buffer();
+        auto output = prepared_buffer();
+        NoteBalance balance;
+        std::vector<AbsoluteEvent> rendered;
+        std::int64_t block_start = 0;
+        std::size_t partition_index = 0;
+
+        while (block_start < total_samples) {
+            const auto block_samples = static_cast<std::int32_t>(std::min<std::int64_t>(
+                partitions[partition_index++ % partitions.size()], total_samples - block_start));
+            input.clear();
+            for (const auto& attack : attacks) {
+                if (attack.sample < block_start ||
+                    attack.sample >= block_start + block_samples)
+                    continue;
+                auto event = midi::MidiEvent::note_on(0, attack.note, attack.velocity);
+                event.sample_offset = static_cast<std::int32_t>(attack.sample - block_start);
+                REQUIRE(input.add(event));
+            }
+
+            REQUIRE(shaper.process(input, output, {block_start}, block_samples).complete);
+            balance.feed(output);
+            for (const auto& event : output) {
+                REQUIRE(event.sample_offset >= 0);
+                REQUIRE(event.sample_offset < block_samples);
+                REQUIRE((event.is_note_on() || event.is_note_off()));
+                rendered.push_back({block_start + event.sample_offset, event.is_note_on(),
+                                    event.channel(), event.note(), event.velocity()});
+            }
+            block_start += block_samples;
+        }
+
+        REQUIRE(shaper.empty());
+        REQUIRE(balance.balanced());
+        return rendered;
+    };
+
+    constexpr std::array<std::int32_t, 1> fixed{64};
+    constexpr std::array<std::int32_t, 5> irregular{17, 31, 5, 64, 9};
+    const auto fixed_events = render(fixed);
+    const auto irregular_events = render(irregular);
+    const std::vector<AbsoluteEvent> expected{
+        {5, true, 0, 60, 100},
+        {60, true, 0, 64, 90},
+        {78, false, 0, 60, 0},
+        {78, true, 0, 60, 110},
+        {133, false, 0, 64, 0},
+        {151, false, 0, 60, 0},
+    };
+
+    REQUIRE(fixed_events == expected);
+    REQUIRE(irregular_events == expected);
+    REQUIRE(fixed_events == irregular_events);
+}
+
 TEST_CASE("Note length shaping treats velocity-zero note-ons as releases",
           "[midi][utility][lifecycle]") {
     auto input = prepared_buffer();
