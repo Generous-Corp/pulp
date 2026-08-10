@@ -81,7 +81,7 @@ ControlOperationResult capture_result(const ControlArtifactMetadata& detail,
     result.detail_json = "{\"artifact_id\":\"" + detail.artifact_id +
                          "\",\"byte_count\":" + std::to_string(detail.byte_size) +
                          ",\"height\":1,\"mime_type\":\"image/png\","
-                         "\"redaction_state\":\"original\",\"sha256\":\"" + detail.sha256 +
+                         "\"redaction_state\":\"redacted\",\"sha256\":\"" + detail.sha256 +
                          "\",\"width\":1}";
     result.artifacts.push_back({handle.artifact_id, handle.content_type, handle.byte_size});
     return result;
@@ -259,6 +259,10 @@ struct AdmissionFixture {
                                                 .content_type = "image/png",
                                                 .created_at_unix_ms = 1,
                                                 .expires_at_unix_ms = 4'102'444'800'000,
+                                                .sensitivity =
+                                                    ControlArtifactSensitivity::Sensitive,
+                                                .redaction_state =
+                                                    ControlArtifactRedactionState::Redacted,
                                             });
         REQUIRE(stored.metadata);
         auto completed = capture_result(*stored.metadata, *stored.metadata);
@@ -377,6 +381,10 @@ TEST_CASE("Artifact reads reauthorize the original producer lineage",
                                                     .content_type = "image/png",
                                                     .created_at_unix_ms = 1,
                                                     .expires_at_unix_ms = 4102444800000,
+                                                    .sensitivity =
+                                                        ControlArtifactSensitivity::Sensitive,
+                                                    .redaction_state =
+                                                        ControlArtifactRedactionState::Redacted,
                                                 });
     REQUIRE(stored.status == ControlArtifactStatus::Stored);
     REQUIRE(stored.metadata);
@@ -573,6 +581,10 @@ TEST_CASE("Artifact-producing completion binds typed detail to the authorized ar
                                                            .content_type = std::move(content_type),
                                                            .created_at_unix_ms = 1,
                                                            .expires_at_unix_ms = 4102444800000,
+                                                           .sensitivity =
+                                                               ControlArtifactSensitivity::Sensitive,
+                                                           .redaction_state =
+                                                               ControlArtifactRedactionState::Redacted,
                                                        });
     };
     const auto first = publish(first_bytes);

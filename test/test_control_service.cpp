@@ -462,6 +462,10 @@ TEST_CASE("control service gates artifact operations and reads on negotiated sup
                                                             .content_type = "image/png",
                                                             .created_at_unix_ms = 1,
                                                             .expires_at_unix_ms = 4'102'444'800'000,
+                                                            .sensitivity =
+                                                                ControlArtifactSensitivity::Sensitive,
+                                                            .redaction_state =
+                                                                ControlArtifactRedactionState::Redacted,
                                                         });
             REQUIRE(stored.status == ControlArtifactStatus::Stored);
             REQUIRE(stored.metadata);
@@ -475,7 +479,7 @@ TEST_CASE("control service gates artifact operations and reads on negotiated sup
                                        ",\"mime_type\":\"image/png\",\"sha256\":\"" +
                                        metadata.sha256 +
                                        "\",\"width\":1,\"height\":1,"
-                                       "\"redaction_state\":\"original\"}",
+                                       "\"redaction_state\":\"redacted\"}",
                         .artifacts = {{metadata.artifact_id, metadata.content_type,
                                        metadata.byte_size}},
                     },
