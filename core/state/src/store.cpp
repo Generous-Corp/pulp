@@ -8,6 +8,7 @@
 #include <vector>
 #include <pulp/events/event_loop.hpp>
 #include <pulp/events/main_thread_dispatcher.hpp>
+#include <pulp/runtime/exceptions.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
 #include <cassert>
 #include <pulp/state/store.hpp>
@@ -592,7 +593,7 @@ ParameterGestureApplyResult StateStore::apply_normalized_gesture_if_generation(
     bool gesture_acquired = false;
     bool value_written = false;
     bool callback_failed = false;
-    try {
+    PULP_TRY {
         acquire_gesture(id);
         gesture_acquired = true;
         if (state_generation() == reserved) {
@@ -602,12 +603,12 @@ ParameterGestureApplyResult StateStore::apply_normalized_gesture_if_generation(
         }
         release_gesture(id);
         gesture_acquired = false;
-    } catch (...) {
+    } PULP_CATCH_ALL {
         callback_failed = true;
         if (gesture_acquired) {
-            try {
+            PULP_TRY {
                 release_gesture(id);
-            } catch (...) {
+            } PULP_CATCH_ALL {
             }
         }
     }
@@ -639,9 +640,9 @@ ParameterGestureApplyResult StateStore::apply_normalized_gesture_if_generation(
                 rollback_expected, reserved, previous, rollback_generation);
         }
         if (rolled_back) {
-            try {
+            PULP_TRY {
                 if (registry_) registry_->notify(id, previous);
-            } catch (...) {
+            } PULP_CATCH_ALL {
                 callback_failed = true;
             }
         }
@@ -800,13 +801,15 @@ void StateStore::acquire_gesture(ParamID id) {
     auto& leases = gesture_leases_[id];
     if (leases++ != 0) return;
     const bool opened = open_gestures_.insert(id).second;
-    try {
+    PULP_TRY {
         if (opened && on_begin_gesture_)
             on_begin_gesture_(id);
-    } catch (...) {
+    } PULP_CATCH_ALL {
         if (opened) open_gestures_.erase(id);
         if (--leases == 0) gesture_leases_.erase(id);
+#if defined(__cpp_exceptions) && __cpp_exceptions
         throw;
+#endif
     }
 }
 
