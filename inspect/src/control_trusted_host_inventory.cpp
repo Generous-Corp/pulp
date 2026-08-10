@@ -695,11 +695,14 @@ bool ControlTrustedHostSnapshot::loaded_runtime_closure_matches_policy(
     }
     if (!complete_scan)
         return false;
-    for (const auto& expected : expected_files) {
-        if (std::ranges::find(loaded_files, expected) == loaded_files.end())
-            return false;
-    }
-    return true;
+    // Runtime dependencies are an allowlist, not an eager-load contract. A
+    // host may link or dlopen a pinned dependency only when the corresponding
+    // feature is used. Requiring every allowed image during bootstrap rejects
+    // legitimate dormant features (the installed GPU author host is one such
+    // case). The exact main executable must be present, while the scan above
+    // still rejects every non-platform executable mapping that is not the
+    // exact main image or one of the pinned dependency files.
+    return std::ranges::find(loaded_files, impl_->executable_file_id) != loaded_files.end();
 #else
     (void)process;
     return impl_->runtime_dependency_file_ids.empty();
