@@ -167,12 +167,16 @@ enum class EditGestureIdentityError : std::uint8_t {
     IdentityExhausted,
     IdentityPending,
     ForeignOrStaleIssue,
+    IssuedTransactionMismatch,
+    SubmissionResultMismatch,
 };
 
-/// Whether the transaction built from an issued identity committed.
-enum class EditGestureSubmission : std::uint8_t {
-    Rejected,
-    Committed,
+/// Result of submitting one issued gesture transaction through its allocator.
+struct EditGestureSubmitOutcome {
+    /// The exact result returned by DocumentSession::submit().
+    runtime::Result<timeline::CommitResult, timeline::TransactionError> document_result;
+    /// Confirmed allocator state after that result was applied.
+    EditGestureIdentityState state = EditGestureIdentityState::AwaitingBegin;
 };
 
 class EditGestureIdentityAllocator;
@@ -190,8 +194,8 @@ class EditGestureIdentityIssue {
 
     /// Lowers `intent` with this issue's authoritative gesture phase and identity.
     ///
-    /// The caller-supplied phase is ignored so the transaction submitted to a
-    /// DocumentSession cannot diverge from the phase later acknowledged here.
+    /// The caller-supplied phase is ignored so the transaction submitted through
+    /// its allocator cannot diverge from the phase used for lifecycle advancement.
     [[nodiscard]] runtime::Result<timeline::Transaction, timeline::ModelError>
     lower(EditIntent intent) const;
 
@@ -217,21 +221,23 @@ class EditGestureIdentityIssue {
     timeline::WriterToken::Provenance provenance_;
 };
 
-/// Allocates one undo group and a submission-safe stream of gesture identities.
+/// Allocates one undo group and submits a construction-safe stream of gesture identities.
 ///
-/// Identity issuance and lifecycle advancement are deliberately separate. A
-/// transaction can be rejected after its IDs are allocated, so only a matching
-/// `Committed` acknowledgement advances Begin, End, or Cancel. A `Rejected`
-/// acknowledgement keeps the last confirmed state and permits a fresh-ID retry
-/// with the same undo group. Every matching acknowledgement consumes its issue,
-/// and exactly one issue may await acknowledgement.
+/// A transaction can be rejected after its IDs are allocated, so issuing an
+/// identity never advances the confirmed lifecycle. submit() validates the
+/// issue and its lowered transaction, calls DocumentSession::submit() itself,
+/// and derives the transition from that result. A rejection keeps the last
+/// confirmed state and permits a fresh-ID retry with the same undo group.
+/// Every attempted session submission consumes its issue, and exactly one issue
+/// may await submission.
 ///
 /// This is control-thread state, not a concurrent reservation in
-/// DocumentSession. The session still owns the one-open-gesture rule and remains
-/// the submission authority. Opaque writer provenance prevents equal numeric ID
-/// streams from separate sessions from being mistaken for one another here.
-/// Cancel closes the group after a successful submission; reverting its applied
-/// edits remains the caller's subsequent `DocumentSession::undo()` operation.
+/// DocumentSession. The session owns the one-open-gesture rule and is the only
+/// submission authority; the allocator retains neither it nor the WriterToken.
+/// Opaque writer provenance prevents equal numeric ID streams from separate
+/// sessions from being mistaken for one another here. Cancel closes the group
+/// after a successful submission; reverting its applied edits remains the
+/// caller's subsequent `DocumentSession::undo()` operation.
 class EditGestureIdentityAllocator {
   public:
     /// Allocates the gesture's sole undo group at pointer-down.
@@ -307,24 +313,38 @@ class EditGestureIdentityAllocator {
             runtime::Ok(EditGestureIdentityIssue(std::move(identity), phase, provenance_)));
     }
 
-    /// Records the authoritative submission outcome for exactly one issue.
+    /// Validates and submits exactly one issued gesture transaction.
     ///
-    /// A foreign, moved-from, already-acknowledged, or superseded issue is stale
-    /// and cannot change either the pending issue or the confirmed lifecycle. A
-    /// matching issue is invalidated for both committed and rejected outcomes.
-    runtime::Result<EditGestureIdentityState, EditGestureIdentityError>
-    acknowledge(EditGestureIdentityIssue&& issue, EditGestureSubmission submission) noexcept {
+    /// Protocol mismatches touch neither DocumentSession nor the pending issue.
+    /// Once DocumentSession is called, both its success and rejection consume
+    /// the issue; only success advances the confirmed lifecycle.
+    runtime::Result<EditGestureSubmitOutcome, EditGestureIdentityError>
+    submit(timeline::DocumentSession& session, timeline::WriterToken& writer,
+           EditGestureIdentityIssue&& issue, timeline::Transaction transaction) {
         if (!matches_pending(issue))
-            return runtime::Result<EditGestureIdentityState, EditGestureIdentityError>(
-                runtime::Err(EditGestureIdentityError::ForeignOrStaleIssue));
+            return submit_error(EditGestureIdentityError::ForeignOrStaleIssue);
+        if (!writer.provenance().valid())
+            return submit_error(EditGestureIdentityError::InvalidWriter);
+        if (writer.provenance() != provenance_)
+            return submit_error(EditGestureIdentityError::WriterMismatch);
+        if (!matches_pending(transaction))
+            return submit_error(EditGestureIdentityError::IssuedTransactionMismatch);
 
         const auto phase = pending_phase_;
+        const auto command = pending_command_;
+        auto document_result = session.submit(writer, std::move(transaction));
         issue.invalidate();
         clear_pending();
-        if (submission == EditGestureSubmission::Committed)
+        if (document_result) {
+            if (document_result->applied_commands.size() != 1 ||
+                document_result->applied_commands.front() != command) {
+                state_ = EditGestureIdentityState::Exhausted;
+                return submit_error(EditGestureIdentityError::SubmissionResultMismatch);
+            }
             state_ = committed_state_after(phase);
-        return runtime::Result<EditGestureIdentityState, EditGestureIdentityError>(
-            runtime::Ok(state_));
+        }
+        return runtime::Result<EditGestureSubmitOutcome, EditGestureIdentityError>(runtime::Ok(
+            EditGestureSubmitOutcome{std::move(document_result), state_}));
     }
 
     /// Returns the one undo group shared by every issue from this allocator.
@@ -337,7 +357,7 @@ class EditGestureIdentityAllocator {
         return state_;
     }
 
-    /// Returns whether one issued identity still needs acknowledgement.
+    /// Returns whether one issued identity still needs submission.
     bool has_pending_identity() const noexcept {
         return pending_;
     }
@@ -362,6 +382,14 @@ class EditGestureIdentityAllocator {
                identity.command_id == pending_command_ && identity.undo_group == undo_group_;
     }
 
+    bool matches_pending(const timeline::Transaction& transaction) const noexcept {
+        return transaction.id == pending_transaction_ &&
+               transaction.expected_revision == pending_revision_ &&
+               transaction.undo_group == undo_group_ &&
+               transaction.gesture_phase == pending_phase_ && transaction.commands.size() == 1 &&
+               transaction.commands.front().id == pending_command_;
+    }
+
     static EditGestureIdentityState committed_state_after(timeline::GesturePhase phase) noexcept {
         if (phase == timeline::GesturePhase::Begin || phase == timeline::GesturePhase::Update)
             return EditGestureIdentityState::Open;
@@ -379,6 +407,12 @@ class EditGestureIdentityAllocator {
     static runtime::Result<EditGestureIdentityIssue, EditGestureIdentityError>
     issue_error(EditGestureIdentityError error) noexcept {
         return runtime::Result<EditGestureIdentityIssue, EditGestureIdentityError>(
+            runtime::Err(error));
+    }
+
+    static runtime::Result<EditGestureSubmitOutcome, EditGestureIdentityError>
+    submit_error(EditGestureIdentityError error) {
+        return runtime::Result<EditGestureSubmitOutcome, EditGestureIdentityError>(
             runtime::Err(error));
     }
 
