@@ -8,8 +8,8 @@
 #include "program_validator.hpp"
 #include "sequence_compile_bookkeeping.hpp"
 #include "sequence_content_lowerer.hpp"
-#include "track_automation_compiler.hpp"
 #include "track_audio_program_compiler.hpp"
+#include "track_automation_compiler.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -33,7 +33,7 @@ CompileInvalidationInput::CompileInvalidationInput(
     if (registry) {
         registry_generation_ = registry->generation_;
         captured_registry_revision_ = registry->revision();
-        registry_snapshot_ = std::make_shared<const CompileContextRegistry>(*registry);
+        registry_snapshot_ = registry->immutable_snapshot();
     }
 }
 
@@ -60,18 +60,6 @@ std::uint16_t groove_velocity(std::uint16_t authored, std::int32_t per_mille) no
         std::min<std::uint64_t>(scaled, std::numeric_limits<std::uint16_t>::max()));
 }
 
-bool same_registry_generation(const ProgramCompileRequest& lhs,
-                              const ProgramCompileRequest& rhs) noexcept {
-    if (lhs.invalidation.has_value() != rhs.invalidation.has_value())
-        return false;
-    if (!lhs.invalidation)
-        return true;
-    return lhs.invalidation->captured_registry_generation() ==
-               rhs.invalidation->captured_registry_generation() &&
-           lhs.invalidation->captured_registry_revision() ==
-               rhs.invalidation->captured_registry_revision();
-}
-
 void merge_track_policy_deltas(std::vector<TrackCompilePolicy>& retained,
                                const std::vector<TrackCompilePolicy>& incoming) {
     for (const auto& policy : incoming) {
@@ -92,6 +80,8 @@ void merge_track_policy_deltas(std::vector<TrackCompilePolicy>& retained,
 struct QueuedCompileRequest {
     ProgramCompileRequest request;
     std::uint64_t submission_epoch = 0;
+    std::shared_ptr<const void> content_registry_generation;
+    std::uint64_t content_registry_revision = 0;
     std::vector<TrackCompilePolicy> policy_delta;
     timeline::ItemId policy_project_id;
     timeline::ItemId policy_sequence_id;
@@ -133,6 +123,9 @@ class ProgramCompilerTask final : public CompileTask {
     const timeline::Sequence* sequence_ = nullptr;
     Stage stage_ = Stage::Capture;
     ProgramGeneration generation_ = 0;
+    std::shared_ptr<const CompileContextRegistry> content_compilers_;
+    std::shared_ptr<const void> content_compiler_generation_;
+    std::uint64_t content_compiler_revision_ = 0;
     bool all_dirty_ = false;
     bool generated_layout_dirty_ = false;
     std::size_t track_index_ = 0;
@@ -140,6 +133,7 @@ class ProgramCompilerTask final : public CompileTask {
     std::size_t converter_clip_index_ = 0;
     std::size_t clip_index_ = 0;
     std::size_t note_index_ = 0;
+    std::size_t registered_note_index_ = 0;
     bool clip_started_ = false;
     bool track_prepared_ = false;
     detail::SequenceCompileBookkeeping sequence_bookkeeping_;
@@ -152,6 +146,10 @@ class ProgramCompilerTask final : public CompileTask {
     std::vector<CompiledNoteModifier> current_note_modifiers_;
     std::vector<CompiledNoteModifier> note_modifier_merge_buffer_;
     detail::BudgetedStableMergeState note_modifier_merge_;
+    std::optional<ContentProgramFragment> current_registered_fragment_;
+    std::uint64_t current_registered_generated_id_start_ = 0;
+    timeline::ProductionDeclaration current_arrangement_production_;
+    bool current_registered_forces_reset_ = false;
     std::vector<AudioClipRendererProgram> current_audio_clips_;
     detail::TrackAudioProgramCompiler audio_compiler_;
     std::vector<timeline::ItemId> current_audio_ids_;
@@ -186,6 +184,10 @@ struct PlaybackProgramCompilerCore
             status.latest_published_generation = store.live()->generation();
             published_project = store.live_project();
             latest_submitted_project = published_project;
+            published_context_registry_generation = store.live()->content_compiler_generation();
+            published_context_registry_revision = store.live()->content_compiler_revision();
+            latest_submitted_context_registry_generation = published_context_registry_generation;
+            latest_submitted_context_registry_revision = published_context_registry_revision;
         } else if (!bound) {
             status.has_error = true;
             status.last_error = {CompileErrorCode::CompilerAlreadyBound, {}, 0};
@@ -209,16 +211,15 @@ struct PlaybackProgramCompilerCore
     bool publish_if_latest(std::uint64_t submission_epoch,
                            std::shared_ptr<const PlaybackProgram> program,
                            const std::shared_ptr<const timeline::Project>& project,
-                           const std::optional<CompileInvalidationInput>& invalidation) {
+                           const std::shared_ptr<const void>& registry_generation,
+                           std::uint64_t registry_revision) {
         std::lock_guard lock(mutex);
         if (latest_submission_epoch != submission_epoch)
             return false;
         store.publish(std::move(program), project);
         published_project = project;
-        published_context_registry_generation =
-            invalidation ? invalidation->registry_generation_ : nullptr;
-        published_context_registry_revision =
-            invalidation ? invalidation->captured_registry_revision() : 0;
+        published_context_registry_generation = registry_generation;
+        published_context_registry_revision = registry_revision;
         return true;
     }
 
@@ -293,12 +294,11 @@ struct PlaybackProgramCompilerCore
     bool accepting = true;
     const bool bound;
     OfflineStretchArtifactCache offline_stretch_cache;
-    std::shared_ptr<const detail::ContextRegistryGeneration> published_context_registry_generation;
+    std::shared_ptr<const void> published_context_registry_generation;
     std::uint64_t published_context_registry_revision = 0;
     std::shared_ptr<const timeline::Project> published_project;
     std::shared_ptr<const timeline::Project> latest_submitted_project;
-    std::shared_ptr<const detail::ContextRegistryGeneration>
-        latest_submitted_context_registry_generation;
+    std::shared_ptr<const void> latest_submitted_context_registry_generation;
     std::uint64_t latest_submitted_context_registry_revision = 0;
     std::uint64_t latest_submission_epoch = 0;
     std::vector<TrackCompilePolicy> active_track_policies;
@@ -363,6 +363,11 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
         if (!next_generation)
             return fail({CompileErrorCode::GenerationExhausted, {}, request_->document_revision});
         generation_ = next_generation.value();
+        content_compilers_ = request_->invalidation
+                                 ? request_->invalidation->registry_snapshot_owner()
+                                 : request_->content_compilers;
+        content_compiler_generation_ = queued_->content_registry_generation;
+        content_compiler_revision_ = queued_->content_registry_revision;
         all_dirty_ = request_->dirty.all || !live ||
                      live->project_id() != request_->project->id() ||
                      live->sequence_id() != request_->sequence_id ||
@@ -371,7 +376,9 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                      live->audio_assets_owner().get() != request_->audio_assets.get() ||
                      live->audio_limits() != request_->audio_limits ||
                      live->automation_limits() != request_->automation_limits ||
-                     live->generated_id_base() != request_->project->next_item_id();
+                     live->generated_id_base() != request_->project->next_item_id() ||
+                     live->content_compiler_generation().get() != content_compiler_generation_.get() ||
+                     live->content_compiler_revision() != content_compiler_revision_;
         sequence_flattener_ = std::make_unique<SequenceContentLowerer>(
             *request_->project, *request_->tempo_map, request_->max_expanded_note_events,
             request_->max_expanded_clips);
@@ -524,7 +531,8 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                         return fail({CompileErrorCode::AudioProgramInvalid, error.item,
                                      request_->document_revision, error.code});
                     }
-                    if (status != detail::TrackAudioClipCompileStatus::Complete) continue;
+                    if (status != detail::TrackAudioClipCompileStatus::Complete)
+                        continue;
                     ++total_audio_clips_;
                     current_audio_clips_.push_back(audio_compiler_.take());
                     clip_index_ = 1;
@@ -584,13 +592,114 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                         return fail({code, detail.renderer.item, request_->document_revision,
                                      detail.renderer.code, detail.offline});
                     }
-                    if (status != detail::TrackAudioClipCompileStatus::Complete) continue;
+                    if (status != detail::TrackAudioClipCompileStatus::Complete)
+                        continue;
                     ++total_audio_clips_;
                     current_audio_clips_.push_back(audio_compiler_.take());
                     current_audio_ids_.push_back(clip.id());
                 }
+                if (const auto* registered =
+                        std::get_if<timeline::RegisteredContent>(&clip.content())) {
+                    if (clip.time_anchor() != timeline::ClipTimeAnchor::Musical)
+                        return fail({CompileErrorCode::RegisteredContentCompileFailed, clip.id(),
+                                     request_->document_revision});
+                    const auto* registry = request_->invalidation
+                                               ? request_->invalidation->registry_snapshot()
+                                               : request_->content_compilers.get();
+                    const auto* registration = registry ? registry->find(*registered) : nullptr;
+                    if (registration == nullptr || registration->compile == nullptr)
+                        return fail({CompileErrorCode::UnresolvedRegisteredContent, clip.id(),
+                                     request_->document_revision});
+                    const auto* context_sequence =
+                        lowered_clip.context_sequence_id.valid()
+                            ? request_->project->find_sequence(lowered_clip.context_sequence_id)
+                            : sequence_;
+                    if (!context_sequence)
+                        return fail({CompileErrorCode::InvalidStructure,
+                                     lowered_clip.context_sequence_id,
+                                     request_->document_revision});
+                    const auto remaining_events = request_->maximum_note_events_per_track -
+                                                  std::min(current_note_events_.size(),
+                                                           request_->maximum_note_events_per_track);
+                    const auto note_bound =
+                        std::min(registration->maximum_fragment_notes, remaining_events / 2);
+                    RegisteredContentCompileInput input{
+                        *registered,
+                        clip.id(),
+                        clip.duration(),
+                        lowered_clip.context_start,
+                        timeline::CompileContextView(*request_->project, context_sequence->id(),
+                                                     registration->subscriptions),
+                        note_bound,
+                    };
+                    auto compiled =
+                        registration->compile(input, registration->compile_context.get());
+                    if (!compiled)
+                        return fail({CompileErrorCode::RegisteredContentCompileFailed, clip.id(),
+                                     request_->document_revision,
+                                     AudioRendererErrorCode::InvalidAsset,
+                                     OfflineStretchErrorCode::None, compiled.error().code});
+                    const auto actual = compiled.value().notes().size();
+                    if (actual > note_bound)
+                        return fail({CompileErrorCode::RegisteredContentFragmentQuotaExceeded,
+                                     clip.id(), request_->document_revision,
+                                     AudioRendererErrorCode::InvalidAsset,
+                                     OfflineStretchErrorCode::None,
+                                     ContentFragmentErrorCode::RendererFailed, actual, note_bound});
+                    if (const auto error = sequence_flattener_->charge_reused(
+                            0, static_cast<std::uint64_t>(actual) * 2,
+                            static_cast<std::uint64_t>(actual), track.id()))
+                        return fail({error->code, error->item, request_->document_revision});
+                    current_registered_generated_id_start_ =
+                        sequence_flattener_->next_generated_id() - actual;
+                    current_registered_fragment_ = std::move(compiled).value();
+                    current_arrangement_production_.reproducibility =
+                        timeline::weakest(current_arrangement_production_.reproducibility,
+                                          registration->production.reproducibility);
+                    if (registration->production.mode == timeline::ProductionMode::Buffered) {
+                        current_arrangement_production_.mode = timeline::ProductionMode::Buffered;
+                        current_arrangement_production_.lookahead_ms =
+                            std::max(current_arrangement_production_.lookahead_ms,
+                                     registration->production.lookahead_ms);
+                    }
+                    current_registered_forces_reset_ =
+                        current_registered_forces_reset_ ||
+                        registration->state_policy == RegisteredRendererStatePolicy::Reset;
+                }
                 current_clip_ids_.push_back(clip.id());
                 clip_started_ = true;
+            }
+            if (current_registered_fragment_) {
+                const auto fragment_notes = current_registered_fragment_->notes();
+                if (registered_note_index_ == fragment_notes.size()) {
+                    current_registered_fragment_.reset();
+                    registered_note_index_ = 0;
+                    clip_started_ = false;
+                    ++clip_index_;
+                    ++work;
+                    continue;
+                }
+                const auto generated_index = registered_note_index_;
+                const auto& note = fragment_notes[registered_note_index_++];
+                const auto start_tick = clip.start() + timebase::TickDuration{note.start.value};
+                const auto end_tick = start_tick + note.duration;
+                const auto start_sample = request_->tempo_map->ticks_to_samples(start_tick);
+                const auto end_sample = request_->tempo_map->ticks_to_samples(end_tick);
+                if (end_sample <= start_sample)
+                    return fail({CompileErrorCode::RegisteredContentCompileFailed, clip.id(),
+                                 request_->document_revision, AudioRendererErrorCode::InvalidAsset,
+                                 OfflineStretchErrorCode::None,
+                                 ContentFragmentErrorCode::InvalidNote});
+                const timeline::ItemId note_id{current_registered_generated_id_start_ +
+                                               generated_index};
+                current_note_events_.push_back({start_sample, start_tick, clip.id(), note_id,
+                                                note.velocity, note.pitch, note.channel,
+                                                NoteProgramEventKind::On});
+                current_note_events_.push_back({end_sample, end_tick, clip.id(), note_id,
+                                                note.velocity, note.pitch, note.channel,
+                                                NoteProgramEventKind::Off});
+                ++work;
+                continue;
             }
             const auto* notes = role == detail::ClipContentRole::Notes
                                     ? std::get_if<timeline::MidiContent>(&clip.content())
@@ -733,7 +842,8 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 return fail({CompileErrorCode::AudioProgramInvalid, error.item,
                              request_->document_revision, error.code});
             }
-            if (status != detail::TrackAudioClipCompileStatus::Complete) continue;
+            if (status != detail::TrackAudioClipCompileStatus::Complete)
+                continue;
             ++total_audio_clips_;
             ++take_comp_index_;
             current_audio_clips_.push_back(audio_compiler_.take());
@@ -820,13 +930,13 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
         if (stage_ == Stage::FinalizeTrack) {
             const auto& track = sequence_->tracks()[track_index_];
             ProviderSelectorProgram provider;
-            RendererStatePolicy state_policy = RendererStatePolicy::CarryByItemId;
+            RendererStatePolicy requested_state_policy = RendererStatePolicy::CarryByItemId;
             const auto& live = core_->store.live();
             if (live && live->project_id() == request_->project->id() &&
                 live->sequence_id() == request_->sequence_id) {
                 if (const auto* prior = live->find_track(track.id())) {
                     provider = prior->provider();
-                    state_policy = prior->state_policy();
+                    requested_state_policy = prior->requested_state_policy();
                 }
             }
             const auto policy = std::lower_bound(
@@ -836,8 +946,11 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 });
             if (policy != request_->track_policies.end() && policy->track_id == track.id()) {
                 provider = policy->provider;
-                state_policy = policy->state_policy;
+                requested_state_policy = policy->state_policy;
             }
+            const auto state_policy = current_registered_forces_reset_
+                                          ? RendererStatePolicy::Stateless
+                                          : requested_state_policy;
             std::shared_ptr<const AudioTrackRendererProgram> audio_program;
             if (!current_audio_clips_.empty()) {
                 audio_program = std::shared_ptr<const AudioTrackRendererProgram>(
@@ -845,15 +958,17 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             }
             auto automation_program = std::move(current_automation_.program);
             const auto mixer = detail::resolve_track_mixer(track, automation_program.get());
+            sequence_bookkeeping_.finish_flattened_track(*sequence_flattener_);
             tracks_.push_back(std::shared_ptr<const TrackProgram>(new TrackProgram(
-                track.id(), generation_, provider, state_policy, std::move(current_clip_ids_),
-                std::move(current_note_events_), std::move(current_note_modifiers_),
-                std::move(audio_program),
+                track.id(), generation_, provider, requested_state_policy, state_policy,
+                std::move(current_clip_ids_), std::move(current_note_events_),
+                std::move(current_note_modifiers_), std::move(audio_program),
                 std::move(current_automation_.ordered_device_placement_ids),
                 std::move(automation_program), sequence_bookkeeping_.expanded_clip_count(),
                 sequence_bookkeeping_.expanded_note_event_count(),
                 sequence_bookkeeping_.generated_id_start(),
-                sequence_bookkeeping_.generated_id_count(), mixer)));
+                sequence_bookkeeping_.generated_id_count(), current_arrangement_production_,
+                mixer)));
             core_->track_completed();
             current_clip_ids_.clear();
             current_note_events_.clear();
@@ -868,7 +983,12 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             automation_compiler_started_ = false;
             clip_index_ = 0;
             note_index_ = 0;
+            registered_note_index_ = 0;
             clip_started_ = false;
+            current_registered_fragment_.reset();
+            current_registered_generated_id_start_ = 0;
+            current_arrangement_production_ = {};
+            current_registered_forces_reset_ = false;
             track_prepared_ = false;
             generated_layout_dirty_ = false;
             sequence_bookkeeping_.reset_current();
@@ -888,8 +1008,8 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             continue;
         }
         if (stage_ == Stage::Validate) {
-            const auto validation = validator_.step(
-                tracks_, request_->project->id(), request_->document_revision, generation_);
+            const auto validation = validator_.step(tracks_, request_->project->id(),
+                                                    request_->document_revision, generation_);
             if (validation.status == detail::ProgramValidationStatus::Complete) {
                 stage_ = Stage::Publish;
                 continue;
@@ -899,13 +1019,14 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             ++work;
             continue;
         }
-        auto program = std::shared_ptr<const PlaybackProgram>(
-            new PlaybackProgram(generation_, request_->document_revision, request_->project->id(),
-                                request_->sequence_id, request_->tempo_map, request_->audio_assets,
-                                request_->audio_limits, request_->automation_limits,
-                                request_->project->next_item_id(), std::move(tracks_)));
+        auto program = std::shared_ptr<const PlaybackProgram>(new PlaybackProgram(
+            generation_, request_->document_revision, request_->project->id(),
+            request_->sequence_id, request_->tempo_map, content_compilers_,
+            content_compiler_generation_, content_compiler_revision_, request_->audio_assets,
+            request_->audio_limits, request_->automation_limits, request_->project->next_item_id(),
+            std::move(tracks_)));
         if (!core_->publish_if_latest(submission_epoch_, std::move(program), request_->project,
-                                      request_->invalidation))
+                                      content_compiler_generation_, content_compiler_revision_))
             return fail({CompileErrorCode::StaleRevision, {}, request_->document_revision});
         core_->finish(true, request_->document_revision, generation_, submission_epoch_);
         return CompileTaskStatus::Complete;
@@ -938,6 +1059,16 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
         core_->status.last_error = error;
         return runtime::Err(error);
     };
+    std::shared_ptr<const void> incoming_registry_generation;
+    std::uint64_t incoming_registry_revision = 0;
+    if (request.invalidation) {
+        incoming_registry_generation = request.invalidation->captured_registry_generation_owner();
+        incoming_registry_revision = request.invalidation->captured_registry_revision();
+    } else if (request.content_compilers) {
+        incoming_registry_generation = request.content_compilers->generation_identity();
+        incoming_registry_revision = request.content_compilers->revision();
+        request.content_compilers = request.content_compilers->immutable_snapshot();
+    }
     const auto normalized_rate = request.sample_rate.normalized();
     if (!request.project || !request.sequence_id.valid() || !request.tempo_map ||
         !normalized_rate.valid() ||
@@ -1012,12 +1143,8 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
                     ? CompileError{CompileErrorCode::InvalidRequest, {}, request.document_revision}
                     : CompileError{
                           CompileErrorCode::CompilerAlreadyBound, {}, request.document_revision});
-        const auto incoming_registry_generation =
-            request.invalidation ? request.invalidation->registry_generation_ : nullptr;
-        const auto incoming_registry_revision =
-            request.invalidation ? request.invalidation->captured_registry_revision() : 0;
         const bool registry_refresh =
-            request.invalidation.has_value() &&
+            incoming_registry_generation &&
             request.document_revision == core_->status.latest_submitted_revision &&
             // Pointer identity proves the immutable snapshot is exactly the
             // submitted/live document, including after compiler replacement.
@@ -1025,7 +1152,7 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
              (core_->latest_submitted_context_registry_generation.get() !=
                   incoming_registry_generation.get() ||
               core_->latest_submitted_context_registry_revision != incoming_registry_revision ||
-              request.invalidation->baseline_)) &&
+              (request.invalidation && request.invalidation->baseline_))) &&
             request.dirty.all;
         if (request.document_revision < core_->status.latest_submitted_revision ||
             (request.document_revision == core_->status.latest_submitted_revision &&
@@ -1047,10 +1174,9 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
         core_->latest_submitted_context_registry_revision = incoming_registry_revision;
         submitted_epoch = ++core_->latest_submission_epoch;
         core_->status.latest_submitted_epoch = submitted_epoch;
-        if (request.invalidation && (core_->published_context_registry_generation.get() !=
-                                         request.invalidation->registry_generation_.get() ||
-                                     core_->published_context_registry_revision !=
-                                         request.invalidation->captured_registry_revision()))
+        if (core_->published_context_registry_generation.get() !=
+                incoming_registry_generation.get() ||
+            core_->published_context_registry_revision != incoming_registry_revision)
             request.dirty.all = true;
         // Sparse reuse is valid only when this commit was reduced from the
         // exact immutable snapshot currently published. Consecutive revision
@@ -1093,7 +1219,10 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
                                 pending_request.sample_rate != request.sample_rate ||
                                 pending_request.audio_assets.get() != request.audio_assets.get() ||
                                 pending_request.audio_limits != request.audio_limits ||
-                                !same_registry_generation(pending_request, request);
+                                !same_registry_generation(pending_request, request) ||
+                                core_->pending->content_registry_generation.get() !=
+                                    incoming_registry_generation.get() ||
+                                core_->pending->content_registry_revision != incoming_registry_revision;
             request.dirty.tracks = std::move(dirty);
 
             const bool same_policy_domain =
@@ -1116,9 +1245,10 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
         auto policy_delta = request.track_policies;
         const auto policy_project_id = request.project->id();
         const auto policy_sequence_id = request.sequence_id;
-        core_->pending = std::make_unique<QueuedCompileRequest>(
-            QueuedCompileRequest{std::move(request), submitted_epoch, std::move(policy_delta),
-                                 policy_project_id, policy_sequence_id});
+        core_->pending = std::make_unique<QueuedCompileRequest>(QueuedCompileRequest{
+            std::move(request), submitted_epoch, std::move(incoming_registry_generation),
+            incoming_registry_revision, std::move(policy_delta), policy_project_id,
+            policy_sequence_id});
         core_->status.busy = true;
         if (!core_->task_scheduled) {
             core_->task_scheduled = true;

@@ -197,6 +197,10 @@ class SchemaRegistry {
     const TypeSchema* find(SchemaDomain domain, std::string_view type_name) const noexcept;
     /// Returns all types sorted by domain and type name.
     std::span<const TypeSchema> types() const noexcept;
+    /// Opaque identity shared by copies of this immutable registry.
+    std::shared_ptr<const void> identity() const noexcept {
+        return impl_;
+    }
 
     /// Migrates an exact envelope along registered adjacent version edges.
     ///
