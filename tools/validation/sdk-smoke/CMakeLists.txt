@@ -44,6 +44,10 @@ find_package(Pulp REQUIRED CONFIG)
 add_executable(PulpSDKSmokeSpectralBandMaskProbe spectral_band_mask_probe.cpp)
 target_link_libraries(PulpSDKSmokeSpectralBandMaskProbe PRIVATE Pulp::signal)
 
+add_executable(PulpSDKSmokeSpectralMaskProcessorProbe
+    spectral_mask_processor_probe.cpp)
+target_link_libraries(PulpSDKSmokeSpectralMaskProcessorProbe PRIVATE Pulp::signal)
+
 foreach(_pulp_alias_target
         audio dsl events format host playback signal signal-modal-spec state timebase timeline view standalone gpu-audio)
     if(TARGET "Pulp::${_pulp_alias_target}"
