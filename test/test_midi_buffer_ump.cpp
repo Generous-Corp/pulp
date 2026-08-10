@@ -90,6 +90,71 @@ TEST_CASE("attached UMP sidecar remains externally owned across MidiBuffer edits
     REQUIRE((*buf.ump())[0].packet.channel() == 2);
 }
 
+TEST_CASE("MidiBuffer copies isolate MIDI1 storage while sharing the external UMP sidecar",
+          "[midi][buffer][ump][copy][ownership]") {
+    UmpBuffer shared;
+    const auto ump_on = UmpPacket::note_on_2(0, 2, 60, 0x9000);
+    const auto ump_off = UmpPacket::note_off_2(0, 2, 60, 0x1000);
+    REQUIRE(shared.add(ump_on, 24));
+
+    MidiBuffer source;
+    REQUIRE(source.add(MidiEvent::note_on(2, 60, 100)));
+    source.attach_ump(&shared);
+
+    MidiBuffer copy(source);
+    REQUIRE(copy.ump() == &shared);
+    REQUIRE(source.ump() == &shared);
+    REQUIRE(copy.size() == 1);
+    REQUIRE(copy[0].is_note_on());
+    REQUIRE(copy[0].channel() == 2);
+    REQUIRE(copy[0].note() == 60);
+    REQUIRE(copy.ump()->size() == 1);
+    REQUIRE((*copy.ump())[0].packet.words == ump_on.words);
+
+    copy.clear();
+    REQUIRE(copy.add(MidiEvent::cc(3, 74, 91)));
+    REQUIRE(copy.size() == 1);
+    REQUIRE(copy[0].is_cc());
+    REQUIRE(source.size() == 1);
+    REQUIRE(source[0].is_note_on());
+    REQUIRE(source[0].channel() == 2);
+    REQUIRE(source[0].note() == 60);
+
+    REQUIRE(shared.add(ump_off, 48));
+    REQUIRE(source.ump()->size() == 2);
+    REQUIRE(copy.ump()->size() == 2);
+    REQUIRE((*source.ump())[1].packet.words == ump_off.words);
+    REQUIRE((*copy.ump())[1].packet.words == ump_off.words);
+    int ump_note_depth = 0;
+    for (const auto& event : *copy.ump()) {
+        const auto status = static_cast<std::uint8_t>(event.packet.status() & 0xF0);
+        if (status == static_cast<std::uint8_t>(Midi2Status::NoteOn))
+            ++ump_note_depth;
+        else if (status == static_cast<std::uint8_t>(Midi2Status::NoteOff))
+            --ump_note_depth;
+        REQUIRE(ump_note_depth >= 0);
+    }
+    REQUIRE(ump_note_depth == 0);
+
+    UmpBuffer displaced;
+    const auto sentinel = UmpPacket::cc_2(0, 7, 1, 0x12345678u);
+    REQUIRE(displaced.add(sentinel, 7));
+    MidiBuffer assigned;
+    REQUIRE(assigned.add(MidiEvent::note_off(7, 72)));
+    assigned.attach_ump(&displaced);
+
+    assigned = source;
+    REQUIRE(assigned.ump() == &shared);
+    REQUIRE(assigned.size() == 1);
+    REQUIRE(assigned[0].is_note_on());
+    REQUIRE(assigned[0].channel() == 2);
+    REQUIRE(assigned[0].note() == 60);
+    REQUIRE(assigned.ump()->size() == 2);
+    REQUIRE(displaced.size() == 1);
+    REQUIRE(displaced[0].sample_offset == 7);
+    REQUIRE(displaced[0].packet.words == sentinel.words);
+}
+
 TEST_CASE("MidiBuffer move assignment preserves attached UMP sidecar pointer",
           "[midi][buffer][ump]") {
     UmpBuffer sidecar;
