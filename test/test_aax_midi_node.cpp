@@ -188,6 +188,33 @@ TEST_CASE("encode_midi_node chunks SysEx into 4-byte packets sharing a timestamp
     REQUIRE(reassembled == payload);
 }
 
+TEST_CASE("encode_midi_node marks only the first zero-timestamp SysEx chunk immediate",
+          "[aax][midi][sysex]") {
+    midi::MidiBuffer out;
+    const std::vector<uint8_t> payload{
+        0xF0, 0x7D, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0xF7};
+    out.add_sysex(payload, /*sample_offset=*/0, /*ts=*/0.0);
+
+    FakeOutputNode out_node;
+    encode_midi_node(&out_node, out);
+
+    REQUIRE(out_node.posted.size() == 3);
+    REQUIRE(out_node.posted[0].mTimestamp == 0);
+    REQUIRE(out_node.posted[0].mIsImmediate);
+    for (std::size_t i = 1; i < out_node.posted.size(); ++i) {
+        REQUIRE(out_node.posted[i].mTimestamp == 0);
+        REQUIRE_FALSE(out_node.posted[i].mIsImmediate);
+    }
+
+    FakeInputNode in_node(out_node.posted);
+    midi::MidiBuffer decoded;
+    decode_midi_node(&in_node, &decoded);
+    REQUIRE(decoded.empty());
+    REQUIRE(decoded.sysex().size() == 1);
+    REQUIRE(decoded.sysex()[0].sample_offset == 0);
+    REQUIRE(decoded.sysex()[0].data == payload);
+}
+
 TEST_CASE("AAX MIDI bridge round-trips short + SysEx through the SDK types", "[aax][midi]") {
     midi::MidiBuffer out;
     out.add(midi::MidiEvent{
