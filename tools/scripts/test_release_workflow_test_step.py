@@ -751,6 +751,16 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
             'cp tools/scripts/release_product_matrix.json',
             run_block,
         )
+        self.assertIn(
+            'for key, value in authoritative["platform_library_stems"].items()',
+            run_block,
+        )
+        self.assertIn('if key in selected_platforms', run_block)
+        self.assertIn(
+            'selected["platform_library_stems"].setdefault(key, value)',
+            run_block,
+        )
+        self.assertNotIn("selected = authoritative", run_block)
 
     def test_release_content_helper_shell_is_syntactically_valid(self) -> None:
         """Catch heredoc indentation that only fails on tagged Linux jobs."""
@@ -964,6 +974,16 @@ class SingleOwnerReleasePublication(unittest.TestCase):
             'authoritative["control_broker_floor"]',
             run_block,
         )
+        self.assertIn(
+            'for key, value in authoritative["platform_library_stems"].items()',
+            run_block,
+        )
+        self.assertIn('if key in selected_platforms', run_block)
+        self.assertIn(
+            'selected["platform_library_stems"].setdefault(key, value)',
+            run_block,
+        )
+        self.assertNotIn("selected = authoritative", run_block)
         self.assertIn('--matrix "$publication_matrix"', run_block)
         self.assertNotIn('--matrix "$matrix"', run_block)
 
