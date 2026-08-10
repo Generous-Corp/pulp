@@ -850,6 +850,7 @@ a working convolution and would hide the bug. Assert
 | Convolver | `convolver.hpp` | Partitioned frequency-domain convolution for reverb impulse responses |
 | Delay Line | `delay_line.hpp` | Sample-accurate delay with linear, cubic, or sinc interpolation |
 | [Fractional Delay](fractional-delay.md) | `fractional_delay.hpp` | Prepared Thiran-1/Lagrange delay lines plus bounded shared history with stateless multitap Lagrange-3/5 heads, explicit causal ranges, and typed fault recovery |
+| Beat Repeat Kernel | `beat_repeat_kernel.hpp` | Zero-latency tempo-map-quantized capture of exact recent dry history with bounded repeat, gate, forward/reverse/alternate playback, frame-offset events, and click-safe transitions. Pitch is not included: it remains gated on an interpolated immutable-span reader that does not duplicate the capture buffer. |
 | Waveguide primitives | `waveguide_line.hpp`, `waveguide_reflection_filter.hpp`, `waveguide_junction.hpp` | Prepared bidirectional double-precision passive-interpolated delay rails with bounded retuning, passive one-pole reflection boundaries, and lossless fixed-capacity scattering junctions; these are composable building blocks, not a complete instrument loop. |
 | Reed exciter | `waveguide_reed_exciter.hpp` | Bounded, allocation-free single-reed valve primitive for waveguide compositions; it does not own oversampling or the recursive loop. |
 | Dither Quantizer | `dither.hpp` | Deterministic TPDF dither with opt-in bounded first- or second-order error-feedback noise shaping; zero latency and allocation-free |
