@@ -191,6 +191,10 @@ struct ControlEndpoint::Impl {
         std::optional<ControlRegistrationId> host_registration;
         std::optional<ControlRegistration> pending_host_registration;
         std::optional<VerifiedControlPeerIdentity> enrolled_peer;
+        // Retains the broker-owned executable/runtime snapshot for the live
+        // host connection so pinned lazy dependencies remain available after
+        // the one-use enrollment claim has been consumed.
+        std::optional<ControlHostEnrollmentPlan> host_enrollment;
         std::thread worker;
     };
 
@@ -403,6 +407,7 @@ struct ControlEndpoint::Impl {
 
         state.pending_host_registration = *registered.registration;
         state.enrolled_peer = std::move(*peer);
+        state.host_enrollment = std::move(*plan);
         response.accepted = true;
         response.registration_id = registration_id.value;
         response.broker_id = registered.registration->broker_id.value;

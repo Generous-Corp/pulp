@@ -168,6 +168,14 @@ int main(int argc, char** argv) {
     });
     if (!installed || !installed->ready())
         return 67;
+#ifdef __APPLE__
+    // Enrollment ownership must retain the exact broker snapshot after the
+    // host becomes ready; GPU and other optional runtime dependencies may be
+    // loaded lazily from this directory later in the session.
+    if (!std::filesystem::is_regular_file(
+            std::filesystem::path(argv[0]).parent_path() / "libwgpu_native.dylib"))
+        return 70;
+#endif
     std::ofstream(argv[1]) << installed->binding().registration_id << '\n'
 #ifdef __APPLE__
                            << ::getpid() << '\n'
