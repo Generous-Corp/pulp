@@ -149,16 +149,20 @@ inline double log_frequency_at(std::size_t index, std::size_t count, double min_
 /// This is the stage a curve widget wants: hand it one point per pixel column
 /// and the result is the polyline, already in the plot's own x-spacing.
 /// Allocation-free — `out` is caller-owned.
-inline void response_curve_db(std::span<const BiquadCoefficients> sos,
-                              double min_hz,
-                              double max_hz,
-                              double sample_rate,
+template <typename SampleType, std::size_t Extent>
+inline void response_curve_db(std::span<const BiquadCoefficientsT<SampleType>, Extent> sos,
+                              double min_hz, double max_hz, double sample_rate,
                               std::span<float> out) {
     const std::size_t n = out.size();
     for (std::size_t i = 0; i < n; ++i) {
         const double hz = log_frequency_at(i, n, min_hz, max_hz);
         out[i] = cascade_magnitude_db(sos, hz, sample_rate);
     }
+}
+
+inline void response_curve_db(std::span<const BiquadCoefficients> sos, double min_hz,
+                              double max_hz, double sample_rate, std::span<float> out) {
+    response_curve_db<float, std::dynamic_extent>(sos, min_hz, max_hz, sample_rate, out);
 }
 
 } // namespace pulp::signal

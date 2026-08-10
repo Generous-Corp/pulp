@@ -14,6 +14,7 @@
 #include <pulp/signal/filter_design.hpp>
 #include <pulp/signal/frequency_response.hpp>
 
+#include <array>
 #include <cmath>
 #include <vector>
 
@@ -215,6 +216,26 @@ TEST_CASE("response_curve_db fills a buffer matching point-wise evaluation",
         const double hz = log_frequency_at(i, curve.size(), 20.0, 20000.0);
         REQUIRE_THAT(curve[i],
                      Catch::Matchers::WithinAbs(cascade_magnitude_db(sos, hz, sr), 1e-4));
+    }
+}
+
+TEST_CASE("response_curve_db preserves double coefficient spans",
+          "[signal][frequency-response]") {
+    constexpr double sr = 48000.0;
+    const std::array<BiquadCoefficientsT<double>, 2> coefficients{{
+        {0.812345678901, -0.456789012345, 0.123456789012, -0.345678901234,
+         0.098765432109},
+        {0.712345678901, -0.356789012345, 0.223456789012, -0.245678901234,
+         0.088765432109},
+    }};
+    const std::span<const BiquadCoefficientsT<double>> sos{coefficients};
+    std::array<float, 17> curve{};
+
+    response_curve_db(sos, 20.0, 20000.0, sr, curve);
+
+    for (std::size_t i = 0; i < curve.size(); ++i) {
+        const double hz = log_frequency_at(i, curve.size(), 20.0, 20000.0);
+        CHECK(curve[i] == cascade_magnitude_db(sos, hz, sr));
     }
 }
 
