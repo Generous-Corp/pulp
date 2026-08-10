@@ -530,3 +530,54 @@ TEST_CASE("SysexAccumulator: aborted then recovered sysex",
     REQUIRE(e.complete.size() == 1);
     REQUIRE(e.complete[0].size() == 6);
 }
+
+TEST_CASE("SysexAccumulator: interleaved ports keep fragments isolated",
+          "[midi][sysex][port-isolation]") {
+    SysexAccumulator first;
+    SysexAccumulator second;
+    Emit first_emits;
+    Emit second_emits;
+    auto first_cb = make_callback(first_emits);
+    auto second_cb = make_callback(second_emits);
+
+    REQUIRE(first.feed(0xF0, first_cb) == Classification::in_sysex);
+    REQUIRE(first.feed(0x41, first_cb) == Classification::in_sysex);
+    REQUIRE(first.partial_size() == 2);
+
+    REQUIRE(second.feed(0xF0, second_cb) == Classification::in_sysex);
+    REQUIRE(second.feed(0x42, second_cb) == Classification::in_sysex);
+    REQUIRE(second.feed(0x10, second_cb) == Classification::in_sysex);
+    REQUIRE(first.partial_size() == 2);
+    REQUIRE(second.partial_size() == 3);
+
+    REQUIRE(first.feed(0xF8, first_cb) == Classification::passthrough);
+    REQUIRE(first.partial_size() == 2);
+    REQUIRE(second.feed(0x02, second_cb) == Classification::in_sysex);
+    REQUIRE(second.feed(0xF7, second_cb) == Classification::completed);
+    REQUIRE_FALSE(second.in_progress());
+    REQUIRE(second.partial_size() == 0);
+    REQUIRE(first.in_progress());
+    REQUIRE(first.partial_size() == 2);
+    REQUIRE(second_emits.aborted.empty());
+    REQUIRE((second_emits.complete == std::vector<std::vector<std::uint8_t>>{
+        {0xF0, 0x42, 0x10, 0x02, 0xF7},
+    }));
+
+    REQUIRE(first.feed(0x01, first_cb) == Classification::in_sysex);
+    REQUIRE(first.feed(0xF7, first_cb) == Classification::completed);
+    REQUIRE_FALSE(first.in_progress());
+    REQUIRE(first.partial_size() == 0);
+    REQUIRE(first_emits.aborted.empty());
+    REQUIRE((first_emits.complete == std::vector<std::vector<std::uint8_t>>{
+        {0xF0, 0x41, 0x01, 0xF7},
+    }));
+
+    const std::uint8_t first_fresh[] = {0xF0, 0x7D, 0xF7};
+    const std::uint8_t second_fresh[] = {0xF0, 0x7E, 0x00, 0xF7};
+    first.feed(first_fresh, sizeof(first_fresh), first_cb);
+    second.feed(second_fresh, sizeof(second_fresh), second_cb);
+    REQUIRE((first_emits.complete[1] ==
+             std::vector<std::uint8_t>{0xF0, 0x7D, 0xF7}));
+    REQUIRE((second_emits.complete[1] ==
+             std::vector<std::uint8_t>{0xF0, 0x7E, 0x00, 0xF7}));
+}
