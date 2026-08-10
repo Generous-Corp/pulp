@@ -187,6 +187,9 @@ TEST_CASE("response curves clamp an ordinary display range to Nyquist") {
     CHECK_THAT(curve.front(), WithinAbs(bank.magnitude_db(40.0), 1e-12));
     CHECK_THAT(curve.back(), WithinAbs(bank.magnitude_db(16000.0), 1e-12));
     CHECK(curve.front() != curve.back());
+    CHECK(std::isnan(bank.magnitude(std::numeric_limits<double>::quiet_NaN())));
+    CHECK(std::isnan(bank.magnitude(-1.0)));
+    CHECK(std::isnan(bank.magnitude(16000.01)));
 }
 
 TEST_CASE("unprepared response inspection is a defined bypass curve") {
@@ -260,6 +263,28 @@ TEST_CASE("retunes use a click-safe transition by default") {
     for (std::size_t i = 0; i < Bank::default_transition_samples; ++i)
         bank.process(0.0);
     CHECK_FALSE(bank.transition_active());
+}
+
+TEST_CASE("a one-sample retune reaches the exact destination endpoint") {
+    Bank transitioned;
+    Bank immediate;
+    const auto first = compact_a();
+    const std::array<Spec, 3> destination{{
+        {500.0, 70.0, 0.0},
+        {1500.0, 100.0, -3.0},
+        {2600.0, 130.0, -8.0},
+    }};
+    for (Bank* bank : {&transitioned, &immediate}) {
+        REQUIRE(bank->prepare(sample_rate, 3));
+        bank->set_transition_samples(0);
+        REQUIRE(bank->configure(first) == Status::configured);
+        (void)bank->process(0.75);
+    }
+    transitioned.set_transition_samples(1);
+    REQUIRE(transitioned.configure(destination) == Status::configured);
+    REQUIRE(immediate.configure(destination) == Status::configured);
+    CHECK(transitioned.process(-0.5) == immediate.process(-0.5));
+    CHECK_FALSE(transitioned.transition_active());
 }
 
 TEST_CASE("requesting the in-flight endpoint cancels a queued retune") {

@@ -206,7 +206,7 @@ template <typename SampleType = float, std::size_t MaxFormants = 5> class Forman
             const std::size_t completed = transition_total_ - transition_remaining_ + 1;
             const double mix =
                 static_cast<double>(completed) / static_cast<double>(transition_total_);
-            output = from + (to - from) * mix;
+            output = transition_remaining_ == 1 ? to : std::lerp(from, to, mix);
             if (--transition_remaining_ == 0) {
                 active_ = transition_;
                 if (queued_transition_) {
@@ -267,8 +267,10 @@ template <typename SampleType = float, std::size_t MaxFormants = 5> class Forman
     double magnitude(double frequency_hz) const noexcept {
         if (!prepared_ || requested_.count == 0)
             return 1.0;
-        const double omega =
-            angular_frequency(std::isfinite(frequency_hz) ? frequency_hz : 0.0, sample_rate_);
+        if (!std::isfinite(frequency_hz) || frequency_hz < 0.0 ||
+            frequency_hz > sample_rate_ * 0.5)
+            return std::numeric_limits<double>::quiet_NaN();
+        const double omega = angular_frequency(frequency_hz, sample_rate_);
         const std::complex<double> z1 = std::polar(1.0, -omega);
         const std::complex<double> z2 = z1 * z1;
         std::complex<double> sum{};
