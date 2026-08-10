@@ -812,6 +812,75 @@ EXPORTS = [
         ],
     ),
     capability(
+        key="signal.spectral-mask-processor", domain="signal",
+        summary=(
+            "Streaming WOLA spectral masking with race-free frame-boundary publication, "
+            "mask interpolation, and latency-aligned dry/wet mixing."
+        ),
+        rt_class="mixed",
+        lifecycle={
+            "construction": "control",
+            "prepare": "control; allocates bounded STFT and dry-delay storage",
+            "process": "audio; control publishes through latest-value SPSC handoff",
+            "reset": "audio",
+            "release": "destruction off audio",
+        },
+        state_model=(
+            "Prepared spectral frame engine, three-slot immutable mask-table handoff, "
+            "fixed current/target interpolation curves, and latency-aligned dry delay."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "tolerance_bounded", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain=(
+            "finite planar audio or coherent complex frame groups plus compiled "
+            "spectral band layouts or mask tables"
+        ),
+        output_domain=(
+            "phase- and channel-coherent masked audio or frames with categorical exact mute"
+        ),
+        units=["samples", "frames", "bins", "channels", "hertz", "decibels",
+               "linear gain", "mix ratio"],
+        latency="exact fixed spectral-frame engine latency",
+        tail="conservative fixed engine latency plus one frame length",
+        scheduling=(
+            "streaming overlap-add with latest-table adoption and interpolation only "
+            "at frame boundaries"
+        ),
+        bindings=[
+            binding(
+                role="entrypoint", kind="cpp_type",
+                include="pulp/signal/spectral_mask_processor.hpp",
+                qualified_name="pulp::signal::SpectralMaskProcessorT<float>",
+                target="Pulp::signal",
+                header_fingerprint=(
+                    "sha256:424014c924770f60d35e16b7179b552ca1b4747381734186fb15d6fb7bd94247"
+                ),
+            ),
+            binding(
+                role="config", kind="cpp_type",
+                include="pulp/signal/spectral_mask_processor.hpp",
+                qualified_name="pulp::signal::SpectralMaskProcessorConfigT<float>",
+                target="Pulp::signal",
+                header_fingerprint=(
+                    "sha256:424014c924770f60d35e16b7179b552ca1b4747381734186fb15d6fb7bd94247"
+                ),
+            ),
+        ],
+        _link_probes=[
+            {
+                "role": "entrypoint",
+                "binding": "pulp::signal::SpectralMaskProcessorT<float>",
+                "operation": "member_call", "member": "reset", "arguments": "",
+            },
+            {
+                "role": "config",
+                "binding": "pulp::signal::SpectralMaskProcessorConfigT<float>",
+                "operation": "construct", "arguments": "",
+            },
+        ],
+    ),
+    capability(
         key="signal.spectral-gate", domain="signal",
         summary="Allocation-free scalar or per-bin gating of caller-owned complex spectra.",
         rt_class="audio",

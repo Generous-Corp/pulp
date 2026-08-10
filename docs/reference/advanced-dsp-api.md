@@ -181,6 +181,36 @@ frame_engine.process(input, output, samples,
 The runnable mathematical, fault, RT, and WOLA composition examples live in
 `test/test_spectral_band_mask.cpp`.
 
+### `SpectralMaskProcessor`
+
+`SpectralMaskProcessor` owns the streaming WOLA lifecycle around those compiled
+masks. A successful `prepare()` allocates bounded transform and latency-aligned
+dry storage and leaves a prior prepared state intact on failure. `publish_layout()`
+compiles on the control thread; `publish_table()` accepts an already compiled
+table. Both publish through a latest-value SPSC handoff, and the audio owner
+adopts one complete table only at a frame boundary. Requested `transition_frames`
+interpolate linear gain per bin; categorical mute still reaches exact `0.0` on
+the final transition frame.
+
+- Lifecycle: `prepare(config)`, `reset()`, `prepared()`.
+- Streaming audio: `process(input, output, num_samples)`.
+- Source-independent frame seam: `process_frame(frames, num_bins)`; exactly one
+  chronological audio-side consumer may drive either this or `process()`.
+- Publication: `publish_layout(layout)`, `publish_table(table)`,
+  `table_publication_pending()`, `active_table_version()`.
+- Mix: `set_mix()`, `set_mix_ramp_samples()`, `set_mix_curve()`; defaults fully
+  wet, and any dry signal is delayed to match the WOLA path.
+- Inspection: `latency_samples()`, `maximum_tail_samples()`, `num_bins()`,
+  `channels()`, `retained_bytes()`.
+
+After preparation, audio processing, frame processing, reset, mix updates, and
+table publication allocate no memory. Layout compilation remains a control-side
+operation. Invalid blocks, frame geometry, tables, or non-finite runtime mix
+values fail closed or are ignored without changing the last valid control state.
+The installed example at
+`tools/validation/sdk-smoke/spectral_mask_processor_probe.cpp` compiles and runs
+stereo nonadjacent islands and exact total mute against a staged SDK.
+
 ### Orthonormal mid/side and stereo width
 
 `mid_side_encode()` and `mid_side_decode()` use the self-inverse

@@ -63,6 +63,7 @@ add_library(pulp-dsp-series-header-self-containment OBJECT
     header_compile/nonlin_ambience_design.cpp
     header_compile/explicit_q_resonator_bank.cpp
     header_compile/transient_designer.cpp
+    header_compile/spectral_mask_processor.cpp
     header_compile/spectral_delay_matrix.cpp
     header_compile/zero_latency_convolver_support.cpp)
 target_link_libraries(pulp-dsp-series-header-self-containment PRIVATE pulp::signal)

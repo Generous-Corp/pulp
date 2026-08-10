@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 27,
+  "inventory_version": 28,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,12 +37,12 @@
     }
   ],
   "counts": {
-    "public_headers": 421,
-    "reviewed_headers": 121,
+    "public_headers": 422,
+    "reviewed_headers": 122,
     "legacy_unreviewed_headers": 300,
     "unsupported_headers": 1,
     "by_disposition": {
-      "capability_entrypoint": 78,
+      "capability_entrypoint": 79,
       "capability_support": 37,
       "infrastructure": 5,
       "legacy_unreviewed": 300,
@@ -74,8 +74,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 243,
-        "reviewed_headers": 82,
+        "public_headers": 244,
+        "reviewed_headers": 83,
         "legacy_unreviewed_headers": 161,
         "unsupported_headers": 1
       },
@@ -3468,7 +3468,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:d69d0210939f9127c8fec4dfb7e4022b53817b7656257dd22e00d34d6dfbac72",
+      "fingerprint": "sha256:dfda31f739af5bd6141564cbe5592176e6b2c581b1b2b62f9bbc6714dd289dc8",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3621,6 +3621,17 @@
       "capability_keys": [
         "signal.spectral-frame-blur",
         "signal.spectral-gate"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/spectral_mask_processor.hpp",
+      "fingerprint": "sha256:424014c924770f60d35e16b7179b552ca1b4747381734186fb15d6fb7bd94247",
+      "include": "pulp/signal/spectral_mask_processor.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.spectral-mask-processor"
       ],
       "rationale": "Public binding for a curated consumer capability."
     },

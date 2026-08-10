@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 17,
+  "manifest_revision": 18,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 38
+        "capabilities": 39
       },
       "timebase": {
         "state": "partial",
@@ -3572,6 +3572,85 @@
       "contract_digest": "sha256:749f2be59d77927be1199753134bc28cb4b602e3748b3e301e4374f030d6c5f7"
     },
     {
+      "key": "signal.spectral-mask-processor",
+      "domain": "signal",
+      "summary": "Streaming WOLA spectral masking with race-free frame-boundary publication, mask interpolation, and latency-aligned dry/wet mixing.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control; allocates bounded STFT and dry-delay storage",
+        "process": "audio; control publishes through latest-value SPSC handoff",
+        "reset": "audio",
+        "release": "destruction off audio"
+      },
+      "state_model": "Prepared spectral frame engine, three-slot immutable mask-table handoff, fixed current/target interpolation curves, and latency-aligned dry delay.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "tolerance_bounded",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "finite planar audio or coherent complex frame groups plus compiled spectral band layouts or mask tables",
+      "output_domain": "phase- and channel-coherent masked audio or frames with categorical exact mute",
+      "units": [
+        "samples",
+        "frames",
+        "bins",
+        "channels",
+        "hertz",
+        "decibels",
+        "linear gain",
+        "mix ratio"
+      ],
+      "latency": "exact fixed spectral-frame engine latency",
+      "tail": "conservative fixed engine latency plus one frame length",
+      "scheduling": "streaming overlap-add with latest-table adoption and interpolation only at frame boundaries",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/spectral_mask_processor.hpp",
+          "qualified_name": "pulp::signal::SpectralMaskProcessorT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "config",
+          "kind": "cpp_type",
+          "include": "pulp/signal/spectral_mask_processor.hpp",
+          "qualified_name": "pulp::signal::SpectralMaskProcessorConfigT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:1585cbfcd3d21665cc67c7843df58d13bfb858cba664c896f455b8f97358b609"
+    },
+    {
       "key": "signal.spectral-morph",
       "domain": "signal",
       "summary": "Allocation-free magnitude and phase morphing between coherent complex spectra.",
@@ -4857,14 +4936,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 70,
+    "total": 71,
     "by_domain": {
       "audio": 7,
       "midi": 9,
       "music": 6,
       "offline": 0,
       "sequence": 1,
-      "signal": 38,
+      "signal": 39,
       "timebase": 9
     }
   },
@@ -10253,6 +10332,30 @@
               "blur_frames()",
               "filled_frames()",
               "retained_bytes()"
+            ],
+            "enums": []
+          }
+        ],
+        "spectral_mask_processor.hpp": [
+          {
+            "class": "SpectralMaskProcessorT",
+            "qualified_name": "pulp::signal::SpectralMaskProcessorT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "prepare(const Config& config)",
+              "process(const SampleType* const* input, SampleType* const* output, int num_samples)",
+              "reset()",
+              "publish_layout(const Layout& layout)",
+              "publish_table(const Table& table)",
+              "process_frame(std::complex<SampleType>* const* frames, int num_bins)",
+              "set_mix(SampleType mix)",
+              "set_mix_ramp_samples(int samples)",
+              "set_mix_curve(MixCurve curve)",
+              "prepared()",
+              "latency_samples()",
+              "maximum_tail_samples()",
+              "num_bins()",
+              "channels()"
             ],
             "enums": []
           }
