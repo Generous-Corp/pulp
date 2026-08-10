@@ -148,6 +148,28 @@ TEST_CASE("scale_16_to_7 inverts scale_7_to_16 for common values", "[midi][ump]"
     }
 }
 
+TEST_CASE("MIDI 2 velocity expansion matches the full-range rounded mapping",
+          "[midi][ump][velocity-scaling]") {
+    uint16_t previous = scale_7_to_16(0);
+    REQUIRE(previous == 0);
+
+    for (uint32_t input = 0; input <= 127; ++input) {
+        const auto velocity = static_cast<uint8_t>(input);
+        const auto expanded = scale_7_to_16(velocity);
+        const auto expected = static_cast<uint16_t>(
+            (input * static_cast<uint32_t>(0xFFFFu) + 63u) / 127u);
+
+        REQUIRE(expanded == expected);
+        REQUIRE(scale_16_to_7(expanded) == velocity);
+        if (input > 0) {
+            REQUIRE(expanded > previous);
+        }
+        previous = expanded;
+    }
+
+    REQUIRE(previous == 0xFFFFu);
+}
+
 TEST_CASE("scale_14_to_32 / scale_32_to_14 preserve center", "[midi][ump]") {
     REQUIRE(scale_14_to_32(0) == 0);
     REQUIRE(scale_14_to_32(0x2000) == 0x80000000u);
