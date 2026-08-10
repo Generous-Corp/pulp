@@ -130,4 +130,31 @@ TEST_CASE("StepSequencer UI<->transport<->audio end-to-end round-trip",
     REQUIRE(ph.active_pattern == grid.displayed_pattern());
     REQUIRE(ph.active_step > 0);         // stepped past step 0
     REQUIRE(overlay_repainted);          // the view repainted for the moving overlay
+
+    // A stop publishes stopped state, and the next start deterministically
+    // restarts the authored pattern at step 0 rather than continuing a stale
+    // internal cursor into one of the disabled steps.
+    {
+        midi::MidiBuffer stopped_out;
+        run_block(/*playing=*/false, stopped_out);
+        REQUIRE(stopped_out.empty());
+        grid.pump();
+        const auto stopped_playhead = proc->channel().ui_read_playhead();
+        REQUIRE(stopped_playhead.playing == 0);
+        REQUIRE(stopped_playhead.active_pattern == grid.displayed_pattern());
+    }
+
+    midi::MidiBuffer resumed_out;
+    run_block(/*playing=*/true, resumed_out);
+    REQUIRE(resumed_out.size() == 1);
+    const auto resumed_note = *resumed_out.begin();
+    REQUIRE(resumed_note.is_note_on());
+    REQUIRE(resumed_note.note() == expected_note);
+    REQUIRE(resumed_note.velocity() == applied_velocity);
+    REQUIRE(resumed_note.sample_offset == 0);
+    REQUIRE(grid.pump().requested_repaint);
+    const auto resumed_playhead = proc->channel().ui_read_playhead();
+    REQUIRE(resumed_playhead.playing == 1);
+    REQUIRE(resumed_playhead.active_pattern == grid.displayed_pattern());
+    REQUIRE(resumed_playhead.active_step == 0);
 }
