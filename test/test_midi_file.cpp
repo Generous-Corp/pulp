@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/midi/midi_file.hpp>
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -390,6 +391,50 @@ TEST_CASE("write_midi_file preserves mixed short messages across tracks",
     REQUIRE(notes_read[0].time_seconds == Approx(0.50).margin(1e-6));
     REQUIRE(notes_read[1].time_seconds == Approx(0.75).margin(1e-6));
     REQUIRE(notes_read[2].time_seconds == Approx(1.00).margin(1e-6));
+}
+
+TEST_CASE("write_midi_file preserves release before a same-tick retrigger",
+          "[midi][file][smf][ordering]") {
+    TempDir tmp;
+    const auto path = tmp.path / "same-tick-retrigger.mid";
+
+    MidiFileData data;
+    data.ticks_per_quarter = 480;
+    data.tempo_bpm = 120.0;
+    MidiTrack track;
+    track.events.push_back({0.0, MidiEvent::note_on(3, 60, 100)});
+    track.events.push_back({0.5, MidiEvent::note_off(3, 60, 17)});
+    track.events.push_back({0.5, MidiEvent::note_on(3, 60, 111)});
+    track.events.push_back({1.0, MidiEvent::note_off(3, 60, 23)});
+    data.tracks.push_back(std::move(track));
+
+    REQUIRE(write_midi_file(path.string(), data));
+    const auto round_trip = read_midi_file(path.string());
+    REQUIRE(round_trip.has_value());
+    REQUIRE(round_trip->tracks.size() == 1);
+
+    const auto& events = round_trip->tracks.front().events;
+    REQUIRE(events.size() == 4);
+    REQUIRE(events[0].event.is_note_on());
+    REQUIRE(events[1].event.is_note_off());
+    REQUIRE(events[2].event.is_note_on());
+    REQUIRE(events[3].event.is_note_off());
+    const std::array expected_velocities{100, 17, 111, 23};
+    const std::array expected_times{0.0, 0.5, 0.5, 1.0};
+
+    int note_depth = 0;
+    for (std::size_t i = 0; i < events.size(); ++i) {
+        const auto& event = events[i];
+        CHECK(event.event.channel() == 3);
+        CHECK(event.event.note() == 60);
+        CHECK(event.event.velocity() == expected_velocities[i]);
+        CHECK(event.time_seconds == Approx(expected_times[i]).margin(1e-6));
+        note_depth += event.event.is_note_on() ? 1 : -1;
+        REQUIRE(note_depth >= 0);
+        if (i == 1)
+            REQUIRE(note_depth == 0);
+    }
+    REQUIRE(note_depth == 0);
 }
 
 TEST_CASE("write_midi_file rejects missing parent directories",
