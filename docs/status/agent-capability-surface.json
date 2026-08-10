@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 29,
+  "inventory_version": 30,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -1740,7 +1740,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/beat_repeat_kernel.hpp",
-      "fingerprint": "sha256:4272908a298829c8c311901047dd242a443b42ae93054783d5488a8f8f33a453",
+      "fingerprint": "sha256:f7c213c193f826f3e791688dbf3dd4626f0b3766aa8659a8910e98e7691ba23e",
       "include": "pulp/signal/beat_repeat_kernel.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -2613,7 +2613,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/freeze_loop_sampler.hpp",
-      "fingerprint": "sha256:771ad66588052eb6e8772ef6f1d6bd871701807667973b3ebd01887d56587a44",
+      "fingerprint": "sha256:fa2406081bd7e78a0097eab797da14d2e1854cd0a6972cf6971728050b19348a",
       "include": "pulp/signal/freeze_loop_sampler.hpp",
       "disposition": "capability_support",
       "capability_keys": [

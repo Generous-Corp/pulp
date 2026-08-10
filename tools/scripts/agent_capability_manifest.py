@@ -49,8 +49,8 @@ from agent_capability_transaction import recover_transaction, write_transaction
 
 SCHEMA = "pulp.agent-capabilities.v1"
 SCHEMA_MINOR = 1
-MANIFEST_REVISION = 19
-SURFACE_INVENTORY_VERSION = 29
+MANIFEST_REVISION = 20
+SURFACE_INVENTORY_VERSION = 30
 WRITE_TRANSACTION_FILE = pathlib.Path(
     "tools/agent-capabilities/.capability-write-transaction.json"
 )

@@ -1,9 +1,4 @@
-// BeatRepeatKernel — exact history, tempo quantization, and bounded gestures.
-
 #include <pulp/signal/beat_repeat_kernel.hpp>
-#include <pulp/signal/freeze_loop_sampler.hpp>
-#include <pulp/timebase/beat_division.hpp>
-#include <pulp/timebase/compiled_tempo_map.hpp>
 
 #include "harness/rt_allocation_probe.hpp"
 
@@ -13,7 +8,6 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <span>
@@ -26,775 +20,876 @@ using namespace pulp::timebase;
 
 namespace {
 
-constexpr RationalRate kSampleRate{480, 1};
-constexpr std::int64_t kQuarterFrames = 240; // 120 BPM at 480 Hz.
+CompiledTempoMap tempo_map(std::span<const TempoPoint> points, std::uint64_t sample_rate = 1'000) {
+    auto compiled = CompiledTempoMap::compile(points, {sample_rate, 1});
+    REQUIRE(compiled);
+    return std::move(compiled.value());
+}
 
-CompiledTempoMap constant_map(double bpm = 120.0, RationalRate sample_rate = kSampleRate) {
+CompiledTempoMap constant_tempo(double bpm = 120.0, std::int64_t sample_rate = 1'000) {
     const std::array points{TempoPoint{{0}, bpm, TempoCurve::Constant}};
-    auto compiled = CompiledTempoMap::compile(points, sample_rate);
-    REQUIRE(compiled);
-    return std::move(compiled).value();
+    return tempo_map(points, sample_rate);
 }
 
-CompiledTempoMap ramp_map() {
-    const std::array points{
-        TempoPoint{{0}, 60.0, TempoCurve::LinearInTicks},
-        TempoPoint{{4 * kTicksPerQuarter}, 180.0, TempoCurve::Constant},
-    };
-    auto compiled = CompiledTempoMap::compile(points, kSampleRate);
-    REQUIRE(compiled);
-    return std::move(compiled).value();
-}
-
-BeatRepeatKernel prepared_kernel(std::size_t history = 4096, std::size_t maximum_transition = 64) {
-    BeatRepeatKernel kernel;
-    REQUIRE(kernel.prepare(kSampleRate, 1, history, maximum_transition));
-    kernel.set_transition_samples(0);
-    return kernel;
-}
-
-BeatRepeatEvent trigger(std::uint32_t offset = 0) {
-    return {BeatRepeatEvent::Type::Trigger, offset, 0};
-}
-
-BeatRepeatEvent stop(std::uint32_t offset = 0) {
-    return {BeatRepeatEvent::Type::Stop, offset, 0};
-}
-
-BeatRepeatEvent seek(std::uint32_t offset, std::int64_t captured_frame) {
-    return {BeatRepeatEvent::Type::Seek, offset, captured_frame};
-}
-
-struct ScheduledEvent {
-    std::int64_t sample = 0;
-    BeatRepeatEvent event{};
-};
-
-struct RenderResult {
-    std::vector<float> output;
-    BeatRepeatState state = BeatRepeatState::Idle;
-    BeatRepeatError error = BeatRepeatError::None;
-    std::size_t rejected_events = 0;
-};
-
-std::vector<float> ramp_input(std::size_t frames, float offset = 0.0f) {
-    std::vector<float> input(frames);
-    for (std::size_t i = 0; i < frames; ++i)
-        input[i] = offset + static_cast<float>(i);
-    return input;
-}
-
-std::vector<int> fixed_partitions(std::size_t total, int block) {
-    std::vector<int> result;
-    while (total != 0) {
-        const int next = std::min<int>(block, static_cast<int>(total));
-        result.push_back(next);
-        total -= static_cast<std::size_t>(next);
-    }
+std::vector<float> ramp(int frames, float scale = 0.001f) {
+    std::vector<float> result(static_cast<std::size_t>(frames));
+    for (int frame = 0; frame < frames; ++frame)
+        result[static_cast<std::size_t>(frame)] = static_cast<float>(frame) * scale;
     return result;
 }
 
-RenderResult render(BeatRepeatKernel& kernel, const CompiledTempoMap& tempo,
-                    std::span<const float> input, std::span<const int> partitions,
-                    std::span<const ScheduledEvent> schedule = {}, std::uint64_t epoch = 1,
-                    std::int64_t start_sample = 0) {
-    RenderResult rendered;
-    rendered.output.resize(input.size(), -999.0f);
-    std::size_t cursor = 0;
+std::vector<float> render_partitioned(const CompiledTempoMap& tempo,
+                                      std::span<const int> partitions, int total_frames,
+                                      int transition_frames = 8) {
+    BeatRepeatKernel kernel;
+    REQUIRE(kernel.prepare({1, 2'000, transition_frames, {1000, 1}}));
+    REQUIRE(kernel.set_repeat_count(2));
+    const auto armed = kernel.trigger(tempo, BeatDivision::Eighth, {510});
+    REQUIRE(armed);
 
-    for (const int requested : partitions) {
-        if (cursor == input.size())
-            break;
-        const auto frames =
-            std::min<std::size_t>(static_cast<std::size_t>(requested), input.size() - cursor);
-        const auto block_start = start_sample + static_cast<std::int64_t>(cursor);
-        const auto block_end = block_start + static_cast<std::int64_t>(frames);
-        std::vector<BeatRepeatEvent> events;
-        for (const auto& scheduled : schedule) {
-            if (scheduled.sample >= block_start && scheduled.sample < block_end) {
-                auto event = scheduled.event;
-                event.frame_offset = static_cast<std::uint32_t>(scheduled.sample - block_start);
-                events.push_back(event);
-            }
-        }
-        std::sort(events.begin(), events.end(), [](const auto& left, const auto& right) {
-            return left.frame_offset < right.frame_offset;
-        });
-
-        const float* in[]{input.data() + cursor};
-        float* out[]{rendered.output.data() + cursor};
-        const auto result = kernel.process(in, out, frames, block_start, epoch, tempo, events);
-        rendered.error = result.error;
-        rendered.rejected_events += result.rejected_events;
-        REQUIRE(result.processed_frames == frames);
-        cursor += frames;
+    auto input = ramp(total_frames);
+    std::vector<float> output(static_cast<std::size_t>(total_frames), -99.0f);
+    int offset = 0;
+    std::size_t partition = 0;
+    while (offset < total_frames) {
+        const int requested = partitions[partition++ % partitions.size()];
+        const int frames = std::min(requested, total_frames - offset);
+        const float* inputs[]{input.data() + offset};
+        float* outputs[]{output.data() + offset};
+        kernel.process(inputs, outputs, frames, {offset});
+        offset += frames;
     }
-
-    REQUIRE(cursor == input.size());
-    rendered.state = kernel.state();
-    return rendered;
+    return output;
 }
 
-BeatRepeatProcessResult process_segment(BeatRepeatKernel& kernel, const CompiledTempoMap& tempo,
-                                        std::span<const float> input, std::span<float> output,
-                                        std::int64_t start_sample, std::uint64_t epoch,
-                                        std::span<const BeatRepeatEvent> events = {}) {
-    REQUIRE(input.size() == output.size());
-    const float* in[]{input.data()};
-    float* out[]{output.data()};
-    return kernel.process(in, out, input.size(), start_sample, epoch, tempo, events);
+float maximum_step(std::span<const float> values, int begin, int end) {
+    float result = 0.0f;
+    for (int frame = std::max(1, begin); frame < std::min<int>(end, values.size()); ++frame)
+        result = std::max(result, std::abs(values[static_cast<std::size_t>(frame)] -
+                                           values[static_cast<std::size_t>(frame - 1)]));
+    return result;
 }
 
-void require_span_equals(std::span<const float> actual, std::span<const float> expected) {
-    REQUIRE(actual.size() == expected.size());
-    for (std::size_t i = 0; i < expected.size(); ++i)
-        REQUIRE_THAT(actual[i], WithinAbs(expected[i], 1.0e-6f));
+template <typename Function> void require_allocates_no_memory(Function&& function) {
+    pulp::test::RtAllocationProbe probe;
+    function();
+    REQUIRE(probe.allocation_count() == 0);
 }
 
 } // namespace
 
-TEST_CASE("FreezeLoopSampler exact capture is non-clamping and transactional",
-          "[signal][beat-repeat][history]") {
-    FreezeLoopSampler sampler;
-    sampler.prepare(1, 8, 0);
-    REQUIRE(sampler.capacity() == 8);
-    REQUIRE(sampler.available_history() == 0);
-
-    const std::array first{0.0f, 1.0f, 2.0f, 3.0f, 4.0f};
-    const float* first_in[]{first.data()};
-    sampler.write(first_in, static_cast<int>(first.size()));
-    REQUIRE(sampler.available_history() == 5);
-    REQUIRE_FALSE(sampler.capture_recent_exact(6));
-    REQUIRE(sampler.captured_channel(0).empty());
-
-    REQUIRE(sampler.capture_recent_exact(4));
-    const std::array expected_first{1.0f, 2.0f, 3.0f, 4.0f};
-    require_span_equals(sampler.captured_channel(0), expected_first);
-
-    const std::array wrapped{5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f};
-    const float* wrapped_in[]{wrapped.data()};
-    sampler.write(wrapped_in, static_cast<int>(wrapped.size()));
-    REQUIRE(sampler.capture_recent_exact(8));
-    const std::array expected_wrapped{3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f};
-    require_span_equals(sampler.captured_channel(0), expected_wrapped);
-    REQUIRE_FALSE(sampler.capture_recent_exact(9));
-    require_span_equals(sampler.captured_channel(0), expected_wrapped);
-    REQUIRE(sampler.retained_bytes() >= 2 * 8 * sizeof(float));
-
-    FreezeLoopSampler malformed;
-    malformed.prepare(1, 8, 0);
-    REQUIRE_FALSE(malformed.restore({std::numeric_limits<float>::quiet_NaN(), 4.0f, 0.0f, 0.0f}));
-    REQUIRE_FALSE(malformed.restore({1.0f, std::numeric_limits<float>::infinity(), 0.0f, 0.0f}));
-    REQUIRE_FALSE(malformed.restore({1.0f, 4.0f, 0.0f, -1.0f, 1.0f, 2.0f, 3.0f, 4.0f}));
-    REQUIRE_FALSE(malformed.restore(
-        {1.0f, 4.0f, 0.0f, 0.0f, 1.0f, std::numeric_limits<float>::quiet_NaN(), 3.0f, 4.0f}));
-    REQUIRE_FALSE(
-        malformed.restore({1.0f, 1.0f, 0.0f, 0.0f, 1.0f, std::numeric_limits<float>::quiet_NaN()}));
-
-    FreezeLoopSampler invalid;
-    invalid.prepare(-1, 8, 0);
-    REQUIRE(invalid.channels() == 0);
-    REQUIRE(invalid.capacity() == 0);
-    invalid.prepare(1, 8, std::numeric_limits<int>::max());
-    REQUIRE(invalid.capacity() == 0);
-    invalid.prepare(1, 16'777'217, 0);
-    REQUIRE(invalid.capacity() == 0);
-    invalid.freeze(1);
-    REQUIRE_FALSE(invalid.frozen());
-}
-
-TEST_CASE("beat repeat uses the strictly next edge and captures before its sample",
-          "[signal][beat-repeat][timing]") {
-    const auto tempo = constant_map();
-    auto kernel = prepared_kernel();
-    kernel.set_division(BeatDivision::Quarter);
-    const auto input = ramp_input(3 * kQuarterFrames);
-    const std::array events{ScheduledEvent{kQuarterFrames, trigger()}};
-    const auto result = render(kernel, tempo, input, fixed_partitions(input.size(), 73), events);
-
-    REQUIRE(result.output[kQuarterFrames] == input[kQuarterFrames]);
-    REQUIRE(result.output[2 * kQuarterFrames - 1] == input[2 * kQuarterFrames - 1]);
-    REQUIRE(result.output[2 * kQuarterFrames] == input[kQuarterFrames]);
-    REQUIRE(result.output[2 * kQuarterFrames + 1] == input[kQuarterFrames + 1]);
-    REQUIRE(kernel.captured_frames() == kQuarterFrames);
-    REQUIRE(result.state == BeatRepeatState::Active);
-}
-
-TEST_CASE("beat repeat resolves strict next edges through tempo ramps",
-          "[signal][beat-repeat][tempo-ramp]") {
-    const auto tempo = ramp_map();
-    const auto ticks = division_ticks(BeatDivision::Eighth);
-    REQUIRE(ticks);
-    const auto first_edge = tempo.ticks_to_samples({ticks.value().value}).value;
-    const auto second_edge = tempo.ticks_to_samples({2 * ticks.value().value}).value;
-    const auto captured = second_edge - first_edge;
-
-    auto kernel = prepared_kernel();
-    kernel.set_division(BeatDivision::Eighth);
-    const auto input = ramp_input(static_cast<std::size_t>(second_edge + captured + 1), 1000.0f);
-    const std::array events{ScheduledEvent{first_edge, trigger()}};
-    const auto result = render(kernel, tempo, input, fixed_partitions(input.size(), 37), events);
-
-    REQUIRE(result.output[first_edge] == input[first_edge]);
-    REQUIRE(result.output[second_edge] == input[first_edge]);
-    REQUIRE(result.output[second_edge + captured - 1] == input[second_edge - 1]);
-    REQUIRE(kernel.captured_frames() == static_cast<std::size_t>(captured));
-}
-
-TEST_CASE("strict next edge does not skip a nearby positive or negative edge",
-          "[signal][beat-repeat][timing][sparse-grid]") {
-    constexpr RationalRate rate{48'000, 1};
-    const auto tempo = constant_map(120.0, rate);
-    constexpr std::size_t quarter = 24'000;
-
-    SECTION("one sample before a positive edge") {
-        BeatRepeatKernel kernel;
-        REQUIRE(kernel.prepare(rate, 1, 30'000, 0));
-        kernel.set_division(BeatDivision::Quarter);
-        const auto input = ramp_input(quarter + 2);
-        std::vector<float> output(input.size());
-        const std::array event{trigger(static_cast<std::uint32_t>(quarter - 1))};
-        REQUIRE(process_segment(kernel, tempo, input, output, 0, 1, event));
-        REQUIRE(output[quarter - 1] == input[quarter - 1]);
-        REQUIRE(output[quarter] == input[0]);
-    }
-
-    SECTION("one sample before transport tick zero") {
-        BeatRepeatKernel kernel;
-        REQUIRE(kernel.prepare(rate, 1, 30'000, 0));
-        kernel.set_division(BeatDivision::Quarter);
-        const auto input = ramp_input(quarter + 2, 1000.0f);
-        std::vector<float> output(input.size());
-        const std::array event{trigger(static_cast<std::uint32_t>(quarter))};
-        REQUIRE(process_segment(kernel, tempo, input, output,
-                                -static_cast<std::int64_t>(quarter) - 1, 1, event));
-        REQUIRE(output[quarter + 1] == input[1]);
-    }
-
-    SECTION("sample grid is denser than the canonical tick lattice") {
-        constexpr RationalRate sparse_tick_rate{768'000, 1};
-        constexpr std::size_t sparse_cell = 1'920'000;
-        const auto sparse_tempo = constant_map(1.0, sparse_tick_rate);
-        BeatRepeatKernel kernel;
-        REQUIRE(kernel.prepare(sparse_tick_rate, 1, sparse_cell + 16, 0));
-        kernel.set_division(BeatDivision::SixtyFourthTriplet);
-        const auto input = ramp_input(sparse_cell + 2);
-        std::vector<float> output(input.size());
-        const std::array event{trigger(static_cast<std::uint32_t>(sparse_cell - 1))};
-        REQUIRE(process_segment(kernel, sparse_tempo, input, output, 0, 1, event));
-        REQUIRE(output[sparse_cell] == input[0]);
-    }
-}
-
-TEST_CASE("beat repeat is invariant to process block partitioning",
-          "[signal][beat-repeat][partition]") {
-    const auto tempo = ramp_map();
-    const auto input = ramp_input(1800, -500.0f);
-    const std::array events{
-        ScheduledEvent{113, trigger()},
-        ScheduledEvent{947, seek(0, 11)},
-        ScheduledEvent{1311, stop()},
-    };
-
-    auto one = prepared_kernel();
-    auto many = prepared_kernel();
-    one.set_division(BeatDivision::Eighth);
-    many.set_division(BeatDivision::Eighth);
-    one.set_direction(BeatRepeatDirection::Alternate);
-    many.set_direction(BeatRepeatDirection::Alternate);
-    const std::array one_block{1800};
-    const std::array odd_blocks{1, 7, 31, 2, 127, 19, 3, 251, 43, 509, 29, 64, 128, 256, 330};
-    const auto a = render(one, tempo, input, one_block, events);
-    const auto b = render(many, tempo, input, odd_blocks, events);
-    require_span_equals(a.output, b.output);
-    REQUIRE(a.state == b.state);
-    REQUIRE(a.error == b.error);
-    REQUIRE(a.rejected_events == b.rejected_events);
-}
-
-TEST_CASE("insufficient-history retrigger preserves the active loop",
-          "[signal][beat-repeat][transactional]") {
-    const auto tempo = constant_map();
-    auto reference = prepared_kernel(300);
-    auto retriggered = prepared_kernel(300);
-    reference.set_division(BeatDivision::Quarter);
-    retriggered.set_division(BeatDivision::Quarter);
-    const auto input = ramp_input(1500);
-    std::vector<float> expected(input.size());
-    std::vector<float> actual(input.size());
-    const std::array first_trigger{trigger(1)};
-
-    REQUIRE(process_segment(reference, tempo, std::span(input).first(721),
-                            std::span(expected).first(721), 0, 1, first_trigger));
-    REQUIRE(process_segment(retriggered, tempo, std::span(input).first(721),
-                            std::span(actual).first(721), 0, 1, first_trigger));
-    retriggered.set_division(BeatDivision::Whole);
-    const std::array failed_trigger{trigger(0)};
-    const auto expected_tail = process_segment(reference, tempo, std::span(input).subspan(721),
-                                               std::span(expected).subspan(721), 721, 1);
-    const auto actual_tail =
-        process_segment(retriggered, tempo, std::span(input).subspan(721),
-                        std::span(actual).subspan(721), 721, 1, failed_trigger);
-
-    REQUIRE(expected_tail.processed_frames == input.size() - 721);
-    REQUIRE(actual_tail.processed_frames == input.size() - 721);
-    require_span_equals(actual, expected);
-    REQUIRE(retriggered.state() == BeatRepeatState::Active);
-    REQUIRE(retriggered.last_capture_rejected());
-    REQUIRE(actual_tail.error == BeatRepeatError::InsufficientHistory);
-}
-
-TEST_CASE("beat repeat retrigger history contains dry input rather than wet output",
-          "[signal][beat-repeat][history][dry-only]") {
-    const auto tempo = constant_map();
-    auto kernel = prepared_kernel();
-    kernel.set_division(BeatDivision::Quarter);
-    std::vector<float> input(1200);
-    for (std::size_t i = 0; i < input.size(); ++i)
-        input[i] = i < 480 ? static_cast<float>(i) : 10'000.0f + static_cast<float>(i);
-    const std::array events{
-        ScheduledEvent{1, trigger()},
-        ScheduledEvent{481, trigger()},
-    };
-    const auto result = render(kernel, tempo, input, fixed_partitions(input.size(), 53), events);
-
-    REQUIRE(result.output[720] == input[480]);
-    REQUIRE(result.output[720] > 10'000.0f);
-    REQUIRE_FALSE(kernel.last_capture_rejected());
-}
-
-TEST_CASE("beat repeat preserves dry history when input aliases output",
-          "[signal][beat-repeat][history][in-place]") {
-    const auto tempo = constant_map();
-    auto reference = prepared_kernel();
-    auto in_place = prepared_kernel();
-    reference.set_division(BeatDivision::Quarter);
-    in_place.set_division(BeatDivision::Quarter);
-    auto dry = ramp_input(1200, 10'000.0f);
-    auto aliased = dry;
-    std::vector<float> expected(dry.size());
-    const std::array events{trigger(1), trigger(481)};
-
-    REQUIRE(process_segment(reference, tempo, dry, expected, 0, 1, events));
-    const float* input[]{aliased.data()};
-    float* output[]{aliased.data()};
-    REQUIRE(in_place.process(input, output, aliased.size(), 0, 1, tempo, events));
-
-    require_span_equals(aliased, expected);
-    REQUIRE(aliased[720] == dry[480]);
-}
-
-TEST_CASE("forward reverse and alternate use exact captured-frame indexing",
-          "[signal][beat-repeat][direction]") {
-    const auto tempo = constant_map();
-    const auto input = ramp_input(4 * kQuarterFrames);
-    const auto blocks = fixed_partitions(input.size(), 64);
-
-    auto run = [&](BeatRepeatDirection direction) {
-        auto kernel = prepared_kernel();
-        kernel.set_division(BeatDivision::Quarter);
-        kernel.set_direction(direction);
-        const std::array events{ScheduledEvent{1, trigger()}};
-        return render(kernel, tempo, input, blocks, events).output;
-    };
-
-    const auto forward = run(BeatRepeatDirection::Forward);
-    const auto reverse = run(BeatRepeatDirection::Reverse);
-    const auto alternate = run(BeatRepeatDirection::Alternate);
-    REQUIRE(forward[kQuarterFrames] == input[0]);
-    REQUIRE(forward[2 * kQuarterFrames - 1] == input[kQuarterFrames - 1]);
-    REQUIRE(reverse[kQuarterFrames] == input[kQuarterFrames - 1]);
-    REQUIRE(reverse[2 * kQuarterFrames - 1] == input[0]);
-    REQUIRE(alternate[kQuarterFrames] == input[0]);
-    REQUIRE(alternate[2 * kQuarterFrames] == input[kQuarterFrames - 1]);
-    REQUIRE(alternate[2 * kQuarterFrames + 1] == input[kQuarterFrames - 2]);
-}
-
-TEST_CASE("repeat count includes the first cell and gate is a bounded duty cycle",
-          "[signal][beat-repeat][repeat-count][gate]") {
-    const auto tempo = constant_map();
-    const auto input = ramp_input(4 * kQuarterFrames, 5000.0f);
-
-    SECTION("finite repeat count returns to dry") {
-        auto kernel = prepared_kernel();
-        kernel.set_division(BeatDivision::Quarter);
-        kernel.set_repeat_count(2);
-        const std::array events{ScheduledEvent{1, trigger()}};
-        const auto result =
-            render(kernel, tempo, input, fixed_partitions(input.size(), 41), events);
-        REQUIRE(result.output[kQuarterFrames] == input[0]);
-        REQUIRE(result.output[2 * kQuarterFrames] == input[0]);
-        REQUIRE(result.output[3 * kQuarterFrames] == input[3 * kQuarterFrames]);
-        REQUIRE(result.state == BeatRepeatState::Idle);
-    }
-
-    SECTION("half gate silences the second half of each repeated cell") {
-        auto kernel = prepared_kernel();
-        kernel.set_division(BeatDivision::Quarter);
-        kernel.set_gate(0.5f);
-        const std::array events{ScheduledEvent{1, trigger()}};
-        const auto result =
-            render(kernel, tempo, input, fixed_partitions(input.size(), 41), events);
-        REQUIRE(result.output[kQuarterFrames] == input[0]);
-        REQUIRE(result.output[kQuarterFrames + 119] == input[119]);
-        REQUIRE(result.output[kQuarterFrames + 120] == 0.0f);
-        REQUIRE(result.output[2 * kQuarterFrames - 1] == 0.0f);
-    }
-}
-
-TEST_CASE("stop seek and retrigger honor frame offsets", "[signal][beat-repeat][events]") {
-    const auto tempo = constant_map();
-    const auto input = ramp_input(1100, 20'000.0f);
-    auto kernel = prepared_kernel();
-    kernel.set_division(BeatDivision::Quarter);
-    const std::array events{
-        ScheduledEvent{1, trigger()},
-        ScheduledEvent{300, seek(0, 10)},
-        ScheduledEvent{350, stop()},
-        ScheduledEvent{401, trigger()},
-    };
-    const auto result = render(kernel, tempo, input, fixed_partitions(input.size(), 128), events);
-
-    REQUIRE(result.output[299] == input[59]);
-    REQUIRE(result.output[300] == input[10]);
-    REQUIRE(result.output[349] == input[59]);
-    REQUIRE(result.output[350] == input[350]);
-    REQUIRE(result.output[479] == input[479]);
-    REQUIRE(result.output[480] == input[240]);
-}
-
-TEST_CASE("same-frame events execute in caller span order",
-          "[signal][beat-repeat][events][ordering]") {
-    const auto tempo = constant_map();
-    auto make_active = [&] {
-        BeatRepeatKernel kernel;
-        REQUIRE(kernel.prepare(kSampleRate, 1, 4096, 8));
-        kernel.set_division(BeatDivision::Quarter);
-        kernel.set_transition_samples(8);
-        const auto input = ramp_input(300);
-        std::vector<float> output(input.size());
-        const std::array arm{trigger(1)};
-        REQUIRE(process_segment(kernel, tempo, input, output, 0, 1, arm));
-        return kernel;
-    };
-
-    const std::array<float, 1> input{300.0f};
-    std::array<float, 1> output{};
-    auto stop_then_trigger = make_active();
-    const std::array first{stop(0), trigger(0)};
-    REQUIRE(process_segment(stop_then_trigger, tempo, input, output, 300, 1, first));
-    REQUIRE(stop_then_trigger.state() == BeatRepeatState::ReleasingArmed);
-
-    auto trigger_then_stop = make_active();
-    const std::array second{trigger(0), stop(0)};
-    REQUIRE(process_segment(trigger_then_stop, tempo, input, output, 300, 1, second));
-    REQUIRE(trigger_then_stop.state() == BeatRepeatState::Releasing);
-}
-
-TEST_CASE("transport epoch changes cancel pending arms but preserve active capture",
-          "[signal][beat-repeat][epoch]") {
-    const auto tempo = constant_map();
-
-    SECTION("pending arm is cancelled at the next process boundary") {
-        auto kernel = prepared_kernel();
-        kernel.set_division(BeatDivision::Quarter);
-        const auto input = ramp_input(500);
-        std::vector<float> output(input.size());
-        const std::array arm{trigger(10)};
-        REQUIRE(process_segment(kernel, tempo, std::span(input).first(100),
-                                std::span(output).first(100), 0, 1, arm));
-        REQUIRE(kernel.state() == BeatRepeatState::Armed);
-        REQUIRE(process_segment(kernel, tempo, std::span(input).subspan(100),
-                                std::span(output).subspan(100), 100, 2));
-        require_span_equals(output, input);
-        REQUIRE(kernel.state() == BeatRepeatState::Idle);
-    }
-
-    SECTION("active loop survives and new history starts at the epoch") {
-        auto kernel = prepared_kernel();
-        kernel.set_division(BeatDivision::Eighth);
-        const auto input = ramp_input(700);
-        std::vector<float> output(input.size());
-        const std::array first_trigger{trigger(1)};
-        REQUIRE(process_segment(kernel, tempo, std::span(input).first(300),
-                                std::span(output).first(300), 0, 1, first_trigger));
-        const std::array new_trigger{trigger(10)};
-        const auto second = process_segment(kernel, tempo, std::span(input).subspan(300),
-                                            std::span(output).subspan(300), 300, 2, new_trigger);
-        REQUIRE(second.processed_frames == input.size() - 300);
-        REQUIRE(second.error == BeatRepeatError::InsufficientHistory);
-        REQUIRE(output[300] == input[60]);
-        REQUIRE(output[360] == input[0]);
-        REQUIRE(kernel.state() == BeatRepeatState::Active);
-        REQUIRE(kernel.last_capture_rejected());
-    }
-}
-
-TEST_CASE("nonzero transitions smooth finite release and reject transient snapshots",
-          "[signal][beat-repeat][transition][snapshot]") {
-    const auto tempo = constant_map();
+TEST_CASE("beat-repeat re-prepare failure preserves the active configuration",
+          "[signal][beat-repeat][prepare]") {
     BeatRepeatKernel kernel;
-    REQUIRE(kernel.prepare(kSampleRate, 1, 4096, 8));
-    kernel.set_division(BeatDivision::Quarter);
-    kernel.set_repeat_count(1);
-    kernel.set_transition_samples(8);
-    const auto input = ramp_input(600);
+    REQUIRE(kernel.prepare({1, 64, 8, {1000, 1}}));
+    REQUIRE_FALSE(kernel.prepare({1, 16'777'217, 8, {1000, 1}}));
+    REQUIRE(kernel.prepared());
+    REQUIRE(kernel.channels() == 1);
+    REQUIRE(kernel.history_capacity_frames() == 64);
+    REQUIRE(kernel.max_tail_samples() == 8);
+}
+
+TEST_CASE("beat-repeat moves leave the source safely unprepared",
+          "[signal][beat-repeat][prepare][move]") {
+    BeatRepeatKernel source;
+    REQUIRE(source.prepare({1, 64, 8, {1000, 1}}));
+    BeatRepeatKernel moved(std::move(source));
+    REQUIRE(moved.prepared());
+    REQUIRE_FALSE(source.prepared());
+    REQUIRE(source.channels() == 0);
+
+    BeatRepeatKernel assigned;
+    REQUIRE(assigned.prepare({1, 32, 4, {1000, 1}}));
+    assigned = std::move(moved);
+    REQUIRE(assigned.prepared());
+    REQUIRE(assigned.history_capacity_frames() == 64);
+    REQUIRE_FALSE(moved.prepared());
+    REQUIRE(moved.channels() == 0);
+}
+
+TEST_CASE("beat-repeat trigger requires preparation and a matching tempo-map rate",
+          "[signal][beat-repeat][prepare][timebase]") {
+    const auto tempo_1k = constant_tempo();
+    BeatRepeatKernel kernel;
+    const auto unprepared = kernel.trigger(tempo_1k, BeatDivision::Eighth, {0});
+    REQUIRE_FALSE(unprepared);
+    REQUIRE(unprepared.error == BeatRepeatPlanError::Unprepared);
+
+    REQUIRE(kernel.prepare({1, 2'000, 0, {1000, 1}}));
+    const auto tempo_48k = constant_tempo(120.0, 48'000);
+    const auto mismatched = kernel.trigger(tempo_48k, BeatDivision::Eighth, {0});
+    REQUIRE_FALSE(mismatched);
+    REQUIRE(mismatched.error == BeatRepeatPlanError::SampleRateMismatch);
+    REQUIRE(kernel.status() == BeatRepeatKernel::Status::Idle);
+
+    REQUIRE(kernel.trigger(tempo_1k, BeatDivision::Eighth, {0}));
+}
+
+TEST_CASE("beat-repeat processing rejects invalid audio buffers without changing state",
+          "[signal][beat-repeat][buffers]") {
+    BeatRepeatKernel kernel;
+    REQUIRE(kernel.prepare({1, 64, 8, {1000, 1}}));
+    kernel.process(nullptr, nullptr, 1, {0});
+    REQUIRE(kernel.available_history_frames() == 0);
+
+    const float* missing_input[]{nullptr};
+    float sample = 0.0f;
+    float* output[]{&sample};
+    kernel.process(missing_input, output, 1, {0});
+    REQUIRE(kernel.available_history_frames() == 0);
+
+    const float input_sample = 1.0f;
+    const float* input[]{&input_sample};
+    float* missing_output[]{nullptr};
+    kernel.process(input, missing_output, 1, {0});
+    REQUIRE(kernel.available_history_frames() == 0);
+}
+
+TEST_CASE("one-frame beat-repeat transitions render the destination endpoint",
+          "[signal][beat-repeat][transition]") {
+    const auto tempo = constant_tempo();
+    BeatRepeatKernel kernel;
+    REQUIRE(kernel.prepare({1, 2'000, 1, {1000, 1}}));
+    REQUIRE(kernel.set_repeat_count(1));
+    REQUIRE(kernel.trigger(tempo, BeatDivision::Eighth, {510}));
+
+    auto input = ramp(760);
     std::vector<float> output(input.size());
-    const std::array event{trigger(1)};
-    REQUIRE(process_segment(kernel, tempo, input, output, 0, 1, event));
-
-    // The final wet sample is 239. Release begins at sample 480 from that
-    // held endpoint, rather than jumping back to capture frame zero.
-    REQUIRE(output[479] == 239.0f);
-    REQUIRE(output[480] > output[479]);
-    REQUIRE(output[480] < input[480]);
-    REQUIRE(std::abs(output[480] - output[479]) < 50.0f);
-    REQUIRE(output[488] == input[488]);
-    REQUIRE(std::abs(output[240] - output[239]) < 50.0f);
-
-    BeatRepeatKernel wrapping;
-    REQUIRE(wrapping.prepare(kSampleRate, 1, 4096, 8));
-    wrapping.set_division(BeatDivision::Quarter);
-    wrapping.set_transition_samples(8);
-    std::vector<float> wrap_output(input.size());
-    REQUIRE(process_segment(wrapping, tempo, input, wrap_output, 0, 1, event));
-    REQUIRE(std::abs(wrap_output[480] - wrap_output[479]) < 50.0f);
-
-    BeatRepeatKernel gated;
-    REQUIRE(gated.prepare(kSampleRate, 1, 4096, 8));
-    gated.set_division(BeatDivision::Quarter);
-    gated.set_transition_samples(8);
-    gated.set_gate(0.5f);
-    std::vector<float> gate_output(input.size());
-    REQUIRE(process_segment(gated, tempo, input, gate_output, 0, 1, event));
-    REQUIRE(std::abs(gate_output[360] - gate_output[359]) < 50.0f);
-
-    BeatRepeatKernel seeking;
-    REQUIRE(seeking.prepare(kSampleRate, 1, 4096, 8));
-    seeking.set_division(BeatDivision::Quarter);
-    seeking.set_transition_samples(8);
-    std::vector<float> seek_output(input.size());
-    const std::array seek_events{trigger(1), seek(300, 10)};
-    REQUIRE(process_segment(seeking, tempo, input, seek_output, 0, 1, seek_events));
-    REQUIRE(std::abs(seek_output[300] - seek_output[299]) < 50.0f);
-
-    BeatRepeatKernel transitioning;
-    REQUIRE(transitioning.prepare(kSampleRate, 1, 4096, 8));
-    transitioning.set_division(BeatDivision::Quarter);
-    transitioning.set_transition_samples(8);
-    std::array<float, 241> short_input{};
-    std::array<float, 241> short_output{};
-    const std::array short_event{trigger(1)};
-    REQUIRE(process_segment(transitioning, tempo, short_input, short_output, 0, 1, short_event));
-    const auto transient = transitioning.snapshot();
-    REQUIRE_FALSE(transient.restorable);
-    BeatRepeatKernel destination;
-    REQUIRE(destination.prepare(kSampleRate, 1, 4096, 8));
-    REQUIRE_FALSE(destination.restore(transient));
-
-    SECTION("stop during dry-to-wet transition starts from the audible sample") {
-        BeatRepeatKernel overlapping;
-        REQUIRE(overlapping.prepare(kSampleRate, 1, 4096, 8));
-        overlapping.set_division(BeatDivision::Quarter);
-        overlapping.set_transition_samples(8);
-        const auto overlap_input = ramp_input(260);
-        std::vector<float> overlap_output(overlap_input.size());
-        const std::array overlap_events{trigger(1), stop(241)};
-        REQUIRE(process_segment(overlapping, tempo, overlap_input, overlap_output, 0, 1,
-                                overlap_events));
-        REQUIRE(std::abs(overlap_output[241] - overlap_output[240]) < 50.0f);
-    }
-
-    SECTION("seek during dry-to-wet transition starts from the audible sample") {
-        BeatRepeatKernel overlapping;
-        REQUIRE(overlapping.prepare(kSampleRate, 1, 4096, 8));
-        overlapping.set_division(BeatDivision::Quarter);
-        overlapping.set_transition_samples(8);
-        const auto overlap_input = ramp_input(260);
-        std::vector<float> overlap_output(overlap_input.size());
-        const std::array overlap_events{trigger(1), seek(241, 100)};
-        REQUIRE(process_segment(overlapping, tempo, overlap_input, overlap_output, 0, 1,
-                                overlap_events));
-        REQUIRE(std::abs(overlap_output[241] - overlap_output[240]) < 50.0f);
-    }
-
-    SECTION("seek during release cancels release without wedging state") {
-        BeatRepeatKernel overlapping;
-        REQUIRE(overlapping.prepare(kSampleRate, 1, 4096, 8));
-        overlapping.set_division(BeatDivision::Quarter);
-        overlapping.set_transition_samples(8);
-        const auto overlap_input = ramp_input(280);
-        std::vector<float> overlap_output(overlap_input.size());
-        const std::array overlap_events{trigger(1), stop(250), seek(251, 100)};
-        REQUIRE(process_segment(overlapping, tempo, overlap_input, overlap_output, 0, 1,
-                                overlap_events));
-        REQUIRE(overlapping.state() == BeatRepeatState::Active);
-        REQUIRE(std::abs(overlap_output[251] - overlap_output[250]) < 50.0f);
-    }
+    const float* inputs[]{input.data()};
+    float* outputs[]{output.data()};
+    kernel.process(inputs, outputs, static_cast<int>(input.size()), {0});
+    REQUIRE_THAT(output[750], WithinAbs(input[500], 1.0e-7f));
+    REQUIRE_THAT(output[751], WithinAbs(input[501], 1.0e-7f));
 }
 
-TEST_CASE("beat repeat has zero latency and a transition-bounded tail",
-          "[signal][beat-repeat][latency][tail]") {
-    auto kernel = prepared_kernel(4096, 64);
-    REQUIRE(kernel.latency_samples() == 0);
-    REQUIRE(kernel.max_tail_samples() == 0);
-    kernel.set_transition_samples(64);
-    REQUIRE(kernel.max_tail_samples() == 64);
-    kernel.set_transition_samples(1000);
-    REQUIRE(kernel.transition_samples() == 64);
-    REQUIRE(kernel.max_tail_samples() == 64);
+TEST_CASE("one-frame beat-repeat gate fades preserve the audible window",
+          "[signal][beat-repeat][gate][transition]") {
+    const auto tempo = constant_tempo();
+    BeatRepeatKernel kernel;
+    REQUIRE(kernel.prepare({1, 2'000, 1, {1000, 1}}));
+    REQUIRE(kernel.set_repeat_count(1));
+    REQUIRE(kernel.set_gate(0.5f));
+    REQUIRE(kernel.trigger(tempo, BeatDivision::Eighth, {510}));
+
+    auto input = ramp(900);
+    std::vector<float> output(input.size());
+    const float* inputs[]{input.data()};
+    float* outputs[]{output.data()};
+    kernel.process(inputs, outputs, static_cast<int>(input.size()), {0});
+    REQUIRE(output[874] != 0.0f);
+    REQUIRE(output[875] == 0.0f);
 }
 
-TEST_CASE("beat repeat reports nonfinite, range, tempo, and event errors",
-          "[signal][beat-repeat][errors]") {
-    SECTION("prepare and setters reject invalid values") {
+TEST_CASE("near-unity beat-repeat gates fade to silence without a hard cutoff",
+          "[signal][beat-repeat][gate][transition]") {
+    const auto tempo = constant_tempo();
+    BeatRepeatKernel kernel;
+    REQUIRE(kernel.prepare({1, 2'000, 8, {1000, 1}}));
+    REQUIRE(kernel.set_repeat_count(1));
+    REQUIRE(kernel.set_gate(249.0f / 250.0f));
+    REQUIRE(kernel.trigger(tempo, BeatDivision::Eighth, {510}));
+
+    std::vector<float> input(1'000, 1.0f);
+    std::vector<float> output(input.size());
+    const float* inputs[]{input.data()};
+    float* outputs[]{output.data()};
+    kernel.process(inputs, outputs, static_cast<int>(input.size()), {0});
+    REQUIRE(output[990] == 1.0f);
+    REQUIRE(output[997] < output[990]);
+    REQUIRE(output[998] == 0.0f);
+    REQUIRE(output[999] == 0.0f);
+}
+
+TEST_CASE("beat-repeat sanitizes non-finite dry and captured audio",
+          "[signal][beat-repeat][finite]") {
+    const auto tempo = constant_tempo();
+    BeatRepeatKernel kernel;
+    REQUIRE(kernel.prepare({1, 2'000, 0, {1000, 1}}));
+    REQUIRE(kernel.set_repeat_count(1));
+    REQUIRE(kernel.trigger(tempo, BeatDivision::Eighth, {510}));
+
+    auto input = ramp(1'000);
+    input[600] = std::numeric_limits<float>::quiet_NaN();
+    std::vector<float> output(input.size());
+    const float* inputs[]{input.data()};
+    float* outputs[]{output.data()};
+    kernel.process(inputs, outputs, static_cast<int>(input.size()), {0});
+    REQUIRE(output[600] == 0.0f);
+    REQUIRE(output[850] == 0.0f);
+    REQUIRE(std::all_of(output.begin(), output.end(),
+                        [](float value) { return std::isfinite(value); }));
+}
+
+TEST_CASE("beat-repeat sanitizes finite transition overflow",
+          "[signal][beat-repeat][finite][transition]") {
+    const auto tempo = constant_tempo();
+    BeatRepeatKernel kernel;
+    REQUIRE(kernel.prepare({1, 2'000, 3, {1000, 1}}));
+    REQUIRE(kernel.set_repeat_count(1));
+    REQUIRE(kernel.trigger(tempo, BeatDivision::Eighth, {510}));
+
+    std::vector<float> input(760, std::numeric_limits<float>::max());
+    std::vector<float> output(input.size());
+    const float* inputs[]{input.data()};
+    float* outputs[]{output.data()};
+    kernel.process(inputs, outputs, static_cast<int>(input.size()), {0});
+    REQUIRE(std::all_of(output.begin(), output.end(),
+                        [](float value) { return std::isfinite(value); }));
+}
+
+TEST_CASE("beat-repeat plans use exact compiled tempo-map grid edges",
+          "[signal][beat-repeat][timebase]") {
+    const std::array points{
+        TempoPoint{{0}, 60.0, TempoCurve::LinearInTicks},
+        TempoPoint{{2 * kTicksPerQuarter}, 180.0, TempoCurve::Constant},
+    };
+    const auto tempo = tempo_map(points, 48'000);
+    for (const auto division : {BeatDivision::Quarter, BeatDivision::Eighth,
+                                BeatDivision::SixteenthTriplet, BeatDivision::EighthDotted}) {
+        const auto quantum = division_ticks(division).value().value;
+        for (const auto edge_tick : {quantum, 2 * quantum, 7 * quantum}) {
+            const auto edge_sample = tempo.ticks_to_samples({edge_tick});
+            const auto previous_sample = tempo.ticks_to_samples({edge_tick - quantum});
+            const auto plan = lower_beat_repeat_capture(tempo, division, {edge_sample.value - 1});
+            REQUIRE(plan);
+            REQUIRE(plan.plan.edge_tick == TickPosition{edge_tick});
+            REQUIRE(plan.plan.edge_sample == edge_sample);
+            REQUIRE(plan.plan.capture_frames == edge_sample.value - previous_sample.value);
+        }
+    }
+
+    REQUIRE_FALSE(lower_beat_repeat_capture(tempo, static_cast<BeatDivision>(255), {0}));
+    const auto maximum = lower_beat_repeat_capture(tempo, BeatDivision::Quarter,
+                                                   {std::numeric_limits<std::int64_t>::max()});
+    REQUIRE_FALSE(maximum);
+    REQUIRE((maximum.error == BeatRepeatPlanError::TickRangeExceeded ||
+             maximum.error == BeatRepeatPlanError::SampleRangeExceeded));
+    const auto minimum = lower_beat_repeat_capture(tempo, BeatDivision::Sixteenth,
+                                                   {std::numeric_limits<std::int64_t>::min()});
+    REQUIRE_FALSE(minimum);
+    REQUIRE((minimum.error == BeatRepeatPlanError::TickRangeExceeded ||
+             minimum.error == BeatRepeatPlanError::SampleRangeExceeded));
+    const std::array slow_point{TempoPoint{{0}, 1.0, TempoCurve::Constant}};
+    const auto slow_tempo = tempo_map(slow_point, 768'000);
+    const auto saturated_minimum = lower_beat_repeat_capture(
+        slow_tempo, BeatDivision::Sixteenth, {std::numeric_limits<std::int64_t>::min()});
+    REQUIRE_FALSE(saturated_minimum);
+    REQUIRE(saturated_minimum.error == BeatRepeatPlanError::SampleRangeExceeded);
+    const auto saturated_maximum = lower_beat_repeat_capture(
+        slow_tempo, BeatDivision::Sixteenth, {std::numeric_limits<std::int64_t>::max() - 1});
+    REQUIRE_FALSE(saturated_maximum);
+    REQUIRE(saturated_maximum.error == BeatRepeatPlanError::SampleRangeExceeded);
+
+    const std::array sparse_point{TempoPoint{{0}, 120.0, TempoCurve::Constant}};
+    const auto sparse_compile = CompiledTempoMap::compile(sparse_point, {1, 1'000'000'000});
+    REQUIRE(sparse_compile);
+    const auto sparse =
+        lower_beat_repeat_capture(sparse_compile.value(), BeatDivision::Sixteenth, {0});
+    REQUIRE(sparse);
+    REQUIRE(sparse.plan.edge_sample.value > 0);
+}
+
+TEST_CASE("beat-repeat captures the exact preceding interval at the armed edge",
+          "[signal][beat-repeat][capture]") {
+    const auto tempo = constant_tempo();
+    BeatRepeatKernel kernel;
+    REQUIRE(kernel.prepare({1, 2'000, 0, {1000, 1}}));
+    REQUIRE(kernel.set_repeat_count(1));
+    const auto plan = kernel.trigger(tempo, BeatDivision::Eighth, {510});
+    REQUIRE(plan);
+    REQUIRE(plan.plan.edge_sample == SamplePosition{750});
+    REQUIRE(plan.plan.capture_frames == 250);
+
+    auto input = ramp(1'050);
+    std::vector<float> output(input.size());
+    const float* inputs[]{input.data()};
+    float* outputs[]{output.data()};
+    kernel.process(inputs, outputs, static_cast<int>(input.size()), {0});
+
+    REQUIRE_THAT(output[750], WithinAbs(input[500], 1.0e-7f));
+    REQUIRE_THAT(output[999], WithinAbs(input[749], 1.0e-7f));
+    REQUIRE(output[749] == input[749]);
+    REQUIRE(kernel.status() == BeatRepeatKernel::Status::Idle);
+}
+
+TEST_CASE("beat-repeat output is invariant to process block partitioning",
+          "[signal][beat-repeat][partition]") {
+    const auto tempo = constant_tempo();
+    const std::array one_block{1'300};
+    const std::array irregular{1, 7, 64, 3, 127, 11, 256};
+    const auto whole = render_partitioned(tempo, one_block, 1'300);
+    const auto split = render_partitioned(tempo, irregular, 1'300);
+    REQUIRE(split == whole);
+}
+
+TEST_CASE("beat-repeat rejects fresh and over-capacity capture without clamping",
+          "[signal][beat-repeat][history]") {
+    const auto tempo = constant_tempo();
+
+    SECTION("fresh history") {
         BeatRepeatKernel kernel;
-        REQUIRE_FALSE(kernel.prepare(kSampleRate, 0, 0, 0));
-        REQUIRE_FALSE(kernel.prepare(kSampleRate, 64,
-                                     static_cast<std::size_t>(std::numeric_limits<int>::max()), 0));
-        REQUIRE(kernel.prepare(kSampleRate, 1, 128, 16));
-        REQUIRE(kernel.prepare(kSampleRate, 1, 256, 8));
-        REQUIRE(kernel.state() == BeatRepeatState::Idle);
-        REQUIRE(kernel.retained_bytes() == (2 * 256 + 5) * sizeof(float));
-        kernel.set_division(static_cast<BeatDivision>(255));
-        REQUIRE(kernel.last_error() == BeatRepeatError::InvalidArgument);
-        kernel.clear_error();
-        kernel.set_direction(static_cast<BeatRepeatDirection>(255));
-        REQUIRE(kernel.last_error() == BeatRepeatError::InvalidArgument);
-        kernel.clear_error();
-        kernel.set_gate(std::numeric_limits<float>::quiet_NaN());
-        REQUIRE(kernel.last_error() == BeatRepeatError::InvalidArgument);
+        REQUIRE(kernel.prepare({1, 600, 0, {1000, 1}}));
+        REQUIRE(kernel.trigger(tempo, BeatDivision::Quarter, {0}));
+        auto input = ramp(100);
+        std::vector<float> output(input.size());
+        const float* inputs[]{input.data()};
+        float* outputs[]{output.data()};
+        kernel.process(inputs, outputs, 100, {450});
+        REQUIRE(kernel.status() == BeatRepeatKernel::Status::CaptureRejectedInsufficientHistory);
+        REQUIRE(kernel.last_capture_rejected());
+        REQUIRE(output == input);
+
+        const auto state = kernel.snapshot();
+        BeatRepeatKernel restored;
+        REQUIRE(restored.prepare({1, 600, 0, {1000, 1}}));
+        REQUIRE(restored.restore(state));
+        REQUIRE(restored.status() ==
+                BeatRepeatKernel::Status::CaptureRejectedInsufficientHistory);
+        REQUIRE(restored.last_capture_rejected());
     }
 
-    SECTION("nonfinite dry input is sanitized") {
-        const auto tempo = constant_map();
-        auto kernel = prepared_kernel();
-        auto input = ramp_input(32);
-        input[7] = std::numeric_limits<float>::quiet_NaN();
-        input[8] = std::numeric_limits<float>::infinity();
-        std::array<int, 1> blocks{32};
-        const auto result = render(kernel, tempo, input, blocks);
-        REQUIRE(
-            std::ranges::all_of(result.output, [](float value) { return std::isfinite(value); }));
-        REQUIRE(result.output[7] == 0.0f);
-        REQUIRE(result.output[8] == 0.0f);
-        REQUIRE(result.error == BeatRepeatError::NonFiniteInput);
+    SECTION("exact capacity succeeds and one larger division rejects") {
+        BeatRepeatKernel exact;
+        REQUIRE(exact.prepare({1, 250, 0, {1000, 1}}));
+        REQUIRE(exact.trigger(tempo, BeatDivision::Eighth, {510}));
+        auto input = ramp(1'100);
+        std::vector<float> output(input.size());
+        const float* inputs[]{input.data()};
+        float* outputs[]{output.data()};
+        exact.process(inputs, outputs, 1'100, {0});
+        REQUIRE_FALSE(exact.last_capture_rejected());
 
-        auto in_place = prepared_kernel();
-        std::array<float, 2> aliased{std::numeric_limits<float>::quiet_NaN(), 1.0f};
-        const float* alias_input[]{aliased.data()};
-        float* alias_output[]{aliased.data()};
-        const auto alias_result =
-            in_place.process(alias_input, alias_output, aliased.size(), 0, 1, tempo);
-        REQUIRE(alias_result.error == BeatRepeatError::NonFiniteInput);
-        REQUIRE(aliased[0] == 0.0f);
-        REQUIRE(aliased[1] == 1.0f);
-    }
-
-    SECTION("tempo rate mismatch and position overflow fail before processing") {
-        auto kernel = prepared_kernel();
-        const auto wrong_rate = constant_map(120.0, RationalRate{960, 1});
-        const std::array<float, 2> input{1.0f, 2.0f};
-        std::array<float, 2> output{};
-        auto mismatch = process_segment(kernel, wrong_rate, input, output, 0, 1);
-        REQUIRE(mismatch.error == BeatRepeatError::TempoMapRateMismatch);
-        REQUIRE(mismatch.processed_frames == 0);
-        kernel.clear_error();
-        const auto tempo = constant_map();
-        auto overflow = process_segment(kernel, tempo, input, output,
-                                        std::numeric_limits<std::int64_t>::max() - 1, 1);
-        REQUIRE(overflow.error == BeatRepeatError::PositionOverflow);
-        REQUIRE(overflow.processed_frames == 0);
-    }
-
-    SECTION("out-of-range and unordered events are rejected") {
-        const auto tempo = constant_map();
-        auto kernel = prepared_kernel();
-        const std::array<float, 16> input{};
-        std::array<float, 16> output{};
-        const std::array events{trigger(12), stop(3), seek(16, 0)};
-        const auto result = process_segment(kernel, tempo, input, output, 0, 1, events);
-        REQUIRE(result.processed_frames == input.size());
-        REQUIRE(result.rejected_events == 2);
-        REQUIRE(result.error == BeatRepeatError::InvalidEventOrder);
+        BeatRepeatKernel over;
+        REQUIRE(over.prepare({1, 250, 0, {1000, 1}}));
+        const auto rejected = over.trigger(tempo, BeatDivision::Quarter, {510});
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.error == BeatRepeatPlanError::HistoryCapacityExceeded);
+        std::fill(output.begin(), output.end(), 0.0f);
+        over.process(inputs, outputs, 1'100, {0});
+        REQUIRE_FALSE(over.last_capture_rejected());
+        REQUIRE(over.status() == BeatRepeatKernel::Status::Idle);
     }
 }
 
-TEST_CASE("beat repeat snapshot restores active capture and playhead",
-          "[signal][beat-repeat][snapshot]") {
-    const auto tempo = constant_map();
-    auto original = prepared_kernel();
-    original.set_division(BeatDivision::Quarter);
-    original.set_direction(BeatRepeatDirection::Alternate);
-    original.set_repeat_count(7);
-    original.set_gate(0.75f);
-    original.set_transition_samples(8);
-    const auto prefix = ramp_input(377);
-    std::vector<float> prefix_output(prefix.size());
-    const std::array arm{trigger(1)};
-    REQUIRE(process_segment(original, tempo, prefix, prefix_output, 0, 1, arm));
-
-    const auto snapshot = original.snapshot();
-    REQUIRE(snapshot.restorable);
-    REQUIRE(snapshot.active);
-    REQUIRE_FALSE(snapshot.capture.empty());
-    auto restored = prepared_kernel();
-    REQUIRE(restored.restore(snapshot));
-    REQUIRE(restored.direction() == BeatRepeatDirection::Alternate);
-    REQUIRE(restored.repeat_count() == 7);
-    REQUIRE(restored.gate() == 0.75f);
-
-    const auto suffix = ramp_input(400, 50'000.0f);
-    std::vector<float> expected(suffix.size());
-    std::vector<float> actual(suffix.size());
-    const std::array immediate_stop{stop(0)};
-    REQUIRE(process_segment(original, tempo, suffix, expected, 377, 1, immediate_stop));
-    REQUIRE(process_segment(restored, tempo, suffix, actual, 377, 1, immediate_stop));
-    require_span_equals(actual, expected);
-
-    auto malformed = snapshot;
-    malformed.version = 2;
-    auto rejected = prepared_kernel();
-    REQUIRE_FALSE(rejected.restore(malformed));
-    REQUIRE(rejected.state() == BeatRepeatState::Idle);
-
-    malformed = snapshot;
-    malformed.last_wet[0] = std::numeric_limits<float>::quiet_NaN();
-    REQUIRE_FALSE(rejected.restore(malformed));
-    malformed = snapshot;
-    malformed.last_rendered[0] = std::numeric_limits<float>::infinity();
-    REQUIRE_FALSE(rejected.restore(malformed));
-    malformed = snapshot;
-    malformed.active = false;
-    REQUIRE_FALSE(rejected.restore(malformed));
+TEST_CASE("beat-repeat reverse and alternate modes own repeat direction",
+          "[signal][beat-repeat][reverse]") {
+    const auto tempo = constant_tempo();
+    BeatRepeatKernel kernel;
+    REQUIRE(kernel.prepare({1, 2'000, 0, {1000, 1}}));
+    REQUIRE(kernel.set_repeat_count(2));
+    REQUIRE(kernel.set_reverse(BeatRepeatKernel::ReverseMode::Alternate));
+    REQUIRE(kernel.trigger(tempo, BeatDivision::Eighth, {510}));
+    auto input = ramp(1'300);
+    std::vector<float> output(input.size());
+    const float* inputs[]{input.data()};
+    float* outputs[]{output.data()};
+    kernel.process(inputs, outputs, 1'300, {0});
+    for (int frame = 0; frame < 250; ++frame) {
+        REQUIRE_THAT(output[750 + frame], WithinAbs(input[500 + frame], 1.0e-7f));
+        REQUIRE_THAT(output[1'000 + frame], WithinAbs(input[749 - frame], 1.0e-7f));
+    }
 }
 
-TEST_CASE("beat repeat process and event handling allocate nothing after prepare",
-          "[signal][beat-repeat][rt]") {
-    const auto tempo = constant_map();
-    auto kernel = prepared_kernel();
-    kernel.set_division(BeatDivision::Sixteenth);
-    kernel.set_direction(BeatRepeatDirection::Alternate);
-    std::array<float, 128> input{};
-    std::array<float, 128> output{};
-    for (std::size_t i = 0; i < input.size(); ++i)
-        input[i] = static_cast<float>(i);
-    const float* in[]{input.data()};
-    float* out[]{output.data()};
-    const std::array events{trigger(7), seek(91, 3)};
+TEST_CASE("lowering the live repeat limit releases to a restorable snapshot",
+          "[signal][beat-repeat][state][controls]") {
+    const auto tempo = constant_tempo();
+    BeatRepeatKernel kernel;
+    REQUIRE(kernel.prepare({1, 2'000, 8, {1000, 1}}));
+    REQUIRE(kernel.set_repeat_count(0));
+    REQUIRE(kernel.trigger(tempo, BeatDivision::Eighth, {510}));
+    auto input = ramp(1'300);
+    std::vector<float> output(input.size());
+    const float* inputs[]{input.data()};
+    float* outputs[]{output.data()};
+    kernel.process(inputs, outputs, static_cast<int>(input.size()), {0});
+    REQUIRE(kernel.completed_repeats() >= 1);
+    REQUIRE(kernel.trigger(tempo, BeatDivision::Eighth, {1'300}));
+    REQUIRE_FALSE(kernel.can_snapshot());
 
-    std::size_t allocations = 1;
-    BeatRepeatProcessResult result;
-    {
-        pulp::test::RtAllocationProbe probe;
-        result = kernel.process(in, out, input.size(), 0, 1, tempo, events);
-        const std::array stop_event{stop(0)};
-        result = kernel.process(in, out, input.size(), 128, 1, tempo, stop_event);
+    REQUIRE(kernel.set_repeat_count(1));
+    REQUIRE(kernel.status() == BeatRepeatKernel::Status::Releasing);
+    const auto state = kernel.snapshot();
+    REQUIRE(state.resumable);
+    REQUIRE_FALSE(state.active);
+
+    BeatRepeatKernel restored;
+    REQUIRE(restored.prepare({1, 2'000, 8, {1000, 1}}));
+    REQUIRE(restored.restore(state));
+    REQUIRE(restored.status() == BeatRepeatKernel::Status::Idle);
+}
+
+TEST_CASE("finite repeat completion cancels a queued retrigger at the same edge",
+          "[signal][beat-repeat][retrigger][controls]") {
+    const auto tempo = constant_tempo();
+    BeatRepeatKernel kernel;
+    REQUIRE(kernel.prepare({1, 2'000, 8, {1000, 1}}));
+    REQUIRE(kernel.set_repeat_count(0));
+    REQUIRE(kernel.trigger(tempo, BeatDivision::Eighth, {510}));
+    auto input = ramp(1'510);
+    std::vector<float> output(input.size());
+    const float* inputs[]{input.data()};
+    float* outputs[]{output.data()};
+    kernel.process(inputs, outputs, 1'300, {0});
+    REQUIRE(kernel.completed_repeats() >= 1);
+
+    REQUIRE(kernel.set_repeat_count(kernel.completed_repeats() + 1));
+    REQUIRE(kernel.trigger(tempo, BeatDivision::Eighth, {1'300}));
+    const float* tail_inputs[]{input.data() + 1'300};
+    float* tail_outputs[]{output.data() + 1'300};
+    kernel.process(tail_inputs, tail_outputs, 210, {1'300});
+    REQUIRE(kernel.status() == BeatRepeatKernel::Status::Idle);
+    REQUIRE(kernel.can_snapshot());
+    REQUIRE_FALSE(kernel.snapshot().active);
+}
+
+TEST_CASE("beat-repeat reverse seek uses captured-frame coordinates",
+          "[signal][beat-repeat][reverse][seek]") {
+    const auto tempo = constant_tempo();
+    BeatRepeatKernel kernel;
+    REQUIRE(kernel.prepare({1, 2'000, 0, {1000, 1}}));
+    REQUIRE(kernel.set_repeat_count(0));
+    REQUIRE(kernel.set_reverse(BeatRepeatKernel::ReverseMode::On));
+    REQUIRE(kernel.trigger(tempo, BeatDivision::Eighth, {510}));
+    auto input = ramp(901);
+    std::vector<float> output(input.size());
+    const float* inputs[]{input.data()};
+    float* outputs[]{output.data()};
+    kernel.process(inputs, outputs, 900, {0});
+    REQUIRE(kernel.seek(0));
+    const float* tail_inputs[]{input.data() + 900};
+    float* tail_outputs[]{output.data() + 900};
+    kernel.process(tail_inputs, tail_outputs, 1, {900});
+    REQUIRE_THAT(output[900], WithinAbs(input[500], 1.0e-7f));
+}
+
+TEST_CASE("beat-repeat retrigger captures dry history rather than its wet output",
+          "[signal][beat-repeat][retrigger]") {
+    const auto tempo = constant_tempo();
+    BeatRepeatKernel kernel;
+    REQUIRE(kernel.prepare({1, 2'000, 0, {1000, 1}}));
+    REQUIRE(kernel.set_repeat_count(0));
+    REQUIRE(kernel.trigger(tempo, BeatDivision::Eighth, {510}));
+    std::vector<float> first_input(900, 0.0f);
+    for (int frame = 500; frame < 750; ++frame)
+        first_input[static_cast<std::size_t>(frame)] = 1.0f;
+    std::vector<float> first_output(first_input.size());
+    const float* first_inputs[]{first_input.data()};
+    float* first_outputs[]{first_output.data()};
+    kernel.process(first_inputs, first_outputs, 900, {0});
+    REQUIRE(first_output[800] == 1.0f);
+
+    REQUIRE(kernel.trigger(tempo, BeatDivision::Eighth, {900}));
+    std::array<float, 350> dry_zeros{};
+    std::array<float, 350> retriggered{};
+    const float* second_inputs[]{dry_zeros.data()};
+    float* second_outputs[]{retriggered.data()};
+    kernel.process(second_inputs, second_outputs, 350, {900});
+    REQUIRE(retriggered[99] == 1.0f);
+    for (int frame = 100; frame < 350; ++frame)
+        REQUIRE(retriggered[static_cast<std::size_t>(frame)] == 0.0f);
+
+    BeatRepeatKernel in_place;
+    REQUIRE(in_place.prepare({1, 2'000, 0, {1000, 1}}));
+    REQUIRE(in_place.set_repeat_count(0));
+    REQUIRE(in_place.trigger(tempo, BeatDivision::Eighth, {510}));
+    std::vector<float> aliased(1'250, 0.0f);
+    for (int frame = 500; frame < 750; ++frame)
+        aliased[static_cast<std::size_t>(frame)] = 1.0f;
+    const float* aliased_input[]{aliased.data()};
+    float* aliased_output[]{aliased.data()};
+    in_place.process(aliased_input, aliased_output, 900, {0});
+    REQUIRE(in_place.trigger(tempo, BeatDivision::Eighth, {900}));
+    const float* aliased_tail_input[]{aliased.data() + 900};
+    float* aliased_tail_output[]{aliased.data() + 900};
+    in_place.process(aliased_tail_input, aliased_tail_output, 350, {900});
+    REQUIRE(aliased[999] == 1.0f);
+    for (int frame = 1'000; frame < 1'250; ++frame)
+        REQUIRE(aliased[static_cast<std::size_t>(frame)] == 0.0f);
+}
+
+TEST_CASE("beat-repeat replacement transition starts from the current output",
+          "[signal][beat-repeat][retrigger][transition]") {
+    const auto tempo = constant_tempo();
+    BeatRepeatKernel kernel;
+    REQUIRE(kernel.prepare({1, 2'000, 32, {1000, 1}}));
+    REQUIRE(kernel.set_repeat_count(0));
+    REQUIRE(kernel.trigger(tempo, BeatDivision::Eighth, {510}));
+    std::vector<float> first_input(800, 0.0f);
+    for (int frame = 500; frame < 750; ++frame)
+        first_input[static_cast<std::size_t>(frame)] = 1.0f;
+    std::vector<float> first_output(first_input.size());
+    const float* first_inputs[]{first_input.data()};
+    float* first_outputs[]{first_output.data()};
+    kernel.process(first_inputs, first_outputs, 800, {0});
+
+    REQUIRE(kernel.trigger(tempo, BeatDivision::Sixteenth, {800}));
+    std::array<float, 200> dry{};
+    std::array<float, 200> output{};
+    const float* inputs[]{dry.data()};
+    float* outputs[]{output.data()};
+    kernel.process(inputs, outputs, 200, {800});
+    REQUIRE(output[74] == 1.0f);
+    REQUIRE(output[75] == 1.0f);
+}
+
+TEST_CASE("beat-repeat gate, stop, seek, and transport reset are deterministic",
+          "[signal][beat-repeat][lifecycle]") {
+    const auto tempo = constant_tempo();
+    BeatRepeatKernel kernel;
+    REQUIRE(kernel.prepare({1, 2'000, 8, {1000, 1}}));
+    REQUIRE(kernel.set_repeat_count(0));
+    REQUIRE(kernel.set_gate(0.5f));
+    REQUIRE(kernel.trigger(tempo, BeatDivision::Eighth, {510}));
+    auto input = ramp(1'100);
+    std::vector<float> output(input.size());
+    const float* inputs[]{input.data()};
+    float* outputs[]{output.data()};
+    kernel.process(inputs, outputs, 900, {0});
+    REQUIRE(kernel.status() == BeatRepeatKernel::Status::Active);
+    REQUIRE(output[880] == 0.0f);
+    REQUIRE(kernel.seek(249));
+    kernel.process(inputs, outputs, 32, {900});
+    kernel.stop();
+    REQUIRE(kernel.status() == BeatRepeatKernel::Status::Releasing);
+    kernel.process(inputs, outputs, 16, {932});
+    REQUIRE(kernel.status() == BeatRepeatKernel::Status::Idle);
+    REQUIRE(kernel.loop_length() == 0);
+    kernel.transport_discontinuity();
+    REQUIRE(kernel.available_history_frames() == 0);
+    REQUIRE(kernel.status() == BeatRepeatKernel::Status::Idle);
+}
+
+TEST_CASE("beat-repeat transition removes the planted capture discontinuity",
+          "[signal][beat-repeat][transition]") {
+    const auto render = [](int transition_frames) {
+        const auto tempo = constant_tempo();
+        BeatRepeatKernel kernel;
+        REQUIRE(kernel.prepare({1, 2'000, transition_frames, {1000, 1}}));
+        REQUIRE(kernel.set_repeat_count(1));
+        REQUIRE(kernel.trigger(tempo, BeatDivision::Eighth, {510}));
+        std::vector<float> input(1'050, -1.0f);
+        std::fill(input.begin() + 500, input.begin() + 620, 1.0f);
+        std::vector<float> output(input.size());
+        const float* inputs[]{input.data()};
+        float* outputs[]{output.data()};
+        kernel.process(inputs, outputs, static_cast<int>(input.size()), {0});
+        return output;
+    };
+    const auto hard = render(0);
+    const auto faded = render(32);
+    REQUIRE(maximum_step(hard, 745, 790) > 1.5f);
+    REQUIRE(maximum_step(faded, 745, 790) < maximum_step(hard, 745, 790) * 0.25f);
+}
+
+TEST_CASE("beat-repeat snapshots active playback and rejects nonfinite controls",
+          "[signal][beat-repeat][state]") {
+    const auto tempo = constant_tempo();
+    BeatRepeatKernel source;
+    REQUIRE(source.prepare({1, 2'000, 0, {1000, 1}}));
+    REQUIRE(source.set_repeat_count(0));
+    REQUIRE_FALSE(source.set_gate(std::numeric_limits<float>::quiet_NaN()));
+    REQUIRE(source.trigger(tempo, BeatDivision::Eighth, {510}));
+    auto input = ramp(1'100);
+    std::vector<float> source_output(input.size());
+    const float* inputs[]{input.data()};
+    float* source_outputs[]{source_output.data()};
+    source.process(inputs, source_outputs, 900, {0});
+    const auto state = source.snapshot();
+    auto invalid_state = state;
+    invalid_state.sampler[1] = std::numeric_limits<float>::infinity();
+
+    BeatRepeatKernel restored;
+    REQUIRE(restored.prepare({1, 2'000, 0, {1000, 1}}));
+    BeatRepeatKernel wrong_rate;
+    REQUIRE(wrong_rate.prepare({1, 2'000, 0, {48'000, 1}}));
+    REQUIRE_FALSE(wrong_rate.restore(state));
+    REQUIRE_FALSE(restored.restore(wrong_rate.snapshot()));
+    std::array<float, 64> pre_restore_dry{};
+    const float* pre_restore_inputs[]{pre_restore_dry.data()};
+    float* pre_restore_outputs[]{pre_restore_dry.data()};
+    restored.process(pre_restore_inputs, pre_restore_outputs, 64, {0});
+    REQUIRE(restored.available_history_frames() == 64);
+    REQUIRE(restored.restore(state));
+    REQUIRE(restored.available_history_frames() == 0);
+    const auto require_rejected_without_mutation =
+        [&](const BeatRepeatKernel::Snapshot& malformed) {
+            const auto before = restored.snapshot();
+            REQUIRE_FALSE(restored.restore(malformed));
+            const auto after = restored.snapshot();
+            REQUIRE(after.sampler == before.sampler);
+            REQUIRE(after.loop_position == before.loop_position);
+            REQUIRE(restored.status() == BeatRepeatKernel::Status::Active);
+        };
+    require_rejected_without_mutation(invalid_state);
+    invalid_state = state;
+    invalid_state.last_output.front() = std::numeric_limits<float>::infinity();
+    require_rejected_without_mutation(invalid_state);
+    invalid_state = state;
+    invalid_state.sampler.pop_back();
+    require_rejected_without_mutation(invalid_state);
+    invalid_state = state;
+    invalid_state.sampler.push_back(0.0f);
+    require_rejected_without_mutation(invalid_state);
+    invalid_state = state;
+    invalid_state.sampler[3] = 0.5f;
+    require_rejected_without_mutation(invalid_state);
+    invalid_state = state;
+    invalid_state.sampler[3] = std::numeric_limits<float>::max();
+    require_rejected_without_mutation(invalid_state);
+    invalid_state = state;
+    invalid_state.transition = BeatRepeatKernel::TransitionKind::HeldToDry;
+    require_rejected_without_mutation(invalid_state);
+    invalid_state = state;
+    invalid_state.sample_rate = {48'000, 1};
+    require_rejected_without_mutation(invalid_state);
+    invalid_state = state;
+    invalid_state.repeat_count = 1;
+    invalid_state.completed_repeats = 1;
+    require_rejected_without_mutation(invalid_state);
+    invalid_state = state;
+    invalid_state.active = false;
+    require_rejected_without_mutation(invalid_state);
+    invalid_state = state;
+    invalid_state.completed_repeats = 1;
+    invalid_state.alternate_repeat = false;
+    require_rejected_without_mutation(invalid_state);
+
+    BeatRepeatKernel saturated;
+    REQUIRE(saturated.prepare({1, 2'000, 0, {1000, 1}}));
+    auto saturated_state = state;
+    saturated_state.completed_repeats = std::numeric_limits<int>::max();
+    saturated_state.alternate_repeat = false;
+    REQUIRE(saturated.restore(saturated_state));
+    std::array<float, 100> saturated_dry{};
+    std::array<float, 100> saturated_output{};
+    const float* saturated_inputs[]{saturated_dry.data()};
+    float* saturated_outputs[]{saturated_output.data()};
+    saturated.process(saturated_inputs, saturated_outputs, 100, {0});
+    REQUIRE(saturated.completed_repeats() == std::numeric_limits<int>::max());
+    REQUIRE(saturated.snapshot().alternate_repeat);
+    std::array<float, 128> source_tail{};
+    std::array<float, 128> restored_tail{};
+    std::array<float, 128> dry{};
+    const float* tail_inputs[]{dry.data()};
+    float* source_tail_outputs[]{source_tail.data()};
+    float* restored_tail_outputs[]{restored_tail.data()};
+    source.process(tail_inputs, source_tail_outputs, 128, {900});
+    restored.process(tail_inputs, restored_tail_outputs, 128, {900});
+    REQUIRE(restored_tail == source_tail);
+    REQUIRE(restored.latency_samples() == 0);
+    REQUIRE(restored.retained_bytes() > 0);
+}
+
+TEST_CASE("beat-repeat snapshots preserve an active transition",
+          "[signal][beat-repeat][state][transition]") {
+    const auto tempo = constant_tempo();
+    BeatRepeatKernel source;
+    REQUIRE(source.prepare({1, 2'000, 32, {1000, 1}}));
+    REQUIRE(source.set_repeat_count(0));
+    REQUIRE(source.trigger(tempo, BeatDivision::Eighth, {510}));
+    auto input = ramp(760);
+    std::vector<float> initial_output(input.size());
+    const float* inputs[]{input.data()};
+    float* outputs[]{initial_output.data()};
+    source.process(inputs, outputs, 760, {0});
+    const auto state = source.snapshot();
+    REQUIRE(state.transition == BeatRepeatKernel::TransitionKind::DryToWet);
+    REQUIRE(state.transition_position == 10);
+    REQUIRE_FALSE(source.set_transition_frames(8));
+
+    BeatRepeatKernel restored;
+    REQUIRE(restored.prepare({1, 2'000, 32, {1000, 1}}));
+    REQUIRE(restored.restore(state));
+    BeatRepeatKernel incompatible;
+    REQUIRE(incompatible.prepare({1, 2'000, 16, {1000, 1}}));
+    REQUIRE(incompatible.restore(state));
+    std::array<float, 64> dry{};
+    std::array<float, 64> source_output{};
+    std::array<float, 64> restored_output{};
+    const float* continuation_inputs[]{dry.data()};
+    float* source_outputs[]{source_output.data()};
+    float* restored_outputs[]{restored_output.data()};
+    source.process(continuation_inputs, source_outputs, 64, {760});
+    restored.process(continuation_inputs, restored_outputs, 64, {760});
+    REQUIRE(restored_output == source_output);
+    const auto steady_state = source.snapshot();
+    REQUIRE(steady_state.transition == BeatRepeatKernel::TransitionKind::None);
+    BeatRepeatKernel steady_restored;
+    REQUIRE(steady_restored.prepare({1, 2'000, 16, {1000, 1}}));
+    REQUIRE(steady_restored.restore(steady_state));
+    REQUIRE(steady_restored.snapshot().transition_frames == 32);
+    REQUIRE(source.set_transition_frames(8));
+}
+
+TEST_CASE("beat-repeat rejects a stale trigger without resetting active playback",
+          "[signal][beat-repeat][trigger][stale]") {
+    const auto tempo = constant_tempo();
+    BeatRepeatKernel kernel;
+    REQUIRE(kernel.prepare({1, 2'000, 0, {1000, 1}}));
+    REQUIRE(kernel.set_repeat_count(0));
+    REQUIRE(kernel.trigger(tempo, BeatDivision::Eighth, {510}));
+    auto input = ramp(900);
+    std::vector<float> output(input.size());
+    const float* inputs[]{input.data()};
+    float* outputs[]{output.data()};
+    kernel.process(inputs, outputs, 900, {0});
+    const auto history_before = kernel.available_history_frames();
+    const auto stale = kernel.trigger(tempo, BeatDivision::Eighth, {0});
+    REQUIRE_FALSE(stale);
+    REQUIRE(stale.error == BeatRepeatPlanError::StaleRequest);
+    REQUIRE(kernel.status() == BeatRepeatKernel::Status::Active);
+    REQUIRE(kernel.available_history_frames() == history_before);
+
+    std::array<float, 16> dry{};
+    std::array<float, 16> continued{};
+    const float* continuation_inputs[]{dry.data()};
+    float* continuation_outputs[]{continued.data()};
+    kernel.process(continuation_inputs, continuation_outputs, 16, {900});
+    REQUIRE(kernel.status() == BeatRepeatKernel::Status::Active);
+}
+
+TEST_CASE("beat-repeat rejects snapshots while capture history is armed",
+          "[signal][beat-repeat][state][armed]") {
+    const auto tempo = constant_tempo();
+
+    SECTION("armed from idle") {
+        BeatRepeatKernel source;
+        REQUIRE(source.prepare({1, 2'000, 0, {1000, 1}}));
+        REQUIRE(source.trigger(tempo, BeatDivision::Eighth, {510}));
+        REQUIRE_FALSE(source.can_snapshot());
+        const auto state = source.snapshot();
+        REQUIRE_FALSE(state.resumable);
+        BeatRepeatKernel restored;
+        REQUIRE(restored.prepare({1, 2'000, 0, {1000, 1}}));
+        REQUIRE_FALSE(restored.restore(state));
+    }
+
+    SECTION("armed retrigger") {
+        BeatRepeatKernel source;
+        REQUIRE(source.prepare({1, 2'000, 0, {1000, 1}}));
+        REQUIRE(source.set_repeat_count(0));
+        REQUIRE(source.trigger(tempo, BeatDivision::Eighth, {510}));
+        auto input = ramp(900);
+        std::vector<float> output(input.size());
+        const float* inputs[]{input.data()};
+        float* outputs[]{output.data()};
+        source.process(inputs, outputs, 900, {0});
+        REQUIRE(source.trigger(tempo, BeatDivision::Eighth, {900}));
+        REQUIRE_FALSE(source.snapshot().resumable);
+    }
+}
+
+TEST_CASE("beat-repeat snapshots a releasing gesture as inactive",
+          "[signal][beat-repeat][state][release]") {
+    const auto tempo = constant_tempo();
+    BeatRepeatKernel source;
+    REQUIRE(source.prepare({1, 2'000, 32, {1000, 1}}));
+    REQUIRE(source.set_repeat_count(0));
+    REQUIRE(source.trigger(tempo, BeatDivision::Eighth, {510}));
+    auto input = ramp(900);
+    std::vector<float> output(input.size());
+    const float* inputs[]{input.data()};
+    float* outputs[]{output.data()};
+    source.process(inputs, outputs, 900, {0});
+    source.stop();
+    const auto state = source.snapshot();
+    REQUIRE_FALSE(state.active);
+    REQUIRE(state.sampler.empty());
+    REQUIRE(std::all_of(state.last_output.begin(), state.last_output.end(),
+                        [](float value) { return value == 0.0f; }));
+
+    BeatRepeatKernel restored;
+    REQUIRE(restored.prepare({1, 2'000, 32, {1000, 1}}));
+    REQUIRE(restored.restore(state));
+    REQUIRE(restored.status() == BeatRepeatKernel::Status::Idle);
+    std::array<float, 64> dry{};
+    std::array<float, 64> restored_output{};
+    std::fill(dry.begin(), dry.end(), 0.25f);
+    const float* restored_inputs[]{dry.data()};
+    float* restored_outputs[]{restored_output.data()};
+    restored.process(restored_inputs, restored_outputs, 64, {900});
+    REQUIRE(restored_output == dry);
+}
+
+TEST_CASE("beat-repeat does not restart a release at the finite-repeat boundary",
+          "[signal][beat-repeat][release][tail]") {
+    const auto tempo = constant_tempo();
+    BeatRepeatKernel kernel;
+    REQUIRE(kernel.prepare({1, 2'000, 32, {1000, 1}}));
+    REQUIRE(kernel.set_repeat_count(1));
+    REQUIRE(kernel.trigger(tempo, BeatDivision::Eighth, {510}));
+    auto input = ramp(990);
+    std::vector<float> output(input.size());
+    const float* inputs[]{input.data()};
+    float* outputs[]{output.data()};
+    kernel.process(inputs, outputs, 990, {0});
+    REQUIRE(kernel.loop_position() == 240);
+    kernel.stop();
+    REQUIRE(kernel.max_tail_samples() == 32);
+
+    std::array<float, 32> dry{};
+    std::array<float, 32> release{};
+    for (int frame = 0; frame < 32; ++frame) {
+        kernel.stop();
+        const float* release_inputs[]{dry.data() + frame};
+        float* release_outputs[]{release.data() + frame};
+        kernel.process(release_inputs, release_outputs, 1, {990 + frame});
+    }
+    REQUIRE(kernel.status() == BeatRepeatKernel::Status::Idle);
+}
+
+TEST_CASE("beat-repeat release absorbs reverse and seek controls",
+          "[signal][beat-repeat][release][controls]") {
+    const auto tempo = constant_tempo();
+    BeatRepeatKernel kernel;
+    REQUIRE(kernel.prepare({1, 2'000, 32, {1000, 1}}));
+    REQUIRE(kernel.set_repeat_count(0));
+    REQUIRE(kernel.trigger(tempo, BeatDivision::Eighth, {510}));
+    auto input = ramp(900);
+    std::vector<float> output(input.size());
+    const float* inputs[]{input.data()};
+    float* outputs[]{output.data()};
+    kernel.process(inputs, outputs, 900, {0});
+    kernel.stop();
+    const auto trigger_during_release = kernel.trigger(tempo, BeatDivision::Eighth, {900});
+    REQUIRE_FALSE(trigger_during_release);
+    REQUIRE(trigger_during_release.error == BeatRepeatPlanError::ReleaseInProgress);
+    REQUIRE(kernel.status() == BeatRepeatKernel::Status::Releasing);
+    REQUIRE(kernel.set_reverse(BeatRepeatKernel::ReverseMode::On));
+    REQUIRE_FALSE(kernel.seek(0));
+
+    std::array<float, 32> dry{};
+    std::array<float, 32> release{};
+    const float* release_inputs[]{dry.data()};
+    float* release_outputs[]{release.data()};
+    kernel.process(release_inputs, release_outputs, 32, {900});
+    REQUIRE(kernel.status() == BeatRepeatKernel::Status::Idle);
+}
+
+TEST_CASE("prepared beat-repeat gesture operations allocate no memory",
+          "[signal][beat-repeat][rt-safety]") {
+    const auto tempo = constant_tempo();
+    BeatRepeatKernel kernel;
+    REQUIRE(kernel.prepare({1, 2'000, 8, {1000, 1}}));
+    std::array<float, 1'100> input{};
+    std::array<float, 1'100> output{};
+    const float* inputs[]{input.data()};
+    float* outputs[]{output.data()};
+    bool controls_valid = true;
+    bool trigger_valid = true;
+    bool seek_valid = true;
+
+    require_allocates_no_memory([&] {
+        controls_valid = kernel.set_repeat_count(0) && kernel.set_gate(0.75f) &&
+                         kernel.set_reverse(BeatRepeatKernel::ReverseMode::Alternate);
+        trigger_valid = static_cast<bool>(kernel.trigger(tempo, BeatDivision::Eighth, {510}));
+        kernel.process(inputs, outputs, 900, {0});
+        seek_valid = kernel.seek(31);
+        kernel.stop();
+        kernel.process(inputs, outputs, 16, {900});
         kernel.reset();
-        allocations = probe.allocation_count();
-    }
-    REQUIRE(result.processed_frames == input.size());
-    REQUIRE(result.rejected_events == 0);
-    REQUIRE(allocations == 0);
-    REQUIRE(kernel.retained_bytes() == (2 * 4096 + 5) * sizeof(float));
+    });
+    REQUIRE(controls_valid);
+    REQUIRE(trigger_valid);
+    REQUIRE(seek_valid);
 }
