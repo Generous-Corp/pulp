@@ -1219,7 +1219,6 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
                                 pending_request.sample_rate != request.sample_rate ||
                                 pending_request.audio_assets.get() != request.audio_assets.get() ||
                                 pending_request.audio_limits != request.audio_limits ||
-                                !same_registry_generation(pending_request, request) ||
                                 core_->pending->content_registry_generation.get() !=
                                     incoming_registry_generation.get() ||
                                 core_->pending->content_registry_revision != incoming_registry_revision;
