@@ -26,6 +26,68 @@ TEST_CASE("Unison voice stacks allocate and release complete logical notes",
     REQUIRE(allocator.allocated_voice_count() == 4);
 }
 
+TEST_CASE("Same-pitch unison stacks release by logical source",
+          "[audio][unison-stack][ownership][polyphony]") {
+    InstrumentVoiceAllocator allocator;
+    REQUIRE(allocator.prepare(4));
+    UnisonVoiceStackManager<> manager;
+    REQUIRE(manager.prepare(allocator));
+    std::array<UnisonVoiceTermination, 4> terminations{};
+
+    REQUIRE(manager.trigger({.source_id = 101, .voice_count = 2, .note = 60,
+                             .sample_id = 1}, terminations).allocated);
+    REQUIRE(manager.trigger({.source_id = 202, .voice_count = 2, .note = 60,
+                             .sample_id = 1}, terminations).allocated);
+    REQUIRE(allocator.active_voice_count() == 4);
+    REQUIRE(allocator.allocated_voice_count() == 4);
+
+    std::array<UnisonVoiceChild, 2> first{};
+    std::array<UnisonVoiceChild, 2> peer{};
+    const auto first_view = manager.children(101);
+    const auto peer_view = manager.children(202);
+    REQUIRE(first_view.size() == first.size());
+    REQUIRE(peer_view.size() == peer.size());
+    std::copy(first_view.begin(), first_view.end(), first.begin());
+    std::copy(peer_view.begin(), peer_view.end(), peer.begin());
+
+    REQUIRE(manager.release(101));
+    for (const auto& child : first) {
+        const auto& voice = allocator.voices()[child.voice_index];
+        REQUIRE(voice.state == VoiceState::Released);
+        REQUIRE(voice.voice_id == child.voice_id);
+        REQUIRE(voice.note == 60);
+        REQUIRE(voice.sample_id == 1);
+    }
+    for (const auto& child : peer) {
+        const auto& voice = allocator.voices()[child.voice_index];
+        REQUIRE(voice.state == VoiceState::Active);
+        REQUIRE(voice.voice_id == child.voice_id);
+        REQUIRE(voice.note == 60);
+        REQUIRE(voice.sample_id == 1);
+    }
+    REQUIRE(allocator.active_voice_count() == 2);
+    REQUIRE(allocator.allocated_voice_count() == 4);
+
+    for (const auto& child : first)
+        REQUIRE(manager.finish(child.voice_index, child.voice_id, child.generation));
+    REQUIRE(manager.children(101).empty());
+    REQUIRE(manager.children(202).size() == peer.size());
+    REQUIRE(allocator.active_voice_count() == 2);
+    REQUIRE(allocator.allocated_voice_count() == 2);
+    for (const auto& child : peer) {
+        const auto& voice = allocator.voices()[child.voice_index];
+        REQUIRE(voice.state == VoiceState::Active);
+        REQUIRE(voice.voice_id == child.voice_id);
+    }
+
+    REQUIRE(manager.release(202));
+    for (const auto& child : peer)
+        REQUIRE(manager.finish(child.voice_index, child.voice_id, child.generation));
+    REQUIRE(manager.children(202).empty());
+    REQUIRE(allocator.active_voice_count() == 0);
+    REQUIRE(allocator.allocated_voice_count() == 0);
+}
+
 TEST_CASE("Unison voice stack stealing removes whole oldest stack and never itself",
           "[audio][unison-stack][steal]") {
     InstrumentVoiceAllocator allocator;
