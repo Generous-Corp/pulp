@@ -15,6 +15,7 @@
 #include <pulp/runtime/trace_session.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>

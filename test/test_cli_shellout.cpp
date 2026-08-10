@@ -1670,27 +1670,22 @@ TEST_CASE("pulp inspect help and no-discovery paths are deterministic",
     REQUIRE_FALSE(help.timed_out);
     REQUIRE(help.exit_code == 0);
     REQUIRE(help.stdout_output.find(
-                "Usage: pulp inspect <profiles|list|capabilities|doctor> [options]") !=
+                "Usage: pulp inspect profiles [--json]") !=
+            std::string::npos);
+    REQUIRE(help.stdout_output.find("pulp inspect audit ARTIFACT [--json]") !=
             std::string::npos);
     REQUIRE(help.stdout_output.find("--port PORT") == std::string::npos);
     REQUIRE(help.stdout_output.find("--command METHOD") == std::string::npos);
-    REQUIRE(help.stdout_output.find("Raw inspector calls") != std::string::npos);
-
-    auto base = unique_temp_dir("pulp-inspect-no-discovery");
-    fs::create_directories(base);
-#if defined(_WIN32)
-    ScopedEnvVar temp_dir("TEMP");
-#else
-    ScopedEnvVar temp_dir("TMPDIR");
-#endif
-    temp_dir.set(base.string());
+    REQUIRE(help.stdout_output.find(
+                "Live discovery, raw Inspector calls, and mutations are not exposed") !=
+            std::string::npos);
 
     auto missing = run_pulp({"inspect", "list"}, 10000);
-    fs::remove_all(base);
 
     REQUIRE_FALSE(missing.timed_out);
-    REQUIRE(missing.exit_code == 0);
-    REQUIRE(missing.stdout_output.find("No live inspector sessions") != std::string::npos);
+    REQUIRE(missing.exit_code == 2);
+    REQUIRE(missing.stderr_output.find("unknown inspect command: list") !=
+            std::string::npos);
     REQUIRE(missing.stdout_output.find("Connecting to") == std::string::npos);
 }
 
