@@ -489,6 +489,14 @@ include(PulpUtils)
 # author opt-in links the same dedicated adapter only into their Standalone.
 if(APPLE AND NOT IOS AND NOT PULP_IOS AND
    TARGET pulp-inspect-standalone-runtime)
+    set(PULP_CONTROL_HOST_CODESIGN_TOOL "" CACHE FILEPATH
+        "Host-side, codesign-compatible tool for signing the installed control host")
+    if(CMAKE_HOST_APPLE AND NOT PULP_CONTROL_HOST_CODESIGN_TOOL)
+        find_program(_pulp_control_host_codesign codesign REQUIRED)
+    elseif(PULP_CONTROL_HOST_CODESIGN_TOOL)
+        set(_pulp_control_host_codesign "${PULP_CONTROL_HOST_CODESIGN_TOOL}")
+    endif()
+
     add_executable(pulp-control-standalone-host
         inspect/src/control_standalone_host_main.cpp)
     set_target_properties(pulp-control-standalone-host PROPERTIES
@@ -503,8 +511,7 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS AND
         "dev.pulp.control-standalone-host" "Pulp Control Standalone Host")
     _pulp_attach_control_shipping(pulp-control-standalone-host
         pulp-control-standalone-host Standalone)
-    if(PULP_BUILD_TESTS)
-        find_program(_pulp_control_host_codesign codesign REQUIRED)
+    if(PULP_BUILD_TESTS AND _pulp_control_host_codesign)
         add_custom_command(TARGET pulp-control-standalone-host POST_BUILD
             COMMAND "${_pulp_control_host_codesign}" --force --sign - --options library
                     "$<TARGET_FILE:pulp-control-standalone-host>"
@@ -529,8 +536,15 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS AND
     # applied. Re-sign the final installed bytes so the broker can pin the
     # exact artifact it will execute; release signing may replace this ad-hoc
     # signature later as part of the normal package transaction.
-    install(CODE
-        "execute_process(COMMAND /usr/bin/codesign --force --sign - --options library \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/pulp/pulp-control-standalone-host\" RESULT_VARIABLE _pulp_control_host_sign_result)\nif(NOT _pulp_control_host_sign_result EQUAL 0)\n  message(FATAL_ERROR \"could not sign installed Standalone control host\")\nendif()")
+    if(_pulp_control_host_codesign)
+        install(CODE
+            "execute_process(COMMAND \"${_pulp_control_host_codesign}\" --force --sign - --options library \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/pulp/pulp-control-standalone-host\" RESULT_VARIABLE _pulp_control_host_sign_result)\nif(NOT _pulp_control_host_sign_result EQUAL 0)\n  message(FATAL_ERROR \"could not sign installed Standalone control host\")\nendif()")
+    elseif(PULP_MACOS_CROSS)
+        message(STATUS
+            "Cross-built control host will be installed unsigned; set "
+            "PULP_CONTROL_HOST_CODESIGN_TOOL to a codesign-compatible host tool "
+            "when the install tree must be immediately runnable")
+    endif()
     install(FILES
         "${CMAKE_BINARY_DIR}/pulp-control-shipping-manifests/pulp-control-standalone-host.Standalone.control-shipping.json"
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/pulp)
