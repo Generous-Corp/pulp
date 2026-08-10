@@ -420,7 +420,7 @@ EXPORTS = [
                 include="pulp/signal/waveguide_reed_exciter.hpp",
                 qualified_name="pulp::signal::ReedExciterT<float>",
                 target="Pulp::signal",
-                header_fingerprint="sha256:60b78877e1d674eb32fbc889430bad2db2453f90c40cb08cc9f0d774803c74be",
+                header_fingerprint="sha256:50fd8027a329b2a8c1c4dd983349e0c9ccf3b958ff3374adaa19dd00e7e8604a",
             ),
             binding(
                 role="whole_loop", kind="cpp_type",

@@ -21,6 +21,7 @@ namespace pulp::signal {
 /// a disturbance; closing requires controls that clamp the opening to zero.
 template <typename SampleType = float> class ReedExciterT {
     static_assert(std::is_floating_point_v<SampleType>);
+    using CalculationType = std::common_type_t<SampleType, double>;
 
   public:
     static constexpr SampleType minimum_closing_pressure = SampleType{0.05};
@@ -64,16 +65,19 @@ template <typename SampleType = float> class ReedExciterT {
         if (!finite(mouth_pressure) || !finite(bore_incident))
             return last_finite_output_;
 
-        const auto mouth = std::clamp(static_cast<double>(mouth_pressure), 0.0, 1.0);
-        const auto incident = static_cast<double>(bore_incident);
+        const auto mouth = std::clamp(static_cast<CalculationType>(mouth_pressure),
+                                      CalculationType{}, CalculationType{1});
+        const auto incident = static_cast<CalculationType>(bore_incident);
         const auto pressure_difference = mouth - incident;
         const auto opening = std::clamp(
-            1.0 - pressure_difference / static_cast<double>(closing_pressure_), 0.0, 1.0);
+            CalculationType{1} -
+                pressure_difference / static_cast<CalculationType>(closing_pressure_),
+            CalculationType{}, CalculationType{1});
         const auto signed_root = pressure_difference < 0.0 ? -std::sqrt(-pressure_difference)
                                                            : std::sqrt(pressure_difference);
-        const auto flow = static_cast<double>(flow_gain_) * opening * signed_root;
-        const auto output = incident - static_cast<double>(bore_impedance_) * flow;
-        const auto limit = static_cast<double>(std::numeric_limits<SampleType>::max());
+        const auto flow = static_cast<CalculationType>(flow_gain_) * opening * signed_root;
+        const auto output = incident - static_cast<CalculationType>(bore_impedance_) * flow;
+        const auto limit = static_cast<CalculationType>(std::numeric_limits<SampleType>::max());
         if (!std::isfinite(output) || output > limit || output < -limit)
             return last_finite_output_;
 
@@ -87,7 +91,7 @@ template <typename SampleType = float> class ReedExciterT {
 
   private:
     [[nodiscard]] static bool finite(SampleType value) noexcept {
-        return std::isfinite(static_cast<double>(value));
+        return std::isfinite(value);
     }
 
     static void set_finite_clamped(SampleType value, SampleType& destination, SampleType minimum,

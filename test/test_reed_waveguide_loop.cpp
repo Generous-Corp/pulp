@@ -204,6 +204,10 @@ TEST_CASE("ReedExciter clamps controls and preserves finite fallback state",
     CHECK(reed.bore_impedance() == 1000.0f);
     reed.reset();
     CHECK(reed.process(std::numeric_limits<float>::quiet_NaN(), 0.0f) == 0.0f);
+
+    pulp::signal::ReedExciterT<long double> wide_reed;
+    wide_reed.set_bore_impedance(std::numeric_limits<long double>::max());
+    CHECK(wide_reed.bore_impedance() == std::numeric_limits<long double>::max());
 }
 
 TEST_CASE("ReedWaveguideLoop tunes across the admitted rate and pitch matrix",
