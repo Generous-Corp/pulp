@@ -116,8 +116,9 @@ class Probe {
   public:
     void prepare() { helper(private_state_); }
     void configure(const Params& params = {}) { helper(params.value); }
+    void configure_if(bool valid = requires(T value) { value.configure(); });
     void note_on(float velocity = float{1}) { helper(static_cast<int>(velocity)); }
-    void set_callback(Callback cb = [](int x) { return helper(x); });
+    void set_callback(Callback cb = [value = values[0]]<typename T>(T x)requires requires(T y) { y.foo(); } { return helper(value + x); });
     void reset() noexcept { private_state_ = 0; }
     int retained_bytes() const noexcept { return private_state_; }
   private:
@@ -130,8 +131,9 @@ class Probe {
         "prepare()",
         "reset()",
         "configure(const Params& params = {})",
+        "configure_if(bool valid = requires(T value) { })",
         "note_on(float velocity = float{1})",
-        "set_callback(Callback cb = [](int x) { })",
+        "set_callback(Callback cb = [value = values[0]]<typename T>(T x)requires requires(T y) { } { })",
         "retained_bytes()",
     ]
     if methods != expected:

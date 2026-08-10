@@ -359,15 +359,34 @@ def matching_brace(text: str, opening: int) -> int:
 def opens_lambda_body(text: str, opening: int) -> bool:
     """Whether a parameter-list brace starts a lambda rather than an initializer."""
     prefix = text[max(0, opening - 512):opening]
-    return re.search(
-        r"\[[^\[\]]*\]"
+    suffix = re.compile(
         r"(?:\s*<[^{};]*>)?"
         r"\s*(?:\([^{};]*\))?"
         r"\s*(?:(?:mutable|constexpr|consteval)\s+)*"
         r"(?:noexcept(?:\s*\([^{};]*\))?\s*)?"
-        r"(?:->\s*[^{};]+)?\s*$",
-        prefix,
-    ) is not None
+        r"(?:\s*\[\[[^{};]*\]\])*"
+        r"(?:\s*->\s*[^{};]+?)?"
+        r"(?:\s*requires\b[\s\S]+)?"
+        r"(?:\s*\[\[[^{};]*\]\])*\s*$",
+    )
+    for closing in range(len(prefix) - 1, -1, -1):
+        if prefix[closing] != "]" or suffix.fullmatch(prefix[closing + 1:]) is None:
+            continue
+        depth = 0
+        for pos in range(closing, -1, -1):
+            if prefix[pos] == "]":
+                depth += 1
+            elif prefix[pos] == "[":
+                depth -= 1
+                if depth == 0:
+                    return True
+    return False
+
+
+def opens_requires_expression_body(text: str, opening: int) -> bool:
+    """Whether a parameter-list brace starts a requires-expression body."""
+    prefix = text[max(0, opening - 512):opening]
+    return re.search(r"\brequires\s*(?:\([^{};]*\))?\s*$", prefix) is not None
 
 
 def public_declarations(text: str, cls: str, *, source_is_code: bool = False) -> str:
@@ -409,7 +428,7 @@ def public_declarations(text: str, cls: str, *, source_is_code: bool = False) ->
         elif depth == 0 and char == ")":
             parameter_depth = max(0, parameter_depth - 1)
         elif depth == 0 and char == "{" and parameter_depth > 0:
-            if opens_lambda_body(body, i):
+            if opens_requires_expression_body(body, i) or opens_lambda_body(body, i):
                 parameter_lambda_depth = 1
             else:
                 parameter_brace_depth += 1
