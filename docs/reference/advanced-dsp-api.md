@@ -155,6 +155,15 @@ geometry or controls leave the destination table unchanged. The table carries a
 caller version and requested frame transition duration so a streaming publisher
 can adopt and interpolate it at spectral-frame boundaries.
 
+`analyze_spectral_band_resolution()` uses the same frequency mapping to report
+how many FFT-bin centers each authored band directly owns. A band with zero
+owned bins is not independently selectable with hard boundaries at that FFT
+geometry, even if the UI draws a separate control. Exterior bins inherited by
+`extend_edge_band` are deliberately excluded so low/high-cut ownership cannot
+hide an under-resolved viewport. Products can use `represented_bands` and
+`fully_represented()` to choose a quality profile or disclose the limit before
+accepting a narrow zoom.
+
 `apply_spectral_mask()` is the allocation-free frame operation. It applies the
 same real-valued gain table to every channel's one-sided complex spectrum,
 preserving ordinary finite phase and stereo relationships. It validates complete
@@ -171,6 +180,12 @@ layout.bands[3].muted = true;
 pulp::signal::SpectralMaskTable mask;
 if (!pulp::signal::build_spectral_mask(layout, 2048, 48000.0f, mask))
     return; // reject invalid control state off the audio thread
+
+pulp::signal::SpectralBandResolution resolution;
+if (!pulp::signal::analyze_spectral_band_resolution(
+        layout, 2048, 48000.0f, resolution))
+    return;
+const bool every_band_owns_a_bin = resolution.fully_represented();
 
 frame_engine.process(input, output, samples,
     [&](std::complex<float>* const* frames, int bins) {

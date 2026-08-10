@@ -139,6 +139,14 @@ instead of rebuilding an application-local STFT lifecycle or publication
 protocol. Analyzer snapshots and captured-frame storage are separate layers;
 do not infer them from this capability or duplicate them inside the processor.
 
+Before presenting every authored band as independently controllable, call
+`analyze_spectral_band_resolution()` with the product's layout, sample rate,
+and FFT size. Its fixed-capacity report counts directly owned viewport bins per
+band and excludes exterior edge-band extension. `fully_represented() == false`
+means the UI or profile selector must disclose the resolution limit, select a
+higher supported geometry, or use a different filter architecture; zoom alone
+cannot create additional FFT bins.
+
 ## Regenerate and validate
 
 Do not use the bootstrap or unpublished-migration switches during normal work.

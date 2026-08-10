@@ -14,12 +14,21 @@ int main() {
     if (!pulp::signal::build_spectral_mask(layout, 1024, 48000.0f, table))
         return 1;
 
+    pulp::signal::SpectralBandResolution resolution;
+    if (!pulp::signal::analyze_spectral_band_resolution(
+            layout, 1024, 48000.0f, resolution))
+        return 2;
+    if (resolution.active_bands != 32
+        || resolution.represented_bands != 25
+        || resolution.fully_represented())
+        return 3;
+
     std::array<std::complex<float>, 513> bins;
     bins.fill({1.0f, -0.5f});
     std::complex<float>* frames[] = {bins.data()};
     if (!pulp::signal::apply_spectral_mask(frames, 1, 513, table))
-        return 2;
+        return 4;
     for (const auto value : bins)
-        if (value != std::complex<float>{}) return 3;
+        if (value != std::complex<float>{}) return 5;
     return 0;
 }
