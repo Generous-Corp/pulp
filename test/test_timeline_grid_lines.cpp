@@ -32,7 +32,7 @@ TEST_CASE("grid lines share one meter-aware viewport kernel", "[timeline-editor]
     std::array<timeline_editor::GridLine, 32> lines{};
     const auto result = timeline_editor::generate_grid_lines(*projection, meter, 80.0f, lines);
     REQUIRE(result);
-    REQUIRE(result.count == 8);
+    REQUIRE(result.count == 9);
     CHECK(lines[0] == timeline_editor::GridLine{{0}, 10.0f,
                                                    timeline_editor::GridLineLevel::Bar});
     CHECK(lines[1].tick == timebase::TickPosition{timebase::kTicksPerQuarter});
@@ -42,6 +42,8 @@ TEST_CASE("grid lines share one meter-aware viewport kernel", "[timeline-editor]
     CHECK(lines[6].tick == timebase::TickPosition{6 * timebase::kTicksPerQuarter});
     CHECK(lines[7].tick == timebase::TickPosition{7 * timebase::kTicksPerQuarter});
     CHECK(lines[7].level == timeline_editor::GridLineLevel::Bar);
+    CHECK(lines[8].tick == timebase::TickPosition{8 * timebase::kTicksPerQuarter});
+    CHECK(lines[8].level == timeline_editor::GridLineLevel::Beat);
 }
 
 TEST_CASE("grid lines reject invalid spacing and bounded output", "[timeline-editor][grid-lines]") {
