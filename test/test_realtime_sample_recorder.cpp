@@ -106,6 +106,60 @@ TEST_CASE("RealtimeSampleRecorder captures a block-offset span",
     REQUIRE(event.block_offset == 6);
 }
 
+TEST_CASE("RealtimeSampleRecorder orders block-offset commands by frame",
+          "[audio][sampler][recorder][timing]") {
+    RealtimeSampleRecorder recorder;
+    REQUIRE(recorder.prepare(RealtimeSampleRecorderConfig{2, 16, 48000.0}));
+
+    RealtimeSampleRecorderCommand start;
+    start.sequence_id = 1;
+    start.type = RealtimeSampleRecorderCommandType::Start;
+    start.timing.type = RealtimeSampleRecorderTimingType::BlockOffset;
+    start.timing.frame_offset = 2;
+    RealtimeSampleRecorderCommand stop;
+    stop.sequence_id = 2;
+    stop.type = RealtimeSampleRecorderCommandType::Stop;
+    stop.timing.type = RealtimeSampleRecorderTimingType::BlockOffset;
+    stop.timing.frame_offset = 6;
+
+    REQUIRE(recorder.enqueue_command(stop));
+    REQUIRE(recorder.enqueue_command(start));
+
+    Buffer<float> source(2, 8);
+    fill_sequence(source, 1.0f);
+    std::vector<const float*> source_ptrs;
+    const auto source_view = const_view(source, source_ptrs);
+    {
+        pulp::runtime::ScopedNoAlloc guard;
+        recorder.process(source_view, 8);
+    }
+
+    REQUIRE(recorder.state() == RealtimeSampleRecorderState::Completed);
+    REQUIRE(recorder.frames_recorded() == 4);
+    for (std::uint32_t channel = 0; channel < 2; ++channel) {
+        for (std::uint32_t frame = 0; frame < 4; ++frame) {
+            const auto expected = 3.0f + static_cast<float>(frame) +
+                                  static_cast<float>(channel) * 1000.0f;
+            REQUIRE(recorder.channel_data(channel)[frame] == expected);
+        }
+    }
+
+    RealtimeSampleRecorderEvent event;
+    REQUIRE(recorder.pop_event(event));
+    REQUIRE(event.type == RealtimeSampleRecorderEventType::Started);
+    REQUIRE(event.sequence_id == 1);
+    REQUIRE(event.state == RealtimeSampleRecorderState::Recording);
+    REQUIRE(event.frames_recorded == 0);
+    REQUIRE(event.block_offset == 2);
+    REQUIRE(recorder.pop_event(event));
+    REQUIRE(event.type == RealtimeSampleRecorderEventType::Completed);
+    REQUIRE(event.sequence_id == 2);
+    REQUIRE(event.state == RealtimeSampleRecorderState::Completed);
+    REQUIRE(event.frames_recorded == 4);
+    REQUIRE(event.block_offset == 6);
+    REQUIRE_FALSE(recorder.pop_event(event));
+}
+
 TEST_CASE("RealtimeSampleRecorder completes at its fixed frame target",
           "[audio][sampler][recorder]") {
     RealtimeSampleRecorder recorder;
