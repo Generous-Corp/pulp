@@ -690,6 +690,12 @@ def validate(doc: Any, root: pathlib.Path) -> list[str]:
     }:
         problems.append("counts must exactly match capabilities by domain")
 
+    # Negative-fixture validation is already conclusive. Avoid rescanning the
+    # repository's complete public surface and compatibility vocabulary for
+    # every intentionally invalid document in the selftest corpus.
+    if problems:
+        return _deduplicate(problems)
+
     try:
         current_surface, surface_problems = build_surface(root)
         problems.extend(surface_problems)
