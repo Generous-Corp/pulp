@@ -93,9 +93,10 @@ class RackLaunchSafety(unittest.TestCase):
                 self.assertEqual(
                     expected, generate.select_rack_app(installed, running))
 
-    def test_rack_detector_error_never_launches_an_edition(self) -> None:
+    def test_macos_rack_detector_error_never_launches_an_edition(self) -> None:
         pro = generate.RACK_APPS[0]
-        with mock.patch.object(generate.os.path, "isdir",
+        with mock.patch.object(generate.sys, "platform", "darwin"), \
+                mock.patch.object(generate.os.path, "isdir",
                                side_effect=lambda path: path == pro), \
                 mock.patch.object(rack_open, "rack_running",
                                   side_effect=RuntimeError("pgrep exit 2")), \
