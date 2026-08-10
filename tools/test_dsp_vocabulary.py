@@ -112,6 +112,9 @@ public:
 class Probe {
   public:
     void prepare() { helper(private_state_); }
+    void configure(const Params& params = {}) { helper(params.value); }
+    void note_on(float velocity = float{1}) { helper(static_cast<int>(velocity)); }
+    void set_callback(Callback cb = [](int x) { return helper(x); });
     void reset() noexcept { private_state_ = 0; }
     int retained_bytes() const noexcept { return private_state_; }
   private:
@@ -120,7 +123,14 @@ class Probe {
 };
 """
     methods = extractor.public_methods(synthetic, "Probe")
-    expected = ["prepare()", "reset()", "retained_bytes()"]
+    expected = [
+        "prepare()",
+        "reset()",
+        "configure(const Params& params = {})",
+        "note_on(float velocity = float{1})",
+        "set_callback(Callback cb = [](int x) { })",
+        "retained_bytes()",
+    ]
     if methods != expected:
         print(f"FAIL: public/private scanner returned {methods!r}, expected {expected!r}")
         return 1

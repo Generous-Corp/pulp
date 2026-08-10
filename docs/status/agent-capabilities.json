@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 19,
+  "manifest_revision": 20,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -5232,7 +5232,7 @@
               "set_release_ms(SampleType ms)",
               "set_mode(Mode m)",
               "current()",
-              "current_db(SampleType floor_db = SampleType)",
+              "current_db(SampleType floor_db = SampleType{-160})",
               "attack_ms()",
               "release_ms()",
               "attack_coefficient()",
@@ -5274,7 +5274,7 @@
             "methods": [
               "prepare(timebase::RationalRate sample_rate, std::size_t channels, std::size_t maximum_history_frames, std::size_t maximum_transition_frames)",
               "reset()",
-              "process(const SampleType* const* input, SampleType* const* output, std::size_t frames, std::int64_t block_sample_start, std::uint64_t transport_epoch, const timebase::CompiledTempoMap& tempo_map, std::span<const BeatRepeatEvent> events =)",
+              "process(const SampleType* const* input, SampleType* const* output, std::size_t frames, std::int64_t block_sample_start, std::uint64_t transport_epoch, const timebase::CompiledTempoMap& tempo_map, std::span<const BeatRepeatEvent> events = {})",
               "set_division(timebase::BeatDivision division)",
               "set_repeat_count(std::uint32_t total_cells)",
               "set_gate(SampleType duty)",
@@ -5328,7 +5328,7 @@
               "reset()",
               "set_coefficients(const BiquadCoefficientsT<U>& c)",
               "coefficients()",
-              "set_coefficients(Type type, SampleType freq_hz, SampleType q, SampleType sample_rate, SampleType gain_db = SampleType)"
+              "set_coefficients(Type type, SampleType freq_hz, SampleType q, SampleType sample_rate, SampleType gain_db = SampleType{0})"
             ],
             "enums": [
               [
@@ -6110,7 +6110,7 @@
             "qualified_name": "pulp::signal::DeEsserT",
             "template": "typename SampleType = float",
             "methods": [
-              "prepare(SampleType sample_rate, const Params& params =)",
+              "prepare(SampleType sample_rate, const Params& params = {})",
               "process(SampleType input)",
               "process(const SampleType* input, SampleType* output, std::size_t num_samples)",
               "process(SampleType* buffer, std::size_t num_samples)",
@@ -6152,7 +6152,7 @@
               "attack_ms()",
               "hold_ms()",
               "decay_ms()",
-              "trigger(SampleType peak = SampleType)",
+              "trigger(SampleType peak = SampleType{1})",
               "is_active()",
               "value()"
             ],
@@ -7057,7 +7057,7 @@
               "set_decay_curve(float c)",
               "set_curve(double c)",
               "set_loop(bool on, int count = 0)",
-              "trigger(SampleType velocity = SampleType)",
+              "trigger(SampleType velocity = SampleType{1})",
               "gate_on()",
               "gate_off()",
               "next()",
@@ -7080,7 +7080,7 @@
               "set_decay_curve(float c)",
               "set_curve(double c)",
               "set_loop(bool on, int count = 0)",
-              "trigger(SampleType velocity = SampleType)",
+              "trigger(SampleType velocity = SampleType{1})",
               "gate_on()",
               "gate_off()",
               "next()",
@@ -7106,7 +7106,7 @@
               "set_release_curve(float c)",
               "set_curve(double c)",
               "set_loop(bool on, int count = 0)",
-              "note_on(SampleType velocity = SampleType)"
+              "note_on(SampleType velocity = SampleType{1})"
             ],
             "enums": []
           },
@@ -7128,7 +7128,7 @@
               "set_curve(double c)",
               "set_loop(bool on, int count = 0)",
               "set_depth(SampleType d)",
-              "trigger(SampleType velocity = SampleType)"
+              "trigger(SampleType velocity = SampleType{1})"
             ],
             "enums": []
           },
@@ -7758,7 +7758,7 @@
               "process()",
               "process(SampleType* output, std::size_t sample_count)",
               "max_operator_count()",
-              "note_on(SampleType velocity = SampleType)",
+              "note_on(SampleType velocity = SampleType{1})",
               "note_off()",
               "set_operator_count(std::size_t count)",
               "set_base_frequency_hz(SampleType hz)",
@@ -8670,7 +8670,7 @@
             "methods": [
               "prepare(double sample_rate)",
               "set_immediate(SampleType value)",
-              "reset(SampleType value = SampleType)",
+              "reset(SampleType value = SampleType{0})",
               "process(SampleType input)",
               "set_mode(Mode mode)",
               "mode()",
@@ -8700,7 +8700,7 @@
             "methods": [
               "prepare(double sample_rate)",
               "set_immediate(SampleType value)",
-              "reset(SampleType value = SampleType)",
+              "reset(SampleType value = SampleType{0})",
               "process(SampleType input)",
               "set_mode(Mode mode)",
               "mode()",
@@ -8729,7 +8729,7 @@
             "template": "typename SampleType = float",
             "methods": [
               "prepare(SampleType sample_rate)",
-              "reset(SampleType value = SampleType)",
+              "reset(SampleType value = SampleType{0})",
               "process(SampleType input, bool clock)",
               "set_threshold(SampleType threshold)",
               "set_glide_ms(SampleType ms)",
@@ -8927,7 +8927,7 @@
               "checked_retained_bytes(int fft_size, std::uint64_t target_max_bytes, std::uint64_t& bytes)",
               "reference_magnitudes()",
               "num_bins()",
-              "process_group(std::complex<SampleType>* const* frames, int num_bins, int analysis_hop, int synthesis_hop, SampleType reset_amount = SampleType)"
+              "process_group(std::complex<SampleType>* const* frames, int num_bins, int analysis_hop, int synthesis_hop, SampleType reset_amount = SampleType{0})"
             ],
             "enums": []
           }
@@ -9150,7 +9150,7 @@
             "qualified_name": "pulp::signal::OfflineStretchT",
             "template": "typename SampleType = float",
             "methods": [
-              "prepare(double sample_rate, int channels, const OfflineStretchOptions& sizing =)",
+              "prepare(double sample_rate, int channels, const OfflineStretchOptions& sizing = {})",
               "process(const SampleType* const* in, long in_frames, SampleType* const* out, long out_frames, const OfflineStretchOptions& opts, std::string* err = nullptr)",
               "channels()",
               "sample_rate()",
@@ -9859,7 +9859,7 @@
             "qualified_name": "pulp::signal::ResamplerT",
             "template": "typename SampleType = float",
             "methods": [
-              "prepare(double input_rate, double output_rate, std::size_t channels, std::size_t max_block_size, ResamplerQuality quality =)",
+              "prepare(double input_rate, double output_rate, std::size_t channels, std::size_t max_block_size, ResamplerQuality quality = {})",
               "reset()",
               "set_ratio(double input_rate, double output_rate)",
               "process_block_detailed(const SampleType* const* input, std::size_t in_count, SampleType* const* output, std::size_t out_capacity)",
@@ -10304,7 +10304,7 @@
             "qualified_name": "pulp::signal::LpcAnalyzerT",
             "template": "typename SampleType = float",
             "methods": [
-              "prepare(int order, SampleType rank_tolerance = std::numeric_limits<SampleType>::epsilon() * SampleType)",
+              "prepare(int order, SampleType rank_tolerance = std::numeric_limits<SampleType>::epsilon() * SampleType{64})",
               "checked_retained_bytes(int order, std::uint64_t target_max_bytes, std::uint64_t& bytes)",
               "analyze(std::span<const SampleType> samples)",
               "prepared()",
@@ -10612,8 +10612,8 @@
               "num_bins()",
               "fft_size()",
               "hop_size()",
-              "to_db(SampleType* magnitudes, int count, SampleType floor_db = SampleType)",
-              "latest_magnitude_db(SampleType floor_db = SampleType)"
+              "to_db(SampleType* magnitudes, int count, SampleType floor_db = SampleType{-120.0f})",
+              "latest_magnitude_db(SampleType floor_db = SampleType{-120.0f})"
             ],
             "enums": []
           }
@@ -10995,7 +10995,7 @@
             "qualified_name": "pulp::signal::TruePeakLimiterT",
             "template": "typename SampleType = float, std::size_t MaxChannels = 2",
             "methods": [
-              "prepare(double sample_rate, std::size_t channels, Params params =)",
+              "prepare(double sample_rate, std::size_t channels, Params params = {})",
               "reset()",
               "interpolation_factor()",
               "interpolation_taps()",
@@ -11079,7 +11079,7 @@
             "template": "typename SampleType = float",
             "methods": [
               "prepare(SampleType sample_rate)",
-              "reset(SampleType control = SampleType)",
+              "reset(SampleType control = SampleType{0})",
               "process(SampleType input, SampleType control)",
               "set_response(Response r)",
               "response()",
@@ -11374,10 +11374,10 @@
               "current_band()",
               "is_crossfading()",
               "band_max_frequency_hz(std::size_t i)",
-              "make_sine(std::size_t table_length = 2048, SampleType reference_sample_rate = SampleType)",
-              "make_saw(std::size_t bands = 10, std::size_t table_length = 2048, SampleType reference_sample_rate = SampleType)",
-              "make_square(std::size_t bands = 10, std::size_t table_length = 2048, SampleType reference_sample_rate = SampleType)",
-              "make_triangle(std::size_t bands = 10, std::size_t table_length = 2048, SampleType reference_sample_rate = SampleType)"
+              "make_sine(std::size_t table_length = 2048, SampleType reference_sample_rate = SampleType{48000.0f})",
+              "make_saw(std::size_t bands = 10, std::size_t table_length = 2048, SampleType reference_sample_rate = SampleType{48000.0f})",
+              "make_square(std::size_t bands = 10, std::size_t table_length = 2048, SampleType reference_sample_rate = SampleType{48000.0f})",
+              "make_triangle(std::size_t bands = 10, std::size_t table_length = 2048, SampleType reference_sample_rate = SampleType{48000.0f})"
             ],
             "enums": []
           },
@@ -11403,7 +11403,7 @@
             "qualified_name": "pulp::signal::WindowFunction",
             "template": null,
             "methods": [
-              "generate(int size, Type type, SampleType param = SampleType)",
+              "generate(int size, Type type, SampleType param = SampleType{0.0f})",
               "apply(SampleType* buffer, const std::vector<SampleType>& window)"
             ],
             "enums": [
