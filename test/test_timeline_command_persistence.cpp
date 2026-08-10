@@ -3,6 +3,7 @@
 #include <pulp/timeline/document_session.hpp>
 
 #include <array>
+#include <span>
 #include <string_view>
 
 namespace {
@@ -521,6 +522,18 @@ Project moved_payload_project() {
     return take(Project::create(ProjectInput{{1}, "moved payloads", 12, {5}, {}, {sequence}}));
 }
 
+// Both identities survive, but their storage order reverses because the notes
+// cross in time. This is the case independently canonicalized command arrays
+// used to mis-pair during decode.
+Project crossed_payload_project() {
+    auto content = take(
+        MidiContent::create({{{10}, {30}, {25}, 32768, 60, 0}, {{11}, {0}, {25}, 32768, 64, 0}}));
+    auto value = take(Clip::create({7}, {0}, {100}, std::move(content)));
+    auto track = take(Track::create({6}, "authored", {value}));
+    auto sequence = take(Sequence::create({5}, "root", TickDuration{100}, {track}));
+    return take(Project::create(ProjectInput{{1}, "crossed payloads", 12, {5}, {}, {sequence}}));
+}
+
 // Returns a copy of the clip's encoded note array, so the caller holds bytes
 // rather than a view into a parse that ends with this call.
 std::string clip_notes_json(const Project& project, const SchemaRegistry& registry) {
@@ -588,6 +601,66 @@ TEST_CASE("A set-note-events envelope reduces through the authoritative document
                                        registry);
     REQUIRE_FALSE(bumped);
     CHECK(bumped.error().code == PersistenceErrorCode::UnsupportedSchemaVersion);
+}
+
+TEST_CASE("Persisted set-note-events pairs identities when edited notes cross in time") {
+    const auto registry = builtins();
+    const auto before_project = modifier_payload_project();
+    const auto after_project = crossed_payload_project();
+    const auto before = clip_notes_json(before_project, registry);
+    const auto after = clip_notes_json(after_project, registry);
+
+    const auto batch =
+        "[" + envelope("pulp.timeline.command.set_note_events",
+                       R"({"clip_id":"7","expected":)" + before + R"(,"replacement":)" +
+                           after + R"(,"sequence_id":"5","track_id":"6"})") +
+        "]";
+    auto commands = take(deserialize_commands(batch, registry));
+    REQUIRE(commands.size() == 1);
+    const auto& decoded = std::get<SetNoteEvents>(commands[0]);
+    REQUIRE(decoded.expected.size() == 2);
+    REQUIRE(decoded.replacement.size() == 2);
+    CHECK(decoded.expected[0].id == ItemId{10});
+    CHECK(decoded.replacement[0].id == ItemId{10});
+    CHECK(decoded.expected[1].id == ItemId{11});
+    CHECK(decoded.replacement[1].id == ItemId{11});
+
+    auto session = take(DocumentSession::create(before_project));
+    auto writer = take(session->register_writer());
+    Transaction submitted;
+    submitted.id = writer.allocate_transaction_id();
+    submitted.expected_revision = session->revision();
+    submitted.commands.push_back({writer.allocate_command_id(), std::move(commands[0])});
+    REQUIRE(session->submit(writer, std::move(submitted)));
+
+    const auto notes = [&]() -> std::span<const NoteEvent> {
+        const auto* sequence = session->snapshot()->find_sequence({5});
+        const auto* track = sequence->find_track({6});
+        const auto* clip = track->find_clip({7});
+        return std::get<MidiContent>(clip->content()).notes();
+    };
+    REQUIRE(notes().size() == 2);
+    CHECK(notes()[0].id == ItemId{11});
+    CHECK(notes()[0].start == TickPosition{0});
+    CHECK(notes()[1].id == ItemId{10});
+    CHECK(notes()[1].start == TickPosition{30});
+    CHECK(clip_notes_json(*session->snapshot(), registry) == after);
+
+    REQUIRE(session->undo(writer));
+    REQUIRE(notes().size() == 2);
+    CHECK(notes()[0].id == ItemId{10});
+    CHECK(notes()[0].start == TickPosition{0});
+    CHECK(notes()[1].id == ItemId{11});
+    CHECK(notes()[1].start == TickPosition{25});
+    CHECK(clip_notes_json(*session->snapshot(), registry) == before);
+
+    REQUIRE(session->redo(writer));
+    REQUIRE(notes().size() == 2);
+    CHECK(notes()[0].id == ItemId{11});
+    CHECK(notes()[0].start == TickPosition{0});
+    CHECK(notes()[1].id == ItemId{10});
+    CHECK(notes()[1].start == TickPosition{30});
+    CHECK(clip_notes_json(*session->snapshot(), registry) == after);
 }
 
 TEST_CASE("Decoded command batch reduces through the authoritative document session") {

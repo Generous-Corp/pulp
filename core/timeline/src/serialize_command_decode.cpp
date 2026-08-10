@@ -4,6 +4,7 @@
 #include "serialize_decode_context.hpp"
 #include "serialize_decode_support.hpp"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <limits>
@@ -382,8 +383,9 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
             return fail<Command>(PersistenceErrorCode::MissingField, data_path);
         // Both arrays are note arrays, decoded exactly as a clip's notes are, so
         // a malformed note is rejected here rather than at the reducer. Whether
-        // the two arrays pair up is a reduction question, not a decode one: it
-        // needs the clip they name.
+        // the two arrays describe a valid paired edit is a reduction question,
+        // not a decode one: identity-set, target-ownership, and exact-CAS gates
+        // live together there.
         auto decoded_expected =
             decode_command_notes(*expected.value(), context, data_path + "/expected");
         if (!decoded_expected)
@@ -392,6 +394,18 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
             decode_command_notes(*replacement.value(), context, data_path + "/replacement");
         if (!decoded_replacement)
             return runtime::Err(decoded_replacement.error());
+        // Each array is validated through MidiContent and therefore arrives in
+        // storage order, (start, id). A multi-note edit may change that order
+        // (for example, two dragged notes can cross), but SetNoteEvents pairs
+        // the two snapshots by identity. Put both validated arrays into the
+        // same identity order before handing them to the reducer. If their
+        // identity sets differ, the reducer's pairwise identity gate still
+        // rejects the command as a model invariant.
+        const auto by_id = [](const NoteEvent& left, const NoteEvent& right) {
+            return left.id < right.id;
+        };
+        std::sort(decoded_expected->begin(), decoded_expected->end(), by_id);
+        std::sort(decoded_replacement->begin(), decoded_replacement->end(), by_id);
         return runtime::Ok(Command(SetNoteEvents{
             decoded.value()[0], decoded.value()[1], decoded.value()[2],
             std::move(decoded_expected).value(), std::move(decoded_replacement).value()}));
