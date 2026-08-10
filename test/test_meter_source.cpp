@@ -997,6 +997,9 @@ TEST_CASE("binding one element scalar does not disturb another element's cached 
 
 TEST_CASE("VectorSource publishes latest-wins and carries the sample count",
           "[view][value-channel]") {
+    STATIC_REQUIRE(std::is_trivially_copyable_v<MeterFrame>);
+    STATIC_REQUIRE(std::is_trivially_copyable_v<VectorFrame>);
+
     VectorSource src;
 
     const std::vector<float> first{1.0f, 2.0f, 3.0f};
