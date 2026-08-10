@@ -340,9 +340,9 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"swing_numerator", SchemaValueKind::I64String},
                                {"timing_strength", SchemaValueKind::U32},
                                {"velocity_strength", SchemaValueKind::U32}}));
-    schemas.push_back(builtin("pulp.timeline.groove_step", SchemaDomain::Document,
-                              {{"timing_offset", SchemaValueKind::I64String},
-                               {"velocity_scale", SchemaValueKind::U32}}));
+    schemas.push_back(builtin(
+        "pulp.timeline.groove_step", SchemaDomain::Document,
+        {{"timing_offset", SchemaValueKind::I64String}, {"velocity_scale", SchemaValueKind::U32}}));
     schemas.push_back(builtin("pulp.timeline.chord_scale_event", SchemaDomain::Document,
                               {{"chord_bass", SchemaValueKind::U32},
                                {"chord_extensions", SchemaValueKind::U32},
@@ -528,6 +528,17 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"replacement", SchemaValueKind::Array},
                                {"sequence_id", SchemaValueKind::U64String},
                                {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.insert_notes", SchemaDomain::Command,
+                              {{"clip_id", SchemaValueKind::U64String},
+                               {"modifiers", SchemaValueKind::Array},
+                               {"notes", SchemaValueKind::Array},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.remove_notes", SchemaDomain::Command,
+                              {{"clip_id", SchemaValueKind::U64String},
+                               {"expected", SchemaValueKind::Array},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
     // The modifier arrays are optional at the current version because a command
     // schema has no migration edges to walk: decode gates on exact version
     // equality, so raising the version would reject every envelope already
@@ -596,12 +607,11 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                               {{"expected", SchemaValueKind::Array},
                                {"replacement", SchemaValueKind::Array},
                                {"sequence_id", SchemaValueKind::U64String}}));
-    schemas.push_back(builtin("pulp.timeline.command.set_groove", SchemaDomain::Command,
-                              {{"expected", SchemaValueKind::Object, true,
-                                "pulp.timeline.groove_template"},
-                               {"replacement", SchemaValueKind::Object, true,
-                                "pulp.timeline.groove_template"},
-                               {"sequence_id", SchemaValueKind::U64String}}));
+    schemas.push_back(
+        builtin("pulp.timeline.command.set_groove", SchemaDomain::Command,
+                {{"expected", SchemaValueKind::Object, true, "pulp.timeline.groove_template"},
+                 {"replacement", SchemaValueKind::Object, true, "pulp.timeline.groove_template"},
+                 {"sequence_id", SchemaValueKind::U64String}}));
     schemas.push_back(builtin("pulp.timeline.command.insert_marker", SchemaDomain::Command,
                               {{"marker", SchemaValueKind::Object, true, "pulp.timeline.marker"},
                                {"sequence_id", SchemaValueKind::U64String}}));
@@ -657,17 +667,16 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"replacement", SchemaValueKind::Object, false},
                                {"sequence_id", SchemaValueKind::U64String},
                                {"track_id", SchemaValueKind::U64String}}));
-    schemas.push_back(builtin("pulp.timeline.command.insert_sequence", SchemaDomain::Command,
-                              {{"sequence", SchemaValueKind::Object, true,
-                                "pulp.timeline.sequence"}}));
+    schemas.push_back(
+        builtin("pulp.timeline.command.insert_sequence", SchemaDomain::Command,
+                {{"sequence", SchemaValueKind::Object, true, "pulp.timeline.sequence"}}));
     schemas.push_back(builtin("pulp.timeline.command.clone_sequence", SchemaDomain::Command,
                               {{"cloned_sequence_id", SchemaValueKind::U64String},
                                {"id_remap", SchemaValueKind::Array},
                                {"source_sequence_id", SchemaValueKind::U64String}}));
     schemas.push_back(builtin("pulp.timeline.command.remove_sequence", SchemaDomain::Command,
                               {{"sequence_id", SchemaValueKind::U64String}}));
-    schemas.push_back(builtin("pulp.timeline.command.set_clip_sequence_ref",
-                              SchemaDomain::Command,
+    schemas.push_back(builtin("pulp.timeline.command.set_clip_sequence_ref", SchemaDomain::Command,
                               {{"clip_id", SchemaValueKind::U64String},
                                {"expected", SchemaValueKind::Object},
                                {"replacement", SchemaValueKind::Object},

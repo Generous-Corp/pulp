@@ -169,6 +169,34 @@ struct SetNoteEvents {
     std::vector<NoteEvent> replacement;
 };
 
+/// Inserts a set of identity-bearing notes into one MIDI clip.
+///
+/// The set is plural so one gesture consumes one journal command regardless of
+/// selection size. Every note identity must be available. `modifiers` may
+/// describe only notes in this same payload; a reducer-built inverse uses it to
+/// restore modifiers removed with their notes. The clip-level modifier seed and
+/// every controller lane carry over unchanged.
+struct InsertNotes {
+    ItemId sequence_id;
+    ItemId track_id;
+    ItemId clip_id;
+    std::vector<NoteEvent> notes;
+    std::vector<NoteModifier> modifiers;
+};
+
+/// Removes a named set of notes under an exact optimistic-value gate.
+///
+/// Each `expected` entry must equal the current note with the same identity in
+/// every field. The reducer captures any attached modifiers in the generated
+/// `InsertNotes` inverse, so undo restores the complete note behavior without
+/// making forward callers restate clip-owned modifier data.
+struct RemoveNotes {
+    ItemId sequence_id;
+    ItemId track_id;
+    ItemId clip_id;
+    std::vector<NoteEvent> expected;
+};
+
 /// Replaces clip-level gain and fade controls under an exact value gate.
 struct SetClipPlaybackProperties {
     ItemId sequence_id;
@@ -414,15 +442,14 @@ struct MoveTrack {
 };
 
 /// Exhaustive set of durable Timeline document mutations.
-using Command =
-    std::variant<InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane, MoveClip,
-                 SetNoteVelocity, ReplaceNoteContent, SetClipPlaybackProperties, SetTempoMap,
-                 SetMeterMap, CreateAsset, RemoveAsset, InsertTakeLane, RemoveTakeLane,
-                 SetRecordArm, InsertTake, RemoveTake, SetActiveTakeLane, SetTakeComp,
-                 SetTrackFreeze, InsertMarker, RemoveMarker, InsertRegion, RemoveRegion,
-                 SetChordScaleLane, SetGroove, InsertScene, RemoveScene, InsertSlot, RemoveSlot,
-                 InsertSequence, CloneSequence, RemoveSequence, SetClipSequenceRef, SetTrackMixer,
-                 InsertTrack, RemoveTrack, SetTrackName, MoveTrack, SetNoteEvents>;
+using Command = std::variant<
+    InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane, MoveClip, SetNoteVelocity,
+    ReplaceNoteContent, SetClipPlaybackProperties, SetTempoMap, SetMeterMap, CreateAsset,
+    RemoveAsset, InsertTakeLane, RemoveTakeLane, SetRecordArm, InsertTake, RemoveTake,
+    SetActiveTakeLane, SetTakeComp, SetTrackFreeze, InsertMarker, RemoveMarker, InsertRegion,
+    RemoveRegion, SetChordScaleLane, SetGroove, InsertScene, RemoveScene, InsertSlot, RemoveSlot,
+    InsertSequence, CloneSequence, RemoveSequence, SetClipSequenceRef, SetTrackMixer, InsertTrack,
+    RemoveTrack, SetTrackName, MoveTrack, SetNoteEvents, InsertNotes, RemoveNotes>;
 
 /// One command paired with its writer-scoped idempotency identity.
 struct CommandEnvelope {
@@ -448,9 +475,9 @@ struct Transaction {
 /// clones the referenced sequence with fresh identities and retargets the clip;
 /// failure leaves the project and supplied identities unchanged.
 runtime::Result<Transaction, ModelError>
-build_diverge_transaction(const Project& project, ItemLocation clip,
-                          TransactionId transaction_id, DocumentRevision expected_revision,
-                          CommandId clone_command_id, CommandId retarget_command_id,
+build_diverge_transaction(const Project& project, ItemLocation clip, TransactionId transaction_id,
+                          DocumentRevision expected_revision, CommandId clone_command_id,
+                          CommandId retarget_command_id,
                           std::optional<UndoGroupId> undo_group = std::nullopt);
 
 /// Compares time ranges by authored value rather than storage representation.
