@@ -33,16 +33,13 @@ constexpr const char* kAudioCaptureWavFramesEnv = "PULP_AUDIO_CAPTURE_WAV_FRAMES
 constexpr const char* kAudioCaptureRollingEnv = "PULP_AUDIO_CAPTURE_ROLLING";
 constexpr const char* kAudioCaptureRollingFramesEnv = "PULP_AUDIO_CAPTURE_ROLLING_FRAMES";
 constexpr const char* kAudioCaptureRollingFormatEnv = "PULP_AUDIO_CAPTURE_ROLLING_FORMAT";
-constexpr const char* kInspectProfileEnv = "PULP_INSPECT_PROFILE";
-constexpr const char* kInspectCapabilitiesEnv = "PULP_INSPECT_CAPABILITIES";
-constexpr const char* kInspectRuntimeEvalEnv = "PULP_INSPECT_RUNTIME_EVAL";
 constexpr const char* kAudioNoticeEnv    = "PULP_RUN_AUDIO_NOTICE";
 
 void print_help() {
     std::cout
         << "pulp run — launch a standalone Pulp application\n\n"
            "Usage: pulp run [target] [--headless] [--screenshot <file>] [--frames <n>]\n"
-           "                [--watch] [--inspect[=<profile>]] [--inspect-runtime-eval]\n"
+           "                [--watch]\n"
            "                [--audio-inspector]\n"
            "                [--audio-probe-json <file>] [-- args...]\n\n"
            "If no target is specified, finds the first standalone binary in the\n"
@@ -59,15 +56,6 @@ void print_help() {
            "                          PULP_FRAMES=<n>.)\n"
            "  --watch                 Re-launch the binary on source changes.\n"
            "                          Composes with --headless / --screenshot.\n"
-           "  --inspect[=<profile>]   Enable the local Development Inspector in a\n"
-           "                          GPU-enabled desktop build. Bare --inspect selects\n"
-           "                          develop. Profiles: off, observe, develop, custom.\n"
-           "  --inspect-capability <id>\n"
-           "                          Add a capability to --inspect=custom; repeatable.\n"
-           "  --inspect-runtime-eval  Enable arbitrary JavaScript evaluation in the live\n"
-           "                          UI realm. HIGH RISK: code runs in the host process.\n"
-           "                          Requires develop, or custom with runtime.eval and\n"
-           "                          session.control. Never implied by a profile.\n"
            "  --audio-inspector       Open the live Audio Inspector window (RT output\n"
            "                          probe). (Forwarded as --audio-inspector and\n"
            "                          PULP_AUDIO_INSPECTOR=1.) Composes with --screenshot.\n"
@@ -108,10 +96,6 @@ void print_help() {
            "  pulp run pulp-gain                       # launch a specific target\n"
            "  pulp run --headless --screenshot ui.png  # CI-friendly headless render\n"
            "  pulp run --watch                         # re-launch on file change\n"
-           "  pulp run --inspect                       # develop inspector profile\n"
-           "  pulp run --inspect=observe               # read-only inspector profile\n"
-           "  pulp run --inspect=develop --inspect-runtime-eval\n"
-           "                                                # explicit high-risk eval\n"
            "  pulp run --audio-inspector               # open the live Audio Inspector\n"
            "  pulp run --audio-probe-json probe.json   # dump live probe metrics + exit\n"
            "  pulp run --audio-scope-json scope.json --frames 90\n";
@@ -318,18 +302,6 @@ int cmd_run(const std::vector<std::string>& args) {
     if (opts.headless) set_env(kHeadlessEnv, "1");
     if (!opts.screenshot_path.empty()) set_env(kScreenshotEnv, opts.screenshot_path);
     if (opts.frames != 1) set_env(kFramesEnv, std::to_string(opts.frames));
-    if (!opts.inspector_profile.empty())
-        set_env(kInspectProfileEnv, opts.inspector_profile);
-    if (!opts.inspector_capabilities.empty()) {
-        std::string capabilities;
-        for (const auto& capability : opts.inspector_capabilities) {
-            if (!capabilities.empty()) capabilities += ',';
-            capabilities += capability;
-        }
-        set_env(kInspectCapabilitiesEnv, capabilities);
-    }
-    if (opts.inspector_runtime_eval)
-        set_env(kInspectRuntimeEvalEnv, "1");
     if (opts.audio_inspector) set_env(kAudioInspectorEnv, "1");
     if (!opts.audio_probe_json_path.empty())
         set_env(kAudioProbeJsonEnv, opts.audio_probe_json_path);

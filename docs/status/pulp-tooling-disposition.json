@@ -1037,6 +1037,87 @@
         ]
       },
       {
+        "name": "control",
+        "disposition": "pulp-owned",
+        "arguments": [
+          {
+            "name": "--json",
+            "kind": "flag",
+            "required": false
+          }
+        ],
+        "subcommands": [
+          {
+            "name": "profiles",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "instances",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "status",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "grant-request",
+            "arguments": [
+              {
+                "name": "--profile",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--operation",
+                "kind": "option",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "call",
+            "arguments": [
+              {
+                "name": "--timeout-ms",
+                "kind": "option",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "watch",
+            "arguments": [
+              {
+                "name": "--timeout-ms",
+                "kind": "option",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "artifact",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "revoke",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "audit",
+            "arguments": [],
+            "subcommands": []
+          }
+        ]
+      },
+      {
         "name": "coverage",
         "disposition": "candidate-shared-later",
         "arguments": [],
@@ -2074,21 +2155,6 @@
         "disposition": "candidate-shared-later",
         "arguments": [
           {
-            "name": "--session",
-            "kind": "option",
-            "required": false
-          },
-          {
-            "name": "--instance",
-            "kind": "option",
-            "required": false
-          },
-          {
-            "name": "--publication",
-            "kind": "option",
-            "required": false
-          },
-          {
             "name": "--json",
             "kind": "flag",
             "required": false
@@ -2113,21 +2179,6 @@
           },
           {
             "name": "profiles",
-            "arguments": [],
-            "subcommands": []
-          },
-          {
-            "name": "list",
-            "arguments": [],
-            "subcommands": []
-          },
-          {
-            "name": "capabilities",
-            "arguments": [],
-            "subcommands": []
-          },
-          {
-            "name": "doctor",
             "arguments": [],
             "subcommands": []
           }
@@ -2820,18 +2871,6 @@
           },
           {
             "name": "--watch",
-            "kind": "flag"
-          },
-          {
-            "name": "--inspect",
-            "kind": "option"
-          },
-          {
-            "name": "--inspect-capability",
-            "kind": "option"
-          },
-          {
-            "name": "--inspect-runtime-eval",
             "kind": "flag"
           },
           {
@@ -3664,26 +3703,6 @@
         "disposition": "candidate-shared-later",
         "arguments": [
           {
-            "name": "--session",
-            "kind": "option",
-            "required": false
-          },
-          {
-            "name": "--instance",
-            "kind": "option",
-            "required": false
-          },
-          {
-            "name": "--publication",
-            "kind": "option",
-            "required": false
-          },
-          {
-            "name": "--port",
-            "kind": "option",
-            "required": false
-          },
-          {
             "name": "--json",
             "kind": "flag",
             "required": false
@@ -3693,6 +3712,11 @@
           {
             "name": "start",
             "arguments": [
+              {
+                "name": "--instance",
+                "kind": "option",
+                "required": false
+              },
               {
                 "name": "--categories",
                 "kind": "option",
@@ -3708,7 +3732,13 @@
           },
           {
             "name": "stop",
-            "arguments": [],
+            "arguments": [
+              {
+                "name": "--instance",
+                "kind": "option",
+                "required": false
+              }
+            ],
             "subcommands": []
           },
           {
@@ -3717,58 +3747,17 @@
               {
                 "name": "sql",
                 "kind": "positional",
-                "required": false
-              },
-              {
-                "name": "--preset",
-                "kind": "option",
-                "required": false
+                "required": true
               },
               {
                 "name": "--trace",
                 "kind": "option",
-                "required": false
+                "required": true
               },
               {
                 "name": "--format",
                 "kind": "option",
                 "required": false
-              }
-            ],
-            "subcommands": []
-          },
-          {
-            "name": "slowest-frames",
-            "arguments": [],
-            "subcommands": []
-          },
-          {
-            "name": "xruns",
-            "arguments": [],
-            "subcommands": []
-          },
-          {
-            "name": "dsp-hotspots",
-            "arguments": [],
-            "subcommands": []
-          },
-          {
-            "name": "layout-vs-paint",
-            "arguments": [],
-            "subcommands": []
-          },
-          {
-            "name": "snapshot",
-            "arguments": [],
-            "subcommands": []
-          },
-          {
-            "name": "explain",
-            "arguments": [
-              {
-                "name": "question",
-                "kind": "positional",
-                "required": true
               }
             ],
             "subcommands": []
@@ -4381,6 +4370,10 @@
         "disposition": "pulp-owned"
       },
       {
+        "name": "pulp_control_profiles",
+        "disposition": "pulp-owned"
+      },
+      {
         "name": "pulp_create",
         "disposition": "candidate-shared-later"
       },
@@ -4394,18 +4387,6 @@
       },
       {
         "name": "pulp_get_view_tree",
-        "disposition": "candidate-shared-later"
-      },
-      {
-        "name": "pulp_inspect_capabilities",
-        "disposition": "candidate-shared-later"
-      },
-      {
-        "name": "pulp_inspect_doctor",
-        "disposition": "candidate-shared-later"
-      },
-      {
-        "name": "pulp_inspect_list",
         "disposition": "candidate-shared-later"
       },
       {
@@ -4478,18 +4459,6 @@
       },
       {
         "name": "pulp_test",
-        "disposition": "candidate-shared-later"
-      },
-      {
-        "name": "pulp_trace_explain",
-        "disposition": "candidate-shared-later"
-      },
-      {
-        "name": "pulp_trace_query",
-        "disposition": "candidate-shared-later"
-      },
-      {
-        "name": "pulp_trace_snapshot",
         "disposition": "candidate-shared-later"
       },
       {

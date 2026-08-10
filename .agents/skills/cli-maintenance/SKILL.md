@@ -1480,11 +1480,6 @@ orders in lockstep.
 - `--watch` — re-launch the binary on file changes via the existing
   `watch_loop` plumbing. Composes with the headless flags so dev
   loops can render PNGs on every save.
-- `--inspect-runtime-eval` — a literal, high-risk acknowledgement for
-  `runtime.eval`, forwarded as argv and `PULP_INSPECT_RUNTIME_EVAL=1`. It
-  requires `--inspect=develop`, or a custom profile that also names
-  `runtime.eval` and `session.control`. Never infer it from a profile, an
-  all-capabilities shorthand, or persisted standalone preferences.
 - `--audio-inspector` — open the live Audio Inspector. Forwarded as
   `--audio-inspector` and `PULP_AUDIO_INSPECTOR=1`.
 - `--audio-probe-json <path>` — write live probe metrics JSON and exit.
@@ -1515,6 +1510,9 @@ same PR whenever the C++ run parser gains a user-facing flag.
 
 Gotchas:
 
+- The legacy `--inspect`, `--inspect-capability`, and
+  `--inspect-runtime-eval` launcher flags are retired. Both C++ and Rust parsers
+  reject them with `pulp control` guidance; do not advertise or forward them.
 - `--screenshot` without a path argument exits 2 with a diagnostic.
   Bad `--frames` (non-integer / <= 0) exits 2 too. Both are caught
   before project resolution so they fail fast in `--help`-adjacent

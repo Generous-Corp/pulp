@@ -712,10 +712,9 @@ python3 tools/motion/visual/capture_sim_frames.py \
     --fps 30 --frame-count 60
 ```
 
-Prefer `--source inspector` for Pulp standalones. It uses the in-app capture
-endpoint, so SSH clients do not need macOS Screen Recording permission. The
-capture tool exits 3 (CTest SKIP) when the selected source is unavailable, so
-it composes cleanly with CI lanes that lack the platform tooling.
+The supported sources are a macOS window region and a booted iOS Simulator.
+The capture tool exits 3 (CTest SKIP) when the selected source is unavailable,
+so it composes cleanly with CI lanes that lack the platform tooling.
 
 ### Claim-evidence preamble
 

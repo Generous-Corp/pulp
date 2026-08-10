@@ -258,8 +258,6 @@ pulp run MyApp -- --arg1                            # pass arguments to the laun
 pulp run --headless --screenshot ui.png             # CI: render offscreen, save PNG
 pulp run --headless --screenshot ui.png --frames 60 # render N frames before capture
 pulp run --watch                                    # re-launch on source-file changes
-pulp run --inspect                                  # authenticated develop-profile inspector
-pulp run --inspect=observe                          # read-only inspector profile
 pulp run --audio-inspector                          # open the live Audio Inspector window
 pulp run --audio-probe-json probe.json              # dump live probe metrics as JSON, then exit
 pulp run --audio-scope-json scope.json              # dump live scope acquisition/measurements JSON
@@ -305,51 +303,12 @@ each produced by the render callback), or opt in explicitly with
 `PULP_SCREENSHOT_KEEP_AUDIO=1` / `StandaloneConfig::screenshot_keeps_audio`
 when the pixels themselves must show live signal.
 
-#### Development Inspector profiles
+#### Capability control
 
-Shipping is a separate build/package decision from these runtime profiles. See
-[Shipping a Development Inspector Endpoint](../guides/development-inspector-shipping.md)
-for the exact target manifest, binary proof, and the separate unsafe
-`runtime.eval` acknowledgement.
-
-Standalone inspector activation requires a GPU-enabled desktop build and a
-window host that can drain accepted owning-thread work while its event loop
-exits and defer a startup-failure close to a later native event turn. Pulp
-currently supplies that complete host contract in its built-in macOS
-standalone window hosts, for both rendering paths. On Windows and Linux,
-`WindowHost` instances come from an external factory. A factory host that wants
-to support an active inspector profile must override
-`event_loop_supports_exit_drain()`, `run_event_loop_until()`,
-`supports_deferred_close()`, and `request_close_deferred()`. The exit drain must
-keep its owning-thread dispatcher live until the readiness callback returns
-true, and deferred close must never invoke the close callback in the idle-pump
-stack that requested it. Active profiles fail closed when either contract is
-absent. A build with
-`PULP_ENABLE_GPU=OFF`, or a mobile build, keeps the inspector runtime disabled
-even when the protocol/client SDK components are present.
-
-- `--inspect` enables the `develop` profile for this standalone instance.
-- `--inspect=observe|develop` selects a named capability set.
-- `--inspect=custom --inspect-capability <id>...` selects an explicit,
-  nonempty capability set; the capability option is repeatable. A custom set
-  containing `state.write`, `test.input`, or `authoring.tweaks` must also contain
-  `session.control`, because mutations require a controller lease.
-- `--inspect-runtime-eval` is the separate high-risk acknowledgement for
-  arbitrary JavaScript evaluation in the live UI realm. It requires
-  `--inspect=develop`, or `--inspect=custom` with both `runtime.eval` and
-  `session.control`. No profile or saved developer preference implies it.
-- `--inspect=off` is the default and starts no listener or discovery artifact.
-
-The active session binds only to loopback, publishes an owner-private ephemeral
-record and credential, and displays an `INSPECT <profile>` badge in the live
-window. `PULP_INSPECT_PROFILE` and comma-separated
-`PULP_INSPECT_CAPABILITIES` are the equivalent host environment contract.
-The explicit evaluation acknowledgement is forwarded as
-`PULP_INSPECT_RUNTIME_EVAL=1` and is never persisted.
-Plugin scanning, validation, and an ordinary `pulp run` never activate it.
-The standalone runtime supports in-place scripted-UI hot reload. A processor
-that replaces its entire editor at runtime fails inspector startup closed
-because its borrowed sources cannot be reattached atomically.
+The legacy `pulp run --inspect*` launcher flags are retired and rejected before
+project discovery. Use `pulp control` with an exact instance identifier and a
+typed registry operation for live capability work. Static profile discovery and
+artifact auditing remain under `pulp control profiles` and `pulp inspect audit`.
 
 #### Live Audio Inspector flags
 

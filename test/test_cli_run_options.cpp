@@ -587,62 +587,17 @@ TEST_CASE("pulp run treats negative-looking targets as pass-through flags",
     REQUIRE(args == std::vector<std::string>{"--standalone"});
 }
 
-TEST_CASE("pulp run parses Development Inspector launcher profiles",
+TEST_CASE("pulp run rejects retired inspector launcher flags with control guidance",
           "[cli][run][inspect]") {
-    auto develop = parse_run_options({"--inspect"});
-    REQUIRE(develop.error.empty());
-    REQUIRE(develop.inspector_profile == "develop");
-
-    auto observe = parse_run_options({"--inspect=observe"});
-    REQUIRE(observe.error.empty());
-    REQUIRE(observe.inspector_profile == "observe");
-
-    auto custom = parse_run_options({"--inspect=custom",
-                                     "--inspect-capability", "session.describe",
-                                     "--inspect-capability", "session.control",
-                                     "--inspect-capability=state.write"});
-    REQUIRE(custom.error.empty());
-    REQUIRE(custom.inspector_profile == "custom");
-    REQUIRE(custom.inspector_capabilities == std::vector<std::string>{
-        "session.describe", "session.control", "state.write"});
-
-    REQUIRE_FALSE(parse_run_options({"--inspect=invalid"}).error.empty());
-    REQUIRE_FALSE(parse_run_options({"--inspect=custom"}).error.empty());
-    REQUIRE_FALSE(parse_run_options({"--inspect=develop",
-                                     "--inspect-capability", "session.describe"}).error.empty());
-    REQUIRE_FALSE(parse_run_options({"--inspect=custom",
-                                     "--inspect-capability", "state.write"}).error.empty());
-    REQUIRE_FALSE(parse_run_options({"--inspect-capability="}).error.empty());
-    REQUIRE_FALSE(parse_run_options({"--inspect=custom", "--inspect-capability",
-                                     "state.write,session.control"}).error.empty());
-    REQUIRE_FALSE(parse_run_options({"--inspect=custom",
-                                     "--inspect-capability=state.write,session.control"}).error.empty());
-}
-
-TEST_CASE("pulp run requires a separate runtime evaluation acknowledgement",
-          "[cli][run][inspect][runtime-eval]") {
-    auto develop = parse_run_options({"--inspect=develop", "--inspect-runtime-eval"});
-    REQUIRE(develop.error.empty());
-    REQUIRE(develop.inspector_runtime_eval);
-    REQUIRE(assemble_launch_args(develop) ==
-            std::vector<std::string>{"--inspect-runtime-eval"});
-
-    auto custom = parse_run_options({
-        "--inspect=custom",
-        "--inspect-capability=session.control",
-        "--inspect-capability=runtime.eval",
-        "--inspect-runtime-eval",
-    });
-    REQUIRE(custom.error.empty());
-    REQUIRE(custom.inspector_runtime_eval);
-
-    REQUIRE_FALSE(parse_run_options({"--inspect-runtime-eval"}).error.empty());
-    REQUIRE_FALSE(parse_run_options({"--inspect=observe",
-                                     "--inspect-runtime-eval"}).error.empty());
-    REQUIRE_FALSE(parse_run_options({"--inspect=custom",
-                                     "--inspect-capability=session.control",
-                                     "--inspect-capability=runtime.eval"}).error.empty());
-    REQUIRE_FALSE(parse_run_options({"--inspect=custom",
-                                     "--inspect-capability=runtime.eval",
-                                     "--inspect-runtime-eval"}).error.empty());
+    for (const auto& args : std::vector<std::vector<std::string>>{
+             {"--inspect"},
+             {"--inspect=observe"},
+             {"--inspect-capability", "session.describe"},
+             {"--inspect-capability=state.write"},
+             {"--inspect-runtime-eval"},
+         }) {
+        const auto result = parse_run_options(args);
+        REQUIRE(result.error.find("retired") != std::string::npos);
+        REQUIRE(result.error.find("pulp control") != std::string::npos);
+    }
 }
