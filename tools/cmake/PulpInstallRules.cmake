@@ -97,15 +97,6 @@ endif()
 if(TARGET pulp-inspect-protocol)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-protocol)
 endif()
-if(TARGET pulp-inspect-discovery-support)
-    list(APPEND PULP_SDK_TARGETS pulp-inspect-discovery-support)
-endif()
-if(TARGET pulp-inspect-discovery)
-    list(APPEND PULP_SDK_TARGETS pulp-inspect-discovery)
-endif()
-if(TARGET pulp-inspect-publication)
-    list(APPEND PULP_SDK_TARGETS pulp-inspect-publication)
-endif()
 if(TARGET pulp-inspect-control)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-control)
 endif()
@@ -115,6 +106,15 @@ endif()
 if(TARGET pulp-inspect-runtime)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-runtime)
 endif()
+if(TARGET pulp-inspect-standalone-runtime)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-standalone-runtime)
+endif()
+if(TARGET pulp-inspect-ui-runtime)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-ui-runtime)
+endif()
+if(TARGET pulp-inspect-offline-runtime)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-offline-runtime)
+endif()
 if(TARGET pulp-inspect-runtime-eval)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-runtime-eval)
 endif()
@@ -123,12 +123,6 @@ if(TARGET pulp-inspect-telemetry)
 endif()
 if(TARGET pulp-inspect-authoring)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-authoring)
-endif()
-if(TARGET pulp-standalone-inspector)
-    list(APPEND PULP_SDK_TARGETS pulp-standalone-inspector)
-endif()
-if(TARGET pulp-standalone-inspector-runtime-eval)
-    list(APPEND PULP_SDK_TARGETS pulp-standalone-inspector-runtime-eval)
 endif()
 
 # pulp-canvas links pulp-bundled-fonts privately when Skia is on.
@@ -335,32 +329,29 @@ elseif(TARGET pulp-inspect-protocol)
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/session.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/test_input.hpp"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
-    if(TARGET pulp-inspect-discovery)
-        install(FILES
-            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/discovery.hpp"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
-    endif()
-    if(TARGET pulp-inspect-publication)
-        install(FILES
-            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/discovery_publisher.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/publication_binding.hpp"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
-    endif()
     if(TARGET pulp-inspect-control)
         install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_admission.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_artifacts.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_broker.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_carrier.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_connection_admission.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_endpoint.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_execution.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_executor_slot.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_grants.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_host_bootstrap.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_host_connection.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_host_enrollment.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_host_preflight.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_host_router.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_identity.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_operations.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_peer.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_read_operations.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_service.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_trusted_host_inventory.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_trusted_host_launcher.hpp"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
     endif()
     if(TARGET pulp-inspect-client)
@@ -369,14 +360,29 @@ elseif(TARGET pulp-inspect-protocol)
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_client.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_client_connection.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_health.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_inspector_client.hpp"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
+    endif()
+    if(TARGET pulp-inspect-offline-runtime)
+        install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_offline_render_executor.hpp"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
     endif()
     if(TARGET pulp-inspect-runtime)
         install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_host_ui_executor.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_standalone_ui_adapter.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_main_thread_executor.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/inspector_server.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_state_read_executor.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_state_write_executor.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_trace_session_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/main_thread_rpc.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/trace_inspector.hpp"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
+    endif()
+    if(TARGET pulp-inspect-standalone-runtime)
+        install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_standalone_host.hpp"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
     endif()
     if(TARGET pulp-inspect-authoring)
@@ -387,6 +393,7 @@ elseif(TARGET pulp-inspect-protocol)
     if(TARGET pulp-inspect-telemetry)
         install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/value_channel_telemetry_broker.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_telemetry_tap.hpp"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
     endif()
 endif()
@@ -410,6 +417,18 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/NOTICE.md"
     DESTINATION "."
 )
+
+# Capability-control walkthroughs are generated from one corpus and use only
+# installed `pulp` / MCP surfaces. Shipping them with the selected SDK makes the
+# clean-machine path independent of a Pulp source checkout.
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/examples/capability-control/control-examples.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/examples/capability-control/README.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/examples/capability-control/generated/mcp-tools.jsonl"
+    DESTINATION "share/pulp/capability-control")
+install(PROGRAMS
+    "${CMAKE_CURRENT_SOURCE_DIR}/examples/capability-control/generated/cli-walkthrough.sh"
+    DESTINATION "share/pulp/capability-control")
 
 # DSP capability registry.
 #
@@ -532,7 +551,11 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpIosHostApp.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAppTargets.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInspectorShipping.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpControlShipping.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/check_inspector_shipping_artifact.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/check_control_shipping_artifact.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/install_control_host.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/remove_control_host.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlugin.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlatformConfig.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake"

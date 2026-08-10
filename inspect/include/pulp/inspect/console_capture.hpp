@@ -17,7 +17,7 @@ namespace pulp::inspect {
 /// Each entry carries a strictly increasing `seq`, so a device-log client can
 /// poll only what is new since its last cursor (`entries_since`) instead of
 /// re-reading the whole ring buffer. An optional sink fires synchronously on
-/// each capture so a host that owns an InspectorServer can also push live
+/// each capture so a canonical control router can also push live
 /// `Console.messageAdded` events.
 class ConsoleCapture {
 public:

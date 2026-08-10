@@ -149,6 +149,7 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
     # a missing definition silently skip staging entirely.
     pulp_stage_runtime_dependencies(${target}_VST3)
     pulp_assert_runtime_dependencies_staged(${target}_VST3)
+    _pulp_attach_control_shipping(${target} ${target}_VST3 VST3)
 endfunction()
 
 # ── Internal: CLAP target ───────────────────────────────────────────────
@@ -235,6 +236,7 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
     pulp_stage_runtime_dependencies(${target}_CLAP)
     pulp_assert_runtime_dependencies_staged(${target}_CLAP)
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_CLAP)
+    _pulp_attach_control_shipping(${target} ${target}_CLAP CLAP)
 endfunction()
 
 # ── Internal: LV2 target ───────────────────────────────────────────────
@@ -267,6 +269,7 @@ function(_pulp_add_lv2 target name bundle_id version manufacturer category)
         PREFIX ""
     )
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_LV2)
+    _pulp_attach_control_shipping(${target} ${target}_LV2 LV2)
 endfunction()
 
 # ── Internal: AAX target ────────────────────────────────────────────────
@@ -354,6 +357,7 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
     pulp_stage_runtime_dependencies(${target}_AAX)
     pulp_assert_runtime_dependencies_staged(${target}_AAX)
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_AAX)
+    _pulp_attach_control_shipping(${target} ${target}_AAX AAX)
 endfunction()
 
 # ── Internal: AU v2 target ──────────────────────────────────────────────
@@ -483,6 +487,7 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     target_link_options(${target}_AU PRIVATE "LINKER:-rpath,@loader_path")
     pulp_validate_bundle_relocatable(${target}_AU)
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_AU)
+    _pulp_attach_control_shipping(${target} ${target}_AU AUv2)
 endfunction()
 
 # ── Internal: AUv3 app extension target ────────────────────────────────

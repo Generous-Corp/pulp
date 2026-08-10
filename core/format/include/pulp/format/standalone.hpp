@@ -8,6 +8,7 @@
 #endif
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/standalone_control_host.hpp>
 #include <pulp/runtime/trace_session.hpp>
 #include <pulp/format/test_signal.hpp>
 #include <pulp/midi/device.hpp>
@@ -23,6 +24,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -253,8 +255,9 @@ class StandaloneTestInputHost {
     StandaloneTestInputResult
     update_transport(const StandaloneTestTransportUpdate& update);
 
-    /// Invalidate all queued input from the current controller. Safe from any
-    /// non-audio thread; the next audio block emits tracked note-offs first.
+    /// Invalidate all queued input from the current controller and restore the
+    /// transport snapshot from before its first update. Safe from any non-audio
+    /// thread; the next audio block emits tracked note-offs first.
     void release_test_input() noexcept;
 
     StandaloneTestTransportState transport_snapshot() const noexcept;
@@ -290,6 +293,8 @@ class StandaloneTestInputHost {
     bool note_release_pending_ = false;
 
     TransportCommand control_transport_{};
+    std::mutex control_transport_mutex_;
+    std::optional<TransportCommand> transport_before_control_;
     runtime::TripleBuffer<TransportCommand> transport_commands_{control_transport_};
     StandaloneTestTransportState audio_transport_{};
     runtime::SeqLock<StandaloneTestTransportState> observed_transport_{audio_transport_};
@@ -411,6 +416,9 @@ private:
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
     std::unique_ptr<Processor> processor_;
+    // Present in every StandaloneApp, but populated only by an executable that
+    // explicitly links and registers a canonical control host adapter.
+    std::unique_ptr<StandaloneControlHost> control_host_;
     StandaloneConfig config_;
     bool persisted_config_loaded_ = false;  // overlay persisted settings once, not on soft restarts
 

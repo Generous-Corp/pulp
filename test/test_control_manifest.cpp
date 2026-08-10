@@ -356,6 +356,14 @@ TEST_CASE("control registry projects capability and operation metadata",
             CHECK(operation.input_schema_json.find("\"event\":{\"type\":\"object\"}") ==
                   std::string_view::npos);
         }
+        if (operation.capability == InspectorCapability::UiInput) {
+            CHECK(operation.input_schema_json.find("\"view_generation\"") !=
+                  std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"const\":\"text\"") !=
+                  std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"maxLength\":4096") !=
+                  std::string_view::npos);
+        }
         if (operation.capability == InspectorCapability::AuthoringTweaks) {
             CHECK(operation.input_schema_json.find("\"propertyNames\"") != std::string_view::npos);
             CHECK(operation.input_schema_json.find("\"anchor_id\"") != std::string_view::npos);
@@ -367,6 +375,10 @@ TEST_CASE("control registry projects capability and operation metadata",
         if (operation.capability == InspectorCapability::CaptureImage) {
             CHECK(operation.input_schema_json.find("\"oneOf\"") != std::string_view::npos);
             CHECK(operation.input_schema_json.find("\"const\":\"node\"") != std::string_view::npos);
+            CHECK(operation.output_schema_json.find("\"redaction_state\":{\"const\":\"redacted\"}") !=
+                  std::string_view::npos);
+            CHECK(operation.output_schema_json.find("\"width\":{\"maximum\":1048576") !=
+                  std::string_view::npos);
         }
         if (operation.capability == InspectorCapability::TestInput) {
             CHECK(operation.input_schema_json.find("\"maximum\":400") != std::string_view::npos);
@@ -381,7 +393,19 @@ TEST_CASE("control registry projects capability and operation metadata",
             CHECK(operation.input_schema_json.find("\"const\":\"motion-start-trace\"") !=
                   std::string_view::npos);
             CHECK(operation.input_schema_json.find("\"maxItems\":32") != std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"const\":\"motion-sample-cost\"") !=
+                  std::string_view::npos);
+            CHECK(operation.input_schema_json.find("performance-enable-tracking") !=
+                  std::string_view::npos);
+            CHECK(operation.output_schema_json.find("audio-enable-metering") !=
+                  std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"maximum\":4096") !=
+                  std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"maximum\":64") !=
+                  std::string_view::npos);
             CHECK(operation.output_schema_json.find("\"trace_id\"") != std::string_view::npos);
+            CHECK(operation.output_schema_json.find("\"redacted\":{\"const\":true}") !=
+                  std::string_view::npos);
             CHECK(operation.output_schema_json.find(
                       "\"required\":[\"action\",\"receipt_id\",\"applied\",\"trace_id\"]") !=
                   std::string_view::npos);

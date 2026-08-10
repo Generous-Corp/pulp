@@ -33,6 +33,21 @@ struct RtListenerQueueTelemetry {
     std::uint64_t overflow_count = 0;
 };
 
+/// Outcome of a generation-bound complete parameter gesture.
+enum class ParameterGestureApplyStatus {
+    Applied,
+    GenerationConflict,
+    InvalidParameter,
+    ConcurrentMutation,
+    CallbackFailureRolledBack,
+    CallbackFailureUnknown,
+};
+
+struct ParameterGestureApplyResult {
+    ParameterGestureApplyStatus status = ParameterGestureApplyStatus::InvalidParameter;
+    std::uint64_t generation = 0;
+};
+
 /// Centralized parameter storage with lock-free value access.
 ///
 /// StateStore is the single source of truth for all plugin parameters.
@@ -118,6 +133,31 @@ public:
 
     /// Write a parameter from a normalized [0, 1] value (lock-free).
     void set_normalized(ParamID id, float normalized);
+
+    /// Current mutation generation for every parameter-state writer.
+    ///
+    /// Base-value writes (UI and audio), modulation changes, trigger resets,
+    /// state restore, and generation-bound gestures all advance this one
+    /// monotonic source. Registration does not: parameters are defined before
+    /// the live store is published.
+    std::uint64_t state_generation() const noexcept {
+        return state_generation_.load(std::memory_order_acquire);
+    }
+
+    bool state_snapshot_is_current(std::uint64_t generation) const noexcept {
+        return active_state_writers_.load(std::memory_order_acquire) == 0 &&
+               state_generation() == generation;
+    }
+
+    /// Atomically claim @p expected_generation and apply one complete host
+    /// gesture if it is still current.
+    ///
+    /// A stale caller fails before begin_gesture. Callback failure restores the
+    /// old value when no newer writer has replaced it. A concurrent writer is
+    /// never overwritten during rollback; the caller must refresh when the
+    /// result is not Applied.
+    ParameterGestureApplyResult apply_normalized_gesture_if_generation(
+        std::uint64_t expected_generation, ParamID id, float normalized);
 
     /// Get the default value for a parameter (from its ParamRange).
     float get_default(ParamID id) const;
@@ -468,6 +508,8 @@ private:
     std::atomic<std::uint64_t> parameter_display_revision_{0};
     std::atomic<std::uint64_t> state_restore_revision_{0};
     std::atomic<std::uint64_t> reconciled_state_restore_revision_{0};
+    std::atomic<std::uint64_t> state_generation_{0};
+    std::atomic<std::uint32_t> active_state_writers_{0};
     // Indices (into values_/params_) of trigger / momentary parameters, cached
     // at registration so reset_triggers_rt() is allocation-free on the audio
     // thread. Empty for the overwhelmingly common no-trigger store.
@@ -495,6 +537,7 @@ private:
     // Close a retired owner's pending host bracket before a replacement owner
     // is allowed to begin the same parameter again.
     void flush_deferred_gesture_release(ParamID id) noexcept;
+    std::uint64_t advance_state_generation() noexcept;
 
     // Off-main-thread gesture-misuse counter. Bumped (relaxed) by
     // begin_gesture/end_gesture when a MainThreadDispatcher backend is live but

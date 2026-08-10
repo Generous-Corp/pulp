@@ -2,6 +2,7 @@
 
 #include <pulp/inspect/client.hpp>
 #include <pulp/inspect/control_client.hpp>
+#include <pulp/inspect/control_host_observability_bundle.hpp>
 #include <pulp/inspect/control_service.hpp>
 #include <pulp/runtime/crypto.hpp>
 
@@ -132,7 +133,9 @@ ControlRegistrationRequest registration_request() {
     manifest.endpoint_included = true;
     manifest.capabilities = {InspectorCapability::SessionDescribe,
                              InspectorCapability::SessionControl, InspectorCapability::StateRead,
-                             InspectorCapability::CaptureImage, InspectorCapability::StateWrite};
+                             InspectorCapability::CaptureImage, InspectorCapability::StateWrite,
+                             InspectorCapability::TraceSessionControl,
+                             InspectorCapability::TelemetryStream};
     return {
         .host_tier = ControlHostTier::Standalone,
         .session_id = "session-a",
@@ -203,7 +206,9 @@ struct ServiceFixture {
                 .client_id = client_identity.client_id,
                 .registration_id = registration.registration_id,
                 .capabilities = {InspectorCapability::StateRead, InspectorCapability::StateWrite,
-                                 InspectorCapability::CaptureImage},
+                                 InspectorCapability::CaptureImage,
+                                 InspectorCapability::TraceSessionControl,
+                                 InspectorCapability::TelemetryStream},
                 .ttl = 5min,
             },
             {
@@ -457,6 +462,10 @@ TEST_CASE("control service gates artifact operations and reads on negotiated sup
                                                             .content_type = "image/png",
                                                             .created_at_unix_ms = 1,
                                                             .expires_at_unix_ms = 4'102'444'800'000,
+                                                            .sensitivity =
+                                                                ControlArtifactSensitivity::Sensitive,
+                                                            .redaction_state =
+                                                                ControlArtifactRedactionState::Redacted,
                                                         });
             REQUIRE(stored.status == ControlArtifactStatus::Stored);
             REQUIRE(stored.metadata);
@@ -468,7 +477,9 @@ TEST_CASE("control service gates artifact operations and reads on negotiated sup
                         .detail_json = "{\"artifact_id\":\"" + metadata.artifact_id +
                                        "\",\"byte_count\":" + std::to_string(metadata.byte_size) +
                                        ",\"mime_type\":\"image/png\",\"sha256\":\"" +
-                                       metadata.sha256 + "\"}",
+                                       metadata.sha256 +
+                                       "\",\"width\":1,\"height\":1,"
+                                       "\"redaction_state\":\"redacted\"}",
                         .artifacts = {{metadata.artifact_id, metadata.content_type,
                                        metadata.byte_size}},
                     },
@@ -1616,4 +1627,40 @@ TEST_CASE("control client artifact reads stay bound to the injected transport se
 
     CHECK(sibling.read_artifact("artifact-session-bound", 7, 11).status ==
           ControlArtifactStatus::Unauthorized);
+}
+
+TEST_CASE("control service dispatches canonical trace through the bound observability executor",
+          "[inspect][control][service][observability][trace]") {
+    ServiceFixture fixture;
+    auto telemetry = std::make_shared<ControlTelemetryTap>(ControlTelemetryTapConfig{});
+    std::size_t trace_calls = 0;
+    auto bundle = ControlHostObservabilityBundle::create({
+        .binding = {.registration_id = fixture.registration.registration_id,
+                    .session_id = fixture.registration.session_id,
+                    .instance_id = fixture.registration.instance_id,
+                    .publication_id = fixture.registration.publication_id,
+                    .authentication_token = std::string(64, 'a')},
+        .trace_executor = [&](const ControlAdmissionPlan&, const ControlRequestEnvelope&,
+                              const ControlExecutionContext&) {
+            ++trace_calls;
+            return ControlExecutionOutcome{
+                .result = {.detail_json = R"({"ok":true,"compiled_in":true,"active":true})"}};
+        },
+        .telemetry = telemetry,
+    });
+    REQUIRE(bundle);
+    ControlService service{fixture.broker, bundle->executor()};
+    auto session = negotiate(service, fixture);
+    auto request = fixture.request(R"({"action":"start"})", "trace-request",
+                                   "trace-idempotency");
+    request.operation_id = "dev.pulp.trace/session-control@1";
+    request.request_hash = *control_request_hash(request);
+
+    const auto dispatched = session.dispatch(encode_control_envelope({
+        .schema_version = kControlProtocolVersion,
+        .payload = std::move(request),
+    }));
+    REQUIRE(dispatched.status == ControlServiceStatus::Responded);
+    CHECK(receipt(dispatched).state == ControlReceiptState::Completed);
+    CHECK(trace_calls == 1);
 }

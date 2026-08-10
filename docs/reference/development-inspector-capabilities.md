@@ -1,379 +1,198 @@
 # Development inspector capabilities
 
-The development inspector is an opt-in platform under construction. In a
-GPU-enabled desktop build with a compatible window host,
-`pulp run --inspect[=PROFILE]` constructs an authenticated network session for
-the selected standalone window and displays a visual Cmd+I indicator. Pulp's
-built-in macOS standalone window hosts currently provide the required event-loop
-exit drain and deferred-close turn. Windows and Linux use external `WindowHost`
-factories; an external host must explicitly implement both contracts before
-active inspector profiles are accepted. A run without `--inspect`, a host
-without those contracts,
-a GPU-disabled or mobile build, and every plugin-format launch constructs no
-endpoint. The installed Rust `pulp`, sibling `pulp-cpp`, and `pulp-mcp` clients
-can discover and authenticate to an explicitly activated endpoint without a
-source checkout.
+The Development Inspector capability-control platform is centralized behind
+the canonical per-user broker. This registry inventory is paired with the
+consolidated [Capability control](capability-control.md) authoring workflow.
+
+The canonical broker evidence, bounded telemetry, and T1/T2a execution
+contracts are documented in [Control evidence and telemetry](control-evidence-and-telemetry.md).
+Phase 3 deleted the legacy server, raw client, discovery, and standalone
+authority. `pulp inspect` remains deliberately static/offline; live typed
+operations use `pulp control` and the generated `pulp_control_*` MCP family.
+Source components, schemas, or a target declaration do not imply live
+reachability.
+
+The earlier temporary capability reduction while Phases 4–7 built that
+replacement is now closed for the typed T0/T1 client foundation. It did not
+preserve a legacy fallback: operations without a canonical executor or grant
+remain unavailable.
 
 This page records the checked baseline so public descriptions do not confuse
-code presence with runtime reachability. The trust boundaries and explicit
-non-claims are defined in the
+implemented building blocks with an activated authority path. The trust
+boundaries and explicit non-claims are defined in the
 [capability-control threat model](../policies/capability-control-threat-model.md).
 
 ## Capability contract
 
 Every protocol method is assigned exactly one stable capability in
 `inspect/include/pulp/inspect/protocol_methods.inc`. Capability IDs, risk,
-side effect, executor, evidence, grantability, and named-profile membership live in
-`inspect/include/pulp/inspect/capability_definitions.inc`. The C++ registries
-reject duplicate method/capability IDs at compile time and test every ID round
-trip. The frozen registry also declares per-operation input/output schema IDs
-and digests, required build feature, runtime contexts, host tiers, activation,
-policy and grant scope, cancellation/timeout behavior, and compatibility and
-deprecation state. Its canonical SHA-256 is embedded in each artifact manifest;
-changing any of those fields invalidates the prior manifest identity.
+side effect, executor, evidence, grantability, and named-profile membership live
+in `inspect/include/pulp/inspect/capability_definitions.inc`. The C++ registries
+reject duplicate method/capability IDs and test every ID round trip. The frozen
+registry also declares operation schemas and digests, build feature, runtime
+contexts, host tiers, activation, policy/grant scope, cancellation/timeout
+behavior, and compatibility state.
 
-Operation schemas are closed, versioned, and resource-bounded. Every string
-value has an explicit maximum; required resource and idempotency identifiers
-also have a nonzero minimum. Capture has separate closed window/node variants,
-state parameter IDs use the complete unsigned 32-bit range, test transport is
-limited to the executor's 20–400 BPM domain, and telemetry accepts at most 32
-unique nonempty channel IDs. These are registry contract bytes, so relaxing or
-narrowing a bound requires a new digest and consent identity.
+Operation schemas are closed, versioned, and resource-bounded. A shipped
+manifest is an upper bound, never a grant. Effective authority requires all
+seven terms: `implemented`, `built`, `host_available`, `activated`,
+`policy_eligible`, `client_granted`, and `session_live`. Missing terms deny by
+default. Capability dispatch is fail-closed before an executor runs.
 
-Trace session control matches the concrete `Trace.startSession`/
-`Trace.stopSession` adapter: start accepts unique categories bounded to 128
-entries and 128 UTF-8 bytes each, plus a
-1–512 MiB ring, the host-main executor enforces the same limits before capture,
-and the raw response is the declared evidence. Publication attachment remains
-host-owned lifecycle.
-The separate trace-control operation uses closed action variants for the
-Performance, Audio, and Motion host-main adapters, including bounded motion
-metrics; its receipt can carry the motion trace ID needed by a later stop.
-The action-discriminated motion-start receipt requires that ID; other action
-receipts cannot smuggle one. Integer-valued JSON numbers use Draft 2020-12
-numeric semantics, so spellings such as `15.0` are accepted when finite and in
-range. Pulp applies a source-owned CHOC compatibility patch so the equivalent
-standards-valid `15e+0` spelling reaches the same executor validation.
-Authoring bypass and lock changes require a nonempty anchor of at most 256
-Unicode codepoints; DOM highlight
-requires an exact node, is capped at 256 UTF-8 bytes, and changes overlay selection instead of
-returning false success. Runtime evaluation additionally rejects NUL and
-enforces a 65,536-byte UTF-8 ceiling (`x-pulp-maxUtf8Bytes`), because JSON
-Schema `maxLength` alone counts characters rather than encoded bytes.
-
-The `dev.pulp.*@1` IDs below are the canonical authoring and broker contract.
-The shorter Inspector IDs are compatibility spellings only. A shipped manifest
-is an upper bound, never a grant. Effective authority requires all seven terms:
-`implemented`, `built`, `host_available`, `activated`, `policy_eligible`,
-`client_granted`, and `session_live`. Missing terms deny by default and surface
-one stable reason such as `not-built`, `client-not-granted`, or
-`session-not-live`.
+The profile columns below are static policy membership, not current runtime
+availability.
 
 | Canonical capability (legacy spelling) | `observe` | `develop` | Current reality |
 |---|---:|---:|---|
-| `dev.pulp.instance/read@1` (`session.describe`) | yes | yes | The standalone owner publishes identity, agent context, and authenticated capability reporting |
-| `dev.pulp.session/control@1` (`session.control`) | no | yes | One-controller lease with expiry, renewal, disconnect release, and structured conflict errors |
-| `dev.pulp.state/read@1` (`state.read`) | yes | yes | The standalone session exposes its exact `StateStore` parameter catalog and values |
-| `dev.pulp.render/offline@1` (`render.offline`) | no | no | Frozen Product A contract; no current executor or grant path |
-| `dev.pulp.ui/observe@1` (`ui.read`) | yes | yes | The standalone session exposes its live view tree and value-channel catalog |
-| `dev.pulp.diagnostics/read@1` (`diagnostics.read`) | yes | yes | Agent context and audio configuration are attached; individual performance sources may report unavailable |
-| `dev.pulp.logs/read@1` (`logs.read`) | yes | yes | Scripted-UI console capture remains attached across in-place reloads |
-| `dev.pulp.ui/capture@1` (`capture.image`) | yes | yes | Advertised only when the initial standalone tree has an honest live or portable whole-window capture route; each request revalidates reload-sensitive native-overlay/GPU requirements; node capture remains unavailable |
-| `dev.pulp.ui/input@1` (`ui.input`) | no | no | Frozen high-risk Product A contract; no current executor or grant path |
-| `dev.pulp.trace/control@1` (`trace.control`) | no | yes | Domain components exist but the standalone owner does not advertise them without a trace binding |
-| `dev.pulp.trace/session-control@1` (`trace.session.control`) | no | yes | Process-global Trace sessions require a publication-scoped binding |
-| `dev.pulp.state/parameter-gesture@1` (`state.write`) | no | yes | The `develop` standalone profile applies legal parameter mutations on the main thread after acquiring the same-connection controller lease |
-| `dev.pulp.test/input@1` (`test.input`) | no | yes | `Test.injectMidi` accepts bounded note-on/off events and `Test.setTransport` applies coherent standalone play/position/tempo updates through the normal host path |
-| `dev.pulp.authoring/tweaks@1` (`authoring.tweaks`) | no | yes | Transient tweaks, exact-node highlight, anchored bypass/lock, live constants, editor URL templates, and repaint flashing stay in this capability; filesystem and editor-launch methods remain unavailable |
-| `dev.pulp.telemetry/subscribe@1` (`telemetry.stream`) | no | yes | The standalone owner claims the value-channel telemetry sidecars only when this capability is effective, then provides bounded contextual snapshots and per-client targeted subscriptions |
-| `dev.pulp.runtime/reload@1` (`runtime.reload`) | no | no | Frozen Product A contract; no current executor or grant path |
-| `dev.pulp.runtime/evaluate@1` (`runtime.eval`) | no | no | High-risk separate opt-in; `--inspect-runtime-eval` is required in addition to a controller-capable develop/custom selection |
-| `dev.pulp.artifact/read@1` (`artifact.read`) | no | no | Frozen publication-bound Product A contract; no current executor or grant path |
-| `dev.pulp.unavailable/operation@1` (`unavailable`) | no | no | Filesystem-backed tweak/fixture operations and editor launch are classified unavailable for the future policy |
+| `dev.pulp.instance/read@1` (`session.describe`) | yes | yes | Broker-owned T0/T1 executor returns the exact active registration, tier, publication generation, build/artifact identity, liveness generation, and declared capabilities after canonical admission |
+| `dev.pulp.session/control@1` (`session.control`) | no | yes | Broker lease/grant machinery exists; no general product host adapter |
+| `dev.pulp.state/read@1` (`state.read`) | yes | yes | T0/T1 runtime executor returns bounded parameter catalog/value snapshots against the shared `StateStore` mutation generation, with explicit sensitive-field redaction; CLI/MCP use the canonical typed client |
+| `dev.pulp.render/offline@1` (`render.offline`) | no | no | T0-only headless executor resolves authority-bound, launcher-trusted in-memory inputs, renders through `OfflineRenderHost`, and publishes broker-owned WAV artifacts; no profile enables it implicitly |
+| `dev.pulp.ui/observe@1` (`ui.read`) | yes | yes | Ordinary Standalone composition snapshots the exact main-thread Pulp view tree, optionally selects one unique node ID and removes geometry, and publishes a bounded sensitive broker artifact |
+| `dev.pulp.diagnostics/read@1` (`diagnostics.read`) | yes | yes | Ordinary Standalone composition publishes bounded typed host and author-supplied diagnostic items as a sensitive broker artifact |
+| `dev.pulp.logs/read@1` (`logs.read`) | yes | yes | Ordinary scripted-UI Standalone composition pages the bounded live JS console ring by monotonic sequence and publishes a sensitive broker artifact; a declared capability without a live ScriptedUi provider fails `HostUnavailable` rather than returning a deceptive empty page |
+| `dev.pulp.ui/capture@1` (`capture.image`) | yes | yes | The exact-instance main-thread executor reuses `InspectorCaptureSource` for bounded window PNGs and the Pulp-owned exact-target adapter for node PNGs; both publish sensitive ACL-bound broker artifacts |
+| `dev.pulp.ui/input@1` (`ui.input`) | no | yes | Grant-controlled ordinary Standalone composition accepts one bounded pointer, keyboard, focus, or UTF-8 text event for an exact registration/view-generation/node target on the fenced main thread; the installed-host seam binds retained state to a broker-projected opaque authority and subscribes exact-owner cleanup to revoke, expiry, disconnect, and teardown |
+| `dev.pulp.trace/control@1` (`trace.control`) | no | yes | Injected exact-T1 main-thread Motion executor provides authority-bound geometry/scroll trace ownership, bounded preloaded-fixture scrub/play/pause, and finite redacted cost snapshots; no generic raw Inspector route |
+| `dev.pulp.trace/session-control@1` (`trace.session.control`) | no | yes | `pulp trace start/stop` and matching MCP tools use canonical control only; the reusable host observability bundle dispatches the exact admitted instance when an adapter publishes it |
+| `dev.pulp.state/parameter-gesture@1` (`state.write`) | no | yes | T1 main-thread exact-slot executor atomically claims the shared `StateStore` generation and rolls back failed brackets without overwriting newer writers; broker grant/consent remains mandatory |
+| `dev.pulp.test/input@1` (`test.input`) | no | yes | Controller-gated ordinary Standalone composition maps monotonic typed note and transport requests onto its existing bounded test-input host; controller/authority/session end releases notes, restores the pre-control transport snapshot, and clears sequencing for the stable controller principal even when the operation used a narrower grant |
+| `dev.pulp.authoring/tweaks@1` (`authoring.tweaks`) | no | yes | Controller-gated ordinary Standalone composition decodes only the frozen bounded tweak object and requires an explicit typed author callback; successful receipts report the author-owned applied generation |
+| `dev.pulp.telemetry/subscribe@1` (`telemetry.stream`) | no | yes | The host observability bundle exposes typed `subscribe`, `poll`, and `unsubscribe` actions over the bounded/redacting tap; exact host publication still determines availability |
+| `dev.pulp.runtime/reload@1` (`runtime.reload`) | no | no | Frozen contract; no current executor or grant path |
+| `dev.pulp.runtime/evaluate@1` (`runtime.eval`) | no | no | Research-unsafe acknowledged manifests may inject the bounded exact-instance evaluator; grants require broker-owned single-use consent, and results/errors are size-bounded and redacted |
+| `dev.pulp.artifact/read@1` (`artifact.read`) | no | no | Publication-bound typed client rechecks exact original lineage and broker ACL for every chunk |
+| `dev.pulp.unavailable/operation@1` (`unavailable`) | no | no | Filesystem/editor-launch operations remain unavailable by policy |
 
-`off` grants nothing. `custom` starts from an empty exact allow-list. These are
-enforced policy definitions. `develop` deliberately excludes `runtime.eval`.
-The launcher can add it only through the literal `--inspect-runtime-eval`
-acknowledgement; custom also has to name `runtime.eval` and `session.control`.
-The acknowledgement is one-run state and is not part of standalone persisted
-preferences.
+`off` grants nothing. `custom` starts from an empty exact allow-list. `develop`
+deliberately excludes `runtime.eval`; no profile or target declaration implies
+that high-risk authority.
 
-## Broker service and local carrier foundation
+## Canonical control foundation
 
-The optional `pulp::inspect-control` component contains the broker-owned
-identity, registration, grant, typed admission, durable receipt, cancellation,
-quota, progress, and artifact-lineage state needed by the capability-control
-migration. It is not linked into ordinary plugin-format artifacts and does not
-replace the current explicitly activated standalone inspector transport. On
-macOS, the optional `pulp-control-broker` executable owns the canonical
-per-user `LocalSocket` endpoint. It currently exposes only a bounded health
-probe: it has no signed launcher bootstrap, host registration channel, consent
-surface, or operation executor, so authority-bearing session admission fails
-closed. Darwin CLI installs place the broker beside `pulp` and `pulp-cpp` and
-reconcile the owner-only `dev.pulp.control-broker` LaunchAgent. A successful
-reconciliation proves only `reachable-unverified`; strict code-signature
-validation at install time is an integrity check, not a trusted publisher or
-authorization decision. Canonical `~/.pulp/bin` installs activate
-automatically. A custom install root requires explicit acceptance on first
-install, and later upgrades may reuse it only when the existing owned plist
-already names that exact broker path. The installed `ControlClient` accepts a typed
-`ControlClientTransport` representing one authenticated, connection-bound peer
-and client identity; its artifact-read API therefore has no caller-supplied
-client ID. The legacy `InspectorSession`/server is not a compatibility
-transport or a second capability-control authority path.
-Ephemeral socket and liveness files are isolated from owner-private durable
-receipts and artifacts under `~/.pulp/state/control-broker/v1`; service stop or
-removal leaves that durable state intact. The installed `ControlClient` accepts
-a typed `ControlClientTransport` representing one authenticated,
-connection-bound peer and client identity; its artifact-read API therefore has
-no caller-supplied client ID. The legacy `InspectorSession`/server is not a
-compatibility transport or a second capability-control authority path.
-`ControlService` accepts a carrier-verified peer and connection-bound client
-identity, but has no executor unless a later runtime adapter injects one.
-Signed service activation, consent UI, host execution routing, and live
-Inspector migration remain later work.
+The optional `pulp::inspect-control` component contains broker-owned identity,
+registration, grant, typed admission, receipt, cancellation, quota, progress,
+artifact-lineage, local carrier, trusted-host inventory, and launcher
+foundations. `pulp::inspect-client` is the canonical control client, not the
+deleted raw Inspector client. The optional macOS `pulp-control-broker` owns one
+per-user `LocalSocket` endpoint and composes enrollment, host routing,
+execution, service, and endpoint ownership. Trusted T0/T1 enrollment can
+publish exact registrations; unsupported tiers and missing executors fail
+closed.
 
-The foundation accepts only carrier-observed `VerifiedControlPeerIdentity`
-values minted by the broker's peer verifier. Its fingerprint binds the peer
-role, UID/SID, PID, process-start generation, executable identity, and verified
-publisher. Payload claims and same-user status alone are insufficient. A
-launcher bootstrap is single-use, short-lived, bound to that exact fingerprint,
-consumed even after a wrong-peer attempt, and wiped on consumption, expiry, or
-destruction. The macOS carrier gathers and validates OS peer evidence before
-the composition root accepts it. Other platforms remain fail-closed until they
-gain an equivalent credential-bearing verifier.
+Darwin CLI installs place the broker beside `pulp` and `pulp-cpp` and reconcile
+the owner-only `dev.pulp.control-broker` LaunchAgent. A successful
+reconciliation proves only `reachable-unverified`; install-time code-signature
+validation is an integrity check, not a publisher-trust or authorization
+decision. Canonical `~/.pulp/bin` installs activate automatically. A custom
+install root requires explicit acceptance on first install, and an upgrade may
+reuse it only when the existing owned plist already names that exact broker
+path. Ephemeral socket and liveness files remain separate from owner-private
+durable receipts and artifacts under `~/.pulp/state/control-broker/v1`; service
+stop or removal leaves that durable state intact.
 
-Registration is limited to Pulp-owned T0 offline jobs and T1 standalone hosts.
-It validates the complete canonical control manifest and exact artifact digest,
-derives the consent identity, and binds an opaque registration to one exact
-session, instance, publication, peer generation, and lease. Empty or
-"latest" selection is unavailable. Shared plugin hosts, including direct AUv3,
-fail with `host-unavailable` until a separately reviewed trusted-host bridge can
-attest the exact loaded slot.
+The installed `ControlClient` accepts a typed `ControlClientTransport`
+representing one authenticated, connection-bound peer and client identity; its
+artifact-read API therefore has no caller-supplied client ID. `ControlService`
+accepts a carrier-verified peer and connection-bound client identity, but has no
+executor unless a runtime adapter injects one. The deleted legacy
+`InspectorSession`/server is not a compatibility transport or a second
+capability-control authority path.
 
-Grant issuance requires a live exact client and registration, a capability
-subset present in that validated manifest, bounded expiry, and approval from a
-trusted Pulp CLI, trusted host UI, or existing user policy. Plugin UI and agent
-client assertions cannot approve a grant. Interactive consent decision IDs are
-single-use; durable policy IDs may be reused within their policy scope. Broker
-restart, client disconnect, registration disappearance, expiry, or explicit
-revocation removes authority. The bounded metadata audit records identities,
-decisions, and stable reason codes, never bootstrap secrets, consent text, or
-operation payload values.
+The control path validates bounded schemas, exact grants, deadlines,
+idempotency, replay, cancellation, operation quotas, and receipt lineage. The
+local carrier binds peer process identity and rejects insecure endpoint parents,
+unsupported transports, malformed input, dead peers, and identity mismatches.
+These protections do not make an owner-private file secret from malicious code
+already running as the same OS user.
 
-A stored grant establishes only the `client_granted` term. It does not activate
-an endpoint, route an operation, or bypass the other six permission terms.
+`pulp control` and the generated `pulp_control_*` MCP family are the general
+typed clients. Trace lifecycle is a narrow facade over the same client:
+`pulp trace start`/`stop` accept an optional exact broker-owned `--instance ID`;
+when omitted, the canonical opener retains its fail-closed unambiguous-selection
+behavior. They and `pulp_trace_start`/`stop` accept no raw host/port or legacy
+publication selector and have no legacy Inspector fallback. Offline
+`trace query --trace`, `doctor`, `fetch`, and `open` do not require a live
+target.
 
-Each service session negotiates its own protocol version and mandatory receipt
-support before request or cancellation dispatch; progress is available only
-when that session negotiated it. Admission validates JSON parameters against
-the resolved operation's input schema before writing an authority-bound
-idempotency receipt. Successful executor output is validated against the same
-operation's output schema before a completed receipt is persisted. Operations
-whose typed result exposes `receipt_id` explicitly bind that field to the
-broker-minted durable receipt; a mismatched executor result fails closed and is
-persisted as an internal failure. Unsupported or malformed schema keywords fail
-closed. Exact replay returns the existing receipt without a second dispatch.
+## Checked surface matrix
 
-Request parameters, result details, and complete wire envelopes have distinct
-bounded budgets (512 KiB, 1,600 KiB, and 2 MiB respectively), including bounded
-JSON node counts. Bulk UI-tree, diagnostics, and log results use artifact
-handles instead of expanding those receipt budgets; artifact reads retain their
-bounded one-mebibyte chunk contract, and publication expiry is capped at 24
-hours by the store rather than trusted to the executor.
-
-The broker checks deadlines and atomically enforces active-operation quotas.
-Trusted in-process executors must return within that bound or promptly return a
-deferred outcome; the service cannot preempt arbitrary C++ in its own process.
-The supplied main-thread adapter enforces the contract with bounded fenced RPC.
-If already-started legal-thread work exceeds its response deadline, the response
-is `unknown-needs-refresh`, while the durable receipt remains `running` and
-retains its quota slot until deferred completion settles it. Cancellation intent
-is durable. Progress events are receipt-bound, monotonic, bounded, and subject
-to carrier backpressure.
-
-Phase 3b's artifact support is intentionally minimal. Publication is blob-first;
-a terminal receipt may name only a stored artifact with matching producer
-lineage, and broker-mediated reads reauthorize the original grant, complete
-lineage, terminal receipt, metadata, and expiry. Per-blob and read-chunk limits
-exist, but aggregate quota, retention collection, deletion audit, redaction, and
-generalized ACL policy remain Phase 7. Expired metadata is removed lazily and
-orphaned content-addressed blobs may remain. Owner-private filesystem modes
-exclude other OS users, not malicious processes running under the same UID;
-broker authorization is not an at-rest secrecy boundary against such a process.
-
-## Checked implementation matrix
-
-| Area | Present | Missing |
+| Area | Present now | Not yet public |
 |---|---|---|
-| Constructor/reachability | Explicit `pulp run --inspect[=PROFILE]` activation constructs one authenticated owner for a compatible GPU desktop standalone window; ordinary and plugin-format launches remain endpoint-free | Additional host-format ownership |
-| Window host | Built-in macOS standalone hosts keep their owning-thread dispatcher alive after native-loop stop until accepted inspector work retires, and schedule startup-failure close on a later native event turn | Windows/Linux external factories must implement `event_loop_supports_exit_drain()` with `run_event_loop_until()`, plus `supports_deferred_close()` with `request_close_deferred()`, to opt into active profiles |
-| Build/link/install | Optional protocol, reader discovery, neutral discovery-path support, publisher/runtime, client, authoring, and `pulp::inspect-control` targets are component-gated and separate from the GPU overlay. Installed protocol/control/client components expose the fail-closed broker, typed service, canonical local client transport, health probe, and macOS health-only broker executable. A mandatory non-slow clean-prefix consumer compiles and runs those installed targets while rejecting direct GPU/render/format/host/CLI/MCP closure. Publisher/runtime link closure does not grant reader authority; an ordinary `pulp::format` fixture proves no inspector symbols are present | Per-target shipped-product declaration and final product-manifest proof |
-| Threading | The standalone owner uses bounded owning-thread RPC, responds after timely application, cancels queued work during teardown, and fences started timeouts as `mayHaveApplied` while discarding late responses. Reload generations rebind owned channel metadata, the sole telemetry attachment, and scripted inspector sources on the UI tick | Additional host-format ownership |
-| Discovery/security | The explicitly activated standalone path retains owner-private ephemeral record/token files, exact publication selection, mutual nonce/HMAC proofs, replay rejection, timeouts, teardown, and one-controller lease. Separately, the broker composition root owns identity-bound single-use bootstrap, exact T0/T1 registration, trusted-consent grants, lifecycle revocation, per-session negotiated envelopes, per-operation input/output schema enforcement, durable replay receipts/cancellation, active-operation quotas, and original-lineage broker reads from the minimal artifact store. Its macOS local carrier owns one endpoint in an owner-only runtime directory and binds accepted-socket UID/GID/PID and audit-token PID generation to a rechecked live code-signing identifier, CDHash, and Team or per-artifact ad-hoc identity; stale-path replacement is device/inode guarded, while insecure endpoint parents, TCP/FIFO identity, malformed UTF-8/JSON, dead peers, and mismatches fail closed | Signed launcher and host registration, trusted consent surface, execution routing, non-macOS verified-peer implementations, migration of live operations to that path, and Phase 7 aggregate artifact quota/retention/redaction/deletion policy; owner-private files are not secret from a same-UID process |
-| CLI | `pulp inspect profiles/list/capabilities/doctor` and typed parameter/MIDI/transport mutations provide stable JSON; every live operation uses exact session/instance/publication targeting through the shared client | Telemetry subscription lands in the next phase |
-| MCP | Installed in-process shared client exposes profiles/list/capabilities/doctor plus typed parameter, MIDI, and transport tools; success carries publication identity and failures carry structured code/message/data | Telemetry subscription lands in the next phase |
-| Capture/telemetry | Whole-window in-process capture (live host back-buffer when available, portable view rendering otherwise), owned value-channel metadata, snapshots, and bounded scalar/meter/vector/event subscriptions are attached to the standalone session; delivery is targeted by authenticated client identity and carries explicit source, stale, coalescing, overflow, and transport-loss state | Node capture, external-host compositing, and CLI/MCP watch commands |
-| Shipping | The component gate removes live inspector targets and the control core; live CLI commands fail explicitly when disabled, while read-only `inspect audit` remains available. Ordinary-format symbol stripping, per-target declarations, canonical manifests, and manifest-versus-binary checks are continuously tested. The optional macOS `pulp-control-broker` ships in the Darwin CLI archive, installs beside the CLI, and is reconciled as the owner-only `dev.pulp.control-broker` LaunchAgent. It opens only the owner-private local endpoint, reports at most `reachable-unverified`, and refuses authority-bearing admission until signed launcher and host adapters are supplied | Trusted service identity, broker-owned consent proof, host execution routing, and platform parity beyond the fail-closed macOS v1 verifier |
+| CLI | `pulp control profiles`; offline `pulp inspect audit ARTIFACT`; exact-instance `pulp control` management/call/watch/artifact/revoke; canonical trace start/stop; offline trace analysis. `pulp inspect profiles` is a compatibility alias through Pulp 0.800.0 on 2026-10-01. | Raw Inspector discovery/RPC, host/port selectors, newest-instance selection, and Motion wrappers |
+| MCP | In-process `pulp_control_profiles`; generated typed `pulp_control_*` operations and management tools; canonical `pulp_trace_start` and `pulp_trace_stop`. `pulp_inspect_profiles` is a compatibility alias through Pulp 0.800.0 on 2026-10-01. | Generic Inspector RPC, raw selectors, and Motion wrappers |
+| Build/link/install | Separate protocol, control, canonical client, runtime, telemetry, authoring, and high-risk eval components; ordinary targets do not gain authority merely because components are built. `ControlInstalledHost` is the explicit T1 composition seam for the authenticated carrier, observability bundle, Motion, exact-target UI, and additional typed host executors, all installed before ready publication. A clean-prefix consumer compiles and runs the installed protocol/control/client targets while rejecting direct GPU/render/format/host/CLI/MCP closure | Per-target shipped-product declarations and cross-platform verified-peer parity |
+| Shipping | Canonical manifests, registry digest, artifact audit, stripped ordinary targets, marker checks, the owner-only macOS health-service LaunchAgent, and a Release installed-author process E2E for all declared ordinary Standalone outcomes, ready-gated exact-host dispatch, artifacts, and authority cleanup | Remaining product declarations and cross-platform release negative controls |
 
-The production server binds loopback only and requires fresh, role-separated
-nonce/HMAC proofs from both client and server using an owner-private
-per-session credential. Discovery rejects expired or dead publishers,
-duplicate live publisher identities, stale publication generations, insecure
-mode bits or extended ACLs, path escapes, and ambiguous selection. Newly
-created Darwin discovery objects
-discard inherited ACLs before any credential material is written; readers
-validate the opened object and fail closed on any remaining extended ACL.
-Rejected server starts wipe their owned credential before releasing storage.
-Capability dispatch is fail-closed before a domain handler runs. The old
-unauthenticated direct-handler server exists only as a non-installed test
-fixture for transport regression coverage.
-Authenticated connections may wait idle for their next frame, but once any
-header byte arrives the complete length-prefixed frame must arrive within a
-bounded cumulative deadline. Partial headers and payloads are disconnected so
-they cannot retain every bounded client slot.
-After a complete request frame is sent, a response timeout or disconnect is
-explicitly reported as `mayHaveApplied`; timeouts fence the connection so a
-late response cannot be mistaken for a safe retry boundary.
+## Centralized replacement boundary
 
-Build presence, host wiring, profile allowance, and current enablement are
-separate facts. `Session.getCapabilities` reports the available and effective
-sets for an authenticated session; no client should infer one from another.
+The replacement is the broker, authenticated carrier, exact registration,
+typed operation registry, generated clients, grants, receipts, and bounded
+artifact/telemetry systems. It is not a compatibility wrapper around the
+deleted Inspector authority. New host tiers or operations must join this
+composition; they may not add a second broker, discovery service, transport,
+session registry, client, generic RPC, or filesystem selector.
 
-### End-to-end validation boundary
+Centralization is not itself a reason to reduce a supported outcome. Outcomes
+remain launch requirements unless a specific security or product rationale is
+recorded for their removal. The retained exclusions are transport or ambient
+authority surfaces rather than outcomes: raw TCP, host/port and discovery
+selectors, arbitrary method/command dispatch, and filesystem/editor-launch
+tweak load/save/autosave/jump. Their bounded typed outcomes use the centralized
+path instead.
 
-The checked source workflow starts three independent standalone processes in
-one discovery directory: an ordinary `develop` session, an `observe` session,
-and a deliberately capability-minimal runtime-evaluation session. It selects
-each process by the exact session, instance, and publication IDs that process
-published. This proves ambiguous selection fails closed, observe reads work
-while state mutation is denied, and runtime evaluation is unavailable without
-the separate opt-in. The minimal evaluation process proves a successful typed
-result plus the 64 KiB request bound without weakening the effectful live
-realm used by the ordinary develop process.
+The deleted legacy TCP server/discovery path is not a compatibility fallback.
+There is one centralized authority path, and unavailable operations remain
+unavailable until that path owns them end to end rather than falling back to an
+Inspector selector.
 
-The same real-process workflow proves controller acquisition, typed parameter,
-transport, and MIDI mutation ordering; compositor-backed PNG capture; scalar,
-vector, event, and deliberately stale value-channel snapshots; slow-client
-attempt sequencing and explicit source/coalescing loss; generation-changing
-reload reattachment of DOM, logs, value telemetry, and runtime-evaluation realm
-authority; and independent record, credential, and lock teardown.
-Those waits advance from observed process, protocol, or sequence state rather
-than assuming a fixed elapsed delay. Processor-owned scripted sessions can
-explicitly opt into in-place reload on the stable host root, preserving the
-session that owns inspector and GPU-surface attachments instead of replacing it
-through `create_view()`. Non-opt-in or replacement-session generations remain
-pending and fail closed.
+Enrolled installed hosts use a two-phase open/ready handshake. The broker holds
+the exact registration in a non-discoverable, non-grantable state until the
+host has installed its executor and acknowledges readiness. Once published,
+the host and broker exchange generation-checked heartbeats. A missed lease,
+disconnect, or restart unregisters the exact publication, detaches its router,
+and cancels retained opaque authority. No host opens a TCP listener, reads a
+discovery file, or becomes a second broker.
 
-A separate packaged-client workflow starts exact `develop` and `observe`
-processes and drives both the installed Rust `pulp inspect` client and the
-installed marketplace `pulp-mcp` client. It covers discovery, capability,
-context, parameter, DOM, capture, transport, MIDI, and typed mutation reads or
-writes without a source-tree client path. An independent source scan rejects
-production protocol literals that are absent from
-`protocol_methods.inc`; its self-test injects an unmapped method and requires
-the check to fail.
+## Phase 4 read-only runtime slice
 
-These proofs apply to the enabled development build described above. The
-ordinary-launch endpoint-free and disabled-component gates remain separate
-tests. Final shipped-product manifest, per-target declaration, and shipping
-override proof depend on the Phase 7 composition and are not claimed here.
+`dev.pulp.instance/read@1` is settled inside `ControlService` from
+`ControlBroker`'s live registration after exact grant admission and a final
+authority checkpoint. It does not ask a host payload to describe its own
+identity. Offline jobs and standalone instances are distinguished explicitly,
+and a heartbeat advances only the liveness generation; unregister/restart
+mints a new registration identity and revokes the old grants.
 
-### Live-realm runtime evaluation boundary
+`dev.pulp.state/read@1` is an injected runtime executor. T0 compositions may
+install it directly; T1 hosts provide it to the canonical authenticated host
+connection. Its resolver receives only the admitted registration plan and an
+exact runtime `StateStore` selection. The adapter runs on the control/host
+worker, never the audio thread, performs no mutation or file I/O, and uses the
+shared parameter JSON serializer for catalog and values. Requests are bounded
+to 4096 unique parameter IDs. Sensitive parameters are omitted unless the
+request explicitly opts in, and the response reports the redacted count.
+The resolver snapshots `StateStore::state_generation()` and the executor
+rechecks that same store before and after serialization; it has no adapter-side
+generation counter.
 
-`runtime.eval` is refused when the attached `ScriptedUiSession` has any
-effectful `ReloadCapability`: `exec`, `clipboard`, `filesystem`, `storage`,
-`ai`, `runtime_import`, or `network`. The inspector reads the immutable grant
-set installed in the live `WidgetBridge`; it does not mask names in
-`globalThis`, because hiding names inside the same reachable realm is not a
-security boundary. `Runtime.getCapabilities` reports `canEvaluate:false` and
-an exact `evaluateDeniedReason` after an unsafe session is attached.
+These adapters do not create a listener, discovery path, CLI command, MCP
+tool, capture/eval/reload surface, or legacy Inspector fallback. A
+`production-stripped` manifest still cannot contain an endpoint or either
+capability; developer/test/support artifacts remain explicit opt-ins whose
+manifests are only an upper bound, not a grant.
 
-The framework-owned `build_editor_ui` path retains its historical
-`CapabilitySet::all()` posture and therefore rejects `--inspect-runtime-eval`.
-A production host or custom processor that needs evaluation must explicitly
-construct `ScriptedUiSession` with an empty
-`ScriptedUiOptions::granted_capabilities` set. That reviewed set is retained
-across hot reloads and checked again whenever the standalone host binds a
-replacement scripted-UI session.
+## High-risk and typed-operation boundaries
 
-The arbitrary-execution adapter is compiled into the separate
-`pulp-inspect-runtime-eval` archive and injected through the narrow
-`RuntimeEvaluator` interface. The base inspector, protocol, transport, client,
-and ordinary format archives do not depend on that component or contain its
-high-risk binary marker. Requests are limited to 64 KiB of decoded code, use a
-fixed two-second deadline, and reject serialized results or encoded responses
-over 1 MiB. Result bytes, nesting depth, and cycles are bounded during QuickJS
-traversal. The scripted realm is rebuilt from source after each evaluation,
-preserving widget values but discarding deferred callbacks and global
-mutations before the next frame pump. That rebuild has a fixed 500 ms cleanup
-grace inside a three-second outer RPC fence; a failed rebuild destroys the
-engine fail-closed. One owned, bounded server worker keeps the controller's
-authenticated connection free to send `Runtime.interrupt` while evaluation is
-in flight, and is included in the server's module-unload shutdown fence. These
-limits compose with the bridge's single-flight, cooperative interrupt,
-engine-detach, and teardown fences.
+`runtime.eval` is arbitrary execution in the UI process. Its retained component
+is separately linked and must remain bounded, single-flight, interruptible, and
+denied for effectful scripted realms. It is never an implementation path for
+MIDI, transport, parameter gestures, authoring controls, or capture.
 
-## Typed test input and authoring boundary
-
-`test.input` is deliberately narrow. `Test.injectMidi` accepts only `note_on`
-and `note_off`, public channels 1–16, note/velocity bytes 0–127, and no raw
-status bytes, SysEx, CC, timestamp, path, or script. Outstanding injected notes
-belong to the controller session and are released when its lease is released,
-expires, disconnects, or the session tears down. The installed one-shot clients
-require a 1–2000 ms hold for note-on and send the matching note-off on the same
-controller connection before releasing the lease. `Test.setTransport` accepts an
-idempotent partial update containing at least one of `playing`, nonnegative
-`position_samples`, or finite `tempo_bpm` from 20 through 400. Both operations
-run through the owning thread and normal standalone host/processor path.
-
-Numeric parameter changes remain `state.write`. Transient authoring controls
-remain `authoring.tweaks`. Generic preset load/save, filesystem tweak
-load/save, source jump, raw MIDI, and arbitrary UI scripting are not test-input
-shortcuts; those methods remain unavailable. `Runtime.evaluate` is never an
-implementation path for MIDI, transport, parameters, or authoring controls.
-
-## Client evidence loop
-
-A client first runs `pulp inspect list --json` (or
-`pulp_inspect_list`) and pins the returned session, instance, and publication
-IDs. It authenticates `capabilities` with those exact IDs, reads the typed state,
-performs only a capability-authorized typed mutation, rereads, and optionally
-captures the selected window. The publication ID is non-reusable; a missing or
-changed publication requires rediscovery. `Runtime.evaluate` is never a
-parameter or test-input mutation path.
-
-## Live value-channel telemetry
-
-`Telemetry.getSnapshot`, `Telemetry.subscribe`, and `Telemetry.unsubscribe`
-are available only when `telemetry.stream` is effective. `observe` and custom
-profiles that omit the capability do not claim or drain the exclusive
-telemetry reader. Client identity is taken from the authenticated connection,
-never from request JSON. Versioned response/event schemas are
-`pulp.inspect.telemetry.snapshot.v1`,
-`pulp.inspect.telemetry.subscription.v1`, and
-`pulp.inspect.telemetry.sample.v1`.
-
-A request may select at most 32 channel names. Subscriptions are limited to one
-per client, default to 15 Hz, and are capped at 60 Hz. `maxVectorValues` is
-bounded by the broker configuration; event and wire payloads are bounded too.
-Slow-client loss is isolated by subscription: attempt sequence advances even
-when delivery drops, and the next successful sample reports
-`transportDroppedSincePrevious`. Continuous channels report only snapshots the
-UI reader actually consumed. Their timestamp is therefore an inspector/UI
-snapshot time, not a producer or audio-clock timestamp. Events use the bounded
-producer tap, preserve zero-valued occurrences, and report cumulative source
-overflow in snapshots plus since-delivery overflow in subscriptions, separately
-from transport loss.
-
-Every channel reports availability, source lifetime, publication/sequence,
-staleness reason, coalescing, source drops, payload size, and its typed payload.
-Non-finite DSP values use the inspector-wide string sentinels `NaN`, `Infinity`,
-and `-Infinity` instead of collapsing anomaly evidence to JSON `null`.
-Source destruction produces one terminal sample. On a successful processor
-reload the subscription ID and requested channel names survive, the source
-generation advances, and the first sample is marked `reattached`; removed names
-remain explicit unavailable entries. The broker is the sidecars' sole reader
-and runs on the serialized UI/control pump. Audio publication remains the
-existing allocation-free, lock-free source/tap path and performs no JSON or
-network work.
+Typed test input, state changes, UI observation/capture/input, diagnostics,
+logs, authoring tweaks, telemetry, and Motion outcomes are composed only through
+the canonical host adapter and its explicit effective grant. Public clients do
+not reach them through a resurrected raw server, custom fixture wire, filesystem
+selector, or generic command. Product-specific diagnostics remain an optional
+typed extension to the built-in host diagnostics. Authoring effects remain an
+explicit typed hook: declaring that capability without a provider fails host
+startup instead of returning a false-success receipt.

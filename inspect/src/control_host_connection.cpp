@@ -1,6 +1,8 @@
 #include <pulp/inspect/control_host_connection.hpp>
 
 #include <pulp/events/interprocess_connection.hpp>
+#include <pulp/runtime/base64.hpp>
+#include <pulp/runtime/crypto.hpp>
 
 #include <atomic>
 #include <condition_variable>
@@ -16,9 +18,12 @@ namespace {
 using events::InterprocessConnection;
 using events::IpcTransport;
 
-ControlExecutionOutcome normalize_host_completion(ControlExecutionOutcome outcome) {
+ControlExecutionOutcome normalize_host_completion(
+    ControlExecutionOutcome outcome,
+    const std::vector<ControlHostArtifactPublication>& publications) {
     const bool unsupported_outputs =
-        !outcome.result.artifacts.empty() || !outcome.result.evidence_ids.empty();
+        !outcome.result.evidence_ids.empty() ||
+        outcome.result.artifacts.size() != publications.size();
     const bool completed = outcome.terminal_state == ControlReceiptState::Completed &&
                            !outcome.result.result_code &&
                            outcome.result.cancellation_reason.empty();
@@ -42,8 +47,12 @@ ControlExecutionOutcome normalize_host_completion(ControlExecutionOutcome outcom
     };
 }
 
-ControlHostCompleteEnvelope completion(std::string route_id, ControlExecutionOutcome outcome) {
-    outcome = normalize_host_completion(std::move(outcome));
+ControlHostCompleteEnvelope completion(
+    std::string route_id, ControlExecutionOutcome outcome,
+    std::vector<ControlHostArtifactPublication> publications) {
+    outcome = normalize_host_completion(std::move(outcome), publications);
+    if (outcome.terminal_state != ControlReceiptState::Completed)
+        publications.clear();
     return {
         .route_id = std::move(route_id),
         .terminal_state = outcome.terminal_state,
@@ -52,6 +61,7 @@ ControlHostCompleteEnvelope completion(std::string route_id, ControlExecutionOut
         .explanation = std::move(outcome.result.explanation),
         .detail_json = std::move(outcome.result.detail_json),
         .cancellation_reason = std::move(outcome.result.cancellation_reason),
+        .artifact_publications = std::move(publications),
     };
 }
 
@@ -60,7 +70,10 @@ ControlHostCompleteEnvelope completion(std::string route_id, ControlExecutionOut
 struct ControlHostConnection::Impl : std::enable_shared_from_this<Impl> {
     struct Job {
         ControlHostExecuteEnvelope execute;
-        std::atomic<bool> cancelled{false};
+        std::atomic<ControlExecutionCheckpoint> checkpoint{ControlExecutionCheckpoint::Continue};
+        std::mutex artifacts_mutex;
+        std::vector<ControlHostArtifactPublication> artifact_publications;
+        std::size_t artifact_bytes = 0;
     };
 
     ControlHostConnectionConfig config;
@@ -69,12 +82,19 @@ struct ControlHostConnection::Impl : std::enable_shared_from_this<Impl> {
     mutable std::mutex mutex;
     std::condition_variable ready;
     std::condition_variable opened_ready;
+    std::condition_variable control_ready;
     std::condition_variable poison_ready;
     std::deque<std::shared_ptr<Job>> queue;
     std::unordered_map<std::string, std::shared_ptr<Job>> active;
     std::optional<ControlHostOpenResult> opened;
+    std::optional<ControlHostReadyResult> ready_result;
+    std::optional<ControlHostHeartbeatResult> heartbeat_result;
+    std::optional<ControlHostOpenResult> binding;
     std::string expected_open_request;
+    std::string expected_ready_request;
+    std::string expected_heartbeat_request;
     ControlRegistrationId registration_id;
+    std::uint64_t liveness_generation = 0;
     std::string last_error;
     std::string last_explanation;
     std::thread worker;
@@ -103,8 +123,10 @@ struct ControlHostConnection::Impl : std::enable_shared_from_this<Impl> {
         return !encoded.empty() && connection.send_message(encoded);
     }
 
-    bool send_completion(std::string_view route, ControlExecutionOutcome outcome) {
-        if (send(ControlEnvelope{.payload = completion(std::string(route), std::move(outcome))}))
+    bool send_completion(std::string_view route, ControlExecutionOutcome outcome,
+                         std::vector<ControlHostArtifactPublication> publications = {}) {
+        if (send(ControlEnvelope{.payload = completion(std::string(route), std::move(outcome),
+                                            std::move(publications))}))
             return true;
         fail("host-completion-send-failed",
              "the final host completion could not be encoded or delivered");
@@ -121,7 +143,8 @@ struct ControlHostConnection::Impl : std::enable_shared_from_this<Impl> {
             stopping = true;
             for (auto& [route, job] : active) {
                 (void)route;
-                job->cancelled.store(true, std::memory_order_release);
+                job->checkpoint.store(ControlExecutionCheckpoint::Cancelled,
+                                      std::memory_order_release);
             }
             queue.clear();
             if (!poison_shutdown)
@@ -129,6 +152,7 @@ struct ControlHostConnection::Impl : std::enable_shared_from_this<Impl> {
         }
         ready.notify_all();
         opened_ready.notify_all();
+        control_ready.notify_all();
         poison_ready.notify_one();
     }
 
@@ -168,8 +192,10 @@ struct ControlHostConnection::Impl : std::enable_shared_from_this<Impl> {
     }
 
     void disconnected() {
+        bool notify = false;
         {
             std::lock_guard lock(mutex);
+            notify = connected || host_open;
             connected = false;
             host_open = false;
             stopping = true;
@@ -179,11 +205,15 @@ struct ControlHostConnection::Impl : std::enable_shared_from_this<Impl> {
             }
             for (auto& [route, job] : active) {
                 (void)route;
-                job->cancelled.store(true, std::memory_order_release);
+                job->checkpoint.store(ControlExecutionCheckpoint::Cancelled,
+                                      std::memory_order_release);
             }
         }
         ready.notify_all();
         opened_ready.notify_all();
+        control_ready.notify_all();
+        if (notify && config.disconnected)
+            config.disconnected();
     }
 
     void receive(const void* data, std::size_t size) {
@@ -211,11 +241,55 @@ struct ControlHostConnection::Impl : std::enable_shared_from_this<Impl> {
                 opened_ready.notify_all();
             return;
         }
+        if (auto* result = std::get_if<ControlHostReadyResult>(&envelope->payload)) {
+            bool valid = false;
+            {
+                std::lock_guard lock(mutex);
+                valid = !expected_ready_request.empty() &&
+                        result->request_id == expected_ready_request && !ready_result;
+                if (valid)
+                    ready_result = std::move(*result);
+            }
+            if (!valid)
+                fail("unexpected-host-ready-result",
+                     "host-ready-result did not match an active request");
+            else
+                control_ready.notify_all();
+            return;
+        }
+        if (auto* result = std::get_if<ControlHostHeartbeatResult>(&envelope->payload)) {
+            bool valid = false;
+            {
+                std::lock_guard lock(mutex);
+                valid = !expected_heartbeat_request.empty() &&
+                        result->request_id == expected_heartbeat_request && !heartbeat_result;
+                if (valid)
+                    heartbeat_result = std::move(*result);
+            }
+            if (!valid)
+                fail("unexpected-host-heartbeat-result",
+                     "host-heartbeat-result did not match an active request");
+            else
+                control_ready.notify_all();
+            return;
+        }
+        if (const auto* ended =
+                std::get_if<ControlHostAuthorityEndEnvelope>(&envelope->payload)) {
+            if (config.authority_ended)
+                config.authority_ended(ended->authority_id, ended->reason);
+            return;
+        }
         if (const auto* cancel = std::get_if<ControlHostCancelEnvelope>(&envelope->payload)) {
             std::lock_guard lock(mutex);
             const auto found = active.find(cancel->route_id);
-            if (found != active.end())
-                found->second->cancelled.store(true, std::memory_order_release);
+            if (found != active.end()) {
+                const auto checkpoint = cancel->reason == "authority-revoked"
+                                            ? ControlExecutionCheckpoint::AuthorityRevoked
+                                        : cancel->reason == "deadline-exceeded"
+                                            ? ControlExecutionCheckpoint::DeadlineExceeded
+                                            : ControlExecutionCheckpoint::Cancelled;
+                found->second->checkpoint.store(checkpoint, std::memory_order_release);
+            }
             return;
         }
         const auto* execute = std::get_if<ControlHostExecuteEnvelope>(&envelope->payload);
@@ -225,9 +299,21 @@ struct ControlHostConnection::Impl : std::enable_shared_from_this<Impl> {
         }
         bool overflow = false;
         bool duplicate = false;
+        bool binding_mismatch = false;
         {
             std::lock_guard lock(mutex);
-            if (!host_open || stopping) {
+            const bool exact_binding = binding && execute->broker_id == binding->broker_id &&
+                                       execute->session_id == binding->session_id &&
+                                       execute->instance_id == binding->instance_id &&
+                                       execute->publication_id == binding->publication_id &&
+                                       execute->instance_generation ==
+                                           binding->instance_generation &&
+                                       execute->manifest_digest == binding->manifest_digest &&
+                                       execute->producer_artifact_digest ==
+                                           binding->producer_artifact_digest;
+            if (!exact_binding) {
+                binding_mismatch = true;
+            } else if (!host_open || stopping) {
                 overflow = true;
             } else if (active.contains(execute->route_id)) {
                 duplicate = true;
@@ -240,7 +326,10 @@ struct ControlHostConnection::Impl : std::enable_shared_from_this<Impl> {
                 queue.push_back(std::move(job));
             }
         }
-        if (duplicate) {
+        if (binding_mismatch) {
+            fail("host-authority-binding-mismatch",
+                 "broker execution did not match the opened host binding");
+        } else if (duplicate) {
             fail("duplicate-host-route", "the broker repeated an active host route identity");
         } else if (overflow) {
             (void)send_completion(execute->route_id,
@@ -261,13 +350,38 @@ struct ControlHostConnection::Impl : std::enable_shared_from_this<Impl> {
             plan.registration_id = registration_id;
         }
         plan.receipt_id = ControlReceiptId{wire.receipt_id};
+        plan.broker_id = ControlBrokerId{wire.broker_id};
+        plan.client_principal = wire.controller_authority_id;
+        plan.client_id = ControlClientId{wire.authority_id};
+        plan.grant_id = ControlGrantId{wire.authority_id};
+        plan.session_id = wire.session_id;
+        plan.instance_id = wire.instance_id;
+        plan.publication_id = wire.publication_id;
+        plan.instance_generation = wire.instance_generation;
+        const auto capability = capability_from_id(wire.capability_id);
+        if (!capability) {
+            (void)send_completion(wire.route_id,
+                                  {.terminal_state = ControlReceiptState::Failed,
+                                   .result = {.result_code = ControlResultCode::InternalError,
+                                              .explanation =
+                                                  "broker projected an unknown capability"}});
+            std::lock_guard lock(mutex);
+            active.erase(wire.route_id);
+            return;
+        }
+        plan.capability = *capability;
+        plan.manifest_digest = wire.manifest_digest;
+        plan.producer_artifact_digest = wire.producer_artifact_digest;
         plan.operation_id = wire.operation_id;
         plan.operation_version = wire.operation_version;
         plan.deadline_unix_ms = wire.deadline_unix_ms;
         plan.expected_state_generation = wire.expected_state_generation;
         ControlRequestEnvelope request{
             .request_id = wire.route_id,
+            .client_id = wire.authority_id,
             .registration_id = plan.registration_id.value,
+            .grant_id = wire.authority_id,
+            .instance_generation = wire.instance_generation,
             .operation_id = wire.operation_id,
             .operation_version = wire.operation_version,
             .deadline_unix_ms = wire.deadline_unix_ms,
@@ -287,22 +401,72 @@ struct ControlHostConnection::Impl : std::enable_shared_from_this<Impl> {
                 },
             .checkpoint =
                 [job] {
-                    return job->cancelled.load(std::memory_order_acquire)
-                               ? ControlExecutionCheckpoint::Cancelled
-                               : ControlExecutionCheckpoint::Continue;
+                    return job->checkpoint.load(std::memory_order_acquire);
                 },
             .complete_deferred =
                 [impl = shared_from_this(),
-                 route = wire.route_id](ControlExecutionOutcome outcome) {
-                    if (impl->send_completion(route, std::move(outcome))) {
+                 route = wire.route_id, job](ControlExecutionOutcome outcome) {
+                    std::vector<ControlHostArtifactPublication> publications;
+                    {
+                        std::lock_guard lock(job->artifacts_mutex);
+                        publications = std::move(job->artifact_publications);
+                    }
+                    if (impl->send_completion(route, std::move(outcome),
+                                              std::move(publications))) {
                         std::lock_guard lock(impl->mutex);
                         impl->active.erase(route);
                     }
                 },
+            .maximum_artifact_bytes = kControlHostMaximumArtifactPublicationBytes,
+            .publish_artifact =
+                [job](std::span<const std::uint8_t> bytes,
+                      ControlArtifactPublication publication) {
+                    if (job->checkpoint.load(std::memory_order_acquire) !=
+                            ControlExecutionCheckpoint::Continue ||
+                        bytes.empty() ||
+                        bytes.size() > kControlHostMaximumArtifactPublicationBytes ||
+                        publication.content_type.empty() || publication.content_type.size() > 256 ||
+                        publication.lifetime <= std::chrono::milliseconds::zero() ||
+                        publication.lifetime > std::chrono::hours{24})
+                        return ControlArtifactStoreResult{.status =
+                                                              ControlArtifactStatus::InvalidRequest};
+                    std::lock_guard lock(job->artifacts_mutex);
+                    if (job->artifact_publications.size() >=
+                            kControlHostMaximumArtifactPublications ||
+                        bytes.size() > kControlHostMaximumArtifactPublicationBytes -
+                                           job->artifact_bytes)
+                        return ControlArtifactStoreResult{.status =
+                                                              ControlArtifactStatus::ResourceExhausted};
+                    const auto reference = "host-publication-" +
+                                           std::to_string(job->artifact_publications.size());
+                    job->artifact_publications.push_back(
+                        {.reference_id = reference,
+                         .bytes_base64 = runtime::base64_encode(bytes.data(), bytes.size()),
+                         .content_type = publication.content_type,
+                         .sensitivity = publication.sensitivity,
+                         .redaction_state = publication.redaction_state,
+                         .lifetime_ms = publication.lifetime.count()});
+                    job->artifact_bytes += bytes.size();
+                    return ControlArtifactStoreResult{
+                        .status = ControlArtifactStatus::Stored,
+                        .metadata = ControlArtifactMetadata{
+                            .artifact_id = reference,
+                            .sha256 = runtime::sha256_hex(bytes.data(), bytes.size()),
+                            .byte_size = bytes.size(),
+                            .content_type = publication.content_type,
+                            .sensitivity = publication.sensitivity,
+                            .redaction_state = publication.redaction_state}};
+                },
         };
         auto outcome = executor(plan, request, context);
         if (!outcome.deferred) {
-            if (send_completion(wire.route_id, std::move(outcome))) {
+            std::vector<ControlHostArtifactPublication> publications;
+            {
+                std::lock_guard lock(job->artifacts_mutex);
+                publications = std::move(job->artifact_publications);
+            }
+            if (send_completion(wire.route_id, std::move(outcome),
+                                std::move(publications))) {
                 std::lock_guard lock(mutex);
                 active.erase(wire.route_id);
             }
@@ -322,6 +486,123 @@ struct ControlHostConnection::Impl : std::enable_shared_from_this<Impl> {
             }
             execute_job(job);
         }
+    }
+
+    ControlHostOpenResult open(ControlHostOpenEnvelope request, std::chrono::milliseconds timeout,
+                               std::string_view invalid_explanation) {
+        const bool enrollment = !request.enrollment_id.empty();
+        request.request_id =
+            "host-open-" + std::to_string(next_request.fetch_add(1, std::memory_order_relaxed));
+        const auto request_id = request.request_id;
+        const bool has_single_authority =
+            request.admission_id.empty() != request.enrollment_id.empty();
+        {
+            std::lock_guard lock(mutex);
+            if (!connected || host_open || !expected_open_request.empty() ||
+                !has_single_authority || timeout.count() <= 0)
+                return {.request_id = request_id,
+                        .error_code = "invalid-host-open",
+                        .explanation = std::string(invalid_explanation)};
+            opened.reset();
+            expected_open_request = request_id;
+        }
+        if (!send(ControlEnvelope{.payload = std::move(request)}))
+            fail("send-failed", "the host-open frame could not be sent");
+
+        std::unique_lock lock(mutex);
+        if (!opened_ready.wait_for(lock, timeout, [&] { return opened || !connected; })) {
+            lock.unlock();
+            fail("timeout", "host-open timed out");
+            return {.request_id = request_id,
+                    .error_code = "timeout",
+                    .explanation = "host-open timed out"};
+        }
+        if (!opened)
+            return {.request_id = request_id,
+                    .error_code = last_error,
+                    .explanation = last_explanation};
+        auto result = std::move(*opened);
+        opened.reset();
+        expected_open_request.clear();
+        host_open = result.accepted && !enrollment;
+        if (result.accepted) {
+            registration_id = ControlRegistrationId{result.registration_id};
+            binding = result;
+        }
+        return result;
+    }
+
+    ControlHostReadyResult mark_ready(std::chrono::milliseconds timeout) {
+        const auto request_id =
+            "host-ready-" + std::to_string(next_request.fetch_add(1, std::memory_order_relaxed));
+        {
+            std::lock_guard lock(mutex);
+            if (!connected || host_open || !binding || !registration_id || timeout.count() <= 0)
+                return {.request_id = request_id,
+                        .error_code = "invalid-host-ready",
+                        .explanation = "a pending enrolled host binding is required"};
+            ready_result.reset();
+            expected_ready_request = request_id;
+        }
+        if (!send(ControlEnvelope{.payload = ControlHostReadyEnvelope{
+                                      .request_id = request_id,
+                                      .registration_id = registration_id.value}}))
+            fail("send-failed", "the host-ready frame could not be sent");
+        std::unique_lock lock(mutex);
+        if (!control_ready.wait_for(lock, timeout, [&] { return ready_result || !connected; })) {
+            lock.unlock();
+            fail("timeout", "host-ready timed out");
+            return {.request_id = request_id,
+                    .error_code = "timeout",
+                    .explanation = "host-ready timed out"};
+        }
+        if (!ready_result)
+            return {.request_id = request_id,
+                    .error_code = last_error,
+                    .explanation = last_explanation};
+        auto result = std::move(*ready_result);
+        ready_result.reset();
+        expected_ready_request.clear();
+        host_open = result.accepted;
+        if (result.accepted)
+            liveness_generation = result.liveness_generation;
+        return result;
+    }
+
+    bool heartbeat(std::chrono::milliseconds timeout) {
+        const auto request_id = "host-heartbeat-" +
+                                std::to_string(next_request.fetch_add(1,
+                                                                      std::memory_order_relaxed));
+        std::uint64_t generation = 0;
+        {
+            std::lock_guard lock(mutex);
+            if (!connected || !host_open || !registration_id || liveness_generation == 0 ||
+                !expected_heartbeat_request.empty() || timeout.count() <= 0)
+                return false;
+            generation = liveness_generation;
+            heartbeat_result.reset();
+            expected_heartbeat_request = request_id;
+        }
+        if (!send(ControlEnvelope{.payload = ControlHostHeartbeatEnvelope{
+                                      .request_id = request_id,
+                                      .registration_id = registration_id.value,
+                                      .liveness_generation = generation}})) {
+            fail("send-failed", "the host heartbeat could not be sent");
+            return false;
+        }
+        std::unique_lock lock(mutex);
+        if (!control_ready.wait_for(lock, timeout,
+                                    [&] { return heartbeat_result || !connected; })) {
+            lock.unlock();
+            fail("timeout", "host heartbeat timed out");
+            return false;
+        }
+        if (!heartbeat_result || !heartbeat_result->accepted)
+            return false;
+        liveness_generation = heartbeat_result->liveness_generation;
+        heartbeat_result.reset();
+        expected_heartbeat_request.clear();
+        return true;
     }
 };
 
@@ -363,42 +644,15 @@ bool ControlHostConnection::connect() {
 
 ControlHostOpenResult ControlHostConnection::open_host(std::string_view admission_id,
                                                        std::chrono::milliseconds timeout) {
-    const auto request_id = "host-open-" + std::to_string(impl_->next_request.fetch_add(1));
-    {
-        std::lock_guard lock(impl_->mutex);
-        if (!impl_->connected || impl_->host_open || admission_id.empty() || timeout.count() <= 0)
-            return {.request_id = request_id,
-                    .error_code = "invalid-host-open",
-                    .explanation = "a connected unopened host and valid admission are required"};
-        impl_->opened.reset();
-        impl_->expected_open_request = request_id;
-    }
-    if (!impl_->send(ControlEnvelope{.payload = ControlHostOpenEnvelope{
-                                         .request_id = request_id,
-                                         .admission_id = std::string(admission_id),
-                                     }})) {
-        impl_->fail("send-failed", "the host-open frame could not be sent");
-    }
-    std::unique_lock lock(impl_->mutex);
-    if (!impl_->opened_ready.wait_for(lock, timeout,
-                                      [&] { return impl_->opened || !impl_->connected; })) {
-        lock.unlock();
-        impl_->fail("timeout", "host-open timed out");
-        return {.request_id = request_id,
-                .error_code = "timeout",
-                .explanation = "host-open timed out"};
-    }
-    if (!impl_->opened)
-        return {.request_id = request_id,
-                .error_code = impl_->last_error,
-                .explanation = impl_->last_explanation};
-    auto result = std::move(*impl_->opened);
-    impl_->opened.reset();
-    impl_->expected_open_request.clear();
-    impl_->host_open = result.accepted;
-    if (result.accepted)
-        impl_->registration_id = ControlRegistrationId{result.registration_id};
-    return result;
+    return impl_->open(ControlHostOpenEnvelope{.admission_id = std::string(admission_id)}, timeout,
+                       "a connected unopened host and valid admission are required");
+}
+
+ControlHostOpenResult
+ControlHostConnection::open_host_enrollment(std::string_view enrollment_id,
+                                            std::chrono::milliseconds timeout) {
+    return impl_->open(ControlHostOpenEnvelope{.enrollment_id = std::string(enrollment_id)},
+                       timeout, "a connected unopened host and valid enrollment are required");
 }
 
 void ControlHostConnection::disconnect() noexcept {
@@ -409,19 +663,39 @@ void ControlHostConnection::disconnect() noexcept {
         impl_->stopping = true;
         impl_->connected = false;
         impl_->host_open = false;
+        impl_->opened.reset();
+        impl_->ready_result.reset();
+        impl_->heartbeat_result.reset();
+        impl_->binding.reset();
+        impl_->expected_open_request.clear();
+        impl_->expected_ready_request.clear();
+        impl_->expected_heartbeat_request.clear();
+        impl_->registration_id = {};
+        impl_->liveness_generation = 0;
         for (auto& [route, job] : impl_->active) {
             (void)route;
-            job->cancelled.store(true, std::memory_order_release);
+            job->checkpoint.store(ControlExecutionCheckpoint::Cancelled,
+                                  std::memory_order_release);
         }
     }
     impl_->ready.notify_all();
     impl_->opened_ready.notify_all();
+    impl_->control_ready.notify_all();
     impl_->connection.disconnect();
     if (impl_->worker.joinable())
         impl_->worker.join();
     std::lock_guard lock(impl_->mutex);
     impl_->queue.clear();
     impl_->active.clear();
+}
+
+ControlHostReadyResult
+ControlHostConnection::mark_executor_ready(std::chrono::milliseconds timeout) {
+    return impl_->mark_ready(timeout);
+}
+
+bool ControlHostConnection::heartbeat(std::chrono::milliseconds timeout) {
+    return impl_->heartbeat(timeout);
 }
 
 bool ControlHostConnection::is_connected() const {

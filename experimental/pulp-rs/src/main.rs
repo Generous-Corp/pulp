@@ -152,23 +152,10 @@ enum Command {
     /// `run`, `doctor`). Archive installation delegates to `pulp-cpp`.
     Tool(PkgTailArgs),
 
-    /// Agent-facing wrappers around the inspector `Motion.*`
-    /// protocol — record / stop / snapshot / list-traces /
-    /// scrub / play / pause / cost. Pairs with the
-    /// `/motion` slash command and the `pulp_motion_*` MCP tools.
-    /// Normal launches publish no endpoint; live use requires an
-    /// explicitly owned custom host that wires `InspectorServer`,
-    /// `DomainHandler`, and authenticated discovery.
-    #[command(name = "motion")]
-    Motion(PkgTailArgs),
-
-    /// Agent-facing wrappers around the inspector `Trace.*` Perfetto
-    /// protocol — start / stop / query / snapshot / explain plus the
-    /// L0 preset verbs (slowest-frames / xruns / dsp-hotspots /
-    /// layout-vs-paint). Pairs with the `/trace` slash command and the
-    /// `pulp_trace_*` MCP tools. Normal launches publish no endpoint;
-    /// live use requires an explicitly owned custom host that wires
-    /// `InspectorServer`, `DomainHandler`, and authenticated discovery.
+    /// Canonical capability-control start/stop plus offline Perfetto query,
+    /// fetch, doctor, and open. Legacy live query/snapshot/explain and raw
+    /// Inspector discovery are rejected. Pairs with `/trace` and the
+    /// canonical `pulp_trace_start` / `pulp_trace_stop` MCP tools.
     #[command(name = "trace")]
     Trace(PkgTailArgs),
 
@@ -185,6 +172,15 @@ struct ControlBrokerReconcileArgs {
     /// Separately staged broker payload from the verified release archive.
     #[arg(long)]
     broker: std::path::PathBuf,
+    /// Separately staged broker-owned ordinary Standalone host.
+    #[arg(long)]
+    standalone_host: std::path::PathBuf,
+    /// Signed capability sidecar for the staged Standalone host.
+    #[arg(long)]
+    standalone_manifest: std::path::PathBuf,
+    /// Runtime library pinned beside the staged Standalone host.
+    #[arg(long)]
+    standalone_runtime: std::path::PathBuf,
     /// Explicitly accept a persistent service rooted outside `~/.pulp`.
     #[arg(long)]
     accept_custom_root: bool,
@@ -341,6 +337,13 @@ struct CacheArgs {
 }
 
 fn main() -> ExitCode {
+    // Installer-only reconciliation must stay in the Rust binary even when a
+    // user's environment enables the public C++ rollback lever. The legacy
+    // binary does not implement this private command, and forwarding it would
+    // silently bypass broker activation during an upgrade.
+    if let Some(exit) = control_broker_reconcile_entrypoint() {
+        return exit;
+    }
     // Rollback lever. When `$PULP_USE_CPP=1` is set, skip the Rust
     // dispatch entirely and exec the C++ binary with the user's full
     // argv unchanged.
@@ -349,9 +352,6 @@ fn main() -> ExitCode {
     // to enable rollback" message and exit 2.
     if std::env::var_os("PULP_USE_CPP").is_some_and(|v| !v.is_empty()) {
         return force_cpp_fallthrough();
-    }
-    if let Some(exit) = control_broker_reconcile_entrypoint() {
-        return exit;
     }
     match real_main() {
         Ok(()) => ExitCode::SUCCESS,
@@ -435,6 +435,9 @@ fn reconcile_installer_control_broker(args: ControlBrokerReconcileArgs) -> Resul
     let result = pulp_rs::install::install_control_broker_path_with(
         &plan,
         &args.broker,
+        &args.standalone_host,
+        &args.standalone_manifest,
+        &args.standalone_runtime,
         |_, rollback_binary| {
             pulp_rs::control_broker_service::reconcile_control_broker_service_transactional(
                 &config,
@@ -914,36 +917,11 @@ fn real_main() -> Result<(), ExitCode> {
             let cmake = root.join("CMakeLists.txt");
             map_exit(cmd::identity::run(&root, &cmake, &parsed, &mut out))
         }
-        Command::Motion(args) => {
-            let (sub, flags) = cmd::motion::parse(&args.tail).map_err(|e| match e {
-                CliError::UnknownSubcommand => {
-                    eprintln!("pulp motion: unknown subcommand");
-                    eprintln!(
-                        "  supported: record, stop, snapshot, list-traces, \
-                         scrub, play, pause, cost"
-                    );
-                    ExitCode::from(2)
-                }
-                CliError::BadUsage(msg) => {
-                    eprintln!("{msg}");
-                    ExitCode::from(2)
-                }
-                other => {
-                    eprintln!("pulp motion: {other}");
-                    ExitCode::from(2)
-                }
-            })?;
-            let talker = cmd::motion::SystemInspector;
-            cmd::motion::dispatch(&sub, &flags, &talker, &mut out).map_err(|e| map_err(&e))
-        }
         Command::Trace(args) => {
             let (sub, flags) = cmd::trace::parse(&args.tail).map_err(|e| match e {
                 CliError::UnknownSubcommand => {
                     eprintln!("pulp trace: unknown subcommand");
-                    eprintln!(
-                        "  supported: start, stop, query, snapshot, explain, \
-                         slowest-frames, xruns, dsp-hotspots, layout-vs-paint"
-                    );
+                    eprintln!("  supported: start, stop, query, doctor, fetch, open");
                     ExitCode::from(2)
                 }
                 CliError::BadUsage(msg) => {
@@ -1000,10 +978,24 @@ mod control_broker_startup_tests {
             "__control-broker-reconcile",
             "--broker",
             "/tmp/staged-broker",
+            "--standalone-host",
+            "/tmp/staged-host",
+            "--standalone-manifest",
+            "/tmp/staged-manifest",
+            "--standalone-runtime",
+            "/tmp/staged-runtime",
             "--accept-custom-root",
         ])
         .expect("valid installer arguments");
         assert_eq!(parsed.broker, std::path::Path::new("/tmp/staged-broker"));
+        assert_eq!(
+            parsed.standalone_host,
+            std::path::Path::new("/tmp/staged-host")
+        );
+        assert_eq!(
+            parsed.standalone_runtime,
+            std::path::Path::new("/tmp/staged-runtime")
+        );
         assert!(parsed.accept_custom_root);
         assert!(
             super::ControlBrokerReconcileArgs::try_parse_from(["__control-broker-reconcile"])

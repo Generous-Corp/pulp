@@ -53,7 +53,9 @@ pulp_add_test_suite(pulp-test-audio-tools LIBRARIES pulp::tool-audio)
 
 if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
     # MCP server protocol tests
-    add_executable(pulp-test-mcp-server test_mcp_server.cpp)
+    add_executable(pulp-test-mcp-server
+        test_mcp_server.cpp
+        test_mcp_control_adapter.cpp)
     target_link_libraries(pulp-test-mcp-server PRIVATE
         pulp-mcp-core
         Catch2::Catch2WithMain)

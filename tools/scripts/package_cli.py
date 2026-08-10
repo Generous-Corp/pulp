@@ -284,6 +284,10 @@ def main() -> int:
                    help="Optional pulp-mcp server binary (#2067 — Claude plugin MCP).")
     p.add_argument("--control-broker-binary", required=False, type=Path, default=None,
                    help="Optional Darwin pulp-control-broker service binary.")
+    p.add_argument("--control-standalone-host-binary", required=False, type=Path,
+                   default=None, help="Broker-owned Darwin Standalone host binary.")
+    p.add_argument("--control-standalone-manifest", required=False, type=Path,
+                   default=None, help="Capability sidecar for the Standalone host.")
     p.add_argument("--import-design-binary", required=False, type=Path, default=None,
                    help="Optional pulp-import-design delegate binary.")
     p.add_argument("--import-design-runtime-dir", required=False, type=Path, default=None,
@@ -306,6 +310,23 @@ def main() -> int:
         print(f"FAIL: --control-broker-binary not at {args.control_broker_binary}",
               file=sys.stderr)
         return 2
+    control_payload = (
+        args.control_broker_binary,
+        args.control_standalone_host_binary,
+        args.control_standalone_manifest,
+    )
+    if any(path is not None for path in control_payload) and not all(
+            path is not None for path in control_payload):
+        print("FAIL: control broker, Standalone host, and capability manifest "
+              "must be supplied together", file=sys.stderr)
+        return 2
+    for flag, path in (
+        ("--control-standalone-host-binary", args.control_standalone_host_binary),
+        ("--control-standalone-manifest", args.control_standalone_manifest),
+    ):
+        if path is not None and not path.is_file():
+            print(f"FAIL: {flag} not at {path}", file=sys.stderr)
+            return 2
     if args.import_design_binary is not None and not args.import_design_binary.exists():
         print(f"FAIL: --import-design-binary not at {args.import_design_binary}",
               file=sys.stderr)
@@ -325,7 +346,7 @@ def main() -> int:
     is_macos = args.platform.startswith("darwin-")
     is_linux = args.platform.startswith("linux-")
     if args.control_broker_binary is not None and not is_macos:
-        print("FAIL: --control-broker-binary is supported only for Darwin archives",
+        print("FAIL: control broker payload is supported only for Darwin archives",
               file=sys.stderr)
         return 2
 
@@ -363,6 +384,7 @@ def main() -> int:
             print(f"bundled: {args.mcp_binary} -> {mcp_name}", flush=True)
 
         staged_broker: Path | None = None
+        staged_control_host: Path | None = None
         if args.control_broker_binary is not None:
             staged_broker = stage_binary(
                 args.control_broker_binary, stage, "pulp-control-broker", is_windows)
@@ -370,6 +392,21 @@ def main() -> int:
             names.append("pulp-control-broker")
             print("bundled: "
                   f"{args.control_broker_binary} -> pulp-control-broker", flush=True)
+            staged_control_host = stage_binary(
+                args.control_standalone_host_binary,
+                stage,
+                "pulp-control-standalone-host",
+                is_windows,
+            )
+            staged_control_host.chmod(0o700)
+            files.append(staged_control_host)
+            names.append("pulp-control-standalone-host")
+            staged_manifest = stage / (
+                "pulp-control-standalone-host.inspector-capabilities.json")
+            shutil.copy2(args.control_standalone_manifest, staged_manifest)
+            staged_manifest.chmod(0o600)
+            files.append(staged_manifest)
+            names.append(staged_manifest.name)
 
         staged_import: Path | None = None
         if args.import_design_binary is not None:
@@ -440,6 +477,9 @@ def main() -> int:
             if staged_broker is not None:
                 print("rewriting macOS rpath: pulp-control-broker", flush=True)
                 fix_rpath_macos(staged_broker)
+            if staged_control_host is not None:
+                print("rewriting macOS rpath: pulp-control-standalone-host", flush=True)
+                fix_rpath_macos(staged_control_host)
             if staged_import is not None:
                 print("rewriting macOS rpath: pulp-import-design", flush=True)
                 fix_rpath_macos(staged_import)

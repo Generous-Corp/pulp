@@ -258,6 +258,15 @@ if [ -f "$ROOT/tools/scripts/inspector_truth_check.py" ]; then
     fi
 fi
 
+# Product B collaboration is a deliberate NO-GO. Keep the public control
+# surface from teaching or retaining a provisional route contract.
+if [ -f "$ROOT/tools/scripts/control_product_b_absence_check.py" ]; then
+    echo "Checking Product B capability-control absence boundary..."
+    if ! python3 "$ROOT/tools/scripts/control_product_b_absence_check.py" --root "$ROOT"; then
+        ERRORS=$((ERRORS + 1))
+    fi
+fi
+
 # ── Widget catalog sync (every View primitive documented) ─────────────────────
 if [ -f "$ROOT/tools/scripts/widgets_doc_check.py" ]; then
     echo "Checking widget catalog (docs/reference/widgets.md) is in sync..."

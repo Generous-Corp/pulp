@@ -295,6 +295,55 @@ std::optional<std::string> control_request_hash(const ControlRequestEnvelope& re
     return runtime::sha256_hex(binding);
 }
 
+std::optional<std::string>
+encode_control_legacy_inspector_error(const ControlLegacyInspectorError& error) {
+    if (!control_protocol_detail::valid_token(error.error_code, kControlMaximumErrorCodeBytes) ||
+        !control_protocol_detail::valid_text(error.error_message,
+                                             kControlReceiptMaximumExplanationBytes) ||
+        !control_protocol_detail::valid_text(error.error_data_json,
+                                             kControlMaximumResultDetailBytes) ||
+        (!error.error_data_json.empty() &&
+         !control_protocol_detail::parse_bounded_control_json(
+             error.error_data_json, kControlMaximumResultDetailBytes,
+             control_protocol_detail::kMaximumResultJsonNodes))) {
+        return std::nullopt;
+    }
+
+    auto detail = choc::value::createObject("");
+    detail.addMember("error_code", choc::value::createString(error.error_code));
+    detail.addMember("error_message", choc::value::createString(error.error_message));
+    detail.addMember("error_data_json", choc::value::createString(error.error_data_json));
+    return control_protocol_detail::canonicalize_control_result_json(
+        choc::json::toString(detail, false));
+}
+
+std::optional<ControlLegacyInspectorError>
+decode_control_legacy_inspector_error(std::string_view detail_json) {
+    const auto detail = control_protocol_detail::parse_bounded_control_json(
+        detail_json, kControlMaximumResultDetailBytes,
+        control_protocol_detail::kMaximumResultJsonNodes);
+    ControlProtocolDiagnostics diagnostics;
+    ControlLegacyInspectorError error;
+    if (!detail ||
+        !control_protocol_detail::only_fields(
+            *detail, {"error_code", "error_message", "error_data_json"}, diagnostics) ||
+        !control_protocol_detail::required_string(*detail, "error_code", error.error_code,
+                                                  kControlMaximumErrorCodeBytes, diagnostics) ||
+        !control_protocol_detail::required_string(*detail, "error_message", error.error_message,
+                                                  kControlReceiptMaximumExplanationBytes,
+                                                  diagnostics, false) ||
+        !control_protocol_detail::required_string(*detail, "error_data_json", error.error_data_json,
+                                                  kControlMaximumResultDetailBytes, diagnostics,
+                                                  false) ||
+        (!error.error_data_json.empty() &&
+         !control_protocol_detail::parse_bounded_control_json(
+             error.error_data_json, kControlMaximumResultDetailBytes,
+             control_protocol_detail::kMaximumResultJsonNodes))) {
+        return std::nullopt;
+    }
+    return error;
+}
+
 bool control_envelope_allowed(const ControlEnvelope& envelope, ControlEnvelopeDirection direction) {
     return std::visit(
         [direction](const auto& payload) {
@@ -307,17 +356,28 @@ bool control_envelope_allowed(const ControlEnvelope& envelope, ControlEnvelopeDi
                 return direction == ControlEnvelopeDirection::BrokerToClient ||
                        direction == ControlEnvelopeDirection::BrokerToHost;
             } else if constexpr (std::is_same_v<T, ControlHostOpenEnvelope> ||
+                                 std::is_same_v<T, ControlHostReadyEnvelope> ||
+                                 std::is_same_v<T, ControlHostHeartbeatEnvelope> ||
                                  std::is_same_v<T, ControlHostProgressEnvelope> ||
                                  std::is_same_v<T, ControlHostCompleteEnvelope>) {
                 return direction == ControlEnvelopeDirection::HostToBroker;
             } else if constexpr (std::is_same_v<T, ControlHostOpenResult> ||
+                                 std::is_same_v<T, ControlHostReadyResult> ||
+                                 std::is_same_v<T, ControlHostHeartbeatResult> ||
                                  std::is_same_v<T, ControlHostExecuteEnvelope> ||
-                                 std::is_same_v<T, ControlHostCancelEnvelope>) {
+                                 std::is_same_v<T, ControlHostCancelEnvelope> ||
+                                 std::is_same_v<T, ControlHostAuthorityEndEnvelope>) {
                 return direction == ControlEnvelopeDirection::BrokerToHost;
+            } else if constexpr (std::is_same_v<T, ControlHostPreflightResponseEnvelope>) {
+                return direction == ControlEnvelopeDirection::HostToLauncher;
+            } else if constexpr (std::is_same_v<T, ControlHostPreflightChallengeEnvelope> ||
+                                 std::is_same_v<T, ControlHostPreflightBootstrapEnvelope>) {
+                return direction == ControlEnvelopeDirection::LauncherToHost;
             } else if constexpr (std::is_same_v<T, ControlNegotiationOffer> ||
                                  std::is_same_v<T, ControlRequestEnvelope> ||
                                  std::is_same_v<T, ControlCancelEnvelope> ||
                                  std::is_same_v<T, ControlSessionOpenEnvelope> ||
+                                 std::is_same_v<T, ControlManagementEnvelope> ||
                                  std::is_same_v<T, ControlArtifactReadEnvelope>) {
                 return direction == ControlEnvelopeDirection::ClientToBroker;
             } else {

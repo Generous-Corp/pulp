@@ -1,7 +1,7 @@
 #pragma once
 
-#include <pulp/inspect/capabilities.hpp>
 #include <pulp/inspect/audit.hpp>
+#include <pulp/inspect/capabilities.hpp>
 #include <pulp/inspect/control_manifest.hpp>
 
 #include <chrono>
@@ -19,21 +19,26 @@ namespace pulp::inspect {
 
 struct ControlBrokerId {
     std::string value;
-    explicit operator bool() const { return !value.empty(); }
+    explicit operator bool() const {
+        return !value.empty();
+    }
     friend bool operator==(const ControlBrokerId&, const ControlBrokerId&) = default;
 };
 
 struct ControlClientId {
     std::string value;
-    explicit operator bool() const { return !value.empty(); }
+    explicit operator bool() const {
+        return !value.empty();
+    }
     friend bool operator==(const ControlClientId&, const ControlClientId&) = default;
 };
 
 struct ControlRegistrationId {
     std::string value;
-    explicit operator bool() const { return !value.empty(); }
-    friend bool operator==(const ControlRegistrationId&,
-                           const ControlRegistrationId&) = default;
+    explicit operator bool() const {
+        return !value.empty();
+    }
+    friend bool operator==(const ControlRegistrationId&, const ControlRegistrationId&) = default;
 };
 
 enum class ControlPeerRole : std::uint8_t {
@@ -56,21 +61,23 @@ struct ControlPeerEvidence {
 
 /// Copyable proof minted only by the broker's trusted OS peer verifier.
 class VerifiedControlPeerIdentity {
-public:
-    const ControlPeerEvidence& evidence() const { return evidence_; }
-    std::string_view fingerprint() const { return fingerprint_; }
+  public:
+    const ControlPeerEvidence& evidence() const {
+        return evidence_;
+    }
+    std::string_view fingerprint() const {
+        return fingerprint_;
+    }
 
     friend bool operator==(const VerifiedControlPeerIdentity& left,
                            const VerifiedControlPeerIdentity& right) {
         return left.fingerprint_ == right.fingerprint_;
     }
 
-private:
+  private:
     friend class ControlPeerVerifier;
-    VerifiedControlPeerIdentity(ControlPeerEvidence evidence,
-                                std::string fingerprint)
-        : evidence_(std::move(evidence)),
-          fingerprint_(std::move(fingerprint)) {}
+    VerifiedControlPeerIdentity(ControlPeerEvidence evidence, std::string fingerprint)
+        : evidence_(std::move(evidence)), fingerprint_(std::move(fingerprint)) {}
 
     ControlPeerEvidence evidence_;
     std::string fingerprint_;
@@ -80,14 +87,13 @@ private:
 /// identity. The authority callback performs the platform-specific UID/SID,
 /// process-generation, and executable-signing checks.
 class ControlPeerVerifier {
-public:
+  public:
     using Authority = std::function<bool(const ControlPeerEvidence&)>;
 
     explicit ControlPeerVerifier(Authority authority);
-    std::optional<VerifiedControlPeerIdentity> verify(
-        ControlPeerEvidence evidence) const;
+    std::optional<VerifiedControlPeerIdentity> verify(ControlPeerEvidence evidence) const;
 
-private:
+  private:
     Authority authority_;
 };
 
@@ -96,6 +102,8 @@ enum class ControlHostTier : std::uint8_t {
     Standalone,
     SharedPluginHost,
 };
+
+std::string_view control_host_tier_id(ControlHostTier tier);
 
 enum class ControlIdentityStatus : std::uint8_t {
     Accepted,
@@ -115,7 +123,7 @@ std::string_view control_identity_status_id(ControlIdentityStatus status);
 
 /// Move-only bootstrap material. Destruction wipes the secret bytes.
 class ControlBootstrapSecret {
-public:
+  public:
     explicit ControlBootstrapSecret(std::span<const std::uint8_t> bytes);
     ~ControlBootstrapSecret();
     ControlBootstrapSecret(const ControlBootstrapSecret&) = delete;
@@ -123,9 +131,11 @@ public:
     ControlBootstrapSecret(ControlBootstrapSecret&& other) noexcept;
     ControlBootstrapSecret& operator=(ControlBootstrapSecret&& other) noexcept;
 
-    std::span<const std::uint8_t> bytes() const { return bytes_; }
+    std::span<const std::uint8_t> bytes() const {
+        return bytes_;
+    }
 
-private:
+  private:
     void clear() noexcept;
     std::vector<std::uint8_t> bytes_;
 };
@@ -147,11 +157,25 @@ struct ControlClientIdentity {
     ControlBrokerId broker_id;
     std::string peer_fingerprint;
     std::chrono::steady_clock::time_point expires_at;
+    /// Broker-owned stable principal for a re-authenticating installed client.
+    /// Empty identities remain strictly connection-scoped.
+    std::string durable_principal;
 };
 
 struct ControlClientResult {
     ControlIdentityStatus status = ControlIdentityStatus::InvalidRequest;
     std::optional<ControlClientIdentity> client;
+};
+
+enum class ControlDurableClientLifetime : std::uint8_t {
+    Broker,
+    Process,
+};
+
+enum class ControlProcessLiveness : std::uint8_t {
+    Unknown,
+    Alive,
+    Dead,
 };
 
 struct ControlRegistrationRequest {
@@ -179,6 +203,10 @@ struct ControlRegistration {
     std::vector<InspectorCapability> capabilities;
     std::string peer_fingerprint;
     std::chrono::steady_clock::time_point expires_at;
+    /// Manifest build identity retained for exact instance/status reads.
+    std::string build_id;
+    /// Starts at one and advances only after an authenticated heartbeat.
+    std::uint64_t liveness_generation = 1;
 };
 
 struct ControlRegistrationResult {
@@ -198,7 +226,7 @@ struct ControlIdentityRegistryConfig {
 /// Broker-owned identity state. It contains no listener and accepts only
 /// verified peers supplied by the future OS-authenticated IPC composition root.
 class ControlIdentityRegistry {
-public:
+  public:
     using Clock = std::function<std::chrono::steady_clock::time_point()>;
 
     explicit ControlIdentityRegistry(
@@ -216,16 +244,26 @@ public:
     ControlClientResult redeem_bootstrap(
         std::string_view ticket_id,
         std::span<const std::uint8_t> secret,
-        const VerifiedControlPeerIdentity& observed_peer);
+        const VerifiedControlPeerIdentity& observed_peer,
+        std::string_view durable_principal = {},
+        ControlDurableClientLifetime durable_lifetime =
+            ControlDurableClientLifetime::Broker);
+    /// Removes process-scoped clients whose kernel process is gone or whose
+    /// reconnect lease expired. The broker owns grant/cancellation cleanup for
+    /// every returned identity.
+    std::vector<ControlClientId> reclaim_process_clients(
+        const std::function<ControlProcessLiveness(const ControlPeerEvidence&)>&
+            process_liveness);
     bool refresh_client(const ControlClientId& client_id,
                         const VerifiedControlPeerIdentity& peer);
     bool disconnect_client(const ControlClientId& client_id);
-    std::optional<ControlClientIdentity> client(
-        const ControlClientId& client_id) const;
+    std::optional<ControlClientIdentity> client(const ControlClientId& client_id) const;
 
-    ControlRegistrationResult register_instance(
-        const VerifiedControlPeerIdentity& peer,
-        ControlRegistrationRequest request);
+    ControlRegistrationResult register_instance(const VerifiedControlPeerIdentity& peer,
+                                                 ControlRegistrationRequest request,
+                                                 bool publish = true);
+    bool publish_instance(const ControlRegistrationId& registration_id,
+                          const VerifiedControlPeerIdentity& peer);
     bool heartbeat(const ControlRegistrationId& registration_id,
                    const VerifiedControlPeerIdentity& peer);
     bool unregister_instance(const ControlRegistrationId& registration_id,
@@ -236,10 +274,13 @@ public:
         std::string_view publication_id) const;
     std::optional<ControlRegistration> registration(
         const ControlRegistrationId& registration_id) const;
+    /// Snapshot of every currently-live exact registration. Human labels are
+    /// metadata only; callers must select by instance_id and reject ambiguity.
+    std::vector<ControlRegistration> registrations() const;
 
     void sweep_expired();
 
-private:
+  private:
     class Impl;
     std::unique_ptr<Impl> impl_;
 };

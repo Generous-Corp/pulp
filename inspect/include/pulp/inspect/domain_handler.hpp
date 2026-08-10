@@ -5,7 +5,6 @@
 #include <pulp/inspect/capture_source.hpp>
 #include <pulp/inspect/editor_url.hpp>
 #include <pulp/inspect/protocol.hpp>
-#include <pulp/inspect/publication_binding.hpp>
 #include <pulp/inspect/runtime_evaluator.hpp>
 #include <pulp/inspect/test_input.hpp>
 
@@ -30,7 +29,7 @@ class TweakStore;
 /// Handles inspector protocol requests by delegating to the appropriate
 /// inspector component. All data sources are optional — missing sources
 /// return error responses for their domain's methods.
-class DomainHandler : public InspectorDomainPublicationBindings {
+class DomainHandler {
 public:
     DomainHandler() = default;
 
@@ -79,17 +78,13 @@ public:
     void set_audio_inspector(AudioInspector* audio) { audio_ = audio; }
     void set_motion_inspector(MotionInspector* motion) { motion_ = motion; }
     void set_motion_scrubber(MotionScrubber* scrubber) { motion_scrubber_ = scrubber; }
-    /// Wire and retain the Perfetto tracing bridge used by both `Trace.*`
-    /// dispatch and the server's publication-scoped ownership lease.
+    /// Wire and retain the Perfetto tracing bridge used by `Trace.*` dispatch.
     void set_trace_inspector(std::shared_ptr<TraceInspector> trace);
-    /// Source-compatible dispatch-only wiring. A server exposing
-    /// `trace.session.control` rejects startup until shared ownership is supplied.
+    /// Source-compatible dispatch-only wiring.
     void set_trace_inspector(TraceInspector* trace) {
         trace_binding_.reset();
         trace_ = trace;
     }
-    std::vector<InspectorPublicationBindingRegistration>
-    publication_bindings() const override;
     void set_render_pass_manager(render::RenderPassManager* rpm) { rpm_ = rpm; }
     void set_tweak_store(TweakStore* store) { tweak_store_ = store; }
     void set_test_input_source(InspectorTestInputSource* source) {

@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -19,6 +20,8 @@ struct ControlHostConnectionConfig {
     std::chrono::milliseconds write_timeout = std::chrono::seconds(3);
     std::chrono::milliseconds frame_read_timeout = std::chrono::seconds(3);
     std::size_t maximum_queued_executions = 8;
+    std::function<void(std::string_view authority_id, std::string_view reason)> authority_ended;
+    std::function<void()> disconnected;
 };
 
 /// Authenticated host-role carrier over the canonical ControlEnvelope stream.
@@ -37,6 +40,12 @@ class ControlHostConnection {
     bool connect();
     ControlHostOpenResult open_host(std::string_view admission_id,
                                     std::chrono::milliseconds timeout = std::chrono::seconds(3));
+    ControlHostOpenResult
+    open_host_enrollment(std::string_view enrollment_id,
+                         std::chrono::milliseconds timeout = std::chrono::seconds(3));
+    ControlHostReadyResult
+    mark_executor_ready(std::chrono::milliseconds timeout = std::chrono::seconds(3));
+    bool heartbeat(std::chrono::milliseconds timeout = std::chrono::seconds(3));
     void disconnect() noexcept;
 
     bool is_connected() const;

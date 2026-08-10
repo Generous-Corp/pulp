@@ -1,6 +1,6 @@
 ---
 name: motion
-description: Debug or validate Pulp animations / transitions / scroll behavior using the runtime motion-trace system. TRIGGER on phrases like "animation is wrong", "transition timing off", "fade too late", "card slides too far", "scroll jumps on restore", "scroll offset wrong on restore", "frame jump in the timeline", "easing looks wonky", "imported Figma motion doesn't match source", "settle time / overshoot / drift / monotonic", "what value does the knob reach at frame N", "record this animation so I can replay it", "this animation is expensive — which one and why", "reduced-motion broken", "scrub a captured fixture". Runs over the inspector wire (no source edits needed), captures fixtures (.motion.jsonl), and ships assertion helpers (is_monotonic / settling_time_seconds / overshoot / start_delay_seconds / final_value / local_step_outlier_ratio) and the `scroll_geometry` trace for `ScrollView` content-offset / visible-rect / content-size observability. Off by default in prod.
+description: Debug or validate Pulp animations / transitions / scroll behavior using in-process motion fixtures and offline visual analysis. TRIGGER on phrases like "animation is wrong", "transition timing off", "fade too late", "card slides too far", "scroll jumps on restore", "scroll offset wrong on restore", "frame jump in the timeline", "easing looks wonky", "imported Figma motion doesn't match source", "settle time / overshoot / drift / monotonic", "what value does the knob reach at frame N", "record this animation so I can replay it", "this animation is expensive — which one and why", "reduced-motion broken", "scrub a captured fixture". Captures fixtures (.motion.jsonl), and ships assertion helpers (is_monotonic / settling_time_seconds / overshoot / start_delay_seconds / final_value / local_step_outlier_ratio) and the `scroll_geometry` trace for `ScrollView` content-offset / visible-rect / content-size observability. Off by default in prod.
 ---
 
 # Motion
@@ -37,26 +37,24 @@ provenance work identically across surfaces.
 
 | You have | Path | Tool |
 |---|---|---|
-| A running app + a node id + a scalar / geometry of interest | **A — Runtime trace** | `Motion.startTrace` over the inspector wire |
+| C++ fixture code + a node id + a scalar / geometry of interest | **A — In-process trace** | `motion::Coordinator` / `MotionInspector` fixture APIs; an admitted exact T1 host may inject `ControlMotionExecutor` |
 | A `ScrollView` whose offset / visible rect / content size you need to observe | **A — Runtime trace (scroll)** | `Trace.scroll_geometry(name, scroll_view, props)` — emits `contentOffsetX/Y`, `visibleRect*`, `contentSize*`, `scrollableMax*`, `inset*` |
 | A captured frame sequence (no app instrumentation available) | **B — Visual analysis** | `tools/motion/visual/analyze_sequence.py` |
 | A previously recorded `.motion.jsonl` fixture | **C — Replay + assert** | `motion::replay_fixture` + `motion::assert_matches` |
 | An interaction that drives the suspect motion | **D — Input record + replay** | `motion::make_input_recorder` + `motion::replay_inputs` |
-| A fixture available to C++ host/test code (design review / CI triage) | **E — Timeline scrubber** | Direct `MotionScrubber` fixture load, then authenticated `Motion.scrubTo` |
-| "Which animation is expensive and why?" | **F — Cost attribution** | `Motion.enableCost` + `CostAttributor` + `make_render_cost_probe` |
+| A fixture available to C++ host/test code (design review / CI triage) | **E — Timeline scrubber** | Direct `MotionScrubber` fixture load; canonical T1 scrub/play/pause is capped at 4,096 emitted events |
+| "Which animation is expensive and why?" | **F — Cost attribution** | `CostAttributor` + `make_render_cost_probe`; canonical T1 returns at most 64 redacted finite samples |
 | SwiftUI / UIKit / AppKit / iOS / macOS / AUv3 host code path | **G — Swift native** | `View.pulpMotionTrace { Trace.* }` / `PulpMotionGeometryProbe` |
 | Jetpack Compose or Android `View` code path | **H — Android native** | `Modifier.pulpMotionGeometry { +Trace.* }` / `View.pulpMotionTrace` |
 | Imported design + intent doc (e.g. "fade in 350 ms ease-out") | **Both A + C** | Record a fixture from the import, assert timing / monotonicity |
 
-## Path A — Runtime trace
+## Path A — In-process fixture trace
 
-The runtime path attaches a trace over an authenticated inspector session.
-Normal Pulp launches do not create that endpoint: use a source-checkout,
-explicitly wired custom fixture that owns an `InspectorServer`, motion domain
-handler, and authenticated discovery publication. The composition root binds
-the `MotionInspector` and `MotionScrubber` event callbacks to
-`InspectorServer::broadcast`; neither motion helper owns server authority.
-Trace teardown is still explicit.
+The runtime path is currently an in-process fixture API. The shipped `pulp
+motion` command, Motion MCP wrappers, and legacy remote transport are
+intentionally unavailable after Phase 3 authority deletion. Remote Motion work
+uses `dev.pulp.trace/control@1` only when the exact T1 host injects
+`ControlMotionExecutor`; do not rebuild the old wire path in a custom fixture.
 
 ### 1. Confirm the complaint as a measurable property
 
@@ -67,62 +65,19 @@ Translate "looks off" into a metric and a target. Example mappings:
 - "two cards drift" → two `frame` traces, deltas correlate
 - "scroll jumps on restore" → child-of-ScrollView geometry, presentation source
 
-### 2. Start an explicitly wired custom fixture
+### 2. Start an owned in-process fixture
 
-No environment flag turns a normal app or `pulp-ui-preview` launch into an
-inspector host. The custom fixture must construct and retain the inspector
-server, attach the Motion domain handler, and publish its owner-private
-session record and credential for authenticated discovery.
+Use the test host's in-process fixture APIs. No environment flag or public CLI
+turns a normal app or `pulp-ui-preview` launch into a remotely controlled Motion
+host.
 
 ### 3. Attach a trace
 
-Three discovery surfaces — pick whichever is at hand. All three terminate
-at the same `Coordinator`.
-
-**3a. `pulp motion *` CLI** (terminal, one verb per Motion.* method,
-prints the trace_id so you can copy it into `motion stop`):
-
-```bash
-pulp motion record --view Card --fps 30 --out card-fade.jsonl
-# → --out is a fixture-path hint; wire make_fixture_sink("card-fade.jsonl")
-#   in the app or test when you need an on-disk JSONL artifact.
-# → trace started — trace_id=1
-# →   stop with: pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE --publication PUBLICATION
-```
-
-`record` resolves authenticated discovery to one exact publication before it
-mutates, then prints that selector in the stop command. `stop` requires the
-exact `--session ID --instance ID --publication ID` selector so a replacement
-process that reuses the other IDs cannot inherit the operation. `scrub`,
-`play`, `pause`, and cost toggles also mutate process-owned state and require
-an exact publication. Read-only `snapshot` and `list-traces` accept
-auto-discovery or exact selection; `--port` remains a discovery filter, and
-`--json` includes the resolved selector for `record`. The command exits 1 with
-custom-fixture guidance when no eligible session exists. Full list: `record /
-stop / snapshot / list-traces / scrub / play / pause / cost
-{enable|disable}`. Fixture loading is deliberately absent
-because a remote client cannot grant the server authority to read an arbitrary
-host filesystem path.
-
-Do not connect to the raw TCP framing yourself. The client performs mutual
-nonce/HMAC authentication with the owner-private per-session credential before
-it sends a request.
-
-**3b. `pulp_motion_*` MCP wrapper tools** — same payload shape as
-the wire path, called as a `tools/call` JSON-RPC request when an
-agent is driving an MCP server (see
-`docs/guides/motion-observability.md` Tooling section).
-
-Stream of events: `Motion.start`, `Motion.sample` (one per change), `Motion.end`
-(with deltas).
-
-`Motion.startTrace` is a closed, bounded request. It accepts 1–32 metrics;
-view and metric names are 1–128 Unicode codepoints; node IDs are 1–256; and
-geometry/scroll property arrays contain only unique members of their published
-enums. Unknown fields, invalid spaces or sources, and malformed property arrays
-return `invalid_params` before a trace is created. When extending the wire
-shape, update the frozen control schema, executor validation, negative
-no-trace tests, this skill, and the motion guide together.
+The shipped `pulp motion` command and `pulp_motion_*` MCP wrappers were retired
+with the raw inspector authority path. Use the in-process fixture APIs for
+tests. Live remote operations require a canonical broker/control capability
+with a frozen schema and receipt. `ControlMotionExecutor` is the canonical broker/control replacement
+for exact T1 Motion outcomes.
 
 ### 4. Trigger the interaction
 
@@ -131,16 +86,8 @@ animation. The motion server emits events as the values change.
 
 ### 5. Stop the trace
 
-```bash
-pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE --publication PUBLICATION
-# → trace stopped (removed=true)
-```
-
-Or the raw wire-protocol equivalent:
-
-```jsonc
-{ "id": 2, "method": "Motion.stopTrace", "params": { "trace_id": 1 } }
-```
+Stop through the same fixture-owned in-process API or canonical control
+operation that started the trace. No shipped Motion CLI/MCP stop route exists.
 
 ### 6. Compare against intent
 
@@ -331,13 +278,12 @@ primitives — matches the originally-recorded one within
 `FixtureMatchOptions::timing_epsilon_seconds`. Use the ID-keyed
 `assert_matches` for the comparison so reordered identical bursts don't
 false-fail.
-## Path E — Timeline scrubber (inspector replay)
+## Path E — Timeline scrubber (in-process replay)
 
 `pulp::inspect::MotionScrubber` loads a `.motion.jsonl` fixture in trusted
 host/test code and
-re-emits the prefix of events with `frame <= playhead` to caller
-sinks and (when attached to an `InspectorServer`) to inspector clients
-over the wire. The scrubber is passive — no clock is pumped, no
+re-emits the prefix of events with `frame <= playhead` to caller sinks. The
+scrubber is passive — no clock is pumped, no
 animation runs live; `play()` is a jump-to-end that emits every event.
 Real-time pacing and live overlay drawing are intentionally Phase 11+.
 
@@ -350,16 +296,13 @@ Protocol surface (routed by `DomainHandler::handle_motion`):
 | `Motion.play`        | `{}`                | `{ playing:true, emitted_count, playhead_frame }`       |
 | `Motion.pause`       | `{}`                | `{ playing:false, playhead_frame }`                     |
 
-Broadcast events reuse `MotionInspector`'s `Motion.start / .sample /
-.end` shape, with an additional `"replay":true` marker so clients can
-distinguish replayed bursts from live coordinator events on the same
-wire.
+Emitted events reuse `MotionInspector`'s `Motion.start / .sample / .end` shape,
+with an additional `"replay":true` marker so fixture consumers can distinguish
+replayed bursts from live coordinator events.
 
-After trusted host/test code loads the fixture, an authenticated client with
-the granted trace-control capability may call `pulp motion scrub 120
---session SESSION --instance INSTANCE --publication PUBLICATION`, `play` with
-the same selector,
-or `pause`. `pulp motion load-fixture` is intentionally unavailable.
+After trusted host/test code loads the fixture, use the in-process
+`MotionScrubber` API to scrub, play, or pause. The retired `pulp motion` command
+must not be recreated as a remote filesystem or mutation fallback.
 
 Direct C++ usage:
 
@@ -427,14 +370,8 @@ sink with:
 enabled, `Motion.cost` events broadcast per frame. `Motion.snapshot`
 also reports `cost_enabled` and `cost_samples_emitted`.
 
-CLI shortcut:
-
-```bash
-pulp motion cost enable --session SESSION --instance INSTANCE --publication PUBLICATION
-# ... drive the suspect animation ...
-pulp motion cost disable --session SESSION --instance INSTANCE --publication PUBLICATION
-pulp motion snapshot --json | jq '.cost_samples_emitted'
-```
+Toggle cost attribution through the explicitly owned in-process host/test API;
+the retired CLI and MCP mutation wrappers are not control surfaces.
 
 ### Notes
 

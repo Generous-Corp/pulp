@@ -1,0 +1,52 @@
+{
+  "schema": "dev.pulp.control/examples@1",
+  "examples": [
+    {
+      "id": "inventory",
+      "tier": "management",
+      "description": "List broker-owned live instances before selecting one exact ID.",
+      "cli": ["pulp", "control", "instances", "--json"],
+      "mcp": {"tool": "pulp_control_instances", "arguments": {}}
+    },
+    {
+      "id": "status",
+      "tier": "management",
+      "description": "Explain the authority terms for one exact live instance.",
+      "requires": ["INSTANCE_ID"],
+      "cli": ["pulp", "control", "status", "--instance", "${INSTANCE_ID}", "--explain", "--json"],
+      "mcp": {"tool": "pulp_control_status", "arguments": {"instance_id": "${INSTANCE_ID}"}}
+    },
+    {
+      "id": "t0-offline-render",
+      "tier": "T0",
+      "description": "Render a launcher-trusted input through an exact offline-job registration.",
+      "requires": ["T0_INSTANCE_ID", "T0_GRANT_ID", "T0_INPUT_ARTIFACT_ID"],
+      "cli": ["pulp", "control", "call", "--instance", "${T0_INSTANCE_ID}", "dev.pulp.render/offline@1", "--grant", "${T0_GRANT_ID}", "--params", "{\"input_artifact_id\":\"${T0_INPUT_ARTIFACT_ID}\",\"max_frames\":48000,\"timeout_ms\":5000}", "--timeout-ms", "10000", "--json"],
+      "mcp": {"tool": "pulp_control_render_offline", "arguments": {"instance_id": "${T0_INSTANCE_ID}", "grant_id": "${T0_GRANT_ID}", "input": {"input_artifact_id": "${T0_INPUT_ARTIFACT_ID}", "max_frames": 48000, "timeout_ms": 5000}}}
+    },
+    {
+      "id": "t1-state-read",
+      "tier": "T1",
+      "description": "Read the bounded visible parameter catalog from one exact standalone instance.",
+      "requires": ["T1_INSTANCE_ID"],
+      "cli": ["pulp", "control", "call", "--instance", "${T1_INSTANCE_ID}", "dev.pulp.state/read@1", "--profile", "inspect-readonly", "--params", "{\"include_catalog\":true,\"include_sensitive\":false}", "--json"],
+      "mcp": {"tool": "pulp_control_state_read", "arguments": {"instance_id": "${T1_INSTANCE_ID}", "profile": "inspect-readonly", "input": {"include_catalog": true, "include_sensitive": false}}}
+    },
+    {
+      "id": "t1-parameter-gesture",
+      "tier": "T1",
+      "description": "Apply one normalized parameter gesture after broker-owned develop consent.",
+      "requires": ["T1_INSTANCE_ID"],
+      "cli": ["pulp", "control", "call", "--instance", "${T1_INSTANCE_ID}", "dev.pulp.state/parameter-gesture@1", "--profile", "develop", "--params", "{\"parameter_id\":1,\"normalized_value\":0.5,\"idempotency_key\":\"phase11-example-gesture\"}", "--json"],
+      "mcp": {"tool": "pulp_control_state_parameter_gesture", "arguments": {"instance_id": "${T1_INSTANCE_ID}", "profile": "develop", "input": {"parameter_id": 1, "normalized_value": 0.5, "idempotency_key": "phase11-example-gesture"}}}
+    },
+    {
+      "id": "revoke",
+      "tier": "management",
+      "description": "Revoke a broker-issued grant owned by this authenticated client.",
+      "requires": ["GRANT_ID"],
+      "cli": ["pulp", "control", "revoke", "--grant", "${GRANT_ID}", "--json"],
+      "mcp": {"tool": "pulp_control_revoke", "arguments": {"grant_id": "${GRANT_ID}"}}
+    }
+  ]
+}

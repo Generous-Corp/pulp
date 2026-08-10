@@ -21,7 +21,7 @@ times to be worth remembering.
 | React when the host actually shows / resizes / closes the editor | Yes — override `on_view_opened / on_view_closed / on_view_resized` |
 | Add a new format adapter | Yes — construct a `ViewBridge` and follow the lifecycle protocol |
 | Hand the built view to an external container (TabPanel, WindowHost) | Yes — call `ViewBridge::release_view()` |
-| Ship a paint-only overlay (inspector) | No — but `attach_secondary_view(…, ViewRole::Inspector)` is the primitive you'll eventually use |
+| Ship a paint-only overlay | No — the legacy standalone inspector runtime was removed; compose canonical control separately |
 
 `Processor`'s editor hooks (`create_view`, `view_size`, `on_view_*`) are
 part of the node ABI surface. When adding a new view lifecycle hook, append
@@ -149,6 +149,12 @@ will host the released editor root directly in `WindowHost` instead of
 wrapping it in the outer `Editor/Settings` `TabPanel`. The same
 ownership rule still applies: close the bridge before the released
 root view is destroyed.
+
+Standalone no longer constructs or close-wraps the legacy
+`StandaloneInspectorRuntime`. Canonical runtime control is a separate host
+composition concern: do not reintroduce it through `ViewBridge` or disturb the
+standalone `open` / `notify_attached` / `close` balance. The audio-inspector tool
+window is a distinct, local observability surface and remains supported.
 
 `run_with_editor()` also opts the host into the platform's native
 file-dialog backend by calling `platform::FileDialog::install_native_backend()`

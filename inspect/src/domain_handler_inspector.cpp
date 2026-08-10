@@ -2,6 +2,23 @@
 
 #include <pulp/inspect/domain_handler.hpp>
 
+#if defined(_MSC_VER)
+#define PULP_CONTROL_COMPONENT_MARKER __declspec(dllexport)
+#else
+#define PULP_CONTROL_COMPONENT_MARKER __attribute__((used, visibility("default")))
+#endif
+
+extern "C" PULP_CONTROL_COMPONENT_MARKER const volatile char
+    pulp_control_host_capability_markers_v1[] =
+        "PULP_INSPECT_CAPABILITY_STATE_READ_V1\0"
+        "PULP_INSPECT_CAPABILITY_UI_READ_V1\0"
+        "PULP_INSPECT_CAPABILITY_CAPTURE_IMAGE_V1\0"
+        "PULP_INSPECT_CAPABILITY_STATE_WRITE_V1\0"
+        "PULP_INSPECT_CAPABILITY_TEST_INPUT_V1\0"
+        "PULP_INSPECT_CAPABILITY_AUTHORING_TWEAKS_V1";
+
+#undef PULP_CONTROL_COMPONENT_MARKER
+
 #include <pulp/inspect/editor_url.hpp>
 #include <pulp/inspect/inspector_overlay.hpp>
 #include <pulp/inspect/source_jump.hpp>

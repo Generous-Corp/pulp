@@ -1,4 +1,5 @@
 #include <pulp/events/interprocess_connection.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/named_pipe.hpp>
 #include <pulp/runtime/socket.hpp>
 #include <algorithm>
@@ -318,6 +319,41 @@ bool InterprocessConnection::create_server(std::string_view name, IpcTransport t
     return ok;
 }
 
+bool InterprocessConnection::attach_inherited_local_socket(std::intptr_t handle) {
+    disconnect();
+    Socket socket;
+    if (!socket.duplicate_local_handle(handle)) {
+        state_.store(IpcState::Error);
+        return false;
+    }
+    const auto connection_generation =
+        connection_generation_.fetch_add(1, std::memory_order_acq_rel) + 1;
+    write_poisoned_.store(false, std::memory_order_release);
+    impl_->transport = IpcTransport::LocalSocket;
+    impl_->socket = std::move(socket);
+    impl_->socket.set_write_timeout(
+        std::chrono::milliseconds(write_timeout_ms_.load(std::memory_order_relaxed)));
+    const auto alive = alive_.capture();
+    state_.store(IpcState::Connected);
+    connection_made();
+    if (!runtime::AliveToken::is_alive(alive) ||
+        connection_generation_.load(std::memory_order_acquire) != connection_generation ||
+        state_.load(std::memory_order_acquire) != IpcState::Connected) {
+        return true;
+    }
+    std::function<void()> connected_callback;
+    {
+        std::lock_guard lock(callback_mutex_);
+        connected_callback = on_connected;
+    }
+    if (connected_callback)
+        connected_callback();
+    if (!runtime::AliveToken::is_alive(alive))
+        return true;
+    start_read_thread(false, connection_generation);
+    return true;
+}
+
 void InterprocessConnection::disconnect() {
     disconnect_impl(false);
 }
@@ -527,6 +563,10 @@ void InterprocessConnection::set_frame_read_timeout(
         std::memory_order_relaxed);
 }
 
+void InterprocessConnection::set_secure_receive_buffer(bool enabled) {
+    secure_receive_buffer_.store(enabled, std::memory_order_relaxed);
+}
+
 void InterprocessConnection::start_read_thread(bool allow_active_disconnect_owner,
                                                std::uint64_t expected_connection_generation) {
     const auto start_gate = std::make_shared<std::atomic<bool>>(false);
@@ -564,6 +604,14 @@ void InterprocessConnection::read_loop(std::uint64_t generation) {
     const auto alive = alive_.capture();
     const auto lifecycle = impl_->lifecycle;
     std::vector<uint8_t> buffer;
+    struct ReceiveBufferWiper {
+        std::vector<uint8_t>& buffer;
+        bool enabled;
+        ~ReceiveBufferWiper() {
+            if (enabled && !buffer.empty())
+                runtime::secure_zero_memory(buffer.data(), buffer.size());
+        }
+    };
     auto is_current = [this, generation] {
         return running_.load(std::memory_order_acquire) &&
                read_generation_.load(std::memory_order_acquire) == generation;
@@ -651,6 +699,8 @@ void InterprocessConnection::read_loop(std::uint64_t generation) {
 
         // Read payload
         buffer.resize(msg_len);
+        ReceiveBufferWiper receive_buffer_wiper{
+            buffer, secure_receive_buffer_.load(std::memory_order_relaxed)};
         if (!read_exact(buffer.data(), msg_len)) {
             if (is_current())
                 notify_lost();

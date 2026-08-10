@@ -34,9 +34,12 @@ use std::process::Command;
 
 use crate::error::{CliError, Result};
 
+#[path = "install_control_broker.rs"]
+mod install_control_broker;
 #[path = "install_import_design.rs"]
 mod install_import_design;
 
+use install_control_broker::{refuse_downgrade, InstallerLock as ControlBrokerInstallerLock};
 pub use install_import_design::import_design_basename;
 
 /// Build the release-asset URL for a target. Mirrors the
@@ -112,6 +115,24 @@ pub fn mcp_basename() -> &'static str {
 #[must_use]
 pub const fn control_broker_basename() -> &'static str {
     "pulp-control-broker"
+}
+
+/// Broker-owned ordinary Standalone host executable basename.
+#[must_use]
+pub const fn control_standalone_host_basename() -> &'static str {
+    "pulp-control-standalone-host"
+}
+
+/// Signed capability sidecar consumed by the broker before host launch.
+#[must_use]
+pub const fn control_standalone_manifest_basename() -> &'static str {
+    "pulp-control-standalone-host.inspector-capabilities.json"
+}
+
+/// Runtime library shipped beside the broker-owned Standalone host on macOS.
+#[must_use]
+pub const fn control_standalone_runtime_basename() -> &'static str {
+    "libwgpu_native.dylib"
 }
 
 /// Resolve the running binary's filesystem path (i.e. the file we
@@ -235,6 +256,12 @@ pub struct ExtractedArchive {
     pub new_mcp: Option<PathBuf>,
     /// Health-only local broker service shipped by Darwin release archives.
     pub new_control_broker: Option<PathBuf>,
+    /// Dedicated broker-owned ordinary Standalone control host.
+    pub new_control_standalone_host: Option<PathBuf>,
+    /// Capability sidecar for the dedicated Standalone control host.
+    pub new_control_standalone_manifest: Option<PathBuf>,
+    /// GPU/view runtime pinned as part of the Standalone host closure.
+    pub new_control_standalone_runtime: Option<PathBuf>,
     /// Browser-solved design import helper and its required JS runtime.
     pub new_import_design: Option<PathBuf>,
     /// Extracted `browser_capture/` runtime directory, when shipped.
@@ -275,6 +302,25 @@ pub fn locate_binaries_in_archive(root: &Path) -> Result<ExtractedArchive> {
     } else {
         None
     };
+    let standalone_host_path = root.join(control_standalone_host_basename());
+    let standalone_manifest_path = root.join(control_standalone_manifest_basename());
+    let standalone_runtime_path = root.join(control_standalone_runtime_basename());
+    let standalone_payload_count = [
+        standalone_host_path.exists(),
+        standalone_manifest_path.exists(),
+        standalone_runtime_path.exists(),
+    ]
+    .into_iter()
+    .filter(|present| *present)
+    .count();
+    if (standalone_payload_count != 0 && standalone_payload_count != 3)
+        || (standalone_payload_count == 3 && new_control_broker.is_none())
+    {
+        return Err(CliError::Other(
+            "control broker release payload must contain Standalone host, capability manifest, and runtime library together"
+                .to_owned(),
+        ));
+    }
     let import_design = install_import_design::locate_payload(root)?;
     Ok(ExtractedArchive {
         root: root.to_owned(),
@@ -282,6 +328,15 @@ pub fn locate_binaries_in_archive(root: &Path) -> Result<ExtractedArchive> {
         new_cpp,
         new_mcp,
         new_control_broker,
+        new_control_standalone_host: standalone_host_path
+            .exists()
+            .then_some(standalone_host_path),
+        new_control_standalone_manifest: standalone_manifest_path
+            .exists()
+            .then_some(standalone_manifest_path),
+        new_control_standalone_runtime: standalone_runtime_path
+            .exists()
+            .then_some(standalone_runtime_path),
         new_import_design: import_design.helper,
         browser_capture_runtime: import_design.runtime,
     })
@@ -506,6 +561,17 @@ pub fn recover_legacy_control_broker_once_with(
     fetch: impl FnOnce() -> Result<ExtractedArchive>,
     reconcile: impl FnOnce(&Path, &mut dyn FnMut() -> Result<()>) -> Result<()>,
 ) -> Result<LegacyControlBrokerRecovery> {
+    recover_legacy_control_broker_once_with_installer(plan, home, fetch, |plan, archive| {
+        install_control_broker_with(plan, archive, reconcile)
+    })
+}
+
+fn recover_legacy_control_broker_once_with_installer(
+    plan: &InstallPlan,
+    home: &Path,
+    fetch: impl FnOnce() -> Result<ExtractedArchive>,
+    install: impl FnOnce(&InstallPlan, &ExtractedArchive) -> Result<ControlBrokerInstall>,
+) -> Result<LegacyControlBrokerRecovery> {
     use std::cmp::Ordering;
 
     if !cfg!(target_os = "macos") {
@@ -551,7 +617,7 @@ pub fn recover_legacy_control_broker_once_with(
     )?;
 
     let archive = fetch()?;
-    let installed = install_control_broker_with(plan, &archive, reconcile)?;
+    let installed = install(plan, &archive)?;
     if installed == ControlBrokerInstall::NotPresent {
         return Err(CliError::Other(format!(
             "release {} does not contain the expected Darwin control broker",
@@ -610,7 +676,21 @@ pub fn install_control_broker_with(
     let Some(src) = archive.new_control_broker.as_deref() else {
         return Ok(ControlBrokerInstall::NotPresent);
     };
-    install_control_broker_path_with(plan, src, reconcile)
+    let companions = match (
+        archive.new_control_standalone_host.as_deref(),
+        archive.new_control_standalone_manifest.as_deref(),
+        archive.new_control_standalone_runtime.as_deref(),
+    ) {
+        (Some(host), Some(manifest), Some(runtime)) => Some((host, manifest, runtime)),
+        (None, None, None) => None,
+        _ => {
+            return Err(CliError::Other(
+                "control broker install requires the complete Standalone runtime closure"
+                    .to_owned(),
+            ));
+        }
+    };
+    install_control_broker_path_with_optional_companions(plan, src, companions, reconcile)
 }
 
 /// Path-based form used by the fresh installer after it stages the broker
@@ -622,12 +702,123 @@ pub fn install_control_broker_with(
 pub fn install_control_broker_path_with(
     plan: &InstallPlan,
     src: &Path,
+    standalone_host: &Path,
+    standalone_manifest: &Path,
+    standalone_runtime: &Path,
     reconcile: impl FnOnce(&Path, &mut dyn FnMut() -> Result<()>) -> Result<()>,
+) -> Result<ControlBrokerInstall> {
+    install_control_broker_path_with_optional_companions(
+        plan,
+        src,
+        Some((standalone_host, standalone_manifest, standalone_runtime)),
+        reconcile,
+    )
+}
+
+fn install_control_broker_path_with_optional_companions(
+    plan: &InstallPlan,
+    src: &Path,
+    companions: Option<(&Path, &Path, &Path)>,
+    reconcile: impl FnOnce(&Path, &mut dyn FnMut() -> Result<()>) -> Result<()>,
+) -> Result<ControlBrokerInstall> {
+    install_control_broker_path_with_version_probe(
+        plan,
+        src,
+        companions,
+        reconcile,
+        |candidate| {
+            crate::control_broker_service::control_broker_payload_release_version(
+                candidate,
+                std::time::Duration::from_secs(5),
+            )
+            .map_err(|error| {
+                CliError::Other(format!(
+                    "could not verify staged control broker release [{}]: {error}",
+                    error.code()
+                ))
+            })
+        },
+        |installed| {
+            crate::control_broker_service::installed_control_broker_release_version(
+                installed,
+                std::time::Duration::from_secs(5),
+            )
+            .map_err(|error| {
+                CliError::Other(format!(
+                    "could not verify installed control broker release [{}]: {error}",
+                    error.code()
+                ))
+            })
+        },
+    )
+}
+
+fn install_control_broker_path_with_version_probe(
+    plan: &InstallPlan,
+    src: &Path,
+    companions: Option<(&Path, &Path, &Path)>,
+    reconcile: impl FnOnce(&Path, &mut dyn FnMut() -> Result<()>) -> Result<()>,
+    inspect_candidate_version: impl FnOnce(&Path) -> Result<Option<String>>,
+    inspect_installed_version: impl FnOnce(&Path) -> Result<Option<String>>,
 ) -> Result<ControlBrokerInstall> {
     if !cfg!(target_os = "macos") {
         return Ok(ControlBrokerInstall::NotPresent);
     }
     let (dst, existed, backup) = control_broker_install_paths(plan, src)?;
+    let install_dir = dst.parent().expect("broker destination has parent");
+    let companion_paths = companions
+        .map(|(host_src, manifest_src, runtime_src)| {
+            let mut paths = Vec::new();
+            for (source, basename, label, mode) in [
+                (
+                    host_src,
+                    control_standalone_host_basename(),
+                    "Standalone host",
+                    0o700,
+                ),
+                (
+                    manifest_src,
+                    control_standalone_manifest_basename(),
+                    "Standalone capability manifest",
+                    0o600,
+                ),
+                (
+                    runtime_src,
+                    control_standalone_runtime_basename(),
+                    "Standalone runtime library",
+                    0o700,
+                ),
+            ] {
+                let destination = install_dir.join(basename);
+                validate_regular_install_file(source, label)?;
+                validate_nonsymlink_destination(&destination, label)?;
+                paths.push(CompanionPath {
+                    source: source.to_owned(),
+                    existed: destination.exists(),
+                    backup: backup_path(&destination),
+                    destination,
+                    mode,
+                });
+            }
+            Ok::<_, CliError>(paths)
+        })
+        .transpose()?;
+    let _install_lock = ControlBrokerInstallerLock::acquire(&dst)?;
+    let candidate_version = inspect_candidate_version(src)?.ok_or_else(|| {
+        CliError::Other("staged control broker did not report a release version".to_owned())
+    })?;
+    if candidate_version != plan.version {
+        return Err(CliError::Other(format!(
+            "staged control broker release {candidate_version} does not match installer plan {}",
+            plan.version
+        )));
+    }
+    let installed_version = if existed {
+        inspect_installed_version(&dst)?
+    } else {
+        None
+    };
+    refuse_downgrade(&candidate_version, installed_version.as_deref())?;
     if backup.exists() {
         fs::remove_file(&backup).map_err(|e| {
             CliError::Other(format!(
@@ -635,6 +826,18 @@ pub fn install_control_broker_path_with(
                 backup.display()
             ))
         })?;
+    }
+    if let Some(paths) = &companion_paths {
+        for path in paths {
+            if path.backup.exists() {
+                fs::remove_file(&path.backup).map_err(|e| {
+                    CliError::Other(format!(
+                        "could not remove stale control companion backup {}: {e}",
+                        path.backup.display()
+                    ))
+                })?;
+            }
+        }
     }
     if existed {
         fs::rename(&dst, &backup).map_err(|e| {
@@ -644,11 +847,44 @@ pub fn install_control_broker_path_with(
             ))
         })?;
     }
+    if let Some(paths) = &companion_paths {
+        for (index, path) in paths.iter().enumerate() {
+            if path.existed {
+                if let Err(e) = fs::rename(&path.destination, &path.backup) {
+                    for retained in paths[..index].iter().rev() {
+                        if retained.existed {
+                            let _ = fs::rename(&retained.backup, &retained.destination);
+                        }
+                    }
+                    if existed {
+                        let _ = fs::rename(&backup, &dst);
+                    }
+                    return Err(CliError::Other(format!(
+                        "could not retain control companion {}: {e}",
+                        path.destination.display()
+                    )));
+                }
+            }
+        }
+    }
     if let Err(error) = copy_with_exec(src, &dst) {
         if existed {
             let _ = fs::rename(&backup, &dst);
         }
+        restore_companions(&companion_paths);
         return Err(error);
+    }
+    if let Some(paths) = &companion_paths {
+        for path in paths {
+            if let Err(error) = copy_with_mode(&path.source, &path.destination, path.mode) {
+                let _ = fs::remove_file(&dst);
+                if existed {
+                    let _ = fs::rename(&backup, &dst);
+                }
+                restore_companions(&companion_paths);
+                return Err(error);
+            }
+        }
     }
 
     let rolled_back = std::cell::Cell::new(false);
@@ -672,6 +908,7 @@ pub fn install_control_broker_path_with(
                 ))
             })?;
         }
+        restore_companions(&companion_paths);
         rolled_back.set(true);
         Ok(())
     };
@@ -699,10 +936,92 @@ pub fn install_control_broker_path_with(
                 backup.display()
             ))
         })?;
+        cleanup_companion_backups(&companion_paths)?;
         Ok(ControlBrokerInstall::Replaced)
     } else {
+        cleanup_companion_backups(&companion_paths)?;
         Ok(ControlBrokerInstall::Created)
     }
+}
+
+struct CompanionPath {
+    source: PathBuf,
+    destination: PathBuf,
+    existed: bool,
+    backup: PathBuf,
+    mode: u32,
+}
+
+type CompanionPaths = Option<Vec<CompanionPath>>;
+
+fn restore_companions(paths: &CompanionPaths) {
+    if let Some(paths) = paths {
+        for path in paths.iter().rev() {
+            let _ = fs::remove_file(&path.destination);
+            if path.existed {
+                let _ = fs::rename(&path.backup, &path.destination);
+            }
+        }
+    }
+}
+
+fn cleanup_companion_backups(paths: &CompanionPaths) -> Result<()> {
+    if let Some(paths) = paths {
+        for path in paths {
+            if path.existed {
+                fs::remove_file(&path.backup).map_err(|e| {
+                    CliError::Other(format!(
+                        "control companion activated but backup cleanup failed at {}: {e}",
+                        path.backup.display()
+                    ))
+                })?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_regular_install_file(path: &Path, label: &str) -> Result<()> {
+    let metadata = fs::symlink_metadata(path).map_err(|e| {
+        CliError::Other(format!(
+            "could not inspect staged {label} {}: {e}",
+            path.display()
+        ))
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(CliError::Other(format!(
+            "staged {label} must be a regular file: {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn validate_nonsymlink_destination(path: &Path, label: &str) -> Result<()> {
+    if fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return Err(CliError::Other(format!(
+            "refusing to replace symlinked {label} destination {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn copy_with_mode(src: &Path, dst: &Path, mode: u32) -> Result<()> {
+    fs::copy(src, dst).map_err(|e| {
+        CliError::Other(format!(
+            "could not copy {} to {}: {e}",
+            src.display(),
+            dst.display()
+        ))
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(dst, fs::Permissions::from_mode(mode))
+            .map_err(|e| CliError::Other(format!("could not chmod {}: {e}", dst.display())))?;
+    }
+    Ok(())
 }
 
 fn control_broker_install_paths(

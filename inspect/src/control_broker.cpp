@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <limits>
 #include <ranges>
 #include <utility>
 
@@ -110,8 +111,14 @@ bool receipt_result_matches(const ControlOperationDescriptor& operation,
 ControlBroker::ControlBroker(ControlBrokerConfig config,
                              std::shared_ptr<ControlSecurityAuditLog> audit_log, Clock clock)
     : audit_log_(audit_log ? std::move(audit_log) : std::make_shared<ControlSecurityAuditLog>()),
+      process_liveness_(config.process_liveness
+                            ? std::move(config.process_liveness)
+                            : [](const ControlPeerEvidence&) {
+                                  return ControlProcessLiveness::Unknown;
+                              }),
+      authority_ended_(std::move(config.authority_ended)),
       identities_(std::move(config.identities), audit_log_, clock),
-      grants_(identities_, audit_log_, std::move(config.grants), std::move(clock)),
+      grants_(identities_, audit_log_, std::move(config.grants), clock),
       admission_policy_(std::move(config.admission)),
       wall_clock_(config.wall_clock ? std::move(config.wall_clock)
                                     : ControlOperationStore::WallClock{[] {
@@ -125,6 +132,11 @@ ControlBroker::ControlBroker(ControlBrokerConfig config,
                                             : nullptr) {
     if (operation_store_)
         (void)operation_store_->open();
+    // Opening a broker generation is the recovery boundary for interrupted
+    // artifact publication. Reap crash-left orphan and partial files before
+    // any caller can obtain broker authority.
+    if (artifact_store_ && !artifact_store_->collect().succeeded)
+        artifact_store_.reset();
 }
 
 ControlBroker::~ControlBroker() = default;
@@ -136,17 +148,26 @@ const ControlBrokerId& ControlBroker::broker_id() const {
 ControlBootstrapResult
 ControlBroker::issue_bootstrap(const VerifiedControlPeerIdentity& client_peer) {
     std::lock_guard coordination_lock(coordination_mutex_);
-    auto result = identities_.issue_bootstrap(client_peer);
-    grants_.sweep_expired();
-    return result;
+    return identities_.issue_bootstrap(client_peer);
 }
 
 ControlClientResult
 ControlBroker::redeem_bootstrap(std::string_view ticket_id, std::span<const std::uint8_t> secret,
-                                const VerifiedControlPeerIdentity& client_peer) {
-    std::lock_guard coordination_lock(coordination_mutex_);
-    auto result = identities_.redeem_bootstrap(ticket_id, secret, client_peer);
-    grants_.sweep_expired();
+                                const VerifiedControlPeerIdentity& client_peer,
+                                std::string_view durable_principal,
+                                ControlDurableClientLifetime durable_lifetime) {
+    std::vector<ControlClientId> reclaimed;
+    ControlClientResult result;
+    {
+        std::lock_guard coordination_lock(coordination_mutex_);
+        reclaimed = identities_.reclaim_process_clients(process_liveness_);
+        for (const auto& client_id : reclaimed)
+            (void)grants_.revoke_client(client_id, "process-client-reclaimed");
+        result = identities_.redeem_bootstrap(ticket_id, secret, client_peer,
+                                              durable_principal, durable_lifetime);
+    }
+    for (const auto& client_id : reclaimed)
+        request_active_cancellation(client_id, {}, {}, "process-client-reclaimed");
     return result;
 }
 
@@ -158,7 +179,6 @@ bool ControlBroker::refresh_client(const ControlClientId& client_id,
         return false;
     }
     const bool refreshed = identities_.refresh_client(client_id, client_peer);
-    grants_.sweep_expired();
     return refreshed;
 }
 
@@ -185,16 +205,22 @@ ControlBroker::disconnect_client(const ControlClientId& client_id,
         };
     }
     request_active_cancellation(client_id, {}, {}, "client-disconnected");
+    if (result.identity_removed && authority_ended_)
+        authority_ended_(client_id, {}, {}, "client-disconnected");
     return result;
 }
 
 ControlRegistrationResult
 ControlBroker::register_instance(const VerifiedControlPeerIdentity& host_peer,
-                                 ControlRegistrationRequest request) {
+                                 ControlRegistrationRequest request, bool publish) {
     std::lock_guard coordination_lock(coordination_mutex_);
-    auto result = identities_.register_instance(host_peer, std::move(request));
-    grants_.sweep_expired();
-    return result;
+    return identities_.register_instance(host_peer, std::move(request), publish);
+}
+
+bool ControlBroker::publish_instance(const ControlRegistrationId& registration_id,
+                                     const VerifiedControlPeerIdentity& host_peer) {
+    std::lock_guard coordination_lock(coordination_mutex_);
+    return identities_.publish_instance(registration_id, host_peer);
 }
 
 bool ControlBroker::heartbeat(const ControlRegistrationId& registration_id,
@@ -205,7 +231,6 @@ bool ControlBroker::heartbeat(const ControlRegistrationId& registration_id,
         return false;
     }
     const bool refreshed = identities_.heartbeat(registration_id, host_peer);
-    grants_.sweep_expired();
     return refreshed;
 }
 
@@ -221,27 +246,33 @@ ControlBroker::unregister_instance(const ControlRegistrationId& registration_id,
                          registration_id);
             return {};
         }
-        if (!owns_registration_peer(registration_id, host_peer)) {
+        // The identity registry validates the exact peer against both public
+        // and executor-pending registrations. The public lookup intentionally
+        // hides pending registrations, so it cannot serve as this teardown
+        // authorization check.
+        if (!identities_.unregister_instance(registration_id, host_peer)) {
             audit_denial("registration.unregister", host_peer, "identity-mismatch", {},
                          registration_id);
             return {};
         }
-        if (!identities_.unregister_instance(registration_id, host_peer))
-            return {};
         result = {
             .identity_removed = true,
             .grants_revoked = grants_.revoke_registration(registration_id, decision_id),
         };
     }
     request_active_cancellation({}, registration_id, {}, "instance-unregistered");
+    if (result.identity_removed && authority_ended_)
+        authority_ended_({}, registration_id, {}, "instance-unregistered");
     return result;
 }
 
 ControlGrantResult ControlBroker::issue_grant(const VerifiedControlPeerIdentity& client_peer,
                                               ControlGrantRequest request,
                                               ControlConsentDecision consent) {
+    // Sweep through the broker lifecycle path so an expired grant's projected
+    // host authority is ended before capacity is reused for a new grant.
+    sweep_expired();
     std::lock_guard coordination_lock(coordination_mutex_);
-    grants_.sweep_expired();
     if (!owns_client_peer(request.client_id, client_peer)) {
         audit_denial("grant.issue", client_peer, "client-unavailable", request.client_id,
                      request.registration_id);
@@ -259,6 +290,8 @@ ControlGrantStatus ControlBroker::revoke_grant(const ControlGrantId& grant_id,
     }
     if (status == ControlGrantStatus::Revoked) {
         request_active_cancellation({}, {}, grant_id, "grant-revoked");
+        if (authority_ended_)
+            authority_ended_({}, {}, grant_id, "grant-revoked");
     }
     return status;
 }
@@ -767,6 +800,34 @@ ControlArtifactStoreResult ControlBroker::store_operation_artifact(
                                   std::move(properties));
 }
 
+ControlArtifactStoreResult ControlBroker::store_operation_artifact(
+    const VerifiedControlPeerIdentity& client_peer, const ControlAdmissionPlan& plan,
+    std::span<const std::uint8_t> bytes, std::string content_type,
+    ControlArtifactSensitivity sensitivity, ControlArtifactRedactionState redaction_state,
+    std::chrono::milliseconds lifetime) {
+    const auto now_count = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               wall_clock_().time_since_epoch())
+                               .count();
+    if (now_count <= 0 || lifetime.count() <= 0 ||
+        static_cast<std::uint64_t>(lifetime.count()) >
+            std::numeric_limits<std::uint64_t>::max() -
+                static_cast<std::uint64_t>(now_count)) {
+        return {.status = ControlArtifactStatus::InvalidRequest};
+    }
+    const auto created_at = static_cast<std::uint64_t>(now_count);
+    return store_operation_artifact(
+        client_peer, plan, bytes,
+        {.content_type = std::move(content_type),
+         .created_at_unix_ms = created_at,
+         .expires_at_unix_ms = created_at + static_cast<std::uint64_t>(lifetime.count()),
+         .sensitivity = sensitivity,
+         .redaction_state = redaction_state});
+}
+
+std::size_t ControlBroker::artifact_maximum_blob_bytes() const noexcept {
+    return artifact_store_ ? artifact_store_->maximum_blob_bytes() : 0;
+}
+
 ControlArtifactReadResult ControlBroker::read_artifact(
     const VerifiedControlPeerIdentity& client_peer, const ControlClientId& requesting_client_id,
     std::string_view artifact_id, std::uint64_t offset, std::size_t maximum_bytes) {
@@ -865,39 +926,61 @@ ControlBroker::registration(const ControlRegistrationId& registration_id) const 
     return identities_.registration(registration_id);
 }
 
+std::vector<ControlRegistration> ControlBroker::registrations() const {
+    std::lock_guard lock(coordination_mutex_);
+    return identities_.registrations();
+}
+
 std::optional<ControlGrant> ControlBroker::grant(const ControlGrantId& grant_id) {
     return grants_.grant(grant_id);
 }
 
 void ControlBroker::sweep_expired() {
-    std::lock_guard coordination_lock(coordination_mutex_);
-    identities_.sweep_expired();
-    grants_.sweep_expired();
-    if (!operation_store_ || !operation_store_->is_open())
-        return;
-    const auto now = wall_clock_unix_ms(wall_clock_);
-    for (const auto& receipt : operation_store_->receipts()) {
-        if (control_receipt_state_is_terminal(receipt.state))
-            continue;
-        const auto& binding = receipt.binding;
-        const auto client = identities_.client(binding.client_id);
-        const auto registration = identities_.registration(binding.registration_id);
-        const auto* operation =
-            resolve_control_operation(binding.operation_id, binding.operation_version);
-        const bool authority_live =
-            client && registration && operation &&
-            client->peer_fingerprint == binding.client_principal &&
-            registration->session_id == binding.session_id &&
-            registration->instance_id == binding.instance_id &&
-            registration->publication_id == binding.publication_id &&
-            registration->manifest_digest == binding.manifest_digest &&
-            grants_.is_granted(binding.grant_id, binding.client_id, binding.registration_id,
-                               operation->capability);
-        if (!authority_live || binding.deadline_unix_ms <= now) {
-            (void)operation_store_->request_cancellation(
-                receipt.receipt_id,
-                authority_live ? "operation-deadline-expired" : "operation-authority-expired");
+    std::vector<ControlClientId> reclaimed;
+    std::vector<ControlGrant> expired_grants;
+    {
+        std::lock_guard coordination_lock(coordination_mutex_);
+        reclaimed = identities_.reclaim_process_clients(process_liveness_);
+        for (const auto& client_id : reclaimed)
+            (void)grants_.revoke_client(client_id, "process-client-reclaimed");
+        identities_.sweep_expired();
+        expired_grants = grants_.sweep_expired();
+        if (operation_store_ && operation_store_->is_open()) {
+            const auto now = wall_clock_unix_ms(wall_clock_);
+            for (const auto& receipt : operation_store_->receipts()) {
+                if (control_receipt_state_is_terminal(receipt.state))
+                    continue;
+                const auto& binding = receipt.binding;
+                const auto client = identities_.client(binding.client_id);
+                const auto registration = identities_.registration(binding.registration_id);
+                const auto* operation =
+                    resolve_control_operation(binding.operation_id, binding.operation_version);
+                const bool authority_live =
+                    client && registration && operation &&
+                    client->peer_fingerprint == binding.client_principal &&
+                    registration->session_id == binding.session_id &&
+                    registration->instance_id == binding.instance_id &&
+                    registration->publication_id == binding.publication_id &&
+                    registration->manifest_digest == binding.manifest_digest &&
+                    grants_.is_granted(binding.grant_id, binding.client_id,
+                                       binding.registration_id, operation->capability);
+                if (!authority_live || binding.deadline_unix_ms <= now) {
+                    (void)operation_store_->request_cancellation(
+                        receipt.receipt_id,
+                        authority_live ? "operation-deadline-expired"
+                                       : "operation-authority-expired");
+                }
+            }
         }
+    }
+    for (const auto& client_id : reclaimed)
+        request_active_cancellation(client_id, {}, {}, "process-client-reclaimed");
+    if (authority_ended_) {
+        for (const auto& client_id : reclaimed)
+            authority_ended_(client_id, {}, {}, "process-client-reclaimed");
+        for (const auto& grant : expired_grants)
+            authority_ended_(grant.client_id, grant.registration_id, grant.grant_id,
+                             "grant-expired");
     }
 }
 

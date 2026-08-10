@@ -45,21 +45,22 @@ std::optional<std::int64_t> schema_integer(
 }
 }  // namespace
 
-class TraceInspector::PublicationLease final
-    : public InspectorPublicationLease {
+class TraceInspector::OwnerLease final : public TraceOwnerLease {
 public:
-    PublicationLease(
-        TraceInspector& inspector,
-        TracePublicationOwner owner)
-        : inspector_(&inspector), owner_(std::move(owner)) {}
+    OwnerLease(TraceInspector& inspector, std::shared_ptr<void> owner_token)
+        : inspector_(&inspector), owner_token_(std::move(owner_token)) {}
 
-    ~PublicationLease() override {
-        inspector_->release_publication(owner_);
+    ~OwnerLease() override {
+        inspector_->release_owner(owner_token_);
+    }
+
+    InspectorMessage handle(const InspectorMessage& request) override {
+        return inspector_->handle_with_owner(request, owner_token_);
     }
 
 private:
     TraceInspector* inspector_;
-    TracePublicationOwner owner_;
+    std::shared_ptr<void> owner_token_;
 };
 
 TraceInspector::~TraceInspector() {
@@ -68,36 +69,36 @@ TraceInspector::~TraceInspector() {
         (void)Tracing::stop_owned(*ownership_);
 }
 
-std::unique_ptr<InspectorPublicationLease>
-TraceInspector::bind_publication(
-    const InspectorDiscoveryRecord& record) {
-    if (record.session_id.empty() || record.instance_id.empty() ||
-        record.publication_id.empty()) {
+std::unique_ptr<TraceOwnerLease>
+TraceInspector::bind_control_registration(
+    std::string registration_id) {
+    if (registration_id.empty())
         return nullptr;
-    }
-    TracePublicationOwner owner{
-        record.session_id,
-        record.instance_id,
-        record.publication_id,
-    };
+    return bind_owner(OwnerKind::ControlRegistration);
+}
+
+std::unique_ptr<TraceOwnerLease> TraceInspector::bind_owner(OwnerKind kind) {
     std::lock_guard lock(mutex_);
-    if (owner_.complete())
+    if (owner_token_)
         return nullptr;
-    auto lease = std::make_unique<PublicationLease>(*this, owner);
-    owner_ = std::move(owner);
+    auto owner_token = std::make_shared<char>();
+    auto lease = std::make_unique<OwnerLease>(*this, owner_token);
+    owner_token_ = std::move(owner_token);
+    owner_kind_ = kind;
     last_trace_path_.clear();
     return lease;
 }
 
-void TraceInspector::release_publication(
-    const TracePublicationOwner& owner) noexcept {
+void TraceInspector::release_owner(
+    const std::shared_ptr<void>& owner_token) noexcept {
     std::lock_guard lock(mutex_);
-    if (owner_ != owner)
+    if (owner_token_ != owner_token)
         return;
     if (ownership_)
         (void)Tracing::stop_owned(*ownership_);
     ownership_.reset();
-    owner_ = {};
+    owner_token_.reset();
+    owner_kind_ = OwnerKind::None;
 }
 
 bool TraceInspector::owns_method(const std::string& method) {
@@ -109,15 +110,27 @@ bool TraceInspector::owns_method(const std::string& method) {
 }
 
 InspectorMessage TraceInspector::handle(const InspectorMessage& req) {
-    if (req.method == methods::kTraceStartSession) return start_session(req);
-    if (req.method == methods::kTraceStopSession)  return stop_session(req);
+    if (req.method == methods::kTraceStartSession) return start_session(req, nullptr);
+    if (req.method == methods::kTraceStopSession)  return stop_session(req, nullptr);
     if (req.method == methods::kTraceSnapshot)     return snapshot(req);
     if (req.method == methods::kTraceQuery)        return query(req);
     if (req.method == methods::kTraceExplain)      return explain(req);
     return make_error(req.id, "Unknown Trace method: " + req.method);
 }
 
-InspectorMessage TraceInspector::start_session(const InspectorMessage& req) {
+InspectorMessage TraceInspector::handle_with_owner(
+    const InspectorMessage& req,
+    const std::shared_ptr<void>& owner_token) {
+    if (req.method == methods::kTraceStartSession)
+        return start_session(req, &owner_token);
+    if (req.method == methods::kTraceStopSession)
+        return stop_session(req, &owner_token);
+    return make_error(req.id, "Unknown owned Trace method: " + req.method);
+}
+
+InspectorMessage TraceInspector::start_session(
+    const InspectorMessage& req,
+    const std::shared_ptr<void>* owner_token) {
     choc::value::Value params;
     try {
         params = choc::json::parse(req.params_json);
@@ -214,11 +227,14 @@ InspectorMessage TraceInspector::start_session(const InspectorMessage& req) {
     // An authenticated peer can control capture, not host filesystem paths.
     // Empty delegates the destination to host-owned trace configuration.
     std::lock_guard lock(mutex_);
-    if (!owner_.complete()) {
+    const auto authorized = owner_token &&
+        owner_kind_ == OwnerKind::ControlRegistration &&
+        owner_token_ == *owner_token;
+    if (!authorized) {
         return make_error(
             req.id,
             "Trace.startSession: trace control is not bound to an active "
-            "inspector publication",
+            "control registration",
             "trace_owner_unbound");
     }
     auto started = Tracing::start_exclusive(categories, {}, ring_kb);
@@ -257,7 +273,9 @@ InspectorMessage TraceInspector::start_session(const InspectorMessage& req) {
     return make_response(req.id, choc::json::toString(out, false));
 }
 
-InspectorMessage TraceInspector::stop_session(const InspectorMessage& req) {
+InspectorMessage TraceInspector::stop_session(
+    const InspectorMessage& req,
+    const std::shared_ptr<void>* owner_token) {
     choc::value::Value params;
     try {
         params = choc::json::parse(
@@ -293,11 +311,14 @@ InspectorMessage TraceInspector::stop_session(const InspectorMessage& req) {
             req.id, "Trace.stopSession: no active tracing session",
             "no_active_trace");
     }
-    if (!owner_.complete()) {
+    const auto authorized = owner_token &&
+        owner_kind_ == OwnerKind::ControlRegistration &&
+        owner_token_ == *owner_token;
+    if (!authorized) {
         return make_error(
             req.id,
             "Trace.stopSession: trace control is not bound to an active "
-            "inspector publication",
+            "control registration",
             "trace_owner_unbound");
     }
     if (!Tracing::ownership_status(
@@ -337,7 +358,8 @@ InspectorMessage TraceInspector::snapshot(const InspectorMessage& req) {
     out.addMember(
         "trace_control_available",
         choc::value::createBool(
-            owner_.complete() && (!ownership.active || ownership.owned)));
+            owner_kind_ == OwnerKind::ControlRegistration &&
+            (!ownership.active || ownership.owned)));
     if (!last_trace_path_.empty())
         out.addMember("last_trace_path", choc::value::createString(last_trace_path_));
     return make_response(req.id, choc::json::toString(out, false));

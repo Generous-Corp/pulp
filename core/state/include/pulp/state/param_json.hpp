@@ -69,4 +69,11 @@ choc::value::Value param_metadata_to_value(const ParamInfo& info);
 /// inspector has always sent.
 choc::value::Value param_snapshot_to_value(const StateStore& store, const ParamInfo& info);
 
-}  // namespace pulp::state
+/// The canonical Product A catalog + live-value shape. This is deliberately
+/// assembled here so control adapters do not grow a second parameter JSON
+/// serializer alongside scripted UI and the development tools.
+///
+/// `{ metadata fields..., value, normalized, modulated, display? }`
+choc::value::Value param_catalog_snapshot_to_value(const StateStore& store, const ParamInfo& info);
+
+} // namespace pulp::state

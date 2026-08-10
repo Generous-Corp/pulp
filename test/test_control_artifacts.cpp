@@ -161,6 +161,31 @@ TEST_CASE("control artifact store publishes blob before opaque ACL metadata",
 #endif
 }
 
+TEST_CASE("capture render state and trace evidence contracts fail closed",
+          "[inspect][control][artifacts][evidence][redaction]") {
+    CHECK(control_evidence_contract_matches(ControlEvidenceKind::Screenshot, "image/png",
+                                            ControlArtifactSensitivity::Sensitive,
+                                            ControlArtifactRedactionState::Redacted));
+    CHECK(control_evidence_contract_matches(ControlEvidenceKind::OfflineRender, "audio/wav",
+                                            ControlArtifactSensitivity::Internal,
+                                            ControlArtifactRedactionState::Original));
+    CHECK(control_evidence_contract_matches(
+        ControlEvidenceKind::StateSnapshot, "application/vnd.pulp.state-snapshot+json",
+        ControlArtifactSensitivity::Restricted, ControlArtifactRedactionState::Redacted));
+    CHECK(control_evidence_contract_matches(
+        ControlEvidenceKind::PerfettoTrace, "application/vnd.pulp.perfetto-trace",
+        ControlArtifactSensitivity::Sensitive, ControlArtifactRedactionState::Redacted));
+    CHECK_FALSE(control_evidence_contract_matches(ControlEvidenceKind::Screenshot, "image/jpeg",
+                                                  ControlArtifactSensitivity::Sensitive,
+                                                  ControlArtifactRedactionState::Redacted));
+    CHECK_FALSE(control_evidence_contract_matches(ControlEvidenceKind::Screenshot, "image/png",
+                                                  ControlArtifactSensitivity::Internal,
+                                                  ControlArtifactRedactionState::Redacted));
+    CHECK_FALSE(control_evidence_contract_matches(
+        ControlEvidenceKind::StateSnapshot, "application/vnd.pulp.state-snapshot+json",
+        ControlArtifactSensitivity::Public, ControlArtifactRedactionState::Original));
+}
+
 TEST_CASE("control artifact blobs dedupe without sharing ACL lineage",
           "[inspect][control][artifacts][security]") {
     TemporaryDirectory temporary;
@@ -220,6 +245,96 @@ TEST_CASE("control artifact lifetime is bounded by store policy",
     bounded.expires_at_unix_ms = 2'001;
     CHECK(store.store(bytes("too long"), lineage("long"), bounded).status ==
           ControlArtifactStatus::InvalidRequest);
+}
+
+TEST_CASE("control artifact quotas bound aggregate and per-client publications",
+          "[inspect][control][artifacts][quota][security]") {
+    TemporaryDirectory temporary;
+    ControlArtifactStore store{{.root = temporary.path / "store",
+                                .maximum_blob_bytes = 16,
+                                .maximum_chunk_bytes = 8,
+                                .maximum_total_bytes = 8,
+                                .maximum_artifacts = 3,
+                                .maximum_artifacts_per_client = 2}};
+    REQUIRE(store.store(bytes("1234"), lineage("a"), properties()).status ==
+            ControlArtifactStatus::Stored);
+    auto same_client = lineage("b");
+    same_client.producer_client_id = "client-a";
+    REQUIRE(store.store(bytes("5678"), same_client, properties()).status ==
+            ControlArtifactStatus::Stored);
+    auto third = lineage("c");
+    third.producer_client_id = "client-a";
+    CHECK(store.store(bytes("x"), third, properties()).status ==
+          ControlArtifactStatus::ResourceExhausted);
+    CHECK(store.store(bytes("x"), lineage("d"), properties()).status ==
+          ControlArtifactStatus::ResourceExhausted);
+}
+
+TEST_CASE(
+    "control artifact collector removes expiry orphans and partial writes with redacted audit",
+    "[inspect][control][artifacts][retention][crash][redaction]") {
+    TemporaryDirectory temporary;
+    auto now_ms = std::make_shared<std::int64_t>(1'500);
+    const auto root = temporary.path / "store";
+    ControlArtifactStore store({.root = root}, [now_ms] {
+        return std::chrono::system_clock::time_point{std::chrono::milliseconds(*now_ms)};
+    });
+    auto expiring = properties("application/vnd.pulp.state-snapshot+json");
+    expiring.created_at_unix_ms = 1'000;
+    expiring.expires_at_unix_ms = 2'000;
+    expiring.redaction_state = ControlArtifactRedactionState::Redacted;
+    const auto stored =
+        store.store(bytes(R"({"token":"[redacted]"})"), lineage("private-secret-marker"), expiring);
+    REQUIRE(stored.metadata);
+
+    const auto orphan_hash = std::string(64, 'c');
+    const auto orphan = root / "blobs" / (orphan_hash + ".blob");
+    {
+        std::ofstream output(orphan, std::ios::binary);
+        output << "orphan";
+    }
+    fs::permissions(orphan, fs::perms::owner_read | fs::perms::owner_write,
+                    fs::perm_options::replace);
+    const auto partial = root / "artifacts" / ".private-publish-crashed";
+    {
+        std::ofstream output(partial, std::ios::binary);
+        output << "partial-secret-marker";
+    }
+    fs::permissions(partial, fs::perms::owner_read | fs::perms::owner_write,
+                    fs::perm_options::replace);
+
+    *now_ms = 2'000;
+    const auto collected = store.collect();
+    REQUIRE(collected.succeeded);
+    CHECK(collected.deleted_artifacts == 1);
+    CHECK(collected.deleted_orphan_blobs == 2); // expired content + crash orphan
+    CHECK(collected.deleted_partial_files == 1);
+    CHECK_FALSE(fs::exists(partial));
+    const auto audit = store.deletion_audit();
+    REQUIRE(audit.size() == 1);
+    CHECK(audit.front().artifact_id == stored.metadata->artifact_id);
+    CHECK(audit.front().reason == ControlArtifactDeletionReason::Expired);
+    std::ifstream audit_file(root / "audit" / "deletions.log", std::ios::binary);
+    REQUIRE(audit_file.good());
+    const std::string persisted((std::istreambuf_iterator<char>(audit_file)),
+                                std::istreambuf_iterator<char>());
+    CHECK(persisted.find("private-secret-marker") == std::string::npos);
+    CHECK(persisted.find("partial-secret-marker") == std::string::npos);
+}
+
+TEST_CASE("control artifact recovery reports malformed durable metadata",
+          "[inspect][control][artifacts][retention][crash][security]") {
+    TemporaryDirectory temporary;
+    const auto root = temporary.path / "store";
+    ControlArtifactStore store{{.root = root}};
+    const auto malformed = root / "artifacts" / "artifact-00000000000000000000000000000000.meta";
+    {
+        std::ofstream output(malformed, std::ios::binary);
+        output << "truncated-metadata";
+    }
+    fs::permissions(malformed, fs::perms::owner_read | fs::perms::owner_write,
+                    fs::perm_options::replace);
+    CHECK_FALSE(store.collect().succeeded);
 }
 
 TEST_CASE("orphan control artifact blob from crash is invisible and reusable",

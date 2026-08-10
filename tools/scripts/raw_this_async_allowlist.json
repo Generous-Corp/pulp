@@ -97,6 +97,11 @@
       "reason": "LinuxEnvObserver is process-static and its destructor signals and joins the poll thread"
     },
     {
+      "path": "core/platform/platform/posix/child_process_posix.cpp",
+      "needle": "std::thread output_drainer([this, spawned_pid, &session_finished, &output_drain_failed]",
+      "reason": "ChildProcess start_impl signals and joins this scoped drainer before every return after the session callback, so the owner and captured stack atomics outlive all worker access"
+    },
+    {
       "path": "core/platform/platform/win/environment_win.cpp",
       "needle": "std::thread([this]",
       "reason": "Windows environment observer is intentionally process-lived and its worker is documented as process-lived"

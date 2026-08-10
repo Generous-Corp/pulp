@@ -232,11 +232,72 @@ pub fn verify_control_broker_payload(
     }
 }
 
+/// Read the release version embedded in a signed staged broker payload.
+///
+/// The result is `None` outside macOS, where the control broker is not a
+/// release product. On macOS the executable must remain a regular,
+/// strict-signature-valid file and its side-effect-free `--version` response
+/// must be exactly one non-empty line.
+///
+/// # Errors
+///
+/// Returns an error when the payload is unsafe, unsigned, or lacks an
+/// unambiguous signed release version.
+pub fn control_broker_payload_release_version(
+    path: &Path,
+    timeout: Duration,
+) -> Result<Option<String>, ControlBrokerServiceError> {
+    #[cfg(target_os = "macos")]
+    {
+        let file_system = SystemFileSystem;
+        let runner = SystemCommandRunner;
+        verify_payload_with(path, timeout, &file_system, &runner)?;
+        payload_release_version_with(path, timeout, &file_system, &runner).map(Some)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (path, timeout);
+        Ok(None)
+    }
+}
+
+/// Read an installed broker release, including brokers predating `--version`.
+///
+/// The owner-private successful service marker is accepted only when its root
+/// and CDHash match the currently signed executable. A broker without a
+/// matching marker must implement the signed `--version` process contract.
+///
+/// # Errors
+///
+/// Returns an error when neither the bound legacy marker nor the executable's
+/// version contract establishes one unambiguous release.
+pub fn installed_control_broker_release_version(
+    path: &Path,
+    timeout: Duration,
+) -> Result<Option<String>, ControlBrokerServiceError> {
+    #[cfg(target_os = "macos")]
+    {
+        let file_system = SystemFileSystem;
+        let runner = SystemCommandRunner;
+        verify_payload_with(path, timeout, &file_system, &runner)?;
+        lifecycle::installed_release_version_with(path, timeout, &file_system, &runner).map(Some)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (path, timeout);
+        Ok(None)
+    }
+}
+
 #[path = "control_broker_service/platform.rs"]
 mod platform;
 use platform::{
     CommandOutput, CommandRequest, CommandRunner, FileSystem, SystemCommandRunner, SystemFileSystem,
 };
+
+#[path = "control_broker_service/lifecycle.rs"]
+mod lifecycle;
+use lifecycle::{payload_release_version_with, read_identity, restore_marker};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AttemptMode {
@@ -434,6 +495,18 @@ fn reconcile_with_callback<F: FileSystem, R: CommandRunner>(
         }
     }
 
+    // Transactional installer reconciliation must restore the complete prior
+    // service identity, not only its executable and launchd plist. Otherwise a
+    // failed upgrade leaves the old broker running behind a marker describing
+    // the rejected replacement release. Lazy attempts intentionally retain a
+    // failure marker so unrelated CLI invocations do not retry forever.
+    let transactional = rollback_callback.is_some();
+    let previous_marker = if transactional && file_system.is_file(&paths.marker) {
+        Some(read_file(file_system, &paths.marker)?)
+    } else {
+        None
+    };
+
     let result = reconcile_transaction(
         config,
         file_system,
@@ -446,10 +519,27 @@ fn reconcile_with_callback<F: FileSystem, R: CommandRunner>(
         Ok(()) => (true, "none"),
         Err(error) => (false, error.code()),
     };
-    let marker_result = write_marker(file_system, &paths.marker, &identity, succeeded, error_code);
-    if let Err(marker_error) = marker_result {
-        if result.is_ok() {
-            return Err(marker_error);
+    // The marker only suppresses a repeated lazy attempt. Once launchd has
+    // accepted the service and its health probe succeeds, that activation is
+    // committed: an explicit installer reconciliation still reports success so
+    // it cannot mistake marker publication for an activation failure and
+    // restore only the old binary. A lazy caller instead receives the marker
+    // error, without rollback, while the owner-private staging marker bounds
+    // later attempts.
+    // A failed activation remains authoritative too; preserve its original
+    // error even if recording the attempt also fails.
+    if transactional && result.is_err() {
+        let _ = restore_marker(file_system, &paths.marker, previous_marker.as_deref());
+    } else if let Err(marker_error) =
+        write_marker(file_system, &paths.marker, &identity, succeeded, error_code)
+    {
+        if mode == AttemptMode::Lazy && result.is_ok() {
+            return Err(ControlBrokerServiceError::coded(
+                "attempt-marker-failed",
+                format!(
+                    "control broker activation committed, but its lazy-attempt marker could not be published: {marker_error}"
+                ),
+            ));
         }
     }
     result.map(|()| ControlBrokerServiceOutcome::Reconciled)
@@ -701,34 +791,6 @@ fn wait_for_health<R: CommandRunner>(
     }
 }
 
-fn read_identity<R: CommandRunner>(
-    runner: &R,
-    broker: &Path,
-    release_version: &str,
-    install_root: PathBuf,
-    plist_fingerprint: String,
-    timeout: Duration,
-) -> Result<BrokerIdentity, ControlBrokerServiceError> {
-    let output = run_success(
-        runner,
-        request("/usr/bin/codesign", timeout).args(["-dvvv".to_owned(), path_text(broker)?]),
-        "control broker identity inspection",
-    )?;
-    let combined = format!("{}\n{}", output.stdout, output.stderr);
-    let cdhash = metadata_value(&combined, "CDHash").ok_or_else(|| {
-        ControlBrokerServiceError::coded(
-            "missing-cdhash",
-            "codesign did not report a broker CDHash",
-        )
-    })?;
-    Ok(BrokerIdentity {
-        cdhash,
-        release_version: release_version.to_owned(),
-        install_root,
-        plist_fingerprint,
-    })
-}
-
 fn metadata_value(text: &str, key: &str) -> Option<String> {
     text.lines().find_map(|line| {
         let (candidate, value) = line.trim().split_once('=')?;
@@ -741,25 +803,29 @@ fn matching_marker<F: FileSystem>(
     marker: &Path,
     identity: &BrokerIdentity,
 ) -> Result<Option<bool>, ControlBrokerServiceError> {
-    if !file_system.is_file(marker) {
-        return Ok(None);
-    }
-    let contents = String::from_utf8_lossy(&read_file(file_system, marker)?).into_owned();
-    if !contents.starts_with(&identity.marker_key()) {
-        return Ok(None);
-    }
-    if !contents.contains("attempt_count=1\n") || !contents.contains("error_code=") {
-        return Ok(None);
-    }
-    Ok(
+    // A failed atomic rename leaves the fully written, owner-private staging
+    // marker in place. Treat it as the durable attempt record so a committed
+    // lazy activation cannot be repeated merely because final publication
+    // failed.
+    for candidate in [marker.with_extension("marker.new"), marker.to_owned()] {
+        if !file_system.is_file(&candidate) {
+            continue;
+        }
+        let contents = String::from_utf8_lossy(&read_file(file_system, &candidate)?).into_owned();
+        if !contents.starts_with(&identity.marker_key())
+            || !contents.contains("attempt_count=1\n")
+            || !contents.contains("error_code=")
+        {
+            continue;
+        }
         if contents.contains("outcome=success\n") && contents.contains("error_code=none\n") {
-            Some(true)
-        } else if contents.contains("outcome=failure\n") {
-            Some(false)
-        } else {
-            None
-        },
-    )
+            return Ok(Some(true));
+        }
+        if contents.contains("outcome=failure\n") {
+            return Ok(Some(false));
+        }
+    }
+    Ok(None)
 }
 
 fn write_marker<F: FileSystem>(

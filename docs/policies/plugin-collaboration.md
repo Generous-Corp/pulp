@@ -5,6 +5,9 @@
 - **Decision scope:** Plugin-to-plugin scene and macro coordination
 - **Evidence baseline:** Pulp `d1ff653cefe022ce920576b3e1086c7db8eaa066`
 
+Product B remains unshipped under this NO-GO; this policy is not an API or
+product commitment.
+
 ## Context
 
 The candidate use case is a producer that selects or morphs a scene and several

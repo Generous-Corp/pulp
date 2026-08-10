@@ -401,10 +401,16 @@ TEST_CASE("control JSON Schema validator accepts representative registry contrac
 
     const auto& input = operation("dev.pulp.ui/input@1");
     CHECK(validate_control_json_schema(
-        R"({"kind":"pointer","target_id":"gain","event":{"phase":"down","x":12.5,"y":3,"button":0}})",
+        R"({"kind":"pointer","target_id":"gain","view_generation":"view-a","event":{"phase":"down","x":12.5,"y":3,"button":0}})",
         input.input_schema_json, &diagnostics));
     CHECK_FALSE(validate_control_json_schema(
-        R"({"kind":"pointer","target_id":"gain","event":{"phase":"down","x":12.5}})",
+        R"({"kind":"pointer","target_id":"gain","view_generation":"view-a","event":{"phase":"down","x":12.5}})",
+        input.input_schema_json, &diagnostics));
+    CHECK(validate_control_json_schema(
+        R"({"kind":"text","target_id":"editor","view_generation":"view-a","event":{"text":"bounded"}})",
+        input.input_schema_json, &diagnostics));
+    CHECK_FALSE(validate_control_json_schema(
+        R"({"kind":"pointer","target_id":"gain","view_generation":"view-a","event":{"phase":"down","x":12.5,"y":3,"button":4}})",
         input.input_schema_json, &diagnostics));
 
     const auto& state_write = operation("dev.pulp.state/parameter-gesture@1");
@@ -550,8 +556,9 @@ TEST_CASE("registry request and result maxima fit their bounded protocol budgets
             state_request += ',';
             state_result += ',';
         }
-        state_request += "4294967295";
-        state_result += R"({"id":4294967295,"normalized":0.5,"sensitive":false})";
+        state_request += std::to_string(index);
+        state_result += R"({"id":)" + std::to_string(index) +
+                        R"(,"normalized":0.5,"sensitive":false})";
     }
     state_request += "]}";
     state_result += "]}";
@@ -812,6 +819,16 @@ TEST_CASE("host control frames round trip and enforce role direction",
     const ControlEnvelope execute{.payload = ControlHostExecuteEnvelope{
                                       .route_id = "route-1",
                                       .receipt_id = "receipt-1",
+                                      .authority_id = "authority-1",
+                                      .controller_authority_id = "controller-1",
+                                      .broker_id = "broker-1",
+                                      .session_id = "session-1",
+                                      .instance_id = "instance-1",
+                                      .publication_id = "publication-1",
+                                      .instance_generation = "publication-1",
+                                      .capability_id = "session.describe",
+                                      .manifest_digest = std::string(64, 'a'),
+                                      .producer_artifact_digest = std::string(64, 'b'),
                                       .operation_id = "session.describe",
                                       .operation_version = 1,
                                       .deadline_unix_ms = 1786000000000,
@@ -826,10 +843,17 @@ TEST_CASE("host control frames round trip and enforce role direction",
     REQUIRE(decoded_execute != nullptr);
     CHECK(decoded_execute->route_id == "route-1");
     CHECK(decoded_execute->receipt_id == "receipt-1");
+    CHECK(decoded_execute->controller_authority_id == "controller-1");
     CHECK(decoded_execute->operation_id == "session.describe");
     CHECK(decoded_execute->expected_state_generation == 9);
     CHECK(control_envelope_allowed(execute, ControlEnvelopeDirection::BrokerToHost));
     CHECK_FALSE(control_envelope_allowed(execute, ControlEnvelopeDirection::BrokerToClient));
+
+    auto missing_controller = *decoded_execute;
+    missing_controller.controller_authority_id.clear();
+    CHECK(encode_control_envelope(
+              ControlEnvelope{.payload = std::move(missing_controller)})
+              .empty());
 
     const ControlEnvelope completed{.payload = ControlHostCompleteEnvelope{
                                         .route_id = "route-1",
@@ -839,7 +863,161 @@ TEST_CASE("host control frames round trip and enforce role direction",
     CHECK(control_envelope_allowed(completed, ControlEnvelopeDirection::HostToBroker));
     CHECK_FALSE(control_envelope_allowed(completed, ControlEnvelopeDirection::ClientToBroker));
 
+    const ControlEnvelope ended{.payload = ControlHostAuthorityEndEnvelope{
+                                    .authority_id = "authority-1", .reason = "grant-revoked"}};
+    CHECK(decode_control_envelope(encode_control_envelope(ended)) == ended);
+    CHECK(control_envelope_allowed(ended, ControlEnvelopeDirection::BrokerToHost));
+
     auto invalid = std::get<ControlHostCompleteEnvelope>(completed.payload);
     invalid.result_code = ControlResultCode::InternalError;
+    CHECK(encode_control_envelope(ControlEnvelope{.payload = invalid}).empty());
+
+    auto artifact_complete = std::get<ControlHostCompleteEnvelope>(completed.payload);
+    artifact_complete.detail_json = R"({"artifact_id": "host-publication-1"})";
+    artifact_complete.artifact_publications.push_back({
+        .reference_id = "host-publication-1",
+        .bytes_base64 = "AQ==",
+        .content_type = "application/octet-stream",
+        .sensitivity = ControlArtifactSensitivity::Sensitive,
+        .redaction_state = ControlArtifactRedactionState::Original,
+        .lifetime_ms = 1000,
+    });
+    const auto artifact_encoded =
+        encode_control_envelope(ControlEnvelope{.payload = artifact_complete});
+    REQUIRE_FALSE(artifact_encoded.empty());
+    const ControlEnvelope expected_artifact_complete{.payload = artifact_complete};
+    ControlProtocolDiagnostics artifact_error;
+    const auto artifact_decoded = decode_control_envelope(artifact_encoded, &artifact_error);
+    INFO(artifact_error.explanation);
+    REQUIRE(artifact_decoded);
+    const auto* decoded_artifact_complete =
+        std::get_if<ControlHostCompleteEnvelope>(&artifact_decoded->payload);
+    REQUIRE(decoded_artifact_complete);
+    REQUIRE(decoded_artifact_complete->artifact_publications.size() == 1);
+    CHECK(decoded_artifact_complete->artifact_publications ==
+          artifact_complete.artifact_publications);
+    CHECK(decoded_artifact_complete->detail_json == artifact_complete.detail_json);
+
+    const auto malformed = replace_once(artifact_encoded, "AQ==", "A===");
+    ControlProtocolDiagnostics malformed_error;
+    CHECK_FALSE(decode_control_envelope(malformed, &malformed_error));
+    CHECK(malformed_error.code == ControlProtocolError::InvalidValue);
+
+    artifact_complete.artifact_publications[0].bytes_base64 =
+        std::string(4 * ((kControlHostMaximumArtifactPublicationBytes + 2) / 3) + 1, 'A');
+    CHECK(encode_control_envelope(ControlEnvelope{.payload = artifact_complete}).empty());
+
+    artifact_complete.artifact_publications.resize(2);
+    CHECK(encode_control_envelope(ControlEnvelope{.payload = artifact_complete}).empty());
+}
+
+TEST_CASE("host open canonically selects exactly one admission mechanism",
+          "[inspect][control-protocol][host][enrollment]") {
+    const ControlEnvelope admission{.payload =
+                                        ControlHostOpenEnvelope{.request_id = "host-open-admission",
+                                                                .admission_id = "admission-1"}};
+    const auto encoded_admission = encode_control_envelope(admission);
+    REQUIRE_FALSE(encoded_admission.empty());
+    CHECK(encoded_admission.find(R"("enrollment_id": "")") != std::string::npos);
+    CHECK(decode_control_envelope(encoded_admission) == admission);
+
+    const ControlEnvelope enrollment{
+        .payload = ControlHostOpenEnvelope{.request_id = "host-open-enrollment",
+                                           .enrollment_id = "enrollment-1"}};
+    const auto encoded_enrollment = encode_control_envelope(enrollment);
+    CHECK(decode_control_envelope(encoded_enrollment) == enrollment);
+
+    const auto enrollment_without_admission =
+        replace_once(encoded_enrollment, R"("admission_id": "", )", "");
+    CHECK(decode_control_envelope(enrollment_without_admission) == enrollment);
+
+    auto both = std::get<ControlHostOpenEnvelope>(enrollment.payload);
+    both.admission_id = "admission-1";
+    CHECK(encode_control_envelope(ControlEnvelope{.payload = both}).empty());
+    auto neither = both;
+    neither.admission_id.clear();
+    neither.enrollment_id.clear();
+    CHECK(encode_control_envelope(ControlEnvelope{.payload = neither}).empty());
+
+    // Older preissued-admission clients did not emit the new empty field.
+    const auto legacy = replace_once(encoded_admission, R"(, "enrollment_id": "")", "");
+    CHECK(decode_control_envelope(legacy) == admission);
+}
+
+TEST_CASE("host preflight frames use the canonical codec and strict directions",
+          "[inspect][control-protocol][host][preflight]") {
+    const auto nonce = std::string(64, 'a');
+    const ControlEnvelope challenge{.payload = ControlHostPreflightChallengeEnvelope{nonce}};
+    const ControlEnvelope response{.payload = ControlHostPreflightResponseEnvelope{nonce}};
+    const ControlEnvelope bootstrap{
+        .payload = ControlHostPreflightBootstrapEnvelope{nonce, "Ym9vdHN0cmFw"}};
+
+    CHECK(round_trip(std::get<ControlHostPreflightChallengeEnvelope>(challenge.payload)).nonce ==
+          nonce);
+    CHECK(round_trip(std::get<ControlHostPreflightResponseEnvelope>(response.payload)).nonce ==
+          nonce);
+    CHECK(round_trip(std::get<ControlHostPreflightBootstrapEnvelope>(bootstrap.payload)) ==
+          std::get<ControlHostPreflightBootstrapEnvelope>(bootstrap.payload));
+
+    CHECK(control_envelope_allowed(challenge, ControlEnvelopeDirection::LauncherToHost));
+    CHECK(control_envelope_allowed(bootstrap, ControlEnvelopeDirection::LauncherToHost));
+    CHECK_FALSE(control_envelope_allowed(challenge, ControlEnvelopeDirection::HostToLauncher));
+    CHECK(control_envelope_allowed(response, ControlEnvelopeDirection::HostToLauncher));
+    CHECK_FALSE(control_envelope_allowed(response, ControlEnvelopeDirection::LauncherToHost));
+
+    ControlProtocolDiagnostics diagnostics;
+    auto encoded = encode_control_envelope(bootstrap);
+    auto unknown = replace_once(encoded, R"("nonce":)", R"("extra":1,"nonce":)");
+    CHECK_FALSE(decode_control_envelope(unknown, &diagnostics));
+    CHECK(diagnostics.code == ControlProtocolError::UnknownField);
+
+    auto bad_nonce = std::get<ControlHostPreflightChallengeEnvelope>(challenge.payload);
+    bad_nonce.nonce.pop_back();
+    CHECK(encode_control_envelope(ControlEnvelope{.payload = bad_nonce}).empty());
+    auto empty_bootstrap = std::get<ControlHostPreflightBootstrapEnvelope>(bootstrap.payload);
+    empty_bootstrap.bootstrap_base64.clear();
+    CHECK(encode_control_envelope(ControlEnvelope{.payload = empty_bootstrap}).empty());
+    auto oversized = std::get<ControlHostPreflightBootstrapEnvelope>(bootstrap.payload);
+    oversized.bootstrap_base64.assign(kControlHostPreflightMaximumBootstrapBase64Bytes + 1, 'x');
+    CHECK(encode_control_envelope(ControlEnvelope{.payload = oversized}).empty());
+}
+
+TEST_CASE("management frames are typed bounded and direction constrained",
+          "[inspect][control-protocol][management]") {
+    const ControlEnvelope request{
+        .payload = ControlManagementEnvelope{
+            .request_id = "management-1",
+            .command = "grant-request",
+            .params_json = R"({"instance_id":"instance-1","profile":"inspect-readonly"})"}};
+    const auto encoded_request = encode_control_envelope(request);
+    REQUIRE_FALSE(encoded_request.empty());
+    const auto decoded_request = decode_control_envelope(encoded_request);
+    REQUIRE(decoded_request.has_value());
+    const auto* management = std::get_if<ControlManagementEnvelope>(&decoded_request->payload);
+    REQUIRE(management != nullptr);
+    CHECK(management->request_id == "management-1");
+    CHECK(management->command == "grant-request");
+    CHECK(canonicalize_control_json(management->params_json) ==
+          canonicalize_control_json(
+              std::get<ControlManagementEnvelope>(request.payload).params_json));
+    CHECK(control_envelope_allowed(request, ControlEnvelopeDirection::ClientToBroker));
+    CHECK_FALSE(control_envelope_allowed(request, ControlEnvelopeDirection::BrokerToClient));
+
+    const ControlEnvelope response{
+        .payload = ControlManagementResult{.request_id = "management-1",
+                                           .status_id = "consent-required",
+                                           .data_json = "{}",
+                                           .explanation = "trusted consent is unavailable"}};
+    const auto decoded_response = decode_control_envelope(encode_control_envelope(response));
+    REQUIRE(decoded_response.has_value());
+    const auto* management_result =
+        std::get_if<ControlManagementResult>(&decoded_response->payload);
+    REQUIRE(management_result != nullptr);
+    CHECK(management_result->status_id == "consent-required");
+    CHECK(control_envelope_allowed(response, ControlEnvelopeDirection::BrokerToClient));
+    CHECK_FALSE(control_envelope_allowed(response, ControlEnvelopeDirection::ClientToBroker));
+
+    auto invalid = std::get<ControlManagementEnvelope>(request.payload);
+    invalid.command = "raw-connect";
     CHECK(encode_control_envelope(ControlEnvelope{.payload = invalid}).empty());
 }

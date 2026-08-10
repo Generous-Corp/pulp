@@ -6,6 +6,7 @@
 #include <pulp/state/parameter_event_queue.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <span>
 
 namespace pulp::format {
@@ -57,6 +58,7 @@ struct OfflineRenderOptions {
     std::int64_t start_position_samples = 0;
     double start_position_beats = 0.0;
     std::int64_t host_time_ns = 0;
+
 };
 
 struct OfflineRenderStats {
@@ -92,6 +94,10 @@ public:
     const OfflineRenderConfig& config() const noexcept { return config_; }
 
     OfflineRenderResult render(const OfflineRenderOptions& options);
+    /// Versioned cancellation/deadline seam for control-thread callers. The
+    /// guard runs before each process block; false stops without success.
+    OfflineRenderResult render(const OfflineRenderOptions& options,
+                               std::function<bool()> should_continue);
 
     HeadlessHost& headless() noexcept { return host_; }
     const HeadlessHost& headless() const noexcept { return host_; }

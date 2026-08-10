@@ -23,6 +23,7 @@ bool trusted_consent(const ControlConsentDecision& consent) {
         return false;
     return consent.authority == ControlConsentAuthority::TrustedPulpCli ||
            consent.authority == ControlConsentAuthority::TrustedHostUi ||
+           consent.authority == ControlConsentAuthority::BrokerUserPrompt ||
            consent.authority == ControlConsentAuthority::ExistingUserPolicy;
 }
 
@@ -188,7 +189,9 @@ ControlGrantResult ControlGrantStore::issue(
         impl_->audit_denial(request, control_grant_status_id(result.status));
         return result;
     }
-    if (!trusted_consent(consent)) {
+    if (!trusted_consent(consent) ||
+        (consent.authority == ControlConsentAuthority::BrokerUserPrompt &&
+         (!consent.expires_at || now >= *consent.expires_at))) {
         result.status = ControlGrantStatus::ConsentRequired;
         impl_->audit_denial(request, control_grant_status_id(result.status));
         return result;
@@ -220,7 +223,15 @@ ControlGrantResult ControlGrantStore::issue(
     }
     const bool one_shot_consent =
         consent.authority == ControlConsentAuthority::TrustedPulpCli ||
-        consent.authority == ControlConsentAuthority::TrustedHostUi;
+        consent.authority == ControlConsentAuthority::TrustedHostUi ||
+        consent.authority == ControlConsentAuthority::BrokerUserPrompt;
+    if (std::ranges::find(request.capabilities, InspectorCapability::RuntimeEval) !=
+            request.capabilities.end() &&
+        !one_shot_consent) {
+        result.status = ControlGrantStatus::ConsentRequired;
+        impl_->audit_denial(request, control_grant_status_id(result.status));
+        return result;
+    }
     ControlGrant grant{
         ControlGrantId{*grant_id},
         impl_->identities.broker_id(),
@@ -260,6 +271,19 @@ ControlGrantResult ControlGrantStore::issue(
         }
         const bool retired_collision = impl_->retired_grant_ids.contains(
             grant.grant_id.value);
+        const auto insertion_time = impl_->clock();
+        if (consent.authority == ControlConsentAuthority::BrokerUserPrompt &&
+            insertion_time >= *consent.expires_at) {
+            result.status = ControlGrantStatus::ConsentRequired;
+            impl_->audit_denial(request, control_grant_status_id(result.status));
+            return result;
+        }
+        if (ttl > std::chrono::steady_clock::time_point::max() - insertion_time) {
+            result.status = ControlGrantStatus::InvalidRequest;
+            impl_->audit_denial(request, control_grant_status_id(result.status));
+            return result;
+        }
+        grant.expires_at = insertion_time + ttl;
         const auto [_, inserted] = retired_collision
             ? std::pair{impl_->grants.end(), false}
             : impl_->grants.emplace(grant.grant_id.value, grant);
@@ -400,7 +424,7 @@ std::optional<ControlGrant> ControlGrantStore::grant(
     return found->second;
 }
 
-void ControlGrantStore::sweep_expired() {
+std::vector<ControlGrant> ControlGrantStore::sweep_expired() {
     const auto now = impl_->clock();
     std::vector<ControlGrant> candidates;
     {
@@ -449,6 +473,9 @@ void ControlGrantStore::sweep_expired() {
                      ControlSecurityOutcome::Revoked,
                      "identity-unavailable");
     }
+    expired.insert(expired.end(), std::make_move_iterator(removed.begin()),
+                   std::make_move_iterator(removed.end()));
+    return expired;
 }
 
 } // namespace pulp::inspect

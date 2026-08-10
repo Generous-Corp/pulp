@@ -341,6 +341,13 @@ TEST_CASE("Standalone inspector transport updates are coherent and do not rewind
     input.end_audio_block(480);
     REQUIRE(input.transport_snapshot().position_samples == 96'000);
 
+    input.release_test_input();
+    const auto restored = input.begin_audio_block();
+    REQUIRE(restored.playing);
+    REQUIRE(restored.tempo_bpm == 120.0);
+    REQUIRE(restored.position_samples == 480);
+    input.end_audio_block(480);
+
     REQUIRE(input.update_transport({}) ==
             detail::StandaloneTestInputResult::InvalidArgument);
     REQUIRE(input.update_transport({.position_samples = -1}) ==

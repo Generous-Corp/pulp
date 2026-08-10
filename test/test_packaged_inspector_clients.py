@@ -284,6 +284,7 @@ def marketplace_mcp_command(
     return [resolved]
 
 
+
 def exercise_clients(
     install: Path,
     client_cwd: Path,
@@ -295,337 +296,55 @@ def exercise_clients(
     rust = install / "pulp"
     cpp = install / "pulp-cpp"
     mcp = install / "pulp-mcp"
-    exact_selector = selector_args(ready)
 
     def run_cli(arguments: list[str]) -> subprocess.CompletedProcess[str]:
         result = run_checked([str(rust), *arguments], cwd=client_cwd, env=env)
-        require(
-            f"fallthrough → {cpp}" in result.stderr,
-            "Rust client did not delegate to its extracted sibling:\n" + result.stderr,
-        )
+        require(f"fallthrough → {cpp}" in result.stderr, result.stderr)
         return result
 
-    listed_result = run_cli(["inspect", "list", "--json"])
-    listed = parse_json_output(listed_result, "packaged Rust inspect list")
-    require(listed.get("schemaVersion") == 1, str(listed))
-    require(len(listed.get("sessions", [])) == 2, f"unexpected sessions: {listed!r}")
-    session = next(
-        item for item in listed["sessions"] if item.get("sessionId") == ready["session_id"]
-    )
-    require(session.get("sessionId") == ready["session_id"], str(session))
-    require(session.get("instanceId") == ready["instance_id"], str(session))
-    require(session.get("publicationId") == ready["publication_id"], str(session))
-    require(session.get("pluginId") == ready["plugin_id"], str(session))
-    listed_identities = {
+    listed = parse_json_output(run_cli(["inspect", "list", "--json"]), "packaged list")
+    identities = {
         (item.get("sessionId"), item.get("instanceId"), item.get("publicationId"))
-        for item in listed["sessions"]
+        for item in listed.get("sessions", [])
     }
-    require(
-        (observe_ready["session_id"], observe_ready["instance_id"],
-         observe_ready["publication_id"]) in listed_identities,
-        f"observe fixture absent from packaged CLI list: {listed!r}",
-    )
-    observe_selector = selector_args(observe_ready)
-    observe_capabilities = parse_json_output(
-        run_cli(["inspect", "capabilities", "--json", *observe_selector]),
-        "packaged CLI observe capabilities",
-    )
-    require(
-        observe_capabilities.get("sessionId") == observe_ready["session_id"],
-        str(observe_capabilities),
-    )
-    require(
-        observe_capabilities.get("publicationId") == observe_ready["publication_id"],
-        str(observe_capabilities),
-    )
-    require(
-        "state.write" not in observe_capabilities.get("effective", []),
-        str(observe_capabilities),
-    )
-    observe_mutation_result = subprocess.run(
-        [
-            str(rust),
-            "inspect",
-            "set-parameter",
-            "--id",
-            str(PARAMETER_ID),
-            "--value",
-            str(CLI_PARAMETER_VALUE),
-            "--json",
-            *observe_selector,
-        ],
-        cwd=client_cwd,
-        env=env,
-        text=True,
-        capture_output=True,
-        timeout=30,
-        check=False,
-    )
-    require(
-        f"fallthrough → {cpp}" in observe_mutation_result.stderr,
-        "Rust observe mutation did not delegate to its extracted sibling:\n"
-        + observe_mutation_result.stderr,
-    )
-    require(observe_mutation_result.returncode == 1, str(observe_mutation_result))
-    observe_denial = parse_json_output(
-        observe_mutation_result, "packaged CLI observe mutation denial"
-    )
-    require(observe_denial.get("ok") is False, str(observe_denial))
-    require(
-        observe_denial.get("error", {}).get("code") == "capability_denied",
-        str(observe_denial),
-    )
-    observe_dom = parse_json_output(
-        run_cli(["inspect", "--json", *observe_selector, "--command", "DOM.getDocument"]),
-        "packaged CLI observe DOM",
-    )
-    require(find_dict_with_id(observe_dom, "workflow-gain") is not None, str(observe_dom))
-    capabilities_result = run_cli(
-        [
-            "inspect",
-            "capabilities",
-            "--json",
-            *exact_selector,
-        ]
-    )
-    capabilities = parse_json_output(capabilities_result, "packaged CLI capabilities")
-    require(capabilities.get("schemaVersion") == 1, str(capabilities))
-    require(capabilities.get("sessionId") == ready["session_id"], str(capabilities))
-    require(capabilities.get("publicationId") == ready["publication_id"], str(capabilities))
-    require("state.write" in capabilities.get("effective", []), str(capabilities))
-
-    parameters_result = run_cli(
-        ["inspect", "--json", *exact_selector, "--command", "State.getParameters"]
-    )
-    parameters = parse_json_output(parameters_result, "packaged CLI parameter read")
-    require(abs(parameter_value(parameters) - RESET_PARAMETER_VALUE) < 0.001, str(parameters))
-
-    mutation_result = run_cli(
-        [
-            "inspect",
-            "set-parameter",
-            "--id",
-            str(PARAMETER_ID),
-            "--value",
-            str(CLI_PARAMETER_VALUE),
-            "--json",
-            *exact_selector,
-        ]
-    )
-    mutation = parse_json_output(mutation_result, "packaged Rust parameter mutation")
-    require(mutation.get("schemaVersion") == "pulp.inspect.set-parameter.v1", str(mutation))
-    require(mutation.get("parameterId") == PARAMETER_ID, str(mutation))
-    require(mutation.get("value") == CLI_PARAMETER_VALUE, str(mutation))
-    require(mutation.get("result", {}).get("ok") is True, str(mutation))
-
-    reread_result = run_cli(
-        ["inspect", "--json", *exact_selector, "--command", "State.getParameters"]
-    )
-    reread = parse_json_output(reread_result, "packaged CLI parameter reread")
-    require(abs(parameter_value(reread) - CLI_PARAMETER_VALUE) < 0.001, str(reread))
-
-    transport_result = run_cli(
-        [
-            "inspect",
-            "set-transport",
-            "--playing",
-            "false",
-            "--position-samples",
-            "96000",
-            "--tempo-bpm",
-            "90",
-            "--json",
-            *exact_selector,
-        ]
-    )
-    transport = parse_json_output(transport_result, "packaged CLI transport mutation")
-    require(transport.get("schemaVersion") == "pulp.inspect.set-transport.v1", str(transport))
-    require(transport.get("result", {}).get("applied") is True, str(transport))
-
-    midi_result = run_cli(
-        [
-            "inspect",
-            "inject-midi",
-            "--kind",
-            "note_on",
-            "--channel",
-            "3",
-            "--note",
-            "64",
-            "--velocity",
-            "99",
-            "--duration-ms",
-            "40",
-            "--json",
-            *exact_selector,
-        ]
-    )
-    midi = parse_json_output(midi_result, "packaged CLI MIDI injection")
-    require(midi.get("schemaVersion") == "pulp.inspect.inject-midi.v1", str(midi))
-    require(midi.get("result", {}).get("accepted") is True, str(midi))
-
-    dom_result = run_cli(
-        ["inspect", "--json", *exact_selector, "--command", "DOM.getDocument"]
-    )
-    dom = parse_json_output(dom_result, "packaged CLI inspector DOM")
-    require("REAL STANDALONE INSPECTOR WORKFLOW" in dom_result.stdout, str(dom))
-    require(find_dict_with_id(dom, "workflow-gain") is not None, str(dom))
-
-    screenshot_result = run_cli(
-        ["inspect", "--json", *exact_selector, "--command", "Capture.screenshot"]
-    )
-    cli_screenshot = parse_json_output(screenshot_result, "packaged CLI screenshot")
-    cli_width, cli_height, cli_digest = require_png(cli_screenshot, "CLI screenshot")
-
-    reset_result = run_cli(
-        [
-            "inspect",
-            "set-parameter",
-            "--id",
-            str(PARAMETER_ID),
-            "--value",
-            str(RESET_PARAMETER_VALUE),
-            "--json",
-            *exact_selector,
-        ]
-    )
-    reset = parse_json_output(reset_result, "packaged CLI state reset")
-    require(reset.get("result", {}).get("ok") is True, str(reset))
-    reset_read = parse_json_output(
-        run_cli(["inspect", "--json", *exact_selector, "--command", "State.getParameters"]),
-        "packaged CLI reset verification",
-    )
-    require(abs(parameter_value(reset_read) - RESET_PARAMETER_VALUE) < 0.001, str(reset_read))
-
-    selector = selector_object(ready)
-    requests = [
-        json.dumps(
-            {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {},
-                    "clientInfo": {"name": "packaged-inspector-proof", "version": "1"},
-                },
-            },
-            separators=(",", ":"),
-        ),
-        mcp_request(2, "pulp_inspect_list", {}),
-        mcp_request(3, "pulp_inspect_capabilities", selector),
-        mcp_request(4, "pulp_inspect_audio", selector),
-        mcp_request(5, "pulp_inspect_params", selector),
-        mcp_request(
-            6,
-            "pulp_inspect_set_param",
-            {**selector, "id": PARAMETER_ID, "value": MCP_PARAMETER_VALUE},
-        ),
-        mcp_request(7, "pulp_inspect_params", selector),
-        mcp_request(8, "pulp_inspect_dom", selector),
-        mcp_request(9, "pulp_inspect_screenshot", selector),
-        mcp_request(
-            10,
-            "pulp_inspect_set_transport",
-            {**selector, "playing": False, "position_samples": 96000, "tempo_bpm": 90},
-        ),
-        mcp_request(
-            11,
-            "pulp_inspect_inject_midi",
-            {
-                **selector,
-                "kind": "note_on",
-                "channel": 3,
-                "note": 64,
-                "velocity": 99,
-                "duration_ms": 40,
-            },
-        ),
-        mcp_request(12, "pulp_inspect_audio", selector_object(observe_ready)),
-        mcp_request(13, "pulp_inspect_params", selector_object(observe_ready)),
-    ]
-    mcp_env = env.copy()
-    mcp_command = marketplace_mcp_command(mcp_config, mcp, mcp_env)
-    mcp_result = subprocess.run(
-        mcp_command,
-        input="\n".join(requests) + "\n",
-        cwd=client_cwd,
-        env=mcp_env,
-        text=True,
-        capture_output=True,
-        timeout=45,
-        check=False,
-    )
-    if mcp_result.returncode != 0:
-        fail(
-            f"packaged MCP exited {mcp_result.returncode}\n"
-            f"stdout:\n{mcp_result.stdout}\nstderr:\n{mcp_result.stderr}"
+    for selected in (ready, observe_ready):
+        require(
+            (selected["session_id"], selected["instance_id"], selected["publication_id"])
+            in identities,
+            str(listed),
         )
-    try:
-        responses = [json.loads(line) for line in mcp_result.stdout.splitlines() if line]
-    except json.JSONDecodeError as error:
-        fail(f"packaged MCP emitted invalid JSON: {error}\n{mcp_result.stdout}")
-    by_id = {response.get("id"): response for response in responses}
-    require(set(by_id) == set(range(1, 14)), f"unexpected MCP responses: {responses!r}")
-    require(by_id[1].get("result", {}).get("serverInfo", {}).get("name") == "pulp-mcp", str(by_id[1]))
+        capabilities = parse_json_output(
+            run_cli(["inspect", "capabilities", "--json", *selector_args(selected)]),
+            "packaged capabilities",
+        )
+        require(capabilities.get("sessionId") == selected["session_id"], str(capabilities))
 
-    structured = {
-        request_id: by_id[request_id].get("result", {}).get("structuredContent")
-        for request_id in range(2, 14)
-    }
-    for request_id, payload in structured.items():
-        require(isinstance(payload, dict), f"MCP response {request_id} lacks structured content: {by_id[request_id]!r}")
-        require(payload.get("ok") is True, f"MCP response {request_id} failed: {payload!r}")
-
-    mcp_sessions = structured[2].get("result", {}).get("sessions", [])
-    require(len(mcp_sessions) == 2, str(structured[2]))
-    require(
-        {item.get("session_id") for item in mcp_sessions}
-        == {ready["session_id"], observe_ready["session_id"]},
-        str(structured[2]),
+    removed = subprocess.run(
+        [str(rust), "inspect", "--command", "DOM.getDocument"],
+        cwd=client_cwd, env=env, text=True, capture_output=True, timeout=30, check=False,
     )
-    listed_develop = next(
-        item for item in mcp_sessions if item.get("session_id") == ready["session_id"]
-    )
-    require_selected_session(listed_develop, ready)
-    require(listed_develop.get("plugin_id") == ready["plugin_id"], str(listed_develop))
+    require(removed.returncode == 2, str(removed))
+    require("unknown inspect argument" in removed.stderr, removed.stderr)
 
-    for request_id in range(3, 12):
-        identity = structured[request_id].get("session", {})
-        require_selected_session(identity, ready)
-    require_selected_session(structured[12].get("session", {}), observe_ready)
-    require_selected_session(structured[13].get("session", {}), observe_ready)
-    require(observe_ready["session_id"] in json.dumps(structured[12]), str(structured[12]))
-    require(isinstance(structured[13].get("result"), list), str(structured[13]))
-
-    capability_policy = structured[3].get("result", {})
-    require("state.write" in capability_policy.get("effective", []), str(structured[3]))
-    require(ready["session_id"] in json.dumps(structured[4]), str(structured[4]))
-
-    require(
-        abs(parameter_value(structured[5].get("result")) - RESET_PARAMETER_VALUE) < 0.001,
-        str(structured[5]),
-    )
-    require(structured[6].get("result", {}).get("ok") is True, str(structured[6]))
-    require(
-        abs(parameter_value(structured[7].get("result")) - MCP_PARAMETER_VALUE) < 0.001,
-        str(structured[7]),
-    )
-
-    mcp_dom = structured[8].get("result")
-    require("REAL STANDALONE INSPECTOR WORKFLOW" in json.dumps(mcp_dom), str(structured[8]))
-    require(find_dict_with_id(mcp_dom, "workflow-gain") is not None, str(structured[8]))
-
-    screenshot = structured[9].get("result", {})
-    mcp_width, mcp_height, mcp_digest = require_png(screenshot, "MCP screenshot")
-    require(structured[10].get("result", {}).get("applied") is True, str(structured[10]))
-    require(structured[11].get("result", {}).get("accepted") is True, str(structured[11]))
-    print(
-        "proved independent packaged CLI and marketplace-configured MCP "
-        "two-process list/select plus capabilities/read/mutate/reread/capture/test-input workflows; "
-        f"cli-screenshot={cli_width}x{cli_height} sha256={cli_digest}; "
-        f"mcp-screenshot={mcp_width}x{mcp_height} sha256={mcp_digest}"
-    )
+    requests = [
+        json.dumps({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}, separators=(",", ":")),
+        mcp_request(2, "pulp_inspect_list", {}),
+        mcp_request(3, "pulp_inspect_capabilities", selector_object(ready)),
+        mcp_request(4, "pulp_inspect_dom", selector_object(ready)),
+        mcp_request(5, "pulp_motion_snapshot", selector_object(ready)),
+    ]
+    command = marketplace_mcp_command(mcp_config, mcp, env)
+    result = subprocess.run(command, input="\n".join(requests) + "\n", cwd=client_cwd,
+                            env=env, text=True, capture_output=True, timeout=30, check=False)
+    require(result.returncode == 0, result.stderr)
+    responses = {item.get("id"): item for item in map(json.loads, result.stdout.splitlines())}
+    require(responses[2].get("result", {}).get("structuredContent", {}).get("ok") is True,
+            str(responses[2]))
+    require(responses[3].get("result", {}).get("structuredContent", {}).get("ok") is True,
+            str(responses[3]))
+    require("Unknown tool: pulp_inspect_dom" in json.dumps(responses[4]), str(responses[4]))
+    require("Unknown tool: pulp_motion_snapshot" in json.dumps(responses[5]), str(responses[5]))
+    print("proved packaged inspector metadata clients and retired raw caller rejection")
 
 
 def parse_args() -> argparse.Namespace:
@@ -717,24 +436,6 @@ def main() -> int:
                 observe_ready,
                 args.mcp_config,
             )
-            observation_deadline = time.monotonic() + 5
-            observation: dict[str, Any] = {}
-            while time.monotonic() < observation_deadline:
-                try:
-                    observation = json.loads(observation_path.read_text(encoding="utf-8"))
-                except (FileNotFoundError, json.JSONDecodeError, OSError):
-                    time.sleep(0.02)
-                    continue
-                if (
-                    observation.get("note_on_count", 0) >= 2
-                    and observation.get("note_off_count", 0) >= 2
-                    and observation.get("transport_match") is True
-                ):
-                    break
-                time.sleep(0.02)
-            require(observation.get("note_on_count", 0) >= 2, str(observation))
-            require(observation.get("note_off_count", 0) >= 2, str(observation))
-            require(observation.get("transport_match") is True, str(observation))
             stop_path.write_text("stop\n", encoding="utf-8")
             observe_stop_path.write_text("stop\n", encoding="utf-8")
             fixture_output = fixture.communicate(timeout=30)

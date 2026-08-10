@@ -65,20 +65,17 @@ The plugin extends Claude Code with:
   `/import-design`, `/version`, `/upgrade` — convenience wrappers over
   the CLI.
 - **MCP server**: Claude can call build/test and other installed tools as MCP
-  calls instead of shell-and-parse. The `pulp_inspect_*` entries currently wrap
-  an experimental source-tree CLI client and therefore require a Pulp source
-  checkout plus a custom server fixture; normal and installed-user launches do
-  not start the required endpoint.
+  calls instead of shell-and-parse. Live plugin work uses the generated,
+  exact-instance `pulp_control_*` tools over the shared control client; see
+  [Capability control over MCP](guides/capability-control-mcp.md).
+  `pulp_control_profiles` is the canonical static profile metadata tool.
+  `pulp_inspect_profiles` remains a compatibility alias until Pulp 0.800.0 on
+  2026-10-01. Legacy raw Inspector discovery and RPC are not exposed.
   For project screenshot artifacts, call `pulp_validate` with
   `screenshot=true` or run `pulp run --headless --screenshot <png>`;
   both use the same capture contract documented for the CLI. The
   `pulp_screenshot` MCP tool is a demo/script fixture renderer, not a
   live plugin capture API.
-  `pulp_inspect_screenshot` currently returns an explicit unavailable error
-  until host-capture wiring lands. `pulp_inspect_evaluate` is
-  unavailable in normal launches, but an explicitly wired custom fixture can
-  enable it; that
-  opt-in is remote code execution.
   Timeline projects have five native tools:
   `pulp_timeline_project_open`, `pulp_timeline_command_apply`,
   `pulp_timeline_validate`, `pulp_timeline_explain`, and
@@ -98,6 +95,17 @@ The plugin extends Claude Code with:
 If `pulp` is missing when a slash command is invoked, the command
 itself also prints the install command before failing. Pulp CLI is
 always the dependency the plugin sits on top of.
+
+The period after legacy Inspector authority deletion was an intentional
+temporary capability reduction. Phases 4–7 retain the canonical replacement
+work: trusted launch and host adapters, broker-routed typed execution, client
+migration, and shipping proof. The old Inspector mutation, evaluation, and
+screenshot tool names were removed without a read-only alias. Their canonical
+replacements and the disposition of `pulp_create` and fixture-only Motion tools
+are published in the MCP control guide. Trace start/stop and all generated
+broker-authorizable live operations use canonical control and never fall back
+to the legacy transport; registry entries without a broker authority path are
+omitted.
 
 ## Why the split
 

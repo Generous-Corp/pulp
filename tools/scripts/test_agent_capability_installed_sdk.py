@@ -82,6 +82,16 @@ def cache_value(cache: str, name: str) -> str | None:
     return None
 
 
+def combine_flag_values(cached: str | None, instrumentation: str | None) -> str | None:
+    """Combine caller flags with the producer instrumentation contract."""
+    combined = " ".join(
+        value.strip()
+        for value in (cached, instrumentation)
+        if value and value.strip()
+    )
+    return combined or None
+
+
 def find_build_tree_artifact(
     build_dir: pathlib.Path,
     archive_name: str,
@@ -539,6 +549,8 @@ def main() -> int:
     parser.add_argument("--osx-architectures")
     parser.add_argument("--osx-sysroot")
     parser.add_argument("--osx-deployment-target")
+    parser.add_argument("--instrumentation-cxx-flags")
+    parser.add_argument("--instrumentation-linker-flags")
     args = parser.parse_args()
     configuration = args.config or None
     if configuration and not configuration.replace("_", "").isalnum():
@@ -603,7 +615,11 @@ def main() -> int:
     for name in cache_definitions:
         if name in forwarded_definitions:
             continue
-        value = cache_value(cache, name)
+        instrumentation = {
+            "CMAKE_CXX_FLAGS": args.instrumentation_cxx_flags,
+            "CMAKE_EXE_LINKER_FLAGS": args.instrumentation_linker_flags,
+        }.get(name)
+        value = combine_flag_values(cache_value(cache, name), instrumentation)
         if value:
             generator_options.append(f"-D{name}={value}")
             forwarded_definitions.add(name)

@@ -342,6 +342,20 @@ inline void install_standalone_idle_callback(
         std::move(poll_scripted_ui), std::move(poll_settings)));
 }
 
+template <typename ControlHost>
+inline std::function<void()> make_standalone_control_idle_callback(
+    std::function<void()> previous,
+    ControlHost& control_host,
+    view::WindowHost& window) {
+    return [previous = std::move(previous), &control_host, &window] {
+        if (previous)
+            previous();
+        control_host.poll();
+        if (!control_host.ready())
+            window.request_close();
+    };
+}
+
 /// Retire every processor-facing route owned by the standalone editor before
 /// StandaloneApp destroys its Processor. Clearing the host callback prevents
 /// future ticks; retiring the bridge owner also makes an already-dispatched

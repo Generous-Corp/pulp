@@ -1,3 +1,4 @@
+#include <pulp/inspect/control_read_operations.hpp>
 #include <pulp/inspect/control_service.hpp>
 
 #include <choc/text/choc_UTF8.h>
@@ -125,6 +126,7 @@ ControlService::Session::Session(Session&& other) noexcept
     : service_(std::exchange(other.service_, nullptr)),
       broker_(std::exchange(other.broker_, nullptr)), peer_(std::move(other.peer_)),
       client_id_(std::move(other.client_id_)), progress_sink_(std::move(other.progress_sink_)),
+      disconnect_client_on_close_(other.disconnect_client_on_close_),
       negotiated_features_(std::move(other.negotiated_features_)) {}
 
 ControlService::Session& ControlService::Session::operator=(Session&& other) noexcept {
@@ -136,6 +138,7 @@ ControlService::Session& ControlService::Session::operator=(Session&& other) noe
     peer_ = std::move(other.peer_);
     client_id_ = std::move(other.client_id_);
     progress_sink_ = std::move(other.progress_sink_);
+    disconnect_client_on_close_ = other.disconnect_client_on_close_;
     negotiated_features_ = std::move(other.negotiated_features_);
     return *this;
 }
@@ -147,15 +150,18 @@ void ControlService::Session::close() noexcept {
     if (!broker_)
         return;
     auto* broker = std::exchange(broker_, nullptr);
-    (void)broker->disconnect_client(client_id_, peer_, "control-session-disconnect");
+    if (disconnect_client_on_close_)
+        (void)broker->disconnect_client(client_id_, peer_, "control-session-disconnect");
 }
 
 ControlService::Session ControlService::open_session(const VerifiedControlPeerIdentity& peer,
                                                      const ControlClientId& connection_client_id,
-                                                     ProgressSink progress_sink) {
+                                                     ProgressSink progress_sink,
+                                                     bool disconnect_client_on_close) {
     const auto client = broker_.client(connection_client_id);
     const bool accepted = client && client->peer_fingerprint == peer.fingerprint();
-    return Session{*this, peer, connection_client_id, std::move(progress_sink), accepted};
+    return Session{*this, peer, connection_client_id, std::move(progress_sink), accepted,
+                   disconnect_client_on_close};
 }
 
 ControlServiceResult ControlService::Session::dispatch(std::string_view encoded_envelope) {
@@ -296,8 +302,11 @@ ControlServiceResult ControlService::dispatch_request(Session& session,
             .explanation = "artifacts feature was not negotiated",
         };
     }
-    auto admission = executor_ ? broker_.admit_operation(session.peer_, request)
-                               : broker_.replay_operation(session.peer_, request);
+    const bool broker_owned_instance_read =
+        request.operation_id == "dev.pulp.instance/read@1" && request.operation_version == 1;
+    const bool has_executor = broker_owned_instance_read || static_cast<bool>(executor_);
+    auto admission = has_executor ? broker_.admit_operation(session.peer_, request)
+                                  : broker_.replay_operation(session.peer_, request);
     if (admission.receipt && !admission.should_dispatch &&
         (admission.status == ControlAdmissionStatus::Admitted ||
          admission.status == ControlAdmissionStatus::CancelledBeforeDispatch)) {
@@ -306,7 +315,7 @@ ControlServiceResult ControlService::dispatch_request(Session& session,
         // denial would discard the receipt ID needed for correlated replay.
         return receipt_response(*admission.receipt, request.request_id);
     }
-    if (!executor_) {
+    if (!has_executor) {
         if (admission.status == ControlAdmissionStatus::IdempotencyConflict ||
             admission.status == ControlAdmissionStatus::RequestIdConflict ||
             admission.status == ControlAdmissionStatus::ReplayWindowExpired) {
@@ -480,11 +489,25 @@ ControlServiceResult ControlService::dispatch_request(Session& session,
             },
         .complete_deferred =
             [settle](ControlExecutionOutcome outcome) mutable { (void)settle(std::move(outcome)); },
+        .maximum_artifact_bytes = broker_.artifact_maximum_blob_bytes(),
+        .publish_artifact =
+            [completion_owner, peer, plan](std::span<const std::uint8_t> bytes,
+                                           ControlArtifactPublication publication) {
+                std::lock_guard lock(completion_owner->mutex);
+                if (!completion_owner->broker)
+                    return ControlArtifactStoreResult{.status =
+                                                          ControlArtifactStatus::Unauthorized};
+                return completion_owner->broker->store_operation_artifact(
+                    peer, plan, bytes, std::move(publication.content_type), publication.sensitivity,
+                    publication.redaction_state, publication.lifetime);
+            },
     };
 
     ControlExecutionOutcome outcome;
     try {
-        outcome = executor_(plan, request, context);
+        outcome = broker_owned_instance_read
+                      ? execute_control_instance_read(broker_, plan, request, context)
+                      : executor_(plan, request, context);
     } catch (const std::exception& error) {
         outcome.terminal_state = ControlReceiptState::Failed;
         outcome.result = internal_failure(error.what());

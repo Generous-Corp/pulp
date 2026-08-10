@@ -8,6 +8,8 @@
 
 #include "support/thread_progress.hpp"
 
+#include <choc/text/choc_JSON.h>
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -64,9 +66,107 @@ struct ReceivedEnvelope {
         std::unique_lock lock(mutex);
         return ready.wait_for(lock, 2s, [&] { return envelope.has_value(); });
     }
+
+    void clear() {
+        std::lock_guard lock(mutex);
+        envelope.reset();
+    }
 };
 
 #ifdef __APPLE__
+struct HostOpenBroker {
+    InterprocessConnectionServer server;
+    ReceivedEnvelope received;
+    std::mutex mutex;
+    std::condition_variable ready;
+    std::unique_ptr<InterprocessConnection> peer;
+    std::atomic<unsigned> message_count{0};
+    bool disconnected = false;
+
+    bool start(const std::filesystem::path& endpoint) {
+        server.on_client_connected = [&](std::unique_ptr<InterprocessConnection> connection) {
+            connection->set_on_message([&](const void* data, std::size_t size) {
+                message_count.fetch_add(1, std::memory_order_relaxed);
+                received.receive(data, size);
+            });
+            connection->set_on_disconnected([&] {
+                {
+                    std::lock_guard lock(mutex);
+                    disconnected = true;
+                }
+                ready.notify_all();
+            });
+            {
+                std::lock_guard lock(mutex);
+                peer = std::move(connection);
+            }
+            ready.notify_all();
+        };
+        return server.start(endpoint.string(), IpcTransport::LocalSocket);
+    }
+
+    ControlHostOpenEnvelope wait_for_open() {
+        REQUIRE(received.wait());
+        const auto* open = std::get_if<ControlHostOpenEnvelope>(&received.envelope->payload);
+        REQUIRE(open != nullptr);
+        return *open;
+    }
+
+    ControlHostReadyEnvelope wait_for_ready() {
+        REQUIRE(received.wait());
+        const auto* ready = std::get_if<ControlHostReadyEnvelope>(&received.envelope->payload);
+        REQUIRE(ready != nullptr);
+        return *ready;
+    }
+
+    bool send(ControlHostOpenResult result) {
+        std::unique_lock lock(mutex);
+        REQUIRE(ready.wait_for(lock, 2s, [&] { return peer != nullptr; }));
+        auto* connected = peer.get();
+        lock.unlock();
+        return connected->send_message(
+            encode_control_envelope(ControlEnvelope{.payload = std::move(result)}));
+    }
+
+    bool send(ControlHostReadyResult result) {
+        std::unique_lock lock(mutex);
+        REQUIRE(ready.wait_for(lock, 2s, [&] { return peer != nullptr; }));
+        auto* connected = peer.get();
+        lock.unlock();
+        return connected->send_message(
+            encode_control_envelope(ControlEnvelope{.payload = std::move(result)}));
+    }
+
+    bool send_raw(std::string_view bytes) {
+        std::unique_lock lock(mutex);
+        REQUIRE(ready.wait_for(lock, 2s, [&] { return peer != nullptr; }));
+        auto* connected = peer.get();
+        lock.unlock();
+        return connected->send_message(bytes);
+    }
+
+    void drop() {
+        InterprocessConnection* connected = nullptr;
+        {
+            std::lock_guard lock(mutex);
+            connected = peer.get();
+        }
+        if (connected)
+            connected->disconnect();
+    }
+
+    bool wait_for_disconnect() {
+        std::unique_lock lock(mutex);
+        return ready.wait_for(lock, 2s, [&] { return disconnected; });
+    }
+
+    ~HostOpenBroker() {
+        drop();
+        peer.reset();
+        server.stop();
+    }
+};
+
 ControlPeerEvidence observe_current_process(const std::filesystem::path& endpoint,
                                             ControlPeerRole role = ControlPeerRole::Client) {
     InterprocessConnectionServer observer;
@@ -106,6 +206,22 @@ std::int64_t host_deadline() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
                std::chrono::system_clock::now().time_since_epoch() + 2s)
         .count();
+}
+
+ControlHostOpenResult accepted_host_open(std::string request_id,
+                                         std::string registration_id) {
+    return {
+        .request_id = std::move(request_id),
+        .accepted = true,
+        .registration_id = std::move(registration_id),
+        .broker_id = "broker-1",
+        .session_id = "session-1",
+        .instance_id = "instance-1",
+        .publication_id = "publication-1",
+        .instance_generation = "publication-1",
+        .manifest_digest = std::string(64, 'a'),
+        .producer_artifact_digest = std::string(64, 'b'),
+    };
 }
 #endif
 
@@ -172,12 +288,26 @@ TEST_CASE("control endpoint authenticates a host role and routes on the canonica
     const auto broker_evidence =
         observe_current_process(directory.path / "b.sock", ControlPeerRole::TrustedHostBridge);
     ControlBroker broker;
+    ControlManifest manifest;
+    manifest.profile = ControlBuildProfile::DeveloperLocal;
+    manifest.target = "ControlEndpointHostFixture";
+    manifest.product_name = "Control Endpoint Host Fixture";
+    manifest.bundle_id = "dev.pulp.control-endpoint-host-fixture";
+    manifest.build_id = "build:0123456789abcdef0123456789abcdef";
+    manifest.endpoint_included = true;
+    manifest.capabilities = {InspectorCapability::SessionDescribe};
+    const auto registered = broker.register_instance(
+        mint_verified(host_evidence),
+        ControlRegistrationRequest{ControlHostTier::Standalone, "session-1", "instance-1",
+                                   "publication-1", std::move(manifest), std::string(64, 'b')});
+    REQUIRE(registered.registration);
+    const auto registration = *registered.registration;
     ControlHostRouter router;
     ControlService service{broker, router.executor()};
     std::optional<ControlConnectionAdmission> admission{ControlConnectionAdmission{
         .admission_id = "host-admission-1",
         .expected_peer = {.evidence = host_evidence},
-        .principal = ControlHostConnectionPrincipal{ControlRegistrationId{"registration-1"}},
+        .principal = ControlHostConnectionPrincipal{registration.registration_id},
         .expires_at = std::chrono::steady_clock::now() + 1min,
     }};
     ControlEndpoint endpoint{
@@ -196,6 +326,8 @@ TEST_CASE("control endpoint authenticates a host role and routes on the canonica
             .process_generation = 42,
         },
         &router,
+        nullptr,
+        &broker,
     };
     REQUIRE(endpoint.start());
 
@@ -206,9 +338,11 @@ TEST_CASE("control endpoint authenticates a host role and routes on the canonica
         {.endpoint_path = directory.socket, .expected_broker = {.evidence = broker_evidence}},
         [&](const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
             const ControlExecutionContext& context) {
-            CHECK(plan.registration_id == ControlRegistrationId{"registration-1"});
-            CHECK(request.client_id.empty());
-            CHECK(request.grant_id.empty());
+            CHECK(plan.registration_id == registration.registration_id);
+            CHECK_FALSE(plan.client_principal.empty());
+            CHECK_FALSE(request.client_id.empty());
+            CHECK(request.client_id == request.grant_id);
+            CHECK(plan.client_principal != request.client_id);
             const auto execution = execution_count.fetch_add(1);
             if (execution == 0)
                 return ControlExecutionOutcome{
@@ -231,11 +365,26 @@ TEST_CASE("control endpoint authenticates a host role and routes on the canonica
     REQUIRE(host.connect());
     const auto opened = host.open_host("host-admission-1");
     REQUIRE(opened.accepted);
-    CHECK(opened.registration_id == "registration-1");
-    REQUIRE(router.connected(ControlRegistrationId{"registration-1"}));
+    CHECK(opened.registration_id == registration.registration_id.value);
+    CHECK(opened.broker_id == registration.broker_id.value);
+    CHECK(opened.manifest_digest == registration.manifest_digest);
+    REQUIRE(router.connected(registration.registration_id));
 
     ControlAdmissionPlan execution_plan;
-    execution_plan.registration_id = ControlRegistrationId{"registration-1"};
+    execution_plan.broker_id = registration.broker_id;
+    execution_plan.client_principal = "client-principal";
+    execution_plan.client_id = ControlClientId{"client-1"};
+    execution_plan.registration_id = registration.registration_id;
+    execution_plan.grant_id = ControlGrantId{"grant-1"};
+    execution_plan.session_id = registration.session_id;
+    execution_plan.instance_id = registration.instance_id;
+    execution_plan.publication_id = registration.publication_id;
+    execution_plan.instance_generation = registration.publication_id;
+    execution_plan.capability = InspectorCapability::SessionDescribe;
+    execution_plan.operation_id = "session.describe";
+    execution_plan.operation_version = 1;
+    execution_plan.manifest_digest = registration.manifest_digest;
+    execution_plan.producer_artifact_digest = registration.artifact_digest;
     execution_plan.receipt_id = ControlReceiptId{"receipt-1"};
     execution_plan.deadline_unix_ms = host_deadline();
     ControlRequestEnvelope request{.request_id = "request-1",
@@ -285,9 +434,10 @@ TEST_CASE("control endpoint authenticates a host role and routes on the canonica
     });
     for (unsigned attempt = 0; attempt != 100 && !blocked_execution_started.load(); ++attempt)
         std::this_thread::sleep_for(1ms);
-    REQUIRE(blocked_execution_started.load());
+    const bool execution_started = blocked_execution_started.load();
     endpoint.stop();
     release_blocked_execution.store(true);
+    REQUIRE(execution_started);
     REQUIRE(interrupted.wait_for(1s) == std::future_status::ready);
     CHECK(interrupted.get().terminal_state == ControlReceiptState::UnknownNeedsRefresh);
     for (unsigned attempt = 0;
@@ -353,6 +503,121 @@ TEST_CASE("host connection reliably poisons malformed broker input off the reade
     server.stop();
 #else
     SUCCEED("the authenticated control endpoint is currently macOS-only");
+#endif
+}
+
+TEST_CASE("host connection enrollment open validates its exact exchange",
+          "[inspect][control][carrier][host][enrollment][security]") {
+#ifdef __APPLE__
+    EndpointDirectory directory;
+    const auto broker_evidence =
+        observe_current_process(directory.path / "eb.sock", ControlPeerRole::TrustedHostBridge);
+    HostOpenBroker broker;
+    REQUIRE(broker.start(directory.socket));
+    ControlHostConnection host{
+        {.endpoint_path = directory.socket, .expected_broker = {.evidence = broker_evidence}},
+        [](const ControlAdmissionPlan&, const ControlRequestEnvelope&,
+           const ControlExecutionContext&) {
+            return ControlExecutionOutcome{.terminal_state = ControlReceiptState::Completed};
+        }};
+    REQUIRE(host.connect());
+
+    auto result =
+        std::async(std::launch::async, [&] { return host.open_host_enrollment("enrollment-one"); });
+    const auto request = broker.wait_for_open();
+    CHECK(request.admission_id.empty());
+    CHECK(request.enrollment_id == "enrollment-one");
+    REQUIRE(broker.send(
+        accepted_host_open(request.request_id, "broker-minted-registration")));
+    REQUIRE(result.wait_for(2s) == std::future_status::ready);
+    const auto opened = result.get();
+    CHECK(opened.accepted);
+    CHECK(opened.request_id == request.request_id);
+    CHECK(opened.registration_id == "broker-minted-registration");
+    CHECK_FALSE(host.is_host_open());
+
+    broker.received.clear();
+    auto ready_result =
+        std::async(std::launch::async, [&] { return host.mark_executor_ready(); });
+    const auto ready = broker.wait_for_ready();
+    CHECK(ready.registration_id == "broker-minted-registration");
+    REQUIRE(broker.send({.request_id = ready.request_id,
+                         .accepted = true,
+                         .liveness_generation = 1}));
+    REQUIRE(ready_result.wait_for(2s) == std::future_status::ready);
+    CHECK(ready_result.get().accepted);
+    CHECK(host.is_host_open());
+
+    const auto enrollment_replay = host.open_host_enrollment("enrollment-one");
+    CHECK_FALSE(enrollment_replay.accepted);
+    CHECK(enrollment_replay.error_code == "invalid-host-open");
+    const auto cross_mode_replay = host.open_host("admission-one");
+    CHECK_FALSE(cross_mode_replay.accepted);
+    CHECK(cross_mode_replay.error_code == "invalid-host-open");
+    std::this_thread::sleep_for(20ms);
+    CHECK(broker.message_count.load(std::memory_order_relaxed) == 2);
+    host.disconnect();
+#endif
+}
+
+TEST_CASE("host connection enrollment failures poison or close the carrier",
+          "[inspect][control][carrier][host][enrollment][security]") {
+#ifdef __APPLE__
+    const auto run = [](auto respond, std::chrono::milliseconds timeout = 2s) {
+        EndpointDirectory directory;
+        const auto broker_evidence =
+            observe_current_process(directory.path / "fb.sock", ControlPeerRole::TrustedHostBridge);
+        HostOpenBroker broker;
+        REQUIRE(broker.start(directory.socket));
+        ControlHostConnection host{
+            {.endpoint_path = directory.socket, .expected_broker = {.evidence = broker_evidence}},
+            [](const ControlAdmissionPlan&, const ControlRequestEnvelope&,
+               const ControlExecutionContext&) {
+                return ControlExecutionOutcome{.terminal_state = ControlReceiptState::Completed};
+            }};
+        REQUIRE(host.connect());
+        auto result = std::async(std::launch::async,
+                                 [&] { return host.open_host_enrollment("enrollment", timeout); });
+        const auto request = broker.wait_for_open();
+        respond(broker, request);
+        REQUIRE(result.wait_for(2s) == std::future_status::ready);
+        const auto opened = result.get();
+        CHECK_FALSE(opened.accepted);
+        host.disconnect();
+        return std::pair{opened.error_code, host.last_error_code()};
+    };
+
+    SECTION("mismatched request identity") {
+        const auto [result_error, connection_error] =
+            run([](HostOpenBroker& broker, const ControlHostOpenEnvelope& request) {
+                REQUIRE(broker.send(accepted_host_open(request.request_id + "-wrong",
+                                                       "broker-registration")));
+                REQUIRE(broker.wait_for_disconnect());
+            });
+        CHECK(result_error == "unexpected-host-opened");
+        CHECK(connection_error == "unexpected-host-opened");
+    }
+    SECTION("malformed result") {
+        const auto [result_error, connection_error] =
+            run([](HostOpenBroker& broker, const ControlHostOpenEnvelope&) {
+                REQUIRE(broker.send_raw("not-json"));
+                REQUIRE(broker.wait_for_disconnect());
+            });
+        CHECK(result_error == "malformed-host-frame");
+        CHECK(connection_error == "malformed-host-frame");
+    }
+    SECTION("peer disconnect") {
+        const auto [result_error, connection_error] =
+            run([](HostOpenBroker& broker, const ControlHostOpenEnvelope&) { broker.drop(); });
+        CHECK(result_error == "connection-lost");
+        CHECK(connection_error == "connection-lost");
+    }
+    SECTION("timeout") {
+        const auto [result_error, connection_error] =
+            run([](HostOpenBroker&, const ControlHostOpenEnvelope&) {}, 20ms);
+        CHECK(result_error == "timeout");
+        CHECK(connection_error == "timeout");
+    }
 #endif
 }
 
@@ -544,6 +809,197 @@ TEST_CASE("control endpoint serializes one-time admission consumption",
     first.disconnect();
     second.disconnect();
     endpoint.stop();
+#else
+    SUCCEED("the authenticated control endpoint is currently macOS-only");
+#endif
+}
+
+TEST_CASE("control endpoint enrolls an authenticated local client and returns broker inventory",
+          "[inspect][control][carrier][management]") {
+#ifdef __APPLE__
+    EndpointDirectory directory;
+    ControlBroker broker;
+    const auto host_peer = mint_verified(
+        observe_current_process(directory.path / "m.sock", ControlPeerRole::StandaloneHost));
+    ControlManifest manifest;
+    manifest.profile = ControlBuildProfile::DeveloperLocal;
+    manifest.target = "Fixture";
+    manifest.product_name = "Fixture";
+    manifest.bundle_id = "dev.pulp.fixture";
+    manifest.build_id = "build:0123456789abcdef0123456789abcdef";
+    manifest.endpoint_included = true;
+    manifest.capabilities = {InspectorCapability::SessionDescribe, InspectorCapability::StateRead};
+    const auto registered = broker.register_instance(
+        host_peer,
+        ControlRegistrationRequest{ControlHostTier::Standalone, "session-a", "instance-a",
+                                   "publication-a", std::move(manifest), std::string(64, 'a')});
+    REQUIRE(registered.registration.has_value());
+    ControlService service{broker};
+    ControlEndpoint endpoint{
+        service,
+        [](std::string_view) -> std::optional<ControlConnectionAdmission> { return std::nullopt; },
+        {
+            .endpoint_path = directory.socket,
+            .sdk_version = "0.791.0-test",
+            .broker_id = broker.broker_id().value,
+            .process_generation = 42,
+            .authorize_client =
+                [](const ControlPeerEvidence& peer) {
+                    return peer.role == ControlPeerRole::Client;
+                },
+        },
+        nullptr,
+        nullptr,
+        &broker};
+    REQUIRE(endpoint.start());
+
+    ReceivedEnvelope received;
+    InterprocessConnection client;
+    client.set_on_message(
+        [&](const void* data, std::size_t size) { received.receive(data, size); });
+    REQUIRE(client.connect(directory.socket.string(), IpcTransport::LocalSocket, 2s));
+    REQUIRE(client.send_message(encode_control_envelope(
+        ControlEnvelope{.payload = ControlManagementEnvelope{.request_id = "management-enroll",
+                                                             .command = "enroll"}})));
+    REQUIRE(received.wait());
+    const auto* enrolled = std::get_if<ControlManagementResult>(&received.envelope->payload);
+    REQUIRE(enrolled != nullptr);
+    CHECK(enrolled->request_id == "management-enroll");
+    CHECK(enrolled->status_id == "accepted");
+
+    received.clear();
+    REQUIRE(client.send_message(encode_control_envelope(
+        ControlEnvelope{.payload = ControlManagementEnvelope{.request_id = "management-instances",
+                                                             .command = "instances"}})));
+    REQUIRE(received.wait());
+    const auto* inventory = std::get_if<ControlManagementResult>(&received.envelope->payload);
+    REQUIRE(inventory != nullptr);
+    CHECK(inventory->request_id == "management-instances");
+    CHECK(inventory->status_id == "completed");
+    const auto inventory_data = choc::json::parse(inventory->data_json);
+    REQUIRE(inventory_data.isObject());
+    CHECK(inventory_data["schema"].getString() == "pulp.control.instances.v1");
+    CHECK(inventory_data["instances"].size() == 1);
+    CHECK(inventory_data["instances"][0]["instance_id"].getString() == "instance-a");
+
+    received.clear();
+    REQUIRE(client.send_message(encode_control_envelope(ControlEnvelope{
+        .payload = ControlManagementEnvelope{
+            .request_id = "management-grant",
+            .command = "grant-request",
+            .params_json = R"({"instance_id":"instance-a","profile":"inspect-readonly"})"}})));
+    REQUIRE(received.wait());
+    const auto* grant = std::get_if<ControlManagementResult>(&received.envelope->payload);
+    REQUIRE(grant != nullptr);
+    CHECK(grant->request_id == "management-grant");
+    CHECK(grant->status_id == "consent-required");
+
+    client.disconnect();
+    endpoint.stop();
+
+    std::optional<ControlGrantConsentRequest> observed_consent;
+    ControlEndpoint durable_endpoint{
+        service,
+        [](std::string_view) -> std::optional<ControlConnectionAdmission> { return std::nullopt; },
+        {
+            .endpoint_path = directory.socket,
+            .sdk_version = "0.791.0-test",
+            .broker_id = broker.broker_id().value,
+            .process_generation = 43,
+            .authorize_client =
+                [](const ControlPeerEvidence& peer) {
+                    return peer.role == ControlPeerRole::Client;
+                },
+            .durable_client_principal =
+                [](const ControlPeerEvidence&) {
+                    return std::optional{
+                        ControlEndpointConfig::DurableClientPrincipal{
+                            .value = "installed-cli-test-principal",
+                        }};
+                },
+            .decide_consent =
+                [&observed_consent](const ControlGrantConsentRequest& request) {
+                    observed_consent = request;
+                    return ControlConsentDecision{true, ControlConsentAuthority::TrustedHostUi,
+                                                  "trusted-ui-decision-a", {}};
+                },
+        },
+        nullptr,
+        nullptr,
+        &broker};
+    REQUIRE(durable_endpoint.start());
+
+    ReceivedEnvelope first_invocation_received;
+    InterprocessConnection first_invocation;
+    first_invocation.set_on_message([&](const void* data, std::size_t size) {
+        first_invocation_received.receive(data, size);
+    });
+    REQUIRE(first_invocation.connect(directory.socket.string(), IpcTransport::LocalSocket, 2s));
+    REQUIRE(first_invocation.send_message(encode_control_envelope(
+        ControlEnvelope{.payload = ControlManagementEnvelope{.request_id = "durable-enroll-a",
+                                                             .command = "enroll"}})));
+    REQUIRE(first_invocation_received.wait());
+    const auto* durable_enrollment_a =
+        std::get_if<ControlManagementResult>(&first_invocation_received.envelope->payload);
+    REQUIRE(durable_enrollment_a != nullptr);
+    REQUIRE(durable_enrollment_a->status_id == "accepted");
+    const auto durable_enrollment_a_data = choc::json::parse(durable_enrollment_a->data_json);
+    const auto durable_client_id =
+        std::string(durable_enrollment_a_data["client_id"].getString());
+
+    first_invocation_received.clear();
+    REQUIRE(first_invocation.send_message(encode_control_envelope(ControlEnvelope{
+        .payload = ControlManagementEnvelope{
+            .request_id = "durable-grant",
+            .command = "grant-request",
+            .params_json = R"({"instance_id":"instance-a","profile":"inspect-readonly"})"}})));
+    REQUIRE(first_invocation_received.wait());
+    const auto* durable_grant =
+        std::get_if<ControlManagementResult>(&first_invocation_received.envelope->payload);
+    REQUIRE(durable_grant != nullptr);
+    REQUIRE(durable_grant->status_id == "granted");
+    REQUIRE(observed_consent);
+    CHECK(observed_consent->grant.client_id.value == durable_client_id);
+    CHECK(observed_consent->registration.instance_id == "instance-a");
+    CHECK(observed_consent->selector_kind == ControlGrantSelectorKind::Profile);
+    CHECK(observed_consent->selector_id == "inspect-readonly");
+    const auto durable_grant_data = choc::json::parse(durable_grant->data_json);
+    const auto durable_grant_id = std::string(durable_grant_data["grant_id"].getString());
+    first_invocation.disconnect();
+
+    ReceivedEnvelope second_invocation_received;
+    InterprocessConnection second_invocation;
+    second_invocation.set_on_message([&](const void* data, std::size_t size) {
+        second_invocation_received.receive(data, size);
+    });
+    REQUIRE(second_invocation.connect(directory.socket.string(), IpcTransport::LocalSocket, 2s));
+    REQUIRE(second_invocation.send_message(encode_control_envelope(
+        ControlEnvelope{.payload = ControlManagementEnvelope{.request_id = "durable-enroll-b",
+                                                             .command = "enroll"}})));
+    REQUIRE(second_invocation_received.wait());
+    const auto* durable_enrollment_b =
+        std::get_if<ControlManagementResult>(&second_invocation_received.envelope->payload);
+    REQUIRE(durable_enrollment_b != nullptr);
+    REQUIRE(durable_enrollment_b->status_id == "accepted");
+    const auto durable_enrollment_b_data = choc::json::parse(durable_enrollment_b->data_json);
+    CHECK(durable_enrollment_b_data["client_id"].getString() == durable_client_id);
+
+    second_invocation_received.clear();
+    auto revoke_params = choc::value::createObject("");
+    revoke_params.addMember("grant_id", choc::value::createString(durable_grant_id));
+    REQUIRE(second_invocation.send_message(encode_control_envelope(ControlEnvelope{
+        .payload = ControlManagementEnvelope{
+            .request_id = "durable-revoke",
+            .command = "revoke",
+            .params_json = choc::json::toString(revoke_params, false)}})));
+    REQUIRE(second_invocation_received.wait());
+    const auto* durable_revoke =
+        std::get_if<ControlManagementResult>(&second_invocation_received.envelope->payload);
+    REQUIRE(durable_revoke != nullptr);
+    CHECK(durable_revoke->status_id == "revoked");
+
+    second_invocation.disconnect();
+    durable_endpoint.stop();
 #else
     SUCCEED("the authenticated control endpoint is currently macOS-only");
 #endif

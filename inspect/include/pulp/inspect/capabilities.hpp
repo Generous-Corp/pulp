@@ -59,6 +59,7 @@ enum class InspectorExecutor : std::uint8_t {
     HostMain,
     Background,
     RuntimeEvaluator,
+    OfflineJob,
 };
 
 enum class InspectorEvidence : std::uint8_t {

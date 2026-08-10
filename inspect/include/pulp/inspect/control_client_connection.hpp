@@ -15,6 +15,10 @@ namespace pulp::inspect {
 struct ControlClientConnectionConfig {
     std::filesystem::path endpoint_path;
     ControlPeerExpectation expected_broker;
+    /// Optional installed-binary trust anchor. Used when no exact live peer
+    /// expectation has been preissued; the carrier still verifies the
+    /// kernel-observed peer against this signed executable before any request.
+    std::filesystem::path expected_broker_executable;
     std::chrono::milliseconds connect_timeout = std::chrono::seconds(3);
     std::chrono::milliseconds write_timeout = std::chrono::seconds(3);
     std::chrono::milliseconds frame_read_timeout = std::chrono::seconds(3);
@@ -40,6 +44,8 @@ class ControlClientConnection final : public ControlClientTransport {
     ControlSessionOpenResult
     open_session(std::string_view admission_id,
                  std::chrono::milliseconds timeout = std::chrono::seconds(3));
+    ControlManagementResult manage(std::string_view command, std::string_view params_json = "{}",
+                                   std::chrono::milliseconds timeout = std::chrono::seconds(3));
     void disconnect() noexcept;
 
     bool is_connected() const;

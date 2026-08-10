@@ -1,9 +1,8 @@
 # Capability control threat model
 
 This document defines the security boundary for Pulp's local capability-control
-platform. It applies to Product A control sessions and the shared primitives a
-future Product B collaboration router may reuse. It does not claim that an
-arbitrary native audio plugin is sandboxed merely because its Pulp control
+platform. It applies only to Product A control sessions. It does not claim that
+an arbitrary native audio plugin is sandboxed merely because its Pulp control
 surface is capability-controlled.
 
 ## Security goals
@@ -21,8 +20,8 @@ surface is capability-controlled.
   nor raw peer addresses, sockets, or generic message escape hatches.
 - Production-stripped artifacts contain no Product A endpoint or legacy Remote
   View parameter authority.
-- Denial is explainable without logging secret values, parameter payloads,
-  captured content, or collaboration message bodies.
+- Denial is explainable without logging secret values, parameter payloads, or
+  captured content.
 
 An operation is allowed only when all seven terms are true:
 
@@ -50,8 +49,7 @@ The broker and its owner-private persistent state are trusted. The CLI and MCP
 adapter are separate clients; neither may self-issue grants. A Pulp-owned host
 bridge is trusted only for the exact host process and slots it attests. Plugin
 code, plugin UI code, imported content, remote renderers, MCP request text,
-project files, presets, collaboration payloads, and third-party host processes
-are untrusted inputs.
+project files, presets, and third-party host processes are untrusted inputs.
 
 The v1 broker is local-only. Loopback is defense in depth, not identity. OS peer
 credentials, owner-private bootstrap material, mutual authentication, exact
@@ -62,7 +60,7 @@ establish what it is and what it may do.
 Shared-process plugins are not meaningfully identified by process signing
 alone. A trusted host bridge must attest the verified artifact publisher and
 exact loaded slot. If a host tier cannot supply that evidence, capability
-control and collaboration are unavailable there.
+control is unavailable there.
 
 ## Implemented foundation and current boundary
 
@@ -111,17 +109,17 @@ to consume its active-operation quota until the deferred completion settles it.
 Progress is monotonically sequenced, bounded, and backpressured. Grant, client,
 and instance teardown request cancellation for affected live receipts.
 
-Phase 3b caps each artifact's readable lifetime at 24 hours and contains only
-the minimal broker artifact store needed by later
-adapters. It durably publishes each bounded blob before opaque lineage metadata,
+The broker artifact system caps each artifact's readable lifetime, total and
+per-client storage/count, and individual blob/chunk size. It durably publishes
+each bounded blob before opaque lineage metadata,
 and a terminal receipt may name only an already-published artifact with matching
 producer lineage. Broker-mediated retrieval rechecks the original producer
 grant, peer, client, registration, session, instance, publication, operation,
 terminal receipt, content metadata, and expiry. A new grant cannot inherit old
-artifact access. This is not the Phase 7 artifact system: there is no aggregate
-artifact quota, retention collector, deletion audit, redaction transform, or
-generalized ACL policy yet. Expiry removes publication metadata lazily; shared
-content-addressed blobs may remain orphaned until the Phase 7 collector exists.
+artifact access. Expiry, crash/orphan recovery, and partial-write cleanup are
+bounded; deletion audit records metadata and reason codes without captured
+content. Redaction state is explicit and broker ACL checks are re-applied on
+every read. Shared content-addressed storage does not weaken producer lineage.
 
 Owner-private directories and files exclude other OS users, but they do not
 provide at-rest secrecy from another malicious process running as the same OS
@@ -129,6 +127,20 @@ user. Such a process may be able to read the store directly if it discovers the
 path. The lineage and grant checks above are guarantees of the broker API, not
 encryption or a same-UID filesystem sandbox. The security audit remains bounded
 to metadata and reason codes rather than operation or artifact contents.
+
+The trusted raw-host launcher likewise treats capability authority, rather than
+same-UID native-code execution, as its security boundary. It snapshots the exact
+main executable, manifest, and adjacent native runtime closure into broker-owned
+storage. On macOS it starts the main executable suspended and verifies that exact
+live code object before child code runs. After resume, dyld may run initializers,
+but the child still has no enrollment or bootstrap authority. The preflight
+provider revalidates every staged byte and signature, enumerates the child's
+file-backed executable mappings, requires the pinned main executable and every
+pinned dependency to be present with the same vnode identity, and rejects every
+unexpected non-system executable image before releasing bootstrap material.
+Team-signed production closures additionally require library validation and one
+Team ID. Ad-hoc developer-local closures have no shared Team ID and rely on the
+exact snapshot plus the same live-closure gate.
 
 The first broker-carrier slice extends the existing length-prefixed IPC stack
 with an OS-local stream; it does not introduce a second framing protocol. Its
@@ -160,47 +172,42 @@ environment-delivered bootstrap credentials remain rejected.
 | Confused deputy asks a trusted client to control another instance | Exact session/instance/publication selection; client-scoped grants; capability and operation binding; no newest-instance fallback |
 | PID reuse, restart, stale project intent, or stale grant | Kernel-origin process generation where available, process-start recheck across code-signature inspection, opaque publication IDs, heartbeat/expiry, disconnect revocation; restore creates fresh grants only after revalidation |
 | Malicious plugin claims another publisher, slot, service, or capability | Signed artifact/declaration verification plus trusted host slot attestation; manifest is only an upper bound; broker rejects self-asserted identity |
-| Compromised or over-broad client | Least-privilege client grants, controller leases, expiry, explicit revocation, per-operation input/output schemas, idempotency keys, bounded receipts, and exact original-lineage checks on broker-mediated artifact reads; generalized artifact ACL policy remains Phase 7 |
+| Compromised or over-broad client | Least-privilege client grants, controller leases, expiry, explicit revocation, per-operation input/output schemas, idempotency keys, bounded receipts, and exact original-lineage checks on every broker-mediated artifact read |
 | Plugin or client bypasses policy with raw transport | No generic message or peer socket SDK; one broker transport; generated typed bindings; legacy Remote View mutation removed; raw host/port authority deleted by the broker migration |
-| Artifact or private-data exfiltration | Phase 3b uses opaque handles, exact producer lineage, original-grant reauthorization, per-blob/chunk limits, and metadata-only audit, but makes no same-UID at-rest secrecy claim; aggregate quota, retention collection, redaction, and deletion audit remain Phase 7 |
+| Artifact or private-data exfiltration | Opaque handles, exact producer lineage, original-grant reauthorization, per-blob/chunk and aggregate quotas, bounded retention/collection, explicit redaction state, and content-free deletion audit; no same-UID at-rest secrecy claim |
 | Runtime evaluation becomes a mutation shortcut | Separate high-risk component and capability, `research-unsafe` profile, exact acknowledgement, dedicated evaluator, realm and size/time limits; never an implementation path for typed operations |
-| Denial of service against broker, host, or audio thread | Bounded clients, frames, queues, rates, subscriptions, jobs, receipts, and per-blob/chunk artifact sizes; timeouts, cancellation, and expiry; no JSON/network work on the audio thread; aggregate artifact quota and collection remain Phase 7 |
+| Denial of service against broker, host, or audio thread | Bounded clients, frames, queues, rates, subscriptions, jobs, receipts, per-blob/chunk and aggregate artifact sizes/counts; timeouts, cancellation, expiry, and orphan/partial cleanup; no JSON/network work on the audio thread |
 | Grant revoked while work is queued or executing | Admission and pre-apply revalidation, cancellable staged operations, truthful `mayHaveApplied`/receipt state, no automatic retry of ambiguous mutation |
 | Schema downgrade or scope smuggling | Namespaced versioned IDs, canonical serialization and digest, unknown-field rejection, no permissive downgrade, explicit manifest changes for new fields/directions/rates |
 | Removed build authority survives reconfiguration | Per-target profile, capability, and unsafe-evaluation declarations force-refresh on every configure; a two-configure regression proves critical authority is withdrawn without deleting the build tree |
 | Artifact changes between discovery and verification | One cached byte snapshot per candidate drives selection, surface detection, marker verification, hashing, and consent identity; sidecar-derived names must remain safe basenames beside the sidecar; artifact and sidecar symlinks are rejected rather than followed |
+| Raw host or runtime dependency changes between selection and launch | Broker-owned exact-byte closure snapshot; suspended exact-main verification; no authority before preflight; staged-byte/signature revalidation; exact live main/dependency vnode closure; unexpected non-system executable mappings rejected; Team-signed closures require library validation and one Team ID |
 | Empty identity, malformed UTF-8/JSON, or oversized typed payload bypasses policy accounting | Required identity and idempotency strings are nonempty; every schema string and collection is bounded; the decoder validates UTF-8 and complete string tokens before the JSON parser; discriminated operations use closed request variants; executor-specific limits are frozen in the registry, including byte-based UTF-8 limits that JSON Schema character counts cannot express |
 | Update installs a second or untrusted broker | One active Pulp-owned per-user service, one signed update/bootstrap path, version negotiation, old service drain and credential invalidation |
-| Cross-vendor route appears from compatibility alone | Compatibility only makes a route offer possible; user/publisher policy and a visible integration action admit it; paired revocable grants are issued only after both exact endpoints are revalidated |
-| A blocked publisher communicates through another allowed route | Publisher deny policy wins before route creation and on restore/reconnect; active routes are inspectable and revoked when policy changes |
 
 ## Consent and policy defaults
 
-Product behavior should be permissive enough for useful integrations without
-making installation consent. Cross-vendor support may be enabled globally, but
-no actual route exists until a visible integration action. Publisher policy has
-three simple states: `use-default`, `always-ask`, and `block-integrations`.
-Blocks always win. A user may allow same-publisher integrations, allow most
-cross-vendor integrations while blocking one publisher, inspect active routes,
-and revoke them at any time.
-
-Routine messages, reconnects, and compatible patch versions do not prompt.
-Publisher changes, service/schema incompatibility, new data fields or direction,
-higher rate/budget, or any other material scope expansion require a new decision.
-Project files store inert route intent, never credentials or durable grants.
+Consent is scoped to one Product A client, target, publication, and live
+session. It never creates a plugin-to-plugin or cross-publisher route: Pulp has
+no such route, policy state, integration action, or paired grant. Project files
+store no broker credential or durable grant.
 
 ## Explicit non-claims
 
 - Product A does not prevent arbitrary native plugin code from accessing files,
   the network, or other process resources allowed by its host and OS sandbox.
+- Product A is not a same-UID native-code sandbox. A malicious process already
+  running as the host user can execute or deny service outside the broker, and a
+  selected raw host's initializers may run before preflight; neither receives
+  capability authority until the exact live runtime closure passes verification.
 - OSC UDP is a separate opt-in network control product and is reported, not
   silently claimed as protected by Product A.
 - Loopback does not make an unauthenticated endpoint safe.
 - Code signing alone does not identify one plugin slot in a shared DAW process.
 - An MCP tool list, a build type, an environment variable, a compatible schema,
   or a discovered peer is not authorization.
-- Product B is not approved merely because the shared identity and policy
-  primitives exist; its design and pilot gates remain separate.
+- Plugin-to-plugin transport is deliberately out of scope. See the accepted
+  [collaboration NO-GO](plugin-collaboration.md) for the only reopen path.
 
 ## Verification gates
 
@@ -209,13 +216,17 @@ permission-term denial, identity forgery and reuse, replay, grant expiry and
 revocation, cancellation races, original-lineage artifact authorization,
 queue/rate limits, broker restart/update, incremental reconfiguration, path
 traversal, immutable artifact snapshot use, schema boundary values, and negative
-binary scans. Phase 7 separately adds aggregate artifact quota, retention,
-redaction, deletion-audit, and generalized ACL tests. The dedicated
+binary scans, aggregate artifact quota/retention/redaction/deletion-audit,
+orphan/partial cleanup, and generalized ACL tests. The dedicated
 platform-sandbox review is accepted with binding T0/T1-only restrictions. It
 rejects direct AUv3 access, self-attested shared-host slots, plugin-rendered
 consent, and environment bootstrap credentials. Any later host tier must close
 its own reachability, trusted-consent ownership, legal completion,
 bootstrap-delivery, and missing-attestation gates before gaining authority.
+Raw-host changes additionally require suspended-main acceptance and rejection,
+launch-material tamper rejection, a positive pinned native-dependency closure,
+and rejection of missing, changed, or unexpected non-system executable images
+before bootstrap authority is released.
 
 Security reviews and host feasibility decisions are durable planning records.
 User-facing artifact checks use `pulp inspect audit ARTIFACT`; that command is

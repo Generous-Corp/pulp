@@ -121,7 +121,7 @@ catch_discover_tests(pulp-test-control-identity
 add_executable(pulp-test-control-peer test_control_peer.cpp)
 target_link_libraries(pulp-test-control-peer PRIVATE
     pulp::inspect-control Catch2::Catch2WithMain)
-if(APPLE)
+if(APPLE AND NOT IOS AND NOT PULP_IOS)
     find_program(_pulp_test_codesign codesign REQUIRED)
     # Apple Silicon's linker emits an ad-hoc signature for native executables,
     # but a cross-built x86_64 test binary may be unsigned. This security test
@@ -150,11 +150,197 @@ endif()
 catch_discover_tests(pulp-test-control-endpoint
     PROPERTIES LABELS "inspect;control;carrier")
 
+add_executable(pulp-test-control-connection-admission
+    test_control_connection_admission.cpp)
+target_link_libraries(pulp-test-control-connection-admission PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-connection-admission
+    PROPERTIES LABELS "inspect;control;carrier;admission;security")
+
+add_executable(pulp-control-trusted-host-fixture
+    control_trusted_host_fixture.cpp)
+add_executable(pulp-test-control-trusted-host-inventory
+    test_control_trusted_host_inventory.cpp)
+target_link_libraries(pulp-test-control-trusted-host-inventory PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+target_include_directories(pulp-test-control-trusted-host-inventory PRIVATE
+    ${CMAKE_SOURCE_DIR}/inspect/src)
+target_compile_definitions(pulp-test-control-trusted-host-inventory PRIVATE
+    PULP_CONTROL_TRUSTED_HOST_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-fixture>"
+    PULP_CONTROL_HOST_PREFLIGHT_FIXTURE="$<TARGET_FILE:pulp-control-host-preflight-fixture>")
+add_dependencies(pulp-test-control-trusted-host-inventory
+    pulp-control-trusted-host-fixture
+    pulp-control-host-preflight-fixture)
+
+add_executable(pulp-test-control-host-enrollment
+    test_control_host_enrollment.cpp)
+target_link_libraries(pulp-test-control-host-enrollment PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-control-host-enrollment PRIVATE
+    PULP_CONTROL_TRUSTED_HOST_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-fixture>")
+add_dependencies(pulp-test-control-host-enrollment
+    pulp-control-trusted-host-fixture)
+catch_discover_tests(pulp-test-control-host-enrollment
+    PROPERTIES LABELS "inspect;control;enrollment;security")
+
+add_executable(pulp-test-control-endpoint-enrollment
+    test_control_endpoint_enrollment.cpp)
+add_executable(pulp-control-enrollment-host-fixture
+    control_enrollment_host_fixture.cpp)
+target_link_libraries(pulp-control-enrollment-host-fixture PRIVATE
+    pulp::inspect-control)
+if(APPLE)
+    target_link_options(pulp-control-enrollment-host-fixture PRIVATE LINKER:-dead_strip)
+endif()
+target_link_libraries(pulp-test-control-endpoint-enrollment PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-control-endpoint-enrollment PRIVATE
+    PULP_CONTROL_ENROLLMENT_HOST_FIXTURE="$<TARGET_FILE:pulp-control-enrollment-host-fixture>")
+add_dependencies(pulp-test-control-endpoint-enrollment
+    pulp-control-enrollment-host-fixture)
+if(APPLE)
+    find_program(_pulp_endpoint_enrollment_codesign codesign REQUIRED)
+    add_custom_command(TARGET pulp-control-enrollment-host-fixture POST_BUILD
+        COMMAND "${_pulp_endpoint_enrollment_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-control-enrollment-host-fixture>"
+        COMMENT "Ad-hoc signing control enrollment host fixture"
+        VERBATIM)
+    add_custom_command(TARGET pulp-test-control-endpoint-enrollment POST_BUILD
+        COMMAND "${_pulp_endpoint_enrollment_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-test-control-endpoint-enrollment>"
+        COMMENT "Ad-hoc signing control endpoint enrollment test fixture"
+        VERBATIM)
+endif()
+catch_discover_tests(pulp-test-control-endpoint-enrollment
+    PROPERTIES LABELS "inspect;control;carrier;enrollment;security")
+if(APPLE)
+    find_program(_pulp_inventory_test_codesign codesign REQUIRED)
+    add_custom_command(TARGET pulp-control-trusted-host-fixture POST_BUILD
+        COMMAND "${_pulp_inventory_test_codesign}" --force --sign - --options runtime
+                "$<TARGET_FILE:pulp-control-trusted-host-fixture>"
+        COMMENT "Ad-hoc hardened-runtime signing trusted host inventory fixture"
+        VERBATIM)
+endif()
+catch_discover_tests(pulp-test-control-trusted-host-inventory
+    PROPERTIES LABELS "inspect;control;inventory;security")
+
+add_executable(pulp-control-trusted-host-e2e-fixture
+    fixtures/control_trusted_host_e2e_fixture.cpp)
+target_link_libraries(pulp-control-trusted-host-e2e-fixture PRIVATE
+    pulp::inspect-runtime)
+add_executable(pulp-test-control-trusted-host-e2e
+    test_control_trusted_host_e2e.cpp)
+target_link_libraries(pulp-test-control-trusted-host-e2e PRIVATE
+    pulp::inspect-client Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-control-trusted-host-e2e PRIVATE
+    PULP_CONTROL_TRUSTED_HOST_E2E_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-e2e-fixture>")
+add_dependencies(pulp-test-control-trusted-host-e2e
+    pulp-control-trusted-host-e2e-fixture)
+if(APPLE)
+    target_link_options(pulp-control-trusted-host-e2e-fixture PRIVATE LINKER:-dead_strip)
+    find_program(_pulp_trusted_host_e2e_codesign codesign REQUIRED)
+    add_custom_command(TARGET pulp-control-trusted-host-e2e-fixture POST_BUILD
+        COMMAND "${_pulp_trusted_host_e2e_codesign}" --force --sign - --options library
+                "$<TARGET_FILE:pulp-control-trusted-host-e2e-fixture>"
+        COMMENT "Ad-hoc signing raw trusted host E2E fixture"
+        VERBATIM)
+    add_custom_command(TARGET pulp-test-control-trusted-host-e2e POST_BUILD
+        COMMAND "${_pulp_trusted_host_e2e_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-test-control-trusted-host-e2e>"
+        COMMENT "Ad-hoc signing raw trusted host E2E test"
+        VERBATIM)
+endif()
+catch_discover_tests(pulp-test-control-trusted-host-e2e
+    PROPERTIES LABELS "inspect;control;e2e;t1;security")
+
+if(TARGET pulp::inspect)
+    add_executable(pulp-control-installed-host-e2e-fixture
+        fixtures/control_installed_host_e2e_fixture.cpp)
+    target_link_libraries(pulp-control-installed-host-e2e-fixture PRIVATE pulp::inspect)
+    pulp_stage_runtime_dependencies(pulp-control-installed-host-e2e-fixture)
+    target_compile_definitions(pulp-test-control-trusted-host-e2e PRIVATE
+        PULP_CONTROL_INSTALLED_HOST_E2E_FIXTURE="$<TARGET_FILE:pulp-control-installed-host-e2e-fixture>")
+    add_dependencies(pulp-test-control-trusted-host-e2e pulp-control-installed-host-e2e-fixture)
+    if(APPLE)
+        target_link_options(pulp-control-installed-host-e2e-fixture PRIVATE LINKER:-dead_strip)
+        add_custom_command(TARGET pulp-control-installed-host-e2e-fixture POST_BUILD
+            COMMAND "${_pulp_trusted_host_e2e_codesign}" --force --sign -
+                    "$<TARGET_FILE:pulp-control-installed-host-e2e-fixture>"
+            COMMENT "Ad-hoc signing installed host closure E2E fixture"
+            VERBATIM)
+    endif()
+endif()
+
 add_executable(pulp-test-control-host-router test_control_host_router.cpp)
 target_link_libraries(pulp-test-control-host-router PRIVATE
     pulp::inspect-control Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-control-host-router
     PROPERTIES LABELS "inspect;control;host;router")
+
+add_executable(pulp-test-control-executor-slot test_control_executor_slot.cpp)
+target_link_libraries(pulp-test-control-executor-slot PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-executor-slot
+    PROPERTIES LABELS "inspect;control;host;executor;slot")
+
+add_executable(pulp-control-host-bootstrap-fixture
+    fixtures/control_host_bootstrap_fixture.cpp)
+target_link_libraries(pulp-control-host-bootstrap-fixture PRIVATE
+    pulp::inspect-control)
+
+add_executable(pulp-test-control-host-bootstrap
+    test_control_host_bootstrap.cpp)
+target_compile_definitions(pulp-test-control-host-bootstrap PRIVATE
+    PULP_CONTROL_HOST_BOOTSTRAP_FIXTURE="$<TARGET_FILE:pulp-control-host-bootstrap-fixture>")
+target_link_libraries(pulp-test-control-host-bootstrap PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+add_dependencies(pulp-test-control-host-bootstrap pulp-control-host-bootstrap-fixture)
+if(APPLE)
+    find_program(_pulp_bootstrap_test_codesign codesign REQUIRED)
+    add_custom_command(TARGET pulp-test-control-host-bootstrap POST_BUILD
+        COMMAND "${_pulp_bootstrap_test_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-test-control-host-bootstrap>"
+        COMMENT "Ad-hoc signing control host bootstrap test fixture"
+        VERBATIM)
+    add_custom_command(TARGET pulp-control-host-bootstrap-fixture POST_BUILD
+        COMMAND "${_pulp_bootstrap_test_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-control-host-bootstrap-fixture>"
+        COMMENT "Ad-hoc signing control host bootstrap child fixture"
+        VERBATIM)
+endif()
+catch_discover_tests(pulp-test-control-host-bootstrap
+    PROPERTIES LABELS "inspect;control;host;bootstrap;security")
+
+add_executable(pulp-control-host-preflight-fixture
+    fixtures/control_host_preflight_fixture.cpp)
+target_link_libraries(pulp-control-host-preflight-fixture PRIVATE
+    pulp::inspect-control)
+if(APPLE)
+    target_link_options(pulp-control-host-preflight-fixture PRIVATE LINKER:-dead_strip)
+endif()
+
+add_executable(pulp-test-control-host-preflight
+    test_control_host_preflight.cpp)
+target_compile_definitions(pulp-test-control-host-preflight PRIVATE
+    PULP_CONTROL_HOST_PREFLIGHT_FIXTURE="$<TARGET_FILE:pulp-control-host-preflight-fixture>")
+target_link_libraries(pulp-test-control-host-preflight PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+add_dependencies(pulp-test-control-host-preflight pulp-control-host-preflight-fixture)
+if(APPLE)
+    find_program(_pulp_preflight_test_codesign codesign REQUIRED)
+    add_custom_command(TARGET pulp-test-control-host-preflight POST_BUILD
+        COMMAND "${_pulp_preflight_test_codesign}" --force --sign - --options library
+                "$<TARGET_FILE:pulp-test-control-host-preflight>"
+        COMMENT "Ad-hoc signing control host preflight test fixture"
+        VERBATIM)
+    add_custom_command(TARGET pulp-control-host-preflight-fixture POST_BUILD
+        COMMAND "${_pulp_preflight_test_codesign}" --force --sign - --options library
+                "$<TARGET_FILE:pulp-control-host-preflight-fixture>"
+        COMMENT "Ad-hoc signing control host preflight child fixture"
+        VERBATIM)
+endif()
+catch_discover_tests(pulp-test-control-host-preflight
+    PROPERTIES LABELS "inspect;control;host;preflight;security")
 
 add_executable(pulp-test-control-carrier test_control_carrier.cpp)
 target_link_libraries(pulp-test-control-carrier PRIVATE
@@ -163,18 +349,54 @@ catch_discover_tests(pulp-test-control-carrier
     PROPERTIES LABELS "inspect;control;carrier;security")
 
 if(APPLE AND NOT IOS AND NOT PULP_IOS)
+    add_executable(pulp-control-broker-crash-fixture
+        fixtures/control_broker_crash_fixture.cpp
+        ${CMAKE_SOURCE_DIR}/inspect/src/control_broker_daemon.cpp)
+    target_include_directories(pulp-control-broker-crash-fixture PRIVATE
+        ${CMAKE_SOURCE_DIR}/inspect/src)
+    target_link_libraries(pulp-control-broker-crash-fixture PRIVATE
+        pulp::inspect-control)
     add_executable(pulp-test-control-broker-daemon
         test_control_broker_daemon.cpp
         ${CMAKE_SOURCE_DIR}/inspect/src/control_broker_daemon.cpp)
     target_include_directories(pulp-test-control-broker-daemon PRIVATE
         ${CMAKE_SOURCE_DIR}/inspect/src)
     target_link_libraries(pulp-test-control-broker-daemon PRIVATE
-        pulp::inspect-control Catch2::Catch2WithMain)
+        pulp::inspect-client Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-control-broker-daemon PRIVATE
+        PULP_CONTROL_TRUSTED_HOST_E2E_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-e2e-fixture>"
+        PULP_CONTROL_BROKER_DAEMON="$<TARGET_FILE:pulp-control-broker>"
+        PULP_CONTROL_BROKER_CRASH_FIXTURE="$<TARGET_FILE:pulp-control-broker-crash-fixture>")
+    add_dependencies(pulp-test-control-broker-daemon
+        pulp-control-trusted-host-e2e-fixture pulp-control-broker
+        pulp-control-broker-crash-fixture)
+    find_program(_pulp_daemon_test_codesign codesign REQUIRED)
+    add_custom_command(TARGET pulp-test-control-broker-daemon POST_BUILD
+        COMMAND "${_pulp_daemon_test_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-test-control-broker-daemon>"
+        COMMAND "${CMAKE_COMMAND}" -E copy
+                "$<TARGET_FILE:pulp-test-control-broker-daemon>"
+                "$<TARGET_FILE_DIR:pulp-test-control-broker-daemon>/pulp"
+        COMMAND "${CMAKE_COMMAND}" -E copy
+                "$<TARGET_FILE:pulp-test-control-broker-daemon>"
+                "$<TARGET_FILE_DIR:pulp-control-broker>/pulp"
+        COMMENT "Ad-hoc signing control broker daemon test"
+        VERBATIM)
+    add_custom_command(TARGET pulp-control-broker-crash-fixture POST_BUILD
+        COMMAND "${_pulp_daemon_test_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-control-broker-crash-fixture>"
+        COMMENT "Ad-hoc signing control broker crash fixture"
+        VERBATIM)
     catch_discover_tests(pulp-test-control-broker-daemon
         PROPERTIES LABELS "inspect;control;carrier;daemon")
+    add_custom_target(pulp-test-control-installed-author-full-parity-e2e
+        DEPENDS pulp-test-control-broker-daemon)
+
 endif()
 
-add_executable(pulp-test-control-grants test_control_grants.cpp)
+add_executable(pulp-test-control-grants
+    test_control_grants.cpp
+    test_control_consent_authority.cpp)
 target_link_libraries(pulp-test-control-grants PRIVATE
     pulp::inspect-control Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-control-grants
@@ -206,9 +428,24 @@ catch_discover_tests(pulp-test-control-artifacts
 
 add_executable(pulp-test-control-service test_control_service.cpp)
 target_link_libraries(pulp-test-control-service PRIVATE
-    pulp::inspect-control pulp::inspect-client Catch2::Catch2WithMain)
+    pulp::inspect-control pulp::inspect-client pulp::inspect-observability-runtime
+    Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-control-service
     PROPERTIES LABELS "inspect;control;service;client")
+
+add_executable(pulp-test-control-offline-render-executor
+    test_control_offline_render_executor.cpp)
+target_link_libraries(pulp-test-control-offline-render-executor PRIVATE
+    pulp::inspect-offline-runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-offline-render-executor
+    PROPERTIES LABELS "inspect;control;offline;t0;artifact")
+
+add_executable(pulp-test-control-read-operations
+    test_control_read_operations.cpp)
+target_link_libraries(pulp-test-control-read-operations PRIVATE
+    pulp::inspect-runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-read-operations
+    PROPERTIES LABELS "inspect;control;read;t0;t1;state")
 
 add_executable(pulp-test-control-client-connection
     test_control_client_connection.cpp)
@@ -239,12 +476,33 @@ endif()
 catch_discover_tests(pulp-test-control-health
     PROPERTIES LABELS "inspect;control;carrier;health")
 
+add_executable(pulp-test-control-inspector-client
+    test_control_inspector_client.cpp)
+target_link_libraries(pulp-test-control-inspector-client PRIVATE
+    pulp::inspect-client Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-inspector-client
+    PROPERTIES LABELS "inspect;control;client;trace")
+
 add_executable(pulp-test-control-main-thread-executor
     test_control_main_thread_executor.cpp)
 target_link_libraries(pulp-test-control-main-thread-executor PRIVATE
     pulp::inspect-runtime pulp::inspect-control Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-control-main-thread-executor
     PROPERTIES LABELS "inspect;control;main-thread;executor")
+
+add_executable(pulp-test-control-state-write-executor
+    test_control_state_write_executor.cpp)
+target_link_libraries(pulp-test-control-state-write-executor PRIVATE
+    pulp::inspect-runtime pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-state-write-executor
+    PROPERTIES LABELS "inspect;control;main-thread;mutation;t1;t2a")
+
+add_executable(pulp-test-control-trace-session-executor
+    test_control_trace_session_executor.cpp)
+target_link_libraries(pulp-test-control-trace-session-executor PRIVATE
+    pulp::inspect-runtime pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-trace-session-executor
+    PROPERTIES LABELS "inspect;control;main-thread;trace")
 
 add_executable(pulp-test-inspector-audit
     test_inspector_audit.cpp
@@ -255,47 +513,40 @@ target_link_libraries(pulp-test-inspector-audit PRIVATE
 catch_discover_tests(pulp-test-inspector-audit
     PROPERTIES LABELS "inspect;control;main-thread;timeout")
 
-add_executable(pulp-test-inspector-server
-    test_inspector_server.cpp
-    unsafe_legacy_inspector_server.cpp)
-target_link_libraries(pulp-test-inspector-server PRIVATE
-    pulp::inspect-protocol pulp::events Catch2::Catch2WithMain)
-if(WIN32)
-    catch_discover_tests(pulp-test-inspector-server
-        PROPERTIES
-            ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1"
-            LABELS "windows-pr-quarantine")
-else()
-    catch_discover_tests(pulp-test-inspector-server
-        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
-endif()
-
-add_executable(pulp-test-inspector-discovery test_inspector_discovery.cpp)
-target_link_libraries(pulp-test-inspector-discovery PRIVATE
-    pulp::inspect-discovery
-    pulp::inspect-publication
-    Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-inspector-discovery)
-
-add_executable(
-    pulp-test-inspector-client
-    test_inspector_client.cpp
-    test_inspector_server_async_lifecycle.cpp
-    test_inspector_server_lifecycle.cpp
-    test_inspector_client_limits.cpp
-)
-target_link_libraries(pulp-test-inspector-client PRIVATE
-    pulp::inspect-client pulp::inspect-runtime Catch2::Catch2WithMain)
-target_include_directories(pulp-test-inspector-client PRIVATE
-    ${PROJECT_SOURCE_DIR}/inspect/src)
-catch_discover_tests(pulp-test-inspector-client)
-
 add_executable(pulp-test-inspector-value-channel-telemetry
     test_value_channel_telemetry_broker.cpp)
 target_link_libraries(pulp-test-inspector-value-channel-telemetry PRIVATE
-    pulp::inspect-telemetry pulp::inspect-client pulp::inspect-runtime
+    pulp::inspect-telemetry
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-value-channel-telemetry)
+
+add_executable(pulp-test-control-telemetry-tap
+    test_control_telemetry_tap.cpp)
+target_link_libraries(pulp-test-control-telemetry-tap PRIVATE
+    pulp::inspect-telemetry Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-telemetry-tap
+    PROPERTIES LABELS "inspect;control;telemetry;t1;t2a")
+
+add_executable(pulp-test-control-host-observability-bundle
+    test_control_host_observability_bundle.cpp)
+target_link_libraries(pulp-test-control-host-observability-bundle PRIVATE
+    pulp::inspect-observability-runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-host-observability-bundle
+    PROPERTIES LABELS "inspect;control;observability;trace;telemetry")
+
+add_executable(pulp-test-control-host-ui-executor
+    test_control_host_ui_executor.cpp)
+target_link_libraries(pulp-test-control-host-ui-executor PRIVATE
+    pulp::inspect-ui-runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-host-ui-executor
+    PROPERTIES LABELS "inspect;control;ui;capture;runtime-eval")
+
+add_executable(pulp-test-control-host-development-executor
+    test_control_host_development_executor.cpp)
+target_link_libraries(pulp-test-control-host-development-executor PRIVATE
+    pulp::inspect-runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-host-development-executor
+    PROPERTIES LABELS "inspect;control;development;main-thread")
 
 # Inspector tests — only when GPU is enabled (pulp-inspect requires GPU stack).
 if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
@@ -448,9 +699,6 @@ add_executable(pulp-test-inspector-stripped-artifact
     fixtures/inspector_stripped_artifact.cpp)
 target_link_libraries(pulp-test-inspector-stripped-artifact PRIVATE
     pulp::standalone)
-set(PULP_pulp-test-inspector-stripped-artifact_SHIP_INSPECTOR FALSE)
-set(PULP_pulp-test-inspector-stripped-artifact_SHIP_INSPECTOR_RUNTIME_EVAL FALSE)
-set(PULP_pulp-test-inspector-stripped-artifact_INSPECTOR_CAPABILITIES "")
 set(PULP_pulp-test-inspector-stripped-artifact_INSPECTOR_MANIFEST_DIRECTORY
     "${CMAKE_BINARY_DIR}/pulp-inspector-test-manifests")
 _pulp_configure_inspector_shipping(

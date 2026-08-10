@@ -235,7 +235,10 @@ and artifact state in `ControlBroker`. Installed `ControlService` and
 `ControlClient` types expose the same typed protocol used by the canonical
 macOS `LocalSocket` endpoint and `ControlClientConnection`. A
 `ControlClientTransport` represents one authenticated connection and owns its
-client lineage, including artifact reads. The optional
+client lineage, including artifact reads. Phase 4's runtime adapters add
+broker-owned exact T0/T1 instance status plus bounded `StateStore` catalog and
+value reads; they add no listener and have no CLI/MCP or legacy Inspector
+fallback. The optional
 `pulp-control-broker` executable owns the per-user endpoint and currently
 serves bounded health requests only; authority-bearing admission remains
 fail-closed until signed launcher, host registration, consent, and execution
@@ -1068,6 +1071,15 @@ store.begin_gesture(kGainId);
 store.set_value(kGainId, -6.0f);
 store.end_gesture(kGainId);
 ```
+
+Every live parameter writer advances `StateStore::state_generation()`: normal
+and real-time base writes, modulation changes, trigger resets, restore, and
+generation-bound gestures share that one monotonic source. Control-style
+optimistic writers use `apply_normalized_gesture_if_generation()`; a stale
+generation fails before the host gesture begins, while callback failure rolls
+back only when doing so cannot overwrite a newer writer. The base float and its
+generation stamp share one lock-free atomic word; snapshot readers reject an
+overlapping writer rather than publishing two states under one generation.
 
 ### StateTree — reactive hierarchical state
 

@@ -75,6 +75,18 @@ ControlOperationResult state_read_result() {
     return result;
 }
 
+ControlOperationResult capture_result(const ControlArtifactMetadata& detail,
+                                      const ControlArtifactMetadata& handle) {
+    ControlOperationResult result;
+    result.detail_json = "{\"artifact_id\":\"" + detail.artifact_id +
+                         "\",\"byte_count\":" + std::to_string(detail.byte_size) +
+                         ",\"height\":1,\"mime_type\":\"image/png\","
+                         "\"redaction_state\":\"redacted\",\"sha256\":\"" + detail.sha256 +
+                         "\",\"width\":1}";
+    result.artifacts.push_back({handle.artifact_id, handle.content_type, handle.byte_size});
+    return result;
+}
+
 std::filesystem::path unique_store_path() {
     const auto random = pulp::runtime::secure_random_bytes(8);
     REQUIRE(random);
@@ -247,15 +259,13 @@ struct AdmissionFixture {
                                                 .content_type = "image/png",
                                                 .created_at_unix_ms = 1,
                                                 .expires_at_unix_ms = 4'102'444'800'000,
+                                                .sensitivity =
+                                                    ControlArtifactSensitivity::Sensitive,
+                                                .redaction_state =
+                                                    ControlArtifactRedactionState::Redacted,
                                             });
         REQUIRE(stored.metadata);
-        ControlOperationResult completed;
-        completed.detail_json =
-            "{\"artifact_id\":\"" + stored.metadata->artifact_id +
-            "\",\"byte_count\":" + std::to_string(stored.metadata->byte_size) +
-            ",\"mime_type\":\"image/png\",\"sha256\":\"" + stored.metadata->sha256 + "\"}";
-        completed.artifacts.push_back({stored.metadata->artifact_id, stored.metadata->content_type,
-                                       stored.metadata->byte_size});
+        auto completed = capture_result(*stored.metadata, *stored.metadata);
         REQUIRE(broker
                     .finish_operation(client, *admitted.plan, ControlReceiptState::Completed,
                                       std::move(completed))
@@ -371,16 +381,14 @@ TEST_CASE("Artifact reads reauthorize the original producer lineage",
                                                     .content_type = "image/png",
                                                     .created_at_unix_ms = 1,
                                                     .expires_at_unix_ms = 4102444800000,
+                                                    .sensitivity =
+                                                        ControlArtifactSensitivity::Sensitive,
+                                                    .redaction_state =
+                                                        ControlArtifactRedactionState::Redacted,
                                                 });
     REQUIRE(stored.status == ControlArtifactStatus::Stored);
     REQUIRE(stored.metadata);
-    ControlOperationResult completed;
-    completed.detail_json =
-        "{\"artifact_id\":\"" + stored.metadata->artifact_id +
-        "\",\"byte_count\":" + std::to_string(stored.metadata->byte_size) +
-        ",\"mime_type\":\"image/png\",\"sha256\":\"" + stored.metadata->sha256 + "\"}";
-    completed.artifacts.push_back(
-        {stored.metadata->artifact_id, stored.metadata->content_type, stored.metadata->byte_size});
+    auto completed = capture_result(*stored.metadata, *stored.metadata);
     REQUIRE(fixture.broker
                 .finish_operation(fixture.client, *admitted.plan, ControlReceiptState::Completed,
                                   std::move(completed))
@@ -573,6 +581,10 @@ TEST_CASE("Artifact-producing completion binds typed detail to the authorized ar
                                                            .content_type = std::move(content_type),
                                                            .created_at_unix_ms = 1,
                                                            .expires_at_unix_ms = 4102444800000,
+                                                           .sensitivity =
+                                                               ControlArtifactSensitivity::Sensitive,
+                                                           .redaction_state =
+                                                               ControlArtifactRedactionState::Redacted,
                                                        });
     };
     const auto first = publish(first_bytes);
@@ -582,15 +594,7 @@ TEST_CASE("Artifact-producing completion binds typed detail to the authorized ar
     REQUIRE(second.metadata);
     REQUIRE(wrong_type.metadata);
 
-    const auto result_for = [](const ControlArtifactMetadata& detail,
-                               const ControlArtifactMetadata& handle) {
-        ControlOperationResult result;
-        result.detail_json = "{\"artifact_id\":\"" + detail.artifact_id +
-                             "\",\"byte_count\":" + std::to_string(detail.byte_size) +
-                             ",\"mime_type\":\"image/png\",\"sha256\":\"" + detail.sha256 + "\"}";
-        result.artifacts.push_back({handle.artifact_id, handle.content_type, handle.byte_size});
-        return result;
-    };
+    const auto result_for = capture_result;
     const auto finish = [&](ControlOperationResult result) {
         return fixture.broker.finish_operation(fixture.client, *admitted.plan,
                                                ControlReceiptState::Completed, std::move(result));

@@ -1,9 +1,12 @@
 #pragma once
 
 #include <pulp/inspect/control_admission.hpp>
+#include <pulp/inspect/control_artifacts.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
+#include <span>
 #include <string>
 
 namespace pulp::inspect {
@@ -22,10 +25,27 @@ using ControlProgressReporter =
 using ControlExecutionGuard = std::function<ControlExecutionCheckpoint()>;
 using ControlDeferredCompletion = std::function<void(ControlExecutionOutcome)>;
 
+struct ControlArtifactPublication {
+    std::string content_type;
+    ControlArtifactSensitivity sensitivity = ControlArtifactSensitivity::Sensitive;
+    ControlArtifactRedactionState redaction_state = ControlArtifactRedactionState::Original;
+    std::chrono::milliseconds lifetime = std::chrono::hours{1};
+};
+
+using ControlArtifactPublisher = std::function<ControlArtifactStoreResult(
+    std::span<const std::uint8_t>, ControlArtifactPublication)>;
+
 struct ControlExecutionContext {
     ControlProgressReporter report_progress;
     ControlExecutionGuard checkpoint;
     ControlDeferredCompletion complete_deferred;
+    /// Broker-owned upper bound, for rejecting impossible artifact-producing
+    /// work before spending resources to materialize its output.
+    std::size_t maximum_artifact_bytes = 0;
+    /// Publishes bytes through the broker-owned store while this receipt is
+    /// Running. The service binds authority, timestamps, provenance, and ACL;
+    /// operation adapters never mint those values themselves.
+    ControlArtifactPublisher publish_artifact;
 };
 
 /// Trusted in-process adapter contract. An executor must never wait past the

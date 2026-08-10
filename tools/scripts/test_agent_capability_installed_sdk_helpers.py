@@ -9,9 +9,24 @@ import unittest
 from unittest import mock
 
 from test_agent_capability_installed_sdk import (
+    combine_flag_values,
     configure_consumer,
     find_build_tree_artifact,
 )
+
+
+class InstrumentationFlagTests(unittest.TestCase):
+    def test_instrumentation_is_appended_to_cached_flags(self) -> None:
+        self.assertEqual(
+            combine_flag_values("-Wall", "-fprofile-instr-generate"),
+            "-Wall -fprofile-instr-generate",
+        )
+
+    def test_instrumentation_survives_empty_cached_flags(self) -> None:
+        self.assertEqual(
+            combine_flag_values("", "-fprofile-instr-generate"),
+            "-fprofile-instr-generate",
+        )
 
 
 class BuildTreeArtifactTests(unittest.TestCase):

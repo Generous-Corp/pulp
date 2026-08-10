@@ -819,6 +819,7 @@ jobs:
           if [ "${RUNNER_OS}" = "macOS" ] \
               && python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "$PULP_CONTROL_BROKER_FLOOR"; then
             release_bins+=(build/inspect/pulp-control-broker)
+            release_bins+=(build/inspect/pulp-control-standalone-host)
           fi
           if [ -f build/tools/import-design/pulp-import-design ]; then
             release_bins+=(build/tools/import-design/pulp-import-design)
@@ -880,6 +881,8 @@ jobs:
               && python3 -c 'import sys; v=lambda s: tuple(map(int, s.removeprefix("v").split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "$RELEASE_TAG" "$PULP_CONTROL_BROKER_FLOOR"; then
             control_broker_args=(
               --control-broker-binary build/inspect/pulp-control-broker
+              --control-standalone-host-binary build/inspect/pulp-control-standalone-host
+              --control-standalone-manifest build/inspect/pulp-control-standalone-host.inspector-capabilities.json
             )
           fi
           python3 "$PULP_RELEASE_PACKAGER" \

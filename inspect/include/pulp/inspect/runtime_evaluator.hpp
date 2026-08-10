@@ -37,7 +37,9 @@ class RuntimeEvaluator {
 public:
     virtual ~RuntimeEvaluator() = default;
     virtual RuntimeEvaluatorCapabilities capabilities() const = 0;
-    virtual RuntimeEvaluationResult evaluate(std::string_view code) = 0;
+    virtual RuntimeEvaluationResult
+    evaluate(std::string_view code, std::chrono::milliseconds timeout = kRuntimeEvalDeadline,
+             std::size_t maximum_result_bytes = kRuntimeEvalMaxResultBytes) = 0;
     virtual bool interrupt() = 0;
     /// A component-specific marker retained through the evaluator vtable.
     virtual std::string_view binary_marker() const noexcept = 0;

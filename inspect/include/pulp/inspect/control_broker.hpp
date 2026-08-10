@@ -20,6 +20,15 @@ struct ControlBrokerConfig {
     /// coordination and must be bounded, non-blocking, and non-reentrant: it
     /// must not call this broker or any store owned by it.
     ControlOperationStore::WallClock wall_clock = [] { return std::chrono::system_clock::now(); };
+    /// Broker-owned process liveness. The daemon supplies the OS-backed
+    /// implementation; tests and unsupported compositions conservatively keep
+    /// process-scoped principals until their reconnect lease expires.
+    std::function<ControlProcessLiveness(const ControlPeerEvidence&)> process_liveness =
+        [](const ControlPeerEvidence&) { return ControlProcessLiveness::Unknown; };
+    /// Broker-to-carrier lifecycle projection. Invoked outside broker locks;
+    /// empty identity fields are wildcards for client/registration teardown.
+    std::function<void(const ControlClientId&, const ControlRegistrationId&,
+                       const ControlGrantId&, std::string_view)> authority_ended;
 };
 
 struct ControlBrokerLifecycleResult {
@@ -55,7 +64,10 @@ class ControlBroker {
     ControlBootstrapResult issue_bootstrap(const VerifiedControlPeerIdentity& client_peer);
     ControlClientResult redeem_bootstrap(std::string_view ticket_id,
                                          std::span<const std::uint8_t> secret,
-                                         const VerifiedControlPeerIdentity& client_peer);
+                                         const VerifiedControlPeerIdentity& client_peer,
+                                         std::string_view durable_principal = {},
+                                         ControlDurableClientLifetime durable_lifetime =
+                                             ControlDurableClientLifetime::Broker);
     bool refresh_client(const ControlClientId& client_id,
                         const VerifiedControlPeerIdentity& client_peer);
     ControlBrokerLifecycleResult disconnect_client(const ControlClientId& client_id,
@@ -63,7 +75,10 @@ class ControlBroker {
                                                    std::string_view decision_id);
 
     ControlRegistrationResult register_instance(const VerifiedControlPeerIdentity& host_peer,
-                                                ControlRegistrationRequest request);
+                                                 ControlRegistrationRequest request,
+                                                 bool publish = true);
+    bool publish_instance(const ControlRegistrationId& registration_id,
+                          const VerifiedControlPeerIdentity& host_peer);
     bool heartbeat(const ControlRegistrationId& registration_id,
                    const VerifiedControlPeerIdentity& host_peer);
     ControlBrokerLifecycleResult unregister_instance(const ControlRegistrationId& registration_id,
@@ -113,6 +128,14 @@ class ControlBroker {
     store_operation_artifact(const VerifiedControlPeerIdentity& client_peer,
                              const ControlAdmissionPlan& plan, std::span<const std::uint8_t> bytes,
                              ControlArtifactProperties properties);
+    /// Broker-timestamped publication used by trusted operation adapters.
+    ControlArtifactStoreResult
+    store_operation_artifact(const VerifiedControlPeerIdentity& client_peer,
+                             const ControlAdmissionPlan& plan, std::span<const std::uint8_t> bytes,
+                             std::string content_type, ControlArtifactSensitivity sensitivity,
+                             ControlArtifactRedactionState redaction_state,
+                             std::chrono::milliseconds lifetime);
+    std::size_t artifact_maximum_blob_bytes() const noexcept;
 
     /// Retrieves an artifact by opaque ID after broker-side reauthorization of
     /// its original producer grant, exact receipt lineage, and exact producing
@@ -126,6 +149,7 @@ class ControlBroker {
     std::optional<ControlClientIdentity> client(const ControlClientId& client_id) const;
     std::optional<ControlRegistration>
     registration(const ControlRegistrationId& registration_id) const;
+    std::vector<ControlRegistration> registrations() const;
     std::optional<ControlGrant> grant(const ControlGrantId& grant_id);
 
     void sweep_expired();
@@ -151,6 +175,9 @@ class ControlBroker {
                                      const ControlGrantId& grant_id, std::string_view reason);
 
     std::shared_ptr<ControlSecurityAuditLog> audit_log_;
+    std::function<ControlProcessLiveness(const ControlPeerEvidence&)> process_liveness_;
+    std::function<void(const ControlClientId&, const ControlRegistrationId&,
+                       const ControlGrantId&, std::string_view)> authority_ended_;
     mutable std::mutex coordination_mutex_;
     ControlIdentityRegistry identities_;
     ControlGrantStore grants_;

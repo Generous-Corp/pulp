@@ -1,6 +1,6 @@
-//! Typed access to inspector trace response objects.
+//! Typed access to canonical trace lifecycle response objects.
 
-/// Parsed inspector response used by trace command rendering and readiness checks.
+/// Parsed response used by trace lifecycle command rendering.
 pub(crate) struct TraceResponse(serde_json::Value);
 
 impl TraceResponse {

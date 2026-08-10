@@ -32,19 +32,8 @@
 // The root component gate defines PULP_ENABLE_INSPECTOR for this standalone
 // authoring target and links the visual overlay here, never through
 // pulp-format. PULP_HAS_INSPECT records that the desktop GPU overlay target
-// actually exists. PULP_STANDALONE_INSPECTOR folds those conditions with the
-// platform guard for every inspector block below.
 #if !defined(PULP_ENABLE_INSPECTOR)
 #define PULP_ENABLE_INSPECTOR 1
-#endif
-#if !defined(__ANDROID__) && defined(PULP_HAS_INSPECT) && PULP_ENABLE_INSPECTOR
-#define PULP_STANDALONE_INSPECTOR 1
-#else
-#define PULP_STANDALONE_INSPECTOR 0
-#endif
-
-#if PULP_STANDALONE_INSPECTOR
-#include <pulp/format/detail/standalone_inspector.hpp>
 #endif
 #if PULP_ENABLE_AUDIO_PROBES
 #include <pulp/audio/audio_probe_json.hpp>
@@ -89,6 +78,16 @@ detail::StandaloneTestInputResult detail::StandaloneTestInputHost::update_transp
         return StandaloneTestInputResult::InvalidArgument;
     }
 
+    std::lock_guard lock(control_transport_mutex_);
+    if (!transport_before_control_) {
+        const auto observed = observed_transport_.read();
+        transport_before_control_ = TransportCommand{
+            .playing = observed.playing,
+            .tempo_bpm = observed.tempo_bpm,
+            .position_samples = observed.position_samples,
+            .position_revision = control_transport_.position_revision,
+        };
+    }
     if (update.playing)
         control_transport_.playing = *update.playing;
     if (update.tempo_bpm)
@@ -103,6 +102,14 @@ detail::StandaloneTestInputResult detail::StandaloneTestInputHost::update_transp
 
 void detail::StandaloneTestInputHost::release_test_input() noexcept {
     midi_generation_.fetch_add(1, std::memory_order_acq_rel);
+    std::lock_guard lock(control_transport_mutex_);
+    if (transport_before_control_) {
+        auto restored = *transport_before_control_;
+        restored.position_revision = control_transport_.position_revision + 1;
+        control_transport_ = restored;
+        transport_before_control_.reset();
+        transport_commands_.write(control_transport_);
+    }
 }
 
 detail::StandaloneTestTransportState
@@ -117,6 +124,7 @@ detail::StandaloneTestInputHost::midi_overflow_count() const noexcept {
 
 void detail::StandaloneTestInputHost::prepare(bool playing,
                                                double tempo_bpm) noexcept {
+    std::lock_guard lock(control_transport_mutex_);
     while (midi_queue_.try_pop()) {}
     midi_queue_.reset_overflow_count();
     const auto generation =
@@ -139,6 +147,7 @@ void detail::StandaloneTestInputHost::prepare(bool playing,
     };
     audio_position_revision_ = control_transport_.position_revision;
     observed_transport_.write(audio_transport_);
+    transport_before_control_.reset();
     prepared_ = true;
 }
 
@@ -647,6 +656,24 @@ bool StandaloneApp::start() {
         processor_->define_parameters(store_);
     }
 
+    const auto start_control_host = [this] {
+        if (control_host_)
+            return true;
+        auto creation = detail::create_standalone_control_host();
+        if (!creation.factory_installed)
+            return true;
+        control_host_ = std::move(creation.host);
+        if (control_host_ && control_host_->start(*processor_, store_, &test_input_host_,
+                                                 config_.sample_rate,
+                                                 StandaloneControlUiMode::DeferToEditor))
+            return true;
+        runtime::log_error("Standalone: canonical control host failed closed during startup");
+        if (control_host_)
+            control_host_->stop();
+        control_host_.reset();
+        return false;
+    };
+
     auto desc = processor_->descriptor();
     runtime::log_info("Standalone: starting '{}'", desc.name);
 
@@ -690,6 +717,10 @@ bool StandaloneApp::start() {
             "or started (set PULP_SCREENSHOT_KEEP_AUDIO=1 to keep audio live)");
         prepare_render_state();
         running_.store(true);
+        if (!start_control_host()) {
+            running_.store(false);
+            return false;
+        }
         return true;
     }
 
@@ -777,6 +808,11 @@ bool StandaloneApp::start() {
     if (!ok) {
         runtime::log_error("Standalone: failed to start audio");
         running_.store(false);
+        return false;
+    }
+
+    if (!start_control_host()) {
+        stop_audio_keep_processor();
         return false;
     }
 
@@ -959,6 +995,15 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // Window host is live — fire Processor::on_view_opened now.
     bridge->notify_attached();
 
+    if (control_host_ &&
+        !control_host_->attach_editor(*bridge, *bridge->view(), *window)) {
+        runtime::log_error(
+            "Standalone: canonical control host failed to attach the editor");
+        detail::retire_standalone_editor(*window, *bridge);
+        stop();
+        return false;
+    }
+
     auto* bridge_raw = bridge.get();
     detail::attach_standalone_editor_bridge(*window, chrome, *bridge);
 
@@ -974,36 +1019,15 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         // Drop the editor→host resize handler before the window / bridge it
         // captures are torn down by stop().
         if (processor_) processor_->set_editor_resize_handler(this, nullptr);
+        // Revoke every control callback that borrows the visible editor before
+        // ViewBridge dispatches on_view_closed and releases that view.
+        if (control_host_) control_host_->stop();
         if (window_raw && bridge_raw)
             detail::retire_standalone_editor(*window_raw, *bridge_raw);
         stop();
     };
 
-#if PULP_STANDALONE_INSPECTOR
-    std::unique_ptr<detail::StandaloneInspectorRuntime> inspector_runtime;
-    if (!detail::StandaloneInspectorRuntime::profile_is_off(
-            effective_config.inspector_profile)
-        || effective_config.inspector_runtime_eval) {
-        inspector_runtime = detail::StandaloneInspectorRuntime::create(
-            *this, *processor_, *bridge, window_root, *window,
-            effective_config.inspector_profile,
-            effective_config.inspector_capabilities,
-            effective_config.inspector_runtime_eval);
-        if (!inspector_runtime) {
-            runtime::log_error(
-                "Standalone: requested Development Inspector profile could not start");
-            detail::retire_standalone_editor(*window, *bridge);
-            stop();
-            return false;
-        }
-        window->set_close_callback(
-            inspector_runtime->wrap_close(std::move(close_editor)));
-    } else {
-        window->set_close_callback(std::move(close_editor));
-    }
-#else
     window->set_close_callback(std::move(close_editor));
-#endif
 
 #if PULP_ENABLE_AUDIO_PROBES
     // Audio Inspector tool window. A SEPARATE floating window (sibling of the
@@ -1070,6 +1094,12 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
             : std::function<void()>{});
     window->set_idle_callback(pre_screenshot_idle);
 #endif
+
+    if (control_host_) {
+        pre_screenshot_idle = detail::make_standalone_control_idle_callback(
+            pre_screenshot_idle, *control_host_, *window);
+        window->set_idle_callback(pre_screenshot_idle);
+    }
 
     // Run the same automation, restore/reload, and scripted work as embedded
     // plugin editors. Compose it over settings/inspector work so standalone
@@ -1298,6 +1328,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
             inspector_runtime->stop();
             return inspector_runtime->try_finish_retirement();
         });
+        if (control_host_) control_host_->stop();
         return !inspector_runtime->startup_failed();
     }
 #endif
@@ -1307,6 +1338,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // processor is torn down; removal is harmless on platforms where no
     // editor-initiated resize handler was installed.
     if (processor_) processor_->set_editor_resize_handler(this, nullptr);
+    if (control_host_) control_host_->stop();
     detail::retire_standalone_editor(*window, *bridge);
     stop();
     return true;
@@ -1339,6 +1371,10 @@ void StandaloneApp::stop() {
     // because that window's global-key callback still references it.
     audio_inspector_.reset();
 #endif
+    if (control_host_) {
+        control_host_->stop();
+        control_host_.reset();
+    }
     if (processor_) {
         processor_->release();
         processor_.reset();

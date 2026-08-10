@@ -55,6 +55,11 @@ tools/cmake/PulpRack.cmake :: _rack_target_processor MATCHES "^(arm64|aarch64)$"
 # Universal Rack packaging contract fixture asserts both emitted thin slugs.
 tools/cmake/test_pulp_rack_contract.py :: "Fixture-1.0.0-mac-arm64.vcvplugin"
 
+# The control shipping scanner validates declared non-Apple artifact
+# architectures against BOTH x86 and ARM spellings reported by native tools.
+tools/cmake/check_control_shipping_artifact.cmake :: MATCHES "^(arm64|aarch64)$"
+tools/cmake/check_control_shipping_artifact.cmake :: MATCHES "arm64|aarch64|aa64"
+
 # Test fixture: a synthetic wgpu cache path exercising the relocatable check.
 tools/cmake/scripts/test_check_bundle_relocatable.py :: wgpu-macos-aarch64
 

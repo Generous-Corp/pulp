@@ -198,7 +198,7 @@ std::string mutate(const std::vector<std::string>& corpus, Random& random, std::
 TEST_CASE("control protocol fuzz oracle accepts every closed seed envelope",
           "[inspect][control-protocol][fuzz]") {
     const auto named_corpus = control_protocol_seed_corpus();
-    REQUIRE(named_corpus.size() == 6);
+    REQUIRE(named_corpus.size() == 8);
     for (const auto& entry : named_corpus) {
         INFO(entry.filename);
         REQUIRE_FALSE(entry.bytes.empty());

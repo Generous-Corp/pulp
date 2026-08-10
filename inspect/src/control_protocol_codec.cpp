@@ -94,6 +94,25 @@ bool valid_session_open_result(const ControlSessionOpenResult& message) {
            !message.explanation.empty();
 }
 
+bool valid_management_command(std::string_view command) {
+    return command == "enroll" || command == "instances" || command == "grant-request" ||
+           command == "revoke" || command == "host-prepare" ||
+           command == "host-prepare-installed" || command == "host-launch";
+}
+
+bool valid_management(const ControlManagementEnvelope& message) {
+    return valid_token(message.request_id, kMaximumIdBytes) &&
+           valid_management_command(message.command) &&
+           canonicalize_control_json(message.params_json).has_value();
+}
+
+bool valid_management_result(const ControlManagementResult& message) {
+    return valid_token(message.request_id, kMaximumIdBytes) &&
+           valid_token(message.status_id, kControlMaximumStatusIdBytes) &&
+           valid_text(message.explanation, kMaximumExplanationBytes) &&
+           canonicalize_control_json(message.data_json).has_value();
+}
+
 bool valid_artifact_read(const ControlArtifactReadEnvelope& message) {
     constexpr auto signed_max =
         static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
@@ -391,28 +410,120 @@ std::string encode_control_envelope(const ControlEnvelope& envelope) {
                 payload.addMember("error_code", choc::value::createString(message.error_code));
                 payload.addMember("explanation", choc::value::createString(message.explanation));
                 payload.addMember("request_id", choc::value::createString(message.request_id));
+            } else if constexpr (std::is_same_v<T, ControlManagementEnvelope>) {
+                valid = valid_management(message);
+                kind = "management";
+                if (!valid)
+                    return;
+                payload.addMember("command", choc::value::createString(message.command));
+                payload.addMember("params",
+                                  canonical_value(choc::json::parse(message.params_json)));
+                payload.addMember("request_id", choc::value::createString(message.request_id));
+            } else if constexpr (std::is_same_v<T, ControlManagementResult>) {
+                valid = valid_management_result(message);
+                kind = "management-result";
+                if (!valid)
+                    return;
+                payload.addMember("data", canonical_value(choc::json::parse(message.data_json)));
+                payload.addMember("explanation", choc::value::createString(message.explanation));
+                payload.addMember("request_id", choc::value::createString(message.request_id));
+                payload.addMember("status_id", choc::value::createString(message.status_id));
             } else if constexpr (std::is_same_v<T, ControlHostOpenEnvelope>) {
                 valid = valid_host_open(message);
                 kind = "host-open";
                 payload.addMember("admission_id", choc::value::createString(message.admission_id));
+                payload.addMember("enrollment_id",
+                                  choc::value::createString(message.enrollment_id));
                 payload.addMember("request_id", choc::value::createString(message.request_id));
             } else if constexpr (std::is_same_v<T, ControlHostOpenResult>) {
                 valid = valid_host_open_result(message);
                 kind = "host-opened";
                 payload.addMember("accepted", choc::value::createBool(message.accepted));
+                payload.addMember("broker_id", choc::value::createString(message.broker_id));
                 payload.addMember("error_code", choc::value::createString(message.error_code));
                 payload.addMember("explanation", choc::value::createString(message.explanation));
                 payload.addMember("registration_id",
                                   choc::value::createString(message.registration_id));
                 payload.addMember("request_id", choc::value::createString(message.request_id));
+                payload.addMember("session_id", choc::value::createString(message.session_id));
+                payload.addMember("instance_id", choc::value::createString(message.instance_id));
+                payload.addMember("publication_id",
+                                  choc::value::createString(message.publication_id));
+                payload.addMember("instance_generation",
+                                  choc::value::createString(message.instance_generation));
+                payload.addMember("manifest_digest",
+                                  choc::value::createString(message.manifest_digest));
+                payload.addMember("producer_artifact_digest",
+                                  choc::value::createString(message.producer_artifact_digest));
+            } else if constexpr (std::is_same_v<T, ControlHostReadyEnvelope>) {
+                valid = valid_host_ready(message);
+                kind = "host-ready";
+                payload.addMember("registration_id",
+                                  choc::value::createString(message.registration_id));
+                payload.addMember("request_id", choc::value::createString(message.request_id));
+            } else if constexpr (std::is_same_v<T, ControlHostReadyResult>) {
+                valid = valid_host_ready_result(message);
+                kind = "host-ready-result";
+                payload.addMember("accepted", choc::value::createBool(message.accepted));
+                payload.addMember("error_code", choc::value::createString(message.error_code));
+                payload.addMember("explanation", choc::value::createString(message.explanation));
+                payload.addMember("liveness_generation",
+                                  choc::value::createInt64(static_cast<std::int64_t>(
+                                      message.liveness_generation)));
+                payload.addMember("request_id", choc::value::createString(message.request_id));
+            } else if constexpr (std::is_same_v<T, ControlHostHeartbeatEnvelope>) {
+                valid = valid_host_heartbeat(message);
+                kind = "host-heartbeat";
+                payload.addMember("liveness_generation",
+                                  choc::value::createInt64(static_cast<std::int64_t>(
+                                      message.liveness_generation)));
+                payload.addMember("registration_id",
+                                  choc::value::createString(message.registration_id));
+                payload.addMember("request_id", choc::value::createString(message.request_id));
+            } else if constexpr (std::is_same_v<T, ControlHostHeartbeatResult>) {
+                valid = valid_host_heartbeat_result(message);
+                kind = "host-heartbeat-result";
+                payload.addMember("accepted", choc::value::createBool(message.accepted));
+                payload.addMember("error_code", choc::value::createString(message.error_code));
+                payload.addMember("explanation", choc::value::createString(message.explanation));
+                payload.addMember("liveness_generation",
+                                  choc::value::createInt64(static_cast<std::int64_t>(
+                                      message.liveness_generation)));
+                payload.addMember("request_id", choc::value::createString(message.request_id));
+            } else if constexpr (std::is_same_v<T, ControlHostPreflightChallengeEnvelope>) {
+                valid = valid_hash(message.nonce);
+                kind = "host-preflight-challenge";
+                payload.addMember("nonce", choc::value::createString(message.nonce));
+            } else if constexpr (std::is_same_v<T, ControlHostPreflightResponseEnvelope>) {
+                valid = valid_hash(message.nonce);
+                kind = "host-preflight-response";
+                payload.addMember("nonce", choc::value::createString(message.nonce));
+            } else if constexpr (std::is_same_v<T, ControlHostPreflightBootstrapEnvelope>) {
+                valid = valid_hash(message.nonce) && !message.bootstrap_base64.empty() &&
+                        message.bootstrap_base64.size() <=
+                            kControlHostPreflightMaximumBootstrapBase64Bytes;
+                kind = "host-preflight-bootstrap";
+                payload.addMember("bootstrap_base64",
+                                  choc::value::createString(message.bootstrap_base64));
+                payload.addMember("nonce", choc::value::createString(message.nonce));
             } else if constexpr (std::is_same_v<T, ControlHostExecuteEnvelope>) {
                 valid = valid_host_execute(message);
                 kind = "host-execute";
+                payload.addMember("authority_id", choc::value::createString(message.authority_id));
+                payload.addMember("controller_authority_id",
+                                  choc::value::createString(message.controller_authority_id));
+                payload.addMember("broker_id", choc::value::createString(message.broker_id));
+                payload.addMember("capability_id", choc::value::createString(message.capability_id));
                 payload.addMember("deadline_unix_ms",
                                   choc::value::createInt64(message.deadline_unix_ms));
                 payload.addMember("expected_state_generation",
                                   choc::value::createInt64(static_cast<std::int64_t>(
                                       message.expected_state_generation)));
+                payload.addMember("instance_generation",
+                                  choc::value::createString(message.instance_generation));
+                payload.addMember("instance_id", choc::value::createString(message.instance_id));
+                payload.addMember("manifest_digest",
+                                  choc::value::createString(message.manifest_digest));
                 payload.addMember("operation_id", choc::value::createString(message.operation_id));
                 payload.addMember("operation_version",
                                   choc::value::createInt64(message.operation_version));
@@ -422,7 +533,12 @@ std::string encode_control_envelope(const ControlEnvelope& envelope) {
                 else
                     valid = false;
                 payload.addMember("receipt_id", choc::value::createString(message.receipt_id));
+                payload.addMember("producer_artifact_digest",
+                                  choc::value::createString(message.producer_artifact_digest));
+                payload.addMember("publication_id",
+                                  choc::value::createString(message.publication_id));
                 payload.addMember("route_id", choc::value::createString(message.route_id));
+                payload.addMember("session_id", choc::value::createString(message.session_id));
             } else if constexpr (std::is_same_v<T, ControlHostProgressEnvelope>) {
                 valid = valid_host_progress(message);
                 kind = "host-progress";
@@ -441,9 +557,35 @@ std::string encode_control_envelope(const ControlEnvelope& envelope) {
                 kind = "host-cancel";
                 payload.addMember("reason", choc::value::createString(message.reason));
                 payload.addMember("route_id", choc::value::createString(message.route_id));
+            } else if constexpr (std::is_same_v<T, ControlHostAuthorityEndEnvelope>) {
+                valid = valid_host_authority_end(message);
+                kind = "host-authority-end";
+                payload.addMember("authority_id", choc::value::createString(message.authority_id));
+                payload.addMember("reason", choc::value::createString(message.reason));
             } else if constexpr (std::is_same_v<T, ControlHostCompleteEnvelope>) {
                 valid = valid_host_complete(message);
                 kind = "host-complete";
+                auto publications = choc::value::createEmptyArray();
+                for (const auto& publication : message.artifact_publications) {
+                    auto value = choc::value::createObject("");
+                    value.addMember("bytes_base64",
+                                    choc::value::createString(publication.bytes_base64));
+                    value.addMember("content_type",
+                                    choc::value::createString(publication.content_type));
+                    value.addMember("lifetime_ms",
+                                    choc::value::createInt64(publication.lifetime_ms));
+                    value.addMember("redaction_state", choc::value::createInt64(
+                                                           static_cast<std::int64_t>(
+                                                               publication.redaction_state)));
+                    value.addMember("reference_id",
+                                    choc::value::createString(publication.reference_id));
+                    value.addMember("sensitivity", choc::value::createInt64(
+                                                        static_cast<std::int64_t>(
+                                                            publication.sensitivity)));
+                    publications.addArrayElement(std::move(value));
+                }
+                if (!message.artifact_publications.empty())
+                    payload.addMember("artifact_publications", std::move(publications));
                 payload.addMember("cancellation_reason",
                                   choc::value::createString(message.cancellation_reason));
                 if (const auto detail = parse_bounded_control_json(message.detail_json,
@@ -838,6 +980,46 @@ std::optional<ControlEnvelope> decode_control_envelope(std::string_view json,
                 return std::nullopt;
             }
             envelope.payload = std::move(result);
+        } else if (kind == "management") {
+            if (!only_fields(payload, {"command", "params", "request_id"}, error))
+                return std::nullopt;
+            ControlManagementEnvelope message;
+            if (!required_string(payload, "request_id", message.request_id, kMaximumIdBytes,
+                                 error) ||
+                !required_string(payload, "command", message.command, kControlMaximumStatusIdBytes,
+                                 error) ||
+                !payload.hasObjectMember("params"))
+                return std::nullopt;
+            message.params_json = choc::json::toString(canonical_value(payload["params"]), false);
+            if (!valid_management(message)) {
+                error = {ControlProtocolError::InvalidValue, "management fields are invalid"};
+                return std::nullopt;
+            }
+            envelope.payload = std::move(message);
+        } else if (kind == "management-result") {
+            if (!only_fields(payload, {"data", "explanation", "request_id", "status_id"}, error))
+                return std::nullopt;
+            ControlManagementResult result;
+            if (!required_string(payload, "request_id", result.request_id, kMaximumIdBytes,
+                                 error) ||
+                !required_string(payload, "status_id", result.status_id,
+                                 kControlMaximumStatusIdBytes, error) ||
+                !required_string(payload, "explanation", result.explanation,
+                                 kMaximumExplanationBytes, error, false) ||
+                !payload.hasObjectMember("data"))
+                return std::nullopt;
+            result.data_json = choc::json::toString(canonical_value(payload["data"]), false);
+            if (!valid_management_result(result)) {
+                error = {ControlProtocolError::InvalidValue,
+                         "management-result fields are invalid"};
+                return std::nullopt;
+            }
+            envelope.payload = std::move(result);
+        } else if (is_host_preflight_kind(kind)) {
+            auto preflight = decode_host_preflight_payload(kind, payload, error);
+            if (!preflight)
+                return std::nullopt;
+            envelope.payload = std::move(*preflight);
         } else if (is_host_control_kind(kind)) {
             auto host = decode_host_control_payload(kind, payload, error);
             if (!host)

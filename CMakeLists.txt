@@ -408,6 +408,7 @@ endif()
 
 set(_pulp_standalone_sources
     core/format/src/standalone.cpp
+    core/format/src/standalone_control_host.cpp
     core/format/src/standalone_musical_typing.cpp
     core/format/src/test_signal.cpp
     core/format/src/settings_panel.cpp)
@@ -430,56 +431,6 @@ target_compile_definitions(pulp-standalone PRIVATE PULP_ENABLE_INSPECTOR=0)
 # returns after that foundation in production-stripped configurations.
 add_subdirectory(inspect)
 
-# Inspector-capable standalone archives are optional SDK components. The
-# ordinary `pulp::standalone` target above is deliberately inspector-free;
-# pulp_add_plugin selects one of these only after an exact shipping declaration.
-if(PULP_ENABLE_INSPECTOR AND TARGET pulp::inspect AND NOT IOS)
-    set(_pulp_standalone_inspector_sources
-        ${_pulp_standalone_sources}
-        core/format/src/standalone_inspector.cpp
-        core/format/src/standalone_inspector_capture.cpp
-        core/format/src/standalone_inspector_policy.cpp
-        core/format/src/standalone_runtime_eval_dispatch.cpp)
-    add_library(pulp-standalone-inspector STATIC
-        ${_pulp_standalone_inspector_sources})
-    add_library(pulp::standalone-inspector ALIAS pulp-standalone-inspector)
-    _pulp_configure_standalone_target(pulp-standalone-inspector)
-    target_link_libraries(pulp-standalone-inspector PRIVATE pulp::inspect)
-    target_compile_definitions(pulp-standalone-inspector PRIVATE
-        PULP_ENABLE_INSPECTOR=1 PULP_HAS_INSPECT=1
-        PULP_STANDALONE_RUNTIME_EVAL_COMPONENT=0)
-
-    add_library(pulp-standalone-inspector-runtime-eval STATIC
-        ${_pulp_standalone_inspector_sources})
-    add_library(pulp::standalone-inspector-runtime-eval ALIAS
-        pulp-standalone-inspector-runtime-eval)
-    _pulp_configure_standalone_target(pulp-standalone-inspector-runtime-eval)
-    target_link_libraries(pulp-standalone-inspector-runtime-eval PRIVATE
-        pulp::inspect pulp::inspect-runtime-eval)
-    target_compile_definitions(pulp-standalone-inspector-runtime-eval PRIVATE
-        PULP_ENABLE_INSPECTOR=1 PULP_HAS_INSPECT=1
-        PULP_STANDALONE_RUNTIME_EVAL_COMPONENT=1)
-
-    get_target_property(_ordinary_standalone_links pulp-standalone LINK_LIBRARIES)
-    get_target_property(_inspector_standalone_links pulp-standalone-inspector LINK_LIBRARIES)
-    get_target_property(_eval_standalone_links
-        pulp-standalone-inspector-runtime-eval LINK_LIBRARIES)
-    if("pulp::inspect" IN_LIST _ordinary_standalone_links OR
-       "pulp::inspect-runtime-eval" IN_LIST _ordinary_standalone_links)
-        message(FATAL_ERROR "ordinary pulp::standalone inherited an inspector component")
-    endif()
-    if("pulp::inspect-runtime-eval" IN_LIST _inspector_standalone_links)
-        message(FATAL_ERROR "generic inspector standalone inherited runtime.eval")
-    endif()
-    if(NOT "pulp::inspect" IN_LIST _inspector_standalone_links OR
-       NOT "pulp::inspect-runtime-eval" IN_LIST _eval_standalone_links)
-        message(FATAL_ERROR "declared standalone inspector component graph is incomplete")
-    endif()
-    unset(_ordinary_standalone_links)
-    unset(_inspector_standalone_links)
-    unset(_eval_standalone_links)
-    unset(_pulp_standalone_inspector_sources)
-endif()
 unset(_pulp_standalone_sources)
 add_subdirectory(ship)
 # tools/audio (offline Audio Doctor CLI) is a dev tool — only when top-level.
@@ -532,6 +483,73 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
 include(PulpUtils)
 
+# One fixed, installed control host gives the production broker a usable
+# broker-owned selection without accepting executable paths, arguments, or a
+# working directory from clients. Ordinary plugin artifacts remain stripped;
+# author opt-in links the same dedicated adapter only into their Standalone.
+if(APPLE AND NOT IOS AND NOT PULP_IOS AND
+   TARGET pulp-inspect-standalone-runtime)
+    set(PULP_CONTROL_HOST_CODESIGN_TOOL "" CACHE FILEPATH
+        "Host-side, codesign-compatible tool for signing the installed control host")
+    if(CMAKE_HOST_APPLE AND NOT PULP_CONTROL_HOST_CODESIGN_TOOL)
+        find_program(_pulp_control_host_codesign codesign REQUIRED)
+    elseif(PULP_CONTROL_HOST_CODESIGN_TOOL)
+        set(_pulp_control_host_codesign "${PULP_CONTROL_HOST_CODESIGN_TOOL}")
+    endif()
+
+    add_executable(pulp-control-standalone-host
+        inspect/src/control_standalone_host_main.cpp)
+    set_target_properties(pulp-control-standalone-host PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/inspect")
+    target_link_libraries(pulp-control-standalone-host PRIVATE
+        pulp::inspect-standalone-runtime pulp::standalone)
+    target_link_options(pulp-control-standalone-host PRIVATE
+        "LINKER:-dead_strip_dylibs")
+    _pulp_cache_control_declarations(pulp-control-standalone-host
+        developer-local "dev.pulp.instance/read@1;dev.pulp.state/read@1" FALSE)
+    _pulp_configure_control_shipping(pulp-control-standalone-host
+        "dev.pulp.control-standalone-host" "Pulp Control Standalone Host")
+    _pulp_attach_control_shipping(pulp-control-standalone-host
+        pulp-control-standalone-host Standalone)
+    if(PULP_BUILD_TESTS AND _pulp_control_host_codesign)
+        add_custom_command(TARGET pulp-control-standalone-host POST_BUILD
+            COMMAND "${_pulp_control_host_codesign}" --force --sign - --options library
+                    "$<TARGET_FILE:pulp-control-standalone-host>"
+            COMMAND /bin/chmod 0700 "$<TARGET_FILE:pulp-control-standalone-host>"
+            COMMAND /bin/chmod 0600
+                    "$<TARGET_FILE:pulp-control-standalone-host>.inspector-capabilities.json"
+            COMMENT "Ad-hoc signing installed Standalone control host"
+            VERBATIM)
+    endif()
+    if(TARGET pulp-control-broker)
+        add_dependencies(pulp-control-broker pulp-control-standalone-host)
+    endif()
+    install(TARGETS pulp-control-standalone-host
+        RUNTIME DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/pulp
+        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+    install(FILES
+        "${PULP_pulp-control-standalone-host_INSPECTOR_MANIFEST}"
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/pulp
+        RENAME "pulp-control-standalone-host.inspector-capabilities.json"
+        PERMISSIONS OWNER_READ OWNER_WRITE)
+    # CMake may rewrite install RPATHs after the build-time signature is
+    # applied. Re-sign the final installed bytes so the broker can pin the
+    # exact artifact it will execute; release signing may replace this ad-hoc
+    # signature later as part of the normal package transaction.
+    if(_pulp_control_host_codesign)
+        install(CODE
+            "execute_process(COMMAND \"${_pulp_control_host_codesign}\" --force --sign - --options library \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/pulp/pulp-control-standalone-host\" RESULT_VARIABLE _pulp_control_host_sign_result)\nif(NOT _pulp_control_host_sign_result EQUAL 0)\n  message(FATAL_ERROR \"could not sign installed Standalone control host\")\nendif()")
+    elseif(PULP_MACOS_CROSS)
+        message(STATUS
+            "Cross-built control host will be installed unsigned; set "
+            "PULP_CONTROL_HOST_CODESIGN_TOOL to a codesign-compatible host tool "
+            "when the install tree must be immediately runnable")
+    endif()
+    install(FILES
+        "${CMAKE_BINARY_DIR}/pulp-control-shipping-manifests/pulp-control-standalone-host.Standalone.control-shipping.json"
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/pulp)
+endif()
+
 # Inbound link-floor check. Reads the resolved link graph, so it has to be
 # included after the module targets exist and before the consumers that assert
 # a bound over them (examples/, tools/).
@@ -570,6 +588,37 @@ endif()
 # Dev tools build only when Pulp is top-level (see PROJECT_IS_TOP_LEVEL).
 if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/mcp)
+endif()
+
+# The Phase 15 aggregate exercises the real CLI and MCP binaries, so define it
+# only after both tool subdirectories have had a chance to create their targets.
+# CPU-only and embedded configurations intentionally omit this process-level
+# test while retaining the transport-free control suites under test/.
+if(PULP_BUILD_TESTS AND APPLE AND NOT IOS AND NOT PULP_IOS
+   AND TARGET pulp-cli AND TARGET pulp-mcp)
+    add_executable(pulp-test-control-phase15-aggregate-e2e
+        test/test_control_phase15_aggregate_e2e.cpp
+        ${CMAKE_SOURCE_DIR}/inspect/src/control_broker_daemon.cpp)
+    target_include_directories(pulp-test-control-phase15-aggregate-e2e PRIVATE
+        ${CMAKE_SOURCE_DIR}/inspect/src)
+    target_link_libraries(pulp-test-control-phase15-aggregate-e2e PRIVATE
+        pulp::inspect-client Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-control-phase15-aggregate-e2e PRIVATE
+        PULP_CONTROL_TRUSTED_HOST_E2E_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-e2e-fixture>"
+        PULP_CONTROL_PHASE15_CLI="$<TARGET_FILE:pulp-cli>"
+        PULP_CONTROL_PHASE15_MCP="$<TARGET_FILE:pulp-mcp>")
+    set_target_properties(pulp-test-control-phase15-aggregate-e2e PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/phase15-control-aggregate/bin")
+    add_dependencies(pulp-test-control-phase15-aggregate-e2e
+        pulp-control-trusted-host-e2e-fixture pulp-cli pulp-mcp)
+    find_program(_pulp_phase15_codesign codesign REQUIRED)
+    add_custom_command(TARGET pulp-test-control-phase15-aggregate-e2e POST_BUILD
+        COMMAND "${_pulp_phase15_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-test-control-phase15-aggregate-e2e>"
+        COMMENT "Signing the Phase 15 aggregate process fixture"
+        VERBATIM)
+    catch_discover_tests(pulp-test-control-phase15-aggregate-e2e
+        PROPERTIES LABELS "inspect;control;e2e;phase15;aggregate;cli;mcp")
 endif()
 
 # ── Screenshot Tool ────────────────────────────────────────────────────────

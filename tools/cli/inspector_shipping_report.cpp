@@ -905,6 +905,19 @@ Report combine_reports(std::vector<Report> reports) {
 namespace {
 bool scan_artifact_bytes(const fs::path& artifact, std::string_view binary,
                          const Manifest& manifest, std::string& error) {
+    if (!manifest.control_profile.empty()) {
+        pulp::inspect::ControlArtifactExpectation expectation;
+        expectation.profile_id = manifest.control_profile;
+        expectation.manifest_digest = manifest.control_manifest_digest;
+        expectation.endpoint_included = manifest.ships_inspector;
+        expectation.runtime_eval_included = manifest.ships_runtime_eval;
+        expectation.capability_ids = manifest.capabilities;
+        const auto validation =
+            pulp::inspect::validate_control_artifact_bytes(binary, expectation);
+        if (!validation.valid)
+            error = validation.error + ": " + artifact.string();
+        return validation.valid;
+    }
     const auto contains = [&](std::string_view token) {
         return binary.find(token) != std::string::npos;
     };
@@ -919,37 +932,6 @@ bool scan_artifact_bytes(const fs::path& artifact, std::string_view binary,
             artifact.string();
         return false;
     }
-    if (!manifest.control_profile.empty()) {
-        std::string profile_marker = "PULP_CONTROL_PROFILE_";
-        for (const auto character : manifest.control_profile) {
-            profile_marker.push_back(
-                std::isalnum(static_cast<unsigned char>(character))
-                    ? static_cast<char>(std::toupper(
-                          static_cast<unsigned char>(character)))
-                    : '_');
-        }
-        profile_marker += "_V1";
-        if (!contains(profile_marker)) {
-            error = "artifact control profile marker does not match manifest: " +
-                artifact.string();
-            return false;
-        }
-        const auto digest_marker = "PULP_CONTROL_MANIFEST_SHA256_" +
-            manifest.control_manifest_digest + "_V1";
-        if (!contains(digest_marker)) {
-            error = "artifact control manifest digest is absent or stale: " +
-                artifact.string();
-            return false;
-        }
-    }
-    if (manifest.control_profile == "production-stripped" &&
-        (contains("PULP_REMOTE_VIEW_PARAMETER_AUTHORITY_V1") ||
-         contains("view.param_set"))) {
-        error = "production-stripped artifact contains Remote View parameter "
-                "authority: " + artifact.string();
-        return false;
-    }
-
     std::vector<std::string> declared_markers;
     declared_markers.reserve(manifest.capabilities.size());
     for (const auto& capability : manifest.capabilities) {

@@ -907,6 +907,14 @@ Contract that must hold across release lanes:
 - `pulp upgrade --install` extracts the whole tarball, so refreshing
   the CLI also refreshes `pulp-mcp`.
 
+On control-enabled macOS release lanes, the CLI archive is also an atomic
+three-file broker installation: `pulp-control-broker`, its sibling
+`pulp-control-standalone-host`, and that host's exact manifest. Strip, sign,
+package, install, upgrade, and roll back that companion set together. A release
+at or above the control-host compatibility floor must fail if any member is
+missing; shipping only the broker leaves ordinary author Standalone capability
+declarations impossible to launch securely.
+
 **Document and enforce install order in user-facing docs**:
 `curl install.sh | sh` BEFORE `claude plugin install pulp`. The
 reverse order leaves `/mcp` broken until the user upgrades the CLI.

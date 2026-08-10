@@ -22,7 +22,6 @@ pub mod identity;
 pub(crate) mod inspector;
 #[cfg(test)]
 pub(crate) mod inspector_test_support;
-pub mod motion;
 pub mod orchestrate;
 pub mod pkg;
 pub mod pr;

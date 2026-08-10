@@ -4,7 +4,7 @@
 //! The reference file is `tests/fixtures/help/expected_cpp.txt`,
 //! captured from the C++ delegate by running `./pulp-cpp help`.
 //! The installed Rust front end intentionally adds Rust-native
-//! commands (`motion`, `trace`, `identity`) to that shared command
+//! commands (`trace`, `identity`) to that shared command
 //! surface.
 //!
 //! The "Examples" section uses literal `pulp create ...` lines on
@@ -40,7 +40,7 @@ fn expected_installed_banner() -> String {
     expected
         .replace(
             "  inspect        Connect to an explicitly hosted inspector fixture\n",
-            "  inspect        Connect to an explicitly hosted inspector fixture\n  motion         Agent-facing wrappers around inspector Motion protocol\n  trace          Agent-facing wrappers around inspector Trace (Perfetto) protocol\n",
+            "  inspect        Connect to an explicitly hosted inspector fixture\n  trace          Canonical trace capture + offline Perfetto analysis\n",
         )
         .replace(
             "  import         Detect a framework project and emit a Pulp migration scaffold\n",

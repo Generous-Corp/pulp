@@ -24,56 +24,19 @@ if(NOT PULP_ENABLE_INSPECTOR)
     return()
 endif()
 
-add_library(pulp-inspect-discovery-support
-    src/discovery_common.cpp
-    src/discovery_paths.cpp
-    src/discovery_security.cpp)
-add_library(pulp::inspect-discovery-support
-    ALIAS pulp-inspect-discovery-support)
-target_include_directories(pulp-inspect-discovery-support
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>)
-target_link_libraries(pulp-inspect-discovery-support
-    PRIVATE pulp::runtime)
-if(WIN32)
-    target_link_libraries(
-        pulp-inspect-discovery-support PRIVATE Advapi32)
-endif()
-
-add_library(pulp-inspect-discovery src/discovery_reader.cpp)
-add_library(pulp::inspect-discovery ALIAS pulp-inspect-discovery)
-target_include_directories(pulp-inspect-discovery
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>)
-target_link_libraries(pulp-inspect-discovery
-    PUBLIC
-        pulp::inspect-protocol
-        pulp::inspect-discovery-support)
-add_library(pulp-inspect-publication
-    src/discovery_publisher.cpp
-    src/discovery_security_write.cpp)
-add_library(pulp::inspect-publication ALIAS pulp-inspect-publication)
-target_include_directories(pulp-inspect-publication
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>)
-target_link_libraries(pulp-inspect-publication
-    PUBLIC
-        pulp::inspect-protocol
-        pulp::inspect-discovery-support)
-if(WIN32)
-    target_link_libraries(pulp-inspect-publication PRIVATE Advapi32)
-endif()
-
 add_library(pulp-inspect-control
     src/control_admission.cpp
     src/control_artifacts.cpp
     src/control_broker.cpp
     src/control_carrier.cpp
+    src/control_connection_admission.cpp
+    src/control_consent_authority.cpp
     src/control_endpoint.cpp
+    src/control_executor_slot.cpp
     src/control_grants.cpp
+    src/control_host_enrollment.cpp
+    src/control_host_bootstrap.cpp
+    src/control_host_preflight.cpp
     src/control_host_connection.cpp
     src/control_host_router.cpp
     src/control_identity.cpp
@@ -81,11 +44,19 @@ add_library(pulp-inspect-control
     src/control_operations.cpp
     src/control_peer.cpp
     src/control_private_store.cpp
+    src/control_read_operations.cpp
     src/control_service.cpp)
+target_sources(pulp-inspect-control PRIVATE
+    src/control_trusted_host_inventory.cpp
+    src/control_trusted_host_launcher.cpp)
 if(APPLE AND NOT IOS AND NOT PULP_IOS)
-    target_sources(pulp-inspect-control PRIVATE src/control_peer_mac.cpp)
+    target_sources(pulp-inspect-control PRIVATE
+        src/control_peer_mac.cpp
+        src/control_static_code_identity_mac.cpp)
 else()
-    target_sources(pulp-inspect-control PRIVATE src/control_peer_stub.cpp)
+    target_sources(pulp-inspect-control PRIVATE
+        src/control_peer_stub.cpp
+        src/control_static_code_identity_stub.cpp)
 endif()
 add_library(pulp::inspect-control ALIAS pulp-inspect-control)
 target_include_directories(pulp-inspect-control
@@ -93,7 +64,7 @@ target_include_directories(pulp-inspect-control
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>)
 target_link_libraries(pulp-inspect-control
-    PUBLIC pulp::inspect-protocol pulp::events)
+    PUBLIC pulp::inspect-protocol pulp::events pulp::platform)
 if(APPLE AND NOT IOS AND NOT PULP_IOS)
     target_link_libraries(pulp-inspect-control PRIVATE
         "-framework Security" "-framework CoreFoundation")
@@ -110,14 +81,22 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS)
     target_compile_definitions(pulp-control-broker PRIVATE
         PULP_CONTROL_SDK_VERSION="${PROJECT_VERSION}")
     target_link_libraries(pulp-control-broker PRIVATE pulp::inspect-control)
+    if(PULP_BUILD_TESTS)
+        find_program(_pulp_control_broker_codesign codesign REQUIRED)
+        add_custom_command(TARGET pulp-control-broker POST_BUILD
+            COMMAND "${_pulp_control_broker_codesign}" --force --sign -
+                    "$<TARGET_FILE:pulp-control-broker>"
+            COMMENT "Ad-hoc signing control broker"
+            VERBATIM)
+    endif()
     install(TARGETS pulp-control-broker
         RUNTIME DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/pulp)
 endif()
 
 add_library(pulp-inspect-client
-    src/client.cpp
     src/control_client.cpp
     src/control_client_connection.cpp
+    src/control_inspector_client.cpp
     src/control_health.cpp)
 add_library(pulp::inspect-client ALIAS pulp-inspect-client)
 target_include_directories(pulp-inspect-client
@@ -125,16 +104,15 @@ target_include_directories(pulp-inspect-client
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>)
 target_link_libraries(pulp-inspect-client
-    PUBLIC pulp::inspect-discovery
-           pulp::inspect-control)
+    PUBLIC pulp::inspect-control)
 
 add_library(pulp-inspect-runtime
+    src/control_host_development_executor.cpp
+    src/control_state_read_executor.cpp
+    src/control_state_write_executor.cpp
+    src/control_host_ui_executor.cpp
     src/control_main_thread_executor.cpp
-    src/inspector_async_request_executor.cpp
-    src/inspector_async_request_executor.hpp
-    src/inspector_connected_client.hpp
-    src/inspector_publication.hpp
-    src/inspector_server.cpp
+    src/control_trace_session_executor.cpp
     src/main_thread_rpc.cpp
     src/trace_inspector.cpp)
 add_library(pulp::inspect-runtime ALIAS pulp-inspect-runtime)
@@ -146,10 +124,60 @@ target_link_libraries(pulp-inspect-runtime
     PUBLIC
         pulp::inspect-control
         pulp::inspect-protocol
-        pulp::inspect-publication
-        pulp::events)
+        pulp::events
+        pulp::state)
+
+# The canonical ordinary-Standalone host bridge is isolated from both the base
+# Standalone archive and every production-stripped plugin artifact. Only an
+# explicitly control-enabled executable links this archive and installs its
+# lifecycle factory.
+if(APPLE AND PULP_ENABLE_GPU AND NOT IOS AND NOT PULP_IOS)
+    set(_pulp_inspect_standalone_runtime_source src/control_standalone_host.cpp)
+else()
+    set(_pulp_inspect_standalone_runtime_source src/control_standalone_host_minimal.cpp)
+endif()
+add_library(pulp-inspect-standalone-runtime
+    ${_pulp_inspect_standalone_runtime_source})
+add_library(pulp::inspect-standalone-runtime ALIAS
+    pulp-inspect-standalone-runtime)
+target_include_directories(pulp-inspect-standalone-runtime
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
+target_link_libraries(pulp-inspect-standalone-runtime
+    PUBLIC pulp::inspect-runtime pulp::format)
+
+# Exact-target UI capture/input remains an optional adapter so the common
+# control runtime does not acquire a renderer dependency.
+add_library(pulp-inspect-ui-runtime
+    src/control_standalone_ui_adapter.cpp)
+add_library(pulp::inspect-ui-runtime ALIAS pulp-inspect-ui-runtime)
+target_include_directories(pulp-inspect-ui-runtime
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
+target_link_libraries(pulp-inspect-ui-runtime
+    PUBLIC pulp::inspect-runtime pulp::view)
+
+if(APPLE AND PULP_ENABLE_GPU AND NOT IOS AND NOT PULP_IOS)
+    target_link_libraries(pulp-inspect-standalone-runtime
+        PUBLIC pulp-inspect pulp-inspect-ui-runtime)
+endif()
+
+# T0 offline integration is a separate headless adapter archive so the shared
+# control runtime does not acquire format/view dependencies merely by existing.
+add_library(pulp-inspect-offline-runtime
+    src/control_offline_render_executor.cpp)
+add_library(pulp::inspect-offline-runtime ALIAS pulp-inspect-offline-runtime)
+target_include_directories(pulp-inspect-offline-runtime
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
+target_link_libraries(pulp-inspect-offline-runtime
+    PUBLIC pulp::inspect-control pulp::format)
 
 add_library(pulp-inspect-telemetry
+    src/control_telemetry_tap.cpp
     src/value_channel_telemetry_broker.cpp)
 add_library(pulp::inspect-telemetry ALIAS pulp-inspect-telemetry)
 target_include_directories(pulp-inspect-telemetry
@@ -160,6 +188,24 @@ target_link_libraries(pulp-inspect-telemetry
     PUBLIC
         pulp::inspect-protocol
         pulp::view-core)
+
+add_library(pulp-inspect-observability-objects OBJECT
+    src/control_host_observability_bundle.cpp)
+target_include_directories(pulp-inspect-observability-objects PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(pulp-inspect-observability-objects PRIVATE
+    pulp::inspect-runtime pulp::inspect-telemetry)
+add_library(pulp-inspect-observability-runtime STATIC
+    $<TARGET_OBJECTS:pulp-inspect-observability-objects>)
+add_library(pulp::inspect-observability-runtime ALIAS pulp-inspect-observability-runtime)
+target_include_directories(pulp-inspect-observability-runtime
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
+target_link_libraries(pulp-inspect-observability-runtime
+    PUBLIC
+        pulp::inspect-runtime
+        pulp::inspect-telemetry)
 
 add_library(pulp-inspect-authoring src/tweak_store.cpp)
 add_library(pulp::inspect-authoring ALIAS pulp-inspect-authoring)
@@ -191,6 +237,8 @@ target_include_directories(pulp-inspect
 )
 
 target_sources(pulp-inspect PRIVATE
+    $<TARGET_OBJECTS:pulp-inspect-observability-objects>
+    src/control_installed_host.cpp
     src/inspector_overlay.cpp
     src/inspector_overlay_field_edit.cpp
     src/inspector_overlay_knobs.cpp
@@ -207,6 +255,7 @@ target_sources(pulp-inspect PRIVATE
     src/domain_runtime.cpp
     src/editor_url.cpp
     src/source_jump.cpp
+    src/control_motion_executor.cpp
     src/motion_inspector.cpp
     src/motion_scrubber.cpp
     src/agent_request_queue.cpp
@@ -224,12 +273,10 @@ endif()
 # without pulling the high-risk evaluator archive into their link closure.
 foreach(_pulp_eval_free_target IN ITEMS
         pulp-inspect-protocol
-        pulp-inspect-discovery-support
-        pulp-inspect-discovery
-        pulp-inspect-publication
         pulp-inspect-control
         pulp-inspect-client
         pulp-inspect-runtime
+        pulp-inspect-offline-runtime
         pulp-inspect-telemetry
         pulp-inspect-authoring
         pulp-inspect

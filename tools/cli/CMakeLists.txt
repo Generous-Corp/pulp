@@ -21,7 +21,7 @@ configure_file(
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 if(TARGET pulp::inspect-client)
-    set(_pulp_inspect_command_source cmd_inspect.cpp cmd_inspect_screenshot.cpp)
+    set(_pulp_inspect_command_source cmd_inspect.cpp)
 else()
     set(_pulp_inspect_command_source cmd_inspect_unavailable.cpp)
 endif()
@@ -114,6 +114,7 @@ add_executable(pulp-cli
     kit_commands.cpp
     kit_manifest_validation.cpp
     cmd_pr.cpp
+    cmd_control.cpp
     ${_pulp_inspect_command_source}
     ${_pulp_tweaks_command_source}
     design_binding.cpp

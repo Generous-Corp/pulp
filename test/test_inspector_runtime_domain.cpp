@@ -21,7 +21,8 @@ public:
                 .can_evaluate = true,
                 .can_interrupt = true};
     }
-    RuntimeEvaluationResult evaluate(std::string_view code) override {
+    RuntimeEvaluationResult evaluate(std::string_view code, std::chrono::milliseconds,
+                                     std::size_t) override {
         ++evaluate_calls;
         last_code = code;
         if (next_result) {

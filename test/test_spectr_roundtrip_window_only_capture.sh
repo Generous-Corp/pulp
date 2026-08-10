@@ -7,10 +7,9 @@
 # This test pins:
 #   1. The script parses cleanly under `bash -n` (no syntax regressions).
 #   2. No OS-level `screencapture` invocation remains.
-#   3. Spectr publishes an observe-profile Inspector session.
-#   4. Capture uses all three discovered identity selectors, preventing a
-#      different live app instance from being captured accidentally.
-#   5. Unsupported capture is reported explicitly.
+#   3. The retired Inspector screenshot route does not return.
+#   4. Capture is delegated to the canonical control platform.
+#   5. The existing-candidate continuation is explicit.
 #
 # Hermetic: reads only the script source; no launch of Spectr or image tools.
 
@@ -39,27 +38,22 @@ if grep -E '^[[:space:]]*screencapture\b' "$HARNESS" >/dev/null; then
 fi
 pass "no OS-level screencapture fallback"
 
-# 3. The app must publish an authenticated observe-profile session.
-if ! grep -q 'PULP_INSPECT_PROFILE=observe' "$HARNESS"; then
-    fail "Spectr is not launched with the Inspector observe profile"
+# 3. The retired Inspector screenshot route must not return.
+if grep -q 'inspect screenshot' "$HARNESS"; then
+    fail "found retired Inspector screenshot command"
 fi
-pass "Inspector observe profile enabled"
+pass "no retired Inspector screenshot route"
 
-# 4. Pin the Inspector verb and exact identity tuple.
-if ! grep -q 'inspect screenshot --out' "$HARNESS"; then
-    fail "Inspector screenshot command is missing"
+# 4. Automatic capture must direct users to the canonical control platform.
+if ! grep -q 'canonical control platform' "$HARNESS"; then
+    fail "canonical control capture handoff is missing"
 fi
-for selector in session instance publication; do
-    if ! grep -q -- "--$selector" "$HARNESS"; then
-        fail "Inspector screenshot command is missing --$selector"
-    fi
-done
-pass "Inspector capture uses the discovered session identity"
+pass "capture delegates to canonical control"
 
-# 5. Unsupported capture must be surfaced instead of leaving an empty result.
-if ! grep -q 'Status 3 means.*lacks capture capability' "$HARNESS"; then
-    fail "unsupported Inspector capture status is not explained"
+# 5. The handoff must name the existing-candidate continuation.
+if ! grep -q -- '--skip-capture' "$HARNESS"; then
+    fail "external capture continuation is missing"
 fi
-pass "unsupported capture is explicit"
+pass "external capture continuation is explicit"
 
 echo "OK — all 5 assertions passed."

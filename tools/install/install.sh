@@ -150,16 +150,44 @@ mkdir -p "$INSTALL_DIR"
 
 echo "Extracting to $INSTALL_DIR..."
 CONTROL_BROKER_STAGE=""
-if tar -tzf "$TMP_DIR/pulp.tar.gz" | grep -qx 'pulp-control-broker'; then
+CONTROL_PAYLOAD_HAS_COMPANIONS=0
+ARCHIVE_MEMBERS=$(tar -tzf "$TMP_DIR/pulp.tar.gz")
+if printf '%s\n' "$ARCHIVE_MEMBERS" | grep -qx 'pulp-control-broker'; then
     mkdir -p "$TMP_DIR/control-broker-stage"
-    tar xzf "$TMP_DIR/pulp.tar.gz" \
-        -C "$TMP_DIR/control-broker-stage" pulp-control-broker
+    if printf '%s\n' "$ARCHIVE_MEMBERS" | grep -qx 'pulp-control-standalone-host' && \
+       printf '%s\n' "$ARCHIVE_MEMBERS" | grep -qx \
+           'pulp-control-standalone-host.inspector-capabilities.json' && \
+       printf '%s\n' "$ARCHIVE_MEMBERS" | grep -qx 'libwgpu_native.dylib'; then
+        tar xzf "$TMP_DIR/pulp.tar.gz" \
+            -C "$TMP_DIR/control-broker-stage" \
+            pulp-control-broker \
+            pulp-control-standalone-host \
+            pulp-control-standalone-host.inspector-capabilities.json \
+            libwgpu_native.dylib
+        CONTROL_PAYLOAD_HAS_COMPANIONS=1
+    else
+        # Historical broker-bearing releases predate the companion host. Their
+        # own archived CLI still owns the legacy broker-only transaction.
+        tar xzf "$TMP_DIR/pulp.tar.gz" \
+            -C "$TMP_DIR/control-broker-stage" pulp-control-broker
+    fi
     CONTROL_BROKER_STAGE="$TMP_DIR/control-broker-stage/pulp-control-broker"
-    # The Rust installer owns the broker binary + LaunchAgent transaction.
-    # Excluding it here prevents a reinstall from overwriting the running
-    # service before its previous binary has been retained for rollback.
-    tar --exclude='pulp-control-broker' \
-        -xzf "$TMP_DIR/pulp.tar.gz" -C "$INSTALL_DIR"
+    CONTROL_STANDALONE_HOST_STAGE="$TMP_DIR/control-broker-stage/pulp-control-standalone-host"
+    CONTROL_STANDALONE_MANIFEST_STAGE="$TMP_DIR/control-broker-stage/pulp-control-standalone-host.inspector-capabilities.json"
+    CONTROL_STANDALONE_RUNTIME_STAGE="$TMP_DIR/control-broker-stage/libwgpu_native.dylib"
+    # The Rust installer owns the broker transaction. For current releases it
+    # also owns the complete host closure; historical broker-only archives
+    # still install their shared WebGPU runtime through the ordinary payload.
+    if [ "$CONTROL_PAYLOAD_HAS_COMPANIONS" = "1" ]; then
+        tar --exclude='pulp-control-broker' \
+            --exclude='pulp-control-standalone-host' \
+            --exclude='pulp-control-standalone-host.inspector-capabilities.json' \
+            --exclude='libwgpu_native.dylib' \
+            -xzf "$TMP_DIR/pulp.tar.gz" -C "$INSTALL_DIR"
+    else
+        tar --exclude='pulp-control-broker' \
+            -xzf "$TMP_DIR/pulp.tar.gz" -C "$INSTALL_DIR"
+    fi
 else
     tar xzf "$TMP_DIR/pulp.tar.gz" -C "$INSTALL_DIR"
 fi
@@ -170,13 +198,30 @@ chmod +x "$INSTALL_DIR/pulp"
 # never duplicates those security-sensitive operations.
 if [ -n "$CONTROL_BROKER_STAGE" ]; then
     CONTROL_BROKER_RECONCILE_FAILED=0
-    if [ "${PULP_ACCEPT_CONTROL_BROKER_CUSTOM_INSTALL_ROOT:-0}" = "1" ]; then
+    if [ "$CONTROL_PAYLOAD_HAS_COMPANIONS" = "0" ]; then
+        if [ "${PULP_ACCEPT_CONTROL_BROKER_CUSTOM_INSTALL_ROOT:-0}" = "1" ]; then
+            "$INSTALL_DIR/pulp" __control-broker-reconcile \
+                --broker "$CONTROL_BROKER_STAGE" --accept-custom-root || \
+                CONTROL_BROKER_RECONCILE_FAILED=1
+        else
+            "$INSTALL_DIR/pulp" __control-broker-reconcile \
+                --broker "$CONTROL_BROKER_STAGE" || \
+                CONTROL_BROKER_RECONCILE_FAILED=1
+        fi
+    elif [ "${PULP_ACCEPT_CONTROL_BROKER_CUSTOM_INSTALL_ROOT:-0}" = "1" ]; then
         "$INSTALL_DIR/pulp" __control-broker-reconcile \
-            --broker "$CONTROL_BROKER_STAGE" --accept-custom-root || \
+            --broker "$CONTROL_BROKER_STAGE" \
+            --standalone-host "$CONTROL_STANDALONE_HOST_STAGE" \
+            --standalone-manifest "$CONTROL_STANDALONE_MANIFEST_STAGE" \
+            --standalone-runtime "$CONTROL_STANDALONE_RUNTIME_STAGE" \
+            --accept-custom-root || \
             CONTROL_BROKER_RECONCILE_FAILED=1
     else
         "$INSTALL_DIR/pulp" __control-broker-reconcile \
-            --broker "$CONTROL_BROKER_STAGE" || \
+            --broker "$CONTROL_BROKER_STAGE" \
+            --standalone-host "$CONTROL_STANDALONE_HOST_STAGE" \
+            --standalone-manifest "$CONTROL_STANDALONE_MANIFEST_STAGE" \
+            --standalone-runtime "$CONTROL_STANDALONE_RUNTIME_STAGE" || \
             CONTROL_BROKER_RECONCILE_FAILED=1
     fi
     if [ "$CONTROL_BROKER_RECONCILE_FAILED" = "1" ]; then

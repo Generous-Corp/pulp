@@ -9,6 +9,7 @@ struct MemoryFileSystem {
     symlinks: RefCell<HashSet<PathBuf>>,
     private_files: RefCell<HashSet<PathBuf>>,
     fail_next_rename: Cell<bool>,
+    fail_rename_to: RefCell<Option<PathBuf>>,
 }
 
 impl MemoryFileSystem {
@@ -46,7 +47,8 @@ impl FileSystem for MemoryFileSystem {
     }
 
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
-        if self.fail_next_rename.replace(false) {
+        let fail_selected = self.fail_rename_to.borrow().as_deref() == Some(to);
+        if self.fail_next_rename.replace(false) || fail_selected {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "scripted rename failure",
@@ -246,6 +248,116 @@ fn explicit_reconcile_validates_then_starts_and_requires_unverified_health() {
         .contains(&paths_for(&config).marker.with_extension("marker.new")));
 }
 
+#[test]
+fn loaded_generation_is_booted_out_before_replacement_generation_starts() {
+    let config = config();
+    let fs = populated_fs(&config);
+    let paths = paths_for(&config);
+    fs.add(&paths.plist, b"old plist".to_vec());
+    let runner = ScriptedRunner::new(vec![
+        identity_output(),
+        output(0, "", ""),
+        output(0, "501\n", ""),
+        output(0, "loaded", ""),
+        output(0, "OK", ""),
+        output(0, "", ""),
+        output(0, "", ""),
+        output(0, &format!("{HEALTH_TEXT}\n"), ""),
+    ]);
+
+    assert_eq!(
+        reconcile_with(&config, &fs, &runner, AttemptMode::Explicit).unwrap(),
+        ControlBrokerServiceOutcome::Reconciled
+    );
+    let calls = runner.calls.borrow();
+    let bootout = calls
+        .iter()
+        .position(|call| call.args.first().map(String::as_str) == Some("bootout"))
+        .unwrap();
+    let bootstrap = calls
+        .iter()
+        .position(|call| call.args.first().map(String::as_str) == Some("bootstrap"))
+        .unwrap();
+    assert!(bootout < bootstrap);
+}
+
+#[test]
+fn successful_activation_is_not_rolled_back_when_marker_publication_fails() {
+    let config = config();
+    let fs = populated_fs(&config);
+    let paths = paths_for(&config);
+    let failed = ScriptedRunner::new(vec![identity_output(), output(1, "", "invalid signature")]);
+    assert!(reconcile_with(&config, &fs, &failed, AttemptMode::Lazy).is_err());
+    *fs.fail_rename_to.borrow_mut() = Some(paths.marker.clone());
+    let runner = ScriptedRunner::new(successful_script());
+    let rollback_called = Cell::new(false);
+    let callback: RollbackCallback<'_> = Box::new(|| {
+        rollback_called.set(true);
+        Ok(())
+    });
+
+    let outcome =
+        reconcile_with_callback(&config, &fs, &runner, AttemptMode::Explicit, Some(callback))
+            .unwrap();
+
+    assert_eq!(outcome, ControlBrokerServiceOutcome::Reconciled);
+    assert!(!rollback_called.get());
+    assert!(fs.is_file(&paths.marker));
+    assert!(fs.is_file(&paths.marker.with_extension("marker.new")));
+    assert_eq!(
+        runner
+            .calls
+            .borrow()
+            .iter()
+            .filter(|call| call.args.first().map(String::as_str) == Some("bootstrap"))
+            .count(),
+        1
+    );
+    let subsequent = ScriptedRunner::new(vec![identity_output()]);
+    assert_eq!(
+        reconcile_with(&config, &fs, &subsequent, AttemptMode::Lazy).unwrap(),
+        ControlBrokerServiceOutcome::AlreadyAttempted { succeeded: true }
+    );
+}
+
+#[test]
+fn lazy_committed_activation_surfaces_marker_failure_without_rollback_or_retry() {
+    let config = config();
+    let fs = populated_fs(&config);
+    let paths = paths_for(&config);
+    *fs.fail_rename_to.borrow_mut() = Some(paths.marker.clone());
+    let first = ScriptedRunner::new(successful_script());
+    let rollback_called = Cell::new(false);
+    let callback: RollbackCallback<'_> = Box::new(|| {
+        rollback_called.set(true);
+        Ok(())
+    });
+
+    let error = reconcile_with_callback(&config, &fs, &first, AttemptMode::Lazy, Some(callback))
+        .unwrap_err();
+
+    assert_eq!(error.code(), "attempt-marker-failed");
+    assert!(!rollback_called.get());
+    assert!(!fs.is_file(&paths.marker));
+    assert!(fs.is_file(&paths.marker.with_extension("marker.new")));
+    assert_eq!(
+        first
+            .calls
+            .borrow()
+            .iter()
+            .filter(|call| call.args.first().map(String::as_str) == Some("bootstrap"))
+            .count(),
+        1
+    );
+
+    let second = ScriptedRunner::new(vec![identity_output()]);
+    assert_eq!(
+        reconcile_with(&config, &fs, &second, AttemptMode::Lazy).unwrap(),
+        ControlBrokerServiceOutcome::AlreadyAttempted { succeeded: true }
+    );
+    assert_eq!(second.calls.borrow().len(), 1);
+}
+
 fn paths_for(config: &ControlBrokerServiceConfig) -> ServicePaths {
     service_paths(config).unwrap()
 }
@@ -318,7 +430,10 @@ fn activation_failure_restores_previous_plist_and_service() {
         output(0, "", ""),
     ]);
     let error = reconcile_with(&config, &fs, &runner, AttemptMode::Explicit).unwrap_err();
-    assert!(error.to_string().contains("launchd bootstrap failed"));
+    assert!(
+        error.to_string().contains("launchd bootstrap failed"),
+        "{error}"
+    );
     assert_eq!(fs.read(&paths.plist).unwrap(), b"old plist");
     let calls = runner.calls.borrow();
     assert_eq!(
@@ -336,6 +451,7 @@ fn transactional_callback_runs_after_plist_restore_before_service_restart() {
     let fs = populated_fs(&config);
     let paths = service_paths(&config).unwrap();
     fs.add(&paths.plist, b"old plist".to_vec());
+    fs.add(&paths.marker, b"prior successful service marker".to_vec());
     let runner = ScriptedRunner::new(vec![
         identity_output(),
         output(0, "", ""),
@@ -359,7 +475,10 @@ fn transactional_callback_runs_after_plist_restore_before_service_restart() {
     let error =
         reconcile_with_callback(&config, &fs, &runner, AttemptMode::Explicit, Some(callback))
             .unwrap_err();
-    assert!(error.to_string().contains("launchd bootstrap failed"));
+    assert!(
+        error.to_string().contains("launchd bootstrap failed"),
+        "{error}"
+    );
     let calls = runner.calls.borrow();
     let rollback_bootstrap = calls
         .iter()
@@ -369,6 +488,37 @@ fn transactional_callback_runs_after_plist_restore_before_service_restart() {
         .map(|(index, _)| index)
         .unwrap();
     assert_eq!(callback_call_count.get(), Some(rollback_bootstrap));
+    assert_eq!(
+        fs.read(&paths.marker).unwrap(),
+        b"prior successful service marker"
+    );
+}
+
+#[test]
+fn failed_transaction_without_prior_marker_leaves_no_replacement_marker() {
+    let config = config();
+    let fs = populated_fs(&config);
+    let paths = service_paths(&config).unwrap();
+    let runner = ScriptedRunner::new(vec![
+        identity_output(),
+        output(0, "", ""),
+        output(0, "501\n", ""),
+        output(113, "", "not found"),
+        output(0, "OK", ""),
+        output(5, "", "bootstrap failed"),
+        output(113, "", "not found"),
+    ]);
+    let callback: RollbackCallback<'_> = Box::new(|| Ok(()));
+
+    let error =
+        reconcile_with_callback(&config, &fs, &runner, AttemptMode::Explicit, Some(callback))
+            .unwrap_err();
+
+    assert!(
+        error.to_string().contains("launchd bootstrap failed"),
+        "{error}"
+    );
+    assert!(!fs.is_file(&paths.marker));
 }
 
 #[test]
@@ -533,4 +683,141 @@ fn metadata_parser_requires_exact_field_names() {
         Some("abc")
     );
     assert_eq!(metadata_value("OtherCDHash=abc", "CDHash"), None);
+}
+
+#[test]
+fn signed_payload_release_version_uses_side_effect_free_process_contract() {
+    let fs = MemoryFileSystem::default();
+    fs.add(
+        "/tmp/pulp-control-broker",
+        lifecycle::VERSION_QUERY_MARKER.to_vec(),
+    );
+    let runner = ScriptedRunner::new(vec![output(0, "0.795.0\n", "")]);
+    assert_eq!(
+        payload_release_version_with(
+            Path::new("/tmp/pulp-control-broker"),
+            Duration::from_secs(1),
+            &fs,
+            &runner,
+        )
+        .unwrap(),
+        "0.795.0"
+    );
+
+    let ambiguous = ScriptedRunner::new(vec![output(0, "0.794.0\n0.795.0\n", "")]);
+    let error = payload_release_version_with(
+        Path::new("/tmp/pulp-control-broker"),
+        Duration::from_secs(1),
+        &fs,
+        &ambiguous,
+    )
+    .unwrap_err();
+    assert_eq!(error.code(), "ambiguous-release-version");
+}
+
+#[test]
+fn legacy_payload_without_version_query_marker_is_never_executed() {
+    let fs = MemoryFileSystem::default();
+    fs.add("/tmp/pulp-control-broker", b"legacy broker".to_vec());
+    let runner = ScriptedRunner::new(vec![]);
+
+    let error = payload_release_version_with(
+        Path::new("/tmp/pulp-control-broker"),
+        Duration::from_secs(1),
+        &fs,
+        &runner,
+    )
+    .unwrap_err();
+
+    assert_eq!(error.code(), "version-query-unsupported");
+    assert!(runner.calls.borrow().is_empty());
+}
+
+#[test]
+fn legacy_installed_version_requires_marker_root_and_signed_cdhash_match() {
+    let config = config();
+    let fs = populated_fs(&config);
+    let paths = paths_for(&config);
+    fs.add(
+        &paths.marker,
+        BrokerIdentity {
+            cdhash: "abc123".to_owned(),
+            release_version: "0.794.0".to_owned(),
+            install_root: config.install_root.clone(),
+            plist_fingerprint: "fnv1a64:old".to_owned(),
+        }
+        .marker_key()
+            + "outcome=success\nattempt_count=1\nerror_code=none\n",
+    );
+    let runner = ScriptedRunner::new(vec![identity_output()]);
+
+    assert_eq!(
+        lifecycle::installed_release_version_with(
+            &paths.broker,
+            Duration::from_secs(1),
+            &fs,
+            &runner,
+        )
+        .unwrap(),
+        "0.794.0"
+    );
+    assert_eq!(runner.calls.borrow().len(), 1);
+    assert_eq!(
+        runner.calls.borrow()[0].program,
+        Path::new("/usr/bin/codesign")
+    );
+}
+
+#[test]
+fn mismatched_legacy_marker_does_not_execute_installed_broker() {
+    let config = config();
+    let fs = populated_fs(&config);
+    let paths = paths_for(&config);
+    fs.add(
+        &paths.marker,
+        "schema=1\ninstall_root=/wrong/root\nrelease_version=0.794.0\ncdhash=abc123\noutcome=success\nerror_code=none\n",
+    );
+    let runner = ScriptedRunner::new(vec![identity_output()]);
+
+    let error = lifecycle::installed_release_version_with(
+        &paths.broker,
+        Duration::from_secs(1),
+        &fs,
+        &runner,
+    )
+    .unwrap_err();
+
+    assert_eq!(error.code(), "version-query-unsupported");
+    assert_eq!(runner.calls.borrow().len(), 1);
+    assert_eq!(
+        runner.calls.borrow()[0].program,
+        Path::new("/usr/bin/codesign")
+    );
+}
+
+#[test]
+fn modern_broker_recovers_from_a_stale_service_marker() {
+    let config = config();
+    let fs = populated_fs(&config);
+    let paths = paths_for(&config);
+    fs.add(&paths.broker, lifecycle::VERSION_QUERY_MARKER.to_vec());
+    fs.add(
+        &paths.marker,
+        "schema=1\ninstall_root=/wrong/root\nrelease_version=0.794.0\ncdhash=stale\noutcome=failure\nerror_code=activation-failed\n",
+    );
+    let runner = ScriptedRunner::new(vec![identity_output(), output(0, "0.795.0\n", "")]);
+
+    assert_eq!(
+        lifecycle::installed_release_version_with(
+            &paths.broker,
+            Duration::from_secs(1),
+            &fs,
+            &runner,
+        )
+        .unwrap(),
+        "0.795.0"
+    );
+    assert_eq!(runner.calls.borrow().len(), 2);
+    assert_eq!(runner.calls.borrow()[1].program, paths.broker);
+    assert_eq!(runner.calls.borrow()[1].args, ["--version"]);
 }

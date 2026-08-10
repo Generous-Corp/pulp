@@ -56,6 +56,16 @@ def main():
     assert cb.unresolved_rpath_deps(
         ["/usr/lib/libSystem.B.dylib"], ["@loader_path"],
         macos, macos, bundle, exists) == []
+    assert cb.unsafe_dependency_paths(
+        ["/opt/homebrew/lib/libexternal.dylib"], ["@loader_path"],
+        macos, macos, bundle, exists) == ["/opt/homebrew/lib/libexternal.dylib"]
+    assert cb.unsafe_dependency_paths(
+        ["@loader_path/libwgpu_native.dylib"], [],
+        macos, macos, bundle, exists) == []
+    assert cb.unsafe_dependency_paths(
+        ["@loader_path/../../../escape/libexternal.dylib"], [],
+        macos, macos, bundle, lambda p: True) == [
+            "@loader_path/../../../escape/libexternal.dylib"]
 
     # 5. A loader rpath that resolves OUTSIDE the bundle root doesn't count as
     #    in-bundle (defends against @loader_path/../../somewhere escapes).
@@ -94,7 +104,7 @@ def main():
         assert target == os.path.abspath(real_bundle)
         assert root == os.path.abspath(real_bundle)
 
-    print("OK — check_bundle_relocatable.py: 9 logic groups passed")
+    print("OK — check_bundle_relocatable.py: 10 logic groups passed")
 
 
 if __name__ == "__main__":

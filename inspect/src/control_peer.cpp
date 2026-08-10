@@ -13,6 +13,11 @@ std::optional<ControlPeerEvidence> observe_control_peer(
     return detail::observe_platform_control_peer(*credentials, role);
 }
 
+std::optional<ControlPeerEvidence> observe_suspended_control_process(
+    std::int64_t process_id, ControlPeerRole role) {
+    return detail::observe_platform_suspended_control_process(process_id, role);
+}
+
 std::optional<VerifiedControlPeerIdentity> verify_control_peer(
     const events::InterprocessConnection& connection,
     const ControlPeerExpectation& expectation) {
@@ -28,6 +33,10 @@ std::optional<VerifiedControlPeerIdentity> verify_control_peer(
                evidence.publisher_id == expectation.evidence.publisher_id;
     });
     return verifier.verify(std::move(*observed));
+}
+
+ControlProcessLiveness control_peer_process_liveness(const ControlPeerEvidence& evidence) {
+    return detail::platform_control_peer_process_liveness(evidence);
 }
 
 } // namespace pulp::inspect

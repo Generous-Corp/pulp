@@ -80,6 +80,7 @@ TEST_CASE("Inspector profiles separate observation, typed control, and runtime e
         InspectorCapability::DiagnosticsRead,
         InspectorCapability::LogsRead,
         InspectorCapability::CaptureImage,
+        InspectorCapability::UiInput,
         InspectorCapability::TraceControl,
         InspectorCapability::TraceSessionControl,
         InspectorCapability::StateWrite,

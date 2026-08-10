@@ -36,6 +36,24 @@ if(Python3_Interpreter_FOUND)
         --cmake "${CMAKE_COMMAND}"
         --generator "${CMAKE_GENERATOR}"
         "--config=$<CONFIG>")
+    set(_pulp_agent_capability_instrumentation_compile_flags
+        ${PULP_SANITIZER_COMPILE_FLAGS}
+        ${PULP_COVERAGE_COMPILE_FLAGS})
+    set(_pulp_agent_capability_instrumentation_link_flags
+        ${PULP_SANITIZER_LINK_FLAGS}
+        ${PULP_COVERAGE_LINK_FLAGS})
+    string(JOIN " " _pulp_agent_capability_instrumentation_compile_flags
+        ${_pulp_agent_capability_instrumentation_compile_flags})
+    string(JOIN " " _pulp_agent_capability_instrumentation_link_flags
+        ${_pulp_agent_capability_instrumentation_link_flags})
+    if(_pulp_agent_capability_instrumentation_compile_flags)
+        list(APPEND _pulp_agent_capability_installed_args
+            "--instrumentation-cxx-flags=${_pulp_agent_capability_instrumentation_compile_flags}")
+    endif()
+    if(_pulp_agent_capability_instrumentation_link_flags)
+        list(APPEND _pulp_agent_capability_installed_args
+            "--instrumentation-linker-flags=${_pulp_agent_capability_instrumentation_link_flags}")
+    endif()
     if(CMAKE_GENERATOR_PLATFORM)
         list(APPEND _pulp_agent_capability_installed_args
             --generator-platform "${CMAKE_GENERATOR_PLATFORM}")
@@ -68,6 +86,8 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_installed_sdk.py"
             ${_pulp_agent_capability_installed_args})
     unset(_pulp_agent_capability_installed_args)
+    unset(_pulp_agent_capability_instrumentation_compile_flags)
+    unset(_pulp_agent_capability_instrumentation_link_flags)
     # This installs the SDK, then configures, builds, and runs an independent
     # consumer for every capability row and typed binding.
     # A cold Linux runner configures, builds, and runs hundreds of isolated
@@ -75,6 +95,12 @@ if(Python3_Interpreter_FOUND)
     # runtime and turns ctest's retry into cross-test pollution; keep the work
     # bounded while allowing the complete proof to finish once.
     set_tests_properties(agent-capability-installed-sdk PROPERTIES TIMEOUT 1200)
+
+    add_test(NAME control-authoring-examples
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/test/test_control_authoring_examples.py")
+    set_tests_properties(control-authoring-examples PROPERTIES
+        LABELS "inspect;control;docs;examples")
 
     add_test(NAME ci-python-selector-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_find_python311.py")
@@ -161,6 +187,24 @@ if(Python3_Interpreter_FOUND)
     # and user-facing runtime claims fail when either side drifts.
     add_test(NAME inspector-truth-check-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_inspector_truth_check.py")
+
+    # Product B collaboration remains an explicit NO-GO. Scan the complete
+    # shipped source/docs surface and the CLI/broker binaries after the build.
+    set(_control_product_b_absence_args --root "${CMAKE_SOURCE_DIR}")
+    if(TARGET pulp-cli)
+        list(APPEND _control_product_b_absence_args
+            --binary "$<TARGET_FILE:pulp-cli>")
+    endif()
+    if(TARGET pulp-control-broker)
+        list(APPEND _control_product_b_absence_args
+            --binary "$<TARGET_FILE:pulp-control-broker>")
+    endif()
+    add_test(NAME control-product-b-absence COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/control_product_b_absence_check.py"
+        ${_control_product_b_absence_args})
+    set_tests_properties(control-product-b-absence PROPERTIES LABELS "inspect;control;docs")
+    add_test(NAME control-product-b-absence-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_control_product_b_absence_check.py")
 
     # Governed-build wrapper: the bound on Shipyard's `local` mac backend, which
     # runs the build string directly on the host and so never sees the pulp

@@ -16,17 +16,10 @@ Examples:
 pulp run                          # launch default standalone
 pulp run PulpGain                 # launch specific plugin standalone
 pulp run --headless --screenshot /tmp/out.png  # capture screenshot instead
-pulp run --inspect                  # GPU-enabled desktop Development Inspector
-pulp run --inspect=develop --inspect-runtime-eval  # high-risk live-realm evaluation
 pulp run PulpGain -- --debug-port=9222         # pass args to launched binary
 ```
 
-`--inspect[=<profile>]` requires a GPU-enabled desktop build. GPU-off and
-mobile builds keep standalone inspector activation disabled.
-
-`--inspect-runtime-eval` is a separate high-risk acknowledgement for arbitrary
-JavaScript execution in the host process. It requires the `develop` profile, or
-a custom profile that also names `runtime.eval` and `session.control`. No
-profile or saved preference implies it.
+The legacy `pulp run --inspect*` flags are retired. Use `pulp control` with an
+exact instance identifier and a typed operation for live capability work.
 
 If the binary doesn't exist, build first with `/build`.

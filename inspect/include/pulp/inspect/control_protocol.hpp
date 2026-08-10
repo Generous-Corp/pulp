@@ -1,5 +1,7 @@
 #pragma once
 
+#include <pulp/inspect/control_artifacts.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -12,8 +14,11 @@ namespace pulp::inspect {
 
 inline constexpr std::uint32_t kControlProtocolVersion = 1;
 inline constexpr std::string_view kControlEnvelopeSchema = "dev.pulp.control/envelope@1";
+inline constexpr std::string_view kControlLegacyInspectorJsonEncoding = "legacy-inspector-json-v1";
 inline constexpr std::size_t kControlMaximumRequestPayloadBytes = 512u * 1024u;
 inline constexpr std::size_t kControlMaximumEnvelopeBytes = 2u * 1024u * 1024u;
+inline constexpr std::size_t kControlHostMaximumArtifactPublications = 1;
+inline constexpr std::size_t kControlHostMaximumArtifactPublicationBytes = 1u * 1024u * 1024u;
 inline constexpr std::size_t kControlMaximumResultDetailBytes = 1600u * 1024u;
 /// Receipt normalization and wire encoding use these same field boundaries.
 inline constexpr std::size_t kControlReceiptMaximumRequestIdBytes = 128;
@@ -33,6 +38,7 @@ inline constexpr std::size_t kControlMaximumErrorCodeBytes = 128;
 inline constexpr std::size_t kControlMaximumSdkVersionBytes = 128;
 inline constexpr std::size_t kControlMaximumArtifactMetadataFieldBytes = 512;
 inline constexpr std::size_t kControlMaximumArtifactContentTypeBytes = 256;
+inline constexpr std::size_t kControlHostPreflightMaximumBootstrapBase64Bytes = 24u * 1024u;
 static_assert(kControlMaximumRequestPayloadBytes + 256u * 1024u <= kControlMaximumEnvelopeBytes);
 static_assert(kControlMaximumResultDetailBytes + 256u * 1024u <= kControlMaximumEnvelopeBytes);
 static_assert(kControlMaximumArtifactChunkBase64Bytes + 256u * 1024u <=
@@ -128,9 +134,31 @@ struct ControlSessionOpenResult {
                            const ControlSessionOpenResult&) = default;
 };
 
+/// Finite broker-management family used by installed control adapters. The
+/// command is one of enroll, instances, grant-request, revoke, host-prepare,
+/// host-prepare-installed, or host-launch; params and data are bounded canonical JSON objects whose
+/// per-command shape is checked by the endpoint/client API.
+struct ControlManagementEnvelope {
+    std::string request_id;
+    std::string command;
+    std::string params_json = "{}";
+    friend bool operator==(const ControlManagementEnvelope&,
+                           const ControlManagementEnvelope&) = default;
+};
+
+struct ControlManagementResult {
+    std::string request_id;
+    std::string status_id;
+    std::string data_json = "{}";
+    std::string explanation;
+    friend bool operator==(const ControlManagementResult&,
+                           const ControlManagementResult&) = default;
+};
+
 struct ControlHostOpenEnvelope {
     std::string request_id;
     std::string admission_id;
+    std::string enrollment_id;
     friend bool operator==(const ControlHostOpenEnvelope&,
                            const ControlHostOpenEnvelope&) = default;
 };
@@ -139,9 +167,68 @@ struct ControlHostOpenResult {
     std::string request_id;
     bool accepted = false;
     std::string registration_id;
+    std::string broker_id;
+    std::string session_id;
+    std::string instance_id;
+    std::string publication_id;
+    std::string instance_generation;
+    std::string manifest_digest;
+    std::string producer_artifact_digest;
     std::string error_code;
     std::string explanation;
     friend bool operator==(const ControlHostOpenResult&, const ControlHostOpenResult&) = default;
+};
+
+struct ControlHostReadyEnvelope {
+    std::string request_id;
+    std::string registration_id;
+    friend bool operator==(const ControlHostReadyEnvelope&, const ControlHostReadyEnvelope&) = default;
+};
+
+struct ControlHostReadyResult {
+    std::string request_id;
+    bool accepted = false;
+    std::uint64_t liveness_generation = 0;
+    std::string error_code;
+    std::string explanation;
+    friend bool operator==(const ControlHostReadyResult&, const ControlHostReadyResult&) = default;
+};
+
+struct ControlHostHeartbeatEnvelope {
+    std::string request_id;
+    std::string registration_id;
+    std::uint64_t liveness_generation = 0;
+    friend bool operator==(const ControlHostHeartbeatEnvelope&,
+                           const ControlHostHeartbeatEnvelope&) = default;
+};
+
+struct ControlHostHeartbeatResult {
+    std::string request_id;
+    bool accepted = false;
+    std::uint64_t liveness_generation = 0;
+    std::string error_code;
+    std::string explanation;
+    friend bool operator==(const ControlHostHeartbeatResult&,
+                           const ControlHostHeartbeatResult&) = default;
+};
+
+struct ControlHostPreflightChallengeEnvelope {
+    std::string nonce;
+    friend bool operator==(const ControlHostPreflightChallengeEnvelope&,
+                           const ControlHostPreflightChallengeEnvelope&) = default;
+};
+
+struct ControlHostPreflightResponseEnvelope {
+    std::string nonce;
+    friend bool operator==(const ControlHostPreflightResponseEnvelope&,
+                           const ControlHostPreflightResponseEnvelope&) = default;
+};
+
+struct ControlHostPreflightBootstrapEnvelope {
+    std::string nonce;
+    std::string bootstrap_base64;
+    friend bool operator==(const ControlHostPreflightBootstrapEnvelope&,
+                           const ControlHostPreflightBootstrapEnvelope&) = default;
 };
 
 /// Broker-to-host execution request. Client and grant identities deliberately
@@ -150,6 +237,22 @@ struct ControlHostOpenResult {
 struct ControlHostExecuteEnvelope {
     std::string route_id;
     std::string receipt_id;
+    /// Broker-minted, connection-local projection of client+grant authority.
+    /// It is stable only for the lifetime of that authority on this host and
+    /// cannot be used on the client carrier.
+    std::string authority_id;
+    /// Broker-minted, host-local projection of the authenticated client scope.
+    /// It correlates that client's separately granted operations only inside
+    /// this exact broker/host lifetime and never authorizes by itself.
+    std::string controller_authority_id;
+    std::string broker_id;
+    std::string session_id;
+    std::string instance_id;
+    std::string publication_id;
+    std::string instance_generation;
+    std::string capability_id;
+    std::string manifest_digest;
+    std::string producer_artifact_digest;
     std::string operation_id;
     std::uint32_t operation_version = 1;
     std::int64_t deadline_unix_ms = 0;
@@ -157,6 +260,13 @@ struct ControlHostExecuteEnvelope {
     std::string params_json = "{}";
     friend bool operator==(const ControlHostExecuteEnvelope&,
                            const ControlHostExecuteEnvelope&) = default;
+};
+
+struct ControlHostAuthorityEndEnvelope {
+    std::string authority_id;
+    std::string reason;
+    friend bool operator==(const ControlHostAuthorityEndEnvelope&,
+                           const ControlHostAuthorityEndEnvelope&) = default;
 };
 
 struct ControlHostProgressEnvelope {
@@ -286,6 +396,19 @@ enum class ControlRetryClassification : std::uint8_t {
 
 /// Host-authored execution outcome. CompletedAfterRevocation is intentionally
 /// unavailable here; only the broker may derive that durable receipt state.
+struct ControlHostArtifactPublication {
+    /// Host-local correlation token only. The broker never accepts it as an
+    /// artifact identity and replaces it with broker-owned ACL metadata.
+    std::string reference_id;
+    std::string bytes_base64;
+    std::string content_type;
+    ControlArtifactSensitivity sensitivity = ControlArtifactSensitivity::Sensitive;
+    ControlArtifactRedactionState redaction_state = ControlArtifactRedactionState::Original;
+    std::int64_t lifetime_ms = 0;
+    friend bool operator==(const ControlHostArtifactPublication&,
+                           const ControlHostArtifactPublication&) = default;
+};
+
 struct ControlHostCompleteEnvelope {
     std::string route_id;
     ControlReceiptState terminal_state = ControlReceiptState::Failed;
@@ -294,6 +417,7 @@ struct ControlHostCompleteEnvelope {
     std::string explanation;
     std::string detail_json = "{}";
     std::string cancellation_reason;
+    std::vector<ControlHostArtifactPublication> artifact_publications;
     friend bool operator==(const ControlHostCompleteEnvelope&,
                            const ControlHostCompleteEnvelope&) = default;
 };
@@ -319,13 +443,31 @@ struct ControlReceiptEnvelope {
     friend bool operator==(const ControlReceiptEnvelope&, const ControlReceiptEnvelope&) = default;
 };
 
+/// Lossless compatibility detail for a failed operation declared with the
+/// legacy-inspector-json-v1 adapter encoding. The typed receipt result remains
+/// authoritative for policy and retry behavior; this tuple preserves the
+/// existing client-facing error contract without deriving codes from prose.
+struct ControlLegacyInspectorError {
+    std::string error_code;
+    std::string error_message;
+    std::string error_data_json;
+    friend bool operator==(const ControlLegacyInspectorError&,
+                           const ControlLegacyInspectorError&) = default;
+};
+
 using ControlEnvelopePayload =
     std::variant<ControlNegotiationOffer, ControlNegotiationResult, ControlRequestEnvelope,
                  ControlCancelEnvelope, ControlProgressEnvelope, ControlReceiptEnvelope,
-                 ControlSessionOpenEnvelope, ControlSessionOpenResult, ControlArtifactReadEnvelope,
+                 ControlSessionOpenEnvelope, ControlSessionOpenResult, ControlManagementEnvelope,
+                 ControlManagementResult, ControlArtifactReadEnvelope,
                  ControlArtifactReadResponseEnvelope, ControlHealthEnvelope, ControlHealthResult,
                  ControlErrorEnvelope, ControlHostOpenEnvelope, ControlHostOpenResult,
-                 ControlHostExecuteEnvelope, ControlHostProgressEnvelope, ControlHostCancelEnvelope,
+                 ControlHostReadyEnvelope, ControlHostReadyResult,
+                 ControlHostHeartbeatEnvelope, ControlHostHeartbeatResult,
+                 ControlHostPreflightChallengeEnvelope, ControlHostPreflightResponseEnvelope,
+                 ControlHostPreflightBootstrapEnvelope, ControlHostExecuteEnvelope,
+                 ControlHostProgressEnvelope, ControlHostCancelEnvelope,
+                 ControlHostAuthorityEndEnvelope,
                  ControlHostCompleteEnvelope>;
 
 struct ControlEnvelope {
@@ -359,6 +501,8 @@ enum class ControlEnvelopeDirection : std::uint8_t {
     BrokerToClient,
     HostToBroker,
     BrokerToHost,
+    HostToLauncher,
+    LauncherToHost,
 };
 
 /// Direction is transport state, not payload authority. Carriers call this
@@ -413,6 +557,14 @@ std::optional<std::string> canonicalize_control_json(std::string_view json);
 /// Hashes the authority and operation binding plus canonical request parameters.
 /// The transport request_id and deadline are deliberately not part of replay identity.
 std::optional<std::string> control_request_hash(const ControlRequestEnvelope& request);
+
+/// Encodes/decodes the strict compatibility object carried in a failed
+/// adapter receipt's detail_json. Unknown structured error data is retained as
+/// its original JSON spelling. Malformed or out-of-bounds input fails closed.
+std::optional<std::string>
+encode_control_legacy_inspector_error(const ControlLegacyInspectorError& error);
+std::optional<ControlLegacyInspectorError>
+decode_control_legacy_inspector_error(std::string_view detail_json);
 
 /// Emits one deterministic JSON representation. Returns an empty string if the
 /// in-memory envelope violates the same bounds enforced by the decoder.

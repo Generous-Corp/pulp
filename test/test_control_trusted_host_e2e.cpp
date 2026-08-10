@@ -1,0 +1,628 @@
+#include <catch2/catch_test_macros.hpp>
+
+#include <pulp/events/interprocess_connection.hpp>
+#include <pulp/inspect/control_client_connection.hpp>
+#include <pulp/inspect/control_endpoint.hpp>
+#include <pulp/inspect/control_host_router.hpp>
+#include <pulp/inspect/control_trusted_host_launcher.hpp>
+#include <pulp/runtime/crypto.hpp>
+
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <memory>
+#include <mutex>
+#include <thread>
+
+#ifdef __APPLE__
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
+using namespace std::chrono_literals;
+using namespace pulp::inspect;
+
+namespace {
+namespace fs = std::filesystem;
+
+constexpr std::string_view kManifest = R"({
+  "schema": "dev.pulp.control/artifact-manifest@1",
+  "schema_version": 1,
+  "profile": "developer-local",
+  "target": "pulp-control-trusted-host-e2e-fixture",
+  "product_name": "Pulp Trusted Host E2E Fixture",
+  "bundle_id": "dev.pulp.test.trusted-host-e2e-fixture",
+  "build_id": "build:0123456789abcdef0123456789abcdef",
+  "registry_digest": "b3bfbc17c377a58531c0689ce961d33d43d7504c61f8db979cd1a0df678409bc",
+  "endpoint_included": true,
+  "unsafe_runtime_eval_acknowledged": false,
+  "permission_terms": ["implemented", "built", "host_available", "activated", "policy_eligible", "client_granted", "session_live"],
+  "capabilities": ["dev.pulp.instance/read@1", "dev.pulp.session/control@1", "dev.pulp.trace/session-control@1"]
+}
+)";
+
+constexpr std::string_view kInstalledManifest = R"({
+  "schema": "dev.pulp.control/artifact-manifest@1",
+  "schema_version": 1,
+  "profile": "developer-local",
+  "target": "pulp-control-installed-host-e2e-fixture",
+  "product_name": "Pulp Installed Host E2E Fixture",
+  "bundle_id": "dev.pulp.test.installed-host-e2e-fixture",
+  "build_id": "build:1123456789abcdef0123456789abcdef",
+  "registry_digest": "b3bfbc17c377a58531c0689ce961d33d43d7504c61f8db979cd1a0df678409bc",
+  "endpoint_included": true,
+  "unsafe_runtime_eval_acknowledged": false,
+  "permission_terms": ["implemented", "built", "host_available", "activated", "policy_eligible", "client_granted", "session_live"],
+  "capabilities": ["dev.pulp.session/control@1", "dev.pulp.trace/control@1", "dev.pulp.trace/session-control@1", "dev.pulp.ui/input@1"]
+}
+)";
+
+struct Directory {
+    fs::path root;
+    Directory() {
+        const auto random = pulp::runtime::secure_random_bytes(8);
+        REQUIRE(random);
+        root =
+            fs::canonical("/tmp") / ("pulp-control-t1-e2e-" + pulp::runtime::hex_encode(*random));
+        for (const auto* child : {"source", "stage", "receipts"})
+            fs::create_directories(root / child);
+#ifdef __APPLE__
+        ::chmod(root.c_str(), 0700);
+        ::chmod((root / "source").c_str(), 0700);
+        ::chmod((root / "stage").c_str(), 0700);
+        ::chmod((root / "receipts").c_str(), 0700);
+#endif
+    }
+    ~Directory() {
+        std::error_code ignored;
+        fs::remove_all(root, ignored);
+    }
+};
+
+#ifdef __APPLE__
+ControlPeerEvidence observe_current_process(const fs::path& endpoint, ControlPeerRole role) {
+    pulp::events::InterprocessConnectionServer observer;
+    std::mutex mutex;
+    std::condition_variable ready;
+    std::unique_ptr<pulp::events::InterprocessConnection> accepted;
+    observer.on_client_connected = [&](auto connection) {
+        {
+            std::lock_guard lock(mutex);
+            accepted = std::move(connection);
+        }
+        ready.notify_all();
+    };
+    REQUIRE(observer.start(endpoint.string(), pulp::events::IpcTransport::LocalSocket));
+    pulp::events::InterprocessConnection client;
+    REQUIRE(client.connect(endpoint.string(), pulp::events::IpcTransport::LocalSocket, 2s));
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(ready.wait_for(lock, 2s, [&] { return accepted != nullptr; }));
+    }
+    const auto evidence = observe_control_peer(*accepted, role);
+    REQUIRE(evidence);
+    client.disconnect();
+    accepted.reset();
+    observer.stop();
+    return *evidence;
+}
+
+VerifiedControlPeerIdentity verify_for_broker(ControlPeerEvidence evidence) {
+    ControlPeerVerifier verifier([](const ControlPeerEvidence&) { return true; });
+    auto verified = verifier.verify(std::move(evidence));
+    REQUIRE(verified);
+    return std::move(*verified);
+}
+
+ControlAdmissionPolicy allow_t1_trace() {
+    ControlAdmissionPolicy policy;
+    policy.host_available = [](const auto&, const auto&) { return true; };
+    policy.activated = [](const auto&, const auto&) { return true; };
+    policy.policy_eligible = [](const auto&, const auto&) { return true; };
+    return policy;
+}
+
+std::string wait_for_registration(const fs::path& path) {
+    for (unsigned attempt = 0; attempt < 15'000; ++attempt) {
+        std::ifstream input(path);
+        std::string registration;
+        if (input >> registration)
+            return registration;
+        std::this_thread::sleep_for(1ms);
+    }
+    return {};
+}
+
+bool wait_for_path(const fs::path& path) {
+    for (unsigned attempt = 0; attempt < 15'000 && !fs::exists(path); ++attempt)
+        std::this_thread::sleep_for(1ms);
+    return fs::exists(path);
+}
+#endif
+} // namespace
+
+TEST_CASE("raw signed T1 host reaches a correlated trace receipt through canonical control",
+          "[inspect][control][e2e][t1][security]") {
+#ifdef __APPLE__
+    Directory directory;
+    const auto executable = directory.root / "source" / "trusted-host";
+    fs::copy_file(PULP_CONTROL_TRUSTED_HOST_E2E_FIXTURE, executable);
+    ::chmod(executable.c_str(), 0700);
+    {
+        std::ofstream sidecar(executable.string() + ".inspector-capabilities.json");
+        sidecar << kManifest;
+    }
+    ::chmod((executable.string() + ".inspector-capabilities.json").c_str(), 0600);
+    ControlManifestDiagnostics manifest_diagnostics;
+    const auto manifest = parse_control_manifest(kManifest, &manifest_diagnostics);
+    INFO(manifest_diagnostics.error);
+    REQUIRE(manifest);
+    REQUIRE(serialize_control_manifest(*manifest) == kManifest);
+
+    const auto broker_evidence = observe_current_process(directory.root / "broker-observer.sock",
+                                                         ControlPeerRole::TrustedHostBridge);
+    ControlBrokerConfig broker_config;
+    broker_config.admission = allow_t1_trace();
+    broker_config.operation_store = ControlOperationStoreConfig{
+        .directory = directory.root / "receipts",
+    };
+    ControlBroker broker(std::move(broker_config));
+    ControlHostRouter router;
+    ControlService service(broker, router.executor());
+    ControlHostEnrollmentStore enrollments;
+    ControlConnectionAdmissionStore admissions;
+    ControlEndpointEnrollmentContext enrollment_context{enrollments, broker, admissions};
+    ControlEndpoint endpoint(
+        service, [&](std::string_view id) { return admissions.consume(id); },
+        {.endpoint_path = directory.root / "broker.sock",
+         .sdk_version = "0.795.2-test",
+         .broker_id = broker.broker_id().value,
+         .process_generation = 17},
+        &router, &enrollment_context);
+    REQUIRE(endpoint.start());
+
+    const auto result_path = directory.root / "host-registration";
+    const auto stop_path = directory.root / "host-stop";
+    ControlTrustedHostInventory inventory(
+        {.staging_root = directory.root / "stage", .broker_generation = 17, .ttl = 10s});
+    const auto prepared = inventory.prepare({
+        .executable = executable,
+        .arguments = {result_path.string(), stop_path.string()},
+        .working_directory = directory.root / "source",
+        .host_tier = ControlHostTier::Standalone,
+    });
+    INFO(control_trusted_host_inventory_status_id(prepared.status));
+    REQUIRE(prepared.ticket);
+
+    ControlTrustedHostLauncher launcher(inventory, enrollments,
+                                        {.endpoint_path = directory.root / "broker.sock",
+                                         .expected_broker = {.evidence = broker_evidence},
+                                         .broker_generation = 17,
+                                         // A freshly copied signed fixture can spend several
+                                         // seconds in dyld/code-signature validation on a busy
+                                         // macOS host before it reaches the inherited channel.
+                                         .preflight_timeout = 15s});
+    pulp::platform::ProcessOptions process_options;
+    process_options.timeout_ms = 20'000;
+    auto launched = launcher.launch(prepared.ticket->inventory_id, process_options);
+    INFO(launched.explanation);
+    INFO(static_cast<unsigned>(launched.preflight.status));
+    REQUIRE(launched.launched());
+
+    const ControlRegistrationId registration_id{wait_for_registration(result_path)};
+    REQUIRE(registration_id);
+    const auto registration = broker.registration(registration_id);
+    REQUIRE(registration);
+    REQUIRE(router.connected(registration_id));
+
+    const auto client_evidence =
+        observe_current_process(directory.root / "client-observer.sock", ControlPeerRole::Client);
+    auto client_peer = verify_for_broker(client_evidence);
+    const auto bootstrap = broker.issue_bootstrap(client_peer);
+    REQUIRE(bootstrap.ticket);
+    const auto redeemed = broker.redeem_bootstrap(bootstrap.ticket->ticket_id,
+                                                  bootstrap.ticket->secret.bytes(), client_peer);
+    REQUIRE(redeemed.client);
+    const auto admission =
+        admissions.issue({.evidence = client_evidence},
+                         ControlClientConnectionPrincipal{redeemed.client->client_id});
+    REQUIRE(admission.ticket);
+
+    ControlClientConnection connection({.endpoint_path = directory.root / "broker.sock",
+                                        .expected_broker = {.evidence = broker_evidence}});
+    REQUIRE(connection.connect());
+    REQUIRE(connection.open_session(admission.ticket->admission_id).accepted);
+    ControlClient client(connection);
+    const auto negotiated = client.negotiate({.mandatory_features = {"receipts"}});
+    REQUIRE(negotiated.succeeded());
+
+    const auto granted =
+        broker.issue_grant(client_peer,
+                           {.client_id = redeemed.client->client_id,
+                            .registration_id = registration_id,
+                            .capabilities = {InspectorCapability::TraceSessionControl},
+                            .ttl = 1min},
+                           {.approved = true,
+                            .authority = ControlConsentAuthority::TrustedPulpCli,
+                            .decision_id = "t1-e2e-trace"});
+    REQUIRE(granted.grant);
+
+    ControlRequestEnvelope request{
+        .request_id = "t1-trace-request",
+        .client_id = redeemed.client->client_id.value,
+        .registration_id = registration_id.value,
+        .grant_id = granted.grant->grant_id.value,
+        .instance_generation = registration->publication_id,
+        .operation_id = "dev.pulp.trace/session-control@1",
+        .operation_version = 1,
+        .idempotency_key = "t1-trace-idempotency",
+        .deadline_unix_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                (std::chrono::system_clock::now() + 5s).time_since_epoch())
+                                .count(),
+        .params_json = R"({"action":"start","ring_mb":8})",
+    };
+    request.request_hash = *control_request_hash(request);
+    const auto dispatched = client.request(request, 5s);
+    REQUIRE(dispatched.succeeded());
+    CHECK(dispatched.response->request_id == request.request_id);
+    CHECK(dispatched.response->operation_id == request.operation_id);
+    const auto persisted =
+        broker.operation_receipt(ControlReceiptId{dispatched.response->receipt_id});
+    REQUIRE(persisted);
+    CHECK(persisted->binding.registration_id == registration_id);
+    CHECK(persisted->binding.operation_id == request.operation_id);
+    CHECK((dispatched.response->state == ControlReceiptState::Completed ||
+           dispatched.response->result_code == ControlResultCode::NotBuilt));
+
+    std::ofstream(stop_path) << "stop";
+    connection.disconnect();
+    const auto process = launched.process->wait();
+    INFO(process.stderr_output);
+    CHECK(process.exit_code == 0);
+    endpoint.stop();
+#else
+    SUCCEED("raw signed T1 launch is currently macOS-only");
+#endif
+}
+
+TEST_CASE("Release installed host publishes only after ready and cleans revoked expired restart authority",
+          "[inspect][control][e2e][t1][release][authority]") {
+#if defined(__APPLE__) && defined(PULP_CONTROL_INSTALLED_HOST_E2E_FIXTURE)
+    Directory directory;
+    const fs::path fixture = PULP_CONTROL_INSTALLED_HOST_E2E_FIXTURE;
+    const auto executable = directory.root / "source" / "installed-host";
+    fs::copy_file(fixture, executable);
+    const auto runtime_dependency = directory.root / "source" / "libwgpu_native.dylib";
+    fs::copy_file(fixture.parent_path() / "libwgpu_native.dylib", runtime_dependency);
+    ::chmod(executable.c_str(), 0700);
+    ::chmod(runtime_dependency.c_str(), 0700);
+    {
+        std::ofstream sidecar(executable.string() + ".inspector-capabilities.json");
+        sidecar << kInstalledManifest;
+    }
+    ::chmod((executable.string() + ".inspector-capabilities.json").c_str(), 0600);
+    ControlManifestDiagnostics installed_manifest_diagnostics;
+    const auto installed_manifest =
+        parse_control_manifest(kInstalledManifest, &installed_manifest_diagnostics);
+    INFO(installed_manifest_diagnostics.error);
+    REQUIRE(installed_manifest);
+    INFO("installed manifest digest: " << control_manifest_digest(*installed_manifest));
+    const auto broker_evidence = observe_current_process(directory.root / "broker-ready.sock",
+                                                         ControlPeerRole::TrustedHostBridge);
+    ControlHostRouter router;
+    ControlBrokerConfig broker_config;
+    broker_config.admission = allow_t1_trace();
+    broker_config.operation_store = ControlOperationStoreConfig{.directory =
+                                                                     directory.root / "receipts"};
+    broker_config.authority_ended =
+        [&](const ControlClientId& client_id, const ControlRegistrationId& registration_id,
+            const ControlGrantId& grant_id, std::string_view reason) {
+            router.end_authority(client_id, registration_id, grant_id, reason);
+        };
+    const auto broker_clock_base = std::chrono::steady_clock::now();
+    std::atomic<std::int64_t> broker_clock_offset_ns{0};
+    ControlBroker broker(
+        std::move(broker_config), {},
+        [&] {
+            return broker_clock_base + std::chrono::nanoseconds(
+                                           broker_clock_offset_ns.load(
+                                               std::memory_order_relaxed));
+        });
+    ControlService service(broker, router.executor());
+    ControlHostEnrollmentStore enrollments;
+    ControlConnectionAdmissionStore admissions;
+    ControlEndpointEnrollmentContext enrollment_context{enrollments, broker, admissions};
+    ControlEndpoint endpoint(
+        service, [&](std::string_view id) { return admissions.consume(id); },
+        {.endpoint_path = directory.root / "broker.sock",
+         .sdk_version = "0.798.1-test",
+         .broker_id = broker.broker_id().value,
+         .process_generation = 29},
+        &router, &enrollment_context);
+    REQUIRE(endpoint.start());
+    ControlTrustedHostInventory inventory(
+        {.staging_root = directory.root / "stage", .broker_generation = 29, .ttl = 30s});
+    auto launch_host = [&](std::vector<std::string> arguments) {
+        ControlTrustedHostLaunchIntent intent{.executable = executable,
+                                              .arguments = std::move(arguments),
+                                              .working_directory = directory.root / "source",
+                                              .host_tier = ControlHostTier::Standalone};
+        const auto policy = pin_control_trusted_host_preparation_policy(intent);
+        REQUIRE(policy);
+        REQUIRE(policy->runtime_dependencies.size() == 1);
+        CHECK(policy->runtime_dependencies.front().filename == "libwgpu_native.dylib");
+        const auto prepared = inventory.prepare(intent, *policy);
+        REQUIRE(prepared.ticket);
+        ControlTrustedHostLauncher launcher(inventory, enrollments,
+                                            {.endpoint_path = directory.root / "broker.sock",
+                                             .expected_broker = {.evidence = broker_evidence},
+                                             .broker_generation = 29,
+                                             .preflight_timeout = 15s});
+        pulp::platform::ProcessOptions options;
+        options.timeout_ms = 20'000;
+        auto launched = launcher.launch(prepared.ticket->inventory_id, options);
+        INFO(launched.explanation);
+        REQUIRE(launched.launched());
+        return std::move(launched.process);
+    };
+
+    const auto registration_path = directory.root / "installed-registration";
+    const auto stop_path = directory.root / "installed-stop";
+    const auto cleanup_path = directory.root / "installed-cleanup";
+    const auto observed_path = directory.root / "bootstrap-observed";
+    const auto ready_path = directory.root / "allow-ready";
+    const auto revoked_active_path = directory.root / "revoked-active";
+    const auto revoked_inactive_path = directory.root / "revoked-inactive";
+    const auto expired_active_path = directory.root / "expired-active";
+    const auto expired_inactive_path = directory.root / "expired-inactive";
+    const auto disconnected_active_path = directory.root / "disconnected-active";
+    const auto disconnected_inactive_path = directory.root / "disconnected-inactive";
+    const auto teardown_active_path = directory.root / "teardown-active";
+    auto process = launch_host({registration_path.string(), stop_path.string(),
+                                cleanup_path.string(), observed_path.string(),
+                                ready_path.string(), revoked_active_path.string(),
+                                revoked_inactive_path.string(), expired_active_path.string(),
+                                expired_inactive_path.string(), disconnected_active_path.string(),
+                                disconnected_inactive_path.string(), teardown_active_path.string()});
+    REQUIRE(wait_for_path(observed_path));
+    CHECK(broker.registrations().empty());
+    CHECK_FALSE(fs::exists(registration_path));
+    std::ofstream(ready_path) << "ready\n";
+    const ControlRegistrationId registration_id{wait_for_registration(registration_path)};
+    REQUIRE(registration_id);
+    REQUIRE(router.connected(registration_id));
+    const auto registration = broker.registration(registration_id);
+    REQUIRE(registration);
+
+    const auto client_evidence =
+        observe_current_process(directory.root / "client-ready.sock", ControlPeerRole::Client);
+    auto client_peer = verify_for_broker(client_evidence);
+    const auto bootstrap = broker.issue_bootstrap(client_peer);
+    REQUIRE(bootstrap.ticket);
+    const auto redeemed = broker.redeem_bootstrap(bootstrap.ticket->ticket_id,
+                                                  bootstrap.ticket->secret.bytes(), client_peer);
+    REQUIRE(redeemed.client);
+    const auto admission = admissions.issue(
+        {.evidence = client_evidence},
+        ControlClientConnectionPrincipal{redeemed.client->client_id});
+    REQUIRE(admission.ticket);
+    ControlClientConnection connection({.endpoint_path = directory.root / "broker.sock",
+                                        .expected_broker = {.evidence = broker_evidence}});
+    REQUIRE(connection.connect());
+    REQUIRE(connection.open_session(admission.ticket->admission_id).accepted);
+    ControlClient client(connection);
+    REQUIRE(client.negotiate({.mandatory_features = {"receipts"}}).succeeded());
+
+    auto start_trace = [&](ControlClient& dispatch_client, const ControlGrant& grant,
+                           std::string suffix) {
+        ControlRequestEnvelope request{
+            .request_id = "motion-" + suffix,
+            .client_id = grant.client_id.value,
+            .registration_id = registration_id.value,
+            .grant_id = grant.grant_id.value,
+            .instance_generation = registration->publication_id,
+            .operation_id = "dev.pulp.trace/control@1",
+            .operation_version = 1,
+            .idempotency_key = "motion-key-" + suffix,
+            .deadline_unix_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    (std::chrono::system_clock::now() + 5s).time_since_epoch())
+                                    .count(),
+            .params_json = R"({"action":"motion-start-trace","view_name":"release","fps":30,"metrics":[{"kind":"geometry","node_id":"root","properties":["width"]}]})",
+        };
+        request.request_hash = *control_request_hash(request);
+        const auto dispatched = dispatch_client.request(request, 5s);
+        INFO("dispatch error: " << dispatched.error_code);
+        INFO("dispatch explanation: " << dispatched.explanation);
+        REQUIRE(dispatched.succeeded());
+        INFO("result code: "
+             << (dispatched.response->result_code
+                     ? control_result_code_id(*dispatched.response->result_code)
+                     : std::string_view{"none"}));
+        INFO("result explanation: " << dispatched.response->explanation);
+        REQUIRE(dispatched.response->state == ControlReceiptState::Completed);
+    };
+    auto acquire_controller = [&](ControlClient& dispatch_client, const ControlGrant& grant,
+                                  std::string suffix) {
+        ControlRequestEnvelope request{
+            .request_id = "controller-" + suffix,
+            .client_id = grant.client_id.value,
+            .registration_id = registration_id.value,
+            .grant_id = grant.grant_id.value,
+            .instance_generation = registration->publication_id,
+            .operation_id = "dev.pulp.session/control@1",
+            .operation_version = 1,
+            .idempotency_key = "controller-key-" + suffix,
+            .deadline_unix_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    (std::chrono::system_clock::now() + 5s).time_since_epoch())
+                                    .count(),
+            .params_json = R"({"action":"acquire"})",
+        };
+        request.request_hash = *control_request_hash(request);
+        const auto dispatched = dispatch_client.request(request, 5s);
+        INFO(dispatched.explanation);
+        REQUIRE(dispatched.succeeded());
+        INFO(dispatched.response->explanation);
+        REQUIRE(dispatched.response->state == ControlReceiptState::Completed);
+    };
+    auto retain_ui = [&](ControlClient& dispatch_client, const ControlGrant& grant,
+                         std::string suffix) {
+        auto apply = [&](std::string kind, std::string event) {
+            ControlRequestEnvelope request{
+                .request_id = "ui-" + kind + "-" + suffix,
+                .client_id = grant.client_id.value,
+                .registration_id = registration_id.value,
+                .grant_id = grant.grant_id.value,
+                .instance_generation = registration->publication_id,
+                .operation_id = "dev.pulp.ui/input@1",
+                .operation_version = 1,
+                .idempotency_key = "ui-key-" + kind + "-" + suffix,
+                .deadline_unix_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                        (std::chrono::system_clock::now() + 5s)
+                                            .time_since_epoch())
+                                        .count(),
+                .params_json = "{\"kind\":\"" + kind +
+                               "\",\"target_id\":\"root\",\"view_generation\":\"view-e2e\",\"event\":" +
+                               event + "}",
+            };
+            request.request_hash = *control_request_hash(request);
+            const auto dispatched = dispatch_client.request(request, 5s);
+            INFO(dispatched.explanation);
+            REQUIRE(dispatched.succeeded());
+            INFO(dispatched.response->explanation);
+            REQUIRE(dispatched.response->state == ControlReceiptState::Completed);
+        };
+        apply("focus", R"({"focused":true})");
+        apply("pointer", R"({"phase":"down","x":1,"y":1,"button":1})");
+    };
+    auto grant = broker.issue_grant(
+        client_peer,
+        {.client_id = redeemed.client->client_id,
+         .registration_id = registration_id,
+         .capabilities = {InspectorCapability::SessionControl, InspectorCapability::TraceControl,
+                          InspectorCapability::UiInput},
+         .ttl = 1min},
+        {.approved = true,
+         .authority = ControlConsentAuthority::TrustedPulpCli,
+         .decision_id = "installed-revoked"});
+    REQUIRE(grant.grant);
+    acquire_controller(client, *grant.grant, "revoked");
+    start_trace(client, *grant.grant, "revoked");
+    retain_ui(client, *grant.grant, "revoked");
+    REQUIRE(wait_for_path(revoked_active_path));
+    REQUIRE(broker.revoke_grant(grant.grant->grant_id, "release-revoke") ==
+            ControlGrantStatus::Revoked);
+    REQUIRE(wait_for_path(revoked_inactive_path));
+
+    auto expiring = broker.issue_grant(
+        client_peer,
+        {.client_id = redeemed.client->client_id,
+         .registration_id = registration_id,
+         .capabilities = {InspectorCapability::SessionControl, InspectorCapability::TraceControl,
+                          InspectorCapability::UiInput},
+         .ttl = 30ms},
+        {.approved = true,
+         .authority = ControlConsentAuthority::TrustedPulpCli,
+         .decision_id = "installed-expiring"});
+    REQUIRE(expiring.grant);
+    acquire_controller(client, *expiring.grant, "expired");
+    start_trace(client, *expiring.grant, "expired");
+    retain_ui(client, *expiring.grant, "expired");
+    REQUIRE(wait_for_path(expired_active_path));
+    broker_clock_offset_ns.store(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(50ms).count(),
+        std::memory_order_relaxed);
+    broker.sweep_expired();
+    REQUIRE(wait_for_path(expired_inactive_path));
+
+    auto disconnecting = broker.issue_grant(
+        client_peer,
+        {.client_id = redeemed.client->client_id,
+         .registration_id = registration_id,
+         .capabilities = {InspectorCapability::SessionControl, InspectorCapability::TraceControl,
+                          InspectorCapability::UiInput},
+         .ttl = 1min},
+        {.approved = true,
+         .authority = ControlConsentAuthority::TrustedPulpCli,
+         .decision_id = "installed-disconnecting"});
+    REQUIRE(disconnecting.grant);
+    acquire_controller(client, *disconnecting.grant, "disconnect");
+    start_trace(client, *disconnecting.grant, "disconnect");
+    retain_ui(client, *disconnecting.grant, "disconnect");
+    REQUIRE(wait_for_path(disconnected_active_path));
+    connection.disconnect();
+    REQUIRE(wait_for_path(disconnected_inactive_path));
+
+    const auto second_evidence =
+        observe_current_process(directory.root / "client-second.sock", ControlPeerRole::Client);
+    auto second_peer = verify_for_broker(second_evidence);
+    const auto second_bootstrap = broker.issue_bootstrap(second_peer);
+    REQUIRE(second_bootstrap.ticket);
+    const auto second_redeemed =
+        broker.redeem_bootstrap(second_bootstrap.ticket->ticket_id,
+                                second_bootstrap.ticket->secret.bytes(), second_peer);
+    REQUIRE(second_redeemed.client);
+    const auto second_admission = admissions.issue(
+        {.evidence = second_evidence},
+        ControlClientConnectionPrincipal{second_redeemed.client->client_id});
+    REQUIRE(second_admission.ticket);
+    ControlClientConnection second_connection(
+        {.endpoint_path = directory.root / "broker.sock",
+         .expected_broker = {.evidence = broker_evidence}});
+    REQUIRE(second_connection.connect());
+    REQUIRE(second_connection.open_session(second_admission.ticket->admission_id).accepted);
+    ControlClient second_client(second_connection);
+    REQUIRE(second_client.negotiate({.mandatory_features = {"receipts"}}).succeeded());
+    auto teardown = broker.issue_grant(
+        second_peer,
+        {.client_id = second_redeemed.client->client_id,
+         .registration_id = registration_id,
+         .capabilities = {InspectorCapability::SessionControl, InspectorCapability::TraceControl,
+                          InspectorCapability::UiInput},
+         .ttl = 1min},
+        {.approved = true,
+         .authority = ControlConsentAuthority::TrustedPulpCli,
+         .decision_id = "installed-teardown"});
+    REQUIRE(teardown.grant);
+    acquire_controller(second_client, *teardown.grant, "teardown");
+    start_trace(second_client, *teardown.grant, "teardown");
+    retain_ui(second_client, *teardown.grant, "teardown");
+    REQUIRE(wait_for_path(teardown_active_path));
+
+    std::ofstream(stop_path) << "stop\n";
+    const auto first = process->wait();
+    INFO(first.stderr_output);
+    REQUIRE(first.exit_code == 0);
+    REQUIRE(wait_for_path(cleanup_path));
+    std::ifstream cleanup(cleanup_path);
+    std::size_t active_traces = 99;
+    std::size_t retained_ui = 99;
+    cleanup >> active_traces >> retained_ui;
+    CHECK(active_traces == 0);
+    CHECK(retained_ui == 0);
+    second_connection.disconnect();
+    for (unsigned attempt = 0; attempt < 15'000 && !broker.registrations().empty(); ++attempt)
+        std::this_thread::sleep_for(1ms);
+    REQUIRE(broker.registrations().empty());
+
+    const auto restarted_registration_path = directory.root / "restart-registration";
+    const auto restarted_stop_path = directory.root / "restart-stop";
+    const auto restarted_cleanup_path = directory.root / "restart-cleanup";
+    auto restarted = launch_host({restarted_registration_path.string(),
+                                  restarted_stop_path.string(),
+                                  restarted_cleanup_path.string()});
+    const ControlRegistrationId restarted_id{
+        wait_for_registration(restarted_registration_path)};
+    REQUIRE(restarted_id);
+    CHECK(restarted_id != registration_id);
+    std::ofstream(restarted_stop_path) << "stop\n";
+    const auto second = restarted->wait();
+    INFO(second.stderr_output);
+    CHECK(second.exit_code == 0);
+    endpoint.stop();
+#else
+    SUCCEED("the installed-host authority E2E requires the full inspector runtime");
+#endif
+}

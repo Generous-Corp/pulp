@@ -7,7 +7,6 @@
 #include <choc/text/choc_JSON.h>
 
 #include "bounded_event_queue.hpp"
-#include "inspector_connected_client.hpp"
 
 #include <chrono>
 #include <atomic>
@@ -134,116 +133,6 @@ TEST_CASE("loss-accounted queue retires only the requested owner",
     CHECK(queue.erase_owner("retired") == 2);
     CHECK(queue.size() == 1);
     REQUIRE(queue.take_front() == 2);
-}
-
-TEST_CASE("outbound targeted cancellation frees capacity for a replacement stream",
-          "[inspect][session][events][backpressure][targeted]") {
-    std::mutex mutex;
-    std::condition_variable cv;
-    bool sender_entered = false;
-    bool release_sender = false;
-    std::vector<std::string> sent;
-    auto outbound = pulp::inspect::detail::InspectorOutboundClient::create_for_testing(
-        [&](std::string_view message) {
-            std::unique_lock lock(mutex);
-            if (!sender_entered) {
-                sender_entered = true;
-                cv.notify_all();
-                cv.wait(lock, [&] { return release_sender; });
-            }
-            sent.emplace_back(message);
-            cv.notify_all();
-            return true;
-        },
-        2);
-
-    REQUIRE(outbound->enqueue("gate", false) == EventQueuePushResult::Queued);
-    {
-        std::unique_lock lock(mutex);
-        REQUIRE(cv.wait_for(lock, 1s, [&] { return sender_entered; }));
-    }
-    REQUIRE(outbound->enqueue_targeted("old-1", true, "old") ==
-            EventQueuePushResult::Queued);
-    REQUIRE(outbound->enqueue_targeted("old-2", true, "old") ==
-            EventQueuePushResult::Queued);
-    REQUIRE(outbound->cancel_targeted_owner("old") == 2);
-    REQUIRE(outbound->enqueue_targeted("replacement", true, "new") ==
-            EventQueuePushResult::Queued);
-    {
-        std::lock_guard lock(mutex);
-        release_sender = true;
-    }
-    cv.notify_all();
-    {
-        std::unique_lock lock(mutex);
-        REQUIRE(cv.wait_for(lock, 1s, [&] { return sent.size() == 2; }));
-    }
-    outbound->shutdown();
-    CHECK(sent == std::vector<std::string>{"gate", "replacement"});
-}
-
-TEST_CASE("outbound worker fairly drains broadcast and targeted queues",
-          "[inspect][session][events][backpressure][targeted][fairness]") {
-    std::mutex mutex;
-    std::condition_variable cv;
-    bool sender_entered = false;
-    bool release_sender = false;
-    std::vector<std::string> sent;
-    auto outbound = pulp::inspect::detail::InspectorOutboundClient::create_for_testing(
-        [&](std::string_view message) {
-            std::unique_lock lock(mutex);
-            if (!sender_entered) {
-                sender_entered = true;
-                cv.notify_all();
-                cv.wait(lock, [&] { return release_sender; });
-            }
-            sent.emplace_back(message);
-            cv.notify_all();
-            return true;
-        },
-        2);
-
-    REQUIRE(outbound->enqueue("gate", false) == EventQueuePushResult::Queued);
-    {
-        std::unique_lock lock(mutex);
-        REQUIRE(cv.wait_for(lock, 1s, [&] { return sender_entered; }));
-    }
-    REQUIRE(outbound->enqueue("broadcast-1", true) ==
-            EventQueuePushResult::Queued);
-    REQUIRE(outbound->enqueue("broadcast-2", true) ==
-            EventQueuePushResult::Queued);
-    REQUIRE(outbound->enqueue_targeted("target-a-1", true, "owner-a") ==
-            EventQueuePushResult::Queued);
-    REQUIRE(outbound->enqueue_targeted("target-b", true, "owner-b") ==
-            EventQueuePushResult::Queued);
-    bool evicted_same_owner = false;
-    CHECK(outbound->enqueue_targeted("target-c", true, "owner-c",
-                                     &evicted_same_owner) ==
-          EventQueuePushResult::DroppedLossy);
-    CHECK_FALSE(evicted_same_owner);
-    CHECK(outbound->enqueue_targeted("target-a-2", true, "owner-a",
-                                     &evicted_same_owner) ==
-          EventQueuePushResult::Queued);
-    CHECK(evicted_same_owner);
-    CHECK(outbound->enqueue_targeted("target-reliable", false, "owner-r") ==
-          EventQueuePushResult::ReliableOverflow);
-    {
-        std::lock_guard lock(mutex);
-        release_sender = true;
-    }
-    cv.notify_all();
-    {
-        std::unique_lock lock(mutex);
-        REQUIRE(cv.wait_for(lock, 1s, [&] { return sent.size() == 5; }));
-    }
-    outbound->shutdown();
-
-    REQUIRE(sent.size() == 5);
-    CHECK(sent[0] == "gate");
-    CHECK(sent[1] == "target-b");
-    CHECK(sent[2] == "broadcast-1");
-    CHECK(sent[3] == "target-a-2");
-    CHECK(sent[4] == "broadcast-2");
 }
 
 TEST_CASE("session authenticates client identity into contextual dispatch",

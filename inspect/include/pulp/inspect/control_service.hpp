@@ -65,6 +65,12 @@ class ControlService {
         bool is_open() const {
             return broker_ != nullptr;
         }
+        const ControlClientId& client_id() const {
+            return client_id_;
+        }
+        const VerifiedControlPeerIdentity& peer() const {
+            return peer_;
+        }
 
         ControlServiceResult dispatch(std::string_view encoded_envelope);
         /// Reads only artifacts produced by this connection-bound client ID.
@@ -74,10 +80,12 @@ class ControlService {
       private:
         friend class ControlService;
         Session(ControlService& service, VerifiedControlPeerIdentity peer,
-                ControlClientId client_id, ProgressSink progress_sink, bool accepted)
+                ControlClientId client_id, ProgressSink progress_sink, bool accepted,
+                bool disconnect_client_on_close)
             : service_(&service), broker_(accepted ? &service.broker_ : nullptr),
               peer_(std::move(peer)), client_id_(std::move(client_id)),
-              progress_sink_(std::move(progress_sink)) {}
+              progress_sink_(std::move(progress_sink)),
+              disconnect_client_on_close_(disconnect_client_on_close) {}
 
         void close() noexcept;
 
@@ -86,12 +94,14 @@ class ControlService {
         VerifiedControlPeerIdentity peer_;
         ControlClientId client_id_;
         ProgressSink progress_sink_;
+        bool disconnect_client_on_close_ = true;
         std::optional<std::vector<std::string>> negotiated_features_;
     };
 
     Session open_session(const VerifiedControlPeerIdentity& peer,
                          const ControlClientId& connection_client_id,
-                         ProgressSink progress_sink = {});
+                         ProgressSink progress_sink = {},
+                         bool disconnect_client_on_close = true);
 
     bool is_listening() const {
         return false;

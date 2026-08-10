@@ -1,10 +1,8 @@
 //! `pulp trace query "<sql>" --trace <file.pftrace>` — run SQL against a
-//! flushed trace **offline**, without a live inspector session.
+//! flushed trace **offline**, without a live control session.
 //!
 //! `--trace <file>` shells out to Perfetto's `trace_processor_shell` and runs
-//! SQL against the saved file. The reserved live `Trace.query` protocol method
-//! currently returns `capability_unavailable`; it does not pretend to execute
-//! a query.
+//! SQL against the saved file.
 //!
 //! Resolution reuses [`crate::cmd::trace::resolve_trace_processor`]
 //! (`$PULP_TRACE_PROCESSOR` → `$PATH`); a missing binary is reported with an
@@ -16,9 +14,8 @@
 //! versions). `-q` has been stable across `trace_processor_shell` releases
 //! far longer than the newer `query` subcommand / `--query-string`
 //! spellings. Offline results are the tool's native aligned-table output;
-//! `--format json|csv` stays a live-path affordance until a pinned
-//! `trace_processor` lands (tracked separately), so we reject that combination
-//! loudly rather than silently returning a table the caller did not ask for.
+//! `--format json|csv` is not supported, so we reject that combination loudly
+//! rather than silently returning a table the caller did not ask for.
 
 use std::fmt::Write as _;
 use std::io::Write;
@@ -84,9 +81,8 @@ fn json_escape(s: &str) -> String {
 ///
 /// # Errors
 ///
-/// - [`CliError::BadUsage`] for an offline-incompatible request: a missing
-///   trace file, a `--preset` (presets run against the live inspector), or
-///   `--format json|csv` (offline returns the native table).
+/// - [`CliError::BadUsage`] for a missing trace file or `--format json|csv`
+///   (offline returns the native table).
 /// - [`CliError::Other`] when `trace_processor` is unavailable (with an
 ///   actionable pointer at `pulp trace doctor`) or exits non-zero.
 /// - [`CliError::Io`] on temp-file or writer failure.
@@ -97,34 +93,21 @@ pub fn run_offline_query(
     out: &mut impl Write,
 ) -> Result<()> {
     let trace = args.trace.as_ref().ok_or_else(|| {
-        CliError::Other(
-            "pulp trace query: run_offline_query called without --trace".to_owned(),
-        )
+        CliError::Other("pulp trace query: run_offline_query called without --trace".to_owned())
     })?;
 
-    // Presets are the inspector's trace-stdlib views; their SQL text lives in
-    // the inspector, not client-side. Offline needs a raw SQL string.
-    if args.preset.is_some() {
-        return Err(CliError::BadUsage(
-            "pulp trace query: --preset runs against the live inspector; \
-             pass a raw SQL string with --trace"
-                .to_owned(),
-        ));
-    }
     let sql = args.sql.as_ref().ok_or_else(|| {
-        CliError::BadUsage(
-            "pulp trace query: --trace needs a SQL string".to_owned(),
-        )
+        CliError::BadUsage("pulp trace query: --trace needs a SQL string".to_owned())
     })?;
 
     // Offline output is trace_processor's native aligned table. `--format
-    // json|csv` is honored only on the live path for now; reject the combo
-    // rather than hand back an unrequested table.
+    // json|csv` is unsupported; reject the combo rather than hand back an
+    // unrequested table.
     if args.format_set && args.format != QueryFormat::Table {
         return Err(CliError::BadUsage(format!(
             "pulp trace query: --format {} is not supported with --trace \
              (offline queries return trace_processor's native table); \
-             omit --format or use the live inspector path",
+             omit --format or use --format table",
             args.format.as_str()
         )));
     }
@@ -146,8 +129,7 @@ pub fn run_offline_query(
     };
 
     let sql_file = sql_temp_path();
-    std::fs::write(&sql_file, sql.as_bytes())
-        .map_err(|e| CliError::io(&sql_file, e))?;
+    std::fs::write(&sql_file, sql.as_bytes()).map_err(|e| CliError::io(&sql_file, e))?;
 
     let tp_args = build_trace_processor_args(trace, &sql_file);
     let result = Command::new(tp_path).args(&tp_args).output();
@@ -198,7 +180,6 @@ mod tests {
     fn q(sql: Option<&str>, trace: Option<&str>) -> QueryArgs {
         QueryArgs {
             sql: sql.map(str::to_owned),
-            preset: None,
             format: QueryFormat::default(),
             format_set: false,
             trace: trace.map(PathBuf::from),
@@ -220,10 +201,7 @@ mod tests {
 
     #[test]
     fn build_args_are_query_file_then_trace_positional() {
-        let a = build_trace_processor_args(
-            Path::new("/t/run.pftrace"),
-            Path::new("/tmp/q.sql"),
-        );
+        let a = build_trace_processor_args(Path::new("/t/run.pftrace"), Path::new("/tmp/q.sql"));
         assert_eq!(a, ["-q", "/tmp/q.sql", "/t/run.pftrace"]);
     }
 
@@ -234,24 +212,12 @@ mod tests {
     }
 
     #[test]
-    fn preset_with_trace_is_rejected() {
-        let mut a = q(None, Some("/t/run.pftrace"));
-        a.preset = Some("xruns".to_owned());
-        let mut buf = Vec::new();
-        let err = run_offline_query(&a, &tp_at(Some("/bin/true")), false, &mut buf)
-            .unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-        assert!(format!("{err}").contains("live inspector"));
-    }
-
-    #[test]
     fn json_format_with_trace_is_rejected() {
         let mut a = q(Some("select 1"), Some("/t/run.pftrace"));
         a.format = QueryFormat::Json;
         a.format_set = true;
         let mut buf = Vec::new();
-        let err = run_offline_query(&a, &tp_at(Some("/bin/true")), false, &mut buf)
-            .unwrap_err();
+        let err = run_offline_query(&a, &tp_at(Some("/bin/true")), false, &mut buf).unwrap_err();
         assert!(matches!(err, CliError::BadUsage(_)));
         assert!(format!("{err}").contains("native table"));
     }
@@ -260,8 +226,7 @@ mod tests {
     fn missing_trace_file_is_rejected_before_spawn() {
         let a = q(Some("select 1"), Some("/no/such/run.pftrace"));
         let mut buf = Vec::new();
-        let err = run_offline_query(&a, &tp_at(Some("/bin/true")), false, &mut buf)
-            .unwrap_err();
+        let err = run_offline_query(&a, &tp_at(Some("/bin/true")), false, &mut buf).unwrap_err();
         assert!(matches!(err, CliError::BadUsage(_)));
         assert!(format!("{err}").contains("trace file not found"));
     }
@@ -274,8 +239,7 @@ mod tests {
         std::fs::write(&trace, b"PFTRACE").unwrap();
         let a = q(Some("select 1"), Some(trace.to_str().unwrap()));
         let mut buf = Vec::new();
-        let err =
-            run_offline_query(&a, &tp_at(None), false, &mut buf).unwrap_err();
+        let err = run_offline_query(&a, &tp_at(None), false, &mut buf).unwrap_err();
         let _ = std::fs::remove_file(&trace);
         assert!(matches!(err, CliError::Other(_)));
         assert!(format!("{err}").contains("pulp trace doctor"));
@@ -350,8 +314,7 @@ mod tests {
         let trace = write_fixture_trace("fail");
         let a = q(Some("select bogus"), trace.to_str());
         let mut buf = Vec::new();
-        let err = run_offline_query(&a, &tp_at(tp.to_str()), false, &mut buf)
-            .unwrap_err();
+        let err = run_offline_query(&a, &tp_at(tp.to_str()), false, &mut buf).unwrap_err();
         let _ = std::fs::remove_file(&tp);
         let _ = std::fs::remove_file(&trace);
         let msg = format!("{err}");

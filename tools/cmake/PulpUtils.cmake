@@ -24,11 +24,14 @@ _pulp_pick_target(_PULP_VIEW_TARGET Pulp::view pulp::view)
 _pulp_pick_target(_PULP_AUDIO_TARGET Pulp::audio pulp::audio)
 _pulp_pick_target(_PULP_MIDI_TARGET Pulp::midi pulp::midi)
 _pulp_pick_target(_PULP_STANDALONE_TARGET Pulp::standalone pulp::standalone)
-_pulp_pick_target(_PULP_STANDALONE_INSPECTOR_TARGET
-    Pulp::standalone-inspector pulp::standalone-inspector)
-_pulp_pick_target(_PULP_STANDALONE_INSPECTOR_RUNTIME_EVAL_TARGET
-    Pulp::standalone-inspector-runtime-eval pulp::standalone-inspector-runtime-eval)
-include("${CMAKE_CURRENT_LIST_DIR}/PulpInspectorShipping.cmake")
+_pulp_pick_target(_PULP_CONTROL_STANDALONE_TARGET
+    Pulp::inspect-standalone-runtime pulp::inspect-standalone-runtime)
+_pulp_pick_target(_PULP_CONTROL_UI_TARGET
+    Pulp::inspect-ui-runtime pulp::inspect-ui-runtime)
+_pulp_pick_target(_PULP_CONTROL_INSPECT_TARGET Pulp::inspect pulp::inspect)
+_pulp_pick_target(_PULP_CONTROL_RUNTIME_EVAL_TARGET
+    Pulp::inspect-runtime-eval pulp::inspect-runtime-eval)
+include("${CMAKE_CURRENT_LIST_DIR}/PulpControlShipping.cmake")
 _pulp_pick_target(_PULP_VST3_SDK_TARGET Pulp::vst3-sdk vst3-sdk)
 _pulp_pick_target(_PULP_CLAP_TARGET Pulp::clap clap)
 _pulp_pick_target(_PULP_LV2_TARGET Pulp::lv2-headers lv2-headers)
@@ -670,17 +673,74 @@ function(pulp_add_plugin target)
     set(PULP_${target}_CONTENT_KINDS "${PLUGIN_CONTENT_KINDS}" CACHE INTERNAL "")
     set(PULP_${target}_CONTENT_HOT_RELOAD_KINDS "${PLUGIN_CONTENT_HOT_RELOAD_KINDS}" CACHE INTERNAL "")
     set(PULP_${target}_CONTENT_MANUAL_RESCAN_KINDS "${PLUGIN_CONTENT_MANUAL_RESCAN_KINDS}" CACHE INTERNAL "")
-    if((PLUGIN_CONTROL_PROFILE OR PLUGIN_CONTROL_CAPABILITIES OR
-        PLUGIN_ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL) AND
-       (PLUGIN_SHIP_INSPECTOR OR PLUGIN_SHIP_INSPECTOR_RUNTIME_EVAL OR
-        PLUGIN_INSPECTOR_CAPABILITIES))
+    if(PLUGIN_SHIP_INSPECTOR OR PLUGIN_SHIP_INSPECTOR_RUNTIME_EVAL OR
+       PLUGIN_INSPECTOR_CAPABILITIES)
         message(FATAL_ERROR
-            "pulp_add_plugin(${target}): CONTROL_* declarations cannot be mixed with legacy SHIP_INSPECTOR/INSPECTOR_CAPABILITIES declarations")
+            "pulp_add_plugin(${target}): SHIP_INSPECTOR and INSPECTOR_CAPABILITIES were removed; use CONTROL_PROFILE and CONTROL_CAPABILITIES")
     endif()
 
     if(PLUGIN_CONTROL_CAPABILITIES AND NOT PLUGIN_CONTROL_PROFILE)
         message(FATAL_ERROR
             "pulp_add_plugin(${target}): CONTROL_CAPABILITIES requires an explicit CONTROL_PROFILE")
+    endif()
+
+    if(PLUGIN_CONTROL_CAPABILITIES)
+        list(LENGTH PLUGIN_FORMATS _pulp_control_format_count)
+        if(NOT _pulp_control_format_count EQUAL 1 OR
+           NOT "Standalone" IN_LIST PLUGIN_FORMATS)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): CONTROL_CAPABILITIES currently require an exclusively Standalone artifact; mixed-format siblings remain production-stripped")
+        endif()
+        if(NOT _PULP_CONTROL_STANDALONE_TARGET)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): CONTROL_CAPABILITIES require the installed canonical Standalone host adapter")
+        endif()
+        if(APPLE AND PULP_ENABLE_GPU AND NOT IOS AND NOT PULP_IOS)
+            set(_pulp_standalone_control_capabilities
+                dev.pulp.instance/read@1
+                dev.pulp.session/control@1
+                dev.pulp.state/read@1
+                dev.pulp.ui/observe@1
+                dev.pulp.diagnostics/read@1
+                dev.pulp.logs/read@1
+                dev.pulp.ui/capture@1
+                dev.pulp.ui/input@1
+                dev.pulp.trace/control@1
+                dev.pulp.trace/session-control@1
+                dev.pulp.state/parameter-gesture@1
+                dev.pulp.test/input@1
+                dev.pulp.authoring/tweaks@1
+                dev.pulp.telemetry/subscribe@1
+                dev.pulp.runtime/evaluate@1)
+        else()
+            set(_pulp_standalone_control_capabilities
+                dev.pulp.instance/read@1
+                dev.pulp.state/read@1)
+        endif()
+        foreach(_pulp_control_capability IN LISTS PLUGIN_CONTROL_CAPABILITIES)
+            if(NOT _pulp_control_capability IN_LIST _pulp_standalone_control_capabilities)
+                message(FATAL_ERROR
+                    "pulp_add_plugin(${target}): '${_pulp_control_capability}' is not yet implemented by the canonical Standalone adapter")
+            endif()
+        endforeach()
+        if(("dev.pulp.ui/capture@1" IN_LIST PLUGIN_CONTROL_CAPABILITIES OR
+            "dev.pulp.ui/input@1" IN_LIST PLUGIN_CONTROL_CAPABILITIES) AND
+           NOT _PULP_CONTROL_UI_TARGET)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): UI control capabilities require the installed exact-target UI adapter")
+        endif()
+        if(("dev.pulp.trace/control@1" IN_LIST PLUGIN_CONTROL_CAPABILITIES OR
+            "dev.pulp.trace/session-control@1" IN_LIST PLUGIN_CONTROL_CAPABILITIES OR
+            "dev.pulp.telemetry/subscribe@1" IN_LIST PLUGIN_CONTROL_CAPABILITIES) AND
+           NOT _PULP_CONTROL_INSPECT_TARGET)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): trace and telemetry capabilities require the installed host observability runtime")
+        endif()
+        if("dev.pulp.runtime/evaluate@1" IN_LIST PLUGIN_CONTROL_CAPABILITIES AND
+           NOT _PULP_CONTROL_RUNTIME_EVAL_TARGET)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): runtime evaluation requires the separately installed high-risk evaluator")
+        endif()
     endif()
 
     if(PLUGIN_CONTROL_PROFILE)
@@ -694,14 +754,6 @@ function(pulp_add_plugin target)
         set(_pulp_control_profile "${PLUGIN_CONTROL_PROFILE}")
         set(_pulp_control_capabilities "${PLUGIN_CONTROL_CAPABILITIES}")
         set(_pulp_control_eval_ack "${PLUGIN_ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL}")
-    elseif(PLUGIN_SHIP_INSPECTOR_RUNTIME_EVAL)
-        set(_pulp_control_profile "research-unsafe")
-        set(_pulp_control_capabilities "")
-        set(_pulp_control_eval_ack "")
-    elseif(PLUGIN_SHIP_INSPECTOR)
-        set(_pulp_control_profile "developer-local")
-        set(_pulp_control_capabilities "")
-        set(_pulp_control_eval_ack "")
     else()
         set(_pulp_control_profile "production-stripped")
         set(_pulp_control_capabilities "")
@@ -711,54 +763,7 @@ function(pulp_add_plugin target)
         "${_pulp_control_profile}"
         "${_pulp_control_capabilities}"
         "${_pulp_control_eval_ack}")
-    if(PLUGIN_INSPECTOR_CAPABILITIES AND NOT PLUGIN_SHIP_INSPECTOR)
-        message(FATAL_ERROR
-            "pulp_add_plugin(${target}): INSPECTOR_CAPABILITIES requires the deliberate SHIP_INSPECTOR acknowledgement")
-    endif()
-    if(PLUGIN_SHIP_INSPECTOR AND NOT PLUGIN_INSPECTOR_CAPABILITIES)
-        message(FATAL_ERROR
-            "pulp_add_plugin(${target}): SHIP_INSPECTOR requires an explicit INSPECTOR_CAPABILITIES list")
-    endif()
-    if((PLUGIN_SHIP_INSPECTOR OR PLUGIN_CONTROL_CAPABILITIES) AND
-       NOT "Standalone" IN_LIST PLUGIN_FORMATS)
-        message(FATAL_ERROR
-            "pulp_add_plugin(${target}): control endpoints are supported only for Standalone targets")
-    endif()
-    if("runtime.eval" IN_LIST PLUGIN_INSPECTOR_CAPABILITIES AND
-       NOT PLUGIN_SHIP_INSPECTOR_RUNTIME_EVAL)
-        message(FATAL_ERROR
-            "pulp_add_plugin(${target}): runtime.eval requires the separate unsafe SHIP_INSPECTOR_RUNTIME_EVAL acknowledgement")
-    endif()
-    if(PLUGIN_SHIP_INSPECTOR_RUNTIME_EVAL AND
-       NOT "runtime.eval" IN_LIST PLUGIN_INSPECTOR_CAPABILITIES)
-        message(FATAL_ERROR
-            "pulp_add_plugin(${target}): SHIP_INSPECTOR_RUNTIME_EVAL does not imply runtime.eval; declare that capability explicitly")
-    endif()
-    set(_inspector_controller_capabilities
-        state.write test.input authoring.tweaks runtime.eval)
-    foreach(_inspector_capability IN LISTS PLUGIN_INSPECTOR_CAPABILITIES)
-        if(_inspector_capability IN_LIST _inspector_controller_capabilities AND
-           NOT "session.control" IN_LIST PLUGIN_INSPECTOR_CAPABILITIES)
-            message(FATAL_ERROR
-                "pulp_add_plugin(${target}): inspector mutation capability '${_inspector_capability}' requires session.control")
-        endif()
-    endforeach()
-    unset(_inspector_capability)
-    unset(_inspector_controller_capabilities)
-    if(PLUGIN_CONTROL_CAPABILITIES)
-        set(_pulp_control_endpoint TRUE)
-    else()
-        set(_pulp_control_endpoint "${PLUGIN_SHIP_INSPECTOR}")
-    endif()
-    if(PLUGIN_ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL)
-        set(_pulp_control_eval TRUE)
-    else()
-        set(_pulp_control_eval "${PLUGIN_SHIP_INSPECTOR_RUNTIME_EVAL}")
-    endif()
-    set(PULP_${target}_SHIP_INSPECTOR "${_pulp_control_endpoint}" CACHE INTERNAL "" FORCE)
-    set(PULP_${target}_SHIP_INSPECTOR_RUNTIME_EVAL "${_pulp_control_eval}" CACHE INTERNAL "" FORCE)
-    set(PULP_${target}_INSPECTOR_CAPABILITIES "${PLUGIN_INSPECTOR_CAPABILITIES}" CACHE INTERNAL "" FORCE)
-    _pulp_configure_inspector_shipping(
+    _pulp_configure_control_shipping(
         ${target} "${PLUGIN_BUNDLE_ID}" "${PLUGIN_PLUGIN_NAME}")
 
     if(_PULP_UI_SCRIPT AND NOT EXISTS "${_PULP_UI_SCRIPT}")
@@ -893,7 +898,7 @@ function(pulp_add_plugin target)
 
     # ── Standalone ───────────────────────────────────────────────────────
     if("Standalone" IN_LIST PLUGIN_FORMATS)
-        _pulp_add_standalone(${target} "${PLUGIN_PLUGIN_NAME}" "${PLUGIN_BUNDLE_ID}" "${PLUGIN_VERSION}")
+        _pulp_add_standalone(${target} "${PLUGIN_PLUGIN_NAME}" "${PLUGIN_BUNDLE_ID}" "${PLUGIN_VERSION}" "${PLUGIN_PROCESSOR_FACTORY}")
     endif()
 
     # ── Install targets ────────────────────────────────────────────────
@@ -914,25 +919,34 @@ function(pulp_add_plugin target)
 
     # Custom install target: pulp-install-<target>
     set(_install_commands "")
+    set(_install_dependencies "")
     if(TARGET ${target}_VST3 AND DEFINED _vst3_dir)
+        _pulp_control_shipping_scan_dependency(_vst3_scan ${target}_VST3)
+        list(APPEND _install_dependencies ${_vst3_scan})
         list(APPEND _install_commands
             COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${CMAKE_BINARY_DIR}/VST3/${PLUGIN_PLUGIN_NAME}.vst3"
                 "${_vst3_dir}/${PLUGIN_PLUGIN_NAME}.vst3")
     endif()
     if(TARGET ${target}_CLAP AND DEFINED _clap_dir)
+        _pulp_control_shipping_scan_dependency(_clap_scan ${target}_CLAP)
+        list(APPEND _install_dependencies ${_clap_scan})
         list(APPEND _install_commands
             COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${CMAKE_BINARY_DIR}/CLAP/${PLUGIN_PLUGIN_NAME}.clap"
                 "${_clap_dir}/${PLUGIN_PLUGIN_NAME}.clap")
     endif()
     if(TARGET ${target}_AU AND DEFINED _au_dir)
+        _pulp_control_shipping_scan_dependency(_au_scan ${target}_AU)
+        list(APPEND _install_dependencies ${_au_scan})
         list(APPEND _install_commands
             COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${CMAKE_BINARY_DIR}/AU/${PLUGIN_PLUGIN_NAME}.component"
                 "${_au_dir}/${PLUGIN_PLUGIN_NAME}.component")
     endif()
     if(TARGET ${target}_AAX AND DEFINED _aax_dir)
+        _pulp_control_shipping_scan_dependency(_aax_scan ${target}_AAX)
+        list(APPEND _install_dependencies ${_aax_scan})
         list(APPEND _install_commands
             COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${CMAKE_BINARY_DIR}/AAX/${PLUGIN_PLUGIN_NAME}.aaxplugin"
@@ -951,6 +965,15 @@ function(pulp_add_plugin target)
     # next relaunch without a full logout. `pulp doctor --au-cache`
     # documents the same `killall -9 AudioComponentRegistrar` step.
     if(TARGET ${target}_AUv3Host AND APPLE AND NOT PULP_IOS)
+        # The embed target depends on all three binaries and assembles their
+        # final host bundle. Depending on the binaries alone can install an
+        # unassembled app when this specific target is built from clean state.
+        _pulp_control_shipping_scan_dependency(_auv3_framework_scan
+            ${target}_AUv3Framework)
+        _pulp_control_shipping_scan_dependency(_auv3_extension_scan ${target}_AUv3)
+        _pulp_control_shipping_scan_dependency(_auv3_host_scan ${target}_AUv3Host)
+        list(APPEND _install_dependencies ${target}_AUv3Host_Embed
+            ${_auv3_framework_scan} ${_auv3_extension_scan} ${_auv3_host_scan})
         set(_auv3_install_dir "$ENV{HOME}/Applications")
         list(APPEND _install_commands
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_auv3_install_dir}"
@@ -969,6 +992,7 @@ function(pulp_add_plugin target)
     if(_install_commands)
         add_custom_target(pulp-install-${target}
             ${_install_commands}
+            DEPENDS ${_install_dependencies}
             COMMENT "Installing ${PLUGIN_PLUGIN_NAME} to system plugin folders"
         )
     endif()
@@ -1037,6 +1061,12 @@ function(pulp_add_plugin_bundle target)
         endif()
     endforeach()
 
+    # Multi-plugin bundles are ordinary production artifacts until a future
+    # bundle-level capability contract exists. They still receive the same
+    # per-format negative scan, so this path cannot bypass strip enforcement.
+    _pulp_cache_control_declarations(${target} production-stripped "" FALSE)
+    _pulp_configure_control_shipping(
+        ${target} "${BUNDLE_BUNDLE_ID}" "${BUNDLE_BUNDLE_NAME}")
     _pulp_configure_plugin_runtime_manifest(${target} "${BUNDLE_BUNDLE_ID}")
 
     # All bundled plugins' code flows into each format binary. With SOURCES, an

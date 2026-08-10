@@ -144,6 +144,9 @@ When a new packaging contract intentionally names thin architecture artifacts,
 allowlist both the architecture-selection predicate and any literal fixture
 slug. Keep the entries narrow and explain why each apparent arm64 assumption is
 portable; never blanket-exempt the containing Rack or packaging file.
+The control-shipping artifact scanner is one such contract: its non-Apple
+validation accepts both x86 and ARM spellings emitted by native inspection
+tools, so its paired ARM predicates are narrowly allowlisted.
 
 When you change the lint, the allowlist, or an Intel workflow:
 

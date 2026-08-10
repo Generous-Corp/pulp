@@ -119,6 +119,11 @@ docs:
     kind: guide
     summary: Install and use the Claude Code plugin for Pulp development workflows
 
+  - slug: capability-control-mcp
+    path: guides/capability-control-mcp.md
+    kind: guide
+    summary: Typed MCP control tools, exact-instance targeting, broker-owned consent, progress, cancellation, subscriptions, and artifact resources
+
   - slug: cmajor-guide
     path: guides/cmajor.md
     kind: guide
@@ -442,15 +447,10 @@ docs:
     kind: reference
     summary: Fixed-capacity chroma and onset-novelty front ends with offline compatibility adapters
 
-  - slug: analysis-frontends
-    path: reference/analysis-frontends.md
+  - slug: capability-control
+    path: reference/capability-control.md
     kind: reference
-    summary: Reusable spectrum conditioning and triggered scope-capture front ends
-
-  - slug: analysis-chroma-onset-frontends
-    path: reference/analysis-chroma-onset-frontends.md
-    kind: reference
-    summary: Fixed-capacity chroma and onset-novelty front ends with offline compatibility adapters
+    summary: Canonical profiles, exact-instance authority, broker-published UI capture, research-only evaluation, safe grants and revocation, diagnostics, and installed T0/T1 examples
 
   - slug: fractional-delay
     path: reference/fractional-delay.md

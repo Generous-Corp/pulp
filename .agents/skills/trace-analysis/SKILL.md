@@ -55,23 +55,14 @@ successful analysis. L1 runs this workflow over real offline queries.
 
 ## Capture (if you don't already have a `.pftrace`)
 
-If a capture or query fails for an unclear reason, run the readiness check first
-— it tells you, in one shot, whether the inspector is reachable, whether the
-host was built with `-DPULP_TRACING=ON`, and whether a `trace_processor` is
-available for offline SQL:
+If a capture or query fails for an unclear reason, run the readiness check
+first. It reports offline `trace_processor` readiness without probing a legacy
+Inspector endpoint:
 
 ```bash
-pulp trace doctor            # human report; add --json for {ready_to_capture, ready_to_query, …}
+pulp trace doctor            # human report; add --json for machine output
 ```
 
-`ready_to_capture:false` usually means no eligible inspector session was found
-or tracing was compiled out. Normal launches create no endpoint; capture
-requires an explicitly wired custom fixture published through authenticated discovery.
-When more than one live session exists—or when a capture spans separate CLI
-invocations—pass the same `--session ID --instance ID --publication ID`
-selector to `doctor`, `start`, and `stop`. The non-reusable
-publication ID pins the exact authenticated publication instead of allowing a
-replacement process that reuses the other IDs to inherit the operation.
 `ready_to_query:false` means no `trace_processor` (on
 `$PULP_TRACE_PROCESSOR`, the pinned Pulp-fetched build, or `$PATH`) or no
 captured trace yet. For zero-install, run
@@ -82,13 +73,19 @@ trace-processor` fetches the same pinned artifact via the tool registry.)
 ```bash
 pulp trace start --categories render,gpu,text,js,layout   # pick the categories the question implicates
 # ... reproduce (open the editor, sweep the knob, run the offline render) ...
-pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp trace stop
 ```
 
 Or accept a `--trace FILE.pftrace` the user hands you. Choose categories from
 the question: startup → `render,gpu,text,js,layout`; DSP cost → `dsp,dsp.node`
-(offline render); UI hitch → `render,layout,canvas,text,js,gpu` plus a
-concurrent `pulp motion record` so the motion `trace_id` joins in.
+(offline render); UI hitch → `render,layout,canvas,text,js,gpu`. Motion capture
+is currently available only through in-process fixture APIs.
+
+Live `start`/`stop` use the canonical capability-control client and have no
+legacy Inspector fallback. If the broker cannot authorize a target, capture
+fails closed. When selecting an exact broker-owned live instance, pass the same
+`--instance ID` to both `start` and `stop`; omission retains fail-closed
+unambiguous selection.
 
 **Before trusting the capture**, confirm it is not silently empty/truncated
 (ring overflow → empty trace): `SELECT DISTINCT category FROM slice`. No rows,
@@ -217,7 +214,7 @@ deterministic — no real-time hazard, works regardless of the DSP story.
 ```bash
 pulp trace start --categories render,gpu,text,js,layout
 # ... open the editor ...
-pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp trace stop
 # Investigate the printed .pftrace using the offline query loop below.
 ```
 

@@ -47,14 +47,23 @@ bool valid_progress(const ControlProgressEnvelope& progress);
 bool valid_receipt(const ControlReceiptEnvelope& receipt);
 bool valid_host_open(const ControlHostOpenEnvelope& message);
 bool valid_host_open_result(const ControlHostOpenResult& message);
+bool valid_host_ready(const ControlHostReadyEnvelope& message);
+bool valid_host_ready_result(const ControlHostReadyResult& message);
+bool valid_host_heartbeat(const ControlHostHeartbeatEnvelope& message);
+bool valid_host_heartbeat_result(const ControlHostHeartbeatResult& message);
 bool valid_host_execute(const ControlHostExecuteEnvelope& message);
 bool valid_host_progress(const ControlHostProgressEnvelope& message);
 bool valid_host_cancel(const ControlHostCancelEnvelope& message);
+bool valid_host_authority_end(const ControlHostAuthorityEndEnvelope& message);
 bool valid_host_complete(const ControlHostCompleteEnvelope& message);
 bool is_host_control_kind(std::string_view kind);
 std::optional<ControlEnvelopePayload>
 decode_host_control_payload(std::string_view kind, ValueView payload,
                             ControlProtocolDiagnostics& diagnostics);
+bool is_host_preflight_kind(std::string_view kind);
+std::optional<ControlEnvelopePayload>
+decode_host_preflight_payload(std::string_view kind, ValueView payload,
+                              ControlProtocolDiagnostics& diagnostics);
 
 bool only_fields(ValueView value, std::initializer_list<std::string_view> allowed,
                  ControlProtocolDiagnostics& diagnostics);

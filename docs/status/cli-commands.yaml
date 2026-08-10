@@ -609,15 +609,6 @@ commands:
       - name: --watch
         kind: flag
         description: Re-launch the binary on source-file changes. Composes with --headless / --screenshot.
-      - name: --inspect
-        kind: option
-        description: Enable the authenticated Development Inspector with an optional off/observe/develop/custom profile. Requires a GPU-enabled desktop build; bare --inspect selects develop.
-      - name: --inspect-capability
-        kind: option
-        description: Add one capability id to --inspect=custom; repeatable. Mutating capabilities require session.control.
-      - name: --inspect-runtime-eval
-        kind: flag
-        description: High-risk separate acknowledgement for runtime.eval. Requires develop, or custom with runtime.eval and session.control, plus a live ScriptedUiSession with no effectful ReloadCapability grants; the stock all-capabilities editor path is refused. No profile or saved preference implies it. Forwarded as argv and PULP_INSPECT_RUNTIME_EVAL=1.
       - name: --audio-inspector
         kind: flag
         description: Open the live Audio Inspector window (realtime output-boundary probe). Forwarded as --audio-inspector and PULP_AUDIO_INSPECTOR=1 env var. Composes with --screenshot.
@@ -1103,92 +1094,12 @@ commands:
 
   - name: inspect
     status: experimental
-    summary: Installed authenticated client for an explicitly activated Development Inspector. The Rust pulp binary delegates to its sibling pulp-cpp; normal Pulp launches publish no endpoint.
+    summary: Read static Development Inspector profiles and perform offline artifact audit. `profiles` is a deprecated compatibility alias; use `pulp control profiles`, removed in Pulp 0.800.0 on 2026-10-01. The legacy live authority is deleted; this temporary capability reduction has no legacy Inspector fallback.
     args:
-      - name: --session
-        kind: option
-        required: false
-        description: Select an exact live inspector session
-      - name: --instance
-        kind: option
-        required: false
-        description: Disambiguate an exact instance when a session ID is shared
-      - name: --publication
-        kind: option
-        required: false
-        description: Pin one non-reusable publication generation; requires --session and --instance
-      - name: --host
-        kind: option
-        required: false
-        description: Inspector host, defaulting to 127.0.0.1
-      - name: --port
-        kind: option
-        required: false
-        description: Filter owner-private authenticated discovery records by port
-      - name: --command
-        kind: option
-        required: false
-        description: Inspector method to send once before exiting
-      - name: --params
-        kind: option
-        required: false
-        description: JSON params for --command
-      - name: --output
-        kind: option
-        required: false
-        description: File path for a legacy one-shot command response
-      - name: --out
-        kind: option
-        required: false
-        description: Screenshot subcommand output path for decoded PNG bytes
-      - name: --id
-        kind: option
-        required: false
-        description: Numeric parameter ID for set-parameter
-      - name: --value
-        kind: option
-        required: false
-        description: Finite parameter value for set-parameter
-      - name: --normalized
-        kind: flag
-        required: false
-        description: Interpret set-parameter value in normalized 0 through 1 space
-      - name: --kind
-        kind: option
-        required: false
-        description: MIDI kind note_on or note_off for inject-midi
-      - name: --channel
-        kind: option
-        required: false
-        description: Public MIDI channel 1 through 16 for inject-midi
-      - name: --note
-        kind: option
-        required: false
-        description: MIDI note 0 through 127 for inject-midi
-      - name: --velocity
-        kind: option
-        required: false
-        description: MIDI velocity 0 through 127 for inject-midi
-      - name: --duration-ms
-        kind: option
-        required: false
-        description: Required bounded note_on hold from 1 through 2000 milliseconds for inject-midi
-      - name: --playing
-        kind: option
-        required: false
-        description: Boolean standalone play state for set-transport
-      - name: --position-samples
-        kind: option
-        required: false
-        description: Nonnegative standalone sample position for set-transport
-      - name: --tempo-bpm
-        kind: option
-        required: false
-        description: Finite standalone tempo from 20 through 400 BPM for set-transport
       - name: --json
         kind: flag
         required: false
-        description: Emit stable JSON for named commands, including screenshot capture or unsupported status
+        description: Emit stable JSON for read-only commands
     subcommands:
       - name: audit
         summary: Read-only artifact preflight for the canonical control manifest, profile and digest markers, declared capabilities, and known external surfaces; never loads or activates the artifact.
@@ -1202,126 +1113,73 @@ commands:
             required: false
             description: Emit the pulp.control.audit.v1 result
       - name: profiles
-        summary: List the declared off, observe, and develop profiles and capabilities
-      - name: list
-        summary: Discover live publications and return exact session, instance, and non-reusable publication identities
-      - name: capabilities
-        summary: Authenticate and report available/effective capabilities for one exact publication
-      - name: doctor
-        summary: Report discovery runtime-directory readiness and live-session count
-      - name: screenshot
-        summary: Save the selected standalone's deterministic in-process back buffer as validated PNG bytes; unsupported hosts exit 3 without creating an output
-      - name: set-parameter
-        summary: Apply one typed numeric parameter mutation under state.write and a controller lease
-      - name: inject-midi
-        summary: Inject one bounded standalone note; note_on is paired with note_off on the same controller lease
-      - name: set-transport
-        summary: Apply one coherent partial standalone play, position, or tempo update under test.input and a controller lease
+        summary: Deprecated alias for `pulp control profiles`; removal deadline Pulp 0.800.0 on 2026-10-01
     docs: reference/cli.md#inspect
 
-  - name: motion
+  - name: control
     status: experimental
-    summary: Experimental Motion.* clients requiring a custom source-checkout fixture that explicitly constructs the inspector server; normal Pulp launches do not.
+    summary: Authenticated local capability control through the canonical broker, including static profile metadata; exposes no host, port, discovery-file, or raw protocol options.
     args:
-      - name: --session
-        kind: option
-        required: false
-        description: Exact authenticated session id; must be paired with --instance
-      - name: --instance
-        kind: option
-        required: false
-        description: Exact authenticated instance id; must be paired with --session
-      - name: --publication
-        kind: option
-        required: false
-        description: Non-reusable publication id; required with --session and --instance for mutations
-      - name: --port
-        kind: option
-        required: false
-        description: Inspector port; defaults to owner-private authenticated discovery
       - name: --json
         kind: flag
         required: false
-        description: Emit JSON for subcommands that support it
+        description: Emit stable machine-readable output and structured errors
     subcommands:
-      - name: record
-        summary: Start a `Motion.startTrace` session and print the trace id; `--out` names the intended fixture path and prints sink guidance but does not write JSONL itself.
+      - name: profiles
+        summary: List the canonical off, observe, and develop profiles and capabilities without connecting to the broker
+      - name: instances
+        summary: List broker-owned exact live registrations, starting the broker-owned ordinary Standalone host when inventory is empty
+      - name: status
+        summary: Describe one exact registration and optionally explain authority terms without claiming operation-dependent gates were evaluated
+      - name: grant-request
+        summary: Ask the broker for a profile-scoped or single typed-operation grant; exactly one of --profile or --operation is required and the CLI never self-approves consent
         args:
-          - name: --view
+          - name: --profile
             kind: option
             required: false
-            description: Human-readable trace/view name
-          - name: --out
+            description: Request the declared capability set for one known profile; mutually exclusive with --operation
+          - name: --operation
             kind: option
             required: false
-            description: Intended fixture path for sink guidance
-          - name: --fps
-            kind: option
-            required: false
-            description: Target sample rate in frames per second
-          - name: --metrics
-            kind: option
-            required: false
-            description: Metric probe spec; may be repeated
-      - name: stop
-        summary: Stop a previously started trace via `Motion.stopTrace`
+            description: Request one grantable typed registry operation, including dev.pulp.runtime/evaluate@1; mutually exclusive with --profile
+      - name: call
+        summary: Invoke one registry operation through ControlClient with typed JSON params; without --grant or --profile, implicit authority is scoped to that exact typed operation
         args:
-          - name: --trace-id
+          - name: --timeout-ms
             kind: option
             required: false
-            description: Trace id returned by record
-      - name: snapshot
-        summary: Print tracing, active-trace, emitted-event, and cost-attribution state via `Motion.snapshot`
-      - name: list-traces
-        summary: List inspector-owned trace ids via `Motion.listTraces`
-      - name: scrub
-        summary: Move the scrubber playhead to a frame via `Motion.scrubTo`
+            description: One 1–300000 ms end-to-end deadline shared by connection, enrollment, inventory, grant, negotiation, and request stages
+      - name: watch
+        summary: Start one bounded registry subscription operation; without --grant or --profile, implicit authority is scoped to that exact typed operation
         args:
-          - name: frame
-            kind: positional
-            required: true
-            description: Target frame
-      - name: play
-        summary: Resume scrubber playback from the current playhead via `Motion.play`
-      - name: pause
-        summary: Pause scrubber playback via `Motion.pause`
-      - name: cost
-        summary: Toggle the cost-attribution channel via `Motion.enableCost` or `Motion.disableCost`
-        args:
-          - name: mode
-            kind: positional
-            required: true
-            description: enable or disable
-    docs: reference/cli.md#motion
+          - name: --timeout-ms
+            kind: option
+            required: false
+            description: One 1–300000 ms end-to-end deadline shared by connection, enrollment, inventory, grant, negotiation, and request stages
+      - name: artifact
+        summary: Retrieve a broker artifact by opaque ID into an explicit output file
+      - name: revoke
+        summary: Revoke a grant owned by this authenticated client
+      - name: audit
+        summary: Audit an artifact offline through the shared shipping report
+    docs: reference/cli.md#control
 
   - name: trace
     status: experimental
-    summary: Experimental source-checkout wrappers for live `Trace.startSession` / `Trace.stopSession` capture plus offline `query --trace` analysis. Live SQL, named presets, and `Trace.explain` are reserved and currently return `capability_unavailable`.
+    summary: Experimental canonical capability-control client for `Trace.startSession` / `Trace.stopSession` capture plus wholly offline query, doctor, fetch, and open utilities. Rust exposes no alternate target-selection path and no legacy Inspector fallback.
     args:
-      - name: --session
-        kind: option
-        required: false
-        description: Exact authenticated session id; must be paired with --instance for live commands
-      - name: --instance
-        kind: option
-        required: false
-        description: Exact authenticated instance id; must be paired with --session for live commands
-      - name: --publication
-        kind: option
-        required: false
-        description: Non-reusable publication id; required with --session and --instance for stop
-      - name: --port
-        kind: option
-        required: false
-        description: Optional owner-private authenticated discovery filter; `$PULP_INSPECTOR_PORT` supplies the same explicit filter
       - name: --json
         kind: flag
         required: false
-        description: Emit the raw inspector JSON response instead of the pretty form
+        description: Emit machine-readable output; live start/stop return the canonical control response
     subcommands:
       - name: start
-        summary: Begin a `Trace.startSession` recording the selected span categories into an in-process ring.
+        summary: Begin trace capture through the canonical broker-authorized control client.
         args:
+          - name: --instance
+            kind: option
+            required: false
+            description: Exact broker-owned live instance ID; omission preserves fail-closed unambiguous selection
           - name: --categories
             kind: option
             required: false
@@ -1331,45 +1189,29 @@ commands:
             required: false
             description: In-process ring size in mebibytes (default 80; accepted range 1 through 512). The host owns the flushed trace destination.
       - name: stop
-        summary: Flush the session and print the `.pftrace` path via `Trace.stopSession`
+        summary: Flush the broker-authorized trace session and print the `.pftrace` path through canonical control
+        args:
+          - name: --instance
+            kind: option
+            required: false
+            description: Exact broker-owned live instance ID; omission preserves fail-closed unambiguous selection
       - name: query
-        summary: Run SQL offline against a `.pftrace` with `--trace`. The live `Trace.query` path and presets are reserved and currently return `capability_unavailable`.
+        summary: Run SQL offline against a `.pftrace` with required `--trace`.
         args:
           - name: sql
             kind: positional
-            required: false
-            description: SQL query string (omit when using --preset)
-          - name: --preset
-            kind: option
-            required: false
-            description: Reserved live preset; currently unavailable
+            required: true
+            description: SQL query string
           - name: --trace
             kind: option
-            required: false
-            description: Run the SQL offline against a flushed FILE.pftrace via trace_processor instead of the live inspector; returns trace_processor's native table
+            required: true
+            description: Run the SQL offline against a flushed FILE.pftrace via trace_processor; returns trace_processor's native table
           - name: --format
             kind: option
             required: false
-            description: Reserved for the live path; offline queries return the native table
-      - name: slowest-frames
-        summary: Reserved L0 preset; currently returns `capability_unavailable`
-      - name: xruns
-        summary: Reserved L0 preset; currently returns `capability_unavailable`
-      - name: dsp-hotspots
-        summary: Reserved L0 preset; currently returns `capability_unavailable`
-      - name: layout-vs-paint
-        summary: Reserved L0 preset; currently returns `capability_unavailable`
-      - name: snapshot
-        summary: Print `compiled_in`, process-global `active`, per-publication `trace_control_available`, and optional `last_trace_path` via `Trace.snapshot`
-      - name: explain
-        summary: Reserved live surface; currently returns `capability_unavailable`. Use the trace-analysis skill with a flushed `.pftrace`.
-        args:
-          - name: question
-            kind: positional
-            required: true
-            description: Plain-English question to investigate
+            description: Offline queries support only the native table format
       - name: doctor
-        summary: Readiness check. Uses the authenticated `Trace.snapshot` request as the inspector availability check, then combines it with `trace_processor` availability (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`) and the inspector's `compiled_in` / `active` / `trace_control_available` / `last_trace_path` to report `ready_to_capture` and `ready_to_query`. `--json` emits the flat readiness object.
+        summary: Report offline trace_processor readiness.
       - name: fetch
         summary: Download + SHA-256-verify the pinned `trace_processor_shell` (Perfetto v57.2) into `$PULP_HOME`, so offline `query --trace` works zero-install. Idempotent; no-op when already present. `--json` emits `{version, platform, path, already_present}`.
       - name: open

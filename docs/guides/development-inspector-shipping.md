@@ -5,35 +5,27 @@ only makes optional SDK components available; it does not link a listener,
 discovery publisher, server, registration, or runtime evaluator into an
 ordinary `pulp_add_plugin` target.
 
-Every `pulp_add_plugin` target now emits one canonical
-`dev.pulp.control/artifact-manifest@1` sidecar. With no declaration, the target
-uses `production-stripped`: no endpoint and no capabilities. An intentionally
-inspectable developer edition declares one profile and its exact stable
-capability IDs:
+The consolidated authoring and diagnostics reference is
+[Capability control](../reference/capability-control.md). Every ordinary
+`pulp_add_plugin` target emits a production-stripped canonical
+`dev.pulp.control/artifact-manifest@1` sidecar: no endpoint and no capabilities.
+The installed SDK ships the canonical adapter that binds a Standalone processor
+and state store. Opt-in requires an exclusively `Standalone` target, an explicit
+non-production `CONTROL_PROFILE`, `CONTROL_CAPABILITIES`, and
+`PROCESSOR_FACTORY`; mixed-format declarations fail closed. macOS GPU builds
+support the full canonical Standalone capability set. Other supported builds
+currently accept only instance and state reads, and configure rejects any
+capability whose required installed adapter component is unavailable.
 
-```cmake
-pulp_add_plugin(MyDeveloperEdition
-    FORMATS Standalone
-    CONTROL_PROFILE developer-local
-    CONTROL_CAPABILITIES
-        dev.pulp.instance/read@1
-        dev.pulp.state/read@1
-        dev.pulp.ui/observe@1
-        dev.pulp.diagnostics/read@1
-        dev.pulp.logs/read@1
-        dev.pulp.ui/capture@1
-        dev.pulp.telemetry/subscribe@1)
-```
+The legacy server, raw client, discovery publisher, and standalone session
+owner were deleted in Phase 3. Do not restore them alongside the canonical host
+adapter.
 
-This declaration links the inspector-capable standalone component and embeds a
-retained capability marker plus `<target>.inspector-capabilities.json`. It does
-not activate the endpoint: the product still owns runtime profile selection,
-and the default remains off. Once activated, the manifest is the maximum runtime
-grant set. The effective grants are its intersection with the selected runtime
-profile, so neither a broader profile nor a broader manifest widens the other.
-The exported inspector-capable archive is an implementation detail of this
-helper: linking it directly cannot produce a runnable endpoint because the
-generated product declaration supplies a required link symbol.
+The Phase 4 runtime archives now implement exact T0/T1 instance status and
+bounded state/parameter catalog reads. They are reachable only through a
+carrier-authenticated `ControlService` session, an exact registration grant,
+and an injected runtime executor. There is no `pulp inspect` or MCP adapter for
+these operations yet, and ordinary production artifacts remain stripped.
 
 Control declarations are re-read as configure-time truth on every CMake run.
 Changing a target from `research-unsafe` to a narrower profile, removing
@@ -45,26 +37,23 @@ cannot preserve a removed capability.
 Available profiles are `production-stripped`, `developer-local`,
 `test-deterministic`, `support-diagnostics`, and `research-unsafe`.
 `support-diagnostics` accepts only instance, state, diagnostics, and log reads.
-Control capabilities require `dev.pulp.session/control@1`. Endpoints are
-currently supported only for `Standalone`; ordinary plugin-format targets stay
-stripped.
+Mutation control capabilities require `dev.pulp.session/control@1`. The
+installed per-user broker composes trusted T0/T1 enrollment and routing;
+ordinary plugin-format targets stay stripped and unsupported host tiers remain
+unavailable.
 
 `dev.pulp.runtime/evaluate@1` is arbitrary execution in the product process.
-No profile or acknowledgement implies it. A target that truly needs it must use
-the `research-unsafe` profile, declare the capability, and add the distinct
-acknowledgement keyword:
-
-```cmake
-    CONTROL_PROFILE research-unsafe
-    CONTROL_CAPABILITIES
-        dev.pulp.instance/read@1
-        dev.pulp.session/control@1
-        dev.pulp.runtime/evaluate@1
-    ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL
-```
+No profile or acknowledgement implies it. The reusable host executor accepts it
+only for an exact `research-unsafe` registration with the distinct unsafe
+acknowledgement, the separately installed high-risk evaluator component, and broker-owned
+single-use consent. The adapter also requires an interrupt-capable evaluator
+and an explicit result redactor; cancellation, deadline, or unsafe result
+handling fails closed. The canonical macOS GPU Standalone adapter composes this
+component only for an explicitly declared research-unsafe target.
 
 The legacy `SHIP_INSPECTOR`, `SHIP_INSPECTOR_RUNTIME_EVAL`, and
-`INSPECTOR_CAPABILITIES` spellings remain a temporary compatibility projection.
+`INSPECTOR_CAPABILITIES` spellings have been removed. Use the canonical control
+profile and capability declarations.
 They cannot be mixed with `CONTROL_*`; new projects should use only the
 canonical form.
 
@@ -81,14 +70,72 @@ also writes `artifacts/inspector-capability-package-input.json`.
 JSON package failures remain JSON and include a nonzero `exit_code` plus the
 fail-closed diagnostic.
 
-Every standalone build runs a manifest-versus-binary scanner using retained,
-Pulp-specific shipping and capability markers. Intentional artifacts fail if
-their endpoint or high-risk evaluator marker is missing, or if the evaluator
-appears without its separate acknowledgement. Generic class or symbol names
-are not treated as proof because unrelated product code may use the same text.
-The scanner also rejects legacy Remote View parameter authority from
-`production-stripped` artifacts. OSC UDP is reported as a separate external
-surface, not misrepresented as Product A protection.
+Every plugin and standalone binary runs a post-link control shipping scan.
+This includes Standalone, VST3, CLAP, LV2, AU v2, both executable AUv3 pieces,
+the AUv3 container, and AAX when that SDK is available. Multi-plugin VST3 and
+CLAP bundles enter the same scanner as ordinary `production-stripped`
+artifacts; the bundle helper is not a packaging bypass.
+Control endpoints are Standalone-only: in a mixed developer build, each
+non-Standalone artifact receives its own `production-stripped` manifest rather
+than inheriting the intentional Standalone profile.
+
+The scanner verifies the canonical manifest digest together with retained
+profile, format, platform, and architecture markers. It measures the actual
+artifact size and records which native symbol and dependency scanners ran in a
+`<target>.<format>.control-shipping-report.json` sidecar. On macOS those tools
+are `nm`, `otool`, and `lipo`; Linux uses `nm` and `readelf`; Windows uses
+`dumpbin`. A missing native scanner blocks the artifact, so each platform lane
+must provide its native toolchain rather than silently claiming evidence.
+
+For an intentional profile, every declared capability and endpoint marker must
+be retained from the linked control implementations; the shipping helper emits
+only artifact identity and cannot make an empty target satisfy its declaration.
+Source-bearing control components own these markers, and a real-component link
+fixture constructs the endpoint and resolves a declared capability before its
+final executable is scanned.
+The high-risk evaluator marker must exactly match its separate acknowledgement.
+For `production-stripped`, the scanner rejects endpoint,
+capability, runtime-evaluation, and Remote View authority strings, known control
+symbols, and known control dynamic dependencies. It also scans native binaries
+inside the package closure (or resolved sibling loader dependencies), so
+renaming a helper library cannot hide retained control code. The check reads
+the final linked artifact, so a CMake option or an unlinked declaration is not
+accepted as shipping proof.
+
+The generated `dev.pulp.control/shipping-artifact@1` sidecar is per binary and
+names its format, platform, complete architecture list, profile, and canonical
+manifest digest. This makes diagnostic and research artifacts visibly distinct
+from ordinary production output while preserving the canonical standalone
+manifest used by the read-only audit command.
+
+Custom `pulp-install-<target>` targets depend on every format binary they copy.
+That dependency is load-bearing: installation cannot copy a stale format while
+skipping its post-link scan. A persisted scan stamp depends on the artifact,
+both manifests, and the scanner itself, so changing shipping policy invalidates
+an earlier report even when the binary did not relink. The helper and scanner
+are both exported in the installed CMake SDK, and an installed-layout test
+builds the complete profile and format policy matrix without reaching back into
+the Pulp source tree.
+
+The repository matrix exercises all five profiles and the Standalone, VST3,
+CLAP, LV2, AU v2, AUv3, and AAX policy labels. The local macOS proof builds
+universal `arm64` and `x86_64` artifacts and verifies both slices with `lipo`.
+The path-scoped `Control shipping native matrix` workflow closes the native CI
+boundary with real installed-SDK consumers: macOS universal, Linux `x86_64`
+and `aarch64`, and Windows `x64`. It builds every available real plug-in format
+for each platform and aggregates the canonical `nm`/`otool`/`lipo`,
+`nm`/`readelf`, or `dumpbin /UNDNAME` reports into
+`dev.pulp.control/native-shipping-evidence@1`. A synthetic format label does
+not count as proof.
+
+AAX remains developer-supplied. On a protected-main push, when both
+`PULP_AAX_SDK_ZIP_URL` and `PULP_AAX_SDK_ZIP_SHA256` repository secrets exist,
+the macOS universal leg builds and scans a real AAX bundle from the verified
+out-of-tree SDK. Pull requests and manual runs never receive those secrets; they
+record `status: unavailable`, `proof: false`, and
+`aax-sdk-secret-withheld-untrusted-event`. A trusted run without the URL uses
+`aax-sdk-secret-unavailable`. Both are explicit availability dispositions, not
+AAX proof, and a configured URL without its checksum fails closed.
 
 Directory and direct-file audits resolve artifact names only as safe basenames
 beside their sidecars. An exact-named direct sidecar is not sufficient by
@@ -137,13 +184,20 @@ cannot produce identity-bound consent. Every block includes a stable
 `manifest.*` or `audit.*` `errorCode` in JSON.
 The report includes both `artifactDigest` and the derived `consentIdentity`, so
 code changes cannot retain consent merely by reusing a build-tree manifest.
-The command is deliberately included in Inspector-disabled production SDKs;
-only live-session commands depend on the optional Inspector client.
+The command is deliberately included in Inspector-disabled production SDKs.
+
+Shipping evidence and runtime authority remain separate checks. The canonical
+trusted launcher, host router, typed execution, CLI/MCP clients, bounded
+artifact store, and telemetry path do not restore the deleted legacy authority;
+new support must extend the same centralized path.
 
 The frozen operation schemas are closed and bounded. Required input and output
 resource, receipt, lease, stream, plugin, build, node, and idempotency
 identifiers cannot be empty; strings and collection sizes have
-explicit ceilings; capture uses distinct window and node request shapes; state
+explicit ceilings; capture uses distinct window and node request shapes;
+node requests bind an opaque attached-view generation, and UI input accepts
+exactly one closed-schema event per receipt with bounded coordinates, button,
+key, target, generation, and UTF-8 text fields; state
 parameter IDs cover the full unsigned 32-bit domain; transport tempo is
 20–400 BPM; and telemetry accepts at most 32 unique, nonempty channel IDs.
 Trace sessions freeze the concrete 1–512 MiB ring and bounded category
@@ -163,6 +217,10 @@ require a nonempty anchor of at most 256 Unicode codepoints, while highlight
 requires an exact node with a 256-byte UTF-8
 ceiling. Runtime evaluation
 rejects NUL and carries both a character ceiling and the executor's
-65,536-byte UTF-8 ceiling.
+65,536-byte UTF-8 ceiling. Window capture additionally reports bounded positive
+dimensions, validates the PNG chunk structure and dimensions, strips ancillary
+metadata, and records `redaction_state=redacted` on a sensitive broker-owned
+artifact. Node capture and UI input use the host-owned exact-target adapter and
+remain unavailable when that component is not installed.
 Changing any of these limits changes the registry digest and therefore the
 artifact and consent identity reviewed above.
