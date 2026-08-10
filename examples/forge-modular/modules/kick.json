@@ -1,0 +1,136 @@
+{
+  "modules": [
+    {
+      "slug": "KICK",
+      "name": "KICK",
+      "description": "Analog-style kick drum: swept-oscillator body with tune, decay and beater click, fired from a trigger.",
+      "tags": [
+        "Drum",
+        "Synth voice"
+      ],
+      "hp": 6,
+      "params": [
+        {
+          "id": 0,
+          "ident": "TUNE_PARAM",
+          "name": "Tune",
+          "label": "TUNE",
+          "unit": " Hz",
+          "min_value": 30.0,
+          "max_value": 120.0,
+          "default_value": 52.0,
+          "kind": "Knob",
+          "x_mm": 15.24,
+          "y_mm": 27.0
+        },
+        {
+          "id": 1,
+          "ident": "DECAY_PARAM",
+          "name": "Decay",
+          "label": "DECAY",
+          "unit": " ms",
+          "min_value": 30.0,
+          "max_value": 1200.0,
+          "default_value": 320.0,
+          "kind": "Knob",
+          "x_mm": 8.5,
+          "y_mm": 47.0
+        },
+        {
+          "id": 2,
+          "ident": "CLICK_PARAM",
+          "name": "Click",
+          "label": "CLICK",
+          "unit": " %",
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "default_value": 0.35,
+          "kind": "Knob",
+          "x_mm": 22.0,
+          "y_mm": 47.0,
+          "display_multiplier": 100.0
+        },
+        {
+          "id": 3,
+          "ident": "SWEEP_PARAM",
+          "name": "Pitch sweep",
+          "label": "SWP",
+          "unit": " oct",
+          "min_value": 0.0,
+          "max_value": 4.0,
+          "default_value": 2.0,
+          "kind": "Trimpot",
+          "x_mm": 8.5,
+          "y_mm": 65.0
+        },
+        {
+          "id": 4,
+          "ident": "TUNECV_PARAM",
+          "name": "Tune CV amount",
+          "label": "CV",
+          "unit": " %",
+          "min_value": -1.0,
+          "max_value": 1.0,
+          "default_value": 0.0,
+          "kind": "Trimpot",
+          "x_mm": 22.0,
+          "y_mm": 65.0,
+          "display_multiplier": 100.0
+        }
+      ],
+      "inputs": [
+        {
+          "id": 0,
+          "ident": "TRIG_INPUT",
+          "name": "Trigger",
+          "label": "TRIG",
+          "role": "Trigger",
+          "x_mm": 8.5,
+          "y_mm": 83.0
+        },
+        {
+          "id": 1,
+          "ident": "TUNECV_INPUT",
+          "name": "Tune CV",
+          "label": "TUNE",
+          "role": "Cv",
+          "x_mm": 22.0,
+          "y_mm": 83.0
+        },
+        {
+          "id": 2,
+          "ident": "ACCENT_INPUT",
+          "name": "Accent",
+          "label": "ACC",
+          "role": "Cv",
+          "x_mm": 8.5,
+          "y_mm": 101.0,
+          "normal_volts": 10.0
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "OUT_OUTPUT",
+          "name": "Kick out",
+          "label": "OUT",
+          "role": "Audio",
+          "x_mm": 22.0,
+          "y_mm": 101.0
+        }
+      ],
+      "lights": [
+        {
+          "id": 0,
+          "ident": "HIT_LIGHT",
+          "name": "Hit",
+          "label": "",
+          "x_mm": 15.24,
+          "y_mm": 113.0,
+          "color": "red",
+          "size": "small"
+        }
+      ]
+    }
+  ]
+}

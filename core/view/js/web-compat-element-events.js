@@ -159,14 +159,10 @@ Element.prototype._registerNativeEvent = function(type) {
         // the standard listener surface instead of the explicit
         // `registerWheel(id)` API.
         if (typeof registerWheel === "function") registerWheel(id);
-        on(id, "wheel", function(dx, dy) {
-            var evt = _makeEvent("wheel", self, {});
-            evt.deltaX = dx || 0;
-            evt.deltaY = dy || 0;
-            evt.deltaZ = 0;
-            evt.deltaMode = 0;  // DOM_DELTA_PIXEL
-            self.dispatchEvent(evt);
-        });
+        // __dispatch__ owns the single DOM element fan-out. Keep this callback
+        // registered so the native channel exists, but do not dispatch here as
+        // well or one native wheel tick reaches listeners twice.
+        on(id, "wheel", function() {});
     } else if (type === "dragstart" || type === "drag" || type === "dragend" ||
                type === "dragenter" || type === "dragover" || type === "dragleave" ||
                type === "drop") {

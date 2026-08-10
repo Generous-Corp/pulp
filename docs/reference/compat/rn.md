@@ -137,3 +137,10 @@ fill (JUCE's `SVGGraphicsContext` does this for
 `Graphics::drawEllipse`) only renders the ring's hole under even-odd
 winding. The raw `<path>` web-compat path also accepts the hyphenated
 `fill-rule` attribute.
+
+## Shared event and realm behavior
+
+RN-style elements lowered through `@pulp/react` share the core WidgetBridge
+dispatch path. Native wheel events are normalized and fanned out once, while
+realm-quarantine teardown restores root visibility before requesting repaint.
+The change does not expand the RN prop, layout, transform, or SvgPath surface.

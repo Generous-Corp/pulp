@@ -204,7 +204,7 @@ TEST_CASE("MultiChannelBallistics holds peaks and clip indicators", "[signal][me
     data.channels[0].rms = 0.5f;
     data.channels[0].clipped = true;
 
-    ballistics.update(data, 0.016f);
+    (void) ballistics.update(data, 0.016f);
     REQUIRE(ballistics.num_channels == 1);
     REQUIRE(ballistics.channels[0].display_peak > 0.9f);
     REQUIRE(ballistics.channels[0].display_rms > 0.45f);
@@ -215,15 +215,15 @@ TEST_CASE("MultiChannelBallistics holds peaks and clip indicators", "[signal][me
     data.channels[0].rms = 0.0f;
     data.channels[0].clipped = false;
 
-    ballistics.update(data, 0.5f);
+    (void) ballistics.update(data, 0.5f);
     REQUIRE(ballistics.channels[0].clip_indicator);
     REQUIRE_THAT(ballistics.channels[0].held_peak, WithinAbs(1.0f, 0.001f));
 
-    ballistics.update(data, 3.0f);
+    (void) ballistics.update(data, 3.0f);
     REQUIRE_FALSE(ballistics.channels[0].clip_indicator);
 
     data.channels[0].clipped = true;
-    ballistics.update(data, 0.016f);
+    (void) ballistics.update(data, 0.016f);
     REQUIRE(ballistics.channels[0].clip_indicator);
     ballistics.clear_clips();
     REQUIRE_FALSE(ballistics.channels[0].clip_indicator);
@@ -238,12 +238,12 @@ TEST_CASE("MultiChannelBallistics clamps tiny levels and releases held peaks",
     data.num_channels = 1;
     data.channels[0].peak = 0.75f;
     data.channels[0].rms = 0.25f;
-    ballistics.update(data, 0.001f);
+    (void) ballistics.update(data, 0.001f);
     REQUIRE_THAT(ballistics.channels[0].held_peak, WithinAbs(0.75f, 1e-6f));
 
     data.channels[0].peak = 0.0f;
     data.channels[0].rms = 0.0f;
-    ballistics.update(data, 0.25f);
+    (void) ballistics.update(data, 0.25f);
     REQUIRE_FALSE(ballistics.channels[0].clip_indicator);
     REQUIRE(ballistics.channels[0].held_peak < 0.75f);
 
@@ -252,7 +252,7 @@ TEST_CASE("MultiChannelBallistics clamps tiny levels and releases held peaks",
     tiny.num_channels = 1;
     tiny.channels[0].peak = 1e-8f;
     tiny.channels[0].rms = 1e-8f;
-    floor.update(tiny, 1.0f);
+    (void) floor.update(tiny, 1.0f);
     REQUIRE_THAT(floor.channels[0].display_peak, WithinAbs(0.0f, 1e-9f));
     REQUIRE_THAT(floor.channels[0].display_rms, WithinAbs(0.0f, 1e-9f));
 }
@@ -263,7 +263,7 @@ TEST_CASE("MultiChannelBallistics clamps invalid snapshot channel counts",
 
     MultiChannelMeterData data;
     data.num_channels = -2;
-    ballistics.update(data, 0.01f);
+    (void) ballistics.update(data, 0.01f);
     REQUIRE(ballistics.num_channels == 0);
 
     data.num_channels = kMaxMeterChannels + 3;
@@ -271,7 +271,7 @@ TEST_CASE("MultiChannelBallistics clamps invalid snapshot channel counts",
         data.channels[ch].peak = static_cast<float>(ch + 1) / 20.0f;
     }
 
-    ballistics.update(data, 0.01f);
+    (void) ballistics.update(data, 0.01f);
     REQUIRE(ballistics.num_channels == kMaxMeterChannels);
     REQUIRE(ballistics.channels[0].display_peak > 0.0f);
     REQUIRE(ballistics.channels[kMaxMeterChannels - 1].display_peak > 0.0f);

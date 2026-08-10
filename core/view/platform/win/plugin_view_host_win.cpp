@@ -392,7 +392,8 @@ public:
             static_cast<uint32_t>(wp), horizontal);
         input_router_.on_mouse_wheel(mouse_point(packed),
                                      horizontal ? steps : 0.0f,
-                                     horizontal ? 0.0f : steps);
+                                     horizontal ? 0.0f : steps,
+                                     mouse_modifiers(wp));
     }
 
     bool handle_key(WPARAM wp, LPARAM lp, bool is_down) {

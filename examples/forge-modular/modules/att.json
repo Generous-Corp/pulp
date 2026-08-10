@@ -1,0 +1,70 @@
+{
+  "modules": [
+    {
+      "slug": "ATT",
+      "name": "ATT",
+      "description": "Bipolar attenuverter with offset",
+      "tags": [
+        "Attenuator",
+        "Utility"
+      ],
+      "hp": 3,
+      "params": [
+        {
+          "id": 0,
+          "ident": "AMT_PARAM",
+          "name": "Amount",
+          "label": "AMT",
+          "unit": "%",
+          "min_value": -1.0,
+          "max_value": 1.0,
+          "default_value": 1.0,
+          "kind": "KnobSmall",
+          "x_mm": 7.62,
+          "y_mm": 28,
+          "display_base": 0.0,
+          "display_multiplier": 100.0,
+          "allow_endpoint_default": "unity pass-through is the useful default for an attenuverter"
+        },
+        {
+          "id": 1,
+          "ident": "OFFSET_PARAM",
+          "name": "Offset",
+          "label": "OFS",
+          "unit": " V",
+          "min_value": -5.0,
+          "max_value": 5.0,
+          "default_value": 0.0,
+          "kind": "KnobSmall",
+          "x_mm": 7.62,
+          "y_mm": 55,
+          "display_base": 0.0,
+          "display_multiplier": 1.0
+        }
+      ],
+      "inputs": [
+        {
+          "id": 0,
+          "ident": "IN_INPUT",
+          "name": "Signal",
+          "label": "IN",
+          "role": "Cv",
+          "x_mm": 7.62,
+          "y_mm": 84
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "OUT_OUTPUT",
+          "name": "Signal",
+          "label": "OUT",
+          "role": "Cv",
+          "x_mm": 7.62,
+          "y_mm": 110
+        }
+      ],
+      "lights": []
+    }
+  ]
+}

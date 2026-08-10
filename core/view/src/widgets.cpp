@@ -1352,13 +1352,34 @@ void ToggleButton::paint(canvas::Canvas& canvas) {
         : off_border_color_.value_or(resolve_color("control.border", canvas::Color::rgba8(80, 80, 100)));
     const bool has_custom_border = on_ ? on_border_color_.has_value() : off_border_color_.has_value();
     const float radius = corner_radius_.value_or(6.0f);
+    const bool per_corner = has_corner_radii();
+    const auto rounded_path = [&] {
+        const float tl = effective_corner_radius_tl(b.width, b.height);
+        const float tr = effective_corner_radius_tr(b.width, b.height);
+        const float br = effective_corner_radius_br(b.width, b.height);
+        const float bl = effective_corner_radius_bl(b.width, b.height);
+        canvas.begin_path();
+        canvas.round_rect(0, 0, b.width, b.height,
+                          tl, tl, tr, tr, br, br, bl, bl);
+        canvas.close_path();
+    };
 
     canvas.set_fill_color(bg);
-    canvas.fill_rounded_rect(0, 0, b.width, b.height, radius);
+    if (per_corner) {
+        rounded_path();
+        canvas.fill_current_path();
+    } else {
+        canvas.fill_rounded_rect(0, 0, b.width, b.height, radius);
+    }
     if (!on_ || has_custom_border) {
         canvas.set_stroke_color(border);
         canvas.set_line_width(1);
-        canvas.stroke_rounded_rect(0, 0, b.width, b.height, radius);
+        if (per_corner) {
+            rounded_path();
+            canvas.stroke_current_path();
+        } else {
+            canvas.stroke_rounded_rect(0, 0, b.width, b.height, radius);
+        }
     }
 
     if (!label_.empty()) {

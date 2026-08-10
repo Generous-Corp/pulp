@@ -108,10 +108,15 @@ ALLOWED_ROOT_PATHS = frozenset({
     "compat",
     "core",
     "docs",
+    "design",     # Design-tool source material for the Forge Modular work.
     "examples",
     "experimental",
     "external",
     "fixtures",  # Package-format manifests and archive/content workflow fixtures.
+    # Forge Modular's shell sources plus the patch that carries them into a
+    # throwaway Forge worktree. Lives at the root because it is a seam between
+    # two repositories rather than a subsystem of either.
+    "forge-seam",
     "hooks",
     "inspect",
     "packages",

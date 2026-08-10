@@ -1,0 +1,194 @@
+# The Forge seam — staged here until it is proposed
+
+Changes destined for the **Forge** repo, kept here while Forge Modular is
+unproven. Nothing in this directory is Rack-shaped: it is a product-neutral
+extension point plus the guard that makes touching shared code safe.
+
+Staged rather than committed to Forge because the user's condition is that
+nothing goes into Forge until Forge Modular earns it. If Forge Modular is
+dropped, delete this directory and Forge never knew.
+
+## What is here
+
+### `test/test_chrome_no_leak.cpp` + `test/baselines/chrome-home/*.png`
+
+**Phase 0, and it is done.** Renders each Forge product's Home frame and holds it
+against a committed baseline. Three products, three baselines.
+
+Proven to work, in both directions:
+
+| | Result |
+|---|---|
+| `shell_rail_width + 1.0f` in shared chrome | **3 of 3 failed** |
+| reverted | **3 of 3 passed** |
+
+Two things about it worth keeping:
+
+- **It renders the chrome directly rather than driving standalones.** Forge MIDI
+  ships CLAP and AU only, so it has no window to screenshot. Rendering chrome
+  covers every product whether or not it has one.
+- **It compares digests, not byte vectors.** Comparing vectors is correct and
+  unreadable — Catch2 printed both PNGs on failure, burying the real message
+  under thousands of characters. Two hashes and two paths is what a person can
+  act on.
+
+A blank render cannot pass: the frame is asserted over 20 KB first, so a render
+that produced nothing could not match an equally empty baseline.
+
+Refresh a baseline deliberately, never casually:
+
+```
+FORGE_NO_LEAK_UPDATE=1 ./forge-test-chrome-no-leak
+```
+
+and commit the changed PNGs with the reason.
+
+### `patches/0001-chrome-copy-from-the-shell.patch`
+
+**Phase 1, step 1 of 3, and it is done.** The four `switch (kind)` functions in
+`chrome.cpp` — badge, prompt placeholder, follow-up placeholder, default build
+title — become one `ChromeCopy` the shell returns. The chrome asks instead of
+deciding.
+
+84 insertions, 40 deletions, across 5 files. Net effect on the three existing
+products: **none**.
+
+| Check | Result |
+|---|---|
+| `forge-test-chrome-no-leak` | 3 of 3 byte-identical |
+| `forge-test-chrome` | 4,711 assertions, 126 cases, all pass |
+
+Two things this cost that are worth knowing:
+
+- **The helpers had to return `std::string`, not `const char*`.** The copy now
+  lives in a value the shell returns, so handing back a pointer into that
+  temporary would dangle. The compiler does not catch it; the switch statements
+  returned string literals and were safe by accident.
+- **`chrome_copy()` is pure virtual on purpose.** A new product that forgets to
+  answer fails to compile rather than silently inheriting another product's
+  words.
+
+### Phase 1, step 2 — the composer action row
+
+**Done, and it is the one genuinely shared change.** `ComposerRow` describes what
+the row contains — left items, right items, each a label, an icon, a primary
+flag and a callback — and `ForgeShell::composer_row()` returns it. An **empty**
+row means "the standard one", so the three original products are untouched and
+nothing that does not care has to change.
+
+The chrome still owns the treatment: size, radius, border, icon colour, label
+type. A product says what its buttons ARE; the chrome decides how they look, so a
+described row cannot accidentally style itself out of the family.
+
+Proven live and per-product in one run. Temporarily describing Forge FX's row:
+
+| Product | Result |
+|---|---|
+| FX (described) | **failed** — the render changed, so the path is live |
+| Instrument | passed — untouched |
+| MIDI | passed — untouched |
+
+Reverted: 3 of 3 pass, and Forge's chrome suite stays at 4,711 assertions.
+
+That is the guarantee demonstrated rather than asserted: a product describing its
+own row changes only itself.
+
+**One honest gap.** That demonstration was manual, because `ForgeFxShell` is
+`final` and cannot be subclassed for a test double. A permanent test needs a
+`ForgeShell` subclass — which is exactly what `ForgeModularShell` will be in
+Phase 2, so the test becomes natural there rather than requiring a throwaway.
+
+`icon_kind` was dropped from the icon enum: it is not declared where the row
+builder sits, and an icon that cannot be wired is worse than one that does not
+exist.
+
+### Phase 1, step 3 — the home accessory hook
+
+**Done. One hook, not two.**
+
+`ForgeShell::home_accessory()` returns an extra view for between the title and
+the composer, or `nullptr`. Forge Modular's Module|Patch tabs go there.
+`build_home()` is a plain sequence of `add_child` calls, so this is one
+conditional insert at the point the tabs belong.
+
+Proven live and per-product the same way: temporarily giving Forge FX a red
+200x40 accessory failed FX and passed Instrument and MIDI. Removed: 3 of 3 pass,
+chrome suite still 4,711 assertions.
+
+**I declared a `workspace_accessory()` hook and then removed it**, because
+nothing called it. A hook no code path reaches is exactly the inert-path problem
+this project keeps hitting -- it compiles, it looks like progress, and it does
+nothing. The rack preview needs it in Phase 5; it gets added there, with a
+mount point and a live-path proof, rather than sitting unused until then.
+
+## Phase 1 is complete
+
+Three changes, 197 insertions and 39 deletions across 6 files. Effect on the
+three existing products: **none**, asserted byte-identical after each step.
+
+Every step was proven live as well as harmless -- an important distinction,
+since "changes nothing" is also what a dead code path looks like.
+
+Still owed: a permanent test for the described row and the accessory hook. Both
+demonstrations were manual because `ForgeFxShell` is `final` and cannot be
+subclassed for a test double. `ForgeModularShell` is that subclass, so the tests
+become natural in Phase 2 rather than needing a throwaway.
+
+Still to do in Phase 1: nothing.
+
+## Phase 2 — Forge Modular's shell
+
+`modular/modular_shell.{hpp,cpp}` is the first real `ForgeShell` subclass outside
+Forge, which is what makes the seam's live-path proofs permanent instead of
+manual.
+
+It answers all three hooks: `chrome_copy()` with Eurorack wording that follows
+Module/Patch, `composer_row()` with mention / Random / Ask / Build, and
+`home_accessory()` with the tabs slot. Everything else `ForgeShell` demands is
+about DSP this product does not have, and every empty override says why — an
+unexplained empty override reads as an oversight.
+
+Four permanent tests replace the manual demonstrations:
+
+| Test | What it holds |
+|---|---|
+| copy reaches the chrome | badge and placeholder follow the artifact, **both directions** |
+| describes its own row | Ask is never primary; every icon-only button has an access label |
+| home accessory reaches the chrome | the tabs slot returns a view |
+| unwired install reports failure | rather than claiming a success that installed nothing |
+
+`forge-test-chrome-no-leak` now runs 7 cases / 35 assertions. Forge's own suite
+is unchanged at 4,711.
+
+**It uses `ShellKind::effect` rather than a new enum value.** Everything Forge
+Modular varies now comes through the three hooks, so a fourth value would mean
+editing all 13 remaining switch sites for no gain — and putting a Rack-shaped
+name in Forge's core enum, which is exactly what this arrangement exists to
+avoid. The badge no longer comes from the kind, so nothing reads "FORGE FX".
+
+**`install_generated_bundle` deliberately returns false with a reason.** The
+other shells lower a bundle onto their DSP; Forge Modular's artifact is a
+`.vcvplugin` that Rack loads once at startup, so "install" means packaging a file
+and a new module needs a Rack restart. That path lives in the generator and is
+joined in Phase 7. Reporting false beats reporting a success that installed
+nothing, which is the failure mode this project has hit most often.
+
+One thing the compiler caught that the JS bridge had not: the flex member is
+`direction`, not `flex_direction`. In JS that silently did nothing thirteen
+times; in C++ it is a build error.
+
+## Applying it to a Forge checkout
+
+The test needs one registration in Forge's `CMakeLists.txt`, beside
+`forge-test-chrome`:
+
+```cmake
+add_executable(forge-test-chrome-no-leak test/test_chrome_no_leak.cpp)
+target_include_directories(forge-test-chrome-no-leak PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/test)
+target_link_libraries(forge-test-chrome-no-leak PRIVATE
+    forge_core Catch2::Catch2WithMain)
+catch_discover_tests(forge-test-chrome-no-leak)
+```
+
+Built and run against Forge `origin/main` at `7f0999a`.

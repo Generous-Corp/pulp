@@ -305,7 +305,10 @@ TEST_CASE("Runtime reset quarantines a partially built replacement until owner t
         REQUIRE(session->load());
         REQUIRE(session->bridge() != nullptr);
         int repaint_requests = 0;
+        int post_reset_rebinds = 0;
         session->set_repaint_callback([&] { ++repaint_requests; });
+        session->set_post_evaluation_reset_callback(
+            [&] { ++post_reset_rebinds; });
 
         // The evaluation itself succeeds and the realm it ran in stays live
         // until the frame boundary; the reset that cannot rebuild it fails
@@ -320,6 +323,7 @@ TEST_CASE("Runtime reset quarantines a partially built replacement until owner t
         REQUIRE(session->bridge() == nullptr);
         REQUIRE_FALSE(root.visible());
         REQUIRE(repaint_requests == 1);
+        REQUIRE(post_reset_rebinds == 0);
         REQUIRE_FALSE(session->poll());
         session->attach_gpu_surface(nullptr);
 
@@ -578,6 +582,83 @@ TEST_CASE("The evaluated realm is discarded at the frame boundary",
     const auto planted = session.script_inspector()->evaluate("typeof globalThis.planted");
     REQUIRE(planted.ok);
     CHECK(planted.json == "\"undefined\"");
+
+    std::error_code cleanup_error;
+    fs::remove_all(temp, cleanup_error);
+}
+
+TEST_CASE("a host can rebind native hooks after an evaluated realm reset",
+          "[view][scripted-ui][inspector][runtime-eval][reset][host-rebind]") {
+    const auto temp = make_temp_dir("pulp-scripted-ui-eval-host-rebind");
+    const auto script = temp / "ui.js";
+    write_text(script,
+               "createCanvas('dial', '');"
+               "on('dial', 'pointerdown', function () { setParam('gain', 1); });");
+
+    View root;
+    StateStore store;
+    store.add_parameter({.id = 1, .name = "gain", .range = {0.0f, 1.0f, 0.0f}});
+    ScriptedUiSession session(root, store, {
+        .script_path = script,
+        .granted_capabilities = CapabilitySet{},
+    });
+    REQUIRE(session.load());
+
+    int host_pointer_downs = 0;
+    int bind_count = 0;
+    View* armed_view = nullptr;
+    const auto bind_host_hook = [&] {
+        armed_view = session.bridge() != nullptr
+                         ? session.bridge()->widget("dial")
+                         : nullptr;
+        if (armed_view == nullptr)
+            return;
+        auto script_handler = armed_view->on_pointer_event;
+        armed_view->on_pointer_event =
+            [script_handler = std::move(script_handler),
+             &host_pointer_downs](const MouseEvent& event) {
+                if (event.isPress())
+                    ++host_pointer_downs;
+                if (script_handler)
+                    script_handler(event);
+            };
+        ++bind_count;
+    };
+    session.set_post_evaluation_reset_callback(bind_host_hook);
+
+    // This is the exact host ordering that exposed the regression: inspect the
+    // script-owned registry, then attach a native hook to the resolved View.
+    // The evaluation schedules a realm reset for the next frame.
+    const auto registry = session.script_inspector()->evaluate(
+        "({ dial: { param: 'gain' } })");
+    REQUIRE(registry.ok);
+    REQUIRE(session.script_inspector()->post_evaluation_reset_pending());
+    bind_host_hook();
+    REQUIRE(armed_view != nullptr);
+    View* const before_reset = armed_view;
+
+    MouseEvent press;
+    press.is_down = true;
+    armed_view->on_mouse_event(press);
+    REQUIRE(host_pointer_downs == 1);
+    REQUIRE(store.get_value(1) == 1.0f);
+
+    store.set_value(1, 0.0f);
+    session.poll();
+
+    // The old wrapper captured the retired script handler and must not be
+    // copied. The host is notified once, resolves the replacement View, and
+    // chains onto that realm's fresh script handler before input resumes.
+    REQUIRE(bind_count == 2);
+    REQUIRE(armed_view != nullptr);
+    REQUIRE(armed_view != before_reset);
+    armed_view->on_mouse_event(press);
+    CHECK(host_pointer_downs == 2);
+    CHECK(store.get_value(1) == 1.0f);
+
+    // Ordinary frames do not re-run the rebind callback.
+    session.poll();
+    CHECK(bind_count == 2);
 
     std::error_code cleanup_error;
     fs::remove_all(temp, cleanup_error);

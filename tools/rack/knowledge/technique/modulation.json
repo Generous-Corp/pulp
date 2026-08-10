@@ -1,0 +1,275 @@
+{
+  "$comment": [
+    "TECHNIQUE, not realisation. Nothing in this file names a module, a jack, a",
+    "cable or VCV Rack. An entry says what a technique IS, why it works, what it",
+    "should sound like, and -- the part that earns the file's existence -- the",
+    "NUMBERS, each with where it came from.",
+    "",
+    "WHY THE TWO LAYERS ARE SEPARATE. An agent writing a C++ Processor for a",
+    "drum synth needs 'the pitch drop carries the character, about two octaves",
+    "in a few tens of milliseconds' and needs nothing about oscillators and",
+    "multiples. An agent wiring a rack needs both. Fused, this is Rack-only",
+    "forever and the question of using it elsewhere cannot even be asked. Split,",
+    "it transfers for free. The link runs one way only: an idiom declares which",
+    "techniques it REALISES, and this layer never mentions an idiom, so it stays",
+    "portable by construction rather than by discipline.",
+    "",
+    "THE FAILURE MODE THIS FILE IS BUILT AGAINST is fluent, reference-shaped",
+    "prose grounded in nothing -- a knowledge base is easy to make large and a",
+    "large one full of confident invention is worse than none, because an agent",
+    "would treat it as reference. So a NUMBER carries its own provenance,",
+    "separately from the entry's: a technique can be common knowledge while one",
+    "of its numbers was measured out of a specific book, and conflating those is",
+    "how a guess acquires a citation. An entry with nothing measured behind it",
+    "says so and offers no numbers rather than plausible ones."
+  ],
+  "entries": [
+    {
+      "id": "vibrato-rate",
+      "canonical_semantic_id": "vibrato-rate",
+      "names": [
+        "vibrato",
+        "pitch wobble",
+        "expressive pitch movement"
+      ],
+      "what": "Pitch moved periodically by a small amount and returned, so the note is decorated rather than changed. The rate has to sit in a narrow band: too slow reads as drift or as being out of tune, too fast stops being movement and becomes timbre.",
+      "why": "Below roughly 20 Hz the ear follows the modulation as a change over time. Above it, the individual excursions stop being resolvable as events and the sidebands they create are heard as a change of tone colour instead. Vibrato lives well below that boundary, and its depth stays small enough that the ear keeps hearing one pitch being decorated rather than two pitches alternating.",
+      "listen_for": {
+        "sounds_like": "one note, wavering around itself at a rate you could tap along with, never losing the pitch it decorates",
+        "confusable_with": "a trill, where the pitch arrives somewhere else instead of returning; and audio-rate modulation of the same input, which is not movement at all"
+      },
+      "numbers": [
+        {
+          "quantity": "vibrato rate",
+          "value": "4 to 8 Hz, with about 5 to 7 as the centre",
+          "provenance": "read",
+          "grounding": "Two independent sources agree. Synth Secrets gives 5-8 Hz for a violin. Separately, across the 66 LFO rate settings in the recipe catalogue of Welsh's Synthesizer Cookbook, the ones its author marks 'moderate' sit at 4, 5, 6 and 7.5 Hz, with 'slow' below 2.5 and 'fast' at 10 and above — a distribution measured here rather than quoted.",
+          "anchor": {
+            "doc": "part-49.md",
+            "quote": "The modulation speed is usually in the range of about 5Hz to 8Hz"
+          }
+        },
+        {
+          "quantity": "vibrato depth",
+          "value": "small: a few percent of the note, and as little as a single cent on a woodwind",
+          "provenance": "read",
+          "grounding": "The commonest depth setting in the same catalogue is 5%; its clarinet recipe uses one cent. Synth Secrets adds the reason to keep it small: past a certain depth the timbre stops sounding like an instrument and starts sounding electronic.",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Depth:     1 cent very light"
+          }
+        }
+      ],
+      "provenance": "canon",
+      "source": "Standard practice; the numbers are cited individually above"
+    },
+    {
+      "id": "modulation-rate-boundary",
+      "canonical_semantic_id": "modulation-rate-boundary",
+      "names": [
+        "audio-rate modulation",
+        "sub-audio modulation",
+        "when movement becomes timbre"
+      ],
+      "what": "The same modulation routing produces two completely different results depending only on the modulator's rate. Below hearing it is heard as movement — tremolo, vibrato, a filter sweep. Above hearing it is heard as timbre: sum and difference tones appear, and the sense of anything moving disappears.",
+      "why": "A modulator at audio rate creates sidebands at the sum and difference of the two frequencies. Below hearing those sidebands are so close to the carrier that the ear integrates them as one pitch changing; above it, they are far enough apart to be heard as separate partials, which is a change of tone rather than a change over time.",
+      "listen_for": {
+        "sounds_like": "at the boundary, a wobble that thickens into a buzz and then resolves into a chord you did not play",
+        "confusable_with": "nothing, once you have heard it move through the boundary — which is the fastest way to understand it"
+      },
+      "numbers": [
+        {
+          "quantity": "the boundary",
+          "value": "the bottom of hearing, around 20 Hz",
+          "provenance": "canon",
+          "grounding": "Common knowledge about hearing rather than a figure taken from any of these books. Stated here because the entry is useless without it."
+        },
+        {
+          "quantity": "a useful modulator range for the sub-audio side",
+          "value": "up to at least 80 Hz for effects meant to be heard as roughness rather than as movement — which is above where many modulators stop",
+          "provenance": "read",
+          "grounding": "The source makes the practical point explicitly: it says a modulator whose maximum rate is 25 Hz is inadequate, because the useful effect it is describing needs about 80.",
+          "anchor": {
+            "doc": "part-25.md",
+            "quote": "a triangle wave is an acceptable source for this modulation, and a frequency in the region of 80Hz does the trick nicely"
+          }
+        }
+      ],
+      "provenance": "read",
+      "source": "Synth Secrets, Part 11: Amplitude Modulation — the closing summary of the three modulation destinations",
+      "anchor": {
+        "doc": "part-11.md",
+        "quote": "Amplitude Modulation (which is tremolo at audio frequencies) and Filter Modulation (which is growl at audio frequencies)"
+      }
+    },
+    {
+      "id": "attack-instability",
+      "canonical_semantic_id": "attack-instability",
+      "names": [
+        "growl",
+        "attack transient",
+        "the parp on a blown note"
+      ],
+      "what": "A real blown or bowed instrument does not reach its steady pitch instantly; the standing wave takes time to establish and the note is unstable while it does. Synthesized without that instability the attack sounds artificial, and the fix is a brief roughness applied to the TIMBRE, not to the pitch — modulation into the filter, gated by a short envelope so it stops when the real instrument's instability would have.",
+      "why": "Modulating pitch to imitate it would be frequency modulation, which produces sidebands and changes the timbre into something else entirely. Modulating the filter produces a comparable roughness without moving the note.",
+      "listen_for": {
+        "sounds_like": "a catch at the front of the note that is gone almost immediately; hold the note and it should be clean",
+        "confusable_with": "vibrato, which moves the pitch and persists; and a permanently rough tone, which is what happens when the roughness is not gated"
+      },
+      "numbers": [
+        {
+          "quantity": "how long the instability lasts",
+          "value": "about a dozen cycles of the note — roughly 50 ms at middle C, and proportionally shorter higher up",
+          "provenance": "read",
+          "grounding": "Given in cycles rather than milliseconds, which is the useful form: the same instability is half as long an octave up. At 256 Hz a dozen cycles is about 47 ms.",
+          "anchor": {
+            "doc": "part-25.md",
+            "quote": "this 'settling' takes about a dozen cycles"
+          }
+        }
+      ],
+      "provenance": "read",
+      "source": "Synth Secrets, Part 25: Synthesizing Brass Instruments — pitch modulation, growl and vibrato",
+      "anchor": {
+        "doc": "part-25.md",
+        "quote": "we patch the modulation into the filter through a VCA whose gain is controlled by an AD contour generator"
+      }
+    },
+    {
+      "id": "fixed-body-resonances",
+      "canonical_semantic_id": "fixed-body-resonances",
+      "names": [
+        "body resonance",
+        "formant",
+        "what makes an instrument sound like an instrument"
+      ],
+      "what": "An acoustic instrument's body emphasises certain absolute frequencies regardless of the note being played. Those emphases do not transpose, which is why some notes on a real instrument bloom and their neighbours sit back — and why a filter that tracks the keyboard sounds synthetic no matter how well it is tuned.",
+      "why": "The body is a resonator with fixed dimensions, so its resonant frequencies are a property of the object rather than of the note. A bank of narrow band-pass filters at fixed frequencies, summed in parallel, reproduces that; a single tracking filter cannot, because it moves with the note.",
+      "listen_for": {
+        "sounds_like": "an uneven-ness across the range that survives transposition — play a scale and some notes should be fuller than others, always the same ones",
+        "confusable_with": "a keyboard-tracking filter, where every note has identical colour, and a filter sweep, where the colour moves while a note holds"
+      },
+      "numbers": [
+        {
+          "quantity": "violin body resonances",
+          "value": "two narrow peaks near 300 Hz and 700 Hz, plus a broader one spanning roughly 2 to 4 kHz set around 3 kHz with lower resonance",
+          "provenance": "read",
+          "grounding": "The third peak is deliberately broader and less resonant than the first two, which is what lets a range of partials through rather than a single frequency.",
+          "anchor": {
+            "doc": "part-49.md",
+            "quote": "we will set the first two filters to accentuate the body resonances at 300Hz and 700Hz"
+          }
+        },
+        {
+          "quantity": "how wide a vocal formant is",
+          "value": "about 100 Hz of bandwidth, so Q rises with the formant's frequency rather than staying constant",
+          "provenance": "read",
+          "grounding": "Stated for a man's voice, with the note that the bandwidth widens somewhat as the formant frequency rises, and that women's formants are wider. The consequence for a patch is that a fixed Q across a filter bank is wrong: the higher filters need higher Q to keep the same bandwidth.",
+          "anchor": {
+            "doc": "part-23.md",
+            "quote": "these Qs (which increase with Fc) suggest a bandwidth for all the formants of around 100Hz"
+          }
+        }
+      ],
+      "provenance": "read",
+      "source": "Synth Secrets, Part 49: Practical Bowed-string Synthesis — tuning a filter bank to a violin's body",
+      "anchor": {
+        "doc": "part-49.md",
+        "quote": "adjusting their resonances to emphasise any signal partials that lie at, or close to, these frequencies"
+      }
+    },
+    {
+      "id": "envelope-shape-conventions",
+      "canonical_semantic_id": "envelope-shape-conventions",
+      "names": [
+        "envelope times",
+        "pad envelope",
+        "plucked envelope",
+        "adsr settings"
+      ],
+      "what": "Two envelope shapes account for most of what a patch needs, and the difference between them is an order of magnitude in time rather than a subtle adjustment. A sustained shape takes seconds to arrive and seconds to leave; a plucked one is done in a fraction of a second and never really sustains.",
+      "why": "The attack and decay together set how long a note takes to become itself, which is the strongest cue a listener has for whether a sound was struck or blown. It also bounds how fast notes can arrive: a shape that takes three seconds to establish cannot be played more than a few times a minute without the notes running into each other.",
+      "listen_for": {
+        "sounds_like": "for the sustained shape, a sound that arrives without an edge and outstays the key; for the plucked one, an immediate front and a body that is already leaving",
+        "confusable_with": "a plucked shape with a long release, which sounds struck but behaves like a pad and will smear a fast passage"
+      },
+      "numbers": [
+        {
+          "quantity": "a sustained/pad envelope",
+          "value": "attack and decay around 1.5 s each, sustain about half, release around 4 s",
+          "provenance": "read",
+          "grounding": "The settings a teaching example chose in order to demonstrate what a slow envelope sounds like, which makes them a demonstrated convention rather than a preference.",
+          "anchor": {
+            "doc": "3. Envelopes.sc",
+            "quote": "Env.adsr(1.5, 1.5, 0.5, 4),\n            gate: gate"
+          }
+        },
+        {
+          "quantity": "a plucked/fast envelope",
+          "value": "attack and decay around 0.3 s each, high sustain, release around 1.2 s",
+          "provenance": "read",
+          "grounding": "The same example's fast counterpart. Attack plus decay is 0.6 s against the pad's 3.0 s, which is the fivefold gap that separates the two shapes.",
+          "anchor": {
+            "doc": "3. Envelopes.sc",
+            "quote": "Env.adsr(0.3, 0.3, 0.9, 1.2),"
+          }
+        },
+        {
+          "quantity": "how fast notes can arrive under each",
+          "value": "roughly 0.3 a second for the pad shape, roughly 1.7 for the plucked one",
+          "provenance": "inferred",
+          "grounding": "Arithmetic on the two settings above — one over attack-plus-decay — rather than anything either source states. It is the bridge between an envelope setting and a measurable property of the audio, and it is the derivation behind the one behaviour threshold that is not a guess."
+        }
+      ],
+      "provenance": "read",
+      "source": "microcosm/cookbook-sc, the envelopes chapter — the slow and fast ADSR demonstrations",
+      "anchor": {
+        "doc": "3. Envelopes.sc",
+        "quote": "Env.adsr(1.5, 1.5, 0.5, 4),\n            gate: gate"
+      }
+    },
+    {
+      "id": "filter-sweep-span",
+      "canonical_semantic_id": "filter-sweep-span",
+      "names": [
+        "filter sweep",
+        "how far to sweep",
+        "cutoff range"
+      ],
+      "what": "A filter sweep meant to be heard as a sweep covers most of the audible range, not a corner of it. The gesture is measured in octaves rather than hertz, because the ear hears pitch and brightness logarithmically.",
+      "why": "A sweep of a few hundred hertz near the top of the range is inaudible; the same few hundred hertz near the bottom is dramatic. Thinking in octaves makes the gesture the same size wherever it happens.",
+      "listen_for": {
+        "sounds_like": "the sound opening from almost nothing to fully bright and back, with the movement obvious at every point in the travel",
+        "confusable_with": "a small sweep near the top of the range, which is nearly inaudible however wide it looks in hertz"
+      },
+      "numbers": [
+        {
+          "quantity": "a demonstrative sweep span",
+          "value": "roughly 110 Hz to 16 kHz — about 7.2 octaves",
+          "provenance": "read",
+          "grounding": "The range a teaching example hands to a mouse so a student can hear what sweeping is. It is a ceiling rather than a target: a real patch's measured brightness moves far less than its cutoff does, because the filter is only removing part of the spectrum.",
+          "anchor": {
+            "doc": "2. Filters.sc",
+            "quote": "in: WhiteNoise.ar(0.4),\n            freq: MouseY.kr(110, 16000)"
+          }
+        },
+        {
+          "quantity": "resonance high enough to be the point",
+          "value": "a reciprocal-Q around 0.005 to 0.01, which is a Q of roughly 100 to 200",
+          "provenance": "read",
+          "grounding": "The setting the same source uses when the resonance itself is meant to be heard. Well above the mild emphasis of an ordinary filtered voice, and in the region where a filter starts behaving like a tone generator.",
+          "anchor": {
+            "doc": "3. Envelopes.sc",
+            "quote": "freq: 220 + (220 * env),\n            rq: 0.005"
+          }
+        }
+      ],
+      "provenance": "read",
+      "source": "microcosm/cookbook-sc, the filters chapter — the swept-cutoff and high-resonance demonstrations",
+      "anchor": {
+        "doc": "2. Filters.sc",
+        "quote": "in: WhiteNoise.ar(0.4),\n            freq: MouseY.kr(110, 16000)"
+      }
+    }
+  ]
+}

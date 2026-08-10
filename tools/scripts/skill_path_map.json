@@ -1,18 +1,18 @@
 {
   "$schema": "./skill_path_map.schema.json",
-  "schema_version": 1,
   "_comment": "Skill name -> glob patterns. When a diff touches any pattern, the corresponding SKILL.md must be updated in the same diff or a Skill-Update: skip trailer must appear on the tip commit. Paired with tools/scripts/versioning.json. Every subdir under .agents/skills/ MUST have an entry here; skill_sync_check.py fails if one is missing. Dual/triple ownership is permitted \u2014 and expected \u2014 for files that span multiple domains: e.g. core/format/src/au_adapter.mm is owned by both `auv3` (the adapter) and `view-bridge` (editor attach lifecycle), because a change to that file reasonably requires guidance updates on both sides. Dual ownership is not a mistake to collapse; use it when a single file legitimately teaches two skills.",
+  "schema_version": 1,
   "skills": {
     "aax": {
+      "_doc": {
+        "empty-ok": "external/AAX-SDK/** intentionally empty \u2014 AAX SDK is developer-supplied per docs/guides/ship.md and the aax skill"
+      },
       "paths": [
         "core/format/src/aax*",
         "core/format/include/pulp/format/aax*",
         "external/AAX-SDK/**",
         "tools/cmake/PulpAAX.cmake"
-      ],
-      "_doc": {
-        "empty-ok": "external/AAX-SDK/** intentionally empty \u2014 AAX SDK is developer-supplied per docs/guides/ship.md and the aax skill"
-      }
+      ]
     },
     "ableton-link": {
       "paths": [
@@ -72,15 +72,15 @@
       ]
     },
     "ara": {
+      "_doc": {
+        "empty-ok": "external/ara-sdk/** intentionally empty \u2014 ARA SDK is developer-supplied per the ara skill"
+      },
       "paths": [
         "core/format/src/ara*",
         "core/format/include/pulp/format/ara*",
         "core/format/include/pulp/format/ara/**",
         "external/ara-sdk/**"
-      ],
-      "_doc": {
-        "empty-ok": "external/ara-sdk/** intentionally empty \u2014 ARA SDK is developer-supplied per the ara skill"
-      }
+      ]
     },
     "audio-harness": {
       "paths": [
@@ -192,10 +192,10 @@
       ]
     },
     "code-comments": {
-      "paths": [],
       "_doc": {
         "empty-ok": "Process/guidance skill (how to write durable source comments + test names/tags) \u2014 applies when writing any code, not tied to a source path, so it is never triggered by a source diff. The entry exists to satisfy the self-check that every .agents/skills/ subdir is mapped."
-      }
+      },
+      "paths": []
     },
     "content": {
       "paths": [
@@ -231,6 +231,9 @@
       }
     },
     "engine": {
+      "_doc": {
+        "empty-ok": "external/quickjs*/** intentionally empty \u2014 QuickJS is fetched at configure time, not vendored"
+      },
       "paths": [
         "core/view/src/js_*",
         "core/view/include/pulp/view/js_engine*",
@@ -238,16 +241,20 @@
         "core/view/include/pulp/view/script_engine*",
         "core/view/js/web-compat-*.js",
         "external/quickjs*/**"
-      ],
-      "_doc": {
-        "empty-ok": "external/quickjs*/** intentionally empty \u2014 QuickJS is fetched at configure time, not vendored"
-      }
+      ]
     },
     "faust": {
       "paths": [
         "examples/faust-*/**",
         "core/dsl/include/pulp/dsl/faust*",
         "tools/cmake/PulpFaust.cmake"
+      ]
+    },
+    "forge-modular": {
+      "paths": [
+        "tools/rack/**",
+        "examples/forge-modular/**",
+        "forge-seam/**"
       ]
     },
     "friction-report": {
@@ -257,10 +264,10 @@
       }
     },
     "handoff": {
-      "paths": [],
       "_doc": {
         "empty-ok": "handoff is a cross-session process skill; it owns no source paths, so no diff triggers a required update (same pattern as code-comments and pr-review-sweep)."
-      }
+      },
+      "paths": []
     },
     "heritage-profile": {
       "paths": [
@@ -392,23 +399,42 @@
         "tools/deps/manifest.json"
       ]
     },
+    "playback": {
+      "paths": [
+        "core/playback/**",
+        "core/format/include/pulp/format/playback_context_projection.hpp",
+        "test/test_playback_*.cpp",
+        "test/test_timeline_replay_golden.cpp",
+        "test/cmake/sampler_runtime_tests.cmake",
+        "tools/scripts/timeline_engine_dependency_floor_check.py",
+        "tools/scripts/*web_timeline_source_closure_check.py",
+        ".agents/skills/playback/**"
+      ]
+    },
     "pr-batching": {
-      "paths": [],
       "_doc": {
         "empty-ok": "pr-batching is process guidance for the ship step (combine vs split finished branches to cut CI runs). It is not owned by any source path \u2014 no file edit should force a SKILL.md update. It is invoked by the shipping workflow, alongside the ci skill."
-      }
+      },
+      "paths": []
     },
     "pr-review-sweep": {
-      "paths": [],
       "_doc": {
         "empty-ok": "Process skill (sweep a PR's review comments and act on them) \u2014 not tied to any source path, so it is never triggered by a source diff. The entry exists to satisfy the self-check that every .agents/skills/ subdir is mapped."
-      }
+      },
+      "paths": []
     },
     "prototype-loop": {
       "paths": [
         "tools/cli/cmd_loop.cpp",
         "docs/guides/focus-mode.md",
         ".claude/commands/prototype-loop.md"
+      ]
+    },
+    "prove-before-showing": {
+      "paths": [
+        "tools/rack/compare_renders.py",
+        "tools/rack/test_ui_script.py",
+        "examples/forge-modular/test/shell_interaction.cpp"
       ]
     },
     "pulp-web-demo": {
@@ -517,6 +543,27 @@
     "threejs-bridge": {
       "paths": [
         "examples/threejs-*/**"
+      ]
+    },
+    "timebase": {
+      "paths": [
+        "core/timebase/**",
+        "core/format/src/transport_quantizer.cpp",
+        "core/format/include/pulp/format/transport_quantizer.hpp",
+        "test/test_timebase.cpp",
+        "test/test_transport_quantizer.cpp",
+        ".agents/skills/timebase/**"
+      ]
+    },
+    "timeline": {
+      "paths": [
+        "core/timeline/**",
+        "test/test_timeline_*.cpp",
+        "test/fixtures/timeline/**",
+        "test/timeline_command_test_helpers.hpp",
+        "test/cmake/sampler_runtime_tests.cmake",
+        "tools/scripts/timeline_engine_dependency_floor_check.py",
+        ".agents/skills/timeline/**"
       ]
     },
     "trace-analysis": {
@@ -695,6 +742,16 @@
     "webview-ui": {
       "paths": [
         "examples/webview-*/**"
+      ]
+    },
+    "forge-app-delivery": {
+      "paths": [
+        "examples/forge-modular/package.sh",
+        "examples/forge-modular/uninstall.sh",
+        "examples/forge-modular/LICENSE-INSTALLER.txt",
+        "forge-seam/populate.sh",
+        "forge-seam/sync.sh",
+        "tools/rack/fetch_sdk.py"
       ]
     }
   }

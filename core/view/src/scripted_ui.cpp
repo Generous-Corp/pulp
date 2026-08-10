@@ -345,6 +345,15 @@ bool ScriptedUiSession::poll(std::string* error) {
     }
     if (runtime_realm_quarantined_)
         return false;
+    if (post_evaluation_reset_callback_pending_) {
+        // The reset replaced every script-owned View and its callback chain.
+        // Notify the host only after the replacement realm is known-good, but
+        // before its first frame can accept input. Clear first so a callback
+        // that re-enters poll() cannot run twice for one replacement.
+        post_evaluation_reset_callback_pending_ = false;
+        if (post_evaluation_reset_callback_)
+            post_evaluation_reset_callback_();
+    }
     bool changed = false;
     if (bridge_) {
         // pulp #1412 — host idle pump must drain BOTH async-shell results
@@ -382,8 +391,10 @@ std::string ScriptedUiSession::reset_after_runtime_evaluation(
     std::string reset_error;
     if (!last_good_code_.empty() && !last_good_script_path_.empty()
         && rebuild_from_code(
-            last_good_code_, last_good_script_path_, true, &reset_error, deadline))
+            last_good_code_, last_good_script_path_, true, &reset_error, deadline)) {
+        post_evaluation_reset_callback_pending_ = true;
         return {};
+    }
     if (reset_error.empty())
         reset_error = "no cached last-good scripted UI source";
 
@@ -405,6 +416,11 @@ void ScriptedUiSession::set_repaint_callback(std::function<void()> cb) {
     if (bridge_) {
         bridge_->set_repaint_callback(repaint_callback_);
     }
+}
+
+void ScriptedUiSession::set_post_evaluation_reset_callback(
+    std::function<void()> cb) {
+    post_evaluation_reset_callback_ = std::move(cb);
 }
 
 bool ScriptedUiSession::rebuild_from_code(

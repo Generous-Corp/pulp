@@ -26,11 +26,41 @@ struct MeterBallistics {
     float held_peak = 0;
     float hold_counter = 0;
 
-    // Update with new audio data. Call once per UI frame.
-    // attack/release in seconds, hold_time in seconds, dt = frame time
-    void update(float new_peak, float new_rms, float dt,
-                float attack = 0.001f, float release = 0.3f,
-                float hold_time = 1.5f) {
+    /// Update with new audio data. Call once per UI frame.
+    /// attack/release in seconds, hold_time in seconds, dt = frame time.
+    ///
+    /// RETURNS TRUE ONLY WHEN A DISPLAYED VALUE MOVED, and a meter must repaint
+    /// only when it does. A UI thread polls this every frame for as long as it
+    /// is bound — through silence, when the ballistics have already settled and
+    /// the next frame would be pixel-identical. Repainting anyway costs a
+    /// composite per meter per frame forever, and on the plug-in-view-host path
+    /// (a DAW) each of those is a FULL-SURFACE repaint of the whole editor: an
+    /// idle window then renders at the display's refresh rate for as long as it
+    /// is open. Any real level change fails the compare on the very next frame,
+    /// so the gate never swallows motion — only the still frames after it.
+    ///
+    /// `MultiChannelBallistics::update` reports movement the same way. If you
+    /// are only advancing the ballistics and will never paint, say so with
+    /// `(void)`.
+    [[nodiscard]] bool update(float new_peak, float new_rms, float dt,
+                              float attack = 0.001f, float release = 0.3f,
+                              float hold_time = 1.5f) {
+        const float prev_peak = display_peak;
+        const float prev_rms = display_rms;
+        const float prev_held = held_peak;
+
+        // ONE NON-FINITE SAMPLE WOULD DISABLE THE GATE PERMANENTLY. A NaN takes
+        // the release branch, poisons the display value, survives the snaps
+        // below (every comparison against NaN is false), and then compares
+        // unequal to itself forever — so `changed` would be true on every frame
+        // for the rest of the process. Sanitise the input, and self-heal state
+        // that arrived non-finite by another route.
+        if (!std::isfinite(new_peak)) new_peak = 0.0f;
+        if (!std::isfinite(new_rms)) new_rms = 0.0f;
+        if (!std::isfinite(display_peak)) display_peak = 0.0f;
+        if (!std::isfinite(display_rms)) display_rms = 0.0f;
+        if (!std::isfinite(held_peak)) held_peak = 0.0f;
+
         // Attack/release envelope
         float attack_coeff = 1.0f - std::exp(-dt / attack);
         float release_coeff = 1.0f - std::exp(-dt / release);
@@ -50,21 +80,30 @@ struct MeterBallistics {
             held_peak = new_peak;
             hold_counter = hold_time;
         } else {
-            hold_counter -= dt;
+            // Floored: left to run it decrements without bound for as long as
+            // the meter is polled, which is forever.
+            hold_counter = std::max(0.0f, hold_counter - dt);
             if (hold_counter <= 0) {
                 held_peak += (0.0f - held_peak) * release_coeff;
             }
         }
 
-        // Clamp to zero for very small values. `held_peak` decays exponentially
-        // and so approaches zero without ever reaching it — left unclamped it
-        // changes by a fraction of a bit every frame FOREVER, which is invisible
-        // on screen but keeps a meter's idle gate (Meter::update) from ever
-        // seeing a still frame. Snap it like the other two so a silent meter
-        // truly settles.
+        // Clamp to zero for very small values. Each of these decays
+        // exponentially and so approaches zero without ever reaching it — left
+        // unclamped it changes by a fraction of a bit every frame FOREVER, which
+        // is invisible on screen but means the meter never reports a still
+        // frame. Snapping is what makes a silent meter actually settle.
+        //
+        // These three rest at ZERO, so a floor test is enough. A smoother whose
+        // resting value is NOT zero needs the general form —
+        // `if (std::abs(v - target) < eps) v = target` — see
+        // CorrelationMeter::update, which settles wherever the signal is.
         if (display_peak < 1e-6f) display_peak = 0;
         if (display_rms < 1e-6f) display_rms = 0;
         if (held_peak < 1e-6f) held_peak = 0;
+
+        return display_peak != prev_peak || display_rms != prev_rms ||
+               held_peak != prev_held;
     }
 };
 

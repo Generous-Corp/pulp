@@ -61,16 +61,29 @@ signal::MultiChannelMeterData to_multi_channel_meter(const view::MeterData& data
     return out;
 }
 
-void update_meter_from_bridge(view::AudioBridge* bridge, view::MultiMeter* meter) {
+void update_meter_from_bridge(view::AudioBridge* bridge, view::MultiMeter* meter,
+                              bool request_repaint) {
     if (!bridge || !meter) return;
 
     view::MeterData data;
     if (!bridge->pop_latest_meter(data)) return;
 
     auto converted = to_multi_channel_meter(data);
+    // set_channel_count() changes how many bars are drawn without touching a
+    // level, so a device swap on a silent bus would otherwise leave the old bar
+    // count on screen. Note it before the update consumes it.
+    const bool channels_changed = converted.num_channels != meter->channel_count();
     meter->set_channel_count(converted.num_channels);
-    meter->update(converted, 1.0f / 30.0f);
-    meter->request_repaint();
+    // REPAINT ONLY WHEN THE NEEDLE MOVED. `pop_latest_meter` reads a triple
+    // buffer and reports success for any published block, new or not, so this
+    // runs on every host tick for as long as an audio device is open — through
+    // silence, with the panel shut. An unconditional request_repaint() here
+    // marks the WHOLE window dirty, which arms the host's needs_repaint flag
+    // before every vsync and composites a full frame at the display's refresh
+    // rate for the life of the process. Nothing moved, so ask for nothing.
+    const bool levels_moved = meter->update(converted, 1.0f / 30.0f);
+    if (request_repaint && (levels_moved || channels_changed))
+        meter->request_repaint();
 }
 
 // ── Natural panel height ────────────────────────────────────────────────────
@@ -613,8 +626,14 @@ void SettingsPanel::poll() {
     if (midi_changed_.exchange(false, std::memory_order_relaxed))
         rebuild_midi_list();
 
-    update_meter_from_bridge(input_bridge_, input_meter_);
-    update_meter_from_bridge(output_bridge_, output_meter_);
+    // Device and MIDI hotplug are event-driven and must stay current while the
+    // panel is shut, so the lists above rebuild regardless. Meter ballistics
+    // must advance too: freezing them while hidden reopens Settings on a stale
+    // peak and restarts its hold/release clock. Hidden meters consume the
+    // latest state but never ask the window for a frame.
+    const bool repaint = visible();
+    update_meter_from_bridge(input_bridge_, input_meter_, repaint);
+    update_meter_from_bridge(output_bridge_, output_meter_, repaint);
 }
 
 } // namespace pulp::format

@@ -73,3 +73,11 @@ Canvas2D is backed by Skia on Linux/Windows and Core Graphics on macOS.
 The catalog notes still preserve backend-specific history where it is
 useful for future audits, but the current machine-readable status is the
 catalog plus harness output above.
+
+## Shared WidgetBridge event dispatch
+
+Canvas elements use the same single DOM fan-out as other native widgets. Wheel
+input is normalized in `__dispatch__` (including the legacy positional
+`deltaX`, `deltaY` form) and dispatched exactly once; the registration callback
+only keeps the native channel alive. This changes event delivery, not the
+Canvas2D drawing inventory or backend status above.

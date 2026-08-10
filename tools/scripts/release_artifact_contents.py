@@ -326,6 +326,19 @@ def cli_members(
     )
 
 
+def sdk_import_design_runtime_members(
+    matrix: ProductMatrix = DEFAULT_MATRIX,
+    version: str | None = None,
+) -> frozenset[str]:
+    _binaries, resources = effective_cli_contract(matrix, version)
+    prefix = "browser_capture/"
+    return frozenset(
+        f"pulp-sdk/bin/browser_capture-v1/{member.removeprefix(prefix)}"
+        for member in resources
+        if member.startswith(prefix)
+    )
+
+
 def sdk_binary_members(
     platform: str,
     matrix: ProductMatrix = DEFAULT_MATRIX,
@@ -406,6 +419,7 @@ def required_sdk_members(
                 f"pulp-sdk/{importer_path(platform).as_posix()}",
             }
         )
+        required.update(sdk_import_design_runtime_members(matrix, version))
     return frozenset(required)
 
 
@@ -551,6 +565,17 @@ def verify_sdk_archive(
                 )
         if version_tuple(version) >= version_tuple(matrix.capability_handoff_floor):
             prefix = "pulp-sdk/"
+            expected_runtime = sdk_import_design_runtime_members(matrix, version)
+            runtime_prefix = "pulp-sdk/bin/browser_capture-v1/"
+            actual_runtime = {
+                name for name in names if name.startswith(runtime_prefix)
+            }
+            if actual_runtime != expected_runtime:
+                raise ContentError(
+                    f"{path.name}: importer runtime matrix mismatch; "
+                    f"missing={sorted(expected_runtime - actual_runtime)}, "
+                    f"stale_or_unexpected={sorted(actual_runtime - expected_runtime)}"
+                )
             try:
                 verify_capability_handoff_payload(
                     handoff_bytes=archive.read(
@@ -563,6 +588,10 @@ def verify_sdk_archive(
                         prefix + importer_path(platform).as_posix(),
                         limit=512 * 1024 * 1024,
                     ),
+                    importer_runtime_bytes={
+                        member.removeprefix(prefix): archive.read(member)
+                        for member in expected_runtime
+                    },
                     capability_bytes=archive.read(
                         prefix + CAPABILITIES_PATH.as_posix(),
                         limit=16 * 1024 * 1024,

@@ -895,6 +895,14 @@ Count the repeating frame — it was 662× `View::paint_all` — to find the rea
 generated grid never animates, so this stays hidden until a real animating editor mounts. **A
 new custom editor must be exercised by the browser fixture (it mounts and must not overflow).**
 
+The demand-driven host checks whether the frame clock has active subscribers
+before asking `needs_continuous_frames()` to walk the whole view tree. Preserve
+that order when changing the browser host: a subscriber scan is the cheap
+positive path for live meters and animations, while the tree walk is the
+fallback for views that request continuous painting without a subscription.
+`surface_lost` still takes precedence over both because recovery must schedule
+another frame regardless of view activity.
+
 ## The full-canvas editor pattern (a plugin's REAL Skia UI on the web)
 
 **Two modes, a per-plugin choice — full-canvas is ADDITIVE, not a replacement.** A demo

@@ -1,0 +1,98 @@
+{
+  "modules": [
+    {
+      "slug": "OFFSETLY",
+      "name": "OFFSET",
+      "description": "Bipolar attenuverter with offset and CV over the gain, polyphonic, normalled to 10 V so it doubles as a voltage source",
+      "tags": [
+        "Attenuator",
+        "Utility",
+        "Polyphonic"
+      ],
+      "hp": 6,
+      "poly_follows": "IN_INPUT",
+      "params": [
+        {
+          "id": 0,
+          "ident": "GAIN_PARAM",
+          "name": "Gain",
+          "label": "GAIN",
+          "unit": "x",
+          "min_value": -1.0,
+          "max_value": 1.0,
+          "default_value": 0.0,
+          "kind": "Knob",
+          "x_mm": 15.24,
+          "y_mm": 30.0
+        },
+        {
+          "id": 1,
+          "ident": "OFFSET_PARAM",
+          "name": "Offset",
+          "label": "OFST",
+          "unit": " V",
+          "min_value": -5.0,
+          "max_value": 5.0,
+          "default_value": 0.0,
+          "kind": "Knob",
+          "x_mm": 15.24,
+          "y_mm": 52.0
+        }
+      ],
+      "inputs": [
+        {
+          "id": 0,
+          "ident": "IN_INPUT",
+          "name": "Signal in",
+          "label": "IN",
+          "role": "Cv",
+          "x_mm": 9.0,
+          "y_mm": 88.0,
+          "normal_volts": 10.0
+        },
+        {
+          "id": 1,
+          "ident": "CV_INPUT",
+          "name": "Gain CV",
+          "label": "CV",
+          "role": "Cv",
+          "x_mm": 21.5,
+          "y_mm": 88.0
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "OUT_OUTPUT",
+          "name": "Signal out",
+          "label": "OUT",
+          "role": "Cv",
+          "x_mm": 15.24,
+          "y_mm": 108.0
+        }
+      ],
+      "lights": [
+        {
+          "id": 0,
+          "ident": "POS_LIGHT",
+          "name": "Positive output",
+          "label": "",
+          "x_mm": 9.0,
+          "y_mm": 70.0,
+          "color": "green",
+          "size": "small"
+        },
+        {
+          "id": 1,
+          "ident": "NEG_LIGHT",
+          "name": "Negative output",
+          "label": "",
+          "x_mm": 21.5,
+          "y_mm": 70.0,
+          "color": "red",
+          "size": "small"
+        }
+      ]
+    }
+  ]
+}

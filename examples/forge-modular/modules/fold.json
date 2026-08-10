@@ -1,0 +1,159 @@
+{
+  "modules": [
+    {
+      "slug": "FOLD",
+      "name": "FOLD",
+      "description": "Sine/triangle/wrap wavefolder with symmetry offset and CV over drive and symmetry.",
+      "tags": [
+        "Waveshaper",
+        "Distortion",
+        "Effect",
+        "Polyphonic"
+      ],
+      "hp": 8,
+      "poly_follows": "IN_INPUT",
+      "params": [
+        {
+          "id": 0,
+          "ident": "DRIVE_PARAM",
+          "name": "Drive",
+          "label": "DRIVE",
+          "unit": " %",
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "default_value": 0.25,
+          "kind": "Knob",
+          "x_mm": 11.8,
+          "y_mm": 30.0,
+          "display_multiplier": 100.0
+        },
+        {
+          "id": 1,
+          "ident": "SYM_PARAM",
+          "name": "Symmetry",
+          "label": "SYM",
+          "unit": " %",
+          "min_value": -1.0,
+          "max_value": 1.0,
+          "default_value": 0.0,
+          "kind": "Knob",
+          "x_mm": 28.8,
+          "y_mm": 30.0,
+          "display_multiplier": 100.0
+        },
+        {
+          "id": 2,
+          "ident": "DRIVE_CV_PARAM",
+          "name": "Drive CV amount",
+          "label": "ATT",
+          "unit": " %",
+          "min_value": -1.0,
+          "max_value": 1.0,
+          "default_value": 0.0,
+          "kind": "Trimpot",
+          "x_mm": 11.8,
+          "y_mm": 52.0,
+          "display_multiplier": 100.0
+        },
+        {
+          "id": 3,
+          "ident": "SYM_CV_PARAM",
+          "name": "Symmetry CV amount",
+          "label": "ATT",
+          "unit": " %",
+          "min_value": -1.0,
+          "max_value": 1.0,
+          "default_value": 0.0,
+          "kind": "Trimpot",
+          "x_mm": 28.8,
+          "y_mm": 52.0,
+          "display_multiplier": 100.0
+        },
+        {
+          "id": 4,
+          "ident": "SHAPE_PARAM",
+          "name": "Fold shape",
+          "label": "SHAPE",
+          "min_value": 0.0,
+          "max_value": 2.0,
+          "default_value": 0.0,
+          "kind": "SwitchThree",
+          "labels": [
+            "Sine",
+            "Triangle",
+            "Wrap"
+          ],
+          "x_mm": 11.8,
+          "y_mm": 86.0
+        },
+        {
+          "id": 5,
+          "ident": "LEVEL_PARAM",
+          "name": "Output level",
+          "label": "LVL",
+          "unit": " %",
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "default_value": 0.8,
+          "kind": "KnobSmall",
+          "x_mm": 28.8,
+          "y_mm": 86.0,
+          "display_multiplier": 100.0
+        }
+      ],
+      "inputs": [
+        {
+          "id": 0,
+          "ident": "DRIVE_CV_INPUT",
+          "name": "Drive CV",
+          "label": "CV",
+          "role": "Cv",
+          "x_mm": 11.8,
+          "y_mm": 68.0
+        },
+        {
+          "id": 1,
+          "ident": "SYM_CV_INPUT",
+          "name": "Symmetry CV",
+          "label": "CV",
+          "role": "Cv",
+          "x_mm": 28.8,
+          "y_mm": 68.0,
+          "normal_to": "DRIVE_CV_INPUT"
+        },
+        {
+          "id": 2,
+          "ident": "IN_INPUT",
+          "name": "Audio in",
+          "label": "IN",
+          "role": "Audio",
+          "x_mm": 11.8,
+          "y_mm": 104.0
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "OUT_OUTPUT",
+          "name": "Folded out",
+          "label": "OUT",
+          "role": "Audio",
+          "x_mm": 28.8,
+          "y_mm": 104.0
+        }
+      ],
+      "lights": [
+        {
+          "id": 0,
+          "ident": "FOLD_LIGHT",
+          "name": "Fold depth",
+          "label": "",
+          "x_mm": 20.32,
+          "y_mm": 104.0,
+          "color": "red",
+          "size": "small"
+        }
+      ]
+    }
+  ]
+}

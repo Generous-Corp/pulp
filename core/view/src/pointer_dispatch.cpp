@@ -458,6 +458,13 @@ void deliver_mouse_cancel(View& root, View* target, Point root_pt,
 void deliver_mouse_wheel(View& root, Point root_pt,
                          float scroll_delta_x, float scroll_delta_y,
                          const WheelHost& host) {
+    deliver_mouse_wheel(root, root_pt, scroll_delta_x, scroll_delta_y,
+                        /*modifiers=*/0, host);
+}
+
+void deliver_mouse_wheel(View& root, Point root_pt,
+                         float scroll_delta_x, float scroll_delta_y,
+                         uint16_t modifiers, const WheelHost& host) {
     const auto repaint = [&] { if (host.request_repaint) host.request_repaint(); };
 
     // 1. An open ComboBox popup consumes the wheel to scroll its (clamped) item
@@ -476,6 +483,7 @@ void deliver_mouse_wheel(View& root, Point root_pt,
             MouseEvent me;
             me.position = point_to_local(root_pt, combo, &root);
             me.window_position = root_pt;
+            me.modifiers = modifiers;
             me.is_wheel = true;
             me.scroll_delta_x = scroll_delta_x;
             me.scroll_delta_y = scroll_delta_y;
@@ -497,6 +505,7 @@ void deliver_mouse_wheel(View& root, Point root_pt,
             MouseEvent me;
             me.position = root_pt;
             me.window_position = root_pt;
+            me.modifiers = modifiers;
             me.is_wheel = true;
             me.scroll_delta_x = scroll_delta_x;
             me.scroll_delta_y = scroll_delta_y;
@@ -515,6 +524,7 @@ void deliver_mouse_wheel(View& root, Point root_pt,
     // `e.clientX - rect.left` (e.g. anchor-frequency for trackpad zoom) get
     // `0 - rect.left` and the wrong anchor.
     me.window_position = root_pt;
+    me.modifiers = modifiers;
     me.is_wheel = true;
     me.scroll_delta_x = scroll_delta_x;
     me.scroll_delta_y = scroll_delta_y;
@@ -539,6 +549,51 @@ void deliver_mouse_wheel(View& root, Point root_pt,
     // registered the zoom handler. A wants_wheel_scroll ancestor still wins and
     // terminates the walk.
     const auto bubble_path = capture_path_to_root(target);
+
+    // A WidgetBridge wheel registration enters the DOM at exactly one origin.
+    // Dispatch from the deepest registered element; __dispatch__ performs the
+    // normal DOM ancestor bubble. A native wheel-scrolling view remains the
+    // consumption boundary: its own DOM registration still receives the tick,
+    // matching an overflow:auto element, while registrations above it must not
+    // also act on a tick that scrolls its content.
+    std::size_t native_scroll_index = bubble_path.size();
+    for (std::size_t index = 0; index < bubble_path.size(); ++index) {
+        auto* v = bubble_path[index].live_in(root);
+        if (v && v->wants_wheel_scroll()) {
+            native_scroll_index = index;
+            break;
+        }
+    }
+    const auto dom_dispatch_limit =
+        native_scroll_index < bubble_path.size()
+            ? native_scroll_index + 1
+            : bubble_path.size();
+    std::size_t dom_origin_index = bubble_path.size();
+    for (std::size_t index = 0; index < dom_dispatch_limit; ++index) {
+        const auto& capture = bubble_path[index];
+        auto* v = capture.live_in(root);
+        if (v && v->on_dom_wheel_event) {
+            auto callback = v->on_dom_wheel_event;
+            callback(me, true);
+            dom_origin_index = index;
+            break;
+        }
+    }
+    // `__dispatch__` above owns the DOM Element bubble. Preserve the separate
+    // low-level on(id, 'wheel', fn) contract for registered native ancestors
+    // without re-entering Element::dispatchEvent and duplicating DOM listeners.
+    if (dom_origin_index != bubble_path.size()) {
+        for (std::size_t index = dom_origin_index + 1;
+             index < dom_dispatch_limit; ++index) {
+            auto* v = bubble_path[index].live_in(root);
+            if (v && v->on_dom_wheel_event) {
+                auto callback = v->on_dom_wheel_event;
+                callback(me, false);
+            }
+        }
+    }
+
+    bool deepest_hit_received = false;
     for (const auto& capture : bubble_path) {
         auto* v = capture.live_in(root);
         if (!v) continue;
@@ -549,12 +604,18 @@ void deliver_mouse_wheel(View& root, Point root_pt,
             repaint();
             return;
         }
-        if (v->on_pointer_event) v->on_mouse_event(me);
+        if (v->on_pointer_event) {
+            v->on_mouse_event(me);
+            if (&capture == &bubble_path.front()) deepest_hit_received = true;
+        }
     }
     // 5. No ancestor handled the wheel — deliver to the deepest hit so any
-    // default behavior still runs.
-    if (auto* live_target = bubble_path.front().live_in(root))
-        live_target->on_mouse_event(me);
+    // default behavior still runs. If its pointer callback already received
+    // the bubbling wheel above, do not deliver the same native tick twice.
+    if (!deepest_hit_received) {
+        if (auto* live_target = bubble_path.front().live_in(root))
+            live_target->on_mouse_event(me);
+    }
     repaint();
 }
 

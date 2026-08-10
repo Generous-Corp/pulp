@@ -1,0 +1,314 @@
+{
+  "slug": "ForgeModular",
+  "name": "Forge Modular",
+  "version": "2.0.0",
+  "license": "MIT",
+  "author": "Generous Corp",
+  "brand": "Forge",
+  "pluginUrl": "https://github.com/Generous-Corp/forge",
+  "manualUrl": "https://github.com/Generous-Corp/forge/blob/main/docs/modular.md",
+  "sourceUrl": "https://github.com/Generous-Corp/forge",
+  "modules": [
+    {
+      "slug": "VCO",
+      "name": "VCO",
+      "description": "Analog-voiced oscillator with 1V/oct tracking and four simultaneous waveform outputs",
+      "tags": [
+        "Oscillator",
+        "Polyphonic"
+      ]
+    },
+    {
+      "slug": "VCF",
+      "name": "VCF",
+      "description": "Resonant state-variable filter with CV",
+      "tags": [
+        "Filter",
+        "Polyphonic"
+      ]
+    },
+    {
+      "slug": "VCA",
+      "name": "VCA",
+      "description": "Voltage-controlled amplifier",
+      "tags": [
+        "Voltage-controlled amplifier",
+        "Polyphonic"
+      ]
+    },
+    {
+      "slug": "ENV",
+      "name": "ENV",
+      "description": "ADSR envelope generator",
+      "tags": [
+        "Envelope generator"
+      ]
+    },
+    {
+      "slug": "LFO",
+      "name": "LFO",
+      "description": "Low-frequency oscillator",
+      "tags": [
+        "Low-frequency oscillator"
+      ]
+    },
+    {
+      "slug": "EUCLID",
+      "name": "EUCL",
+      "description": "Euclidean gate generator",
+      "tags": [
+        "Clock modulator",
+        "Sequencer",
+        "Random"
+      ]
+    },
+    {
+      "slug": "SEQ",
+      "name": "SEQ",
+      "description": "8-step CV and gate sequencer",
+      "tags": [
+        "Sequencer"
+      ]
+    },
+    {
+      "slug": "MIX",
+      "name": "MIX",
+      "description": "Four-channel mixer with sliders, per-channel CV and chained normalling",
+      "tags": [
+        "Mixer",
+        "Voltage-controlled amplifier",
+        "Polyphonic"
+      ]
+    },
+    {
+      "slug": "ATT",
+      "name": "ATT",
+      "description": "Bipolar attenuverter with offset",
+      "tags": [
+        "Attenuator",
+        "Utility"
+      ]
+    },
+    {
+      "slug": "MULT",
+      "name": "MULT",
+      "description": "Passive 1-to-3 signal splitter",
+      "tags": [
+        "Multiple",
+        "Utility"
+      ]
+    },
+    {
+      "slug": "ATTEN",
+      "name": "AT",
+      "description": "Attenuator: scales a CV or audio signal from silence to unity, normalled to 10 V as a manual voltage source.",
+      "tags": [
+        "Attenuator",
+        "Utility",
+        "Polyphonic"
+      ]
+    },
+    {
+      "slug": "CARTOG",
+      "name": "MAP",
+      "description": "Records the port layout of every module in your rack, so patches can be drawn and wired accurately.",
+      "tags": [
+        "Utility"
+      ]
+    },
+    {
+      "slug": "CLOCKWEAVE",
+      "name": "CLKWEAVE",
+      "description": "Resettable musical clock with variable pulse width and phase ramp output.",
+      "tags": [
+        "Clock generator",
+        "Low-frequency oscillator"
+      ]
+    },
+    {
+      "slug": "DIV",
+      "name": "DIV",
+      "description": "Clock divider with CV-controlled division, reset, and trigger or gate output",
+      "tags": [
+        "Clock modulator",
+        "Utility"
+      ]
+    },
+    {
+      "slug": "DIVIDELY",
+      "name": "DIV4",
+      "description": "Four independent clock dividers from one clock, with a shared reset.",
+      "tags": [
+        "Clock modulator",
+        "Quad",
+        "Utility"
+      ]
+    },
+    {
+      "slug": "DUALAD",
+      "name": "DUAL AD",
+      "description": "Dual attack/decay envelope generator with variable curve, 1V/oct time CV, free-running loop mode and end-of-cycle triggers.",
+      "tags": [
+        "Envelope generator",
+        "Function generator",
+        "Dual"
+      ]
+    },
+    {
+      "slug": "DUALATN",
+      "name": "DUAL ATT",
+      "description": "Dual attenuverter with DC offset; an unpatched channel outputs its offset voltage.",
+      "tags": [
+        "Attenuator",
+        "Utility",
+        "Dual"
+      ]
+    },
+    {
+      "slug": "FOLD",
+      "name": "FOLD",
+      "description": "Sine/triangle/wrap wavefolder with symmetry offset and CV over drive and symmetry.",
+      "tags": [
+        "Waveshaper",
+        "Distortion",
+        "Effect",
+        "Polyphonic"
+      ]
+    },
+    {
+      "slug": "FOLDR",
+      "name": "FOLD",
+      "description": "Triangle wavefolder with drive, symmetry offset and CV over the fold amount",
+      "tags": [
+        "Waveshaper",
+        "Distortion",
+        "Effect"
+      ]
+    },
+    {
+      "slug": "FOURPOLE",
+      "name": "4POLE",
+      "description": "Four-pole resonant low-pass filter with measured analog voicings, 1V/oct cutoff tracking, attenuverted FM and input drive.",
+      "tags": [
+        "Filter",
+        "Polyphonic"
+      ]
+    },
+    {
+      "slug": "KICK",
+      "name": "KICK",
+      "description": "Analog-style kick drum: swept-oscillator body with tune, decay and beater click, fired from a trigger.",
+      "tags": [
+        "Drum",
+        "Synth voice"
+      ]
+    },
+    {
+      "slug": "LPGATE",
+      "name": "LPGATE",
+      "description": "Vactrol lowpass gate with resonance, strike input and voltage-controlled decay",
+      "tags": [
+        "Low-pass gate",
+        "Filter",
+        "Voltage-controlled amplifier",
+        "Polyphonic"
+      ]
+    },
+    {
+      "slug": "MORPHLFO",
+      "name": "MORPH",
+      "description": "Morphing LFO: sine through triangle, ramp and square, with attenuverted rate and shape CV and a hard reset.",
+      "tags": [
+        "Low-frequency oscillator",
+        "Function generator"
+      ]
+    },
+    {
+      "slug": "OFFSETLY",
+      "name": "OFFSET",
+      "description": "Bipolar attenuverter with offset and CV over the gain, polyphonic, normalled to 10 V so it doubles as a voltage source",
+      "tags": [
+        "Attenuator",
+        "Utility",
+        "Polyphonic"
+      ]
+    },
+    {
+      "slug": "PULSEARC",
+      "name": "PULSEARC",
+      "description": "Voltage-controlled clock and phase generator with reset and variable pulse width.",
+      "tags": [
+        "Clock generator",
+        "Low-frequency oscillator"
+      ]
+    },
+    {
+      "slug": "SANDH",
+      "name": "SH",
+      "description": "Sample and hold with an internal white-noise source, a slewed output, CV over the slew time, and a switchable linear or exponential glide curve.",
+      "tags": [
+        "Sample and hold",
+        "Noise",
+        "Random",
+        "Utility"
+      ]
+    },
+    {
+      "slug": "SIXMIX",
+      "name": "SIXMIX",
+      "description": "Six-channel mono mixer with per-channel level, CV-controlled master level",
+      "tags": [
+        "Mixer",
+        "Utility"
+      ]
+    },
+    {
+      "slug": "SLEWRF",
+      "name": "SLEW",
+      "description": "Slew limiter with independent rise and fall times, CV over each, three slope laws, and an end-of-rise gate.",
+      "tags": [
+        "Slew limiter",
+        "Function generator",
+        "Utility"
+      ]
+    },
+    {
+      "slug": "STEPS",
+      "name": "STEPS",
+      "description": "8-step CV sequencer with per-step level, clock, reset, gate and end-of-cycle",
+      "tags": [
+        "Sequencer"
+      ]
+    },
+    {
+      "slug": "STRANGE",
+      "name": "STRANGE",
+      "description": "Twin chaotic CV from a logistic map, with rate, character, glide and a link that fades the two decorrelated outputs together.",
+      "tags": [
+        "Random",
+        "Low-frequency oscillator",
+        "Dual"
+      ]
+    },
+    {
+      "slug": "TANGLE",
+      "name": "TANGLE",
+      "description": "Chaos source: three coupled CV outputs \u2014 stepped, lagged and drifting \u2014 that stay related but never repeat.",
+      "tags": [
+        "Random",
+        "Low-frequency oscillator",
+        "Noise"
+      ]
+    },
+    {
+      "slug": "TURBID",
+      "name": "TURBID",
+      "description": "Chaotic modulation source with two decorrelated CV outputs and a step trigger",
+      "tags": [
+        "Random",
+        "Low-frequency oscillator",
+        "Dual"
+      ]
+    }
+  ]
+}

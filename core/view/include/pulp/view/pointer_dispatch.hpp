@@ -174,6 +174,14 @@ void deliver_mouse_wheel(View& root, Point root_pt,
                          float scroll_delta_x, float scroll_delta_y,
                          const WheelHost& host);
 
+/// Attribute-carrying wheel delivery. `modifiers` is sampled from the native
+/// event so consumers can distinguish Cmd/Ctrl-wheel zoom from ordinary
+/// two-finger pan. The overload above remains source-compatible and supplies
+/// no modifiers for existing synthetic callers.
+void deliver_mouse_wheel(View& root, Point root_pt,
+                         float scroll_delta_x, float scroll_delta_y,
+                         uint16_t modifiers, const WheelHost& host);
+
 /// Deliver a press to an already-resolved `target` (the host has done the
 /// hit_test, any combo/overlay pre-routing, and the focus protocol before
 /// calling in — those steps diverge per platform/host and stay host-side).

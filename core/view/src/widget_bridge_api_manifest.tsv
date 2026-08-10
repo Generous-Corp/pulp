@@ -34,6 +34,8 @@ setMax	widget_value	function	core/view/src/widget_bridge/widget_value_controls_a
 setStep	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
 setOrientation	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
 setAccentColor	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
+setToggleOn	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
+setRadioGroup	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
 onParamChanged	state_binding	preamble_function	core/view/src/widget_bridge/state_binding_api.cpp	internal
 offParamChanged	state_binding	preamble_function	core/view/src/widget_bridge/state_binding_api.cpp	internal
 bindEvents	state_binding	preamble_function	core/view/src/widget_bridge/state_binding_api.cpp	internal
@@ -177,6 +179,9 @@ setCornerRadius	css_style	function	core/view/src/widget_bridge/border_box_api.cp
 setBorderColor	css_style	function	core/view/src/widget_bridge/border_box_api.cpp
 setBorderWidth	css_style	function	core/view/src/widget_bridge/border_box_api.cpp
 setBorderStyle	css_style	function	core/view/src/widget_bridge/border_box_api.cpp
+setToggleBackground	css_style	function	core/view/src/widget_bridge/border_box_api.cpp
+setToggleBorderColor	css_style	function	core/view/src/widget_bridge/border_box_api.cpp
+setToggleTextColor	css_style	function	core/view/src/widget_bridge/border_box_api.cpp
 setListStyleType	css_style	function	core/view/src/widget_bridge/list_style_api.cpp
 setListStyleImage	css_style	function	core/view/src/widget_bridge/list_style_api.cpp
 setListStylePosition	css_style	function	core/view/src/widget_bridge/list_style_api.cpp

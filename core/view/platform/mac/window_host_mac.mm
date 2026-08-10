@@ -362,7 +362,8 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
     host.request_repaint = [self] { [self setNeedsDisplay:YES]; };
     pulp::view::deliver_mouse_wheel(
         *self.rootView, pt, static_cast<float>(event.scrollingDeltaX),
-        static_cast<float>(-event.scrollingDeltaY), host);
+        static_cast<float>(-event.scrollingDeltaY),
+        modifiers_from_ns_flags(event.modifierFlags), host);
 }
 
 - (void)mouseDown:(NSEvent*)event {
@@ -2572,8 +2573,27 @@ private:
             [this](canvas::Canvas& c) { paint_scene(c); },
             skia_surface_->graphite_context());
 
+        // THIS IS THE SECOND TREE WALK OF THE FRAME, and it is deliberate.
+        // `begin_host_frame` already answered this question at the TOP of the
+        // frame, to decide whether to render at all. Between the two answers
+        // sits `advance_host_frame`, which ticks the clock and advances every
+        // widget animation — and that is exactly where liveness ENDS: a
+        // ValueAnimation reaching its target clears its own flag, and a
+        // FrameClock subscriber that returns false unsubscribes itself. So the
+        // value computed at the top of the frame is stale by the bottom of it.
+        // This one is the one that matters: it is what the display-link thread
+        // reads next vsync (`should_dispatch_host_frame`), so recomputing here
+        // is what lets the loop stop on the frame an animation finishes rather
+        // than one frame later. Reusing `tick.continuous` would cost a spurious
+        // frame per animation instead of a walk.
+        //
+        // The O(1) question first. `needs_continuous_frames` walks the
+        // whole view tree; `has_active_subscribers` is a count. Asking the
+        // expensive one first meant the walk ran on every frame of every
+        // animation, when the answer was already yes.
         continuous_frames_.store(
-            pulp::view::needs_continuous_frames(&root_) || frame_clock_.has_active_subscribers(),
+            frame_clock_.has_active_subscribers() ||
+                pulp::view::needs_continuous_frames(&root_),
             std::memory_order_relaxed);
 
         const auto outcome = skia_surface_->end_frame();  // submit Graphite recording

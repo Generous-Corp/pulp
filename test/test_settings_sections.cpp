@@ -8,11 +8,15 @@
 #include <pulp/format/settings_panel.hpp>
 #include <pulp/format/standalone.hpp>
 #include <pulp/format/test_signal.hpp>
+#include <pulp/view/audio_bridge.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/visualizers.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/screenshot.hpp>
+#include <pulp/view/window_host.hpp>
 
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -215,4 +219,193 @@ TEST_CASE("Host composition: plugin sections compose onto the host panel", "[for
         if (sec.view) panel.add_section(std::move(sec.title), std::move(sec.view));
 
     REQUIRE(panel.tab_count() == 4);  // Audio + MIDI + Models + License
+}
+
+// ── Idle gate ────────────────────────────────────────────────────────────────
+// SettingsPanel::poll() is installed as the standalone window's idle callback,
+// and every macOS host fires that on EVERY display-link tick. `pop_latest_meter`
+// reads a triple buffer and reports success for any block the audio thread has
+// ever published, new or not, so the poll reaches the meters at the display's
+// refresh rate for as long as an audio device is open — through digital silence,
+// with the Settings tab shut. Repainting on each of those marks the whole window
+// dirty, which arms the host's needs_repaint flag before every vsync: a window
+// nobody is touching composites a full frame ~60-120 times a second forever.
+//
+// So the property is not "the meter updates". It is that an untouched window
+// asks for NO frames: a still meter requests nothing, and a meter nobody can see
+// requests nothing however loud the bus is.
+
+namespace {
+
+// Counts the repaints a view actually asks the host for. View::request_repaint()
+// routes through WindowHost::mark_dirty() → repaint() when no RenderLoop is
+// attached, so this is exactly the signal that arms a real host's dirty flag.
+class RepaintCountingHost : public pulp::view::WindowHost {
+public:
+    void show() override {}
+    void hide() override {}
+    bool is_visible() const override { return true; }
+    void repaint() override { ++repaints; }
+    void set_close_callback(std::function<void()>) override {}
+    void run_event_loop() override {}
+    int repaints = 0;
+};
+
+pulp::view::MeterData stereo_levels(float peak, float rms) {
+    pulp::view::MeterData d;
+    d.num_channels = 2;
+    d.peak[0] = d.peak[1] = peak;
+    d.rms[0] = d.rms[1] = rms;
+    return d;
+}
+
+// Mount a panel under a host the way the standalone chrome does, so
+// request_repaint() has somewhere to land.
+struct MountedPanel {
+    RepaintCountingHost host;
+    pulp::view::View root;
+    SettingsPanel* panel = nullptr;
+    pulp::view::AudioBridge input;
+    pulp::view::AudioBridge output;
+
+    MountedPanel() {
+        root.set_bounds({0, 0, 600, 500});
+        auto owned = std::make_unique<SettingsPanel>();
+        panel = owned.get();
+        root.add_child(std::move(owned));
+        root.set_window_host(&host);
+        panel->set_input_meter_bridge(&input);
+        panel->set_output_meter_bridge(&output);
+    }
+
+    void tick(int frames) {
+        for (int i = 0; i < frames; ++i) panel->poll();
+    }
+};
+
+}  // namespace
+
+TEST_CASE("an open Settings panel over a silent bus settles to zero repaints",
+          "[format][settings][idle-gate]") {
+    MountedPanel m;
+    m.panel->set_visible(true);
+
+    // Control first: the instrument must be able to report motion, or "zero
+    // repaints" below would prove nothing. A real level moves the needle.
+    m.input.push_meter(stereo_levels(0.8f, 0.5f));
+    m.output.push_meter(stereo_levels(0.8f, 0.5f));
+    m.tick(1);
+    REQUIRE(m.host.repaints > 0);
+
+    // Silence. The ballistics decay, the peak hold expires, and every displayed
+    // value reaches its resting state — after which no frame differs from the
+    // last. 10 s at 30 Hz is far longer than the 1.5 s hold plus the 0.3 s
+    // release, so anything still moving here moves forever.
+    m.input.push_meter(stereo_levels(0.0f, 0.0f));
+    m.output.push_meter(stereo_levels(0.0f, 0.0f));
+    m.tick(300);
+
+    const int settled = m.host.repaints;
+    m.tick(300);
+    CHECK(m.host.repaints == settled);  // 10 further seconds, not one frame asked for
+
+    // And the gate never swallows real motion: the next real level repaints.
+    m.input.push_meter(stereo_levels(0.6f, 0.4f));
+    m.tick(1);
+    CHECK(m.host.repaints > settled);
+}
+
+TEST_CASE("a channel-count change repaints even on a silent bus",
+          "[format][settings][idle-gate]") {
+    MountedPanel m;
+    m.panel->set_visible(true);
+
+    // Settle a silent stereo meter, so nothing at all is moving.
+    m.input.push_meter(stereo_levels(0.0f, 0.0f));
+    m.tick(300);
+    const int settled = m.host.repaints;
+
+    // A device swap changes how many bars are drawn without moving a level.
+    // Gating purely on the levels would leave the old bar count on screen.
+    pulp::view::MeterData mono;
+    mono.num_channels = 1;
+    m.input.push_meter(mono);
+    m.tick(1);
+    CHECK(m.host.repaints > settled);
+}
+
+TEST_CASE("a Settings panel that is not on screen asks for no frames at all",
+          "[format][settings][idle-gate]") {
+    MountedPanel m;
+    // The standalone chrome parks the panel in a TabPanel, which hides every
+    // tab but the active one — the state an untouched app sits in. The hide is
+    // itself a change to what is on screen and repaints once, so the count that
+    // matters is taken after it: what the panel costs while it sits there.
+    m.panel->set_visible(false);
+    const int parked = m.host.repaints;
+
+    // A bus that is anything but silent: a fresh, different level every frame,
+    // so a poll that reached the meters could not possibly find them still.
+    for (int i = 0; i < 300; ++i) {
+        const float level = 0.2f + 0.6f * static_cast<float>(i % 7) / 7.0f;
+        m.input.push_meter(stereo_levels(level, level * 0.5f));
+        m.output.push_meter(stereo_levels(level, level * 0.5f));
+        m.panel->poll();
+    }
+    CHECK(m.host.repaints == parked);
+
+    // Silence while still hidden must advance release/peak-hold state without
+    // painting. Otherwise reopening after a quiet interval resurrects the old
+    // peak and starts its decay from that moment.
+    m.input.push_meter(stereo_levels(0.0f, 0.0f));
+    m.output.push_meter(stereo_levels(0.0f, 0.0f));
+    m.tick(300);
+    CHECK(m.host.repaints == parked);
+    std::vector<pulp::view::MultiMeter*> meters;
+    collect_widgets(m.panel, meters);
+    REQUIRE(meters.size() >= 2);
+    CHECK(meters[0]->ballistics().channels[0].display_peak == 0.0f);
+    CHECK(meters[1]->ballistics().channels[0].display_peak == 0.0f);
+
+    // Opening Settings puts it back on screen, and the meters resume.
+    m.panel->set_visible(true);
+    const int shown = m.host.repaints;
+    m.input.push_meter(stereo_levels(0.9f, 0.6f));
+    m.panel->poll();
+    CHECK(m.host.repaints > shown);
+}
+
+// MAKING A PANEL VISIBLE MUST REPAINT ON ITS OWN, with nothing else changing.
+//
+// It is tempting to prove this by showing the panel and pushing a level, but
+// that passes whether or not the transition repaints -- the moving needle
+// accounts for it. The transition has to be the ONLY thing that happened: a
+// settled meter, an unchanged bus, no poll at all. Before the off-screen gate
+// existed the next unconditional poll covered for this; now nothing does, and a
+// programmatic show (restoring window state, a deep link, a screenshot harness)
+// would render nothing at all.
+TEST_CASE("showing the Settings panel repaints even when nothing else changed",
+          "[format][settings][idle-gate]") {
+    MountedPanel m;
+    m.panel->set_visible(false);
+
+    // Settle a silent meter while hidden, then stop touching anything.
+    m.input.push_meter(stereo_levels(0.0f, 0.0f));
+    m.output.push_meter(stereo_levels(0.0f, 0.0f));
+    m.tick(300);
+    const int before = m.host.repaints;
+
+    // The transition alone, against an unchanged bus and with no poll after it.
+    m.panel->set_visible(true);
+    CHECK(m.host.repaints > before);
+
+    // And hiding it is equally a change to what is on screen.
+    const int shown = m.host.repaints;
+    m.panel->set_visible(false);
+    CHECK(m.host.repaints > shown);
+
+    // Setting the same value twice is not a transition and must not repaint.
+    const int hidden = m.host.repaints;
+    m.panel->set_visible(false);
+    CHECK(m.host.repaints == hidden);
 }
