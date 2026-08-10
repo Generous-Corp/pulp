@@ -210,7 +210,8 @@ TEST_CASE("WaveguideReflectionFilter matches its independent impulse recurrence"
 TEST_CASE("WaveguideReflectionFilter is passive across legal coefficient extremes",
           "[signal][waveguide][reflection][passivity]") {
     constexpr std::array gains{-0.999, 0.0, 0.999};
-    constexpr std::array poles{0.0, 0.2, 0.98};
+    constexpr std::array poles{
+        0.0, 0.2, pulp::signal::WaveguideReflectionFilter64::maximum_loss_pole};
     constexpr std::array frequencies{0.0, 0.05, 0.25, 0.49};
     for (const auto gain : gains) {
         for (const auto pole : poles) {
