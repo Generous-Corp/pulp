@@ -24,6 +24,7 @@
 #include <map>
 #include <mutex>
 #include <sstream>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -38,6 +39,7 @@ constexpr std::string_view kStatusTool = "pulp_control_status";
 constexpr std::string_view kGrantTool = "pulp_control_grant_request";
 constexpr std::string_view kRevokeTool = "pulp_control_revoke";
 constexpr std::string_view kCancelTool = "pulp_control_cancel";
+constexpr std::string_view kDefaultInstalledHostId = "ordinary-standalone";
 
 std::string quote(std::string_view value) {
     return json_string(std::string(value));
@@ -309,7 +311,8 @@ class ControlMcpAdapter::Impl {
 
     std::optional<Value> inventory(std::string& error,
                                    std::chrono::milliseconds timeout = std::chrono::seconds(3),
-                                   const OperationDeadline* deadline = nullptr) {
+                                   const OperationDeadline* deadline = nullptr,
+                                   bool ensure_default = false) {
         if (auto unavailable = ensure_session(timeout)) {
             error = *unavailable;
             return std::nullopt;
@@ -319,7 +322,7 @@ class ControlMcpAdapter::Impl {
             error = error_payload("timeout", "the control operation timed out");
             return std::nullopt;
         }
-        const auto managed = session->manage("instances", "{}", inventory_timeout);
+        auto managed = session->manage("instances", "{}", inventory_timeout);
         if (managed.status_id != "completed") {
             if (is_terminal_session_status(managed.status_id))
                 mark_session_unhealthy();
@@ -330,6 +333,70 @@ class ControlMcpAdapter::Impl {
         if (!data || !data->hasObjectMember("instances") || !(*data)["instances"].isArray()) {
             error = error_payload("malformed-response", "broker inventory omitted instances");
             return std::nullopt;
+        }
+        if ((*data)["instances"].size() == 0 && ensure_default) {
+            auto prepare = choc::value::createObject("");
+            prepare.addMember("host_id", choc::value::createString(kDefaultInstalledHostId));
+            const auto prepare_timeout = deadline ? deadline->remaining() : timeout;
+            if (prepare_timeout <= std::chrono::milliseconds::zero()) {
+                error = error_payload("timeout", "the control operation timed out");
+                return std::nullopt;
+            }
+            const auto prepared = session->manage(
+                "host-prepare-installed", choc::json::toString(prepare, false), prepare_timeout);
+            const auto prepared_data = parse_object(prepared.data_json);
+            const auto inventory_id = prepared_data
+                                          ? required_string(*prepared_data, "inventory_id")
+                                          : std::nullopt;
+            if (prepared.status_id != "prepared" || !inventory_id) {
+                error = error_payload(
+                    prepared.status_id == "prepared" ? "malformed-response"
+                                                     : prepared.status_id,
+                    prepared.status_id == "prepared"
+                        ? "broker host preparation omitted inventory_id"
+                        : prepared.explanation);
+                return std::nullopt;
+            }
+            auto launch = choc::value::createObject("");
+            launch.addMember("inventory_id", choc::value::createString(*inventory_id));
+            const auto launch_timeout = deadline ? deadline->remaining() : timeout;
+            if (launch_timeout <= std::chrono::milliseconds::zero()) {
+                error = error_payload("timeout", "the control operation timed out");
+                return std::nullopt;
+            }
+            const auto launched = session->manage(
+                "host-launch", choc::json::toString(launch, false), launch_timeout);
+            if (launched.status_id != "launched") {
+                error = error_payload(launched.status_id, launched.explanation);
+                return std::nullopt;
+            }
+            const auto stop = steady_now() + (deadline ? deadline->remaining() : timeout);
+            for (unsigned attempt = 0; attempt < 300 && steady_now() < stop; ++attempt) {
+                const auto publish_timeout = std::chrono::ceil<std::chrono::milliseconds>(
+                    stop - steady_now());
+                if (publish_timeout <= std::chrono::milliseconds::zero())
+                    break;
+                managed = session->manage("instances", "{}", publish_timeout);
+                data = parse_object(managed.data_json);
+                if (managed.status_id != "completed") {
+                    error = error_payload(managed.status_id, managed.explanation);
+                    return std::nullopt;
+                }
+                if (!data || !data->hasObjectMember("instances") ||
+                    !(*data)["instances"].isArray()) {
+                    error = error_payload("malformed-response",
+                                          "broker inventory omitted instances");
+                    return std::nullopt;
+                }
+                if ((*data)["instances"].size() != 0)
+                    return data;
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            if ((*data)["instances"].size() == 0) {
+                error = error_payload(
+                    "timeout", "the installed control host did not publish an instance");
+                return std::nullopt;
+            }
         }
         return data;
     }
@@ -652,7 +719,7 @@ std::string ControlMcpAdapter::call_tool(std::string_view name, std::string_view
 
     if (name == kInstancesTool) {
         std::string error;
-        auto data = impl_->inventory(error);
+        auto data = impl_->inventory(error, std::chrono::seconds(3), nullptr, true);
         if (!data)
             return error;
         auto root = choc::value::createObject("");
@@ -681,10 +748,14 @@ std::string ControlMcpAdapter::call_tool(std::string_view name, std::string_view
         if (name == kGrantTool) {
             const auto instance_id = required_string(*arguments, "instance_id");
             const auto profile = required_string(*arguments, "profile");
-            if (!instance_id || !profile)
-                return error_payload("invalid-arguments", "instance_id and profile are required");
+            const auto operation_id = required_string(*arguments, "operation_id");
+            if (!instance_id || (profile.has_value() == operation_id.has_value()))
+                return error_payload(
+                    "invalid-arguments",
+                    "instance_id and exactly one of profile or operation_id are required");
             params.addMember("instance_id", choc::value::createString(*instance_id));
-            params.addMember("profile", choc::value::createString(*profile));
+            params.addMember(profile ? "profile" : "operation_id",
+                             choc::value::createString(profile ? *profile : *operation_id));
         } else {
             const auto grant_id = required_string(*arguments, "grant_id");
             if (!grant_id)

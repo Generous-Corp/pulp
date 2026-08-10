@@ -24,6 +24,7 @@
 #include <set>
 #include <span>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -31,6 +32,7 @@ using namespace pulp::inspect;
 
 constexpr std::int64_t kDefaultOperationTimeoutMs = 3'000;
 constexpr std::int64_t kMaximumOperationTimeoutMs = 300'000;
+constexpr std::string_view kDefaultInstalledHostId = "ordinary-standalone";
 
 struct Connection {
     std::unique_ptr<ControlClientConnection> transport;
@@ -127,27 +129,83 @@ std::optional<Connection> connect(bool json, std::chrono::milliseconds fallback_
 
 std::optional<choc::value::Value> instances(Connection& connection, bool json,
                                             std::chrono::milliseconds fallback_timeout,
-                                            const OperationDeadline* deadline) {
-    const auto timeout = remaining_timeout(deadline, fallback_timeout, json);
-    if (!timeout)
-        return std::nullopt;
-    const auto result = connection.transport->manage("instances", "{}", *timeout);
-    if (result.status_id != "completed") {
-        (void)fail(result.status_id, result.explanation, json);
-        return std::nullopt;
-    }
-    try {
-        auto data = choc::json::parse(result.data_json);
-        if (!data.isObject() || !data.hasObjectMember("instances") ||
-            !data["instances"].isArray()) {
-            (void)fail("malformed-response", "broker inventory omitted instances", json);
+                                            const OperationDeadline* deadline,
+                                            bool ensure_default = false) {
+    const auto query = [&](std::chrono::milliseconds timeout)
+        -> std::optional<choc::value::Value> {
+        const auto result = connection.transport->manage("instances", "{}", timeout);
+        if (result.status_id != "completed") {
+            (void)fail(result.status_id, result.explanation, json);
             return std::nullopt;
         }
+        try {
+            auto data = choc::json::parse(result.data_json);
+            if (!data.isObject() || !data.hasObjectMember("instances") ||
+                !data["instances"].isArray()) {
+                (void)fail("malformed-response", "broker inventory omitted instances", json);
+                return std::nullopt;
+            }
+            return data;
+        } catch (...) {
+            (void)fail("malformed-response", "broker inventory returned invalid data", json);
+            return std::nullopt;
+        }
+    };
+
+    const auto first_timeout = remaining_timeout(deadline, fallback_timeout, json);
+    if (!first_timeout)
+        return std::nullopt;
+    auto data = query(*first_timeout);
+    if (!data || (*data)["instances"].size() != 0 || !ensure_default)
         return data;
-    } catch (...) {
-        (void)fail("malformed-response", "broker inventory returned invalid data", json);
+
+    auto prepare = choc::value::createObject("");
+    prepare.addMember("host_id", choc::value::createString(kDefaultInstalledHostId));
+    const auto prepare_timeout = remaining_timeout(deadline, fallback_timeout, json);
+    if (!prepare_timeout)
+        return std::nullopt;
+    const auto prepared = connection.transport->manage(
+        "host-prepare-installed", choc::json::toString(prepare, false), *prepare_timeout);
+    if (prepared.status_id != "prepared") {
+        (void)fail(prepared.status_id, prepared.explanation, json);
         return std::nullopt;
     }
+    std::string inventory_id;
+    try {
+        const auto prepared_data = choc::json::parse(prepared.data_json);
+        if (prepared_data.isObject() && prepared_data.hasObjectMember("inventory_id") &&
+            prepared_data["inventory_id"].isString())
+            inventory_id = std::string(prepared_data["inventory_id"].getString());
+    } catch (...) {
+    }
+    if (inventory_id.empty()) {
+        (void)fail("malformed-response", "broker host preparation omitted inventory_id", json);
+        return std::nullopt;
+    }
+    auto launch = choc::value::createObject("");
+    launch.addMember("inventory_id", choc::value::createString(inventory_id));
+    const auto launch_timeout = remaining_timeout(deadline, fallback_timeout, json);
+    if (!launch_timeout)
+        return std::nullopt;
+    const auto launched = connection.transport->manage(
+        "host-launch", choc::json::toString(launch, false), *launch_timeout);
+    if (launched.status_id != "launched") {
+        (void)fail(launched.status_id, launched.explanation, json);
+        return std::nullopt;
+    }
+
+    const auto stop = std::chrono::steady_clock::now() +
+                      (deadline ? deadline->remaining() : fallback_timeout);
+    while (std::chrono::steady_clock::now() < stop) {
+        const auto remaining = std::chrono::ceil<std::chrono::milliseconds>(
+            stop - std::chrono::steady_clock::now());
+        data = query(std::max(remaining, std::chrono::milliseconds{1}));
+        if (!data || (*data)["instances"].size() != 0)
+            return data;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    (void)fail("timeout", "the installed control host did not publish an instance", json);
+    return std::nullopt;
 }
 
 std::optional<choc::value::Value> exact_instance(Connection& connection,
@@ -418,7 +476,7 @@ int cmd_control(const std::vector<std::string>& args) {
     if (!connection)
         return 1;
     if (verb == "instances") {
-        auto data = instances(*connection, json, request_timeout, deadline);
+        auto data = instances(*connection, json, request_timeout, deadline, true);
         if (!data)
             return 1;
         if (json)

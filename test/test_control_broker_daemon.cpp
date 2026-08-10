@@ -789,29 +789,45 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
 
     auto named = choc::value::createObject("");
     named.addMember("host_id", choc::value::createString(host_id));
-    const auto prepared = connection->manage(
-        "host-prepare-installed", choc::json::toString(named, false));
-    INFO(prepared.explanation);
-    REQUIRE(prepared.status_id == "prepared");
-    const auto inventory_id = std::string(
-        choc::json::parse(prepared.data_json)["inventory_id"].getString());
-    REQUIRE_FALSE(inventory_id.empty());
-
-    auto launch = choc::value::createObject("");
-    launch.addMember("inventory_id", choc::value::createString(inventory_id));
-    const auto launched =
-        connection->manage("host-launch", choc::json::toString(launch, false), 15s);
-    INFO(launched.explanation);
-    REQUIRE(launched.status_id == "launched");
-
     choc::value::Value instances;
-    for (unsigned attempt = 0; attempt < 10'000; ++attempt) {
-        const auto result = connection->manage("instances");
-        REQUIRE(result.status_id == "completed");
-        instances = choc::json::parse(result.data_json)["instances"];
-        if (instances.size() == 1)
-            break;
-        std::this_thread::sleep_for(1ms);
+    if (!author_host_environment) {
+        const std::vector<std::filesystem::path> cli_candidates{
+            installed_broker.parent_path().parent_path().parent_path() / "bin" / "pulp-cpp",
+            installed_broker.parent_path().parent_path() / "tools" / "cli" / "pulp-cpp",
+        };
+        const auto cli = std::ranges::find_if(cli_candidates, [](const auto& candidate) {
+            return std::filesystem::is_regular_file(candidate);
+        });
+        REQUIRE(cli != cli_candidates.end());
+        const auto listed = run_installed_client(*cli, root.runtime,
+                                                 {"control", "instances", "--json"});
+        INFO(listed.stdout_output);
+        INFO(listed.stderr_output);
+        REQUIRE(listed.exit_code == 0);
+        instances = choc::json::parse(listed.stdout_output)["instances"];
+    } else {
+        const auto prepared = connection->manage(
+            "host-prepare-installed", choc::json::toString(named, false));
+        INFO(prepared.explanation);
+        REQUIRE(prepared.status_id == "prepared");
+        const auto inventory_id = std::string(
+            choc::json::parse(prepared.data_json)["inventory_id"].getString());
+        REQUIRE_FALSE(inventory_id.empty());
+
+        auto launch = choc::value::createObject("");
+        launch.addMember("inventory_id", choc::value::createString(inventory_id));
+        const auto launched =
+            connection->manage("host-launch", choc::json::toString(launch, false), 15s);
+        INFO(launched.explanation);
+        REQUIRE(launched.status_id == "launched");
+        for (unsigned attempt = 0; attempt < 10'000; ++attempt) {
+            const auto result = connection->manage("instances");
+            REQUIRE(result.status_id == "completed");
+            instances = choc::json::parse(result.data_json)["instances"];
+            if (instances.size() == 1)
+                break;
+            std::this_thread::sleep_for(1ms);
+        }
     }
     REQUIRE(instances.size() == 1);
     const auto instance = instances[0];

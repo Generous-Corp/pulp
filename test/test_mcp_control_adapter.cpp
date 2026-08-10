@@ -34,6 +34,10 @@ struct FakeState {
     bool artifact_wrong_instance = false;
     bool artifact_chunked = false;
     bool inventory_session_error_once = false;
+    bool inventory_empty_until_launch = false;
+    bool installed_host_launched = false;
+    int installed_host_prepares = 0;
+    int installed_host_launches = 0;
     int grant_requests = 0;
     std::vector<std::string> grant_authorities;
     int session_opens = 0;
@@ -172,8 +176,26 @@ class FakeSession final : public ControlMcpSession {
                 return {.status_id = "session-superseded",
                         .explanation = "test session expired"};
             }
+            if (state_->inventory_empty_until_launch && !state_->installed_host_launched)
+                return {.status_id = "completed",
+                        .data_json = R"({"schema":"pulp.control.instances.v1","instances":[]})"};
             return {.status_id = "completed",
                     .data_json = R"({"schema":"pulp.control.instances.v1","instances":[{"instance_id":"instance-1","plugin_id":"dev.pulp.fixture","profile":"developer-local","publication_id":"publication-1","registration_id":"registration-1","session_id":"session-1"}]})"};
+        }
+        if (command == "host-prepare-installed") {
+            const auto params = choc::json::parse(params_json);
+            REQUIRE(params["host_id"].getString() == "ordinary-standalone");
+            ++state_->installed_host_prepares;
+            return {.status_id = "prepared",
+                    .data_json = R"({"schema":"pulp.control.host-prepare-installed.v1","host_id":"ordinary-standalone","inventory_id":"inventory-1"})"};
+        }
+        if (command == "host-launch") {
+            const auto params = choc::json::parse(params_json);
+            REQUIRE(params["inventory_id"].getString() == "inventory-1");
+            ++state_->installed_host_launches;
+            state_->installed_host_launched = true;
+            return {.status_id = "launched",
+                    .data_json = R"({"schema":"pulp.control.host-launch.v1","inventory_id":"inventory-1"})"};
         }
         if (command == "grant-request") {
             ++state_->grant_requests;
@@ -264,6 +286,50 @@ TEST_CASE("control MCP bindings are generated from every canonical operation",
         }
     }
     REQUIRE(tools.find("\"required\":[\"instance_id\",\"input\"]") != std::string::npos);
+    REQUIRE(tools.find("\"oneOf\":[{\"required\":[\"profile\"]},{\"required\":[\"operation_id\"]}]") !=
+            std::string::npos);
+}
+
+TEST_CASE("control MCP inventory bootstraps the broker-owned installed host",
+          "[mcp][control][inventory][installed-host]") {
+    auto state = std::make_shared<FakeState>();
+    state->inventory_empty_until_launch = true;
+    ControlMcpAdapter adapter(factory(state));
+
+    const auto first = adapter.call_tool("pulp_control_instances", "{}");
+    REQUIRE(first.find("\"isError\":true") == std::string::npos);
+    const auto first_json = choc::json::parse(first);
+    REQUIRE(first_json["structuredContent"]["instances"].size() == 1);
+    CHECK(first_json["structuredContent"]["instances"][0]["instance_id"].getString() ==
+          "instance-1");
+    CHECK(state->installed_host_prepares == 1);
+    CHECK(state->installed_host_launches == 1);
+
+    const auto repeated = adapter.call_tool("pulp_control_instances", "{}");
+    REQUIRE(repeated.find("\"isError\":true") == std::string::npos);
+    CHECK(state->installed_host_prepares == 1);
+    CHECK(state->installed_host_launches == 1);
+}
+
+TEST_CASE("control MCP grant requests accept exactly one authority selector",
+          "[mcp][control][grant][operation]") {
+    auto state = std::make_shared<FakeState>();
+    ControlMcpAdapter adapter(factory(state));
+
+    const auto operation = adapter.call_tool(
+        "pulp_control_grant_request",
+        R"({"instance_id":"instance-1","operation_id":"dev.pulp.runtime/evaluate@1"})");
+    CHECK(operation.find("consent-required") != std::string::npos);
+    CHECK(state->grant_authorities ==
+          std::vector<std::string>{"operation:dev.pulp.runtime/evaluate@1"});
+
+    const auto missing = adapter.call_tool(
+        "pulp_control_grant_request", R"({"instance_id":"instance-1"})");
+    CHECK(missing.find("exactly one of profile or operation_id") != std::string::npos);
+    const auto conflicting = adapter.call_tool(
+        "pulp_control_grant_request",
+        R"({"instance_id":"instance-1","profile":"develop","operation_id":"dev.pulp.runtime/evaluate@1"})");
+    CHECK(conflicting.find("exactly one of profile or operation_id") != std::string::npos);
 }
 
 TEST_CASE("control MCP and CLI semantics produce the same canonical service request",

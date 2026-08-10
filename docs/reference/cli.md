@@ -1346,6 +1346,12 @@ pulp control audit path/to/MyProduct --json
 without connecting to the broker. `pulp inspect profiles` is its deprecated
 compatibility alias and will be removed in Pulp 0.800.0 on 2026-10-01.
 
+`instances` starts the broker-owned `ordinary-standalone` installed host when
+the live inventory is empty, waits within the command's bounded management
+budget for its exact registration, and then lists the inventory. It never
+accepts an executable path or launch arguments from the caller. Repeated calls
+only read inventory while an instance is already live.
+
 `status --explain` reports the exact live registration but does not execute an
 operation. Consequently `implemented`, `built`, `host_available`, `activated`,
 and `session_live` are `not_evaluated`; operation-specific policy and grant

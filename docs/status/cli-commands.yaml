@@ -1128,7 +1128,7 @@ commands:
       - name: profiles
         summary: List the canonical off, observe, and develop profiles and capabilities without connecting to the broker
       - name: instances
-        summary: List broker-owned exact live instance registrations
+        summary: List broker-owned exact live registrations, starting the broker-owned ordinary Standalone host when inventory is empty
       - name: status
         summary: Describe one exact registration and optionally explain authority terms without claiming operation-dependent gates were evaluated
       - name: grant-request

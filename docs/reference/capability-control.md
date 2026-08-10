@@ -122,7 +122,10 @@ Interpret common failures literally:
 2. Select the narrowest build profile and exact capability list in that integration.
 3. Run the offline artifact audit and review every declared capability.
 4. Launch through the trusted Pulp integration; copy the exact `instance_id`
-   from `pulp control instances --json`.
+   from `pulp control instances --json`. On a clean SDK installation that
+   command launches the broker-owned ordinary Standalone host when inventory is
+   empty; author-specific hosts still launch only through their trusted Pulp
+   integration.
 5. Start read-only with `inspect-readonly`. Request `develop` only for an
    intended mutation and review the broker's consent prompt.
 6. Revoke the returned grant with `pulp control revoke --grant ID`.
