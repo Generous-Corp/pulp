@@ -243,19 +243,28 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
   public:
     bool start(format::Processor& processor, state::StateStore& store,
                format::detail::StandaloneTestInputHost* test_input,
-               double sample_rate) override {
-        const auto handle = inherited_control_host_bootstrap_handle();
+               double sample_rate, format::StandaloneControlUiMode ui_mode) override {
+        std::optional<ControlHostBootstrapRecord> bootstrap;
+        std::optional<ControlManifest> manifest;
+        if (pending_bootstrap_ && pending_manifest_) {
+            bootstrap = std::move(pending_bootstrap_);
+            manifest = std::move(pending_manifest_);
+            pending_bootstrap_.reset();
+            pending_manifest_.reset();
+        } else {
+            const auto handle = inherited_control_host_bootstrap_handle();
 #ifdef _WIN32
-        if (handle == nullptr)
+            if (handle == nullptr)
 #else
-        if (handle < 0)
+            if (handle < 0)
 #endif
-            return true;
+                return true;
 
-        ControlHostPreflightDiagnostics diagnostics;
-        auto bootstrap = receive_control_host_preflight(
-            handle, 10s, std::chrono::system_clock::now(), &diagnostics);
-        auto manifest = installed_manifest();
+            ControlHostPreflightDiagnostics diagnostics;
+            bootstrap = receive_control_host_preflight(
+                handle, 10s, std::chrono::system_clock::now(), &diagnostics);
+            manifest = installed_manifest();
+        }
         if (!bootstrap || bootstrap->enrollment_id.empty() || !manifest)
             return false;
 
@@ -264,6 +273,21 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
         test_input_ = test_input;
         sample_rate_ = sample_rate;
         main_thread_ = std::this_thread::get_id();
+
+        const bool needs_ui = has_capability(*manifest, InspectorCapability::CaptureImage) ||
+                              has_capability(*manifest, InspectorCapability::UiRead) ||
+                              has_capability(*manifest, InspectorCapability::LogsRead) ||
+                              has_capability(*manifest, InspectorCapability::AuthoringTweaks) ||
+                              has_capability(*manifest, InspectorCapability::UiInput) ||
+                              has_capability(*manifest, InspectorCapability::TraceControl) ||
+                              has_capability(*manifest, InspectorCapability::RuntimeEval);
+        if (needs_ui && ui_mode == format::StandaloneControlUiMode::DeferToEditor &&
+            !view_bridge_) {
+            pending_bootstrap_ = std::move(bootstrap);
+            pending_manifest_ = std::move(manifest);
+            return true;
+        }
+
         queue_ = std::make_shared<MainThreadQueue>();
         rpc_ = std::make_shared<InspectorMainThreadRpc>(
             InspectorMainThreadRpc::Config{2s, 64},
@@ -311,24 +335,20 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                 return unavailable_operation();
             };
 
-        const bool needs_ui = has_capability(*manifest, InspectorCapability::CaptureImage) ||
-                              has_capability(*manifest, InspectorCapability::UiRead) ||
-                              has_capability(*manifest, InspectorCapability::LogsRead) ||
-                              has_capability(*manifest, InspectorCapability::AuthoringTweaks) ||
-                              has_capability(*manifest, InspectorCapability::UiInput) ||
-                              has_capability(*manifest, InspectorCapability::TraceControl) ||
-                              has_capability(*manifest, InspectorCapability::RuntimeEval);
-        if (needs_ui) {
-            view_bridge_ = std::make_unique<format::ViewBridge>(processor, store);
+        if (needs_ui && !view_bridge_) {
+            owned_view_bridge_ = std::make_unique<format::ViewBridge>(processor, store);
             std::string view_error;
-            if (!view_bridge_->open(&view_error))
+            if (!owned_view_bridge_->open(&view_error))
                 return false;
-            root_ = view_bridge_->release_view();
-            if (!root_)
+            owned_root_ = owned_view_bridge_->release_view();
+            if (!owned_root_)
                 return false;
+            view_bridge_ = owned_view_bridge_.get();
+            root_ = owned_root_.get();
         }
         if (!root_) {
-            root_ = std::make_unique<view::View>();
+            owned_root_ = std::make_unique<view::View>();
+            root_ = owned_root_.get();
             root_->set_id("control-root");
             root_->set_bounds({0, 0, 1, 1});
         }
@@ -350,9 +370,12 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                 author_hooks_.motion_cost_probe);
         motion_ = std::make_unique<MotionInspector>(*root_);
         if (needs_ui) {
-            window_ = std::make_unique<HeadlessViewWindow>(*root_);
-            root_->set_window_host(window_.get());
-            view_bridge_->notify_attached();
+            if (!window_) {
+                owned_window_ = std::make_unique<HeadlessViewWindow>(*root_);
+                window_ = owned_window_.get();
+                root_->set_window_host(window_);
+                view_bridge_->notify_attached();
+            }
             if (!author_hooks_.motion_fixture_path.empty() &&
                 !scrubber_.load_fixture(author_hooks_.motion_fixture_path))
                 return false;
@@ -442,7 +465,7 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                     -> std::optional<ControlUiObservation> {
                     if (!root_)
                         return std::nullopt;
-                    view::View* selected = root_.get();
+                    view::View* selected = root_;
                     if (!request.selector.empty()) {
                         auto selector = request.selector;
                         if (selector.starts_with('#'))
@@ -551,6 +574,17 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
         return true;
     }
 
+    bool attach_editor(format::ViewBridge& bridge, view::View& root,
+                       view::WindowHost& window) override {
+        if (!pending_bootstrap_ || !pending_manifest_)
+            return true;
+        view_bridge_ = &bridge;
+        root_ = &root;
+        window_ = &window;
+        return start(*processor_, *store_, test_input_, sample_rate_,
+                     format::StandaloneControlUiMode::Headless);
+    }
+
     void stop() noexcept override {
         if (installed_)
             installed_->stop();
@@ -567,13 +601,18 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
         ui_adapter_.reset();
         evaluator_.reset();
         motion_.reset();
-        if (root_)
+        if (owned_root_ && root_)
             root_->set_window_host(nullptr);
-        window_.reset();
-        if (view_bridge_)
-            view_bridge_->close();
-        root_.reset();
-        view_bridge_.reset();
+        owned_window_.reset();
+        window_ = nullptr;
+        if (owned_view_bridge_)
+            owned_view_bridge_->close();
+        owned_root_.reset();
+        root_ = nullptr;
+        owned_view_bridge_.reset();
+        view_bridge_ = nullptr;
+        pending_bootstrap_.reset();
+        pending_manifest_.reset();
         telemetry_.reset();
         rpc_.reset();
         queue_.reset();
@@ -624,9 +663,14 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
     std::shared_ptr<ConsoleCapture> console_;
     view::ScriptedUiSession* log_session_ = nullptr;
     std::uint64_t log_subscription_ = 0;
-    std::unique_ptr<view::View> root_;
-    std::unique_ptr<format::ViewBridge> view_bridge_;
-    std::unique_ptr<HeadlessViewWindow> window_;
+    std::unique_ptr<view::View> owned_root_;
+    view::View* root_ = nullptr;
+    std::unique_ptr<format::ViewBridge> owned_view_bridge_;
+    format::ViewBridge* view_bridge_ = nullptr;
+    std::unique_ptr<HeadlessViewWindow> owned_window_;
+    view::WindowHost* window_ = nullptr;
+    std::optional<ControlHostBootstrapRecord> pending_bootstrap_;
+    std::optional<ControlManifest> pending_manifest_;
     std::unique_ptr<MotionInspector> motion_;
     MotionScrubber scrubber_;
     view::FrameClock frame_clock_;

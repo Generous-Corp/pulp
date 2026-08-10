@@ -664,7 +664,8 @@ bool StandaloneApp::start() {
             return true;
         control_host_ = std::move(creation.host);
         if (control_host_ && control_host_->start(*processor_, store_, &test_input_host_,
-                                                 config_.sample_rate))
+                                                 config_.sample_rate,
+                                                 StandaloneControlUiMode::DeferToEditor))
             return true;
         runtime::log_error("Standalone: canonical control host failed closed during startup");
         if (control_host_)
@@ -994,6 +995,15 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // Window host is live — fire Processor::on_view_opened now.
     bridge->notify_attached();
 
+    if (control_host_ &&
+        !control_host_->attach_editor(*bridge, *bridge->view(), *window)) {
+        runtime::log_error(
+            "Standalone: canonical control host failed to attach the editor");
+        detail::retire_standalone_editor(*window, *bridge);
+        stop();
+        return false;
+    }
+
     auto* bridge_raw = bridge.get();
     detail::attach_standalone_editor_bridge(*window, chrome, *bridge);
 
@@ -1009,6 +1019,9 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         // Drop the editor→host resize handler before the window / bridge it
         // captures are torn down by stop().
         if (processor_) processor_->set_editor_resize_handler(this, nullptr);
+        // Revoke every control callback that borrows the visible editor before
+        // ViewBridge dispatches on_view_closed and releases that view.
+        if (control_host_) control_host_->stop();
         if (window_raw && bridge_raw)
             detail::retire_standalone_editor(*window_raw, *bridge_raw);
         stop();
@@ -1083,13 +1096,8 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
 #endif
 
     if (control_host_) {
-        auto previous_idle = pre_screenshot_idle;
-        auto* control_host = control_host_.get();
-        pre_screenshot_idle = [previous_idle, control_host] {
-            if (previous_idle)
-                previous_idle();
-            control_host->poll();
-        };
+        pre_screenshot_idle = detail::make_standalone_control_idle_callback(
+            pre_screenshot_idle, *control_host_, *window);
         window->set_idle_callback(pre_screenshot_idle);
     }
 
@@ -1320,6 +1328,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
             inspector_runtime->stop();
             return inspector_runtime->try_finish_retirement();
         });
+        if (control_host_) control_host_->stop();
         return !inspector_runtime->startup_failed();
     }
 #endif
@@ -1329,6 +1338,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // processor is torn down; removal is harmless on platforms where no
     // editor-initiated resize handler was installed.
     if (processor_) processor_->set_editor_resize_handler(this, nullptr);
+    if (control_host_) control_host_->stop();
     detail::retire_standalone_editor(*window, *bridge);
     stop();
     return true;

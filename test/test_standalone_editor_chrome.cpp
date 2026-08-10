@@ -82,12 +82,14 @@ public:
     float aspect_ratio_ = 0.0f;
     std::vector<ContentSize> content_size_requests_;
     int repaint_calls_ = 0;
+    int close_requests_ = 0;
     std::vector<std::uint8_t> capture_bytes_;
 
     void show() override {}
     void hide() override {}
     bool is_visible() const override { return false; }
     void repaint() override { ++repaint_calls_; }
+    void request_close() override { ++close_requests_; }
     std::vector<std::uint8_t> capture_png() override { return capture_bytes_; }
     ContentSize get_content_size() const override { return content_size_; }
     void set_idle_callback(std::function<void()> cb) override {
@@ -974,6 +976,31 @@ TEST_CASE("Standalone idle callback can be composed by tool windows",
     composed();
     REQUIRE(calls == std::vector<std::string>{
         "scripted", "settings", "audio-inspector"});
+}
+
+TEST_CASE("Standalone control idle closes when the carrier becomes unready",
+          "[standalone][chrome][control]") {
+    struct ControlHost {
+        int polls = 0;
+        bool carrier_ready = true;
+        void poll() { ++polls; }
+        bool ready() const { return carrier_ready; }
+    } control;
+    StubWindowHost window;
+    int previous_polls = 0;
+    auto idle = make_standalone_control_idle_callback(
+        [&] { ++previous_polls; }, control, window);
+
+    idle();
+    REQUIRE(previous_polls == 1);
+    REQUIRE(control.polls == 1);
+    REQUIRE(window.close_requests_ == 0);
+
+    control.carrier_ready = false;
+    idle();
+    REQUIRE(previous_polls == 2);
+    REQUIRE(control.polls == 2);
+    REQUIRE(window.close_requests_ == 1);
 }
 
 TEST_CASE("Standalone repaint helper routes scripted UI repaint through the window",

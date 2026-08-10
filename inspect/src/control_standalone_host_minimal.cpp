@@ -38,7 +38,8 @@ ControlExecutionOutcome unavailable_operation() {
 class MinimalStandaloneControlHost final : public format::StandaloneControlHost {
   public:
     bool start(format::Processor&, state::StateStore& store,
-               format::detail::StandaloneTestInputHost*, double) override {
+               format::detail::StandaloneTestInputHost*, double,
+               format::StandaloneControlUiMode) override {
         const auto handle = inherited_control_host_bootstrap_handle();
 #ifdef _WIN32
         if (handle == nullptr)

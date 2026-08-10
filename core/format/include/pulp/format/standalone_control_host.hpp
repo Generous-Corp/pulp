@@ -13,7 +13,19 @@ namespace pulp::state {
 class StateStore;
 }
 
+namespace pulp::view {
+class View;
+class WindowHost;
+}
+
 namespace pulp::format {
+
+class ViewBridge;
+
+enum class StandaloneControlUiMode {
+    Headless,
+    DeferToEditor,
+};
 
 /// Optional host-side control composition for one ordinary StandaloneApp.
 ///
@@ -30,7 +42,16 @@ class StandaloneControlHost {
     /// direct user launch with no broker bootstrap remains an inert launch.
     virtual bool start(Processor& processor, state::StateStore& store,
                        detail::StandaloneTestInputHost* test_input = nullptr,
-                       double sample_rate = 0.0) = 0;
+                       double sample_rate = 0.0,
+                       StandaloneControlUiMode ui_mode =
+                           StandaloneControlUiMode::Headless) = 0;
+
+    /// Complete a deferred UI-capable startup against the editor that the
+    /// Standalone is actually presenting. The control host borrows all three
+    /// objects until stop(); it must never create a second processor view.
+    virtual bool attach_editor(ViewBridge&, view::View&, view::WindowHost&) {
+        return true;
+    }
 
     /// Revoke host-side authority before the processor or StateStore retires.
     virtual void stop() noexcept = 0;
