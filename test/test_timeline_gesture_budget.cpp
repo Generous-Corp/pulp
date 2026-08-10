@@ -156,8 +156,7 @@ EditIntent move_clip_intent(GesturePhase phase, std::int64_t expected_start,
 }
 
 Transaction lower_issue(const EditGestureIdentityIssue& issue, EditIntent intent) {
-    REQUIRE(issue.phase() == intent.phase);
-    auto lowered = lower_edit_intent(intent, issue.identity());
+    auto lowered = issue.lower(std::move(intent));
     REQUIRE(lowered);
     return std::move(lowered).value();
 }
@@ -198,8 +197,8 @@ TEST_CASE("Gesture identity allocation validates lifecycle before consuming writ
     REQUIRE(other_writer.allocate_transaction_id().sequence == 1);
     REQUIRE(other_writer.allocate_command_id().sequence == 1);
 
-    for (const auto phase : {GesturePhase::Single, GesturePhase::Update, GesturePhase::End,
-                             GesturePhase::Cancel}) {
+    for (const auto phase :
+         {GesturePhase::Single, GesturePhase::Update, GesturePhase::End, GesturePhase::Cancel}) {
         auto out_of_order = allocator.issue(writer, {}, phase);
         REQUIRE_FALSE(out_of_order);
         REQUIRE(out_of_order.error() == EditGestureIdentityError::InvalidPhase);
@@ -207,10 +206,12 @@ TEST_CASE("Gesture identity allocation validates lifecycle before consuming writ
 
     auto first_begin = allocator.issue(writer, {7}, GesturePhase::Begin);
     REQUIRE(first_begin);
-    REQUIRE(first_begin->identity().transaction_id == TransactionId{writer.id(), 1});
-    REQUIRE(first_begin->identity().command_id == CommandId{writer.id(), 1});
-    REQUIRE(first_begin->identity().expected_revision == DocumentRevision{7});
-    REQUIRE(first_begin->identity().undo_group == allocator.undo_group());
+    const auto first_begin_tx =
+        lower_issue(*first_begin, move_clip_intent(GesturePhase::Begin, 0, kTicksPerQuarter));
+    REQUIRE(first_begin_tx.id == TransactionId{writer.id(), 1});
+    REQUIRE(first_begin_tx.commands.front().id == CommandId{writer.id(), 1});
+    REQUIRE(first_begin_tx.expected_revision == DocumentRevision{7});
+    REQUIRE(first_begin_tx.undo_group == allocator.undo_group());
     REQUIRE(allocator.state() == EditGestureIdentityState::AwaitingBegin);
     REQUIRE(allocator.has_pending_identity());
 
@@ -218,21 +219,25 @@ TEST_CASE("Gesture identity allocation validates lifecycle before consuming writ
     REQUIRE_FALSE(while_pending);
     REQUIRE(while_pending.error() == EditGestureIdentityError::IdentityPending);
 
-    auto rejected = allocator.acknowledge(*first_begin, EditGestureSubmission::Rejected);
+    auto rejected = allocator.acknowledge(std::move(*first_begin), EditGestureSubmission::Rejected);
     REQUIRE(rejected);
     REQUIRE(*rejected == EditGestureIdentityState::AwaitingBegin);
     REQUIRE_FALSE(allocator.has_pending_identity());
+    auto after_ack = first_begin->lower(move_clip_intent(GesturePhase::Begin, 0, kTicksPerQuarter));
+    REQUIRE_FALSE(after_ack);
 
-    auto stale = allocator.acknowledge(*first_begin, EditGestureSubmission::Committed);
+    auto stale = allocator.acknowledge(std::move(*first_begin), EditGestureSubmission::Committed);
     REQUIRE_FALSE(stale);
     REQUIRE(stale.error() == EditGestureIdentityError::ForeignOrStaleIssue);
 
     auto retried_begin = allocator.issue(writer, {8}, GesturePhase::Begin);
     REQUIRE(retried_begin);
-    REQUIRE(retried_begin->identity().transaction_id == TransactionId{writer.id(), 2});
-    REQUIRE(retried_begin->identity().command_id == CommandId{writer.id(), 2});
-    REQUIRE(retried_begin->identity().undo_group == allocator.undo_group());
-    REQUIRE(allocator.acknowledge(*retried_begin, EditGestureSubmission::Committed));
+    const auto retried_begin_tx =
+        lower_issue(*retried_begin, move_clip_intent(GesturePhase::Begin, 0, kTicksPerQuarter));
+    REQUIRE(retried_begin_tx.id == TransactionId{writer.id(), 2});
+    REQUIRE(retried_begin_tx.commands.front().id == CommandId{writer.id(), 2});
+    REQUIRE(retried_begin_tx.undo_group == allocator.undo_group());
+    REQUIRE(allocator.acknowledge(std::move(*retried_begin), EditGestureSubmission::Committed));
     REQUIRE(allocator.state() == EditGestureIdentityState::Open);
 
     for (const auto phase : {GesturePhase::Single, GesturePhase::Begin}) {
@@ -243,17 +248,20 @@ TEST_CASE("Gesture identity allocation validates lifecycle before consuming writ
 
     auto update = allocator.issue(writer, {9}, GesturePhase::Update);
     REQUIRE(update);
-    REQUIRE(update->identity().transaction_id == TransactionId{writer.id(), 3});
-    REQUIRE(update->identity().command_id == CommandId{writer.id(), 3});
-    REQUIRE(update->identity().undo_group == allocator.undo_group());
-    REQUIRE(allocator.acknowledge(*update, EditGestureSubmission::Committed));
+    const auto update_tx =
+        lower_issue(*update, move_clip_intent(GesturePhase::Update, 0, kTicksPerQuarter));
+    REQUIRE(update_tx.id == TransactionId{writer.id(), 3});
+    REQUIRE(update_tx.commands.front().id == CommandId{writer.id(), 3});
+    REQUIRE(update_tx.undo_group == allocator.undo_group());
+    REQUIRE(allocator.acknowledge(std::move(*update), EditGestureSubmission::Committed));
 
     auto end = allocator.issue(writer, {10}, GesturePhase::End);
     REQUIRE(end);
-    REQUIRE(end->identity().transaction_id == TransactionId{writer.id(), 4});
-    REQUIRE(end->identity().command_id == CommandId{writer.id(), 4});
-    REQUIRE(end->identity().undo_group == allocator.undo_group());
-    REQUIRE(allocator.acknowledge(*end, EditGestureSubmission::Committed));
+    const auto end_tx = lower_issue(*end, move_clip_intent(GesturePhase::End, 0, kTicksPerQuarter));
+    REQUIRE(end_tx.id == TransactionId{writer.id(), 4});
+    REQUIRE(end_tx.commands.front().id == CommandId{writer.id(), 4});
+    REQUIRE(end_tx.undo_group == allocator.undo_group());
+    REQUIRE(allocator.acknowledge(std::move(*end), EditGestureSubmission::Committed));
     REQUIRE(allocator.state() == EditGestureIdentityState::Closed);
 
     auto after_close = allocator.issue(writer, {11}, GesturePhase::Update);
@@ -278,9 +286,13 @@ TEST_CASE("Gesture identity issues reject foreign tickets and survive moves whil
     auto second_issue = second.issue(writer, {}, GesturePhase::Begin);
     REQUIRE(first_issue);
     REQUIRE(second_issue);
-    REQUIRE(first_issue->identity().undo_group != second_issue->identity().undo_group);
+    const auto first_tx =
+        lower_issue(*first_issue, move_clip_intent(GesturePhase::Begin, 0, kTicksPerQuarter));
+    const auto second_tx =
+        lower_issue(*second_issue, move_clip_intent(GesturePhase::Begin, 0, kTicksPerQuarter));
+    REQUIRE(first_tx.undo_group != second_tx.undo_group);
 
-    auto foreign = first.acknowledge(*second_issue, EditGestureSubmission::Committed);
+    auto foreign = first.acknowledge(std::move(*second_issue), EditGestureSubmission::Committed);
     REQUIRE_FALSE(foreign);
     REQUIRE(foreign.error() == EditGestureIdentityError::ForeignOrStaleIssue);
     REQUIRE(first.has_pending_identity());
@@ -293,14 +305,14 @@ TEST_CASE("Gesture identity issues reject foreign tickets and survive moves whil
     REQUIRE_FALSE(from_moved_allocator);
     REQUIRE(from_moved_allocator.error() == EditGestureIdentityError::GestureClosed);
 
-    auto from_moved_issue = moved_allocator.acknowledge(*first_issue,
-                                                       EditGestureSubmission::Committed);
+    auto from_moved_issue =
+        moved_allocator.acknowledge(std::move(*first_issue), EditGestureSubmission::Committed);
     REQUIRE_FALSE(from_moved_issue);
     REQUIRE(from_moved_issue.error() == EditGestureIdentityError::ForeignOrStaleIssue);
     REQUIRE(moved_allocator.has_pending_identity());
-    REQUIRE(moved_allocator.acknowledge(moved_issue, EditGestureSubmission::Committed));
+    REQUIRE(moved_allocator.acknowledge(std::move(moved_issue), EditGestureSubmission::Committed));
     REQUIRE(moved_allocator.state() == EditGestureIdentityState::Open);
-    REQUIRE(second.acknowledge(*second_issue, EditGestureSubmission::Rejected));
+    REQUIRE(second.acknowledge(std::move(*second_issue), EditGestureSubmission::Rejected));
 }
 
 TEST_CASE("Gesture identity allocation follows transferred writer authority") {
@@ -309,7 +321,10 @@ TEST_CASE("Gesture identity allocation follows transferred writer authority") {
     auto created = EditGestureIdentityAllocator::create(original_writer);
     REQUIRE(created);
     auto allocator = std::move(created).value();
+    const auto provenance = original_writer.provenance();
     auto active_writer = std::move(original_writer);
+    REQUIRE(active_writer.provenance() == provenance);
+    REQUIRE_FALSE(original_writer.provenance().valid());
 
     auto from_moved_writer = allocator.issue(original_writer, {}, GesturePhase::Begin);
     REQUIRE_FALSE(from_moved_writer);
@@ -317,8 +332,128 @@ TEST_CASE("Gesture identity allocation follows transferred writer authority") {
 
     auto from_active_writer = allocator.issue(active_writer, {}, GesturePhase::Begin);
     REQUIRE(from_active_writer);
-    REQUIRE(from_active_writer->identity().transaction_id.writer == active_writer.id());
-    REQUIRE(allocator.acknowledge(*from_active_writer, EditGestureSubmission::Rejected));
+    const auto transaction = lower_issue(
+        *from_active_writer, move_clip_intent(GesturePhase::Begin, 0, kTicksPerQuarter));
+    REQUIRE(transaction.id.writer == active_writer.id());
+    REQUIRE(allocator.acknowledge(std::move(*from_active_writer), EditGestureSubmission::Rejected));
+}
+
+TEST_CASE("Gesture identity provenance rejects equal numeric streams from another session",
+          "[gesture-identity][session-provenance]") {
+    SECTION("a foreign writer is rejected before its ID streams advance") {
+        auto first_session = std::move(DocumentSession::create(make_project())).value();
+        auto second_session = std::move(DocumentSession::create(make_project())).value();
+        auto first_writer = std::move(first_session->register_writer()).value();
+        auto second_writer = std::move(second_session->register_writer()).value();
+        REQUIRE(first_writer.id() == second_writer.id());
+        REQUIRE(first_writer.provenance() != second_writer.provenance());
+
+        auto created = EditGestureIdentityAllocator::create(first_writer);
+        REQUIRE(created);
+        auto allocator = std::move(created).value();
+        auto foreign = allocator.issue(second_writer, {}, GesturePhase::Begin);
+        REQUIRE_FALSE(foreign);
+        REQUIRE(foreign.error() == EditGestureIdentityError::WriterMismatch);
+        REQUIRE(second_writer.allocate_transaction_id() == TransactionId{second_writer.id(), 1});
+        REQUIRE(second_writer.allocate_command_id() == CommandId{second_writer.id(), 1});
+        REQUIRE(second_writer.allocate_undo_group_id() == UndoGroupId{second_writer.id(), 1});
+    }
+
+    SECTION("a value-identical issue from another session cannot acknowledge") {
+        auto first_session = std::move(DocumentSession::create(make_project())).value();
+        auto second_session = std::move(DocumentSession::create(make_project())).value();
+        auto first_writer = std::move(first_session->register_writer()).value();
+        auto second_writer = std::move(second_session->register_writer()).value();
+        REQUIRE(first_writer.id() == second_writer.id());
+        REQUIRE(first_writer.provenance() != second_writer.provenance());
+
+        auto first_created = EditGestureIdentityAllocator::create(first_writer);
+        auto second_created = EditGestureIdentityAllocator::create(second_writer);
+        REQUIRE(first_created);
+        REQUIRE(second_created);
+        auto first = std::move(first_created).value();
+        auto second = std::move(second_created).value();
+        REQUIRE(first.undo_group() == second.undo_group());
+
+        auto first_issue = first.issue(first_writer, {}, GesturePhase::Begin);
+        auto second_issue = second.issue(second_writer, {}, GesturePhase::Begin);
+        REQUIRE(first_issue);
+        REQUIRE(second_issue);
+        const auto first_tx =
+            lower_issue(*first_issue, move_clip_intent(GesturePhase::Begin, 0, kTicksPerQuarter));
+        const auto second_tx =
+            lower_issue(*second_issue, move_clip_intent(GesturePhase::Begin, 0, kTicksPerQuarter));
+        REQUIRE(first_tx.id == second_tx.id);
+        REQUIRE(first_tx.expected_revision == second_tx.expected_revision);
+        REQUIRE(first_tx.undo_group == second_tx.undo_group);
+        REQUIRE(first_tx.commands.front().id == second_tx.commands.front().id);
+        REQUIRE(first_tx.gesture_phase == second_tx.gesture_phase);
+
+        auto foreign =
+            first.acknowledge(std::move(*second_issue), EditGestureSubmission::Committed);
+        REQUIRE_FALSE(foreign);
+        REQUIRE(foreign.error() == EditGestureIdentityError::ForeignOrStaleIssue);
+        REQUIRE(first.has_pending_identity());
+        REQUIRE(second.has_pending_identity());
+        REQUIRE(first.acknowledge(std::move(*first_issue), EditGestureSubmission::Committed));
+        REQUIRE(second.acknowledge(std::move(*second_issue), EditGestureSubmission::Rejected));
+    }
+}
+
+TEST_CASE("Gesture issue lowering makes Begin phase authoritative",
+          "[gesture-identity][phase-authority]") {
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto created = EditGestureIdentityAllocator::create(writer);
+    REQUIRE(created);
+    auto allocator = std::move(created).value();
+
+    auto begin = allocator.issue(writer, session->revision(), GesturePhase::Begin);
+    REQUIRE(begin);
+    const auto supplied = move_clip_intent(GesturePhase::Single, 0, kTicksPerQuarter);
+    auto begin_tx = lower_issue(*begin, supplied);
+    REQUIRE(supplied.phase == GesturePhase::Single);
+    REQUIRE(begin_tx.gesture_phase == GesturePhase::Begin);
+    REQUIRE(session->submit(writer, std::move(begin_tx)));
+    REQUIRE(allocator.acknowledge(std::move(*begin), EditGestureSubmission::Committed));
+    REQUIRE(allocator.state() == EditGestureIdentityState::Open);
+
+    auto end = allocator.issue(writer, session->revision(), GesturePhase::End);
+    REQUIRE(end);
+    auto end_tx = lower_issue(
+        *end, move_clip_intent(GesturePhase::End, kTicksPerQuarter, 2 * kTicksPerQuarter));
+    REQUIRE(session->submit(writer, std::move(end_tx)));
+    REQUIRE(allocator.acknowledge(std::move(*end), EditGestureSubmission::Committed));
+    REQUIRE(session->undo(writer));
+    REQUIRE(current_clip_start(*session) == 0);
+}
+
+TEST_CASE("Gesture issue lowering makes End phase authoritative",
+          "[gesture-identity][phase-authority]") {
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto created = EditGestureIdentityAllocator::create(writer);
+    REQUIRE(created);
+    auto allocator = std::move(created).value();
+
+    auto begin = allocator.issue(writer, session->revision(), GesturePhase::Begin);
+    REQUIRE(begin);
+    auto begin_tx = lower_issue(*begin, move_clip_intent(GesturePhase::Begin, 0, kTicksPerQuarter));
+    REQUIRE(session->submit(writer, std::move(begin_tx)));
+    REQUIRE(allocator.acknowledge(std::move(*begin), EditGestureSubmission::Committed));
+
+    auto end = allocator.issue(writer, session->revision(), GesturePhase::End);
+    REQUIRE(end);
+    const auto supplied =
+        move_clip_intent(GesturePhase::Update, kTicksPerQuarter, 2 * kTicksPerQuarter);
+    auto end_tx = lower_issue(*end, supplied);
+    REQUIRE(supplied.phase == GesturePhase::Update);
+    REQUIRE(end_tx.gesture_phase == GesturePhase::End);
+    REQUIRE(session->submit(writer, std::move(end_tx)));
+    REQUIRE(allocator.acknowledge(std::move(*end), EditGestureSubmission::Committed));
+    REQUIRE(allocator.state() == EditGestureIdentityState::Closed);
+    REQUIRE(session->undo(writer));
+    REQUIRE(current_clip_start(*session) == 0);
 }
 
 TEST_CASE("Rejected begin and end submissions retry with fresh IDs in one undo group") {
@@ -331,48 +466,49 @@ TEST_CASE("Rejected begin and end submissions retry with fresh IDs in one undo g
 
     auto stale_begin = allocator.issue(writer, {99}, GesturePhase::Begin);
     REQUIRE(stale_begin);
-    auto stale_result = session->submit(
-        writer, lower_issue(*stale_begin, move_clip_intent(GesturePhase::Begin, 0,
-                                                          kTicksPerQuarter)));
+    auto stale_tx =
+        lower_issue(*stale_begin, move_clip_intent(GesturePhase::Begin, 0, kTicksPerQuarter));
+    const auto stale_transaction_sequence = stale_tx.id.sequence;
+    const auto stale_command_sequence = stale_tx.commands.front().id.sequence;
+    auto stale_result = session->submit(writer, std::move(stale_tx));
     REQUIRE_FALSE(stale_result);
     REQUIRE(stale_result.error().code == ConflictCode::StaleRevision);
-    REQUIRE(allocator.acknowledge(*stale_begin, EditGestureSubmission::Rejected));
+    REQUIRE(allocator.acknowledge(std::move(*stale_begin), EditGestureSubmission::Rejected));
     REQUIRE(allocator.state() == EditGestureIdentityState::AwaitingBegin);
 
     auto begin = allocator.issue(writer, session->revision(), GesturePhase::Begin);
     REQUIRE(begin);
-    REQUIRE(begin->identity().transaction_id.sequence >
-            stale_begin->identity().transaction_id.sequence);
-    REQUIRE(begin->identity().command_id.sequence > stale_begin->identity().command_id.sequence);
-    REQUIRE(begin->identity().undo_group == group);
-    REQUIRE(session->submit(
-        writer, lower_issue(*begin, move_clip_intent(GesturePhase::Begin, 0,
-                                                    kTicksPerQuarter))));
-    REQUIRE(allocator.acknowledge(*begin, EditGestureSubmission::Committed));
+    auto begin_tx = lower_issue(*begin, move_clip_intent(GesturePhase::Begin, 0, kTicksPerQuarter));
+    REQUIRE(begin_tx.id.sequence > stale_transaction_sequence);
+    REQUIRE(begin_tx.commands.front().id.sequence > stale_command_sequence);
+    REQUIRE(begin_tx.undo_group == group);
+    REQUIRE(session->submit(writer, std::move(begin_tx)));
+    REQUIRE(allocator.acknowledge(std::move(*begin), EditGestureSubmission::Committed));
     REQUIRE(allocator.state() == EditGestureIdentityState::Open);
     REQUIRE(current_clip_start(*session) == kTicksPerQuarter);
 
     auto rejected_end = allocator.issue(writer, session->revision(), GesturePhase::End);
     REQUIRE(rejected_end);
-    auto rejected_result = session->submit(
-        writer, lower_issue(*rejected_end,
-                            move_clip_intent(GesturePhase::End, 0, 2 * kTicksPerQuarter)));
+    auto rejected_end_tx =
+        lower_issue(*rejected_end, move_clip_intent(GesturePhase::End, 0, 2 * kTicksPerQuarter));
+    const auto rejected_transaction_sequence = rejected_end_tx.id.sequence;
+    const auto rejected_command_sequence = rejected_end_tx.commands.front().id.sequence;
+    auto rejected_result = session->submit(writer, std::move(rejected_end_tx));
     REQUIRE_FALSE(rejected_result);
     REQUIRE(rejected_result.error().code == ConflictCode::ExpectedValueMismatch);
-    REQUIRE(allocator.acknowledge(*rejected_end, EditGestureSubmission::Rejected));
+    REQUIRE(allocator.acknowledge(std::move(*rejected_end), EditGestureSubmission::Rejected));
     REQUIRE(allocator.state() == EditGestureIdentityState::Open);
     REQUIRE(current_clip_start(*session) == kTicksPerQuarter);
 
     auto end = allocator.issue(writer, session->revision(), GesturePhase::End);
     REQUIRE(end);
-    REQUIRE(end->identity().transaction_id.sequence >
-            rejected_end->identity().transaction_id.sequence);
-    REQUIRE(end->identity().command_id.sequence > rejected_end->identity().command_id.sequence);
-    REQUIRE(end->identity().undo_group == group);
-    REQUIRE(session->submit(
-        writer, lower_issue(*end, move_clip_intent(GesturePhase::End, kTicksPerQuarter,
-                                                  2 * kTicksPerQuarter))));
-    REQUIRE(allocator.acknowledge(*end, EditGestureSubmission::Committed));
+    auto end_tx = lower_issue(
+        *end, move_clip_intent(GesturePhase::End, kTicksPerQuarter, 2 * kTicksPerQuarter));
+    REQUIRE(end_tx.id.sequence > rejected_transaction_sequence);
+    REQUIRE(end_tx.commands.front().id.sequence > rejected_command_sequence);
+    REQUIRE(end_tx.undo_group == group);
+    REQUIRE(session->submit(writer, std::move(end_tx)));
+    REQUIRE(allocator.acknowledge(std::move(*end), EditGestureSubmission::Committed));
     REQUIRE(allocator.state() == EditGestureIdentityState::Closed);
     REQUIRE(current_clip_start(*session) == 2 * kTicksPerQuarter);
 
@@ -391,31 +527,30 @@ TEST_CASE("Rejected cancel submission stays retryable and undo reverts its gestu
     auto begin = allocator.issue(writer, session->revision(), GesturePhase::Begin);
     REQUIRE(begin);
     REQUIRE(session->submit(
-        writer, lower_issue(*begin, move_clip_intent(GesturePhase::Begin, 0,
-                                                    kTicksPerQuarter))));
-    REQUIRE(allocator.acknowledge(*begin, EditGestureSubmission::Committed));
+        writer, lower_issue(*begin, move_clip_intent(GesturePhase::Begin, 0, kTicksPerQuarter))));
+    REQUIRE(allocator.acknowledge(std::move(*begin), EditGestureSubmission::Committed));
 
     auto rejected_cancel = allocator.issue(writer, session->revision(), GesturePhase::Cancel);
     REQUIRE(rejected_cancel);
-    auto rejected_result = session->submit(
-        writer, lower_issue(*rejected_cancel,
-                            move_clip_intent(GesturePhase::Cancel, 0, 2 * kTicksPerQuarter)));
+    auto rejected_cancel_tx = lower_issue(
+        *rejected_cancel, move_clip_intent(GesturePhase::Cancel, 0, 2 * kTicksPerQuarter));
+    const auto rejected_transaction_sequence = rejected_cancel_tx.id.sequence;
+    const auto rejected_command_sequence = rejected_cancel_tx.commands.front().id.sequence;
+    auto rejected_result = session->submit(writer, std::move(rejected_cancel_tx));
     REQUIRE_FALSE(rejected_result);
     REQUIRE(rejected_result.error().code == ConflictCode::ExpectedValueMismatch);
-    REQUIRE(allocator.acknowledge(*rejected_cancel, EditGestureSubmission::Rejected));
+    REQUIRE(allocator.acknowledge(std::move(*rejected_cancel), EditGestureSubmission::Rejected));
     REQUIRE(allocator.state() == EditGestureIdentityState::Open);
 
     auto cancel = allocator.issue(writer, session->revision(), GesturePhase::Cancel);
     REQUIRE(cancel);
-    REQUIRE(cancel->identity().transaction_id.sequence >
-            rejected_cancel->identity().transaction_id.sequence);
-    REQUIRE(cancel->identity().command_id.sequence >
-            rejected_cancel->identity().command_id.sequence);
-    REQUIRE(cancel->identity().undo_group == group);
-    REQUIRE(session->submit(
-        writer, lower_issue(*cancel, move_clip_intent(GesturePhase::Cancel, kTicksPerQuarter,
-                                                     2 * kTicksPerQuarter))));
-    REQUIRE(allocator.acknowledge(*cancel, EditGestureSubmission::Committed));
+    auto cancel_tx = lower_issue(
+        *cancel, move_clip_intent(GesturePhase::Cancel, kTicksPerQuarter, 2 * kTicksPerQuarter));
+    REQUIRE(cancel_tx.id.sequence > rejected_transaction_sequence);
+    REQUIRE(cancel_tx.commands.front().id.sequence > rejected_command_sequence);
+    REQUIRE(cancel_tx.undo_group == group);
+    REQUIRE(session->submit(writer, std::move(cancel_tx)));
+    REQUIRE(allocator.acknowledge(std::move(*cancel), EditGestureSubmission::Committed));
     REQUIRE(allocator.state() == EditGestureIdentityState::Closed);
     REQUIRE(current_clip_start(*session) == 2 * kTicksPerQuarter);
 
@@ -448,8 +583,7 @@ TEST_CASE("Gesture identity exhaustion fails closed without reusing partial IDs"
     auto transaction_created = EditGestureIdentityAllocator::create(transaction_writer);
     REQUIRE(transaction_created);
     auto transaction_allocator = std::move(transaction_created).value();
-    auto no_transaction =
-        transaction_allocator.issue(transaction_writer, {}, GesturePhase::Begin);
+    auto no_transaction = transaction_allocator.issue(transaction_writer, {}, GesturePhase::Begin);
     REQUIRE_FALSE(no_transaction);
     REQUIRE(no_transaction.error() == EditGestureIdentityError::IdentityExhausted);
     REQUIRE(transaction_allocator.state() == EditGestureIdentityState::Exhausted);

@@ -184,26 +184,37 @@ class EditGestureIdentityIssue {
     EditGestureIdentityIssue& operator=(const EditGestureIdentityIssue&) = delete;
     EditGestureIdentityIssue(EditGestureIdentityIssue&& other) noexcept
         : identity_(std::exchange(other.identity_, {})),
-          phase_(std::exchange(other.phase_, timeline::GesturePhase::Single)) {}
+          phase_(std::exchange(other.phase_, timeline::GesturePhase::Single)),
+          provenance_(std::exchange(other.provenance_, {})) {}
     EditGestureIdentityIssue& operator=(EditGestureIdentityIssue&&) = delete;
 
-    /// Returns the identity to pass unchanged to lower_edit_intent.
-    const EditIntentIdentity& identity() const noexcept {
-        return identity_;
-    }
+    /// Lowers `intent` with this issue's authoritative gesture phase and identity.
+    ///
+    /// The caller-supplied phase is ignored so the transaction submitted to a
+    /// DocumentSession cannot diverge from the phase later acknowledged here.
+    [[nodiscard]] runtime::Result<timeline::Transaction, timeline::ModelError>
+    lower(EditIntent intent) const;
 
-    /// Returns the phase the matching intent must carry.
+    /// Returns the authoritative phase used by lower().
     timeline::GesturePhase phase() const noexcept {
         return phase_;
     }
 
   private:
     friend class EditGestureIdentityAllocator;
-    EditGestureIdentityIssue(EditIntentIdentity identity, timeline::GesturePhase phase) noexcept
-        : identity_(std::move(identity)), phase_(phase) {}
+    EditGestureIdentityIssue(EditIntentIdentity identity, timeline::GesturePhase phase,
+                             timeline::WriterToken::Provenance provenance) noexcept
+        : identity_(std::move(identity)), phase_(phase), provenance_(provenance) {}
+
+    void invalidate() noexcept {
+        identity_ = {};
+        phase_ = timeline::GesturePhase::Single;
+        provenance_ = {};
+    }
 
     EditIntentIdentity identity_;
     timeline::GesturePhase phase_ = timeline::GesturePhase::Single;
+    timeline::WriterToken::Provenance provenance_;
 };
 
 /// Allocates one undo group and a submission-safe stream of gesture identities.
@@ -212,12 +223,13 @@ class EditGestureIdentityIssue {
 /// transaction can be rejected after its IDs are allocated, so only a matching
 /// `Committed` acknowledgement advances Begin, End, or Cancel. A `Rejected`
 /// acknowledgement keeps the last confirmed state and permits a fresh-ID retry
-/// with the same undo group. Exactly one issue may await acknowledgement.
+/// with the same undo group. Every matching acknowledgement consumes its issue,
+/// and exactly one issue may await acknowledgement.
 ///
 /// This is control-thread state, not a concurrent reservation in
-/// DocumentSession. The session still owns the one-open-gesture rule and is the
-/// authority for writer provenance: separate sessions can assign equal numeric
-/// writer and group IDs, which this value-only helper cannot distinguish.
+/// DocumentSession. The session still owns the one-open-gesture rule and remains
+/// the submission authority. Opaque writer provenance prevents equal numeric ID
+/// streams from separate sessions from being mistaken for one another here.
 /// Cancel closes the group after a successful submission; reverting its applied
 /// edits remains the caller's subsequent `DocumentSession::undo()` operation.
 class EditGestureIdentityAllocator {
@@ -225,7 +237,8 @@ class EditGestureIdentityAllocator {
     /// Allocates the gesture's sole undo group at pointer-down.
     static runtime::Result<EditGestureIdentityAllocator, EditGestureIdentityError>
     create(timeline::WriterToken& writer) noexcept {
-        if (!writer.id().valid())
+        const auto provenance = writer.provenance();
+        if (!provenance.valid())
             return runtime::Result<EditGestureIdentityAllocator, EditGestureIdentityError>(
                 runtime::Err(EditGestureIdentityError::InvalidWriter));
 
@@ -234,14 +247,14 @@ class EditGestureIdentityAllocator {
             return runtime::Result<EditGestureIdentityAllocator, EditGestureIdentityError>(
                 runtime::Err(EditGestureIdentityError::IdentityExhausted));
 
-        return runtime::Result<EditGestureIdentityAllocator, EditGestureIdentityError>(runtime::Ok(
-            EditGestureIdentityAllocator(writer.id(), undo_group)));
+        return runtime::Result<EditGestureIdentityAllocator, EditGestureIdentityError>(
+            runtime::Ok(EditGestureIdentityAllocator(provenance, undo_group)));
     }
 
     EditGestureIdentityAllocator(const EditGestureIdentityAllocator&) = delete;
     EditGestureIdentityAllocator& operator=(const EditGestureIdentityAllocator&) = delete;
     EditGestureIdentityAllocator(EditGestureIdentityAllocator&& other) noexcept
-        : writer_id_(std::exchange(other.writer_id_, {})),
+        : provenance_(std::exchange(other.provenance_, {})),
           undo_group_(std::exchange(other.undo_group_, {})),
           state_(std::exchange(other.state_, EditGestureIdentityState::Closed)),
           pending_(std::exchange(other.pending_, false)),
@@ -265,9 +278,9 @@ class EditGestureIdentityAllocator {
             return issue_error(EditGestureIdentityError::IdentityExhausted);
         if (pending_)
             return issue_error(EditGestureIdentityError::IdentityPending);
-        if (!writer.id().valid())
+        if (!writer.provenance().valid())
             return issue_error(EditGestureIdentityError::InvalidWriter);
-        if (writer.id() != writer_id_)
+        if (writer.provenance() != provenance_)
             return issue_error(EditGestureIdentityError::WriterMismatch);
         if (!phase_permitted(phase))
             return issue_error(EditGestureIdentityError::InvalidPhase);
@@ -291,21 +304,22 @@ class EditGestureIdentityAllocator {
         pending_command_ = command_id;
         pending_phase_ = phase;
         return runtime::Result<EditGestureIdentityIssue, EditGestureIdentityError>(
-            runtime::Ok(EditGestureIdentityIssue(std::move(identity), phase)));
+            runtime::Ok(EditGestureIdentityIssue(std::move(identity), phase, provenance_)));
     }
 
     /// Records the authoritative submission outcome for exactly one issue.
     ///
     /// A foreign, moved-from, already-acknowledged, or superseded issue is stale
-    /// and cannot change either the pending issue or the confirmed lifecycle.
+    /// and cannot change either the pending issue or the confirmed lifecycle. A
+    /// matching issue is invalidated for both committed and rejected outcomes.
     runtime::Result<EditGestureIdentityState, EditGestureIdentityError>
-    acknowledge(const EditGestureIdentityIssue& issue,
-                EditGestureSubmission submission) noexcept {
+    acknowledge(EditGestureIdentityIssue&& issue, EditGestureSubmission submission) noexcept {
         if (!matches_pending(issue))
             return runtime::Result<EditGestureIdentityState, EditGestureIdentityError>(
                 runtime::Err(EditGestureIdentityError::ForeignOrStaleIssue));
 
         const auto phase = pending_phase_;
+        issue.invalidate();
         clear_pending();
         if (submission == EditGestureSubmission::Committed)
             state_ = committed_state_after(phase);
@@ -329,9 +343,9 @@ class EditGestureIdentityAllocator {
     }
 
   private:
-    EditGestureIdentityAllocator(timeline::WriterId writer_id,
+    EditGestureIdentityAllocator(timeline::WriterToken::Provenance provenance,
                                  timeline::UndoGroupId undo_group) noexcept
-        : writer_id_(writer_id), undo_group_(undo_group) {}
+        : provenance_(provenance), undo_group_(undo_group) {}
 
     bool phase_permitted(timeline::GesturePhase phase) const noexcept {
         if (state_ == EditGestureIdentityState::AwaitingBegin)
@@ -342,14 +356,13 @@ class EditGestureIdentityAllocator {
 
     bool matches_pending(const EditGestureIdentityIssue& issue) const noexcept {
         const auto& identity = issue.identity_;
-        return pending_ && issue.phase_ == pending_phase_ &&
+        return pending_ && issue.provenance_ == provenance_ && issue.phase_ == pending_phase_ &&
                identity.transaction_id == pending_transaction_ &&
                identity.expected_revision == pending_revision_ &&
                identity.command_id == pending_command_ && identity.undo_group == undo_group_;
     }
 
-    static EditGestureIdentityState
-    committed_state_after(timeline::GesturePhase phase) noexcept {
+    static EditGestureIdentityState committed_state_after(timeline::GesturePhase phase) noexcept {
         if (phase == timeline::GesturePhase::Begin || phase == timeline::GesturePhase::Update)
             return EditGestureIdentityState::Open;
         return EditGestureIdentityState::Closed;
@@ -369,7 +382,7 @@ class EditGestureIdentityAllocator {
             runtime::Err(error));
     }
 
-    timeline::WriterId writer_id_;
+    timeline::WriterToken::Provenance provenance_;
     timeline::UndoGroupId undo_group_;
     EditGestureIdentityState state_ = EditGestureIdentityState::AwaitingBegin;
     bool pending_ = false;
@@ -448,6 +461,12 @@ lower_note_edit_intent(const ValidatedNoteEditIntent& intent,
 /// at commit.
 runtime::Result<timeline::Transaction, timeline::ModelError>
 lower_edit_intent(const EditIntent& intent, const EditIntentIdentity& identity);
+
+inline runtime::Result<timeline::Transaction, timeline::ModelError>
+EditGestureIdentityIssue::lower(EditIntent intent) const {
+    intent.phase = phase_;
+    return lower_edit_intent(intent, identity_);
+}
 
 /// @}
 
