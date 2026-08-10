@@ -2553,6 +2553,10 @@ signed/notarized `.dmg`, so the version and asset metadata must move together.
   When adding optional shell arguments in `build.yml` (for example macOS-only
   `-G Ninja`), use bash arrays and expand them as `"${args[@]}"`; scalar
   `$args` trips actionlint/shellcheck word-splitting checks.
+  Shipyard's `workflow_dispatch` payload has no `pull_request.base.sha`, so its
+  shallow build checkout must fetch `origin/main` before CTest runs the
+  fail-closed agent-capability history gate. Do not remove that focused fetch
+  unless the dispatch contract starts supplying an exact protected-base SHA.
 - **Heartbeat line during long validation** (Shipyard v0.29.0). A
   20-minute lane now prints periodic progress instead of leaving a
   silent terminal. Helpful when watching `shipyard ship` interactively.

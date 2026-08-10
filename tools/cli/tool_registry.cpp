@@ -714,18 +714,129 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
 
     auto venv_dir = tools_dir() / "python-envs" / tool.id;
     auto venv_path = venv_dir / ".venv";
+    const auto rollback_path = venv_dir / ".venv.rollback";
+    const auto install_complete_path = venv_path / ".pulp-install-complete";
+#ifdef _WIN32
+    const auto wrapper_path = venv_dir / "run.bat";
+    const auto wrapper_rollback_path = venv_dir / "run.bat.rollback";
+#else
+    const auto wrapper_path = venv_dir / "run.sh";
+    const auto wrapper_rollback_path = venv_dir / "run.sh.rollback";
+#endif
+
+    // Recover conservatively if a previous replacement was interrupted. A
+    // completed replacement carries its marker; otherwise the saved
+    // environment remains the last known usable copy.
+    if (fs::exists(rollback_path)) {
+        std::error_code recovery_error;
+        if (fs::exists(install_complete_path)) {
+            fs::remove_all(rollback_path, recovery_error);
+            if (!recovery_error)
+                fs::remove(wrapper_rollback_path, recovery_error);
+        } else {
+            fs::remove_all(venv_path, recovery_error);
+            if (!recovery_error)
+                fs::rename(rollback_path, venv_path, recovery_error);
+            if (!recovery_error && fs::exists(wrapper_rollback_path)) {
+                fs::remove(wrapper_path, recovery_error);
+                if (!recovery_error)
+                    fs::rename(wrapper_rollback_path, wrapper_path,
+                               recovery_error);
+            }
+        }
+        if (recovery_error) {
+            result.error = "Failed to recover interrupted Python environment at "
+                + venv_path.string() + ": " + recovery_error.message();
+            return result;
+        }
+    }
+    if (!fs::exists(rollback_path) &&
+        fs::exists(install_complete_path) &&
+        fs::exists(wrapper_rollback_path)) {
+        std::error_code cleanup_error;
+        fs::remove(wrapper_rollback_path, cleanup_error);
+        if (cleanup_error) {
+            result.error = "Failed to finish Python wrapper recovery at "
+                + wrapper_path.string() + ": " + cleanup_error.message();
+            return result;
+        }
+    }
 
     if (!force && fs::exists(venv_path)) {
-        // Already installed
-#ifdef _WIN32
-        result.binary_path = venv_dir / "run.bat";
-#else
-        result.binary_path = venv_dir / "run.sh";
-#endif
-        result.ok = fs::exists(result.binary_path);
-        result.installed_version = tool.pinned_version;
-        return result;
+        result.binary_path = wrapper_path;
+        const auto manifest_path = venv_dir / "manifest.json";
+        const std::string version_field =
+            "\"version\": \"" + tool.pinned_version + "\"";
+        const std::string compact_version_field =
+            "\"version\":\"" + tool.pinned_version + "\"";
+        const std::string manifest_content = fs::exists(manifest_path)
+            ? read_file(manifest_path) : std::string{};
+        const std::string completion_content = fs::exists(install_complete_path)
+            ? read_file(install_complete_path) : std::string{};
+        const bool environment_ok =
+            completion_content == "version=" + tool.pinned_version + "\n";
+        const bool version_ok = fs::exists(manifest_path) &&
+            (manifest_content.find(version_field) != std::string::npos ||
+             manifest_content.find(compact_version_field) != std::string::npos);
+        if (fs::exists(result.binary_path) && version_ok && environment_ok) {
+            result.ok = true;
+            result.installed_version = tool.pinned_version;
+            return result;
+        }
+        // A venv without the current manifest is stale. Reinstall it instead
+        // of reporting the registry pin as if it described the installed code.
     }
+
+    // `uv venv` may reuse an existing environment, and a normal `uv pip
+    // install` is allowed to leave already-installed package bytes in place.
+    // Save the managed environment before replacing it so stale bytes cannot
+    // survive, while a transient installer failure can still roll back.
+    bool has_rollback = false;
+    if (fs::exists(venv_path)) {
+        std::error_code save_error;
+        fs::rename(venv_path, rollback_path, save_error);
+        if (save_error) {
+            result.error = "Failed to preserve Python environment before replacement at "
+                + venv_path.string() + ": " + save_error.message();
+            return result;
+        }
+        has_rollback = true;
+    }
+    bool has_wrapper_rollback = false;
+    if (fs::exists(wrapper_path)) {
+        std::error_code save_error;
+        fs::rename(wrapper_path, wrapper_rollback_path, save_error);
+        if (save_error) {
+            std::error_code restore_error;
+            if (has_rollback)
+                fs::rename(rollback_path, venv_path, restore_error);
+            result.error = "Failed to preserve Python wrapper before replacement at "
+                + wrapper_path.string() + ": " + save_error.message();
+            return result;
+        }
+        has_wrapper_rollback = true;
+    }
+
+    const auto restore_previous_environment = [&]() -> std::string {
+        std::error_code restore_error;
+        fs::remove_all(venv_path, restore_error);
+        if (restore_error)
+            return restore_error.message();
+        if (has_rollback) {
+            fs::rename(rollback_path, venv_path, restore_error);
+            if (restore_error)
+                return restore_error.message();
+        }
+        fs::remove(wrapper_path, restore_error);
+        if (restore_error)
+            return restore_error.message();
+        if (has_wrapper_rollback) {
+            fs::rename(wrapper_rollback_path, wrapper_path, restore_error);
+            if (restore_error)
+                return restore_error.message();
+        }
+        return {};
+    };
 
     // Create venv
     fs::create_directories(venv_dir);
@@ -734,7 +845,10 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
         uv_loc.path.string(), {"venv", venv_path.string(), "--python", "3.12"}, 120000);
 
     if (venv_result.exit_code != 0) {
+        const auto restore_error = restore_previous_environment();
         result.error = "Failed to create venv: " + venv_result.stderr_output;
+        if (!restore_error.empty())
+            result.error += "; rollback also failed: " + restore_error;
         return result;
     }
 
@@ -752,7 +866,10 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
         {"pip", "install", "--python", python_path, pip_spec}, 300000);
 
     if (pip_result.exit_code != 0) {
+        const auto restore_error = restore_previous_environment();
         result.error = "Failed to install " + pip_spec + ": " + pip_result.stderr_output;
+        if (!restore_error.empty())
+            result.error += "; rollback also failed: " + restore_error;
         return result;
     }
 
@@ -760,11 +877,9 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
 
     // Create wrapper script
 #ifdef _WIN32
-    auto wrapper_path = venv_dir / "run.bat";
     std::string wrapper = "@echo off\n\"" + python_path + "\" -m "
                         + run_module + " %*\n";
 #else
-    auto wrapper_path = venv_dir / "run.sh";
     std::string wrapper = "#!/bin/sh\nexec '" + python_path + "' -m "
                         + run_module + " \"$@\"\n";
 #endif
@@ -787,6 +902,29 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
              << "  \"module\": \"" << json_escape(run_module) << "\",\n"
              << "  \"venv_path\": \"" << venv_path.string() << "\"\n"
              << "}\n";
+    // The in-environment marker binds the installed bytes to the registry pin.
+    // Until it exists, the next invocation restores rollback_path. The outer
+    // manifest is written last: it is the public certificate and must never
+    // describe an environment whose replacement transaction is incomplete.
+    write_file(install_complete_path, "version=" + tool.pinned_version + "\n");
+    if (has_rollback) {
+        std::error_code remove_error;
+        fs::remove_all(rollback_path, remove_error);
+        if (remove_error) {
+            result.error = "Installed new Python environment but could not remove rollback at "
+                + rollback_path.string() + ": " + remove_error.message();
+            return result;
+        }
+    }
+    if (has_wrapper_rollback) {
+        std::error_code remove_error;
+        fs::remove(wrapper_rollback_path, remove_error);
+        if (remove_error) {
+            result.error = "Installed new Python wrapper but could not remove rollback at "
+                + wrapper_rollback_path.string() + ": " + remove_error.message();
+            return result;
+        }
+    }
     write_file(venv_dir / "manifest.json", manifest.str());
 
     result.ok = true;

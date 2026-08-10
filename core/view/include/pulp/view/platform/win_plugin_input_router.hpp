@@ -326,10 +326,12 @@ public:
         host_.input_request_repaint();
     }
 
-    void on_mouse_wheel(Point pt, float dx, float dy) {
+    void on_mouse_wheel(Point pt, float dx, float dy,
+                        std::uint16_t modifiers = 0) {
         WheelHost wheel_host;
         wheel_host.request_repaint = [this] { host_.input_request_repaint(); };
-        deliver_mouse_wheel(host_.input_root(), pt, dx, dy, wheel_host);
+        deliver_mouse_wheel(host_.input_root(), pt, dx, dy, modifiers,
+                            wheel_host);
     }
 
     // ── Keyboard and text ───────────────────────────────────────────────────

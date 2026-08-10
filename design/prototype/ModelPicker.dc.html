@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/pulp-design-system-d35e14f8-849f-422c-8e3c-b492737526a3/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/pulp-design-system-d35e14f8-849f-422c-8e3c-b492737526a3/tokens/colors.css">
+<link rel="stylesheet" href="_ds/pulp-design-system-d35e14f8-849f-422c-8e3c-b492737526a3/tokens/semantic.css">
+</helmet>
+
+<div style="width:340px;background:var(--surface-overlay);border:1px solid var(--line-strong);border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,0.6);padding:6px;font-family:'Jost',system-ui,sans-serif;color:var(--text)">
+
+  <sc-if value="{{ p.root }}" hint-placeholder-val="{{ true }}">
+    <div onClick="{{ p.toEngineer }}" style="display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:10px;cursor:pointer" style-hover="background:var(--surface-hover)">
+      <div style="flex:1"><div style="font-size:14px;font-weight:600;color:var(--text-strong)">Engineer</div><div style="font-size:12px;color:var(--text-muted)">Writes and compiles the DSP</div></div>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-muted)">{{ p.engName }}</span><i data-lucide="chevron-right" style="width:15px;height:15px;color:var(--text-faint)"></i>
+    </div>
+    <div onClick="{{ p.toDesigner }}" style="display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:10px;cursor:pointer" style-hover="background:var(--surface-hover)">
+      <div style="flex:1"><div style="font-size:14px;font-weight:600;color:var(--text-strong)">Designer</div><div style="font-size:12px;color:var(--text-muted)">Builds the plugin interface</div></div>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-muted)">{{ p.uiName }}</span><i data-lucide="chevron-right" style="width:15px;height:15px;color:var(--text-faint)"></i>
+    </div>
+    <div onClick="{{ p.toEffort }}" style="display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:10px;cursor:pointer" style-hover="background:var(--surface-hover)">
+      <div style="flex:1"><div style="font-size:14px;font-weight:600;color:var(--text-strong)">Effort</div></div>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-muted)">{{ p.effName }}</span><i data-lucide="chevron-right" style="width:15px;height:15px;color:var(--text-faint)"></i>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ p.eng }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ p.toRoot }}" style="display:flex;align-items:center;gap:8px;padding:9px 10px;font-size:14px;font-weight:600;color:var(--text);cursor:pointer"><i data-lucide="chevron-left" style="width:16px;height:16px"></i>Engineer model</div>
+    <sc-for list="{{ p.pickEng }}" as="m" hint-placeholder-count="4">
+      <div onClick="{{ m.onClick }}" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;cursor:pointer" style-hover="background:var(--surface-hover)">
+        <div style="flex:1"><div style="font-size:14px;font-weight:600;color:var(--text-strong)">{{ m.name }}</div><div style="font-size:11.5px;color:var(--text-muted)">{{ m.desc }}</div></div>
+        <div style="display:flex;gap:2px;align-items:flex-end;height:14px"><sc-for list="{{ m.bars }}" as="b" hint-placeholder-count="5"><span style="width:3px;height:12px;border-radius:1px;{{ b.extra }}"></span></sc-for></div>
+        <i data-lucide="check" style="width:15px;height:15px;color:var(--accent);{{ m.checkExtra }}"></i>
+      </div>
+    </sc-for>
+  </sc-if>
+
+  <sc-if value="{{ p.des }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ p.toRoot }}" style="display:flex;align-items:center;gap:8px;padding:9px 10px;font-size:14px;font-weight:600;color:var(--text);cursor:pointer"><i data-lucide="chevron-left" style="width:16px;height:16px"></i>Designer model</div>
+    <sc-for list="{{ p.pickUi }}" as="m" hint-placeholder-count="4">
+      <div onClick="{{ m.onClick }}" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;cursor:pointer" style-hover="background:var(--surface-hover)">
+        <div style="flex:1"><div style="font-size:14px;font-weight:600;color:var(--text-strong)">{{ m.name }}</div><div style="font-size:11.5px;color:var(--text-muted)">{{ m.desc }}</div></div>
+        <div style="display:flex;gap:2px;align-items:flex-end;height:14px"><sc-for list="{{ m.bars }}" as="b" hint-placeholder-count="5"><span style="width:3px;height:12px;border-radius:1px;{{ b.extra }}"></span></sc-for></div>
+        <i data-lucide="check" style="width:15px;height:15px;color:var(--accent);{{ m.checkExtra }}"></i>
+      </div>
+    </sc-for>
+  </sc-if>
+
+  <sc-if value="{{ p.eff }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ p.toRoot }}" style="display:flex;align-items:center;gap:8px;padding:9px 10px;font-size:14px;font-weight:600;color:var(--text);cursor:pointer"><i data-lucide="chevron-left" style="width:16px;height:16px"></i>Effort</div>
+    <sc-for list="{{ p.pickEff }}" as="e" hint-placeholder-count="5">
+      <div onClick="{{ e.onClick }}" style="display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:10px;cursor:pointer" style-hover="background:var(--surface-hover)"><span style="flex:1;font-size:14px;font-weight:600;color:var(--text-strong)">{{ e.label }}</span><i data-lucide="check" style="width:15px;height:15px;color:var(--accent);{{ e.checkExtra }}"></i></div>
+    </sc-for>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:340,&quot;height&quot;:220}}"></script>
+</body>
+</html>

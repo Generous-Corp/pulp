@@ -13,7 +13,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quality-lab"
-version = "0.1.0"
+version = "0.1.2"
 description = "Pulp Audio Quality Lab — offline reference-vs-candidate audio artifact detection"
 readme = "README.md"
 requires-python = ">=3.9"

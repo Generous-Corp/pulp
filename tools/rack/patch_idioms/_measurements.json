@@ -1,0 +1,142 @@
+{
+  "$comment": [
+    "Every number the gate reports, named once so an idiom's calibration can",
+    "refer to it and be wrong in a way somebody notices.",
+    "",
+    "WHY THIS FILE EXISTS. `patch_behaviour_thresholds.json` says which numbers",
+    "a behaviour flag DEMANDS, and every value in it is admitted to be an",
+    "untuned guess. An idiom's `listen_for.expect` says which numbers the",
+    "technique should PRODUCE, taken from what the technique is meant to sound",
+    "like rather than from what a threshold happens to be set to. Those are two",
+    "different claims about the same measurement, and having them written in the",
+    "same vocabulary is the whole point: where they disagree, one of them is",
+    "wrong, and the disagreement is findable (`library_problems` finds it).",
+    "",
+    "A field here has to be one `patch_behaviour.hpp` actually measures, and",
+    "every field the thresholds already use has to be here. Both directions are",
+    "checked, because either gap turns a calibration into a sentence nothing",
+    "will ever compare against anything.",
+    "",
+    "`means` is for a reader; `unit` is what the number is in; `higher_is` says",
+    "which way the scale runs, because 'expect a low interval_cv' is meaningless",
+    "unless you know that low means even."
+  ],
+  "schema": 1,
+  "fields": {
+    "pitch.voiced_fraction": {
+      "means": "how much of the run had a pitch that could be tracked at all",
+      "unit": "fraction of the run",
+      "higher_is": "more of the run was pitched"
+    },
+    "pitch.notes": {
+      "means": "held pitches counted in order, repeats included",
+      "unit": "count",
+      "higher_is": "more notes"
+    },
+    "pitch.distinct_pitches": {
+      "means": "how many different pitches were played",
+      "unit": "count",
+      "higher_is": "more variety"
+    },
+    "pitch.pitch_changes": {
+      "means": "how many times the pitch moved",
+      "unit": "count",
+      "higher_is": "more movement"
+    },
+    "pitch.semitone_range": {
+      "means": "the span from the lowest note to the highest",
+      "unit": "semitones",
+      "higher_is": "a wider register"
+    },
+    "pitch.median_hz": {
+      "means": "the middle of the pitches played",
+      "unit": "hertz",
+      "higher_is": "higher register"
+    },
+    "dynamics.peak_rms": {
+      "means": "the loudest moment",
+      "unit": "rms",
+      "higher_is": "louder"
+    },
+    "dynamics.mean_rms": {
+      "means": "the average level across the run",
+      "unit": "rms",
+      "higher_is": "louder"
+    },
+    "dynamics.end_over_peak": {
+      "means": "how loud the last half second is against the loudest moment",
+      "unit": "ratio",
+      "higher_is": "still playing at the end"
+    },
+    "dynamics.duty_cycle": {
+      "means": "how much of the run had sound in it",
+      "unit": "fraction of the run",
+      "higher_is": "fewer gaps"
+    },
+    "dynamics.rms_trend": {
+      "means": "whether the level rises or falls across the run",
+      "unit": "normalised slope",
+      "higher_is": "getting louder"
+    },
+    "onsets.onsets": {
+      "means": "how many attacks were detected",
+      "unit": "count",
+      "higher_is": "more events"
+    },
+    "onsets.per_second": {
+      "means": "attacks per second",
+      "unit": "events a second",
+      "higher_is": "busier"
+    },
+    "onsets.interval_mean_ms": {
+      "means": "the average gap between attacks",
+      "unit": "milliseconds",
+      "higher_is": "slower"
+    },
+    "onsets.interval_cv": {
+      "means": "how much the gaps between attacks differ from each other",
+      "unit": "coefficient of variation",
+      "higher_is": "less even"
+    },
+    "onsets.interval_trend": {
+      "means": "whether the gaps grow or shrink across the run",
+      "unit": "normalised slope",
+      "higher_is": "slowing down"
+    },
+    "onsets.periodicity": {
+      "means": "how strongly the attacks fall on one repeating pulse",
+      "unit": "autocorrelation peak",
+      "higher_is": "more metronomic"
+    },
+    "onsets.period_ms": {
+      "means": "the pulse the attacks fall on, when there is one",
+      "unit": "milliseconds",
+      "higher_is": "a slower pulse"
+    },
+    "spectrum.centroid_mean_hz": {
+      "means": "the average brightness",
+      "unit": "hertz",
+      "higher_is": "brighter"
+    },
+    "spectrum.centroid_cv": {
+      "means": "how much the brightness wobbles",
+      "unit": "coefficient of variation",
+      "higher_is": "more timbral movement"
+    },
+    "spectrum.centroid_trend": {
+      "means": "whether the sound opens or closes across the run",
+      "unit": "normalised slope",
+      "higher_is": "opening up"
+    },
+    "spectrum.centroid_range_octaves": {
+      "means": "the spread between the darkest and brightest moments",
+      "unit": "octaves",
+      "higher_is": "a wider sweep"
+    },
+    "spectrum.active_windows": {
+      "means": "how many analysis windows carried enough signal to have a spectrum",
+      "unit": "count",
+      "higher_is": "more of the run was measurable"
+    }
+  }
+}

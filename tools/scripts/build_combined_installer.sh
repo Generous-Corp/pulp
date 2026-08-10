@@ -19,6 +19,7 @@
 #     --sign-identity <Developer ID Application hash> \
 #     --installer-identity <Developer ID Installer hash> \
 #     --out DIR \
+#     [--architectures arm64|x86_64|arm64,x86_64]
 #     [--plugin au|vst3|clap PATH]...     (repeatable)
 #     [--product-title BUNDLE "Display Title"]...  (repeatable; renames the
 #                                                   expandable group for that
@@ -32,6 +33,8 @@
 #                                                   standalone that carries the
 #                                                   uninstaller, which a user
 #                                                   must not be able to skip)
+#     [--app-scripts "Title" DIR]...      (repeatable; a pkgbuild --scripts
+#                                          directory for the app of that title)
 #     [--content "Title" "Desc" DEST SRCDIR]...  (repeatable; installs SRCDIR's
 #                                                 contents to DEST, e.g. sample
 #                                                 models/IRs into Application Support)
@@ -45,12 +48,14 @@ VALIDATOR="$ROOT/tools/cmake/scripts/check_bundle_relocatable.py"
 CLI="${PULP_CPP:-$ROOT/build/tools/cli/pulp-cpp}"
 
 NAME=""; VERSION=""; APP_ID=""; INST_ID=""; OUT=""; NOTARIZE=1
+HOST_ARCHITECTURES=""
 # Parallel arrays of components.
 declare -a P_KIND P_PATH      # plugins: kind + bundle path
 declare -a A_TITLE A_PATH A_ENT  # apps: choice title + bundle path + entitlements (or "")
 declare -a C_TITLE C_DESC C_DEST C_SRC  # content: title + description + install dest + source dir
 declare -a A_GROUP                      # apps: plugin name to nest under ("" = top level)
 declare -a PT_NAME PT_TITLE             # product display titles: bundle name -> title
+declare -a S_TITLE S_DIR                 # app script directories: title -> directory
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -59,6 +64,7 @@ while [[ $# -gt 0 ]]; do
     --sign-identity) APP_ID="$2"; shift 2;;
     --installer-identity) INST_ID="$2"; shift 2;;
     --out) OUT="$2"; shift 2;;
+    --architectures) HOST_ARCHITECTURES="$2"; shift 2;;
     --no-notarize) NOTARIZE=0; shift;;
     --plugin) P_KIND+=("$2"); P_PATH+=("$3"); shift 3;;
     --product-title) PT_NAME+=("$2"); PT_TITLE+=("$3"); shift 3;;
@@ -73,12 +79,22 @@ while [[ $# -gt 0 ]]; do
     --app-for)
       A_GROUP+=("$2"); A_TITLE+=("$3"); A_PATH+=("$4")
       if [[ "${5:-}" == --* || -z "${5:-}" ]]; then A_ENT+=(""); shift 4; else A_ENT+=("$5"); shift 5; fi;;
+    --app-scripts) S_TITLE+=("$2"); S_DIR+=("$3"); shift 3;;
     --content) C_TITLE+=("$2"); C_DESC+=("$3"); C_DEST+=("$4"); C_SRC+=("$5"); shift 5;;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
 done
 [[ -n "$NAME" && -n "$VERSION" && -n "$APP_ID" && -n "$INST_ID" && -n "$OUT" ]] || {
   echo "missing required args (--name --version --sign-identity --installer-identity --out)" >&2; exit 2; }
+if [[ -z "$HOST_ARCHITECTURES" ]]; then
+  case "$(uname -m)" in
+    arm64|aarch64) HOST_ARCHITECTURES="arm64" ;;
+    x86_64|amd64) HOST_ARCHITECTURES="x86_64" ;;
+    *) echo "unsupported installer host architecture: $(uname -m)" >&2; exit 2 ;;
+  esac
+fi
+[[ "$HOST_ARCHITECTURES" =~ ^(arm64|x86_64)(,(arm64|x86_64))*$ ]] || {
+  echo "invalid --architectures: $HOST_ARCHITECTURES" >&2; exit 2; }
 
 UNINSTALL_IN="${UNINSTALL_IN:-}"
 WELCOME_FILE="${WELCOME_FILE:-}"; LICENSE_FILE="${LICENSE_FILE:-}"
@@ -343,8 +359,27 @@ for ((i=0; i<${#A_TITLE[@]}; i++)); do
     exit 2
   }
   f="$(basename "$p").pkg"
+  # Components that need to write outside their payload root (for example,
+  # user-specific Rack modules) may carry pkgbuild scripts. Match by title so
+  # callers can attach scripts to either --app or --app-for entries without
+  # changing the component graph.
+  SCRIPT_ARGS=()
+  for ((s=0; s<${#S_TITLE[@]}; s++)); do
+    [[ "${S_TITLE[$s]}" == "$t" ]] || continue
+    [[ -d "${S_DIR[$s]}" ]] || { echo "missing scripts dir: ${S_DIR[$s]}" >&2; exit 2; }
+    for hook in preinstall postinstall; do
+      if [[ -f "${S_DIR[$s]}/$hook" && ! -x "${S_DIR[$s]}/$hook" ]]; then
+        echo "scripts/$hook is not executable — it would ship and never run" >&2
+        exit 2
+      fi
+    done
+    SCRIPT_ARGS=(--scripts "${S_DIR[$s]}")
+    echo "  scripts: ${S_DIR[$s]}"
+    break
+  done
   pkgbuild --root "$r" --component-plist "$component_plist" \
     --identifier "com.pulp.$NAME.$id.pkg" --version "$VERSION" \
+    "${SCRIPT_ARGS[@]+"${SCRIPT_ARGS[@]}"}" \
     --install-location / "$STAGE/comp/$f" >/dev/null
   add_ref "$id" "$t" "$t" "$f"
   if [[ -n "${A_GROUP[$i]}" ]]; then
@@ -432,7 +467,9 @@ cat > "$STAGE/distribution.xml" <<XML
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
   <title>$NAME $VERSION</title><organization>com.pulp</organization>
-  <options customize="always" require-scripts="false" hostArchitectures="arm64"/>
+  <!-- pkgbuild component pre/postinstall hooks run independently of this
+       distribution-script flag. This distribution has no JavaScript layer. -->
+  <options customize="always" require-scripts="false" hostArchitectures="$HOST_ARCHITECTURES"/>
   $PANES
   <choices-outline>$CHOICES</choices-outline>
   $DEFS

@@ -1,0 +1,133 @@
+{
+  "modules": [
+    {
+      "slug": "VCO",
+      "name": "VCO",
+      "description": "Analog-voiced oscillator with 1V/oct tracking and four simultaneous waveform outputs",
+      "tags": [
+        "Oscillator",
+        "Polyphonic"
+      ],
+      "hp": 8,
+      "params": [
+        {
+          "id": 0,
+          "ident": "FREQ_PARAM",
+          "name": "Frequency",
+          "label": "FREQ",
+          "unit": " Hz",
+          "min_value": -4.0,
+          "max_value": 4.0,
+          "default_value": 0.0,
+          "kind": "KnobLarge",
+          "x_mm": 20.32,
+          "y_mm": 30.0,
+          "display_base": 2.0,
+          "display_multiplier": 261.6256
+        },
+        {
+          "id": 1,
+          "ident": "FINE_PARAM",
+          "name": "Fine tune",
+          "label": "FINE",
+          "unit": " cents",
+          "min_value": -1.0,
+          "max_value": 1.0,
+          "default_value": 0.0,
+          "kind": "Knob",
+          "x_mm": 11.8,
+          "y_mm": 52.0,
+          "display_multiplier": 100.0
+        },
+        {
+          "id": 2,
+          "ident": "PW_PARAM",
+          "name": "Pulse width",
+          "label": "PW",
+          "unit": "%",
+          "min_value": 0.05,
+          "max_value": 0.95,
+          "default_value": 0.5,
+          "kind": "Knob",
+          "x_mm": 28.84,
+          "y_mm": 52.0,
+          "display_multiplier": 100.0
+        },
+        {
+          "id": 3,
+          "ident": "FM_PARAM",
+          "name": "FM amount",
+          "label": "FM",
+          "unit": "%",
+          "min_value": -1.0,
+          "max_value": 1.0,
+          "default_value": 0.0,
+          "kind": "Trimpot",
+          "x_mm": 28.84,
+          "y_mm": 68.0,
+          "display_multiplier": 100.0
+        }
+      ],
+      "inputs": [
+        {
+          "id": 0,
+          "ident": "VOCT_INPUT",
+          "name": "1V/oct pitch",
+          "label": "V/OCT",
+          "role": "Pitch",
+          "x_mm": 11.8,
+          "y_mm": 84.0
+        },
+        {
+          "id": 1,
+          "ident": "FM_INPUT",
+          "name": "Frequency modulation",
+          "label": "FM",
+          "role": "Cv",
+          "x_mm": 28.84,
+          "y_mm": 84.0
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "SAW_OUTPUT",
+          "name": "Sawtooth",
+          "label": "SAW",
+          "role": "Audio",
+          "x_mm": 11.8,
+          "y_mm": 102.0
+        },
+        {
+          "id": 1,
+          "ident": "PULSE_OUTPUT",
+          "name": "Pulse",
+          "label": "PLS",
+          "role": "Audio",
+          "x_mm": 28.84,
+          "y_mm": 102.0
+        },
+        {
+          "id": 2,
+          "ident": "TRI_OUTPUT",
+          "name": "Triangle",
+          "label": "TRI",
+          "role": "Audio",
+          "x_mm": 11.8,
+          "y_mm": 118.0
+        },
+        {
+          "id": 3,
+          "ident": "SINE_OUTPUT",
+          "name": "Sine",
+          "label": "SIN",
+          "role": "Audio",
+          "x_mm": 28.84,
+          "y_mm": 118.0
+        }
+      ],
+      "lights": [],
+      "poly_follows": "VOCT_INPUT"
+    }
+  ]
+}

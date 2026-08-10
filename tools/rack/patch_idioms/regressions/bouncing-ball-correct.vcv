@@ -1,0 +1,189 @@
+{
+ "version": "2.6.6",
+ "modules": [
+  {
+   "id": 1,
+   "plugin": "ForgeModular",
+   "model": "DUALAD",
+   "pos": [
+    0,
+    0
+   ],
+   "params": [
+    {
+     "id": 0,
+     "value": 0.02
+    },
+    {
+     "id": 1,
+     "value": 0.18
+    },
+    {
+     "id": 4,
+     "value": 0.75
+    },
+    {
+     "id": 5,
+     "value": 0.95
+    }
+   ]
+  },
+  {
+   "id": 2,
+   "plugin": "ForgeModular",
+   "model": "MULT",
+   "pos": [
+    16,
+    0
+   ],
+   "params": []
+  },
+  {
+   "id": 3,
+   "plugin": "ForgeModular",
+   "model": "DUALATN",
+   "pos": [
+    22,
+    0
+   ],
+   "params": [
+    {
+     "id": 0,
+     "value": -0.65
+    },
+    {
+     "id": 1,
+     "value": 0.35
+    }
+   ]
+  },
+  {
+   "id": 4,
+   "plugin": "ForgeModular",
+   "model": "VCO",
+   "pos": [
+    30,
+    0
+   ],
+   "params": [
+    {
+     "id": 0,
+     "value": -1.5
+    }
+   ]
+  },
+  {
+   "id": 5,
+   "plugin": "ForgeModular",
+   "model": "LPGATE",
+   "pos": [
+    42,
+    0
+   ],
+   "params": [
+    {
+     "id": 0,
+     "value": 0.35
+    },
+    {
+     "id": 1,
+     "value": 0.25
+    }
+   ]
+  },
+  {
+   "id": 6,
+   "plugin": "Core",
+   "model": "AudioInterface2",
+   "pos": [
+    54,
+    0
+   ],
+   "params": [],
+   "data": {
+    "audio": {
+     "driver": 5,
+     "deviceName": "Mac Studio Speakers",
+     "sampleRate": 44100,
+     "blockSize": 256,
+     "inputOffset": 0,
+     "outputOffset": 0
+    }
+   }
+  }
+ ],
+ "cables": [
+  {
+   "id": 1,
+   "outputModuleId": 1,
+   "outputId": 0,
+   "inputModuleId": 1,
+   "inputId": 0,
+   "color": "#3695ef"
+  },
+  {
+   "id": 2,
+   "outputModuleId": 1,
+   "outputId": 1,
+   "inputModuleId": 2,
+   "inputId": 0,
+   "color": "#8b4ade"
+  },
+  {
+   "id": 3,
+   "outputModuleId": 2,
+   "outputId": 0,
+   "inputModuleId": 1,
+   "inputId": 2,
+   "color": "#3695ef"
+  },
+  {
+   "id": 4,
+   "outputModuleId": 2,
+   "outputId": 1,
+   "inputModuleId": 3,
+   "inputId": 0,
+   "color": "#8b4ade"
+  },
+  {
+   "id": 5,
+   "outputModuleId": 3,
+   "outputId": 0,
+   "inputModuleId": 1,
+   "inputId": 1,
+   "color": "#8b4ade"
+  },
+  {
+   "id": 6,
+   "outputModuleId": 1,
+   "outputId": 3,
+   "inputModuleId": 5,
+   "inputId": 1,
+   "color": "#8b4ade"
+  },
+  {
+   "id": 7,
+   "outputModuleId": 4,
+   "outputId": 2,
+   "inputModuleId": 5,
+   "inputId": 0,
+   "color": "#00b56e"
+  },
+  {
+   "id": 8,
+   "outputModuleId": 5,
+   "outputId": 0,
+   "inputModuleId": 6,
+   "inputId": 0,
+   "color": "#00b56e"
+  },
+  {
+   "id": 9,
+   "outputModuleId": 5,
+   "outputId": 0,
+   "inputModuleId": 6,
+   "inputId": 1,
+   "color": "#00b56e"
+  }
+ ]
+}

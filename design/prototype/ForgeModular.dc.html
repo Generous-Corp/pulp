@@ -1,0 +1,1403 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/pulp-design-system-d35e14f8-849f-422c-8e3c-b492737526a3/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/pulp-design-system-d35e14f8-849f-422c-8e3c-b492737526a3/tokens/colors.css">
+<link rel="stylesheet" href="_ds/pulp-design-system-d35e14f8-849f-422c-8e3c-b492737526a3/tokens/semantic.css">
+<link rel="stylesheet" href="_ds/pulp-design-system-d35e14f8-849f-422c-8e3c-b492737526a3/tokens/typography.css">
+<link rel="stylesheet" href="_ds/pulp-design-system-d35e14f8-849f-422c-8e3c-b492737526a3/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/pulp-design-system-d35e14f8-849f-422c-8e3c-b492737526a3/tokens/elevation.css">
+<link rel="stylesheet" href="_ds/pulp-design-system-d35e14f8-849f-422c-8e3c-b492737526a3/tokens/motion.css">
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:#07090C;height:100%}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{color:var(--ink-signal-bright)}
+  svg.lucide{stroke-width:1.75px}
+  i[data-lucide]{display:inline-block;width:20px;height:20px;color:inherit}
+  .fg-scroll::-webkit-scrollbar{width:8px;height:8px}
+  .fg-scroll::-webkit-scrollbar-thumb{background:rgba(220,232,250,0.14);border-radius:8px}
+  .fg-scroll::-webkit-scrollbar-track{background:transparent}
+  @keyframes fg-rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  @keyframes fg-breathe{0%,100%{opacity:.5;transform:scale(1)}50%{opacity:1;transform:scale(1.35)}}
+  .fg-breathe{animation:fg-breathe 1.5s cubic-bezier(.34,1.56,.64,1) infinite}
+  @keyframes fg-materialize{0%{opacity:0;transform:scale(.955);filter:blur(12px) saturate(.55)}55%{opacity:1;filter:blur(0) saturate(1.06)}100%{opacity:1;transform:scale(1);filter:none}}
+  .fg-materialize{animation:fg-materialize .78s cubic-bezier(.34,1.56,.64,1) both}
+  @keyframes fg-seat{0%{opacity:0;transform:translateY(-16px) scale(.98)}62%{opacity:1;transform:translateY(3px) scale(1.004)}100%{opacity:1;transform:none}}
+  .fg-seat{animation:fg-seat .82s cubic-bezier(.34,1.56,.64,1) both}
+  @keyframes fg-slack{0%{opacity:0;transform:scale(.994)}100%{opacity:1;transform:none}}
+  .fg-slack{animation:fg-slack .66s cubic-bezier(.2,.7,.3,1) both}
+  @keyframes fg-flash{0%{opacity:0;transform:scale(.86)}22%{opacity:.85}100%{opacity:0;transform:scale(1.14)}}
+  .fg-flash{animation:fg-flash .9s cubic-bezier(.2,.7,.3,1) both;pointer-events:none}
+  @media (prefers-reduced-motion: reduce){
+    .fg-materialize,.fg-seat,.fg-slack,.fg-flash,.fg-breathe{animation-duration:.001s !important}
+  }
+</style>
+<template id="__bundler_thumbnail"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><rect width="200" height="200" fill="#161A21"/><rect x="46" y="34" width="34" height="132" rx="5" fill="#2A2F36" stroke="#16DAC2" stroke-width="2"/><rect x="118" y="34" width="34" height="132" rx="5" fill="#2A2F36" stroke="#16DAC2" stroke-width="2"/><path d="M63 74 C 63 128, 135 128, 135 74" fill="none" stroke="#16DAC2" stroke-width="6" stroke-linecap="round"/></svg></template>
+</helmet>
+
+<div style="position:fixed;inset:0;background:radial-gradient(120% 120% at 50% -10%,#12131C 0%,#07090C 60%);display:flex;align-items:center;justify-content:center;overflow:hidden;padding-bottom:80px;font-family:'Jost',system-ui,sans-serif">
+
+  <div style="width:1280px;height:800px;flex:0 0 auto;transform:scale({{ scale }});transform-origin:center center;border-radius:18px;overflow:hidden;background:var(--surface-app);box-shadow:0 40px 120px rgba(0,0,0,0.6),0 0 0 1px rgba(255,255,255,0.04);position:relative;color:var(--text)">
+
+    <!-- ===================== TITLE BAR ===================== -->
+    <div style="height:38px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;background:var(--surface-panel);border-bottom:1px solid var(--line);position:relative;z-index:8">
+      <div style="display:flex;align-items:center;gap:10px;min-width:0">
+        <div style="width:20px;height:20px;border-radius:6px;background:linear-gradient(135deg,var(--ink-signal),var(--ink-indigo));display:flex;align-items:center;justify-content:center;box-shadow:var(--glow-sm)"><i data-lucide="grip-vertical" style="width:13px;height:13px;color:#04201d"></i></div>
+        <span style="font-size:13px;font-weight:600;color:var(--text-strong);letter-spacing:-0.01em">Forge Modular</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.08em;color:var(--text-faint);border:1px solid var(--line);border-radius:5px;padding:1px 6px">{{ docTag }}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <div onClick="{{ toggleRack }}" title="Simulate Rack running / not running" style="display:flex;align-items:center;gap:6px;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.06em;color:var(--text-muted);cursor:pointer">
+          <span style="width:7px;height:7px;border-radius:50%;{{ rackDotStyle }}"></span>{{ rackStatus }}
+        </div>
+        <div style="display:flex;gap:5px;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.06em;color:var(--text-faint)"><span style="border:1px solid var(--line);border-radius:5px;padding:2px 6px">VCV</span><span style="border:1px solid var(--line);border-radius:5px;padding:2px 6px">VST3</span><span style="border:1px solid var(--line);border-radius:5px;padding:2px 6px">STANDALONE</span></div>
+      </div>
+    </div>
+
+    <!-- ===================== BODY ===================== -->
+    <div style="position:absolute;top:38px;left:0;right:0;bottom:0;display:flex">
+
+      <!-- ICON RAIL -->
+      <div style="width:60px;flex:0 0 60px;background:var(--surface-panel);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:6px;z-index:7">
+        <div style="width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,var(--ink-signal),var(--ink-indigo));display:flex;align-items:center;justify-content:center;margin-bottom:8px;box-shadow:var(--glow-sm)"><i data-lucide="grip-vertical" style="width:18px;height:18px;color:#04201d"></i></div>
+        <sc-for list="{{ railItems }}" as="r" hint-placeholder-count="4">
+          <div onClick="{{ r.onClick }}" title="{{ r.title }}" style="position:relative;width:40px;height:40px;border-radius:11px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text-muted);{{ r.extra }}">
+            <sc-if value="{{ r.active }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;left:-12px;top:11px;width:3px;height:18px;border-radius:2px;background:var(--accent);box-shadow:var(--glow-sm)"></span></sc-if>
+            <i data-lucide="{{ r.icon }}" style="width:20px;height:20px"></i>
+          </div>
+        </sc-for>
+        <div style="flex:1"></div>
+        <div onClick="{{ goInstaller }}" title="Installer" style="width:34px;height:34px;border-radius:11px;display:flex;align-items:center;justify-content:center;color:var(--text-muted);cursor:pointer;{{ installerExtra }}"><i data-lucide="hard-drive-download" style="width:18px;height:18px"></i></div>
+        <div style="width:34px;height:34px;border-radius:50%;background:var(--surface-raised);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--text-muted);cursor:pointer;margin-top:6px"><i data-lucide="user" style="width:17px;height:17px"></i></div>
+      </div>
+
+      <!-- MAIN -->
+      <div style="flex:1;min-width:0;position:relative">
+
+        <!-- ================= HOME ================= -->
+        <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+          <div style="position:absolute;inset:0;display:flex;flex-direction:column;background:radial-gradient(90% 70% at 50% 26%,rgba(94,120,255,0.10),transparent 60%),radial-gradient(60% 50% at 84% 92%,rgba(22,218,194,0.08),transparent)">
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 60px">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.16em;color:var(--text-muted);margin-bottom:16px">FORGE MODULAR · FOR VCV RACK</div>
+              <h1 style="font-size:40px;font-weight:700;letter-spacing:-0.02em;color:var(--text-strong);margin:0 0 6px">{{ heroTitle }}</h1>
+              <div style="font-size:15px;color:var(--text-muted);margin:0 0 26px">{{ heroSub }}</div>
+
+              <div style="position:relative;width:700px;max-width:100%">
+
+                <!-- MODE TABS -->
+                <div style="display:flex;align-items:flex-end;position:relative;z-index:2">
+                  <div onClick="{{ setModeModule }}" style="display:flex;align-items:center;gap:9px;padding:0 16px;border-radius:12px 12px 0 0;cursor:pointer;font-size:13.5px;font-weight:600;border:1px solid;border-bottom:none;margin-bottom:-1px;{{ moduleTabExtra }}">
+                    <i data-lucide="rectangle-vertical" style="width:16px;height:16px"></i>Module
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.08em;font-weight:400;opacity:.6">ONE PANEL</span>
+                  </div>
+                  <div onClick="{{ setModePatch }}" style="display:flex;align-items:center;gap:9px;padding:0 16px;border-radius:12px 12px 0 0;cursor:pointer;font-size:13.5px;font-weight:600;border:1px solid;border-bottom:none;margin-bottom:-1px;margin-left:-1px;{{ patchTabExtra }}">
+                    <i data-lucide="cable" style="width:16px;height:16px"></i>Patch
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.08em;font-weight:400;opacity:.6">A WHOLE RACK</span>
+                  </div>
+                </div>
+
+                <!-- COMPOSER -->
+                <div style="position:relative;z-index:1;background:var(--surface-raised);border:1px solid var(--line-strong);border-radius:0 18px 18px 18px;padding:17px 18px 12px;box-shadow:0 18px 50px rgba(0,0,0,0.4)">
+
+                  <!-- MENTION PICKER -->
+                  <sc-if value="{{ mentionOpen }}" hint-placeholder-val="{{ false }}">
+                    <div style="position:absolute;left:14px;right:14px;top:calc(100% + 10px);background:var(--surface-overlay);border:1px solid var(--line-strong);border-radius:14px;box-shadow:0 26px 70px rgba(0,0,0,0.6);z-index:40;overflow:hidden;animation:fg-rise .16s ease-out">
+                      <div style="display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line)">
+                        <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--accent)">@</span>
+                        <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--text-strong)">{{ mentionQuery }}</span>
+                        <span style="width:1.5px;height:15px;background:var(--accent);animation:fg-breathe 1.1s steps(2,end) infinite"></span>
+                        <div style="flex:1"></div>
+                        <span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--text-muted)">{{ mentionCount }}</span>
+                      </div>
+                      <div class="fg-scroll" style="max-height:238px;overflow-y:auto;overflow-x:hidden;padding:6px">
+                        <sc-for list="{{ mentionResults }}" as="m" hint-placeholder-count="5">
+                          <div onClick="{{ m.onPick }}" style="display:flex;align-items:center;gap:12px;padding:9px 10px;border-radius:10px;cursor:pointer;{{ m.rowExtra }}" style-hover="background:var(--surface-hover)">
+                            <span style="display:flex;align-items:center;justify-content:center;gap:5px;width:74px;flex:0 0 74px;height:21px;border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.06em;{{ m.stateStyle }}"><i data-lucide="{{ m.stateIcon }}" style="width:11px;height:11px"></i>{{ m.stateLabel }}</span>
+                            <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--text-muted);width:206px;flex:0 0 206px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ m.slug }}</span>
+                            <span style="font-size:13px;color:var(--text-strong);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ m.name }}</span>
+                            <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--text-faint);white-space:nowrap">{{ m.tags }}</span>
+                          </div>
+                        </sc-for>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:14px;padding:9px 14px;border-top:1px solid var(--line);background:var(--surface-panel);font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-faint)">
+                        <span>4,705 MODULES · 543 PLUGINS · 425 BRANDS · INDEXED LOCALLY</span>
+                        <div style="flex:1"></div>
+                        <span>ONLY <span style="color:var(--success)">READY</span> CAN BE PATCHED NOW</span>
+                      </div>
+                    </div>
+                  </sc-if>
+
+                  <!-- mentioned chips -->
+                  <sc-if value="{{ hasChips }}" hint-placeholder-val="{{ false }}">
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:11px">
+                      <sc-for list="{{ chips }}" as="c" hint-placeholder-count="2">
+                        <div style="display:flex;align-items:center;gap:7px;height:28px;padding:0 9px 0 8px;border-radius:8px;background:var(--surface-overlay);border:1px solid {{ c.line }}">
+                          <i data-lucide="{{ c.icon }}" style="width:12px;height:12px;color:{{ c.color }}"></i>
+                          <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text)">{{ c.label }}</span>
+                          <span onClick="{{ c.onRemove }}" style="display:flex;cursor:pointer;color:var(--text-faint)"><i data-lucide="x" style="width:12px;height:12px"></i></span>
+                        </div>
+                      </sc-for>
+                    </div>
+                  </sc-if>
+
+                  <div onClick="{{ cycleExample }}" title="Click to cycle example prompts" style="font-size:16px;line-height:1.5;min-height:48px;cursor:text;{{ promptStyle }}">{{ promptText }}</div>
+
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;gap:10px">
+                    <div style="display:flex;align-items:center;gap:8px">
+                      <div onClick="{{ openMention }}" title="Mention a module or brand — @" style="width:34px;height:34px;border-radius:10px;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:15px">@</div>
+                      <div onClick="{{ rollRandom }}" title="{{ randomTitle }}" style="display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;border-radius:10px;border:1px solid var(--line);cursor:pointer;font-size:13px;color:var(--text)">
+                        <i data-lucide="dices" style="width:16px;height:16px;color:{{ randomColor }}"></i>{{ randomLabel }}
+                      </div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:9px">
+                      <div onClick="{{ doAsk }}" title="Answers in chat. Never changes what you have." style="display:flex;align-items:center;gap:8px;height:38px;padding:0 15px;border-radius:11px;border:1px solid var(--line-strong);background:var(--surface-overlay);cursor:pointer;font-size:13.5px;font-weight:600;color:var(--text)">
+                        <i data-lucide="message-circle-question" style="width:16px;height:16px;color:var(--text-muted)"></i>Ask
+                      </div>
+                      <div onClick="{{ doBuild }}" title="{{ buildTitle }}" style="display:flex;align-items:center;gap:8px;height:38px;padding:0 17px;border-radius:11px;background:var(--accent);cursor:pointer;font-size:13.5px;font-weight:700;color:var(--on-ink);box-shadow:var(--glow-sm)">
+                        <i data-lucide="hammer" style="width:16px;height:16px"></i>{{ buildLabel }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style="display:flex;align-items:center;gap:7px;margin-top:9px;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.05em;color:var(--text-faint)">
+                    <i data-lucide="corner-down-left" style="width:12px;height:12px"></i>ASK ANSWERS · BUILD REWRITES. TWO BUTTONS SO NOTHING IS INFERRED.
+                  </div>
+                </div>
+
+                <!-- ROLLED IDEA -->
+                <sc-if value="{{ rolled }}" hint-placeholder-val="{{ false }}">
+                  <div class="fg-slack" style="display:flex;align-items:center;gap:12px;margin-top:12px;padding:12px 14px;border-radius:13px;background:var(--surface-panel);border:1px solid var(--line-strong)">
+                    <i data-lucide="dices" style="width:17px;height:17px;color:{{ randomColor }};flex:0 0 auto"></i>
+                    <div style="flex:1;min-width:0">
+                      <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.1em;color:var(--text-faint);margin-bottom:3px">{{ rolledKind }} · IN THE BOX, NOT BUILT YET</div>
+                      <div style="font-size:13px;color:var(--text)">{{ rolledMeta }}</div>
+                    </div>
+                    <span onClick="{{ rollRandom }}" style="display:flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:9px;border:1px solid var(--line);cursor:pointer;font-size:12.5px;color:var(--text-muted)"><i data-lucide="rotate-cw" style="width:13px;height:13px"></i>Roll again</span>
+                  </div>
+                </sc-if>
+
+                <!-- ASK ANSWER (home) — proves Ask never touches your work -->
+                <sc-if value="{{ askAnswer }}" hint-placeholder-val="{{ false }}">
+                  <div class="fg-slack" style="margin-top:12px;padding:13px 15px;border-radius:13px;background:var(--surface-panel);border:1px solid var(--line-strong)">
+                    <div style="display:flex;align-items:center;gap:9px;margin-bottom:8px">
+                      <i data-lucide="message-circle-question" style="width:15px;height:15px;color:var(--ink-indigo)"></i>
+                      <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.1em;color:var(--text-faint)">ANSWER · NOTHING WAS BUILT</span>
+                      <div style="flex:1"></div>
+                      <span onClick="{{ clearAsk }}" style="font-size:12px;color:var(--text-faint);cursor:pointer">Dismiss</span>
+                    </div>
+                    <div style="font-size:13.5px;line-height:1.55;color:var(--text)">{{ askAnswer }}</div>
+                  </div>
+                </sc-if>
+
+                <!-- CAPABILITY PREFLIGHT -->
+                <sc-if value="{{ preflight }}" hint-placeholder-val="{{ false }}">
+                  <div class="fg-slack" style="margin-top:12px;border-radius:14px;background:var(--surface-panel);border:1px solid rgba(94,120,255,0.32);overflow:hidden">
+                    <div style="display:flex;align-items:center;gap:10px;padding:12px 15px 10px">
+                      <i data-lucide="lightbulb" style="width:17px;height:17px;color:var(--ink-indigo);flex:0 0 auto"></i>
+                      <div style="flex:1;font-size:13.5px;color:var(--text-strong)">{{ preflightTitle }}</div>
+                      <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.08em;color:var(--ink-indigo);border:1px solid rgba(94,120,255,0.4);border-radius:6px;padding:2px 7px">PREFLIGHT</span>
+                    </div>
+                    <div style="padding:0 15px 4px;font-size:13px;color:var(--text-muted);line-height:1.5">{{ preflightBody }}</div>
+                    <div style="padding:10px 15px 4px;display:flex;flex-direction:column;gap:6px">
+                      <sc-for list="{{ preflightOptions }}" as="o" hint-placeholder-count="2">
+                        <div style="display:flex;align-items:center;gap:12px;padding:8px 10px;border-radius:10px;background:var(--surface-inset);box-shadow:var(--elev-inset)">
+                          <span style="display:flex;align-items:center;justify-content:center;gap:5px;width:74px;flex:0 0 74px;height:21px;border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.06em;{{ o.stateStyle }}"><i data-lucide="{{ o.stateIcon }}" style="width:11px;height:11px"></i>{{ o.stateLabel }}</span>
+                          <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--text-muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ o.slug }}</span>
+                          <span style="font-size:12.5px;color:var(--text)">{{ o.name }}</span>
+                        </div>
+                      </sc-for>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;padding:13px 15px 14px">
+                      <div onClick="{{ doBuild }}" style="display:flex;align-items:center;gap:8px;height:34px;padding:0 14px;border-radius:10px;background:var(--accent);cursor:pointer;font-size:13px;font-weight:700;color:var(--on-ink)"><i data-lucide="hammer" style="width:15px;height:15px"></i>{{ preflightPrimary }}</div>
+                      <div style="display:flex;align-items:center;gap:8px;height:34px;padding:0 14px;border-radius:10px;border:1px solid var(--line-strong);background:var(--surface-overlay);cursor:pointer;font-size:13px;color:var(--text)"><i data-lucide="external-link" style="width:15px;height:15px;color:var(--text-muted)"></i>Show these in Rack's Library</div>
+                      <div style="flex:1"></div>
+                      <span onClick="{{ dismissPreflight }}" style="font-size:12.5px;color:var(--text-faint);cursor:pointer">Not now</span>
+                    </div>
+                    <div style="padding:11px 15px;border-top:1px solid var(--line);background:var(--surface-inset);font-size:12px;color:var(--text-muted);line-height:1.5">{{ preflightFoot }}</div>
+                  </div>
+                </sc-if>
+              </div>
+            </div>
+
+            <!-- SHELF -->
+            <div style="height:224px;flex:0 0 224px;border-top:1px solid var(--line);background:var(--surface-panel);padding:16px 34px 0;display:flex;flex-direction:column">
+              <div style="display:flex;align-items:center;gap:18px;margin-bottom:13px">
+                <span onClick="{{ shelfPatches }}" style="font-size:14px;font-weight:600;padding-bottom:6px;cursor:pointer;{{ shelfPatchesExtra }}">Patches</span>
+                <span onClick="{{ shelfModules }}" style="font-size:14px;padding-bottom:6px;cursor:pointer;{{ shelfModulesExtra }}">My modules</span>
+                <div style="flex:1"></div>
+                <div style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border-radius:10px;border:1px solid var(--line);background:var(--surface-raised);cursor:pointer;font-size:13px;color:var(--text)"><i data-lucide="library" style="width:15px;height:15px"></i>Module library<i data-lucide="arrow-right" style="width:14px;height:14px;color:var(--text-faint)"></i></div>
+              </div>
+              <div class="fg-scroll" style="display:flex;gap:13px;overflow-x:auto;overflow-y:hidden;padding-bottom:12px">
+                <sc-for list="{{ shelfTiles }}" as="t" hint-placeholder-count="5">
+                  <div onClick="{{ t.onClick }}" style="width:{{ t.w }};flex:0 0 {{ t.w }};border-radius:13px;overflow:hidden;border:1px solid var(--line);background:var(--surface-raised);cursor:pointer">
+                    <div style="height:96px;position:relative;display:flex;align-items:flex-end;padding:9px;{{ t.art }}"><span style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(255,255,255,0.72)">{{ t.badge }}</span></div>
+                    <div style="padding:9px 11px"><div style="font-size:13px;font-weight:600;color:var(--text-strong)">{{ t.name }}</div><div style="font-size:11px;color:var(--text-faint);margin-top:2px">{{ t.sub }}</div></div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ================= BUILD / RESULT ================= -->
+        <sc-if value="{{ isWork }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;inset:0;display:flex;flex-direction:column">
+
+            <!-- TOOLBAR -->
+            <div style="height:52px;flex:0 0 52px;display:flex;align-items:center;gap:10px;padding:0 18px;border-bottom:1px solid var(--line);background:var(--surface-panel);position:relative;z-index:6">
+              <div onClick="{{ goHome }}" style="display:flex;align-items:center;gap:7px;height:32px;padding:0 11px 0 9px;border-radius:9px;border:1px solid var(--line);cursor:pointer;font-size:13px;color:var(--text)"><i data-lucide="arrow-left" style="width:15px;height:15px"></i>Home</div>
+              <div style="width:1px;height:22px;background:var(--line)"></div>
+              <div style="display:flex;align-items:center;gap:9px;font-size:14px;font-weight:600;color:var(--text-strong)"><i data-lucide="{{ workIcon }}" style="width:16px;height:16px;color:var(--accent)"></i>{{ workTitle }}</div>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.07em;color:var(--text-faint);border:1px solid var(--line);border-radius:5px;padding:2px 7px">{{ workMeta }}</span>
+              <div style="flex:1"></div>
+              <sc-if value="{{ isPatch }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;background:var(--surface-raised);border:1px solid var(--line);border-radius:9px;padding:2px">
+                  <sc-for list="{{ depthTabs }}" as="d" hint-placeholder-count="3">
+                    <span onClick="{{ d.onClick }}" style="font-size:12.5px;padding:5px 12px;border-radius:7px;cursor:pointer;{{ d.extra }}">{{ d.label }}</span>
+                  </sc-for>
+                </div>
+              </sc-if>
+              <div onClick="{{ goParts }}" title="Eurorack component set" style="width:32px;height:32px;border-radius:9px;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text-muted)"><i data-lucide="circle-dot" style="width:16px;height:16px"></i></div>
+              <sc-if value="{{ isDone }}" hint-placeholder-val="{{ false }}">
+                <div onClick="{{ launchRack }}" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 14px;border-radius:9px;background:{{ launchBg }};color:{{ launchFg }};cursor:pointer;font-size:13px;font-weight:700"><i data-lucide="{{ launchIcon }}" style="width:15px;height:15px"></i>{{ launchLabel }}</div>
+              </sc-if>
+            </div>
+
+            <div style="flex:1;display:flex;min-height:0">
+
+              <!-- CHAT / EXPLANATION RAIL -->
+              <div class="fg-scroll" style="width:392px;flex:0 0 392px;border-right:1px solid var(--line);background:var(--surface-panel);overflow-y:auto;display:flex;flex-direction:column">
+
+                <div style="padding:16px 18px 12px;border-bottom:1px solid var(--line)">
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.11em;color:var(--text-faint);margin-bottom:7px">YOU</div>
+                  <div style="font-size:14px;line-height:1.5;color:var(--text)">{{ workPrompt }}</div>
+                </div>
+
+                <!-- STATUS -->
+                <sc-if value="{{ isBuilding }}" hint-placeholder-val="{{ true }}">
+                  <div style="padding:15px 18px">
+                    <div style="display:flex;align-items:baseline;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.11em;color:var(--text-faint);margin-bottom:10px">
+                      <span>{{ phaseLabel }}</span><span data-fm-elapsed style="color:var(--accent)">0.0s</span>
+                    </div>
+                    <div style="height:3px;border-radius:3px;background:var(--surface-inset);box-shadow:var(--elev-inset);overflow:hidden;margin-bottom:14px">
+                      <div data-fm-bar style="height:100%;width:0%;border-radius:3px;background:linear-gradient(90deg,var(--ink-indigo),var(--accent));box-shadow:0 0 14px rgba(22,218,194,0.55)"></div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:9px">
+                      <sc-for list="{{ steps }}" as="s" hint-placeholder-count="5">
+                        <div style="display:flex;align-items:center;gap:11px;font-size:12.5px;transition:opacity .4s cubic-bezier(.2,.7,.3,1);{{ s.rowExtra }}">
+                          <span class="{{ s.dotClass }}" style="width:8px;height:8px;flex:0 0 auto;border-radius:50%;{{ s.dotStyle }}"></span>
+                          <span style="flex:1;color:{{ s.color }}">{{ s.label }}</span>
+                          <span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--text-faint)">{{ s.time }}</span>
+                        </div>
+                      </sc-for>
+                    </div>
+                    <div style="margin-top:15px;padding:10px 12px;border-radius:11px;background:var(--surface-inset);box-shadow:var(--elev-inset);font-size:12px;color:var(--text-muted);line-height:1.5">{{ waitNote }}</div>
+                  </div>
+                </sc-if>
+
+                <!-- PATCH EXPLANATION -->
+                <sc-if value="{{ showWiring }}" hint-placeholder-val="{{ false }}">
+                  <div style="padding:14px 18px 22px">
+                    <div style="font-size:13.5px;line-height:1.55;color:var(--text);margin-bottom:16px">{{ patchIntro }}</div>
+                    <sc-for list="{{ wireGroups }}" as="g" hint-placeholder-count="4">
+                      <div style="margin-bottom:18px">
+                        <div onMouseEnter="{{ g.onEnter }}" onMouseLeave="{{ g.onLeave }}" style="display:flex;align-items:center;gap:9px;margin-bottom:9px;cursor:default">
+                          <i data-lucide="{{ g.icon }}" style="width:14px;height:14px;color:var(--text-muted)"></i>
+                          <span style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.13em;color:var(--text-strong)">{{ g.label }}</span>
+                          <span style="flex:1;height:1px;background:var(--line)"></span>
+                          <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--text-faint)">{{ g.count }}</span>
+                        </div>
+                        <sc-if value="{{ g.showPrimer }}" hint-placeholder-val="{{ false }}">
+                          <div style="font-size:12px;color:var(--text-muted);line-height:1.5;margin:0 0 10px 23px;padding-left:11px;border-left:1px solid var(--line)">{{ g.primer }}</div>
+                        </sc-if>
+                        <div style="display:flex;flex-direction:column;gap:2px">
+                          <sc-for list="{{ g.wires }}" as="w" hint-placeholder-count="3">
+                            <div onMouseEnter="{{ w.onEnter }}" onMouseLeave="{{ w.onLeave }}" style="border-radius:9px;padding:6px 9px;cursor:default;transition:background .14s ease;{{ w.rowExtra }}">
+                              <div style="display:flex;align-items:center;gap:9px;font-family:'JetBrains Mono',monospace;font-size:11.5px">
+                                <span style="width:11px;height:11px;flex:0 0 auto;border-radius:50%;background:{{ w.color }};box-shadow:0 0 8px {{ w.glow }}"></span>
+                                <span style="color:var(--text-strong)">{{ w.src }}</span>
+                                <i data-lucide="arrow-right" style="width:12px;height:12px;color:var(--text-faint);flex:0 0 auto"></i>
+                                <span style="color:var(--text-strong)">{{ w.dst }}</span>
+                                <sc-if value="{{ w.hasNote }}" hint-placeholder-val="{{ false }}">
+                                  <span style="font-size:10.5px;color:var(--text-faint)">{{ w.note }}</span>
+                                </sc-if>
+                              </div>
+                              <sc-if value="{{ w.showVendor }}" hint-placeholder-val="{{ false }}">
+                                <div style="font-family:'Jost',sans-serif;font-size:11.5px;color:var(--text-faint);line-height:1.4;margin:3px 0 0 20px">{{ w.vendor }}</div>
+                              </sc-if>
+                              <sc-if value="{{ w.showWhy }}" hint-placeholder-val="{{ false }}">
+                                <div style="font-family:'Jost',sans-serif;font-size:12px;color:var(--text-muted);line-height:1.5;margin:5px 0 2px 20px">{{ w.why }}</div>
+                              </sc-if>
+                            </div>
+                          </sc-for>
+                        </div>
+                      </div>
+                    </sc-for>
+                    <sc-if value="{{ hasDegradeNote }}" hint-placeholder-val="{{ false }}">
+                      <div style="display:flex;align-items:flex-start;gap:9px;padding:11px 12px;margin-bottom:10px;border-radius:11px;background:var(--warning-soft);border:1px solid rgba(246,184,71,0.32);font-size:12px;color:var(--text);line-height:1.5">
+                        <i data-lucide="image-off" style="width:15px;height:15px;color:var(--warning);flex:0 0 auto;margin-top:1px"></i>
+                        <span>{{ degradeNote }}</span>
+                      </div>
+                    </sc-if>
+                    <div style="display:flex;align-items:flex-start;gap:9px;padding:11px 12px;border-radius:11px;background:var(--surface-inset);box-shadow:var(--elev-inset);font-size:12px;color:var(--text-muted);line-height:1.5">
+                      <i data-lucide="info" style="width:15px;height:15px;color:var(--text-faint);flex:0 0 auto;margin-top:1px"></i>
+                      <span>Panels are composited from each module's own artwork at its true width, with cables drawn between real jack centres. Cable colours are the ones Rack will show — we write the colour field by role at generation. Role groups above are typographic, so an imported patch still reads.</span>
+                    </div>
+                  </div>
+                </sc-if>
+
+                <!-- MODULE RESULT -->
+                <sc-if value="{{ showModuleResult }}" hint-placeholder-val="{{ false }}">
+                  <div style="padding:15px 18px 22px">
+                    <div style="font-size:13.5px;line-height:1.55;color:var(--text);margin-bottom:15px">{{ moduleIntro }}</div>
+                    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+                      <sc-for list="{{ moduleSpecs }}" as="s" hint-placeholder-count="4">
+                        <div style="display:flex;align-items:center;gap:10px;font-family:'JetBrains Mono',monospace;font-size:11.5px">
+                          <span style="width:112px;flex:0 0 112px;color:var(--text-faint);letter-spacing:0.07em">{{ s.k }}</span>
+                          <span style="color:var(--text-strong)">{{ s.v }}</span>
+                        </div>
+                      </sc-for>
+                    </div>
+                    <div style="padding:13px 14px;border-radius:13px;background:var(--surface-inset);box-shadow:var(--elev-inset)">
+                      <div style="display:flex;align-items:center;gap:9px;margin-bottom:7px"><i data-lucide="{{ launchIcon }}" style="width:15px;height:15px;color:var(--accent)"></i><span style="font-size:13px;font-weight:600;color:var(--text-strong)">{{ launchHeadline }}</span></div>
+                      <div style="font-size:12.5px;color:var(--text-muted);line-height:1.55;margin-bottom:11px">{{ launchBody }}</div>
+                      <div onClick="{{ launchRack }}" style="display:flex;align-items:center;justify-content:center;gap:8px;height:36px;border-radius:10px;background:{{ launchBg }};color:{{ launchFg }};cursor:pointer;font-size:13px;font-weight:700"><i data-lucide="{{ launchIcon }}" style="width:15px;height:15px"></i>{{ launchLabel }}</div>
+                    </div>
+                  </div>
+                </sc-if>
+
+                <!-- ANSWER TURNS — appended by Ask; the patch is never touched -->
+                <sc-if value="{{ hasAnswers }}" hint-placeholder-val="{{ false }}">
+                  <div style="padding:0 18px 18px;display:flex;flex-direction:column;gap:14px">
+                    <sc-for list="{{ answers }}" as="q" hint-placeholder-count="1">
+                      <div class="fg-slack" style="border-top:1px solid var(--line);padding-top:14px">
+                        <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:0.11em;color:var(--text-faint);margin-bottom:6px">YOU ASKED</div>
+                        <div style="font-size:13.5px;color:var(--text);margin-bottom:10px">{{ q.q }}</div>
+                        <div onMouseEnter="{{ q.onEnter }}" onMouseLeave="{{ q.onLeave }}" style="padding:11px 13px;border-radius:12px;background:var(--surface-inset);box-shadow:var(--elev-inset)">
+                          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                            <span style="width:9px;height:9px;flex:0 0 auto;border-radius:50%;background:{{ q.color }}"></span>
+                            <span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--text-strong)">{{ q.ref }}</span>
+                            <div style="flex:1"></div>
+                            <span style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.09em;color:var(--text-faint)">{{ q.unchanged }}</span>
+                          </div>
+                          <div style="font-size:13px;line-height:1.55;color:var(--text-muted)">{{ q.a }}</div>
+                        </div>
+                      </div>
+                    </sc-for>
+                  </div>
+                </sc-if>
+
+                <div style="flex:1"></div>
+
+                <!-- FOLLOW-UP COMPOSER -->
+                <div style="border-top:1px solid var(--line);padding:12px 14px;background:var(--surface-app)">
+                  <div style="font-size:13px;color:var(--text-faint);min-height:34px;line-height:1.45">{{ followPlaceholder }}</div>
+                  <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+                    <div onClick="{{ openMention }}" style="width:30px;height:30px;border-radius:9px;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:14px">@</div>
+                    <div style="flex:1"></div>
+                    <div onClick="{{ doAsk }}" title="Answers in the thread. Never changes what you have." style="display:flex;align-items:center;gap:7px;height:32px;padding:0 13px;border-radius:9px;border:1px solid var(--line-strong);background:var(--surface-overlay);cursor:pointer;font-size:12.5px;font-weight:600;color:var(--text)"><i data-lucide="message-circle-question" style="width:14px;height:14px;color:var(--text-muted)"></i>Ask</div>
+                    <div onClick="{{ rebuild }}" style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border-radius:9px;background:var(--accent);cursor:pointer;font-size:12.5px;font-weight:700;color:var(--on-ink)"><i data-lucide="hammer" style="width:14px;height:14px"></i>{{ buildLabel }}</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- STAGE -->
+              <div style="flex:1;min-width:0;position:relative;background:radial-gradient(72% 60% at 50% 42%,rgba(22,218,194,0.06),transparent 72%),var(--surface-app);overflow:hidden">
+                <canvas data-fm-canvas onMouseMove="{{ onStageMove }}" onMouseLeave="{{ onStageLeave }}" style="position:absolute;inset:0;width:100%;height:100%;display:block"></canvas>
+                <sc-if value="{{ bloom }}" hint-placeholder-val="{{ false }}">
+                  <div class="fg-flash" style="position:absolute;inset:0;background:radial-gradient(46% 44% at 50% 48%,rgba(22,218,194,0.28),rgba(94,120,255,0.09) 56%,rgba(22,218,194,0) 76%)"></div>
+                </sc-if>
+                <!-- no caption under the artwork. only the cable key, and only once it means something -->
+                <sc-if value="{{ showKey }}" hint-placeholder-val="{{ false }}">
+                  <div class="fg-slack" style="position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:flex-end;gap:16px;padding:11px 18px;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.08em;color:var(--text-faint)">
+                    <sc-for list="{{ roleKeys }}" as="k" hint-placeholder-count="4">
+                      <span style="display:flex;align-items:center;gap:6px;transition:opacity .16s ease;{{ k.extra }}"><span style="width:9px;height:9px;border-radius:50%;background:{{ k.color }}"></span>{{ k.label }}</span>
+                    </sc-for>
+                  </div>
+                </sc-if>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ================= PARTS ================= -->
+        <sc-if value="{{ isParts }}" hint-placeholder-val="{{ false }}">
+          <div class="fg-scroll" style="position:absolute;inset:0;overflow-y:auto;background:var(--surface-app)">
+            <div style="padding:26px 34px 44px;max-width:1120px">
+              <div onClick="{{ goHome }}" style="display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 11px 0 9px;border-radius:9px;border:1px solid var(--line);cursor:pointer;font-size:13px;color:var(--text);margin-bottom:20px"><i data-lucide="arrow-left" style="width:15px;height:15px"></i>Home</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:var(--text-muted);margin-bottom:9px">INK &amp; SIGNAL · MODULAR PANELS</div>
+              <h2 style="font-size:30px;font-weight:700;letter-spacing:-0.02em;color:var(--text-strong);margin:0 0 8px">Our own Eurorack hardware</h2>
+              <p style="font-size:14.5px;line-height:1.6;color:var(--text-muted);max-width:640px;margin:0 0 8px;text-wrap:pretty">Rack's stock knobs and jacks are CC BY-NC, which limits what you can do with a module you built and want to sell. These are ours — drawn in the Pulp language, sized in millimetres, and legible at Eurorack scale.</p>
+              <p style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-faint);margin:0 0 30px">1 HP = 5.08 mm = 15 px · PANEL HEIGHT 380 px (3U) · SHOWN 1:1</p>
+
+              <sc-for list="{{ partGroups }}" as="pg" hint-placeholder-count="4">
+                <div style="margin-bottom:34px">
+                  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:4px">
+                    <h3 style="font-size:17px;font-weight:600;color:var(--text-strong);margin:0">{{ pg.title }}</h3>
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.09em;color:var(--text-faint)">{{ pg.spec }}</span>
+                  </div>
+                  <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;max-width:620px;line-height:1.55">{{ pg.note }}</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:14px">
+                    <sc-for list="{{ pg.items }}" as="it" hint-placeholder-count="4">
+                      <div style="width:170px;border-radius:14px;border:1px solid var(--line);background:var(--surface-panel);overflow:hidden">
+                        <div style="height:118px;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,#2C3138,#23272D);border-bottom:1px solid var(--line)">
+                          <div style="{{ it.art }}"><span style="{{ it.inner }}"><b style="{{ it.tick }}"></b></span></div>
+                        </div>
+                        <div style="padding:10px 12px">
+                          <div style="font-size:13px;font-weight:600;color:var(--text-strong)">{{ it.name }}</div>
+                          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-faint);margin-top:3px">{{ it.dim }}</div>
+                        </div>
+                      </div>
+                    </sc-for>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ================= INSTALLER ================= -->
+        <sc-if value="{{ isInstaller }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(80% 70% at 50% 30%,rgba(94,120,255,0.08),transparent 62%),var(--surface-app)">
+            <div style="width:560px;border-radius:20px;background:var(--surface-panel);border:1px solid var(--line-strong);box-shadow:0 30px 80px rgba(0,0,0,0.55);overflow:hidden">
+              <div style="padding:26px 30px 6px">
+                <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.14em;color:var(--text-faint);margin-bottom:12px">INSTALL FORGE MODULAR · STEP 2 OF 2</div>
+                <h2 style="font-size:25px;font-weight:700;letter-spacing:-0.02em;color:var(--text-strong);margin:0 0 10px">One thing to acknowledge</h2>
+                <p style="font-size:14.5px;line-height:1.6;color:var(--text-muted);margin:0 0 20px;text-wrap:pretty">Forge Modular compiles real modules, so it uses VCV's Rack SDK. We're not allowed to redistribute it, so it downloads from vcvrack.com as part of this install.</p>
+              </div>
+              <div style="margin:0 30px 20px;padding:14px 16px;border-radius:13px;background:var(--surface-inset);box-shadow:var(--elev-inset)">
+                <div style="display:flex;align-items:center;gap:10px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-muted)">
+                  <i data-lucide="check" style="width:14px;height:14px;color:var(--success)"></i>
+                  <span style="flex:1">RACK SDK 2.6.4 · 41.2 MB</span>
+                  <span style="color:var(--success)">DOWNLOADED</span>
+                </div>
+              </div>
+              <div onClick="{{ toggleSdk }}" style="display:flex;align-items:flex-start;gap:13px;margin:0 30px;padding:15px 16px;border-radius:13px;cursor:pointer;border:1px solid {{ sdkLine }};background:{{ sdkBg }}">
+                <span style="width:20px;height:20px;flex:0 0 auto;margin-top:1px;border-radius:6px;display:flex;align-items:center;justify-content:center;{{ sdkBox }}"><i data-lucide="check" style="width:14px;height:14px;color:var(--on-ink)"></i></span>
+                <span style="font-size:13.5px;line-height:1.55;color:var(--text)">I've read the <a href="#sdk">Rack SDK licence</a>. Modules I build with Forge Modular are mine; the SDK stays VCV's, under its own terms.</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:12px;padding:22px 30px 24px">
+                <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-faint);flex:1">{{ sdkHint }}</span>
+                <span style="font-size:13.5px;color:var(--text-muted);cursor:pointer">Back</span>
+                <div onClick="{{ finishInstall }}" style="display:flex;align-items:center;gap:8px;height:38px;padding:0 19px;border-radius:11px;cursor:pointer;font-size:13.5px;font-weight:700;{{ installBtn }}">Install<i data-lucide="arrow-right" style="width:15px;height:15px"></i></div>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1400,&quot;height&quot;:900},&quot;degradation&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;none&quot;,&quot;no-image&quot;,&quot;unplaced&quot;],&quot;default&quot;:&quot;none&quot;,&quot;tsType&quot;:&quot;'none'|'no-image'|'unplaced'&quot;,&quot;section&quot;:&quot;Real panel data&quot;,&quot;label&quot;:&quot;Missing-data state&quot;},&quot;buildSpeed&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;demo&quot;,&quot;realistic&quot;],&quot;default&quot;:&quot;demo&quot;,&quot;tsType&quot;:&quot;'demo'|'realistic'&quot;,&quot;section&quot;:&quot;Animation&quot;,&quot;label&quot;:&quot;Build length&quot;}}">
+class Component extends DCLogic {
+  state = {
+    view:'home', mode:'module', phase:'idle', shelf:'patches',
+    step:0, bloom:false, rackRunning:false, hover:null, hoverGroup:null,
+    mentionOpen:false, chips:[], rolled:null, preflight:false, exampleIdx:0,
+    answers:[], askAnswer:null, askIdx:0,
+    depth:'standard', sdkOk:false, scale:1, done:null
+  };
+
+  // ---------- geometry ----------
+  HP=15; PH=380;
+  // ---- module descriptors ----
+  // Shape matches what the local index actually gives us per installed module:
+  //   slug, true width in HP, a panel PNG rendered by Rack, and every port with the
+  //   vendor's own name + the exact jack centre. `img` null = not captured yet,
+  //   `placed:false` = never placed in a rack, so no port coordinates exist.
+  // ports: [id, x (0-1 of width), y (px of 380), 'in'|'out', vendor name]
+  K={lg:11.5, md:9, sm:7.5, tr:4.8};
+  MODS=[
+    {id:'LFO', slug:'Fundamental/LFO', hp:6, brand:'Fundamental', name:'LFO', img:1, placed:1,
+     knobs:[['FREQ',.5,92,'lg'],['PW',.28,152,'sm'],['FM',.72,152,'sm'],['OFST',.28,196,'tr'],['INV',.72,196,'tr']],
+     ports:[['FM',.22,254,'in','Frequency modulation'],['RST',.5,254,'in','Reset'],['PW',.78,254,'in','Pulse width modulation'],
+            ['SIN',.22,312,'out','Sine'],['TRI',.5,312,'out','Triangle'],['SQR',.78,312,'out','Square']]},
+    {id:'MULT', slug:'Fundamental/Mult', hp:3, brand:'Fundamental', name:'Mult', img:1, placed:1,
+     knobs:[],
+     ports:[['IN',.5,164,'in','Input'],['1',.5,216,'out','Output 1'],['2',.5,258,'out','Output 2'],['3',.5,300,'out','Output 3'],['4',.5,342,'out','Output 4']]},
+    {id:'SEQ', slug:'Fundamental/SEQ', hp:12, brand:'Fundamental', name:'SEQ', img:1, placed:1,
+     knobs:[['1',.14,98,'md'],['2',.38,98,'md'],['3',.62,98,'md'],['4',.86,98,'md'],
+            ['5',.14,168,'md'],['6',.38,168,'md'],['7',.62,168,'md'],['8',.86,168,'md'],
+            ['LEN',.3,220,'tr'],['SLEW',.7,220,'tr']],
+     ports:[['CLK',.13,268,'in','Clock'],['RST',.37,268,'in','Reset'],['DIR',.63,268,'in','Direction'],['HOLD',.87,268,'in','Hold'],
+            ['CV',.25,330,'out','CV'],['GATE',.5,330,'out','Gate'],['EOC',.75,330,'out','End of cycle']]},
+    {id:'VCO', slug:'Fundamental/VCO', hp:9, brand:'Fundamental', name:'VCO', img:1, placed:1,
+     knobs:[['FREQ',.5,100,'lg'],['PW',.5,164,'sm'],['FM',.24,206,'tr'],['PWM',.76,206,'tr']],
+     ports:[['V/OCT',.15,262,'in','1V/octave'],['FM',.38,262,'in','Frequency modulation'],['SYNC',.62,262,'in','Sync'],['PWM',.85,262,'in','Pulse width modulation'],
+            ['SIN',.15,326,'out','Sine'],['TRI',.38,326,'out','Triangle'],['SAW',.62,326,'out','Sawtooth'],['SQR',.85,326,'out','Square']]},
+    {id:'VCF', slug:'Fundamental/VCF', hp:8, brand:'Fundamental', name:'VCF', img:1, placed:1,
+     knobs:[['FREQ',.5,100,'lg'],['RES',.28,166,'sm'],['DRIVE',.72,166,'sm'],['FM',.5,208,'tr']],
+     ports:[['CV',.18,264,'in','Frequency CV'],['IN',.5,264,'in','Audio input'],['RESCV',.82,264,'in','Resonance CV'],
+            ['LPF',.28,328,'out','Low-pass output'],['HPF',.72,328,'out','High-pass output']]},
+    {id:'ENV', slug:'Fundamental/ADSR', hp:8, brand:'Fundamental', name:'ADSR', img:1, placed:1,
+     knobs:[['A',.22,96,'md'],['D',.5,96,'md'],['S',.78,96,'md'],['R',.5,158,'md'],['SHAPE',.5,206,'tr']],
+     ports:[['GATE',.22,262,'in','Gate'],['RETRIG',.5,262,'in','Retrigger'],['CV',.78,262,'in','Sustain CV'],
+            ['ENV',.35,328,'out','Envelope'],['INV',.68,328,'out','Inverted envelope']]},
+    {id:'VCA', slug:'Fundamental/VCA', hp:6, brand:'Fundamental', name:'VCA', img:1, placed:1,
+     knobs:[['LEVEL',.5,104,'lg'],['RESP',.5,168,'tr']],
+     ports:[['CV',.28,240,'in','Level CV'],['IN',.28,312,'in','Audio input'],['EXP',.72,240,'in','Exponential CV'],['OUT',.72,312,'out','Audio output']]},
+    {id:'AUDIO', slug:'VCV/Audio2', hp:8, brand:'VCV', name:'Audio 2', img:1, placed:1,
+     knobs:[],
+     ports:[['IN1',.28,214,'in','To device 1'],['IN2',.72,214,'in','To device 2'],
+            ['OUT1',.28,300,'out','From device 1'],['OUT2',.72,300,'out','From device 2']]}
+  ];
+  WIRES=[
+    {role:'audio', a:['VCO','SAW'],  b:['VCF','IN'],    c:'#00b56e'},
+    {role:'audio', a:['VCF','LPF'],  b:['VCA','IN'],    c:'#00b56e'},
+    {role:'audio', a:['VCA','OUT'],  b:['AUDIO','IN1'], c:'#00b56e', note:'device output 1'},
+    {role:'pitch', a:['SEQ','CV'],   b:['VCO','V/OCT'], c:'#3695ef', why:"the sequencer walks the drone's pitch so it never settles on one note"},
+    {role:'pitch', a:['SEQ','GATE'], b:['ENV','GATE'],  c:'#3695ef', why:'each step opens the envelope, so the drone re-articulates instead of droning flat'},
+    {role:'clock', a:['LFO','SQR'],  b:['MULT','IN'],   c:'#ffb437'},
+    {role:'clock', a:['MULT','1'],   b:['SEQ','CLK'],   c:'#ffb437', why:'one slow square drives everything — the mult copies it so the patch stays in step'},
+    {role:'mod',   a:['LFO','TRI'],  b:['VCF','CV'],    c:'#8b4ade', why:'an unrelated slow LFO sweeps the cutoff — the timbre breathes'},
+    {role:'mod',   a:['ENV','ENV'],  b:['VCA','CV'],    c:'#8b4ade', why:'long attack and release means notes swell in and fade, never strike'}
+  ];
+  portName(modId,portId){
+    const m=this.MODS.find(x=>x.id===modId); if(!m) return portId;
+    const p=(m.ports||[]).find(x=>x[0]===portId);
+    return p?p[4]:portId;
+  }
+  ROLES={
+    audio:{label:'AUDIO', icon:'volume-2', color:'#00b56e', primer:'What you actually hear. It has to reach an output or there is silence.'},
+    pitch:{label:'PITCH & GATE', icon:'music-2', color:'#3695ef', primer:'Which note, and when. Pitch is a voltage; a gate is a yes/no.'},
+    clock:{label:'CLOCK', icon:'timer', color:'#ffb437', primer:'The pulse everything times itself against.'},
+    mod:{label:'MODULATION', icon:'activity', color:'#8b4ade', primer:'Slow changes that make a static sound move. Nothing here makes noise on its own.'}
+  };
+  // module-build part plan (12 HP wavefolder)
+  MOD_HP=12;
+  MPARTS=[
+    {t:'led',  x:.5,  y:262, r:6,  k:'#46F0DB', l:'',      s:0.00},
+    {t:'knob', x:.28, y:98,  r:19, k:'#16DAC2', l:'DRIVE', s:0.04, lo:35},
+    {t:'knob', x:.72, y:98,  r:19, k:'#F6B847', l:'SYMM',  s:0.10, lo:35},
+    {t:'knob', x:.28, y:168, r:15, k:'#5E78FF', l:'FOLD',  s:0.16, lo:31},
+    {t:'knob', x:.72, y:168, r:15, k:'#8B6CF5', l:'BIAS',  s:0.22, lo:31},
+    {t:'slider',x:.5, y:220, r:0,  k:'#16DAC2', l:'GAIN',  s:0.30, lo:19},
+    {t:'sw',   x:.26, y:262, r:0,  k:'#16DAC2', l:'X2',    s:0.38, lo:22},
+    {t:'sw',   x:.74, y:262, r:0,  k:'#16DAC2', l:'DC',    s:0.42, lo:22},
+    {t:'jack', x:.2,  y:318, r:11, k:'#00b56e', l:'IN',    s:0.50, lo:-19},
+    {t:'jack', x:.5,  y:318, r:11, k:'#8b4ade', l:'CV',    s:0.55, lo:-19},
+    {t:'jack', x:.8,  y:318, r:11, k:'#00b56e', l:'OUT',   s:0.60, lo:-19},
+    {t:'jack', x:.2,  y:356, r:11, k:'#3695ef', l:'GATE',  s:0.66, lo:-19},
+    {t:'jack', x:.5,  y:356, r:11, k:'#ffb437', l:'CLK',   s:0.71, lo:-19},
+    {t:'jack', x:.8,  y:356, r:11, k:'#00b56e', l:'MIX',   s:0.76, lo:-19}
+  ];
+
+  MODULE_STEPS=[
+    {label:'Reading intent — 12 HP, wavefolder', t:0.0},
+    {label:'Blank panel · 12 HP × 3U', t:1.1},
+    {label:'Placing controls — 4 knobs, 6 jacks', t:2.2},
+    {label:'Silkscreen & panel graphics', t:3.6},
+    {label:'Compiling against Rack SDK 2.6.4', t:4.8},
+    {label:'Seating in rack', t:6.2}
+  ];
+  PATCH_STEPS=[
+    {label:'Reading intent — evolving ambient drone', t:0.0},
+    {label:'Choosing 8 modules you have installed', t:1.0},
+    {label:'Patching audio path', t:2.4},
+    {label:'Patching pitch & gate', t:4.2},
+    {label:'Patching clock', t:5.6},
+    {label:'Patching modulation', t:6.8},
+    {label:'Writing patch file', t:8.6}
+  ];
+  MOD_DUR=7.4; PATCH_DUR=9.9; RESOLVE=0.9;
+  get modDur(){ return this.props.buildSpeed==='realistic'?34:this.MOD_DUR; }
+  get patchDur(){ return this.props.buildSpeed==='realistic'?46:this.PATCH_DUR; }
+
+  // Ask never mutates the artifact — it appends an answer and points at the picture
+  ASKS={
+    patch:[
+      {q:'Why did you wire the LFO there?', w:7,
+       a:"The LFO isn't making sound — it's moving the filter. LFO TRI goes to VCF CV, so the cutoff sweeps slowly and the drone's timbre breathes instead of sitting still. The audio path is untouched by it."},
+      {q:'What is the Mult for? It has no knobs.', w:6,
+       a:'It copies one signal to three. The LFO square is the clock, and the Mult lets that same clock reach the sequencer now and anything you add later, without unplugging what is already there.'},
+      {q:'Would the patch still work without the envelope?', w:8,
+       a:'Yes, but flatter — the VCA would sit open and the drone would be continuous. ENV OUT to VCA CV is what gives each step a long swell and fade instead of a hard start.'}
+    ],
+    module:[
+      {q:'What does symmetry actually do?',
+       a:'It offsets the signal before it reaches the folds, so the top and bottom fold at different points. Centred gives you even harmonics; off-centre gives you odd ones, which is where the reedy character comes from.'},
+      {q:'How much CPU is this?',
+       a:'0.9% of one core at 48 kHz. The fold is a handful of branches per sample and there is no oversampling yet — which is why DC is a switch rather than always on.'}
+    ]
+  };
+  EXAMPLES={
+    module:[
+      'A 12 HP wavefolder with drive and symmetry, plus a CV input for the fold amount.',
+      'A 6 HP slew limiter — separate rise and fall, and a gate out when it reaches the target.',
+      'An 8 HP quantiser with a scale selector and a trigger out on note change.'
+    ],
+    patch:[
+      'An evolving ambient drone that plays by itself.',
+      'A generative techno patch — kick, hats, and an acid line that mutates every 16 bars.',
+      'A lush granular texture that swells and recedes on its own.'
+    ]
+  };
+  ROLLS={
+    module:['A 6 HP wavefolder with drive and symmetry.','A 4 HP dual attenuverter with a mix out.','A 10 HP chaos source — three related CV outs that never repeat.'],
+    patch:['A slow krell patch — self-triggering, never the same twice.','A bouncing-ball rhythm from one envelope and a comparator.','A drifting chord pad that reharmonises itself.']
+  };
+
+  componentDidMount(){ window.__fm=this; this.heal(); this.fit(); this._ro=new ResizeObserver(()=>this.fit()); this._ro.observe(document.body); this.icons(); this.loop(); }
+  componentDidUpdate(){ this.icons(); this.heal(); }
+  heal(){
+    clearTimeout(this._heal);
+    const chk=()=>{
+      this._heal=setTimeout(chk,400);
+      if(this.state.view!=='work') return;
+      // restart only if NOBODY has drawn recently — never just because we aren't the owner
+      if(!window.__fmDrawn || performance.now()-window.__fmDrawn>320){ clearInterval(this._tmr); this._tmr=null; this.loop(); }
+    };
+    chk();
+  }
+  componentWillUnmount(){ if(this._ro) this._ro.disconnect(); clearInterval(this._tmr); clearTimeout(this._heal); (this._gs||[]).forEach(clearTimeout); }
+  icons(){ clearTimeout(this._ic); this._ic=setTimeout(()=>{ try{ window.lucide && window.lucide.createIcons(); }catch(e){} },0); }
+  fit(){ const s=Math.min(window.innerWidth/1330, (window.innerHeight-80)/850, 1); this.setState({scale:Math.max(0.3,s)}); }
+
+  // ---------- flow ----------
+  go(v){ (this._gs||[]).forEach(clearTimeout); this._gs=[]; this.setState({view:v, phase:'idle', bloom:false}); }
+  start(mode){
+    (this._gs||[]).forEach(clearTimeout); this._gs=[];
+    this._mode=mode; this._P=null;
+    const steps = mode==='patch'?this.PATCH_STEPS:this.MODULE_STEPS;
+    const D = mode==='patch'?this.patchDur:this.modDur;
+    this.setState({view:'work', mode, phase:'building', step:0, bloom:false, hover:null, mentionOpen:false, preflight:false, rolled:null, answers:[], askAnswer:null, askIdx:0});
+    this._t0=performance.now();
+    steps.forEach((s,i)=>{ if(i>0) this._gs.push(setTimeout(()=>this.setState({step:i}), s.t*1000)); });
+    this._gs.push(setTimeout(()=>this.setState({step:steps.length}), D*1000));
+    this._gs.push(setTimeout(()=>this.setState({phase:'done', bloom:true}), (D+this.RESOLVE)*1000));
+    this._gs.push(setTimeout(()=>this.setState({bloom:false}), (D+this.RESOLVE+1.1)*1000));
+    this.loop();
+  }
+  loop(){
+    // exactly one owner drives the canvas; older instances (StrictMode double-mount,
+    // hot reload) stop drawing the moment a newer one claims it
+    if(!this._id) this._id='fm'+Math.random().toString(36).slice(2);
+    window.__fmOwner=this._id; window.__fm=this;
+    if(!this._tmr){
+      this._tmr=setInterval(()=>{ try{ this.frame(); }catch(e){ this._err=String(e&&e.stack||e); } },16);
+    }
+  }
+
+  // ---------- drawing primitives ----------
+  rr(ctx,x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.arcTo(x+w,y,x+w,y+r,r); ctx.lineTo(x+w,y+h-r); ctx.arcTo(x+w,y+h,x+w-r,y+h,r); ctx.lineTo(x+r,y+h); ctx.arcTo(x,y+h,x,y+h-r,r); ctx.lineTo(x,y+r); ctx.arcTo(x,y,x+r,y,r); ctx.closePath(); }
+
+  panel(ctx,x,y,w,h,a,hi){
+    ctx.save(); ctx.globalAlpha=a;
+    const g=ctx.createLinearGradient(0,y,0,y+h);
+    g.addColorStop(0,'#30353C'); g.addColorStop(0.42,'#282D34'); g.addColorStop(1,'#20242A');
+    this.rr(ctx,x,y,w,h,4); ctx.fillStyle=g; ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.10)'; ctx.lineWidth=1; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x+1,y+1.5); ctx.lineTo(x+w-1,y+1.5);
+    ctx.strokeStyle='rgba(255,255,255,0.13)'; ctx.stroke();
+    // side rails shading
+    const sg=ctx.createLinearGradient(x,0,x+w,0);
+    sg.addColorStop(0,'rgba(0,0,0,0.30)'); sg.addColorStop(0.12,'rgba(0,0,0,0)');
+    sg.addColorStop(0.88,'rgba(0,0,0,0)'); sg.addColorStop(1,'rgba(0,0,0,0.30)');
+    this.rr(ctx,x,y,w,h,4); ctx.fillStyle=sg; ctx.fill();
+    if(hi>0){ ctx.globalAlpha=1; this.rr(ctx,x-1,y-1,w+2,h+2,5); ctx.strokeStyle='rgba(22,218,194,'+(0.85*hi*a).toFixed(3)+')'; ctx.lineWidth=1.6; ctx.shadowColor='rgba(22,218,194,'+(0.7*a).toFixed(3)+')'; ctx.shadowBlur=14*hi; ctx.stroke(); ctx.shadowBlur=0; }
+    ctx.restore();
+  }
+  screws(ctx,x,y,w,h,a){
+    ctx.save(); ctx.globalAlpha=a;
+    [[x+7,y+7],[x+w-7,y+7],[x+7,y+h-7],[x+w-7,y+h-7]].forEach(p=>{
+      const g=ctx.createRadialGradient(p[0]-1.4,p[1]-1.4,0.5,p[0],p[1],4.6);
+      g.addColorStop(0,'#9AA3AD'); g.addColorStop(0.6,'#6B7480'); g.addColorStop(1,'#3A4048');
+      ctx.beginPath(); ctx.arc(p[0],p[1],4.4,0,6.283); ctx.fillStyle=g; ctx.fill();
+      ctx.strokeStyle='rgba(0,0,0,0.5)'; ctx.lineWidth=1; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(p[0]-2.4,p[1]); ctx.lineTo(p[0]+2.4,p[1]); ctx.strokeStyle='rgba(10,12,16,0.8)'; ctx.lineWidth=1.3; ctx.stroke();
+    });
+    ctx.restore();
+  }
+  knob(ctx,cx,cy,r,col,val,a){
+    if(a<=0.01) return;
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx,cy+1.6,r+1,0,6.283); ctx.fillStyle='rgba(0,0,0,'+(0.45*a).toFixed(3)+')'; ctx.fill();
+    const g=ctx.createRadialGradient(cx-r*0.42,cy-r*0.5,r*0.15,cx,cy,r);
+    g.addColorStop(0,this.rgba('#4A525C',a)); g.addColorStop(0.55,this.rgba('#333A43',a)); g.addColorStop(1,this.rgba('#1B1F25',a));
+    ctx.beginPath(); ctx.arc(cx,cy,r,0,6.283); ctx.fillStyle=g; ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,'+(0.10*a).toFixed(3)+')'; ctx.lineWidth=1; ctx.stroke();
+    const a0=-Math.PI*1.25, sweep=Math.PI*1.5;
+    ctx.beginPath(); ctx.arc(cx,cy,r+4.6,a0,a0+sweep); ctx.strokeStyle='rgba(220,232,250,'+(0.13*a).toFixed(3)+')'; ctx.lineWidth=2.4; ctx.lineCap='round'; ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx,cy,r+4.6,a0,a0+sweep*val); ctx.strokeStyle=this.rgba(col,a); ctx.lineWidth=2.4;
+    if(a>0.4){ ctx.shadowColor=this.rgba(col,0.9*a); ctx.shadowBlur=9; }
+    ctx.stroke(); ctx.shadowBlur=0;
+    const pa=a0+sweep*val;
+    ctx.beginPath(); ctx.moveTo(cx+Math.cos(pa)*r*0.32, cy+Math.sin(pa)*r*0.32); ctx.lineTo(cx+Math.cos(pa)*(r-2.4), cy+Math.sin(pa)*(r-2.4));
+    ctx.strokeStyle=this.rgba('#E6ECF2',a); ctx.lineWidth=2; ctx.stroke();
+    ctx.restore();
+  }
+  jack(ctx,cx,cy,r,col,plug,a,ring){
+    ctx.save(); ctx.globalAlpha=a;
+    if(ring){ ctx.beginPath(); ctx.arc(cx,cy,r+4.2,0,6.283); ctx.strokeStyle=col; ctx.globalAlpha=a*0.5; ctx.lineWidth=1.6; ctx.stroke(); ctx.globalAlpha=a; }
+    const g=ctx.createRadialGradient(cx-r*0.4,cy-r*0.4,r*0.2,cx,cy,r);
+    g.addColorStop(0,'#98A1AB'); g.addColorStop(0.62,'#69727D'); g.addColorStop(1,'#333A42');
+    ctx.beginPath(); ctx.arc(cx,cy,r,0,6.283); ctx.fillStyle=g; ctx.fill();
+    ctx.strokeStyle='rgba(0,0,0,0.55)'; ctx.lineWidth=1; ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx,cy,r*0.56,0,6.283); ctx.fillStyle='#0D1014'; ctx.fill();
+    if(plug>0){
+      ctx.beginPath(); ctx.arc(cx,cy,r*0.52,0,6.283); ctx.fillStyle=this.rgba(col,a*plug); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx,cy,r*0.26,0,6.283); ctx.fillStyle='rgba(255,255,255,'+(0.5*a*plug).toFixed(3)+')'; ctx.fill();
+    }
+    ctx.restore();
+  }
+  silk(ctx,txt,cx,cy,size,a,col,weight){
+    ctx.save(); ctx.globalAlpha=a; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.font=(weight||500)+' '+size+"px 'Jost',system-ui,sans-serif";
+    ctx.fillStyle=col||'rgba(214,226,238,0.78)'; ctx.fillText(txt,cx,cy); ctx.restore();
+  }
+  // hex → [r,g,b], cached. Alpha is baked into every fill/stroke colour rather than
+  // relying on globalAlpha, so dimming is deterministic across renderers.
+  rgb(hex){
+    const C=this._rgbC||(this._rgbC={});
+    if(!C[hex]) C[hex]=[parseInt(hex.slice(1,3),16),parseInt(hex.slice(3,5),16),parseInt(hex.slice(5,7),16)];
+    return C[hex];
+  }
+  rgba(hex,al){ const c=this.rgb(hex); return 'rgba('+c[0]+','+c[1]+','+c[2]+','+Math.max(0,Math.min(1,al)).toFixed(3)+')'; }
+  cable(ctx,x1,y1,x2,y2,col,t,a,glow){
+    if(t<=0||a<=0.01) return;
+    const ex=x1+(x2-x1)*t, ey=y1+(y2-y1)*t;
+    const dist=Math.hypot(x2-x1,y2-y1);
+    const sag=Math.min(160, 46+dist*0.36)*t;
+    const mx=(x1+ex)/2, my=Math.max(y1,ey)+sag*0.86;
+    ctx.save(); ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(x1,y1+2); ctx.quadraticCurveTo(mx,my+3,ex,ey+2);
+    ctx.strokeStyle='rgba(0,0,0,'+(0.42*a).toFixed(3)+')'; ctx.lineWidth=5.4; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.quadraticCurveTo(mx,my,ex,ey);
+    ctx.strokeStyle=this.rgba(col,a); ctx.lineWidth=4.2;
+    if(glow>0&&a>0.5){ ctx.shadowColor=this.rgba(col,0.85*glow); ctx.shadowBlur=15*glow; }
+    ctx.stroke(); ctx.shadowBlur=0;
+    ctx.beginPath(); ctx.moveTo(x1,y1-1.1); ctx.quadraticCurveTo(mx,my-1.1,ex,ey-1.1);
+    ctx.strokeStyle='rgba(255,255,255,'+(0.20*a).toFixed(3)+')'; ctx.lineWidth=1.2; ctx.stroke();
+    ctx.restore();
+  }
+
+  // ---------- layout ----------
+  // panels butt together in a real rack — no gutters. widths are fixed, so the whole
+  // strip scales as one; nothing is nudged to fit.
+  patchLayout(w,h){
+    const deg=this.props.degradation||'none';
+    const total=this.MODS.reduce((s,m)=>s+m.hp,0)*this.HP;
+    const sc=Math.min((w-70)/total, (h-110)/this.PH, 1.05);
+    const ox=(w-total*sc)/2, oy=(h-this.PH*sc)/2-10;
+    let x=ox; const out={sc,ox,oy,total,mods:{}};
+    this.MODS.forEach(m=>{
+      const mw=m.hp*this.HP*sc;
+      const img = deg==='no-image' && m.id==='VCA' ? 0 : m.img;
+      const placed = deg==='unplaced' && m.id==='VCA' ? 0 : m.placed;
+      const jm={};
+      if(placed) (m.ports||[]).forEach(p=>{ jm[p[0]]={x:x+p[1]*mw, y:oy+p[2]*sc, dir:p[3], name:p[4]}; });
+      out.mods[m.id]={m, x, w:mw, y:oy, h:this.PH*sc, jacks:jm, img, placed};
+      x+=mw;
+    });
+    return out;
+  }
+  // a port with no captured coordinates docks at the panel edge facing its partner
+  portPt(L,modId,portId,otherModId){
+    const M=L.mods[modId]; if(!M) return null;
+    const J=M.jacks[portId];
+    if(J) return J;
+    const O=L.mods[otherModId];
+    const left = O ? (O.x+O.w/2) < (M.x+M.w/2) : true;
+    // fan docked ends by port order so several never land on the same spot
+    const list=M.m.ports||[], idx=Math.max(0,list.findIndex(p=>p[0]===portId));
+    const step=Math.max(11,19*L.sc);
+    const y=M.y+M.h*0.56+(idx-(list.length-1)/2)*step;
+    return {x: left ? M.x+3 : M.x+M.w-3, y, dock:true, name:this.portName(modId,portId)};
+  }
+
+  frame(){
+    if(!this._id || window.__fmOwner!==this._id){ clearInterval(this._tmr); this._tmr=null; return; }
+    const now=performance.now();
+    if(now-(window.__fmDrawn||0)<8) return;   // one composite per clear, ever
+    window.__fmDrawn=now; this._last=now;
+    if(this.state.view!=='work') return;
+    const cv=this._cv||document.querySelector('[data-fm-canvas]'); if(!cv||!cv.parentNode) return;
+    const w=Math.round(cv.clientWidth), h=Math.round(cv.clientHeight); if(!w||!h) return;
+    const dpr=Math.min(2,window.devicePixelRatio||1);
+    if(cv.width!==Math.round(w*dpr)){ cv.width=Math.round(w*dpr); cv.height=Math.round(h*dpr); }
+    const ctx=cv.getContext('2d'); if(!ctx) return;
+    ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
+    const T=(performance.now()-(this._t0||performance.now()))/1000;
+    const patch=this._mode==='patch';
+    const D=patch?this.patchDur:this.modDur;
+    const p=Math.max(0,Math.min(1,T/D));
+    const res=Math.max(0,Math.min(1,(T-D)/this.RESOLVE));
+    const bar=document.querySelector('[data-fm-bar]'), el=document.querySelector('[data-fm-elapsed]');
+    if(bar) bar.style.width=(p*100).toFixed(1)+'%';
+    if(el) el.textContent=Math.min(T,D+this.RESOLVE).toFixed(1)+'s';
+    if(T>D+this.RESOLVE+3 && this.state.phase==='done'){ /* keep idling gently */ }
+    if(patch) this.patchFrame(ctx,w,h,T,p,res); else this.moduleFrame(ctx,w,h,T,p,res);
+  }
+
+  // ============ PATCH: rails → panels → cables → resolve ============
+  patchFrame(ctx,w,h,T,p,res){
+    const L=this._L=this.patchLayout(w,h);
+    const ease=x=>x<=0?0:x>=1?1:1-Math.pow(1-x,3);
+    const spring=x=>x<=0?0:x>=1?1:1-Math.pow(2,-9*x)*Math.cos(x*11);
+    const introT=Math.min(1,T/1.4);
+    const done=this.state.phase==='done';
+
+    // rails
+    const railA=ease(Math.min(1,T/0.5));
+    ctx.save(); ctx.globalAlpha=railA;
+    [L.oy-9, L.oy+this.PH*L.sc+1].forEach(ry=>{
+      const g=ctx.createLinearGradient(0,ry,0,ry+8);
+      g.addColorStop(0,'#3A4048'); g.addColorStop(1,'#1C2026');
+      ctx.fillStyle=g; ctx.fillRect(L.ox-14,ry,L.total*L.sc+28,8);
+      ctx.fillStyle='rgba(0,0,0,0.35)';
+      for(let sx=L.ox-6; sx<L.ox+L.total*L.sc+18; sx+=this.HP*L.sc){ ctx.fillRect(sx,ry+3,2,2); }
+    });
+    ctx.restore();
+
+    // panels — stagger left→right during intro
+    const ids=Object.keys(L.mods);
+    ids.forEach((id,i)=>{
+      const M=L.mods[id];
+      if(!M) return;
+      const st=0.22+i*(0.62/ids.length);
+      const a=ease(Math.max(0,Math.min(1,(introT-st*0.7)/0.34)));
+      if(a<=0) return;
+      const rise=(1-spring(Math.max(0,Math.min(1,(introT-st*0.7)/0.5))))*-18;
+      const hoverHi=(this.state.hover!=null && (this.WIRES[this.state.hover].a[0]===id||this.WIRES[this.state.hover].b[0]===id))?1:0;
+      const s=L.sc;
+      ctx.save(); ctx.translate(0,rise);
+
+      if(!M.img){
+        // DEGRADATION 1 — no captured panel image. Correct width, hatched, and clearly
+        // "not drawn yet" rather than broken. Resolves the first time it opens in Rack.
+        this.rr(ctx,M.x,M.y,M.w,M.h,4);
+        ctx.save(); ctx.clip();
+        ctx.fillStyle=this.rgba('#1B1F25',a); ctx.fillRect(M.x,M.y,M.w,M.h);
+        ctx.strokeStyle='rgba(220,232,250,'+(0.055*a).toFixed(3)+')'; ctx.lineWidth=1;
+        for(let d2=-M.h; d2<M.w+M.h; d2+=9){ ctx.beginPath(); ctx.moveTo(M.x+d2,M.y); ctx.lineTo(M.x+d2-M.h,M.y+M.h); ctx.stroke(); }
+        ctx.restore();
+        this.rr(ctx,M.x+0.5,M.y+0.5,M.w-1,M.h-1,4);
+        ctx.setLineDash([5,4]); ctx.strokeStyle='rgba(220,232,250,'+(0.22*a).toFixed(3)+')'; ctx.lineWidth=1; ctx.stroke(); ctx.setLineDash([]);
+        this.silk(ctx,M.m.name,M.x+M.w/2,M.y+M.h/2-14*s,Math.max(8,12*s),a*0.7,'rgba(214,226,238,0.7)',600);
+        this.silk(ctx,M.m.hp+' HP',M.x+M.w/2,M.y+M.h/2+2*s,Math.max(6.5,8.5*s),a*0.45,'rgba(214,226,238,0.55)',500);
+        this.silk(ctx,'PANEL NOT',M.x+M.w/2,M.y+M.h/2+22*s,Math.max(6,7.6*s),a*0.4,'rgba(214,226,238,0.5)',500);
+        this.silk(ctx,'CAPTURED',M.x+M.w/2,M.y+M.h/2+33*s,Math.max(6,7.6*s),a*0.4,'rgba(214,226,238,0.5)',500);
+        ctx.restore();
+        return;
+      }
+
+      this.panel(ctx,M.x,M.y,M.w,M.h,a,hoverHi);
+      this.screws(ctx,M.x,M.y,M.w,M.h,a*(done?1:0.65));
+      this.silk(ctx,M.m.name,M.x+M.w/2,M.y+20*s,Math.max(8,12*s),a*0.95,'rgba(230,238,246,0.9)',600);
+      this.silk(ctx,M.m.brand.toUpperCase(),M.x+M.w/2,M.y+M.h-14*s,Math.max(6,7.4*s),a*0.28,'rgba(214,226,238,0.5)',500);
+      M.m.knobs.forEach((k,ki)=>{
+        const v=0.22+0.6*(0.5+0.5*Math.sin(T*0.5+ki*1.3+i));
+        this.knob(ctx,M.x+k[1]*M.w,M.y+k[2]*s,Math.max(4.2,(this.K[k[3]]||9)*s),'#16DAC2',v,a*0.96);
+      });
+
+      if(!M.placed){
+        // DEGRADATION 2 — never placed in a rack, so no port coordinates exist.
+        // Draw no jacks; cables dock at the edge instead of guessing a position.
+        this.silk(ctx,'PORTS',M.x+M.w/2,M.y+M.h*0.62-13*s,Math.max(6,7.4*s),a*0.4,'rgba(214,226,238,0.5)',500);
+        this.silk(ctx,'NOT MAPPED',M.x+M.w/2,M.y+M.h*0.62-3*s,Math.max(6,7.4*s),a*0.4,'rgba(214,226,238,0.5)',500);
+        ctx.restore();
+        return;
+      }
+
+      const focus=(this.state.hover!=null||this.state.hoverGroup!=null);
+      (M.m.ports||[]).forEach(p=>{
+        const J=M.jacks[p[0]]; if(!J) return;
+        let wi=-1;
+        this.WIRES.forEach((wr,k)=>{ if((wr.a[0]===id&&wr.a[1]===p[0])||(wr.b[0]===id&&wr.b[1]===p[0])) wi=k; });
+        // a withheld cable must not leave a plugged-looking jack behind
+        const live = wi>=0 && (function(L2,wr){ const A2=L2.mods[wr.a[0]], B2=L2.mods[wr.b[0]]; return !!(A2&&B2&&A2.img&&B2.img); })(L,this.WIRES[wi]);
+        const wired = live && this.cableT(wi,T)>0.9;
+        const col = wi>=0 ? this.WIRES[wi].c : '#16DAC2';
+        const jhov = wi>=0 && (this.state.hover===wi || this.state.hoverGroup===this.WIRES[wi].role);
+        const plug = wired ? (focus&&!jhov ? 0.16 : 1) : 0;
+        const jr=Math.max(3.6,9.2*s);
+        this.jack(ctx,J.x,J.y,jr,col,plug,a);
+        // real panels are dense — labels sit above the jack and only when they fit
+        if(s>0.62) this.silk(ctx,p[0],J.x,J.y-jr-Math.max(5,6.5*s),Math.max(5.4,6.6*s),a*0.55,'rgba(214,226,238,0.62)',500);
+      });
+      ctx.restore();
+    });
+
+    // cables
+    this.WIRES.forEach((wr,i)=>{
+      const A=L.mods[wr.a[0]], B=L.mods[wr.b[0]]; if(!A||!B) return;
+      if(!A.img||!B.img) return;                       // nothing to hang a cable off yet
+      const ja=this.portPt(L,wr.a[0],wr.a[1],wr.b[0]);
+      const jb=this.portPt(L,wr.b[0],wr.b[1],wr.a[0]);
+      if(!ja||!jb) return;
+      const t=this.cableT(i,T);
+      const hov=this.state.hover===i || this.state.hoverGroup===wr.role;
+      const dim=(this.state.hover!=null||this.state.hoverGroup!=null)&&!hov;
+      this.cable(ctx,ja.x,ja.y,jb.x,jb.y,wr.c,t,dim?0.14:1,hov?1:(t<1?0.7:0.25));
+      if(t>0.02&&t<1){ ctx.save(); const ex=ja.x+(jb.x-ja.x)*t, ey=ja.y+(jb.y-ja.y)*t;
+        ctx.beginPath(); ctx.arc(ex,ey,7,0,6.283); ctx.fillStyle=wr.c; ctx.globalAlpha=0.9; ctx.fill();
+        ctx.beginPath(); ctx.arc(ex,ey,3,0,6.283); ctx.fillStyle='rgba(255,255,255,0.65)'; ctx.fill(); ctx.restore(); }
+      // a docked end gets a collar, so "we don't know where this jack is" is visible
+      [ja,jb].forEach(J=>{
+        if(!J.dock||t<0.9) return;
+        const dimD=(this.state.hover!=null||this.state.hoverGroup!=null)&&!hov;
+        ctx.save();
+        this.rr(ctx,J.x-4,J.y-9,8,18,4); ctx.fillStyle=this.rgba(wr.c,dimD?0.16:0.9); ctx.fill();
+        ctx.strokeStyle='rgba(255,255,255,'+(dimD?0.06:0.28)+')'; ctx.lineWidth=1; ctx.stroke();
+        ctx.restore();
+      });
+      // SUSTAIN: signal travels the finished cables, indefinitely — resolves nothing
+      if(t>=1 && !done){
+        const per=2.2, ph=((T/per)+i*0.11)%1;
+        const q=ph, sag=Math.min(160,46+Math.hypot(jb.x-ja.x,jb.y-ja.y)*0.36);
+        const mx=(ja.x+jb.x)/2, my=Math.max(ja.y,jb.y)+sag*0.86;
+        const bx=(1-q)*(1-q)*ja.x+2*(1-q)*q*mx+q*q*jb.x;
+        const by=(1-q)*(1-q)*ja.y+2*(1-q)*q*my+q*q*jb.y;
+        ctx.save(); ctx.globalCompositeOperation='lighter'; ctx.globalAlpha=(dim?0.2:0.7)*Math.sin(Math.PI*ph);
+        ctx.beginPath(); ctx.arc(bx,by,5.5,0,6.283); ctx.fillStyle=wr.c; ctx.fill(); ctx.restore();
+      }
+      // hover callout at readable size
+      if(hov && this.state.hover===i){
+        ctx.save();
+        ctx.font="600 12px 'JetBrains Mono',monospace";
+        // the vendor's own name for the port, not our short silkscreen
+        const boxes=[[ja,wr.a],[jb,wr.b]].map(pair=>{
+          const label=pair[1][0]+' · '+this.portName(pair[1][0],pair[1][1]);
+          const tw=ctx.measureText(label).width+16;
+          return {J:pair[0], label, tw, x:Math.max(6,Math.min(w-tw-6,pair[0].x-tw/2)), y:pair[0].y-30};
+        });
+        // two nearby jacks would collide — stack the second callout above the first
+        if(boxes[1].x < boxes[0].x+boxes[0].tw+6 && boxes[0].x < boxes[1].x+boxes[1].tw+6) boxes[1].y-=26;
+        boxes.forEach(bx=>{
+          this.rr(ctx,bx.x,bx.y,bx.tw,21,7); ctx.fillStyle='rgba(10,13,18,0.94)'; ctx.fill();
+          ctx.strokeStyle=wr.c; ctx.lineWidth=1; ctx.stroke();
+          ctx.fillStyle='#E9EFF5'; ctx.textAlign='center'; ctx.textBaseline='middle';
+          ctx.fillText(bx.label,bx.x+bx.tw/2,bx.y+11);
+          ctx.beginPath(); ctx.arc(bx.J.x,bx.J.y,Math.max(6,13*L.sc),0,6.283); ctx.strokeStyle=wr.c; ctx.lineWidth=2; ctx.stroke();
+        });
+        ctx.restore();
+      }
+    });
+
+    // RESOLVE sweep
+    if(res>0&&res<1){
+      const sx=L.ox-40+(L.total*L.sc+80)*res;
+      ctx.save(); ctx.globalCompositeOperation='lighter';
+      const g=ctx.createLinearGradient(sx-60,0,sx+60,0);
+      g.addColorStop(0,'rgba(22,218,194,0)'); g.addColorStop(0.5,'rgba(22,218,194,0.14)'); g.addColorStop(1,'rgba(22,218,194,0)');
+      ctx.fillStyle=g; ctx.fillRect(sx-60,L.oy-14,120,this.PH*L.sc+28);
+      ctx.fillStyle='rgba(190,255,246,0.42)'; ctx.fillRect(sx-0.5,L.oy-14,1,this.PH*L.sc+28);
+      ctx.restore();
+    }
+  }
+  // cable arrival is milestone-driven; order = audio → pitch → clock → mod
+  cableT(i,T){
+    const order=['audio','pitch','clock','mod'];
+    const sorted=this.WIRES.map((w,ix)=>({w,ix})).sort((a,b)=>order.indexOf(a.w.role)-order.indexOf(b.w.role)||a.ix-b.ix);
+    const slot=sorted.findIndex(s=>s.ix===i);
+    const start=1.5+slot*0.86;
+    const t=(T-start)/0.66;
+    return t<=0?0:t>=1?1:1-Math.pow(1-t,3);
+  }
+
+  // ============ MODULE: blank panel → parts land → silkscreen → seat ============
+  moduleFrame(ctx,w,h,T,p,res){
+    const ease=x=>x<=0?0:x>=1?1:1-Math.pow(1-x,3);
+    const spring=x=>x<=0?0:x>=1?1:1-Math.pow(2,-9*x)*Math.cos(x*11);
+    const sc=Math.min(1.32,(h-110)/this.PH);
+    const pw=this.MOD_HP*this.HP*sc, ph=this.PH*sc;
+    const x=(w-pw)/2, y=(h-ph)/2-12;
+    const done=this.state.phase==='done';
+
+    // rails
+    const railA=ease(Math.min(1,T/0.45));
+    ctx.save(); ctx.globalAlpha=railA;
+    [y-9,y+ph+1].forEach(ry=>{
+      const g=ctx.createLinearGradient(0,ry,0,ry+8); g.addColorStop(0,'#3A4048'); g.addColorStop(1,'#1C2026');
+      ctx.fillStyle=g; ctx.fillRect(x-110,ry,pw+220,8);
+      ctx.fillStyle='rgba(0,0,0,0.35)';
+      for(let sx=x-104;sx<x+pw+214;sx+=this.HP*sc) ctx.fillRect(sx,ry+3,2,2);
+    });
+    ctx.restore();
+
+    // INTRO: blank panel materializes and settles into the rails
+    const pa=ease(Math.max(0,Math.min(1,(T-0.32)/0.62)));
+    if(pa<=0) return;
+    const seat=spring(Math.max(0,Math.min(1,(T-0.32)/0.95)));
+    ctx.save(); ctx.translate(0,(1-seat)*-26);
+    this.panel(ctx,x,y,pw,ph,pa,0);
+
+    // SUSTAIN: parts land with spring; silkscreen follows each part
+    this.MPARTS.forEach((q,qi)=>{
+      const st=1.15+q.s*3.0;
+      const la=Math.max(0,Math.min(1,(T-st)/0.52));
+      if(la<=0) return;
+      const s2=spring(la), drop=(1-s2)*-34, alpha=ease(Math.min(1,la*1.6))*pa;
+      const cx=x+q.x*pw, cy=y+q.y*sc+drop;
+      if(q.t==='knob'){ const v=0.24+0.56*(0.5+0.5*Math.sin(T*0.6+qi)); this.knob(ctx,cx,cy,q.r*sc,q.k,v,alpha); }
+      else if(q.t==='jack'){ this.jack(ctx,cx,cy,q.r*sc,q.k,0,alpha,true); }
+      else if(q.t==='led'){ ctx.save(); ctx.globalAlpha=alpha; const g=ctx.createRadialGradient(cx,cy,0.5,cx,cy,q.r*sc);
+        g.addColorStop(0,'#EAFFFB'); g.addColorStop(0.4,q.k); g.addColorStop(1,'rgba(70,240,219,0)');
+        ctx.beginPath(); ctx.arc(cx,cy,q.r*sc,0,6.283); ctx.fillStyle=g; ctx.globalAlpha=alpha*(0.55+0.45*Math.sin(T*3.1)); ctx.fill(); ctx.restore(); }
+      else if(q.t==='sw'){ ctx.save(); ctx.globalAlpha=alpha; const sw=15*sc, sh=25*sc;
+        this.rr(ctx,cx-sw/2,cy-sh/2,sw,sh,sw/2); const g=ctx.createLinearGradient(0,cy-sh/2,0,cy+sh/2);
+        g.addColorStop(0,'#141820'); g.addColorStop(1,'#20252C'); ctx.fillStyle=g; ctx.fill();
+        ctx.strokeStyle='rgba(255,255,255,0.10)'; ctx.lineWidth=1; ctx.stroke();
+        const up=Math.sin(T*0.7+qi)>0; const ky=cy+(up?-1:1)*sh*0.22;
+        const kg=ctx.createRadialGradient(cx-2,ky-3,1,cx,ky,sw*0.52);
+        kg.addColorStop(0,'#A9B2BC'); kg.addColorStop(1,'#5D666F');
+        ctx.beginPath(); ctx.arc(cx,ky,sw*0.40,0,6.283); ctx.fillStyle=kg; ctx.fill(); ctx.restore(); }
+      else if(q.t==='slider'){ ctx.save(); ctx.globalAlpha=alpha; const sl=84*sc, sh2=9*sc;
+        this.rr(ctx,cx-sl/2,cy-sh2/2,sl,sh2,sh2/2); ctx.fillStyle='#12151A'; ctx.fill();
+        ctx.strokeStyle='rgba(0,0,0,0.5)'; ctx.lineWidth=1; ctx.stroke();
+        const v=0.3+0.4*(0.5+0.5*Math.sin(T*0.45));
+        this.rr(ctx,cx-sl/2,cy-sh2/2,sl*v,sh2,sh2/2); ctx.fillStyle=q.k; ctx.globalAlpha=alpha*0.85; ctx.fill();
+        ctx.globalAlpha=alpha; const hx=cx-sl/2+sl*v, hw=13*sc, hh=20*sc;
+        this.rr(ctx,hx-hw/2,cy-hh/2,hw,hh,3.5*sc);
+        const hg=ctx.createLinearGradient(0,cy-hh/2,0,cy+hh/2); hg.addColorStop(0,'#AEB7C1'); hg.addColorStop(1,'#5A636D');
+        ctx.fillStyle=hg; ctx.fill(); ctx.strokeStyle='rgba(0,0,0,0.5)'; ctx.stroke(); ctx.restore(); }
+      // silkscreen label trails the part by 0.18s
+      if(q.l){ const sa=ease(Math.max(0,Math.min(1,(T-st-0.18)/0.42)))*pa;
+        this.silk(ctx,q.l,cx,y+(q.y+(q.lo||16))*sc,Math.max(7.5,8.8*sc),sa*0.78,'rgba(214,226,238,0.8)',500); }
+    });
+
+    // panel graphics: title + brand + divider
+    const ta=ease(Math.max(0,Math.min(1,(T-3.5)/0.6)))*pa;
+    this.silk(ctx,'WAVEFOLD',x+pw/2,y+30*sc,Math.max(11,15*sc),ta,'rgba(234,242,249,0.95)',700);
+    ctx.save(); ctx.globalAlpha=ta*0.5; ctx.strokeStyle='rgba(22,218,194,0.6)'; ctx.lineWidth=1.4;
+    ctx.beginPath(); ctx.moveTo(x+14*sc,y+44*sc); ctx.lineTo(x+pw-14*sc,y+44*sc); ctx.stroke(); ctx.restore();
+    this.silk(ctx,'FORGE MODULAR · 12 HP',x+pw/2,y+54*sc,Math.max(6.5,8.2*sc),ta*0.5,'rgba(214,226,238,0.58)',500);
+
+    // screws torque in at resolve
+    const sa2=done?1:ease(Math.max(0,Math.min(1,(T-5.9)/0.7)));
+    if(sa2>0){ ctx.save(); ctx.translate(x+pw/2,y+ph/2); ctx.rotate((1-sa2)*0.5); ctx.translate(-(x+pw/2),-(y+ph/2)); this.screws(ctx,x,y,pw,ph,sa2); ctx.restore(); }
+    ctx.restore();
+
+    // SUSTAIN loop: an inspection band travels down the panel, forever, resolving nothing
+    if(!done && T>2.0){
+      const per=2.6, q=((T-2.0)/per)%1, by=y+q*ph;
+      ctx.save(); ctx.globalCompositeOperation='lighter';
+      const g=ctx.createLinearGradient(0,by-46,0,by+46);
+      g.addColorStop(0,'rgba(22,218,194,0)'); g.addColorStop(0.5,'rgba(22,218,194,0.10)'); g.addColorStop(1,'rgba(22,218,194,0)');
+      ctx.fillStyle=g; ctx.fillRect(x,by-46,pw,92);
+      ctx.fillStyle='rgba(190,255,246,0.26)'; ctx.fillRect(x,by-0.5,pw,1);
+      ctx.restore();
+    }
+    // RESOLVE: bloom ring
+    if(res>0&&res<1){
+      ctx.save(); ctx.globalCompositeOperation='lighter';
+      const cx=x+pw/2, cy=y+ph/2, r=pw*(0.7+res*1.5);
+      const g=ctx.createRadialGradient(cx,cy,r*0.55,cx,cy,r);
+      g.addColorStop(0,'rgba(22,218,194,0)'); g.addColorStop(0.72,'rgba(22,218,194,'+(0.30*(1-res))+')'); g.addColorStop(1,'rgba(22,218,194,0)');
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(cx,cy,r,0,6.283); ctx.fill(); ctx.restore();
+    }
+  }
+
+  // ---------- hit test ----------
+  onStageMove=(e)=>{
+    if(this._mode!=='patch'||!this._L) return;
+    const r=e.currentTarget.getBoundingClientRect();
+    const mx=e.clientX-r.left, my=e.clientY-r.top;
+    let best=null, bd=26;
+    this.WIRES.forEach((wr,i)=>{
+      const A=this._L.mods[wr.a[0]], B=this._L.mods[wr.b[0]]; if(!A||!B) return;
+      const ja=A.jacks[wr.a[1]], jb=B.jacks[wr.b[1]]; if(!ja||!jb) return;
+      const sag=Math.min(160,46+Math.hypot(jb.x-ja.x,jb.y-ja.y)*0.36);
+      const cx=(ja.x+jb.x)/2, cy=Math.max(ja.y,jb.y)+sag*0.86;
+      for(let s=0;s<=1.001;s+=0.06){
+        const bx=(1-s)*(1-s)*ja.x+2*(1-s)*s*cx+s*s*jb.x;
+        const by=(1-s)*(1-s)*ja.y+2*(1-s)*s*cy+s*s*jb.y;
+        const d=Math.hypot(bx-mx,by-my); if(d<bd){ bd=d; best=i; }
+      }
+    });
+    if(best!==this.state.hover) this.setState({hover:best});
+  };
+  onStageLeave=()=>{ if(this.state.hover!=null) this.setState({hover:null}); };
+
+  // ---------- mention data ----------
+  MENTIONS=[
+    {state:'ready',   slug:'Fundamental/VCO',              name:'VCO',                    tags:'VCO · Polyphonic'},
+    {state:'ready',   slug:'Fundamental/VCO2',             name:'VCO 2',                  tags:'VCO · LFO'},
+    {state:'free',    slug:'Befaco/EvenVCO',               name:'Even VCO',               tags:'VCO · Hardware clone'},
+    {state:'free',    slug:'AudibleInstruments/Macro',     name:'Macro Oscillator',       tags:'VCO · Digital'},
+    {state:'premium', slug:'ALM034/ALM034',                name:"Pamela's Pro Workout",   tags:'Clock · Sequencer'},
+    {state:'premium', slug:'Vult/Caudal',                  name:'Caudal',                 tags:'VCO · Chaos'},
+    {state:'free',    slug:'4ms/SphereVCO',                name:'Spherical Wavetable',    tags:'VCO · Wavetable'}
+  ];
+  ST={
+    ready:{icon:'check', label:'READY', style:'background:rgba(63,207,119,0.16);color:#3FCF77'},
+    free:{icon:'arrow-down', label:'FREE', style:'background:rgba(94,120,255,0.16);color:#5E78FF'},
+    premium:{icon:'dollar-sign', label:'PREMIUM', style:'background:rgba(246,184,71,0.18);color:#F6B847'}
+  };
+
+  // ---------- parts set ----------
+  // 270° value arc (conic ring) + dished cap + pointer, at real Eurorack size
+  KNOB(size,col,val){
+    const cap=Math.round(size*0.72), start=0.375, span=0.75;
+    const on=start+span*val;
+    return {
+      art:'position:relative;width:'+size+'px;height:'+size+'px;border-radius:50%;background:conic-gradient(from 180deg,'
+        +'transparent 0turn '+start.toFixed(3)+'turn,'
+        +col+' '+start.toFixed(3)+'turn '+on.toFixed(3)+'turn,'
+        +'rgba(220,232,250,0.14) '+on.toFixed(3)+'turn '+(start+span).toFixed(3)+'turn,'
+        +'transparent '+(start+span).toFixed(3)+'turn 1turn);'
+        +'filter:drop-shadow(0 0 6px '+col+'66)',
+      inner:'position:absolute;top:50%;left:50%;width:'+cap+'px;height:'+cap+'px;margin:'+(-cap/2)+'px 0 0 '+(-cap/2)+'px;border-radius:50%;'
+        +'background:radial-gradient(circle at 32% 26%,#4A525C,#333A43 55%,#1B1F25);'
+        +'box-shadow:0 2px 5px rgba(0,0,0,0.55),inset 0 0 0 1px rgba(255,255,255,0.10),0 0 0 3px #262B31',
+      tick:'position:absolute;left:50%;top:'+Math.round(cap*0.14)+'px;width:2px;height:'+Math.round(cap*0.30)+'px;margin-left:-1px;border-radius:1px;background:#E6ECF2'
+    };
+  }
+  PARTS=[
+    {title:'Knobs', spec:'12 MM · 9 MM · 6 MM', note:'Dished cap, off-axis highlight, a 270° value arc in the signal ink. The arc is what still reads at 60% scale when the cap no longer does.', items:[
+      {name:'Knob · large', dim:'12 mm cap · 46 px arc', ...this.KNOB(46,'#16DAC2',0.62)},
+      {name:'Knob · medium', dim:'9 mm cap · 36 px arc', ...this.KNOB(36,'#F6B847',0.34)},
+      {name:'Trimmer', dim:'6 mm · no arc', art:'position:relative;width:18px;height:18px;border-radius:50%;background:radial-gradient(circle at 32% 28%,#454D57,#2B3138 60%,#181C22);box-shadow:0 1px 3px rgba(0,0,0,0.5),inset 0 0 0 1px rgba(255,255,255,0.08)', inner:'position:absolute;inset:0;border-radius:50%', tick:'position:absolute;left:50%;top:3px;width:1.5px;height:6px;margin-left:-.75px;background:#C9D2DC'},
+      {name:'Attenuverter', dim:'9 mm · centre detent', ...this.KNOB(36,'#8B6CF5',0.5)}
+    ]},
+    {title:'Jacks', spec:'8 MM · 24 PX', note:'Nickel ring, black bore, and a coloured pupil that only appears when something is plugged in — so an unpatched panel reads instantly.', items:[
+      {name:'Jack · unpatched', dim:'8 mm · 24 px', art:'position:relative;width:24px;height:24px;border-radius:50%;background:radial-gradient(circle at 34% 30%,#98A1AB,#69727D 62%,#333A42);box-shadow:0 1px 3px rgba(0,0,0,0.55)', inner:'position:absolute;inset:6px;border-radius:50%;background:#0D1014'},
+      {name:'Jack · audio', dim:'patched · #00b56e', art:'position:relative;width:24px;height:24px;border-radius:50%;background:radial-gradient(circle at 34% 30%,#98A1AB,#69727D 62%,#333A42);box-shadow:0 1px 3px rgba(0,0,0,0.55)', inner:'position:absolute;inset:6px;border-radius:50%;background:#00b56e;box-shadow:inset 0 0 0 2px rgba(255,255,255,0.35)'},
+      {name:'Jack · modulation', dim:'patched · #8b4ade', art:'position:relative;width:24px;height:24px;border-radius:50%;background:radial-gradient(circle at 34% 30%,#98A1AB,#69727D 62%,#333A42);box-shadow:0 1px 3px rgba(0,0,0,0.55)', inner:'position:absolute;inset:6px;border-radius:50%;background:#8b4ade;box-shadow:inset 0 0 0 2px rgba(255,255,255,0.35)'},
+      {name:'LED', dim:'3 mm · 9 px', art:'position:relative;width:14px;height:14px;border-radius:50%;background:radial-gradient(circle,#EAFFFB,#46F0DB 42%,rgba(70,240,219,0) 78%)', inner:'position:absolute;inset:5px;border-radius:50%;background:#EAFFFB'}
+    ]},
+    {title:'Switches', spec:'15 × 25 PX', note:'A toggle you can read at a glance from the throw position alone — no label state, no colour dependency.', items:[
+      {name:'Toggle · up', dim:'2-position', art:'position:relative;width:15px;height:25px;border-radius:8px;background:linear-gradient(180deg,#141820,#20252C);box-shadow:inset 0 0 0 1px rgba(255,255,255,0.1)', inner:'position:absolute;left:1.5px;top:2px;width:12px;height:12px;border-radius:50%;background:radial-gradient(circle at 32% 28%,#A9B2BC,#5D666F)'},
+      {name:'Toggle · down', dim:'2-position', art:'position:relative;width:15px;height:25px;border-radius:8px;background:linear-gradient(180deg,#141820,#20252C);box-shadow:inset 0 0 0 1px rgba(255,255,255,0.1)', inner:'position:absolute;left:1.5px;bottom:2px;width:12px;height:12px;border-radius:50%;background:radial-gradient(circle at 32% 28%,#A9B2BC,#5D666F)'},
+      {name:'Button', dim:'7 mm · momentary', art:'position:relative;width:21px;height:21px;border-radius:50%;background:radial-gradient(circle at 34% 28%,#3B434D,#22272E);box-shadow:0 2px 4px rgba(0,0,0,0.5),inset 0 0 0 1px rgba(22,218,194,0.4)', inner:'position:absolute;inset:6px;border-radius:50%;background:rgba(22,218,194,0.75);box-shadow:0 0 10px rgba(22,218,194,0.6)'},
+      {name:'3-position', dim:'mode select', art:'position:relative;width:15px;height:32px;border-radius:8px;background:linear-gradient(180deg,#141820,#20252C);box-shadow:inset 0 0 0 1px rgba(255,255,255,0.1)', inner:'position:absolute;left:1.5px;top:10px;width:12px;height:12px;border-radius:50%;background:radial-gradient(circle at 32% 28%,#A9B2BC,#5D666F)'}
+    ]},
+    {title:'Sliders & meters', spec:'84 × 9 PX TRACK', note:'Inset well, ink fill, machined cap. The fill is the value — the cap is only the grip.', items:[
+      {name:'Slider · horizontal', dim:'28 mm throw', art:'position:relative;width:84px;height:9px;border-radius:5px;background:#12151A;box-shadow:inset 0 1px 3px rgba(0,0,0,0.6)', inner:'position:absolute;left:0;top:0;bottom:0;width:52px;border-radius:5px;background:#16DAC2;box-shadow:0 0 10px rgba(22,218,194,0.45)'},
+      {name:'Fader · vertical', dim:'40 mm throw', art:'position:relative;width:9px;height:84px;border-radius:5px;background:#12151A;box-shadow:inset 0 1px 3px rgba(0,0,0,0.6)', inner:'position:absolute;left:0;right:0;bottom:0;height:48px;border-radius:5px;background:#5E78FF;box-shadow:0 0 10px rgba(94,120,255,0.45)'},
+      {name:'Meter · 6 segment', dim:'level', art:'position:relative;width:11px;height:70px;border-radius:4px;background:#12151A;box-shadow:inset 0 1px 3px rgba(0,0,0,0.6)', inner:'position:absolute;left:2px;right:2px;bottom:2px;height:42px;border-radius:3px;background:linear-gradient(0deg,#3FCF77,#16DAC2 62%,#F6B847)'},
+      {name:'Scope well', dim:'inset display', art:'position:relative;width:78px;height:44px;border-radius:7px;background:#0C0F14;box-shadow:inset 0 1px 4px rgba(0,0,0,0.7),inset 0 0 0 1px rgba(220,232,250,0.07)', inner:'position:absolute;left:6px;right:6px;top:50%;height:2px;margin-top:-1px;border-radius:2px;background:#16DAC2;box-shadow:0 0 10px rgba(22,218,194,0.7)'}
+    ]}
+  ];
+
+  // ---------- handlers / values ----------
+  renderVals(){
+    const st=this.state, mode=st.mode, patch=mode==='patch';
+    const view=st.view, building=view==='work'&&st.phase==='building', done=view==='work'&&st.phase==='done';
+    const steps = patch?this.PATCH_STEPS:this.MODULE_STEPS;
+    // selected tab IS the composer surface — same fill, borders overlapping, no seam.
+    // unselected sits a little lower and behind, so the joint reads as one shape.
+    const tab=(on)=>on
+      ? 'height:40px;background:var(--surface-raised);color:var(--text-strong);border-color:var(--line-strong);position:relative;z-index:2'
+      : 'height:36px;background:var(--surface-app);color:var(--text-muted);border-color:var(--line);position:relative;z-index:1';
+    const stx=(k)=>this.ST[k];
+    const rack=st.rackRunning;
+
+    const railItems=[
+      {icon:'home', title:'Home', active:view==='home', onClick:()=>this.go('home'), extra:view==='home'?'background:var(--accent-soft);color:var(--accent)':''},
+      {icon:'rectangle-vertical', title:'Module', active:view==='work'&&!patch, onClick:()=>this.start('module'), extra:(view==='work'&&!patch)?'background:var(--accent-soft);color:var(--accent)':''},
+      {icon:'cable', title:'Patch', active:view==='work'&&patch, onClick:()=>this.start('patch'), extra:(view==='work'&&patch)?'background:var(--accent-soft);color:var(--accent)':''},
+      {icon:'circle-dot', title:'Eurorack parts', active:view==='parts', onClick:()=>this.go('parts'), extra:view==='parts'?'background:var(--accent-soft);color:var(--accent)':''}
+    ];
+
+    // wiring groups
+    const order=['audio','pitch','clock','mod'];
+    const wireGroups=order.map(role=>{
+      const R=this.ROLES[role];
+      const list=this.WIRES.map((w,i)=>({w,i})).filter(o=>o.w.role===role);
+      return {
+        label:R.label, icon:R.icon, count:list.length+(list.length===1?' CABLE':' CABLES'),
+        primer:R.primer, showPrimer:st.depth==='learning',
+        onEnter:()=>this.setState({hoverGroup:role}), onLeave:()=>this.setState({hoverGroup:null}),
+        wires:list.map(o=>({
+          src:o.w.a[0]+' '+o.w.a[1], dst:o.w.b[0]+' '+o.w.b[1],
+          vendor:this.portName(o.w.a[0],o.w.a[1])+' → '+this.portName(o.w.b[0],o.w.b[1]),
+          color:o.w.c, glow:o.w.c+'99',
+          note:o.w.note?'· '+o.w.note:'', hasNote:!!o.w.note,
+          why:o.w.why||'', showWhy: st.depth!=='terse' && !!o.w.why,
+          showVendor: st.depth==='learning',
+          rowExtra: st.hover===o.i?'background:var(--surface-hover)':'',
+          onEnter:()=>this.setState({hover:o.i}), onLeave:()=>this.setState({hover:null})
+        }))
+      };
+    });
+
+    const q='vco';
+    const mentionResults=this.MENTIONS.map((m,i)=>({
+      slug:m.slug, name:m.name, tags:m.tags,
+      stateIcon:stx(m.state).icon, stateLabel:stx(m.state).label, stateStyle:stx(m.state).style,
+      rowExtra:m.state==='ready'?'':'opacity:.82',
+      onPick:()=>this.setState({mentionOpen:false, chips:[...st.chips,{slug:m.slug,state:m.state}]})
+    }));
+
+    const rolled=st.rolled;
+    return {
+      scale:st.scale,
+      isHome:view==='home', isWork:view==='work', isParts:view==='parts', isInstaller:view==='installer',
+      isPatch:patch, isBuilding:building, isDone:done,
+      docTag: patch?'PATCH · UNTITLED':'MODULE · 12 HP',
+      rackStatus: rack?'RACK RUNNING':'RACK NOT RUNNING',
+      rackDotStyle: rack?'background:var(--success);box-shadow:0 0 8px var(--success)':'background:var(--text-faint)',
+      toggleRack:()=>this.setState({rackRunning:!rack}),
+      railItems, installerExtra: view==='installer'?'background:var(--accent-soft);color:var(--accent)':'',
+      goInstaller:()=>this.go('installer'), goParts:()=>this.go('parts'), goHome:()=>this.go('home'),
+
+      heroTitle: patch?'What should the rack do?':'What should the module do?',
+      heroSub: patch?'A whole rack, wired and explained. It only uses modules you have installed.'
+                    :'One Eurorack panel — knobs, jacks and the DSP behind them.',
+      moduleTabExtra:tab(!patch), patchTabExtra:tab(patch),
+      setModeModule:()=>this.setState({mode:'module', rolled:null, preflight:false, exampleIdx:0, askAnswer:null, askIdx:0}),
+      setModePatch:()=>this.setState({mode:'patch', rolled:null, preflight:false, exampleIdx:0, askAnswer:null, askIdx:0}),
+
+      promptText: rolled ? rolled : this.EXAMPLES[mode][st.exampleIdx%3],
+      promptStyle: rolled?'color:var(--text-strong)':'color:var(--text-faint)',
+      cycleExample:()=>this.setState({exampleIdx:st.exampleIdx+1, rolled:null, preflight:false, askAnswer:null}),
+
+      randomLabel: patch?'Random patch':'Random module',
+      randomTitle: patch?'Rolls a whole rack — from the modules you actually have installed'
+                        :'Rolls a single module idea',
+      randomColor: patch?'var(--ink-violet)':'var(--accent)',
+      rollRandom:()=>{ const l=this.ROLLS[mode]; const pick=l[Math.floor(Math.random()*l.length)];
+        this.setState({rolled:pick, preflight:false, mentionOpen:false}); },
+      rolled:!!rolled,
+      rolledKind: patch?'RANDOM PATCH':'RANDOM MODULE',
+      rolledMeta: patch?'Uses 8 of your 214 installed modules. Roll until you like it — nothing is built until you press Build.'
+                       :'A single idea. Roll until you like it — nothing is built until you press Build.',
+
+      openMention:()=>this.setState({mentionOpen:!st.mentionOpen}),
+      mentionOpen:st.mentionOpen, mentionQuery:q,
+      mentionCount:'51 MATCHES · 2 USABLE NOW', mentionResults,
+      hasChips:st.chips.length>0,
+      chips:st.chips.map((c,i)=>({label:c.slug, icon:stx(c.state).icon, color:c.state==='ready'?'#3FCF77':(c.state==='free'?'#5E78FF':'#F6B847'),
+        line:c.state==='ready'?'rgba(63,207,119,0.4)':'var(--line)',
+        onRemove:()=>this.setState({chips:st.chips.filter((_,j)=>j!==i)})})),
+
+      doAsk:()=>{
+        const list=this.ASKS[mode]||[], i=(st.askIdx||0)%list.length, item=list[i];
+        if(!item) return;
+        if(view==='work'){
+          // append an answer turn; phase, buildStep and the artifact itself stay put
+          this.setState({answers:[...(st.answers||[]), item], askIdx:i+1,
+            hover: item.w!=null?item.w:null});
+          clearTimeout(this._askHl);
+          this._askHl=setTimeout(()=>this.setState({hover:null}), 2600);
+        } else {
+          this.setState({askAnswer:item.a, askIdx:i+1, preflight:false});
+        }
+      },
+      askAnswer: st.askAnswer||null,
+      clearAsk:()=>this.setState({askAnswer:null}),
+      hasAnswers:(st.answers||[]).length>0,
+      answers:(st.answers||[]).map(x=>{
+        const wr=x.w!=null?this.WIRES[x.w]:null;
+        return {q:x.q, a:x.a,
+          ref: wr ? (wr.a[0]+' '+wr.a[1]+'  →  '+wr.b[0]+' '+wr.b[1]) : 'WAVEFOLD · 12 HP',
+          color: wr?wr.c:'var(--accent)',
+          unchanged: patch?'PATCH UNCHANGED':'MODULE UNCHANGED',
+          onEnter:()=>{ if(x.w!=null) this.setState({hover:x.w}); },
+          onLeave:()=>{ if(x.w!=null) this.setState({hover:null}); }};
+      }),
+      buildLabel: patch?'Build patch':'Build module',
+      buildTitle: patch?'Generates a new patch. Replaces what is on the rack.':'Compiles a new module.',
+      doBuild:()=>{ const txt=rolled||this.EXAMPLES[mode][st.exampleIdx%3];
+        if(patch && /granular/i.test(txt) && !st.preflight){ this.setState({preflight:true}); return; }
+        this.start(mode); },
+      rebuild:()=>this.start(mode),
+      preflight:st.preflight,
+      preflightTitle:'No granular module is installed.',
+      preflightBody:"We can hear what you're after, and nothing in your rack will do it. Either of these would — both free.",
+      preflightOptions:[
+        {slug:'AudibleInstruments/Clouds', name:'Texture Synthesizer', stateIcon:'arrow-down', stateLabel:'FREE', stateStyle:this.ST.free.style},
+        {slug:'Ambivalent-Instruments/Grainer', name:'Grainer', stateIcon:'arrow-down', stateLabel:'FREE', stateStyle:this.ST.free.style}
+      ],
+      preflightPrimary:'Build it anyway',
+      preflightFoot:"If you build anyway, Rack will name what's missing when it opens the patch, offer to show it in the Library, and keep the modules and cables in place — so installing later makes the patch whole. If you already own one of these, sync it in Rack's Library.",
+      dismissPreflight:()=>this.setState({preflight:false}),
+
+      shelf:st.shelf, shelfPatches:()=>this.setState({shelf:'patches'}), shelfModules:()=>this.setState({shelf:'modules'}),
+      shelfPatchesExtra: st.shelf==='patches'?'color:var(--text-strong);border-bottom:2px solid var(--accent)':'color:var(--text-muted)',
+      shelfModulesExtra: st.shelf==='modules'?'color:var(--text-strong);border-bottom:2px solid var(--accent);font-weight:600':'color:var(--text-muted)',
+      shelfTiles: st.shelf==='patches'
+        ? [['Ambient drone','8 modules · 9 cables','PATCH','linear-gradient(135deg,#1A3A44,#122630)'],
+           ['Krell garden','11 modules · 17 cables','PATCH','linear-gradient(135deg,#2A2450,#141A32)'],
+           ['Acid mutation','9 modules · 14 cables','PATCH','linear-gradient(135deg,#3A2A18,#20161C)'],
+           ['Bouncing ball','5 modules · 7 cables','PATCH','linear-gradient(135deg,#123A2E,#101E22)']].map(t=>({
+             name:t[0], sub:t[1], badge:t[2], w:'216px',
+             art:'background:'+t[3], onClick:()=>this.start('patch')}))
+        : [['Wavefold','12 HP · effect','MODULE','linear-gradient(160deg,#30353C,#20242A)'],
+           ['Slew','6 HP · utility','MODULE','linear-gradient(160deg,#30353C,#20242A)'],
+           ['Quantise','8 HP · pitch','MODULE','linear-gradient(160deg,#30353C,#20242A)'],
+           ['Chaos','10 HP · source','MODULE','linear-gradient(160deg,#30353C,#20242A)'],
+           ['Attenuvert','4 HP · utility','MODULE','linear-gradient(160deg,#30353C,#20242A)']].map(t=>({
+             name:t[0], sub:t[1], badge:t[2], w:'150px',
+             art:'background:'+t[3]+';box-shadow:inset 0 1px 0 rgba(255,255,255,0.09)', onClick:()=>this.start('module')})),
+
+      workIcon: patch?'cable':'rectangle-vertical',
+      workTitle: patch?'Ambient drone':'Wavefold',
+      workMeta: patch?(this.MODS.length+' MODULES · '+this.MODS.reduce((s,m)=>s+m.hp,0)+' HP · '+this.WIRES.length+' CABLES'):'12 HP · 3U · WAVEFOLDER',
+      workPrompt: patch?'An evolving ambient drone that plays by itself.'
+                       :'A 12 HP wavefolder with drive and symmetry, plus a CV input for the fold amount.',
+      phaseLabel: patch?'PATCHING':'FORGING PANEL',
+      steps: steps.map((s,i)=>{
+        const cur=st.step, d=i<cur, a=i===cur;
+        return {label:s.label, time:d?(s.t?s.t.toFixed(1)+'s':'0.1s'):(a?'running':'—'),
+          color:d?'var(--text)':(a?'var(--text-strong)':'var(--text-faint)'),
+          rowExtra:d?'opacity:.62':(a?'opacity:1':'opacity:.34'),
+          dotClass:a?'fg-breathe':'',
+          dotStyle:d?'background:var(--accent);box-shadow:0 0 8px rgba(22,218,194,0.55)'
+            :(a?'background:var(--accent);box-shadow:0 0 14px rgba(22,218,194,0.85)'
+            :'background:transparent;border:1px solid var(--line-strong)')};
+      }),
+      waitNote: patch?'Generation runs 30–90s. Cables land when the agent commits one; between commits the signal keeps moving but nothing settles — so a long wait never looks finished.'
+                     :'Generation runs 30–90s. Parts land on real commits; the inspection sweep loops while the compiler works, and resolves only when the module is real.',
+
+      showWiring: patch&&done, showModuleResult: !patch&&done,
+      wireGroups, patchIntro:'Eight modules, nine cables. The audio path is three cables long — everything else exists to make those three move.',
+      degradeNote: (this.props.degradation==='no-image')
+        ? 'VCA has no captured panel yet, so it holds its true 6 HP and reads as not-drawn. Its cables wait. Opening it once in Rack fixes this permanently.'
+        : ((this.props.degradation==='unplaced')
+          ? "VCA has never been placed in a rack, so we have no jack coordinates. Its cables dock at the panel edge rather than guess a position — truthful, and it resolves the first time you place it."
+          : null),
+      hasDegradeNote: this.props.degradation && this.props.degradation!=='none',
+      depthTabs:[['terse','Terse'],['standard','Standard'],['learning','Learning']].map(d=>({
+        label:d[1], onClick:()=>this.setState({depth:d[0]}),
+        extra: st.depth===d[0]?'background:var(--accent-soft);color:var(--accent);font-weight:600':'color:var(--text-muted)'})),
+      roleKeys: order.map(r=>({label:this.ROLES[r].label, color:this.ROLES[r].color,
+        extra: st.hoverGroup&&st.hoverGroup!==r?'opacity:.35':''})),
+
+      moduleIntro:'A 12 HP wavefolder. Drive pushes the signal into the folds; symmetry offsets it so the folds go asymmetric and the harmonics go odd. Fold amount takes CV.',
+      moduleSpecs:[{k:'WIDTH',v:'12 HP · 60.96 mm'},{k:'CONTROLS',v:'4 knobs · 1 slider · 2 switches'},{k:'I/O',v:'2 in · 1 out · 2 CV · 1 clock'},{k:'DSP',v:'C++ · 48–192 kHz · 0.9% CPU'},{k:'PANEL',v:'Forge Modular parts · fully licensable'}],
+      launchHeadline: rack?'Rack needs a relaunch':'Rack needs to start',
+      launchBody: rack?'Rack loads its module list once, at startup, so a brand-new module appears after a relaunch. We\'ll save your open patch, restart Rack, and put Wavefold on the rails where you left off.'
+                      :'Rack loads its module list once, at startup. Launching from here starts Rack with Wavefold already installed and placed.',
+      launchLabel: patch ? (rack?'Send patch to Rack':'Open patch in Rack')
+                         : (rack?'Relaunch Rack':'Launch Rack with this module'),
+      launchIcon: patch ? 'arrow-right-to-line' : (rack?'rotate-cw':'play'),
+      launchBg: (!patch&&rack)?'var(--ink-amber)':'var(--accent)',
+      launchFg: (!patch&&rack)?'#241703':'var(--on-ink)',
+      launchRack:()=>this.setState({rackRunning:true}),
+
+      followPlaceholder: patch?'Ask why the LFO is there, or Build to change the patch. @ to mention a module.'
+                              :'Ask about the DSP, or Build to change the module. @ to mention a module.',
+      showKey: patch && done,
+      bloom:st.bloom,
+      onStageMove:this.onStageMove, onStageLeave:this.onStageLeave,
+
+      partGroups:this.PARTS.map(g=>({title:g.title, spec:g.spec, note:g.note, items:g.items})),
+
+      sdkOk:st.sdkOk, toggleSdk:()=>this.setState({sdkOk:!st.sdkOk}),
+      sdkBox: st.sdkOk?'background:var(--accent);box-shadow:var(--glow-sm)':'background:transparent;box-shadow:inset 0 0 0 1px var(--line-strong);color:transparent',
+      sdkLine: st.sdkOk?'var(--accent-line)':'var(--line-strong)',
+      sdkBg: st.sdkOk?'var(--accent-soft)':'var(--surface-raised)',
+      sdkHint: st.sdkOk?'':'REQUIRED TO CONTINUE',
+      installBtn: st.sdkOk?'background:var(--accent);color:var(--on-ink);box-shadow:var(--glow-sm)':'background:var(--control);color:var(--text-faint);cursor:not-allowed',
+      finishInstall:()=>{ if(st.sdkOk) this.go('home'); }
+    };
+  }
+}
+
+</script>
+</body>
+</html>

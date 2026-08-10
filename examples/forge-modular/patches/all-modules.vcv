@@ -1,0 +1,106 @@
+{
+ "version": "2.6.6",
+ "modules": [
+  {
+   "id": 1,
+   "plugin": "ForgeModular",
+   "model": "VCO",
+   "pos": [
+    0,
+    0
+   ],
+   "params": []
+  },
+  {
+   "id": 2,
+   "plugin": "ForgeModular",
+   "model": "VCF",
+   "pos": [
+    8,
+    0
+   ],
+   "params": []
+  },
+  {
+   "id": 3,
+   "plugin": "ForgeModular",
+   "model": "VCA",
+   "pos": [
+    16,
+    0
+   ],
+   "params": []
+  },
+  {
+   "id": 4,
+   "plugin": "ForgeModular",
+   "model": "ENV",
+   "pos": [
+    19,
+    0
+   ],
+   "params": []
+  },
+  {
+   "id": 5,
+   "plugin": "ForgeModular",
+   "model": "LFO",
+   "pos": [
+    25,
+    0
+   ],
+   "params": []
+  },
+  {
+   "id": 6,
+   "plugin": "ForgeModular",
+   "model": "EUCLID",
+   "pos": [
+    31,
+    0
+   ],
+   "params": []
+  },
+  {
+   "id": 7,
+   "plugin": "ForgeModular",
+   "model": "SEQ",
+   "pos": [
+    37,
+    0
+   ],
+   "params": []
+  },
+  {
+   "id": 8,
+   "plugin": "ForgeModular",
+   "model": "MIX",
+   "pos": [
+    49,
+    0
+   ],
+   "params": []
+  },
+  {
+   "id": 9,
+   "plugin": "ForgeModular",
+   "model": "ATT",
+   "pos": [
+    61,
+    0
+   ],
+   "params": []
+  },
+  {
+   "id": 10,
+   "plugin": "ForgeModular",
+   "model": "MULT",
+   "pos": [
+    64,
+    0
+   ],
+   "params": []
+  }
+ ],
+ "cables": []
+}

@@ -10,7 +10,7 @@ source of truth — there is no separate per-agent copy.
 You rarely invoke a skill by name. Each one activates automatically when
 your request matches what it covers (its `description` lists the triggers),
 and many also have a matching `/slash-command`. The table below is the full
-catalog of the 61 skills Pulp ships; open a skill's `SKILL.md`
+catalog of the 64 skills Pulp ships; open a skill's `SKILL.md`
 for its complete, authoritative guidance.
 
 | Skill | What it does |
@@ -36,6 +36,8 @@ for its complete, authoritative guidance.
 | `decide` | Ask Daniel a blocking decision as options with a recommendation and honest pros/cons, rather than prose. |
 | `engine` | Query, recommend, and switch the Pulp JS engine backend (QuickJS, JavaScriptCore, V8). |
 | `faust` | Create FAUST DSP plugins in Pulp using offline codegen, pre-generated C++ headers, and the FaustProcessor template wrapper. |
+| `forge-app-delivery` | Building and shipping a Forge app (Modular, Instrument, MIDI, FX, and the sequencer work to come) as a signed installer somebody else can actually use. |
+| `forge-modular` | Forge Modular's generator, patch checker, module pack and Forge-worktree seam — the traps that make green results untrue |
 | `friction-report` | Turn a moment of friction — a conflicting PR, a wedged runner, a mysterious red check, a repeated manual chore — into a durable, actionable report. |
 | `handoff` | Coordinate a cross-session or cross-machine handoff — snapshot the open work, write a status doc to the pulp-planning repo on main, and emit a ready-to-paste goal prompt that links it, so a fresh session (often on another machine) can pick up and finish. |
 | `heritage-profile` | Research, author, validate, render, and archive data-only Pulp Sample Heritage profiles. |
@@ -54,6 +56,7 @@ for its complete, authoritative guidance.
 | `pr-batching` | Decide whether several finished branches ship as ONE PR or stay separate. |
 | `pr-review-sweep` | Sweep a PR's automated + human review comments and act on them — especially for material (large / logic-bearing) PRs. |
 | `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`) — focus marker plus normal watch/rebuild loop, with AOT analyzer guidance and deferred ar-swap/PR-monitor playbook. |
+| `prove-before-showing` | Prove a UI or generation feature actually works before asking a human to look at it. |
 | `pulp-web-demo` | Generate and maintain browser demos of Pulp audio plugins (both web ABIs — WAM and WCLAP) from one declarative config, so every demo mounts the SAME shared player and the two ABIs stay in lockstep. |
 | `render-toolchain-update` | Update Pulp's pinned Skia, Dawn, and optional V8 prebuilts as one milestone-matched render-toolchain release. |
 | `screenshot` | Capture faithful PNGs of Pulp view trees / imported UIs headlessly. |

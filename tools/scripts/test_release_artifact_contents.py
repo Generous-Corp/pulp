@@ -221,6 +221,19 @@ def member_payload(name: str, platform: str = "linux-x64") -> bytes:
             "importer": {
                 "path": importer.removeprefix("pulp-sdk/"),
                 "sha256": hashlib.sha256(FIXTURE_IMPORTER).hexdigest(),
+                "runtime": [
+                    {
+                        "path": member.removeprefix("pulp-sdk/"),
+                        "sha256": hashlib.sha256(
+                            member_payload(member, platform)
+                        ).hexdigest(),
+                    }
+                    for member in sorted(
+                        rac.sdk_import_design_runtime_members(
+                            rac.DEFAULT_MATRIX, VERSION
+                        )
+                    )
+                ],
             },
             "agent_capabilities": {
                 "path": "share/pulp/agent-capabilities.json",
@@ -446,6 +459,15 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             runtime_members,
             "browser-capture runtime manifest and release product matrix drifted",
         )
+        self.assertEqual(
+            rac.sdk_import_design_runtime_members(rac.DEFAULT_MATRIX, VERSION),
+            {
+                "pulp-sdk/bin/browser_capture-v1/"
+                + member.removeprefix("browser_capture/")
+                for member in runtime_members
+            },
+            "SDK importer runtime and release product matrix drifted",
+        )
 
     def test_declared_matrix_selects_historical_cli_contracts(self) -> None:
         legacy = {"pulp", "pulp-cpp", "pulp-mcp", "libwgpu_native.dylib"}
@@ -630,6 +652,60 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 rac.ContentError, "agent-capability-handoff.json"
             ):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
+    def test_negative_control_missing_sdk_importer_runtime_fires_at_new_floor(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            sdk.remove("pulp-sdk/bin/browser_capture-v1/capture.mjs")
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(root / rac.sdk_asset_name("linux-x64"), sdk, as_zip=False)
+            with self.assertRaisesRegex(rac.ContentError, "browser_capture-v1/capture.mjs"):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
+    def test_negative_control_stale_sdk_importer_runtime_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            make_platform(root, "linux-x64")
+            sdk_path = root / rac.sdk_asset_name("linux-x64")
+            with rac.Archive(sdk_path) as archive:
+                members = set(archive.members)
+            runtime_member = "pulp-sdk/bin/browser_capture-v1/capture.mjs"
+            handoff_member = "pulp-sdk/share/pulp/agent-capability-handoff.json"
+            original_payload = member_payload
+            stamped_handoff = original_payload(handoff_member, "linux-x64")
+
+            def stale_runtime_payload(
+                name: str, platform: str = "linux-x64"
+            ) -> bytes:
+                if name == handoff_member:
+                    return stamped_handoff
+                if name == runtime_member:
+                    return b"stale browser runtime"
+                return original_payload(name, platform)
+
+            with mock.patch(
+                __name__ + ".member_payload", side_effect=stale_runtime_payload
+            ):
+                write_archive(sdk_path, members, as_zip=False)
+            with self.assertRaisesRegex(rac.ContentError, "runtime sha256"):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
+    def test_negative_control_unexpected_sdk_importer_runtime_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            sdk.add("pulp-sdk/bin/browser_capture-v1/stale.mjs")
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(root / rac.sdk_asset_name("linux-x64"), sdk, as_zip=False)
+            with self.assertRaisesRegex(rac.ContentError, "stale_or_unexpected"):
                 rac.verify_platform(
                     root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
                 )

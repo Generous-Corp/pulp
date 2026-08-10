@@ -78,6 +78,16 @@ public:
     bool reload_from(std::filesystem::path script_path, std::string* error = nullptr);
 
     void set_repaint_callback(std::function<void()> cb);
+    /// Install the host-owned rebind run after a successful deferred
+    /// Runtime.evaluate realm reset. The callback runs from poll(), after the
+    /// replacement bridge is live and before that bridge pumps a frame. Hosts
+    /// that attach native observers to script-owned Views must resolve those
+    /// Views again here; the reset deliberately discards every callback that
+    /// belonged to the evaluated realm.
+    ///
+    /// The callback must not retain pre-reset View pointers or perform another
+    /// inspector evaluation (which would immediately owe another reset).
+    void set_post_evaluation_reset_callback(std::function<void()> cb);
     /// Replace the live JS console sink and retain it across hot reloads.
     /// This is the primary application-owned sink; secondary scoped observers
     /// installed with add_log_callback() are preserved.
@@ -190,6 +200,8 @@ private:
     ScriptInspectorBridge inspector_bridge_;
     std::unique_ptr<HotReloader> reloader_;
     std::function<void()> repaint_callback_;
+    std::function<void()> post_evaluation_reset_callback_;
+    bool post_evaluation_reset_callback_pending_ = false;
     LogCallback log_callback_;
     std::unordered_map<std::uint64_t, LogCallback> log_subscribers_;
     std::uint64_t next_log_subscription_ = 0;

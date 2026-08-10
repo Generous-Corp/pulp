@@ -1863,6 +1863,33 @@ Three things bite when adding a pack:
   that it bounds the rate-specific helper. Otherwise DSP math leaks into the
   importer/generator layer and the two formulas drift independently.
 
+- **The index array is length-typed — bump the size, not just the entry.**
+  `kHeaderNames` is a `std::array<std::string_view, N>`, so adding a pack means the
+  `#include`, the name in the list, **and** `N`. Forgetting `N` is a compile error,
+  so it fails closed; it is only worth knowing so the error reads as expected rather
+  than mysterious.
+
+**A CV pack works in VOLTS, and that is a deliberate exception to the `[0,1]`
+convention above.** `forge_eurorack_utility_catalog.hpp` holds the modular
+primitives with no DAW-plugin analogue — nobody ships a "Multiple" as a VST — so
+they live in their own pack instead of being retrofitted into the musical-DSP packs
+that stay shared across targets. Those nodes follow the published modular voltage
+standards, not a normalized range: audio ±5 V, unipolar CV 0–10 V, bipolar CV ±5 V,
+gates and triggers 10 V, and Schmitt detection with a 0.1 V low / 1.0 V high
+hysteresis band. The constants live once in `pulp::host::eurorack`
+(`kAudioPeak`, `kCvUnipolarMax`, `kCvBipolarPeak`, `kGateHigh`, `kSchmittLow`,
+`kSchmittHigh`) specifically so nodes cannot drift apart — a baked param range is
+written as `{kOffset, -kCvBipolarPeak, kCvBipolarPeak, 0.0f}`, in volts.
+
+So there are now two control conventions in the catalog, and which one applies is a
+property of the pack, not of the port: the shared DSP packs carry unipolar `[0, 1]`
+on an ordinary port, and the eurorack pack carries volts. The graph still cannot
+tell CV from audio, which is why neither convention needs a new graph concept — but
+patching a eurorack node's output into a shared-pack modulation input without
+scaling is a 10× error that will not fail to compile and will not fail a contract
+test. Reuse these constants rather than writing `5.0f`, and convert explicitly at
+the boundary between packs.
+
 Reconfiguring state (a filter's cutoff range, an envelope's stage lengths) is a
 per-block-on-change read of `BakedParamView::value_at(id, 0)`, not a per-sample
 one: those setters recompute coefficients rather than scale a value, and a
@@ -2096,7 +2123,7 @@ Two rules that are easy to get wrong:
 directions, so a node that gains a control with no descriptor fails as loudly
 as a descriptor for a control that was removed — the two ways a catalog goes
 quietly stale. `tools/scripts/forge_descriptor_coverage.py` holds the other
-half: its independent 77-key semantic manifest must agree with the 19-pack
+half: its independent 81-key semantic manifest must agree with the 20-pack
 index, descriptor sources, expected-node inventory, and explicit export
 registrations. There is no `PENDING` escape hatch, so a newly indexed pack
 cannot land undescribed.

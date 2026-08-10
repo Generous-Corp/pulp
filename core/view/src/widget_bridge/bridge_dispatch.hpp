@@ -91,4 +91,13 @@ void dispatch_event(ScriptEngine& engine,
                     const std::string& event_name,
                     std::string_view payload_expr);
 
+// Dispatch only the low-level `on(id, event_name, fn)` callback. Unlike
+// dispatch_event(), this does not fan out through Element::dispatchEvent and is
+// used for native ancestors above a DOM event's single dispatch origin.
+void dispatch_callback_only(const std::shared_ptr<BridgeCallbackState>& alive,
+                            ScriptEngine* engine,
+                            std::string_view id,
+                            const std::string& event_name,
+                            std::string_view payload_expr);
+
 } // namespace pulp::view

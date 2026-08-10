@@ -1,0 +1,140 @@
+{
+  "modules": [
+    {
+      "slug": "FOURPOLE",
+      "name": "4POLE",
+      "description": "Four-pole resonant low-pass filter with measured analog voicings, 1V/oct cutoff tracking, attenuverted FM and input drive.",
+      "tags": [
+        "Filter",
+        "Polyphonic"
+      ],
+      "hp": 8,
+      "poly_follows": "IN_INPUT",
+      "params": [
+        {
+          "id": 0,
+          "ident": "CUTOFF_PARAM",
+          "name": "Cutoff",
+          "label": "CUTOFF",
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "default_value": 0.5,
+          "kind": "KnobLarge",
+          "x_mm": 20.32,
+          "y_mm": 32.0,
+          "display_multiplier": 10.0
+        },
+        {
+          "id": 1,
+          "ident": "RES_PARAM",
+          "name": "Resonance",
+          "label": "RES",
+          "unit": " %",
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "default_value": 0.0,
+          "kind": "Knob",
+          "x_mm": 11.8,
+          "y_mm": 58.0,
+          "display_multiplier": 100.0
+        },
+        {
+          "id": 2,
+          "ident": "DRIVE_PARAM",
+          "name": "Input drive",
+          "label": "DRIVE",
+          "unit": " dB",
+          "min_value": -6.0,
+          "max_value": 24.0,
+          "default_value": 0.0,
+          "kind": "Knob",
+          "x_mm": 28.8,
+          "y_mm": 58.0
+        },
+        {
+          "id": 3,
+          "ident": "FM_PARAM",
+          "name": "Cutoff FM amount",
+          "label": "FM",
+          "unit": " %",
+          "min_value": -1.0,
+          "max_value": 1.0,
+          "default_value": 0.0,
+          "kind": "Trimpot",
+          "x_mm": 11.8,
+          "y_mm": 77.0,
+          "display_multiplier": 100.0
+        },
+        {
+          "id": 4,
+          "ident": "VOICE_PARAM",
+          "name": "Voicing",
+          "label": "VOICE",
+          "min_value": 0.0,
+          "max_value": 2.0,
+          "default_value": 0.0,
+          "kind": "SwitchThree",
+          "x_mm": 28.8,
+          "y_mm": 77.0,
+          "labels": [
+            "Juno",
+            "Prophet",
+            "Ladder"
+          ]
+        }
+      ],
+      "inputs": [
+        {
+          "id": 0,
+          "ident": "VOCT_INPUT",
+          "name": "Cutoff 1V/oct",
+          "label": "V/OCT",
+          "role": "Pitch",
+          "x_mm": 11.8,
+          "y_mm": 93.0
+        },
+        {
+          "id": 1,
+          "ident": "FM_INPUT",
+          "name": "Cutoff FM",
+          "label": "FM",
+          "role": "Cv",
+          "x_mm": 28.8,
+          "y_mm": 93.0
+        },
+        {
+          "id": 2,
+          "ident": "IN_INPUT",
+          "name": "Audio in",
+          "label": "IN",
+          "role": "Audio",
+          "x_mm": 11.8,
+          "y_mm": 112.0
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "OUT_OUTPUT",
+          "name": "Low-pass out",
+          "label": "OUT",
+          "role": "Audio",
+          "x_mm": 28.8,
+          "y_mm": 112.0
+        }
+      ],
+      "lights": [
+        {
+          "id": 0,
+          "ident": "LVL_LIGHT",
+          "name": "Output level",
+          "label": "",
+          "x_mm": 28.8,
+          "y_mm": 120.5,
+          "color": "green",
+          "size": "small"
+        }
+      ]
+    }
+  ]
+}

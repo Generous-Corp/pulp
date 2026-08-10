@@ -596,7 +596,7 @@ TEST_CASE("MultiChannelBallistics smoothing", "[signal][meter]") {
     data.channels[0].rms = 0.5f;
 
     // Feed sudden peak
-    ballistics.update(data, 1.0f / 60.0f);
+    (void) ballistics.update(data, 1.0f / 60.0f);
     REQUIRE(ballistics.channels[0].display_peak > 0);
 
     // Feed silence — should decay
@@ -604,7 +604,7 @@ TEST_CASE("MultiChannelBallistics smoothing", "[signal][meter]") {
     data.channels[0].rms = 0.0f;
     float prev = ballistics.channels[0].display_peak;
     for (int i = 0; i < 30; ++i)
-        ballistics.update(data, 1.0f / 60.0f);
+        (void) ballistics.update(data, 1.0f / 60.0f);
 
     REQUIRE(ballistics.channels[0].display_peak < prev);
     REQUIRE(ballistics.channels[0].display_peak > 0); // Not yet zero
@@ -618,18 +618,18 @@ TEST_CASE("MultiChannelBallistics clip indicator hold", "[signal][meter]") {
     MultiChannelMeterData data;
     data.num_channels = 1;
     data.channels[0].clipped = true;
-    ballistics.update(data, 1.0f / 60.0f);
+    (void) ballistics.update(data, 1.0f / 60.0f);
     REQUIRE(ballistics.channels[0].clip_indicator);
 
     // Stop clipping — indicator should hold
     data.channels[0].clipped = false;
     for (int i = 0; i < 30; ++i) // 0.5s at 60fps
-        ballistics.update(data, 1.0f / 60.0f);
+        (void) ballistics.update(data, 1.0f / 60.0f);
     REQUIRE(ballistics.channels[0].clip_indicator); // Still held
 
     // After hold time expires
     for (int i = 0; i < 60; ++i) // Another second
-        ballistics.update(data, 1.0f / 60.0f);
+        (void) ballistics.update(data, 1.0f / 60.0f);
     REQUIRE_FALSE(ballistics.channels[0].clip_indicator);
 }
 
@@ -641,7 +641,7 @@ TEST_CASE("MultiChannelBallistics clear_clips", "[signal][meter]") {
     data.num_channels = 2;
     data.channels[0].clipped = true;
     data.channels[1].clipped = true;
-    ballistics.update(data, 1.0f / 60.0f);
+    (void) ballistics.update(data, 1.0f / 60.0f);
 
     REQUIRE(ballistics.channels[0].clip_indicator);
     REQUIRE(ballistics.channels[1].clip_indicator);

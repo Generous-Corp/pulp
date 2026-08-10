@@ -95,4 +95,16 @@ void dispatch_event(ScriptEngine& engine,
     dispatch_event(always_alive, &engine, id, event_name, payload_expr);
 }
 
+void dispatch_callback_only(const std::shared_ptr<BridgeCallbackState>& alive,
+                            ScriptEngine* engine,
+                            std::string_view id,
+                            const std::string& event_name,
+                            std::string_view payload_expr) {
+    std::string js = "__dispatchCallbackOnly__(" + js_string_literal(id) +
+                     ", '" + event_name + "', ";
+    js.append(payload_expr.data(), payload_expr.size());
+    js += ")";
+    safe_dispatch_eval(alive, engine, js, event_name.c_str());
+}
+
 } // namespace pulp::view

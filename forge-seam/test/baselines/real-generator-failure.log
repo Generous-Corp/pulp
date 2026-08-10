@@ -1,0 +1,43 @@
+  audio out: Mac Studio Speakers
+  builds, but makes no sound (attempt 1):
+    warn  VCA out 0 is silent (mean 0.000000 V)
+    warn  VCA out 0 is silent (mean 0.000000 V)
+    FAIL  every cable into the audio interface is silent — this patch makes no sound
+    PATCH GATE FAILED: 1 failure(s), 2 warning(s)
+  audio out: Mac Studio Speakers
+  not a bouncing-ball patch yet:
+    - the generator's end-of-cycle has to retrigger it — that loop is what starts the next bounce, and a patch without it fires once and stops
+  audio out: Mac Studio Speakers
+  builds, but makes no sound (attempt 3):
+    warn  VCA out 0 is silent (mean 0.000000 V)
+    warn  VCA out 0 is silent (mean 0.000000 V)
+    FAIL  every cable into the audio interface is silent — this patch makes no sound
+    PATCH GATE FAILED: 1 failure(s), 2 warning(s)
+  audio out: Mac Studio Speakers
+  idiom holds: bouncing-ball
+  built 9 modules, 13 cables → /Users/danielraffel/Library/Application Support/Forge Modular/examples/forge-modular/patches/a-bouncing-ball-rhythm-that-slows-down-a-7.vcv
+
+AUDIO
+  VCO TRI → VCF IN
+  VCF LP → VCA IN
+  VCA OUT → Audio 2 To "device output 1"
+  VCA OUT → Audio 2 To "device output 2"
+
+PITCH & GATE
+  DUAL AD EOC → DUAL AD TRIG
+      end-of-cycle retriggers channel A — each bounce launches the next one
+  DUAL AD EOC → DUAL AD TRIG
+      the same EOC fires channel B, the audible hit for every bounce
+
+MODULATION
+  MORPH OUT → SLEW IN
+      the LFO ramp is the drop; SLEW's long fall is the ball losing height
+  SLEW OUT → DUAL ATT A IN
+  DUAL ATT A OUT → MULT IN
+  MULT 1 → DUAL AD TIME
+      the falling voltage shortens channel A's time, so bounces crowd together
+  MULT 2 → DUAL AD TIME
+  DUAL AD ENV → VCA CV
+      channel B's envelope is the loudness shape of each strike
+  MULT 3 → VCF CV
+      the settling voltage darkens the filter as the ball loses energy

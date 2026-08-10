@@ -49,6 +49,12 @@ tools/cmake/FindSkia.cmake :: CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "aarch64|arm64
 # probe for the unset-CMAKE_OSX_ARCHITECTURES fallback.
 tools/cmake/PulpMinOs.cmake :: _host_machine MATCHES "arm64|aarch64"
 
+# Rack publishes thin arm64 and x86_64 plugin packages. This branch maps the
+# target architecture selected above from CMAKE_OSX_ARCHITECTURES to its slug.
+tools/cmake/PulpRack.cmake :: _rack_target_processor MATCHES "^(arm64|aarch64)$"
+# Universal Rack packaging contract fixture asserts both emitted thin slugs.
+tools/cmake/test_pulp_rack_contract.py :: "Fixture-1.0.0-mac-arm64.vcvplugin"
+
 # Test fixture: a synthetic wgpu cache path exercising the relocatable check.
 tools/cmake/scripts/test_check_bundle_relocatable.py :: wgpu-macos-aarch64
 

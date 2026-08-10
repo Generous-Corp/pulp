@@ -1,0 +1,133 @@
+{
+  "modules": [
+    {
+      "slug": "DUALATN",
+      "name": "DUAL ATT",
+      "description": "Dual attenuverter with DC offset; an unpatched channel outputs its offset voltage.",
+      "tags": [
+        "Attenuator",
+        "Utility",
+        "Dual"
+      ],
+      "hp": 6,
+      "params": [
+        {
+          "id": 0,
+          "ident": "A_ATT_PARAM",
+          "name": "Channel A attenuversion",
+          "label": "ATT",
+          "unit": "",
+          "min_value": -1.0,
+          "max_value": 1.0,
+          "default_value": 0.0,
+          "kind": "KnobSmall",
+          "x_mm": 9.0,
+          "y_mm": 30.0
+        },
+        {
+          "id": 1,
+          "ident": "A_OFF_PARAM",
+          "name": "Channel A offset",
+          "label": "OFF",
+          "unit": " V",
+          "min_value": -5.0,
+          "max_value": 5.0,
+          "default_value": 0.0,
+          "kind": "KnobSmall",
+          "x_mm": 21.5,
+          "y_mm": 30.0
+        },
+        {
+          "id": 2,
+          "ident": "B_ATT_PARAM",
+          "name": "Channel B attenuversion",
+          "label": "ATT",
+          "unit": "",
+          "min_value": -1.0,
+          "max_value": 1.0,
+          "default_value": 0.0,
+          "kind": "KnobSmall",
+          "x_mm": 9.0,
+          "y_mm": 74.0
+        },
+        {
+          "id": 3,
+          "ident": "B_OFF_PARAM",
+          "name": "Channel B offset",
+          "label": "OFF",
+          "unit": " V",
+          "min_value": -5.0,
+          "max_value": 5.0,
+          "default_value": 0.0,
+          "kind": "KnobSmall",
+          "x_mm": 21.5,
+          "y_mm": 74.0
+        }
+      ],
+      "inputs": [
+        {
+          "id": 0,
+          "ident": "A_IN_INPUT",
+          "name": "Channel A input",
+          "label": "A IN",
+          "role": "Cv",
+          "x_mm": 9.0,
+          "y_mm": 46.0,
+          "normal_volts": 0.0
+        },
+        {
+          "id": 1,
+          "ident": "B_IN_INPUT",
+          "name": "Channel B input",
+          "label": "B IN",
+          "role": "Cv",
+          "x_mm": 9.0,
+          "y_mm": 90.0,
+          "normal_volts": 0.0
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "A_OUT_OUTPUT",
+          "name": "Channel A output",
+          "label": "A OUT",
+          "role": "Cv",
+          "x_mm": 21.5,
+          "y_mm": 46.0
+        },
+        {
+          "id": 1,
+          "ident": "B_OUT_OUTPUT",
+          "name": "Channel B output",
+          "label": "B OUT",
+          "role": "Cv",
+          "x_mm": 21.5,
+          "y_mm": 90.0
+        }
+      ],
+      "lights": [
+        {
+          "id": 0,
+          "ident": "A_LIGHT",
+          "name": "Channel A activity",
+          "label": "",
+          "x_mm": 15.24,
+          "y_mm": 58.0,
+          "color": "green",
+          "size": "small"
+        },
+        {
+          "id": 1,
+          "ident": "B_LIGHT",
+          "name": "Channel B activity",
+          "label": "",
+          "x_mm": 15.24,
+          "y_mm": 102.0,
+          "color": "green",
+          "size": "small"
+        }
+      ]
+    }
+  ]
+}

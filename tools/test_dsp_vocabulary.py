@@ -61,7 +61,53 @@ def extractor_module():
 
 
 def main():
-    module = extractor_module()
+    extractor = extractor_module()
+    fixture = """
+struct Fixture {
+    enum class Mode {
+        first, // a trailing comment must not consume the next line
+        second,
+        third = 3, /* nor may a block comment hide later values */
+        fourth,
+    };
+    float process(float input) {
+        std::vector<float> work(static_cast<std::size_t>(4));
+        return calibration_tables(input);
+    }
+    int declared(int amount);
+};
+"""
+    parsed = extractor.public_methods(fixture, "Fixture")
+    if parsed != ["process(float input)", "declared(int amount)"]:
+        print(f"FAIL: inline method bodies leaked into the API surface: {parsed}")
+        return 1
+    enums = extractor.public_enums(fixture, "Fixture")
+    if enums != [["Mode", ["first", "second", "third", "fourth"]]]:
+        print(f"FAIL: enum comments hid public choices: {enums}")
+        return 1
+
+    identity_fixture = """
+namespace pulp::signal::osc {
+class PhaseAccumulator {
+public:
+    int advance(double increment);
+};
+template <typename SampleType = float>
+class ScalarOscillator {
+public:
+    SampleType process();
+};
+}
+"""
+    identities = extractor.scan_text(identity_fixture)
+    phase = next(row for row in identities if row["class"] == "PhaseAccumulator")
+    scalar = next(row for row in identities if row["class"] == "ScalarOscillator")
+    if phase.get("qualified_name") != "pulp::signal::osc::PhaseAccumulator" or phase.get("template") is not None:
+        print(f"FAIL: non-template identity is not exact: {phase}")
+        return 1
+    if scalar.get("qualified_name") != "pulp::signal::osc::ScalarOscillator" or scalar.get("template") != "typename SampleType = float":
+        print(f"FAIL: template identity is not exact: {scalar}")
+        return 1
     synthetic = """
 class Probe {
   public:
@@ -73,7 +119,7 @@ class Probe {
     int private_state_{};
 };
 """
-    methods = module.public_methods(synthetic, "Probe")
+    methods = extractor.public_methods(synthetic, "Probe")
     expected = ["prepare()", "reset()", "retained_bytes()"]
     if methods != expected:
         print(f"FAIL: public/private scanner returned {methods!r}, expected {expected!r}")
@@ -94,6 +140,79 @@ class Probe {
     n_headers = len(doc)
     n_classes = sum(len(v) for v in doc.values())
     bad = 0
+    registry_problems = extractor.module_capability_problems(doc)
+    if registry_problems:
+        print(f"  WRONG  module capability registry: {registry_problems}")
+        bad += 1
+    else:
+        print("  ok     every curated module capability resolves exactly")
+
+    malformed = [
+        f"{row.get('class')}.{method}"
+        for classes in doc.values()
+        for row in classes
+        if isinstance(row, dict)
+        for method in row.get("methods", [])
+        if not isinstance(method, str) or method.count("(") != method.count(")")
+    ]
+    if malformed:
+        print(f"  WRONG  malformed method signatures: {malformed[:5]}")
+        bad += 1
+
+    phase_rows = doc.get("osc/phase.hpp", [])
+    phase = next((row for row in phase_rows
+                  if row.get("class") == "PhaseAccumulator"), {})
+    if phase.get("qualified_name") != "pulp::signal::osc::PhaseAccumulator" or phase.get("template") is not None:
+        print(f"  WRONG  PhaseAccumulator identity is incomplete: {phase}")
+        bad += 1
+    else:
+        print("  ok     PhaseAccumulator is advertised as an exact non-template type")
+
+    compact = extractor.shortlist(
+        doc,
+        "6HP clock generator with phase reset, rate, and pulse width",
+    )
+    compact_rows = [row for rows in compact.values() for row in rows]
+    compact_names = {row.get("qualified_name") for row in compact_rows}
+    if not (3 <= len(compact_rows) <= 8):
+        print(f"  WRONG  request shortlist has {len(compact_rows)} classes")
+        bad += 1
+    elif "pulp::signal::osc::PhaseAccumulator" not in compact_names:
+        print("  WRONG  clock/phase shortlist omitted PhaseAccumulator")
+        bad += 1
+    else:
+        print(f"  ok     request shortlist is {len(compact_rows)} exact classes")
+    if not any(row.get("capability") == "phase-clock" and
+               row.get("capability_role") == "primary"
+               for row in compact_rows):
+        print("  WRONG  clock helpers can satisfy the shortlist without its primary")
+        bad += 1
+    vca_rows = [row for rows in extractor.shortlist(
+        doc, "4HP VCA with gain CV and audio input").values() for row in rows]
+    if not any(row.get("capability") == "vca" and
+               row.get("qualified_name") == "pulp::signal::VcaT" and
+               row.get("capability_role") == "primary" for row in vca_rows):
+        print("  WRONG  VCA request omitted its exact primary primitive")
+        bad += 1
+    compact_markdown = extractor.markdown(compact)
+    if "pulp::signal::osc::PhaseAccumulator<float>" in compact_markdown:
+        print("  WRONG  non-template PhaseAccumulator gained <float> in prompt")
+        bad += 1
+    if "pulp::signal::OscillatorT<float>" not in extractor.markdown(doc):
+        print("  WRONG  scalar template lost its concrete <float> use form")
+        bad += 1
+    if "reset(double phase = 0.0)" not in " ".join(phase.get("methods", [])):
+        print("  WRONG  PhaseAccumulator omitted its reset lifecycle method")
+        bad += 1
+    forbidden = {"PhaseVocoderT", "MultichannelPhaseCoordinatorT",
+                 "TransientPhasePolicyT"}
+    if forbidden & {row.get("class") for row in compact_rows}:
+        print("  WRONG  block/offline phase APIs leaked into module shortlist")
+        bad += 1
+    obscure = extractor.shortlist(doc, "an unusual bespoke utility")
+    if any(not row.get("capability") for rows in obscure.values() for row in rows):
+        print("  WRONG  obscure request escaped the curated capability registry")
+        bad += 1
 
     print(f"  {n_classes} classes across {n_headers} headers")
     if n_classes < MIN_CLASSES or n_headers < MIN_HEADERS:

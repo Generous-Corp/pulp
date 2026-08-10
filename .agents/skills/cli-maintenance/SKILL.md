@@ -849,6 +849,13 @@ above, both new fields are also declared in `experimental/pulp-rs/src/tool_regis
 (serde `#[serde(default)]`, ignored on the delegated install path) so `pulp
 tool info`/`list` round-trip them. First user: `audio-quality-lab`.
 
+The venv directory alone is not an installed-version proof. On a non-forced
+install, reuse it only when the run wrapper exists and the adjacent
+`manifest.json` records the descriptor's current `pinned_version`. A missing or
+stale manifest must enter the reinstall path; never echo the registry pin as
+`installed_version` for old bytes. `test_cli_tool_registry.cpp` pins both the
+current-manifest reuse and stale-manifest refusal/reinstall attempt.
+
 ### Remove/uninstall commands name what they deleted
 
 Every extend-surface removal (`pulp tool uninstall`, `pulp kit remove`, `pulp

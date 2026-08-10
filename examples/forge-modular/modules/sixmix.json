@@ -1,0 +1,112 @@
+{
+  "modules": [
+    {
+      "slug": "SIXMIX",
+      "name": "SIXMIX",
+      "description": "Six-channel mono mixer with per-channel level, CV-controlled master level",
+      "tags": [
+        "Mixer",
+        "Utility"
+      ],
+      "hp": 12,
+      "sections": [
+        {
+          "label": "MASTER",
+          "y_mm": 82.0
+        }
+      ],
+      "param_array": [
+        {
+          "ident_fmt": "CH%d_PARAM",
+          "label_fmt": "%d",
+          "name_fmt": "Channel %d level",
+          "count": 6,
+          "id_start": 0,
+          "grid": {
+            "cols": 2,
+            "x0_mm": 22.0,
+            "y0_mm": 32.0,
+            "dx_mm": 29.0,
+            "dy_mm": 18.0
+          },
+          "template": {
+            "min_value": 0.0,
+            "max_value": 2.0,
+            "default_value": 1.0,
+            "kind": "Knob",
+            "unit": "x"
+          }
+        }
+      ],
+      "params": [
+        {
+          "id": 6,
+          "ident": "MASTER_PARAM",
+          "name": "Master level",
+          "label": "MASTER",
+          "unit": "x",
+          "min_value": 0.0,
+          "max_value": 2.0,
+          "default_value": 1.0,
+          "kind": "KnobLarge",
+          "x_mm": 30.48,
+          "y_mm": 94.0
+        }
+      ],
+      "input_array": [
+        {
+          "ident_fmt": "IN%d_INPUT",
+          "label_fmt": "%d",
+          "name_fmt": "Channel %d in",
+          "count": 6,
+          "id_start": 0,
+          "grid": {
+            "cols": 2,
+            "x0_mm": 9.0,
+            "y0_mm": 32.0,
+            "dx_mm": 29.0,
+            "dy_mm": 18.0
+          },
+          "template": {
+            "role": "Audio"
+          }
+        }
+      ],
+      "inputs": [
+        {
+          "id": 6,
+          "ident": "MCV_INPUT",
+          "name": "Master level CV",
+          "label": "M CV",
+          "role": "Cv",
+          "x_mm": 9.0,
+          "y_mm": 110.0,
+          "normal_volts": 10.0
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "MIX_OUTPUT",
+          "name": "Mix out",
+          "label": "MIX",
+          "role": "Audio",
+          "x_mm": 51.0,
+          "y_mm": 110.0
+        }
+      ],
+      "lights": [
+        {
+          "id": 0,
+          "ident": "LVL_LIGHT",
+          "name": "Output level",
+          "label": "",
+          "x_mm": 30.48,
+          "y_mm": 110.0,
+          "color": "green",
+          "size": "small"
+        }
+      ]
+    }
+  ]
+}

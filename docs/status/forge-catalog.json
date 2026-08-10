@@ -96,6 +96,46 @@
       ]
     },
     {
+      "key": "eurorack_attenuverter",
+      "label": "Attenuverter",
+      "description": "Scales, inverts, and offsets a Eurorack control-voltage signal.",
+      "realization_axes": [],
+      "realizations": [{"mode": "default", "type_id": "eurorack.attenuverter", "settings": {}}],
+      "parameters": [
+        {"key": "amount", "label": "Amount", "unit": "", "kind": "continuous", "curve": "linear", "description": "Scales the input from full inversion through zero to unity.", "choices": [], "contracts": [{"realization_mode": "default", "min": -1, "max": 1, "default": 1}], "realization_modes": []},
+        {"key": "offset_v", "label": "Offset", "unit": "V", "kind": "continuous", "curve": "linear", "description": "Adds a bipolar voltage offset after scaling.", "choices": [], "contracts": [{"realization_mode": "default", "min": -5, "max": 5, "default": 0}], "realization_modes": []}
+      ]
+    },
+    {
+      "key": "eurorack_slew",
+      "label": "Slew Limiter",
+      "description": "Limits independent rising and falling CV slopes for glide and lag processing.",
+      "realization_axes": [],
+      "realizations": [{"mode": "default", "type_id": "eurorack.slew", "settings": {}}],
+      "parameters": [
+        {"key": "rise_s", "label": "Rise", "unit": "s", "kind": "continuous", "curve": "linear", "description": "Sets the time for a ten-volt upward transition.", "choices": [], "contracts": [{"realization_mode": "default", "min": 0, "max": 10, "default": 0}], "realization_modes": []},
+        {"key": "fall_s", "label": "Fall", "unit": "s", "kind": "continuous", "curve": "linear", "description": "Sets the time for a ten-volt downward transition.", "choices": [], "contracts": [{"realization_mode": "default", "min": 0, "max": 10, "default": 0}], "realization_modes": []}
+      ]
+    },
+    {
+      "key": "eurorack_clock_divider",
+      "label": "Clock Divider",
+      "description": "Emits a ten-volt gate on every Nth Schmitt-detected input clock edge.",
+      "realization_axes": [],
+      "realizations": [{"mode": "default", "type_id": "eurorack.clock_divider", "settings": {}}],
+      "parameters": [
+        {"key": "division", "label": "Division", "unit": "", "kind": "continuous", "curve": "linear", "description": "Sets the integer input-clock division from one through sixty-four.", "choices": [], "contracts": [{"realization_mode": "default", "min": 1, "max": 64, "default": 2}], "realization_modes": []}
+      ]
+    },
+    {
+      "key": "eurorack_sample_hold",
+      "label": "Sample & Hold",
+      "description": "Captures the signal input on each Schmitt-detected trigger edge and holds it.",
+      "realization_axes": [],
+      "realizations": [{"mode": "default", "type_id": "eurorack.sample_hold", "settings": {}}],
+      "parameters": []
+    },
+    {
       "key": "drum_kick_oscillator",
       "label": "Oscillator Kick",
       "description": "Synthesized oscillator kick with pitch envelope, click, noise, sub, and FM layers.",

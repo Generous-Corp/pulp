@@ -1,0 +1,189 @@
+// Click somewhere, or type something, as the window server sees it.
+//
+//   uidriver click <x> <y>     one left click at a GLOBAL screen point
+//   uidriver type  <text>      that text, into whatever has focus
+//   uidriver at    <x> <y>     which app owns the topmost window at that point
+//
+// drive_app.py presses the app's own Build button rather than calling into it,
+// because "the button works" and "the code behind the button works" are
+// different claims and this project has had them disagree. Driving the window
+// server is the only way to make the first claim.
+//
+// This existed as two binaries in /tmp and as no source at all. macOS clears
+// /tmp, so the app proof ran on exactly one machine, until it was rebooted --
+// it failed on the M5 with "build the click/type helpers first", naming a step
+// nobody could carry out because there was nothing to build. That is the same
+// failure the seam guard exists for: work that lives only in /tmp is work that
+// has already been lost.
+//
+// Typing goes through setUnicodeString rather than key codes, so the text
+// arrives whatever keyboard layout the machine is set to -- a prompt typed as
+// key codes on a Dvorak machine is not the prompt anybody read.
+//
+// Needs Accessibility permission for whatever runs it (Terminal, usually).
+// Without it the events are silently dropped, which looks exactly like a
+// button that does nothing, so the failure is reported rather than assumed.
+
+import CoreGraphics
+import Foundation
+
+func fail(_ message: String) -> Never {
+    FileHandle.standardError.write(Data(("uidriver: " + message + "\n").utf8))
+    exit(2)
+}
+
+/// Are we allowed to post events at all? Posting without permission succeeds
+/// and does nothing, which is indistinguishable from a dead control.
+func requireAccessibility() {
+    if !CGPreflightListenEventAccess() {
+        // Ask once; on a machine that has already granted it this is a no-op.
+        _ = CGRequestListenEventAccess()
+    }
+    if !CGPreflightListenEventAccess() {
+        fail("no Accessibility permission — events would be dropped silently. "
+             + "Grant it to the app running this (System Settings > Privacy & "
+             + "Security > Accessibility).")
+    }
+}
+
+func click(x: Double, y: Double) {
+    let point = CGPoint(x: x, y: y)
+    guard let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                             mouseCursorPosition: point, mouseButton: .left),
+          let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown,
+                             mouseCursorPosition: point, mouseButton: .left),
+          let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp,
+                           mouseCursorPosition: point, mouseButton: .left)
+    else { fail("could not build the click events") }
+
+    // Moved first, and with a beat between: a click delivered to a window that
+    // has not seen the pointer arrive lands on the window rather than on the
+    // control under it.
+    move.post(tap: .cghidEventTap)
+    usleep(60_000)
+    down.post(tap: .cghidEventTap)
+    usleep(40_000)
+    up.post(tap: .cghidEventTap)
+}
+
+func type(_ text: String) {
+    // In SMALL chunks, slowly. setUnicodeString takes a bounded buffer, and
+    // posting the pieces back to back drops characters: a prompt typed as
+    // "a classic subtractive voice with a filter envelope" arrived as
+    // "a classic subtractive voice withpe" -- the middle simply gone, and the
+    // run then built something nobody asked for. The receiving app coalesces
+    // events that arrive faster than it drains them, so the fix is to give it
+    // time rather than to send more.
+    for chunk in Array(text).chunked(into: 8) {
+        let piece = String(chunk)
+        guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+              let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
+        else { fail("could not build the key events") }
+        var utf16 = Array(piece.utf16)
+        down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
+        up.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
+        down.post(tap: .cghidEventTap)
+        usleep(25_000)
+        up.post(tap: .cghidEventTap)
+        usleep(25_000)
+    }
+}
+
+extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        stride(from: 0, to: count, by: size).map {
+            Array(self[$0 ..< Swift.min($0 + size, count)])
+        }
+    }
+}
+
+/// Which application owns the topmost on-screen window containing a point.
+///
+/// The exact question, asked of the window server, instead of guessing from
+/// pixels. "Is REAPER frontmost" is not the same question and answering it
+/// cost real harm: REAPER reported itself frontmost while its editor sat
+/// under a remote-desktop session, and the clicks went into that.
+func ownerAt(x: Double, y: Double) -> String {
+    let opts: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+    guard let list = CGWindowListCopyWindowInfo(opts, kCGNullWindowID)
+            as? [[String: Any]] else { return "" }
+    // The list is front-to-back, so the first window containing the point is
+    // the one a click would reach.
+    for w in list {
+        guard let b = w[kCGWindowBounds as String] as? [String: Any],
+              let wx = b["X"] as? Double, let wy = b["Y"] as? Double,
+              let ww = b["Width"] as? Double, let wh = b["Height"] as? Double
+        else { continue }
+        // Menu-bar-height slivers and other zero-ish layers are not what a
+        // click lands on.
+        if ww < 40 || wh < 40 { continue }
+        if x >= wx && x < wx + ww && y >= wy && y < wy + wh {
+            return (w[kCGWindowOwnerName as String] as? String) ?? ""
+        }
+    }
+    return ""
+}
+
+/// A named key, as a virtual key code.
+///
+/// Typing goes through setUnicodeString, which carries no key code -- right for
+/// text, and useless for a key that produces no text. An arrow, Return or Tab
+/// has to be sent as the code, or the app's key handler never sees a key at
+/// all. Without this the mention list's arrow selection could not be driven
+/// from outside the process, so it was only ever proven by unit test -- which
+/// is exactly how a hook installed on the wrong view stayed broken through two
+/// rounds of "fixed".
+let namedKeys: [String: CGKeyCode] = [
+    "down": 125, "up": 126, "left": 123, "right": 124,
+    "return": 36, "enter": 36, "tab": 48, "escape": 53, "delete": 51,
+]
+
+func key(_ code: CGKeyCode) {
+    guard let down = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true),
+          let up = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false)
+    else { fail("could not build the key events") }
+    down.post(tap: .cghidEventTap)
+    usleep(12_000)
+    up.post(tap: .cghidEventTap)
+    usleep(30_000)
+}
+
+let args = Array(CommandLine.arguments.dropFirst())
+guard let command = args.first else {
+    fail("usage: uidriver click <x> <y> | type <text> | key <name|code>")
+}
+
+switch command {
+case "click":
+    guard args.count >= 3, let x = Double(args[1]), let y = Double(args[2]) else {
+        fail("usage: uidriver click <x> <y>")
+    }
+    requireAccessibility()
+    click(x: x, y: y)
+case "type":
+    guard args.count >= 2 else { fail("usage: uidriver type <text>") }
+    requireAccessibility()
+    // Everything after the verb, so an unquoted prompt still arrives whole.
+    type(args.dropFirst().joined(separator: " "))
+case "key":
+    guard args.count >= 2 else {
+        fail("usage: uidriver key <" + namedKeys.keys.sorted().joined(separator: "|") + "|code>")
+    }
+    requireAccessibility()
+    let want = args[1].lowercased()
+    if let code = namedKeys[want] {
+        key(code)
+    } else if let raw = UInt16(want) {
+        key(CGKeyCode(raw))
+    } else {
+        fail("unknown key \(args[1]) — expected one of " +
+             namedKeys.keys.sorted().joined(separator: ", ") + ", or a key code")
+    }
+case "at":
+    guard args.count >= 3, let x = Double(args[1]), let y = Double(args[2]) else {
+        fail("usage: uidriver at <x> <y>")
+    }
+    print(ownerAt(x: x, y: y))
+default:
+    fail("unknown command \(command) — expected click, type, key or at")
+}

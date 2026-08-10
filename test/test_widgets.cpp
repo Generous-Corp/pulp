@@ -1614,6 +1614,24 @@ TEST_CASE("Checkbox, toggle button, icons, and image placeholders cover widget p
     REQUIRE(off_canvas.count(DrawCommand::Type::stroke_rounded_rect) == 1);
     REQUIRE(commands_of(off_canvas, DrawCommand::Type::fill_text).front().text == "Latch");
 
+    ToggleButton asymmetric_button;
+    asymmetric_button.set_bounds({0, 0, 96, 32});
+    asymmetric_button.set_corner_radius_tl(2.0f);
+    asymmetric_button.set_corner_radius_tr(4.0f);
+    asymmetric_button.set_corner_radius_br(6.0f);
+    asymmetric_button.set_corner_radius_bl(8.0f);
+    RecordingCanvas asymmetric_canvas;
+    asymmetric_button.paint(asymmetric_canvas);
+    const auto asymmetric_round_rects =
+        commands_of(asymmetric_canvas, DrawCommand::Type::round_rect);
+    REQUIRE(asymmetric_round_rects.size() == 2);
+    for (const auto& rr : asymmetric_round_rects) {
+        CHECK(rr.f[4] == 2.0f);
+        CHECK(rr.floats[0] == 4.0f);
+        CHECK(rr.floats[2] == 6.0f);
+        CHECK(rr.floats[4] == 8.0f);
+    }
+
     int toggle_count = 0;
     bool toggle_state = false;
     button.on_toggle = [&](bool on) {
@@ -2021,7 +2039,7 @@ TEST_CASE("MultiMeter paints vertical and horizontal channel indicators",
     vertical.set_channel_count(20);
     REQUIRE(vertical.channel_count() == pulp::signal::kMaxMeterChannels);
 
-    vertical.update(data, 0.1f);
+    (void) vertical.update(data, 0.1f);
     REQUIRE(vertical.channel_count() == 3);
     REQUIRE(vertical.ballistics().channels[0].clip_indicator);
 
@@ -2035,7 +2053,7 @@ TEST_CASE("MultiMeter paints vertical and horizontal channel indicators",
     MultiMeter horizontal;
     horizontal.set_bounds({0, 0, 120, 60});
     horizontal.set_layout(MultiMeter::Layout::horizontal);
-    horizontal.update(data, 0.1f);
+    (void) horizontal.update(data, 0.1f);
 
     RecordingCanvas horizontal_canvas;
     horizontal.paint(horizontal_canvas);
@@ -2049,7 +2067,7 @@ TEST_CASE("MultiMeter paints vertical and horizontal channel indicators",
     segmented.set_bounds({0, 0, 260, 48});
     segmented.set_layout(MultiMeter::Layout::horizontal);
     segmented.set_display_style(MultiMeter::DisplayStyle::segmented);
-    segmented.update(data, 0.1f);
+    (void) segmented.update(data, 0.1f);
 
     RecordingCanvas segmented_canvas;
     segmented.paint(segmented_canvas);
@@ -2077,7 +2095,7 @@ TEST_CASE("CorrelationMeter clamps updates and paints both polarities",
     CorrelationMeter meter;
     meter.set_bounds({0, 0, 100, 20});
 
-    meter.update(2.0f, 1.0f);
+    (void) meter.update(2.0f, 1.0f);
     REQUIRE(meter.display_correlation() > 0.99f);
 
     RecordingCanvas positive_canvas;
@@ -2087,7 +2105,7 @@ TEST_CASE("CorrelationMeter clamps updates and paints both polarities",
     REQUIRE(positive_canvas.count(DrawCommand::Type::stroke_line) == 3);
     REQUIRE(positive_canvas.count(DrawCommand::Type::fill_rect) == 1);
 
-    meter.update(-2.0f, 1.0f);
+    (void) meter.update(-2.0f, 1.0f);
     REQUIRE(meter.display_correlation() < -0.99f);
 
     RecordingCanvas negative_canvas;

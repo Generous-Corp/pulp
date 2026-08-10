@@ -1,0 +1,99 @@
+{
+  "modules": [
+    {
+      "slug": "DIV",
+      "name": "DIV",
+      "description": "Clock divider with CV-controlled division, reset, and trigger or gate output",
+      "tags": [
+        "Clock modulator",
+        "Utility"
+      ],
+      "hp": 4,
+      "params": [
+        {
+          "id": 0,
+          "ident": "DIV_PARAM",
+          "name": "Division",
+          "label": "DIV",
+          "unit": "",
+          "min_value": 1.0,
+          "max_value": 16.0,
+          "default_value": 2.0,
+          "kind": "Knob",
+          "x_mm": 10.16,
+          "y_mm": 28.0
+        },
+        {
+          "id": 1,
+          "ident": "MODE_PARAM",
+          "name": "Output mode",
+          "label": "MODE",
+          "unit": "",
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "default_value": 0.0,
+          "kind": "Toggle",
+          "labels": [
+            "Trig",
+            "Gate"
+          ],
+          "x_mm": 10.16,
+          "y_mm": 60.0
+        }
+      ],
+      "inputs": [
+        {
+          "id": 0,
+          "ident": "CLK_INPUT",
+          "name": "Clock",
+          "label": "CLK",
+          "role": "Clock",
+          "x_mm": 10.16,
+          "y_mm": 76.0
+        },
+        {
+          "id": 1,
+          "ident": "RST_INPUT",
+          "name": "Reset",
+          "label": "RST",
+          "role": "Trigger",
+          "x_mm": 10.16,
+          "y_mm": 92.0
+        },
+        {
+          "id": 2,
+          "ident": "CV_INPUT",
+          "name": "Division CV",
+          "label": "CV",
+          "role": "Cv",
+          "x_mm": 10.16,
+          "y_mm": 45.0,
+          "normal_volts": 0.0
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "OUT_OUTPUT",
+          "name": "Divided clock",
+          "label": "OUT",
+          "role": "Gate",
+          "x_mm": 10.16,
+          "y_mm": 117.0
+        }
+      ],
+      "lights": [
+        {
+          "id": 0,
+          "ident": "ACT_LIGHT",
+          "name": "Beat",
+          "label": "",
+          "x_mm": 10.16,
+          "y_mm": 104.0,
+          "color": "green",
+          "size": "small"
+        }
+      ]
+    }
+  ]
+}

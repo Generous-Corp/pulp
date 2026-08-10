@@ -51,6 +51,25 @@ def _capability_handoff_required(prefix: Path) -> bool:
     return _version_tuple(_read_text(prefix / "version.txt")) >= _version_tuple(floor)
 
 
+def _importer_runtime_paths() -> set[str]:
+    try:
+        matrix = json.loads(PRODUCT_MATRIX.read_text(encoding="utf-8"))
+        members = matrix["common_cli_members"]
+    except (KeyError, TypeError, OSError, json.JSONDecodeError) as exc:
+        raise ProvenanceError(
+            f"cannot determine importer runtime contract from {PRODUCT_MATRIX}: {exc}"
+        ) from exc
+    prefix = "browser_capture/"
+    paths = {
+        "bin/browser_capture-v1/" + str(member).removeprefix(prefix)
+        for member in members
+        if isinstance(member, str) and member.startswith(prefix)
+    }
+    if not paths:
+        raise ProvenanceError(f"empty importer runtime contract in {PRODUCT_MATRIX}")
+    return paths
+
+
 def _read_text(path: Path) -> str:
     try:
         return path.read_text(encoding="utf-8").strip()
@@ -215,6 +234,25 @@ def verify_release_marker(
     return marker
 
 
+def verify_release_sdk(
+    prefix: Path, *, expected_platform: str, expected_source_sha: str
+) -> dict[str, object]:
+    """Verify the complete release contract for one selected SDK prefix."""
+    marker = verify_release_marker(
+        prefix,
+        expected_platform=expected_platform,
+        expected_source_sha=expected_source_sha,
+    )
+    if _capability_handoff_required(prefix):
+        verify_handoff(
+            prefix,
+            expected_platform=expected_platform,
+            expected_sdk_source_sha=expected_source_sha,
+            expected_importer_runtime_paths=_importer_runtime_paths(),
+        )
+    return marker
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -246,40 +284,30 @@ def main(argv: list[str] | None = None) -> int:
             )
             handoff = None
             if _capability_handoff_required(args.prefix):
+                runtime_paths = _importer_runtime_paths()
                 handoff = build_handoff(
                     args.prefix,
                     sdk_source_sha=args.source_sha,
                     platform=args.platform,
+                    expected_importer_runtime_paths=runtime_paths,
                 )
             write_atomically(args.prefix / "sdk-provenance.json", marker)
             if handoff is not None:
                 write_handoff_atomically(args.prefix / HANDOFF_PATH, handoff)
-            verify_release_marker(
+            verify_release_sdk(
                 args.prefix,
                 expected_platform=args.platform,
                 expected_source_sha=args.source_sha,
             )
-            if handoff is not None:
-                verify_handoff(
-                    args.prefix,
-                    expected_platform=args.platform,
-                    expected_sdk_source_sha=args.source_sha,
-                )
             suffix = " and capability handoff" if handoff is not None else ""
             print(f"OK: stamped official SDK provenance{suffix} in {args.prefix}")
         else:
-            verify_release_marker(
+            verify_release_sdk(
                 args.prefix,
                 expected_platform=args.platform,
                 expected_source_sha=args.source_sha,
             )
             required = _capability_handoff_required(args.prefix)
-            if required:
-                verify_handoff(
-                    args.prefix,
-                    expected_platform=args.platform,
-                    expected_sdk_source_sha=args.source_sha,
-                )
             suffix = " and capability handoff" if required else ""
             print(f"OK: verified official SDK provenance{suffix} in {args.prefix}")
     except (ProvenanceError, HandoffError, OSError) as exc:

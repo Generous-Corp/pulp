@@ -1,0 +1,17 @@
+{
+  "slug": "ForgeProbe",
+  "name": "Forge Probe",
+  "version": "2.0.0",
+  "license": "MIT",
+  "brand": "Forge",
+  "author": "Forge Modular",
+  "description": "Test instrument: reports the engine state a patch actually loaded into, and records what its jacks receive.",
+  "modules": [
+    {
+      "slug": "PROBE",
+      "name": "Probe",
+      "description": "Reads back loaded engine state and captures a bounded window of signal.",
+      "tags": ["Utility"]
+    }
+  ]
+}

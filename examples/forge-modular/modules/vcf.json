@@ -1,0 +1,103 @@
+{
+  "modules": [
+    {
+      "slug": "VCF",
+      "name": "VCF",
+      "description": "Resonant state-variable filter with CV",
+      "tags": [
+        "Filter",
+        "Polyphonic"
+      ],
+      "hp": 8,
+      "params": [
+        {
+          "id": 0,
+          "ident": "CUTOFF_PARAM",
+          "name": "Cutoff",
+          "label": "CUTOFF",
+          "unit": " Hz",
+          "min_value": -4.0,
+          "max_value": 4.0,
+          "default_value": 0.0,
+          "kind": "KnobLarge",
+          "x_mm": 20.32,
+          "y_mm": 30,
+          "display_base": 2.0,
+          "display_multiplier": 261.6256
+        },
+        {
+          "id": 1,
+          "ident": "RES_PARAM",
+          "name": "Resonance",
+          "label": "RES",
+          "unit": "%",
+          "min_value": 0.0,
+          "max_value": 0.95,
+          "default_value": 0.1,
+          "kind": "Knob",
+          "x_mm": 11.785599999999999,
+          "y_mm": 56,
+          "display_base": 0.0,
+          "display_multiplier": 100.0
+        },
+        {
+          "id": 2,
+          "ident": "CVAMT_PARAM",
+          "name": "Cutoff CV amount",
+          "label": "AMT",
+          "unit": "%",
+          "min_value": -1.0,
+          "max_value": 1.0,
+          "default_value": 0.0,
+          "kind": "Trimpot",
+          "x_mm": 28.8544,
+          "y_mm": 56,
+          "display_base": 0.0,
+          "display_multiplier": 100.0
+        }
+      ],
+      "inputs": [
+        {
+          "id": 0,
+          "ident": "CV_INPUT",
+          "name": "Cutoff CV (1V/oct)",
+          "label": "CV",
+          "role": "Cv",
+          "x_mm": 28.8544,
+          "y_mm": 76
+        },
+        {
+          "id": 1,
+          "ident": "IN_INPUT",
+          "name": "Audio",
+          "label": "IN",
+          "role": "Audio",
+          "x_mm": 11.785599999999999,
+          "y_mm": 98
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "LP_OUTPUT",
+          "name": "Low-pass",
+          "label": "LP",
+          "role": "Audio",
+          "x_mm": 28.8544,
+          "y_mm": 98
+        },
+        {
+          "id": 1,
+          "ident": "HP_OUTPUT",
+          "name": "High-pass",
+          "label": "HP",
+          "role": "Audio",
+          "x_mm": 28.8544,
+          "y_mm": 116
+        }
+      ],
+      "lights": [],
+      "poly_follows": "IN_INPUT"
+    }
+  ]
+}

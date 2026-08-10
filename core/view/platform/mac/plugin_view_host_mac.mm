@@ -425,7 +425,9 @@ void pulp_plugin_wheel(pulp::view::View* root, pulp::view::Point pt, NSEvent* ev
     // frame pump, so no request_repaint hook is needed (empty = no-op).
     pulp::view::deliver_mouse_wheel(
         *root, pt, static_cast<float>(event.scrollingDeltaX),
-        static_cast<float>(-event.scrollingDeltaY), /*host=*/{});
+        static_cast<float>(-event.scrollingDeltaY),
+        pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags),
+        /*host=*/{});
   } catch (const std::exception& e) {
     std::fprintf(stderr, "[plugin-view-host] scrollWheel handler threw: %s\n", e.what());
   } catch (...) {
@@ -2196,7 +2198,12 @@ private:
         paint_scene(*canvas);
 
         continuous_frames_.store(
-            pulp::view::needs_continuous_frames(&root_) || frame_clock_.has_active_subscribers(),
+            // The O(1) question first. `needs_continuous_frames` walks the
+            // whole view tree; `has_active_subscribers` is a count. Asking the
+            // expensive one first meant the walk ran on every frame of every
+            // animation, when the answer was already yes.
+            frame_clock_.has_active_subscribers() ||
+                pulp::view::needs_continuous_frames(&root_),
             std::memory_order_relaxed);
 
         // PULP_EMBED_GPU_FRAME_STAT — env-gated LIVE display-link present-path

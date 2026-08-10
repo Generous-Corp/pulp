@@ -938,12 +938,12 @@ TEST_CASE("WidgetBridge reinserted DOM elements re-arm native event routing",
 
     auto* first = bridge.widget(native_id);
     REQUIRE(first != nullptr);
-    REQUIRE(first->on_pointer_event);
+    REQUIRE(first->on_dom_wheel_event);
 
     MouseEvent wheel;
     wheel.is_wheel = true;
     wheel.scroll_delta_y = 7.0f;
-    first->on_pointer_event(wheel);
+    first->on_dom_wheel_event(wheel, true);
     REQUIRE(engine.evaluate("__reuseWheelHits").getWithDefault<int>(0) > 0);
 
     bridge.load_script(R"(
@@ -958,10 +958,10 @@ TEST_CASE("WidgetBridge reinserted DOM elements re-arm native event routing",
 
     auto* second = bridge.widget(native_id);
     REQUIRE(second != nullptr);
-    REQUIRE(second->on_pointer_event);
+    REQUIRE(second->on_dom_wheel_event);
 
     const int before = engine.evaluate("__reuseWheelHits").getWithDefault<int>(0);
-    second->on_pointer_event(wheel);
+    second->on_dom_wheel_event(wheel, true);
     REQUIRE(engine.evaluate("__reuseWheelHits").getWithDefault<int>(0) > before);
 }
 
@@ -1345,7 +1345,8 @@ TEST_CASE("WidgetBridge rewires native events when a recycled subtree reuses ids
     MouseEvent wheel;
     wheel.is_wheel = true;
     wheel.scroll_delta_y = 12.0f;
-    first->on_mouse_event(wheel);
+    REQUIRE(first->on_dom_wheel_event);
+    first->on_dom_wheel_event(wheel, true);
 
     REQUIRE(engine.evaluate("pointer_hits").getWithDefault<int>(0) == 1);
     REQUIRE(engine.evaluate("wheel_hits").getWithDefault<int>(0) == 1);
@@ -1362,7 +1363,8 @@ TEST_CASE("WidgetBridge rewires native events when a recycled subtree reuses ids
     REQUIRE(second->on_pointer_event);
 
     second->on_mouse_event(down);
-    second->on_mouse_event(wheel);
+    REQUIRE(second->on_dom_wheel_event);
+    second->on_dom_wheel_event(wheel, true);
 
     REQUIRE(engine.evaluate("pointer_hits").getWithDefault<int>(0) == 11);
     REQUIRE(engine.evaluate("wheel_hits").getWithDefault<int>(0) == 11);
@@ -1711,7 +1713,8 @@ TEST_CASE("WidgetBridge pointer, gesture, capture, and shortcut APIs dispatch to
     wheel.is_wheel = true;
     wheel.scroll_delta_x = 2.5f;
     wheel.scroll_delta_y = -7.0f;
-    surface->on_mouse_event(wheel);
+    REQUIRE(surface->on_dom_wheel_event);
+    surface->on_dom_wheel_event(wheel, true);
     REQUIRE_THAT(engine.evaluate("wheel_x").getWithDefault<double>(0.0), WithinAbs(2.5, 0.001));
     REQUIRE_THAT(engine.evaluate("wheel_y").getWithDefault<double>(0.0), WithinAbs(-7.0, 0.001));
 
@@ -2029,7 +2032,8 @@ TEST_CASE("WidgetBridge remounts native event registrations for reused widget id
     wheel.scroll_delta_y = -3.0f;
     wheel.position = {42.0f, 64.0f};
     wheel.window_position = wheel.position;
-    surface->on_mouse_event(wheel);
+    REQUIRE(surface->on_dom_wheel_event);
+    surface->on_dom_wheel_event(wheel, true);
     REQUIRE(engine.evaluate("wheel_events").getWithDefault<int>(0) == 1);
 
     REQUIRE(root.dispatch_gesture_pointer_event(down, 0.10));
@@ -5323,6 +5327,42 @@ static std::string capture_widget_bridge_stderr(Body&& body) {
         ss.write(buffer, static_cast<std::streamsize>(n));
     }
     return ss.str();
+}
+
+TEST_CASE("WidgetBridge teardown reports a quarantine repaint failure without terminating",
+          "[view][bridge][lifetime][quarantine]") {
+    class ThrowingRepaintHost final : public WindowHost {
+    public:
+        void show() override {}
+        void hide() override {}
+        bool is_visible() const override { return true; }
+        void repaint() override {
+            ++repaint_calls;
+            throw std::runtime_error("test repaint failure");
+        }
+        void set_close_callback(std::function<void()>) override {}
+        void run_event_loop() override {}
+
+        int repaint_calls = 0;
+    } host;
+
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    root.set_window_host(&host);
+    root.set_visible(true);
+
+    const std::string captured = capture_widget_bridge_stderr([&] {
+        auto bridge = std::make_unique<WidgetBridge>(engine, root, store);
+        bridge->quarantine_realm();
+        CHECK_FALSE(root.visible());
+        bridge.reset();
+    });
+
+    CHECK(root.visible());
+    CHECK(host.repaint_calls == 2);
+    CHECK(captured.find("WidgetBridge quarantine repaint error: test repaint failure") !=
+          std::string::npos);
 }
 
 TEST_CASE("WidgetBridge eval_or_throw logs PULP_EVAL_THROW before rethrowing (#3206)",

@@ -1,0 +1,67 @@
+{
+  "$comment": [
+    "ADMISSION QUARANTINE. Candidate entries are never returned by the normal",
+    "knowledge loader and cannot influence generation. An explicit guided",
+    "off/on audio A/B must justify changing status to admitted and linking an",
+    "idiom to it. If another source supports the same canonical claim, append",
+    "its locator to evidence; never create a duplicate guidance row."
+  ],
+  "entries": [
+    {
+      "id": "post-multiplier-low-pass",
+      "canonical_semantic_id": "post-multiplier-low-pass",
+      "status": "candidate",
+      "kind": "technique",
+      "names": [
+        "filtered ring modulation",
+        "softened sum and difference tones"
+      ],
+      "claim": "low-pass filtering after ring modulation suppresses brittle high-frequency products while preserving the sum-and-difference structure",
+      "canonical_claim_fingerprint": "b8177c86ba3b1b3aeb6c8b0cdfab787620aa3efe1b538e19ecb95bc24912b337",
+      "what": "A product signal followed by a low-pass stage, with the cutoff chosen against the new spectrum rather than inherited from either input. The multiplication still creates sum-and-difference components; the following stage decides how much of their upper, brittle region remains.",
+      "why": "Multiplication creates components above and below the input frequencies, often adding a dense high-frequency edge. Filtering the result acts on those newly created components. Filtering either input first is not equivalent because it changes which products are created in the first place.",
+      "listen_for": {
+        "sounds_like": "an inharmonic or metallic structure whose identity remains clear without the upper edge dominating it",
+        "confusable_with": "filtering before multiplication, which changes the ingredients and therefore changes the product spectrum itself"
+      },
+      "numbers": [],
+      "provenance": "read",
+      "source": "Allen Strange, Electronic Music: Systems, Techniques and Controls, a worked ring-modulator filtering example",
+      "anchor": {
+        "doc": "electronic-music-systems-strange-1972",
+        "page": 230,
+        "sha256": "f9faced60598885e4aa2f62690af5201558b98eb428a3dfbfd864ac3560d23f3",
+        "shows": "A worked signal path placing a low-pass stage after a ring modulator and explaining the intended spectral restraint."
+      },
+      "evidence": [
+        {
+          "work_id": "allen-strange-electronic-music-systems-techniques-controls",
+          "edition_id": "1972-first-edition",
+          "page": 230,
+          "source_sha256": "493884cb97d11df5c776dd5a7ea27d35fde98cafa7da97304bf816ae654918df",
+          "page_sha256": "f9faced60598885e4aa2f62690af5201558b98eb428a3dfbfd864ac3560d23f3",
+          "recovery_quality": 0.71,
+          "shows": "A worked signal path placing a low-pass stage after a ring modulator and explaining the intended spectral restraint."
+        }
+      ],
+      "validation": {
+        "type": "guided-audio-ab",
+        "result": "not_proven",
+        "disposition": "holdout did not justify admission; keep quarantined from generation",
+        "prompt": "build a sustained inharmonic ring-modulated texture that remains metallic without a brittle top end",
+        "off": "Generate with the admitted knowledge loader, which excludes this candidate.",
+        "on": "Inject only this candidate into the otherwise identical contract; do not add any other recovered guidance.",
+        "controls": [
+          "Use the same installed inventory, generator model, attempt count and audibility gate.",
+          "Require ring modulation and an audible output in both arms; reject topology changes that replace the requested technique.",
+          "Keep every generated patch and compare paired attempts rather than selecting only the best on-arm result."
+        ],
+        "measure": [
+          "Blind listening for retained metallic identity with reduced brittle high-frequency dominance.",
+          "Quality Lab spectral_centroid and hf_fizz as corroboration, guarded against regressions in audibility and spectral_flux."
+        ],
+        "promotion": "Admit only if the guided arm wins the blinded paired comparison and Pareto-improves the stated detectors without losing the requested ring-modulated identity."
+      }
+    }
+  ]
+}

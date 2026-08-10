@@ -1,4 +1,68 @@
 #include "test_forge_sequencing_catalog_support.hpp"
+#include <pulp/host/forge_eurorack_utility_catalog.hpp>
+
+TEST_CASE("Eurorack clock divider emits one input-width pulse every N edges",
+          "[host][baked][forge][eurorack][clock-divider]") {
+    using Fixture = pulp::test::BakedNodeFixture<1>;
+    const auto render = [](int division) {
+        Fixture fx(pulp::host::eurorack::make_clock_divider_node(), kSr, kFrames);
+        auto inj = fx.claim_injector();
+        REQUIRE(inj.valid());
+        REQUIRE(inj.inject(immediate(pulp::host::eurorack::kDivision,
+                                     static_cast<float>(division))) == InjectStatus::Ok);
+        return fx.render({clock_line(16)})[0];
+    };
+
+    const auto div1 = render(1);
+    const auto div2 = render(2);
+    for (int i = 0; i < kFrames; ++i) {
+        const bool input_pulse = (i % 16) == 0;
+        CHECK(high(div1[static_cast<std::size_t>(i)]) == input_pulse);
+        const bool second_pulse = input_pulse && ((i / 16) % 2 == 1);
+        CHECK(high(div2[static_cast<std::size_t>(i)]) == second_pulse);
+    }
+}
+
+TEST_CASE("Eurorack slew time covers the declared 10 V CV span",
+          "[host][baked][forge][eurorack][slew]") {
+    using Fixture = pulp::test::BakedNodeFixture<1>;
+    Fixture fx(pulp::host::eurorack::make_slew_node(), kSr, kFrames);
+    auto inj = fx.claim_injector();
+    REQUIRE(inj.valid());
+    const float seconds = static_cast<float>(kFrames / kSr);
+    REQUIRE(inj.inject(immediate(pulp::host::eurorack::kSlewRise, seconds)) ==
+            InjectStatus::Ok);
+    const auto out = fx.render({flat(pulp::host::eurorack::kCvUnipolarMax)})[0];
+    REQUIRE_THAT(out[kFrames / 2 - 1], WithinAbs(5.0, 1e-3));
+    REQUIRE_THAT(out.back(), WithinAbs(10.0, 1e-3));
+}
+
+TEST_CASE("Eurorack sample and hold captures signal only on independent trigger edges",
+          "[host][baked][forge][eurorack][sample-hold]") {
+    const auto type = pulp::host::eurorack::make_sample_hold_node();
+    REQUIRE(type.num_input_ports == 2);
+    REQUIRE(type.num_output_ports == 1);
+    std::vector<float> signal(static_cast<std::size_t>(kFrames), 2.0f);
+    std::fill(signal.begin() + 24, signal.end(), 7.0f);
+    std::vector<float> trigger(static_cast<std::size_t>(kFrames), 0.0f);
+    trigger[8] = pulp::host::eurorack::kGateHigh;
+    trigger[32] = pulp::host::eurorack::kGateHigh;
+    std::vector<float> out(static_cast<std::size_t>(kFrames), 0.0f);
+    const float* input_ptrs[] = {signal.data(), trigger.data()};
+    float* output_ptrs[] = {out.data()};
+    pulp::audio::BufferView<const float> input(input_ptrs, 2, kFrames);
+    pulp::audio::BufferView<float> output(output_ptrs, 1, kFrames);
+    void* instance = type.create();
+    REQUIRE(instance != nullptr);
+    type.prepare(instance, kSr, kFrames);
+    type.process_instance(instance, output, input, kFrames);
+    type.destroy(instance);
+    REQUIRE(out[7] == 0.0f);
+    REQUIRE(out[8] == 2.0f);
+    REQUIRE(out[31] == 2.0f);
+    REQUIRE(out[32] == 7.0f);
+    REQUIRE(out.back() == 7.0f);
+}
 
 TEST_CASE("Forge sequencing quantizer: edo_n sets the step grid",
           "[host][baked][forge][forge-sequencing][quantizer]") {

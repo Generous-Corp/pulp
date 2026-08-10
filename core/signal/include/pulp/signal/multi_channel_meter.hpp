@@ -135,8 +135,19 @@ struct MultiChannelBallistics {
     float clip_hold_time = 3.0f;    // seconds
 
     /// Update ballistics from new meter data. Call once per UI frame.
-    void update(const MultiChannelMeterData& data, float dt) {
-        num_channels = std::clamp(data.num_channels, 0, kMaxMeterChannels);
+    ///
+    /// Returns true when a displayed value actually moved. A UI thread polls
+    /// this every frame for as long as it is bound, silence included, so the
+    /// return value is what lets a still meter ask for nothing: repaint on true,
+    /// and a settled meter costs zero composites instead of one per frame
+    /// forever. Only the fields that reach the screen count — the hold counters
+    /// tick down invisibly. `MeterBallistics::update` reports movement the same
+    /// way. If you are only advancing the ballistics and will never paint, say
+    /// so with `(void)`.
+    [[nodiscard]] bool update(const MultiChannelMeterData& data, float dt) {
+        const int requested = std::clamp(data.num_channels, 0, kMaxMeterChannels);
+        bool changed = requested != num_channels;
+        num_channels = requested;
 
         float attack_coeff = 1.0f - std::exp(-dt / attack_time);
         float release_coeff = 1.0f - std::exp(-dt / release_time);
@@ -144,25 +155,43 @@ struct MultiChannelBallistics {
         for (int ch = 0; ch < num_channels; ++ch) {
             auto& b = channels[ch];
             auto& d = data.channels[ch];
+            const float prev_peak = b.display_peak;
+            const float prev_rms = b.display_rms;
+            const float prev_held = b.held_peak;
+            const bool prev_clip = b.clip_indicator;
+
+            // ONE NON-FINITE SAMPLE WOULD DISABLE THE GATE PERMANENTLY. A NaN
+            // takes the release branch, poisons the display value, survives the
+            // snaps below (every comparison against NaN is false), and then
+            // compares unequal to itself forever — so `changed` would be true on
+            // every frame for the rest of the process. Sanitise the input, and
+            // self-heal state that arrived non-finite by another route.
+            const float in_peak = std::isfinite(d.peak) ? d.peak : 0.0f;
+            const float in_rms = std::isfinite(d.rms) ? d.rms : 0.0f;
+            if (!std::isfinite(b.display_peak)) b.display_peak = 0.0f;
+            if (!std::isfinite(b.display_rms)) b.display_rms = 0.0f;
+            if (!std::isfinite(b.held_peak)) b.held_peak = 0.0f;
 
             // Peak
-            if (d.peak > b.display_peak)
-                b.display_peak += (d.peak - b.display_peak) * attack_coeff;
+            if (in_peak > b.display_peak)
+                b.display_peak += (in_peak - b.display_peak) * attack_coeff;
             else
-                b.display_peak += (d.peak - b.display_peak) * release_coeff;
+                b.display_peak += (in_peak - b.display_peak) * release_coeff;
 
             // RMS
-            if (d.rms > b.display_rms)
-                b.display_rms += (d.rms - b.display_rms) * attack_coeff;
+            if (in_rms > b.display_rms)
+                b.display_rms += (in_rms - b.display_rms) * attack_coeff;
             else
-                b.display_rms += (d.rms - b.display_rms) * release_coeff;
+                b.display_rms += (in_rms - b.display_rms) * release_coeff;
 
             // Peak hold
-            if (d.peak >= b.held_peak) {
-                b.held_peak = d.peak;
+            if (in_peak >= b.held_peak) {
+                b.held_peak = in_peak;
                 b.hold_counter = peak_hold_time;
             } else {
-                b.hold_counter -= dt;
+                // Floor the counters at zero. Left to run they decrement without
+                // bound for as long as the meter is polled, which is forever.
+                b.hold_counter = std::max(0.0f, b.hold_counter - dt);
                 if (b.hold_counter <= 0)
                     b.held_peak += (0.0f - b.held_peak) * release_coeff;
             }
@@ -172,15 +201,30 @@ struct MultiChannelBallistics {
                 b.clip_indicator = true;
                 b.clip_hold_counter = clip_hold_time;
             } else {
-                b.clip_hold_counter -= dt;
+                b.clip_hold_counter = std::max(0.0f, b.clip_hold_counter - dt);
                 if (b.clip_hold_counter <= 0)
                     b.clip_indicator = false;
             }
 
-            // Clamp noise floor
+            // Clamp noise floor. The decays are exponential, so each of these
+            // approaches zero without ever arriving: unsnapped they change by a
+            // fraction of a bit every frame FOREVER, which is invisible on
+            // screen but means the meter never reports a still frame.
+            //
+            // These three rest at ZERO, so a floor test is enough. A smoother
+            // whose resting value is NOT zero needs the general form —
+            // `if (std::abs(v - target) < eps) v = target` — because a floor
+            // test never fires for it. Copying these three lines to such a
+            // smoother silently does nothing; see CorrelationMeter::update.
             if (b.display_peak < 1e-6f) b.display_peak = 0;
             if (b.display_rms < 1e-6f) b.display_rms = 0;
+            if (b.held_peak < 1e-6f) b.held_peak = 0;
+
+            changed = changed || b.display_peak != prev_peak ||
+                      b.display_rms != prev_rms || b.held_peak != prev_held ||
+                      b.clip_indicator != prev_clip;
         }
+        return changed;
     }
 
     /// Reset all clip indicators immediately.

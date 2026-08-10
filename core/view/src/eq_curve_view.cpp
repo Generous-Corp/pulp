@@ -113,6 +113,7 @@ signal::BiquadCoefficients design_band(const EqCurveView::Band& band, float samp
 } // namespace
 
 EqCurveView::EqCurveView() {
+    mark_runtime_view_kind(RuntimeViewKind::eq_curve);
     set_focusable(true);
 }
 

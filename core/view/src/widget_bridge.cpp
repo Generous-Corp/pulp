@@ -86,7 +86,7 @@ var __nativeRegistered__ = {};
 // keydown only fed __callbacks__['__global__:keydown'] (a per-id
 // channel nothing subscribes to). With it, Spectr-style global key
 // listeners just work.
-function __dispatch__(id, eventName) {
+function __dispatchCallbackOnly__(id, eventName) {
     var args = Array.prototype.slice.call(arguments, 2);
     var key = id + ':' + eventName;
     var cb = __callbacks__[key];
@@ -101,6 +101,10 @@ function __dispatch__(id, eventName) {
             if (typeof __dispatchError__ === 'function') __dispatchError__(id, eventName, String(e && e.stack ? e.stack : e));
         }
     }
+}
+function __dispatch__(id, eventName) {
+    var args = Array.prototype.slice.call(arguments, 2);
+    __dispatchCallbackOnly__.apply(null, arguments);
     if (id === '__global__' && typeof window !== 'undefined' && window._listeners) {
         var list = window._listeners[eventName];
         if (list && list.length) {
@@ -146,6 +150,13 @@ function __dispatch__(id, eventName) {
             stats.byType[eventName] = (stats.byType[eventName] || 0) + 1;
             try {
                 var data = args && args.length ? args[0] : {};
+                // Older wheel producers supplied positional (dx, dy) values.
+                // Normalize them here, at the sole DOM dispatch path, rather
+                // than dispatching once from the registered callback and once
+                // again from this generic element fan-out.
+                if (eventName === 'wheel' && (typeof data !== 'object' || data === null)) {
+                    data = { deltaX: data || 0, deltaY: (args && args.length > 1 ? args[1] : 0) || 0 };
+                }
                 var ev = (typeof _makeEvent === 'function')
                     ? _makeEvent(eventName, el, data || {})
                     : {
@@ -434,8 +445,18 @@ WidgetBridge::~WidgetBridge() {
     // bridge awaited owner teardown, so do not erase it here.
     if (!realm_quarantined_ && !realm_retired_)
         root_.on_global_click = {};
-    if (realm_quarantined_)
-        end_root_quarantine();
+    if (realm_quarantined_) {
+        try {
+            end_root_quarantine();
+        } catch (const std::exception& e) {
+            // Destructors cannot propagate safely during stack unwinding. The
+            // visibility state is already restored before repaint scheduling,
+            // so preserve teardown and make the host failure observable.
+            std::cerr << "WidgetBridge quarantine repaint error: " << e.what() << "\n";
+        } catch (...) {
+            std::cerr << "WidgetBridge quarantine repaint error: unknown exception\n";
+        }
+    }
 }
 
 void WidgetBridge::unregister_global_dispatch() noexcept {
@@ -488,7 +509,7 @@ void WidgetBridge::begin_root_quarantine() noexcept {
     realm_quarantined_ = true;
 }
 
-void WidgetBridge::end_root_quarantine() noexcept {
+void WidgetBridge::end_root_quarantine() {
     root_.end_visibility_quarantine();
 }
 
