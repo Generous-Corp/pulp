@@ -26,7 +26,9 @@ template <typename SampleType = float> class WaveguideReflectionFilterT {
     static constexpr double maximum_reflection_gain = 0.999;
     static constexpr double default_reflection_gain = -0.995;
     static constexpr double minimum_loss_pole = 0.0;
-    static constexpr double maximum_loss_pole = 0.98;
+    // Leaves headroom for rate-mapped base-domain poles when this boundary is
+    // evaluated inside an oversampled recursive loop.
+    static constexpr double maximum_loss_pole = 0.9999;
     static constexpr double default_loss_pole = 0.20;
 
     void set_reflection_gain(SampleType gain) noexcept {

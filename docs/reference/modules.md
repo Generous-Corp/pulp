@@ -850,7 +850,8 @@ a working convolution and would hide the bug. Assert
 | Convolver | `convolver.hpp` | Partitioned frequency-domain convolution for reverb impulse responses |
 | Delay Line | `delay_line.hpp` | Sample-accurate delay with linear, cubic, or sinc interpolation |
 | [Fractional Delay](fractional-delay.md) | `fractional_delay.hpp` | Prepared Thiran-1/Lagrange delay lines plus bounded shared history with stateless multitap Lagrange-3/5 heads, explicit causal ranges, and typed fault recovery |
-| Waveguide primitives | `waveguide_line.hpp`, `waveguide_reflection_filter.hpp`, `waveguide_junction.hpp` | Prepared bidirectional double-precision passive-interpolated delay rails with bounded retuning, passive one-pole reflection boundaries, and lossless fixed-capacity scattering junctions. Reed excitation and whole-loop oversampling are separate composition work. |
+| Waveguide primitives | `waveguide_line.hpp`, `waveguide_reflection_filter.hpp`, `waveguide_junction.hpp` | Prepared bidirectional double-precision passive-interpolated delay rails with bounded retuning, passive one-pole reflection boundaries, and lossless fixed-capacity scattering junctions; these are composable building blocks, not a complete instrument loop. |
+| Reed exciter | `waveguide_reed_exciter.hpp` | Bounded, allocation-free single-reed valve primitive for waveguide compositions; it does not own oversampling or the recursive loop. |
 | Dither Quantizer | `dither.hpp` | Deterministic TPDF dither with opt-in bounded first- or second-order error-feedback noise shaping; zero latency and allocation-free |
 | Lo-Fi Chain | `lofi_chain.hpp` | Bit-depth reduction, sample-and-hold rate reduction, and dead-zone saturation; dither/noise shaping are opt-in so the legacy default remains exact |
 | Oversampling | `oversampling.hpp` | 2x/4x/8x/16x realtime up/downsampling; minimum-phase IIR and 96/140 dB-prototype linear-phase FIR tiers with exact latency reporting |
@@ -890,6 +891,7 @@ a working convolution and would hide the bug. Assert
 | Processor | Header | Description |
 |-----------|--------|-------------|
 | Modal Bank | `modal_bank.hpp` | SIMD-friendly bank of coupled-form modes with contact-pulse excitation, independent strike/pickup weights, amplitude-preserving retuning, and up to eight pickup outputs |
+| Reed waveguide loop | `reed_waveguide_loop.hpp` | Public fixed-topology single-reed instrument owner: composes the reed, waveguide, bell reflection, and whole-loop 1x/2x/4x oversampling with physical one-way-time tuning |
 | Particle percussion | `particle_collision_exciter.hpp`, `particle_percussion_voice.hpp` | Deterministic, depletion-aware collision excitation with selectable shaker, maraca, rattle, and tambourine models; zero-latency prepared voice rendering |
 | Modal Specification | `modal_spec.hpp` | Versioned JSON interchange for modal frequencies, T60 values, amplitudes, and optional shapes, with bounded validation before allocation |
 | Bridged-T Resonator | `bridged_t_resonator.hpp` | Trapezoidally integrated two-state model of the published TR-808 bridged-T network, exposing physical component values and circuit nodes; it is a resonator primitive, not a complete drum voice |
