@@ -361,6 +361,16 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
                 close(devnull);
             }
         }
+        // Resolve the pinned directory before closing inherited descriptors.
+        // The descriptor itself is intentionally part of the close sweep; the
+        // process retains the directory reference after a successful fchdir.
+        if (options.working_directory_descriptor >= 0) {
+            if (fchdir(options.working_directory_descriptor) != 0)
+                _exit(126);
+        } else if (!options.working_directory.empty() &&
+                   chdir(options.working_directory.c_str()) != 0) {
+            _exit(126);
+        }
         impl_->stdout_pipe.close_all();
         impl_->stderr_pipe.close_all();
         impl_->standard_input.close_all();
@@ -370,10 +380,6 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
             for (int descriptor = 3; descriptor < upper; ++descriptor)
                 ::close(descriptor);
         }
-        if (options.working_directory_descriptor >= 0)
-            fchdir(options.working_directory_descriptor);
-        else if (!options.working_directory.empty())
-            chdir(options.working_directory.c_str());
         execvp(command.c_str(), const_cast<char* const*>(argv.data()));
         _exit(127); // exec failed
     }

@@ -7,8 +7,10 @@
 #include <pulp/inspect/control_trusted_host_launcher.hpp>
 #include <pulp/runtime/crypto.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -320,7 +322,15 @@ TEST_CASE("Release installed host publishes only after ready and cleans revoked 
             const ControlGrantId& grant_id, std::string_view reason) {
             router.end_authority(client_id, registration_id, grant_id, reason);
         };
-    ControlBroker broker(std::move(broker_config));
+    const auto broker_clock_base = std::chrono::steady_clock::now();
+    std::atomic<std::int64_t> broker_clock_offset_ns{0};
+    ControlBroker broker(
+        std::move(broker_config), {},
+        [&] {
+            return broker_clock_base + std::chrono::nanoseconds(
+                                           broker_clock_offset_ns.load(
+                                               std::memory_order_relaxed));
+        });
     ControlService service(broker, router.executor());
     ControlHostEnrollmentStore enrollments;
     ControlConnectionAdmissionStore admissions;
@@ -334,7 +344,7 @@ TEST_CASE("Release installed host publishes only after ready and cleans revoked 
         &router, &enrollment_context);
     REQUIRE(endpoint.start());
     ControlTrustedHostInventory inventory(
-        {.staging_root = directory.root / "stage", .broker_generation = 29, .ttl = 10s});
+        {.staging_root = directory.root / "stage", .broker_generation = 29, .ttl = 30s});
     auto launch_host = [&](std::vector<std::string> arguments) {
         ControlTrustedHostLaunchIntent intent{.executable = executable,
                                               .arguments = std::move(arguments),
@@ -521,7 +531,9 @@ TEST_CASE("Release installed host publishes only after ready and cleans revoked 
     start_trace(client, *expiring.grant, "expired");
     retain_ui(client, *expiring.grant, "expired");
     REQUIRE(wait_for_path(expired_active_path));
-    std::this_thread::sleep_for(50ms);
+    broker_clock_offset_ns.store(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(50ms).count(),
+        std::memory_order_relaxed);
     broker.sweep_expired();
     REQUIRE(wait_for_path(expired_inactive_path));
 
