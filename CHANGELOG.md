@@ -8,8 +8,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v08010"></a>
-## [0.801.0] - Unreleased
+<a id="v08020"></a>
+## [0.802.0] - Unreleased
 
 - Added generated typed `pulp_control_*` tools over the shared authenticated
   control client, with exact `instance_id`, structured receipts, progress,
@@ -7642,7 +7642,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
-[0.801.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.801.0
+[0.802.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.802.0
 [0.800.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.800.0
 [0.799.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.799.1
 [0.799.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.799.0
