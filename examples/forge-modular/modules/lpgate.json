@@ -1,0 +1,152 @@
+{
+  "modules": [
+    {
+      "slug": "LPGATE",
+      "name": "LPGATE",
+      "description": "Vactrol lowpass gate with resonance, strike input and voltage-controlled decay",
+      "tags": [
+        "Low-pass gate",
+        "Filter",
+        "Voltage-controlled amplifier",
+        "Polyphonic"
+      ],
+      "hp": 8,
+      "poly_follows": "IN_INPUT",
+      "params": [
+        {
+          "id": 0,
+          "ident": "LEVEL_PARAM",
+          "name": "Level",
+          "label": "LEVEL",
+          "unit": "%",
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "default_value": 0.0,
+          "kind": "Knob",
+          "x_mm": 11.8,
+          "y_mm": 30.0,
+          "display_multiplier": 100.0
+        },
+        {
+          "id": 1,
+          "ident": "DECAY_PARAM",
+          "name": "Decay",
+          "label": "DECAY",
+          "unit": " ms",
+          "min_value": -1.0,
+          "max_value": 1.0,
+          "default_value": 0.0,
+          "kind": "Knob",
+          "x_mm": 28.8,
+          "y_mm": 30.0,
+          "display_base": 10.0,
+          "display_multiplier": 200.0
+        },
+        {
+          "id": 2,
+          "ident": "RES_PARAM",
+          "name": "Resonance",
+          "label": "RES",
+          "unit": "%",
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "default_value": 0.15,
+          "kind": "Knob",
+          "x_mm": 11.8,
+          "y_mm": 52.0,
+          "display_multiplier": 100.0
+        },
+        {
+          "id": 3,
+          "ident": "COLOR_PARAM",
+          "name": "Colour (VCA to filter)",
+          "label": "COLOR",
+          "unit": "%",
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "default_value": 0.5,
+          "kind": "Knob",
+          "x_mm": 28.8,
+          "y_mm": 52.0,
+          "display_multiplier": 100.0
+        },
+        {
+          "id": 4,
+          "ident": "DCVAMT_PARAM",
+          "name": "Decay CV amount",
+          "label": "DCV",
+          "unit": "",
+          "min_value": -1.0,
+          "max_value": 1.0,
+          "default_value": 0.0,
+          "kind": "Trimpot",
+          "x_mm": 28.8,
+          "y_mm": 70.0
+        }
+      ],
+      "inputs": [
+        {
+          "id": 0,
+          "ident": "IN_INPUT",
+          "name": "Audio in",
+          "label": "IN",
+          "role": "Audio",
+          "x_mm": 11.8,
+          "y_mm": 88.0
+        },
+        {
+          "id": 1,
+          "ident": "GATE_INPUT",
+          "name": "Gate / CV",
+          "label": "GATE",
+          "role": "Cv",
+          "x_mm": 28.8,
+          "y_mm": 88.0,
+          "normal_volts": 0.0
+        },
+        {
+          "id": 2,
+          "ident": "STRIKE_INPUT",
+          "name": "Strike",
+          "label": "STRK",
+          "role": "Trigger",
+          "x_mm": 11.8,
+          "y_mm": 103.0
+        },
+        {
+          "id": 3,
+          "ident": "DCV_INPUT",
+          "name": "Decay CV",
+          "label": "DCV",
+          "role": "Cv",
+          "x_mm": 28.8,
+          "y_mm": 103.0,
+          "normal_volts": 0.0
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "OUT_OUTPUT",
+          "name": "Gated out",
+          "label": "OUT",
+          "role": "Audio",
+          "x_mm": 20.32,
+          "y_mm": 118.0
+        }
+      ],
+      "lights": [
+        {
+          "id": 0,
+          "ident": "GATE_LIGHT",
+          "name": "Gate opening",
+          "label": "",
+          "x_mm": 11.8,
+          "y_mm": 70.0,
+          "color": "yellow",
+          "size": "small"
+        }
+      ]
+    }
+  ]
+}

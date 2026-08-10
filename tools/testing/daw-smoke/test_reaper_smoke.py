@@ -18,11 +18,15 @@ Run:
 """
 from __future__ import annotations
 
+import argparse
 import importlib.util
+import os
 import pathlib
 import subprocess
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
 MODULE_PATH = HERE / "reaper_smoke.py"
@@ -248,5 +252,376 @@ class LuaStructure(unittest.TestCase):
         self.assertIn("PULP_DAW_SMOKE_LOOP_END", text)
 
 
+class EditorOpenMode(unittest.TestCase):
+    """The fourth mode: insert, open the editor, confirm it rendered.
+
+    Products whose editor IS the product need this and none of the hot-swap or
+    transport scenarios. auval and clap-validator prove a plugin scans and
+    instantiates; neither proves its window comes up.
+    """
+
+    def test_mode_is_offered(self):
+        ap = rs.build_parser()
+        args = ap.parse_args(["--mode", "editor-open",
+                              "--plugin-name", "Forge Modular",
+                              "--plugin-path", __file__])
+        self.assertEqual(args.mode, "editor-open")
+
+    def test_needs_nothing_but_the_plugin(self):
+        # The other modes each demand extra flags. Requiring any here would
+        # defeat the point: the question is only whether the thing loads and
+        # draws.
+        ap = rs.build_parser()
+        args = ap.parse_args(["--mode", "editor-open",
+                              "--plugin-name", "Forge Modular",
+                              "--plugin-path", __file__])
+        rs.validate_mode_args(ap, args)   # must not raise or exit
+
+    def test_a_missing_plugin_is_not_a_pass(self):
+        ap = rs.build_parser()
+        args = ap.parse_args(["--mode", "editor-open",
+                              "--plugin-name", "Nope",
+                              "--plugin-path", "/tmp/definitely-not-here.vst3"])
+        rc = rs.run_editor_open_mode(pathlib.Path("/nonexistent/REAPER"), args)
+        self.assertNotEqual(rc, rs.EXIT_PASS)
+
+    def test_every_exit_runs_full_cleanup(self):
+        args = argparse.Namespace(plugin_path=__file__, plugin_name="X",
+                                  format="clap", timeout=1)
+        session = mock.MagicMock()
+        session.place_plugin.return_value = rs.EXIT_FAIL
+        with mock.patch.object(rs, "ReaperSession", return_value=session):
+            self.assertEqual(rs.run_editor_open_mode(pathlib.Path("/reaper"), args),
+                             rs.EXIT_FAIL)
+        session.cleanup.assert_called_once_with()
+
+    def test_pass_requires_two_stable_nonblank_editor_frames(self):
+        args = argparse.Namespace(plugin_path=__file__, plugin_name="X",
+                                  format="clap", timeout=1)
+        session = mock.MagicMock()
+        session.place_plugin.return_value = None
+        session.run_until_fx_shown.return_value = None
+        session.captured_log.return_value = ""
+        with mock.patch.object(rs, "ReaperSession", return_value=session), \
+             mock.patch.object(rs.time, "sleep"), \
+             mock.patch.object(rs, "_floating_editor_bounds", return_value=(1, 2, 640, 480)), \
+             mock.patch.object(rs, "_editor_rect_in", side_effect=[(10, 20, 600, 420),
+                                                                   (11, 20, 600, 420)]) as pixels:
+            self.assertEqual(rs.run_editor_open_mode(pathlib.Path("/reaper"), args),
+                             rs.EXIT_PASS)
+        self.assertEqual(pixels.call_count, 2)
+        self.assertTrue(all(call.args[1] is session.portable
+                            for call in pixels.call_args_list))
+        session.cleanup.assert_called_once_with()
+
+    def test_a_shown_but_unpainted_editor_is_not_a_pass(self):
+        args = argparse.Namespace(plugin_path=__file__, plugin_name="X",
+                                  format="clap", timeout=1)
+        session = mock.MagicMock()
+        session.place_plugin.return_value = None
+        session.run_until_fx_shown.return_value = None
+        with mock.patch.object(rs, "ReaperSession", return_value=session), \
+             mock.patch.object(rs.time, "sleep"), \
+             mock.patch.object(rs, "_floating_editor_bounds", return_value=(1, 2, 640, 480)), \
+             mock.patch.object(rs, "_editor_rect_in", return_value=None):
+            self.assertEqual(rs.run_editor_open_mode(pathlib.Path("/reaper"), args),
+                             rs.EXIT_INCONCLUSIVE)
+
+
+class PerRunBuildLog(unittest.TestCase):
+    def test_selects_only_a_log_created_after_the_build_request(self):
+        with tempfile.TemporaryDirectory() as td:
+            runs = pathlib.Path(td)
+            old = runs / "old.log"
+            old.write_text("old")
+            existing = {old}
+            self.assertIsNone(rs._new_run_log(runs, existing))
+            new = runs / "20260806-120000.log"
+            new.write_text("new")
+            self.assertEqual(rs._new_run_log(runs, existing), new)
+
+
+class AuAlreadyInstalled(unittest.TestCase):
+    """An AU that is already installed is the case worth proving, not a clash.
+
+    The AU leg copies the component into ~/Library/Audio/Plug-Ins/Components
+    and removes it again afterwards, and it refused outright when something
+    was already there -- a guard against deleting somebody's real plugin on
+    teardown. But the component being there IS the normal state: it is how the
+    host finds it, and it is what a signed, notarized, installed AU looks like.
+    So the AU leg could not run on any machine anyone would actually test on,
+    and reported FAIL for a reason that had nothing to do with the plugin.
+
+    Now the same path is used in place and NOT uninstalled; a different path
+    still refuses.
+    """
+
+    def _prep(self, plugin_path):
+        import argparse
+        args = argparse.Namespace(format="au", plugin_path=str(plugin_path),
+                                  mode="editor-open", plugin_name="X")
+        smoke = rs.ReaperSession.__new__(rs.ReaperSession)
+        smoke.args = args
+        smoke.au_installed = None
+        return smoke
+
+    def test_the_installed_component_is_used_in_place(self):
+        with tempfile.TemporaryDirectory() as home:
+            comps = pathlib.Path(home) / "Library/Audio/Plug-Ins/Components"
+            comps.mkdir(parents=True)
+            comp = comps / "Forge Modular.component"
+            comp.mkdir()
+            smoke = self._prep(comp)
+            with mock.patch.dict(os.environ, {"HOME": home}):
+                smoke.portable = pathlib.Path(home) / "portable"
+                smoke.scan_dir = pathlib.Path(home) / "scan"
+                smoke.portable.mkdir(); smoke.scan_dir.mkdir()
+                smoke.args.plugin_path = str(comp)
+                rc = rs.ReaperSession.place_plugin(smoke)
+            self.assertIsNone(rc, "an already-installed AU must not be refused")
+            self.assertIsNone(smoke.au_installed,
+                              "teardown must not uninstall what it did not install")
+            self.assertTrue(comp.exists())
+
+    def test_a_different_component_still_refuses(self):
+        with tempfile.TemporaryDirectory() as home:
+            comps = pathlib.Path(home) / "Library/Audio/Plug-Ins/Components"
+            comps.mkdir(parents=True)
+            (comps / "Forge Modular.component").mkdir()
+            other = pathlib.Path(home) / "build" / "Forge Modular.component"
+            other.mkdir(parents=True)
+            smoke = self._prep(other)
+            with mock.patch.dict(os.environ, {"HOME": home}):
+                smoke.portable = pathlib.Path(home) / "portable"
+                smoke.scan_dir = pathlib.Path(home) / "scan"
+                smoke.portable.mkdir(); smoke.scan_dir.mkdir()
+                smoke.args.plugin_path = str(other)
+                rc = rs.ReaperSession.place_plugin(smoke)
+            self.assertEqual(rc, rs.EXIT_FAIL,
+                             "a DIFFERENT build must still not clobber an install")
+
+
+class EditorBuildMode(unittest.TestCase):
+    """Pressing Build INSIDE the host, which editor-open does not do.
+
+    editor-open proves the window comes up. It cannot prove the product works
+    there: the generator is spawned BY the plugin, and a plugin whose editor
+    draws perfectly can still never reach it -- the standalone did exactly
+    that once, because an app launched from Finder inherits no PATH. Only a
+    press inside the host tests that path.
+    """
+
+    def test_mode_is_offered_and_needs_nothing_extra(self):
+        ap = rs.build_parser()
+        args = ap.parse_args(["--mode", "editor-build",
+                              "--plugin-name", "Forge Modular",
+                              "--plugin-path", __file__])
+        self.assertEqual(args.mode, "editor-build")
+        rs.validate_mode_args(ap, args)   # must not raise or exit
+
+    def test_every_exit_runs_full_cleanup(self):
+        args = argparse.Namespace(plugin_path=__file__, plugin_name="X",
+                                  format="clap", timeout=1)
+        session = mock.MagicMock()
+        session.place_plugin.return_value = rs.EXIT_FAIL
+        with mock.patch.object(rs, "ReaperSession", return_value=session):
+            self.assertEqual(rs.run_editor_build_mode(pathlib.Path("/reaper"), args),
+                             rs.EXIT_FAIL)
+        session.cleanup.assert_called_once_with()
+
+    def test_it_does_not_drive_the_screen_at_all(self):
+        """No clicks, no keystrokes, no screen coordinates.
+
+        The earlier version of this mode pressed the editor's Build button by
+        posting synthetic events at computed coordinates. It typed a prompt
+        into somebody's terminal twice -- once believing "REAPER is frontmost"
+        while its window sat buried, once taking that terminal's dark
+        background for the plugin's editor. Each guard was correct and each
+        was defeated by the next assumption.
+
+        The claim being proven is that the generator runs when the PLUGIN
+        spawns it, inheriting the host's environment. That is just as true
+        asked through a file as asked through a button, and a file cannot
+        land on somebody else's window.
+        """
+        src = open(rs.__file__ if hasattr(rs, "__file__")
+                   else MODULE_PATH).read()
+        body = src[src.index("def run_editor_build_mode"):]
+        body = body[:body.index("\ndef ", 1)]
+        for banned in ("uidriver", "screencapture", "click(", "\"type\"",
+                       "AXRaise"):
+            self.assertNotIn(banned, body,
+                             f"editor-build still reaches for {banned!r} — "
+                             f"it must not drive the screen")
+
+
+class FormatIsAsked(unittest.TestCase):
+    """--format has to decide which plugin REAPER inserts.
+
+    TrackFX_AddByName with a bare name lets REAPER pick whichever format it
+    finds first. A crash report from a `--format clap` run named
+    com.generous.forge.modular.au, so the CLAP leg had been proving the AU --
+    and the three format legs were one leg wearing three hats.
+    """
+
+    def test_each_format_asks_for_that_format(self):
+        import argparse
+        seen = {}
+        for fmt, prefix in (("vst3", "VST3:"), ("clap", "CLAP:"), ("au", "AU:")):
+            args = argparse.Namespace(format=fmt, plugin_name="Forge Modular",
+                                      mode="editor-open", plugin_path=__file__,
+                                      timeout=30)
+            env = rs._common_env(args, pathlib.Path("/tmp/status"))
+            seen[fmt] = env["PULP_DAW_SMOKE_FX"]
+            self.assertTrue(env["PULP_DAW_SMOKE_FX"].startswith(prefix),
+                            f"{fmt} asked for {env['PULP_DAW_SMOKE_FX']!r}")
+        self.assertEqual(len(set(seen.values())), 3,
+                         f"the three formats must ask for three things: {seen}")
+
+
+
+class DoesNotWreckSomebodysReaper(unittest.TestCase):
+    """This harness ships in Pulp. It must be safe on a machine someone uses.
+
+    Two faults did real damage before these existed. It launched REAPER with an
+    EMPTY portable config, so every run came up as a fresh install -- licence
+    prompt, first-run preferences, audio-hardware setup, again and again. And
+    it ran `pkill -x REAPER`, killing the session the person at the keyboard
+    was working in, which read to them as REAPER restarting by itself.
+    """
+
+    def _session(self, home):
+        import argparse
+        s = rs.ReaperSession.__new__(rs.ReaperSession)
+        s.args = argparse.Namespace(format="clap", plugin_path=str(home),
+                                    plugin_name="X", mode="editor-open")
+        s.portable = pathlib.Path(home) / "portable"
+        s.scan_dir = pathlib.Path(home) / "scan"
+        s.portable.mkdir(parents=True)
+        s.scan_dir.mkdir(parents=True)
+        s.au_installed = None
+        return s
+
+    def test_the_users_settings_are_carried_not_discarded(self):
+        with tempfile.TemporaryDirectory() as home:
+            real = pathlib.Path(home) / "Library/Application Support/REAPER"
+            real.mkdir(parents=True)
+            (real / "reaper.ini").write_text(
+                "[REAPER]\naudioconfig=coreaudio\naudio_device=Built-in\n"
+                "vstpath=/somewhere/of/theirs\n[moreprefs]\nfoo=bar\n")
+            (real / "reaper-license.rk").write_text("LICENCE")
+            plugin = pathlib.Path(home) / "Thing.clap"
+            plugin.mkdir()
+            s = self._session(home)
+            s.args.plugin_path = str(plugin)
+            with mock.patch.dict(os.environ, {"HOME": home}):
+                rs.ReaperSession.place_plugin(s)
+            ini = (s.portable / "reaper.ini").read_text()
+
+            # Their audio device and their other preferences survive, so
+            # REAPER does not ask for them again.
+            self.assertIn("audioconfig=coreaudio", ini)
+            self.assertIn("audio_device=Built-in", ini)
+            self.assertIn("foo=bar", ini)
+            # Their licence travels, so it does not prompt for one.
+            self.assertTrue((s.portable / "reaper-license.rk").exists())
+            # Only the scan paths are ours.
+            self.assertIn(str(s.scan_dir), ini)
+            self.assertNotIn("/somewhere/of/theirs", ini)
+            # And their real config is never written to.
+            self.assertEqual((real / "reaper.ini").read_text().count("[REAPER]"), 1)
+            self.assertNotIn(str(s.scan_dir), (real / "reaper.ini").read_text())
+
+    def test_it_still_works_with_no_reaper_config_at_all(self):
+        with tempfile.TemporaryDirectory() as home:
+            plugin = pathlib.Path(home) / "Thing.clap"
+            plugin.mkdir()
+            s = self._session(home)
+            s.args.plugin_path = str(plugin)
+            with mock.patch.dict(os.environ, {"HOME": home}):
+                rs.ReaperSession.place_plugin(s)
+            ini = (s.portable / "reaper.ini").read_text()
+            self.assertIn("[REAPER]", ini)
+            self.assertIn(str(s.scan_dir), ini)
+
+    def test_it_does_not_kill_a_reaper_it_did_not_start(self):
+        with mock.patch.object(rs.subprocess, "run") as run:
+            rs.kill_reaper()
+        for call in run.call_args_list:
+            self.assertNotIn("pkill", call.args[0],
+                             "killed every REAPER, including somebody's session")
+
+    def test_it_stops_and_reaps_the_exact_child_it_started(self):
+        proc = mock.Mock()
+        proc.poll.return_value = None
+        proc.wait.side_effect = [rs.subprocess.TimeoutExpired("REAPER", 2), 0]
+
+        rs.stop_reaper_process(proc)
+
+        proc.terminate.assert_called_once_with()
+        proc.kill.assert_called_once_with()
+        self.assertEqual(proc.wait.call_count, 2)
+
+    def test_it_never_signals_an_already_reaped_child(self):
+        proc = mock.Mock()
+        proc.poll.return_value = 0
+
+        rs.stop_reaper_process(proc)
+
+        proc.terminate.assert_not_called()
+        proc.kill.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_seeded_config_never_reopens_the_users_project(tmp_path, monkeypatch):
+    """The smoke must not open somebody's session, or list their filenames.
+
+    Seeding the portable config from the real reaper.ini is deliberate — it is
+    what carries the licence and the chosen audio device, so a run does not
+    put a first-run wizard on screen. But it also carried `lastproject`, so an
+    "isolated" REAPER opened the user's actual project; that project referenced
+    a plugin the smoke had not installed, REAPER came up on a modal Project
+    Load Warning, the scripted insert never ran, and the smoke reported
+    INCONCLUSIVE while naming neither the dialog nor the project.
+    """
+    real = tmp_path / "REAPER"
+    real.mkdir()
+    (real / "reaper.ini").write_text(
+        "[REAPER]\n"
+        "lastproject=/Users/someone/Desktop/Private Session.RPP\n"
+        "loadlastproj=1\n"
+        "audiodevice=CoreAudio\n"
+        "[Recent]\n"
+        "recent01=/Users/someone/Desktop/Another Private.RPP\n"
+        "recent02=/Users/someone/Music/Unreleased.RPP\n"
+        "[MoreStuff]\n"
+        "keepme=1\n")
+    monkeypatch.setattr(os.path, "expanduser", lambda p: p.replace(
+        "~/Library/Application Support/REAPER", str(real)).replace(
+        "~", str(tmp_path)))
+
+    plugin = tmp_path / "Thing.vst3"
+    plugin.mkdir()
+    args = argparse.Namespace(plugin_path=str(plugin), format="vst3")
+    session = rs.ReaperSession.__new__(rs.ReaperSession)
+    session.args = args
+    session.portable = tmp_path / "portable"
+    session.portable.mkdir()
+    session.scan_dir = tmp_path / "scan"
+    session.scan_dir.mkdir()
+    session.au_installed = None
+    assert session.place_plugin() is None
+
+    ini = (session.portable / "reaper.ini").read_text()
+    # The two that matter.
+    assert "Private Session.RPP" not in ini, "it would reopen the user's project"
+    assert "Unreleased.RPP" not in ini, "it copied the user's recent-project list"
+    assert "loadlastproj=0" in ini
+    # And the settings that are the whole reason for seeding must survive, or
+    # the fix trades a modal project warning for a first-run wizard.
+    assert "audiodevice=CoreAudio" in ini
+    assert "keepme=1" in ini
+    assert str(session.scan_dir) in ini

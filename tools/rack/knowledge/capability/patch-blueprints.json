@@ -1,0 +1,90 @@
+{
+  "schema": 1,
+  "lessons": [
+    {
+      "id": "layered-continuous-tone",
+      "status": "candidate",
+      "intent": ["continuous", "layered", "slow beating"],
+      "traits": ["voice", "texture"],
+      "why": "Nearby periodic tones repeatedly move into and out of phase, creating an audible amplitude envelope without a separate modulator.",
+      "behavior": ["sustained"],
+      "nodes": [
+        {"id": "tone_a", "role": "audio_oscillator"},
+        {"id": "tone_b", "role": "audio_oscillator"},
+        {"id": "sum", "role": "mixer"},
+        {"id": "sink", "role": "output"}
+      ],
+      "relations": [
+        {"id": "tone-a-to-sum", "from": "tone_a", "out": "audio_out", "to": "sum", "in": "audio_in"},
+        {"id": "tone-b-to-sum", "from": "tone_b", "out": "audio_out", "to": "sum", "in": "audio_in"},
+        {"id": "sum-to-sink", "from": "sum", "out": "audio_out", "to": "sink", "in": "audio_in"}
+      ],
+      "controls": [],
+      "assertions": [
+        {"id": "tone-a-is-heard", "kind": "relation_present", "relation": "tone-a-to-sum"},
+        {"id": "tone-b-is-heard", "kind": "relation_present", "relation": "tone-b-to-sum"},
+        {"id": "sum-is-heard", "kind": "relation_present", "relation": "sum-to-sink"},
+        {"id": "continuous-energy", "kind": "metric", "field": "dynamics.duty_cycle", "op": ">=", "value": 0.8},
+        {"id": "beating-is-present", "kind": "probe", "probe": "amplitude-beat-rate", "contract": "A non-zero stable envelope periodicity must remain after either tone is rendered alone as a negative control."}
+      ],
+      "mutations": [
+        {"id": "remove-second-tone", "operation": "remove_relation", "relation": "tone-b-to-sum", "must_fail": ["tone-b-is-heard"]},
+        {"id": "disconnect-output", "operation": "remove_relation", "relation": "sum-to-sink", "must_fail": ["sum-is-heard"]}
+      ],
+      "independent_holdout": false
+    },
+    {
+      "id": "accented-sliding-sequence",
+      "status": "admitted",
+      "intent": ["repeating bass phrase", "selected accents", "selected slides"],
+      "traits": ["voice", "articulation", "sequence"],
+      "why": "Independent step lanes keep pitch, selective transition glide, and selective brightness emphasis synchronized while preserving different values for each job.",
+      "behavior": ["melodic", "rhythmic", "spectrally_varying"],
+      "nodes": [
+        {"id": "pattern", "role": "sequencer"},
+        {"id": "glide", "role": "slew"},
+        {"id": "tone", "role": "audio_oscillator"},
+        {"id": "colour", "role": "filter"},
+        {"id": "shape", "role": "envelope"},
+        {"id": "accent_sum", "role": "mixer"},
+        {"id": "level", "role": "amplifier"},
+        {"id": "sink", "role": "output"}
+      ],
+      "relations": [
+        {"id": "pitch-to-glide", "from": "pattern", "out": "cv_out", "to": "glide", "in": "cv_in"},
+        {"id": "slide-select", "from": "pattern", "out": "cv_out", "to": "glide", "in": "gate_in"},
+        {"id": "glide-to-pitch", "from": "glide", "out": "cv_out", "to": "tone", "in": "pitch_in"},
+        {"id": "tone-to-colour", "from": "tone", "out": "audio_out", "to": "colour", "in": "audio_in"},
+        {"id": "accent-to-sum", "from": "pattern", "out": "cv_out", "to": "accent_sum", "in": "cv_in"},
+        {"id": "gate-to-shape", "from": "pattern", "out": "gate_out", "to": "shape", "in": "gate_in"},
+        {"id": "shape-to-accent-sum", "from": "shape", "out": "cv_out", "to": "accent_sum", "in": "cv_in"},
+        {"id": "accent-sum-to-colour", "from": "accent_sum", "out": "any_out", "to": "colour", "in": "cv_in"},
+        {"id": "shape-to-level", "from": "shape", "out": "cv_out", "to": "level", "in": "cv_in"},
+        {"id": "colour-to-level", "from": "colour", "out": "audio_out", "to": "level", "in": "audio_in"},
+        {"id": "level-to-sink", "from": "level", "out": "audio_out", "to": "sink", "in": "audio_in"}
+      ],
+      "controls": [
+        {"id": "low-base-colour", "node": "colour", "affordance": "timbre", "target": {"value": 400.0, "unit": "Hz"}, "required": true},
+        {"id": "short-glide", "node": "glide", "affordance": "time", "target": {"value": 50.0, "unit": "ms"}, "required": true}
+      ],
+      "assertions": [
+        {"id": "pitch-is-glided", "kind": "relation_present", "relation": "pitch-to-glide"},
+        {"id": "slide-is-selected", "kind": "relation_present", "relation": "slide-select"},
+        {"id": "accent-reaches-sum", "kind": "relation_present", "relation": "accent-to-sum"},
+        {"id": "accent-sum-reaches-colour", "kind": "relation_present", "relation": "accent-sum-to-colour"},
+        {"id": "audible-tail", "kind": "relation_present", "relation": "level-to-sink"},
+        {"id": "independent-expression-lanes", "kind": "distinct_source_ports", "relations": ["pitch-to-glide", "slide-select", "accent-to-sum"]},
+        {"id": "written-phrase", "kind": "metric", "field": "pitch.distinct_pitches", "op": ">=", "value": 3},
+        {"id": "selected-transitions-glide", "kind": "probe", "probe": "step-synchronous-pitch", "contract": "Pitch transitions selected by the slide lane must take measurably longer than matched unselected transitions."},
+        {"id": "selected-notes-brighten", "kind": "probe", "probe": "step-synchronous-spectrum", "contract": "Matched same-pitch accented notes must have a larger transient or spectral-centroid value than unaccented notes."}
+      ],
+      "mutations": [
+        {"id": "bypass-glide", "operation": "remove_relation", "relation": "pitch-to-glide", "must_fail": ["pitch-is-glided"]},
+        {"id": "remove-accent", "operation": "remove_relation", "relation": "accent-to-sum", "must_fail": ["accent-reaches-sum"]},
+        {"id": "copy-one-lane-everywhere", "operation": "collapse_source_ports", "relations": ["pitch-to-glide", "slide-select", "accent-to-sum"], "must_fail": ["independent-expression-lanes"]},
+        {"id": "disconnect-output", "operation": "remove_relation", "relation": "level-to-sink", "must_fail": ["audible-tail"]}
+      ],
+      "independent_holdout": true
+    }
+  ]
+}

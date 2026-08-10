@@ -682,7 +682,7 @@ EXPORTS = [
         tail="measurement history until reset", scheduling="block accumulation and snapshot",
         bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/multi_channel_meter.hpp",
                          qualified_name="pulp::signal::MultiChannelMeterT<float>", target="Pulp::signal",
-                         header_fingerprint="sha256:a9437e126faff12dfc60d80e59381fe0f5f005b3638d445d06daf4b8cb2fd695")],
+                         header_fingerprint="sha256:cfe3d3d562c903e1c7c64f404a264e7445aed4d6f14ab4fa3544b5ccd8346aee")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::MultiChannelMeterT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),

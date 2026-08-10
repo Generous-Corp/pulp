@@ -91,6 +91,14 @@ request pointing into a detached tree, so a panel would render and stop
 responding. The response describes the live realm at the evaluation safe point,
 and that realm stays the caller's until it returns to its run loop.
 
+Realm reconstruction replaces every script-owned `View` and its callback
+chain. A host that adds native observers to those views must install
+`ScriptedUiSession::set_post_evaluation_reset_callback()` and resolve the new
+views by stable widget id there. The callback runs after the replacement bridge
+is live and before its first frame pump. It must use metadata retained from the
+original inspection; evaluating the registry again from that callback would
+owe another reset and create a reset/rebind loop.
+
 Realm reconstruction gets a fixed 500 ms cleanup grace, measured from the frame
 boundary that runs it; the enclosing main-thread RPC still bounds the evaluation
 at three seconds. Because the rebuild is deferred, a reset failure is reported by

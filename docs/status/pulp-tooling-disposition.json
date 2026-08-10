@@ -4356,6 +4356,14 @@
         "disposition": "excluded"
       },
       {
+        "name": "forge-app-delivery",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "forge-modular",
+        "disposition": "pulp-owned"
+      },
+      {
         "name": "friction-report",
         "disposition": "pulp-owned"
       },
@@ -4426,6 +4434,10 @@
       {
         "name": "prototype-loop",
         "disposition": "pulp-owned"
+      },
+      {
+        "name": "prove-before-showing",
+        "disposition": "candidate-shared-later"
       },
       {
         "name": "pulp-web-demo",

@@ -579,6 +579,22 @@ harness or `ctest`.
   `engine [--input <wav>] --character <c>` (validate the REAL stretch engine, reference-free
   on a dry input), `engine-baseline` (regression gate: did an engine change make it worse?),
   `corpus list|add` (versioned, license-guarded corpus).
+- **Synth-guidance experiment:** `tools/rack/fidelity.py patch.vcv --wav render.wav`
+  writes only the speaker-bound audio taps, using one shared peak-normalization gain while
+  refusing a silent source and content-binding original Rack voltage levels in the adjacent
+  `.fidelity.json` sidecar. Run `quality-lab analyze`
+  for one-render features, then `quality-lab catalogue-ab off.wav on.wav --expectations
+  cited.json --experiment experiment.json --holdout-without off-2.wav --holdout-with
+  on-2.wav`. The content-bound experiment manifest records prompt, inventory digest, model,
+  a fixed analysis channel, audibility-gate configuration, matched attempt/seed, distinct
+  generation identity, guidance state, pair identity, exact WAV digests, source RMS, and
+  each Fidelity-sidecar digest. Every expectation must
+  name exactly one target/min/max plus a positive tolerance and cite `source.path` with a
+  page or locator. The A/B turns those physical expectations into normalized errors and
+  reuses `goodhart_guard`: a working-pair win is not the headline result until an
+  independent holdout pair agrees, and any regression on another named metric or a source
+  level drop over 3 dB refuses the candidate. This proves a bounded guidance tranche before admitting a larger corpus; it
+  does not make reference-free features universal definitions of quality.
 - **`corpus.seed()`** ships FIVE synthetic families, not just the two stretch-oriented ones:
   `synthetic_drumbreak` / `synthetic_tonalpad` (time-stretch / tonal) plus three oscillator
   families (`family: "oscillator"`, `material_class: "synth"`) built from `osc_fixtures.py`'s

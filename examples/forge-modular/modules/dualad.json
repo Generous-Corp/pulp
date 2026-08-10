@@ -1,0 +1,235 @@
+{
+  "modules": [
+    {
+      "slug": "DUALAD",
+      "name": "DUAL AD",
+      "description": "Dual attack/decay envelope generator with variable curve, 1V/oct time CV, free-running loop mode and end-of-cycle triggers.",
+      "tags": [
+        "Envelope generator",
+        "Function generator",
+        "Dual"
+      ],
+      "hp": 10,
+      "params": [
+        {
+          "id": 0,
+          "ident": "A_ATK_PARAM",
+          "name": "Channel A attack time",
+          "label": "A ATK",
+          "unit": " s",
+          "min_value": -10.0,
+          "max_value": 1.0,
+          "default_value": -6.0,
+          "kind": "Knob",
+          "x_mm": 12.9,
+          "y_mm": 30.0,
+          "display_base": 2.0,
+          "display_multiplier": 1.0
+        },
+        {
+          "id": 1,
+          "ident": "A_DEC_PARAM",
+          "name": "Channel A decay time",
+          "label": "A DEC",
+          "unit": " s",
+          "min_value": -9.0,
+          "max_value": 3.0,
+          "default_value": -3.0,
+          "kind": "Knob",
+          "x_mm": 12.9,
+          "y_mm": 50.0,
+          "display_base": 2.0,
+          "display_multiplier": 1.0
+        },
+        {
+          "id": 2,
+          "ident": "A_CURVE_PARAM",
+          "name": "Channel A curve",
+          "label": "A CRV",
+          "unit": "",
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "default_value": 0.5,
+          "kind": "KnobSmall",
+          "x_mm": 12.9,
+          "y_mm": 68.0
+        },
+        {
+          "id": 3,
+          "ident": "A_LOOP_PARAM",
+          "name": "Channel A loop",
+          "label": "A LOOP",
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "default_value": 0.0,
+          "kind": "Toggle",
+          "x_mm": 12.9,
+          "y_mm": 83.0,
+          "labels": [
+            "One-shot",
+            "Loop"
+          ]
+        },
+        {
+          "id": 4,
+          "ident": "B_ATK_PARAM",
+          "name": "Channel B attack time",
+          "label": "B ATK",
+          "unit": " s",
+          "min_value": -10.0,
+          "max_value": 1.0,
+          "default_value": -6.0,
+          "kind": "Knob",
+          "x_mm": 37.9,
+          "y_mm": 30.0,
+          "display_base": 2.0,
+          "display_multiplier": 1.0
+        },
+        {
+          "id": 5,
+          "ident": "B_DEC_PARAM",
+          "name": "Channel B decay time",
+          "label": "B DEC",
+          "unit": " s",
+          "min_value": -9.0,
+          "max_value": 3.0,
+          "default_value": -1.0,
+          "kind": "Knob",
+          "x_mm": 37.9,
+          "y_mm": 50.0,
+          "display_base": 2.0,
+          "display_multiplier": 1.0
+        },
+        {
+          "id": 6,
+          "ident": "B_CURVE_PARAM",
+          "name": "Channel B curve",
+          "label": "B CRV",
+          "unit": "",
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "default_value": 0.5,
+          "kind": "KnobSmall",
+          "x_mm": 37.9,
+          "y_mm": 68.0
+        },
+        {
+          "id": 7,
+          "ident": "B_LOOP_PARAM",
+          "name": "Channel B loop",
+          "label": "B LOOP",
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "default_value": 0.0,
+          "kind": "Toggle",
+          "x_mm": 37.9,
+          "y_mm": 83.0,
+          "labels": [
+            "One-shot",
+            "Loop"
+          ]
+        }
+      ],
+      "inputs": [
+        {
+          "id": 0,
+          "ident": "A_TRIG_INPUT",
+          "name": "Channel A trigger",
+          "label": "TRIG",
+          "role": "Trigger",
+          "x_mm": 6.9,
+          "y_mm": 102.0
+        },
+        {
+          "id": 1,
+          "ident": "A_TIME_CV_INPUT",
+          "name": "Channel A time CV (1V/oct)",
+          "label": "TIME",
+          "role": "Cv",
+          "x_mm": 18.9,
+          "y_mm": 102.0
+        },
+        {
+          "id": 2,
+          "ident": "B_TRIG_INPUT",
+          "name": "Channel B trigger",
+          "label": "TRIG",
+          "role": "Trigger",
+          "x_mm": 31.9,
+          "y_mm": 102.0,
+          "normal_to": "A_TRIG_INPUT"
+        },
+        {
+          "id": 3,
+          "ident": "B_TIME_CV_INPUT",
+          "name": "Channel B time CV (1V/oct)",
+          "label": "TIME",
+          "role": "Cv",
+          "x_mm": 43.9,
+          "y_mm": 102.0,
+          "normal_to": "A_TIME_CV_INPUT"
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "A_EOC_OUTPUT",
+          "name": "Channel A end of cycle",
+          "label": "EOC",
+          "role": "Trigger",
+          "x_mm": 6.9,
+          "y_mm": 116.0
+        },
+        {
+          "id": 1,
+          "ident": "A_ENV_OUTPUT",
+          "name": "Channel A envelope",
+          "label": "ENV",
+          "role": "Cv",
+          "x_mm": 18.9,
+          "y_mm": 116.0
+        },
+        {
+          "id": 2,
+          "ident": "B_EOC_OUTPUT",
+          "name": "Channel B end of cycle",
+          "label": "EOC",
+          "role": "Trigger",
+          "x_mm": 31.9,
+          "y_mm": 116.0
+        },
+        {
+          "id": 3,
+          "ident": "B_ENV_OUTPUT",
+          "name": "Channel B envelope",
+          "label": "ENV",
+          "role": "Cv",
+          "x_mm": 43.9,
+          "y_mm": 116.0
+        }
+      ],
+      "lights": [
+        {
+          "id": 0,
+          "ident": "A_LIGHT",
+          "name": "Channel A level",
+          "label": "",
+          "x_mm": 12.9,
+          "y_mm": 91.0,
+          "color": "green",
+          "size": "small"
+        },
+        {
+          "id": 1,
+          "ident": "B_LIGHT",
+          "name": "Channel B level",
+          "label": "",
+          "x_mm": 37.9,
+          "y_mm": 91.0,
+          "color": "green",
+          "size": "small"
+        }
+      ]
+    }
+  ]
+}

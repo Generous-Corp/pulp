@@ -13,9 +13,11 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <memory>
+#include <vector>
 
 using namespace pulp::view;
 
@@ -30,6 +32,23 @@ TEST_CASE("a static tree needs no continuous frames", "[view][continuous-frames]
     root.add_child(std::move(child));
 
     REQUIRE_FALSE(needs_continuous_frames(&root));
+}
+
+TEST_CASE("continuous-frame widget tags match their concrete types",
+          "[view][continuous-frames]") {
+    View generic;
+    Knob knob;
+    Fader fader;
+    Toggle toggle;
+    ScrollView scroll;
+    EqCurveView eq;
+
+    CHECK(generic.runtime_view_kind() == RuntimeViewKind::generic);
+    CHECK(knob.runtime_view_kind() == RuntimeViewKind::knob);
+    CHECK(fader.runtime_view_kind() == RuntimeViewKind::fader);
+    CHECK(toggle.runtime_view_kind() == RuntimeViewKind::toggle);
+    CHECK(scroll.runtime_view_kind() == RuntimeViewKind::scroll);
+    CHECK(eq.runtime_view_kind() == RuntimeViewKind::eq_curve);
 }
 
 TEST_CASE("an opted-in continuous-repaint view is detected", "[view][continuous-frames]") {
@@ -96,6 +115,115 @@ TEST_CASE("the predicate walks descendants", "[view][continuous-frames]") {
     REQUIRE_FALSE(needs_continuous_frames(&root));
 }
 
+// EVERY BRANCH THAT KEEPS THE LOOP ALIVE NEEDS A POSITIVE TEST.
+//
+// The idle-side coverage below ("idle widgets do not force frames") is
+// satisfied by a predicate that returns false unconditionally — so on its own it
+// would let a widget whose animation stopped pinning the loop sail through the
+// whole suite, and the symptom is a knob whose glow freezes mid-fade rather than
+// anything that fails a build. These drive each widget's own animation and
+// assert the live window between "started" and "settled" through the shared
+// tree walk.
+//
+// One host tick at 60 Hz is 16.7 ms into an 80-150 ms ease: far enough in to be
+// unambiguously moving, far short of arriving.
+//
+// Each predicate carries a DEADBAND, and the settled assertions below are
+// written against it rather than against the animation's arithmetic end: a
+// fader stops asking once its thumb is within 0.01 of rest, a toggle once its
+// thumb is past 0.99. So the last sub-1% of travel is never painted unless
+// something else is keeping the loop alive. That is the intended trade -- an
+// invisible sliver is not worth a frame.
+namespace {
+constexpr float kTick = 1.0f / 60.0f;
+
+// Run the animation to completion the way a host does, with a bound so a
+// predicate that never settles fails as a hang-free assertion instead.
+void settle(View& v) {
+    for (int i = 0; i < 600 && needs_continuous_frames(&v); ++i)
+        v.advance_animations(kTick);
+}
+}  // namespace
+
+TEST_CASE("a knob mid hover-glow keeps the tree live", "[view][continuous-frames]") {
+    View root;
+    auto owned = std::make_unique<Knob>();
+    Knob* knob = owned.get();
+    knob->set_bounds({0, 0, 60, 60});
+    root.add_child(std::move(owned));
+    REQUIRE_FALSE(needs_continuous_frames(&root));
+
+    knob->on_mouse_enter();          // glow eases 0 -> 1
+    knob->advance_animations(kTick); // mid-ease
+    CHECK(knob->hover_glow() > 0.01f);
+    CHECK(knob->hover_glow() < 0.99f);
+    CHECK(needs_continuous_frames(&root));
+
+    settle(*knob);
+    CHECK(knob->hover_glow() == Catch::Approx(1.0f));
+    CHECK_FALSE(needs_continuous_frames(&root));
+}
+
+TEST_CASE("a fader mid hover-scale keeps the tree live", "[view][continuous-frames]") {
+    View root;
+    auto owned = std::make_unique<Fader>();
+    Fader* fader = owned.get();
+    fader->set_bounds({0, 0, 40, 160});
+    root.add_child(std::move(owned));
+    REQUIRE_FALSE(needs_continuous_frames(&root));
+
+    fader->on_mouse_enter();          // thumb grows 1.0 -> 1.3
+    fader->advance_animations(kTick);
+    CHECK(fader->hover_scale() > 1.01f);
+    CHECK(needs_continuous_frames(&root));
+
+    // Leaving shrinks it back; once it reaches 1.0 the fader is idle again.
+    fader->on_mouse_leave();
+    settle(*fader);
+    CHECK(fader->hover_scale() <= 1.01f);   // inside the deadband, i.e. at rest
+    CHECK_FALSE(needs_continuous_frames(&root));
+}
+
+TEST_CASE("a toggle mid thumb-travel keeps the tree live", "[view][continuous-frames]") {
+    View root;
+    auto owned = std::make_unique<Toggle>();
+    Toggle* toggle = owned.get();
+    toggle->set_bounds({0, 0, 48, 24});
+    root.add_child(std::move(owned));
+    REQUIRE_FALSE(needs_continuous_frames(&root));
+
+    toggle->set_on(true, /*animate=*/true);  // thumb travels 0 -> 1
+    toggle->advance_animations(kTick);
+    CHECK(toggle->thumb_position() > 0.01f);
+    CHECK(toggle->thumb_position() < 0.99f);
+    CHECK(needs_continuous_frames(&root));
+
+    settle(*toggle);
+    CHECK(toggle->thumb_position() >= 0.99f);  // inside the deadband, i.e. arrived
+    CHECK_FALSE(needs_continuous_frames(&root));
+}
+
+TEST_CASE("a scroll view mid offset-ease keeps the tree live",
+          "[view][continuous-frames]") {
+    View root;
+    auto owned = std::make_unique<ScrollView>();
+    ScrollView* scroll = owned.get();
+    scroll->set_bounds({0, 0, 200, 100});
+    scroll->set_content_size({200, 800});   // taller than the view, so it can scroll
+    root.add_child(std::move(owned));
+    REQUIRE_FALSE(needs_continuous_frames(&root));
+
+    // Programmatic scroll eases (wheel input passes animate=false and jumps,
+    // which is why this asks for the animated path explicitly).
+    scroll->scroll_by(0.0f, 120.0f, /*animate=*/true);
+    CHECK(scroll->scroll_animating());
+    CHECK(needs_continuous_frames(&root));
+
+    settle(*scroll);
+    CHECK(scroll->scroll_y() == Catch::Approx(120.0f));
+    CHECK_FALSE(needs_continuous_frames(&root));
+}
+
 TEST_CASE("idle widgets do not force frames", "[view][continuous-frames]") {
     View root;
     root.add_child(std::make_unique<Knob>());
@@ -109,8 +237,7 @@ TEST_CASE("idle widgets do not force frames", "[view][continuous-frames]") {
 }
 
 // A shader that declares a `time` uniform animates every frame, so the widget's
-// subtree needs continuous frames. Any CustomShaderHost is covered by the single
-// dynamic_cast in needs_continuous_frames().
+// subtree needs continuous frames.
 namespace {
 // Valid SkSL that really declares `time`. The fixture used to be
 // `half4 main() { return half4(time); }`, which declares no uniform and does not
@@ -121,6 +248,9 @@ constexpr const char* kTimeShader =
     "uniform float time; half4 main(float2 p) { return half4(time); }";
 constexpr const char* kStaticShader =
     "half4 main(float2 p) { return half4(1); }";
+
+class UntaggedShaderView : public View, public CustomShaderHost {};
+class TaggedShaderScrollView : public ScrollView, public CustomShaderHost {};
 } // namespace
 
 TEST_CASE("a time-driven widget shader keeps the tree live", "[view][continuous-frames]") {
@@ -143,6 +273,21 @@ TEST_CASE("a time-driven widget shader keeps the tree live", "[view][continuous-
         auto toggle = std::make_unique<Toggle>();
         toggle->set_custom_shader(kTimeShader);
         root.add_child(std::move(toggle));
+        REQUIRE(needs_continuous_frames(&root));
+    }
+    SECTION("future untagged shader host") {
+        View root;
+        auto future = std::make_unique<UntaggedShaderView>();
+        future->set_custom_shader(kTimeShader);
+        root.add_child(std::move(future));
+        REQUIRE(needs_continuous_frames(&root));
+    }
+    SECTION("future shader host inheriting a non-shader tag") {
+        View root;
+        auto future = std::make_unique<TaggedShaderScrollView>();
+        REQUIRE(future->runtime_view_kind() == RuntimeViewKind::scroll);
+        future->set_custom_shader(kTimeShader);
+        root.add_child(std::move(future));
         REQUIRE(needs_continuous_frames(&root));
     }
 }

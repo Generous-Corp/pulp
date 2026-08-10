@@ -108,6 +108,16 @@ class WorkflowBuildDirTests(unittest.TestCase):
             text,
         )
 
+    def test_build_workflow_shipyard_dispatch_fetches_capability_base(self) -> None:
+        text = BUILD_WORKFLOW.read_text(encoding="utf-8")
+
+        fetch_step = """- name: Fetch protected capability base
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main"""
+        self.assertIn(fetch_step, text)
+        self.assertLess(text.index(fetch_step), text.index("- name: Test (non-Windows)"))
+
     def test_sanitizer_jobs_use_distinct_build_dirs(self) -> None:
         text = SANITIZERS_WORKFLOW.read_text(encoding="utf-8")
 

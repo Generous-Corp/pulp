@@ -1,0 +1,33 @@
+  audio out: Mac Studio Speakers
+  builds, but makes no sound (attempt 1):
+    warn  VCA out 0 is silent (mean 0.000000 V)
+    warn  VCA out 0 is silent (mean 0.000000 V)
+    FAIL  every cable into the audio interface is silent — this patch makes no sound
+    PATCH GATE FAILED: 1 failure(s), 2 warning(s)
+  audio out: Mac Studio Speakers
+  idiom holds: krell
+  built 8 modules, 13 cables → /Users/danielraffel/Library/Application Support/Forge Modular/examples/forge-modular/patches/a-krell-patch-where-each-note-chooses-th-7.vcv
+
+AUDIO
+  SH N → SH IN
+      the S&H samples its own noise, so every note draws a fresh voltage
+  VCO SAW → VCF IN
+  VCF LP → VCA IN
+  VCA OUT → Audio 2 To "device output 1"
+  VCA OUT → Audio 2 To "device output 2"
+
+PITCH & GATE
+  DUAL AD EOC → SH CLK
+      each note's end-of-cycle clocks the next random value — the note chooses its successor
+  DUAL AD EOC → DUAL AD TRIG
+      end-of-cycle retriggers the envelope: the loop that makes the patch play itself
+  DUAL ATT B OUT → VCO V/OCT
+
+MODULATION
+  SH OUT → DUAL ATT A IN
+  DUAL ATT A OUT → DUAL AD TIME
+      random voltage offset into the B channel's time input sets how long this note lasts
+  DUAL AD ENV → MULT IN
+      the envelope is both the loudness shape and the filter sweep, so short notes stay dark
+  MULT 1 → VCA CV
+  MULT 2 → VCF CV

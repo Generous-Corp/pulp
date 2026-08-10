@@ -140,6 +140,11 @@ as the Tier-2 nightly's native-silicon signal. See `docs/guides/intel-support.md
 
 ## Editing checklist
 
+When a new packaging contract intentionally names thin architecture artifacts,
+allowlist both the architecture-selection predicate and any literal fixture
+slug. Keep the entries narrow and explain why each apparent arm64 assumption is
+portable; never blanket-exempt the containing Rack or packaging file.
+
 When you change the lint, the allowlist, or an Intel workflow:
 
 1. `python3 tools/scripts/test_intel_canary_lint.py` — self-test must pass.

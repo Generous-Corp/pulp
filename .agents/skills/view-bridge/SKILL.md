@@ -913,6 +913,18 @@ N renders → N firings per event. Always gate the registration with a
 per-id set (e.g. `pointer_registered_`, `wheel_registered_`) and
 early-return on duplicates.
 
+Wheel delivery has two distinct JS channels and must preserve both without
+double-dispatching either one. The deepest registered native view is the sole
+`__dispatch__` origin; its Element event bubbles `addEventListener('wheel', …)`
+through the synthetic DOM. Registered ancestors above that origin still need
+their low-level `on(id, 'wheel', fn)` callback, so native routing invokes
+`__dispatchCallbackOnly__` for those ancestors. Never call full `__dispatch__`
+again on an ancestor: that would re-enter Element bubbling and fire DOM
+listeners twice. A native `wants_wheel_scroll()` view is the inclusive upper
+boundary for both searches; a registration on that scroller receives the tick,
+matching an `overflow:auto` DOM element, while registrations above it do not
+receive a tick the scroller consumes.
+
 ### macOS host-side bubbling
 
 `core/view/platform/mac/window_host_mac.mm` is the dispatch source for
@@ -1891,6 +1903,23 @@ re-emits `on_element_changed`, so it cannot echo back into the surface. That is
 what makes it safe to pull unconditionally on a tick even though routing is
 auto-enabled for every bound imported design — do not "optimize" it into a
 re-emit.
+
+**The walk is not free once the view tree is an application shell.** The walk is
+deliberately over the LIVE tree — a cached `DesignFrameView*` list would dangle
+whenever a view is removed (an editor reload transplants children), and a dangling
+pointer here is a use-after-free inside a DAW's UI tick. But the original comment
+justified doing that identification with a `dynamic_cast` per node on the grounds
+that "a design tree is tens of views, not thousands." A plugin editor is; an
+application shell built on the same view tree is not. Sampled on an *idle* Forge
+Modular window, the `dynamic_cast` RTTI lookup alone — `libc++abi`'s
+`__dynamic_cast`, one question per node per frame — was **7% of the process**.
+
+Keep the live walk; drop the RTTI. `View::is_design_frame()` is set by
+`DesignFrameView`'s own constructor, so the `static_cast` that follows is asking a
+type that has already answered. If you add another "is it this kind of view?" test
+to a per-frame walk, add a flag the constructor sets rather than a `dynamic_cast` —
+and note that this cost is invisible in a plugin editor and only shows up when the
+same tree carries an app.
 
 **Testing that property: assert zero writes, not "it converges."** A
 settle/no-drift check over repeated pulls looks like the natural convergence

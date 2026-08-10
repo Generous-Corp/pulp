@@ -235,12 +235,13 @@ TEST_CASE("Spectr regression: registerPointer / registerWheel are idempotent acr
     MouseEvent w1{};
     w1.is_wheel = true;
     w1.scroll_delta_y = 2.5f;
-    wrap->on_mouse_event(w1);
+    REQUIRE(wrap->on_dom_wheel_event);
+    wrap->on_dom_wheel_event(w1, true);
 
     MouseEvent w2{};
     w2.is_wheel = true;
     w2.scroll_delta_y = -1.5f;
-    wrap->on_mouse_event(w2);
+    wrap->on_dom_wheel_event(w2, true);
 
     // The pointerdown handler fired 3 times — once per mouse event,
     // NOT 3*N where N is the registrar-call count. The wheel handler

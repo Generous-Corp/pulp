@@ -1,0 +1,64 @@
+{
+  "modules": [
+    {
+      "slug": "VCA",
+      "name": "VCA",
+      "description": "Voltage-controlled amplifier",
+      "tags": [
+        "Voltage-controlled amplifier",
+        "Polyphonic"
+      ],
+      "hp": 3,
+      "params": [
+        {
+          "id": 0,
+          "ident": "LEVEL_PARAM",
+          "name": "Level",
+          "label": "LVL",
+          "unit": "%",
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "default_value": 0.5,
+          "kind": "KnobSmall",
+          "x_mm": 7.62,
+          "y_mm": 28,
+          "display_base": 0.0,
+          "display_multiplier": 100.0
+        }
+      ],
+      "inputs": [
+        {
+          "id": 0,
+          "ident": "CV_INPUT",
+          "name": "Level CV",
+          "label": "CV",
+          "role": "Cv",
+          "x_mm": 7.62,
+          "y_mm": 55
+        },
+        {
+          "id": 1,
+          "ident": "IN_INPUT",
+          "name": "Audio",
+          "label": "IN",
+          "role": "Audio",
+          "x_mm": 7.62,
+          "y_mm": 80
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "OUT_OUTPUT",
+          "name": "Audio",
+          "label": "OUT",
+          "role": "Audio",
+          "x_mm": 7.62,
+          "y_mm": 108
+        }
+      ],
+      "lights": [],
+      "poly_follows": "IN_INPUT"
+    }
+  ]
+}

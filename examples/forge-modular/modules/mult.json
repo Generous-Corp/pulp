@@ -1,0 +1,56 @@
+{
+  "modules": [
+    {
+      "slug": "MULT",
+      "name": "MULT",
+      "description": "Passive 1-to-3 signal splitter",
+      "tags": [
+        "Multiple",
+        "Utility"
+      ],
+      "hp": 3,
+      "params": [],
+      "inputs": [
+        {
+          "id": 0,
+          "ident": "IN_INPUT",
+          "name": "Signal",
+          "label": "IN",
+          "role": "Cv",
+          "x_mm": 7.62,
+          "y_mm": 34
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "OUT1_OUTPUT",
+          "name": "Copy 1",
+          "label": "1",
+          "role": "Cv",
+          "x_mm": 7.62,
+          "y_mm": 62
+        },
+        {
+          "id": 1,
+          "ident": "OUT2_OUTPUT",
+          "name": "Copy 2",
+          "label": "2",
+          "role": "Cv",
+          "x_mm": 7.62,
+          "y_mm": 84
+        },
+        {
+          "id": 2,
+          "ident": "OUT3_OUTPUT",
+          "name": "Copy 3",
+          "label": "3",
+          "role": "Cv",
+          "x_mm": 7.62,
+          "y_mm": 106
+        }
+      ],
+      "lights": []
+    }
+  ]
+}

@@ -1,0 +1,215 @@
+{
+  "version": "2.6.6",
+  "modules": [
+    {
+      "id": 1,
+      "plugin": "CVfunk",
+      "model": "Hammer",
+      "pos": [
+        0,
+        0
+      ],
+      "params": [
+        {
+          "id": 32,
+          "value": 112
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "plugin": "CVfunk",
+      "model": "StepWave",
+      "pos": [
+        15,
+        0
+      ],
+      "params": [
+        {
+          "id": 0,
+          "value": 0.0
+        },
+        {
+          "id": 1,
+          "value": 0.417
+        },
+        {
+          "id": 2,
+          "value": 0.583
+        },
+        {
+          "id": 3,
+          "value": 0.25
+        },
+        {
+          "id": 4,
+          "value": 0.833
+        },
+        {
+          "id": 5,
+          "value": 0.583
+        },
+        {
+          "id": 6,
+          "value": 1.0
+        },
+        {
+          "id": 7,
+          "value": 0.417
+        },
+        {
+          "id": 39,
+          "value": 0.0
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "plugin": "CVfunkSands",
+      "model": "Zephyr",
+      "pos": [
+        45,
+        0
+      ],
+      "params": [
+        {
+          "id": 8,
+          "value": -1.0
+        },
+        {
+          "id": 2,
+          "value": 4
+        },
+        {
+          "id": 6,
+          "value": 0.72
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "plugin": "CVfunk",
+      "model": "EnvelopeArray",
+      "pos": [
+        57,
+        0
+      ],
+      "params": [
+        {
+          "id": 0,
+          "value": -0.7
+        },
+        {
+          "id": 1,
+          "value": -0.6
+        },
+        {
+          "id": 2,
+          "value": 0.32
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "plugin": "CVfunk",
+      "model": "PressedDuck",
+      "pos": [
+        72,
+        0
+      ],
+      "params": [
+        {
+          "id": 0,
+          "value": 1.0
+        },
+        {
+          "id": 37,
+          "value": 1.0
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "plugin": "Core",
+      "model": "AudioInterface2",
+      "pos": [
+        96,
+        0
+      ],
+      "params": [
+        {
+          "id": 0,
+          "value": 0.6
+        }
+      ],
+      "data": {
+        "audio": {
+          "driver": 5,
+          "deviceName": "Mac Studio Speakers",
+          "sampleRate": 44100,
+          "blockSize": 256,
+          "inputOffset": 0,
+          "outputOffset": 0
+        }
+      }
+    }
+  ],
+  "cables": [
+    {
+      "id": 1,
+      "outputModuleId": 1,
+      "outputId": 0,
+      "inputModuleId": 2,
+      "inputId": 0,
+      "color": "#ffb437"
+    },
+    {
+      "id": 2,
+      "outputModuleId": 2,
+      "outputId": 0,
+      "inputModuleId": 3,
+      "inputId": 0,
+      "color": "#3695ef"
+    },
+    {
+      "id": 3,
+      "outputModuleId": 2,
+      "outputId": 1,
+      "inputModuleId": 4,
+      "inputId": 4,
+      "color": "#3695ef"
+    },
+    {
+      "id": 4,
+      "outputModuleId": 4,
+      "outputId": 0,
+      "inputModuleId": 5,
+      "inputId": 12,
+      "color": "#8b4ade"
+    },
+    {
+      "id": 5,
+      "outputModuleId": 3,
+      "outputId": 0,
+      "inputModuleId": 5,
+      "inputId": 0,
+      "color": "#00b56e"
+    },
+    {
+      "id": 6,
+      "outputModuleId": 5,
+      "outputId": 0,
+      "inputModuleId": 6,
+      "inputId": 0,
+      "color": "#00b56e"
+    },
+    {
+      "id": 7,
+      "outputModuleId": 5,
+      "outputId": 1,
+      "inputModuleId": 6,
+      "inputId": 1,
+      "color": "#00b56e"
+    }
+  ]
+}

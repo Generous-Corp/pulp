@@ -1,0 +1,43 @@
+{
+ "version": "2.6.6",
+ "modules": [
+  {
+   "id": 1,
+   "plugin": "ForgeModular",
+   "model": "VCO",
+   "pos": [
+    0,
+    0
+   ],
+   "params": [
+    {
+     "id": 0,
+     "value": 0.0
+    },
+    {
+     "id": 1,
+     "value": 0.0
+    },
+    {
+     "id": 2,
+     "value": 0.5
+    },
+    {
+     "id": 3,
+     "value": 0.0
+    }
+   ]
+  },
+  {
+   "id": 2,
+   "plugin": "Fundamental",
+   "model": "VCO",
+   "pos": [
+    8,
+    0
+   ],
+   "params": []
+  }
+ ],
+ "cables": []
+}

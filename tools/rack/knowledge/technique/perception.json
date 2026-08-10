@@ -1,0 +1,97 @@
+{
+  "$comment": [
+    "A deliberately small tranche from Curtis Roads, The Computer Music",
+    "Tutorial, Chapters 12 and 23. The source files stay outside the tree.",
+    "These records contain paraphrased conclusions and cryptographic source",
+    "coordinates only; they reproduce neither the book's text nor its images.",
+    "The provenance tier is `inferred` because each record transfers a source",
+    "observation into a generation or listening rule rather than quoting it."
+  ],
+  "entries": [
+    {
+      "id": "pitch-analysis-eligibility",
+      "canonical_semantic_id": "pitch-analysis-eligibility",
+      "names": [
+        "pitch evidence",
+        "pitch tracker eligibility",
+        "when pitch measurement is meaningful"
+      ],
+      "what": "Pitch estimates are evidence only after a signal has become sufficiently periodic and stable. Noise, brief attacks, very low rumblings, and dense inharmonic spectra can make a pitch detector return little or misleading evidence without making the sound itself defective.",
+      "why": "A detector needs repeated cycles from a locally steady signal. The beginning of an acoustic-like event can still be settling, and a low fundamental takes longer to provide the same number of cycles, so confidence must be interpreted with the signal class and analysis interval in view.",
+      "listen_for": {
+        "sounds_like": "a stable periodic region yields a pitch that persists, while noise or a clangorous attack makes the estimate disappear or wander before any steady portion arrives",
+        "confusable_with": "an actually mistuned steady tone; low confidence on nonperiodic material is an analysis limitation, not proof of bad tuning"
+      },
+      "numbers": [
+        {
+          "quantity": "minimum periodic evidence",
+          "value": "at least 3 cycles of the candidate fundamental",
+          "provenance": "inferred",
+          "grounding": "Roads Chapter 12 uses three cycles as the practical minimum for low-frequency pitch analysis. This paraphrases that constraint as an eligibility floor rather than claiming a universal detector setting.",
+          "source_evidence": {
+            "work": "Curtis Roads, The Computer Music Tutorial",
+            "chapter": 12,
+            "epub_member": "index_split_006.html",
+            "sha256": "87cfea8a694d30654d69f50ae0c1d121918eab7665cd42218927db6d9ee1454e",
+            "locator": "Pitch recognition and analysis-time discussion"
+          }
+        },
+        {
+          "quantity": "attack settling allowance",
+          "value": "allow about 100 ms before treating an unstable attack as steady pitch evidence",
+          "provenance": "inferred",
+          "grounding": "Roads Chapter 12 notes that an attack may require this order of time to settle. The value is guidance for interpreting measurements, not a promise that every source settles by then.",
+          "source_evidence": {
+            "work": "Curtis Roads, The Computer Music Tutorial",
+            "chapter": 12,
+            "epub_member": "index_split_006.html",
+            "sha256": "87cfea8a694d30654d69f50ae0c1d121918eab7665cd42218927db6d9ee1454e",
+            "locator": "Pitch recognition, transient settling discussion"
+          }
+        }
+      ],
+      "provenance": "inferred",
+      "source": "Derived guidance from Curtis Roads, The Computer Music Tutorial, Chapter 12",
+      "source_evidence": {
+        "epub_member": "index_split_006.html",
+        "sha256": "87cfea8a694d30654d69f50ae0c1d121918eab7665cd42218927db6d9ee1454e"
+      }
+    },
+    {
+      "id": "event-fusion-density",
+      "canonical_semantic_id": "event-fusion-density",
+      "names": [
+        "event fusion",
+        "grain density",
+        "when pulses become a texture"
+      ],
+      "what": "As discrete events become dense enough, the ear stops following each one separately and hears a continuous texture. That boundary is a useful lower edge for a cloud: below it the result reads as repeated ticks, while above it individual events begin to fuse.",
+      "why": "Temporal resolution is finite and context-dependent. Reducing the interval between otherwise similar events eventually changes the perceptual object from a sequence into a fused mass, so event rate is not merely a scheduling value; it determines which kind of sound exists.",
+      "listen_for": {
+        "sounds_like": "a transition from countable repeated particles into a continuous but internally animated surface",
+        "confusable_with": "a slow pulse train, where every event remains separately countable, or a flat sustained tone with no internal particle motion"
+      },
+      "numbers": [
+        {
+          "quantity": "practical fusion floor",
+          "value": "20 events per second, with the source describing a 20 to 30 events-per-second transition region",
+          "provenance": "inferred",
+          "grounding": "Roads Chapter 23 places the echo-to-reverberation transition in this range. Applying its conservative lower edge to a grain cloud is an explicit transfer of a temporal-fusion result, not a claim that every grain source fuses identically.",
+          "source_evidence": {
+            "work": "Curtis Roads, The Computer Music Tutorial",
+            "chapter": 23,
+            "epub_member": "index_split_013.html",
+            "sha256": "c7b7d6f3abfe705125976ace3cf92ca60be26e0171898516cc0c0c3aa0b2fb2e",
+            "locator": "Temporal integration, echo density and reverberation transition"
+          }
+        }
+      ],
+      "provenance": "inferred",
+      "source": "Transferred temporal-fusion guidance from Curtis Roads, The Computer Music Tutorial, Chapter 23",
+      "source_evidence": {
+        "epub_member": "index_split_013.html",
+        "sha256": "c7b7d6f3abfe705125976ace3cf92ca60be26e0171898516cc0c0c3aa0b2fb2e"
+      }
+    }
+  ]
+}

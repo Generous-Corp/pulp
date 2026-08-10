@@ -290,12 +290,11 @@ TEST_CASE("the export joins semantic descriptors to baked numeric ranges", "[for
     const auto findings = audit_forge_catalog_export(nodes);
     INFO(render(findings));
     REQUIRE(findings.empty());
-    REQUIRE(nodes.size() == 78);
+    REQUIRE(nodes.size() == 82);
 
     for (const auto& node : nodes) {
         INFO("node " << node.descriptor.key);
         REQUIRE_FALSE(node.descriptor.key.empty());
-        REQUIRE_FALSE(node.descriptor.params.empty());
         REQUIRE_FALSE(node.descriptor.realizations.empty());
         REQUIRE(node.realizations.size() == node.descriptor.realizations.size());
 
@@ -319,7 +318,11 @@ TEST_CASE("the export joins semantic descriptors to baked numeric ranges", "[for
             INFO("constructed realization " << built.mode);
             REQUIRE_FALSE(built.mode.empty());
             REQUIRE_FALSE(built.type_id.empty());
-            REQUIRE_FALSE(built.baked_params.empty());
+            // Parameterless graph utilities (for example Sample & Hold) are
+            // valid exports. Parity still fails closed: either both semantic
+            // and numeric parameter lists are empty, or the audit joins every
+            // descriptor to a baked parameter below.
+            REQUIRE(built.baked_params.empty() == node.descriptor.params.empty());
             for (const auto& param : built.baked_params) {
                 REQUIRE(param.min_value <= param.default_value);
                 REQUIRE(param.default_value <= param.max_value);
@@ -355,6 +358,17 @@ TEST_CASE("every declared export realization is constructed and type checked", "
 
 TEST_CASE("dynamic Forge families export every supported finite realization", "[forge][catalog]") {
     const auto nodes = forge_catalog_export_nodes();
+
+    REQUIRE(realization_modes(require_node(nodes, "eurorack_attenuverter")) ==
+            std::set<std::string>{"default"});
+    REQUIRE(realization_modes(require_node(nodes, "eurorack_slew")) ==
+            std::set<std::string>{"default"});
+    REQUIRE(realization_modes(require_node(nodes, "eurorack_clock_divider")) ==
+            std::set<std::string>{"default"});
+    const auto& sample_hold = require_node(nodes, "eurorack_sample_hold");
+    REQUIRE(realization_modes(sample_hold) == std::set<std::string>{"default"});
+    REQUIRE(sample_hold.descriptor.params.empty());
+    REQUIRE(sample_hold.realizations.front().baked_params.empty());
 
     REQUIRE(realization_modes(require_node(nodes, "feedforward_compressor")) ==
             std::set<std::string>{"lookahead_10ms", "lookahead_3ms", "zero_lookahead"});

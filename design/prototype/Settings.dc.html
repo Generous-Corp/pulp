@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/pulp-design-system-d35e14f8-849f-422c-8e3c-b492737526a3/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/pulp-design-system-d35e14f8-849f-422c-8e3c-b492737526a3/tokens/colors.css">
+<link rel="stylesheet" href="_ds/pulp-design-system-d35e14f8-849f-422c-8e3c-b492737526a3/tokens/semantic.css">
+</helmet>
+
+<div style="width:760px;max-width:94vw;max-height:660px;display:flex;flex-direction:column;background:var(--surface-overlay);border:1px solid var(--line-strong);border-radius:18px;box-shadow:0 30px 90px rgba(0,0,0,0.6);overflow:hidden;font-family:'Jost',system-ui,sans-serif;color:var(--text)">
+
+  <!-- header tabs -->
+  <div style="display:flex;align-items:center;gap:4px;padding:12px 14px;border-bottom:1px solid var(--line);flex:0 0 auto">
+    <span onClick="{{ s.setPaneAI }}" style="display:flex;align-items:center;gap:7px;font-size:13px;padding:7px 12px;border-radius:9px;cursor:pointer;{{ s.tabAiExtra }}"><i data-lucide="sparkles" style="width:15px;height:15px"></i>AI Models</span>
+    <span onClick="{{ s.setPaneProviders }}" style="display:flex;align-items:center;gap:7px;font-size:13px;padding:7px 12px;border-radius:9px;cursor:pointer;{{ s.tabProvidersExtra }}"><i data-lucide="plug" style="width:15px;height:15px"></i>Providers</span>
+    <span onClick="{{ s.setPanePermissions }}" style="display:flex;align-items:center;gap:7px;font-size:13px;padding:7px 12px;border-radius:9px;cursor:pointer;{{ s.tabPermExtra }}"><i data-lucide="shield" style="width:15px;height:15px"></i>Permissions</span>
+    <span onClick="{{ s.setPaneMcp }}" style="display:flex;align-items:center;gap:7px;font-size:13px;padding:7px 12px;border-radius:9px;cursor:pointer;{{ s.tabMcpExtra }}"><i data-lucide="terminal" style="width:15px;height:15px"></i>MCP</span>
+    <div style="flex:1"></div>
+    <span onClick="{{ s.close }}" style="display:inline-flex;cursor:pointer"><i data-lucide="x" style="width:18px;height:18px;color:var(--text-muted)"></i></span>
+  </div>
+
+  <div class="fg-scroll" style="flex:1;overflow-y:auto;padding:20px 22px">
+
+    <!-- ===== AI MODELS ===== -->
+    <sc-if value="{{ s.isAi }}" hint-placeholder-val="{{ true }}">
+      <h3 style="margin:0 0 4px;font-size:18px;font-weight:700;color:var(--text-strong)">AI Settings</h3>
+      <p style="margin:0 0 18px;font-size:13px;line-height:1.5;color:var(--text-muted)">Forge runs a hybrid pipeline: an engineering model writes the DSP, a UI designer model builds the interface. Pick a model for each role.</p>
+
+      <div style="display:flex;align-items:center;gap:9px;margin-bottom:10px"><i data-lucide="wrench" style="width:16px;height:16px;color:var(--accent)"></i><span style="font-size:14px;font-weight:600;color:var(--text-strong)">Engineering model</span><span style="font-size:12px;color:var(--text-faint)">Writes and compiles the DSP, manages the manifest.</span></div>
+      <div style="border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:22px">
+        <sc-for list="{{ s.engModels }}" as="m" hint-placeholder-count="4">
+          <div onClick="{{ m.onSelect }}" style="display:flex;align-items:center;gap:12px;padding:13px 15px;cursor:pointer;border-top:1px solid var(--line);{{ m.rowExtra }}">
+            <div style="flex:1">
+              <div style="display:flex;align-items:center;gap:8px"><span style="font-size:15px;font-weight:600;color:var(--text-strong)">{{ m.name }}</span><sc-if value="{{ m.isDefault }}" hint-placeholder-val="{{ false }}"><span style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.08em;color:var(--text-muted);border:1px solid var(--line-strong);border-radius:5px;padding:2px 6px">DEFAULT</span></sc-if></div>
+              <div style="font-size:12.5px;color:var(--text-muted);margin-top:2px">{{ m.desc }}</div>
+            </div>
+            <div style="display:flex;gap:2px;align-items:flex-end;height:16px"><sc-for list="{{ m.bars }}" as="b" hint-placeholder-count="5"><span style="width:4px;height:14px;border-radius:1px;{{ b.extra }}"></span></sc-for></div>
+            <div style="width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;{{ m.radioExtra }}"><sc-if value="{{ m.selected }}" hint-placeholder-val="{{ false }}"><i data-lucide="check" style="width:13px;height:13px;color:var(--on-ink)"></i></sc-if></div>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:9px;margin-bottom:10px"><i data-lucide="paintbrush" style="width:16px;height:16px;color:var(--ink-violet)"></i><span style="font-size:14px;font-weight:600;color:var(--text-strong)">UI designer model</span><span style="font-size:12px;color:var(--text-faint)">Builds the plugin interface, renderers, and visuals.</span></div>
+      <div style="border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:22px">
+        <sc-for list="{{ s.uiModels }}" as="m" hint-placeholder-count="4">
+          <div onClick="{{ m.onSelect }}" style="display:flex;align-items:center;gap:12px;padding:13px 15px;cursor:pointer;border-top:1px solid var(--line);{{ m.rowExtra }}">
+            <div style="flex:1">
+              <div style="display:flex;align-items:center;gap:8px"><span style="font-size:15px;font-weight:600;color:var(--text-strong)">{{ m.name }}</span><sc-if value="{{ m.isDefault }}" hint-placeholder-val="{{ false }}"><span style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.08em;color:var(--text-muted);border:1px solid var(--line-strong);border-radius:5px;padding:2px 6px">DEFAULT</span></sc-if></div>
+              <div style="font-size:12.5px;color:var(--text-muted);margin-top:2px">{{ m.desc }}</div>
+            </div>
+            <div style="display:flex;gap:2px;align-items:flex-end;height:16px"><sc-for list="{{ m.bars }}" as="b" hint-placeholder-count="5"><span style="width:4px;height:14px;border-radius:1px;{{ b.extra }}"></span></sc-for></div>
+            <div style="width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;{{ m.radioExtra }}"><sc-if value="{{ m.selected }}" hint-placeholder-val="{{ false }}"><i data-lucide="check" style="width:13px;height:13px;color:var(--on-ink)"></i></sc-if></div>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:9px;margin-bottom:10px"><i data-lucide="gauge" style="width:16px;height:16px;color:var(--ink-amber)"></i><span style="font-size:14px;font-weight:600;color:var(--text-strong)">Reasoning effort</span><span style="font-size:12px;color:var(--text-faint)">Deeper thinking costs more and takes longer.</span></div>
+      <div style="display:flex;gap:8px;margin-bottom:22px">
+        <sc-for list="{{ s.efforts }}" as="e" hint-placeholder-count="5"><span onClick="{{ e.onClick }}" style="flex:1;text-align:center;font-size:13px;padding:10px 0;border-radius:10px;cursor:pointer;{{ e.extra }}">{{ e.label }}</span></sc-for>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:9px;margin-bottom:10px"><i data-lucide="git-branch" style="width:16px;height:16px;color:var(--ink-indigo)"></i><span style="font-size:14px;font-weight:600;color:var(--text-strong)">Generation mode</span><span style="font-size:12px;color:var(--text-faint)">Parallel builds the UI while the DSP is written — much faster.</span></div>
+      <div style="display:flex;gap:10px;margin-bottom:6px">
+        <div onClick="{{ s.setSequential }}" style="flex:1;text-align:center;padding:14px;border-radius:12px;cursor:pointer;{{ s.seqExtra }}"><div style="font-size:14px;font-weight:600;color:var(--text-strong)">Sequential</div><div style="font-size:11px;color:var(--text-muted);margin-top:3px">Proven · DSP, then UI</div></div>
+        <div onClick="{{ s.setParallel }}" style="flex:1;text-align:center;padding:14px;border-radius:12px;cursor:pointer;{{ s.parExtra }}"><div style="font-size:14px;font-weight:600;color:var(--text-strong)">Parallel <span style="font-size:11px;font-weight:400;color:var(--text-faint)">experimental</span></div><div style="font-size:11px;color:var(--text-muted);margin-top:3px">Faster · UI appears early</div></div>
+      </div>
+      <p style="margin:16px 0 0;font-size:12px;color:var(--text-faint);border-top:1px solid var(--line);padding-top:14px">Applies to your next message — switching mid‑project is safe. The quick picker in the chat box sets both roles at once.</p>
+    </sc-if>
+
+    <!-- ===== PROVIDERS ===== -->
+    <sc-if value="{{ s.isProviders }}" hint-placeholder-val="{{ false }}">
+      <sc-if value="{{ s.providerGrid }}" hint-placeholder-val="{{ true }}">
+        <h3 style="margin:0 0 4px;font-size:20px;font-weight:700;color:var(--text-strong)">Connect your AI subscription or key</h3>
+        <p style="margin:0 0 18px;font-size:13px;line-height:1.55;color:var(--text-muted)">Forge builds with your Claude Code, Codex, Gemini or other agent — using an existing subscription, an API key, or a router. Your credentials stay on this machine and are never shared.</p>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+          <sc-for list="{{ s.providers }}" as="p" hint-placeholder-count="6">
+            <div style="border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:12px;{{ p.cardExtra }}">
+              <div style="display:flex;align-items:flex-start;justify-content:space-between"><span style="font-size:14px;font-weight:600;color:var(--text-strong);line-height:1.25">{{ p.name }}</span><span style="width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;color:var(--on-ink);background:{{ p.mono }}">{{ p.abbr }}</span></div>
+              <span style="font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px;align-self:flex-start;{{ p.statusExtra }}">{{ p.status }}</span>
+              <div onClick="{{ p.onSetup }}" style="text-align:center;font-size:13px;font-weight:600;padding:8px;border-radius:9px;border:1px solid var(--line-strong);color:var(--text);cursor:pointer">Setup</div>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ s.providerDetailOpen }}" hint-placeholder-val="{{ false }}">
+        <div onClick="{{ s.backProviders }}" style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted);cursor:pointer;margin-bottom:14px"><i data-lucide="chevron-left" style="width:16px;height:16px"></i>Back</div>
+        <h3 style="margin:0 0 14px;font-size:20px;font-weight:700;color:var(--text-strong)">Set up your AI agent</h3>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px"><span style="width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;color:var(--on-ink);background:{{ s.detail.mono }}">{{ s.detail.abbr }}</span><span style="font-size:16px;font-weight:600;color:var(--text-strong)">{{ s.detail.name }}</span><span style="font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px;{{ s.detail.statusExtra }}">{{ s.detail.status }}</span></div>
+        <div style="font-size:14px;font-weight:600;color:var(--text-strong);margin-bottom:4px">Step 1</div>
+        <div style="font-size:13.5px;color:var(--text);margin-bottom:18px">{{ s.detail.step1 }} <a href="{{ s.detail.link }}" target="_blank" style="color:var(--accent)">{{ s.detail.linkText }}</a></div>
+        <div style="font-size:14px;font-weight:600;color:var(--text-strong);margin-bottom:4px">Step 2</div>
+        <div style="font-size:13.5px;color:var(--text);margin-bottom:12px">Authenticate with:</div>
+        <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px">
+          <sc-for list="{{ s.detail.auth }}" as="a" hint-placeholder-count="2">
+            <div onClick="{{ a.onClick }}" style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:14px;color:var(--text)"><span style="width:18px;height:18px;border-radius:50%;border:2px solid var(--line-strong);display:flex;align-items:center;justify-content:center;{{ a.dotBorder }}"><sc-if value="{{ a.selected }}" hint-placeholder-val="{{ false }}"><span style="width:8px;height:8px;border-radius:50%;background:var(--accent)"></span></sc-if></span>{{ a.label }}</div>
+          </sc-for>
+        </div>
+        <sc-if value="{{ s.detail.showKey }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">API Key · <a href="{{ s.detail.link }}" target="_blank" style="color:var(--accent)">{{ s.detail.consoleLabel }}</a></div>
+          <div style="display:flex;gap:8px"><div style="flex:1;height:38px;border:1px solid var(--line);border-radius:9px;background:var(--surface-inset);display:flex;align-items:center;padding:0 12px;font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--text-faint)">{{ s.detail.keyPh }}</div><div onClick="{{ s.detail.onSave }}" style="height:38px;padding:0 18px;border-radius:9px;background:var(--accent);color:var(--on-ink);display:flex;align-items:center;font-size:13px;font-weight:600;cursor:pointer">Save</div></div>
+        </sc-if>
+        <sc-if value="{{ s.detail.showSubBtn }}" hint-placeholder-val="{{ false }}">
+          <div onClick="{{ s.detail.onSave }}" style="align-self:flex-start;display:inline-flex;height:38px;padding:0 16px;border-radius:9px;background:var(--surface-raised);border:1px solid var(--line-strong);color:var(--text);align-items:center;font-size:13px;font-weight:600;cursor:pointer">{{ s.detail.subBtnLabel }}</div>
+        </sc-if>
+        <p style="margin:18px 0 0;font-size:12px;color:var(--text-faint)">Additional variables can be set in your agent config. Credentials never leave this machine.</p>
+      </sc-if>
+    </sc-if>
+
+    <!-- ===== PERMISSIONS ===== -->
+    <sc-if value="{{ s.isPermissions }}" hint-placeholder-val="{{ false }}">
+      <h3 style="margin:0 0 4px;font-size:18px;font-weight:700;color:var(--text-strong)">Permissions & chat</h3>
+      <p style="margin:0 0 18px;font-size:13px;color:var(--text-muted)">Control how much access the agent has while it builds.</p>
+      <div style="border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:14px;margin-bottom:12px">
+        <i data-lucide="bell" style="width:18px;height:18px;color:var(--text-muted)"></i>
+        <div style="flex:1"><div style="font-size:14px;font-weight:600;color:var(--text-strong)">Notifications</div><div style="font-size:12px;color:var(--text-muted)">Notify when the agent finishes building while Forge is in the background.</div></div>
+        <div onClick="{{ s.toggleNotif }}" style="width:44px;height:26px;border-radius:20px;position:relative;cursor:pointer;transition:background .15s;{{ s.notifTrack }}"><span style="position:absolute;top:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left .18s cubic-bezier(.34,1.56,.64,1);{{ s.notifKnob }}"></span></div>
+      </div>
+      <div style="border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:14px">
+        <i data-lucide="triangle-alert" style="width:18px;height:18px;color:var(--warning)"></i>
+        <div style="flex:1"><div style="font-size:14px;font-weight:600;color:var(--text-strong)">Dangerously skip permissions</div><div style="font-size:12px;color:var(--text-muted)">Let the agent run without permission prompts — full file‑system and command access.</div></div>
+        <div onClick="{{ s.toggleSkip }}" style="width:44px;height:26px;border-radius:20px;position:relative;cursor:pointer;transition:background .15s;{{ s.skipTrack }}"><span style="position:absolute;top:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left .18s cubic-bezier(.34,1.56,.64,1);{{ s.skipKnob }}"></span></div>
+      </div>
+    </sc-if>
+
+    <!-- ===== MCP ===== -->
+    <sc-if value="{{ s.isMcp }}" hint-placeholder-val="{{ false }}">
+      <h3 style="margin:0 0 4px;font-size:18px;font-weight:700;color:var(--text-strong)">Connect to Forge via MCP</h3>
+      <p style="margin:0 0 18px;font-size:13px;line-height:1.55;color:var(--text-muted)">Optional — beyond the built‑in agents, external tools can drive Forge over MCP. On startup, MCP is auto‑configured for the tools you enable here.</p>
+      <div style="border:1px solid var(--line);border-radius:12px;overflow:hidden">
+        <sc-for list="{{ s.mcpItems }}" as="m" hint-placeholder-count="5">
+          <div style="display:flex;align-items:center;padding:13px 16px;border-top:1px solid var(--line)"><span style="flex:1;font-size:14px;color:var(--text-strong)">{{ m.name }}</span><div onClick="{{ m.onToggle }}" style="width:44px;height:26px;border-radius:20px;position:relative;cursor:pointer;{{ m.track }}"><span style="position:absolute;top:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left .18s cubic-bezier(.34,1.56,.64,1);{{ m.knob }}"></span></div></div>
+        </sc-for>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:16px"><span style="font-size:13px;font-weight:600;color:var(--text-strong)">Custom MCP server configuration</span><span style="font-size:12px;color:var(--accent);border:1px solid var(--accent-line);border-radius:8px;padding:6px 11px;cursor:pointer">Copy MCP config</span></div>
+    </sc-if>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:760,&quot;height&quot;:660}}"></script>
+</body>
+</html>

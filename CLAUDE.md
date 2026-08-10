@@ -1691,6 +1691,8 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `decide` | Put a blocked decision in front of the user as selectable options with a recommendation and honest pros/cons, instead of burying it in prose |
 | `engine` | JS engine backend selection (QuickJS / JavaScriptCore / V8) with recommendations per workload |
 | `faust` | FAUST DSP plugins: offline codegen, pre-generated C++ headers, FaustProcessor wrapper |
+| `forge-app-delivery` | Building and shipping a Forge app as an installer somebody else can use: the Forge/Pulp seam, what a green signal does not prove, shipping the runtime not just the binary, wiring gaps |
+| `forge-modular` | Forge Modular generation, Rack SDK/toolchain staging, catalogue-guided patches, physical parameter mapping, packaging boundaries, and validation loops |
 | `handoff` | Coordinate a cross-session / cross-machine handoff: snapshot open work, write a status doc to pulp-planning main, emit a goal prompt linking it, verify monitored work is terminal before retiring |
 | `hosting` | Load + run + test VST3 / AU / CLAP / LV2 plugins from Pulp (scanner, plugin_slot, signal_graph) |
 | `import-design` | Import designs from Figma / Stitch / v0 / Pencil into Pulp web-compat JS with visual validation |
@@ -1704,6 +1706,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `packages` | Third-party audio package search, suggest, add, browse |
 | `pr-review-sweep` | Sweep a PR's automated + human review comments and act on them — especially material/large PRs; pre-/post-merge, cross-repo (Pulp + Shipyard) |
 | `pr-batching` | Ship 2+ finished branches as ONE PR when they're related — cuts CI runs; heuristics for when NOT to |
+| `prove-before-showing` | Prove a UI or generation feature works before a human sees it: A/B against the source design, drive every control headlessly, prove the generator spawns, launch the real host, negative-control every gate |
 | `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`): focus marker + normal watch/rebuild, AOT analyzer guidance, deferred ar-swap / PR monitor |
 | `render-toolchain-update` | Update milestone-matched Skia, built-Dawn, and V8 releases together while preserving the separate weekly V8 lane |
 | `screenshot` | Faithful headless PNG capture: render_to_png Skia-vs-CoreGraphics backends, image-compositing trap, `--screenshot-backend`, capture_png |

@@ -1,0 +1,46 @@
+Forge Modular (beta)
+
+Forge Modular generates VCV Rack patches and modules from a description. Type what you want, and it builds it.
+
+WHAT GETS INSTALLED
+
+  Forge Modular.app          in your Applications folder
+  The Forge Modular modules  so VCV Rack can use them
+  AU, VST3 and CLAP          only if you tick them
+
+Forge Modular itself is required, because the Rack modules and the uninstaller live inside it. The plug-in formats are optional.
+
+WHAT YOU NEED BEFORE IT CAN DO ANYTHING
+
+Two things, and neither can be shipped inside this installer. Forge Modular checks for both before it spends any time, and names whichever is missing.
+
+  VCV Rack 2         free from vcvrack.com. It is what plays the patches, and
+                     the modules install into it.
+  Claude Code        free from claude.com/claude-code. It is the model that
+                     writes the patch. Install it, then run "claude" once in
+                     Terminal to sign in.
+  Command Line Tools Apple's, and already present on most Macs that have ever
+                     run a developer tool. If not, macOS offers to install
+                     them, or run: xcode-select --install
+
+The Command Line Tools are needed for patches as well as modules, not only for modules. On macOS the python3 that runs the generator is part of them.
+
+ABOUT BUILDING MODULES
+
+Generating a new module compiles real code on your Mac, and that needs the VCV Rack SDK, about 40 MB. The first time you build one, Forge Modular downloads it from vcvrack.com for you. It says so in the build progress before the download starts, and it happens once. That SDK belongs to VCV and is licensed under the GPLv3. We do not ship a copy of it. If you never build a module, it is never downloaded.
+
+A module you build links the Rack SDK, so it inherits the GPLv3. That is fine for your own use. If you ever share one, its licence follows from that.
+
+REMOVING IT
+
+An uninstaller ships inside the app. It removes the app, the plug-ins, the Rack modules and the downloaded SDK, and it keeps the patches you have made unless you ask it not to. Run it from Terminal, with the quotes:
+
+  "/Applications/Forge Modular.app/Contents/Resources/uninstall.sh"
+
+The quotes matter. There is a space in the name, and without them the shell reads the path as far as "Forge" and reports that no such file exists. Add --all to remove your patches too, or --dry-run to see what would go without removing anything.
+
+THIS IS A BETA
+
+Things will be rough in places. Forge Modular itself is MIT licensed and comes with no warranty.
+
+Generous Corp daniel@generouscorp.com

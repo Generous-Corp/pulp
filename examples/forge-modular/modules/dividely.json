@@ -1,0 +1,169 @@
+{
+  "modules": [
+    {
+      "slug": "DIVIDELY",
+      "name": "DIV4",
+      "description": "Four independent clock dividers from one clock, with a shared reset.",
+      "tags": [
+        "Clock modulator",
+        "Quad",
+        "Utility"
+      ],
+      "hp": 4,
+      "params": [
+        {
+          "id": 0,
+          "ident": "DIV1_PARAM",
+          "name": "Divide 1",
+          "label": "1",
+          "unit": "x",
+          "min_value": 1.0,
+          "max_value": 32.0,
+          "default_value": 2.0,
+          "kind": "Trimpot",
+          "x_mm": 6.0,
+          "y_mm": 28.0
+        },
+        {
+          "id": 1,
+          "ident": "DIV2_PARAM",
+          "name": "Divide 2",
+          "label": "2",
+          "unit": "x",
+          "min_value": 1.0,
+          "max_value": 32.0,
+          "default_value": 4.0,
+          "kind": "Trimpot",
+          "x_mm": 14.32,
+          "y_mm": 28.0
+        },
+        {
+          "id": 2,
+          "ident": "DIV3_PARAM",
+          "name": "Divide 3",
+          "label": "3",
+          "unit": "x",
+          "min_value": 1.0,
+          "max_value": 32.0,
+          "default_value": 8.0,
+          "kind": "Trimpot",
+          "x_mm": 6.0,
+          "y_mm": 44.0
+        },
+        {
+          "id": 3,
+          "ident": "DIV4_PARAM",
+          "name": "Divide 4",
+          "label": "4",
+          "unit": "x",
+          "min_value": 1.0,
+          "max_value": 32.0,
+          "default_value": 16.0,
+          "kind": "Trimpot",
+          "x_mm": 14.32,
+          "y_mm": 44.0
+        }
+      ],
+      "inputs": [
+        {
+          "id": 0,
+          "ident": "CLK_INPUT",
+          "name": "Clock",
+          "label": "CLK",
+          "role": "Clock",
+          "x_mm": 5.2,
+          "y_mm": 62.0
+        },
+        {
+          "id": 1,
+          "ident": "RST_INPUT",
+          "name": "Reset",
+          "label": "RST",
+          "role": "Trigger",
+          "x_mm": 15.12,
+          "y_mm": 62.0
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "OUT1_OUTPUT",
+          "name": "Division 1 gate",
+          "label": "1",
+          "role": "Gate",
+          "x_mm": 5.2,
+          "y_mm": 90.0
+        },
+        {
+          "id": 1,
+          "ident": "OUT2_OUTPUT",
+          "name": "Division 2 gate",
+          "label": "2",
+          "role": "Gate",
+          "x_mm": 15.12,
+          "y_mm": 90.0
+        },
+        {
+          "id": 2,
+          "ident": "OUT3_OUTPUT",
+          "name": "Division 3 gate",
+          "label": "3",
+          "role": "Gate",
+          "x_mm": 5.2,
+          "y_mm": 108.0
+        },
+        {
+          "id": 3,
+          "ident": "OUT4_OUTPUT",
+          "name": "Division 4 gate",
+          "label": "4",
+          "role": "Gate",
+          "x_mm": 15.12,
+          "y_mm": 108.0
+        }
+      ],
+      "lights": [
+        {
+          "id": 0,
+          "ident": "DIV1_LIGHT",
+          "name": "Division 1 active",
+          "label": "",
+          "x_mm": 3.3,
+          "y_mm": 76.0,
+          "color": "green",
+          "size": "tiny"
+        },
+        {
+          "id": 1,
+          "ident": "DIV2_LIGHT",
+          "name": "Division 2 active",
+          "label": "",
+          "x_mm": 7.9,
+          "y_mm": 76.0,
+          "color": "green",
+          "size": "tiny"
+        },
+        {
+          "id": 2,
+          "ident": "DIV3_LIGHT",
+          "name": "Division 3 active",
+          "label": "",
+          "x_mm": 12.4,
+          "y_mm": 76.0,
+          "color": "green",
+          "size": "tiny"
+        },
+        {
+          "id": 3,
+          "ident": "DIV4_LIGHT",
+          "name": "Division 4 active",
+          "label": "",
+          "x_mm": 17.0,
+          "y_mm": 76.0,
+          "color": "green",
+          "size": "tiny"
+        }
+      ]
+    }
+  ]
+}

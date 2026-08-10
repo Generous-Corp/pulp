@@ -13,6 +13,8 @@
 //     that thread through View's slots.
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <cmath>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/view/asset_manager.hpp>
@@ -657,4 +659,65 @@ TEST_CASE("CSSStyleDeclaration display: contents is a safe arch-deferred no-op",
     // intact — `display: contents` is a no-op on the flex direction
     // because the dispatcher doesn't have a `contents` branch.
     REQUIRE(p_contents->flex().direction == FlexDirection::row);
+}
+
+TEST_CASE("WidgetBridge exposes a ToggleButton's on/off colour pairs",
+          "[view][bridge][toggle]") {
+    // A ToggleButton paints its own background, border and text from its own
+    // colour pairs and overdraws the generic View background. So a script could
+    // create one and then had no way to make it look like anything --
+    // setBackground() was simply painted over, and a primary button came out
+    // the stock surface colour with the fill silently discarded.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // Color channels are 0..1 floats, not bytes.
+    const auto chan = [](int byte) { return static_cast<float>(byte) / 255.0f; };
+    const auto near = [](float a, float b) { return std::abs(a - b) < 0.01f; };
+
+    bridge.load_script("createToggleButton('t')");
+    auto* t = dynamic_cast<ToggleButton*>(bridge.widget("t"));
+    REQUIRE(t != nullptr);
+    REQUIRE_FALSE(t->off_background_color_override().has_value());
+    REQUIRE_FALSE(t->on_background_color_override().has_value());
+
+    bridge.load_script("setToggleBackground('t', '#16DAC2', '#10B6A3')");
+    REQUIRE(t->off_background_color_override().has_value());
+    REQUIRE(t->on_background_color_override().has_value());
+    CHECK(near(t->off_background_color_override()->r, chan(0x16)));
+    CHECK(near(t->off_background_color_override()->g, chan(0xDA)));
+    CHECK(near(t->off_background_color_override()->b, chan(0xC2)));
+    CHECK(near(t->on_background_color_override()->r, chan(0x10)));
+
+    bridge.load_script("setToggleBorderColor('t', '#2B3340', '#3A4351')");
+    REQUIRE(t->off_border_color_override().has_value());
+    CHECK(near(t->off_border_color_override()->r, chan(0x2B)));
+    CHECK(near(t->on_border_color_override()->b, chan(0x51)));
+
+    bridge.load_script("setToggleTextColor('t', '#052320', '#F3F6F9')");
+    REQUIRE(t->off_text_color_override().has_value());
+    CHECK(near(t->off_text_color_override()->g, chan(0x23)));
+    CHECK(near(t->on_text_color_override()->r, chan(0xF3)));
+
+    // An empty colour leaves that state alone rather than clearing it, so one
+    // state can be styled without disturbing the other.
+    bridge.load_script("setToggleBackground('t', '', '#FFFFFF')");
+    CHECK(near(t->off_background_color_override()->r, chan(0x16)));
+    CHECK(near(t->on_background_color_override()->r, 1.0f));
+
+    bridge.load_script(
+        "setCornerRadius('t', 'All', 10);"
+        "setCornerRadius('t', 'TopLeft', 2);");
+    REQUIRE(t->corner_radius_override().has_value());
+    CHECK(*t->corner_radius_override() == 10.0f);
+    CHECK(t->corner_radius_tl() == 2.0f);
+    CHECK(t->corner_radius_tr() == 10.0f);
+
+    // A non-toggle target is ignored rather than crashing: the same script may
+    // style a mixed tree.
+    bridge.load_script("createRow('r'); setToggleBackground('r', '#FFFFFF', '#000000')");
+    CHECK(bridge.widget("r") != nullptr);
 }

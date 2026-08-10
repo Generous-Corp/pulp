@@ -125,6 +125,10 @@ For removal:
 ## Regenerate and validate
 
 Do not use the bootstrap or unpublished-migration switches during normal work.
+When the base branch has already advanced either counter, recompute the next
+`MANIFEST_REVISION` and `SURFACE_INVENTORY_VERSION` from that exact base before
+running `--write`; replaying stale projection counters can silently reuse an
+already-published contract identity.
 Use Python 3.10 or newer: transactional generation uses modern standard-library
 APIs such as `zip(..., strict=True)`, so an older system `python3` can fail before
 validating the contract. Run installed-SDK capability tests from a Release build.

@@ -380,21 +380,29 @@ TEST_CASE("addEventListener('wheel', fn) routes through registerWheel",
     bridge.load_script(R"(
         var el = document.createElement('div');
         document.body.appendChild(el);
-        var fired = false;
+        var fired = 0;
+        var wheelFields = '';
         el.addEventListener('wheel', function(e) {
-            fired = true;
+            fired++;
+            wheelFields = [e.deltaX, e.deltaY, e.clientX, e.clientY,
+                e.ctrlKey, e.shiftKey, e.altKey, e.metaKey].join(':');
         });
         // Manually invoke the bridge's __dispatch__ for 'wheel' to
         // simulate a native wheel event delivery — that's the path
         // _registerNativeEvent wires up via on(id, 'wheel', ...).
         if (typeof __dispatch__ === 'function') {
-            __dispatch__(el._id, 'wheel', 5, -7);
+            __dispatch__(el._id, 'wheel', {deltaX: 5, deltaY: -7,
+                clientX: 40, clientY: 60, ctrlKey: true, shiftKey: true,
+                altKey: true, metaKey: true});
         }
         globalThis.__test_wheel_fired__ = fired;
+        globalThis.__test_wheel_fields__ = wheelFields;
     )");
 
-    auto fired = engine.evaluate("globalThis.__test_wheel_fired__").getWithDefault<bool>(false);
-    REQUIRE(fired);
+    auto fired = engine.evaluate("globalThis.__test_wheel_fired__").getWithDefault<int>(0);
+    REQUIRE(fired == 1);
+    REQUIRE(engine.evaluate("globalThis.__test_wheel_fields__").toString() ==
+            "5:-7:40:60:true:true:true:true");
 }
 
 TEST_CASE("addEventListener('drop', fn) routes through registerDrop",

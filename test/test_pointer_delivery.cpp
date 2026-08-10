@@ -677,6 +677,22 @@ public:
     MouseEvent last{};
 };
 
+class DomWheelSpy : public View {
+public:
+    DomWheelSpy() {
+        on_dom_wheel_event = [this](const MouseEvent& e, bool is_dom_origin) {
+            if (is_dom_origin)
+                ++dom_wheel_events;
+            else
+                ++raw_ancestor_wheel_events;
+            last = e;
+        };
+    }
+    int dom_wheel_events = 0;
+    int raw_ancestor_wheel_events = 0;
+    MouseEvent last{};
+};
+
 // Counts terminal wheel dispatches so the request_repaint contract is asserted.
 pulp::view::WheelHost counting_host(int& counter) {
     pulp::view::WheelHost h;
@@ -720,6 +736,32 @@ TEST_CASE("deliver_mouse_wheel routes to a wheel-scroll ancestor and stops",
     REQUIRE(spy->hits == 1);
     CHECK(spy->last.is_wheel);
     CHECK_THAT(spy->last.scroll_delta_y, WithinAbs(-2.0f, 0.01f));
+    CHECK(repaints == 1);
+}
+
+TEST_CASE("deliver_mouse_wheel preserves modifiers through portable routing",
+          "[view][input][wheel]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto scroller = std::make_unique<WheelScrollSpy>();
+    WheelScrollSpy* spy = scroller.get();
+    spy->set_bounds({0, 0, 400, 300});
+    root.add_child(std::move(scroller));
+
+    int repaints = 0;
+#if defined(__APPLE__)
+    constexpr auto primary = kModCmd;
+#else
+    constexpr auto primary = kModCtrl;
+#endif
+    const auto modifiers = static_cast<std::uint16_t>(primary | kModShift);
+    deliver_mouse_wheel(root, {130, 70}, 0.0f, -2.0f, modifiers,
+                        counting_host(repaints));
+
+    REQUIRE(spy->hits == 1);
+    CHECK(spy->last.modifiers == modifiers);
+    CHECK(spy->last.isMainModifier());
+    CHECK(spy->last.isShiftDown());
     CHECK(repaints == 1);
 }
 
@@ -780,6 +822,149 @@ TEST_CASE("deliver_mouse_wheel bubbles to a pointer ancestor, then the deepest h
     CHECK(wrap->wheel_events == 1);          // W3C wheel bubble reached the wrapper
     CHECK(wrap->last.is_wheel);
     CHECK(repaints == 1);                     // one terminal dispatch to the deepest hit
+}
+
+TEST_CASE("deliver_mouse_wheel invokes a pointer-registered hit exactly once",
+          "[view][input][wheel]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto child = std::make_unique<WheelPointerSpy>();
+    WheelPointerSpy* spy = child.get();
+    spy->set_bounds({50, 40, 300, 200});
+    root.add_child(std::move(child));
+
+    int repaints = 0;
+    deliver_mouse_wheel(root, {70, 60}, 0.0f, 1.0f,
+                        counting_host(repaints));
+
+    CHECK(spy->wheel_events == 1);
+    CHECK(repaints == 1);
+}
+
+TEST_CASE("deliver_mouse_wheel uses one deepest DOM wheel dispatch origin",
+          "[view][input][wheel]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto wrapper = std::make_unique<DomWheelSpy>();
+    DomWheelSpy* outer = wrapper.get();
+    outer->set_bounds({50, 40, 300, 200});
+
+    auto child = std::make_unique<DomWheelSpy>();
+    DomWheelSpy* inner = child.get();
+    inner->set_bounds({10, 10, 100, 100});
+    outer->add_child(std::move(child));
+    root.add_child(std::move(wrapper));
+
+    int repaints = 0;
+    deliver_mouse_wheel(root, {70, 60}, 0.0f, 1.0f,
+                        counting_host(repaints));
+
+    CHECK(inner->dom_wheel_events == 1);
+    CHECK(inner->raw_ancestor_wheel_events == 0);
+    CHECK(outer->dom_wheel_events == 0); // DOM bubbling follows the one origin.
+    CHECK(outer->raw_ancestor_wheel_events == 1);
+    CHECK(repaints == 1);
+}
+
+TEST_CASE("DOM wheel origin preserves native scroll ancestor routing",
+          "[view][input][wheel]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto scroller = std::make_unique<WheelScrollSpy>();
+    WheelScrollSpy* scroll = scroller.get();
+    scroll->set_bounds({50, 40, 300, 200});
+    int scroller_dom_events = 0;
+    int scroller_raw_events = 0;
+    scroll->on_dom_wheel_event =
+        [&](const MouseEvent&, bool is_dom_origin) {
+            if (is_dom_origin)
+                ++scroller_dom_events;
+            else
+                ++scroller_raw_events;
+        };
+    auto child = std::make_unique<DomWheelSpy>();
+    DomWheelSpy* dom = child.get();
+    dom->set_bounds({10, 10, 100, 100});
+    scroll->add_child(std::move(child));
+    root.add_child(std::move(scroller));
+
+    int repaints = 0;
+    deliver_mouse_wheel(root, {70, 60}, 0.0f, 1.0f,
+                        counting_host(repaints));
+
+    CHECK(dom->dom_wheel_events == 1);
+    CHECK(scroller_dom_events == 0);
+    CHECK(scroller_raw_events == 1);
+    CHECK(scroll->hits == 1);
+    CHECK(repaints == 1);
+}
+
+TEST_CASE("native wheel scrolling blocks DOM registrations above the scroller",
+          "[view][input][wheel]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto wrapper = std::make_unique<DomWheelSpy>();
+    DomWheelSpy* outer = wrapper.get();
+    outer->set_bounds({0, 0, 400, 300});
+    auto scroller = std::make_unique<WheelScrollSpy>();
+    WheelScrollSpy* scroll = scroller.get();
+    scroller->set_bounds({20, 20, 300, 200});
+    auto leaf = std::make_unique<View>();
+    leaf->set_bounds({0, 0, 100, 100});
+    scroller->add_child(std::move(leaf));
+    wrapper->add_child(std::move(scroller));
+    root.add_child(std::move(wrapper));
+
+    int repaints = 0;
+    deliver_mouse_wheel(root, {30, 30}, 0.0f, 1.0f,
+                        counting_host(repaints));
+
+    CHECK(scroll->hits == 1);
+    CHECK(outer->dom_wheel_events == 0);
+    CHECK(outer->raw_ancestor_wheel_events == 0);
+    CHECK(repaints == 1);
+}
+
+TEST_CASE("native wheel scrolling preserves a DOM registration on the scroller",
+          "[view][input][wheel]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto wrapper = std::make_unique<DomWheelSpy>();
+    DomWheelSpy* outer = wrapper.get();
+    outer->set_bounds({0, 0, 400, 300});
+    auto scroller = std::make_unique<WheelScrollSpy>();
+    WheelScrollSpy* scroll = scroller.get();
+    scroller->set_bounds({20, 20, 300, 200});
+    int scroller_dom_events = 0;
+    int scroller_raw_events = 0;
+    scroll->on_dom_wheel_event =
+        [&](const MouseEvent&, bool is_dom_origin) {
+            if (is_dom_origin)
+                ++scroller_dom_events;
+            else
+                ++scroller_raw_events;
+        };
+    auto leaf = std::make_unique<View>();
+    leaf->set_bounds({0, 0, 100, 100});
+    scroller->add_child(std::move(leaf));
+    wrapper->add_child(std::move(scroller));
+    root.add_child(std::move(wrapper));
+
+    int repaints = 0;
+    deliver_mouse_wheel(root, {30, 30}, 0.0f, 1.0f,
+                        counting_host(repaints));
+
+    CHECK(scroller_dom_events == 1);
+    CHECK(scroller_raw_events == 0);
+    CHECK(scroll->hits == 1);
+    CHECK(outer->dom_wheel_events == 0);
+    CHECK(outer->raw_ancestor_wheel_events == 0);
+    CHECK(repaints == 1);
 }
 
 TEST_CASE("deliver_mouse_wheel scrolls an open ComboBox popup ahead of the tree",

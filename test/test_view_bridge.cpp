@@ -1607,6 +1607,7 @@ TEST_CASE("the host pull reaches a design frame nested below the root",
     format::ViewBridge bridge(proc, store);
     REQUIRE(bridge.open());
     REQUIRE(proc.last_frame != nullptr);
+    CHECK(proc.last_frame->runtime_view_kind() == view::RuntimeViewKind::design_frame);
 
     store.set_normalized_rt(1, 0.5f);
     format::make_editor_idle_pump(bridge)();

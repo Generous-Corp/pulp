@@ -1,0 +1,65 @@
+#!/bin/bash
+# Put the Rack modules where Rack looks, once the app is on disk.
+#
+# The installer writes the app, the plug-ins and the .vcvplugin that lives
+# inside the app bundle. It cannot write the last one to its real home: Rack
+# reads ~/Library/Application Support/Rack2, and a package payload addresses
+# absolute paths as root. Without this step the modules ship, install, and are
+# never seen -- which on a development machine is invisible, because the pack
+# is already in that folder from a build.
+#
+# Arguments are Apple's: $1 package, $2 destination, $3 destination volume,
+# $4 root. $3 is used rather than a literal "/" so installing to another volume
+# reads the app from the volume it was written to.
+
+# THIS RUNS AS ROOT, AND $HOME IS ROOT'S.
+#
+# The whole point of the step is to write into a particular person's home
+# directory, and every fact about that person has to be asked for. The console
+# user is the one sitting at the machine; their home directory comes from
+# Directory Services, because it is not always /Users/<name> (network and
+# mobile accounts, and a renamed account, all break that assumption).
+CONSOLE_USER="$(/usr/bin/stat -f%Su /dev/console 2>/dev/null)"
+
+if [ -z "$CONSOLE_USER" ] || [ "$CONSOLE_USER" = "root" ]; then
+    # No one is logged in -- an MDM push, or an install from the recovery
+    # environment. There is no home directory to choose, and guessing one
+    # would install the modules for somebody who never asked. The app repairs
+    # this on its first patch inventory, so say so and let the install succeed.
+    echo "Forge Modular: no console user; the app will place the Rack modules"
+    echo "               when it first inventories patches."
+    exit 0
+fi
+
+USER_HOME="$(/usr/bin/dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory 2>/dev/null \
+             | /usr/bin/sed -n 's/^NFSHomeDirectory: //p')"
+if [ -z "$USER_HOME" ] || [ ! -d "$USER_HOME" ]; then
+    echo "Forge Modular: could not resolve a home directory for $CONSOLE_USER;"
+    echo "               the app will place the Rack modules when it first inventories patches."
+    exit 0
+fi
+
+VOLUME="${3:-/}"
+VOLUME="${VOLUME%/}"
+APP="$VOLUME/Applications/Forge Modular.app"
+PLACER="$APP/Contents/Resources/install_pack.sh"
+
+if [ ! -x "$PLACER" ]; then
+    echo "Forge Modular: $PLACER is missing, so the Rack modules were not placed."
+    exit 0
+fi
+
+# One rule, shared with the app's own repair path, rather than a second copy
+# that drifts. Run it with the user's credentials, not merely against the
+# user's path while still root: every component below HOME is user-controlled
+# and may be a symlink. Dropping privilege makes following one no more powerful
+# than the app's normal first-run repair path.
+/usr/bin/sudo -H -u "$CONSOLE_USER" -- \
+    "$PLACER" --source "$APP" --home "$USER_HOME"
+
+# NEVER fail. A non-zero postinstall aborts the installation and takes the app
+# with it, so a machine that could not receive the modules would end up with no
+# software at all -- strictly worse than one where the app repairs itself on
+# first use. The line above says what happened either way, in
+# /var/log/install.log.
+exit 0

@@ -1,0 +1,128 @@
+/* ============================================================
+   PULP · SEMANTIC TOKENS  (theme-adaptive)
+   :root defaults to DARK (studio). [data-theme="light"] is the paper twin.
+   Neutrals are cool graphite; accent is signal teal with GPU glow tokens.
+   Surfaces are lifted for clear depth between objects.
+   Components consume ONLY these tokens, never raw ramps.
+   ============================================================ */
+
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Surfaces — cool graphite ink, layered by elevation (lifted for depth) */
+  --surface-app:     #161A21;   /* window / canvas */
+  --surface-sunken:  #0E1116;   /* wells, track insets, timeline */
+  --surface-panel:   #1E2530;   /* sidebars, inspector, toolbars */
+  --surface-raised:  #28303C;   /* cards, list rows */
+  --surface-overlay: #2F3743;   /* menus, popovers, dialogs */
+  --surface-inset:   #0C0F14;   /* slider tracks, input wells */
+  --surface-hover:   rgba(225,235,250,0.06);
+  --surface-active:  rgba(225,235,250,0.10);
+
+  /* Lines & borders */
+  --line-soft:   rgba(220,232,250,0.07);
+  --line:        rgba(220,232,250,0.12);
+  --line-strong: rgba(220,232,250,0.22);
+
+  /* Text */
+  --text-strong: #F3F6F9;
+  --text:        #D6DCE4;
+  --text-muted:  #939CA9;
+  --text-faint:  #646D7A;
+  --text-inverse:#161A21;
+
+  /* Accent (primary = signal teal) */
+  --accent:        var(--ink-signal);
+  --accent-press:  var(--ink-signal-deep);
+  --accent-text:   var(--on-ink);
+  --accent-soft:   rgba(22,218,194,0.15);
+  --accent-soft-2: rgba(22,218,194,0.26);
+  --accent-line:   rgba(22,218,194,0.45);
+  --accent-ring:   rgba(22,218,194,0.5);
+
+  /* GPU glow — luminous accent bloom (stronger in dark) */
+  --glow-sm: 0 0 10px color-mix(in oklab, var(--accent) 45%, transparent);
+  --glow-md: 0 0 20px color-mix(in oklab, var(--accent) 55%, transparent);
+  --glow-lg: 0 0 32px color-mix(in oklab, var(--accent) 60%, transparent);
+
+  /* Status */
+  --info:    var(--ink-indigo);  --info-soft:    rgba(94,120,255,0.16);
+  --success: var(--ink-leaf);    --success-soft: rgba(63,207,119,0.16);
+  --warning: var(--ink-amber);   --warning-soft: rgba(246,184,71,0.18);
+  --danger:  var(--ink-coral);   --danger-soft:  rgba(255,92,77,0.16);
+  --status-text: var(--on-ink);
+
+  /* Control fills (knobs, toggles, raised buttons) */
+  --control:       #2A323D;
+  --control-hover: #323B47;
+  --control-press: #222932;
+  --control-line:  rgba(220,230,245,0.14);
+
+  /* Shadow tint (neutral) */
+  --shadow-color:  rgba(0,0,0,0.5);
+  --shadow-color-2:rgba(0,0,0,0.34);
+  --highlight-top: rgba(255,255,255,0.09);  /* inner top edge on raised controls */
+
+  /* Knob / dimensional control caps */
+  --knob-hi:   #424B58;
+  --knob-base: #2C333E;
+  --knob-lo:   #181C23;
+  --knob-rim:  rgba(0,0,0,0.55);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --surface-app:     #EDEFF2;   /* cool paper */
+  --surface-sunken:  #E0E4E9;
+  --surface-panel:   #FAFBFC;
+  --surface-raised:  #FFFFFF;
+  --surface-overlay: #FFFFFF;
+  --surface-inset:   #E6E9EE;
+  --surface-hover:   rgba(16,20,28,0.04);
+  --surface-active:  rgba(16,20,28,0.07);
+
+  --line-soft:   rgba(20,28,40,0.06);
+  --line:        rgba(20,28,40,0.12);
+  --line-strong: rgba(20,28,40,0.22);
+
+  --text-strong: #14171C;
+  --text:        #2C313A;
+  --text-muted:  #5A636F;
+  --text-faint:  #939BA8;
+  --text-inverse:#FAFBFC;
+
+  --accent:        var(--ink-signal-deep);
+  --accent-press:  #0C9A8A;
+  --accent-text:   #042420;
+  --accent-soft:   rgba(16,182,163,0.15);
+  --accent-soft-2: rgba(16,182,163,0.26);
+  --accent-line:   rgba(16,182,163,0.5);
+  --accent-ring:   rgba(16,182,163,0.45);
+
+  /* Glow is subtler on paper */
+  --glow-sm: 0 0 8px color-mix(in oklab, var(--accent) 28%, transparent);
+  --glow-md: 0 0 14px color-mix(in oklab, var(--accent) 34%, transparent);
+  --glow-lg: 0 0 22px color-mix(in oklab, var(--accent) 38%, transparent);
+
+  --info:    var(--ink-indigo-deep);  --info-soft:    rgba(71,96,230,0.14);
+  --success: #2BA85E;                 --success-soft: rgba(43,168,94,0.14);
+  --warning: var(--ink-amber-deep);   --warning-soft: rgba(224,158,42,0.2);
+  --danger:  var(--ink-coral-deep);   --danger-soft:  rgba(242,59,51,0.14);
+  --status-text: #ffffff;
+
+  --control:       #FFFFFF;
+  --control-hover: #F6F8FA;
+  --control-press: #ECEFF2;
+  --control-line:  rgba(20,28,40,0.14);
+
+  --shadow-color:  rgba(20,28,45,0.16);
+  --shadow-color-2:rgba(20,28,45,0.10);
+  --highlight-top: rgba(255,255,255,0.9);
+
+  --knob-hi:   #FFFFFF;
+  --knob-base: #EDF0F4;
+  --knob-lo:   #D6DCE4;
+  --knob-rim:  rgba(20,28,40,0.16);
+}
