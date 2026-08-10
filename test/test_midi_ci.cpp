@@ -540,6 +540,30 @@ TEST_CASE("CiDiscovery properties accept empty and overwritten values",
     REQUIRE(*value == "Second");
 }
 
+TEST_CASE("CiDiscovery property updates preserve independent resources",
+          "[midi][ci][pe]") {
+    CiDiscovery ci;
+
+    ci.set_property("/Patch/Lead/Cutoff", "0.75");
+    ci.set_property("/Patch/Pad/Resonance", "0.30");
+
+    auto lead_cutoff = ci.get_property("/Patch/Lead/Cutoff");
+    auto pad_resonance = ci.get_property("/Patch/Pad/Resonance");
+    REQUIRE(lead_cutoff.has_value());
+    REQUIRE(*lead_cutoff == "0.75");
+    REQUIRE(pad_resonance.has_value());
+    REQUIRE(*pad_resonance == "0.30");
+
+    ci.set_property("/Patch/Lead/Cutoff", "0.90");
+
+    lead_cutoff = ci.get_property("/Patch/Lead/Cutoff");
+    pad_resonance = ci.get_property("/Patch/Pad/Resonance");
+    REQUIRE(lead_cutoff.has_value());
+    REQUIRE(*lead_cutoff == "0.90");
+    REQUIRE(pad_resonance.has_value());
+    REQUIRE(*pad_resonance == "0.30");
+}
+
 TEST_CASE("CiDiscovery profile inquiry response", "[midi][ci]") {
     CiDiscovery ci;
     ProfileId p1{0x01, 0x01, 0x00, 0x00, 0x00};
