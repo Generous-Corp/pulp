@@ -203,6 +203,50 @@ TEST_CASE("UmpSession wire_virtual_loopback rejects unknown endpoints",
     REQUIRE_FALSE(session.wire_virtual_loopback("only-one", "missing"));
 }
 
+TEST_CASE("UmpSession unregister closes retained endpoints and wired delivery",
+          "[midi][ump][session][lifetime]") {
+    UmpSession session({"unregister-lifetime", false});
+    auto src = session.register_virtual_endpoint(
+        {"retained-src", false, {true, true}});
+    auto dst = session.register_virtual_endpoint(
+        {"retained-dst", false, {true, true}});
+
+    int seen = 0;
+    UmpPacket received{};
+    dst->set_receive_callback([&](const UmpPacket& packet, double) {
+        received = packet;
+        ++seen;
+    });
+    REQUIRE(session.wire_virtual_loopback("retained-src", "retained-dst"));
+
+    const auto note = make_midi2_note_on(0, 3, 67, 0xA000);
+    REQUIRE(src->deliver(note, 0.25));
+    REQUIRE(seen == 1);
+    REQUIRE(received.words == note.words);
+    REQUIRE(received.word_count == note.word_count);
+
+    REQUIRE(session.unregister_virtual_endpoint("retained-dst"));
+    REQUIRE(session.virtual_endpoint_count() == 1);
+    const auto endpoints = session.enumerate_endpoints();
+    REQUIRE(endpoints.size() == 1);
+    REQUIRE(endpoints[0].id == "retained-src");
+
+    UmpOpenStatus status = UmpOpenStatus::Ok;
+    REQUIRE(session.open_endpoint("retained-dst", &status) == nullptr);
+    REQUIRE(status == UmpOpenStatus::OsBackendUnavailable);
+
+    // Both this external handle and the source wire retain shared ownership of
+    // the removed destination. Registry removal must nevertheless close it.
+    REQUIRE_FALSE(dst->deliver(note, 0.5));
+    REQUIRE(src->deliver(note, 0.75));
+    REQUIRE(seen == 1);
+
+    REQUIRE(session.unregister_virtual_endpoint("retained-src"));
+    REQUIRE(session.virtual_endpoint_count() == 0);
+    REQUIRE_FALSE(src->deliver(note, 1.0));
+    REQUIRE(seen == 1);
+}
+
 TEST_CASE("UmpSession survives concurrent virtual register + enumerate",
           "[midi][ump][session][item-8.1][thread]") {
     // Light TSan-style smoke: a writer thread spams register/unregister
