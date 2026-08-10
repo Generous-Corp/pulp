@@ -67,6 +67,33 @@ TEST_CASE("PulpTranspose shifts notes by semitones plus octaves",
     REQUIRE(h.out[1].sample_offset == 32);
 }
 
+TEST_CASE(
+    "PulpTranspose preserves nonzero channels across same-pitch note lifecycles",
+    "[example][transpose][midi][channel]")
+{
+    Harness h;
+    h.set_shift(7.0f, 0.0f);
+
+    h.in.add(short_message(0x91, 60, 101, 2));
+    h.in.add(short_message(0x9F, 60, 83, 5));
+    h.in.add(short_message(0xAF, 60, 47, 9));
+    h.in.add(short_message(0x81, 60, 64, 17));
+    h.in.add(short_message(0x8F, 60, 0, 23));
+    h.run();
+
+    REQUIRE(h.out.size() == 5);
+    REQUIRE(h.message(0) == std::vector<std::uint8_t>{0x91, 67, 101});
+    REQUIRE(h.message(1) == std::vector<std::uint8_t>{0x9F, 67, 83});
+    REQUIRE(h.message(2) == std::vector<std::uint8_t>{0xAF, 67, 47});
+    REQUIRE(h.message(3) == std::vector<std::uint8_t>{0x81, 67, 64});
+    REQUIRE(h.message(4) == std::vector<std::uint8_t>{0x8F, 67, 0});
+    REQUIRE(h.out[0].sample_offset == 2);
+    REQUIRE(h.out[1].sample_offset == 5);
+    REQUIRE(h.out[2].sample_offset == 9);
+    REQUIRE(h.out[3].sample_offset == 17);
+    REQUIRE(h.out[4].sample_offset == 23);
+}
+
 TEST_CASE("PulpTranspose transposes poly aftertouch but not control changes",
           "[example][transpose][midi]")
 {
