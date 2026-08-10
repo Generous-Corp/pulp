@@ -278,9 +278,9 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     }
 
     STARTUPINFOEXA startup{};
-    startup.StartupInfo.cb = sizeof(STARTUPINFOA);
-    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
     auto& si = startup.StartupInfo;
+    si.cb = sizeof(STARTUPINFOA);
+    si.dwFlags = STARTF_USESTDHANDLES;
 
     SECURITY_ATTRIBUTES sa{};
     sa.nLength = sizeof(sa);
@@ -330,7 +330,7 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     DWORD creation_flags = CREATE_NO_WINDOW;
     bool attributes_initialized = false;
     if (has_standard_input) {
-        startup.StartupInfo.cb = sizeof(startup);
+        si.cb = sizeof(startup);
         inherited = {si.hStdInput, si.hStdOutput, si.hStdError};
         InitializeProcThreadAttributeList(nullptr, 1, 0, &attributes_size);
         attributes.resize(attributes_size);
@@ -364,7 +364,7 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
                              creation_flags, nullptr,
                              options.working_directory.empty() ? nullptr
                                                                : options.working_directory.c_str(),
-                             &startup.StartupInfo, &pi);
+                             &si, &pi);
 
     if (attributes_initialized)
         DeleteProcThreadAttributeList(startup.lpAttributeList);

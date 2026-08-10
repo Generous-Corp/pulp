@@ -91,16 +91,27 @@ if [ -n "$output" ]; then
 fi
 EOF
 
-    cat > "$mock_bin/tar" <<'EOF'
+cat > "$mock_bin/tar" <<'EOF'
 #!/bin/sh
 destination=
+list_members=0
 while [ "$#" -gt 0 ]; do
-    if [ "$1" = "-C" ]; then
-        shift
-        destination="$1"
-    fi
+    case "$1" in
+        -*t*) list_members=1 ;;
+        -C)
+            shift
+            destination="$1"
+            ;;
+    esac
     shift
 done
+if [ "$list_members" = "1" ]; then
+    echo pulp
+    if [ "${MOCK_INCLUDE_MCP:-1}" = "1" ]; then
+        echo pulp-mcp
+    fi
+    exit 0
+fi
 [ -n "$destination" ] || exit 2
 mkdir -p "$destination"
 cat > "$destination/pulp" <<'PULP_EOF'

@@ -36,6 +36,24 @@ if(Python3_Interpreter_FOUND)
         --cmake "${CMAKE_COMMAND}"
         --generator "${CMAKE_GENERATOR}"
         "--config=$<CONFIG>")
+    set(_pulp_agent_capability_instrumentation_compile_flags
+        ${PULP_SANITIZER_COMPILE_FLAGS}
+        ${PULP_COVERAGE_COMPILE_FLAGS})
+    set(_pulp_agent_capability_instrumentation_link_flags
+        ${PULP_SANITIZER_LINK_FLAGS}
+        ${PULP_COVERAGE_LINK_FLAGS})
+    string(JOIN " " _pulp_agent_capability_instrumentation_compile_flags
+        ${_pulp_agent_capability_instrumentation_compile_flags})
+    string(JOIN " " _pulp_agent_capability_instrumentation_link_flags
+        ${_pulp_agent_capability_instrumentation_link_flags})
+    if(_pulp_agent_capability_instrumentation_compile_flags)
+        list(APPEND _pulp_agent_capability_installed_args
+            "--instrumentation-cxx-flags=${_pulp_agent_capability_instrumentation_compile_flags}")
+    endif()
+    if(_pulp_agent_capability_instrumentation_link_flags)
+        list(APPEND _pulp_agent_capability_installed_args
+            "--instrumentation-linker-flags=${_pulp_agent_capability_instrumentation_link_flags}")
+    endif()
     if(CMAKE_GENERATOR_PLATFORM)
         list(APPEND _pulp_agent_capability_installed_args
             --generator-platform "${CMAKE_GENERATOR_PLATFORM}")
@@ -68,6 +86,8 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_installed_sdk.py"
             ${_pulp_agent_capability_installed_args})
     unset(_pulp_agent_capability_installed_args)
+    unset(_pulp_agent_capability_instrumentation_compile_flags)
+    unset(_pulp_agent_capability_instrumentation_link_flags)
     # This installs the SDK, then configures, builds, and runs an independent
     # consumer for every capability row and typed binding.
     # A cold Linux runner configures, builds, and runs hundreds of isolated
