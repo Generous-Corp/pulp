@@ -317,6 +317,7 @@ TEST_CASE("ProgramCompiler realizes registered harmony and leaves authored MIDI 
     initial.project = before;
     initial.sequence_id = {2};
     initial.tempo_map = tempo;
+    initial.sample_rate = tempo->sample_rate();
     initial.document_revision = 1;
     initial.dirty.all = true;
     initial.invalidation = CompileInvalidationInput::baseline(registry, before, 1);
@@ -384,6 +385,7 @@ TEST_CASE("ProgramCompiler realizes registered harmony and leaves authored MIDI 
     removal_request.project = without_pattern;
     removal_request.sequence_id = {2};
     removal_request.tempo_map = tempo;
+    removal_request.sample_rate = tempo->sample_rate();
     removal_request.document_revision = 3;
     removal_request.invalidation = CompileInvalidationInput{registry, removed_commit};
     REQUIRE(compiler.submit(std::move(removal_request)));
@@ -431,6 +433,7 @@ TEST_CASE("a trimmed nested registered pattern is explicitly refused",
     request.project = project;
     request.sequence_id = {2};
     request.tempo_map = test_tempo_map();
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty.all = true;
     request.invalidation = CompileInvalidationInput::baseline(registry, project, 1);
@@ -475,6 +478,7 @@ TEST_CASE("a count-changing fragment rekeys every downstream generated range",
     initial.project = before;
     initial.sequence_id = {2};
     initial.tempo_map = test_tempo_map();
+    initial.sample_rate = initial.tempo_map->sample_rate();
     initial.document_revision = 1;
     initial.dirty.all = true;
     initial.invalidation = CompileInvalidationInput::baseline(registry, before, 1);
@@ -540,7 +544,8 @@ TEST_CASE("ProgramCompiler refuses unresolved and quota-violating registered con
         ProgramCompileRequest request;
         request.project = project;
         request.sequence_id = {2};
-        request.tempo_map = tempo;
+    request.tempo_map = tempo;
+        request.sample_rate = tempo->sample_rate();
         request.document_revision = 1;
         request.dirty.all = true;
         request.invalidation = CompileInvalidationInput::baseline(empty_registry, project, 1);
@@ -568,6 +573,7 @@ TEST_CASE("ProgramCompiler refuses unresolved and quota-violating registered con
         request.project = project;
         request.sequence_id = {2};
         request.tempo_map = tempo;
+        request.sample_rate = tempo->sample_rate();
         request.document_revision = 1;
         request.dirty.all = true;
         request.invalidation = CompileInvalidationInput::baseline(registry, project, 1);
@@ -603,6 +609,7 @@ TEST_CASE("registered production aggregates the weakest active content declarati
     request.project = project;
     request.sequence_id = {2};
     request.tempo_map = test_tempo_map();
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty.all = true;
     request.invalidation = CompileInvalidationInput::baseline(registry, project, 1);
