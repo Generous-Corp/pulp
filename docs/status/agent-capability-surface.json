@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 28,
+  "inventory_version": 29,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,15 +37,15 @@
     }
   ],
   "counts": {
-    "public_headers": 422,
-    "reviewed_headers": 122,
-    "legacy_unreviewed_headers": 300,
+    "public_headers": 423,
+    "reviewed_headers": 124,
+    "legacy_unreviewed_headers": 299,
     "unsupported_headers": 1,
     "by_disposition": {
-      "capability_entrypoint": 79,
-      "capability_support": 37,
+      "capability_entrypoint": 80,
+      "capability_support": 38,
       "infrastructure": 5,
-      "legacy_unreviewed": 300,
+      "legacy_unreviewed": 299,
       "unsupported_capability": 1
     },
     "by_domain": {
@@ -74,9 +74,9 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 244,
-        "reviewed_headers": 83,
-        "legacy_unreviewed_headers": 161,
+        "public_headers": 245,
+        "reviewed_headers": 85,
+        "legacy_unreviewed_headers": 160,
         "unsupported_headers": 1
       },
       "timebase": {
@@ -1739,6 +1739,17 @@
     },
     {
       "domain": "signal",
+      "source": "core/signal/include/pulp/signal/beat_repeat_kernel.hpp",
+      "fingerprint": "sha256:4272908a298829c8c311901047dd242a443b42ae93054783d5488a8f8f33a453",
+      "include": "pulp/signal/beat_repeat_kernel.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.beat-repeat-kernel"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
       "source": "core/signal/include/pulp/signal/bias.hpp",
       "fingerprint": "sha256:e1b90f23d44c752132d0feb9e5873a03069a32cf40f9631098d2019231f696d8",
       "include": "pulp/signal/bias.hpp",
@@ -2602,11 +2613,13 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/freeze_loop_sampler.hpp",
-      "fingerprint": "sha256:e1f095e06e0edf5600fdcf321f368f952eb17f2b9b09e334d351a2ab0eb05cbd",
+      "fingerprint": "sha256:771ad66588052eb6e8772ef6f1d6bd871701807667973b3ebd01887d56587a44",
       "include": "pulp/signal/freeze_loop_sampler.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.beat-repeat-kernel"
+      ],
+      "rationale": "Single rolling dry-history and immutable exact-capture owner reused by the beat-repeat kernel; legacy freeze and snapshot behavior remains source compatible."
     },
     {
       "domain": "signal",
@@ -3468,7 +3481,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:dfda31f739af5bd6141564cbe5592176e6b2c581b1b2b62f9bbc6714dd289dc8",
+      "fingerprint": "sha256:cf36559168b3f108277cd9106604ec16670b9cbae863813d468f4ab0363d3aff",
       "include": "pulp/signal/signal.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],

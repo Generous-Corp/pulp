@@ -439,6 +439,50 @@ EXPORTS = [
         ],
     ),
     capability(
+        key="signal.beat-repeat-kernel", domain="signal",
+        summary=(
+            "Tempo-map-quantized exact dry-history capture with bounded repeat, gate, "
+            "reverse/alternate playback, and frame-offset gesture events; pitch excluded."
+        ),
+        rt_class="mixed",
+        lifecycle={"construction": "control",
+                   "prepare": "control; allocates one rolling-history/capture owner and bounded transition scratch",
+                   "process": "audio", "reset": "audio",
+                   "release": "snapshot/restore and destruction off audio"},
+        state_model=(
+            "One FreezeLoopSampler dry-history/capture owner, armed tempo-map edge, active "
+            "cell phase/direction/gate, and bounded dry-wet or wet-wet transition state."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "input"},
+        input_domain=(
+            "finite planar dry audio, immutable CompiledTempoMap, canonical BeatDivision, "
+            "transport epoch, and ordered trigger/stop/seek events with block frame offsets"
+        ),
+        output_domain="dry passthrough or repeated immutable captured audio",
+        units=["samples", "frames", "canonical ticks", "normalized gate duty"],
+        latency="zero",
+        tail="configured bounded transition sample count",
+        scheduling=(
+            "strictly next canonical division edge; captures [edge-N, edge) before writing "
+            "the edge dry sample; epoch discontinuities cancel only pending arms"
+        ),
+        bindings=[
+            binding(
+                role="kernel", kind="cpp_type",
+                include="pulp/signal/beat_repeat_kernel.hpp",
+                qualified_name="pulp::signal::BeatRepeatKernelT<float>",
+                target="Pulp::signal",
+                header_fingerprint="sha256:4272908a298829c8c311901047dd242a443b42ae93054783d5488a8f8f33a453",
+            ),
+        ],
+        _link_probes=[
+            {"role": "kernel", "binding": "pulp::signal::BeatRepeatKernelT<float>",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+        ],
+    ),
+    capability(
         key="signal.nonlinear-shaping", domain="signal",
         summary="Antialiased multistage wavefolding, Chebyshev harmonic shaping, and ring modulation.",
         rt_class="mixed",

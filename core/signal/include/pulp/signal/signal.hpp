@@ -15,6 +15,7 @@
 #include <pulp/signal/waveguide_reed_exciter.hpp>
 #include <pulp/signal/waveguide_reflection_filter.hpp>
 #include <pulp/signal/reed_waveguide_loop.hpp>
+#include <pulp/signal/beat_repeat_kernel.hpp>
 #include <pulp/signal/dry_wet_mixer.hpp>
 #include <pulp/signal/gain.hpp>
 #include <pulp/signal/compressor.hpp>
