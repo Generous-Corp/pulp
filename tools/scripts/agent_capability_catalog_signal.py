@@ -442,23 +442,26 @@ EXPORTS = [
         key="signal.beat-repeat-kernel", domain="signal",
         summary=(
             "Tempo-map-quantized exact dry-history capture with bounded repeat, gate, "
-            "reverse/alternate playback, and frame-offset gesture events; pitch excluded."
+            "reverse/alternate playback, and direct trigger/stop/seek controls; pitch excluded."
         ),
+        contract_version={"major": 2, "minor": 0},
         rt_class="mixed",
         lifecycle={"construction": "control",
-                   "prepare": "control; allocates one rolling-history/capture owner and bounded transition scratch",
+                   "prepare": "control; binds sample rate and allocates one rolling-history/capture owner plus bounded transition scratch",
                    "process": "audio", "reset": "audio",
                    "release": "snapshot/restore and destruction off audio"},
         state_model=(
-            "One FreezeLoopSampler dry-history/capture owner, armed tempo-map edge, active "
-            "cell phase/direction/gate, and bounded dry-wet or wet-wet transition state."
+            "One FreezeLoopSampler dry-history/capture owner, pending compiled grid edge, "
+            "prepared RationalRate, active loop phase/direction/gate, continuity cursor, "
+            "and bounded transition state."
         ),
         seed_model="none",
         determinism={"repeatability": "bit_exact", "block_partition": "invariant",
                      "platform_scope": "same_build", "transport_history": "input"},
         input_domain=(
-            "finite planar dry audio, immutable CompiledTempoMap, canonical BeatDivision, "
-            "transport epoch, and ordered trigger/stop/seek events with block frame offsets"
+            "finite planar dry audio, immutable CompiledTempoMap matching the prepared "
+            "RationalRate, canonical BeatDivision, requested sample, contiguous block "
+            "positions, and direct controls"
         ),
         output_domain="dry passthrough or repeated immutable captured audio",
         units=["samples", "frames", "canonical ticks", "normalized gate duty"],
@@ -466,7 +469,8 @@ EXPORTS = [
         tail="configured bounded transition sample count",
         scheduling=(
             "strictly next canonical division edge; captures [edge-N, edge) before writing "
-            "the edge dry sample; epoch discontinuities cancel only pending arms"
+            "the edge dry sample; explicit or detected transport discontinuity resets the "
+            "pending arm, active loop, transitions, and rolling history"
         ),
         bindings=[
             binding(
@@ -474,7 +478,7 @@ EXPORTS = [
                 include="pulp/signal/beat_repeat_kernel.hpp",
                 qualified_name="pulp::signal::BeatRepeatKernelT<float>",
                 target="Pulp::signal",
-                header_fingerprint="sha256:4272908a298829c8c311901047dd242a443b42ae93054783d5488a8f8f33a453",
+                header_fingerprint="sha256:f7c213c193f826f3e791688dbf3dd4626f0b3766aa8659a8910e98e7691ba23e",
             ),
         ],
         _link_probes=[

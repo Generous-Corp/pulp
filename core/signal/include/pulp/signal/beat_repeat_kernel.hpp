@@ -1,24 +1,22 @@
 #pragma once
 
 /// @file beat_repeat_kernel.hpp
-/// Tempo-map-quantized capture and bounded repeat gestures over the existing
-/// FreezeLoopSampler history owner.
+/// Quantized capture and bounded repeat gestures over FreezeLoopSamplerT.
 ///
-/// The archived design also proposed pitch-shifted playback. That feature is
-/// deliberately not advertised here: FractionalDelayHistoryT owns a separate
-/// history buffer and cannot read this immutable capture without duplicating
-/// it. This kernel closes the currently admitted history/timing, repeat, gate,
-/// reverse, seek, and transition contract while retaining one full-buffer
-/// owner.
+/// Capture timing is lowered from CompiledTempoMap and the canonical
+/// BeatDivision tick lattice. The kernel therefore has no independent BPM or
+/// floating-point transport clock. It records dry input only, captures an
+/// exact recent interval without clamping, and layers finite/infinite repeat,
+/// gate, reverse, seek, retrigger, and click-safe transitions over the reused
+/// sampler storage.
 ///
-/// RT contract: prepare(), snapshot(), and restore() may allocate. Once
-/// prepared, process(), reset(), and all event handling are bounded,
-/// allocation-free, lock-free, and I/O-free. Events carry offsets inside the
-/// current block; capture always occurs before that edge sample is written to
-/// dry history, so the immutable source interval is exactly [edge-N, edge).
+/// RT contract: prepare(), snapshot(), and restore() may allocate. After a
+/// successful prepare(), trigger(), stop(), seek(), reset(),
+/// transport_discontinuity(), parameter setters, and process() allocate
+/// nothing and take no locks.
 
-#include <pulp/signal/crossfade.hpp>
 #include <pulp/signal/freeze_loop_sampler.hpp>
+#include <pulp/signal/transition_mixer.hpp>
 #include <pulp/timebase/beat_division.hpp>
 #include <pulp/timebase/compiled_tempo_map.hpp>
 
@@ -28,135 +26,245 @@
 #include <cstdint>
 #include <limits>
 #include <new>
-#include <span>
 #include <stdexcept>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace pulp::signal {
 
-enum class BeatRepeatDirection : std::uint8_t {
-    Forward,
-    Reverse,
-    Alternate,
-};
-
-enum class BeatRepeatState : std::uint8_t {
-    Idle,
-    Armed,
-    Active,
-    ActiveArmed,
-    Releasing,
-    ReleasingArmed,
-};
-
-enum class BeatRepeatError : std::uint8_t {
+enum class BeatRepeatPlanError {
     None,
-    NotPrepared,
-    InvalidArgument,
-    InvalidEventOrder,
-    TempoMapRateMismatch,
-    InsufficientHistory,
-    PositionOverflow,
-    NonFiniteInput,
+    InvalidDivision,
+    TickRangeExceeded,
+    SampleRangeExceeded,
+    CaptureRangeExceeded,
+    HistoryCapacityExceeded,
+    Unprepared,
+    SampleRateMismatch,
+    ReleaseInProgress,
+    StaleRequest,
 };
 
-struct BeatRepeatEvent {
-    enum class Type : std::uint8_t {
-        Trigger,
-        Stop,
-        Seek,
-    };
-
-    Type type = Type::Trigger;
-    std::uint32_t frame_offset = 0;
-    /// Forward-coordinate frame in the immutable capture. Direction affects
-    /// subsequent stepping, never the coordinate accepted here.
-    std::int64_t seek_frame = 0;
+struct BeatRepeatCapturePlan {
+    timebase::SamplePosition requested_sample{};
+    timebase::SamplePosition edge_sample{};
+    timebase::TickPosition edge_tick{};
+    int capture_frames = 0;
+    constexpr auto operator<=>(const BeatRepeatCapturePlan&) const = default;
 };
 
-/// Events must be ordered by nondecreasing frame_offset. Events sharing one
-/// frame are applied in span order, before capture/render/history for that
-/// frame; callers can therefore express stop-then-trigger or trigger-then-stop
-/// deliberately without an implicit precedence table.
-struct BeatRepeatProcessResult {
-    BeatRepeatError error = BeatRepeatError::None;
-    std::size_t processed_frames = 0;
-    std::size_t rejected_events = 0;
-
-    [[nodiscard]] explicit operator bool() const noexcept {
-        return error == BeatRepeatError::None;
+struct BeatRepeatPlanResult {
+    BeatRepeatCapturePlan plan{};
+    BeatRepeatPlanError error = BeatRepeatPlanError::None;
+    constexpr explicit operator bool() const noexcept {
+        return error == BeatRepeatPlanError::None;
     }
 };
 
-template <typename SampleType = float> class BeatRepeatKernelT {
-    static_assert(std::is_floating_point_v<SampleType>);
+namespace detail {
 
+inline bool beat_repeat_checked_add(std::int64_t lhs, std::int64_t rhs,
+                                    std::int64_t& result) noexcept {
+    constexpr auto minimum = std::numeric_limits<std::int64_t>::min();
+    constexpr auto maximum = std::numeric_limits<std::int64_t>::max();
+    if ((rhs > 0 && lhs > maximum - rhs) || (rhs < 0 && lhs < minimum - rhs))
+        return false;
+    result = lhs + rhs;
+    return true;
+}
+
+inline bool beat_repeat_checked_subtract(std::int64_t lhs, std::int64_t rhs,
+                                         std::int64_t& result) noexcept {
+    constexpr auto minimum = std::numeric_limits<std::int64_t>::min();
+    constexpr auto maximum = std::numeric_limits<std::int64_t>::max();
+    if ((rhs > 0 && lhs < minimum + rhs) || (rhs < 0 && lhs > maximum + rhs))
+        return false;
+    result = lhs - rhs;
+    return true;
+}
+
+inline bool beat_repeat_ceil_tick(std::int64_t value, std::int64_t quantum,
+                                  std::int64_t& result) noexcept {
+    if (quantum <= 0)
+        return false;
+    const auto remainder = value % quantum;
+    if (remainder == 0) {
+        result = value;
+        return true;
+    }
+    const auto delta = remainder < 0 ? -remainder : quantum - remainder;
+    return beat_repeat_checked_add(value, delta, result);
+}
+
+} // namespace detail
+
+/// Lower the first grid edge strictly after `requested_sample` and the exact
+/// preceding grid interval into integer host samples. Tempo ramps and segment
+/// anchors are resolved by CompiledTempoMap itself.
+inline BeatRepeatPlanResult
+lower_beat_repeat_capture(const timebase::CompiledTempoMap& tempo, timebase::BeatDivision division,
+                          timebase::SamplePosition requested_sample) noexcept {
+    const auto quantum_result = timebase::division_ticks(division);
+    if (!quantum_result)
+        return {{}, BeatRepeatPlanError::InvalidDivision};
+    const auto quantum = quantum_result.value().value;
+    auto candidate_source = tempo.samples_to_ticks(requested_sample).value;
+    std::int64_t candidate = 0;
+    if (!detail::beat_repeat_ceil_tick(candidate_source, quantum, candidate))
+        return {{}, BeatRepeatPlanError::TickRangeExceeded};
+
+    auto edge = tempo.ticks_to_samples({candidate});
+    if (edge.value == std::numeric_limits<std::int64_t>::min() ||
+        edge.value == std::numeric_limits<std::int64_t>::max())
+        return {{}, BeatRepeatPlanError::SampleRangeExceeded};
+    if (edge.value <= requested_sample.value) {
+        const auto candidate_bits = static_cast<std::uint64_t>(candidate);
+        const auto maximum_bits =
+            static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+        const auto maximum_steps =
+            (maximum_bits - candidate_bits) / static_cast<std::uint64_t>(quantum);
+        if (maximum_steps == 0)
+            return {{}, BeatRepeatPlanError::TickRangeExceeded};
+        const auto tick_at_step = [&](std::uint64_t step) noexcept {
+            const auto offset = step * static_cast<std::uint64_t>(quantum);
+            return static_cast<std::int64_t>(candidate_bits + offset);
+        };
+
+        std::uint64_t lower_step = 0;
+        std::uint64_t upper_step = 1;
+        for (;;) {
+            upper_step = std::min(upper_step, maximum_steps);
+            const auto probe = tick_at_step(upper_step);
+            edge = tempo.ticks_to_samples({probe});
+            if (edge.value > requested_sample.value)
+                break;
+            if (upper_step == maximum_steps)
+                return {{}, BeatRepeatPlanError::SampleRangeExceeded};
+            lower_step = upper_step;
+            upper_step = upper_step > maximum_steps / 2 ? maximum_steps : upper_step * 2;
+        }
+        while (upper_step - lower_step > 1) {
+            const auto middle_step = lower_step + (upper_step - lower_step) / 2;
+            const auto middle = tick_at_step(middle_step);
+            if (tempo.ticks_to_samples({middle}).value <= requested_sample.value)
+                lower_step = middle_step;
+            else
+                upper_step = middle_step;
+        }
+        candidate = tick_at_step(upper_step);
+        edge = tempo.ticks_to_samples({candidate});
+    }
+
+    if (edge.value == std::numeric_limits<std::int64_t>::min() ||
+        edge.value == std::numeric_limits<std::int64_t>::max())
+        return {{}, BeatRepeatPlanError::SampleRangeExceeded};
+
+    std::int64_t previous_tick = 0;
+    if (!detail::beat_repeat_checked_subtract(candidate, quantum, previous_tick))
+        return {{}, BeatRepeatPlanError::TickRangeExceeded};
+    const auto previous_sample = tempo.ticks_to_samples({previous_tick});
+    if (previous_sample.value == std::numeric_limits<std::int64_t>::min() ||
+        previous_sample.value == std::numeric_limits<std::int64_t>::max())
+        return {{}, BeatRepeatPlanError::SampleRangeExceeded};
+    std::int64_t capture_frames = 0;
+    if (!detail::beat_repeat_checked_subtract(edge.value, previous_sample.value, capture_frames) ||
+        capture_frames <= 0 || capture_frames > std::numeric_limits<int>::max())
+        return {{}, BeatRepeatPlanError::CaptureRangeExceeded};
+    return {{requested_sample, edge, {candidate}, static_cast<int>(capture_frames)},
+            BeatRepeatPlanError::None};
+}
+
+template <typename SampleType = float> class BeatRepeatKernelT {
   public:
+    enum class ReverseMode {
+        Off,
+        On,
+        Alternate,
+    };
+
+    enum class Status {
+        Idle,
+        Armed,
+        CaptureRejectedInsufficientHistory,
+        Active,
+        Releasing,
+    };
+
+    enum class TransitionKind {
+        None,
+        DryToWet,
+        HeldToWet,
+        HeldToDry,
+    };
+
+    struct Config {
+        int channels = 2;
+        int history_capacity_frames = 192'000;
+        int transition_frames = 144;
+        timebase::RationalRate sample_rate{48'000, 1};
+    };
+
     struct Snapshot {
-        std::uint32_t version = 1;
-        bool restorable = false;
-        std::vector<SampleType> capture;
-        std::vector<SampleType> last_wet;
-        std::vector<SampleType> last_rendered;
-        timebase::BeatDivision division = timebase::BeatDivision::Eighth;
-        BeatRepeatDirection direction = BeatRepeatDirection::Forward;
-        std::uint32_t repeat_count = 0;
+        bool resumable = true;
+        timebase::RationalRate sample_rate{48'000, 1};
+        int repeat_count = 4;
         SampleType gate = SampleType{1};
-        std::size_t transition_samples = 0;
-        std::size_t phase = 0;
-        std::uint32_t completed_cells = 0;
+        ReverseMode reverse = ReverseMode::Off;
+        int loop_position = 0;
+        int completed_repeats = 0;
+        bool alternate_repeat = false;
         bool active = false;
-        bool capture_rejected = false;
-        BeatRepeatError error = BeatRepeatError::None;
+        bool last_capture_rejected = false;
+        TransitionKind transition = TransitionKind::None;
+        int transition_frames = 0;
+        int transition_position = 0;
+        int transition_length = 0;
+        std::vector<SampleType> sampler;
+        std::vector<SampleType> last_output;
+        std::vector<SampleType> transition_old;
     };
 
     BeatRepeatKernelT() = default;
     BeatRepeatKernelT(const BeatRepeatKernelT&) = delete;
     BeatRepeatKernelT& operator=(const BeatRepeatKernelT&) = delete;
-    BeatRepeatKernelT(BeatRepeatKernelT&&) noexcept = default;
-    BeatRepeatKernelT& operator=(BeatRepeatKernelT&&) noexcept = default;
-
-    /// Prepare one dry-history/capture owner and bounded transition scratch.
-    /// Returns false atomically for invalid or unrepresentable bounds.
-    [[nodiscard]] bool prepare(timebase::RationalRate sample_rate, std::size_t channels,
-                               std::size_t maximum_history_frames,
-                               std::size_t maximum_transition_frames) {
-        const auto normalized = sample_rate.normalized();
-        if (!normalized.valid() || channels == 0 || channels > 64 || maximum_history_frames == 0 ||
-            maximum_history_frames > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
-            maximum_transition_frames > maximum_history_frames ||
-            channels > std::numeric_limits<std::size_t>::max() / maximum_history_frames) {
-            return false;
+    BeatRepeatKernelT(BeatRepeatKernelT&& other) noexcept {
+        swap(other);
+    }
+    BeatRepeatKernelT& operator=(BeatRepeatKernelT&& other) noexcept {
+        if (this != &other) {
+            BeatRepeatKernelT replacement(std::move(other));
+            swap(replacement);
         }
+        return *this;
+    }
+
+    bool prepare(const Config& config) {
+        if (config.channels <= 0 || config.history_capacity_frames <= 0 ||
+            config.transition_frames < 0 || !config.sample_rate.valid())
+            return false;
+        const auto normalized_rate = config.sample_rate.normalized();
 
 #if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
         try {
 #endif
-            std::vector<SampleType> replacement_last(channels, SampleType{});
-            std::vector<SampleType> replacement_rendered(channels, SampleType{});
-            std::vector<SampleType> replacement_from(channels, SampleType{});
-            std::vector<SampleType> replacement_wrap(channels, SampleType{});
-            std::vector<SampleType> replacement_frame(channels, SampleType{});
-
-            FreezeLoopSamplerT<SampleType> replacement;
-            replacement.prepare(static_cast<int>(channels),
-                                static_cast<int>(maximum_history_frames), 0);
-            if (replacement.capacity() != static_cast<int>(maximum_history_frames) ||
-                replacement.channels() != static_cast<int>(channels))
+            FreezeLoopSamplerT<SampleType> replacement_sampler;
+            replacement_sampler.prepare(config.channels, config.history_capacity_frames, 0);
+            if (replacement_sampler.channels() != config.channels ||
+                replacement_sampler.capacity() != config.history_capacity_frames)
                 return false;
+            std::vector<const SampleType*> replacement_inputs(
+                static_cast<std::size_t>(config.channels), nullptr);
+            std::vector<SampleType> replacement_last(static_cast<std::size_t>(config.channels),
+                                                     SampleType{});
+            std::vector<SampleType> replacement_transition(
+                static_cast<std::size_t>(config.channels), SampleType{});
 
-            history_ = std::move(replacement);
-            last_wet_.swap(replacement_last);
-            last_rendered_.swap(replacement_rendered);
-            transition_from_.swap(replacement_from);
-            wrap_from_.swap(replacement_wrap);
-            frame_scratch_.swap(replacement_frame);
-            sample_rate_ = normalized;
-            channels_ = channels;
-            maximum_transition_samples_ = maximum_transition_frames;
-            transition_samples_ = maximum_transition_frames;
+            sampler_ = std::move(replacement_sampler);
+            history_inputs_.swap(replacement_inputs);
+            last_output_.swap(replacement_last);
+            transition_old_.swap(replacement_transition);
+            transition_frames_ = config.transition_frames;
+            sample_rate_ = normalized_rate;
             prepared_ = true;
             reset();
             return true;
@@ -169,572 +277,553 @@ template <typename SampleType = float> class BeatRepeatKernelT {
 #endif
     }
 
-    void reset() noexcept {
-        if (!prepared_)
-            return;
-        history_.reset();
-        std::fill(last_wet_.begin(), last_wet_.end(), SampleType{});
-        std::fill(last_rendered_.begin(), last_rendered_.end(), SampleType{});
-        std::fill(transition_from_.begin(), transition_from_.end(), SampleType{});
-        std::fill(wrap_from_.begin(), wrap_from_.end(), SampleType{});
-        armed_ = false;
-        active_ = false;
-        releasing_ = false;
-        capture_rejected_ = false;
-        error_ = BeatRepeatError::None;
-        capture_frames_ = 0;
-        phase_ = 0;
-        completed_cells_ = 0;
-        transition_kind_ = TransitionKind::None;
-        transition_position_ = 0;
-        wrap_position_ = 0;
-        epoch_known_ = false;
-        stream_position_known_ = false;
+    bool prepared() const noexcept {
+        return prepared_;
     }
-
-    void set_division(timebase::BeatDivision division) noexcept {
-        if (timebase::division_ticks(division))
-            division_ = division;
-        else
-            set_error(BeatRepeatError::InvalidArgument);
+    int channels() const noexcept {
+        return sampler_.channels();
     }
-    void set_repeat_count(std::uint32_t total_cells) noexcept {
-        repeat_count_ = total_cells;
+    int history_capacity_frames() const noexcept {
+        return sampler_.capacity();
     }
-    void set_gate(SampleType duty) noexcept {
-        if (!std::isfinite(duty)) {
-            set_error(BeatRepeatError::InvalidArgument);
-            return;
-        }
-        gate_ = std::clamp(duty, SampleType{}, SampleType{1});
+    int available_history_frames() const noexcept {
+        return sampler_.available_history();
     }
-    void set_direction(BeatRepeatDirection direction) noexcept {
-        if (direction > BeatRepeatDirection::Alternate) {
-            set_error(BeatRepeatError::InvalidArgument);
-            return;
-        }
-        direction_ = direction;
+    Status status() const noexcept {
+        return status_;
     }
-    void set_transition_samples(std::size_t samples) noexcept {
-        transition_samples_ = std::min(samples, maximum_transition_samples_);
+    bool last_capture_rejected() const noexcept {
+        return last_capture_rejected_;
     }
-
-    [[nodiscard]] timebase::BeatDivision division() const noexcept {
-        return division_;
+    bool can_snapshot() const noexcept {
+        return !pending_capture_;
     }
-    [[nodiscard]] std::uint32_t repeat_count() const noexcept {
-        return repeat_count_;
+    int loop_length() const noexcept {
+        return active_loop_ ? sampler_.loop_length() : 0;
     }
-    [[nodiscard]] SampleType gate() const noexcept {
-        return gate_;
+    int loop_position() const noexcept {
+        return loop_position_;
     }
-    [[nodiscard]] BeatRepeatDirection direction() const noexcept {
-        return direction_;
+    int completed_repeats() const noexcept {
+        return completed_repeats_;
     }
-    [[nodiscard]] std::size_t transition_samples() const noexcept {
-        return transition_samples_;
-    }
-    [[nodiscard]] BeatRepeatState state() const noexcept {
-        if (releasing_)
-            return armed_ ? BeatRepeatState::ReleasingArmed : BeatRepeatState::Releasing;
-        if (active_)
-            return armed_ ? BeatRepeatState::ActiveArmed : BeatRepeatState::Active;
-        return armed_ ? BeatRepeatState::Armed : BeatRepeatState::Idle;
-    }
-    [[nodiscard]] BeatRepeatError last_error() const noexcept {
-        return error_;
-    }
-    void clear_error() noexcept {
-        error_ = BeatRepeatError::None;
-    }
-    [[nodiscard]] bool last_capture_rejected() const noexcept {
-        return capture_rejected_;
-    }
-    [[nodiscard]] std::size_t captured_frames() const noexcept {
-        return capture_frames_;
-    }
-    [[nodiscard]] std::size_t available_history() const noexcept {
-        return static_cast<std::size_t>(std::max(0, history_.available_history()));
-    }
-    [[nodiscard]] constexpr int latency_samples() const noexcept {
+    int latency_samples() const noexcept {
         return 0;
     }
-    [[nodiscard]] std::size_t max_tail_samples() const noexcept {
-        return transition_samples_;
+    int max_tail_samples() const noexcept {
+        return active_transition_frames();
     }
-    [[nodiscard]] std::size_t retained_bytes() const noexcept {
-        return history_.retained_bytes() +
-               (last_wet_.capacity() + last_rendered_.capacity() + transition_from_.capacity() +
-                wrap_from_.capacity() + frame_scratch_.capacity()) *
-                   sizeof(SampleType);
+    std::size_t retained_bytes() const noexcept {
+        return sampler_.retained_bytes() + (history_inputs_.capacity() * sizeof(const SampleType*) +
+                                            last_output_.capacity() * sizeof(SampleType) +
+                                            transition_old_.capacity() * sizeof(SampleType));
     }
 
-    [[nodiscard]] BeatRepeatProcessResult
-    process(const SampleType* const* input, SampleType* const* output, std::size_t frames,
-            std::int64_t block_sample_start, std::uint64_t transport_epoch,
-            const timebase::CompiledTempoMap& tempo_map,
-            std::span<const BeatRepeatEvent> events = {}) noexcept {
-        BeatRepeatProcessResult result;
+    bool set_repeat_count(int count) noexcept {
+        if (count < 0)
+            return false;
+        repeat_count_ = count;
+        if (active_loop_ && status_ != Status::Releasing && count > 0 &&
+            completed_repeats_ >= count) {
+            pending_capture_ = false;
+            status_ = Status::Releasing;
+            begin_held_transition(TransitionKind::HeldToDry);
+        }
+        return true;
+    }
+
+    bool set_gate(SampleType duty) noexcept {
+        if (!std::isfinite(static_cast<double>(duty)))
+            return false;
+        gate_ = std::clamp(duty, SampleType{}, SampleType{1});
+        return true;
+    }
+
+    bool set_reverse(ReverseMode mode) noexcept {
+        if (mode != ReverseMode::Off && mode != ReverseMode::On && mode != ReverseMode::Alternate)
+            return false;
+        if (mode != reverse_ && active_loop_ && status_ != Status::Releasing)
+            begin_held_transition(TransitionKind::HeldToWet);
+        reverse_ = mode;
+        return true;
+    }
+
+    bool set_transition_frames(int frames) noexcept {
+        if (frames < 0)
+            return false;
+        if (frames != transition_frames_ && transition_kind_ != TransitionKind::None)
+            return false;
+        transition_frames_ = frames;
+        return true;
+    }
+
+    BeatRepeatPlanResult trigger(const timebase::CompiledTempoMap& tempo,
+                                 timebase::BeatDivision division,
+                                 timebase::SamplePosition requested_sample) noexcept {
         if (!prepared_)
-            return fail_process(BeatRepeatError::NotPrepared);
-        if ((frames != 0 && (input == nullptr || output == nullptr)) ||
-            frames > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()))
-            return fail_process(BeatRepeatError::InvalidArgument);
-        if (frames > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()) ||
-            block_sample_start >
-                std::numeric_limits<std::int64_t>::max() - static_cast<std::int64_t>(frames)) {
-            set_error(BeatRepeatError::PositionOverflow);
-            return fail_process(BeatRepeatError::PositionOverflow);
+            return {{}, BeatRepeatPlanError::Unprepared};
+        if (tempo.sample_rate().normalized() != sample_rate_)
+            return {{}, BeatRepeatPlanError::SampleRateMismatch};
+        if (status_ == Status::Releasing)
+            return {{}, BeatRepeatPlanError::ReleaseInProgress};
+        const auto lowered = lower_beat_repeat_capture(tempo, division, requested_sample);
+        if (!lowered)
+            return lowered;
+        if (lowered.plan.capture_frames > sampler_.capacity())
+            return {{}, BeatRepeatPlanError::HistoryCapacityExceeded};
+        if (have_expected_sample_ && lowered.plan.edge_sample.value < expected_sample_)
+            return {{}, BeatRepeatPlanError::StaleRequest};
+        pending_plan_ = lowered.plan;
+        pending_capture_ = true;
+        last_capture_rejected_ = false;
+        status_ = Status::Armed;
+        return lowered;
+    }
+
+    void stop() noexcept {
+        pending_capture_ = false;
+        if (!active_loop_) {
+            status_ = Status::Idle;
+            transition_kind_ = TransitionKind::None;
+            return;
         }
-        for (std::size_t channel = 0; channel < channels_; ++channel) {
-            if (frames != 0 && (input[channel] == nullptr || output[channel] == nullptr))
-                return fail_process(BeatRepeatError::InvalidArgument);
+        if (transition_kind_ == TransitionKind::HeldToDry)
+            return;
+        status_ = Status::Releasing;
+        begin_held_transition(TransitionKind::HeldToDry);
+    }
+
+    bool seek(int captured_frame) noexcept {
+        if (!active_loop_ || status_ == Status::Releasing || sampler_.loop_length() <= 0)
+            return false;
+        const auto clamped = std::clamp(captured_frame, 0, sampler_.loop_length() - 1);
+        loop_position_ =
+            reverse_for_current_repeat() ? sampler_.loop_length() - 1 - clamped : clamped;
+        begin_held_transition(TransitionKind::HeldToWet);
+        return true;
+    }
+
+    void reset() noexcept {
+        sampler_.reset();
+        status_ = Status::Idle;
+        pending_capture_ = false;
+        active_loop_ = false;
+        last_capture_rejected_ = false;
+        loop_position_ = 0;
+        completed_repeats_ = 0;
+        alternate_repeat_ = false;
+        transition_kind_ = TransitionKind::None;
+        transition_position_ = 0;
+        have_expected_sample_ = false;
+        std::fill(last_output_.begin(), last_output_.end(), SampleType{});
+        std::fill(transition_old_.begin(), transition_old_.end(), SampleType{});
+    }
+
+    /// A seek, loop jump, or clock-domain replacement invalidates both pending
+    /// grid ownership and the continuity claim of the rolling history.
+    void transport_discontinuity() noexcept {
+        reset();
+    }
+
+    void process(const SampleType* const* input, SampleType* const* output, int frames,
+                 timebase::SamplePosition block_start) noexcept {
+        if (!prepared_ || frames <= 0 || input == nullptr || output == nullptr)
+            return;
+        for (int channel = 0; channel < sampler_.channels(); ++channel) {
+            if (input[channel] == nullptr || output[channel] == nullptr)
+                return;
         }
-        if (tempo_map.sample_rate().normalized() != sample_rate_) {
-            set_error(BeatRepeatError::TempoMapRateMismatch);
-            return fail_process(BeatRepeatError::TempoMapRateMismatch);
+        std::int64_t block_end = 0;
+        if (!detail::beat_repeat_checked_add(block_start.value, frames, block_end)) {
+            transport_discontinuity();
+            copy_dry(input, output, 0, frames);
+            return;
+        }
+        if (have_expected_sample_ && block_start.value != expected_sample_) {
+            transport_discontinuity();
         }
 
-        const bool discontinuity =
-            (epoch_known_ && transport_epoch != transport_epoch_) ||
-            (stream_position_known_ && block_sample_start != next_stream_sample_);
-        if (discontinuity) {
-            armed_ = false;
-            history_.invalidate_history();
-        }
-        transport_epoch_ = transport_epoch;
-        epoch_known_ = true;
-
-        std::size_t event_index = 0;
-        std::uint32_t previous_offset = 0;
-        bool have_previous = false;
-        for (std::size_t frame = 0; frame < frames; ++frame) {
-            while (event_index < events.size() && events[event_index].frame_offset == frame) {
-                const auto& event = events[event_index];
-                if ((have_previous && event.frame_offset < previous_offset) ||
-                    event.frame_offset >= frames) {
-                    set_error(BeatRepeatError::InvalidEventOrder);
-                    ++result.rejected_events;
-                } else {
-                    handle_event(event, block_sample_start + static_cast<std::int64_t>(frame),
-                                 transport_epoch, tempo_map, result);
-                }
-                previous_offset = event.frame_offset;
-                have_previous = true;
-                ++event_index;
-            }
-
-            const auto absolute_sample = block_sample_start + static_cast<std::int64_t>(frame);
-            if (armed_ && armed_epoch_ == transport_epoch && absolute_sample == armed_sample_)
-                commit_capture();
-
-            for (std::size_t channel = 0; channel < channels_; ++channel) {
-                const auto value = input[channel][frame];
-                if (std::isfinite(value)) {
-                    frame_scratch_[channel] = value;
-                } else {
-                    frame_scratch_[channel] = SampleType{};
-                    set_error(BeatRepeatError::NonFiniteInput);
-                }
-            }
-            render_frame(output, frame);
-            history_.write_frame(frame_scratch_.data());
-            advance_playback();
-            ++result.processed_frames;
+        int capture_offset = -1;
+        if (pending_capture_ && pending_plan_.edge_sample.value >= block_start.value &&
+            pending_plan_.edge_sample.value < block_end) {
+            capture_offset = static_cast<int>(pending_plan_.edge_sample.value - block_start.value);
+        } else if (pending_capture_ && pending_plan_.edge_sample.value < block_start.value) {
+            pending_capture_ = false;
+            status_ = active_loop_ ? Status::Active : Status::Idle;
         }
 
-        while (event_index < events.size()) {
-            set_error(BeatRepeatError::InvalidEventOrder);
-            ++result.rejected_events;
-            ++event_index;
-        }
-        if (frames <= static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()) &&
-            block_sample_start <=
-                std::numeric_limits<std::int64_t>::max() - static_cast<std::int64_t>(frames)) {
-            next_stream_sample_ = block_sample_start + static_cast<std::int64_t>(frames);
-            stream_position_known_ = true;
+        if (capture_offset >= 0) {
+            write_history(input, 0, capture_offset);
+            render_segment(input, output, 0, capture_offset);
+            if (pending_capture_)
+                capture_pending();
+            write_history(input, capture_offset, frames - capture_offset);
+            render_segment(input, output, capture_offset, frames - capture_offset);
         } else {
-            stream_position_known_ = false;
-            set_error(BeatRepeatError::PositionOverflow);
+            write_history(input, 0, frames);
+            render_segment(input, output, 0, frames);
         }
-        result.error = error_;
+        expected_sample_ = block_end;
+        have_expected_sample_ = true;
+    }
+
+    Snapshot snapshot() const {
+        Snapshot result;
+        result.resumable = can_snapshot();
+        result.sample_rate = sample_rate_;
+        result.repeat_count = repeat_count_;
+        result.gate = gate_;
+        result.reverse = reverse_;
+        // A release is a transient route back to dry audio, not persistent
+        // gesture state. Serializing it as inactive prevents state recall from
+        // reviving a gesture that was already stopped.
+        result.active = active_loop_ && status_ != Status::Releasing;
+        result.alternate_repeat = result.active && alternate_repeat_;
+        result.last_capture_rejected = last_capture_rejected_;
+        result.transition_frames = transition_frames_;
+        if (result.active) {
+            result.loop_position = loop_position_;
+            result.completed_repeats = completed_repeats_;
+            result.sampler = sampler_.snapshot();
+            result.transition = transition_kind_;
+            result.transition_position = transition_position_;
+            result.transition_length = active_transition_frames();
+            result.transition_old = transition_old_;
+            result.last_output = last_output_;
+        } else {
+            result.last_output.assign(last_output_.size(), SampleType{});
+        }
         return result;
     }
 
-    [[nodiscard]] Snapshot snapshot() const {
-        Snapshot value;
-        value.restorable = !armed_ && !releasing_ && transition_kind_ == TransitionKind::None &&
-                           wrap_position_ == 0;
-        if (!value.restorable)
-            return value;
-        value.capture = history_.snapshot();
-        value.last_wet = last_wet_;
-        value.last_rendered = last_rendered_;
-        value.division = division_;
-        value.direction = direction_;
-        value.repeat_count = repeat_count_;
-        value.gate = gate_;
-        value.transition_samples = transition_samples_;
-        value.phase = phase_;
-        value.completed_cells = completed_cells_;
-        value.active = active_ && capture_frames_ != 0;
-        value.capture_rejected = capture_rejected_;
-        value.error = error_;
-        return value;
-    }
-
-    [[nodiscard]] bool restore(const Snapshot& value) {
-        if (!prepared_ || value.version != 1 || !value.restorable ||
-            !timebase::division_ticks(value.division) ||
-            value.direction > BeatRepeatDirection::Alternate || !std::isfinite(value.gate) ||
+    bool restore(const Snapshot& value) {
+        if (!prepared_ || !value.resumable || value.repeat_count < 0 ||
+            !value.sample_rate.valid() || value.sample_rate.normalized() != sample_rate_ ||
+            value.transition_frames < 0 || !std::isfinite(static_cast<double>(value.gate)) ||
             value.gate < SampleType{} || value.gate > SampleType{1} ||
-            value.transition_samples > maximum_transition_samples_ ||
-            value.last_wet.size() != channels_ || value.last_rendered.size() != channels_ ||
-            value.error > BeatRepeatError::NonFiniteInput ||
-            (!value.active && !value.capture.empty()) ||
-            !std::ranges::all_of(value.capture,
-                                 [](SampleType sample) { return std::isfinite(sample); }) ||
-            !std::ranges::all_of(value.last_wet,
-                                 [](SampleType sample) { return std::isfinite(sample); }) ||
-            !std::ranges::all_of(value.last_rendered,
-                                 [](SampleType sample) { return std::isfinite(sample); }))
+            (value.reverse != ReverseMode::Off && value.reverse != ReverseMode::On &&
+             value.reverse != ReverseMode::Alternate) ||
+            value.last_output.size() != last_output_.size())
             return false;
-
-        FreezeLoopSamplerT<SampleType> replacement;
-        replacement.prepare(static_cast<int>(channels_), history_.capacity(), 0);
-        if (value.active && !replacement.restore(value.capture))
+        if (!value.active &&
+            (!value.sampler.empty() || value.loop_position != 0 || value.completed_repeats != 0 ||
+             value.alternate_repeat || value.transition != TransitionKind::None ||
+             value.transition_position != 0 || value.transition_length != 0 ||
+             !value.transition_old.empty()))
             return false;
-
-        history_ = std::move(replacement);
-        division_ = value.division;
-        direction_ = value.direction;
+        for (const auto sample : value.last_output) {
+            if (!std::isfinite(static_cast<double>(sample)))
+                return false;
+        }
+        if (value.active) {
+            if (value.sampler.size() < 4 || !std::isfinite(static_cast<double>(value.sampler[0])) ||
+                !std::isfinite(static_cast<double>(value.sampler[1])) ||
+                value.sampler[0] != static_cast<SampleType>(sampler_.channels()) ||
+                value.sampler[1] < SampleType{1} ||
+                value.sampler[1] > static_cast<SampleType>(sampler_.capacity()) ||
+                std::trunc(value.sampler[1]) != value.sampler[1] || value.loop_position < 0 ||
+                value.loop_position >= static_cast<int>(value.sampler[1]) ||
+                value.completed_repeats < 0 ||
+                (value.completed_repeats < std::numeric_limits<int>::max() &&
+                 value.alternate_repeat != (value.completed_repeats % 2 != 0)) ||
+                (value.repeat_count > 0 && value.completed_repeats >= value.repeat_count))
+                return false;
+            const auto loop_length = static_cast<int>(value.sampler[1]);
+            const auto expected_size =
+                static_cast<std::size_t>(4) + static_cast<std::size_t>(sampler_.channels()) *
+                                                  static_cast<std::size_t>(loop_length);
+            if (value.sampler.size() != expected_size ||
+                !std::isfinite(static_cast<double>(value.sampler[3])) ||
+                std::trunc(value.sampler[3]) != value.sampler[3] ||
+                value.sampler[3] < SampleType{} ||
+                value.sampler[3] >= static_cast<SampleType>(loop_length))
+                return false;
+            const auto transition_length = std::min(value.transition_frames, loop_length / 2);
+            if ((value.transition != TransitionKind::None &&
+                 value.transition != TransitionKind::DryToWet &&
+                 value.transition != TransitionKind::HeldToWet) ||
+                value.transition_old.size() != transition_old_.size() ||
+                value.transition_position < 0 || value.transition_length < 0 ||
+                value.transition_length != transition_length ||
+                (value.transition == TransitionKind::None && value.transition_position != 0) ||
+                (value.transition != TransitionKind::None &&
+                 (transition_length == 0 || value.transition_position >= transition_length)))
+                return false;
+            for (const auto sample : value.transition_old) {
+                if (!std::isfinite(static_cast<double>(sample)))
+                    return false;
+            }
+            for (const auto sample : value.sampler) {
+                if (!std::isfinite(static_cast<double>(sample)))
+                    return false;
+            }
+            if (!sampler_.restore(value.sampler))
+                return false;
+        } else {
+            sampler_.release();
+        }
+        sampler_.clear_history();
         repeat_count_ = value.repeat_count;
         gate_ = value.gate;
-        transition_samples_ = value.transition_samples;
-        active_ = value.active;
-        armed_ = false;
-        releasing_ = false;
-        capture_frames_ = active_ ? static_cast<std::size_t>(history_.loop_length()) : 0;
-        phase_ = capture_frames_ == 0 ? 0 : value.phase % capture_frames_;
-        completed_cells_ = value.completed_cells;
-        std::copy(value.last_wet.begin(), value.last_wet.end(), last_wet_.begin());
-        std::copy(value.last_rendered.begin(), value.last_rendered.end(), last_rendered_.begin());
-        capture_rejected_ = value.capture_rejected;
-        error_ = value.error;
-        transition_kind_ = TransitionKind::None;
-        transition_position_ = 0;
-        wrap_position_ = 0;
+        reverse_ = value.reverse;
+        transition_frames_ = value.transition_frames;
+        loop_position_ = value.active ? value.loop_position : 0;
+        completed_repeats_ = value.active ? value.completed_repeats : 0;
+        alternate_repeat_ = value.active && value.alternate_repeat;
+        active_loop_ = value.active;
+        last_capture_rejected_ = value.last_capture_rejected;
+        last_output_ = value.last_output;
+        transition_kind_ = value.active ? value.transition : TransitionKind::None;
+        transition_position_ = value.active ? value.transition_position : 0;
+        if (value.active)
+            transition_old_ = value.transition_old;
+        else
+            std::fill(transition_old_.begin(), transition_old_.end(), SampleType{});
+        pending_capture_ = false;
+        status_ = last_capture_rejected_ ? Status::CaptureRejectedInsufficientHistory
+                                         : (active_loop_ ? Status::Active : Status::Idle);
+        have_expected_sample_ = false;
         return true;
     }
 
   private:
-    enum class TransitionKind : std::uint8_t {
-        None,
-        DryToWet,
-        WetToDry,
-        WetToWet,
-    };
-
-    static BeatRepeatProcessResult fail_process(BeatRepeatError error) noexcept {
-        return {error, 0, 0};
+    void swap(BeatRepeatKernelT& other) noexcept {
+        using std::swap;
+        swap(sampler_, other.sampler_);
+        swap(sample_rate_, other.sample_rate_);
+        swap(history_inputs_, other.history_inputs_);
+        swap(last_output_, other.last_output_);
+        swap(transition_old_, other.transition_old_);
+        swap(pending_plan_, other.pending_plan_);
+        swap(repeat_count_, other.repeat_count_);
+        swap(gate_, other.gate_);
+        swap(reverse_, other.reverse_);
+        swap(status_, other.status_);
+        swap(transition_kind_, other.transition_kind_);
+        swap(transition_frames_, other.transition_frames_);
+        swap(transition_position_, other.transition_position_);
+        swap(loop_position_, other.loop_position_);
+        swap(completed_repeats_, other.completed_repeats_);
+        swap(expected_sample_, other.expected_sample_);
+        swap(prepared_, other.prepared_);
+        swap(pending_capture_, other.pending_capture_);
+        swap(active_loop_, other.active_loop_);
+        swap(alternate_repeat_, other.alternate_repeat_);
+        swap(last_capture_rejected_, other.last_capture_rejected_);
+        swap(have_expected_sample_, other.have_expected_sample_);
     }
 
-    void set_error(BeatRepeatError error) noexcept {
-        if (error_ == BeatRepeatError::None)
-            error_ = error;
+    int active_transition_frames() const noexcept {
+        if (!active_loop_ || sampler_.loop_length() <= 0)
+            return transition_frames_;
+        return std::min(transition_frames_, sampler_.loop_length() / 2);
     }
 
-    void handle_event(const BeatRepeatEvent& event, std::int64_t absolute_sample,
-                      std::uint64_t epoch, const timebase::CompiledTempoMap& tempo_map,
-                      BeatRepeatProcessResult& result) noexcept {
-        switch (event.type) {
-        case BeatRepeatEvent::Type::Trigger:
-            if (!arm(absolute_sample, epoch, tempo_map))
-                ++result.rejected_events;
-            break;
-        case BeatRepeatEvent::Type::Stop:
-            armed_ = false;
-            if (active_)
-                begin_release();
-            break;
-        case BeatRepeatEvent::Type::Seek:
-            if (!active_ || capture_frames_ == 0) {
-                ++result.rejected_events;
-                set_error(BeatRepeatError::InvalidArgument);
-                break;
-            }
-            begin_wet_transition();
-            seek_forward_coordinate(event.seek_frame);
-            break;
-        default:
-            ++result.rejected_events;
-            set_error(BeatRepeatError::InvalidArgument);
-            break;
-        }
+    void begin_held_transition(TransitionKind kind) noexcept {
+        std::copy(last_output_.begin(), last_output_.end(), transition_old_.begin());
+        transition_kind_ = active_transition_frames() == 0 ? TransitionKind::None : kind;
+        transition_position_ = 0;
+        if (transition_kind_ == TransitionKind::None && kind == TransitionKind::HeldToDry)
+            finish_release();
     }
 
-    [[nodiscard]] bool arm(std::int64_t trigger_sample, std::uint64_t epoch,
-                           const timebase::CompiledTempoMap& tempo_map) noexcept {
-        const auto duration_result = timebase::division_ticks(division_);
-        if (!duration_result) {
-            set_error(BeatRepeatError::InvalidArgument);
-            return false;
-        }
-        const auto duration = duration_result.value().value;
-        const auto trigger_tick =
-            tempo_map.fractional_samples_to_ticks(static_cast<long double>(trigger_sample));
-        if (!std::isfinite(trigger_tick)) {
-            set_error(BeatRepeatError::PositionOverflow);
-            return false;
-        }
-        const auto quotient_value = std::floor(trigger_tick / static_cast<long double>(duration));
-        if (quotient_value < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
-            quotient_value > static_cast<long double>(std::numeric_limits<std::int64_t>::max())) {
-            set_error(BeatRepeatError::PositionOverflow);
-            return false;
-        }
-        const auto quotient = static_cast<std::int64_t>(quotient_value);
-        if (quotient == std::numeric_limits<std::int64_t>::max()) {
-            set_error(BeatRepeatError::PositionOverflow);
-            return false;
-        }
-        const auto next_quotient = quotient + 1;
-        if (next_quotient > std::numeric_limits<std::int64_t>::max() / duration ||
-            next_quotient < std::numeric_limits<std::int64_t>::min() / duration) {
-            set_error(BeatRepeatError::PositionOverflow);
-            return false;
-        }
-        auto target_tick_value = next_quotient * duration;
-        auto target_sample = tempo_map.ticks_to_samples({target_tick_value}).value;
-        // Sparse tick grids can resolve the trigger to the nearest tick on the
-        // far side. The event contract is strict: the armed edge is > trigger.
-        if (target_sample <= trigger_sample) {
-            if (target_tick_value > std::numeric_limits<std::int64_t>::max() - duration) {
-                set_error(BeatRepeatError::PositionOverflow);
-                return false;
-            }
-            target_tick_value += duration;
-            target_sample = tempo_map.ticks_to_samples({target_tick_value}).value;
-        }
-        if (target_sample <= trigger_sample ||
-            target_tick_value < std::numeric_limits<std::int64_t>::min() + duration) {
-            set_error(BeatRepeatError::PositionOverflow);
-            return false;
-        }
-        const auto begin_sample = tempo_map.ticks_to_samples({target_tick_value - duration}).value;
-        if (begin_sample >= target_sample) {
-            set_error(BeatRepeatError::PositionOverflow);
-            return false;
-        }
-        const auto difference =
-            static_cast<std::uint64_t>(target_sample) - static_cast<std::uint64_t>(begin_sample);
-        if (difference == 0 ||
-            difference > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
-            set_error(BeatRepeatError::PositionOverflow);
-            return false;
-        }
-        armed_ = true;
-        armed_epoch_ = epoch;
-        armed_sample_ = target_sample;
-        armed_frames_ = static_cast<std::size_t>(difference);
-        return true;
-    }
-
-    void commit_capture() noexcept {
-        armed_ = false;
-        if (armed_frames_ > static_cast<std::size_t>(history_.capacity()) ||
-            !history_.capture_recent_exact(static_cast<int>(armed_frames_))) {
-            capture_rejected_ = true;
-            set_error(BeatRepeatError::InsufficientHistory);
+    void capture_pending() noexcept {
+        pending_capture_ = false;
+        const auto capture = sampler_.try_freeze_recent(pending_plan_.capture_frames);
+        if (capture != FreezeLoopSamplerT<SampleType>::CaptureResult::Success) {
+            last_capture_rejected_ = true;
+            status_ = Status::CaptureRejectedInsufficientHistory;
             return;
         }
-
-        const bool replacing = active_;
-        if (replacing)
-            begin_wet_transition();
-        capture_frames_ = armed_frames_;
-        phase_ = 0;
-        completed_cells_ = 0;
-        wrap_position_ = 0;
-        active_ = true;
-        releasing_ = false;
-        capture_rejected_ = false;
-        if (!replacing) {
-            transition_kind_ = TransitionKind::DryToWet;
+        const bool replacing = active_loop_;
+        active_loop_ = true;
+        loop_position_ = 0;
+        completed_repeats_ = 0;
+        alternate_repeat_ = false;
+        status_ = Status::Active;
+        last_capture_rejected_ = false;
+        if (replacing) {
+            begin_held_transition(TransitionKind::HeldToWet);
+        } else {
+            transition_kind_ =
+                active_transition_frames() == 0 ? TransitionKind::None : TransitionKind::DryToWet;
             transition_position_ = 0;
         }
     }
 
-    void begin_wet_transition() noexcept {
-        std::copy(last_rendered_.begin(), last_rendered_.end(), transition_from_.begin());
-        releasing_ = false;
-        transition_kind_ = TransitionKind::WetToWet;
-        transition_position_ = 0;
+    void write_history(const SampleType* const* input, int offset, int frames) noexcept {
+        if (frames <= 0)
+            return;
+        for (int channel = 0; channel < sampler_.channels(); ++channel)
+            history_inputs_[static_cast<std::size_t>(channel)] = input[channel] + offset;
+        sampler_.write(history_inputs_.data(), frames);
     }
 
-    void begin_release() noexcept {
-        std::copy(last_rendered_.begin(), last_rendered_.end(), transition_from_.begin());
-        releasing_ = true;
-        transition_kind_ = TransitionKind::WetToDry;
-        transition_position_ = 0;
+    void copy_dry(const SampleType* const* input, SampleType* const* output, int offset,
+                  int frames) noexcept {
+        for (int channel = 0; channel < sampler_.channels(); ++channel) {
+            for (int frame = 0; frame < frames; ++frame)
+                output[channel][offset + frame] = finite_sample(input[channel][offset + frame]);
+        }
     }
 
-    [[nodiscard]] std::size_t bounded_transition() const noexcept {
-        if (capture_frames_ == 0)
-            return 0;
-        return std::min(transition_samples_, capture_frames_ / 2);
+    bool reverse_for_current_repeat() const noexcept {
+        return reverse_ == ReverseMode::On ||
+               (reverse_ == ReverseMode::Alternate && alternate_repeat_);
     }
 
-    [[nodiscard]] bool reverse_for_cell() const noexcept {
-        return direction_ == BeatRepeatDirection::Reverse ||
-               (direction_ == BeatRepeatDirection::Alternate && (completed_cells_ & 1u) != 0u);
-    }
-
-    void seek_forward_coordinate(std::int64_t coordinate) noexcept {
-        const auto clamped =
-            std::clamp<std::int64_t>(coordinate, 0, static_cast<std::int64_t>(capture_frames_ - 1));
-        const auto forward = static_cast<std::size_t>(clamped);
-        phase_ = reverse_for_cell() ? capture_frames_ - 1 - forward : forward;
-        wrap_position_ = 0;
-    }
-
-    [[nodiscard]] SampleType gate_gain(std::size_t phase) const noexcept {
+    SampleType gate_gain() const noexcept {
+        const int length = sampler_.loop_length();
+        if (length <= 0 || gate_ <= SampleType{})
+            return SampleType{};
         if (gate_ >= SampleType{1})
             return SampleType{1};
-        const auto audible =
-            std::min(capture_frames_, static_cast<std::size_t>(std::llround(
-                                          static_cast<long double>(gate_) * capture_frames_)));
-        if (audible == 0 || phase >= audible)
+        const int audible = std::clamp(
+            static_cast<int>(std::llround(static_cast<double>(gate_) * length)), 0, length);
+        if (audible <= 0 || loop_position_ >= audible)
             return SampleType{};
-        const auto fade = std::min({bounded_transition(), audible, capture_frames_ - audible});
-        if (fade == 0)
+        const int fade = std::min(active_transition_frames(), audible / 2);
+        if (fade <= 1)
             return SampleType{1};
-        SampleType gain = SampleType{1};
-        if (phase < fade) {
-            gain = crossfade_smoothstep(static_cast<SampleType>(phase + 1) /
-                                        static_cast<SampleType>(fade));
+        if (loop_position_ < fade) {
+            const auto t =
+                static_cast<SampleType>(loop_position_) / static_cast<SampleType>(fade - 1);
+            SampleType old_gain{};
+            SampleType new_gain{};
+            crossfade_gains(crossfade_smoothstep(t), CrossfadeGainLaw::EqualGain, old_gain,
+                            new_gain);
+            return new_gain;
         }
-        if (phase + fade >= audible) {
-            const auto remaining = audible - phase;
-            gain = std::min(gain, crossfade_smoothstep(static_cast<SampleType>(remaining) /
-                                                       static_cast<SampleType>(fade)));
+        if (loop_position_ >= audible - fade) {
+            const auto t = static_cast<SampleType>(loop_position_ - (audible - fade)) /
+                           static_cast<SampleType>(fade - 1);
+            SampleType old_gain{};
+            SampleType new_gain{};
+            crossfade_gains(crossfade_smoothstep(t), CrossfadeGainLaw::EqualGain, old_gain,
+                            new_gain);
+            return old_gain;
         }
-        return gain;
+        return SampleType{1};
     }
 
-    [[nodiscard]] SampleType wet_sample(std::size_t channel) const noexcept {
-        if (!active_ || capture_frames_ == 0)
+    SampleType wet_sample(int channel) const noexcept {
+        const int length = sampler_.loop_length();
+        if (!active_loop_ || length <= 0)
             return SampleType{};
-        const auto capture = history_.captured_channel(static_cast<int>(channel));
-        if (capture.size() != capture_frames_)
-            return SampleType{};
-        const auto index = reverse_for_cell() ? capture_frames_ - 1 - phase_ : phase_;
-        return capture[index] * gate_gain(phase_);
+        const int index =
+            reverse_for_current_repeat() ? length - 1 - loop_position_ : loop_position_;
+        return sampler_.loop_sample(channel, index) * gate_gain();
     }
 
-    void render_frame(SampleType* const* output, std::size_t frame) noexcept {
-        const auto fade = bounded_transition();
-        for (std::size_t channel = 0; channel < channels_; ++channel) {
-            const auto dry = frame_scratch_[channel];
-            auto wet = wet_sample(channel);
-            if (wrap_position_ != 0 && fade != 0 && wrap_position_ <= fade) {
-                const auto u = crossfade_smoothstep(static_cast<SampleType>(wrap_position_) /
-                                                    static_cast<SampleType>(fade));
-                SampleType old_gain{};
-                SampleType new_gain{};
-                crossfade_gains(u, CrossfadeGainLaw::EqualGain, old_gain, new_gain);
-                wet = wrap_from_[channel] * old_gain + wet * new_gain;
+    void render_segment(const SampleType* const* input, SampleType* const* output, int offset,
+                        int frames) noexcept {
+        for (int frame = 0; frame < frames; ++frame) {
+            SampleType old_gain{};
+            SampleType new_gain{SampleType{1}};
+            if (transition_kind_ != TransitionKind::None) {
+                const auto length = active_transition_frames();
+                const auto t = length <= 1 ? SampleType{1}
+                                           : static_cast<SampleType>(transition_position_) /
+                                                 static_cast<SampleType>(length - 1);
+                crossfade_gains(crossfade_smoothstep(t), CrossfadeGainLaw::EqualGain, old_gain,
+                                new_gain);
             }
 
-            auto rendered = active_ ? wet : dry;
-            if (transition_kind_ != TransitionKind::None && fade != 0) {
-                const auto u = crossfade_smoothstep(
-                    static_cast<SampleType>(std::min(transition_position_ + 1, fade)) /
-                    static_cast<SampleType>(fade));
-                SampleType old_gain{};
-                SampleType new_gain{};
-                crossfade_gains(u, CrossfadeGainLaw::EqualGain, old_gain, new_gain);
-                if (transition_kind_ == TransitionKind::DryToWet)
+            for (int channel = 0; channel < sampler_.channels(); ++channel) {
+                const auto dry = finite_sample(input[channel][offset + frame]);
+                const auto wet = wet_sample(channel);
+                SampleType rendered = active_loop_ ? wet : dry;
+                switch (transition_kind_) {
+                case TransitionKind::None:
+                    break;
+                case TransitionKind::DryToWet:
                     rendered = dry * old_gain + wet * new_gain;
-                else if (transition_kind_ == TransitionKind::WetToDry)
-                    rendered = transition_from_[channel] * old_gain + dry * new_gain;
-                else
-                    rendered = transition_from_[channel] * old_gain + wet * new_gain;
-            } else if (transition_kind_ == TransitionKind::WetToDry && fade == 0) {
-                rendered = dry;
-            }
-            output[channel][frame] = std::isfinite(rendered) ? rendered : SampleType{};
-            last_rendered_[channel] = output[channel][frame];
-            last_wet_[channel] = wet;
-        }
-    }
-
-    void advance_playback() noexcept {
-        if (!active_ || capture_frames_ == 0)
-            return;
-        const auto fade = bounded_transition();
-        if (transition_kind_ != TransitionKind::None) {
-            if (fade == 0 || ++transition_position_ >= fade) {
-                const bool finished_release = transition_kind_ == TransitionKind::WetToDry;
-                transition_kind_ = TransitionKind::None;
-                transition_position_ = 0;
-                if (finished_release) {
-                    releasing_ = false;
-                    active_ = false;
-                    capture_frames_ = 0;
-                    history_.release();
-                    return;
+                    break;
+                case TransitionKind::HeldToWet:
+                    rendered = transition_old_[static_cast<std::size_t>(channel)] * old_gain +
+                               wet * new_gain;
+                    break;
+                case TransitionKind::HeldToDry:
+                    rendered = transition_old_[static_cast<std::size_t>(channel)] * old_gain +
+                               dry * new_gain;
+                    break;
                 }
+                rendered = finite_sample(rendered);
+                output[channel][offset + frame] = rendered;
+                last_output_[static_cast<std::size_t>(channel)] = rendered;
             }
-        }
-        if (wrap_position_ != 0 && (fade == 0 || ++wrap_position_ > fade))
-            wrap_position_ = 0;
 
-        if (++phase_ < capture_frames_)
-            return;
-        phase_ = 0;
-        ++completed_cells_;
-        if (repeat_count_ != 0 && completed_cells_ >= repeat_count_) {
-            begin_release();
-            return;
+            advance_transition();
+            if (active_loop_)
+                advance_loop();
         }
-        std::copy(last_wet_.begin(), last_wet_.end(), wrap_from_.begin());
-        wrap_position_ = fade == 0 ? 0 : 1;
     }
 
-    FreezeLoopSamplerT<SampleType> history_;
-    std::vector<SampleType> last_wet_;
-    std::vector<SampleType> last_rendered_;
-    std::vector<SampleType> transition_from_;
-    std::vector<SampleType> wrap_from_;
-    std::vector<SampleType> frame_scratch_;
-    timebase::RationalRate sample_rate_{};
-    std::size_t channels_ = 0;
-    std::size_t maximum_transition_samples_ = 0;
-    std::size_t transition_samples_ = 0;
-    timebase::BeatDivision division_ = timebase::BeatDivision::Eighth;
-    BeatRepeatDirection direction_ = BeatRepeatDirection::Forward;
-    std::uint32_t repeat_count_ = 0;
+    void advance_transition() noexcept {
+        if (transition_kind_ == TransitionKind::None)
+            return;
+        const auto completed_kind = transition_kind_;
+        if (++transition_position_ < active_transition_frames())
+            return;
+        transition_kind_ = TransitionKind::None;
+        transition_position_ = 0;
+        if (completed_kind == TransitionKind::HeldToDry)
+            finish_release();
+    }
+
+    static SampleType finite_sample(SampleType value) noexcept {
+        return std::isfinite(static_cast<double>(value)) ? value : SampleType{};
+    }
+
+    void advance_loop() noexcept {
+        if (++loop_position_ < sampler_.loop_length())
+            return;
+        loop_position_ = 0;
+        if (completed_repeats_ < std::numeric_limits<int>::max())
+            ++completed_repeats_;
+        alternate_repeat_ = !alternate_repeat_;
+        if (repeat_count_ > 0 && completed_repeats_ >= repeat_count_) {
+            pending_capture_ = false;
+            status_ = Status::Releasing;
+            if (transition_kind_ != TransitionKind::HeldToDry)
+                begin_held_transition(TransitionKind::HeldToDry);
+            return;
+        }
+        if (transition_kind_ == TransitionKind::None)
+            begin_held_transition(TransitionKind::HeldToWet);
+    }
+
+    void finish_release() noexcept {
+        active_loop_ = false;
+        sampler_.release();
+        status_ = pending_capture_ ? Status::Armed : Status::Idle;
+        loop_position_ = 0;
+        completed_repeats_ = 0;
+        alternate_repeat_ = false;
+    }
+
+    FreezeLoopSamplerT<SampleType> sampler_;
+    timebase::RationalRate sample_rate_{48'000, 1};
+    std::vector<const SampleType*> history_inputs_;
+    std::vector<SampleType> last_output_;
+    std::vector<SampleType> transition_old_;
+    BeatRepeatCapturePlan pending_plan_{};
+    int repeat_count_ = 4;
     SampleType gate_ = SampleType{1};
-    bool prepared_ = false;
-    bool armed_ = false;
-    bool active_ = false;
-    bool releasing_ = false;
-    bool capture_rejected_ = false;
-    BeatRepeatError error_ = BeatRepeatError::None;
-    std::uint64_t transport_epoch_ = 0;
-    std::uint64_t armed_epoch_ = 0;
-    bool epoch_known_ = false;
-    bool stream_position_known_ = false;
-    std::int64_t next_stream_sample_ = 0;
-    std::int64_t armed_sample_ = 0;
-    std::size_t armed_frames_ = 0;
-    std::size_t capture_frames_ = 0;
-    std::size_t phase_ = 0;
-    std::uint32_t completed_cells_ = 0;
+    ReverseMode reverse_ = ReverseMode::Off;
+    Status status_ = Status::Idle;
     TransitionKind transition_kind_ = TransitionKind::None;
-    std::size_t transition_position_ = 0;
-    std::size_t wrap_position_ = 0;
+    int transition_frames_ = 144;
+    int transition_position_ = 0;
+    int loop_position_ = 0;
+    int completed_repeats_ = 0;
+    std::int64_t expected_sample_ = 0;
+    bool prepared_ = false;
+    bool pending_capture_ = false;
+    bool active_loop_ = false;
+    bool alternate_repeat_ = false;
+    bool last_capture_rejected_ = false;
+    bool have_expected_sample_ = false;
 };
 
 using BeatRepeatKernel = BeatRepeatKernelT<float>;

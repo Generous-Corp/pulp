@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 19,
+  "manifest_revision": 20,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -1569,16 +1569,20 @@
     {
       "key": "signal.beat-repeat-kernel",
       "domain": "signal",
-      "summary": "Tempo-map-quantized exact dry-history capture with bounded repeat, gate, reverse/alternate playback, and frame-offset gesture events; pitch excluded.",
+      "summary": "Tempo-map-quantized exact dry-history capture with bounded repeat, gate, reverse/alternate playback, and direct trigger/stop/seek controls; pitch excluded.",
+      "contract_version": {
+        "major": 2,
+        "minor": 0
+      },
       "rt_class": "mixed",
       "lifecycle": {
         "construction": "control",
-        "prepare": "control; allocates one rolling-history/capture owner and bounded transition scratch",
+        "prepare": "control; binds sample rate and allocates one rolling-history/capture owner plus bounded transition scratch",
         "process": "audio",
         "reset": "audio",
         "release": "snapshot/restore and destruction off audio"
       },
-      "state_model": "One FreezeLoopSampler dry-history/capture owner, armed tempo-map edge, active cell phase/direction/gate, and bounded dry-wet or wet-wet transition state.",
+      "state_model": "One FreezeLoopSampler dry-history/capture owner, pending compiled grid edge, prepared RationalRate, active loop phase/direction/gate, continuity cursor, and bounded transition state.",
       "seed_model": "none",
       "determinism": {
         "repeatability": "bit_exact",
@@ -1586,7 +1590,7 @@
         "platform_scope": "same_build",
         "transport_history": "input"
       },
-      "input_domain": "finite planar dry audio, immutable CompiledTempoMap, canonical BeatDivision, transport epoch, and ordered trigger/stop/seek events with block frame offsets",
+      "input_domain": "finite planar dry audio, immutable CompiledTempoMap matching the prepared RationalRate, canonical BeatDivision, requested sample, contiguous block positions, and direct controls",
       "output_domain": "dry passthrough or repeated immutable captured audio",
       "units": [
         "samples",
@@ -1596,7 +1600,7 @@
       ],
       "latency": "zero",
       "tail": "configured bounded transition sample count",
-      "scheduling": "strictly next canonical division edge; captures [edge-N, edge) before writing the edge dry sample; epoch discontinuities cancel only pending arms",
+      "scheduling": "strictly next canonical division edge; captures [edge-N, edge) before writing the edge dry sample; explicit or detected transport discontinuity resets the pending arm, active loop, transitions, and rolling history",
       "bindings": [
         {
           "role": "kernel",
@@ -1613,10 +1617,6 @@
           }
         }
       ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
       "status": "usable",
       "evolution": {
         "state": "active",
@@ -1625,7 +1625,7 @@
           "minor": 0
         }
       },
-      "contract_digest": "sha256:29fa3a494adfe7abf39e05a3353c5035d08e6f2c99864548e2f72b1796475f2d"
+      "contract_digest": "sha256:5bf779fafe96b8c2c0eeaa6796c5c2e53cf7909dcb8aa177eae15fc04b82e6be"
     },
     {
       "key": "signal.bounded-sample-history",
@@ -5259,8 +5259,8 @@
         ],
         "beat_repeat_kernel.hpp": [
           {
-            "class": "BeatRepeatProcessResult",
-            "qualified_name": "pulp::signal::BeatRepeatProcessResult",
+            "class": "BeatRepeatPlanResult",
+            "qualified_name": "pulp::signal::BeatRepeatPlanResult",
             "template": null,
             "methods": [
               "bool()"
@@ -5272,29 +5272,47 @@
             "qualified_name": "pulp::signal::BeatRepeatKernelT",
             "template": "typename SampleType = float",
             "methods": [
-              "prepare(timebase::RationalRate sample_rate, std::size_t channels, std::size_t maximum_history_frames, std::size_t maximum_transition_frames)",
+              "prepare(const Config& config)",
               "reset()",
-              "process(const SampleType* const* input, SampleType* const* output, std::size_t frames, std::int64_t block_sample_start, std::uint64_t transport_epoch, const timebase::CompiledTempoMap& tempo_map, std::span<const BeatRepeatEvent> events =)",
-              "set_division(timebase::BeatDivision division)",
-              "set_repeat_count(std::uint32_t total_cells)",
+              "process(const SampleType* const* input, SampleType* const* output, int frames, timebase::SamplePosition block_start)",
+              "trigger(const timebase::CompiledTempoMap& tempo, timebase::BeatDivision division, timebase::SamplePosition requested_sample)",
+              "stop()",
+              "seek(int captured_frame)",
+              "snapshot()",
+              "restore(const Snapshot& value)",
+              "set_repeat_count(int count)",
               "set_gate(SampleType duty)",
-              "set_direction(BeatRepeatDirection direction)",
-              "set_transition_samples(std::size_t samples)",
-              "division()",
-              "repeat_count()",
-              "gate()",
-              "direction()",
-              "transition_samples()",
-              "state()"
+              "set_reverse(ReverseMode mode)",
+              "set_transition_frames(int frames)",
+              "prepared()",
+              "channels()"
             ],
             "enums": [
+              [
+                "ReverseMode",
+                [
+                  "Off",
+                  "On",
+                  "Alternate"
+                ]
+              ],
+              [
+                "Status",
+                [
+                  "Idle",
+                  "Armed",
+                  "CaptureRejectedInsufficientHistory",
+                  "Active",
+                  "Releasing"
+                ]
+              ],
               [
                 "TransitionKind",
                 [
                   "None",
                   "DryToWet",
-                  "WetToDry",
-                  "WetToWet"
+                  "HeldToWet",
+                  "HeldToDry"
                 ]
               ]
             ]
@@ -7880,13 +7898,23 @@
               "loop_length()",
               "retained_bytes()",
               "write(const SampleType* const* in, int n)",
-              "write_frame(const SampleType* frame)",
-              "capture_recent_exact(int frames)",
-              "captured_channel(int channel)",
+              "try_freeze_recent(int loop_samples)",
+              "loop_sample(int channel, int frame)",
               "freeze(int loop_samples)",
-              "release()"
+              "release()",
+              "read(SampleType* const* out, int n)"
             ],
-            "enums": []
+            "enums": [
+              [
+                "CaptureResult",
+                [
+                  "Success",
+                  "InvalidLength",
+                  "InsufficientHistory",
+                  "ExceedsCapacity"
+                ]
+              ]
+            ]
           }
         ],
         "frequency_shifter.hpp": [
@@ -10055,6 +10083,30 @@
                 ]
               ]
             ]
+          }
+        ],
+        "scale_quantizer.hpp": [
+          {
+            "class": "QuantizeScaleT",
+            "qualified_name": "pulp::signal::QuantizeScaleT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "prepare(double sample_rate)",
+              "reset()",
+              "process(SampleType cv_volts)",
+              "set_mode(QuantizeMode mode)",
+              "mode()",
+              "set_edo(int n)",
+              "edo()",
+              "set_scale_mask(std::uint16_t mask)",
+              "scale_mask()",
+              "set_root_pc(int pc)",
+              "root_pc()",
+              "set_hysteresis_cents(double cents)",
+              "hysteresis_cents()",
+              "apply_reset_edge()"
+            ],
+            "enums": []
           }
         ],
         "scanner_vibrato.hpp": [

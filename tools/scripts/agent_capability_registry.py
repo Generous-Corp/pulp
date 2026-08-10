@@ -109,7 +109,7 @@ EXPORTS = [
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
         "include": "pulp/signal/freeze_loop_sampler.hpp",
-        "fingerprint": "sha256:771ad66588052eb6e8772ef6f1d6bd871701807667973b3ebd01887d56587a44",
+        "fingerprint": "sha256:fa2406081bd7e78a0097eab797da14d2e1854cd0a6972cf6971728050b19348a",
         "disposition": "capability_support",
         "capability_keys": ["signal.beat-repeat-kernel"],
         "rationale": (
