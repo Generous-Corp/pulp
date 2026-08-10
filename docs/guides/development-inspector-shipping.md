@@ -9,15 +9,17 @@ The consolidated authoring and diagnostics reference is
 [Capability control](../reference/capability-control.md). Every ordinary
 `pulp_add_plugin` target emits a production-stripped canonical
 `dev.pulp.control/artifact-manifest@1` sidecar: no endpoint and no capabilities.
-The canonical broker and trusted-host fixtures prove the host protocol, but the
-dedicated adapter that binds a general `pulp::standalone` processor and state
-store is not yet shipped. Until it is, nonempty `CONTROL_CAPABILITIES` on
-`pulp_add_plugin` fails at configure time rather than emitting a manifest or
-binary that falsely claims live reachability.
+The installed SDK ships the canonical adapter that binds a Standalone processor
+and state store. Opt-in requires an exclusively `Standalone` target, an explicit
+non-production `CONTROL_PROFILE`, `CONTROL_CAPABILITIES`, and
+`PROCESSOR_FACTORY`; mixed-format declarations fail closed. macOS GPU builds
+support the full canonical Standalone capability set. Other supported builds
+currently accept only instance and state reads, and configure rejects any
+capability whose required installed adapter component is unavailable.
 
 The legacy server, raw client, discovery publisher, and standalone session
-owner were deleted in Phase 3. Do not restore them as a shortcut around the
-missing canonical host adapter.
+owner were deleted in Phase 3. Do not restore them alongside the canonical host
+adapter.
 
 The Phase 4 runtime archives now implement exact T0/T1 instance status and
 bounded state/parameter catalog reads. They are reachable only through a
@@ -43,11 +45,11 @@ unavailable.
 `dev.pulp.runtime/evaluate@1` is arbitrary execution in the product process.
 No profile or acknowledgement implies it. The reusable host executor accepts it
 only for an exact `research-unsafe` registration with the distinct unsafe
-acknowledgement, an injected high-risk evaluator component, and broker-owned
+acknowledgement, the separately installed high-risk evaluator component, and broker-owned
 single-use consent. The adapter also requires an interrupt-capable evaluator
 and an explicit result redactor; cancellation, deadline, or unsafe result
-handling fails closed. Ordinary `pulp_add_plugin` targets still cannot opt in
-because they do not compose that host adapter.
+handling fails closed. The canonical macOS GPU Standalone adapter composes this
+component only for an explicitly declared research-unsafe target.
 
 The legacy `SHIP_INSPECTOR`, `SHIP_INSPECTOR_RUNTIME_EVAL`, and
 `INSPECTOR_CAPABILITIES` spellings have been removed. Use the canonical control
@@ -216,8 +218,9 @@ requires an exact node with a 256-byte UTF-8
 ceiling. Runtime evaluation
 rejects NUL and carries both a character ceiling and the executor's
 65,536-byte UTF-8 ceiling. Window capture additionally reports bounded positive
-dimensions, validates the PNG signature, and records `redaction_state=original`
-on a sensitive broker-owned artifact. Node capture and UI input remain explicit
-unsupported dispositions until host-owned exact-target seams exist.
+dimensions, validates the PNG chunk structure and dimensions, strips ancillary
+metadata, and records `redaction_state=redacted` on a sensitive broker-owned
+artifact. Node capture and UI input use the host-owned exact-target adapter and
+remain unavailable when that component is not installed.
 Changing any of these limits changes the registry digest and therefore the
 artifact and consent identity reviewed above.

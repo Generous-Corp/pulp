@@ -52,7 +52,7 @@ constexpr std::string_view kHostManifest = R"({
   "product_name": "Pulp Trusted Host E2E Fixture",
   "bundle_id": "dev.pulp.test.trusted-host-e2e-fixture",
   "build_id": "build:0123456789abcdef0123456789abcdef",
-  "registry_digest": "1ef00512c588766b7ec414c2f4bf1b2572e115b2e9be83ea61cc35ee434ad086",
+  "registry_digest": "b3bfbc17c377a58531c0689ce961d33d43d7504c61f8db979cd1a0df678409bc",
   "endpoint_included": true,
   "unsafe_runtime_eval_acknowledged": false,
   "permission_terms": ["implemented", "built", "host_available", "activated", "policy_eligible", "client_granted", "session_live"],
@@ -1151,6 +1151,31 @@ TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
         REQUIRE(renewed_controller.succeeded());
         CHECK(choc::json::parse(renewed_controller.response->detail_json)["lease_id"].getString() ==
               controller_lease_id);
+
+        const auto renewal_granted =
+            connection.manage("grant-request", choc::json::toString(grant, false));
+        REQUIRE(renewal_granted.status_id == "granted");
+        const auto renewal_grant_id = std::string(
+            choc::json::parse(renewal_granted.data_json)["grant_id"].getString());
+        REQUIRE_FALSE(renewal_grant_id.empty());
+        REQUIRE(renewal_grant_id != request.grant_id);
+        const auto renewed_under_new_grant = invoke(
+            "dev.pulp.session/control@1", R"({"action":"renew"})", std::nullopt,
+            renewal_grant_id);
+        REQUIRE(renewed_under_new_grant.succeeded());
+        CHECK(choc::json::parse(renewed_under_new_grant.response->detail_json)["lease_id"]
+                  .getString() == controller_lease_id);
+        auto revoke_previous = choc::value::createObject("");
+        revoke_previous.addMember("grant_id", choc::value::createString(request.grant_id));
+        REQUIRE(connection.manage("revoke", choc::json::toString(revoke_previous, false))
+                    .status_id == "revoked");
+        request.grant_id = renewal_grant_id;
+        const auto renewed_after_previous_grant_ended =
+            invoke("dev.pulp.session/control@1", R"({"action":"renew"})");
+        REQUIRE(renewed_after_previous_grant_ended.succeeded());
+        CHECK(choc::json::parse(renewed_after_previous_grant_ended.response->detail_json)
+                  ["lease_id"]
+                      .getString() == controller_lease_id);
 
         const auto read_json_artifact = [&](const ControlClientReceiptResult& operation) {
             REQUIRE(operation.succeeded());

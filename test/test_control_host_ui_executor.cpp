@@ -11,12 +11,17 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <span>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -25,6 +30,36 @@ using namespace std::chrono_literals;
 using namespace pulp::inspect;
 
 namespace {
+
+void append_png_u32(std::vector<std::uint8_t>& bytes, std::uint32_t value) {
+    bytes.push_back(static_cast<std::uint8_t>(value >> 24));
+    bytes.push_back(static_cast<std::uint8_t>(value >> 16));
+    bytes.push_back(static_cast<std::uint8_t>(value >> 8));
+    bytes.push_back(static_cast<std::uint8_t>(value));
+}
+
+void append_png_chunk(std::vector<std::uint8_t>& bytes, std::string_view type,
+                      std::span<const std::uint8_t> data) {
+    append_png_u32(bytes, static_cast<std::uint32_t>(data.size()));
+    bytes.insert(bytes.end(), type.begin(), type.end());
+    bytes.insert(bytes.end(), data.begin(), data.end());
+    append_png_u32(bytes, 0); // Parser preserves but does not reinterpret the encoder's CRC.
+}
+
+std::vector<std::uint8_t> fixture_capture_png(std::uint32_t width, std::uint32_t height) {
+    std::vector<std::uint8_t> bytes{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
+    std::vector<std::uint8_t> header;
+    append_png_u32(header, width);
+    append_png_u32(header, height);
+    header.insert(header.end(), {8, 6, 0, 0, 0});
+    append_png_chunk(bytes, "IHDR", header);
+    constexpr std::array<std::uint8_t, 6> metadata{'s', 'e', 'c', 'r', 'e', 't'};
+    append_png_chunk(bytes, "tEXt", metadata);
+    constexpr std::array<std::uint8_t, 1> image_data{0};
+    append_png_chunk(bytes, "IDAT", image_data);
+    append_png_chunk(bytes, "IEND", {});
+    return bytes;
+}
 
 struct PostedQueue {
     std::mutex mutex;
@@ -54,9 +89,7 @@ class CaptureSource final : public InspectorCaptureSource {
   public:
     InspectorCapture capture_png() override {
         ++calls;
-        return {.png = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 1, 2, 3},
-                .width = 64,
-                .height = 32};
+        return {.png = fixture_capture_png(64, 32), .width = 64, .height = 32};
     }
     int calls = 0;
 };
@@ -66,9 +99,7 @@ class TargetAdapter final : public ControlHostUiTargetAdapter {
     InspectorCapture capture_node_png(const ControlUiExactTarget& target) override {
         ++capture_calls;
         last_target = target;
-        return {.png = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 4, 5, 6},
-                .width = 24,
-                .height = 12};
+        return {.png = fixture_capture_png(24, 12), .width = 24, .height = 12};
     }
 
     ControlUiApplyStatus dispatch_input(const ControlUiExactTarget& target,
@@ -309,9 +340,14 @@ TEST_CASE("host UI capture publishes one exact-lineage sensitive PNG artifact",
          .maximum_artifact_bytes = 1024,
          .publish_artifact =
              [&](std::span<const std::uint8_t> bytes, ControlArtifactPublication publication) {
-                 published = bytes.size() == 11 && publication.content_type == "image/png" &&
+                 published = bytes.size() < fixture_capture_png(64, 32).size() &&
+                             std::search(bytes.begin(), bytes.end(),
+                                         reinterpret_cast<const std::uint8_t*>("secret"),
+                                         reinterpret_cast<const std::uint8_t*>("secret") + 6) ==
+                                 bytes.end() &&
+                             publication.content_type == "image/png" &&
                              publication.sensitivity == ControlArtifactSensitivity::Sensitive &&
-                             publication.redaction_state == ControlArtifactRedactionState::Original;
+                             publication.redaction_state == ControlArtifactRedactionState::Redacted;
                  ControlArtifactMetadata metadata;
                  metadata.artifact_id = "artifact-0123456789abcdef0123456789abcdef";
                  metadata.sha256 = std::string(64, 'b');
@@ -328,7 +364,7 @@ TEST_CASE("host UI capture publishes one exact-lineage sensitive PNG artifact",
     const auto detail = choc::json::parse(outcome.result.detail_json);
     CHECK(detail["width"].getInt64() == 64);
     CHECK(detail["height"].getInt64() == 32);
-    CHECK(detail["redaction_state"].getString() == "original");
+    CHECK(detail["redaction_state"].getString() == "redacted");
 
     auto wrong_plan = admission;
     wrong_plan.session_id = "session-b";

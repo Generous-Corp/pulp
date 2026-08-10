@@ -80,10 +80,65 @@ bool exact_authority(const ControlAdmissionPlan& plan, const ControlRequestEnvel
            request.deadline_unix_ms == plan.deadline_unix_ms;
 }
 
-bool valid_png(std::span<const std::uint8_t> bytes, std::uint32_t width, std::uint32_t height) {
+std::uint32_t png_u32(std::span<const std::uint8_t> bytes, std::size_t offset) {
+    return (static_cast<std::uint32_t>(bytes[offset]) << 24) |
+           (static_cast<std::uint32_t>(bytes[offset + 1]) << 16) |
+           (static_cast<std::uint32_t>(bytes[offset + 2]) << 8) |
+           static_cast<std::uint32_t>(bytes[offset + 3]);
+}
+
+std::optional<std::vector<std::uint8_t>>
+redact_png_metadata(std::span<const std::uint8_t> bytes, std::uint32_t width,
+                    std::uint32_t height) {
     constexpr std::array<std::uint8_t, 8> signature{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
-    return width != 0 && height != 0 && bytes.size() >= signature.size() &&
-           std::equal(signature.begin(), signature.end(), bytes.begin());
+    if (width == 0 || height == 0 || bytes.size() < signature.size() ||
+        !std::equal(signature.begin(), signature.end(), bytes.begin()))
+        return std::nullopt;
+
+    std::vector<std::uint8_t> redacted(signature.begin(), signature.end());
+    std::size_t offset = signature.size();
+    bool saw_ihdr = false;
+    bool saw_idat = false;
+    bool saw_iend = false;
+    while (offset <= bytes.size() && bytes.size() - offset >= 12) {
+        const auto length = static_cast<std::size_t>(png_u32(bytes, offset));
+        if (length > bytes.size() - offset - 12)
+            return std::nullopt;
+        const auto type = bytes.subspan(offset + 4, 4);
+        if (!std::ranges::all_of(type, [](std::uint8_t value) {
+                return (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z');
+            }))
+            return std::nullopt;
+        const std::string_view type_id(reinterpret_cast<const char*>(type.data()), type.size());
+        if (!saw_ihdr) {
+            if (type_id != "IHDR" || length != 13 ||
+                png_u32(bytes, offset + 8) != width ||
+                png_u32(bytes, offset + 12) != height)
+                return std::nullopt;
+            saw_ihdr = true;
+        } else if (type_id == "IHDR") {
+            return std::nullopt;
+        }
+        if (type_id == "IDAT")
+            saw_idat = true;
+        if (type_id == "IEND") {
+            if (length != 0 || offset + 12 != bytes.size())
+                return std::nullopt;
+            saw_iend = true;
+        }
+
+        // Critical chunks and tRNS affect pixel rendering. Other ancillary
+        // chunks are metadata and are deliberately omitted before publication.
+        if ((type[0] & 0x20u) == 0 || type_id == "tRNS")
+            redacted.insert(redacted.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset),
+                            bytes.begin() + static_cast<std::ptrdiff_t>(offset + length + 12));
+        offset += length + 12;
+        if (saw_iend)
+            break;
+    }
+    if (!saw_ihdr || !saw_idat || !saw_iend)
+        return std::nullopt;
+    return redacted;
 }
 
 std::optional<std::int64_t> eval_timeout_ms(std::string_view params_json) {
@@ -435,17 +490,18 @@ struct ControlHostUiExecutor::State : std::enable_shared_from_this<State> {
             if (maximum == 0 || captured.png.size() > maximum)
                 return failure(ControlResultCode::ResourceExhausted,
                                "UI capture exceeds the broker artifact capacity");
-            if (captured.width > 1'048'576 || captured.height > 1'048'576 ||
-                !valid_png(captured.png, captured.width, captured.height))
+            const auto redacted_png =
+                redact_png_metadata(captured.png, captured.width, captured.height);
+            if (captured.width > 1'048'576 || captured.height > 1'048'576 || !redacted_png)
                 return failure(ControlResultCode::InternalError,
                                "UI capture did not return a bounded PNG");
             const auto before_publish = context.checkpoint();
             if (before_publish != ControlExecutionCheckpoint::Continue)
                 return checkpoint_failure(before_publish);
             const auto stored = context.publish_artifact(
-                captured.png, {.content_type = "image/png",
+                *redacted_png, {.content_type = "image/png",
                                .sensitivity = ControlArtifactSensitivity::Sensitive,
-                               .redaction_state = ControlArtifactRedactionState::Original,
+                               .redaction_state = ControlArtifactRedactionState::Redacted,
                                .lifetime = capture_lifetime});
             if (stored.status != ControlArtifactStatus::Stored || !stored.metadata) {
                 if (stored.status == ControlArtifactStatus::Unauthorized) {
@@ -466,7 +522,7 @@ struct ControlHostUiExecutor::State : std::enable_shared_from_this<State> {
             detail.addMember("byte_count", static_cast<std::int64_t>(metadata.byte_size));
             detail.addMember("width", static_cast<std::int64_t>(captured.width));
             detail.addMember("height", static_cast<std::int64_t>(captured.height));
-            detail.addMember("redaction_state", "original");
+            detail.addMember("redaction_state", "redacted");
             return {.terminal_state = ControlReceiptState::Completed,
                     .result = {.detail_json = choc::json::toString(detail, true),
                                .artifacts = {{.artifact_id = metadata.artifact_id,

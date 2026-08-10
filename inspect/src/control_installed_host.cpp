@@ -304,6 +304,11 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
             controller_principal = plan.client_principal;
             controller_acquiring_authority_id = plan.client_id.value;
             controller_live = std::make_shared<ControllerExecutionToken>();
+        } else if (result == ControllerLeaseResult::Renewed) {
+            // A principal may renew through a freshly issued grant. The renewed
+            // grant becomes the projected authority that owns the lease so
+            // expiry or revocation of the previous grant cannot tear it down.
+            controller_acquiring_authority_id = plan.client_id.value;
         }
         const auto lease_id = controller_lease_id;
         const auto remaining = action == "release" ? std::chrono::milliseconds{0}

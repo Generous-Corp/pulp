@@ -21,15 +21,18 @@ reported as `not_evaluated`, never inferred as satisfied from registration.
 
 ## Author a target manifest
 
-Ordinary `pulp_add_plugin` targets are currently production-stripped. The
-canonical broker, protocol, manifests, grants, and trusted-host launch path are
-available, but the dedicated host-side adapter that binds a general
-`pulp::standalone` processor and state store is not yet shipped. Consequently,
-`pulp_add_plugin(... CONTROL_CAPABILITIES ...)` fails at configure time instead
-of producing an artifact that falsely claims an endpoint.
+Ordinary `pulp_add_plugin` targets remain production-stripped unless they opt in.
+The installed SDK ships the canonical Standalone host adapter. A controlled
+target must build only the `Standalone` format, provide `PROCESSOR_FACTORY`, set
+an explicit non-production `CONTROL_PROFILE`, and list its
+`CONTROL_CAPABILITIES`. Other plugin formats and mixed-format declarations fail
+closed instead of inheriting an endpoint. On macOS GPU builds the adapter
+supports the full canonical Standalone capability set; other supported builds
+currently accept only `dev.pulp.instance/read@1` and
+`dev.pulp.state/read@1`. Configure-time diagnostics reject unavailable adapter
+components or capabilities.
 
-The frozen declaration syntax will become an upper bound when that adapter is
-available; it will never activate an endpoint or grant a client by itself.
+The declaration is an upper bound; it never grants a client by itself.
 Mutation capabilities additionally require
 `dev.pulp.session/control@1`. Runtime evaluation is accepted only under
 `research-unsafe` with `ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL`; no named grant profile
@@ -38,8 +41,9 @@ automatically grants it.
 The Pulp-owned host UI executor is a composition building block, not automatic
 activation. It binds one registration/session/instance/publication and an
 opaque view generation, uses the existing main-thread capture/input/evaluator
-seams, and publishes window or exact-node PNGs only through broker-owned
-artifact storage. `ui.input` is a develop-only, controller-lease mutation: one
+seams, strips ancillary PNG metadata, and publishes window or exact-node PNGs
+as sensitive redacted evidence only through broker-owned artifact storage.
+`ui.input` is a develop-only, controller-lease mutation: one
 closed-schema pointer, keyboard, focus, or text event is dispatched per receipt
 to the exact node named under that view generation. Pointer coordinates are
 finite root coordinates bounded to +/-1,000,000; buttons, phases, key names,
