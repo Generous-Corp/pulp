@@ -257,6 +257,12 @@ pulp_add_test_suite(pulp-test-reed-waveguide-loop
     SOURCES test_reed_waveguide_loop.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
 
+# Tempo-map beat repeat: exact dry-history capture, frame-offset events, and
+# the prepared allocation contract. Pitch remains a separately gated design.
+pulp_add_test_suite(pulp-test-beat-repeat-kernel
+    SOURCES test_beat_repeat_kernel.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal pulp::timebase)
+
 # Depletion-aware stochastic collision and prepared voice contracts use
 # independent statistical oracles plus the realtime allocation probe.
 pulp_add_test_suite(pulp-test-particle-percussion

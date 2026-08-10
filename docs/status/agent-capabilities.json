@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 18,
+  "manifest_revision": 19,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 39
+        "capabilities": 40
       },
       "timebase": {
         "state": "partial",
@@ -1565,6 +1565,67 @@
         }
       },
       "contract_digest": "sha256:415624b411001a8583ecde5da2c6a695c74e874eb4b36a46536b17d3cddf1004"
+    },
+    {
+      "key": "signal.beat-repeat-kernel",
+      "domain": "signal",
+      "summary": "Tempo-map-quantized exact dry-history capture with bounded repeat, gate, reverse/alternate playback, and frame-offset gesture events; pitch excluded.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control; allocates one rolling-history/capture owner and bounded transition scratch",
+        "process": "audio",
+        "reset": "audio",
+        "release": "snapshot/restore and destruction off audio"
+      },
+      "state_model": "One FreezeLoopSampler dry-history/capture owner, armed tempo-map edge, active cell phase/direction/gate, and bounded dry-wet or wet-wet transition state.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "input"
+      },
+      "input_domain": "finite planar dry audio, immutable CompiledTempoMap, canonical BeatDivision, transport epoch, and ordered trigger/stop/seek events with block frame offsets",
+      "output_domain": "dry passthrough or repeated immutable captured audio",
+      "units": [
+        "samples",
+        "frames",
+        "canonical ticks",
+        "normalized gate duty"
+      ],
+      "latency": "zero",
+      "tail": "configured bounded transition sample count",
+      "scheduling": "strictly next canonical division edge; captures [edge-N, edge) before writing the edge dry sample; epoch discontinuities cancel only pending arms",
+      "bindings": [
+        {
+          "role": "kernel",
+          "kind": "cpp_type",
+          "include": "pulp/signal/beat_repeat_kernel.hpp",
+          "qualified_name": "pulp::signal::BeatRepeatKernelT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:29fa3a494adfe7abf39e05a3353c5035d08e6f2c99864548e2f72b1796475f2d"
     },
     {
       "key": "signal.bounded-sample-history",
@@ -4936,14 +4997,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 71,
+    "total": 72,
     "by_domain": {
       "audio": 7,
       "midi": 9,
       "music": 6,
       "offline": 0,
       "sequence": 1,
-      "signal": 39,
+      "signal": 40,
       "timebase": 9
     }
   },
@@ -5191,6 +5252,49 @@
                 [
                   "legacy_nominal",
                   "exact_10_to_90"
+                ]
+              ]
+            ]
+          }
+        ],
+        "beat_repeat_kernel.hpp": [
+          {
+            "class": "BeatRepeatProcessResult",
+            "qualified_name": "pulp::signal::BeatRepeatProcessResult",
+            "template": null,
+            "methods": [
+              "bool()"
+            ],
+            "enums": []
+          },
+          {
+            "class": "BeatRepeatKernelT",
+            "qualified_name": "pulp::signal::BeatRepeatKernelT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "prepare(timebase::RationalRate sample_rate, std::size_t channels, std::size_t maximum_history_frames, std::size_t maximum_transition_frames)",
+              "reset()",
+              "process(const SampleType* const* input, SampleType* const* output, std::size_t frames, std::int64_t block_sample_start, std::uint64_t transport_epoch, const timebase::CompiledTempoMap& tempo_map, std::span<const BeatRepeatEvent> events =)",
+              "set_division(timebase::BeatDivision division)",
+              "set_repeat_count(std::uint32_t total_cells)",
+              "set_gate(SampleType duty)",
+              "set_direction(BeatRepeatDirection direction)",
+              "set_transition_samples(std::size_t samples)",
+              "division()",
+              "repeat_count()",
+              "gate()",
+              "direction()",
+              "transition_samples()",
+              "state()"
+            ],
+            "enums": [
+              [
+                "TransitionKind",
+                [
+                  "None",
+                  "DryToWet",
+                  "WetToDry",
+                  "WetToWet"
                 ]
               ]
             ]
@@ -7770,14 +7874,17 @@
               "prepare(int channels, int capacity, int crossfade)",
               "reset()",
               "channels()",
+              "capacity()",
+              "available_history()",
               "frozen()",
               "loop_length()",
+              "retained_bytes()",
               "write(const SampleType* const* in, int n)",
+              "write_frame(const SampleType* frame)",
+              "capture_recent_exact(int frames)",
+              "captured_channel(int channel)",
               "freeze(int loop_samples)",
-              "release()",
-              "read(SampleType* const* out, int n)",
-              "snapshot()",
-              "restore(const std::vector<SampleType>& blob)"
+              "release()"
             ],
             "enums": []
           }
