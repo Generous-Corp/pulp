@@ -38,3 +38,11 @@ widget for web-compat consumers.
 Follow-up: enumerate observed React features (concurrent rendering,
 suspense boundaries, transition state, error boundaries, portal
 targets) and populate per-feature entries.
+
+## Delegated event delivery
+
+React's delegated root listener now receives each native wheel tick once.
+`__dispatch__` owns the element fan-out and normalizes legacy positional wheel
+deltas there; the per-event registration callback does not dispatch again.
+Handler exceptions stay inside the bridge dispatch boundary so one component
+error cannot terminate requestAnimationFrame rescheduling.

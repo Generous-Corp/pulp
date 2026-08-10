@@ -86,3 +86,11 @@ props (`marginStart` / `marginEnd` / `paddingStart` / `paddingEnd`
 verified end-to-end by the layout asserts in
 `test/test_widget_bridge.cpp`. The CSS `inset-inline-*`
 shorthands and bidi-aware text shaping are tracked separately.
+
+## Realm-quarantine visibility
+
+WidgetBridge realm teardown now restores the root visibility quarantine before
+requesting its repaint. A repaint-scheduling exception is observable and is
+contained during destructor cleanup; it no longer requires `end_root_quarantine`
+to pretend it is `noexcept`. Yoga layout values and direction semantics are
+unchanged.
