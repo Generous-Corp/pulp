@@ -121,6 +121,61 @@ TEST_CASE("InstrumentVoiceAllocator steals the oldest voice when full",
     REQUIRE(allocator.voices()[0].note == 64);
 }
 
+TEST_CASE("InstrumentVoiceAllocator reclaims a released tail before a held voice",
+          "[audio][sampler][voices][steal][release]") {
+    InstrumentVoiceAllocator allocator;
+    REQUIRE(allocator.prepare(2));
+    allocator.set_steal_policy(VoiceStealPolicy::Oldest);
+
+    const auto released = allocator.trigger(
+        InstrumentVoiceTrigger{.note = 60, .sample_id = 10});
+    const auto held = allocator.trigger(
+        InstrumentVoiceTrigger{.note = 64, .sample_id = 11});
+    REQUIRE(released.allocated);
+    REQUIRE(held.allocated);
+    REQUIRE(allocator.release_voice(released.voice_index));
+    REQUIRE(allocator.voices()[released.voice_index].state == VoiceState::Released);
+    REQUIRE(allocator.voices()[held.voice_index].state == VoiceState::Active);
+    REQUIRE(allocator.active_voice_count() == 1);
+    REQUIRE(allocator.allocated_voice_count() == 2);
+
+    std::array<VoiceTermination, 1> terminations{};
+    const auto replacement = allocator.trigger(
+        InstrumentVoiceTrigger{.note = 67, .sample_id = 12}, terminations);
+    REQUIRE(replacement.allocated);
+    REQUIRE(replacement.stolen);
+    REQUIRE(replacement.stolen_voice_index == released.voice_index);
+    REQUIRE(replacement.stolen_voice_id == released.voice_id);
+    REQUIRE(replacement.voice_index == released.voice_index);
+    REQUIRE(replacement.voice_id != released.voice_id);
+    REQUIRE(replacement.termination_count == 1);
+    REQUIRE(replacement.termination_overflow_count == 0);
+    REQUIRE(terminations[0].voice_index == released.voice_index);
+    REQUIRE(terminations[0].voice_id == released.voice_id);
+    REQUIRE(terminations[0].reason == VoiceTerminationReason::Stolen);
+    REQUIRE(terminations[0].fade_out_frames == kDefaultVoiceTerminationFadeFrames);
+
+    const auto& survivor = allocator.voices()[held.voice_index];
+    REQUIRE(survivor.state == VoiceState::Active);
+    REQUIRE(survivor.voice_id == held.voice_id);
+    REQUIRE(survivor.note == 64);
+    REQUIRE(survivor.sample_id == 11);
+    const auto& replacement_voice = allocator.voices()[replacement.voice_index];
+    REQUIRE(replacement_voice.state == VoiceState::Active);
+    REQUIRE(replacement_voice.voice_id == replacement.voice_id);
+    REQUIRE(replacement_voice.note == 67);
+    REQUIRE(replacement_voice.sample_id == 12);
+    REQUIRE(allocator.active_voice_count() == 2);
+    REQUIRE(allocator.allocated_voice_count() == 2);
+
+    REQUIRE(allocator.release_voice(replacement.voice_index));
+    REQUIRE(allocator.release_voice(held.voice_index));
+    REQUIRE(allocator.finish_voice(replacement.voice_index));
+    REQUIRE(allocator.finish_voice(held.voice_index));
+    REQUIRE(allocator.active_voice_count() == 0);
+    REQUIRE(allocator.allocated_voice_count() == 0);
+}
+
 TEST_CASE("InstrumentVoiceAllocator prefers stealing inside the same voice group",
           "[audio][sampler][voices][steal]") {
     InstrumentVoiceAllocator allocator;
