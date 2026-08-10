@@ -1,12 +1,15 @@
 // Portable conformance runner for the timeline fixture corpus.
 //
 // One binary validates the whole corpus with no Catch2 and no desktop
-// dependencies, so the same executable runs under desktop ctest, on an Android
-// emulator via `adb push`, and compiled to WASM. It links only pulp::timeline
-// and pulp::interchange, both of which sit on the portable floor. The runner
-// lives inside core/interchange rather than beside the corpus so that claim is
-// checked rather than asserted: the interchange dependency floor gate scans
-// this file, so reaching for a view, host, or format header fails CI.
+// dependencies, so the same source is suitable for desktop ctest, an Android
+// emulator via `adb push`, and compilation to WASM. The repository executes
+// the desktop and WASM paths; Android portability is currently a dependency
+// contract rather than an automated emulator lane. It links only
+// pulp::timeline and pulp::interchange, both of which sit on the portable
+// floor. The runner lives inside core/interchange rather than beside the
+// corpus so that this contract is checked rather than asserted: the
+// interchange dependency floor gate scans this file, so reaching for a view,
+// host, or format header fails CI.
 //
 // The WASM half of that claim is carried by core/interchange/wasm, which builds
 // this file under emscripten, and by tools/ci/wasm-fixture-lane.sh, which runs
